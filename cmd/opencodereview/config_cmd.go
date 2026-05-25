@@ -30,13 +30,17 @@ func runConfig(args []string) error {
 
 	switch action.subCmd {
 	case "set":
-		return runConfigSet(action.key, action.value)
+		return runConfigSet(action.key, action.value, action.modelID)
 	default:
 		return fmt.Errorf("unknown config sub-command: %s", action.subCmd)
 	}
 }
 
-func runConfigSet(key, value string) error {
+func runConfigSet(key, value, modelID string) error {
+	if modelID == "" {
+		modelID = DefaultModelID
+	}
+
 	configPath := defaultConfigPath()
 
 	cfg, err := loadOrCreateConfig(configPath)
@@ -44,7 +48,7 @@ func runConfigSet(key, value string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	if err := setConfigValue(cfg, key, value); err != nil {
+	if err := setConfigValue(cfg, key, value, modelID); err != nil {
 		return err
 	}
 
@@ -62,24 +66,32 @@ func runConfigSet(key, value string) error {
 		return fmt.Errorf("write config: %w", err)
 	}
 
-	fmt.Printf("Set %s = %s\n", key, value)
+	if modelID == DefaultModelID {
+		fmt.Printf("Set %s = %s\n", key, value)
+	} else {
+		fmt.Printf("Set %s = %s (model: %s)\n", key, value, modelID)
+	}
 	return nil
 }
 
 // Config represents the user-level configuration file (~/.open-code-review/config.json).
 type Config struct {
-	Llm       LlmConfig         `json:"llm,omitempty"`
-	Language  string            `json:"language,omitempty"` // Output language, defaults to Chinese when empty
-	Telemetry *TelemetryConfig  `json:"telemetry,omitempty"` // Telemetry/observability settings
+	Llm       LlmConfig              `json:"llm,omitempty"`       // Legacy single-model config (backward compatible)
+	Models    map[string]*LlmConfig  `json:"models,omitempty"`    // Multi-model config, keyed by model id
+	Language  string                 `json:"language,omitempty"`  // Output language, defaults to Chinese when empty
+	Telemetry *TelemetryConfig       `json:"telemetry,omitempty"` // Telemetry/observability settings
 }
 
 type LlmConfig struct {
 	URL          string         `json:"url,omitempty"`
 	AuthToken    string         `json:"auth_token,omitempty"`
-	Model        string         `json:"model,omitempty"`
+	Model        string         `json:"model,omitempty"`      // Model name (e.g., "claude-3-5-sonnet")
 	UseAnthropic *bool          `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol
 	ExtraBody    map[string]any `json:"extra_body,omitempty"`
 }
+
+// DefaultModelID is the default model identifier used when --model is not specified.
+const DefaultModelID = "default"
 
 // TelemetryConfig holds telemetry-specific settings.
 type TelemetryConfig struct {
@@ -120,20 +132,35 @@ func LoadAppConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func setConfigValue(cfg *Config, key, value string) error {
+func setConfigValue(cfg *Config, key, value, modelID string) error {
+	// Determine target config: if modelID is "default" or empty, use legacy Llm field
+	// Otherwise, use Models map
+	var target *LlmConfig
+	if modelID == "" || modelID == DefaultModelID {
+		target = &cfg.Llm
+	} else {
+		if cfg.Models == nil {
+			cfg.Models = make(map[string]*LlmConfig)
+		}
+		if cfg.Models[modelID] == nil {
+			cfg.Models[modelID] = &LlmConfig{}
+		}
+		target = cfg.Models[modelID]
+	}
+
 	switch key {
 	case "llm.url", "llm.URL":
-		cfg.Llm.URL = value
+		target.URL = value
 	case "llm.auth_token", "llm.AuthToken":
-		cfg.Llm.AuthToken = value
+		target.AuthToken = value
 	case "llm.model", "llm.Model":
-		cfg.Llm.Model = value
+		target.Model = value
 	case "llm.use_anthropic", "llm.UseAnthropic":
 		b, err := strconv.ParseBool(value)
 		if err != nil {
 			return fmt.Errorf("invalid boolean for llm.use_anthropic: %w", err)
 		}
-		cfg.Llm.UseAnthropic = &b
+		target.UseAnthropic = &b
 	case "language", "Language":
 		cfg.Language = value
 	case "telemetry.enabled", "telemetry.Enabled":
@@ -161,7 +188,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		if err := json.Unmarshal([]byte(value), &m); err != nil {
 			return fmt.Errorf("invalid JSON for llm.extra_body: %w", err)
 		}
-		cfg.Llm.ExtraBody = m
+		target.ExtraBody = m
 	default:
 		return fmt.Errorf("unknown config key: %s\nSupported keys: llm.url, llm.auth_token, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging", key)
 	}

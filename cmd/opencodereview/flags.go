@@ -200,45 +200,71 @@ Flags:
 // --- config subcommand ---
 
 type configAction struct {
-	subCmd string // "set"
-	key    string
-	value  string
+	subCmd  string // "set"
+	key     string
+	value   string
+	modelID string // model identifier, defaults to "default"
 }
 
 func parseConfigArgs(args []string) (configAction, error) {
 	if len(args) == 0 {
-		return configAction{}, fmt.Errorf("usage: ocr config set <key> <value>\ne.g., ocr config set llm.model claude-opus-4-6")
+		return configAction{}, fmt.Errorf("usage: ocr config set <key> <value> [--model <id>]\ne.g., ocr config set llm.model claude-opus-4-6")
 	}
 
 	subCmd := args[0]
 	switch subCmd {
 	case "set":
-		if len(args) < 3 {
-			return configAction{}, fmt.Errorf("usage: ocr config set <key> <value>\ne.g., ocr config set llm.model claude-opus-4-6")
-		}
-		return configAction{
-			subCmd: "set",
-			key:    args[1],
-			value:  args[2],
-		}, nil
+		return parseConfigSetArgs(args[1:])
 	default:
 		return configAction{}, fmt.Errorf("unknown config sub-command: %s\nAvailable: set", subCmd)
 	}
+}
+
+func parseConfigSetArgs(args []string) (configAction, error) {
+	fs := newOcrFlagSet("ocr config set")
+	var modelID string
+	fs.StringVar(&modelID, "model", "", "model identifier (default: \"default\")")
+
+	if err := fs.Parse(args); err != nil {
+		return configAction{}, fmt.Errorf("parse flags: %w", err)
+	}
+
+	remaining := fs.fs.Args()
+	if len(remaining) < 2 {
+		return configAction{}, fmt.Errorf("usage: ocr config set <key> <value> [--model <id>]\ne.g., ocr config set llm.model claude-opus-4-6")
+	}
+
+	return configAction{
+		subCmd:  "set",
+		key:     remaining[0],
+		value:   remaining[1],
+		modelID: modelID,
+	}, nil
 }
 
 func printConfigUsage() {
 	fmt.Println(`Configuration management.
 
 Usage:
-  ocr config set <key> <value>
+  ocr config set [--model <id>] <key> <value>
 
 Examples:
-  ocr config set llm.url https://xx/v1/openai/chat/completions
+  # Configure default model
+  ocr config set llm.url https://api.anthropic.com/v1/messages
   ocr config set llm.auth_token xxxxxxxxxx
-  ocr config set llm.model claude-opus-4-6
+  ocr config set llm.model claude-sonnet-4-20250514
+
+  # Configure multiple models (use --model before key/value)
+  ocr config set --model openai llm.model gpt-4o
+  ocr config set --model openai llm.url https://api.openai.com/v1/chat/completions
+  ocr config set --model openai llm.auth_token sk-xxx
+
+  # Other settings
   ocr config set llm.extra_body '{"thinking":{"type":"disabled"}}'
   ocr config set language English
   ocr config set telemetry.enabled true
 
-Supported keys: llm.url, llm.auth_token, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging`)
+Supported keys: llm.url, llm.auth_token, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging
+
+The --model flag specifies a model identifier (default: "default"). Use different identifiers to configure multiple LLM endpoints.`)
 }

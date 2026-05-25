@@ -38,12 +38,19 @@ const (
 // Each strategy requires all three fields (URL, Token, Model) to be non-empty.
 // Returns the first valid strategy's result.
 func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
+	return ResolveEndpointWithModel(configPath, "")
+}
+
+// ResolveEndpointWithModel resolves LLM endpoint for a specific model ID.
+// If modelID is empty or "default", it uses the default configuration.
+// Otherwise, it looks for the model in the "models" map in the config file.
+func ResolveEndpointWithModel(configPath, modelID string) (ResolvedEndpoint, error) {
 	strategies := []struct {
 		name string
 		fn   func() (ResolvedEndpoint, bool, error)
 	}{
 		{"OCR environment", tryOCREnv},
-		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath) }},
+		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfigWithModel(configPath, modelID) }},
 		{"Claude Code environment", tryCCEnv},
 		{"Shell rc file", tryShellRC},
 	}
@@ -95,11 +102,17 @@ type llmFileConfig struct {
 }
 
 type configFile struct {
-	Llm llmFileConfig `json:"llm,omitempty"`
+	Llm    llmFileConfig              `json:"llm,omitempty"`    // Legacy single-model config
+	Models map[string]*llmFileConfig `json:"models,omitempty"` // Multi-model config
 }
 
-// tryOCRConfig reads the OCR config file.
+// tryOCRConfig reads the OCR config file (default model).
 func tryOCRConfig(path string) (ResolvedEndpoint, bool, error) {
+	return tryOCRConfigWithModel(path, "")
+}
+
+// tryOCRConfigWithModel reads the OCR config file for a specific model ID.
+func tryOCRConfigWithModel(path, modelID string) (ResolvedEndpoint, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -113,13 +126,42 @@ func tryOCRConfig(path string) (ResolvedEndpoint, bool, error) {
 		return ResolvedEndpoint{}, false, fmt.Errorf("parse config: %w", err)
 	}
 
-	if cfg.Llm.URL == "" || cfg.Llm.AuthToken == "" || cfg.Llm.Model == "" {
+	// If modelID is empty or "default", use legacy Llm field for backward compatibility
+	if modelID == "" || modelID == "default" {
+		if cfg.Llm.URL == "" || cfg.Llm.AuthToken == "" || cfg.Llm.Model == "" {
+			return ResolvedEndpoint{}, false, nil
+		}
+
+		useAnthropic := true // default true
+		if cfg.Llm.UseAnthropic != nil {
+			useAnthropic = *cfg.Llm.UseAnthropic
+		}
+
+		protocol := "anthropic"
+		if !useAnthropic {
+			protocol = "openai"
+		}
+
+		return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: cfg.Llm.Model, Protocol: protocol, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody}, true, nil
+	}
+
+	// For non-default modelID, look in Models map
+	if cfg.Models == nil {
+		return ResolvedEndpoint{}, false, nil
+	}
+
+	modelCfg, ok := cfg.Models[modelID]
+	if !ok || modelCfg == nil {
+		return ResolvedEndpoint{}, false, nil
+	}
+
+	if modelCfg.URL == "" || modelCfg.AuthToken == "" || modelCfg.Model == "" {
 		return ResolvedEndpoint{}, false, nil
 	}
 
 	useAnthropic := true // default true
-	if cfg.Llm.UseAnthropic != nil {
-		useAnthropic = *cfg.Llm.UseAnthropic
+	if modelCfg.UseAnthropic != nil {
+		useAnthropic = *modelCfg.UseAnthropic
 	}
 
 	protocol := "anthropic"
@@ -127,7 +169,7 @@ func tryOCRConfig(path string) (ResolvedEndpoint, bool, error) {
 		protocol = "openai"
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: cfg.Llm.Model, Protocol: protocol, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody}, true, nil
+	return ResolvedEndpoint{URL: modelCfg.URL, Token: modelCfg.AuthToken, Model: modelCfg.Model, Protocol: protocol, Source: "OCR config file", ExtraBody: modelCfg.ExtraBody}, true, nil
 }
 
 // tryCCEnv reads Claude Code environment variables.
