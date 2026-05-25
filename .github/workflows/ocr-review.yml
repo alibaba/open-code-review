@@ -42,17 +42,6 @@ jobs:
       - name: Configure OCR
         run: |
           mkdir -p ~/.open-code-review
-          cat > ~/.open-code-review/config.json << 'EOF'
-          {
-            "llm": {
-              "url": "${{ secrets.OCR_LLM_URL }}",
-              "auth_token": "${{ secrets.OCR_LLM_AUTH_TOKEN }}",
-              "model": "${{ secrets.OCR_LLM_MODEL || 'gpt-4o' }}"
-            },
-            "language": "English"
-          }
-          EOF
-          # Replace placeholders with actual values (handles special characters in secrets)
           python3 -c "
           import json, os
           cfg = {
@@ -60,6 +49,7 @@ jobs:
               'url': os.environ['OCR_LLM_URL'],
               'auth_token': os.environ['OCR_LLM_AUTH_TOKEN'],
               'model': os.environ.get('OCR_LLM_MODEL', 'gpt-4o')
+              'extra_body': {'thinking': {'type': 'disabled'}}
             },
             'language': 'English'
           }
