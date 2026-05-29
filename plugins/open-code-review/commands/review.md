@@ -14,7 +14,7 @@ Run the OCR command:
 ocr review --audience agent [user-args]
 ```
 - Default (no user arguments): reviews staged, unstaged, and untracked changes (workspace mode).
-- If the user provides `--commit` or `--c`: pass through as-is.
+- If the user provides `--commit` or `--c`: pass through as-is. Supports comma-separated hashes for multi-commit review (e.g., `--commit abc123,def456`).
 - If the user provides `--from` and `--to`: pass through as-is.
 - (Optional) Provide `--background "requirement context"` to review whether the requirements are correctly implemented.
 - Capture full stdout. Set a 5-minute timeout.

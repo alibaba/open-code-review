@@ -105,6 +105,9 @@ ocr review --from main --to feature-branch
 
 # Single commit
 ocr review --commit abc123
+
+# Multiple commits combined (e.g., your own commits interleaved with others')
+ocr review --commit abc123,def456
 ```
 
 ## Commands
@@ -125,7 +128,7 @@ ocr review --commit abc123
 | `--repo` | — | current dir | Git repository root |
 | `--from` | — | — | Source ref (e.g., `main`) |
 | `--to` | — | — | Target ref (e.g., `feature-branch`) |
-| `--commit` | `-c` | — | Single commit to review |
+| `--commit` | `-c` | — | Commit hash(es) to review — single or comma-separated for multiple |
 | `--preview` | `-p` | `false` | Preview which files will be reviewed without running the LLM |
 | `--format` | `-f` | `text` | Output format: `text` or `json` |
 | `--concurrency` | — | `8` | Max concurrent file reviews |
@@ -149,6 +152,9 @@ ocr review --from main --to my-feature --concurrency 4
 
 # Review a specific commit with verbose JSON output
 ocr review --commit abc123 --format json --audience agent
+
+# Review multiple commits combined (e.g., bug fix across several commits)
+ocr review --commit abc123,def456 --format json --audience agent
 
 # Use custom review rules
 ocr review --rule /path/to/my-rules.json

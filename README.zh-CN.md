@@ -105,6 +105,9 @@ ocr review --from main --to feature-branch
 
 # 单个提交
 ocr review --commit abc123
+
+# 多个提交合并审查（例如你的提交之间夹杂了其他人的提交）
+ocr review --commit abc123,def456
 ```
 
 ## 命令
@@ -125,7 +128,7 @@ ocr review --commit abc123
 | `--repo` | — | 当前目录 | Git 仓库根目录 |
 | `--from` | — | — | 源引用（如 `main`） |
 | `--to` | — | — | 目标引用（如 `feature-branch`） |
-| `--commit` | `-c` | — | 审查单个提交 |
+| `--commit` | `-c` | — | 审查提交，支持单个或逗号分隔的多个提交 |
 | `--preview` | `-p` | `false` | 预览将被审查的文件列表，不调用 LLM |
 | `--format` | `-f` | `text` | 输出格式：`text` 或 `json` |
 | `--concurrency` | — | `8` | 最大并发文件审查数 |
@@ -149,6 +152,9 @@ ocr review --from main --to my-feature --concurrency 4
 
 # 审查特定提交并以 JSON 格式输出详细信息
 ocr review --commit abc123 --format json --audience agent
+
+# 审查多个提交合并（例如一个 bug 修复跨了多个提交）
+ocr review --commit abc123,def456 --format json --audience agent
 
 # 使用自定义审查规则
 ocr review --rule /path/to/my-rules.json

@@ -82,6 +82,7 @@ ocr review --audience agent --background "business context here" [user-args]
 - **Background context** (RECOMMENDED): use `--background "context"` or `-b "context"` to provide business context for better review quality
 - **Default** (no user arguments): reviews staged, unstaged, and untracked changes (workspace mode)
 - **Specific commit**: use `--commit` or `-c` to review a single commit against its parent
+- **Multiple commits**: use `--commit hash1,hash2` to review multiple commits combined (e.g., your own commits interleaved with others')
 - **Branch comparison**: use `--from <ref>` and `--to <ref>` to review diff between two refs
 - **Timeout**: default timeout is 10 minutes per file; adjust with `--timeout <minutes>`
 - **Concurrency**: default concurrency is 8 file workers; reduce with `--concurrency <n>` if rate limits are hit
@@ -95,6 +96,7 @@ ocr review --audience agent --background "business context here" [user-args]
 | "review my changes" / "review the working copy" | `ocr review --audience agent -b "context"` |
 | "review this PR" / "review feature branch" | `ocr review --audience agent -b "context" --from main --to <branch>` |
 | "review commit abc123" | `ocr review --audience agent -b "context" --commit abc123` |
+| "review my commits abc123 and def456" | `ocr review --audience agent -b "context" --commit abc123,def456` |
 | "what would be reviewed?" (dry-run) | `ocr review --preview` |
 
 **Output mode:**

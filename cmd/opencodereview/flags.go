@@ -119,7 +119,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.repoDir, "repo", "", "root directory of the git repository (default: current dir)")
 	a.StringVar(&opts.from, "from", "", "source ref to start diff from (e.g., 'main')")
 	a.StringVar(&opts.to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
-	a.StringVarP(&opts.commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
+	a.StringVarP(&opts.commit, "commit", "c", "", "commit hash(es) to review -- single hash or comma-separated for multiple (vs their parent(s))")
 	a.StringVarP(&opts.outputFormat, "format", "f", "text", "output format: text or json")
 	a.IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file reviews")
 	a.IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
@@ -178,6 +178,10 @@ Examples:
   ocr review --commit abc123
   ocr review -c abc123
 
+  # Review multiple commits combined
+  ocr review --commit abc123,def456
+  ocr review -c abc123,def456
+
   # Output JSON format
   ocr review --format json
   ocr review -f json
@@ -192,7 +196,7 @@ Examples:
 Flags:
   --audience string       output audience: human (show progress) or agent (summary only) (default "human")
   -b, --background string optional requirement/business context for the review
-  -c, --commit string     single commit hash or tag to review (vs its parent)
+  -c, --commit string     commit hash(es) to review -- single hash or comma-separated for multiple
   -f, --format string     output format: text or json (default "text")
   --concurrency int       max concurrent file reviews (default 8)
   --from string           source ref to start diff from (e.g., 'main')

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/open-code-review/open-code-review/internal/agent"
@@ -84,7 +85,13 @@ func runReview(args []string) error {
 
 	collector := tool.NewCommentCollector()
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
-	ref, _ := mode.RefValue(opts.to, opts.commit)
+	// For multi-commit mode, use the last commit hash as the FileReader ref.
+	refCommit := opts.commit
+	if strings.Contains(opts.commit, ",") {
+		parts := strings.Split(opts.commit, ",")
+		refCommit = strings.TrimSpace(parts[len(parts)-1])
+	}
+	ref, _ := mode.RefValue(opts.to, refCommit)
 	diffMap := make(map[string]string)
 	fileReader := &tool.FileReader{
 		RepoDir: repoDir,

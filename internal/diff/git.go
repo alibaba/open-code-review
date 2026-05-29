@@ -34,9 +34,10 @@ var providerDirIgnoreDirs = []string{
 type Mode int
 
 const (
-	ModeWorkspace Mode = iota // current workspace (staged + unstaged + untracked)
-	ModeCommit                // single commit vs its parent
-	ModeRange                 // merge-base(from,to)..to
+	ModeWorkspace   Mode = iota // current workspace (staged + unstaged + untracked)
+	ModeCommit                  // single commit vs its parent
+	ModeRange                   // merge-base(from,to)..to
+	ModeMultiCommit             // multiple commits combined
 )
 
 // Provider retrieves and parse git diffs from a repository.
@@ -49,6 +50,9 @@ type Provider struct {
 
 	// Commit mode parameter
 	commit string // single commit hash/ref
+
+	// Multi-commit mode parameters
+	commits []string // multiple commit hashes for combined review
 
 	mergeBase string // cached common ancestor for range mode
 }
@@ -69,6 +73,15 @@ func NewCommitProvider(repoDir, commit string) *Provider {
 		repoDir: repoDir,
 		mode:    ModeCommit,
 		commit:  commit,
+	}
+}
+
+// NewMultiCommitProvider creates a Provider for multi-commit mode: combined changes from multiple commits.
+func NewMultiCommitProvider(repoDir string, commits []string) *Provider {
+	return &Provider{
+		repoDir: repoDir,
+		mode:    ModeMultiCommit,
+		commits: commits,
 	}
 }
 
@@ -121,6 +134,9 @@ func (p *Provider) GetDiff() ([]model.Diff, error) {
 			return nil, fmt.Errorf("git show failed: %w", err)
 		}
 		combined.WriteString(out)
+
+	case ModeMultiCommit:
+		return p.getMultiCommitDiff()
 
 	case ModeWorkspace:
 		tracked, err := p.workspaceTrackedDiff()
@@ -241,6 +257,27 @@ func (p *Provider) filterDiffs(diffs []model.Diff) []model.Diff {
 }
 
 // ---- Internal helpers ----
+
+// getMultiCommitDiff generates a combined diff from multiple commits by running
+// git show for each commit individually, parsing the results, and merging them.
+func (p *Provider) getMultiCommitDiff() ([]model.Diff, error) {
+	diffSets := make([][]model.Diff, 0, len(p.commits))
+
+	for _, c := range p.commits {
+		out, err := p.runGit("show", "--no-color", "-U"+fmt.Sprint(DiffContextLines), c)
+		if err != nil {
+			return nil, fmt.Errorf("git show %s failed: %w", c, err)
+		}
+		diffs, err := ParseDiffText(out, p.repoDir)
+		if err != nil {
+			return nil, fmt.Errorf("parse diff for commit %s: %w", c, err)
+		}
+		diffSets = append(diffSets, diffs)
+	}
+
+	merged := MergeDiffs(diffSets...)
+	return p.filterDiffs(merged), nil
+}
 
 func (p *Provider) computeMergeBase(from, to string) string {
 	out, err := p.runGit("merge-base", from, to)

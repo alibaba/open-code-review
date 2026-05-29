@@ -58,6 +58,9 @@ ocr review --from main --to feature-branch
 
 # Review a single commit
 ocr review --commit abc123
+
+# Review multiple commits combined
+ocr review --commit abc123,def456
 ```
 
 ## Commands
@@ -77,14 +80,14 @@ ocr review --commit abc123
 | `--repo` | | current dir | Git repository root |
 | `--from` | | | Source ref (e.g., `main`) |
 | `--to` | | | Target ref (e.g., `feature-branch`) |
-| `--commit` | `-c` | | Review a single commit |
+| `--commit` | `-c` | | Review commit(s) — single hash or comma-separated for multiple |
 | `--format` | `-f` | `text` | Output format: `text` or `json` |
 | `--concurrency` | | `4` | Max concurrent file reviews |
 | `--timeout` | | `10` | Per-file timeout (minutes) |
 
 ## Features
 
-- **Three review modes**: workspace changes, branch range, single commit
+- **Three review modes**: workspace changes, branch range, single or multiple commits
 - **Context-aware**: Agent reads arbitrary files, searches code via `git grep`, inspects diffs
 - **Plan phase**: Large changes (>50 lines) get risk analysis first
 - **Any LLM**: Works with OpenAI, Claude-compatible endpoints, local models

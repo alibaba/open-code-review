@@ -106,6 +106,9 @@ Examples:
   # Single commit vs its parent
   go run ./cmd/testdiff -commit abc1234
 
+  # Multiple commits combined
+  go run ./cmd/testdiff -commit abc1234,def5678
+
   # Summary only (file paths and line counts)
   go run ./cmd/testdiff -from master -to dev-ref -summary
 
@@ -113,7 +116,7 @@ Flags:
   -repo DIR       git repository root (default: auto-detect via git rev-parse)
   -from REF       source ref (e.g. 'main')
   -to REF         target ref (e.g. 'feature-branch')
-  -commit SHA     single commit to review (vs its parent)
+  -commit SHA     commit hash(es) to review -- single or comma-separated for multiple
   -format FMT     output format: text or json (default: text)
   -summary        show file list and insertions/deletions only`)
 }
@@ -136,12 +139,28 @@ func resolveRepo(input string) (string, error) {
 func buildProvider(repoDir string, args cliArgs) *diff.Provider {
 	switch {
 	case args.commit != "":
+		if strings.Contains(args.commit, ",") {
+			commits := parseCommitList(args.commit)
+			return diff.NewMultiCommitProvider(repoDir, commits)
+		}
 		return diff.NewCommitProvider(repoDir, args.commit)
 	case args.from != "" && args.to != "":
 		return diff.NewProvider(repoDir, args.from, args.to)
 	default:
 		return diff.NewWorkspaceProvider(repoDir)
 	}
+}
+
+func parseCommitList(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 // ---- output helpers ----

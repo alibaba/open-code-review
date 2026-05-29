@@ -316,7 +316,12 @@ func (a *Agent) loadDiffs() error {
 
 	switch {
 	case a.args.Commit != "":
-		provider = diff.NewCommitProvider(a.args.RepoDir, a.args.Commit)
+		if strings.Contains(a.args.Commit, ",") {
+			commits := parseCommitList(a.args.Commit)
+			provider = diff.NewMultiCommitProvider(a.args.RepoDir, commits)
+		} else {
+			provider = diff.NewCommitProvider(a.args.RepoDir, a.args.Commit)
+		}
 	case a.args.From != "" && a.args.To != "":
 		provider = diff.NewProvider(a.args.RepoDir, a.args.From, a.args.To)
 	default:
@@ -340,6 +345,20 @@ func (a *Agent) loadDiffs() error {
 	}
 
 	return nil
+}
+
+// parseCommitList splits a comma-separated commit string into individual hashes,
+// trimming whitespace and skipping empty parts.
+func parseCommitList(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 // lookupTool returns the provider for a given tool from the registry,
