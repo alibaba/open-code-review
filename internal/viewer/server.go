@@ -46,9 +46,16 @@ func StartServer(addr string) error {
 		handleSession(w, r, root, repo, sid)
 	})
 
+	// Wrap the mux with a Host-header allowlist. Without this, any web page
+	// the user visits can DNS-rebind its origin to 127.0.0.1 and read the
+	// session JSONL exposed by this viewer (which contains LLM request bodies
+	// = source code being reviewed and the LLM's analysis of it).
+	allowed := resolveAllowedHostsFromEnv(addr)
+	guarded := hostGuard(allowed, mux)
+
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: guarded,
 	}
 
 	fmt.Printf("\nOpen browser: http://%s\n", addr)
