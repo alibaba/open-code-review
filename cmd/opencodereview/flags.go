@@ -107,6 +107,19 @@ type reviewOptions struct {
 	perFileTimeout int
 	preview        bool
 	showHelp       bool
+
+	// GitLab platform flags
+	platform         string
+	mrIID            int
+	projectID        string
+	baseURL          string
+	publish          bool
+	prSummary        bool
+	clearExisting    bool
+	clearInline      bool
+	clearSummary     bool
+	noInline         bool
+	noSummaryComment bool
 }
 
 func parseReviewFlags(args []string) (reviewOptions, error) {
@@ -127,6 +140,19 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the review")
 	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be reviewed without running the LLM")
 
+	// GitLab platform flags
+	a.StringVar(&opts.platform, "platform", "", "publish platform: gitlab")
+	a.IntVar(&opts.mrIID, "mr", 0, "merge request IID (GitLab)")
+	a.StringVar(&opts.projectID, "project-id", "", "GitLab project ID or namespace path (e.g. group/sub/project)")
+	a.StringVar(&opts.baseURL, "gitlab-base-url", "", "GitLab base URL (default: https://gitlab.com)")
+	a.BoolVar(&opts.publish, "publish", false, "publish review results to merge request")
+	a.BoolVar(&opts.prSummary, "pr-summary", false, "append/update managed MR description summary")
+	a.BoolVar(&opts.clearExisting, "clear-existing", false, "delete OCR comments before publishing")
+	a.BoolVar(&opts.clearInline, "clear-inline", false, "delete OCR inline comments and exit")
+	a.BoolVar(&opts.clearSummary, "clear-summary", false, "delete OCR summary/request-changes comments and exit")
+	a.BoolVar(&opts.noInline, "no-inline", false, "skip inline discussions during publish")
+	a.BoolVar(&opts.noSummaryComment, "no-summary-comment", false, "skip summary note during publish")
+
 	if err := a.Parse(args); err != nil {
 		return opts, fmt.Errorf("parse flags: %w", err)
 	}
@@ -134,6 +160,10 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	opts.showHelp = a.showHelp
 	if opts.showHelp {
 		return opts, nil
+	}
+
+	if opts.platform != "" && opts.platform != "gitlab" {
+		return opts, fmt.Errorf("unsupported platform %q: only 'gitlab' is supported", opts.platform)
 	}
 
 	modeCount := 0
@@ -189,19 +219,38 @@ Examples:
   ocr review --preview
   ocr review -c abc123 -p
 
+  # Publish to GitLab MR
+  GITLAB_TOKEN=... ocr review --platform gitlab --project-id 456 --mr 123 --publish
+
+  # Clear OCR comments from GitLab MR
+  GITLAB_TOKEN=... ocr review --platform gitlab --project-id 456 --mr 123 --clear-inline
+
 Flags:
-  --audience string       output audience: human (show progress) or agent (summary only) (default "human")
-  -b, --background string optional requirement/business context for the review
-  -c, --commit string     single commit hash or tag to review (vs its parent)
-  -f, --format string     output format: text or json (default "text")
-  --concurrency int       max concurrent file reviews (default 8)
-  --from string           source ref to start diff from (e.g., 'main')
-  -p, --preview           preview which files will be reviewed without running the LLM
-  --repo string           root directory of the git repository (default: current dir)
-  --rule string           path to JSON file with system review rules
-  --timeout int           concurrent task timeout in minutes (default 10)
-  --to string             target ref to end diff at (e.g., 'feature-branch')
-  --tools string          path to JSON tools config file (default: embedded)`)
+  --audience string          output audience: human (show progress) or agent (summary only) (default "human")
+  -b, --background string    optional requirement/business context for the review
+  -c, --commit string        single commit hash or tag to review (vs its parent)
+  -f, --format string        output format: text or json (default "text")
+  --concurrency int          max concurrent file reviews (default 8)
+  --from string              source ref to start diff from (e.g., 'main')
+  -p, --preview              preview which files will be reviewed without running the LLM
+  --repo string              root directory of the git repository (default: current dir)
+  --rule string              path to JSON file with system review rules
+  --timeout int              concurrent task timeout in minutes (default 10)
+  --to string                target ref to end diff at (e.g., 'feature-branch')
+  --tools string             path to JSON tools config file (default: embedded)
+
+GitLab flags:
+  --platform string          publish platform: gitlab
+  --mr int                   merge request IID (GitLab)
+  --project-id string        GitLab project ID or namespace path (e.g. group/sub/project)
+  --gitlab-base-url string   GitLab base URL (default: https://gitlab.com)
+  --publish                  publish review results to merge request
+  --pr-summary               append/update managed MR description summary
+  --clear-existing           delete OCR comments before publishing
+  --clear-inline             delete OCR inline comments and exit
+  --clear-summary            delete OCR summary/request-changes comments and exit
+  --no-inline                skip inline discussions during publish
+  --no-summary-comment       skip summary note during publish`)
 }
 
 // --- config subcommand ---

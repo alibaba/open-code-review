@@ -28,6 +28,20 @@ func runReview(args []string) error {
 		return nil
 	}
 
+	// Resolve GitLab options early for clear/publish operations.
+	if hasGitLabOperation(opts) {
+		token := firstNonEmpty(os.Getenv("GITLAB_TOKEN"), os.Getenv("OCR_GITLAB_TOKEN"))
+		pubOpts, err := resolveGitLabReviewOptions(opts, token)
+		if err != nil {
+			return fmt.Errorf("gitlab options: %w", err)
+		}
+
+		// Clear operations exit early without running review.
+		if opts.clearInline || opts.clearSummary {
+			return runGitLabClear(pubOpts)
+		}
+	}
+
 	if err := requireGitRepo(opts.repoDir); err != nil {
 		return err
 	}
@@ -138,6 +152,21 @@ func runReview(args []string) error {
 	// Resolve line numbers by matching existing_code against diff hunks.
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
+	// Publish to GitLab if requested.
+	if opts.publish {
+		token := firstNonEmpty(os.Getenv("GITLAB_TOKEN"), os.Getenv("OCR_GITLAB_TOKEN"))
+		pubOpts, err := resolveGitLabReviewOptions(opts, token)
+		if err != nil {
+			return fmt.Errorf("gitlab options: %w", err)
+		}
+		pub := newGitLabPublisher(pubOpts)
+		result, err := pub.Publish(comments)
+		if err != nil {
+			return fmt.Errorf("gitlab publish: %w", err)
+		}
+		printPublishResult(opts, result)
+	}
+
 	// Record summary metrics (files_reviewed is refined by agent.Run).
 	duration := time.Since(startTime)
 	telemetry.RecordReviewDuration(ctx, duration)
@@ -218,6 +247,15 @@ func runPreview(repoDir string, opts reviewOptions, fileFilter *rules.FileFilter
 
 	outputPreviewText(preview)
 	return nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader, diffMap map[string]string) tool.Registry {
