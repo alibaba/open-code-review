@@ -218,6 +218,17 @@ curl -o ~/.claude/commands/open-code-review.md \
 | `--audience` | — | `human` | `human` (show progress) or `agent` (summary only) |
 | `--rule` | — | — | Path to custom JSON review rules |
 | `--tools` | — | — | Path to custom JSON tools config |
+| `--platform` | — | — | Publish platform: `gitlab` |
+| `--mr` | — | — | Merge request IID (GitLab) |
+| `--project-id` | — | — | GitLab project ID or namespace path (e.g. group/sub/project) |
+| `--gitlab-base-url` | — | — | GitLab base URL (default: `https://gitlab.com`) |
+| `--publish` | — | `false` | Publish review results to merge request |
+| `--pr-summary` | — | `false` | Append/update managed MR description summary |
+| `--clear-existing` | — | `false` | Delete OCR comments before publishing |
+| `--clear-inline` | — | `false` | Delete OCR inline comments and exit |
+| `--clear-summary` | — | `false` | Delete OCR summary/request-changes comments and exit |
+| `--no-inline` | — | `false` | Skip inline discussions during publish |
+| `--no-summary-comment` | — | `false` | Skip summary note during publish |
 
 ## Examples
 
@@ -245,6 +256,89 @@ ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
 # View review session history in browser
 ocr viewer
 ocr viewer --addr :3000
+```
+
+## GitLab MR Publishing
+
+OCR can publish review results directly to a GitLab Merge Request.
+
+### Usage
+
+```bash
+# Publish review to a GitLab MR
+GITLAB_TOKEN=... ocr review --platform gitlab --project-id 456 --mr 123 --publish
+
+# Publish with MR description summary
+GITLAB_TOKEN=... ocr review --platform gitlab --project-id 456 --mr 123 --publish --pr-summary
+
+# Clear OCR inline comments from a MR
+GITLAB_TOKEN=... ocr review --platform gitlab --project-id 456 --mr 123 --clear-inline
+
+# Clear OCR summary/request-changes comments from a MR
+GITLAB_TOKEN=... ocr review --platform gitlab --project-id 456 --mr 123 --clear-summary
+
+# CI-style invocation (env inference)
+export GITLAB_TOKEN=...
+export CI_PROJECT_ID=456
+export CI_MERGE_REQUEST_IID=123
+export CI_SERVER_URL=https://gitlab.example.com
+ocr review --platform gitlab --publish
+```
+
+### GitLab Flags
+
+| Flag | Description |
+|------|-------------|
+| `--platform gitlab` | Enable GitLab platform mode |
+| `--mr <iid>` | Merge request IID |
+| `--project-id <id-or-path>` | GitLab project ID or namespace path (e.g. group/sub/project) |
+| `--gitlab-base-url <url>` | Self-hosted GitLab base URL (default: `https://gitlab.com`) |
+| `--publish` | Publish review results to the MR |
+| `--pr-summary` | Append/update managed MR description summary |
+| `--clear-existing` | Delete OCR comments before publishing (requires `--publish`) |
+| `--clear-inline` | Delete OCR inline comments and exit |
+| `--clear-summary` | Delete OCR summary/request-changes comments and exit |
+| `--no-inline` | Skip inline discussions during publish |
+| `--no-summary-comment` | Skip summary note during publish |
+
+### Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `GITLAB_TOKEN` | GitLab API token (takes precedence) |
+| `OCR_GITLAB_TOKEN` | GitLab API token (fallback) |
+| `OCR_GITLAB_BASE_URL` | Self-hosted GitLab base URL |
+| `CI_SERVER_URL` | CI-inferred GitLab base URL |
+| `CI_PROJECT_ID` | CI-inferred project ID |
+| `CI_MERGE_REQUEST_IID` | CI-inferred MR IID |
+
+### Marker Ownership
+
+OCR only deletes or updates comments that contain OCR markers. Unmarked user comments are never touched:
+
+- Inline comments: `<!-- open-code-review:inline -->`
+- Summary comments: `<!-- open-code-review:summary -->`
+- Request-changes comments: `<!-- open-code-review:request-changes -->`
+- MR description summary: bounded by `<!-- open-code-review:pr-summary:start -->` and `<!-- open-code-review:pr-summary:end -->`
+
+### GitLab 13.12 Compatibility
+
+The GitLab client supports self-hosted instances running GitLab 13.12+:
+
+- `/merge_requests/:iid/diffs` 404 fallback to `/merge_requests/:iid/changes?access_raw_diffs=true`
+- Self-hosted base URLs via `--gitlab-base-url`, `OCR_GITLAB_BASE_URL`, or `CI_SERVER_URL`
+
+### E2E Tests
+
+Opt-in e2e tests run against a local GitLab container:
+
+```bash
+OCR_E2E_GITLAB=1 \
+OCR_E2E_GITLAB_URL=http://localhost:8929 \
+OCR_E2E_GITLAB_TOKEN=<token> \
+OCR_E2E_GITLAB_PROJECT_ID=<project-id> \
+OCR_E2E_GITLAB_MR_IID=<iid> \
+  go test -tags=e2e ./internal/e2e/gitlab -count=1 -v
 ```
 
 ## Review Rules

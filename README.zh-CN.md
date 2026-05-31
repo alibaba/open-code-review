@@ -218,6 +218,17 @@ curl -o ~/.claude/commands/open-code-review.md \
 | `--audience` | — | `human` | `human`（显示进度）或 `agent`（仅输出摘要） |
 | `--rule` | — | — | 自定义 JSON 审查规则路径 |
 | `--tools` | — | — | 自定义 JSON 工具配置路径 |
+| `--platform` | — | — | 发布平台：`gitlab` |
+| `--mr` | — | — | Merge Request IID（GitLab） |
+| `--project-id` | — | — | GitLab 项目 ID 或命名空间路径（如 group/sub/project） |
+| `--gitlab-base-url` | — | — | GitLab 基础 URL（默认：`https://gitlab.com`） |
+| `--publish` | — | `false` | 将审查结果发布到 Merge Request |
+| `--pr-summary` | — | `false` | 追加/更新 MR 描述中的摘要块 |
+| `--clear-existing` | — | `false` | 发布前删除 OCR 评论 |
+| `--clear-inline` | — | `false` | 删除 OCR 行内评论后退出 |
+| `--clear-summary` | — | `false` | 删除 OCR 摘要/请求修改评论后退出 |
+| `--no-inline` | — | `false` | 发布时跳过行内评论 |
+| `--no-summary-comment` | — | `false` | 发布时跳过摘要评论 |
 
 ## 示例
 
@@ -245,6 +256,89 @@ ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
 # 在浏览器中查看审查会话历史
 ocr viewer
 ocr viewer --addr :3000
+```
+
+## GitLab MR 发布
+
+OCR 可以将审查结果直接发布到 GitLab Merge Request。
+
+### 用法
+
+```bash
+# 将审查结果发布到 GitLab MR
+GITLAB_TOKEN=... ocr review --platform gitlab --project-id 456 --mr 123 --publish
+
+# 发布并更新 MR 描述摘要
+GITLAB_TOKEN=... ocr review --platform gitlab --project-id 456 --mr 123 --publish --pr-summary
+
+# 删除 MR 上的 OCR 行内评论
+GITLAB_TOKEN=... ocr review --platform gitlab --project-id 456 --mr 123 --clear-inline
+
+# 删除 MR 上的 OCR 摘要/请求修改评论
+GITLAB_TOKEN=... ocr review --platform gitlab --project-id 456 --mr 123 --clear-summary
+
+# CI 环境变量推断
+export GITLAB_TOKEN=...
+export CI_PROJECT_ID=456
+export CI_MERGE_REQUEST_IID=123
+export CI_SERVER_URL=https://gitlab.example.com
+ocr review --platform gitlab --publish
+```
+
+### GitLab 参数
+
+| 参数 | 描述 |
+|------|------|
+| `--platform gitlab` | 启用 GitLab 平台模式 |
+| `--mr <iid>` | Merge Request IID |
+| `--project-id <id-or-path>` | GitLab 项目 ID 或命名空间路径（如 group/sub/project） |
+| `--gitlab-base-url <url>` | 自托管 GitLab 基础 URL（默认：`https://gitlab.com`） |
+| `--publish` | 将审查结果发布到 MR |
+| `--pr-summary` | 追加/更新 MR 描述中的摘要块 |
+| `--clear-existing` | 发布前删除 OCR 评论（需要 `--publish`） |
+| `--clear-inline` | 删除 OCR 行内评论后退出 |
+| `--clear-summary` | 删除 OCR 摘要/请求修改评论后退出 |
+| `--no-inline` | 发布时跳过行内评论 |
+| `--no-summary-comment` | 发布时跳过摘要评论 |
+
+### 环境变量
+
+| 变量 | 用途 |
+|------|------|
+| `GITLAB_TOKEN` | GitLab API 令牌（优先级最高） |
+| `OCR_GITLAB_TOKEN` | GitLab API 令牌（备选） |
+| `OCR_GITLAB_BASE_URL` | 自托管 GitLab 基础 URL |
+| `CI_SERVER_URL` | CI 推断的 GitLab 基础 URL |
+| `CI_PROJECT_ID` | CI 推断的项目 ID |
+| `CI_MERGE_REQUEST_IID` | CI 推断的 MR IID |
+
+### Marker 归属
+
+OCR 只删除或更新包含 OCR marker 的评论。未标记的用户评论不会被触碰：
+
+- 行内评论：`<!-- open-code-review:inline -->`
+- 摘要评论：`<!-- open-code-review:summary -->`
+- 请求修改评论：`<!-- open-code-review:request-changes -->`
+- MR 描述摘要：由 `<!-- open-code-review:pr-summary:start -->` 和 `<!-- open-code-review:pr-summary:end -->` 包围
+
+### GitLab 13.12 兼容性
+
+GitLab 客户端支持 GitLab 13.12+ 自托管实例：
+
+- `/merge_requests/:iid/diffs` 404 时回退到 `/merge_requests/:iid/changes?access_raw_diffs=true`
+- 通过 `--gitlab-base-url`、`OCR_GITLAB_BASE_URL` 或 `CI_SERVER_URL` 支持自托管基础 URL
+
+### E2E 测试
+
+可选的 E2E 测试针对本地 GitLab 容器运行：
+
+```bash
+OCR_E2E_GITLAB=1 \
+OCR_E2E_GITLAB_URL=http://localhost:8929 \
+OCR_E2E_GITLAB_TOKEN=<token> \
+OCR_E2E_GITLAB_PROJECT_ID=<project-id> \
+OCR_E2E_GITLAB_MR_IID=<iid> \
+  go test -tags=e2e ./internal/e2e/gitlab -count=1 -v
 ```
 
 ## 评审规则
