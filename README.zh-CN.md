@@ -214,6 +214,15 @@ ocr review \
 
 `--format json` 和 `--audience agent` 参数输出适合 CI 脚本解析的机器可读结果。
 
+JSON 输出中的每条评审结果可包含两个可选的结构化字段，便于 CI 集成在无需解析评论文本的情况下排序、分组或卡点构建：
+
+| 字段 | 允许的取值 | 说明 |
+|------|-----------|------|
+| `category` | `bug`、`security`、`performance`、`maintainability`、`test`、`style`、`documentation`、`other` | 标识问题的类别。 |
+| `severity` | `critical`、`high`、`medium`、`low`、`info` | 标识问题的严重程度。 |
+
+这两个字段均为可选，仅在模型填充时才会输出，因此忽略它们的现有消费方不受影响（字段为空时会被完全省略）。
+
 集成示例请参见 [`examples/`](./examples/) 目录：
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions 集成示例

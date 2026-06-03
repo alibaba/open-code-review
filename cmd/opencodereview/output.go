@@ -58,6 +58,10 @@ func renderComment(comment model.LlmComment) {
 
 	fmt.Printf("\n\033[2m─── %s:%d-%d ───\033[0m\n", comment.Path, comment.StartLine, comment.EndLine)
 
+	if badge := buildBadge(comment); badge != "" {
+		fmt.Printf("%s\n", badge)
+	}
+
 	if comment.Content != "" {
 		for _, ln := range wrapByRunes(comment.Content, 100) {
 			fmt.Printf("%s\n", ln)
@@ -79,6 +83,20 @@ func renderComment(comment model.LlmComment) {
 	}
 
 	fmt.Println()
+}
+
+// buildBadge renders a compact "[severity:high] [category:security]" prefix line
+// for a comment. It returns an empty string when both fields are absent, so existing
+// text output is unchanged for findings without structured metadata.
+func buildBadge(comment model.LlmComment) string {
+	var parts []string
+	if comment.Severity != "" {
+		parts = append(parts, fmt.Sprintf("[severity:%s]", comment.Severity))
+	}
+	if comment.Category != "" {
+		parts = append(parts, fmt.Sprintf("[category:%s]", comment.Category))
+	}
+	return strings.Join(parts, " ")
 }
 
 // printDiffLine renders a single diff line with colored prefix and background on content.

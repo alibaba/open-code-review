@@ -214,6 +214,17 @@ ocr review \
 
 The `--format json` and `--audience agent` flags output machine-readable results suitable for parsing in CI scripts.
 
+Each finding in the JSON output may include two optional structured fields so CI
+integrations can sort, group, or gate builds without re-parsing comment text:
+
+| Field | Allowed values | Notes |
+|-------|----------------|-------|
+| `category` | `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other` | Classifies the kind of issue. |
+| `severity` | `critical`, `high`, `medium`, `low`, `info` | Indicates the importance of the issue. |
+
+Both fields are optional and emitted only when the model populates them, so existing
+consumers that ignore them are unaffected (the keys are omitted entirely when empty).
+
 See the [`examples/`](./examples/) directory for integration examples:
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions integration example
