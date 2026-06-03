@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,27 @@ import (
 	"github.com/open-code-review/open-code-review/internal/telemetry"
 	"github.com/open-code-review/open-code-review/internal/tool"
 )
+
+// planBlockPattern matches the optional "Review Plan" section in a MAIN_TASK
+// template user message: a header line beginning with "### " whose text
+// contains "Review Plan" or "审查计划" (with optional ASCII "(Optional)" /
+// Chinese "（可选）" suffix), the {{plan_guidance}} placeholder on its own
+// line, and one trailing blank line. The ASCII and Chinese header forms
+// are matched separately because Go's regexp engine does not define \b
+// around CJK ideographs.
+var planBlockPattern = regexp.MustCompile(
+	`(?m)^### [^\n]*(?:Review Plan|审查计划)[^\n]*\n\{\{plan_guidance\}\}\n\n?`)
+
+// stripEmptyPlanBlock removes the "### Review Plan …\n{{plan_guidance}}\n\n"
+// wrapper from a MAIN_TASK user message when the plan phase produced no
+// guidance. The previous implementation hard-coded a single Chinese literal,
+// which did not match the actual English template shipped in
+// task_template.json, so the literal token "{{plan_guidance}}" leaked into
+// the rendered prompt on every review where the plan phase was skipped or
+// failed. Strip is a no-op when the wrapper is absent.
+func stripEmptyPlanBlock(content string) string {
+	return planBlockPattern.ReplaceAllString(content, "")
+}
 
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
@@ -483,11 +505,17 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
 		content = strings.ReplaceAll(content, "{{diff}}", d.Diff)
 		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
+		// Always substitute the {{plan_guidance}} token so the literal placeholder
+		// never leaks into the rendered prompt. When the plan phase produced no
+		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
+		// (any language variant) so the LLM does not see a dangling section header.
+		// Strip MUST run before ReplaceAll: the regex requires the literal
+		// {{plan_guidance}} token to be present; if we replace first, the token
+		// is gone and the wrapper can't be matched.
 		if planResult == "" {
-			content = strings.ReplaceAll(content, "### 审查计划\n{{plan_guidance}}\n\n", "")
-		} else {
-			content = strings.ReplaceAll(content, "{{plan_guidance}}", planResult)
+			content = stripEmptyPlanBlock(content)
 		}
+		content = strings.ReplaceAll(content, "{{plan_guidance}}", planResult)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
