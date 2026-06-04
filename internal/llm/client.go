@@ -313,14 +313,9 @@ func messagesToOpenAI(msgs []Message) []openai.ChatCompletionMessageParamUnion {
 }
 
 // extractMessageText returns the text content from a Message.
+// Delegates to Message.ExtractText() which handles both string and content block formats.
 func extractMessageText(m Message) string {
-	switch v := m.Content.(type) {
-	case string:
-		return v
-	default:
-		b, _ := json.Marshal(m.Content)
-		return string(b)
-	}
+	return m.ExtractText()
 }
 
 // toolsToOpenAI converts internal ToolDef slice to OpenAI SDK tool params.
@@ -358,19 +353,30 @@ func openAIToChatResponse(id, model, finishReason, content string, toolCalls []T
 
 // messagesToAnthropic converts internal Messages to Anthropic SDK params.
 // Returns system prompt blocks and message params separately.
+// Consecutive tool-result messages are batched into a single user message,
+// as required by the Anthropic Messages API.
 func messagesToAnthropic(msgs []Message) ([]anthropic.TextBlockParam, []anthropic.MessageParam) {
 	var system []anthropic.TextBlockParam
 	var result []anthropic.MessageParam
+	var pendingToolResults []anthropic.ContentBlockParamUnion
+
+	flushToolResults := func() {
+		if len(pendingToolResults) > 0 {
+			result = append(result, anthropic.NewUserMessage(pendingToolResults...))
+			pendingToolResults = nil
+		}
+	}
 
 	for _, m := range msgs {
 		switch m.Role {
 		case "system":
-			text := extractMessageText(m)
-			system = append(system, anthropic.TextBlockParam{Text: text})
+			system = append(system, anthropic.TextBlockParam{Text: extractMessageText(m)})
 		case "user":
+			flushToolResults()
 			text := extractMessageText(m)
 			result = append(result, anthropic.NewUserMessage(anthropic.NewTextBlock(text)))
 		case "assistant":
+			flushToolResults()
 			if len(m.ToolCalls) > 0 {
 				var blocks []anthropic.ContentBlockParamUnion
 				if text := extractMessageText(m); text != "" {
@@ -395,18 +401,17 @@ func messagesToAnthropic(msgs []Message) ([]anthropic.TextBlockParam, []anthropi
 				result = append(result, anthropic.NewAssistantMessage(anthropic.NewTextBlock(text)))
 			}
 		case "tool":
-			result = append(result, anthropic.NewUserMessage(
-				anthropic.ContentBlockParamUnion{
-					OfToolResult: &anthropic.ToolResultBlockParam{
-						ToolUseID: m.ToolCallID,
-						Content: []anthropic.ToolResultBlockParamContentUnion{{
-							OfText: &anthropic.TextBlockParam{Text: extractMessageText(m)},
-						}},
-					},
+			pendingToolResults = append(pendingToolResults, anthropic.ContentBlockParamUnion{
+				OfToolResult: &anthropic.ToolResultBlockParam{
+					ToolUseID: m.ToolCallID,
+					Content: []anthropic.ToolResultBlockParamContentUnion{{
+						OfText: &anthropic.TextBlockParam{Text: extractMessageText(m)},
+					}},
 				},
-			))
+			})
 		}
 	}
+	flushToolResults()
 	return system, result
 }
 
@@ -414,12 +419,29 @@ func messagesToAnthropic(msgs []Message) ([]anthropic.TextBlockParam, []anthropi
 func toolsToAnthropic(tools []ToolDef) []anthropic.ToolUnionParam {
 	var result []anthropic.ToolUnionParam
 	for _, t := range tools {
+		schema := anthropic.ToolInputSchemaParam{}
+		if t.Function.Parameters != nil {
+			// Extract properties from the full JSON Schema
+			if props, ok := t.Function.Parameters["properties"]; ok {
+				schema.Properties = props
+			}
+			// Extract required fields
+			if req, ok := t.Function.Parameters["required"]; ok {
+				if reqSlice, ok := req.([]string); ok {
+					schema.Required = reqSlice
+				} else if reqAny, ok := req.([]any); ok {
+					for _, r := range reqAny {
+						if s, ok := r.(string); ok {
+							schema.Required = append(schema.Required, s)
+						}
+					}
+				}
+			}
+		}
 		toolParam := anthropic.ToolParam{
 			Name:        t.Function.Name,
 			Description: anthropic.String(t.Function.Description),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: t.Function.Parameters,
-			},
+			InputSchema: schema,
 		}
 		result = append(result, anthropic.ToolUnionParam{OfTool: &toolParam})
 	}
@@ -464,10 +486,16 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithAPIKey(cfg.APIKey),
 	}
 	if cfg.URL != "" {
-		opts = append(opts, openaiopt.WithBaseURL(cfg.URL))
+		// Strip /chat/completions suffix if present — SDK appends it.
+		base := strings.TrimRight(cfg.URL, "/")
+		base = strings.TrimSuffix(base, "/chat/completions")
+		opts = append(opts, openaiopt.WithBaseURL(base))
 	}
 	if cfg.Timeout > 0 {
 		opts = append(opts, openaiopt.WithRequestTimeout(cfg.Timeout))
+	} else {
+		// Default 5-minute timeout
+		opts = append(opts, openaiopt.WithRequestTimeout(5*time.Minute))
 	}
 	client := openai.NewClient(opts...)
 	return &OpenAIClient{
@@ -499,9 +527,11 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 	}
 
 	params := openai.ChatCompletionNewParams{
-		Model:               openai.ChatModel(model),
-		Messages:            messagesToOpenAI(req.Messages),
-		MaxCompletionTokens: openai.Int(int64(req.MaxTokens)),
+		Model:    openai.ChatModel(model),
+		Messages: messagesToOpenAI(req.Messages),
+	}
+	if req.MaxTokens > 0 {
+		params.MaxCompletionTokens = openai.Int(int64(req.MaxTokens))
 	}
 	if len(req.Tools) > 0 {
 		params.Tools = toolsToOpenAI(req.Tools)
@@ -570,9 +600,11 @@ func (c *OpenAIClient) StreamCompletion(req ChatRequest, cb func(chunk []byte) e
 	}
 
 	params := openai.ChatCompletionNewParams{
-		Model:               openai.ChatModel(model),
-		Messages:            messagesToOpenAI(req.Messages),
-		MaxCompletionTokens: openai.Int(int64(req.MaxTokens)),
+		Model:    openai.ChatModel(model),
+		Messages: messagesToOpenAI(req.Messages),
+	}
+	if req.MaxTokens > 0 {
+		params.MaxCompletionTokens = openai.Int(int64(req.MaxTokens))
 	}
 	if len(req.Tools) > 0 {
 		params.Tools = toolsToOpenAI(req.Tools)
@@ -617,10 +649,16 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		anthropt.WithAPIKey(cfg.APIKey),
 	}
 	if cfg.URL != "" {
-		opts = append(opts, anthropt.WithBaseURL(cfg.URL))
+		// Strip /v1/messages suffix if present — SDK appends it.
+		base := strings.TrimRight(cfg.URL, "/")
+		base = strings.TrimSuffix(base, "/v1/messages")
+		opts = append(opts, anthropt.WithBaseURL(base))
 	}
 	if cfg.Timeout > 0 {
 		opts = append(opts, anthropt.WithRequestTimeout(cfg.Timeout))
+	} else {
+		// Default 5-minute timeout
+		opts = append(opts, anthropt.WithRequestTimeout(5*time.Minute))
 	}
 	client := anthropic.NewClient(opts...)
 	return &AnthropicClient{
@@ -669,18 +707,26 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		opts = append(opts, anthropt.WithJSONSet(k, v))
 	}
 
-	message, err := c.client.Messages.New(ctx, params, opts...)
+	var message *anthropic.Message
+	err := c.withRetryCtx(ctx, func() error {
+		var err error
+		message, err = c.client.Messages.New(ctx, params, opts...)
+		if err != nil {
+			return fmt.Errorf("llm request failed: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("llm request failed: %w", err)
+		return nil, err
 	}
 
 	// Extract text and tool calls from response content blocks
-	var textContent string
+	var textParts []string
 	var toolCalls []ToolCall
 	for _, block := range message.Content {
 		switch block.Type {
 		case "text":
-			textContent += block.Text
+			textParts = append(textParts, block.Text)
 		case "tool_use":
 			toolCalls = append(toolCalls, ToolCall{
 				ID:   block.ID,
@@ -692,6 +738,7 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 			})
 		}
 	}
+	textContent := strings.Join(textParts, "\n")
 
 	var usage *UsageInfo
 	if message.Usage.InputTokens > 0 || message.Usage.OutputTokens > 0 {
@@ -743,10 +790,16 @@ func (c *AnthropicClient) StreamCompletion(req ChatRequest, cb func(chunk []byte
 		params.Temperature = anthropic.Float(*req.Temperature)
 	}
 
+	// Apply ExtraBody via request options.
+	var opts []anthropt.RequestOption
+	for k, v := range c.cfg.ExtraBody {
+		opts = append(opts, anthropt.WithJSONSet(k, v))
+	}
+
 	// TODO: LLMClient.StreamCompletion interface does not accept context.Context;
 	// using context.Background() as a workaround. Consider updating the interface
 	// to support context propagation for cancellation and tracing.
-	stream := c.client.Messages.NewStreaming(context.Background(), params)
+	stream := c.client.Messages.NewStreaming(context.Background(), params, opts...)
 	for stream.Next() {
 		evt := stream.Current()
 		chunkBytes, err := json.Marshal(evt)
@@ -791,21 +844,28 @@ func (c *OpenAIClient) withRetryCtx(ctx context.Context, fn func() error) error 
 	return retryWithCtx(ctx, fn)
 }
 
+func (c *AnthropicClient) withRetryCtx(ctx context.Context, fn func() error) error {
+	return retryWithCtx(ctx, fn)
+}
+
 // isRetryable determines whether an error is transient and worth retrying.
 func isRetryable(err error) bool {
 	msg := err.Error()
-	// 429 (rate limit) and 5xx server errors are retryable.
-	if strings.Contains(msg, "API error 429:") {
+	// SDK format: "POST \"...\": 429 Too Many Requests" or "... 429 Too Many Requests ..."
+	// Also check old format "API error 429:" for backward compatibility.
+	if strings.Contains(msg, " 429 ") || strings.Contains(msg, "API error 429:") {
 		return true
 	}
+	// Server errors: match " 500 " through " 599 " (with spaces to avoid false positives).
+	// SDK format: "POST \"...\": 500 Internal Server Error"
+	// Old format: "API error 500: ..."
 	for code := 500; code <= 599; code++ {
-		if strings.Contains(msg, fmt.Sprintf("API error %d:", code)) {
+		if strings.Contains(msg, fmt.Sprintf(" %d ", code)) || strings.Contains(msg, fmt.Sprintf("API error %d:", code)) {
 			return true
 		}
 	}
 	// Network-level errors (timeout, connection refused, DNS failure, etc.) are retryable.
-	if strings.Contains(msg, "request failed:") ||
-		strings.Contains(msg, "connection refused") ||
+	if strings.Contains(msg, "connection refused") ||
 		strings.Contains(msg, "no such host") ||
 		strings.Contains(msg, "i/o timeout") ||
 		strings.Contains(msg, "EOF") {
