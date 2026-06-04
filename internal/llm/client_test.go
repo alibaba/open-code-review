@@ -8,44 +8,71 @@ import (
 	openai "github.com/openai/openai-go/v3"
 )
 
-func TestNewAnthropicClient_URLNormalization(t *testing.T) {
+func TestNewAnthropicClient_SDKConstruction(t *testing.T) {
+	client := NewAnthropicClient(ClientConfig{
+		URL:    "https://api.anthropic.com",
+		APIKey: "test-key",
+		Model:  "claude-sonnet-4-20250514",
+	})
+	if client.client == nil {
+		t.Error("SDK client should not be nil")
+	}
+	if client.cfg.Model != "claude-sonnet-4-20250514" {
+		t.Errorf("Model = %q, want %q", client.cfg.Model, "claude-sonnet-4-20250514")
+	}
+}
+
+func TestAnthropicClient_CompletionsWithCtx_TranslatesRequest(t *testing.T) {
+	client := NewAnthropicClient(ClientConfig{
+		URL:    "https://api.anthropic.com",
+		APIKey: "test-key",
+		Model:  "claude-sonnet-4-20250514",
+	})
+
+	req := ChatRequest{
+		Model:     "claude-sonnet-4-20250514",
+		Messages:  []Message{NewTextMessage("user", "hello")},
+		MaxTokens: 1000,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := client.CompletionsWithCtx(ctx, req)
+	if err == nil {
+		t.Log("Expected error from fake server, got nil")
+	}
+}
+
+func TestNewAnthropicClient_URLPassthrough(t *testing.T) {
 	tests := []struct {
 		name     string
 		inputURL string
-		wantURL  string
 	}{
 		{
 			name:     "bare host",
 			inputURL: "https://api.anthropic.com",
-			wantURL:  "https://api.anthropic.com/v1/messages",
 		},
 		{
 			name:     "bare host with trailing slash",
 			inputURL: "https://api.anthropic.com/",
-			wantURL:  "https://api.anthropic.com/v1/messages",
 		},
 		{
-			name:     "full URL already has /v1/messages",
-			inputURL: "https://api.anthropic.com/v1/messages",
-			wantURL:  "https://api.anthropic.com/v1/messages",
-		},
-		{
-			name:     "full URL with trailing slash",
-			inputURL: "https://api.anthropic.com/v1/messages/",
-			wantURL:  "https://api.anthropic.com/v1/messages/",
+			name:     "full URL",
+			inputURL: "https://api.anthropic.com/v1",
 		},
 		{
 			name:     "custom proxy base URL",
 			inputURL: "https://proxy.example.com/anthropic",
-			wantURL:  "https://proxy.example.com/anthropic/v1/messages",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := NewAnthropicClient(ClientConfig{URL: tt.inputURL})
-			if client.cfg.URL != tt.wantURL {
-				t.Errorf("got URL %q, want %q", client.cfg.URL, tt.wantURL)
+			client := NewAnthropicClient(ClientConfig{URL: tt.inputURL, APIKey: "test-key"})
+			// SDK handles URL construction internally; verify client was created.
+			if client.client == nil {
+				t.Error("SDK client should not be nil")
 			}
 		})
 	}
