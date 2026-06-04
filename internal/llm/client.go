@@ -276,7 +276,10 @@ func messagesToOpenAI(msgs []Message) []openai.ChatCompletionMessageParamUnion {
 	var result []openai.ChatCompletionMessageParamUnion
 	for _, m := range msgs {
 		switch m.Role {
-		case "system", "developer":
+		case "system":
+			text := extractMessageText(m)
+			result = append(result, openai.SystemMessage(text))
+		case "developer":
 			text := extractMessageText(m)
 			result = append(result, openai.DeveloperMessage(text))
 		case "user":
@@ -303,7 +306,7 @@ func messagesToOpenAI(msgs []Message) []openai.ChatCompletionMessageParamUnion {
 				result = append(result, openai.AssistantMessage(extractMessageText(m)))
 			}
 		case "tool":
-			result = append(result, openai.ToolMessage(m.Content.(string), m.ToolCallID))
+			result = append(result, openai.ToolMessage(extractMessageText(m), m.ToolCallID))
 		}
 	}
 	return result
@@ -375,7 +378,9 @@ func messagesToAnthropic(msgs []Message) ([]anthropic.TextBlockParam, []anthropi
 				}
 				for _, tc := range m.ToolCalls {
 					var input any
-					json.Unmarshal([]byte(tc.Function.Arguments), &input)
+					if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
+						input = map[string]any{}
+					}
 					blocks = append(blocks, anthropic.ContentBlockParamUnion{
 						OfToolUse: &anthropic.ToolUseBlockParam{
 							ID:    tc.ID,
@@ -581,6 +586,9 @@ func (c *OpenAIClient) StreamCompletion(req ChatRequest, cb func(chunk []byte) e
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 
+	// TODO: LLMClient.StreamCompletion interface does not accept context.Context;
+	// using context.Background() as a workaround. Consider updating the interface
+	// to support context propagation for cancellation and tracing.
 	stream := c.client.Chat.Completions.NewStreaming(context.Background(), params, opts...)
 	for stream.Next() {
 		evt := stream.Current()
@@ -655,7 +663,13 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		params.Temperature = anthropic.Float(*req.Temperature)
 	}
 
-	message, err := c.client.Messages.New(ctx, params)
+	// Apply ExtraBody via request options.
+	var opts []anthropt.RequestOption
+	for k, v := range c.cfg.ExtraBody {
+		opts = append(opts, anthropt.WithJSONSet(k, v))
+	}
+
+	message, err := c.client.Messages.New(ctx, params, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("llm request failed: %w", err)
 	}
@@ -725,7 +739,13 @@ func (c *AnthropicClient) StreamCompletion(req ChatRequest, cb func(chunk []byte
 	if len(req.Tools) > 0 {
 		params.Tools = toolsToAnthropic(req.Tools)
 	}
+	if req.Temperature != nil {
+		params.Temperature = anthropic.Float(*req.Temperature)
+	}
 
+	// TODO: LLMClient.StreamCompletion interface does not accept context.Context;
+	// using context.Background() as a workaround. Consider updating the interface
+	// to support context propagation for cancellation and tracing.
 	stream := c.client.Messages.NewStreaming(context.Background(), params)
 	for stream.Next() {
 		evt := stream.Current()
