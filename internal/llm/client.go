@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	anthropic "github.com/anthropics/anthropic-sdk-go"
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
 	tiktoken "github.com/pkoukk/tiktoken-go"
@@ -344,6 +345,99 @@ func toolsToOpenAI(tools []ToolDef) []openai.ChatCompletionToolUnionParam {
 
 // openAIToChatResponse converts OpenAI SDK response to internal ChatResponse.
 func openAIToChatResponse(id, model, finishReason, content string, toolCalls []ToolCall, usage *UsageInfo) *ChatResponse {
+	respMsg := ResponseMessage{
+		Role:      "assistant",
+		Content:   &content,
+		ToolCalls: toolCalls,
+	}
+	return &ChatResponse{
+		ID:    id,
+		Model: model,
+		Choices: []Choice{{
+			Message:      respMsg,
+			FinishReason: finishReason,
+		}},
+		Usage: usage,
+	}
+}
+
+// --- Anthropic SDK translation functions ---
+
+// messagesToAnthropic converts internal Messages to Anthropic SDK params.
+// Returns system prompt blocks and message params separately.
+func messagesToAnthropic(msgs []Message) ([]anthropic.TextBlockParam, []anthropic.MessageParam) {
+	var system []anthropic.TextBlockParam
+	var result []anthropic.MessageParam
+
+	for _, m := range msgs {
+		switch m.Role {
+		case "system":
+			text := extractMessageText(m)
+			system = append(system, anthropic.TextBlockParam{Text: text})
+		case "user":
+			text := extractMessageText(m)
+			result = append(result, anthropic.NewUserMessage(anthropic.NewTextBlock(text)))
+		case "assistant":
+			if len(m.ToolCalls) > 0 {
+				var blocks []anthropic.ContentBlockParamUnion
+				if text := extractMessageText(m); text != "" {
+					blocks = append(blocks, anthropic.NewTextBlock(text))
+				}
+				for _, tc := range m.ToolCalls {
+					var input any
+					json.Unmarshal([]byte(tc.Function.Arguments), &input)
+					blocks = append(blocks, anthropic.ContentBlockParamUnion{
+						OfToolUse: &anthropic.ToolUseBlockParam{
+							ID:    tc.ID,
+							Name:  tc.Function.Name,
+							Input: input,
+						},
+					})
+				}
+				result = append(result, anthropic.NewAssistantMessage(blocks...))
+			} else {
+				text := extractMessageText(m)
+				result = append(result, anthropic.NewAssistantMessage(anthropic.NewTextBlock(text)))
+			}
+		case "tool":
+			result = append(result, anthropic.NewUserMessage(
+				anthropic.ContentBlockParamUnion{
+					OfToolResult: &anthropic.ToolResultBlockParam{
+						ToolUseID: m.ToolCallID,
+						Content: []anthropic.ToolResultBlockParamContentUnion{{
+							OfText: &anthropic.TextBlockParam{Text: extractMessageText(m)},
+						}},
+					},
+				},
+			))
+		}
+	}
+	return system, result
+}
+
+// toolsToAnthropic converts internal ToolDef slice to Anthropic SDK tool params.
+func toolsToAnthropic(tools []ToolDef) []anthropic.ToolParam {
+	var result []anthropic.ToolParam
+	for _, t := range tools {
+		result = append(result, anthropic.ToolParam{
+			Name:        t.Function.Name,
+			Description: anthropic.String(t.Function.Description),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: t.Function.Parameters,
+			},
+		})
+	}
+	return result
+}
+
+// anthropicToChatResponse converts Anthropic SDK response to internal ChatResponse.
+func anthropicToChatResponse(id, model, stopReason, content string, toolCalls []ToolCall, usage *UsageInfo) *ChatResponse {
+	// Map Anthropic stop reasons to OpenAI-style finish reasons
+	finishReason := stopReason
+	if stopReason == "tool_use" {
+		finishReason = "tool_calls"
+	}
+
 	respMsg := ResponseMessage{
 		Role:      "assistant",
 		Content:   &content,

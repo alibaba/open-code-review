@@ -201,5 +201,102 @@ func TestOpenAIClient_CompletionsWithCtx_TranslatesRequest(t *testing.T) {
 	}
 }
 
+func TestMessagesToAnthropic(t *testing.T) {
+	t.Run("extracts system message", func(t *testing.T) {
+		msgs := []Message{
+			NewTextMessage("system", "you are helpful"),
+			NewTextMessage("user", "hello"),
+		}
+		system, result := messagesToAnthropic(msgs)
+		if len(system) != 1 {
+			t.Errorf("got %d system blocks, want 1", len(system))
+		}
+		if len(result) != 1 {
+			t.Errorf("got %d messages, want 1", len(result))
+		}
+	})
+
+	t.Run("assistant with tool calls", func(t *testing.T) {
+		msgs := []Message{{
+			Role:    "assistant",
+			Content: "let me check",
+			ToolCalls: []ToolCall{{
+				ID:   "call_123",
+				Type: "function",
+				Function: FunctionCall{
+					Name:      "read_file",
+					Arguments: `{"path":"main.go"}`,
+				},
+			}},
+		}}
+		_, result := messagesToAnthropic(msgs)
+		if len(result) != 1 {
+			t.Fatalf("got %d messages, want 1", len(result))
+		}
+	})
+
+	t.Run("tool result message", func(t *testing.T) {
+		msgs := []Message{{
+			Role:       "tool",
+			Content:    "file contents",
+			ToolCallID: "call_123",
+		}}
+		_, result := messagesToAnthropic(msgs)
+		if len(result) != 1 {
+			t.Fatalf("got %d messages, want 1", len(result))
+		}
+	})
+}
+
+func TestToolsToAnthropic(t *testing.T) {
+	tools := []ToolDef{{
+		Type: "function",
+		Function: FunctionDef{
+			Name:        "read_file",
+			Description: "Read a file",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{"type": "string"},
+				},
+			},
+		},
+	}}
+	result := toolsToAnthropic(tools)
+	if len(result) != 1 {
+		t.Fatalf("got %d tools, want 1", len(result))
+	}
+}
+
+func TestAnthropicToChatResponse(t *testing.T) {
+	t.Run("text response", func(t *testing.T) {
+		resp := anthropicToChatResponse("msg_123", "claude-sonnet-4-20250514", "end_turn", "Hello!", nil, nil)
+		if resp.ID != "msg_123" {
+			t.Errorf("ID = %q, want %q", resp.ID, "msg_123")
+		}
+		if len(resp.Choices) != 1 {
+			t.Fatalf("got %d choices, want 1", len(resp.Choices))
+		}
+		if resp.Choices[0].Message.Content == nil || *resp.Choices[0].Message.Content != "Hello!" {
+			t.Errorf("Content = %v, want %q", resp.Choices[0].Message.Content, "Hello!")
+		}
+	})
+
+	t.Run("tool use response", func(t *testing.T) {
+		toolCalls := []ToolCall{{
+			ID:       "toolu_abc",
+			Type:     "function",
+			Function: FunctionCall{Name: "read_file", Arguments: `{"path":"main.go"}`},
+		}}
+		resp := anthropicToChatResponse("msg_456", "claude-sonnet-4-20250514", "tool_use", "", toolCalls, nil)
+		if resp.Choices[0].FinishReason != "tool_calls" {
+			t.Errorf("FinishReason = %q, want %q", resp.Choices[0].FinishReason, "tool_calls")
+		}
+		if len(resp.Choices[0].Message.ToolCalls) != 1 {
+			t.Fatalf("got %d tool calls, want 1", len(resp.Choices[0].Message.ToolCalls))
+		}
+	})
+}
+
 // Verify that the openai import is used (avoids unused import errors during compilation).
 var _ = openai.ChatCompletionMessageParamUnion{}
