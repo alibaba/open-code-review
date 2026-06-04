@@ -16,6 +16,7 @@ import (
 	"time"
 
 	openai "github.com/openai/openai-go/v3"
+	openaiopt "github.com/openai/openai-go/v3/option"
 	tiktoken "github.com/pkoukk/tiktoken-go"
 
 	"github.com/open-code-review/open-code-review/internal/stdout"
@@ -364,29 +365,25 @@ func openAIToChatResponse(id, model, finishReason, content string, toolCalls []T
 // OpenAIClient sends requests to an OpenAI-compatible chat completion API.
 type OpenAIClient struct {
 	cfg    ClientConfig
-	client *http.Client
+	client *openai.Client
 }
 
-// NewOpenAIClient creates a new OpenAI-compatible LLM client.
+// NewOpenAIClient creates a new OpenAI-compatible LLM client using the official SDK.
 func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = 5 * time.Minute
+	opts := []openaiopt.RequestOption{
+		openaiopt.WithAPIKey(cfg.APIKey),
 	}
-	baseURL := strings.TrimRight(cfg.URL, "/")
-	if !strings.HasSuffix(baseURL, "/chat/completions") {
-		cfg.URL = baseURL + "/chat/completions"
+	if cfg.URL != "" {
+		opts = append(opts, openaiopt.WithBaseURL(cfg.URL))
 	}
+	if cfg.Timeout > 0 {
+		opts = append(opts, openaiopt.WithRequestTimeout(cfg.Timeout))
+	}
+	client := openai.NewClient(opts...)
 	return &OpenAIClient{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: cfg.Timeout,
-		},
+		cfg:    cfg,
+		client: &client,
 	}
-}
-
-// NewClient is kept as an alias for backward compatibility during transition.
-func NewClient(cfg ClientConfig) *OpenAIClient {
-	return NewOpenAIClient(cfg)
 }
 
 // ChatRequest represents the payload for a chat completion call.
@@ -404,155 +401,113 @@ func (c *OpenAIClient) Completions(req ChatRequest) (*ChatResponse, error) {
 	return c.CompletionsWithCtx(context.Background(), req)
 }
 
-// CompletionsWithCtx sends a chat completion request with context support for cancellation and timeout.
+// CompletionsWithCtx sends a chat completion request with context support.
 func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	model := req.Model
 	if model == "" {
 		model = c.cfg.Model
 	}
 
+	params := openai.ChatCompletionNewParams{
+		Model:               openai.ChatModel(model),
+		Messages:            messagesToOpenAI(req.Messages),
+		MaxCompletionTokens: openai.Int(int64(req.MaxTokens)),
+	}
+	if len(req.Tools) > 0 {
+		params.Tools = toolsToOpenAI(req.Tools)
+	}
+	if req.Temperature != nil {
+		params.Temperature = openai.Float(*req.Temperature)
+	}
+
+	// Apply ExtraBody via request options.
+	var opts []openaiopt.RequestOption
+	for k, v := range c.cfg.ExtraBody {
+		opts = append(opts, openaiopt.WithJSONSet(k, v))
+	}
+
 	var result *ChatResponse
 	err := c.withRetryCtx(ctx, func() error {
-		resp, err := c.doRequestCtx(ctx, model, req)
+		completion, err := c.client.Chat.Completions.New(ctx, params, opts...)
 		if err != nil {
-			return err
+			return fmt.Errorf("llm request failed: %w", err)
 		}
-		result = resp
+
+		if len(completion.Choices) == 0 {
+			return fmt.Errorf("llm response: no choices returned")
+		}
+
+		choice := completion.Choices[0]
+		var toolCalls []ToolCall
+		for _, tc := range choice.Message.ToolCalls {
+			toolCalls = append(toolCalls, ToolCall{
+				ID:   tc.ID,
+				Type: tc.Type,
+				Function: FunctionCall{
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				},
+			})
+		}
+
+		var usage *UsageInfo
+		if completion.Usage.TotalTokens > 0 {
+			usage = &UsageInfo{
+				TotalTokens:      completion.Usage.TotalTokens,
+				PromptTokens:     completion.Usage.PromptTokens,
+				CompletionTokens: completion.Usage.CompletionTokens,
+			}
+		}
+
+		result = openAIToChatResponse(
+			completion.ID,
+			completion.Model,
+			choice.FinishReason,
+			choice.Message.Content,
+			toolCalls,
+			usage,
+		)
 		return nil
 	})
 	return result, err
 }
 
-// GeneralRequest sends a simple chat request without or with optional tool calls.
-func (c *OpenAIClient) GeneralRequest(messages []Message, model string, tools []ToolDef) (*ChatResponse, error) {
-	return c.GeneralRequestWithCtx(context.Background(), messages, model, tools)
-}
-
-// GeneralRequestWithCtx sends a simple chat request with context support.
-func (c *OpenAIClient) GeneralRequestWithCtx(ctx context.Context, messages []Message, model string, tools []ToolDef) (*ChatResponse, error) {
-	return c.CompletionsWithCtx(ctx, ChatRequest{
-		Model:    model,
-		Messages: messages,
-		Tools:    tools,
-	})
-}
-
 // StreamCompletion initiates a streaming chat completion. The callback is invoked per chunk.
 func (c *OpenAIClient) StreamCompletion(req ChatRequest, cb func(chunk []byte) error) error {
-	req.Stream = true
-
 	model := req.Model
 	if model == "" {
 		model = c.cfg.Model
 	}
 
-	return c.withRetry(func() error {
-		body := make(map[string]any)
-		b, _ := json.Marshal(req)
-		json.Unmarshal(b, &body)
-		body["model"] = model
-		for k, v := range c.cfg.ExtraBody {
-			body[k] = v
-		}
+	params := openai.ChatCompletionNewParams{
+		Model:               openai.ChatModel(model),
+		Messages:            messagesToOpenAI(req.Messages),
+		MaxCompletionTokens: openai.Int(int64(req.MaxTokens)),
+	}
+	if len(req.Tools) > 0 {
+		params.Tools = toolsToOpenAI(req.Tools)
+	}
+	if req.Temperature != nil {
+		params.Temperature = openai.Float(*req.Temperature)
+	}
 
-		payload, _ := json.Marshal(body)
-		httpReq, err := http.NewRequest(http.MethodPost, c.cfg.URL, bytes.NewReader(payload))
+	var opts []openaiopt.RequestOption
+	for k, v := range c.cfg.ExtraBody {
+		opts = append(opts, openaiopt.WithJSONSet(k, v))
+	}
+
+	stream := c.client.Chat.Completions.NewStreaming(context.Background(), params, opts...)
+	for stream.Next() {
+		evt := stream.Current()
+		chunkBytes, err := json.Marshal(evt)
 		if err != nil {
-			return fmt.Errorf("create request: %w", err)
+			continue
 		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-		httpReq.Header.Set("Accept", "text/event-stream")
-		httpReq.Header.Set("User-Agent", userAgent(""))
-
-		resp, err := c.client.Do(httpReq)
-		if err != nil {
-			return fmt.Errorf("request failed: %w", err)
+		if err := cb(chunkBytes); err != nil {
+			return err
 		}
-		defer resp.Body.Close()
-
-		if isRetryableStatus(resp.StatusCode) {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("API error %d: %s", resp.StatusCode, string(bodyBytes))
-		}
-		if resp.StatusCode >= 400 {
-			bodyBytes, _ := io.ReadAll(resp.Body)
-			return fmt.Errorf("API error %d: %s (non-retryable)", resp.StatusCode, string(bodyBytes))
-		}
-
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				break
-			}
-			if err := cb([]byte(data)); err != nil {
-				return err
-			}
-		}
-		return scanner.Err()
-	})
-}
-
-// doRequest builds and sends a non-streaming completion request, returning the parsed response.
-func (c *OpenAIClient) doRequest(model string, req ChatRequest) (*ChatResponse, error) {
-	return c.doRequestCtx(context.Background(), model, req)
-}
-
-// doRequestCtx builds and sends a non-streaming completion request with context support.
-func (c *OpenAIClient) doRequestCtx(ctx context.Context, model string, req ChatRequest) (*ChatResponse, error) {
-	if model == "" {
-		model = c.cfg.Model
 	}
-	req.Model = model
-	payload, err := mergeExtraBody(req, c.cfg.ExtraBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request body: %w", err)
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.URL, bytes.NewReader(payload))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
-	httpReq.Header.Set("User-Agent", userAgent(""))
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response body: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		detail := extractErrorMessage(bodyBytes)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, detail)
-	}
-
-	var apiResp struct {
-		ID      string   `json:"id"`
-		Model   string   `json:"model"`
-		Choices []Choice `json:"choices"`
-	}
-	if err := json.Unmarshal(bodyBytes, &apiResp); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	return &ChatResponse{
-		ID:      apiResp.ID,
-		Model:   apiResp.Model,
-		Choices: apiResp.Choices,
-		Headers: resp.Header,
-		Usage:   resolveUsage(bodyBytes),
-	}, nil
+	return stream.Err()
 }
 
 // --- AnthropicClient ---

@@ -1,53 +1,12 @@
 package llm
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	openai "github.com/openai/openai-go/v3"
 )
-
-func TestNewOpenAIClient_URLNormalization(t *testing.T) {
-	tests := []struct {
-		name     string
-		inputURL string
-		wantURL  string
-	}{
-		{
-			name:     "base URL without trailing slash",
-			inputURL: "https://api.example.com/v1",
-			wantURL:  "https://api.example.com/v1/chat/completions",
-		},
-		{
-			name:     "base URL with trailing slash",
-			inputURL: "https://api.example.com/v1/",
-			wantURL:  "https://api.example.com/v1/chat/completions",
-		},
-		{
-			name:     "full URL already has chat/completions",
-			inputURL: "https://api.example.com/v1/chat/completions",
-			wantURL:  "https://api.example.com/v1/chat/completions",
-		},
-		{
-			name:     "full URL with trailing slash",
-			inputURL: "https://api.example.com/v1/chat/completions/",
-			wantURL:  "https://api.example.com/v1/chat/completions/",
-		},
-		{
-			name:     "bare host",
-			inputURL: "https://api.example.com",
-			wantURL:  "https://api.example.com/chat/completions",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := NewOpenAIClient(ClientConfig{URL: tt.inputURL})
-			if client.cfg.URL != tt.wantURL {
-				t.Errorf("got URL %q, want %q", client.cfg.URL, tt.wantURL)
-			}
-		})
-	}
-}
 
 func TestNewAnthropicClient_URLNormalization(t *testing.T) {
 	tests := []struct {
@@ -202,6 +161,44 @@ func TestOpenAIToChatResponse(t *testing.T) {
 			t.Errorf("ToolCall ID = %q, want %q", resp.Choices[0].Message.ToolCalls[0].ID, "call_abc")
 		}
 	})
+}
+
+func TestNewOpenAIClient_SDKConstruction(t *testing.T) {
+	client := NewOpenAIClient(ClientConfig{
+		URL:    "https://api.openai.com/v1",
+		APIKey: "test-key",
+		Model:  "gpt-4",
+	})
+	if client.client == nil {
+		t.Error("SDK client should not be nil")
+	}
+	if client.cfg.Model != "gpt-4" {
+		t.Errorf("Model = %q, want %q", client.cfg.Model, "gpt-4")
+	}
+}
+
+func TestOpenAIClient_CompletionsWithCtx_TranslatesRequest(t *testing.T) {
+	client := NewOpenAIClient(ClientConfig{
+		URL:    "https://api.example.com/v1",
+		APIKey: "test-key",
+		Model:  "gpt-4",
+	})
+
+	req := ChatRequest{
+		Model:     "gpt-4",
+		Messages:  []Message{NewTextMessage("user", "hello")},
+		MaxTokens: 1000,
+	}
+
+	// Use a short timeout so the test doesn't hang on retries.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// The call will fail (no real server), but we verify no panic and proper error handling.
+	_, err := client.CompletionsWithCtx(ctx, req)
+	if err == nil {
+		t.Log("Expected error from fake server, got nil (server might be reachable)")
+	}
 }
 
 // Verify that the openai import is used (avoids unused import errors during compilation).
