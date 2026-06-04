@@ -740,10 +740,6 @@ func (c *AnthropicClient) StreamCompletion(req ChatRequest, cb func(chunk []byte
 	return stream.Err()
 }
 
-
-
-
-
 // --- Retry logic ---
 
 func retryWithCtx(ctx context.Context, fn func() error) error {
@@ -771,14 +767,9 @@ func retryWithCtx(ctx context.Context, fn func() error) error {
 	return fmt.Errorf("request failed after %d retries: %w", maxRetries, lastErr)
 }
 
-func (c *OpenAIClient) withRetry(fn func() error) error {
-	return retryWithCtx(context.Background(), fn)
-}
-
 func (c *OpenAIClient) withRetryCtx(ctx context.Context, fn func() error) error {
 	return retryWithCtx(ctx, fn)
 }
-
 
 // isRetryable determines whether an error is transient and worth retrying.
 func isRetryable(err error) bool {
@@ -802,7 +793,6 @@ func isRetryable(err error) bool {
 	}
 	return false
 }
-
 
 // sleepWithBackoff sleeps for baseDelay * 2^attempt + jitter, capped at 60s.
 // Jitter spreads retries randomly within ±50% of the computed delay.
@@ -834,5 +824,3 @@ func stripThinkTags(s string) string {
 	s = strings.ReplaceAll(s, string(closeBytes), "")
 	return s
 }
-
-

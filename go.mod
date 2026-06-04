@@ -3,6 +3,7 @@ module github.com/open-code-review/open-code-review
 go 1.25.0
 
 require (
+	github.com/anthropics/anthropic-sdk-go v1.46.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/openai/openai-go/v3 v3.39.0
 	github.com/pkoukk/tiktoken-go v0.1.8
@@ -18,7 +19,6 @@ require (
 )
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.46.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
