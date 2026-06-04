@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	openai "github.com/openai/openai-go/v3"
 	tiktoken "github.com/pkoukk/tiktoken-go"
 
 	"github.com/open-code-review/open-code-review/internal/stdout"
@@ -273,6 +274,88 @@ func encodingForModel(modelName string) string {
 		return "o200k_base"
 	default:
 		return "cl100k_base"
+	}
+}
+
+// --- OpenAI SDK translation functions ---
+
+// messagesToOpenAI converts internal Message slice to OpenAI SDK message params.
+func messagesToOpenAI(msgs []Message) []openai.ChatCompletionMessageParamUnion {
+	var result []openai.ChatCompletionMessageParamUnion
+	for _, m := range msgs {
+		switch m.Role {
+		case "system", "developer":
+			text := extractMessageText(m)
+			result = append(result, openai.DeveloperMessage(text))
+		case "user":
+			text := extractMessageText(m)
+			result = append(result, openai.UserMessage(text))
+		case "assistant":
+			if len(m.ToolCalls) > 0 {
+				var toolCalls []openai.ChatCompletionMessageToolCallUnionParam
+				for _, tc := range m.ToolCalls {
+					toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+							ID: tc.ID,
+							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+								Name:      tc.Function.Name,
+								Arguments: tc.Function.Arguments,
+							},
+						},
+					})
+				}
+				msg := openai.AssistantMessage(extractMessageText(m))
+				msg.OfAssistant.ToolCalls = toolCalls
+				result = append(result, msg)
+			} else {
+				result = append(result, openai.AssistantMessage(extractMessageText(m)))
+			}
+		case "tool":
+			result = append(result, openai.ToolMessage(m.Content.(string), m.ToolCallID))
+		}
+	}
+	return result
+}
+
+// extractMessageText returns the text content from a Message.
+func extractMessageText(m Message) string {
+	switch v := m.Content.(type) {
+	case string:
+		return v
+	default:
+		b, _ := json.Marshal(m.Content)
+		return string(b)
+	}
+}
+
+// toolsToOpenAI converts internal ToolDef slice to OpenAI SDK tool params.
+func toolsToOpenAI(tools []ToolDef) []openai.ChatCompletionToolUnionParam {
+	var result []openai.ChatCompletionToolUnionParam
+	for _, t := range tools {
+		result = append(result, openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
+			Name:        t.Function.Name,
+			Description: openai.String(t.Function.Description),
+			Parameters:  openai.FunctionParameters(t.Function.Parameters),
+		}))
+	}
+	return result
+}
+
+// openAIToChatResponse converts OpenAI SDK response to internal ChatResponse.
+func openAIToChatResponse(id, model, finishReason, content string, toolCalls []ToolCall, usage *UsageInfo) *ChatResponse {
+	respMsg := ResponseMessage{
+		Role:      "assistant",
+		Content:   &content,
+		ToolCalls: toolCalls,
+	}
+	return &ChatResponse{
+		ID:    id,
+		Model: model,
+		Choices: []Choice{{
+			Message:      respMsg,
+			FinishReason: finishReason,
+		}},
+		Usage: usage,
 	}
 }
 
