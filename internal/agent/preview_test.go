@@ -207,7 +207,7 @@ func TestWhyExcluded_DefaultPathFilter(t *testing.T) {
 func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 	agent := New(Args{
 		FileFilter: &rules.FileFilter{
-			Include: []string{"src/**/*.go", "pkg/**/*.go"},
+			Include: []string{"src/**/*.go", "pkg/**/*.go", "**/*.supportedext"},
 		},
 	})
 
@@ -260,13 +260,12 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 			},
 			expected: ExcludeNone,
 		},
-		// --- Extension filter still takes precedence over include logic ---
 		{
-			name: "unsupported extension excluded before include check",
+			name: "include check overrides extension exclusion",
 			diff: model.Diff{
-				NewPath: "docs/readme.md",
+				NewPath: "internal/test.supportedext",
 			},
-			expected: ExcludeExtension,
+			expected: ExcludeNone,
 		},
 		{
 			name: "unsupported extension even if path looks like include dir",
