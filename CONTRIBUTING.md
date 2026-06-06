@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to OpenCodeReview! Every contribution matters — whether it's fixing a typo, reporting a bug, or implementing a new feature.
 
-[简体中文版](CONTRIBUTING.zh-CN.md)
+[简体中文版](CONTRIBUTING.zh-CN.md) | [日本語版](CONTRIBUTING.ja-JP.md)
 
 ## Code of Conduct
 
