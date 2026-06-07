@@ -184,7 +184,43 @@ For [Claude Code](https://docs.anthropic.com/en/docs/claude-code), install the c
 
 This registers the `/open-code-review:review` slash command, which runs OCR and automatically filters and fixes issues.
 
-#### Option 3: Copy the Command File Directly
+#### Option 3: Install as a Codex Plugin
+
+For local Codex, install the Open Code Review plugin from this repository:
+
+```bash
+codex plugin marketplace add alibaba/open-code-review
+codex
+/plugins
+```
+
+For a local checkout or fork:
+
+```bash
+codex plugin marketplace add .
+codex
+/plugins
+```
+
+Install and enable `Open Code Review`, then start a new Codex thread and invoke it explicitly:
+
+```text
+@Open Code Review review my current changes
+@Open Code Review review this branch against main
+@Open Code Review review and fix high-confidence issues
+```
+
+This registers a Codex skill that runs the local OCR CLI:
+
+```bash
+ocr review --audience agent
+```
+
+This integration does not change OCR's internal LLM backend and does not require configuring an OpenAI Responses API endpoint for Codex. OCR itself still requires the `ocr` CLI to be installed and configured as described in the CLI setup section.
+
+Korean guide: [`plugins/open-code-review/CODEX.ko-KR.md`](plugins/open-code-review/CODEX.ko-KR.md)
+
+#### Option 4: Copy the Command File Directly
 
 For a quick setup without any package manager, simply copy the command file to use the `/open-code-review` slash command in Claude Code.
 
