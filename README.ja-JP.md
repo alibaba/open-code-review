@@ -11,7 +11,7 @@
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
 </p>
 <p align="center">
-  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | 日本語
+  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | 日本語 | <a href="README.ko-KR.md">한국어</a>
 </p>
 
 ---
@@ -184,7 +184,43 @@ npx skills add alibaba/open-code-review --skill open-code-review
 
 これにより`/open-code-review:review`スラッシュコマンドが登録され、OCRを実行して問題を自動的にフィルタリング・修正します。
 
-#### オプション3: コマンドファイルを直接コピー
+#### オプション3: Codexプラグインとしてインストール
+
+ローカルCodexでは、このリポジトリからOpen Code Reviewプラグインをインストールできます：
+
+```bash
+codex plugin marketplace add alibaba/open-code-review
+codex
+/plugins
+```
+
+ローカルcheckoutまたはforkでは、次を使用できます：
+
+```bash
+codex plugin marketplace add .
+codex
+/plugins
+```
+
+`Open Code Review`をインストールして有効化した後、新しいCodex threadを開始して明示的に呼び出します：
+
+```text
+@Open Code Review review my current changes
+@Open Code Review review this branch against main
+@Open Code Review review and fix high-confidence issues
+```
+
+これにより、ローカルOCR CLIを実行するCodex skillが登録されます：
+
+```bash
+ocr review --audience agent
+```
+
+この統合はOCRの内部LLM backendを変更せず、Codex用のOpenAI Responses API endpoint設定も必要ありません。OCR自体には、CLI setupセクションで説明されている`ocr` CLIのインストールと設定が引き続き必要です。
+
+韓国語ガイド：[`plugins/open-code-review/CODEX.ko-KR.md`](plugins/open-code-review/CODEX.ko-KR.md)
+
+#### オプション4: コマンドファイルを直接コピー
 
 パッケージマネージャーを使わずに素早くセットアップしたい場合は、コマンドファイルをコピーするだけでClaude Codeで`/open-code-review`スラッシュコマンドを使えるようになります。
 

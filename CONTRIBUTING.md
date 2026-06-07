@@ -149,9 +149,11 @@ Documentation is a crucial part of OpenCodeReview. We welcome improvements to RE
 | ----------------------- | ------------------------------------ |
 | `README.md`             | Main project documentation (English) |
 | `README.zh-CN.md`       | Chinese translation                  |
+| `README.ja-JP.md`       | Japanese translation                 |
 | `README.ko-KR.md`       | Korean translation                   |
 | `CONTRIBUTING.md`       | Contribution guide (English)         |
 | `CONTRIBUTING.zh-CN.md` | Contribution guide (Chinese)         |
+| `CONTRIBUTING.ja-JP.md` | Contribution guide (Japanese)        |
 | `CONTRIBUTING.ko-KR.md` | Contribution guide (Korean)          |
 
 ## Submitting Changes

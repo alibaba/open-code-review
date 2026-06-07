@@ -22,8 +22,7 @@
     "developerName": "Alibaba",
     "category": "Developer Tools",
     "capabilities": [
-      "Read",
-      "Write"
+      "Read"
     ],
     "websiteURL": "https://github.com/alibaba/open-code-review",
     "defaultPrompt": [

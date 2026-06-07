@@ -11,7 +11,7 @@
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
 </p>
 <p align="center">
-  <a href="README.md">English</a> | 简体中文 | <a href="README.ja-JP.md">日本語</a>
+  <a href="README.md">English</a> | 简体中文 | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a>
 </p>
 
 ---
@@ -184,7 +184,43 @@ npx skills add alibaba/open-code-review --skill open-code-review
 
 此命令注册 `/open-code-review:review` 斜杠命令，运行 OCR 并自动过滤和修复问题。
 
-#### 方式三：直接复制命令文件
+#### 方式三：作为 Codex Plugin 安装
+
+对于本地 Codex，可以从此仓库安装 Open Code Review plugin：
+
+```bash
+codex plugin marketplace add alibaba/open-code-review
+codex
+/plugins
+```
+
+对于本地 checkout 或 fork：
+
+```bash
+codex plugin marketplace add .
+codex
+/plugins
+```
+
+安装并启用 `Open Code Review` 后，启动新的 Codex thread 并显式调用：
+
+```text
+@Open Code Review review my current changes
+@Open Code Review review this branch against main
+@Open Code Review review and fix high-confidence issues
+```
+
+这会注册一个 Codex skill，用于运行本地 OCR CLI：
+
+```bash
+ocr review --audience agent
+```
+
+此集成不会改变 OCR 的内部 LLM backend，也不需要为 Codex 配置 OpenAI Responses API endpoint。OCR 本身仍需要按照 CLI setup 部分安装并配置 `ocr` CLI。
+
+韩文指南：[`plugins/open-code-review/CODEX.ko-KR.md`](plugins/open-code-review/CODEX.ko-KR.md)
+
+#### 方式四：直接复制命令文件
 
 如果不想使用任何包管理器，可以直接复制命令文件，在 Claude Code 中使用 `/open-code-review` 斜杠命令。
 
