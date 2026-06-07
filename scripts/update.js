@@ -183,16 +183,23 @@ async function main() {
           const trimmed = line.trim();
           if (trimmed.includes(`-${platform}-${arch}`)) {
             const expectedSha = trimmed.split(/\s+/)[0].toLowerCase();
-            if (expectedSha && actualSha !== expectedSha) {
+            if (!expectedSha) {
+              throw new Error(`Invalid checksum entry for ${platform}/${arch}`);
+            }
+            if (actualSha !== expectedSha) {
               fs.unlinkSync(tempPath);
-              return;
+              throw new Error(`Checksum mismatch for ${platform}/${arch}`);
             }
             verified = true;
             break;
           }
         }
-      } catch (_) {
-        // checksum fetch failed, continue with the download
+        if (!verified) {
+          throw new Error(`No matching checksum entry found for ${platform}/${arch}`);
+        }
+      } catch (e) {
+        try { fs.unlinkSync(tempPath); } catch (_) {}
+        throw e;
       }
     }
 

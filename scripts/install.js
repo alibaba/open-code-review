@@ -213,13 +213,10 @@ async function main() {
         }
       }
       if (!verified) {
-        warn("No matching checksum entry found; skipping verification.");
+        throw new Error(`No matching checksum entry found for ${os}/${arch}`);
       }
     } catch (e) {
-      if (e.message.includes("mismatch")) {
-        throw e;
-      }
-      warn(`Could not verify checksum: ${e.message}`);
+      throw new Error(`Could not verify checksum: ${e.message}`);
     }
   }
 
