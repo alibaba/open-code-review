@@ -133,7 +133,7 @@ Claude Code 환경 변수(`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROP
 
 > **CC-Switch 사용자 참고**: [CC-Switch](https://github.com/farion1231/cc-switch)를 [routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service)와 함께 사용한다면, 추가 설정 없이 `llm.url`을 CC-Switch proxy 주소로 지정할 수 있습니다.
 > - **Claude** provider: `llm.url`을 `http://127.0.0.1:15721`로 설정
-> - **CodeX** provider: `llm.url`을 `http://127.0.0.1:15721/v1`로 설정
+> - **Codex** provider: `llm.url`을 `http://127.0.0.1:15721/v1`로 설정
 > - provider 설정에 맞게 `llm.model` 설정
 > - `llm.auth_token`은 아무 값이나 사용할 수 있음
 > - `extra_body` 설정은 그대로 적용됨

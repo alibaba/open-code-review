@@ -133,7 +133,7 @@ It is also compatible with Claude Code environment variables (`ANTHROPIC_BASE_UR
 
 > **Note for CC-Switch Users**: If you are using [CC-Switch](https://github.com/farion1231/cc-switch) with [routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service) enabled, you can point `llm.url` to the CC-Switch proxy address without additional configuration:
 > - For **Claude** provider: set `llm.url` to `http://127.0.0.1:15721`
-> - For **CodeX** provider: set `llm.url` to `http://127.0.0.1:15721/v1`
+> - For **Codex** provider: set `llm.url` to `http://127.0.0.1:15721/v1`
 > - Set `llm.model` according to your provider settings
 > - `llm.auth_token` can be any value
 > - `extra_body` settings still apply

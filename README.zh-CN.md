@@ -133,7 +133,7 @@ export OCR_USE_ANTHROPIC=true
 
 > **CC-Switch 用户特别提醒**：如果你使用 [CC-Switch](https://github.com/farion1231/cc-switch) 并开启了[路由服务](https://www.ccswitch.io/zh/docs?section=proxy&item=service)，可以将 `llm.url` 配置成 CC-Switch 启动的代理地址，无需额外配置：
 > - 如果路由的是 **Claude** 供应商：设置 `llm.url` 为 `http://127.0.0.1:15721`
-> - 如果路由的是 **CodeX** 供应商：设置 `llm.url` 为 `http://127.0.0.1:15721/v1`
+> - 如果路由的是 **Codex** 供应商：设置 `llm.url` 为 `http://127.0.0.1:15721/v1`
 > - `llm.model` 根据你的供应商设置进行配置
 > - `llm.auth_token` 可以设置成任意值
 > - `extra_body` 设置依然生效

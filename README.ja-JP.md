@@ -133,7 +133,7 @@ export OCR_USE_ANTHROPIC=true
 
 > **CC-Switchユーザー向けの注意**: [CC-Switch](https://github.com/farion1231/cc-switch)を[ルーティングサービス](https://www.ccswitch.io/en/docs?section=proxy&item=service)有効で使用している場合、追加設定なしで`llm.url`をCC-Switchのプロキシアドレスに向けることができます：
 > - **Claude**プロバイダーの場合: `llm.url`を`http://127.0.0.1:15721`に設定
-> - **CodeX**プロバイダーの場合: `llm.url`を`http://127.0.0.1:15721/v1`に設定
+> - **Codex**プロバイダーの場合: `llm.url`を`http://127.0.0.1:15721/v1`に設定
 > - `llm.model`はプロバイダー設定に応じて設定
 > - `llm.auth_token`は任意の値で構いません
 > - `extra_body`設定は引き続き有効です
