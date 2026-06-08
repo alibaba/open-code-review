@@ -38,7 +38,9 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 	if arr, ok := args["comments"].([]any); ok && len(arr) > 0 {
 		rawComments = arr
 	} else if s, ok := args["comments"].(string); ok && s != "" {
-		_ = json.Unmarshal([]byte(s), &rawComments)
+		if err := json.Unmarshal([]byte(s), &rawComments); err != nil {
+			return nil, fmt.Sprintf("Error: failed to parse 'comments' JSON string: %v", err)
+		}
 	}
 	if len(rawComments) == 0 {
 		raw, _ := json.Marshal(args)

@@ -107,7 +107,10 @@ func TestBuildAnthropicParams_CacheControl(t *testing.T) {
 		},
 	}
 
-	params := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+	params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+	if err != nil {
+		t.Fatalf("buildAnthropicParams: %v", err)
+	}
 
 	t.Run("last system block has cache control", func(t *testing.T) {
 		if len(params.System) < 2 {
@@ -166,7 +169,10 @@ func TestBuildAnthropicParams_CacheControl_NoTools(t *testing.T) {
 		},
 	}
 
-	params := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+	params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+	if err != nil {
+		t.Fatalf("buildAnthropicParams: %v", err)
+	}
 
 	if len(params.System) == 0 {
 		t.Fatal("expected system blocks")
@@ -192,7 +198,10 @@ func TestBuildAnthropicParams_CacheControl_NoSystem(t *testing.T) {
 		},
 	}
 
-	params := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+	params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+	if err != nil {
+		t.Fatalf("buildAnthropicParams: %v", err)
+	}
 
 	if len(params.System) != 0 {
 		t.Errorf("expected no system blocks, got %d", len(params.System))

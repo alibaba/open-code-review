@@ -502,7 +502,10 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		model = c.cfg.Model
 	}
 
-	params := c.buildAnthropicParams(model, req)
+	params, err := c.buildAnthropicParams(model, req)
+	if err != nil {
+		return nil, err
+	}
 
 	var opts []option.RequestOption
 	for k, v := range c.cfg.ExtraBody {
@@ -518,7 +521,7 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 }
 
 // buildAnthropicParams converts the shared ChatRequest into Anthropic SDK parameters.
-func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) anthropic.MessageNewParams {
+func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (anthropic.MessageNewParams, error) {
 	var systemBlocks []anthropic.TextBlockParam
 	var messages []anthropic.MessageParam
 	var pendingToolResults []Message
@@ -557,7 +560,9 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) an
 			for _, tc := range msg.ToolCalls {
 				argsMap := map[string]any{}
 				if tc.Function.Arguments != "" {
-					json.Unmarshal([]byte(tc.Function.Arguments), &argsMap)
+					if err := json.Unmarshal([]byte(tc.Function.Arguments), &argsMap); err != nil {
+						return anthropic.MessageNewParams{}, fmt.Errorf("invalid tool call arguments for %s: %w", tc.Function.Name, err)
+					}
 				}
 				blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, argsMap, tc.Function.Name))
 			}
@@ -623,7 +628,7 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) an
 		params.Temperature = anthropic.Float(*req.Temperature)
 	}
 
-	return params
+	return params, nil
 }
 
 func buildToolInputSchema(params map[string]any) anthropic.ToolInputSchemaParam {
