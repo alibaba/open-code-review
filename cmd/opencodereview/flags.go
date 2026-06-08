@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"time"
+
+	"github.com/open-code-review/open-code-review/internal/model"
 )
 
 // --- custom flag set that supports short flags (-c, -f etc.) ---
@@ -103,6 +105,7 @@ type reviewOptions struct {
 	outputFormat   string
 	audience       string // --audience: "human" (default) or "agent"
 	background     string // --background: optional requirement context
+	minSeverity    string // --min-severity: filter comments below this severity
 	concurrency    int
 	perFileTimeout int
 	maxTools       int
@@ -129,6 +132,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the review")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
+	a.StringVar(&opts.minSeverity, "min-severity", "", "minimum severity to include in output: critical, warning, suggestion, nitpick")
 	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be reviewed without running the LLM")
 
 	if err := a.Parse(args); err != nil {
@@ -159,6 +163,10 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	case "human", "agent":
 	default:
 		return opts, fmt.Errorf("invalid --audience value %q: must be 'human' or 'agent'", opts.audience)
+	}
+
+	if opts.minSeverity != "" && !model.ValidSeverity(opts.minSeverity) {
+		return opts, fmt.Errorf("invalid --min-severity value %q: must be one of critical, warning, suggestion, nitpick", opts.minSeverity)
 	}
 
 	if opts.maxTools < 0 {
@@ -197,6 +205,9 @@ Examples:
   # Agent mode (summary only, no progress lines)
   ocr review --audience agent
 
+  # Only show warnings and above (skip suggestion/nitpick)
+  ocr review --min-severity warning
+
   # Preview which files will be reviewed
   ocr review --preview
   ocr review -c abc123 -p
@@ -208,6 +219,7 @@ Flags:
   -f, --format string     output format: text or json (default "text")
   --concurrency int       max concurrent file reviews (default 8)
   --max-git-procs int     max concurrent git subprocesses (default 16)
+  --min-severity string   minimum severity to include: critical, warning, suggestion, nitpick
   --from string           source ref to start diff from (e.g., 'main')
   --max-tools int         max tool call rounds per file; only takes effect when greater than template default
   -p, --preview           preview which files will be reviewed without running the LLM

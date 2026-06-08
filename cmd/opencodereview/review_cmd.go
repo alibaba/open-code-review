@@ -150,6 +150,9 @@ func runReview(args []string) error {
 	// Resolve line numbers by matching existing_code against diff hunks.
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
+	// Filter by minimum severity if requested.
+	comments = filterBySeverity(comments, opts.minSeverity)
+
 	// Record summary metrics (files_reviewed is refined by agent.Run).
 	duration := time.Since(startTime)
 	telemetry.RecordReviewDuration(ctx, duration)

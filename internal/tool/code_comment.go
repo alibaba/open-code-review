@@ -63,6 +63,9 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 		if existing, ok := obj["existing_code"].(string); ok {
 			cm.ExistingCode = existing
 		}
+		if severity, ok := obj["severity"].(string); ok && model.ValidSeverity(severity) {
+			cm.Severity = model.Severity(severity)
+		}
 		if thinking, ok := obj["thinking"].(string); ok {
 			cm.Thinking = thinking
 		}

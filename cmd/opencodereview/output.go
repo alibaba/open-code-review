@@ -12,6 +12,35 @@ import (
 	"github.com/open-code-review/open-code-review/internal/suggestdiff"
 )
 
+func severityBadge(s model.Severity) string {
+	switch s {
+	case model.SeverityCritical:
+		return "\033[91m[critical]\033[0m"
+	case model.SeverityWarning:
+		return "\033[93m[warning]\033[0m"
+	case model.SeveritySuggestion:
+		return "\033[96m[suggestion]\033[0m"
+	case model.SeverityNitpick:
+		return "\033[2m[nitpick]\033[0m"
+	default:
+		return ""
+	}
+}
+
+func filterBySeverity(comments []model.LlmComment, minSeverity string) []model.LlmComment {
+	if minSeverity == "" {
+		return comments
+	}
+	minRank := model.Severity(minSeverity).Rank()
+	var filtered []model.LlmComment
+	for _, c := range comments {
+		if c.Severity == "" || c.Severity.Rank() >= minRank {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
 func outputText(comments []model.LlmComment) {
 	if len(comments) == 0 {
 		fmt.Println("No comments generated. Looks good to me.")
@@ -57,7 +86,11 @@ func renderComment(comment model.LlmComment) {
 		return
 	}
 
-	fmt.Printf("\n\033[2m─── %s:%d-%d ───\033[0m\n", comment.Path, comment.StartLine, comment.EndLine)
+	severityTag := ""
+	if comment.Severity != "" {
+		severityTag = " " + severityBadge(comment.Severity)
+	}
+	fmt.Printf("\n\033[2m─── %s:%d-%d%s ───\033[0m\n", comment.Path, comment.StartLine, comment.EndLine, severityTag)
 
 	if comment.Content != "" {
 		for _, ln := range wrapByRunes(comment.Content, 100) {
