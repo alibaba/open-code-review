@@ -11,20 +11,22 @@ import (
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
 type ResolvedEndpoint struct {
-	URL       string
-	Token     string
-	Model     string
-	Protocol  string         // "anthropic" or "openai"
-	Source    string         // human-readable config source label
-	ExtraBody map[string]any // vendor-specific request body fields
+	URL        string
+	Token      string
+	Model      string
+	Protocol   string         // "anthropic" or "openai"
+	AuthHeader string         // Anthropic auth header: "x-api-key" or "authorization"
+	Source     string         // human-readable config source label
+	ExtraBody  map[string]any // vendor-specific request body fields
 }
 
 // Environment variable names for OCR-specific configuration.
 const (
-	envOCRLLMURL       = "OCR_LLM_URL"
-	envOCRLLMToken     = "OCR_LLM_TOKEN"
-	envOCRLLMModel     = "OCR_LLM_MODEL"
-	envOCRUseAnthropic = "OCR_USE_ANTHROPIC"
+	envOCRLLMURL        = "OCR_LLM_URL"
+	envOCRLLMToken      = "OCR_LLM_TOKEN"
+	envOCRLLMModel      = "OCR_LLM_MODEL"
+	envOCRLLMAuthHeader = "OCR_LLM_AUTH_HEADER"
+	envOCRUseAnthropic  = "OCR_USE_ANTHROPIC"
 )
 
 // Environment variable names from Claude Code configuration.
@@ -83,13 +85,22 @@ func tryOCREnv() (ResolvedEndpoint, bool, error) {
 		protocol = "openai"
 	}
 
-	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: protocol, Source: "OCR environment"}, true, nil
+	var authHeader string
+	if protocol == "anthropic" {
+		authHeader = normalizeAuthHeader(os.Getenv(envOCRLLMAuthHeader))
+		if authHeader == "" {
+			authHeader = defaultAuthHeader(protocol)
+		}
+	}
+
+	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR environment"}, true, nil
 }
 
 // llmFileConfig represents the llm section in config.json.
 type llmFileConfig struct {
 	URL          string         `json:"url,omitempty"`
 	AuthToken    string         `json:"auth_token,omitempty"`
+	AuthHeader   string         `json:"auth_header,omitempty"`
 	Model        string         `json:"model,omitempty"`
 	UseAnthropic *bool          `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
 	ExtraBody    map[string]any `json:"extra_body,omitempty"`
@@ -128,7 +139,15 @@ func tryOCRConfig(path string) (ResolvedEndpoint, bool, error) {
 		protocol = "openai"
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: cfg.Llm.Model, Protocol: protocol, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody}, true, nil
+	var authHeader string
+	if protocol == "anthropic" {
+		authHeader = normalizeAuthHeader(cfg.Llm.AuthHeader)
+		if authHeader == "" {
+			authHeader = defaultAuthHeader(protocol)
+		}
+	}
+
+	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: cfg.Llm.Model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody}, true, nil
 }
 
 // tryCCEnv reads Claude Code environment variables.
@@ -142,7 +161,8 @@ func tryCCEnv() (ResolvedEndpoint, bool, error) {
 
 	url := ensureMessagesSuffix(baseURL)
 
-	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: "anthropic", Source: "Claude Code environment"}, true, nil
+	// Claude Code environment tokens are OAuth/Bearer-style credentials.
+	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: "anthropic", AuthHeader: "authorization", Source: "Claude Code environment"}, true, nil
 }
 
 // tryShellRC parses ~/.zshrc and ~/.bashrc for ANTHROPIC_* exports.
@@ -224,7 +244,28 @@ func parseShellRC(path string) (ResolvedEndpoint, bool, error) {
 
 	url := ensureMessagesSuffix(baseURL)
 
-	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: "anthropic", Source: "Shell rc file"}, true, nil
+	// Claude Code shell rc tokens are OAuth/Bearer-style credentials.
+	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: "anthropic", AuthHeader: "authorization", Source: "Shell rc file"}, true, nil
+}
+
+func defaultAuthHeader(protocol string) string {
+	// auth_header is Anthropic-only; OpenAI-compatible clients keep API key auth.
+	if protocol == "anthropic" {
+		return "authorization"
+	}
+	return ""
+}
+
+func normalizeAuthHeader(header string) string {
+	header = strings.TrimSpace(header)
+	switch strings.ToLower(header) {
+	case "x-api-key":
+		return "x-api-key"
+	case "authorization", "bearer":
+		return "authorization"
+	default:
+		return header
+	}
 }
 
 // ensureMessagesSuffix appends /v1/messages to base URLs that lack a versioned path.

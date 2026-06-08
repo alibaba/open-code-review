@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // Default config file location: ~/.opencodereview/config.json
@@ -79,6 +80,7 @@ type Config struct {
 type LlmConfig struct {
 	URL          string         `json:"url,omitempty"`
 	AuthToken    string         `json:"auth_token,omitempty"`
+	AuthHeader   string         `json:"auth_header,omitempty"`
 	Model        string         `json:"model,omitempty"`
 	UseAnthropic *bool          `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol
 	ExtraBody    map[string]any `json:"extra_body,omitempty"`
@@ -129,6 +131,8 @@ func setConfigValue(cfg *Config, key, value string) error {
 		cfg.Llm.URL = value
 	case "llm.auth_token", "llm.AuthToken":
 		cfg.Llm.AuthToken = value
+	case "llm.auth_header", "llm.AuthHeader":
+		cfg.Llm.AuthHeader = normalizeConfigAuthHeader(value)
 	case "llm.model", "llm.Model":
 		cfg.Llm.Model = value
 	case "llm.use_anthropic", "llm.UseAnthropic":
@@ -166,9 +170,21 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: llm.url, llm.auth_token, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging", key)
+		return fmt.Errorf("unknown config key: %s\nSupported keys: llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging", key)
 	}
 	return nil
+}
+
+func normalizeConfigAuthHeader(header string) string {
+	header = strings.TrimSpace(header)
+	switch strings.ToLower(header) {
+	case "x-api-key":
+		return "x-api-key"
+	case "authorization", "bearer":
+		return "authorization"
+	default:
+		return header
+	}
 }
 
 func (c *Config) ensureTelemetry() {

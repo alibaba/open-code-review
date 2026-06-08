@@ -179,11 +179,12 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	URL       string         // Full API endpoint URL
-	APIKey    string         // Bearer token / API key
-	Model     string         // Default model override
-	Timeout   time.Duration  // Request timeout
-	ExtraBody map[string]any // Vendor-specific fields merged into every request body
+	URL        string         // Full API endpoint URL
+	APIKey     string         // Bearer token / API key
+	Model      string         // Default model override
+	AuthHeader string         // Anthropic auth header: "x-api-key" or "authorization"
+	Timeout    time.Duration  // Request timeout
+	ExtraBody  map[string]any // Vendor-specific fields merged into every request body
 }
 
 // --- Factory ---
@@ -192,10 +193,11 @@ type ClientConfig struct {
 // protocol: "anthropic" -> AnthropicClient, anything else -> OpenAIClient.
 func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 	cfg := ClientConfig{
-		URL:       ep.URL,
-		APIKey:    ep.Token,
-		Model:     ep.Model,
-		ExtraBody: ep.ExtraBody,
+		URL:        ep.URL,
+		APIKey:     ep.Token,
+		Model:      ep.Model,
+		AuthHeader: ep.AuthHeader,
+		ExtraBody:  ep.ExtraBody,
 	}
 	if ep.Protocol == "anthropic" {
 		return NewAnthropicClient(cfg)
@@ -482,16 +484,35 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	}
 
 	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/v1/messages")
+	authHeader := normalizeAuthHeader(cfg.AuthHeader)
+	if authHeader == "" {
+		authHeader = "authorization"
+	}
+	cfg.AuthHeader = authHeader
+
+	opts := []option.RequestOption{
+		option.WithBaseURL(sdkBaseURL),
+		option.WithMaxRetries(5),
+		option.WithHeader("User-Agent", userAgent("claude")),
+		option.WithRequestTimeout(cfg.Timeout),
+	}
+
+	switch authHeader {
+	case "authorization":
+		opts = append(opts, option.WithHeaderDel("X-Api-Key"), option.WithAuthToken(cfg.APIKey))
+	case "x-api-key":
+		opts = append(opts, option.WithHeaderDel("Authorization"), option.WithAPIKey(cfg.APIKey))
+	default:
+		opts = append(opts,
+			option.WithHeaderDel("Authorization"),
+			option.WithHeaderDel("X-Api-Key"),
+			option.WithHeader(authHeader, cfg.APIKey),
+		)
+	}
 
 	return &AnthropicClient{
 		cfg: cfg,
-		sdk: anthropic.NewClient(
-			option.WithAuthToken(cfg.APIKey),
-			option.WithBaseURL(sdkBaseURL),
-			option.WithMaxRetries(5),
-			option.WithHeader("User-Agent", userAgent("claude")),
-			option.WithRequestTimeout(cfg.Timeout),
-		),
+		sdk: anthropic.NewClient(opts...),
 	}
 }
 

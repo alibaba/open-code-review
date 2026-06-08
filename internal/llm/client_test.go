@@ -1,6 +1,9 @@
 package llm
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
@@ -202,6 +205,140 @@ func TestBuildAnthropicParams_CacheControl_NoSystem(t *testing.T) {
 	}
 	if params.Tools[0].OfTool.CacheControl.Type != "ephemeral" {
 		t.Errorf("tool CacheControl.Type = %q, want %q", params.Tools[0].OfTool.CacheControl.Type, "ephemeral")
+	}
+}
+
+func TestAnthropicClient_UsesConfiguredXAPIKeyHeader(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "env-oauth-token")
+
+	var gotXAPIKey string
+	var gotAuthorization string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotXAPIKey = r.Header.Get("X-Api-Key")
+		gotAuthorization = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:        server.URL + "/v1/messages",
+		APIKey:     "sk-ant-api03-test",
+		Model:      "claude-test",
+		AuthHeader: "x-api-key",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotXAPIKey != "sk-ant-api03-test" {
+		t.Errorf("X-Api-Key = %q, want %q", gotXAPIKey, "sk-ant-api03-test")
+	}
+	if gotAuthorization != "" {
+		t.Errorf("Authorization = %q, want empty", gotAuthorization)
+	}
+}
+
+func TestAnthropicClient_UsesConfiguredAuthorizationHeader(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "env-api-key")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+
+	var gotXAPIKey string
+	var gotAuthorization string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotXAPIKey = r.Header.Get("X-Api-Key")
+		gotAuthorization = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:        server.URL + "/v1/messages",
+		APIKey:     "oauth-token",
+		Model:      "claude-test",
+		AuthHeader: "authorization",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotAuthorization != "Bearer oauth-token" {
+		t.Errorf("Authorization = %q, want %q", gotAuthorization, "Bearer oauth-token")
+	}
+	if gotXAPIKey != "" {
+		t.Errorf("X-Api-Key = %q, want empty", gotXAPIKey)
+	}
+}
+
+func TestAnthropicClient_DefaultsToAuthorizationHeader(t *testing.T) {
+	var gotXAPIKey string
+	var gotAuthorization string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotXAPIKey = r.Header.Get("X-Api-Key")
+		gotAuthorization = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "oauth-token",
+		Model:  "claude-test",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotAuthorization != "Bearer oauth-token" {
+		t.Errorf("Authorization = %q, want %q", gotAuthorization, "Bearer oauth-token")
+	}
+	if gotXAPIKey != "" {
+		t.Errorf("X-Api-Key = %q, want empty", gotXAPIKey)
 	}
 }
 

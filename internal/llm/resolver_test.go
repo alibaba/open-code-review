@@ -115,3 +115,132 @@ func TestResolveEndpoint_ConfigFileStripsModelSuffix(t *testing.T) {
 		t.Errorf("expected source %q, got %q", "OCR config file", ep.Source)
 	}
 }
+
+func TestResolveEndpoint_ConfigAnthropicDefaultsToAuthorization(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "")
+	t.Setenv("OCR_LLM_TOKEN", "")
+	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_MODEL", "")
+
+	useAnthropic := true
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:          "https://api.anthropic.com",
+			AuthToken:    "sk-ant-api03-test",
+			Model:        "claude-opus-4-6",
+			UseAnthropic: &useAnthropic,
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.AuthHeader != "authorization" {
+		t.Errorf("expected auth header %q, got %q", "authorization", ep.AuthHeader)
+	}
+}
+
+func TestResolveEndpoint_ConfigAuthHeaderOverrideToXAPIKey(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "")
+	t.Setenv("OCR_LLM_TOKEN", "")
+	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_MODEL", "")
+
+	useAnthropic := true
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:          "https://api.anthropic.com",
+			AuthToken:    "sk-ant-api03-test",
+			AuthHeader:   "x-api-key",
+			Model:        "claude-opus-4-6",
+			UseAnthropic: &useAnthropic,
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.AuthHeader != "x-api-key" {
+		t.Errorf("expected auth header %q, got %q", "x-api-key", ep.AuthHeader)
+	}
+}
+
+func TestResolveEndpoint_ConfigOpenAIIgnoresAuthHeader(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "")
+	t.Setenv("OCR_LLM_TOKEN", "")
+	t.Setenv("OCR_LLM_MODEL", "")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_MODEL", "")
+
+	useAnthropic := false
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:          "https://api.openai.com/v1",
+			AuthToken:    "openai-token",
+			AuthHeader:   "x-api-key",
+			Model:        "gpt-4",
+			UseAnthropic: &useAnthropic,
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Protocol != "openai" {
+		t.Errorf("expected protocol %q, got %q", "openai", ep.Protocol)
+	}
+	if ep.AuthHeader != "" {
+		t.Errorf("expected empty auth header for OpenAI protocol, got %q", ep.AuthHeader)
+	}
+}
+
+func TestResolveEndpoint_OCREnvAuthHeader(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "https://api.anthropic.com")
+	t.Setenv("OCR_LLM_TOKEN", "oauth-token")
+	t.Setenv("OCR_LLM_MODEL", "claude-opus-4-6")
+	t.Setenv("OCR_LLM_AUTH_HEADER", "authorization")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.AuthHeader != "authorization" {
+		t.Errorf("expected auth header %q, got %q", "authorization", ep.AuthHeader)
+	}
+}
+
+func TestResolveEndpoint_OCREnvOpenAIIgnoresAuthHeader(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "https://api.openai.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "openai-token")
+	t.Setenv("OCR_LLM_MODEL", "gpt-4")
+	t.Setenv("OCR_LLM_AUTH_HEADER", "x-api-key")
+	t.Setenv("OCR_USE_ANTHROPIC", "false")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Protocol != "openai" {
+		t.Errorf("expected protocol %q, got %q", "openai", ep.Protocol)
+	}
+	if ep.AuthHeader != "" {
+		t.Errorf("expected empty auth header for OpenAI protocol, got %q", ep.AuthHeader)
+	}
+}
