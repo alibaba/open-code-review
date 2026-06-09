@@ -20,11 +20,16 @@ func TestFilterBySeverity(t *testing.T) {
 		wantCount   int
 		wantPaths   []string
 	}{
+		// No filter: all comments returned.
 		{"", 5, []string{"a.go", "b.go", "c.go", "d.go", "e.go"}},
-		{"nitpick", 5, []string{"a.go", "b.go", "c.go", "d.go", "e.go"}},
-		{"suggestion", 4, []string{"a.go", "b.go", "c.go", "e.go"}},
-		{"warning", 3, []string{"a.go", "b.go", "e.go"}},
-		{"critical", 2, []string{"a.go", "e.go"}},
+		// nitpick: keeps all with severity, filters out unset (rank 0 < 1).
+		{"nitpick", 4, []string{"a.go", "b.go", "c.go", "d.go"}},
+		// suggestion: keeps critical + warning + suggestion.
+		{"suggestion", 3, []string{"a.go", "b.go", "c.go"}},
+		// warning: keeps critical + warning.
+		{"warning", 2, []string{"a.go", "b.go"}},
+		// critical: keeps only critical.
+		{"critical", 1, []string{"a.go"}},
 	}
 
 	for _, tt := range tests {
@@ -44,7 +49,21 @@ func TestFilterBySeverity(t *testing.T) {
 
 func TestFilterBySeverity_Empty(t *testing.T) {
 	got := filterBySeverity(nil, "warning")
-	if got != nil {
-		t.Errorf("expected nil, got %v", got)
+	if len(got) != 0 {
+		t.Errorf("expected empty slice, got %v", got)
+	}
+}
+
+func TestFilterBySeverity_ReturnsNonNilSlice(t *testing.T) {
+	// When minSeverity is set, result should always be non-nil (for JSON: [] not null).
+	comments := []model.LlmComment{
+		{Path: "a.go", Content: "nitpick", Severity: model.SeverityNitpick},
+	}
+	got := filterBySeverity(comments, "critical")
+	if got == nil {
+		t.Fatal("expected non-nil empty slice, got nil")
+	}
+	if len(got) != 0 {
+		t.Errorf("expected 0 comments, got %d", len(got))
 	}
 }

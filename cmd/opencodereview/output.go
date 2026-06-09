@@ -32,9 +32,11 @@ func filterBySeverity(comments []model.LlmComment, minSeverity string) []model.L
 		return comments
 	}
 	minRank := model.Severity(minSeverity).Rank()
-	var filtered []model.LlmComment
+	filtered := make([]model.LlmComment, 0)
 	for _, c := range comments {
-		if c.Severity == "" || c.Severity.Rank() >= minRank {
+		// Unset severity (Rank 0) is treated as lowest priority and filtered out
+		// when --min-severity is specified.
+		if c.Severity.Rank() >= minRank {
 			filtered = append(filtered, c)
 		}
 	}
