@@ -115,14 +115,14 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 		if base == "" {
 			return nil, fmt.Errorf("cannot find merge-base between %s and %s", p.from, p.to)
 		}
-		out, err := p.runGit(ctx, "diff", "--no-color", "-U"+fmt.Sprint(DiffContextLines), base, p.to, "--")
+		out, err := p.runGit(ctx, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "-U"+fmt.Sprint(DiffContextLines), base, p.to, "--")
 		if err != nil {
 			return nil, fmt.Errorf("git diff failed: %w", err)
 		}
 		combined.WriteString(out)
 
 	case ModeCommit:
-		out, err := p.runGit(ctx, "show", "--no-color", "-U"+fmt.Sprint(DiffContextLines), p.commit)
+		out, err := p.runGit(ctx, "show", "--no-ext-diff", "--no-textconv", "--no-color", "-U"+fmt.Sprint(DiffContextLines), p.commit)
 		if err != nil {
 			return nil, fmt.Errorf("git show failed: %w", err)
 		}
@@ -265,14 +265,14 @@ func (p *Provider) computeMergeBase(ctx context.Context, from, to string) string
 }
 
 func (p *Provider) workspaceTrackedDiff(ctx context.Context) (string, error) {
-	out, err := p.runGit(ctx, "diff", "HEAD", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--")
+	out, err := p.runGit(ctx, "diff", "--no-ext-diff", "--no-textconv", "HEAD", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--")
 	if err == nil && out != "" {
 		return out, nil
 	}
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
-	return p.runGit(ctx, "diff", "--staged", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--")
+	return p.runGit(ctx, "diff", "--no-ext-diff", "--no-textconv", "--staged", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--")
 }
 
 func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
