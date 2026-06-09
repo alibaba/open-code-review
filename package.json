@@ -6,7 +6,8 @@
     "ocr": "bin/ocr.js"
   },
   "scripts": {
-    "postinstall": "node scripts/install.js"
+    "postinstall": "node scripts/install.js",
+    "test:github-actions": "node scripts/github-actions/post-review-comments.test.js"
   },
   "repository": {
     "type": "git",
