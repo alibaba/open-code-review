@@ -8,8 +8,13 @@ import (
 )
 
 // Template holds the native agent task template configuration.
-// Mirrors NativeAgentTemplate from the Java implementation, loaded via JSON at runtime.
+// Mirrors NativeAgentTemplate from the Java implementation, loaded via JSON
+// at runtime.
+//
+// Field grouping: the "scan-only fields" section is consumed exclusively by
+// internal/scan; internal/agent (diff review) does not read those fields.
 type Template struct {
+	// Diff-review fields.
 	MainTask              LlmConversation  `json:"MAIN_TASK"`
 	PlanTask              *LlmConversation `json:"PLAN_TASK,omitempty"`
 	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
@@ -20,6 +25,10 @@ type Template struct {
 	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask      *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+
+	// Scan-only fields — consumed by internal/scan, never by internal/agent.
+	FullScanTask                *LlmConversation `json:"FULL_SCAN_TASK,omitempty"`
+	FullScanMaxToolRequestTimes int              `json:"FULL_SCAN_MAX_TOOL_REQUEST_TIMES,omitempty"`
 }
 
 //go:embed task_template.json
@@ -52,12 +61,16 @@ func resolveLang(lang string) string {
 }
 
 // ApplyLanguage injects a language directive into all system-role messages
-// across MAIN_TASK, PLAN_TASK (if set), and MEMORY_COMPRESSION_TASK.
+// across MAIN_TASK, PLAN_TASK (if set), FULL_SCAN_TASK (if set), and
+// MEMORY_COMPRESSION_TASK.
 func (t *Template) ApplyLanguage(lang string) {
 	instruction := "\n\nAlways respond in " + resolveLang(lang) + "."
 	applyLanguage(&t.MainTask, instruction)
 	if t.PlanTask != nil {
 		applyLanguage(t.PlanTask, instruction)
+	}
+	if t.FullScanTask != nil {
+		applyLanguage(t.FullScanTask, instruction)
 	}
 	applyLanguage(&t.MemoryCompressionTask, instruction)
 }

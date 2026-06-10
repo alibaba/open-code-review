@@ -17,12 +17,25 @@ import (
 	"github.com/open-code-review/open-code-review/internal/diff"
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
 	"github.com/open-code-review/open-code-review/internal/llm"
+	"github.com/open-code-review/open-code-review/internal/llmloop"
 	"github.com/open-code-review/open-code-review/internal/model"
 	"github.com/open-code-review/open-code-review/internal/session"
 	"github.com/open-code-review/open-code-review/internal/stdout"
 	"github.com/open-code-review/open-code-review/internal/telemetry"
 	"github.com/open-code-review/open-code-review/internal/tool"
 )
+
+// AgentWarning is re-exported from llmloop for backwards compatibility with
+// existing callers (cmd/opencodereview/output.go).
+type AgentWarning = llmloop.AgentWarning
+
+// CommentWorkerPool is re-exported from llmloop for backwards compatibility.
+type CommentWorkerPool = llmloop.CommentWorkerPool
+
+// NewCommentWorkerPool delegates to llmloop.NewCommentWorkerPool.
+func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
+	return llmloop.NewCommentWorkerPool(workerCount)
+}
 
 // planBlockPattern matches the optional "Review Plan" section in a MAIN_TASK
 // template user message: a header line beginning with "### " whose text
@@ -59,6 +72,7 @@ type Args struct {
 
 	// ReviewMode is one of "workspace", "range", or "commit".
 	// When empty, it is derived from From/To/Commit at session creation time.
+	// Full-scan reviews are owned by internal/scan and never reach this Args.
 	ReviewMode string
 
 	// Template loaded from YAML config file.
@@ -121,109 +135,18 @@ type Args struct {
 	Session *session.SessionHistory
 }
 
-// AgentWarning describes a non-fatal warning recorded during review.
-type AgentWarning struct {
-	File    string `json:"file"`
-	Message string `json:"message"`
-	Type    string `json:"type"`
-}
-
-// compression thresholds as fractions of MaxTokens.
-const (
-	tokenSoftThreshold    = 0.60 // async background compression
-	tokenWarningThreshold = 0.80 // immediate sync compression
-)
-
-// round groups consecutive messages starting with an assistant message
-// followed by zero or more tool result messages.
-type round struct {
-	assistantIdx int
-	toolIdxs     []int
-}
-
-// partitionResult describes how messages should be split for compression.
-type partitionResult struct {
-	frozenEnd   int
-	compressEnd int
-	rounds      []round
-	activeCount int
-}
-
-// compressionJob tracks an in-flight background compression operation.
-type compressionJob struct {
-	done    chan struct{}
-	rebuilt []llm.Message
-	cancel  context.CancelFunc
-}
-
-// Agent orchestrates the AI-powered code review.
+// Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
+// compression / token aggregation now live in internal/llmloop.Runner; this
+// struct holds the diff-side state and orchestrates per-file subtasks.
 type Agent struct {
-	args                  Args
-	diffs                 []model.Diff // parsed diffs
-	totalInsertions       int64
-	totalDeletions        int64
-	currentDate           string
-	session               *session.SessionHistory
-	totalInputTokens      int64 // accumulated input/prompt tokens, accessed atomically
-	totalOutputTokens     int64 // accumulated completion tokens, accessed atomically
-	totalCacheReadTokens  int64 // accumulated cache read tokens, accessed atomically
-	totalCacheWriteTokens int64 // accumulated cache write tokens, accessed atomically
-	subtaskFailed         int64 // count of failed subtasks, accessed atomically
-	warningsMu            sync.Mutex
-	warnings              []AgentWarning
-	compressionMu         sync.Mutex
-	pendingJob            *compressionJob
-}
-
-// CommentWorkerPool manages a fixed-size pool of workers dedicated to
-// processing code-review comment post-steps (line-range tracking,
-// re-tracking, reflection, suggestion validation) asynchronously.
-//
-// These steps can be time-consuming (network calls to LLM, external APIs,
-// heavy computation). By offloading them to a worker pool the main LLM
-// tool-use loop stays unblocked, reducing overall latency - just like the
-// Java implementation uses a dedicated subtaskExecutor for the CODE_COMMENT
-// tool (see CodeReviewNativeAgent.executeToolCall ~L640-642).
-type CommentWorkerPool struct {
-	semaphore chan struct{}
-	wg        sync.WaitGroup
-	resultsMu sync.Mutex
-	results   []model.LlmComment
-}
-
-// NewCommentWorkerPool creates a pool with the given concurrency limit.
-func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
-	if workerCount <= 0 {
-		workerCount = 8
-	}
-	return &CommentWorkerPool{
-		semaphore: make(chan struct{}, workerCount),
-	}
-}
-
-// Submit runs f in a background goroutine bounded by the semaphore.
-// When f completes its return value is collected internally.
-func (p *CommentWorkerPool) Submit(f func() ([]model.LlmComment, error)) {
-	p.wg.Add(1)
-	go func() {
-		defer p.wg.Done()
-		p.semaphore <- struct{}{}        // acquire
-		defer func() { <-p.semaphore }() // release
-
-		comments, err := f()
-		if err != nil {
-			fmt.Fprintf(stdout.Writer(), "[ocr] CommentWorkerPool error: %v\n", err)
-		}
-		p.resultsMu.Lock()
-		p.results = append(p.results, comments...)
-		p.resultsMu.Unlock()
-	}()
-}
-
-// Await blocks until all submitted work has completed and returns aggregated results.
-func (p *CommentWorkerPool) Await() []model.LlmComment {
-	p.wg.Wait()
-	return p.results
+	args            Args
+	diffs           []model.Diff // parsed diffs
+	totalInsertions int64
+	totalDeletions  int64
+	currentDate     string
+	session         *session.SessionHistory
+	subtaskFailed   int64 // count of failed subtasks, accessed atomically
+	runner          *llmloop.Runner
 }
 
 // New creates a new Agent from the given arguments.
@@ -247,10 +170,25 @@ func New(args Args) *Agent {
 			DiffCommit: args.Commit,
 		})
 	}
-	return &Agent{
+	a := &Agent{
 		args:    args,
 		session: args.Session,
 	}
+	// DiffLookup closure captures a so the runner can resolve per-file
+	// model.Diff records lazily (a.diffs is only populated by loadDiffs,
+	// after New returns).
+	a.runner = llmloop.NewRunner(llmloop.Deps{
+		LLMClient:         args.LLMClient,
+		Model:             args.Model,
+		Template:          args.Template,
+		Tools:             args.Tools,
+		MainToolDefs:      args.MainToolDefs,
+		CommentCollector:  args.CommentCollector,
+		CommentWorkerPool: args.CommentWorkerPool,
+		Session:           args.Session,
+		DiffLookup:        a.findDiff,
+	})
+	return a
 }
 
 // Run executes the full review pipeline: parse diffs -> plan per file -> LLM tool-loop -> collect comments.
@@ -319,48 +257,26 @@ func (a *Agent) Diffs() []model.Diff {
 
 // TotalTokensUsed returns PromptTokens + CompletionTokens across all LLM calls.
 // For Anthropic, PromptTokens already includes cache read/write tokens.
-func (a *Agent) TotalTokensUsed() int64 {
-	return atomic.LoadInt64(&a.totalInputTokens) + atomic.LoadInt64(&a.totalOutputTokens)
-}
+func (a *Agent) TotalTokensUsed() int64 { return a.runner.TotalTokensUsed() }
 
 // TotalInputTokens returns the accumulated input/prompt tokens from all LLM calls.
-func (a *Agent) TotalInputTokens() int64 {
-	return atomic.LoadInt64(&a.totalInputTokens)
-}
+func (a *Agent) TotalInputTokens() int64 { return a.runner.TotalInputTokens() }
 
 // TotalOutputTokens returns the accumulated completion tokens from all LLM calls.
-func (a *Agent) TotalOutputTokens() int64 {
-	return atomic.LoadInt64(&a.totalOutputTokens)
-}
+func (a *Agent) TotalOutputTokens() int64 { return a.runner.TotalOutputTokens() }
 
 // TotalCacheReadTokens returns the accumulated cache read tokens from all LLM calls.
-func (a *Agent) TotalCacheReadTokens() int64 {
-	return atomic.LoadInt64(&a.totalCacheReadTokens)
-}
+func (a *Agent) TotalCacheReadTokens() int64 { return a.runner.TotalCacheReadTokens() }
 
 // TotalCacheWriteTokens returns the accumulated cache write tokens from all LLM calls.
-func (a *Agent) TotalCacheWriteTokens() int64 {
-	return atomic.LoadInt64(&a.totalCacheWriteTokens)
-}
+func (a *Agent) TotalCacheWriteTokens() int64 { return a.runner.TotalCacheWriteTokens() }
 
 // Warnings returns a copy of non-fatal warnings recorded during review.
-func (a *Agent) Warnings() []AgentWarning {
-	a.warningsMu.Lock()
-	defer a.warningsMu.Unlock()
-	out := make([]AgentWarning, len(a.warnings))
-	copy(out, a.warnings)
-	return out
-}
+func (a *Agent) Warnings() []AgentWarning { return a.runner.Warnings() }
 
 // recordWarning adds a non-fatal warning to the agent's warning list.
 func (a *Agent) recordWarning(warningType, file, message string) {
-	a.warningsMu.Lock()
-	a.warnings = append(a.warnings, AgentWarning{
-		File:    file,
-		Message: message,
-		Type:    warningType,
-	})
-	a.warningsMu.Unlock()
+	a.runner.RecordWarning(warningType, file, message)
 }
 
 // loadDiffs populates the diff-related fields.
@@ -409,16 +325,6 @@ func (a *Agent) injectDiffMap() {
 			frd.SetDiffMap(dm)
 		}
 	}
-}
-
-// lookupTool returns the provider for a given tool from the registry,
-// or nil if the tool is not registered.
-func lookupTool(reg *tool.Registry, t tool.Tool) tool.Provider {
-	p, ok := reg.Get(t.Name())
-	if !ok {
-		return nil
-	}
-	return p
 }
 
 // dispatchSubtasks runs the Plan + Main phases for each changed file concurrently.
@@ -566,7 +472,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
-	tokenCount := countMessagesTokens(messages)
+	tokenCount := llmloop.CountMessagesTokens(messages)
 	maxAllowed := a.args.Template.MaxTokens
 	tokenLimit := maxAllowed * 4 / 5 // 80% of MaxTokens
 	if tokenCount > tokenLimit {
@@ -580,8 +486,11 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 		return nil
 	}
 
-	err := a.performLlmCodeReview(ctx, messages, newPath)
+	err := a.runner.RunPerFile(ctx, messages, newPath)
 	if err == nil {
+		// REVIEW_FILTER_TASK runs after the main loop and decides which of the
+		// just-collected comments to drop. It needs to see comments produced by
+		// the async CommentWorkerPool, so wait for that to drain first.
 		if a.args.CommentWorkerPool != nil {
 			a.args.CommentWorkerPool.Await()
 		}
@@ -635,12 +544,7 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 		return
 	}
 	rec.SetResponse(resp, time.Since(startTime))
-	if resp.Usage != nil {
-		atomic.AddInt64(&a.totalInputTokens, resp.Usage.PromptTokens)
-		atomic.AddInt64(&a.totalOutputTokens, resp.Usage.CompletionTokens)
-		atomic.AddInt64(&a.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-		atomic.AddInt64(&a.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
-	}
+	a.runner.RecordUsage(resp.Usage)
 
 	indices := parseFilterResponse(resp.Content(), len(comments))
 	if len(indices) == 0 {
@@ -673,7 +577,7 @@ func buildFilterCommentsJSON(comments []model.LlmComment) string {
 // parseFilterResponse extracts comment indices from the LLM filter response.
 // Returns a set of 0-based indices. Invalid IDs or out-of-range indices are ignored.
 func parseFilterResponse(raw string, total int) map[int]struct{} {
-	raw = stripMarkdownFences(raw)
+	raw = llmloop.StripMarkdownFences(raw)
 	var ids []string
 	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
 		preview := raw
@@ -845,12 +749,7 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 		return "", fmt.Errorf("plan request: %w", err)
 	}
 	rec.SetResponse(resp, time.Since(startTime))
-	if resp.Usage != nil {
-		atomic.AddInt64(&a.totalInputTokens, resp.Usage.PromptTokens)
-		atomic.AddInt64(&a.totalOutputTokens, resp.Usage.CompletionTokens)
-		atomic.AddInt64(&a.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-		atomic.AddInt64(&a.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
-	}
+	a.runner.RecordUsage(resp.Usage)
 	fmt.Fprintf(stdout.Writer(), "[ocr] Plan completed for %s\n", newPath)
 	return resp.Content(), nil
 }
@@ -893,236 +792,6 @@ func formatToolDefs(toolDefs []llm.ToolDef) string {
 	return sb.String()
 }
 
-// performLlmCodeReview drives the main LLM conversation loop for a single file.
-// It sends messages with tool definitions, handles tool calls returned by the model,
-// and collects review comments until task_done is called or limits are reached.
-func (a *Agent) performLlmCodeReview(ctx context.Context, messages []llm.Message, newPath string) error {
-	toolReqCount := a.args.Template.MaxToolRequestTimes
-	const maxConsecutiveEmptyRounds = 3
-	consecutiveEmptyRounds := 0
-
-	for toolReqCount > 0 {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		toolReqCount--
-
-		fs := a.session.GetOrCreateFileSession(newPath)
-		rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
-		startTime := time.Now()
-
-		resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
-			Model:     a.args.Model,
-			Messages:  messages,
-			Tools:     a.args.MainToolDefs,
-			MaxTokens: a.args.Template.MaxTokens,
-		})
-		duration := time.Since(startTime)
-		if err != nil {
-			rec.SetError(err, duration)
-			telemetry.RecordLLMRequest(ctx, a.args.Model, duration, 0, "error")
-			return fmt.Errorf("LLM completion error: %w", err)
-		}
-		rec.SetResponse(resp, duration)
-		// Record LLM metrics with token info from API response usage field.
-		totalTokens := int64(0)
-		if resp.Usage != nil {
-			totalTokens = resp.Usage.TotalTokens
-			atomic.AddInt64(&a.totalInputTokens, resp.Usage.PromptTokens)
-			atomic.AddInt64(&a.totalOutputTokens, resp.Usage.CompletionTokens)
-			atomic.AddInt64(&a.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-			atomic.AddInt64(&a.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
-		}
-		telemetry.RecordLLMRequest(ctx, a.args.Model, duration, totalTokens, "ok")
-
-		content := resp.Content()
-		calls := resp.ToolCalls()
-
-		if len(calls) == 0 {
-			// No tool calls - remind the model
-			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", newPath)
-			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
-			if content != "" {
-				messages = append(messages[:len(messages)-1], llm.NewTextMessage("assistant", content), messages[len(messages)-1])
-			}
-			continue
-		}
-
-		var results []tool.ToolCallResult
-		taskCompleted := false
-		hasValidResult := false
-
-		for _, call := range calls {
-			cp := a.executeToolCall(ctx, newPath, call, rec)
-			if cp.Completed {
-				results = append(results, tool.ToolCallResult{
-					ToolCallID: call.ID,
-					Name:       call.Function.Name,
-					Result:     "Task completed successfully.",
-				})
-				taskCompleted = true
-			} else if cp.Data != "" {
-				results = append(results, tool.ToolCallResult{
-					ToolCallID: call.ID,
-					Name:       call.Function.Name,
-					Result:     cp.Data,
-				})
-				hasValidResult = true
-			} else {
-				results = append(results, tool.ToolCallResult{
-					ToolCallID: call.ID,
-					Name:       call.Function.Name,
-					Result:     "Error: Tool execution returned no result.",
-				})
-			}
-		}
-
-		if taskCompleted {
-			break
-		}
-		if !hasValidResult {
-			consecutiveEmptyRounds++
-			if consecutiveEmptyRounds >= maxConsecutiveEmptyRounds {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Too many empty retries for %s, stopping.\n", newPath)
-				break
-			}
-			fmt.Fprintf(stdout.Writer(), "[ocr] No valid tool results for %s, retrying...\n", newPath)
-		} else {
-			consecutiveEmptyRounds = 0
-		}
-
-		succeed := a.addNextMessage(ctx, content, calls, results, &messages, newPath)
-		if !succeed {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", newPath)
-			break
-		}
-	}
-
-	if toolReqCount <= 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", newPath)
-	}
-
-	return nil
-}
-
-// executeToolCall executes a single tool call from the LLM response and records
-// the result in session history. It handles async dispatch for code_comment when
-// a worker pool is configured, otherwise runs synchronously.
-func (a *Agent) executeToolCall(ctx context.Context, newPath string, call llm.ToolCall, rec *session.TaskRecord) tool.TaskCheckpoint {
-	t := tool.OfName(call.Function.Name)
-	if !t.IsKnown() {
-		return tool.Of(tool.NotAvailableMsg)
-	}
-
-	if t == tool.TaskDone {
-		return tool.Complete()
-	}
-
-	p := lookupTool(a.args.Tools, t)
-	if p == nil {
-		return tool.Of(tool.NotAvailableMsg)
-	}
-
-	var args map[string]any
-	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
-		return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
-	}
-
-	// Inject current file path as default for code_comment when not provided.
-	// The model already knows which file it's reviewing, so it omits path.
-	if t == tool.CodeComment && newPath != "" {
-		if _, ok := args["path"]; !ok {
-			args["path"] = newPath
-		}
-	}
-
-	startTime := time.Now()
-
-	// code_comment: parse → resolve line numbers → re-locate if needed → add to collector
-	if t == tool.CodeComment {
-		telemetry.PrintToolCallStarted(t.Name(), args)
-
-		comments, errMsg := tool.ParseComments(args)
-		if errMsg != "" {
-			telemetry.RecordToolCall(ctx, t.Name(), time.Since(startTime), false)
-			return tool.Of(errMsg)
-		}
-
-		resolveAndCollect := func(rctx context.Context) {
-			for i := range comments {
-				cm := &comments[i]
-				d := a.findDiff(cm.Path)
-				if d != nil {
-					if !diff.ResolveComment(cm, d) && a.args.Template.ReLocationTask != nil {
-						rlStart := time.Now()
-						_, resp, msgs := diff.ReLocateComment(rctx, cm, d, a.args.LLMClient, a.args.Template.ReLocationTask, a.args.Model, a.args.Template.MaxTokens)
-						if msgs != nil {
-							fs := a.session.GetOrCreateFileSession(cm.Path)
-							rlRec := fs.AppendTaskRecord(session.ReLocationTask, msgs)
-							if resp != nil {
-								rlRec.SetResponse(resp, time.Since(rlStart))
-								if resp.Usage != nil {
-									atomic.AddInt64(&a.totalInputTokens, resp.Usage.PromptTokens)
-									atomic.AddInt64(&a.totalOutputTokens, resp.Usage.CompletionTokens)
-									atomic.AddInt64(&a.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-									atomic.AddInt64(&a.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
-								}
-							} else {
-								rlRec.SetError(fmt.Errorf("re-location LLM call failed"), time.Since(rlStart))
-							}
-						}
-					}
-				}
-				a.args.CommentCollector.Add(*cm)
-			}
-		}
-
-		if a.args.CommentWorkerPool != nil {
-			if rec != nil {
-				rec.AddToolResult(t.Name(), call.Function.Arguments, "(async)")
-			}
-			pool := a.args.CommentWorkerPool
-			asyncCtx := context.WithoutCancel(ctx)
-			toolName := t.Name()
-			pool.Submit(func() ([]model.LlmComment, error) {
-				resolveAndCollect(asyncCtx)
-				telemetry.PrintToolCallFinished(toolName, time.Since(startTime))
-				return []model.LlmComment{}, nil
-			})
-			telemetry.RecordToolCall(asyncCtx, toolName, time.Since(startTime), true)
-			return tool.Of(tool.CommentSucceed)
-		}
-
-		resolveAndCollect(ctx)
-		dur := time.Since(startTime)
-		telemetry.RecordToolCall(ctx, t.Name(), dur, true)
-		telemetry.PrintToolCallFinished(t.Name(), dur)
-		if rec != nil {
-			rec.AddToolResult(t.Name(), call.Function.Arguments, tool.CommentSucceed)
-		}
-		return tool.Of(tool.CommentSucceed)
-	}
-
-	// Synchronous path for all other tools
-	telemetry.PrintToolCallStarted(t.Name(), args)
-	result, err := p.Execute(ctx, args)
-	dur := time.Since(startTime)
-	ok := err == nil
-	telemetry.RecordToolCall(ctx, t.Name(), dur, ok)
-
-	if err != nil {
-		telemetry.PrintToolCallError(t.Name(), err)
-		return tool.Of(fmt.Sprintf("Error executing tool %s: %v", t.Name(), err))
-	}
-	telemetry.PrintToolCallFinished(t.Name(), dur)
-	if rec != nil {
-		rec.AddToolResult(t.Name(), call.Function.Arguments, result)
-	}
-	return tool.Of(result)
-}
 
 // findDiff returns the Diff for the given file path, or nil if not found.
 func (a *Agent) findDiff(path string) *model.Diff {
@@ -1134,301 +803,6 @@ func (a *Agent) findDiff(path string) *model.Diff {
 	return nil
 }
 
-// collectPendingComments waits for any async workers then returns aggregated comments from the collector.
-func (a *Agent) collectPendingComments() []model.LlmComment {
-	if a.args.CommentWorkerPool != nil {
-		a.args.CommentWorkerPool.Await()
-	}
-	return a.args.CommentCollector.Comments()
-}
-
-// addNextMessage adds assistant + tool response messages to the conversation history.
-// Implements dual-threshold compression:
-//   - 60% of MaxTokens: trigger async background compression (non-blocking)
-//   - 80% of MaxTokens: perform synchronous compression immediately
-func (a *Agent) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]llm.Message, filePath string) bool {
-	maxAllowed := a.args.Template.MaxTokens
-	softLimit := int(float64(maxAllowed) * tokenSoftThreshold)
-	warnLimit := int(float64(maxAllowed) * tokenWarningThreshold)
-
-	// Try to apply any completed async compression from a previous iteration.
-	a.tryApplyPendingCompression(messages)
-
-	tokenCount := countMessagesTokens(*messages)
-
-	// Hard threshold: synchronous compression.
-	if tokenCount > warnLimit {
-		a.cancelPendingCompression()
-		*messages, _ = a.runCompression(ctx, *messages, filePath)
-		tokenCount = countMessagesTokens(*messages)
-	}
-
-	// Soft threshold: async compression.
-	if tokenCount > softLimit && a.pendingJob == nil {
-		a.triggerAsyncCompression(ctx, *messages, filePath)
-	}
-
-	// Add assistant message with tool_calls when present.
-	if len(toolCalls) > 0 {
-		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls))
-	} else if assistantContent != "" {
-		*messages = append(*messages, llm.NewTextMessage("assistant", assistantContent))
-	}
-
-	// Add tool response messages using Claude's tool_result format.
-	for _, r := range results {
-		*messages = append(*messages, llm.NewToolResultMessage(r.ToolCallID, r.Result))
-	}
-
-	// Final check: compress synchronously if still over warning limit.
-	finalCount := countMessagesTokens(*messages)
-	if finalCount > warnLimit {
-		a.cancelPendingCompression()
-		*messages, _ = a.runCompression(ctx, *messages, filePath)
-	}
-
-	return countMessagesTokens(*messages) < warnLimit
-}
-
-func countMessagesTokens(msgs []llm.Message) int {
-	var total int
-	for _, m := range msgs {
-		total += llm.CountTokens(m.ExtractText())
-	}
-	return total
-}
-
-// groupIntoRounds parses messages[start:] into logical (assistant + tool_results) pairs.
-func groupIntoRounds(messages []llm.Message, start int) []round {
-	var rounds []round
-	i := start
-	for i < len(messages) {
-		if messages[i].Role == "assistant" {
-			r := round{assistantIdx: i}
-			i++
-			for i < len(messages) && messages[i].Role == "tool" {
-				r.toolIdxs = append(r.toolIdxs, i)
-				i++
-			}
-			rounds = append(rounds, r)
-		} else {
-			i++
-		}
-	}
-	return rounds
-}
-
-// computeActiveZoneSize returns how many trailing rounds fit within the remaining
-// token budget after accounting for frozen zone and the compressed summary.
-func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int, reservedTokens int) int {
-	budget := int(float64(maxTokens)*tokenWarningThreshold) - reservedTokens
-	if budget <= 0 {
-		return 0
-	}
-
-	count := 0
-	tokensUsed := 0
-	for i := len(rounds) - 1; i >= 0; i-- {
-		roundTokens := llm.CountTokens(messages[rounds[i].assistantIdx].ExtractText())
-		for _, ti := range rounds[i].toolIdxs {
-			roundTokens += llm.CountTokens(messages[ti].ExtractText())
-		}
-		if tokensUsed+roundTokens > budget {
-			break
-		}
-		tokensUsed += roundTokens
-		count++
-	}
-	return count
-}
-
-// partitionMessages divides messages into frozen, compress, and active zones.
-// Frozen zone is always messages[0:2]. Active zone preserves the K most recent
-// complete rounds based on available token budget.
-func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEstimate int) partitionResult {
-	result := partitionResult{frozenEnd: 2}
-	if len(messages) <= 2 {
-		result.compressEnd = len(messages)
-		return result
-	}
-
-	result.rounds = groupIntoRounds(messages, 2)
-	if len(result.rounds) == 0 {
-		result.compressEnd = len(messages)
-		return result
-	}
-
-	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, prevSummaryTokenEstimate)
-	if result.activeCount >= len(result.rounds) {
-		// Everything fits — no compression needed.
-		result.compressEnd = len(messages)
-		result.activeCount = 0
-		return result
-	}
-
-	// compressEnd = index after the last round NOT in active zone.
-	activeStartIdx := len(result.rounds) - result.activeCount
-	lastCompressRound := result.rounds[activeStartIdx-1]
-	if len(lastCompressRound.toolIdxs) > 0 {
-		result.compressEnd = lastCompressRound.toolIdxs[len(lastCompressRound.toolIdxs)-1] + 1
-	} else {
-		result.compressEnd = lastCompressRound.assistantIdx + 1
-	}
-
-	return result
-}
-
-// stripMarkdownFences removes ```json and ``` wrappers that some models
-// add around structured outputs.
-func stripMarkdownFences(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```") {
-		if nl := strings.IndexByte(s, '\n'); nl >= 0 {
-			s = s[nl+1:]
-		} else {
-			s = strings.TrimPrefix(s, "```json")
-			s = strings.TrimPrefix(s, "```")
-		}
-	}
-	s = strings.TrimSpace(s)
-	if strings.HasSuffix(s, "```") {
-		s = strings.TrimSuffix(s, "```")
-		s = strings.TrimSpace(s)
-	}
-	return s
-}
-
-// runCompression performs three-zone memory compression on the given messages.
-// It summarizes the compress zone while preserving the active zone intact.
-// Returns the rebuilt messages slice: [frozen] + [compressed_summary] + [active].
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-	if len(a.args.Template.MemoryCompressionTask.Messages) == 0 || len(msgs) <= 2 {
-		return msgs[:min(len(msgs), 2)], nil
-	}
-
-	part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
-	if part.compressEnd <= part.frozenEnd {
-		return msgs, nil
-	}
-
-	contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
-
-	compressionMsgs := make([]llm.Message, 0, len(a.args.Template.MemoryCompressionTask.Messages))
-	for _, m := range a.args.Template.MemoryCompressionTask.Messages {
-		content := strings.ReplaceAll(m.Content, "{{context}}", contextXML)
-		compressionMsgs = append(compressionMsgs, llm.NewTextMessage(m.Role, content))
-	}
-
-	startTime := time.Now()
-	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
-		Model:     a.args.Model,
-		Messages:  compressionMsgs,
-		MaxTokens: a.args.Template.MaxTokens,
-	})
-	duration := time.Since(startTime)
-
-	fs := a.session.GetOrCreateFileSession(filePath)
-	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, compressionMsgs)
-	if err != nil {
-		rec.SetError(err, duration)
-		fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
-		return msgs[:part.frozenEnd], fmt.Errorf("memory compression: %w", err)
-	}
-	rec.SetResponse(resp, duration)
-	if resp.Usage != nil {
-		atomic.AddInt64(&a.totalInputTokens, resp.Usage.PromptTokens)
-		atomic.AddInt64(&a.totalOutputTokens, resp.Usage.CompletionTokens)
-		atomic.AddInt64(&a.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-		atomic.AddInt64(&a.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
-	}
-
-	rawSummary := stripMarkdownFences(resp.Content())
-	if rawSummary == "" {
-		return msgs[:part.frozenEnd], nil
-	}
-
-	rebuilt := make([]llm.Message, 2)
-	copy(rebuilt, msgs[:2])
-
-	userMsg := rebuilt[1]
-	currentText := userMsg.ExtractText()
-	rebuilt[1] = llm.NewTextMessage(userMsg.Role, currentText+"\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
-
-	for i := part.compressEnd; i < len(msgs); i++ {
-		rebuilt = append(rebuilt, msgs[i])
-	}
-
-	return rebuilt, nil
-}
-
-// triggerAsyncCompression kicks off a background compression job.
-func (a *Agent) triggerAsyncCompression(ctx context.Context, messages []llm.Message, filePath string) {
-	msgSnapshot := copyMessages(messages)
-
-	asyncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-
-	job := &compressionJob{done: make(chan struct{}), cancel: cancel}
-	a.compressionMu.Lock()
-	a.pendingJob = job
-	a.compressionMu.Unlock()
-
-	go func() {
-		defer cancel()
-		rebuilt, _ := a.runCompression(asyncCtx, msgSnapshot, filePath)
-
-		a.compressionMu.Lock()
-		defer a.compressionMu.Unlock()
-
-		if a.pendingJob != job {
-			return // cancelled or superseded
-		}
-		job.rebuilt = rebuilt
-		close(job.done)
-	}()
-}
-
-// tryApplyPendingCompression checks if a background compression completed
-// and swaps the rebuilt messages into place. Returns true if applied.
-func (a *Agent) tryApplyPendingCompression(messages *[]llm.Message) bool {
-	a.compressionMu.Lock()
-	job := a.pendingJob
-	a.compressionMu.Unlock()
-
-	if job == nil {
-		return false
-	}
-
-	select {
-	case <-job.done:
-		a.compressionMu.Lock()
-		if a.pendingJob == job && job.rebuilt != nil {
-			*messages = job.rebuilt
-			a.pendingJob = nil
-		}
-		a.compressionMu.Unlock()
-		return true
-	default:
-		return false
-	}
-}
-
-// cancelPendingCompression aborts any in-flight background compression.
-func (a *Agent) cancelPendingCompression() {
-	a.compressionMu.Lock()
-	defer a.compressionMu.Unlock()
-
-	if a.pendingJob != nil {
-		a.pendingJob.cancel()
-		a.pendingJob = nil
-	}
-}
-
-// copyMessages creates a shallow copy of a message slice.
-func copyMessages(msgs []llm.Message) []llm.Message {
-	out := make([]llm.Message, len(msgs))
-	copy(out, msgs)
-	return out
-}
 
 // BuildToolDefs converts toolsconfig.ToolConfigEntry slice into []llm.ToolDef,
 // filtering by phase (planOnly=true for plan_task, false for main_task).
@@ -1452,20 +826,6 @@ func BuildToolDefs(entries []toolsconfig.ToolConfigEntry, planOnly bool) []llm.T
 	return defs
 }
 
-func buildMessageXML(msgs []llm.Message) string {
-	var sb strings.Builder
-	for i, m := range msgs {
-		sb.WriteString(fmt.Sprintf("<message id=\"%d\" role=\"%s\">\n", i, m.Role))
-		sb.WriteString("    <content>\n")
-		sb.WriteString(fmt.Sprintf("      %s\n", m.ExtractText()))
-		sb.WriteString("    </content>\n")
-		sb.WriteString("</message>")
-		if i < len(msgs)-1 {
-			sb.WriteString("\n")
-		}
-	}
-	return sb.String()
-}
 
 func reviewModeString(from, to, commit string) string {
 	if commit != "" {

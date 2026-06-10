@@ -299,6 +299,8 @@ func statusBadge(status string) string {
 		return "\033[36m[R]\033[0m"
 	case "binary":
 		return "\033[35m[B]\033[0m"
+	case "scan":
+		return "\033[34m[S]\033[0m"
 	default:
 		return "[?]"
 	}
