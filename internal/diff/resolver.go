@@ -75,6 +75,9 @@ type indexedLine struct {
 	content string
 }
 
+// maxMatchLineSpanFactor prevents matching snippets across excessive blank-line gaps.
+const maxMatchLineSpanFactor = 2
+
 // resolveFromHunk tries to find startLine/endLine by matching ExistingCode
 // against hunk lines. It tries the new-side first (context + added lines →
 // new-file line numbers), then falls back to old-side (context + deleted →
@@ -149,16 +152,30 @@ func matchConsecutive(sideLines []indexedLine, targetLines []string) (startLine,
 	if len(targetLines) == 0 || len(sideLines) < len(targetLines) {
 		return 0, 0, false
 	}
-	for i := 0; i <= len(sideLines)-len(targetLines); i++ {
-		matched := true
-		for j, target := range targetLines {
-			if sideLines[i+j].content != target {
-				matched = false
+	for i := 0; i < len(sideLines); i++ {
+		targetIndex := 0
+		start, end := 0, 0
+
+		for j := i; j < len(sideLines) && targetIndex < len(targetLines); j++ {
+			// ExistingCode normalization drops blank lines. Skip blank lines on the
+			// diff/file side as well so snippets containing internal blank lines
+			// can still resolve to their real line range.
+			if sideLines[j].content == "" {
+				continue
+			}
+			if sideLines[j].content != targetLines[targetIndex] {
 				break
 			}
+			if start == 0 {
+				start = sideLines[j].lineNum
+			}
+			end = sideLines[j].lineNum
+			targetIndex++
 		}
-		if matched {
-			return sideLines[i].lineNum, sideLines[i+len(targetLines)-1].lineNum, true
+		if targetIndex == len(targetLines) {
+			if end-start+1 <= len(targetLines)*maxMatchLineSpanFactor {
+				return start, end, true
+			}
 		}
 	}
 	return 0, 0, false
@@ -177,19 +194,17 @@ func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
 		return false
 	}
 
-	for i := 0; i <= len(fileLines)-len(targetLines); i++ {
-		matched := true
-		for j, target := range targetLines {
-			if normalizeLine(strings.TrimRight(fileLines[i+j], "\r")) != target {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			cm.StartLine = i + 1
-			cm.EndLine = i + len(targetLines)
-			return true
-		}
+	indexed := make([]indexedLine, 0, len(fileLines))
+	for i, line := range fileLines {
+		indexed = append(indexed, indexedLine{
+			lineNum: i + 1,
+			content: normalizeLine(strings.TrimRight(line, "\r")),
+		})
+	}
+	if start, end, ok := matchConsecutive(indexed, targetLines); ok {
+		cm.StartLine = start
+		cm.EndLine = end
+		return true
 	}
 
 	return false

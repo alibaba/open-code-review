@@ -117,6 +117,53 @@ import "fmt"`},
 	}
 }
 
+func TestResolveLineNumbers_NewFileSnippetWithInternalBlankLine(t *testing.T) {
+	raw := `diff --git a/internal/handler/file/file_handler_base.go b/internal/handler/file/file_handler_base.go
+new file mode 100644
+index 0000000..1b3ffb7
+--- /dev/null
++++ b/internal/handler/file/file_handler_base.go
+@@ -0,0 +1,17 @@
++package file
++
++import (
++	"example.com/acme/review-agent/internal/types"
++	"example.com/acme/review-agent/pkg/log"
++)
++
++// processFileTransfer processes file transfer with given direction
++func (h *Handler) processFileTransfer(fileInfo *types.FileInfo, direction string) *types.SystemStatus {
++	log.Infof("processing transfer: direction=%s, src=%s, dst=%s",
++		direction, fileInfo.SrcPath, fileInfo.DstPath)
++
++	if direction == "download" {
++		return h.performDownload(fileInfo.DstPath, nil)
++	}
++	return h.performUpload(fileInfo.SrcPath)
++}`
+
+	diffs := []model.Diff{
+		{NewPath: "internal/handler/file/file_handler_base.go", Diff: raw},
+	}
+	comments := []model.LlmComment{
+		{Path: "internal/handler/file/file_handler_base.go", ExistingCode: `func (h *Handler) processFileTransfer(fileInfo *types.FileInfo, direction string) *types.SystemStatus {
+	log.Infof("processing transfer: direction=%s, src=%s, dst=%s",
+		direction, fileInfo.SrcPath, fileInfo.DstPath)
+
+	if direction == "download" {
+		return h.performDownload(fileInfo.DstPath, nil)
+	}
+	return h.performUpload(fileInfo.SrcPath)
+}`},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 9 || cm.EndLine != 17 {
+		t.Errorf("new file with internal blank line: expected 9..17, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
 func TestResolveLineNumbers_NoMatchKeepsZero(t *testing.T) {
 	diffs := []model.Diff{
 		{NewPath: "test.go", Diff: testDiff},
@@ -426,6 +473,34 @@ func TestMatchConsecutive_ExactFull(t *testing.T) {
 	start, end, ok := matchConsecutive(lines, []string{"a", "b"})
 	if !ok || start != 1 || end != 2 {
 		t.Errorf("exact-full: got (%d, %d, %v), want (1, 2, true)", start, end, ok)
+	}
+}
+
+func TestMatchConsecutive_SkipsInternalBlankLines(t *testing.T) {
+	lines := []indexedLine{
+		{lineNum: 10, content: "alpha"},
+		{lineNum: 11, content: ""},
+		{lineNum: 12, content: "beta"},
+	}
+
+	start, end, ok := matchConsecutive(lines, []string{"alpha", "beta"})
+	if !ok || start != 10 || end != 12 {
+		t.Errorf("blank-line match: got (%d, %d, %v), want (10, 12, true)", start, end, ok)
+	}
+}
+
+func TestMatchConsecutive_RejectsExcessiveBlankLineGap(t *testing.T) {
+	lines := []indexedLine{
+		{lineNum: 10, content: "alpha"},
+		{lineNum: 11, content: ""},
+		{lineNum: 12, content: ""},
+		{lineNum: 13, content: ""},
+		{lineNum: 14, content: "beta"},
+	}
+
+	start, end, ok := matchConsecutive(lines, []string{"alpha", "beta"})
+	if ok {
+		t.Errorf("expected excessive blank-line gap to be rejected, got (%d, %d, true)", start, end)
 	}
 }
 
