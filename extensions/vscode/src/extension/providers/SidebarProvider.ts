@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { SIDEBAR_VIEW_ID } from '../../shared/constants';
 import { HostToWebview, WebviewToHost } from '../../shared/messages';
 import { FileChange } from '../../shared/types';
 import { CliService } from '../services/CliService';
