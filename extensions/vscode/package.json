@@ -1,0 +1,70 @@
+{
+  "name": "open-code-review-vscode",
+  "displayName": "Open Code Review",
+  "description": "AI 代码审查 —— 基于 open-code-review CLI",
+  "version": "0.1.0",
+  "publisher": "open-code-review",
+  "license": "Apache-2.0",
+  "engines": { "vscode": "^1.74.0" },
+  "categories": ["Other"],
+  "main": "./out/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ocr-container",
+          "title": "Open Code Review",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "ocr-container": [
+        { "id": "ocr.sidebar", "type": "webview", "name": "Code Review" }
+      ]
+    },
+    "commands": [
+      { "command": "ocr.review.start", "title": "OCR: 开始代码审查" },
+      { "command": "ocr.review.cancel", "title": "OCR: 取消审查" },
+      { "command": "ocr.config.open", "title": "OCR: 打开配置" },
+      { "command": "ocr.comment.apply", "title": "应用" },
+      { "command": "ocr.comment.discard", "title": "忽略" },
+      { "command": "ocr.comment.falsePositive", "title": "误报" }
+    ],
+    "menus": {
+      "comments/commentThread/title": [
+        { "command": "ocr.comment.apply", "group": "navigation@1", "when": "commentController == ocr-review && commentThread == pending" },
+        { "command": "ocr.comment.discard", "group": "navigation@2", "when": "commentController == ocr-review && commentThread =~ /^pending/" }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "webpack --mode development",
+    "watch": "webpack --mode development --watch",
+    "build": "webpack --mode production",
+    "test": "jest",
+    "sync:aone": "node scripts/sync-to-aone.js",
+    "lint": "eslint src --ext ts,tsx",
+    "vscode:prepublish": "yarn build"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.74.0",
+    "@types/jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "jest": "^29.7.0",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.3.0",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.0",
+    "css-loader": "^6.8.0",
+    "style-loader": "^3.3.0",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/parser": "^6.18.0",
+    "@typescript-eslint/eslint-plugin": "^6.18.0"
+  },
+  "dependencies": {
+    "preact": "^10.19.0"
+  }
+}
