@@ -1,4 +1,4 @@
-.PHONY: build test clean run help fmt vet check \
+.PHONY: build test test-e2e-gitflic clean run help fmt vet check \
 	build-all dist sha256sum version-info \
 	build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64 \
 	build-windows-amd64 build-windows-arm64
@@ -31,6 +31,11 @@ build:
 
 test:
 	$(GO) test -v -race -count=1 ./...
+
+# E2E against a live GitFlic instance (opt-in; see internal/publish/gitflic/e2e_test.go).
+# Requires GITFLIC_TOKEN; defaults target a local GitFlic CE on localhost:8080.
+test-e2e-gitflic:
+	$(GO) test -tags gitflic_e2e -count=1 -v ./internal/publish/gitflic/
 
 clean:
 	rm -rf $(DIST_DIR)
