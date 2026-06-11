@@ -44,7 +44,6 @@
     "watch": "webpack --mode development --watch",
     "build": "webpack --mode production",
     "test": "jest",
-    "sync:aone": "node scripts/sync-to-aone.js",
     "lint": "eslint src --ext ts,tsx",
     "vscode:prepublish": "yarn build"
   },

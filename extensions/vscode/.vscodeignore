@@ -1,7 +1,6 @@
 src/**
 reference/**
 docs/**
-scripts/**
 node_modules/**
 **/*.ts
 **/*.map
