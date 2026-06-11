@@ -54,6 +54,8 @@ func dispatch() error {
 		return runRules(args[1:])
 	case "viewer":
 		return runViewer(args[1:])
+	case "publish":
+		return runPublish(args[1:])
 	case "-h", "--help":
 		printTopLevelUsage()
 		return nil
@@ -74,6 +76,7 @@ Commands:
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
+  publish      Post review results to a code host (gitflic)
   version      Show version information
 
 Examples:

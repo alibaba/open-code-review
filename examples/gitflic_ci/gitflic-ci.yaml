@@ -1,0 +1,64 @@
+# OpenCodeReview - GitFlic CI Merge Request Auto-Review Demo
+#
+# Reviews Merge Requests with OpenCodeReview and posts the findings onto the
+# MR as discussions (inline where possible) using `ocr publish gitflic`.
+#
+# Requirements:
+#   - "Merge Request Pipeline" enabled in Project Settings → CI/CD Settings
+#   - A runner able to run the node:20 image (or a shell runner with node 20+ and git)
+#
+# Required CI/CD Variables (Settings → CI/CD → Variables):
+#   OCR_LLM_URL        - LLM API endpoint (e.g., https://api.openai.com/v1/chat/completions)
+#   OCR_LLM_AUTH_TOKEN - Authentication token for the LLM API
+#   GITFLIC_TOKEN      - GitFlic access token used to post MR discussions
+#
+# Optional CI/CD Variables:
+#   OCR_LLM_MODEL      - Model name (e.g., gpt-4o)
+#   GITFLIC_API_URL    - GitFlic REST API base URL; only needed for
+#                        self-hosted instances (defaults to https://api.gitflic.ru)
+#
+# `ocr publish gitflic` picks up the MR context automatically from the
+# predefined GitFlic CI variables: CI_PROJECT_NAMESPACE, CI_PROJECT_NAME,
+# CI_MERGE_REQUEST_LOCAL_ID, CI_MERGE_REQUEST_TARGET_BRANCH_NAME, CI_COMMIT_SHA.
+
+stages:
+  - review
+
+code-review:
+  stage: review
+  image: node:20
+  script:
+    # Run only in merge request pipelines
+    - |
+      if [ -z "$CI_MERGE_REQUEST_LOCAL_ID" ]; then
+        echo "Not a merge request pipeline, skipping review."
+        exit 0
+      fi
+
+    # Install OpenCodeReview
+    - npm install -g @alibaba-group/open-code-review
+
+    # Configure OCR
+    - |
+      ocr config set llm.url $OCR_LLM_URL
+      ocr config set llm.auth_token $OCR_LLM_AUTH_TOKEN
+      ocr config set llm.model $OCR_LLM_MODEL
+      ocr config set llm.use_anthropic false
+      ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
+
+    # Make sure the target branch and full history are available for merge-base diff
+    - git fetch --unshallow 2>/dev/null || true
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
+    # Run OCR review (CI_COMMIT_SHA as head supports forked MRs as well)
+    - |
+      ocr review \
+        --from "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" \
+        --to "${CI_COMMIT_SHA}" \
+        --format json \
+        --audience agent \
+        > /tmp/ocr-result.json || true
+      echo "OCR review completed."
+
+    # Post review comments onto the MR (inline discussions + summary note)
+    - ocr publish gitflic --file /tmp/ocr-result.json
