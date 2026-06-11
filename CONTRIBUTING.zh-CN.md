@@ -2,7 +2,7 @@
 
 感谢你对 OpenCodeReview 的关注！无论是修复拼写错误、报告 Bug，还是实现新功能，每一份贡献都很有价值。
 
-[English version](CONTRIBUTING.md) | [日本語版](CONTRIBUTING.ja-JP.md)
+[English version](CONTRIBUTING.md) | [日本語版](CONTRIBUTING.ja-JP.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md)
 
 ## 行为准则
 

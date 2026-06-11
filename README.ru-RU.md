@@ -1,0 +1,476 @@
+<p align="center">
+  <a href="https://alibaba.github.io/open-code-review/">
+    <img src="imgs/logo.svg" alt="OpenCodeReview logo" width="240" height="240">
+  </a>
+</p>
+<p align="center">AI-агент код-ревью с открытым исходным кодом.</p>
+<p align="center">
+  <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
+  <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
+  <a href="https://goreportcard.com/report/github.com/alibaba/open-code-review"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/alibaba/open-code-review?style=flat-square" /></a>
+  <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
+</p>
+<p align="center">
+  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | Русский
+</p>
+
+---
+
+## Что такое Open Code Review?
+
+Open Code Review — это CLI-инструмент для код-ревью на основе ИИ. Он появился как внутренний официальный ИИ-ассистент код-ревью Alibaba Group: за последние два года им воспользовались десятки тысяч разработчиков, и он выявил миллионы дефектов в коде. После тщательной проверки в огромных масштабах мы превратили его в open-source-проект для сообщества. Чтобы начать работу, достаточно настроить эндпоинт модели.
+
+Инструмент читает git-диффы, отправляет изменённые файлы настраиваемой LLM через агента с поддержкой вызова инструментов (tool use) и генерирует структурированные ревью-комментарии с точностью до строки. Агент может читать полное содержимое файлов, искать по кодовой базе, заглядывать в другие изменённые файлы за контекстом и выполнять глубокое ревью — а не только давать поверхностные замечания по диффу.
+
+![Highlights](imgs/highlights-en.png)
+
+## Почему Open Code Review?
+
+### Проблема агентов общего назначения
+
+Если вы использовали для код-ревью агентов общего назначения, например Claude Code со Skills, вы наверняка сталкивались с этими болевыми точками:
+
+- **Неполное покрытие** — на крупных ченджсетах агенты склонны «срезать углы»: выборочно проверяют часть файлов и пропускают остальные.
+- **Дрейф позиций** — найденные проблемы часто не совпадают с реальным местом в коде: номера строк и ссылки на файлы «уезжают» от цели.
+- **Нестабильное качество** — Skills, управляемые естественным языком, трудно отлаживать, и качество ревью заметно колеблется при небольших изменениях промпта.
+
+Первопричина: чисто языковая архитектура не накладывает жёстких ограничений на процесс ревью.
+
+### Ключевая идея: детерминированная инженерия × агент
+
+Ключевая философия Open Code Review — сочетать детерминированную инженерию и агента так, чтобы каждый занимался тем, что у него получается лучше всего.
+
+**Детерминированная инженерия — жёсткие гарантии**
+
+Для тех шагов ревью, где *нельзя ошибаться*, корректность гарантирует инженерная логика, а не языковая модель:
+
+- **Точный отбор файлов** — точно определяет, какие файлы нуждаются в ревью, а какие следует отфильтровать, гарантируя, что ни одно важное изменение не будет упущено.
+- **Умный бандлинг файлов** — группирует связанные файлы в одну единицу ревью (например, `message_en.properties` и `message_zh.properties` объединяются вместе). Каждый бандл выполняется как суб-агент с изолированным контекстом — стратегия «разделяй и властвуй», которая сохраняет стабильность на очень больших ченджсетах и естественным образом поддерживает конкурентное ревью.
+- **Тонкий матчинг правил** — сопоставляет правила ревью с характеристиками каждого файла, удерживая внимание модели сфокусированным и устраняя информационный шум у самого источника. По сравнению с чисто языковым управлением правилами матчинг правил на основе шаблонизатора стабильнее и предсказуемее.
+- **Внешние модули позиционирования и рефлексии** — независимые модули позиционирования комментариев и рефлексии над комментариями системно повышают точность как расположения, так и содержания замечаний ИИ.
+
+**Агент — динамические решения**
+
+Сильные стороны агента сосредоточены там, где они важнее всего, — в динамических решениях и динамическом доборе контекста:
+
+- **Промпты, заточенные под сценарий** — шаблоны промптов, глубоко оптимизированные под код-ревью: выше качество при меньшем расходе токенов.
+- **Набор инструментов, заточенный под сценарий** — выведен из глубокого анализа трейсов вызовов инструментов на больших продакшен-данных, включая распределение частоты вызовов, долю повторных вызовов каждого инструмента и влияние новых инструментов на всю цепочку вызовов. В результате получился специализированный набор инструментов, который для код-ревью стабильнее и предсказуемее, чем универсальный агентский тулкит.
+
+## Как использовать
+
+### CLI
+
+#### Установка
+
+**Через NPM (рекомендуется)**
+
+```bash
+npm install -g @alibaba-group/open-code-review
+```
+
+После установки команда `ocr` доступна глобально.
+
+**Из GitHub Release**
+
+Скачайте свежий бинарный файл со страницы [GitHub Releases](https://github.com/alibaba/open-code-review/releases):
+
+```bash
+# macOS (Apple Silicon)
+curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-darwin-arm64
+chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
+
+# macOS (Intel)
+curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-darwin-amd64
+chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
+
+# Linux (x86_64)
+curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-linux-amd64
+chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
+
+# Linux (ARM64)
+curl -Lo ocr https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-linux-arm64
+chmod +x ocr && sudo mv ocr /usr/local/bin/ocr
+
+# Windows (x86_64) — переместите ocr.exe в каталог из вашего PATH
+curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-amd64.exe
+
+# Windows (ARM64) — переместите ocr.exe в каталог из вашего PATH
+curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-arm64.exe
+```
+
+**Из исходников**
+
+```bash
+git clone https://github.com/alibaba/open-code-review.git
+cd open-code-review
+make build
+sudo cp dist/opencodereview /usr/local/bin/ocr
+```
+
+#### Быстрый старт
+
+**1. Настройте LLM**
+
+**Перед запуском ревью необходимо настроить LLM.**
+
+```bash
+# Вариант A: настройка через CLI
+ocr config set llm.url https://api.anthropic.com/v1/messages
+ocr config set llm.auth_token your-api-key-here
+ocr config set llm.model claude-opus-4-6
+ocr config set llm.use_anthropic true
+
+# Вариант B: переменные окружения (наивысший приоритет)
+export OCR_LLM_URL=https://api.anthropic.com/v1/messages
+export OCR_LLM_TOKEN=your-api-key-here
+export OCR_LLM_MODEL=claude-opus-4-6
+export OCR_USE_ANTHROPIC=true
+```
+
+Конфигурация хранится в `~/.opencodereview/config.json`.
+
+**`auth_header` (необязательно):** определяет, в каком HTTP-заголовке передаётся API-ключ при работе с Anthropic. Если не задан, по умолчанию используется `authorization` (Bearer-токен). Если у вас стандартный API-ключ вида `sk-ant-*`, необходимо установить значение `x-api-key`:
+
+```bash
+ocr config set llm.auth_header x-api-key
+# или
+export OCR_LLM_AUTH_HEADER=x-api-key
+```
+
+Поддерживаемые значения: `x-api-key`, `authorization` (алиас: `bearer`). Прочие значения отклоняются с ошибкой.
+
+Инструмент также совместим с переменными окружения Claude Code (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) и разбирает `~/.zshrc` / `~/.bashrc` в поисках соответствующих export'ов.
+
+> **Примечание для пользователей CC-Switch**: если вы используете [CC-Switch](https://github.com/farion1231/cc-switch) с включённым [routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service), можно указать в `llm.url` адрес прокси CC-Switch без дополнительной настройки:
+> - для провайдера **Claude**: установите `llm.url` в `http://127.0.0.1:15721`
+> - для провайдера **Codex**: установите `llm.url` в `http://127.0.0.1:15721/v1`
+> - `llm.model` задайте в соответствии с настройками вашего провайдера
+> - `llm.auth_token` может быть любым
+> - настройки `extra_body` продолжают действовать
+
+**2. Проверьте подключение**
+
+```bash
+ocr llm test
+```
+
+**3. Запустите ревью**
+
+```bash
+cd your-project
+
+# Режим рабочей копии — ревью всех staged, unstaged и untracked изменений
+ocr review
+
+# Диапазон веток — сравнение двух ref'ов
+ocr review --from main --to feature-branch
+
+# Один коммит
+ocr review --commit abc123
+```
+
+### Интеграция с кодинг-агентами
+
+OCR легко встраивается в ИИ-агентов для разработки в виде slash-команды, позволяя выполнять код-ревью прямо в рабочем процессе агента.
+
+#### Вариант 1: установка как Skill
+
+Установите скилл OCR в свой проект через `npx`:
+
+```bash
+npx skills add alibaba/open-code-review --skill open-code-review
+```
+
+Это установит скилл `open-code-review` из [реестра скиллов](skills/open-code-review/SKILL.md), который объясняет вашему кодинг-агенту, как вызывать `ocr` для код-ревью, классифицировать найденные проблемы по приоритету и при необходимости применять исправления.
+
+#### Вариант 2: установка как плагин Claude Code
+
+Для [Claude Code](https://docs.anthropic.com/en/docs/claude-code) установите плагин с командой, выполнив в Claude Code:
+
+```bash
+/plugin marketplace add alibaba/open-code-review
+/plugin install open-code-review@open-code-review
+```
+
+Это зарегистрирует slash-команду `/open-code-review:review`, которая запускает OCR и автоматически фильтрует и исправляет найденные проблемы.
+
+#### Вариант 3: установка как плагин Codex
+
+Для локального Codex установите плагин Open Code Review из этого репозитория:
+
+```bash
+codex plugin marketplace add alibaba/open-code-review
+codex
+/plugins
+```
+
+Для локального чекаута или форка:
+
+```bash
+codex plugin marketplace add .
+codex
+/plugins
+```
+
+Установите и включите `Open Code Review`, затем начните новый тред Codex и вызывайте плагин явно:
+
+```text
+@Open Code Review review my current changes
+@Open Code Review review this branch against main
+@Open Code Review review and fix high-confidence issues
+```
+
+Это зарегистрирует Codex-скилл, запускающий локальный CLI OCR:
+
+```bash
+ocr review --audience agent
+```
+
+Эта интеграция не меняет внутренний LLM-бэкенд OCR и не требует настройки эндпоинта OpenAI Responses API для Codex. Самому OCR по-прежнему нужен установленный и настроенный CLI `ocr`, как описано в разделе про настройку CLI.
+
+Руководство на корейском: [`plugins/open-code-review/CODEX.ko-KR.md`](plugins/open-code-review/CODEX.ko-KR.md)
+
+#### Вариант 4: просто скопировать файл команды
+
+Для быстрой настройки без пакетных менеджеров достаточно скопировать файл команды, чтобы использовать slash-команду `/open-code-review` в Claude Code.
+
+**На уровне проекта** (общий для команды через git):
+
+```bash
+mkdir -p .claude/commands
+curl -o .claude/commands/open-code-review.md \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+```
+
+**На уровне пользователя** (личное глобальное использование во всех проектах):
+
+```bash
+mkdir -p ~/.claude/commands
+curl -o ~/.claude/commands/open-code-review.md \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+```
+
+> **Требование**: для всех способов интеграции необходим установленный CLI `ocr` и настроенная LLM. См. разделы [Установка](#установка) и [Настройте LLM](#быстрый-старт) выше.
+
+### Интеграция с CI/CD
+
+OCR можно встроить в CI/CD-пайплайны для автоматического код-ревью Merge Request'ов / Pull Request'ов.
+
+Базовая команда для интеграции с CI:
+
+```bash
+ocr review \
+  --from "origin/main" \
+  --to "<commit_sha>" \
+  --format json
+```
+
+Флаг `--from` принимает в качестве базы ref ветки (например, `origin/main`) или SHA коммита, а `--to` — SHA коммита или ref ветки в качестве head. В CI-окружениях для `--to` рекомендуется использовать SHA коммита: это корректно обрабатывает PR/MR из форков, у которых исходная ветка отсутствует в remote `origin`.
+
+Флаг `--format json` выводит машиночитаемый результат, удобный для разбора в CI-скриптах.
+
+Примеры интеграции — в каталоге [`examples/`](./examples/):
+
+- [`github_actions/`](./examples/github_actions/) — пример интеграции с GitHub Actions
+- [`gitlab_ci/`](./examples/gitlab_ci/) — пример интеграции с GitLab CI
+
+## Команды
+
+| Команда | Алиас | Описание |
+|---------|-------|----------|
+| `ocr review` | `ocr r` | Запустить код-ревью |
+| `ocr rules check <file>` | — | Показать, какое правило ревью применяется к пути файла |
+| `ocr config set <key> <value>` | — | Установить значения конфигурации |
+| `ocr llm test` | — | Проверить подключение к LLM |
+| `ocr viewer` | `ocr v` | Запустить WebUI-просмотрщик сессий на `localhost:5483` |
+| `ocr version` | — | Показать информацию о версии |
+
+### Флаги `ocr review`
+
+| Флаг | Короткая форма | По умолчанию | Описание |
+|------|----------------|--------------|----------|
+| `--repo` | — | текущий каталог | Корень git-репозитория |
+| `--from` | — | — | Исходный ref (например, `main`) |
+| `--to` | — | — | Целевой ref (например, `feature-branch`) |
+| `--commit` | `-c` | — | Один коммит для ревью |
+| `--preview` | `-p` | `false` | Показать, какие файлы попадут в ревью, без запуска LLM |
+| `--format` | `-f` | `text` | Формат вывода: `text` или `json` |
+| `--concurrency` | — | `8` | Максимум одновременных ревью файлов |
+| `--timeout` | — | `10` | Таймаут конкурентной задачи в минутах |
+| `--audience` | — | `human` | `human` (показывать прогресс) или `agent` (только сводка) |
+| `--background` | `-b` | — | Необязательный контекст требований/бизнес-логики для ревью; при `--commit` автоматически заполняется из сообщения коммита |
+| `--rule` | — | — | Путь к пользовательским JSON-правилам ревью |
+| `--max-tools` | — | встроенное | Максимум раундов вызова инструментов на файл; действует, только если больше значения шаблона по умолчанию |
+| `--max-git-procs` | — | встроенное | Максимум одновременных git-подпроцессов |
+| `--tools` | — | — | Путь к пользовательскому JSON-конфигу инструментов |
+
+## Примеры
+
+```bash
+# Показать, какие файлы попадут в ревью (без вызовов LLM)
+ocr review --preview
+ocr review -c abc123 -p
+
+# Ревью изменений рабочей копии с настройками по умолчанию
+ocr review
+
+# Ревью диффа веток с заданной конкурентностью
+ocr review --from main --to my-feature --concurrency 4
+
+# Ревью конкретного коммита с подробным JSON-выводом
+ocr review --commit abc123 --format json --audience agent
+
+# Передать контекст требований для более прицельного ревью
+ocr review --background "Добавляем rate limiting в API логина"
+
+# Использовать собственные правила ревью
+ocr review --rule /path/to/my-rules.json
+
+# Посмотреть, какое правило применяется к файлу
+ocr rules check src/main/java/com/example/Foo.java
+ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
+
+# Открыть историю сессий ревью в браузере
+ocr viewer
+ocr viewer --addr :3000
+```
+
+### Безопасность viewer'а
+
+Viewer отдаёт содержимое сессионных JSONL-файлов (сообщения запросов к LLM и ответы) по HTTP. На каждый запрос применяется allowlist по заголовку Host: loopback-имена (`localhost`, `127.0.0.0/8`, `::1`) и конкретный хост привязки разрешены всегда. Wildcard-привязки (`--addr :3000`, `--addr 0.0.0.0:3000`) и прочие не-loopback имена хостов нужно добавлять через переменную окружения `OCR_VIEWER_ALLOWED_HOSTS` (через запятую):
+
+```bash
+OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
+```
+
+Это блокирует атаки DNS rebinding на локальный viewer.
+
+## Правила ревью
+
+OCR разрешает правила ревью по цепочке приоритетов из четырёх уровней. На каждом уровне действует принцип «первое совпадение побеждает»: если путь файла совпал с паттерном, используется это правило; иначе поиск продолжается на следующем уровне.
+
+| Приоритет | Источник | Путь | Описание |
+|-----------|----------|------|----------|
+| 1 (высший) | Флаг `--rule` | Путь, указанный пользователем | Явное переопределение из CLI |
+| 2 | Конфиг проекта | `<repoDir>/.opencodereview/rule.json` | Правила уровня проекта, можно коммитить в git |
+| 3 | Глобальный конфиг | `~/.opencodereview/rule.json` | Личные настройки пользователя |
+| 4 (низший) | Системные по умолчанию | Встроенный `system_rules.json` | Встроенные правила для распространённых языков и типов файлов |
+
+### Формат файла правил
+
+Уровни 1–3 используют один и тот же JSON-формат:
+
+```json
+{
+  "rules": [
+    {
+      "path": "force-api/**/*.java",
+      "rule": "Все новые методы должны проверять обязательные параметры на null"
+    },
+    {
+      "path": "**/*mapper*.xml",
+      "rule": "Проверять SQL на риски инъекций, ошибки в параметрах и незакрытые теги"
+    }
+  ]
+}
+```
+
+- `path` поддерживает рекурсивное сопоставление `**` и расширение фигурных скобок `{java,kt}`.
+- Внутри каждого уровня правила проверяются в порядке объявления — побеждает первое совпадение.
+- Если файл правил не существует, он молча пропускается.
+
+### Фильтрация путей
+
+Файлы правил также поддерживают поля `include` и `exclude`, управляющие тем, какие файлы попадают в область ревью:
+
+```json
+{
+  "rules": [
+    {"path": "**/*.java", "rule": "Проверять null-безопасность"}
+  ],
+  "include": ["src/main/**/*.java", "lib/**/*.kt"],
+  "exclude": ["**/generated/**", "vendor/**"]
+}
+```
+
+**Приоритет решений фильтра (от высшего к низшему):**
+
+| Шаг | Условие | Результат |
+|-----|---------|-----------|
+| 1 | Файл бинарный | Исключён |
+| 2 | Путь совпадает с пользовательским паттерном `exclude` | Исключён |
+| 3 | Расширение файла не входит в список поддерживаемых | Исключён |
+| 4 | `include` настроен и путь совпадает | **В ревью** (шаг 5 пропускается) |
+| 5 | Путь совпадает со встроенным паттерном исключения по умолчанию (тестовые файлы и т. п.) | Исключён |
+| 6 | Ничего из перечисленного | В ревью |
+
+**Как это работает:**
+
+- `include` и `exclude` следуют той же цепочке приоритетов, что и правила ревью (`--rule` > конфиг проекта > глобальный конфиг). Действует **целиком самый приоритетный уровень, на котором include/exclude настроены** — паттерны разных уровней не объединяются.
+- `exclude` всегда сильнее `include` — файл, совпавший с обоими, исключается.
+- `include` работает как **обход встроенных паттернов исключения по умолчанию** (например, тестовых файлов), а не как эксклюзивный allowlist: файлы, не совпавшие ни с одним паттерном `include`, всё равно обычным образом проходят проверки фильтра по умолчанию.
+- Синтаксис паттернов: поддерживаются рекурсивное сопоставление `**`, односегментное `*` и расширение фигурных скобок `{a,b}`. Сопоставление регистронезависимое.
+
+**Встроенные паттерны исключения по умолчанию** (отфильтровывают тестовые файлы и т. п. — можно переопределить через `include`):
+
+```
+**/*_test.go, **/*Test.java, **/*Tests.java, **/*_test.rs,
+**/*.test.{js,jsx,ts,tsx}, **/*.spec.{js,jsx,ts,tsx}, **/__tests__/**,
+**/src/test/java/**/*.java, **/src/test/**/*.kt,
+**/test/**/*_test.py, **/tests/**/*_test.py, **/*_test.py,
+**/*_spec.rb, **/spec/**/*_spec.rb, **/oh_modules/**
+```
+
+## Справочник по конфигурации
+
+Файл конфигурации: `~/.opencodereview/config.json`
+
+| Ключ | Тип | Пример |
+|------|-----|--------|
+| `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
+| `llm.auth_token` | string | `sk-xxxxxxx` |
+| `llm.auth_header` | string | Только для Anthropic: `x-api-key` \| `authorization` |
+| `llm.model` | string | `claude-opus-4-6` |
+| `llm.use_anthropic` | boolean | `true` \| `false` |
+| `language` | string | `English` \| `Chinese` (по умолчанию: Chinese) |
+| `telemetry.enabled` | boolean | `true` \| `false` |
+| `telemetry.exporter` | string | `console` \| `otlp` |
+| `telemetry.otlp_endpoint` | string | Адрес OTLP-коллектора |
+| `telemetry.content_logging` | boolean | Включать промпты в телеметрию |
+
+Переменные окружения имеют приоритет над файлом конфигурации.
+
+### Переменные окружения
+
+| Переменная | Назначение |
+|------------|------------|
+| `OCR_LLM_URL` | URL эндпоинта LLM API |
+| `OCR_LLM_TOKEN` | API-ключ / токен авторизации |
+| `OCR_LLM_AUTH_HEADER` | Заголовок авторизации Anthropic (`x-api-key` или `authorization`) |
+| `OCR_LLM_MODEL` | Имя модели |
+| `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
+
+
+## Телеметрия
+
+Интеграция с OpenTelemetry для наблюдаемости (спаны, метрики). По умолчанию выключена.
+
+```bash
+ocr config set telemetry.enabled true
+ocr config set telemetry.exporter otlp
+ocr config set telemetry.otlp_endpoint localhost:4317
+```
+
+Установите `telemetry.content_logging`, чтобы включать промпты и ответы LLM в экспортируемые данные.
+
+## Участие в разработке
+
+В [CONTRIBUTING.ru-RU.md](CONTRIBUTING.ru-RU.md) описаны настройка окружения разработки, рекомендации по коду и порядок отправки pull request'ов.
+
+## История звёзд
+
+[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
+
+## Лицензия
+
+[Apache-2.0](LICENSE) — Copyright 2026 Alibaba
