@@ -11,7 +11,7 @@ import (
 // without dispatching any LLM calls. Returns a *model.Preview ready for
 // cmd/opencodereview.outputPreviewText to render.
 func (a *Agent) Preview(ctx context.Context) (*model.Preview, error) {
-	provider := NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner)
+	provider := NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
 	items, err := provider.Enumerate(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("enumerate files: %w", err)

@@ -175,11 +175,12 @@ type jsonSummary struct {
 }
 
 type jsonOutput struct {
-	Status   string               `json:"status"`
-	Message  string               `json:"message,omitempty"`
-	Summary  *jsonSummary         `json:"summary,omitempty"`
-	Comments []model.LlmComment   `json:"comments"`
-	Warnings []agent.AgentWarning `json:"warnings,omitempty"`
+	Status         string               `json:"status"`
+	Message        string               `json:"message,omitempty"`
+	Summary        *jsonSummary         `json:"summary,omitempty"`
+	Comments       []model.LlmComment   `json:"comments"`
+	Warnings       []agent.AgentWarning `json:"warnings,omitempty"`
+	ProjectSummary string               `json:"project_summary,omitempty"`
 }
 
 func outputJSON(comments []model.LlmComment) error {
@@ -196,7 +197,8 @@ func outputJSON(comments []model.LlmComment) error {
 }
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
-	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64, duration time.Duration) error {
+	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
+	duration time.Duration, projectSummary string) error {
 	out := jsonOutput{
 		Status:   "success",
 		Comments: comments,
@@ -210,6 +212,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			CacheWriteTokens: cacheWriteTokens,
 			Elapsed:          duration.Round(time.Second).String(),
 		},
+		ProjectSummary: projectSummary,
 	}
 	if len(comments) == 0 {
 		if hasSubtaskErrors(warnings) {

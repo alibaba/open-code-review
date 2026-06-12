@@ -101,6 +101,7 @@ type reviewOptions struct {
 	from           string
 	to             string
 	commit         string
+	excludes       string // --exclude: comma-separated gitignore-style patterns
 	outputFormat   string
 	audience       string // --audience: "human" (default) or "agent"
 	background     string // --background: optional requirement context
@@ -123,6 +124,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.from, "from", "", "source ref to start diff from (e.g., 'main')")
 	a.StringVar(&opts.to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
 	a.StringVarP(&opts.commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
+	a.StringVar(&opts.excludes, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 	a.StringVarP(&opts.outputFormat, "format", "f", "text", "output format: text or json")
 	a.IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file reviews")
 	a.IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")

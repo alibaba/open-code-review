@@ -11,7 +11,7 @@ import (
 	"github.com/open-code-review/open-code-review/internal/tool"
 )
 
-func newAgentForTest(t *testing.T, tpl template.Template) *Agent {
+func newAgentForTest(t *testing.T, tpl template.ScanTemplate) *Agent {
 	t.Helper()
 	return NewAgent(Args{
 		Template:         tpl,
@@ -23,17 +23,11 @@ func newAgentForTest(t *testing.T, tpl template.Template) *Agent {
 	})
 }
 
-func makeTemplateWithFullScan() template.Template {
-	return template.Template{
+func makeTemplateWithFullScan() template.ScanTemplate {
+	return template.ScanTemplate{
 		MaxTokens:           1000,
 		MaxToolRequestTimes: 5,
 		MainTask: template.LlmConversation{
-			Messages: []template.ChatMessage{
-				{Role: "system", Content: "main"},
-				{Role: "user", Content: "main user"},
-			},
-		},
-		FullScanTask: &template.LlmConversation{
 			Messages: []template.ChatMessage{
 				{Role: "system", Content: "scan system rule={{system_rule}}"},
 				{
@@ -42,10 +36,108 @@ func makeTemplateWithFullScan() template.Template {
 						"date={{current_system_date_time}}\n" +
 						"siblings=[{{change_files}}]\n" +
 						"bg={{requirement_background}}\n" +
+						"plan={{plan_guidance}}\n" +
 						"<content>\n{{file_content}}\n</content>",
 				},
 			},
 		},
+	}
+}
+
+func TestFormatPlanGuidance_FullJSON(t *testing.T) {
+	raw := "```json\n" + `{
+  "summary": "this file orchestrates X.",
+  "checkpoints": [
+    {"focus": "race in cache", "lines": "45-78", "why": "writes under read lock"},
+    {"focus": "error swallowing", "lines": "120-130", "why": "ignored Err return"}
+  ]
+}` + "\n```"
+	got := formatPlanGuidance(raw)
+	for _, want := range []string{
+		"**Summary**: this file orchestrates X.",
+		"1. `race in cache` (lines 45-78) — writes under read lock",
+		"2. `error swallowing` (lines 120-130) — ignored Err return",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q\nfull:\n%s", want, got)
+		}
+	}
+}
+
+func TestFormatPlanGuidance_EmptyAndMalformed(t *testing.T) {
+	if got := formatPlanGuidance(""); got != "" {
+		t.Errorf("empty input should yield empty guidance, got %q", got)
+	}
+	// Malformed JSON falls back to the raw text so we don't lose what the
+	// model said — better to feed bad text to the reviewer than nothing.
+	raw := "the LLM forgot to use JSON: focus on error handling"
+	if got := formatPlanGuidance(raw); got != raw {
+		t.Errorf("malformed input should pass through raw, got %q", got)
+	}
+}
+
+func TestFormatPlanGuidance_SummaryOnly(t *testing.T) {
+	raw := `{"summary": "small helper file", "checkpoints": []}`
+	got := formatPlanGuidance(raw)
+	if !strings.Contains(got, "**Summary**: small helper file") {
+		t.Errorf("missing summary header, got %q", got)
+	}
+	if strings.Contains(got, "Focus areas") {
+		t.Errorf("should not render focus header when no checkpoints, got %q", got)
+	}
+}
+
+func TestBuildSummaryCommentsList_TruncatesAndOneLines(t *testing.T) {
+	long := strings.Repeat("x", 400)
+	cs := []model.LlmComment{
+		{Path: "a.go", Content: "line one\nline two\nline three"},
+		{Path: "b.go", Content: long},
+	}
+	got := buildSummaryCommentsList(cs)
+
+	// Newlines in content should be collapsed to spaces.
+	if strings.Contains(got, "line one\nline two") {
+		t.Errorf("expected content newlines to be flattened, got:\n%s", got)
+	}
+	if !strings.Contains(got, "- `a.go`: line one line two line three") {
+		t.Errorf("expected path-anchored prefix, got:\n%s", got)
+	}
+	// Long content truncated to ~280 + "..." marker.
+	if !strings.Contains(got, "...") {
+		t.Errorf("expected truncation marker on long content, got:\n%s", got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if len(line) > 320 { // 280 content + small path/prefix overhead
+			t.Errorf("line not capped: len=%d %q", len(line), line)
+		}
+	}
+}
+
+func TestMaybeRunPlan_SkipPathsDoNotCallLLM(t *testing.T) {
+	tpl := makeTemplateWithFullScan()
+	// no PlanTask attached → must return sentinel without crashing
+	a := newAgentForTest(t, tpl)
+	guidance := a.maybeRunPlan(t.Context(), model.ScanItem{Path: "x.go", Content: "package x"}, "rule")
+	if !strings.Contains(guidance, "no pre-scan plan") {
+		t.Errorf("expected fallback sentinel, got %q", guidance)
+	}
+
+	// PlanTask attached but SkipPlan set
+	tpl.PlanTask = &template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "plan {{file_content}}"}},
+	}
+	a2 := NewAgent(Args{
+		Template:         tpl,
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		Session: session.New(t.TempDir(), "main", "test-model", session.SessionOptions{
+			ReviewMode: session.ReviewModeFullScan,
+		}),
+		SkipPlan: true,
+	})
+	guidance2 := a2.maybeRunPlan(t.Context(), model.ScanItem{Path: "x.go", Content: "package x"}, "rule")
+	if !strings.Contains(guidance2, "no pre-scan plan") {
+		t.Errorf("SkipPlan should suppress plan, got %q", guidance2)
 	}
 }
 
@@ -59,7 +151,7 @@ func TestRenderMessages(t *testing.T) {
 		Path:    "internal/foo/bar.go",
 		Content: "package foo\n\nfunc Bar() {}\n",
 	}
-	msgs := a.renderMessages(it, "rule-text")
+	msgs := a.renderMessages(it, "rule-text", "(no pre-scan plan; review the entire file as usual)")
 
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(msgs))

@@ -23,10 +23,12 @@ func runReview(args []string) error {
 		return nil
 	}
 
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs)
+	// review path: git repo is required (diff concepts depend on it).
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
 	}
+	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	if opts.commit != "" && opts.background == "" {
 		if msg, err := getCommitMessage(cc.RepoDir, opts.commit); err == nil && msg != "" {

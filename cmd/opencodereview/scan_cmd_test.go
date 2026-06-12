@@ -62,18 +62,18 @@ func TestSplitPaths(t *testing.T) {
 	}
 }
 
-func TestParseScanFlags_RequiresAllOrPath(t *testing.T) {
-	_, err := parseScanFlags([]string{}) // no flags
-	if err == nil {
-		t.Fatal("expected error when neither --all nor --path is supplied")
+func TestParseScanFlags_BareCommandScansWholeRepo(t *testing.T) {
+	opts, err := parseScanFlags([]string{}) // no flags
+	if err != nil {
+		t.Fatalf("bare `ocr scan` should not error, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "must specify --all or --path") {
-		t.Errorf("error message = %q; want it to mention --all/--path", err.Error())
+	if opts.paths != "" {
+		t.Errorf("default paths should be empty (= whole repo), got %q", opts.paths)
 	}
 }
 
 func TestParseScanFlags_RejectsInvalidAudience(t *testing.T) {
-	_, err := parseScanFlags([]string{"--all", "--audience", "robot"})
+	_, err := parseScanFlags([]string{"--audience", "robot"})
 	if err == nil {
 		t.Fatal("expected error for invalid --audience")
 	}
@@ -83,7 +83,7 @@ func TestParseScanFlags_RejectsInvalidAudience(t *testing.T) {
 }
 
 func TestParseScanFlags_RejectsNegativeMaxTools(t *testing.T) {
-	_, err := parseScanFlags([]string{"--all", "--max-tools", "-1"})
+	_, err := parseScanFlags([]string{"--max-tools", "-1"})
 	if err == nil {
 		t.Fatal("expected error for negative --max-tools")
 	}
@@ -93,7 +93,7 @@ func TestParseScanFlags_RejectsNegativeMaxTools(t *testing.T) {
 }
 
 func TestParseScanFlags_RejectsNegativeMaxGitProcs(t *testing.T) {
-	_, err := parseScanFlags([]string{"--all", "--max-git-procs", "-3"})
+	_, err := parseScanFlags([]string{"--max-git-procs", "-3"})
 	if err == nil {
 		t.Fatal("expected error for negative --max-git-procs")
 	}
@@ -102,13 +102,13 @@ func TestParseScanFlags_RejectsNegativeMaxGitProcs(t *testing.T) {
 	}
 }
 
-func TestParseScanFlags_AllSetsValid(t *testing.T) {
-	opts, err := parseScanFlags([]string{"--all"})
+func TestParseScanFlags_DefaultsValid(t *testing.T) {
+	opts, err := parseScanFlags([]string{}) // bare command
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !opts.all || opts.paths != "" {
-		t.Errorf("opts = %+v; want all=true paths=\"\"", opts)
+	if opts.paths != "" {
+		t.Errorf("opts = %+v; want paths empty (whole repo)", opts)
 	}
 	if opts.audience != "human" {
 		t.Errorf("default audience = %q, want \"human\"", opts.audience)
@@ -121,13 +121,10 @@ func TestParseScanFlags_AllSetsValid(t *testing.T) {
 	}
 }
 
-func TestParseScanFlags_PathOnlyIsValid(t *testing.T) {
+func TestParseScanFlags_PathNarrowsScope(t *testing.T) {
 	opts, err := parseScanFlags([]string{"--path", "internal/agent,internal/diff"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if opts.all {
-		t.Errorf("opts.all = true, want false")
 	}
 	if got := splitPaths(opts.paths); !reflect.DeepEqual(got, []string{"internal/agent", "internal/diff"}) {
 		t.Errorf("splitPaths(opts.paths) = %v", got)

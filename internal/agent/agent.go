@@ -271,6 +271,11 @@ func (a *Agent) TotalCacheReadTokens() int64 { return a.runner.TotalCacheReadTok
 // TotalCacheWriteTokens returns the accumulated cache write tokens from all LLM calls.
 func (a *Agent) TotalCacheWriteTokens() int64 { return a.runner.TotalCacheWriteTokens() }
 
+// ProjectSummary returns the markdown project-level summary. Always empty
+// for the diff-review path; defined so *Agent satisfies the
+// cmd/opencodereview.ResultProvider interface that scan.Agent also implements.
+func (a *Agent) ProjectSummary() string { return "" }
+
 // Warnings returns a copy of non-fatal warnings recorded during review.
 func (a *Agent) Warnings() []AgentWarning { return a.runner.Warnings() }
 

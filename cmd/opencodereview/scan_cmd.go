@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-code-review/open-code-review/internal/config/template"
 	"github.com/open-code-review/open-code-review/internal/llmloop"
 	"github.com/open-code-review/open-code-review/internal/scan"
 	"github.com/open-code-review/open-code-review/internal/telemetry"
@@ -15,12 +16,14 @@ import (
 // scanOptions mirrors reviewOptions for the full-scan subcommand. The two
 // types are kept separate so the scan flag set can evolve independently of
 // the diff-based review flags (e.g. --from/--to/--commit make no sense here).
+//
+// Bare `ocr scan` (no --path) scans the entire repository; --path narrows.
 type scanOptions struct {
 	toolConfigPath string
 	rulePath       string
 	repoDir        string
-	all            bool
-	paths          string // comma-separated relative paths
+	paths          string // comma-separated relative paths; empty = whole repo
+	excludes       string // comma-separated gitignore-style exclude patterns
 	outputFormat   string
 	audience       string
 	background     string
@@ -29,6 +32,10 @@ type scanOptions struct {
 	maxTools       int
 	maxGitProcs    int
 	preview        bool
+	noPlan         bool   // --no-plan: skip the PLAN_TASK pre-pass per file
+	noDedup        bool   // --no-dedup: skip the per-batch DEDUP_TASK
+	noSummary      bool   // --no-summary: skip the post-run PROJECT_SUMMARY_TASK
+	batch          string // --batch: override scan template's BATCH_STRATEGY
 	showHelp       bool
 }
 
@@ -39,8 +46,8 @@ func parseScanFlags(args []string) (scanOptions, error) {
 	a.StringVar(&opts.toolConfigPath, "tools", "", "path to JSON tools config file (default: embedded)")
 	a.StringVar(&opts.rulePath, "rule", "", "path to JSON file with system review rules")
 	a.StringVar(&opts.repoDir, "repo", "", "root directory of the git repository (default: current dir)")
-	a.BoolVar(&opts.all, "all", false, "scan every reviewable file in the repository")
-	a.StringVar(&opts.paths, "path", "", "comma-separated repo-relative directories or files to scan")
+	a.StringVar(&opts.paths, "path", "", "comma-separated repo-relative directories or files to scan (default: whole repo)")
+	a.StringVar(&opts.excludes, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 	a.StringVarP(&opts.outputFormat, "format", "f", "text", "output format: text or json")
 	a.IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file scans")
 	a.IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
@@ -49,6 +56,10 @@ func parseScanFlags(args []string) (scanOptions, error) {
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be scanned without running the LLM")
+	a.BoolVar(&opts.noPlan, "no-plan", false, "skip the per-file PLAN_TASK pre-pass (one fewer LLM call per file; may reduce review focus)")
+	a.BoolVar(&opts.noDedup, "no-dedup", false, "skip the per-batch DEDUP_TASK (keeps raw comments; one fewer LLM call per batch)")
+	a.BoolVar(&opts.noSummary, "no-summary", false, "skip the post-run PROJECT_SUMMARY_TASK (no project-level markdown summary)")
+	a.StringVar(&opts.batch, "batch", "", "override BATCH_STRATEGY from scan template: none | by-language | by-directory")
 
 	if err := a.Parse(args); err != nil {
 		return opts, fmt.Errorf("parse flags: %w", err)
@@ -57,10 +68,6 @@ func parseScanFlags(args []string) (scanOptions, error) {
 	opts.showHelp = a.showHelp
 	if opts.showHelp {
 		return opts, nil
-	}
-
-	if !opts.all && strings.TrimSpace(opts.paths) == "" {
-		return opts, fmt.Errorf("must specify --all or --path; run 'ocr scan -h' for usage")
 	}
 
 	switch opts.audience {
@@ -104,33 +111,47 @@ func runScan(args []string) error {
 		return nil
 	}
 
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs)
+	// scan path: git is preferred (more accurate .gitignore handling) but not required;
+	// provider falls back to filepath.Walk when the dir is not a git repo.
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, false)
 	if err != nil {
 		return err
 	}
-	if cc.Template.FullScanTask == nil || len(cc.Template.FullScanTask.Messages) == 0 {
-		return fmt.Errorf("FULL_SCAN_TASK is missing from the loaded template")
-	}
+	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
-	// Scan reviews whole files (often hundreds of lines with multiple
-	// findings), so it needs a larger per-file tool-call budget than diff
-	// review. Promote MaxToolRequestTimes to the scan-specific value. The
-	// --max-tools flag (handled in loadCommonContext) can still raise this
-	// further; we only raise, never lower, so an explicit --max-tools
-	// override wins.
-	if cc.Template.FullScanMaxToolRequestTimes > cc.Template.MaxToolRequestTimes {
-		cc.Template.MaxToolRequestTimes = cc.Template.FullScanMaxToolRequestTimes
+	// scan owns its own template (scan_template.json) independent from the
+	// diff-review template loaded by loadCommonContext above. Apply --max-tools
+	// as an "only raise" override to the scan template's per-file budget.
+	scanTpl, err := template.LoadScanDefault()
+	if err != nil {
+		return fmt.Errorf("load scan template: %w", err)
+	}
+	if err := scanTpl.Validate(); err != nil {
+		return fmt.Errorf("invalid scan template: %w", err)
+	}
+	if opts.maxTools > scanTpl.MaxToolRequestTimes {
+		scanTpl.MaxToolRequestTimes = opts.maxTools
+	}
+	if opts.batch != "" {
+		// CLI override of BATCH_STRATEGY; validated downstream by parseBatchStrategy
+		// (unknown values silently fall back to "none").
+		scanTpl.BatchStrategy = opts.batch
 	}
 
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
-		return runScanPreview(cc, scanPaths)
+		return runScanPreview(cc, scanTpl, scanPaths)
 	}
 
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath)
 	if err != nil {
 		return err
+	}
+	// Apply language to the scan template too (loadLLMRuntime only mutates
+	// the diff-review template it was handed).
+	if rt.AppCfg != nil {
+		scanTpl.ApplyLanguage(rt.AppCfg.Language)
 	}
 
 	// file_read_diff is meaningless in scan mode (no diff exists). Hiding it
@@ -149,7 +170,7 @@ func runScan(args []string) error {
 	ag := scan.NewAgent(scan.Args{
 		RepoDir:               cc.RepoDir,
 		Paths:                 scanPaths,
-		Template:              *cc.Template,
+		Template:              *scanTpl,
 		SystemRule:            cc.Resolver,
 		FileFilter:            cc.FileFilter,
 		LLMClient:             rt.Client,
@@ -162,6 +183,10 @@ func runScan(args []string) error {
 		Model:                 rt.Model,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
+		MaxFileSizeBytes:      scanTpl.MaxFileSizeBytes,
+		SkipPlan:              opts.noPlan,
+		SkipDedup:             opts.noDedup,
+		SkipSummary:           opts.noSummary,
 	})
 
 	q := newQuietHandle(opts.outputFormat, opts.audience)
@@ -180,13 +205,16 @@ func runScan(args []string) error {
 	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q)
 }
 
-func runScanPreview(cc *commonContext, scanPaths []string) error {
+func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string) error {
 	ag := scan.NewAgent(scan.Args{
-		RepoDir:    cc.RepoDir,
-		Paths:      scanPaths,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
-		// Template is unused by Preview but NewAgent inspects nothing in it.
+		RepoDir:          cc.RepoDir,
+		Paths:            scanPaths,
+		FileFilter:       cc.FileFilter,
+		GitRunner:        cc.GitRunner,
+		MaxFileSizeBytes: scanTpl.MaxFileSizeBytes,
+		// Template's prompt fields are unused by Preview; pass the same
+		// value so MaxFileSizeBytes is consistent.
+		Template: *scanTpl,
 	})
 
 	preview, err := ag.Preview(context.Background())
@@ -205,8 +233,8 @@ Usage:
   ocr s    [flags]                (alias)
 
 Examples:
-  # Scan the entire repository
-  ocr scan --all
+  # Scan the entire repository (default when no --path is given)
+  ocr scan
 
   # Scan a single directory
   ocr scan --path internal/agent
@@ -214,15 +242,23 @@ Examples:
   # Scan multiple files
   ocr scan --path internal/agent/agent.go,internal/diff/scan.go
 
-  # Combine --all with --path to restrict the all-scan
-  ocr scan --all --path internal/
+  # Exclude generated files / fixtures
+  ocr scan --exclude '**/generated/*,**/testdata/*'
 
   # Preview which files would be scanned without calling the LLM
-  ocr scan --all --preview
+  ocr scan --preview
+
+  # Skip the per-file PLAN_TASK pre-pass (saves ~1 LLM call per file, may
+  # reduce review focus)
+  ocr scan --no-plan
 
 Flags:
-  --all                   scan every reviewable file in the repository
-  --path string           comma-separated repo-relative dirs/files to scan
+  --path string           comma-separated repo-relative dirs/files to scan (default: whole repo)
+  --exclude string        comma-separated gitignore-style patterns to exclude (merged with rule.json)
+  --no-plan               skip the per-file PLAN_TASK pre-pass (faster, less focused)
+  --no-dedup              skip the per-batch DEDUP_TASK (keeps raw comments)
+  --no-summary            skip the post-run PROJECT_SUMMARY_TASK
+  --batch string          override BATCH_STRATEGY: none | by-language | by-directory
   --audience string       output audience: human (show progress) or agent (summary only) (default "human")
   -b, --background string optional requirement/business context for the scan
   -f, --format string     output format: text or json (default "text")

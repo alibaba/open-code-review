@@ -70,7 +70,7 @@ func TestNewProvider_NormalizesPaths(t *testing.T) {
 		"cmd",
 		"   internal/diff   ",
 		filepath.FromSlash("a/b"),
-	}, nil)
+	}, nil, 0)
 	want := []string{"internal/agent", "cmd", "internal/diff", "a/b"}
 	if !reflect.DeepEqual(p.paths, want) {
 		t.Errorf("paths = %v, want %v", p.paths, want)
@@ -133,7 +133,7 @@ func TestProvider_Enumerate_FullRepo(t *testing.T) {
 	writeFile(t, repo, "ignored.txt", []byte("should not appear\n"))
 	gitCommit(t, repo, "init")
 
-	got, err := NewProvider(repo, nil, nil).Enumerate(context.Background())
+	got, err := NewProvider(repo, nil, nil, 0).Enumerate(context.Background())
 	if err != nil {
 		t.Fatalf("Enumerate: %v", err)
 	}
@@ -171,6 +171,32 @@ func TestProvider_Enumerate_FullRepo(t *testing.T) {
 	}
 }
 
+func TestProvider_Enumerate_NonGitDirectory(t *testing.T) {
+	// Plain temp dir — no `git init`. Walker fallback should kick in.
+	repo := t.TempDir()
+	writeFile(t, repo, "main.go", []byte("package main\n"))
+	writeFile(t, repo, "pkg/util.go", []byte("package pkg\n"))
+	writeFile(t, repo, ".gitignore", []byte("ignored.txt\n"))
+	writeFile(t, repo, "ignored.txt", []byte("should be excluded by root .gitignore\n"))
+	writeFile(t, repo, "node_modules/lib/foo.js", []byte("module.exports = 1;\n")) // should be skipped via ExcludedDirs
+
+	got, err := NewProvider(repo, nil, nil, 0).Enumerate(context.Background())
+	if err != nil {
+		t.Fatalf("Enumerate (non-git): %v", err)
+	}
+
+	paths := make([]string, 0, len(got))
+	for _, it := range got {
+		paths = append(paths, it.Path)
+	}
+	sort.Strings(paths)
+
+	want := []string{".gitignore", "main.go", "pkg/util.go"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Errorf("paths = %v, want %v (ignored.txt must be filtered by .gitignore, node_modules/* by ExcludedDirs)", paths, want)
+	}
+}
+
 func TestProvider_Enumerate_PathFilter(t *testing.T) {
 	repo := initTestRepo(t)
 	writeFile(t, repo, "a.go", []byte("package a\n"))
@@ -178,7 +204,7 @@ func TestProvider_Enumerate_PathFilter(t *testing.T) {
 	writeFile(t, repo, "pkg/sub/c.go", []byte("package sub\n"))
 	gitCommit(t, repo, "init")
 
-	got, err := NewProvider(repo, []string{"pkg"}, nil).Enumerate(context.Background())
+	got, err := NewProvider(repo, []string{"pkg"}, nil, 0).Enumerate(context.Background())
 	if err != nil {
 		t.Fatalf("Enumerate: %v", err)
 	}
