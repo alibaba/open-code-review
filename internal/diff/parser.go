@@ -17,8 +17,6 @@ import (
 
 var (
 	diffHeaderRe = regexp.MustCompile(`^diff --git a/(.+?) b/(.+)$`)
-	oldFileRe    = regexp.MustCompile(`^--- a/(.+)$`)
-	newFileRe    = regexp.MustCompile(`^\+\+\+ b/(.+)$`)
 	binaryRe     = regexp.MustCompile(`Binary files `)
 )
 
@@ -57,14 +55,25 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 		switch {
 		case binaryRe.MatchString(line):
 			current.IsBinary = true
-		case oldFileRe.MatchString(line):
-			if p := oldFileRe.FindStringSubmatch(line); len(p) > 1 && p[1] == "/dev/null" {
-				current.IsNew = true
-			}
-		case newFileRe.MatchString(line):
-			if p := newFileRe.FindStringSubmatch(line); len(p) > 1 && p[1] == "/dev/null" {
-				current.IsDeleted = true
-			}
+		// Extended header lines (unambiguous: content lines always carry a
+		// leading "+", "-" or " " prefix, so a bare prefix match is safe).
+		case strings.HasPrefix(line, "new file mode "):
+			current.IsNew = true
+		case strings.HasPrefix(line, "deleted file mode "):
+			current.IsDeleted = true
+		case strings.HasPrefix(line, "rename from "):
+			// Authoritative old path for renames; more reliable than the
+			// "diff --git" header when paths contain spaces.
+			current.OldPath = strings.TrimPrefix(line, "rename from ")
+			current.IsRenamed = true
+		case strings.HasPrefix(line, "rename to "):
+			current.NewPath = strings.TrimPrefix(line, "rename to ")
+			current.IsRenamed = true
+		// git emits "--- /dev/null" / "+++ /dev/null" without a/ b/ prefixes.
+		case line == "--- /dev/null":
+			current.IsNew = true
+		case line == "+++ /dev/null":
+			current.IsDeleted = true
 		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
 			current.Insertions++
 		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):

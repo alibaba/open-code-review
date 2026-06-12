@@ -2,9 +2,11 @@ package diff
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
@@ -143,6 +145,66 @@ func TestCommitDiffTreatsOptionLikeRefAsRevision(t *testing.T) {
 		t.Fatal("option-like commit ref was interpreted as a git show option")
 	} else if !os.IsNotExist(statErr) {
 		t.Fatal(statErr)
+	}
+}
+
+// TestRangeDiffDetectsRename guards against issue #99: when a file is renamed
+// on the target branch, `ocr review --from master --to BRANCH` must recognize
+// the rename and read content at the NEW path. Before the fix the rename could
+// surface as delete(old)+add(new) (e.g. diff.renames=false) and the parser's
+// broken /dev/null detection sent the deleted half into `git show ref:oldpath`
+// -> "WARNING: cannot read file ... exit status 128".
+func TestRangeDiffDetectsRename(t *testing.T) {
+	repo := initRepoWithChange(t)
+
+	// Reset the working-tree modification left by the helper.
+	runGitTest(t, repo, "checkout", "--", "sample.txt")
+	// Simulate a user config where git does NOT detect renames on its own;
+	// the provider must force --find-renames.
+	runGitTest(t, repo, "config", "diff.renames", "false")
+
+	// Commit a file large enough for git's similarity detection to work
+	// (tiny files fall below the rename threshold even for 1-line edits).
+	var content strings.Builder
+	for i := 1; i <= 50; i++ {
+		fmt.Fprintf(&content, "line%d\n", i)
+	}
+	orig := filepath.Join(repo, "orig.txt")
+	if err := os.WriteFile(orig, []byte(content.String()), 0o644); err != nil {
+		t.Fatalf("write orig.txt: %v", err)
+	}
+	runGitTest(t, repo, "add", "orig.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "add orig.txt")
+
+	// Rename on a feature branch, with a small edit (like the issue repro).
+	runGitTest(t, repo, "checkout", "-q", "-b", "feature")
+	runGitTest(t, repo, "mv", "orig.txt", "renamed.txt")
+	edited := strings.Replace(content.String(), "line25\n", "line25-edited\n", 1)
+	if err := os.WriteFile(filepath.Join(repo, "renamed.txt"), []byte(edited), 0o644); err != nil {
+		t.Fatalf("edit renamed.txt: %v", err)
+	}
+	runGitTest(t, repo, "add", "-A")
+	runGitTest(t, repo, "commit", "-q", "-m", "rename orig.txt")
+
+	runner := gitcmd.New(0)
+	provider := NewProvider(repo, "HEAD~1", "feature", runner)
+
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff (range, rename) returned error: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected exactly 1 diff for a rename, got %d: %+v", len(diffs), diffs)
+	}
+	d := diffs[0]
+	if !d.IsRenamed {
+		t.Errorf("IsRenamed = false, want true")
+	}
+	if d.OldPath != "orig.txt" || d.NewPath != "renamed.txt" {
+		t.Errorf("OldPath/NewPath = %q/%q, want orig.txt/renamed.txt", d.OldPath, d.NewPath)
+	}
+	if d.NewFileContent == "" {
+		t.Errorf("NewFileContent is empty: content at new path was not read at ref")
 	}
 }
 
