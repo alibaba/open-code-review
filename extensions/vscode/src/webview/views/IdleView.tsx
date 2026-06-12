@@ -10,11 +10,12 @@ interface Props {
   configured: boolean;
   onModeChange: (mode: ReviewMode) => void;
   onRequestModeFiles: (mode: ReviewMode, from?: string, to?: string, commit?: string) => void;
+  onOpenFile: (file: FileChange, mode: ReviewMode, from?: string, to?: string, commit?: string) => void;
   onStart: (options: CliRunOptions) => void;
   running?: boolean;
 }
 
-export function IdleView({ gitState, modeFiles, filesLoading, configured, onModeChange, onRequestModeFiles, onStart, running }: Props) {
+export function IdleView({ gitState, modeFiles, filesLoading, configured, onModeChange, onRequestModeFiles, onOpenFile, onStart, running }: Props) {
   const [mode, setMode] = useState<ReviewMode>('workspace');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -80,7 +81,8 @@ export function IdleView({ gitState, modeFiles, filesLoading, configured, onMode
         </div>
       )}
 
-      <FileList files={files} loading={loading} />
+      <FileList files={files} loading={loading}
+        onOpenFile={(f) => onOpenFile(f, mode, from, to, commit)} />
 
       <textarea class="mode-param-input" rows={3} placeholder="自定义审查提示词（可选）"
         value={prompt} onInput={(e) => setPrompt((e.target as HTMLTextAreaElement).value)} />

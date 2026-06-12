@@ -7,6 +7,7 @@ export type WebviewToHost =
   | { type: 'ready' }
   | { type: 'getGitState'; mode: ReviewMode }
   | { type: 'getModeFiles'; mode: ReviewMode; from?: string; to?: string; commit?: string }
+  | { type: 'openFileDiff'; path: string; status: FileChange['status']; mode: ReviewMode; from?: string; to?: string; commit?: string }
   | { type: 'startReview'; options: CliRunOptions }
   | { type: 'cancelReview' }
   | { type: 'getConfig' }

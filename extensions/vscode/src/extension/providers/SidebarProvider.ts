@@ -55,6 +55,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this.post({ type: 'modeFiles', mode: msg.mode, files });
         break;
       }
+      case 'openFileDiff':
+        await this.git.openDiff({
+          path: msg.path, status: msg.status, mode: msg.mode,
+          from: msg.from, to: msg.to, commit: msg.commit,
+        });
+        break;
       case 'startReview': {
         this.session = new ReviewSession(this.cli, cwd);
         await this.session.run(msg.options, {

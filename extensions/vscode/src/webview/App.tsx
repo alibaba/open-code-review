@@ -1,7 +1,7 @@
 import { useEffect, useReducer } from 'preact/hooks';
 import { reducer, initialState } from './store';
 import { bridge } from './bridge';
-import { ReviewMode, CliRunOptions } from '../shared/types';
+import { ReviewMode, CliRunOptions, FileChange } from '../shared/types';
 import { IdleView } from './views/IdleView';
 import { RunningView } from './views/RunningView';
 import { DoneView } from './views/DoneView';
@@ -29,6 +29,9 @@ export function App() {
     dispatch({ type: 'filesLoading' });
     bridge.post({ type: 'getModeFiles', mode, from, to, commit });
   };
+  const openFile = (file: FileChange, mode: ReviewMode, from?: string, to?: string, commit?: string) => {
+    bridge.post({ type: 'openFileDiff', path: file.path, status: file.status, mode, from, to, commit });
+  };
 
   const openConfig = () => {
     dispatch({ type: 'openConfig' });
@@ -42,7 +45,8 @@ export function App() {
 
       <div class="action-region">
         <IdleView gitState={state.gitState} modeFiles={state.modeFiles} filesLoading={state.filesLoading}
-          configured={configured} onModeChange={onModeChange} onRequestModeFiles={requestModeFiles} onStart={start}
+          configured={configured} onModeChange={onModeChange} onRequestModeFiles={requestModeFiles}
+          onOpenFile={openFile} onStart={start}
           running={state.view === 'running'} />
 
         {state.view !== 'idle' && (

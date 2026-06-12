@@ -140,6 +140,64 @@ export class GitService {
       ?? vscode.workspace.workspaceFolders?.[0].uri.fsPath
       ?? process.cwd();
   }
+
+  /** 在 VSCode 原生 diff 视图中打开某个待审查文件。三种模式各自决定 diff 的左右两侧。 */
+  async openDiff(opts: {
+    path: string; status: FileChange['status'];
+    mode: ReviewMode; from?: string; to?: string; commit?: string;
+  }): Promise<void> {
+    const api = await this.ensureApi();
+    const root = await this.repoRoot();
+    if (!api || !root) return;
+
+    const fileUri = vscode.Uri.file(`${root}/${opts.path}`);
+
+    // 二进制无法做文本 diff，直接打开文件本身。
+    if (opts.status === 'binary') {
+      try { await vscode.window.showTextDocument(fileUri, { preview: true }); } catch { /* ignore */ }
+      return;
+    }
+
+    // toGitUri(uri, '') 返回空文档，用于新增/删除时缺失的一侧。
+    const emptyRef = '';
+    let left: vscode.Uri;
+    let right: vscode.Uri;
+    let label: string;
+
+    if (opts.mode === 'workspace') {
+      left = api.toGitUri(fileUri, opts.status === 'added' ? emptyRef : 'HEAD');
+      right = opts.status === 'deleted' ? api.toGitUri(fileUri, emptyRef) : fileUri;
+      label = '工作区 ↔ HEAD';
+    } else if (opts.mode === 'commit' && opts.commit) {
+      left = api.toGitUri(fileUri, opts.status === 'added' ? emptyRef : `${opts.commit}^`);
+      right = opts.status === 'deleted' ? api.toGitUri(fileUri, emptyRef) : api.toGitUri(fileUri, opts.commit);
+      label = `${opts.commit}^ ↔ ${opts.commit}`;
+    } else if (opts.mode === 'branch' && opts.from && opts.to) {
+      // 文件列表用三点 diff（merge-base），逐文件 diff 也应以 merge-base 为基准。
+      const base = (await this.mergeBase(root, opts.from, opts.to)) || opts.from;
+      left = api.toGitUri(fileUri, opts.status === 'added' ? emptyRef : base);
+      right = opts.status === 'deleted' ? api.toGitUri(fileUri, emptyRef) : api.toGitUri(fileUri, opts.to);
+      label = `${opts.from}...${opts.to}`;
+    } else {
+      return;
+    }
+
+    const title = `${opts.path} (${label})`;
+    try {
+      await vscode.commands.executeCommand('vscode.diff', left, right, title, { preview: true });
+    } catch (e) {
+      this.trace(`openDiff failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  private async mergeBase(root: string, from: string, to: string): Promise<string | null> {
+    try {
+      const out = await runGit(root, ['merge-base', from, to]);
+      return out.trim() || null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 function runGit(cwd: string, args: string[]): Promise<string> {
