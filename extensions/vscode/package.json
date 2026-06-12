@@ -5,6 +5,11 @@
   "version": "0.1.0",
   "publisher": "open-code-review",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nigulasikk/open-code-review.git",
+    "directory": "extensions/vscode"
+  },
   "engines": { "vscode": "^1.74.0" },
   "categories": ["Other"],
   "main": "./out/extension.js",
@@ -45,6 +50,7 @@
     "build": "webpack --mode production",
     "test": "jest",
     "lint": "eslint src --ext ts,tsx",
+    "package": "vsce package --no-yarn",
     "vscode:prepublish": "yarn build"
   },
   "devDependencies": {
@@ -61,7 +67,8 @@
     "style-loader": "^3.3.0",
     "eslint": "^8.56.0",
     "@typescript-eslint/parser": "^6.18.0",
-    "@typescript-eslint/eslint-plugin": "^6.18.0"
+    "@typescript-eslint/eslint-plugin": "^6.18.0",
+    "@vscode/vsce": "^3.0.0"
   },
   "dependencies": {
     "preact": "^10.19.0"

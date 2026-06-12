@@ -8,3 +8,8 @@ tsconfig*.json
 webpack.config.js
 jest.config.js
 .gitignore
+.eslintrc.json
+.vscode/**
+.superpowers/**
+prototype.html
+resources/icon-old.svg

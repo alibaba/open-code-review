@@ -40,30 +40,86 @@
 
 ## 开发
 
+### 环境准备
+
+- Node.js ≥ 18，包管理器使用 **Yarn**（仓库自带 `yarn.lock`）。
+- VS Code ≥ 1.74。
+- 全局可用的 `ocr` CLI（见上文「前置依赖」），插件本质上是 `ocr` 的图形前端。
+
+### 启动开发环境
+
 ```bash
+cd extensions/vscode
 yarn install      # 安装依赖
-yarn compile      # 开发构建（webpack development，产出 out/extension.js + out/webview.js）
+yarn watch        # 监听式开发构建（推荐：改代码自动重新打包 out/）
 ```
 
-然后在 VSCode 中按 **F5** 启动 Extension Development Host（已提供 `.vscode/launch.json`），打开一个有 Git 变更的项目即可体验。
+然后在 VS Code 中打开 `extensions/vscode` 目录，按 **F5** 启动 Extension Development Host
+（调试配置已在 `.vscode/launch.json` 提供）。在弹出的新窗口里打开一个有 Git 变更的项目，
+即可在活动栏看到 Open Code Review 图标并发起审查。
 
-其他脚本：
+> 改了代码后：WebView 改动需在开发宿主窗口里 **重新打开侧边栏**（或执行命令 `Developer: Reload Webviews`）；
+> Extension Host 改动需 **重启调试**（调试工具栏的 ⟳ 或在宿主窗口按 `Cmd+R`）。
+
+### 常用脚本
 
 ```bash
+yarn compile      # 单次开发构建（webpack development）
 yarn watch        # 监听式开发构建
+yarn build        # 生产构建（webpack production，打包前自动执行）
 yarn test         # 运行 Jest 单测
-yarn lint         # ESLint
+yarn lint         # ESLint 检查
+yarn package      # 生成可分发的 .vsix 安装包（见下文「构建发布包」）
 ```
+
+### 调试要点
+
+- **双端通信**：WebView 与 Extension Host 通过 `postMessage` 通信，消息类型定义在
+  `src/shared/messages.ts`。两端发收都走 `dispatch` / `handle`，定位问题先看这里。
+- **CLI 调用**：所有 `ocr` 子命令由 `src/extension/services/CliService.ts` 通过 `child_process.spawn` 执行。
+  `runRaw` 会在 CLI 退出码非 0 时 reject 并带上 stderr 中的 `Error:` 文本，便于排查“审查失败/连接失败”。
+- **配置读写**：`ConfigService` 读取 `~/.opencodereview/config.json`，写入则委托 `ocr config set`。
+  WebView 端字段为 camelCase（如 `useAnthropic`），磁盘/CLI 端为 snake_case（如 `use_anthropic`），
+  转换在 `src/extension/services/configParse.ts`。
 
 ---
 
 ## 构建
+
+### 仅编译产物
 
 ```bash
 yarn build        # 生产构建（webpack production）
 ```
 
 产物：`out/extension.js`（Extension Host）+ `out/webview.js`（WebView SPA）。
+
+### 构建发布包（.vsix）
+
+```bash
+yarn package      # = vsce package --no-yarn
+```
+
+该命令会：
+
+1. 自动触发 `vscode:prepublish` → 执行 `yarn build` 生产构建；
+2. 按 `.vscodeignore` 排除源码、测试、开发文件；
+3. 在当前目录生成 `open-code-review-vscode-<version>.vsix`。
+
+> 打包工具为 `@vscode/vsce`，已作为 devDependency 安装，无需全局安装或联网下载。
+> `--no-yarn` 用于跳过 vsce 默认的 npm 依赖树校验（本项目用 Yarn）。
+
+发布包只包含运行必需文件：`package.json`、`README.md`、`resources/icon.svg`、`out/extension.js`、`out/webview.js`。
+
+### 本地安装 / 验证
+
+```bash
+code --install-extension open-code-review-vscode-<version>.vsix
+```
+
+或在 VS Code 中：扩展面板 → 右上角 `⋯` → **Install from VSIX…** → 选择生成的 `.vsix` 文件。
+
+> 发布到 Marketplace 时改用 `vsce publish`（需要 publisher 账号与 PAT），日常分发用上面的 `.vsix` 即可。
 
 ---
 
