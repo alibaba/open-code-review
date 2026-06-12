@@ -297,6 +297,7 @@ ocr review \
 | `--timeout` | - | `10` | 동시 task timeout(분) |
 | `--audience` | - | `human` | `human`(progress 표시) 또는 `agent`(summary only) |
 | `--background` | `-b` | - | 리뷰를 위한 선택적 요구사항/비즈니스 컨텍스트. `--commit` 사용 시 미지정이면 commit message에서 자동 추출 |
+| `--model` | - | - | 이번 리뷰에서 LLM model override (예: `claude-opus-4-5`) |
 | `--rule` | - | - | custom JSON review rules 경로 |
 | `--max-tools` | - | built-in | 파일별 최대 tool call round. template default보다 클 때만 적용 |
 | `--max-git-procs` | - | built-in | 최대 동시 git subprocess 수 |
@@ -317,6 +318,10 @@ ocr review --from main --to my-feature --concurrency 4
 
 # 특정 commit을 verbose JSON output으로 리뷰
 ocr review --commit abc123 --format json --audience agent
+
+# 이번 리뷰에서 model 임시 override
+ocr review --model claude-opus-4-5
+ocr review --commit abc123 --model claude-haiku-4-5
 
 # 요구사항 컨텍스트를 제공하여 더 정확한 리뷰 수행
 ocr review --background "로그인 API에 rate limiting 추가"

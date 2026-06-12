@@ -91,6 +91,9 @@ func runReview(args []string) error {
 
 	llmClient := llm.NewLLMClient(ep)
 	model := ep.Model
+	if opts.model != "" {
+		model = opts.model
+	}
 
 	gitRunner := gitcmd.New(opts.maxGitProcs)
 

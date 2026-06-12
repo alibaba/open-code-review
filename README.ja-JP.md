@@ -297,6 +297,7 @@ ocr review \
 | `--timeout` | — | `10` | 同時実行タスクのタイムアウト（分） |
 | `--audience` | — | `human` | `human`（進捗を表示）または`agent`（サマリーのみ） |
 | `--background` | `-b` | — | レビューのための任意の要件/ビジネスコンテキスト。`--commit`使用時に未指定の場合、コミットメッセージから自動取得 |
+| `--model` | — | — | このレビューでLLMモデルをオーバーライド（例：`claude-opus-4-5`） |
 | `--rule` | — | — | カスタムJSONレビュールールへのパス |
 | `--max-tools` | — | 組み込み値 | ファイルごとのツール呼び出しラウンドの上限。テンプレートのデフォルトより大きい場合のみ有効 |
 | `--max-git-procs` | — | 組み込み値 | gitサブプロセスの最大同時実行数 |
@@ -317,6 +318,10 @@ ocr review --from main --to my-feature --concurrency 4
 
 # 特定のコミットを詳細なJSON出力でレビュー
 ocr review --commit abc123 --format json --audience agent
+
+# モデルを一時的にオーバーライド
+ocr review --model claude-opus-4-5
+ocr review --commit abc123 --model claude-haiku-4-5
 
 # 要件コンテキストを提供してより的確なレビューを実施
 ocr review --background "ログインAPIにレート制限を追加"
