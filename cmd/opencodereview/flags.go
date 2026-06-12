@@ -104,6 +104,7 @@ type reviewOptions struct {
 	outputFormat   string
 	audience       string // --audience: "human" (default) or "agent"
 	background     string // --background: optional requirement context
+	model          string // --model: override llm.model from config
 	concurrency    int
 	perFileTimeout int
 	maxTools       int
@@ -128,6 +129,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
 	a.StringVar(&opts.audience, "audience", "human", "output audience: human (show progress) or agent (summary only)")
 	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the review")
+	a.StringVar(&opts.model, "model", "", "override LLM model for this review (e.g., claude-opus-4-5)")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be reviewed without running the LLM")
@@ -216,6 +218,7 @@ Flags:
   --max-git-procs int     max concurrent git subprocesses (default 16)
   --from string           source ref to start diff from (e.g., 'main')
   --max-tools int         max tool call rounds per file (0 = template default; min 10)
+  --model string          override LLM model for this review (e.g., claude-opus-4-5)
   -p, --preview           preview which files will be reviewed without running the LLM
   --repo string           root directory of the git repository (default: current dir)
   --rule string           path to JSON file with system review rules

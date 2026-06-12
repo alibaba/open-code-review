@@ -299,6 +299,7 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `--timeout` | — | `10` | Concurrent task timeout in minutes |
 | `--audience` | — | `human` | `human` (show progress) or `agent` (summary only) |
 | `--background` | `-b` | — | Optional requirement/business context for the review; auto-filled from commit message when using `--commit` |
+| `--model` | — | — | Override LLM model for this review (e.g., `claude-opus-4-5`) |
 | `--rule` | — | — | Path to custom JSON review rules |
 | `--max-tools` | — | built-in | Max tool call rounds per file; only takes effect when greater than template default |
 | `--max-git-procs` | — | built-in | Max concurrent git subprocesses |
@@ -319,6 +320,10 @@ ocr review --from main --to my-feature --concurrency 4
 
 # Review a specific commit with verbose JSON output
 ocr review --commit abc123 --format json --audience agent
+
+# Override model for this review
+ocr review --model claude-opus-4-5
+ocr review --commit abc123 --model claude-haiku-4-5
 
 # Provide requirement context for more targeted review
 ocr review --background "Adding rate limiting to the login API"
