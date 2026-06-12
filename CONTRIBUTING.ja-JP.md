@@ -2,7 +2,7 @@
 
 OpenCodeReviewへのコントリビューションに興味を持っていただきありがとうございます！タイポの修正、バグ報告、新機能の実装など、あらゆる貢献が重要です。
 
-[English Version](CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md)
+[English Version](CONTRIBUTING.md) | [简体中文版](CONTRIBUTING.zh-CN.md) | [한국어](CONTRIBUTING.ko-KR.md) | [Русский](CONTRIBUTING.ru-RU.md)
 
 ## 行動規範
 

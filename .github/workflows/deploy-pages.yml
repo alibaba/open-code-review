@@ -18,13 +18,14 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    container:
+      image: node:20
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - name: Trust workspace
+        run: git config --global safe.directory '*'
 
       - name: Install dependencies
         working-directory: pages
@@ -48,7 +49,9 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    container:
+      image: node:20
     needs: build
     steps:
       - name: Deploy to GitHub Pages

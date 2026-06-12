@@ -136,7 +136,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: context.issue.number,
-                  body: `⚠️ **OpenCodeReview** encountered an error:\n\`\`\`\n${stderr}\n\`\`\``
+                  body: `⚠️ **OpenCodeReview** encountered an error:\n${fencedBlock(stderr)}`
                 });
               }
               return;
@@ -208,27 +208,17 @@ jobs:
                 reviewComment.side = 'RIGHT';
               }
 
-              reviewComments.push(reviewComment);
+              reviewComments.push({ comment, reviewComment });
             }
 
             // Submit as a single PR review with all comments
             const totalCount = comments.length;
             const inlineCount = reviewComments.length;
             const summaryCount = commentsWithoutLine.length;
-            let summaryBody = `🔍 **OpenCodeReview** found **${totalCount}** issue(s) in this PR.`;
-            if (totalCount > 0) {
-              summaryBody += `\n- ✅ ${inlineCount} posted as inline comment(s)`;
-              summaryBody += `\n- 📝 ${summaryCount} posted as summary (missing line info)`;
-            }
-            if (warnings.length > 0) {
-              summaryBody += `\n\n⚠️ ${warnings.length} warning(s) occurred during review.`;
-            }
+            let summaryBody = buildSummaryBody(totalCount, inlineCount, summaryCount, warnings);
 
             // Add comments without line info to summary body
-            for (const { comment, body } of commentsWithoutLine) {
-              summaryBody += '\n\n---\n\n';
-              summaryBody += formatCommentMarkdown(comment);
-            }
+            summaryBody += formatSummaryComments(commentsWithoutLine);
 
             // Statistics tracking
             let successCount = 0;
@@ -243,7 +233,7 @@ jobs:
                 commit_id: commitSha,
                 body: summaryBody,
                 event: 'COMMENT',
-                comments: reviewComments
+                comments: reviewComments.map(({ reviewComment }) => reviewComment)
               });
               successCount = reviewComments.length;
               console.log(`Successfully posted review with ${successCount} inline comments (${commentsWithoutLine.length} in summary)`);
@@ -252,7 +242,7 @@ jobs:
               console.log('Falling back to posting comments individually...');
               
               // Fallback: post comments one by one
-              for (const reviewComment of reviewComments) {
+              for (const { comment, reviewComment } of reviewComments) {
                 try {
                   await github.rest.pulls.createReview({
                     owner: context.repo.owner,
@@ -267,26 +257,27 @@ jobs:
                   console.log(`Successfully posted comment for ${reviewComment.path}`);
                 } catch (innerE) {
                   failedCount++;
-                  failedComments.push({ comment: reviewComment, error: innerE.message });
+                  failedComments.push({ comment, error: innerE.message });
                   console.log(`Failed to post comment for ${reviewComment.path}: ${innerE.message}`);
                 }
               }
               
               // Post summary comment with statistics
-              let finalBody = summaryBody;
+              let finalBody = buildSummaryBody(totalCount, successCount, commentsWithoutLine.length + failedComments.length, warnings);
+              finalBody += formatSummaryComments(commentsWithoutLine);
               finalBody += `\n\n---\n\n📊 **Posting Statistics:**`;
               finalBody += `\n- ✅ Successfully posted: ${successCount} comment(s)`;
               if (failedCount > 0) {
                 finalBody += `\n- ❌ Failed to post: ${failedCount} comment(s)`;
               }
               
-              // Add failed comments details
+              // Add failed comments as summary content so review feedback is not lost.
               if (failedComments.length > 0) {
-                finalBody += '\n\n<details><summary>❌ Failed Comments Details</summary>\n\n';
+                finalBody += '\n\n---\n\n### ⚠️ Inline comments shown in summary';
                 for (const { comment, error } of failedComments) {
-                  finalBody += `- \`${comment.path}\`: ${error}\n`;
+                  finalBody += '\n\n---\n\n';
+                  finalBody += formatCommentMarkdown(comment, error);
                 }
-                finalBody += '\n</details>';
               }
               
               await github.rest.issues.createComment({
@@ -303,29 +294,64 @@ jobs:
               // Add code suggestion if available
               if (comment.suggestion_code && comment.existing_code) {
                 body += '\n\n**Suggestion:**\n';
-                body += '```suggestion\n';
-                body += comment.suggestion_code;
-                if (!comment.suggestion_code.endsWith('\n')) body += '\n';
-                body += '```';
+                body += fencedBlock(comment.suggestion_code, 'suggestion');
               }
 
               return body;
             }
 
-            function formatCommentMarkdown(comment) {
+            function formatCommentMarkdown(comment, error) {
               let md = `### 📄 \`${comment.path}\``;
               if (comment.start_line && comment.end_line) {
                 md += ` (L${comment.start_line}-L${comment.end_line})`;
               }
               md += '\n\n';
+              if (error) {
+                md += `⚠️ GitHub could not post this as an inline comment: ${error}\n\n`;
+              }
               md += comment.content || '';
 
               if (comment.suggestion_code && comment.existing_code) {
                 md += '\n\n<details><summary>💡 Suggested Change</summary>\n\n';
-                md += '**Before:**\n```\n' + comment.existing_code + '\n```\n\n';
-                md += '**After:**\n```\n' + comment.suggestion_code + '\n```\n\n';
+                md += '**Before:**\n' + fencedBlock(comment.existing_code) + '\n\n';
+                md += '**After:**\n' + fencedBlock(comment.suggestion_code) + '\n\n';
                 md += '</details>';
               }
 
               return md;
+            }
+
+            function buildSummaryBody(totalCount, inlineCount, summaryCount, warnings) {
+              let body = `🔍 **OpenCodeReview** found **${totalCount}** issue(s) in this PR.`;
+              if (totalCount > 0) {
+                body += `\n- ✅ ${inlineCount} posted as inline comment(s)`;
+                body += `\n- 📝 ${summaryCount} posted as summary`;
+              }
+              if (warnings.length > 0) {
+                body += `\n\n⚠️ ${warnings.length} warning(s) occurred during review.`;
+              }
+              return body;
+            }
+
+            function formatSummaryComments(summaryComments) {
+              let body = '';
+              for (const { comment } of summaryComments) {
+                body += '\n\n---\n\n';
+                body += formatCommentMarkdown(comment);
+              }
+              return body;
+            }
+
+            function fencedBlock(content, language = '') {
+              const text = String(content || '');
+              const fence = safeFence(text);
+              let block = fence + language + '\n' + text;
+              if (!text.endsWith('\n')) block += '\n';
+              return block + fence;
+            }
+
+            function safeFence(content) {
+              const matches = String(content || '').match(/`+/g) || [];
+              const maxTicks = matches.reduce((max, ticks) => Math.max(max, ticks.length), 0);
+              return '`'.repeat(Math.max(3, maxTicks + 1));
             }

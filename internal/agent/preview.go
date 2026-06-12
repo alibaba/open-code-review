@@ -40,13 +40,13 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 		return ExcludeUserRule
 	}
 
+	if f != nil && f.HasInclude() && f.IsUserIncluded(path) {
+		return ExcludeNone
+	}
+
 	ext := a.extFromPath(path)
 	if ext != "" && !allowedext.IsAllowedExt(ext) {
 		return ExcludeExtension
-	}
-
-	if f != nil && f.HasInclude() && f.IsUserIncluded(path) {
-		return ExcludeNone
 	}
 
 	if allowedext.IsExcludedPath(path) {

@@ -9,7 +9,9 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    container:
+      image: golang:1.26.4
     strategy:
       matrix:
         include:
@@ -28,9 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - name: Trust workspace
+        run: git config --global safe.directory '*'
 
       - name: Build
         env:
@@ -56,7 +57,9 @@ jobs:
 
   release:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    container:
+      image: ubuntu:24.04
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -76,17 +79,20 @@ jobs:
 
   npm-publish:
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    container:
+      image: node:20
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          registry-url: 'https://registry.npmjs.org'
+      - name: Trust workspace
+        run: git config --global safe.directory '*'
+
+      - name: Install jq
+        run: apt-get update && apt-get install -y jq
 
       - name: Inject version from tag
         run: jq --arg v "${GITHUB_REF_NAME#v}" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
