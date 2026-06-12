@@ -22,7 +22,7 @@ export type HostToWebview =
   | { type: 'gitState'; gitState: GitState }
   | { type: 'modeFiles'; mode: ReviewMode; files: FileChange[] }
   | { type: 'logLine'; line: LogLine }
-  | { type: 'stateChange'; state: ReviewState }
+  | { type: 'stateChange'; state: ReviewState; error?: string }
   | { type: 'reviewDone'; result: CliResult }
   | { type: 'config'; config: OcrConfig | null }
   | { type: 'connectionResult'; ok: boolean; message?: string }

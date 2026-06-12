@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import { CliResult, CliRunOptions, LogLine } from '../../shared/types';
-import { buildReviewArgs, parseCliResult, parseLogLine } from './cliParse';
+import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
 import { getShellEnv, resolveBin } from './shellEnv';
 
 export class CliService {
@@ -52,21 +52,28 @@ export class CliService {
     });
   }
 
-  /** 运行任意参数，流式回调日志，结束返回 stdout 全文。 */
+  /** 运行任意参数，流式回调日志，结束返回 stdout 全文。退出码非 0 时 reject，并带上 CLI 报错文本。 */
   runRaw(args: string[], cwd: string, onLog: (l: LogLine) => void): Promise<string> {
     return new Promise((resolve, reject) => {
       const proc = spawn(resolveBin(this.cliPath), args, { cwd, env: getShellEnv() });
       this.current = proc;
       let stdout = '';
+      let stderr = '';
       proc.stdout.on('data', (d) => { stdout += d.toString(); });
       proc.stderr.on('data', (d) => {
-        for (const line of d.toString().split('\n')) {
+        const text = d.toString();
+        stderr += text;
+        for (const line of text.split('\n')) {
           const parsed = parseLogLine(line);
           if (parsed) onLog(parsed);
         }
       });
       proc.on('error', (err) => { this.current = null; reject(err); });
-      proc.on('close', () => { this.current = null; resolve(stdout); });
+      proc.on('close', (code) => {
+        this.current = null;
+        if (code === 0) { resolve(stdout); return; }
+        reject(new Error(extractCliError(stderr) || `CLI exited with code ${code}`));
+      });
     });
   }
 

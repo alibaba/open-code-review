@@ -8,7 +8,7 @@ export function resultToState(result: CliResult): ReviewState {
 }
 
 export interface SessionCallbacks {
-  onState: (state: ReviewState) => void;
+  onState: (state: ReviewState, error?: string) => void;
   onLog: (line: LogLine) => void;
   onDone: (result: CliResult) => void;
 }
@@ -33,8 +33,9 @@ export class ReviewSession {
       if (this.cancelled) {
         cb.onState('cancelled');
       } else {
-        cb.onLog({ text: `[ocr] ${e instanceof Error ? e.message : String(e)}`, level: 'error' });
-        cb.onState('failed');
+        const msg = e instanceof Error ? e.message : String(e);
+        cb.onLog({ text: `[ocr] ${msg}`, level: 'error' });
+        cb.onState('failed', msg);
       }
     }
   }

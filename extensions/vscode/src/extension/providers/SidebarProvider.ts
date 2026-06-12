@@ -58,7 +58,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       case 'startReview': {
         this.session = new ReviewSession(this.cli, cwd);
         await this.session.run(msg.options, {
-          onState: (state) => this.post({ type: 'stateChange', state }),
+          onState: (state, error) => this.post({ type: 'stateChange', state, error }),
           onLog: (line) => this.post({ type: 'logLine', line }),
           onDone: (result) => {
             this.post({ type: 'reviewDone', result });

@@ -10,7 +10,8 @@ export function buildReviewArgs(opts: CliRunOptions): string[] {
   }
   args.push('--format', 'json');
   // JSON 结果走 stdout，进度日志走 stderr，供扩展实时回显
-  args.push('--progress-stderr');
+  // TODO: 待 CLI 发布支持 --progress-stderr 后再启用（当前已安装版本不识别该 flag）
+  // args.push('--progress-stderr');
   if (opts.customPrompt && opts.customPrompt.trim()) {
     args.push('--background', opts.customPrompt.trim());
   }
@@ -51,6 +52,14 @@ export function parseCliResult(stdout: string): CliResult {
       elapsed: s.elapsed,
     } : undefined,
   };
+}
+
+/** 从 CLI stderr 中提取最有用的报错文本：优先 `Error:` 行，否则取最后一行非空内容。 */
+export function extractCliError(stderr: string): string {
+  const lines = stderr.split('\n').map((l) => l.trim()).filter(Boolean);
+  const errLine = [...lines].reverse().find((l) => /^error:/i.test(l));
+  if (errLine) return errLine.replace(/^error:\s*/i, '');
+  return lines.length ? lines[lines.length - 1] : '';
 }
 
 export function parseLogLine(raw: string): LogLine | null {

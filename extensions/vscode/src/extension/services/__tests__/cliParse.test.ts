@@ -1,29 +1,29 @@
-import { buildReviewArgs, parseCliResult, parseLogLine } from '../cliParse';
+import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from '../cliParse';
 
 describe('buildReviewArgs', () => {
-  it('workspace 模式加 --format json --progress-stderr', () => {
+  it('workspace 模式加 --format json', () => {
     expect(buildReviewArgs({ mode: 'workspace' }))
-      .toEqual(['review', '--format', 'json', '--progress-stderr']);
+      .toEqual(['review', '--format', 'json']);
   });
 
   it('branch 模式加 --from/--to', () => {
     expect(buildReviewArgs({ mode: 'branch', from: 'main', to: 'dev' }))
-      .toEqual(['review', '--from', 'main', '--to', 'dev', '--format', 'json', '--progress-stderr']);
+      .toEqual(['review', '--from', 'main', '--to', 'dev', '--format', 'json']);
   });
 
   it('commit 模式加 --commit', () => {
     expect(buildReviewArgs({ mode: 'commit', commit: 'abc123' }))
-      .toEqual(['review', '--commit', 'abc123', '--format', 'json', '--progress-stderr']);
+      .toEqual(['review', '--commit', 'abc123', '--format', 'json']);
   });
 
   it('customPrompt 追加 --background', () => {
     expect(buildReviewArgs({ mode: 'workspace', customPrompt: '关注安全' }))
-      .toEqual(['review', '--format', 'json', '--progress-stderr', '--background', '关注安全']);
+      .toEqual(['review', '--format', 'json', '--background', '关注安全']);
   });
 
   it('concurrency 追加 --concurrency', () => {
     expect(buildReviewArgs({ mode: 'workspace', concurrency: 4 }))
-      .toEqual(['review', '--format', 'json', '--progress-stderr', '--concurrency', '4']);
+      .toEqual(['review', '--format', 'json', '--concurrency', '4']);
   });
 });
 
@@ -60,6 +60,23 @@ describe('parseCliResult', () => {
     const raw = '[ocr] some log\n{"status":"success","comments":[]}';
     const r = parseCliResult(raw);
     expect(r.status).toBe('success');
+  });
+});
+
+describe('extractCliError', () => {
+  it('优先提取 Error: 行并去掉前缀', () => {
+    const stderr = '[ocr] starting\nError: llm request failed: 401 unauthorized\n';
+    expect(extractCliError(stderr)).toBe('llm request failed: 401 unauthorized');
+  });
+  it('多个 Error 行取最后一个', () => {
+    const stderr = 'Error: first\nError: last';
+    expect(extractCliError(stderr)).toBe('last');
+  });
+  it('无 Error 行时取最后一行非空内容', () => {
+    expect(extractCliError('foo\nbar\n\n')).toBe('bar');
+  });
+  it('空 stderr → 空字符串', () => {
+    expect(extractCliError('')).toBe('');
   });
 });
 

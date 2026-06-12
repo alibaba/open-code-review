@@ -943,6 +943,22 @@ body {
   line-height: 1.6;
 }
 
+.failed-card .fc-detail {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--ink-soft);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+  user-select: text;
+}
+
 .retry-pill {
   display: inline-flex;
   align-items: center;

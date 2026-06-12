@@ -55,7 +55,7 @@ export function App() {
             )}
             {state.view === 'empty' && <EmptyView logs={state.logs} />}
             {state.view === 'cancelled' && <CancelledView />}
-            {state.view === 'failed' && <FailedView onRetry={() => start({ mode: 'workspace' })} />}
+            {state.view === 'failed' && <FailedView error={state.session.error} onRetry={() => start({ mode: 'workspace' })} />}
           </div>
         )}
       </div>

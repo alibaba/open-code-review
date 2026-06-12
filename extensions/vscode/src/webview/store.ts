@@ -14,7 +14,7 @@ export interface AppState {
   modeFiles: FileChange[];
   filesLoading: boolean;
   logs: LogLine[];
-  session: { state: ReviewState; result: CliResult | null };
+  session: { state: ReviewState; result: CliResult | null; error?: string };
   commentStatus: Record<number, CommentStatus>;
   cliStatus: CliStatus;
   installing: boolean;
@@ -92,7 +92,7 @@ export function reducer(state: AppState, msg: HostToWebview | LocalAction): AppS
         ...state,
         logs: starting ? [] : state.logs,
         commentStatus: starting ? {} : state.commentStatus,
-        session: { state: msg.state, result: starting ? null : state.session.result },
+        session: { state: msg.state, result: starting ? null : state.session.result, error: msg.error },
         view: STATE_TO_VIEW[msg.state],
       };
     }
