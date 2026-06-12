@@ -1,4 +1,4 @@
-import { CliResult, CommentStatus, FileChange, GitState, LogLine, OcrConfig, ReviewState } from '../shared/types';
+import { CliResult, CommentStatus, FileChange, GitState, LogLine, OcrConfig, ReviewMode, ReviewState } from '../shared/types';
 import { HostToWebview } from '../shared/messages';
 
 export type AppView = 'idle' | 'running' | 'done' | 'empty' | 'cancelled' | 'failed';
@@ -20,6 +20,7 @@ export interface AppState {
   installing: boolean;
   installLogs: LogLine[];
   connTest: ConnTest;
+  reviewMode: ReviewMode;
 }
 
 export const initialState: AppState = {
@@ -36,6 +37,7 @@ export const initialState: AppState = {
   installing: false,
   installLogs: [],
   connTest: { status: 'idle' },
+  reviewMode: 'workspace',
 };
 
 const STATE_TO_VIEW: Record<ReviewState, AppView> = {
@@ -49,7 +51,8 @@ export type LocalAction =
   | { type: 'filesLoading' }
   | { type: 'checkingCli' }
   | { type: 'installingCli' }
-  | { type: 'testingConn' };
+  | { type: 'testingConn' }
+  | { type: 'startReview'; mode: ReviewMode };
 
 export function reducer(state: AppState, msg: HostToWebview | LocalAction): AppState {
   switch (msg.type) {
@@ -65,6 +68,8 @@ export function reducer(state: AppState, msg: HostToWebview | LocalAction): AppS
       return { ...state, installing: true, installLogs: [] };
     case 'testingConn':
       return { ...state, connTest: { status: 'testing' } };
+    case 'startReview':
+      return { ...state, reviewMode: msg.mode };
     case 'cliStatus':
       return { ...state, cliStatus: msg.installed ? 'installed' : 'missing' };
     case 'installLog':

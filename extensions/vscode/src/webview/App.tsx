@@ -20,7 +20,10 @@ export function App() {
   }, []);
 
   const configured = Boolean(state.config);
-  const start = (options: CliRunOptions) => bridge.post({ type: 'startReview', options });
+  const start = (options: CliRunOptions) => {
+    dispatch({ type: 'startReview', mode: options.mode });
+    bridge.post({ type: 'startReview', options });
+  };
   const onModeChange = (mode: ReviewMode) => {
     dispatch({ type: 'filesLoading' });
     bridge.post({ type: 'getGitState', mode });
@@ -54,6 +57,7 @@ export function App() {
             {state.view === 'running' && <RunningView logs={state.logs} onCancel={() => bridge.post({ type: 'cancelReview' })} />}
             {state.view === 'done' && state.session.result && (
               <DoneView result={state.session.result} commentStatus={state.commentStatus} logs={state.logs}
+                canJump={state.reviewMode === 'workspace'}
                 onOpen={(i) => bridge.post({ type: 'jumpToComment', index: i })}
                 onAction={(i, action) => bridge.post({ type: 'commentAction', index: i, action })} />
             )}

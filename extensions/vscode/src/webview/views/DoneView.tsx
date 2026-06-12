@@ -7,11 +7,12 @@ interface Props {
   result: CliResult;
   commentStatus: Record<number, CommentStatus>;
   logs: LogLine[];
+  canJump: boolean;
   onOpen: (index: number) => void;
   onAction: (index: number, action: 'apply' | 'discard' | 'falsePositive') => void;
 }
 
-export function DoneView({ result, commentStatus, logs, onOpen, onAction }: Props) {
+export function DoneView({ result, commentStatus, logs, canJump, onOpen, onAction }: Props) {
   const [showLogs, setShowLogs] = useState(false);
   const s = result.summary;
   return (
@@ -32,7 +33,7 @@ export function DoneView({ result, commentStatus, logs, onOpen, onAction }: Prop
       )}
 
       {result.comments.map((c, i) => (
-        <CommentCard key={i} comment={c} index={i}
+        <CommentCard key={i} comment={c} index={i} canJump={canJump}
           status={commentStatus[i] ?? 'pending'} onOpen={onOpen} onAction={onAction} />
       ))}
     </div>

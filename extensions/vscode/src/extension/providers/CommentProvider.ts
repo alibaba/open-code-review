@@ -28,12 +28,24 @@ export class CommentProvider {
     this.syncListeners.forEach((fn) => fn(states));
   }
 
-  async show(comments: ReviewComment[]): Promise<void> {
+  /**
+   * 展示审查评论。
+   * @param inEditor 是否在编辑器内创建 CommentThread。仅工作区模式为 true；
+   *   分支对比/单次提交模式下被审查代码不在当前工作区，行号会错位，故只在侧边栏展示。
+   */
+  async show(comments: ReviewComment[], inEditor = true): Promise<void> {
     this.clear();
     // 不重排：保持与 webview（result.comments）相同的顺序与下标
     this.comments = comments;
     const root = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
     if (!root) return;
+
+    // 非工作区模式：只登记评论与状态供侧边栏同步，不在编辑器内放置 thread。
+    if (!inEditor) {
+      for (let i = 0; i < this.comments.length; i++) this.status.set(i, 'pending');
+      this.emitSync();
+      return;
+    }
 
     let firstShown = -1;
     for (let i = 0; i < this.comments.length; i++) {
