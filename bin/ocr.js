@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 "use strict";
+process.stderr.write("[ocr-bin] workspace path check\n");
 
 const { spawnSync, spawn } = require("child_process");
 const path = require("path");
