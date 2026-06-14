@@ -81,13 +81,14 @@ var registry = []Provider{
 		Name:        "mimo",
 		DisplayName: "Xiaomi MiMo API",
 		Protocol:    "openai",
-		BaseURL:     "https://token-plan-cn.xiaomimimo.com/v1",
+		BaseURL:     "https://api.xiaomimimo.com/v1",
 		EnvVar:      "MIMO_API_KEY",
 		Models: []string{
 			"mimo-v2.5-pro",
 			"mimo-v2.5",
 			"mimo-v2-pro",
 			"mimo-v2-omni",
+			"mimo-v2-flash",
 		},
 	},
 }
