@@ -365,6 +365,36 @@ func TestResolveEndpoint_ProviderEntryModelOverridesDefault(t *testing.T) {
 	}
 }
 
+func TestResolveEndpointWithModelOverride_CustomProviderWithoutConfiguredModel(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "openai",
+				Models:   []string{"llama-3-70b", "llama-3-8b"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpointWithModelOverride(cfgPath, "llama-3-8b")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Model != "llama-3-8b" {
+		t.Errorf("Model = %q, want %q", ep.Model, "llama-3-8b")
+	}
+	if ep.Source != "provider:my-gateway" {
+		t.Errorf("Source = %q, want %q", ep.Source, "provider:my-gateway")
+	}
+}
+
 func TestResolveEndpoint_ProviderAPIKeyEnvFallback(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "env-api-key")

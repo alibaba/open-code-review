@@ -299,6 +299,7 @@ ocr review \
 | `--timeout` | — | `10` | Таймаут конкурентной задачи в минутах |
 | `--audience` | — | `human` | `human` (показывать прогресс) или `agent` (только сводка) |
 | `--background` | `-b` | — | Необязательный контекст требований/бизнес-логики для ревью; при `--commit` автоматически заполняется из сообщения коммита |
+| `--model` | — | — | Выбрать или переопределить LLM-модель для этого ревью |
 | `--rule` | — | — | Путь к пользовательским JSON-правилам ревью |
 | `--max-tools` | — | встроенное | Максимум раундов вызова инструментов на файл; действует, только если больше значения шаблона по умолчанию |
 | `--max-git-procs` | — | встроенное | Максимум одновременных git-подпроцессов |
@@ -319,6 +320,10 @@ ocr review --from main --to my-feature --concurrency 4
 
 # Ревью конкретного коммита с подробным JSON-выводом
 ocr review --commit abc123 --format json --audience agent
+
+# Выбрать или переопределить модель для этого ревью
+ocr review --model claude-opus-4-6
+ocr review --commit abc123 --model claude-sonnet-4-6
 
 # Передать контекст требований для более прицельного ревью
 ocr review --background "Добавляем rate limiting в API логина"
@@ -427,6 +432,14 @@ OCR разрешает правила ревью по цепочке приор�
 
 | Ключ | Тип | Пример |
 |------|-----|--------|
+| `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
+| `providers.<name>.api_key` | string | API-ключ провайдера |
+| `providers.<name>.url` | string | Переопределение base URL провайдера |
+| `providers.<name>.protocol` | string | `anthropic` \| `openai` |
+| `providers.<name>.model` | string | Имя модели провайдера |
+| `providers.<name>.models` | array | Необязательный список моделей для интерактивного выбора |
+| `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
+| `custom_providers.<name>.*` | — | Те же поля, что и `providers.<name>.*`, включая необязательное `models` |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Только для Anthropic: `x-api-key` \| `authorization` |

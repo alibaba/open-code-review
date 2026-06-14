@@ -311,6 +311,7 @@ ocr review \
 | `--timeout` | - | `10` | 동시 task timeout(분) |
 | `--audience` | - | `human` | `human`(progress 표시) 또는 `agent`(summary only) |
 | `--background` | `-b` | - | 리뷰를 위한 선택적 요구사항/비즈니스 컨텍스트. `--commit` 사용 시 미지정이면 commit message에서 자동 추출 |
+| `--model` | - | - | 이번 리뷰에서 LLM model 선택 또는 override |
 | `--rule` | - | - | custom JSON review rules 경로 |
 | `--max-tools` | - | built-in | 파일별 최대 tool call round. template default보다 클 때만 적용 |
 | `--max-git-procs` | - | built-in | 최대 동시 git subprocess 수 |
@@ -336,6 +337,10 @@ ocr review --from main --to my-feature --concurrency 4
 
 # 특정 commit을 verbose JSON output으로 리뷰
 ocr review --commit abc123 --format json --audience agent
+
+# 이번 리뷰에서 model 선택 또는 override
+ocr review --model claude-opus-4-6
+ocr review --commit abc123 --model claude-sonnet-4-6
 
 # 요구사항 컨텍스트를 제공하여 더 정확한 리뷰 수행
 ocr review --background "로그인 API에 rate limiting 추가"
@@ -407,8 +412,9 @@ Config file: `~/.opencodereview/config.json`
 | `providers.<name>.url` | string | Provider base URL override |
 | `providers.<name>.protocol` | string | `anthropic` \| `openai` |
 | `providers.<name>.model` | string | Provider의 model 이름 |
+| `providers.<name>.models` | array | 대화형 선택에 사용할 optional provider model 목록 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
-| `custom_providers.<name>.*` | — | `providers.<name>.*`과 동일한 필드 |
+| `custom_providers.<name>.*` | — | optional `models`를 포함한 `providers.<name>.*`과 동일한 필드 |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |

@@ -444,7 +444,7 @@ func TestProviderTUI_CustomProviderExistsInList(t *testing.T) {
 	}
 }
 
-func TestProviderTUI_SelectExistingCustomGoesToAPIKey(t *testing.T) {
+func TestProviderTUI_SelectExistingCustomGoesToModel(t *testing.T) {
 	cfg := &Config{
 		Provider: "my-llm",
 		CustomProviders: map[string]ProviderEntry{
@@ -452,17 +452,21 @@ func TestProviderTUI_SelectExistingCustomGoesToAPIKey(t *testing.T) {
 				URL:      "https://custom.api/v1",
 				Protocol: "openai",
 				Model:    "custom-model",
+				Models:   []string{"custom-model", "custom-fast"},
 				APIKey:   "key-123",
 			},
 		},
 	}
 	m := newProviderTUI(cfg)
 
-	// Enter on existing custom provider should go to API key step
+	// Enter on existing custom provider should go to model selection first.
 	result, _ := m.Update(enterKey())
 	m2 := result.(providerTUIModel)
-	if m2.step != stepAPIKey {
-		t.Errorf("step = %d, want %d (stepAPIKey)", m2.step, stepAPIKey)
+	if m2.step != stepModel {
+		t.Errorf("step = %d, want %d (stepModel)", m2.step, stepModel)
+	}
+	if m2.models()[0] != "custom-model" {
+		t.Errorf("first model = %q, want %q", m2.models()[0], "custom-model")
 	}
 }
 

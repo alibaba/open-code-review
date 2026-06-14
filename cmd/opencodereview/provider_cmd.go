@@ -94,6 +94,9 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 
 	entry := cfg.CustomProviders[result.provider]
 	entry.Model = result.model
+	if len(result.models) > 0 {
+		entry.Models = mergeModelLists([]string{result.model}, result.models)
+	}
 	if result.url != "" {
 		entry.URL = result.url
 	}
@@ -154,6 +157,9 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 
 	entry := cfg.Providers[result.provider]
 	entry.Model = result.model
+	if len(result.models) > 0 {
+		entry.Models = mergeModelLists(entry.Models, result.models)
+	}
 	if result.apiKey != "" {
 		entry.APIKey = result.apiKey
 	}
@@ -197,20 +203,32 @@ func runConfigModel() error {
 		return fmt.Errorf("no provider configured. Run 'ocr config provider' first")
 	}
 
-	preset, isPreset := llm.LookupProvider(cfg.Provider)
-	if !isPreset {
-		return fmt.Errorf("provider %q is not a preset provider; use 'ocr config set providers.%s.model <name>' instead", cfg.Provider, cfg.Provider)
-	}
-
 	currentModel := ""
-	if entry, ok := cfg.Providers[cfg.Provider]; ok {
+	provider := llm.Provider{Name: cfg.Provider, DisplayName: cfg.Provider}
+	isCustom := false
+	if preset, isPreset := llm.LookupProvider(cfg.Provider); isPreset {
+		provider = preset
+		if entry, ok := cfg.Providers[cfg.Provider]; ok {
+			currentModel = entry.Model
+			provider.Models = mergeModelLists(provider.Models, entry.Models)
+		}
+	} else {
+		isCustom = true
+		entry, ok := cfg.CustomProviders[cfg.Provider]
+		if !ok {
+			return fmt.Errorf("provider %q is not configured in custom_providers", cfg.Provider)
+		}
 		currentModel = entry.Model
+		provider.DisplayName = cfg.Provider + " (custom)"
+		provider.Protocol = entry.Protocol
+		provider.BaseURL = entry.URL
+		provider.Models = mergeModelLists(entry.Models)
 	}
 	if currentModel == "" {
 		currentModel = cfg.Model
 	}
 
-	m := newModelTUI(preset, currentModel)
+	m := newModelTUI(provider, currentModel)
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
@@ -228,12 +246,25 @@ func runConfigModel() error {
 		return fmt.Errorf("model name cannot be empty")
 	}
 
-	if cfg.Providers == nil {
-		cfg.Providers = make(map[string]ProviderEntry)
+	if isCustom {
+		if cfg.CustomProviders == nil {
+			cfg.CustomProviders = make(map[string]ProviderEntry)
+		}
+		entry := cfg.CustomProviders[cfg.Provider]
+		entry.Model = selectedModel
+		entry.Models = mergeModelLists([]string{selectedModel}, entry.Models)
+		cfg.CustomProviders[cfg.Provider] = entry
+	} else {
+		if cfg.Providers == nil {
+			cfg.Providers = make(map[string]ProviderEntry)
+		}
+		entry := cfg.Providers[cfg.Provider]
+		entry.Model = selectedModel
+		if !modelListContains(provider.Models, selectedModel) {
+			entry.Models = mergeModelLists([]string{selectedModel}, entry.Models)
+		}
+		cfg.Providers[cfg.Provider] = entry
 	}
-	entry := cfg.Providers[cfg.Provider]
-	entry.Model = selectedModel
-	cfg.Providers[cfg.Provider] = entry
 
 	if err := saveConfig(configPath, cfg); err != nil {
 		return err
