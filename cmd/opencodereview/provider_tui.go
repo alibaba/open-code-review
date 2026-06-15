@@ -903,6 +903,9 @@ func (m providerTUIModel) viewOfficialTab(s *strings.Builder) {
 			s.WriteString(cursor + tuiItemStyle.Render(name))
 		}
 		s.WriteString("\n")
+		if subtitle := providerOfficialSubtitle(p); subtitle != "" {
+			s.WriteString("      " + tuiDimStyle.Render(subtitle) + "\n")
+		}
 	}
 }
 
@@ -1109,6 +1112,13 @@ func (m providerTUIModel) viewAPIKey(s *strings.Builder) {
 
 	if m.activeTab == tabOfficial {
 		provider := m.currentProvider()
+		if provider.IsCursorAgent() {
+			s.WriteString("\n")
+			s.WriteString(tuiDimStyle.Render("  Requires Cursor SDK bridge (Node.js >= 18, npm)."))
+			s.WriteString("\n")
+			s.WriteString(tuiDimStyle.Render("  One-time setup: " + cursorBridgeSetupHint))
+			s.WriteString("\n")
+		}
 		if envKey := os.Getenv(provider.EnvVar); envKey != "" {
 			s.WriteString("\n")
 			s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  $%s is set", provider.EnvVar)))
@@ -1127,7 +1137,19 @@ func (m providerTUIModel) viewAPIKey(s *strings.Builder) {
 
 // --- Styles ---
 
+const cursorBridgeSetupHint = "go run github.com/remdev/cursor-go-sdk/cmd/setup@latest"
+
 const tuiCursor = "▸"
+
+func providerOfficialSubtitle(p llm.Provider) string {
+	if p.IsCursorAgent() {
+		return "local agent via Cursor SDK (no HTTP endpoint)"
+	}
+	if p.BaseURL != "" {
+		return p.BaseURL
+	}
+	return ""
+}
 
 var (
 	tuiTitleStyle = lipgloss.NewStyle().

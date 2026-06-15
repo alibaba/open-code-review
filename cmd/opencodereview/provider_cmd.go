@@ -171,6 +171,11 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	fmt.Printf("\nProvider set to: %s\n", result.provider)
 	fmt.Printf("Model: %s\n", result.model)
 
+	if isPreset && preset.IsCursorAgent() {
+		fmt.Println("\nCursor backend requires the SDK bridge before the first review.")
+		fmt.Printf("Run: %s\n", cursorBridgeSetupHint)
+	}
+
 	fmt.Println("\nTesting connection...")
 	if err := runLLMTest(); err != nil {
 		fmt.Fprintf(os.Stderr, "Connection test failed: %v\n", err)

@@ -126,6 +126,34 @@ func TestSetConfigValueProviderEntryExtraBody(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueProviderCursor(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "provider", "cursor"); err != nil {
+		t.Fatalf("setConfigValue provider: %v", err)
+	}
+	if cfg.Provider != "cursor" {
+		t.Errorf("Provider = %q, want cursor", cfg.Provider)
+	}
+	if cfg.Providers["cursor"].APIKey != "" {
+		t.Error("expected empty cursor provider entry after provider switch")
+	}
+
+	if err := setConfigValue(cfg, "providers.cursor.api_key", "cursor-key"); err != nil {
+		t.Fatalf("setConfigValue api_key: %v", err)
+	}
+	if cfg.Providers["cursor"].APIKey != "cursor-key" {
+		t.Errorf("api_key = %q, want cursor-key", cfg.Providers["cursor"].APIKey)
+	}
+
+	if err := setConfigValue(cfg, "providers.cursor.model", "composer-2.5"); err != nil {
+		t.Fatalf("setConfigValue model: %v", err)
+	}
+	if cfg.Providers["cursor"].Model != "composer-2.5" {
+		t.Errorf("model = %q, want composer-2.5", cfg.Providers["cursor"].Model)
+	}
+}
+
 func TestSetConfigValueModelWithCustomProvider(t *testing.T) {
 	cfg := &Config{
 		Provider: "my-gateway",

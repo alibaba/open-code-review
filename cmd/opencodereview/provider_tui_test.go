@@ -136,6 +136,57 @@ func TestProviderTUI_TabSwitchOnlyOnStepProvider(t *testing.T) {
 
 // --- Official tab tests (updated from original) ---
 
+func TestProviderTUI_OfficialTabIncludesCursor(t *testing.T) {
+	m := newProviderTUI(&Config{})
+
+	found := false
+	for _, p := range m.providers {
+		if p.Name == "cursor" {
+			found = true
+			if !p.IsCursorAgent() {
+				t.Error("cursor preset should use Cursor agent backend")
+			}
+			if subtitle := providerOfficialSubtitle(p); subtitle == "" {
+				t.Error("expected subtitle for cursor preset")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("cursor preset missing from official provider list")
+	}
+}
+
+func TestProviderTUI_CursorProviderSelectsModels(t *testing.T) {
+	m := newProviderTUI(&Config{})
+	idx := -1
+	for i, p := range m.providers {
+		if p.Name == "cursor" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatal("cursor preset not found")
+	}
+
+	m.officialIdx = idx
+	result, _ := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.step != stepModel {
+		t.Fatalf("step = %d, want stepModel", m2.step)
+	}
+
+	models := m2.models()
+	want := map[string]bool{"auto": true, "composer-2.5": true, "composer-2": true}
+	for _, model := range models {
+		delete(want, model)
+	}
+	if len(want) > 0 {
+		t.Errorf("missing cursor models: %v", want)
+	}
+}
+
 func TestProviderTUI_EscFromModelGoesBackToProvider(t *testing.T) {
 	m := newProviderTUI(&Config{})
 
