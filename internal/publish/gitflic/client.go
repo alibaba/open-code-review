@@ -41,10 +41,15 @@ func NewClient(baseURL, token string) *Client {
 // A general comment needs only Message. An inline (code) comment requires
 // all four of NewLine, OldLine, NewPath and OldPath: if any of them is
 // missing, GitFlic silently creates a general comment instead.
+//
+// NewLine and OldLine are pointers so that an unset value is omitted from the
+// payload (nil) rather than serialized as 0: with a plain int and omitempty a
+// deliberate caller-set 0 would be silently dropped, turning an intended
+// inline comment into a general one.
 type Discussion struct {
 	Message string `json:"message"`
-	NewLine int    `json:"newLine,omitempty"`
-	OldLine int    `json:"oldLine,omitempty"`
+	NewLine *int   `json:"newLine,omitempty"`
+	OldLine *int   `json:"oldLine,omitempty"`
 	NewPath string `json:"newPath,omitempty"`
 	OldPath string `json:"oldPath,omitempty"`
 }

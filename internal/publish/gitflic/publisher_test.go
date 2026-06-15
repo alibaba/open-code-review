@@ -39,6 +39,15 @@ func silentPublisher(client *Client) *Publisher {
 	return p
 }
 
+// val dereferences a *int line field, returning -1 for nil so assertions can
+// report a stable value instead of panicking.
+func val(p *int) int {
+	if p == nil {
+		return -1
+	}
+	return *p
+}
+
 func TestPublishInlineAndSummary(t *testing.T) {
 	var requests []recordedRequest
 	srv := newRecordingServer(t, &requests)
@@ -74,8 +83,8 @@ func TestPublishInlineAndSummary(t *testing.T) {
 	if inline.auth != "token secret-token" {
 		t.Errorf("auth header = %q, want %q", inline.auth, "token secret-token")
 	}
-	if inline.body.NewLine != 6 || inline.body.OldLine != 5 {
-		t.Errorf("position = new %d / old %d, want new 6 / old 5", inline.body.NewLine, inline.body.OldLine)
+	if val(inline.body.NewLine) != 6 || val(inline.body.OldLine) != 5 {
+		t.Errorf("position = new %d / old %d, want new 6 / old 5", val(inline.body.NewLine), val(inline.body.OldLine))
 	}
 	if inline.body.NewPath != "main.go" || inline.body.OldPath != "main.go" {
 		t.Errorf("paths = %q / %q, want main.go / main.go", inline.body.NewPath, inline.body.OldPath)
@@ -212,8 +221,8 @@ func TestPublishNewFileAnchorsToNewPath(t *testing.T) {
 		t.Fatalf("stats = %+v, want 1 inline", stats)
 	}
 	inline := requests[0].body
-	if inline.OldPath != "added.go" || inline.OldLine != 1 || inline.NewLine != 3 {
+	if inline.OldPath != "added.go" || val(inline.OldLine) != 1 || val(inline.NewLine) != 3 {
 		t.Errorf("new-file position = old %s:%d new line %d, want added.go:1 / 3",
-			inline.OldPath, inline.OldLine, inline.NewLine)
+			inline.OldPath, val(inline.OldLine), val(inline.NewLine))
 	}
 }

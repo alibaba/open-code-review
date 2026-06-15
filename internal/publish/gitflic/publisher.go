@@ -98,10 +98,18 @@ func (p *Publisher) Publish(ctx context.Context, opts Options, result *ReviewRes
 		byPath[d.NewPath] = d
 	}
 
+	// Parse each file's diff hunks at most once, even with several comments.
+	hunksByPath := make(map[string][]diff.Hunk)
+
 	var failed []model.LlmComment
 	for _, c := range result.Comments {
 		d, ok := byPath[c.Path]
-		if !ok || d.IsBinary || c.EndLine <= 0 {
+		if !ok {
+			p.logf("no diff for %s; folding comment into the summary note", c.Path)
+			failed = append(failed, c)
+			continue
+		}
+		if d.IsBinary || d.IsDeleted || c.EndLine <= 0 {
 			failed = append(failed, c)
 			continue
 		}
@@ -112,13 +120,18 @@ func (p *Publisher) Publish(ctx context.Context, opts Options, result *ReviewRes
 			// GitFlic has no old side for a new file; anchor to the new path.
 			oldPath = d.NewPath
 		} else {
-			oldLine = oldLineFor(diff.ParseHunks(d.Diff), c.EndLine)
+			hunks, cached := hunksByPath[c.Path]
+			if !cached {
+				hunks = diff.ParseHunks(d.Diff)
+				hunksByPath[c.Path] = hunks
+			}
+			oldLine = oldLineFor(hunks, c.EndLine)
 		}
 
 		disc := Discussion{
 			Message: formatComment(c),
-			NewLine: c.EndLine,
-			OldLine: oldLine,
+			NewLine: intPtr(c.EndLine),
+			OldLine: intPtr(oldLine),
 			NewPath: c.Path,
 			OldPath: oldPath,
 		}
@@ -158,14 +171,17 @@ func (p *Publisher) Publish(ctx context.Context, opts Options, result *ReviewRes
 func (p *Publisher) post(ctx context.Context, opts Options, d Discussion) error {
 	if opts.DryRun {
 		position := "general"
-		if d.NewPath != "" {
-			position = fmt.Sprintf("%s:%d (old %s:%d)", d.NewPath, d.NewLine, d.OldPath, d.OldLine)
+		if d.NewPath != "" && d.NewLine != nil && d.OldLine != nil {
+			position = fmt.Sprintf("%s:%d (old %s:%d)", d.NewPath, *d.NewLine, d.OldPath, *d.OldLine)
 		}
 		fmt.Printf("--- dry-run discussion [%s] ---\n%s\n\n", position, d.Message)
 		return nil
 	}
 	return p.client.CreateDiscussion(ctx, opts.Owner, opts.Project, opts.MRID, d)
 }
+
+// intPtr returns a pointer to i, for Discussion's nullable line fields.
+func intPtr(i int) *int { return &i }
 
 // formatComment renders an inline discussion body.
 func formatComment(c model.LlmComment) string {
