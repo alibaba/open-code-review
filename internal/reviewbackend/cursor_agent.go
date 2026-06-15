@@ -73,8 +73,8 @@ func (b *CursorAgentBackend) Complete(ctx context.Context, req CompleteRequest) 
 	if err != nil {
 		return nil, wrapCursorError(err)
 	}
-	if result.Status == cursor.RunStatusError {
-		return nil, fmt.Errorf("cursor prompt failed: %s", result.Result)
+	if err := cursorRunStatusError(result); err != nil {
+		return nil, err
 	}
 
 	return &CompleteResponse{
@@ -100,17 +100,6 @@ func (b *CursorAgentBackend) ReviewFile(ctx context.Context, req ReviewFileReque
 
 	tracker := &cursorReviewTracker{}
 	mcpExec := func(callCtx context.Context, call ToolCallInput) ToolCallOutput {
-		tracker.markTool(call.Name)
-		if call.Name == "code_comment" {
-			tracker.mcpCodeComment = true
-		}
-		out := exec(callCtx, call)
-		if out.Completed {
-			tracker.taskDone = true
-		}
-		return out
-	}
-	replayExec := func(callCtx context.Context, call ToolCallInput) ToolCallOutput {
 		tracker.markTool(call.Name)
 		out := exec(callCtx, call)
 		if out.Completed {
@@ -138,9 +127,10 @@ func (b *CursorAgentBackend) ReviewFile(ctx context.Context, req ReviewFileReque
 
 	prompt := buildCursorReviewPrompt(req.Messages, req.ToolsPrompt)
 	basePrompt := prompt
-	consecutiveNoTools := 0
 
 	for round := 0; round < maxRounds; round++ {
+		tracker.roundToolInvoked = false
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -204,46 +194,23 @@ func (b *CursorAgentBackend) ReviewFile(ctx context.Context, req ReviewFileReque
 		}
 		recordCursorRoundMetrics(hooks, usageAcc, durationMs, string(result.Status))
 
-		if result.Result != "" {
-			replayCursorTextToolCalls(ctx, result.Result, req.FilePath, replayExec, logf, tracker.mcpCodeComment)
-		}
-
 		if tracker.taskDone {
 			return nil
 		}
-
-		invokedTools := tracker.roundToolInvoked
-		tracker.roundToolInvoked = false
-		tracker.mcpCodeComment = false
-
-		if !invokedTools {
-			consecutiveNoTools++
-			if consecutiveNoTools >= 3 {
-				logf("[ocr] Cursor agent did not call tools for %s after %d attempts, stopping.\n", req.FilePath, consecutiveNoTools)
-				break
-			}
-			logf("[ocr] Cursor agent replied without tools for %s, retrying...\n", req.FilePath)
-			prompt = basePrompt + "\n\n" + cursorReviewNudge(tracker, true)
-			continue
+		if tracker.roundToolInvoked {
+			break
 		}
-
-		consecutiveNoTools = 0
-		if tracker.commentCalls > 0 {
-			logf("[ocr] Cursor agent left comments for %s without task_done, retrying...\n", req.FilePath)
-		} else {
-			logf("[ocr] Cursor agent called tools for %s without code_comment, retrying...\n", req.FilePath)
+		if round+1 >= maxRounds {
+			break
 		}
-		prompt = basePrompt + "\n\n" + cursorReviewNudge(tracker, false)
+		logf("[ocr] Cursor agent replied without MCP tools for %s, retrying...\n", req.FilePath)
+		prompt = basePrompt + "\n\n" + cursorReviewNudgeNoTools()
 	}
 
-	if tracker.taskDone {
+	if tracker.taskDone || tracker.commentCalls > 0 {
 		return nil
 	}
-	if tracker.commentCalls > 0 {
-		logf("[ocr] Cursor review for %s finished with %d comment(s) without task_done.\n", req.FilePath, tracker.commentCalls)
-		return nil
-	}
-	logf("[ocr] Max tool requests reached for %s without review comments.\n", req.FilePath)
+	logf("[ocr] Cursor review for %s produced no comments.\n", req.FilePath)
 	return fmt.Errorf("cursor review incomplete for %s", req.FilePath)
 }
 
@@ -251,7 +218,6 @@ type cursorReviewTracker struct {
 	taskDone         bool
 	commentCalls     int
 	roundToolInvoked bool
-	mcpCodeComment   bool
 }
 
 func (t *cursorReviewTracker) markTool(name string) {
@@ -277,14 +243,8 @@ func recordCursorRoundMetrics(hooks *ReviewHooks, usageAcc *cursorUsageAccumulat
 	}
 }
 
-func cursorReviewNudge(tracker *cursorReviewTracker, noTools bool) string {
-	if noTools {
-		return "You must not reply with a markdown review. For each confirmed issue in the diff, call the code_comment tool with structured comments (path, start_line, end_line, content). When finished, call task_done."
-	}
-	if tracker.commentCalls > 0 {
-		return "Comments received. Call task_done if the review is complete, or call code_comment for any remaining issues."
-	}
-	return "Call code_comment for each confirmed issue, then call task_done when finished."
+func cursorReviewNudgeNoTools() string {
+	return "You must not reply with a markdown review. For each confirmed issue in the diff, call the code_comment tool with structured comments (path, start_line, end_line, content). When finished, call task_done."
 }
 
 func cursorRunStatusError(result cursor.RunResult) error {

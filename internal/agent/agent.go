@@ -905,6 +905,8 @@ func (a *Agent) performLlmCodeReview(ctx context.Context, messages []llm.Message
 	}
 
 	var mainRec *session.TaskRecord
+	// mainRec is set by AppendTaskRecord at the start of each backend round.
+	// Backends must invoke tools sequentially after recording the round task.
 	executor := func(execCtx context.Context, call reviewbackend.ToolCallInput) reviewbackend.ToolCallOutput {
 		if execCtx == nil {
 			execCtx = ctx

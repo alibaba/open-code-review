@@ -49,16 +49,6 @@ func runLLMTest() error {
 		return err
 	}
 
-	backend, err := reviewbackend.New(context.Background(), resolved, repoDir)
-	if err != nil {
-		return fmt.Errorf("create review backend: %w", err)
-	}
-
-	llmClient := reviewbackend.TextClient(backend)
-
-	model := backend.Model()
-	source := backend.Source()
-
 	task, err := testconnection.LoadDefault()
 	if err != nil {
 		return fmt.Errorf("load test task config: %w", err)
@@ -72,20 +62,29 @@ func runLLMTest() error {
 		timeout = time.Duration(task.Timeout) * time.Second
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	backend, err := reviewbackend.New(ctx, resolved, repoDir)
+	if err != nil {
+		return fmt.Errorf("create review backend: %w", err)
+	}
+
+	llmClient := reviewbackend.TextClient(backend)
+
+	model := backend.Model()
+	source := backend.Source()
+
 	messages := make([]llm.Message, 0, len(task.Messages))
 	for _, m := range task.Messages {
 		messages = append(messages, llm.Message{Role: m.Role, Content: m.Content})
 	}
 
-	resp, err := func() (*llm.ChatResponse, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		return llmClient.CompletionsWithCtx(ctx, llm.ChatRequest{
-			Model:     model,
-			Messages:  messages,
-			MaxTokens: 256,
-		})
-	}()
+	resp, err := llmClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+		Model:     model,
+		Messages:  messages,
+		MaxTokens: 256,
+	})
 	if err != nil {
 		return fmt.Errorf("llm request failed: %w", err)
 	}

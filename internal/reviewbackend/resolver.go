@@ -77,7 +77,7 @@ func readConfigBytes(path string) ([]byte, *configFile, error) {
 }
 
 func resolveCursorProvider(cfg *configFile) (ResolvedBackend, error) {
-	entry, ok := cfg.Providers["cursor"]
+	entry, ok := providerEntryCI(cfg.Providers, "cursor")
 	if !ok {
 		return ResolvedBackend{}, fmt.Errorf("provider %q is set but not configured in providers section", cfg.Provider)
 	}
@@ -106,4 +106,19 @@ func resolveCursorProvider(cfg *configFile) (ResolvedBackend, error) {
 			Source: "provider:cursor",
 		},
 	}, nil
+}
+
+func providerEntryCI(m map[string]providerEntry, key string) (providerEntry, bool) {
+	if m == nil {
+		return providerEntry{}, false
+	}
+	if entry, ok := m[key]; ok {
+		return entry, true
+	}
+	for k, entry := range m {
+		if strings.EqualFold(k, key) {
+			return entry, true
+		}
+	}
+	return providerEntry{}, false
 }

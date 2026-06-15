@@ -53,6 +53,26 @@ func TestResolveBackend_CursorProvider(t *testing.T) {
 	}
 }
 
+func TestResolveBackend_CursorProviderKeyCaseInsensitive(t *testing.T) {
+	cfgPath := writeConfig(t, t.TempDir(), map[string]any{
+		"provider": "cursor",
+		"providers": map[string]any{
+			"Cursor": map[string]any{
+				"api_key": "cursor-test-key",
+				"model":   "composer-2.5",
+			},
+		},
+	})
+
+	resolved, err := ResolveBackend(cfgPath)
+	if err != nil {
+		t.Fatalf("ResolveBackend: %v", err)
+	}
+	if resolved.Cursor.APIKey != "cursor-test-key" {
+		t.Errorf("APIKey = %q, want cursor-test-key", resolved.Cursor.APIKey)
+	}
+}
+
 func TestResolveBackend_CursorEnvAPIKeyFallback(t *testing.T) {
 	t.Setenv("CURSOR_API_KEY", "env-cursor-key")
 	cfgPath := writeConfig(t, t.TempDir(), map[string]any{

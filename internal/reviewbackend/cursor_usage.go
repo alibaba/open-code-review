@@ -16,6 +16,7 @@ type cursorUsageAccumulator struct {
 	cacheWrite      int64
 	deltaCompletion int64
 	hasTurnUsage    bool
+	reportedTotal   int64
 }
 
 func (a *cursorUsageAccumulator) observe(update cursor.InteractionUpdate) {
@@ -34,6 +35,9 @@ func (a *cursorUsageAccumulator) observe(update cursor.InteractionUpdate) {
 			a.completion += ui.CompletionTokens
 			a.cacheRead += ui.CacheReadTokens
 			a.cacheWrite += ui.CacheWriteTokens
+			if ui.TotalTokens > 0 {
+				a.reportedTotal += ui.TotalTokens
+			}
 			a.mu.Unlock()
 		}
 	case "token-delta":
@@ -55,15 +59,22 @@ func (a *cursorUsageAccumulator) usage() *llm.UsageInfo {
 	completion := a.completion
 	cacheRead := a.cacheRead
 	cacheWrite := a.cacheWrite
+	reportedTotal := a.reportedTotal
 
 	if !a.hasTurnUsage && a.deltaCompletion > 0 {
 		completion = a.deltaCompletion
 	}
 
-	if prompt == 0 && completion == 0 && cacheRead == 0 && cacheWrite == 0 {
+	componentTotal := prompt + completion + cacheRead + cacheWrite
+	if componentTotal == 0 && reportedTotal == 0 {
 		return nil
 	}
-	total := prompt + completion + cacheRead + cacheWrite
+	total := componentTotal
+	if total == 0 {
+		total = reportedTotal
+	} else if reportedTotal > total {
+		total = reportedTotal
+	}
 	return &llm.UsageInfo{
 		TotalTokens:      total,
 		PromptTokens:     prompt,

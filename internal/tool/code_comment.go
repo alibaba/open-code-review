@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -161,6 +162,9 @@ func toInt(v any) (int, bool) {
 	case int64:
 		n, ok = int(t), true
 	case float64:
+		if t <= 0 || t != math.Trunc(t) || t > float64(math.MaxInt) {
+			return 0, false
+		}
 		n, ok = int(t), true
 	case json.Number:
 		i, err := t.Int64()

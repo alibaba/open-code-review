@@ -50,6 +50,8 @@ type ToolCallInput struct {
 }
 
 // ToolCallOutput is returned by the tool executor.
+// Backends treat non-empty Result strings as model-visible tool output; errors
+// are conventionally prefixed with "Error:" by tool providers.
 type ToolCallOutput struct {
 	Result    string
 	Completed bool

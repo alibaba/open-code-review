@@ -31,8 +31,8 @@ func normalizeCursorToolName(name string) string {
 	if i := strings.LastIndex(name, "/"); i >= 0 {
 		name = name[i+1:]
 	}
-	if i := strings.LastIndex(name, "__"); i >= 0 {
-		name = name[i+2:]
+	if strings.HasPrefix(name, "custom-user-tools__") {
+		return strings.TrimPrefix(name, "custom-user-tools__")
 	}
 	return name
 }

@@ -28,6 +28,8 @@ func TestNormalizeCursorToolName(t *testing.T) {
 		"code_comment":                    "code_comment",
 		"custom-user-tools/code_comment":  "code_comment",
 		"custom-user-tools__code_comment": "code_comment",
+		"other__code_comment":             "other__code_comment",
+		"other__task_done":                "other__task_done",
 	}
 	for in, want := range cases {
 		if got := normalizeCursorToolName(in); got != want {
