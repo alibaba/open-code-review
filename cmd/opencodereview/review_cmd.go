@@ -49,6 +49,14 @@ func runReview(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve repo: %w", err)
 	}
+	if opts.upstream != "" {
+		from, to, uerr := resolveUpstream(repoDir, opts)
+		if uerr != nil {
+			return uerr
+		}
+		opts.from = from
+		opts.to = to
+	}
 	if err := validateReviewRefs(repoDir, opts); err != nil {
 		return err
 	}
