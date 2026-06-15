@@ -9,11 +9,16 @@ import (
 type Provider struct {
 	Name        string
 	DisplayName string
-	Protocol    string // "anthropic" or "openai"
+	Protocol    string // "anthropic", "openai", or "cursor"
 	BaseURL     string
 	AuthHeader  string // Anthropic-only; empty for OpenAI-compatible
 	EnvVar      string // environment variable name for API key fallback
 	Models      []string
+}
+
+// IsCursorAgent reports whether the provider uses the Cursor Agent SDK backend.
+func (p Provider) IsCursorAgent() bool {
+	return p.Protocol == "cursor"
 }
 
 var registry = []Provider{
@@ -100,6 +105,17 @@ var registry = []Provider{
 			"glm-5.1",
 			"glm-5-turbo",
 			"glm-4.7",
+		},
+	},
+	{
+		Name:        "cursor",
+		DisplayName: "Cursor Agent SDK",
+		Protocol:    "cursor",
+		EnvVar:      "CURSOR_API_KEY",
+		Models: []string{
+			"auto",
+			"composer-2.5",
+			"composer-2",
 		},
 	},
 	{

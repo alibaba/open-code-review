@@ -18,12 +18,16 @@ var promptTokensPaths = []string{
 	"usage.prompt_tokens",      // OpenAI standard
 	"prompt_tokens",            // flat at root
 	"data.usage.prompt_tokens", // wrapped in data layer
+	"usage.inputTokens",        // Cursor / camelCase
+	"inputTokens",
 }
 
 var completionTokensPaths = []string{
 	"usage.completion_tokens",      // OpenAI standard
 	"completion_tokens",            // flat at root
 	"data.usage.completion_tokens", // wrapped in data layer
+	"usage.outputTokens",           // Cursor / camelCase
+	"outputTokens",
 }
 
 var cacheReadTokensPaths = []string{
@@ -45,6 +49,8 @@ var totalTokensPaths = []string{
 	"usage.total_tokens",      // OpenAI standard
 	"total_tokens",            // flat at root
 	"data.usage.total_tokens", // wrapped in data layer (some proxy APIs)
+	"usage.totalTokens",       // Cursor / camelCase
+	"totalTokens",
 }
 
 // resolveUsage parses raw JSON bytes into a map and extracts token usage
