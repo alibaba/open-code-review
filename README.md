@@ -180,6 +180,28 @@ ocr review --from main --to feature-branch
 ocr review --commit abc123
 ```
 
+#### Reviewing a fork against upstream
+
+When you work on a fork and want to review what your current branch changed
+relative to the original repository, use `--upstream`:
+
+```bash
+# Against a configured remote (auto-fetches its default branch):
+ocr review --upstream upstream
+
+# Against the original repo by URL, without configuring a remote:
+ocr review --upstream https://github.com/orig/repo
+
+# Pick a specific upstream branch; default is HEAD vs upstream's default branch:
+ocr review --upstream upstream --upstream-branch main
+
+# Offline: use the already-fetched remote-tracking branch, no network:
+ocr review --upstream upstream --no-fetch
+```
+
+`--upstream` reviews `merge-base(upstream, HEAD)..HEAD` — i.e. exactly the
+commits your branch adds on top of upstream. Override the target with `--to`.
+
 ### Integrate with Coding Agents
 
 OCR can be seamlessly integrated into AI coding agents as a slash command, enabling code review directly within your agent workflow.
@@ -307,6 +329,9 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `--from` | — | — | Source ref (e.g., `main`) |
 | `--to` | — | — | Target ref (e.g., `feature-branch`) |
 | `--commit` | `-c` | — | Single commit to review |
+| `--upstream` | — | — | Upstream remote name or git URL to review the current branch against (fork workflow); reviews `merge-base(upstream, HEAD)..HEAD` |
+| `--upstream-branch` | — | upstream default | Branch on `--upstream` to compare against |
+| `--no-fetch` | — | `false` | With `--upstream`: skip network fetch, use the local remote-tracking ref |
 | `--preview` | `-p` | `false` | Preview which files will be reviewed without running the LLM |
 | `--format` | `-f` | `text` | Output format: `text` or `json` |
 | `--concurrency` | — | `8` | Max concurrent file reviews |
