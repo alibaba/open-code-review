@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/config/template"
 	"github.com/open-code-review/open-code-review/internal/config/testconnection"
 	"github.com/open-code-review/open-code-review/internal/llm"
 )
@@ -19,6 +18,9 @@ func runLLM(args []string) error {
 	switch args[0] {
 	case "test":
 		return runLLMTest()
+	case "providers":
+		runLLMProviders()
+		return nil
 	default:
 		return fmt.Errorf("unknown llm sub-command: %s\nRun 'ocr llm' for usage", args[0])
 	}
@@ -53,11 +55,6 @@ func runLLMTest() error {
 		timeout = time.Duration(task.Timeout) * time.Second
 	}
 
-	tpl, err := template.LoadDefault()
-	if err != nil {
-		return fmt.Errorf("load default template: %w", err)
-	}
-
 	llmClient := llm.NewLLMClient(ep)
 
 	messages := make([]llm.Message, 0, len(task.Messages))
@@ -71,7 +68,7 @@ func runLLMTest() error {
 		return llmClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 			Model:     ep.Model,
 			Messages:  messages,
-			MaxTokens: tpl.MaxTokens,
+			MaxTokens: 256,
 		})
 	}()
 	if err != nil {
@@ -89,6 +86,18 @@ func runLLMTest() error {
 	return nil
 }
 
+func runLLMProviders() {
+	providers := llm.ListProviders()
+	fmt.Println("\nBuilt-in providers:")
+	fmt.Printf("  %-14s %-10s %s\n", "NAME", "PROTOCOL", "BASE URL")
+	fmt.Printf("  %-14s %-10s %s\n", "----", "--------", "--------")
+	for _, p := range providers {
+		fmt.Printf("  %-14s %-10s %s\n", p.Name, p.Protocol, p.BaseURL)
+	}
+	fmt.Println("\nUse 'ocr config provider' to configure a provider interactively.")
+	fmt.Println("Use 'ocr config set provider <name>' to switch providers non-interactively.")
+}
+
 func printLLMUsage() {
 	fmt.Println(`LLM utility commands.
 
@@ -97,7 +106,9 @@ Usage:
 
 Sub-commands:
   test         Send a test conversation to the configured LLM model
+  providers    List all built-in LLM providers
 
 Examples:
-  ocr llm test                   Verify LLM connectivity and configuration`)
+  ocr llm test                   Verify LLM connectivity and configuration
+  ocr llm providers              List available built-in providers`)
 }

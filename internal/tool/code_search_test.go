@@ -29,7 +29,14 @@ func TestBuildGrepArgs_CommitMode(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "abc1234"})
 	args := p.buildGrepArgs("myFunc", false, false, []string{"pkg/"})
 
-	assertContainsInOrder(t, args, "-e", "myFunc", "abc1234", "--", "pkg/")
+	assertContainsInOrder(t, args, "-e", "myFunc", "--end-of-options", "abc1234", "--", "pkg/")
+}
+
+func TestBuildGrepArgs_RefUsesEndOfOptions(t *testing.T) {
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "-O./pwn.sh"})
+	args := p.buildGrepArgs("myFunc", false, false, nil)
+
+	assertContainsInOrder(t, args, "-e", "myFunc", "--end-of-options", "-O./pwn.sh", "--")
 }
 
 func TestBuildGrepArgs_PatternStartingWithDash(t *testing.T) {
@@ -184,6 +191,29 @@ func TestGitGrep_CommitMode_WithPathspec(t *testing.T) {
 	}
 	if result2 != "No matches found" {
 		t.Errorf("expected 'No matches found' when pathspec excludes match, got: %s", result2)
+	}
+}
+
+func TestGitGrep_OptionLikeRefDoesNotLaunchPager(t *testing.T) {
+	dir := setupTestRepo(t)
+	proofPath := filepath.Join(dir, "PROOF")
+	pagerPath := filepath.Join(dir, "pwn.sh")
+	if err := os.WriteFile(pagerPath, []byte("#!/bin/sh\nprintf pwned > PROOF\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "-O./pwn.sh", Mode: ModeCommit})
+	result, err := p.gitGrep(context.Background(), "Hello", false, false, []string{"hello.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "unable to resolve revision") && !strings.Contains(result, "Not a valid object name") {
+		t.Fatalf("expected invalid revision error, got: %s", result)
+	}
+	if _, err := os.Stat(proofPath); err == nil {
+		t.Fatal("option-like ref launched pager and created proof file")
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
 	}
 }
 

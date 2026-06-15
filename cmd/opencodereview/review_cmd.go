@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/open-code-review/open-code-review/internal/agent"
@@ -29,6 +30,11 @@ func runReview(args []string) error {
 		return err
 	}
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
+
+	// Security (#112): reject ref-option injection before any git invocation.
+	if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
+		return err
+	}
 
 	if opts.commit != "" && opts.background == "" {
 		if msg, err := getCommitMessage(cc.RepoDir, opts.commit); err == nil && msg != "" {
@@ -122,6 +128,35 @@ func requireGitRepo(dir string) error {
 	out, err := runGitCmd(repoDir, "rev-parse", "--git-dir")
 	if err != nil || len(out) == 0 {
 		return fmt.Errorf("%s is not a git repository, code review requires a valid git repository", repoDir)
+	}
+	return nil
+}
+
+// validateReviewRefs rejects ref-option injection (#112): any --from/--to/
+// --commit value must be a real commit ref and must not start with '-'.
+func validateReviewRefs(repoDir string, opts reviewOptions) error {
+	refs := []struct {
+		flag string
+		ref  string
+	}{
+		{"--from", opts.from},
+		{"--to", opts.to},
+		{"--commit", opts.commit},
+	}
+	for _, item := range refs {
+		if item.ref == "" {
+			continue
+		}
+		if strings.HasPrefix(item.ref, "-") {
+			return fmt.Errorf("%s value %q is not a valid git ref: refs must not start with '-'", item.flag, item.ref)
+		}
+		if out, err := runGitCmd(repoDir, "rev-parse", "--verify", "--end-of-options", item.ref+"^{commit}"); err != nil {
+			msg := strings.TrimSpace(string(out))
+			if msg != "" {
+				return fmt.Errorf("%s value %q is not a valid commit ref: %s", item.flag, item.ref, msg)
+			}
+			return fmt.Errorf("%s value %q is not a valid commit ref", item.flag, item.ref)
+		}
 	}
 	return nil
 }

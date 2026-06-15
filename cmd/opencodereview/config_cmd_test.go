@@ -21,3 +21,126 @@ func TestSetConfigValueAuthHeaderRejectsCustomHeader(t *testing.T) {
 		t.Fatal("expected error for unsupported auth_header, got nil")
 	}
 }
+
+func TestSetConfigValueProvider(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "provider", "anthropic"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want %q", cfg.Provider, "anthropic")
+	}
+}
+
+func TestSetConfigValueModel(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "model", "claude-opus-4-6"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.Model != "claude-opus-4-6" {
+		t.Errorf("Model = %q, want %q", cfg.Model, "claude-opus-4-6")
+	}
+}
+
+func TestSetConfigValueModelWithProvider(t *testing.T) {
+	cfg := &Config{
+		Provider: "anthropic",
+		Providers: map[string]ProviderEntry{
+			"anthropic": {APIKey: "sk-test"},
+		},
+	}
+
+	if err := setConfigValue(cfg, "model", "claude-opus-4-6"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.Providers["anthropic"].Model != "claude-opus-4-6" {
+		t.Errorf("entry Model = %q, want %q", cfg.Providers["anthropic"].Model, "claude-opus-4-6")
+	}
+	if cfg.Model != "" {
+		t.Errorf("top-level Model = %q, want empty (should write to provider entry)", cfg.Model)
+	}
+}
+
+func TestSetConfigValueProviderEntry(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "providers.anthropic.api_key", "sk-ant-test"); err != nil {
+		t.Fatalf("setConfigValue api_key: %v", err)
+	}
+	if cfg.Providers["anthropic"].APIKey != "sk-ant-test" {
+		t.Errorf("api_key = %q, want %q", cfg.Providers["anthropic"].APIKey, "sk-ant-test")
+	}
+
+	if err := setConfigValue(cfg, "providers.anthropic.model", "claude-opus-4-6"); err != nil {
+		t.Fatalf("setConfigValue model: %v", err)
+	}
+	if cfg.Providers["anthropic"].Model != "claude-opus-4-6" {
+		t.Errorf("model = %q, want %q", cfg.Providers["anthropic"].Model, "claude-opus-4-6")
+	}
+}
+
+func TestSetConfigValueProviderEntryProtocol(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "custom_providers.custom.protocol", "openai"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.CustomProviders["custom"].Protocol != "openai" {
+		t.Errorf("protocol = %q, want %q", cfg.CustomProviders["custom"].Protocol, "openai")
+	}
+
+	if err := setConfigValue(cfg, "custom_providers.custom.protocol", "invalid"); err == nil {
+		t.Fatal("expected error for invalid protocol")
+	}
+}
+
+func TestSetConfigValueProviderEntryInvalidKey(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "providers.anthropic.unknown_field", "value"); err == nil {
+		t.Fatal("expected error for unknown provider field")
+	}
+}
+
+func TestSetConfigValueProviderEntryInvalidPath(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "providers.anthropic", "value"); err == nil {
+		t.Fatal("expected error for incomplete provider path")
+	}
+}
+
+func TestSetConfigValueProviderEntryExtraBody(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "providers.anthropic.extra_body", `{"thinking":{"type":"disabled"}}`); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.Providers["anthropic"].ExtraBody == nil {
+		t.Fatal("extra_body should not be nil")
+	}
+	if _, ok := cfg.Providers["anthropic"].ExtraBody["thinking"]; !ok {
+		t.Error("extra_body missing 'thinking' key")
+	}
+}
+
+func TestSetConfigValueModelWithCustomProvider(t *testing.T) {
+	cfg := &Config{
+		Provider: "my-gateway",
+		CustomProviders: map[string]ProviderEntry{
+			"my-gateway": {URL: "https://gw.example.com/v1", Protocol: "openai"},
+		},
+	}
+
+	if err := setConfigValue(cfg, "model", "llama-3-70b"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.CustomProviders["my-gateway"].Model != "llama-3-70b" {
+		t.Errorf("entry Model = %q, want %q", cfg.CustomProviders["my-gateway"].Model, "llama-3-70b")
+	}
+	if cfg.Model != "" {
+		t.Errorf("top-level Model = %q, want empty (should write to custom provider entry)", cfg.Model)
+	}
+}

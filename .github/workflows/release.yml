@@ -84,7 +84,6 @@ jobs:
       image: node:20
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -97,7 +96,12 @@ jobs:
       - name: Inject version from tag
         run: jq --arg v "${GITHUB_REF_NAME#v}" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
 
+      - name: Configure npm registry
+        run: echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish to npm
-        run: npm publish --access public --provenance
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

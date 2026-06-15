@@ -113,18 +113,22 @@ sudo cp dist/opencodereview /usr/local/bin/ocr
 
 **코드 리뷰를 실행하기 전에 반드시 LLM을 설정해야 합니다.**
 
+**Option A: 대화형 설정 (권장)**
+
 ```bash
-# Option A: 대화형 config
+ocr config provider          # built-in provider 선택 또는 custom provider 추가
+ocr config model             # 활성 provider의 model 선택
+```
+
+![Provider setup](imgs/providers.jpg)
+
+**Option B: 수동 설정**
+
+```bash
 ocr config set llm.url https://api.anthropic.com/v1/messages
 ocr config set llm.auth_token your-api-key-here
 ocr config set llm.model claude-opus-4-6
 ocr config set llm.use_anthropic true
-
-# Option B: 환경 변수(가장 높은 우선순위)
-export OCR_LLM_URL=https://api.anthropic.com/v1/messages
-export OCR_LLM_TOKEN=your-api-key-here
-export OCR_LLM_MODEL=claude-opus-4-6
-export OCR_USE_ANTHROPIC=true
 ```
 
 config는 `~/.opencodereview/config.json`에 저장됩니다.
@@ -133,11 +137,18 @@ config는 `~/.opencodereview/config.json`에 저장됩니다.
 
 ```bash
 ocr config set llm.auth_header x-api-key
-# 또는
-export OCR_LLM_AUTH_HEADER=x-api-key
 ```
 
 지원되는 값: `x-api-key`, `authorization` (별칭: `bearer`). 그 외 값은 오류로 처리됩니다.
+
+**Option C: 환경 변수(가장 높은 우선순위)**
+
+```bash
+export OCR_LLM_URL=https://api.anthropic.com/v1/messages
+export OCR_LLM_TOKEN=your-api-key-here
+export OCR_LLM_MODEL=claude-opus-4-6
+export OCR_USE_ANTHROPIC=true
+```
 
 Claude Code 환경 변수(`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`)와도 호환되며, `~/.zshrc` / `~/.bashrc`의 export도 파싱합니다.
 
@@ -278,8 +289,11 @@ ocr review \
 |---------|-------|-------------|
 | `ocr review` | `ocr r` | 코드 리뷰 시작 |
 | `ocr rules check <file>` | - | 파일 경로에 적용될 리뷰 rule 미리보기 |
+| `ocr config provider` | - | 대화형 provider 설정 (built-in, custom, 수동) |
+| `ocr config model` | - | 활성 provider의 대화형 model 선택 |
 | `ocr config set <key> <value>` | - | config 값 설정 |
 | `ocr llm test` | - | LLM 연결 테스트 |
+| `ocr llm providers` | - | built-in LLM provider 목록 표시 |
 | `ocr viewer` | `ocr v` | `localhost:5483`에서 WebUI session viewer 실행 |
 | `ocr version` | - | version 정보 표시 |
 
@@ -305,6 +319,11 @@ ocr review \
 ## Examples
 
 ```bash
+# 대화형 provider 및 model 설정
+ocr config provider
+ocr config model
+ocr llm providers
+
 # 리뷰 대상 파일 미리보기(LLM call 없음)
 ocr review --preview
 ocr review -c abc123 -p
@@ -383,6 +402,13 @@ Config file: `~/.opencodereview/config.json`
 
 | Key | Type | Example |
 |-----|------|---------|
+| `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
+| `providers.<name>.api_key` | string | Provider별 API key |
+| `providers.<name>.url` | string | Provider base URL override |
+| `providers.<name>.protocol` | string | `anthropic` \| `openai` |
+| `providers.<name>.model` | string | Provider의 model 이름 |
+| `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
+| `custom_providers.<name>.*` | — | `providers.<name>.*`과 동일한 필드 |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |

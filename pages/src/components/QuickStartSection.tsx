@@ -50,9 +50,12 @@ const QuickStartSection: React.FC = () => {
       codeBlocks: [
         {
           label: t('quickstart.step2Label1'),
+          code: `ocr config provider`
+        },
+        {
+          label: t('quickstart.step2Label2'),
           code: `ocr config set llm.url https://api.anthropic.com \\\n    && ocr config set llm.auth_token {{your-api-key}} \\\n    && ocr config set llm.model claude-opus-4-6 \\\n    && ocr config set llm.use_anthropic true`
         },
-        { label: t('quickstart.step2Label2'), code: `ocr config set language Chinese` },
         { label: t('quickstart.step2Label3'), code: `ocr llm test` }
       ]
     },

@@ -56,7 +56,9 @@ func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
 			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
 		}
 		if ok && ep.URL != "" && ep.Token != "" && ep.Model != "" {
-			ep.Source = s.name
+			if ep.Source == "" {
+				ep.Source = s.name
+			}
 			ep.Model = stripModelSuffix(ep.Model)
 			return ep, nil
 		}
@@ -110,8 +112,22 @@ type llmFileConfig struct {
 	ExtraBody    map[string]any `json:"extra_body,omitempty"`
 }
 
+// providerEntryConfig represents a single provider entry in config.json.
+type providerEntryConfig struct {
+	APIKey     string         `json:"api_key,omitempty"`
+	URL        string         `json:"url,omitempty"`
+	Protocol   string         `json:"protocol,omitempty"`
+	Model      string         `json:"model,omitempty"`
+	AuthHeader string         `json:"auth_header,omitempty"`
+	ExtraBody  map[string]any `json:"extra_body,omitempty"`
+}
+
 type configFile struct {
-	Llm llmFileConfig `json:"llm,omitempty"`
+	Provider        string                         `json:"provider,omitempty"`
+	Model           string                         `json:"model,omitempty"`
+	Providers       map[string]providerEntryConfig `json:"providers,omitempty"`
+	CustomProviders map[string]providerEntryConfig `json:"custom_providers,omitempty"`
+	Llm             llmFileConfig                  `json:"llm,omitempty"`
 }
 
 // tryOCRConfig reads the OCR config file.
@@ -129,6 +145,116 @@ func tryOCRConfig(path string) (ResolvedEndpoint, bool, error) {
 		return ResolvedEndpoint{}, false, fmt.Errorf("parse config: %w", err)
 	}
 
+	if cfg.Provider != "" {
+		return tryProviderConfig(cfg)
+	}
+
+	return tryLegacyLlmConfig(cfg)
+}
+
+// tryProviderConfig resolves an endpoint from the provider-based configuration.
+func tryProviderConfig(cfg configFile) (ResolvedEndpoint, bool, error) {
+	preset, isPreset := LookupProvider(cfg.Provider)
+
+	var entry providerEntryConfig
+	var ok bool
+	if isPreset {
+		entry, ok = cfg.Providers[cfg.Provider]
+	} else {
+		entry, ok = cfg.CustomProviders[cfg.Provider]
+	}
+	if !ok {
+		section := "providers"
+		if !isPreset {
+			section = "custom_providers"
+		}
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q is set but not configured in %s section", cfg.Provider, section)
+	}
+
+	apiKey := entry.APIKey
+	if apiKey == "" {
+		if isPreset && preset.EnvVar != "" {
+			apiKey = os.Getenv(preset.EnvVar)
+		}
+	}
+	if apiKey == "" {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key configured and no environment variable fallback found", cfg.Provider)
+	}
+
+	var url, protocol, authHeader, model string
+	var extraBody map[string]any
+
+	if isPreset {
+		url = preset.BaseURL
+		protocol = preset.Protocol
+		authHeader = preset.AuthHeader
+		if entry.URL != "" {
+			url = entry.URL
+		}
+		if entry.Protocol != "" {
+			protocol = strings.ToLower(entry.Protocol)
+		}
+	} else {
+		// Custom provider: url and protocol are required; model can come from cfg.Model.
+		if entry.URL == "" || entry.Protocol == "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires url and protocol fields", cfg.Provider)
+		}
+		if !strings.EqualFold(entry.Protocol, "anthropic") && !strings.EqualFold(entry.Protocol, "openai") {
+			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q has invalid protocol %q: must be \"anthropic\" or \"openai\"", cfg.Provider, entry.Protocol)
+		}
+		url = entry.URL
+		protocol = strings.ToLower(entry.Protocol)
+	}
+
+	if cfg.Model != "" {
+		model = cfg.Model
+	}
+	if entry.Model != "" {
+		model = entry.Model
+	}
+	if model == "" {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no model configured; run 'ocr config model' to select one", cfg.Provider)
+	}
+
+	if protocol == "anthropic" {
+		var err error
+		ah := "authorization"
+		if isPreset && authHeader != "" {
+			ah = authHeader
+		}
+		if entry.AuthHeader != "" {
+			ah = entry.AuthHeader
+		}
+		authHeader, err = NormalizeAuthHeader(ah)
+		if err != nil {
+			return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+		}
+		if authHeader == "" {
+			authHeader = defaultAuthHeader(protocol)
+		}
+	} else {
+		authHeader = ""
+	}
+
+	extraBody = entry.ExtraBody
+
+	if protocol == "anthropic" {
+		url = ensureMessagesSuffix(url)
+	}
+
+	return ResolvedEndpoint{
+		URL:        url,
+		Token:      apiKey,
+		Model:      model,
+		Protocol:   protocol,
+		AuthHeader: authHeader,
+		Source:     "provider:" + cfg.Provider,
+		ExtraBody:  extraBody,
+	}, true, nil
+}
+
+// tryLegacyLlmConfig resolves an endpoint from the legacy llm config block.
+func tryLegacyLlmConfig(cfg configFile) (ResolvedEndpoint, bool, error) {
 	if cfg.Llm.URL == "" || cfg.Llm.AuthToken == "" || cfg.Llm.Model == "" {
 		return ResolvedEndpoint{}, false, nil
 	}

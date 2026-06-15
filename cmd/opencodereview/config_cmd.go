@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/open-code-review/open-code-review/internal/llm"
 )
@@ -23,6 +24,19 @@ func runConfig(args []string) error {
 	if len(args) == 0 {
 		printConfigUsage()
 		return nil
+	}
+
+	switch args[0] {
+	case "provider":
+		if len(args) != 1 {
+			return fmt.Errorf("config provider does not accept arguments; use 'ocr config set provider <name>' for non-interactive setup")
+		}
+		return runConfigProvider()
+	case "model":
+		if len(args) != 1 {
+			return fmt.Errorf("config model does not accept arguments; use 'ocr config set model <name>' for non-interactive setup")
+		}
+		return runConfigModel()
 	}
 
 	action, err := parseConfigArgs(args)
@@ -53,29 +67,38 @@ func runConfigSet(key, value string) error {
 		return err
 	}
 
-	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
 	}
 
-	data, err := json.MarshalIndent(cfg, "", "    ")
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
+	displayValue := value
+	normalizedKey := strings.ToLower(strings.ReplaceAll(key, "_", ""))
+	if strings.HasSuffix(normalizedKey, "apikey") || strings.HasSuffix(normalizedKey, "authtoken") {
+		displayValue = maskKey(value)
 	}
-
-	if err := os.WriteFile(configPath, data, 0o644); err != nil {
-		return fmt.Errorf("write config: %w", err)
-	}
-
-	fmt.Printf("Set %s = %s\n", key, value)
+	fmt.Printf("Set %s = %s\n", key, displayValue)
 	return nil
+}
+
+// ProviderEntry holds per-provider configuration in the providers map.
+type ProviderEntry struct {
+	APIKey     string         `json:"api_key,omitempty"`
+	URL        string         `json:"url,omitempty"`
+	Protocol   string         `json:"protocol,omitempty"`
+	Model      string         `json:"model,omitempty"`
+	AuthHeader string         `json:"auth_header,omitempty"`
+	ExtraBody  map[string]any `json:"extra_body,omitempty"`
 }
 
 // Config represents the user-level configuration file (~/.opencodereview/config.json).
 type Config struct {
-	Llm       LlmConfig        `json:"llm,omitempty"`
-	Language  string           `json:"language,omitempty"`  // Output language, defaults to Chinese when empty
-	Telemetry *TelemetryConfig `json:"telemetry,omitempty"` // Telemetry/observability settings
+	Provider        string                   `json:"provider,omitempty"`
+	Model           string                   `json:"model,omitempty"`
+	Providers       map[string]ProviderEntry `json:"providers,omitempty"`
+	CustomProviders map[string]ProviderEntry `json:"custom_providers,omitempty"`
+	Llm             LlmConfig                `json:"llm,omitempty"`
+	Language        string                   `json:"language,omitempty"`
+	Telemetry       *TelemetryConfig         `json:"telemetry,omitempty"`
 }
 
 type LlmConfig struct {
@@ -127,7 +150,55 @@ func LoadAppConfig(path string) (*Config, error) {
 }
 
 func setConfigValue(cfg *Config, key, value string) error {
+	// Handle providers.<name>.<field> paths.
+	if strings.HasPrefix(key, "providers.") {
+		return setProviderValue(cfg, key, value)
+	}
+	if strings.HasPrefix(key, "custom_providers.") {
+		return setCustomProviderValue(cfg, key, value)
+	}
+
 	switch key {
+	case "provider":
+		if cfg.Provider != value {
+			cfg.Model = ""
+		}
+		cfg.Provider = value
+		if _, isPreset := llm.LookupProvider(value); isPreset {
+			if cfg.Providers == nil {
+				cfg.Providers = make(map[string]ProviderEntry)
+			}
+			if _, exists := cfg.Providers[value]; !exists {
+				cfg.Providers[value] = ProviderEntry{}
+			}
+		} else {
+			if cfg.CustomProviders == nil {
+				cfg.CustomProviders = make(map[string]ProviderEntry)
+			}
+			if _, exists := cfg.CustomProviders[value]; !exists {
+				cfg.CustomProviders[value] = ProviderEntry{}
+			}
+		}
+	case "model":
+		if cfg.Provider != "" {
+			if _, isPreset := llm.LookupProvider(cfg.Provider); isPreset {
+				if cfg.Providers == nil {
+					cfg.Providers = make(map[string]ProviderEntry)
+				}
+				entry := cfg.Providers[cfg.Provider]
+				entry.Model = value
+				cfg.Providers[cfg.Provider] = entry
+			} else {
+				if cfg.CustomProviders == nil {
+					cfg.CustomProviders = make(map[string]ProviderEntry)
+				}
+				entry := cfg.CustomProviders[cfg.Provider]
+				entry.Model = value
+				cfg.CustomProviders[cfg.Provider] = entry
+			}
+		} else {
+			cfg.Model = value
+		}
 	case "llm.url", "llm.URL":
 		cfg.Llm.URL = value
 	case "llm.auth_token", "llm.AuthToken":
@@ -175,8 +246,71 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging", key)
+		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging", key)
 	}
+	return nil
+}
+
+func applyProviderField(entry *ProviderEntry, field, key, value string) error {
+	switch field {
+	case "api_key":
+		entry.APIKey = value
+	case "url":
+		entry.URL = value
+	case "protocol":
+		if value != "anthropic" && value != "openai" {
+			return fmt.Errorf("invalid protocol %q: must be \"anthropic\" or \"openai\"", value)
+		}
+		entry.Protocol = value
+	case "model":
+		entry.Model = value
+	case "auth_header":
+		normalized, err := llm.NormalizeAuthHeader(value)
+		if err != nil {
+			return err
+		}
+		entry.AuthHeader = normalized
+	case "extra_body":
+		var m map[string]any
+		if err := json.Unmarshal([]byte(value), &m); err != nil {
+			return fmt.Errorf("invalid JSON for %s: %w", key, err)
+		}
+		entry.ExtraBody = m
+	default:
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, auth_header, extra_body", field)
+	}
+	return nil
+}
+
+func setProviderValue(cfg *Config, key, value string) error {
+	parts := strings.SplitN(key, ".", 3)
+	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
+		return fmt.Errorf("invalid provider key %q: expected providers.<name>.<field>", key)
+	}
+	if cfg.Providers == nil {
+		cfg.Providers = make(map[string]ProviderEntry)
+	}
+	entry := cfg.Providers[parts[1]]
+	if err := applyProviderField(&entry, parts[2], key, value); err != nil {
+		return err
+	}
+	cfg.Providers[parts[1]] = entry
+	return nil
+}
+
+func setCustomProviderValue(cfg *Config, key, value string) error {
+	parts := strings.SplitN(key, ".", 3)
+	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
+		return fmt.Errorf("invalid custom provider key %q: expected custom_providers.<name>.<field>", key)
+	}
+	if cfg.CustomProviders == nil {
+		cfg.CustomProviders = make(map[string]ProviderEntry)
+	}
+	entry := cfg.CustomProviders[parts[1]]
+	if err := applyProviderField(&entry, parts[2], key, value); err != nil {
+		return err
+	}
+	cfg.CustomProviders[parts[1]] = entry
 	return nil
 }
 

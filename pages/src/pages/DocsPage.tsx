@@ -227,10 +227,43 @@ const DocsPage: React.FC = () => {
           <DocSection id="config" title={t('docs.configTitle')}>
             <p className="text-slate-300 leading-relaxed mb-6" dangerouslySetInnerHTML={{ __html: t('docs.configDesc') }} />
 
-            <h3 className="text-lg font-semibold text-white mb-3">{t('docs.configCommand')}</h3>
+            <h3 className="text-lg font-semibold text-white mb-3">{t('docs.configInteractive')}</h3>
+            <p className="text-slate-400 text-sm mb-3">{t('docs.configInteractiveDesc')}</p>
+            <div className="space-y-3 mb-6">
+              <CodeBlock
+                code="ocr config provider"
+                copied={copiedIndex === 'config-provider'}
+                onCopy={() => handleCopy('ocr config provider', 'config-provider')}
+                copyLabel={t('docs.copy')}
+              />
+            </div>
+            <div className="space-y-3 mb-6">
+              <p className="text-slate-500 text-xs font-mono mb-2 ml-1">{t('docs.configModelSelect')}</p>
+              <p className="text-slate-400 text-sm mb-3">{t('docs.configModelSelectDesc')}</p>
+              <CodeBlock
+                code="ocr config model"
+                copied={copiedIndex === 'config-model'}
+                onCopy={() => handleCopy('ocr config model', 'config-model')}
+                copyLabel={t('docs.copy')}
+              />
+            </div>
+            <div className="space-y-3 mb-8">
+              <p className="text-slate-500 text-xs font-mono mb-2 ml-1">{t('docs.configListProviders')}</p>
+              <p className="text-slate-400 text-sm mb-3">{t('docs.configListProvidersDesc')}</p>
+              <CodeBlock
+                code="ocr llm providers"
+                copied={copiedIndex === 'config-providers-list'}
+                onCopy={() => handleCopy('ocr llm providers', 'config-providers-list')}
+                copyLabel={t('docs.copy')}
+              />
+            </div>
+
+            <h3 className="text-lg font-semibold text-white mb-3">{t('docs.configManual')}</h3>
+
+            <h4 className="text-base font-medium text-slate-300 mb-3">{t('docs.configCommand')}</h4>
             <CodeBlock code="ocr config set &lt;key&gt; &lt;value&gt;" />
 
-            <h3 className="text-lg font-semibold text-white mb-3 mt-8">{t('docs.configExample')}</h3>
+            <h4 className="text-base font-medium text-slate-300 mb-3 mt-6">{t('docs.configExample')}</h4>
             <div className="space-y-3 mb-8">
               <CodeBlock
                 code={`ocr config set llm.url https://api.anthropic.com \\\n    && ocr config set llm.auth_token {{your-api-key}} \\\n    && ocr config set llm.model claude-opus-4-6 \\\n    && ocr config set llm.use_anthropic true  \\\n    && ocr config set language Chinese`}

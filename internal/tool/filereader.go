@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
+	"github.com/open-code-review/open-code-review/internal/pathutil"
 )
 
 // ReviewMode represents the active review mode.
@@ -76,7 +77,10 @@ func (fr *FileReader) Read(ctx context.Context, path string) (string, error) {
 }
 
 func (fr *FileReader) readFromDisk(path string) (string, error) {
-	fullPath := filepath.Join(fr.RepoDir, path)
+	fullPath, err := fr.resolveWorkspacePath(path)
+	if err != nil {
+		return "", err
+	}
 	content, err := os.ReadFile(fullPath)
 	if err != nil {
 		return "", fmt.Errorf("read file %q: %w", path, err)
@@ -84,11 +88,35 @@ func (fr *FileReader) readFromDisk(path string) (string, error) {
 	return string(content), nil
 }
 
+func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
+	repoRoot, err := pathutil.CanonicalPath(fr.RepoDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve repository path %q: %w", fr.RepoDir, err)
+	}
+
+	fullPath := filepath.Join(repoRoot, path)
+	if !pathutil.WithinBase(repoRoot, fullPath) {
+		return "", fmt.Errorf("file path %q is outside repository", path)
+	}
+
+	resolvedPath, err := filepath.EvalSymlinks(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fullPath, nil
+		}
+		return "", fmt.Errorf("resolve file %q: %w", path, err)
+	}
+	if !pathutil.WithinBase(repoRoot, resolvedPath) {
+		return "", fmt.Errorf("file path %q is outside repository", path)
+	}
+	return resolvedPath, nil
+}
+
 func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
 
-	args := []string{"-c", "core.quotepath=false", "show", fr.Ref + ":" + path}
+	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
 	if fr.Runner != nil {
 		output, err := fr.Runner.Output(ctx, fr.RepoDir, args...)
 		if err != nil {
@@ -160,7 +188,10 @@ func scanLines(r io.Reader, startLine, maxLines int) ([]string, int, error) {
 }
 
 func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([]string, int, error) {
-	fullPath := filepath.Join(fr.RepoDir, path)
+	fullPath, err := fr.resolveWorkspacePath(path)
+	if err != nil {
+		return nil, 0, err
+	}
 	f, err := os.Open(fullPath)
 	if err != nil {
 		return nil, 0, fmt.Errorf("read file %q: %w", path, err)
@@ -171,7 +202,7 @@ func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([
 }
 
 func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
-	args := []string{"-c", "core.quotepath=false", "show", fr.Ref + ":" + path}
+	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
 
 	var collected []string
 	var totalLines int

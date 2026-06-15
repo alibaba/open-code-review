@@ -82,10 +82,13 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
-  ocr scan --all                           Scan every reviewable file in the repo
+  ocr scan                                 Scan every reviewable file in the repo
   ocr scan --path internal/agent           Scan a single directory
+  ocr config provider                      Interactive provider setup
+  ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
   ocr llm test                             Test LLM connectivity
+  ocr llm providers                        List built-in providers
   ocr version                              Show version info
 
 Use "ocr review -h" for more information about review.

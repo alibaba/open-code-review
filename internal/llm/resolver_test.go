@@ -244,3 +244,369 @@ func TestResolveEndpoint_OCREnvOpenAIIgnoresAuthHeader(t *testing.T) {
 		t.Errorf("expected empty auth header for OpenAI protocol, got %q", ep.AuthHeader)
 	}
 }
+
+// --- Provider-based resolution tests ---
+
+func clearAllEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{
+		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_AUTH_HEADER", "OCR_USE_ANTHROPIC",
+		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
+		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+	} {
+		t.Setenv(k, "")
+	}
+}
+
+func TestResolveEndpoint_ProviderAnthropic(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-sonnet-4-6"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Protocol != "anthropic" {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, "anthropic")
+	}
+	if ep.AuthHeader != "x-api-key" {
+		t.Errorf("AuthHeader = %q, want %q", ep.AuthHeader, "x-api-key")
+	}
+	if ep.Token != "sk-ant-test" {
+		t.Errorf("Token = %q, want %q", ep.Token, "sk-ant-test")
+	}
+	if ep.Model != "claude-sonnet-4-6" {
+		t.Errorf("Model = %q, want %q", ep.Model, "claude-sonnet-4-6")
+	}
+	if ep.Source != "provider:anthropic" {
+		t.Errorf("Source = %q, want %q", ep.Source, "provider:anthropic")
+	}
+}
+
+func TestResolveEndpoint_ProviderOpenAI(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "openai",
+		Providers: map[string]providerEntryConfig{
+			"openai": {APIKey: "sk-openai-test", Model: "gpt-4o"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Protocol != "openai" {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, "openai")
+	}
+	if ep.AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty", ep.AuthHeader)
+	}
+	if ep.Model != "gpt-4o" {
+		t.Errorf("Model = %q, want %q", ep.Model, "gpt-4o")
+	}
+}
+
+func TestResolveEndpoint_ProviderModelOverride(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Model:    "claude-opus-4-6",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-haiku-4-5"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Model != "claude-haiku-4-5" {
+		t.Errorf("Model = %q, want %q (entry model should override top-level model)", ep.Model, "claude-haiku-4-5")
+	}
+}
+
+func TestResolveEndpoint_ProviderEntryModelOverridesDefault(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-haiku-4-5"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Model != "claude-haiku-4-5" {
+		t.Errorf("Model = %q, want %q", ep.Model, "claude-haiku-4-5")
+	}
+}
+
+func TestResolveEndpoint_ProviderAPIKeyEnvFallback(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "env-api-key")
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {Model: "claude-sonnet-4-6"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Token != "env-api-key" {
+		t.Errorf("Token = %q, want %q (should fall back to env var)", ep.Token, "env-api-key")
+	}
+}
+
+func TestResolveEndpoint_ProviderMissingAPIKey(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+}
+
+func TestResolveEndpoint_ProviderNotConfigured(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider:  "anthropic",
+		Providers: map[string]providerEntryConfig{},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for unconfigured provider")
+	}
+}
+
+func TestResolveEndpoint_CustomProvider(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "custom-token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "openai",
+				Model:    "llama-3-70b",
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Protocol != "openai" {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, "openai")
+	}
+	if ep.URL != "https://gateway.internal.com/v1" {
+		t.Errorf("URL = %q", ep.URL)
+	}
+	if ep.Model != "llama-3-70b" {
+		t.Errorf("Model = %q, want %q", ep.Model, "llama-3-70b")
+	}
+	if ep.Source != "provider:my-gateway" {
+		t.Errorf("Source = %q, want %q", ep.Source, "provider:my-gateway")
+	}
+}
+
+func TestResolveEndpoint_CustomProviderInvalidProtocol(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "grpc",
+				Model:    "some-model",
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for custom provider with invalid protocol")
+	}
+}
+
+func TestResolveEndpoint_CustomProviderMissingFields(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey: "token",
+				URL:    "https://gateway.internal.com/v1",
+				// Missing protocol and model.
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for custom provider missing required fields")
+	}
+}
+
+func TestResolveEndpoint_CustomProviderModelFromTopLevel(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		Model:    "top-level-model",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "openai",
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Model != "top-level-model" {
+		t.Errorf("Model = %q, want %q", ep.Model, "top-level-model")
+	}
+}
+
+func TestResolveEndpoint_LegacyLlmStillWorks(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:       "https://api.example.com/v1/messages",
+			AuthToken: "legacy-token",
+			Model:     "claude-opus-4-6",
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Source != "OCR config file" {
+		t.Errorf("Source = %q, want %q", ep.Source, "OCR config file")
+	}
+	if ep.Token != "legacy-token" {
+		t.Errorf("Token = %q, want %q", ep.Token, "legacy-token")
+	}
+}
+
+func TestResolveEndpoint_ProviderAnthropicURLHasMessagesSuffix(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-sonnet-4-6"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.URL != "https://api.anthropic.com/v1/messages" {
+		t.Errorf("URL = %q, want %q", ep.URL, "https://api.anthropic.com/v1/messages")
+	}
+}
+
+func TestResolveEndpoint_ProviderExtraBody(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {
+				APIKey:    "sk-ant-test",
+				Model:     "claude-sonnet-4-6",
+				ExtraBody: map[string]any{"thinking": map[string]any{"type": "disabled"}},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.ExtraBody == nil {
+		t.Fatal("ExtraBody should not be nil")
+	}
+	if _, ok := ep.ExtraBody["thinking"]; !ok {
+		t.Error("ExtraBody missing 'thinking' key")
+	}
+}

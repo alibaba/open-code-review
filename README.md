@@ -113,18 +113,22 @@ sudo cp dist/opencodereview /usr/local/bin/ocr
 
 **You must configure an LLM before reviewing code.**
 
+**Option A: Interactive setup (Recommended)**
+
 ```bash
-# Option A: Interactive config
+ocr config provider          # Select a built-in provider or add a custom one
+ocr config model             # Pick a model for the active provider
+```
+
+![Provider setup](imgs/providers.jpg)
+
+**Option B: Manual config**
+
+```bash
 ocr config set llm.url https://api.anthropic.com/v1/messages
 ocr config set llm.auth_token your-api-key-here
 ocr config set llm.model claude-opus-4-6
 ocr config set llm.use_anthropic true
-
-# Option B: Environment variables (highest priority)
-export OCR_LLM_URL=https://api.anthropic.com/v1/messages
-export OCR_LLM_TOKEN=your-api-key-here
-export OCR_LLM_MODEL=claude-opus-4-6
-export OCR_USE_ANTHROPIC=true
 ```
 
 Config is stored in `~/.opencodereview/config.json`.
@@ -133,11 +137,18 @@ Config is stored in `~/.opencodereview/config.json`.
 
 ```bash
 ocr config set llm.auth_header x-api-key
-# or
-export OCR_LLM_AUTH_HEADER=x-api-key
 ```
 
 Supported values: `x-api-key`, `authorization` (alias: `bearer`). Other values are rejected with an error.
+
+**Option C: Environment variables (highest priority)**
+
+```bash
+export OCR_LLM_URL=https://api.anthropic.com/v1/messages
+export OCR_LLM_TOKEN=your-api-key-here
+export OCR_LLM_MODEL=claude-opus-4-6
+export OCR_USE_ANTHROPIC=true
+```
 
 It is also compatible with Claude Code environment variables (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) and parses `~/.zshrc` / `~/.bashrc` for those exports.
 
@@ -280,8 +291,11 @@ See the [`examples/`](./examples/) directory for integration examples:
 |---------|-------|-------------|
 | `ocr review` | `ocr r` | Start a code review |
 | `ocr rules check <file>` | — | Preview which review rule applies to a file path |
+| `ocr config provider` | — | Interactive provider setup (built-in, custom, or manual) |
+| `ocr config model` | — | Interactive model selection for the active provider |
 | `ocr config set <key> <value>` | — | Set configuration values |
 | `ocr llm test` | — | Test LLM connectivity |
+| `ocr llm providers` | — | List built-in LLM providers |
 | `ocr viewer` | `ocr v` | Launch WebUI session viewer on `localhost:5483` |
 | `ocr version` | — | Show version info |
 
@@ -307,6 +321,11 @@ See the [`examples/`](./examples/) directory for integration examples:
 ## Examples
 
 ```bash
+# Interactive provider and model setup
+ocr config provider
+ocr config model
+ocr llm providers
+
 # Preview which files will be reviewed (no LLM calls)
 ocr review --preview
 ocr review -c abc123 -p
@@ -427,6 +446,13 @@ Config file: `~/.opencodereview/config.json`
 
 | Key | Type | Example |
 |-----|------|---------|
+| `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
+| `providers.<name>.api_key` | string | Provider-specific API key |
+| `providers.<name>.url` | string | Provider base URL override |
+| `providers.<name>.protocol` | string | `anthropic` \| `openai` |
+| `providers.<name>.model` | string | Model name for the provider |
+| `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
+| `custom_providers.<name>.*` | — | Same fields as `providers.<name>.*` |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |

@@ -2,9 +2,11 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -158,6 +160,140 @@ func TestReadLines_GitShow_Window(t *testing.T) {
 	}
 	if len(lines) < 1 || lines[0] != "package main" {
 		t.Errorf("first line = %q, want %q", lines[0], "package main")
+	}
+}
+
+func TestReadLines_Disk_RejectsParentTraversal(t *testing.T) {
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "repo")
+	if err := os.Mkdir(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	secretPath := filepath.Join(base, "secret.txt")
+	if err := os.WriteFile(secretPath, []byte("outside-secret\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	escapePath, err := filepath.Rel(repoDir, secretPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fr := &FileReader{RepoDir: repoDir, Mode: ModeWorkspace}
+	if _, _, err := fr.ReadLines(context.Background(), escapePath, 1, 10); err == nil || !strings.Contains(err.Error(), "outside repository") {
+		t.Fatalf("ReadLines(%q) error = %v, want outside repository", escapePath, err)
+	}
+	if _, err := fr.Read(context.Background(), escapePath); err == nil || !strings.Contains(err.Error(), "outside repository") {
+		t.Fatalf("Read(%q) error = %v, want outside repository", escapePath, err)
+	}
+}
+
+func TestReadLines_Disk_AllowsParentSegmentWithinRepo(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "pkg"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, dir, "target.txt", "inside\n")
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	lines, _, err := fr.ReadLines(context.Background(), filepath.Join("pkg", "..", "target.txt"), 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) == 0 || lines[0] != "inside" {
+		t.Fatalf("ReadLines(pkg/../target.txt) = %q, want inside", lines)
+	}
+}
+
+func TestReadLines_Disk_AbsolutePathStaysUnderRepo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("absolute path syntax varies on Windows")
+	}
+
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "etc"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, dir, filepath.Join("etc", "passwd"), "repo-passwd\n")
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	lines, _, err := fr.ReadLines(context.Background(), "/etc/passwd", 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) == 0 || lines[0] != "repo-passwd" {
+		t.Fatalf("ReadLines(/etc/passwd) = %q, want repo-passwd", lines)
+	}
+}
+
+func TestReadLines_Disk_MissingFilePreservesReadError(t *testing.T) {
+	dir := t.TempDir()
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+
+	_, _, err := fr.ReadLines(context.Background(), "missing.txt", 1, 10)
+	if err == nil {
+		t.Fatal("ReadLines(missing.txt) error = nil, want not exist")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ReadLines(missing.txt) error = %v, want os.ErrNotExist", err)
+	}
+	if !strings.Contains(err.Error(), `read file "missing.txt"`) || strings.Contains(err.Error(), "resolve file") {
+		t.Fatalf("ReadLines(missing.txt) error = %v, want read file error", err)
+	}
+
+	_, err = fr.Read(context.Background(), "missing.txt")
+	if err == nil {
+		t.Fatal("Read(missing.txt) error = nil, want not exist")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Read(missing.txt) error = %v, want os.ErrNotExist", err)
+	}
+	if !strings.Contains(err.Error(), `read file "missing.txt"`) || strings.Contains(err.Error(), "resolve file") {
+		t.Fatalf("Read(missing.txt) error = %v, want read file error", err)
+	}
+}
+
+func TestReadLines_Disk_RejectsSymlinkOutsideRepo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink privileges vary on Windows")
+	}
+
+	base := t.TempDir()
+	repoDir := filepath.Join(base, "repo")
+	if err := os.Mkdir(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	secretPath := filepath.Join(base, "secret.txt")
+	if err := os.WriteFile(secretPath, []byte("outside-secret\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secretPath, filepath.Join(repoDir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	fr := &FileReader{RepoDir: repoDir, Mode: ModeWorkspace}
+	if _, _, err := fr.ReadLines(context.Background(), "link.txt", 1, 10); err == nil || !strings.Contains(err.Error(), "outside repository") {
+		t.Fatalf("ReadLines(link.txt) error = %v, want outside repository", err)
+	}
+}
+
+func TestReadLines_Disk_AllowsSymlinkInsideRepo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink privileges vary on Windows")
+	}
+
+	dir := t.TempDir()
+	writeTestFile(t, dir, "target.txt", "inside\n")
+	if err := os.Symlink(filepath.Join(dir, "target.txt"), filepath.Join(dir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	lines, _, err := fr.ReadLines(context.Background(), "link.txt", 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) == 0 || lines[0] != "inside" {
+		t.Fatalf("ReadLines(link.txt) = %q, want inside", lines)
 	}
 }
 

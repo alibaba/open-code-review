@@ -251,7 +251,7 @@ func parseConfigArgs(args []string) (configAction, error) {
 			value:  args[2],
 		}, nil
 	default:
-		return configAction{}, fmt.Errorf("unknown config sub-command: %s\nAvailable: set", subCmd)
+		return configAction{}, fmt.Errorf("unknown config sub-command: %s\nAvailable: set, provider, model", subCmd)
 	}
 }
 
@@ -260,8 +260,29 @@ func printConfigUsage() {
 
 Usage:
   ocr config set <key> <value>
+  ocr config provider              Interactive provider setup
+  ocr config model                 Interactive model selection
 
 Examples:
+  # Provider setup (interactive)
+  ocr config provider
+  ocr config model
+
+  # Provider setup (non-interactive)
+  ocr config set provider anthropic
+  ocr config set model claude-opus-4-6
+  # Set API key via environment variable (recommended) or config:
+  # export ANTHROPIC_API_KEY=sk-ant-xxx
+  ocr config set providers.anthropic.api_key "$ANTHROPIC_API_KEY"
+
+  # Custom provider
+  ocr config set provider my-gateway
+  ocr config set providers.my-gateway.url https://gateway.internal.com/v1
+  ocr config set providers.my-gateway.protocol openai
+  ocr config set providers.my-gateway.model llama-3-70b
+  ocr config set providers.my-gateway.api_key "$MY_API_KEY"
+
+  # Legacy endpoint configuration
   ocr config set llm.url https://xx/v1/openai/chat/completions
   ocr config set llm.auth_token xxxxxxxxxx
   ocr config set llm.auth_header x-api-key
@@ -270,5 +291,5 @@ Examples:
   ocr config set language English
   ocr config set telemetry.enabled true
 
-Supported keys: llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging`)
+Supported keys: provider, model, providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging`)
 }
