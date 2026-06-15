@@ -88,6 +88,12 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 
 	var out []model.ScanItem
 	for _, rel := range files {
+		// Per-iteration cancellation check: a large repo with thousands of
+		// files may take seconds to walk, and downstream Lstat / ReadFile
+		// each cost a syscall — abort early when ctx is cancelled.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if rel == "" {
 			continue
 		}
@@ -187,11 +193,16 @@ func (p *Provider) listFilesViaGit(ctx context.Context) ([]string, error) {
 //     supported in this mode)
 //
 // Skips entire subtrees via filepath.SkipDir for performance.
-func (p *Provider) listFilesViaWalk(_ context.Context) ([]string, error) {
+func (p *Provider) listFilesViaWalk(ctx context.Context) ([]string, error) {
 	gitignorePatterns := diff.LoadGitignorePatterns(p.repoDir)
 	var files []string
 
 	err := filepath.WalkDir(p.repoDir, func(path string, d os.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			// Abort the walk; filepath.WalkDir propagates this back as the
+			// returned error so the caller sees ctx.Err().
+			return cerr
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: walk error at %s: %v\n", path, err)
 			return nil // continue walking; skip this entry

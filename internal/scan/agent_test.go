@@ -87,6 +87,52 @@ func TestFormatPlanGuidance_SummaryOnly(t *testing.T) {
 	}
 }
 
+// TestPreview_DoesNotMutateAgentItems guards against re-introducing a
+// side-effect that pre-populated a.items, which made subsequent Run calls
+// on the same Agent silently observe stale state.
+func TestPreview_DoesNotMutateAgentItems(t *testing.T) {
+	repo := initTestRepo(t)
+	writeFile(t, repo, "a.go", []byte("package a\n"))
+	writeFile(t, repo, "b.go", []byte("package b\n"))
+	gitCommit(t, repo, "init")
+
+	a := NewAgent(Args{
+		RepoDir:   repo,
+		GitRunner: nil,
+		Template:  makeTemplateWithFullScan(),
+	})
+	if got := a.items; got != nil {
+		t.Fatalf("pre-Preview items should be nil, got %v", got)
+	}
+	if _, err := a.Preview(t.Context()); err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if a.items != nil {
+		t.Errorf("Preview must not mutate a.items; got %d items", len(a.items))
+	}
+}
+
+// TestPreview_EmptyResultEntriesIsNonNilSlice prevents `"files":null` in
+// JSON output when there is nothing reviewable to enumerate.
+func TestPreview_EmptyResultEntriesIsNonNilSlice(t *testing.T) {
+	// Empty repo → empty Entries
+	repo := initTestRepo(t)
+	a := NewAgent(Args{
+		RepoDir:  repo,
+		Template: makeTemplateWithFullScan(),
+	})
+	got, err := a.Preview(t.Context())
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if got.Entries == nil {
+		t.Errorf("Entries must be non-nil even when empty (JSON would emit null)")
+	}
+	if len(got.Entries) != 0 {
+		t.Errorf("expected 0 entries, got %d", len(got.Entries))
+	}
+}
+
 func TestBuildSummaryCommentsList_TruncatesAndOneLines(t *testing.T) {
 	long := strings.Repeat("x", 400)
 	cs := []model.LlmComment{

@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -194,6 +195,26 @@ func TestProvider_Enumerate_NonGitDirectory(t *testing.T) {
 	want := []string{".gitignore", "main.go", "pkg/util.go"}
 	if !reflect.DeepEqual(paths, want) {
 		t.Errorf("paths = %v, want %v (ignored.txt must be filtered by .gitignore, node_modules/* by ExcludedDirs)", paths, want)
+	}
+}
+
+// TestProvider_Enumerate_RespectsContextCancellation guards the
+// per-iteration ctx.Err() check that was previously missing.
+func TestProvider_Enumerate_RespectsContextCancellation(t *testing.T) {
+	repo := initTestRepo(t)
+	for i := 0; i < 30; i++ {
+		writeFile(t, repo, "pkg/"+strings.Repeat("a", i+1)+".go", []byte("package pkg\n"))
+	}
+	gitCommit(t, repo, "init")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancelled
+	_, err := NewProvider(repo, nil, nil, 0).Enumerate(ctx)
+	if err == nil {
+		t.Fatal("expected ctx-cancelled error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }
 
