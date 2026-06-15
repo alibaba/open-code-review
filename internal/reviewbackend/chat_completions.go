@@ -34,13 +34,11 @@ func (b *ChatCompletionsBackend) Complete(ctx context.Context, req CompleteReque
 	if model == "" {
 		model = b.ep.Model
 	}
-	start := time.Now()
 	resp, err := b.client.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     model,
 		Messages:  req.Messages,
 		MaxTokens: req.MaxTokens,
 	})
-	_ = start
 	if err != nil {
 		return nil, err
 	}
@@ -132,9 +130,13 @@ func (b *ChatCompletionsBackend) ReviewFile(ctx context.Context, req ReviewFileR
 
 		if len(calls) == 0 {
 			logf("[ocr] No tool calls parsed for %s, retrying...\n", req.FilePath)
-			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
 			if content != "" {
-				messages = append(messages[:len(messages)-1], llm.NewTextMessage("assistant", content), messages[len(messages)-1])
+				messages = append(messages,
+					llm.NewTextMessage("assistant", content),
+					llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."),
+				)
+			} else {
+				messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
 			}
 			continue
 		}

@@ -38,6 +38,8 @@ type ReviewFileRequest struct {
 	MaxTokens     int
 	MaxToolRounds int
 	FilePath      string
+	// ToolsPrompt is human-readable tool guidance for Cursor MCP custom tools.
+	ToolsPrompt string
 }
 
 // ToolCallInput is passed to the tool executor from any backend.
@@ -58,6 +60,8 @@ type ToolExecutor func(ctx context.Context, call ToolCallInput) ToolCallOutput
 
 // ReviewHooks wires agent-level session, telemetry, and compression into a backend loop.
 type ReviewHooks struct {
+	// AppendTaskRecord must be called at the start of each review round, before exec
+	// invokes tools, so tool results are recorded on the active task record.
 	AppendTaskRecord func(taskType session.TaskType, messages []llm.Message) *session.TaskRecord
 	SetResponse      func(rec *session.TaskRecord, resp *llm.ChatResponse, durationMs int64)
 	SetError         func(rec *session.TaskRecord, err error, durationMs int64)

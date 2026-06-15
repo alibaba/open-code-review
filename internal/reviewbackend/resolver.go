@@ -25,12 +25,22 @@ type ResolvedBackend struct {
 
 // ResolveBackend reads OCR config and returns the appropriate backend kind.
 func ResolveBackend(configPath string) (ResolvedBackend, error) {
-	cfg, err := readConfigFile(configPath)
+	data, cfg, err := readConfigBytes(configPath)
 	if err != nil {
 		return ResolvedBackend{}, err
 	}
 	if cfg != nil && strings.EqualFold(cfg.Provider, "cursor") {
 		return resolveCursorProvider(cfg)
+	}
+
+	if len(data) > 0 {
+		ep, ok, err := llm.TryOCRConfigBytes(data)
+		if err != nil {
+			return ResolvedBackend{}, err
+		}
+		if ok {
+			return ResolvedBackend{Kind: KindChatCompletions, Endpoint: ep}, nil
+		}
 	}
 
 	ep, err := llm.ResolveEndpoint(configPath)
@@ -51,19 +61,19 @@ type configFile struct {
 	Providers map[string]providerEntry `json:"providers,omitempty"`
 }
 
-func readConfigFile(path string) (*configFile, error) {
+func readConfigBytes(path string) ([]byte, *configFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	var cfg configFile
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+		return nil, nil, fmt.Errorf("parse config: %w", err)
 	}
-	return &cfg, nil
+	return data, &cfg, nil
 }
 
 func resolveCursorProvider(cfg *configFile) (ResolvedBackend, error) {

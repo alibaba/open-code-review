@@ -36,7 +36,7 @@ func TestToolDefsToCustomTools_Executor(t *testing.T) {
 			Description: "Leave a comment",
 			Parameters:  map[string]any{"type": "object"},
 		},
-	}}, func(_ context.Context, call ToolCallInput) ToolCallOutput {
+	}}, "foo.go", func(_ context.Context, call ToolCallInput) ToolCallOutput {
 		gotName = call.Name
 		gotArgs = call.Arguments
 		return ToolCallOutput{Result: `{"ok":true}`}
@@ -72,7 +72,7 @@ func TestToolDefsToCustomTools_TaskDone(t *testing.T) {
 			Name:        "task_done",
 			Description: "Finish review",
 		},
-	}}, func(_ context.Context, _ ToolCallInput) ToolCallOutput {
+	}}, "foo.go", func(_ context.Context, _ ToolCallInput) ToolCallOutput {
 		return ToolCallOutput{Completed: true}
 	})
 

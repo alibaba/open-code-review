@@ -73,8 +73,8 @@ github.com/pkoukk/tiktoken-go v0.1.8 h1:85ENo+3FpWgAACBaEUVp+lctuTcYUO7BtmfhlN/Q
 github.com/pkoukk/tiktoken-go v0.1.8/go.mod h1:9NiV+i9mJKGj1rYOT+njbv+ZwA/zJxYdewGl6qVatpg=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/remdev/cursor-go-sdk v0.0.2 h1:2bB/CKYuDWvqImaMvnlv6IfrMBkSouPegVdf+cnVjeY=
-github.com/remdev/cursor-go-sdk v0.0.2/go.mod h1:8+NZymOCljHsqHoor5ZU9o4kuwy573NuY7U8n6jajAY=
+github.com/remdev/cursor-go-sdk v0.0.3 h1:iDkAip8KdmXg5OID1F9wNbufmInlIcGEE74+8BantFE=
+github.com/remdev/cursor-go-sdk v0.0.3/go.mod h1:8+NZymOCljHsqHoor5ZU9o4kuwy573NuY7U8n6jajAY=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
 github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
 github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 h1:uOfcYT+3QungH6tIGSVCR/Y3KJmgJiHcojJbMTPDZAI=

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/open-code-review/open-code-review/internal/model"
 )
@@ -43,10 +45,47 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 		}
 	}
 	if len(rawComments) == 0 {
+		if content, ok := args["content"].(string); ok && content != "" {
+			cm := model.LlmComment{Content: content}
+			if path, ok := args["path"].(string); ok {
+				cm.Path = path
+			}
+			if start, ok := toInt(args["start_line"]); ok {
+				cm.StartLine = start
+				cm.EndLine = start
+			}
+			if end, ok := toInt(args["end_line"]); ok {
+				if cm.StartLine > 0 {
+					cm.EndLine = end
+				} else {
+					cm.EndLine = end
+					cm.StartLine = end
+				}
+			}
+			if existing, ok := args["existing_code"].(string); ok {
+				cm.ExistingCode = existing
+			}
+			if suggestion, ok := args["suggestion_code"].(string); ok {
+				cm.SuggestionCode = suggestion
+			}
+			if thinking, ok := args["thinking"].(string); ok {
+				cm.Thinking = thinking
+			}
+			normalizeCommentLines(&cm)
+			if cm.Content != "" && cm.Path != "" {
+				return []model.LlmComment{cm}, ""
+			}
+			if content != "" && cm.Path == "" {
+				return nil, "Error: flat code_comment requires path"
+			}
+		}
 		raw, _ := json.Marshal(args)
 		return nil, fmt.Sprintf("Error: 'comments' array is required. Got args: %s", string(raw))
 	}
 
+	topPath, _ := args["path"].(string)
+	topStart, hasTopStart := toInt(args["start_line"])
+	topEnd, hasTopEnd := toInt(args["end_line"])
 	var comments []model.LlmComment
 	for _, raw := range rawComments {
 		obj, ok := raw.(map[string]any)
@@ -68,9 +107,32 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 		if thinking, ok := obj["thinking"].(string); ok {
 			cm.Thinking = thinking
 		}
-		if path, ok := args["path"].(string); ok {
+		if path, ok := obj["path"].(string); ok && path != "" {
 			cm.Path = path
+		} else if topPath != "" {
+			cm.Path = topPath
 		}
+		if start, ok := toInt(obj["start_line"]); ok {
+			cm.StartLine = start
+			if cm.EndLine == 0 {
+				cm.EndLine = start
+			}
+		} else if hasTopStart {
+			cm.StartLine = topStart
+			cm.EndLine = topStart
+		}
+		if end, ok := toInt(obj["end_line"]); ok {
+			if cm.StartLine > 0 {
+				cm.EndLine = end
+			} else {
+				cm.StartLine = end
+				cm.EndLine = end
+			}
+		} else if hasTopEnd && cm.StartLine > 0 {
+			cm.EndLine = topEnd
+		}
+
+		normalizeCommentLines(&cm)
 
 		if cm.Path == "" || cm.Content == "" {
 			continue
@@ -78,5 +140,39 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 
 		comments = append(comments, cm)
 	}
+	if len(rawComments) > 0 && len(comments) == 0 {
+		return nil, "Error: no valid comments parsed from comments[] array"
+	}
 	return comments, ""
+}
+
+func normalizeCommentLines(cm *model.LlmComment) {
+	if cm.StartLine > 0 && cm.EndLine > 0 && cm.EndLine < cm.StartLine {
+		cm.EndLine = cm.StartLine
+	}
+}
+
+func toInt(v any) (int, bool) {
+	var n int
+	var ok bool
+	switch t := v.(type) {
+	case int:
+		n, ok = t, true
+	case int64:
+		n, ok = int(t), true
+	case float64:
+		n, ok = int(t), true
+	case json.Number:
+		i, err := t.Int64()
+		n, ok = int(i), err == nil
+	case string:
+		i, err := strconv.Atoi(strings.TrimSpace(t))
+		n, ok = i, err == nil
+	default:
+		return 0, false
+	}
+	if !ok || n <= 0 {
+		return 0, false
+	}
+	return n, true
 }

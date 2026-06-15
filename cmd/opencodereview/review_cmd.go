@@ -99,10 +99,7 @@ func runReview(args []string) error {
 	}
 
 	llmClient := reviewbackend.TextClient(backend)
-	model := resolved.Endpoint.Model
-	if resolved.Kind == reviewbackend.KindCursorAgent {
-		model = resolved.Cursor.Model
-	}
+	model := backend.Model()
 
 	gitRunner := gitcmd.New(opts.maxGitProcs)
 

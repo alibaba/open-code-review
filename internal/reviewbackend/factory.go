@@ -32,6 +32,9 @@ type completeAdapter struct {
 }
 
 func (a *completeAdapter) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	if len(req.Tools) > 0 {
+		return nil, fmt.Errorf("completeAdapter does not support tools; use Backend.ReviewFile instead")
+	}
 	model := req.Model
 	if model == "" {
 		model = a.backend.Model()

@@ -56,12 +56,8 @@ func runLLMTest() error {
 
 	llmClient := reviewbackend.TextClient(backend)
 
-	model := resolved.Endpoint.Model
-	source := resolved.Endpoint.Source
-	if resolved.Kind == reviewbackend.KindCursorAgent {
-		model = resolved.Cursor.Model
-		source = resolved.Cursor.Source
-	}
+	model := backend.Model()
+	source := backend.Source()
 
 	task, err := testconnection.LoadDefault()
 	if err != nil {

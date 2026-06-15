@@ -14,7 +14,7 @@ import (
 )
 
 const bridgeSetupHint = "install Cursor bridge: go run github.com/remdev/cursor-go-sdk/cmd/setup@latest " +
-	"or npm install -g @cursor-go-sdk/cursor-sdk-bridge@0.0.2"
+	"or npm install -g @cursor-go-sdk/cursor-sdk-bridge@0.0.3"
 
 // CursorAgentBackend runs review via Cursor Agent SDK local runtime and custom tools.
 type CursorAgentBackend struct {
@@ -51,7 +51,7 @@ func (b *CursorAgentBackend) Complete(ctx context.Context, req CompleteRequest) 
 		model = b.cfg.Model
 	}
 
-	agent, err := cursor.CreateAgent(ctx, b.agentOptions(model))
+	agent, err := cursor.CreateAgent(ctx, b.agentOptions(model, nil))
 	if err != nil {
 		return nil, wrapCursorError(err)
 	}
@@ -88,15 +88,40 @@ func (b *CursorAgentBackend) ReviewFile(ctx context.Context, req ReviewFileReque
 	if hooks == nil {
 		hooks = &ReviewHooks{}
 	}
+	logf := hooks.Logf
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
 
 	model := req.Model
 	if model == "" {
 		model = b.cfg.Model
 	}
 
-	customTools := toolDefsToCustomTools(ctx, req.Tools, exec)
+	tracker := &cursorReviewTracker{}
+	mcpExec := func(callCtx context.Context, call ToolCallInput) ToolCallOutput {
+		tracker.markTool(call.Name)
+		if call.Name == "code_comment" {
+			tracker.mcpCodeComment = true
+		}
+		out := exec(callCtx, call)
+		if out.Completed {
+			tracker.taskDone = true
+		}
+		return out
+	}
+	replayExec := func(callCtx context.Context, call ToolCallInput) ToolCallOutput {
+		tracker.markTool(call.Name)
+		out := exec(callCtx, call)
+		if out.Completed {
+			tracker.taskDone = true
+		}
+		return out
+	}
 
-	agent, err := cursor.CreateAgent(ctx, b.agentOptions(model))
+	customTools := toolDefsToCustomTools(ctx, req.Tools, req.FilePath, mcpExec)
+
+	agent, err := cursor.CreateAgent(ctx, b.agentOptions(model, customTools))
 	if err != nil {
 		return wrapCursorError(err)
 	}
@@ -106,58 +131,163 @@ func (b *CursorAgentBackend) ReviewFile(ctx context.Context, req ReviewFileReque
 		_ = agent.Close(closeCtx)
 	}()
 
-	var rec *session.TaskRecord
-	if hooks.AppendTaskRecord != nil {
-		rec = hooks.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), req.Messages...))
+	maxRounds := req.MaxToolRounds
+	if maxRounds <= 0 {
+		maxRounds = 1
 	}
 
-	start := time.Now()
-	usageAcc := &cursorUsageAccumulator{}
-	run, err := agent.Send(ctx, messagesToPrompt(req.Messages), cursor.SendOptions{
-		Local: &cursor.LocalSendOptions{
-			CustomTools: customTools,
-		},
-		OnDelta: usageAcc.callback(),
-	})
-	if err != nil {
-		if hooks.SetError != nil && rec != nil {
-			hooks.SetError(rec, err, time.Since(start).Milliseconds())
+	prompt := buildCursorReviewPrompt(req.Messages, req.ToolsPrompt)
+	basePrompt := prompt
+	consecutiveNoTools := 0
+
+	for round := 0; round < maxRounds; round++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
-		return wrapCursorError(err)
-	}
 
-	result, err := run.Wait(ctx)
-	duration := time.Since(start)
-	if err != nil {
-		if hooks.SetError != nil && rec != nil {
-			hooks.SetError(rec, err, duration.Milliseconds())
+		usageAcc := &cursorUsageAccumulator{}
+		sendOpts := cursor.SendOptions{
+			Mode:    cursor.AgentModeAgent,
+			OnDelta: usageAcc.callback(),
 		}
-		return wrapCursorError(err)
+
+		var rec *session.TaskRecord
+		if hooks.AppendTaskRecord != nil {
+			msgs := req.Messages
+			if round > 0 {
+				msgs = []llm.Message{llm.NewTextMessage("user", prompt)}
+			}
+			rec = hooks.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), msgs...))
+		}
+
+		start := time.Now()
+		run, err := agent.Send(ctx, prompt, sendOpts)
+		if err != nil {
+			durationMs := time.Since(start).Milliseconds()
+			if hooks.SetError != nil && rec != nil {
+				hooks.SetError(rec, err, durationMs)
+			}
+			recordCursorRoundMetrics(hooks, usageAcc, durationMs, "error")
+			return wrapCursorError(err)
+		}
+
+		result, err := run.Wait(ctx)
+		durationMs := time.Since(start).Milliseconds()
+		if err != nil {
+			if hooks.SetError != nil && rec != nil {
+				hooks.SetError(rec, err, durationMs)
+			}
+			recordCursorRoundMetrics(hooks, usageAcc, durationMs, "error")
+			return wrapCursorError(err)
+		}
+
+		if hooks.SetResponse != nil && rec != nil {
+			content := result.Result
+			hooks.SetResponse(rec, &llm.ChatResponse{
+				Model: model,
+				Choices: []llm.Choice{{
+					Message:      llm.ResponseMessage{Role: "assistant", Content: &content},
+					FinishReason: string(result.Status),
+				}},
+				Usage: usageAcc.usage(),
+			}, durationMs)
+		}
+
+		if err := cursorRunStatusError(result); err != nil {
+			if hooks.SetError != nil && rec != nil {
+				hooks.SetError(rec, err, durationMs)
+			}
+			recordCursorRoundMetrics(hooks, usageAcc, durationMs, "error")
+			return err
+		}
+		recordCursorRoundMetrics(hooks, usageAcc, durationMs, string(result.Status))
+
+		if result.Result != "" {
+			replayCursorTextToolCalls(ctx, result.Result, req.FilePath, replayExec, logf, tracker.mcpCodeComment)
+		}
+
+		if tracker.taskDone {
+			return nil
+		}
+
+		invokedTools := tracker.roundToolInvoked
+		tracker.roundToolInvoked = false
+		tracker.mcpCodeComment = false
+
+		if !invokedTools {
+			consecutiveNoTools++
+			if consecutiveNoTools >= 3 {
+				logf("[ocr] Cursor agent did not call tools for %s after %d attempts, stopping.\n", req.FilePath, consecutiveNoTools)
+				break
+			}
+			logf("[ocr] Cursor agent replied without tools for %s, retrying...\n", req.FilePath)
+			prompt = basePrompt + "\n\n" + cursorReviewNudge(tracker, true)
+			continue
+		}
+
+		consecutiveNoTools = 0
+		if tracker.commentCalls > 0 {
+			logf("[ocr] Cursor agent left comments for %s without task_done, retrying...\n", req.FilePath)
+		} else {
+			logf("[ocr] Cursor agent called tools for %s without code_comment, retrying...\n", req.FilePath)
+		}
+		prompt = basePrompt + "\n\n" + cursorReviewNudge(tracker, false)
 	}
 
-	if hooks.SetResponse != nil && rec != nil {
-		content := result.Result
-		hooks.SetResponse(rec, &llm.ChatResponse{
-			Model: model,
-			Choices: []llm.Choice{{
-				Message:      llm.ResponseMessage{Role: "assistant", Content: &content},
-				FinishReason: string(result.Status),
-			}},
-			Usage: usageAcc.usage(),
-		}, duration.Milliseconds())
+	if tracker.taskDone {
+		return nil
 	}
-	usage := usageAcc.usage()
-	if usage != nil && hooks.RecordUsage != nil {
+	if tracker.commentCalls > 0 {
+		logf("[ocr] Cursor review for %s finished with %d comment(s) without task_done.\n", req.FilePath, tracker.commentCalls)
+		return nil
+	}
+	logf("[ocr] Max tool requests reached for %s without review comments.\n", req.FilePath)
+	return fmt.Errorf("cursor review incomplete for %s", req.FilePath)
+}
+
+type cursorReviewTracker struct {
+	taskDone         bool
+	commentCalls     int
+	roundToolInvoked bool
+	mcpCodeComment   bool
+}
+
+func (t *cursorReviewTracker) markTool(name string) {
+	t.roundToolInvoked = true
+	if name == "code_comment" {
+		t.commentCalls++
+	}
+}
+
+func recordCursorRoundMetrics(hooks *ReviewHooks, usageAcc *cursorUsageAccumulator, durationMs int64, status string) {
+	if hooks == nil {
+		return
+	}
+	if usage := usageAcc.usage(); usage != nil && hooks.RecordUsage != nil {
 		hooks.RecordUsage(usage)
 	}
 	totalTokens := int64(0)
-	if usage != nil {
+	if usage := usageAcc.usage(); usage != nil {
 		totalTokens = usage.TotalTokens
 	}
 	if hooks.RecordLLMRequest != nil {
-		hooks.RecordLLMRequest(duration.Milliseconds(), totalTokens, string(result.Status))
+		hooks.RecordLLMRequest(durationMs, totalTokens, status)
 	}
+}
 
+func cursorReviewNudge(tracker *cursorReviewTracker, noTools bool) string {
+	if noTools {
+		return "You must not reply with a markdown review. For each confirmed issue in the diff, call the code_comment tool with structured comments (path, start_line, end_line, content). When finished, call task_done."
+	}
+	if tracker.commentCalls > 0 {
+		return "Comments received. Call task_done if the review is complete, or call code_comment for any remaining issues."
+	}
+	return "Call code_comment for each confirmed issue, then call task_done when finished."
+}
+
+func cursorRunStatusError(result cursor.RunResult) error {
 	switch result.Status {
 	case cursor.RunStatusFinished:
 		return nil
@@ -175,21 +305,24 @@ func (b *CursorAgentBackend) ReviewFile(ctx context.Context, req ReviewFileReque
 	}
 }
 
-func (b *CursorAgentBackend) agentOptions(model string) cursor.AgentOptions {
-	sandboxEnabled := true
+func (b *CursorAgentBackend) agentOptions(model string, customTools map[string]cursor.CustomTool) cursor.AgentOptions {
+	// Sandbox is disabled so MCP custom-user-tools can run. Operators should treat
+	// the local Cursor agent as trusted code with full repo access (see Cursor SDK docs).
+	sandboxEnabled := false
 	return cursor.AgentOptions{
 		Model:  model,
 		APIKey: b.cfg.APIKey,
+		Mode:   cursor.AgentModeAgent,
 		Local: &cursor.LocalAgentOptions{
 			CWD:            []string{b.repoDir},
 			SettingSources: nil,
 			SandboxOptions: &cursor.SandboxOptions{Enabled: &sandboxEnabled},
-			CustomTools:    nil,
+			CustomTools:    customTools,
 		},
 	}
 }
 
-func toolDefsToCustomTools(ctx context.Context, defs []llm.ToolDef, exec ToolExecutor) map[string]cursor.CustomTool {
+func toolDefsToCustomTools(ctx context.Context, defs []llm.ToolDef, filePath string, exec ToolExecutor) map[string]cursor.CustomTool {
 	if len(defs) == 0 {
 		return nil
 	}
@@ -201,6 +334,9 @@ func toolDefsToCustomTools(ctx context.Context, defs []llm.ToolDef, exec ToolExe
 			Description: fn.Description,
 			InputSchema: fn.Parameters,
 			Execute: func(args map[string]any, tctx cursor.CustomToolContext) (any, error) {
+				if name == "code_comment" {
+					args = normalizeCodeCommentArgs(args, filePath)
+				}
 				raw, err := json.Marshal(args)
 				if err != nil {
 					return nil, err

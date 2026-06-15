@@ -30,8 +30,11 @@ func (a *cursorUsageAccumulator) observe(update cursor.InteractionUpdate) {
 				a.cacheWrite = 0
 				a.hasTurnUsage = true
 			}
+			a.prompt += ui.PromptTokens
+			a.completion += ui.CompletionTokens
+			a.cacheRead += ui.CacheReadTokens
+			a.cacheWrite += ui.CacheWriteTokens
 			a.mu.Unlock()
-			a.merge(ui)
 		}
 	case "token-delta":
 		if update.Tokens > 0 {
@@ -42,15 +45,6 @@ func (a *cursorUsageAccumulator) observe(update cursor.InteractionUpdate) {
 			a.mu.Unlock()
 		}
 	}
-}
-
-func (a *cursorUsageAccumulator) merge(ui *llm.UsageInfo) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.prompt += ui.PromptTokens
-	a.completion += ui.CompletionTokens
-	a.cacheRead += ui.CacheReadTokens
-	a.cacheWrite += ui.CacheWriteTokens
 }
 
 func (a *cursorUsageAccumulator) usage() *llm.UsageInfo {

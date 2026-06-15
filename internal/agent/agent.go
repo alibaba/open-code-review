@@ -960,10 +960,16 @@ func (a *Agent) performLlmCodeReview(ctx context.Context, messages []llm.Message
 		},
 	}
 
+	toolsPrompt := ""
+	if a.args.Backend.Kind() == reviewbackend.KindCursorAgent {
+		toolsPrompt = reviewbackend.FormatCursorToolDefs(a.args.MainToolDefs)
+	}
+
 	return a.args.Backend.ReviewFile(ctx, reviewbackend.ReviewFileRequest{
 		Model:         a.args.Model,
 		Messages:      messages,
 		Tools:         a.args.MainToolDefs,
+		ToolsPrompt:   toolsPrompt,
 		MaxTokens:     a.args.Template.MaxTokens,
 		MaxToolRounds: a.args.Template.MaxToolRequestTimes,
 		FilePath:      newPath,

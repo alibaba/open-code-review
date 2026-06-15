@@ -139,17 +139,28 @@ func tryOCRConfig(path string) (ResolvedEndpoint, bool, error) {
 		}
 		return ResolvedEndpoint{}, false, err
 	}
+	return TryOCRConfigBytes(data)
+}
 
+// TryOCRConfigBytes resolves an endpoint from already-read OCR config JSON.
+func TryOCRConfigBytes(data []byte) (ResolvedEndpoint, bool, error) {
 	var cfg configFile
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return ResolvedEndpoint{}, false, fmt.Errorf("parse config: %w", err)
 	}
 
+	var ep ResolvedEndpoint
+	var ok bool
+	var err error
 	if cfg.Provider != "" {
-		return tryProviderConfig(cfg)
+		ep, ok, err = tryProviderConfig(cfg)
+	} else {
+		ep, ok, err = tryLegacyLlmConfig(cfg)
 	}
-
-	return tryLegacyLlmConfig(cfg)
+	if ok {
+		ep.Model = stripModelSuffix(ep.Model)
+	}
+	return ep, ok, err
 }
 
 // tryProviderConfig resolves an endpoint from the provider-based configuration.
