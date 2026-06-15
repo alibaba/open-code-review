@@ -3,6 +3,7 @@ package diff
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -101,7 +102,8 @@ func (p *Provider) MergeBase(ctx context.Context) string {
 	if p.mode != ModeRange || p.mergeBase != "" {
 		return p.mergeBase
 	}
-	p.mergeBase = p.computeMergeBase(ctx, p.from, p.to)
+	base, _ := p.computeMergeBase(ctx, p.from, p.to)
+	p.mergeBase = base
 	return p.mergeBase
 }
 
@@ -113,7 +115,14 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 	case ModeRange:
 		base := p.MergeBase(ctx)
 		if base == "" {
-			return nil, fmt.Errorf("cannot find merge-base between %s and %s (if this is a shallow clone, run: git fetch --unshallow)", p.from, p.to)
+			// Re-run to recover git's own diagnostic (merge-base can fail for
+			// many reasons: invalid/missing refs, unrelated histories, etc.).
+			_, mbErr := p.computeMergeBase(ctx, p.from, p.to)
+			msg := fmt.Sprintf("cannot find merge-base between %s and %s", p.from, p.to)
+			if mbErr != nil {
+				msg += ": " + mbErr.Error()
+			}
+			return nil, fmt.Errorf("%s (if this is a shallow clone, run: git fetch --unshallow)", msg)
 		}
 		out, err := p.runGit(ctx, "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, p.to, "--")
 		if err != nil {
@@ -256,12 +265,20 @@ func (p *Provider) filterDiffs(diffs []model.Diff) []model.Diff {
 
 // ---- Internal helpers ----
 
-func (p *Provider) computeMergeBase(ctx context.Context, from, to string) string {
+// computeMergeBase runs `git merge-base from to`. On success it returns the
+// common-ancestor commit. On failure it returns an empty base and, when git
+// emitted a diagnostic, an error carrying that message. A nil error with an
+// empty base means git found no common ancestor without printing anything
+// (e.g. unrelated histories).
+func (p *Provider) computeMergeBase(ctx context.Context, from, to string) (string, error) {
 	out, err := p.runGit(ctx, "merge-base", "--end-of-options", from, to)
 	if err != nil {
-		return ""
+		if detail := strings.TrimSpace(out); detail != "" {
+			return "", errors.New(detail)
+		}
+		return "", nil
 	}
-	return strings.TrimSpace(out)
+	return strings.TrimSpace(out), nil
 }
 
 func (p *Provider) workspaceTrackedDiff(ctx context.Context) (string, error) {

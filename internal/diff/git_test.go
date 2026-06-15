@@ -364,3 +364,34 @@ func TestRangeMergeBaseErrorHasUnshallowHint(t *testing.T) {
 		t.Fatalf("error missing merge-base/unshallow hint: %v", err)
 	}
 }
+
+// TestRangeMergeBaseErrorIncludesGitDetail verifies that when merge-base fails
+// with a real git diagnostic (e.g. a missing ref), the message surfaces it
+// instead of swallowing it -- so users can tell apart "unrelated histories"
+// from "bad ref" and other failure modes.
+func TestRangeMergeBaseErrorIncludesGitDetail(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repo, "add", "a.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "first")
+
+	runner := gitcmd.New(4)
+	p := NewProvider(repo, "HEAD", "does-not-exist", runner)
+	_, err := p.GetDiff(context.Background())
+	if err == nil {
+		t.Fatal("expected error for missing ref")
+	}
+	// git's own diagnostic names the bad ref; it must not be swallowed.
+	if !strings.Contains(err.Error(), "does-not-exist") {
+		t.Fatalf("error should include git's detail naming the bad ref: %v", err)
+	}
+	if !strings.Contains(err.Error(), "merge-base") {
+		t.Fatalf("error should still name the merge-base failure: %v", err)
+	}
+}
