@@ -23,9 +23,7 @@ var registry = []Provider{
 		EnvVar:      "ANTHROPIC_API_KEY",
 		Models: []string{
 			"claude-opus-4-8",
-			"claude-sonnet-4-8",
 			"claude-opus-4-7",
-			"claude-sonnet-4-7",
 			"claude-opus-4-6",
 			"claude-sonnet-4-6",
 		},
