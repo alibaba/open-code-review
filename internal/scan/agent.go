@@ -62,6 +62,26 @@ type Args struct {
 	// SkipSummary disables the post-run PROJECT_SUMMARY_TASK even when the
 	// template defines one. Set via the --no-summary CLI flag.
 	SkipSummary bool
+	// MaxTokensBudget, when > 0, caps total token usage (input+output, as
+	// reported by the API). Once the running total exceeds it, no further
+	// batches are dispatched. 0 = unlimited. Set via --max-tokens-budget
+	// or ScanTemplate.MaxTokensBudget.
+	MaxTokensBudget int64
+}
+
+// planEnabled / dedupEnabled / summaryEnabled report whether each optional
+// phase will actually run: template must define it AND the corresponding
+// --no-* flag must not be set. Used by both cost estimation and dispatch.
+func (a *Agent) planEnabled() bool {
+	return !a.args.SkipPlan && a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0
+}
+
+func (a *Agent) dedupEnabled() bool {
+	return !a.args.SkipDedup && a.args.Template.DedupTask != nil && len(a.args.Template.DedupTask.Messages) > 0
+}
+
+func (a *Agent) summaryEnabled() bool {
+	return !a.args.SkipSummary && a.args.Template.ProjectSummaryTask != nil && len(a.args.Template.ProjectSummaryTask.Messages) > 0
 }
 
 // Agent orchestrates full-file code review. It delegates the per-file LLM
@@ -200,10 +220,22 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		return []model.LlmComment{}, nil
 	}
 
+	// Pre-run cost projection so users aren't surprised by a large scan.
+	est := estimateCost(a.items, a.planEnabled(), a.dedupEnabled(), a.summaryEnabled())
+	fmt.Fprintf(stdout.Writer(), "[ocr] estimated cost: %s\n", est)
+	if a.args.MaxTokensBudget > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
+		if est.TotalTokens > a.args.MaxTokensBudget {
+			fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: estimate (%s) exceeds budget (%s); scan will stop partway\n",
+				humanTokens(est.TotalTokens), humanTokens(a.args.MaxTokensBudget))
+		}
+	}
+
 	a.currentDate = time.Now().Format("2006-01-02 15:04")
 	telemetry.Event(ctx, "scan.started",
 		telemetry.AnyToAttr("file.count", totalDiscovered),
 		telemetry.AnyToAttr("review.count", reviewable),
+		telemetry.AnyToAttr("est.total.tokens", est.TotalTokens),
 		telemetry.AnyToAttr("repo.dir", a.args.RepoDir))
 	telemetry.RecordFilesReviewed(ctx, int64(reviewable))
 
@@ -361,7 +393,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		// batch and feed them into the per-batch dedup hook.
 		batchStart := a.args.CommentCollector.Snapshot()
 
-		n, err := a.dispatchBatch(ctx, bi, batch)
+		n, budgetHit, err := a.dispatchBatch(ctx, bi, batch)
 		dispatched += n
 		if err != nil {
 			// ctx cancelled mid-batch: stop scheduling further batches but
@@ -377,6 +409,12 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		}
 
 		a.maybeRunDedup(ctx, bi, batchStart)
+
+		// The per-file budget gate inside dispatchBatch tripped — stop
+		// scheduling any remaining batches.
+		if budgetHit {
+			break
+		}
 	}
 
 	failed := atomic.LoadInt64(&a.subtaskFailed)
@@ -394,8 +432,16 @@ func (a *Agent) resolveBatchStrategy() BatchStrategy {
 
 // dispatchBatch fans out the files of a single batch concurrently and
 // blocks until they all finish (or ctx is cancelled). Returns the number
-// of files dispatched and ctx.Err() if cancelled.
-func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.ScanItem) (int64, error) {
+// of files dispatched, whether the token budget was hit mid-batch, and
+// ctx.Err() if cancelled.
+//
+// The budget gate is checked per file, right after acquiring the
+// concurrency slot and before launching the subtask: if the tokens already
+// spent PLUS a look-ahead estimate of this file's cost would exceed the
+// budget, the file (and all remaining files in the batch) are skipped.
+// This keeps overrun bounded by roughly one in-flight file per worker,
+// instead of a whole batch as the coarse batch-level gate did.
+func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.ScanItem) (int64, bool, error) {
 	concurrency := a.args.MaxConcurrency
 	if concurrency <= 0 {
 		concurrency = 8
@@ -406,14 +452,30 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 	var (
 		wg         sync.WaitGroup
 		dispatched int64
+		budgetHit  bool
 	)
 
 	for i := range batch {
+		// Per-file budget look-ahead. Stop before acquiring a slot so we
+		// don't even queue work that would blow the budget.
+		if a.args.MaxTokensBudget > 0 {
+			used := a.runner.TotalTokensUsed()
+			projected := used + estimateFileTokens(batch[i], a.planEnabled())
+			if projected > a.args.MaxTokensBudget {
+				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + next-file est ≈ %s > budget %s) — skipping %s and remaining files\n",
+					humanTokens(used), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), batch[i].Path)
+				a.recordWarning("token_budget_reached", batch[i].Path,
+					fmt.Sprintf("stopped in batch #%d: used %d tokens + next-file estimate exceeds budget %d", batchIdx, used, a.args.MaxTokensBudget))
+				budgetHit = true
+				break
+			}
+		}
+
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
 			wg.Wait()
-			return dispatched, ctx.Err()
+			return dispatched, budgetHit, ctx.Err()
 		}
 
 		dispatched++
@@ -443,7 +505,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 	}
 
 	wg.Wait()
-	return dispatched, nil
+	return dispatched, budgetHit, nil
 }
 
 // executeSubtask runs the scan pipeline for one file:
@@ -500,13 +562,10 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) error {
 func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string) string {
 	const noPlan = "(no pre-scan plan; review the entire file as usual)"
 
-	if a.args.SkipPlan {
+	if !a.planEnabled() {
 		return noPlan
 	}
 	pt := a.args.Template.PlanTask
-	if pt == nil || len(pt.Messages) == 0 {
-		return noPlan
-	}
 
 	// Render plan messages.
 	messages := make([]llm.Message, 0, len(pt.Messages))
@@ -547,13 +606,10 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 // union of all collected comments. Best-effort: any error / empty input
 // / no-template silently leaves projectSummary unset.
 func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.LlmComment) {
-	if a.args.SkipSummary {
+	if !a.summaryEnabled() {
 		return
 	}
 	pt := a.args.Template.ProjectSummaryTask
-	if pt == nil || len(pt.Messages) == 0 {
-		return
-	}
 	if len(comments) == 0 {
 		return
 	}
@@ -626,13 +682,10 @@ func buildSummaryCommentsList(comments []model.LlmComment) string {
 // invalid grouping) the original batch comments are kept unchanged — dedup
 // is a best-effort optimization, never a correctness gate.
 func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) {
-	if a.args.SkipDedup {
+	if !a.dedupEnabled() {
 		return
 	}
 	dt := a.args.Template.DedupTask
-	if dt == nil || len(dt.Messages) == 0 {
-		return
-	}
 	minN := a.args.Template.DedupMinComments
 	if minN <= 0 {
 		minN = 2

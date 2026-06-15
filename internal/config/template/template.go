@@ -37,6 +37,9 @@ type ScanTemplate struct {
 	// MaxFileSizeBytes is the per-file size cap (bytes) for enumeration.
 	// Defaults to 2 MiB when ≤ 0.
 	MaxFileSizeBytes int64 `json:"MAX_FILE_SIZE_BYTES,omitempty"`
+	// MaxTokensBudget caps total token usage (input+output) for one scan.
+	// Dispatch stops scheduling new batches once exceeded. 0 = unlimited.
+	MaxTokensBudget int64 `json:"MAX_TOKENS_BUDGET,omitempty"`
 	// BatchStrategy controls how files are grouped before per-batch dispatch.
 	// Supported values: "none" (each file is its own batch — v1 behavior),
 	// "by-language" (group by file extension), "by-directory" (group by

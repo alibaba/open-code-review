@@ -36,6 +36,7 @@ type scanOptions struct {
 	noDedup        bool   // --no-dedup: skip the per-batch DEDUP_TASK
 	noSummary      bool   // --no-summary: skip the post-run PROJECT_SUMMARY_TASK
 	batch          string // --batch: override scan template's BATCH_STRATEGY
+	maxTokensBudget int   // --max-tokens-budget: cap total token usage; 0 = unlimited
 	showHelp       bool
 }
 
@@ -60,6 +61,7 @@ func parseScanFlags(args []string) (scanOptions, error) {
 	a.BoolVar(&opts.noDedup, "no-dedup", false, "skip the per-batch DEDUP_TASK (keeps raw comments; one fewer LLM call per batch)")
 	a.BoolVar(&opts.noSummary, "no-summary", false, "skip the post-run PROJECT_SUMMARY_TASK (no project-level markdown summary)")
 	a.StringVar(&opts.batch, "batch", "", "override BATCH_STRATEGY from scan template: none | by-language | by-directory")
+	a.IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output); dispatch stops once exceeded (0 = unlimited)")
 
 	if err := a.Parse(args); err != nil {
 		return opts, fmt.Errorf("parse flags: %w", err)
@@ -81,6 +83,9 @@ func parseScanFlags(args []string) (scanOptions, error) {
 	}
 	if opts.maxGitProcs < 0 {
 		return opts, fmt.Errorf("--max-git-procs must be a non-negative integer (0 means use default 16)")
+	}
+	if opts.maxTokensBudget < 0 {
+		return opts, fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
 	}
 	return opts, nil
 }
@@ -137,6 +142,11 @@ func runScan(args []string) error {
 		// (unknown values silently fall back to "none").
 		scanTpl.BatchStrategy = opts.batch
 	}
+	// Token budget: --max-tokens-budget overrides the template value when set.
+	budget := scanTpl.MaxTokensBudget
+	if opts.maxTokensBudget > 0 {
+		budget = int64(opts.maxTokensBudget)
+	}
 
 	scanPaths := splitPaths(opts.paths)
 
@@ -184,6 +194,7 @@ func runScan(args []string) error {
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		MaxFileSizeBytes:      scanTpl.MaxFileSizeBytes,
+		MaxTokensBudget:       budget,
 		SkipPlan:              opts.noPlan,
 		SkipDedup:             opts.noDedup,
 		SkipSummary:           opts.noSummary,
@@ -259,6 +270,7 @@ Flags:
   --no-dedup              skip the per-batch DEDUP_TASK (keeps raw comments)
   --no-summary            skip the post-run PROJECT_SUMMARY_TASK
   --batch string          override BATCH_STRATEGY: none | by-language | by-directory
+  --max-tokens-budget int cap total token usage; dispatch stops once exceeded (0 = unlimited)
   --audience string       output audience: human (show progress) or agent (summary only) (default "human")
   -b, --background string optional requirement/business context for the scan
   -f, --format string     output format: text or json (default "text")

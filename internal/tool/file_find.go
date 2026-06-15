@@ -3,9 +3,13 @@ package tool
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/open-code-review/open-code-review/internal/diff"
 )
 
 const (
@@ -89,6 +93,13 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		// Non-git directory (git ls-files exits 128) and no specific ref:
+		// fall back to a filesystem walk so file_find still works for
+		// `ocr scan` on plain directories. Ref-based lookups can't be
+		// satisfied without git, so those still error.
+		if p.FileReader.Ref == "" {
+			return p.listWalkFiles(ctx)
+		}
 		return nil, err
 	}
 
@@ -104,6 +115,55 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 			}
 			files = append(files, s)
 		}
+	}
+	return files, nil
+}
+
+// listWalkFiles is the non-git fallback for listGitFiles: it walks the repo
+// directory honoring the root .gitignore and the default excluded-dir
+// blocklist (.git, node_modules, vendor, ...). Used when `git ls-files`
+// fails because the directory is not a git repository.
+func (p *FileFindProvider) listWalkFiles(ctx context.Context) ([]string, error) {
+	root := p.FileReader.RepoDir
+	gitignorePatterns := diff.LoadGitignorePatterns(root)
+	var files []string
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
+		if err != nil {
+			return nil // skip unreadable entries
+		}
+		if path == root {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+
+		if d.IsDir() {
+			if diff.IsPathExcluded(root, rel, gitignorePatterns) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		if diff.IsPathExcluded(root, rel, gitignorePatterns) {
+			return nil
+		}
+		if shouldSkipFile(rel) {
+			return nil
+		}
+		files = append(files, rel)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return files, nil
 }
