@@ -101,6 +101,9 @@ type reviewOptions struct {
 	from           string
 	to             string
 	commit         string
+	upstream       string // --upstream: remote name or git URL to review against (fork workflow)
+	upstreamBranch string // --upstream-branch: branch on --upstream (default: its default branch)
+	noFetch        bool   // --no-fetch: with --upstream, skip network fetch and use local ref
 	outputFormat   string
 	audience       string // --audience: "human" (default) or "agent"
 	background     string // --background: optional requirement context
@@ -131,6 +134,9 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be reviewed without running the LLM")
+	a.StringVar(&opts.upstream, "upstream", "", "upstream remote name or git URL to review the current branch against (fork workflow)")
+	a.StringVar(&opts.upstreamBranch, "upstream-branch", "", "branch on --upstream to compare against (default: upstream's default branch)")
+	a.BoolVar(&opts.noFetch, "no-fetch", false, "with --upstream: skip network fetch and use the local remote-tracking ref")
 
 	if err := a.Parse(args); err != nil {
 		return opts, fmt.Errorf("parse flags: %w", err)
@@ -151,6 +157,18 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	// modeCount == 0 → workspace mode (no error, allowed)
 	if modeCount > 1 {
 		return opts, fmt.Errorf("only one review mode allowed (--from/--to or --commit)")
+	}
+	if opts.upstream != "" {
+		if opts.from != "" || opts.commit != "" {
+			return opts, fmt.Errorf("--upstream cannot be combined with --from or --commit")
+		}
+	} else {
+		if opts.upstreamBranch != "" {
+			return opts, fmt.Errorf("--upstream-branch requires --upstream")
+		}
+		if opts.noFetch {
+			return opts, fmt.Errorf("--no-fetch requires --upstream")
+		}
 	}
 	if opts.from != "" && opts.to == "" {
 		return opts, fmt.Errorf("--to is required when --from is specified")
@@ -196,6 +214,10 @@ Examples:
   ocr review --commit abc123
   ocr review -c abc123
 
+  # Review current branch against an upstream repo (fork workflow)
+  ocr review --upstream upstream
+  ocr review --upstream https://github.com/orig/repo --upstream-branch main
+
   # Output JSON format
   ocr review --format json
   ocr review -f json
@@ -221,7 +243,10 @@ Flags:
   --rule string           path to JSON file with system review rules
   --timeout int           concurrent task timeout in minutes (default 10)
   --to string             target ref to end diff at (e.g., 'feature-branch')
-  --tools string          path to JSON tools config file (default: embedded)`)
+  --tools string          path to JSON tools config file (default: embedded)
+  --upstream string       upstream remote name or git URL to review the current branch against
+  --upstream-branch string  branch on --upstream to compare against (default: its default branch)
+  --no-fetch              with --upstream: skip network fetch, use local remote-tracking ref`)
 }
 
 // --- config subcommand ---
