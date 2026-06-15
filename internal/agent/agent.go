@@ -18,6 +18,7 @@ import (
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
 	"github.com/open-code-review/open-code-review/internal/llm"
 	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/open-code-review/open-code-review/internal/reviewbackend"
 	"github.com/open-code-review/open-code-review/internal/session"
 	"github.com/open-code-review/open-code-review/internal/stdout"
 	"github.com/open-code-review/open-code-review/internal/telemetry"
@@ -71,8 +72,12 @@ type Args struct {
 	// When nil, only the default extension and path filters apply.
 	FileFilter *rules.FileFilter
 
-	// LLM client for model inference.
+	// LLM client for text completions (relocation, compression). When Backend is set,
+	// callers should also set LLMClient to reviewbackend.TextClient(Backend).
 	LLMClient llm.LLMClient
+
+	// Backend executes plan/main review model work (chat completions or Cursor agent).
+	Backend reviewbackend.Backend
 
 	// Tool registry mapping tool aliases to implementations.
 	Tools *tool.Registry
@@ -893,119 +898,76 @@ func formatToolDefs(toolDefs []llm.ToolDef) string {
 	return sb.String()
 }
 
-// performLlmCodeReview drives the main LLM conversation loop for a single file.
-// It sends messages with tool definitions, handles tool calls returned by the model,
-// and collects review comments until task_done is called or limits are reached.
+// performLlmCodeReview drives the main review conversation for a single file via the configured backend.
 func (a *Agent) performLlmCodeReview(ctx context.Context, messages []llm.Message, newPath string) error {
-	toolReqCount := a.args.Template.MaxToolRequestTimes
-	const maxConsecutiveEmptyRounds = 3
-	consecutiveEmptyRounds := 0
-
-	for toolReqCount > 0 {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		toolReqCount--
-
-		fs := a.session.GetOrCreateFileSession(newPath)
-		rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
-		startTime := time.Now()
-
-		resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
-			Model:     a.args.Model,
-			Messages:  messages,
-			Tools:     a.args.MainToolDefs,
-			MaxTokens: a.args.Template.MaxTokens,
-		})
-		duration := time.Since(startTime)
-		if err != nil {
-			rec.SetError(err, duration)
-			telemetry.RecordLLMRequest(ctx, a.args.Model, duration, 0, "error")
-			return fmt.Errorf("LLM completion error: %w", err)
-		}
-		rec.SetResponse(resp, duration)
-		// Record LLM metrics with token info from API response usage field.
-		totalTokens := int64(0)
-		if resp.Usage != nil {
-			totalTokens = resp.Usage.TotalTokens
-			atomic.AddInt64(&a.totalInputTokens, resp.Usage.PromptTokens)
-			atomic.AddInt64(&a.totalOutputTokens, resp.Usage.CompletionTokens)
-			atomic.AddInt64(&a.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-			atomic.AddInt64(&a.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
-		}
-		telemetry.RecordLLMRequest(ctx, a.args.Model, duration, totalTokens, "ok")
-
-		content := resp.Content()
-		calls := resp.ToolCalls()
-
-		if len(calls) == 0 {
-			// No tool calls - remind the model
-			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", newPath)
-			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
-			if content != "" {
-				messages = append(messages[:len(messages)-1], llm.NewTextMessage("assistant", content), messages[len(messages)-1])
-			}
-			continue
-		}
-
-		var results []tool.ToolCallResult
-		taskCompleted := false
-		hasValidResult := false
-
-		for _, call := range calls {
-			cp := a.executeToolCall(ctx, newPath, call, rec)
-			if cp.Completed {
-				results = append(results, tool.ToolCallResult{
-					ToolCallID: call.ID,
-					Name:       call.Function.Name,
-					Result:     "Task completed successfully.",
-				})
-				taskCompleted = true
-			} else if cp.Data != "" {
-				results = append(results, tool.ToolCallResult{
-					ToolCallID: call.ID,
-					Name:       call.Function.Name,
-					Result:     cp.Data,
-				})
-				hasValidResult = true
-			} else {
-				results = append(results, tool.ToolCallResult{
-					ToolCallID: call.ID,
-					Name:       call.Function.Name,
-					Result:     "Error: Tool execution returned no result.",
-				})
-			}
-		}
-
-		if taskCompleted {
-			break
-		}
-		if !hasValidResult {
-			consecutiveEmptyRounds++
-			if consecutiveEmptyRounds >= maxConsecutiveEmptyRounds {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Too many empty retries for %s, stopping.\n", newPath)
-				break
-			}
-			fmt.Fprintf(stdout.Writer(), "[ocr] No valid tool results for %s, retrying...\n", newPath)
-		} else {
-			consecutiveEmptyRounds = 0
-		}
-
-		succeed := a.addNextMessage(ctx, content, calls, results, &messages, newPath)
-		if !succeed {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", newPath)
-			break
-		}
+	if a.args.Backend == nil {
+		return fmt.Errorf("review backend is not configured")
 	}
 
-	if toolReqCount <= 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", newPath)
+	var mainRec *session.TaskRecord
+	executor := func(execCtx context.Context, call reviewbackend.ToolCallInput) reviewbackend.ToolCallOutput {
+		if execCtx == nil {
+			execCtx = ctx
+		}
+		cp := a.executeToolCall(execCtx, newPath, llm.ToolCall{
+			ID:   call.ID,
+			Type: "function",
+			Function: llm.FunctionCall{
+				Name:      call.Name,
+				Arguments: call.Arguments,
+			},
+		}, mainRec)
+		return reviewbackend.ToolCallOutput{Result: cp.Data, Completed: cp.Completed}
 	}
 
-	return nil
+	hooks := &reviewbackend.ReviewHooks{
+		AppendTaskRecord: func(taskType session.TaskType, msgs []llm.Message) *session.TaskRecord {
+			fs := a.session.GetOrCreateFileSession(newPath)
+			mainRec = fs.AppendTaskRecord(taskType, msgs)
+			return mainRec
+		},
+		SetResponse: func(rec *session.TaskRecord, resp *llm.ChatResponse, durationMs int64) {
+			rec.SetResponse(resp, time.Duration(durationMs)*time.Millisecond)
+		},
+		SetError: func(rec *session.TaskRecord, err error, durationMs int64) {
+			rec.SetError(err, time.Duration(durationMs)*time.Millisecond)
+		},
+		RecordUsage: func(usage *llm.UsageInfo) {
+			if usage == nil {
+				return
+			}
+			atomic.AddInt64(&a.totalInputTokens, usage.PromptTokens)
+			atomic.AddInt64(&a.totalOutputTokens, usage.CompletionTokens)
+			atomic.AddInt64(&a.totalCacheReadTokens, usage.CacheReadTokens)
+			atomic.AddInt64(&a.totalCacheWriteTokens, usage.CacheWriteTokens)
+		},
+		RecordLLMRequest: func(durationMs int64, totalTokens int64, status string) {
+			telemetry.RecordLLMRequest(ctx, a.args.Model, time.Duration(durationMs)*time.Millisecond, totalTokens, status)
+		},
+		AppendRound: func(assistantContent string, calls []llm.ToolCall, results []reviewbackend.ToolRoundResult, msgs *[]llm.Message) bool {
+			toolResults := make([]tool.ToolCallResult, len(results))
+			for i, r := range results {
+				toolResults[i] = tool.ToolCallResult{
+					ToolCallID: r.ToolCallID,
+					Name:       r.Name,
+					Result:     r.Result,
+				}
+			}
+			return a.addNextMessage(ctx, assistantContent, calls, toolResults, msgs, newPath)
+		},
+		Logf: func(format string, args ...any) {
+			fmt.Fprintf(stdout.Writer(), format, args...)
+		},
+	}
+
+	return a.args.Backend.ReviewFile(ctx, reviewbackend.ReviewFileRequest{
+		Model:         a.args.Model,
+		Messages:      messages,
+		Tools:         a.args.MainToolDefs,
+		MaxTokens:     a.args.Template.MaxTokens,
+		MaxToolRounds: a.args.Template.MaxToolRequestTimes,
+		FilePath:      newPath,
+	}, executor, hooks)
 }
 
 // executeToolCall executes a single tool call from the LLM response and records

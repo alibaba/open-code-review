@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/open-code-review/open-code-review/internal/config/testconnection"
 	"github.com/open-code-review/open-code-review/internal/llm"
+	"github.com/open-code-review/open-code-review/internal/reviewbackend"
 )
 
 func runLLM(args []string) error {
@@ -37,9 +39,28 @@ func runLLMTest() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	ep, err := llm.ResolveEndpoint(cfgPath)
+	resolved, err := reviewbackend.ResolveBackend(cfgPath)
 	if err != nil {
-		return fmt.Errorf("resolve LLM endpoint: %w", err)
+		return fmt.Errorf("resolve review backend: %w", err)
+	}
+
+	repoDir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	backend, err := reviewbackend.New(context.Background(), resolved, repoDir)
+	if err != nil {
+		return fmt.Errorf("create review backend: %w", err)
+	}
+
+	llmClient := reviewbackend.TextClient(backend)
+
+	model := resolved.Endpoint.Model
+	source := resolved.Endpoint.Source
+	if resolved.Kind == reviewbackend.KindCursorAgent {
+		model = resolved.Cursor.Model
+		source = resolved.Cursor.Source
 	}
 
 	task, err := testconnection.LoadDefault()
@@ -55,8 +76,6 @@ func runLLMTest() error {
 		timeout = time.Duration(task.Timeout) * time.Second
 	}
 
-	llmClient := llm.NewLLMClient(ep)
-
 	messages := make([]llm.Message, 0, len(task.Messages))
 	for _, m := range task.Messages {
 		messages = append(messages, llm.Message{Role: m.Role, Content: m.Content})
@@ -66,7 +85,7 @@ func runLLMTest() error {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		return llmClient.CompletionsWithCtx(ctx, llm.ChatRequest{
-			Model:     ep.Model,
+			Model:     model,
 			Messages:  messages,
 			MaxTokens: 256,
 		})
@@ -75,13 +94,15 @@ func runLLMTest() error {
 		return fmt.Errorf("llm request failed: %w", err)
 	}
 
-	model := ep.Model
+	outModel := model
 	if resp.Model != "" {
-		model = resp.Model
+		outModel = resp.Model
 	}
-	fmt.Printf("Source: %s\n", ep.Source)
-	fmt.Printf("URL:    %s\n", ep.URL)
-	fmt.Printf("Model:  %s\n", model)
+	fmt.Printf("Source: %s\n", source)
+	if resolved.Kind == reviewbackend.KindChatCompletions {
+		fmt.Printf("URL:    %s\n", resolved.Endpoint.URL)
+	}
+	fmt.Printf("Model:  %s\n", outModel)
 	fmt.Printf("%s\n", resp.Content())
 	return nil
 }

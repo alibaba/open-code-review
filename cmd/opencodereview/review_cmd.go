@@ -14,7 +14,7 @@ import (
 	"github.com/open-code-review/open-code-review/internal/config/toolsconfig"
 	"github.com/open-code-review/open-code-review/internal/diff"
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
-	"github.com/open-code-review/open-code-review/internal/llm"
+	"github.com/open-code-review/open-code-review/internal/reviewbackend"
 	"github.com/open-code-review/open-code-review/internal/stdout"
 	"github.com/open-code-review/open-code-review/internal/telemetry"
 	"github.com/open-code-review/open-code-review/internal/tool"
@@ -88,13 +88,21 @@ func runReview(args []string) error {
 		tpl.ApplyLanguage(appCfg.Language)
 	}
 
-	ep, err := llm.ResolveEndpoint(cfgPath)
+	resolved, err := reviewbackend.ResolveBackend(cfgPath)
 	if err != nil {
-		return fmt.Errorf("resolve LLM endpoint: %w", err)
+		return fmt.Errorf("resolve review backend: %w", err)
 	}
 
-	llmClient := llm.NewLLMClient(ep)
-	model := ep.Model
+	backend, err := reviewbackend.New(context.Background(), resolved, repoDir)
+	if err != nil {
+		return fmt.Errorf("create review backend: %w", err)
+	}
+
+	llmClient := reviewbackend.TextClient(backend)
+	model := resolved.Endpoint.Model
+	if resolved.Kind == reviewbackend.KindCursorAgent {
+		model = resolved.Cursor.Model
+	}
 
 	gitRunner := gitcmd.New(opts.maxGitProcs)
 
@@ -118,6 +126,7 @@ func runReview(args []string) error {
 		SystemRule:            resolver,
 		FileFilter:            fileFilter,
 		LLMClient:             llmClient,
+		Backend:               backend,
 		Tools:                 tools,
 		PlanToolDefs:          planToolDefs,
 		MainToolDefs:          mainToolDefs,
