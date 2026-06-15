@@ -113,7 +113,7 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 	case ModeRange:
 		base := p.MergeBase(ctx)
 		if base == "" {
-			return nil, fmt.Errorf("cannot find merge-base between %s and %s", p.from, p.to)
+			return nil, fmt.Errorf("cannot find merge-base between %s and %s (if this is a shallow clone, run: git fetch --unshallow)", p.from, p.to)
 		}
 		out, err := p.runGit(ctx, "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, p.to, "--")
 		if err != nil {

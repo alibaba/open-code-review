@@ -330,3 +330,37 @@ func TestRangeDiffSurvivesExternalDiffTool(t *testing.T) {
 			"--no-ext-diff (issue #82). GIT_EXTERNAL_DIFF=%s", garbage)
 	}
 }
+
+// TestRangeMergeBaseErrorHasUnshallowHint verifies the range-mode error names
+// the offending refs and hints at shallow clones when no common ancestor exists.
+func TestRangeMergeBaseErrorHasUnshallowHint(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	// Two unrelated root commits => no merge-base.
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repo, "add", "a.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "first")
+	runGitTest(t, repo, "checkout", "-q", "--orphan", "other")
+	runGitTest(t, repo, "rm", "-q", "-rf", ".")
+	if err := os.WriteFile(filepath.Join(repo, "b.txt"), []byte("b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repo, "add", "b.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "unrelated")
+
+	runner := gitcmd.New(4)
+	p := NewProvider(repo, "master", "other", runner)
+	_, err := p.GetDiff(context.Background())
+	if err == nil {
+		t.Fatal("expected merge-base error for unrelated histories")
+	}
+	if !strings.Contains(err.Error(), "merge-base") || !strings.Contains(err.Error(), "unshallow") {
+		t.Fatalf("error missing merge-base/unshallow hint: %v", err)
+	}
+}
