@@ -155,6 +155,9 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	if opts.from != "" && opts.to == "" {
 		return opts, fmt.Errorf("--to is required when --from is specified")
 	}
+	if opts.to != "" && opts.from == "" {
+		return opts, fmt.Errorf("--from is required when --to is specified")
+	}
 
 	switch opts.audience {
 	case "human", "agent":
