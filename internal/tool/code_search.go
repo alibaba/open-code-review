@@ -67,7 +67,6 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	cmdArgs = append(cmdArgs, "-e", searchText)
 
 	if ref := p.FileReader.Ref; ref != "" {
-		cmdArgs = append(cmdArgs, "--end-of-options")
 		cmdArgs = append(cmdArgs, ref)
 	}
 
@@ -104,6 +103,10 @@ func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []str
 }
 
 func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, caseSensitive bool, usePerlRegexp bool, pathspec []string) (string, error) {
+	if ref := p.FileReader.Ref; ref != "" && strings.HasPrefix(ref, "-") {
+		return "Error: invalid ref: refs must not start with '-'", nil
+	}
+
 	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, pathspec)
 
 	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)
