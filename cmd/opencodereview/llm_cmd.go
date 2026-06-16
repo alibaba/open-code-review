@@ -84,7 +84,15 @@ func runLLMTest() error {
 	fmt.Printf("Source: %s\n", ep.Source)
 	fmt.Printf("URL:    %s\n", ep.URL)
 	fmt.Printf("Model:  %s\n", model)
-	fmt.Printf("%s\n", resp.Content())
+
+	content := resp.Content()
+	if content == "" {
+		fmt.Println("\n(empty response)")
+	} else {
+		fmt.Printf("\n%s\n", content)
+	}
+
+	fmt.Println("\n✓ Connection test successful")
 	return nil
 }
 
