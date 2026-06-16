@@ -88,7 +88,23 @@ After installation, the `ocr` command is available globally.
 
 **From GitHub Release**
 
-Download the latest binary from [GitHub Releases](https://github.com/alibaba/open-code-review/releases):
+Install the latest binary for your OS/architecture with one command (macOS / Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+```
+
+The script picks the right release binary, verifies its SHA-256 checksum, and installs it as `ocr` in `/usr/local/bin`. Override the target with `OCR_INSTALL_DIR` or pin a release with `OCR_VERSION`:
+
+```bash
+OCR_INSTALL_DIR="$HOME/.local/bin" OCR_VERSION=v1.3.13 \
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh)"
+```
+
+<details>
+<summary>Manual download (all platforms, including Windows)</summary>
+
+Download the binary for your platform from [GitHub Releases](https://github.com/alibaba/open-code-review/releases):
 
 ```bash
 # macOS (Apple Silicon)
@@ -113,6 +129,8 @@ curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/dow
 # Windows (ARM64) — move ocr.exe to a directory in your PATH
 curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-arm64.exe
 ```
+
+</details>
 
 **From Source**
 
