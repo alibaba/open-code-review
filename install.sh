@@ -12,13 +12,8 @@ main() {
   VERSION="${OCR_VERSION:-}"
 
   command -v curl >/dev/null 2>&1 || err "curl is required"
-  if command -v shasum >/dev/null 2>&1; then
-    SHA_CMD="shasum -a 256"
-  elif command -v sha256sum >/dev/null 2>&1; then
-    SHA_CMD="sha256sum"
-  else
+  command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 ||
     err "shasum or sha256sum is required for checksum verification"
-  fi
 
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   case "$os" in
@@ -34,7 +29,9 @@ main() {
   esac
 
   if [ -z "$VERSION" ]; then
-    VERSION="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" |
+    release_json="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")" ||
+      err "failed to fetch latest release info from github api"
+    VERSION="$(printf '%s' "$release_json" |
       sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
     [ -n "$VERSION" ] || err "could not resolve latest release tag"
   fi
@@ -50,7 +47,7 @@ main() {
 
   want="$(awk -v a="$asset" '$2 == a {print tolower($1)}' "$tmp/sha256sum.txt")"
   [ -n "$want" ] || err "no checksum entry for $asset in sha256sum.txt"
-  got="$($SHA_CMD "$tmp/$asset" | awk '{print tolower($1)}')"
+  got="$(sha256 "$tmp/$asset" | awk '{print tolower($1)}')"
   [ "$got" = "$want" ] || err "checksum mismatch for $asset (got $got, want $want)"
 
   chmod 0755 "$tmp/$asset"
@@ -84,6 +81,15 @@ post_install_path_notice() {
     *) printf 'note: %s is not on your PATH; add it or run %s/%s directly\n' "$install_dir" "$install_dir" "$bin"; return ;;
   esac
   command -v "$bin" >/dev/null 2>&1 || printf 'note: open a new shell so %s resolves on PATH\n' "$bin"
+}
+
+# Print the SHA-256 of a file, preferring shasum (macOS) over sha256sum (Linux).
+sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1"
+  else
+    sha256sum "$1"
+  fi
 }
 
 err() { printf 'error: %s\n' "$1" >&2; exit 1; }
