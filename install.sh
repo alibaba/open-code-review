@@ -12,8 +12,6 @@ main() {
   VERSION="${OCR_VERSION:-}"
 
   command -v curl >/dev/null 2>&1 || err "curl is required"
-  command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 ||
-    err "shasum or sha256sum is required for checksum verification"
 
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   case "$os" in
@@ -39,7 +37,7 @@ main() {
   asset="${ASSET_PREFIX}-${os}-${arch}"
   base="https://github.com/$REPO/releases/download/$VERSION"
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
+  trap 'rm -rf "$tmp"' INT TERM EXIT
 
   printf 'downloading %s %s (%s/%s)...\n' "$BIN" "$VERSION" "$os" "$arch"
   curl -fsSL -o "$tmp/$asset" "$base/$asset" || err "download failed: $base/$asset"
@@ -50,24 +48,24 @@ main() {
   got="$(sha256 "$tmp/$asset" | awk '{print tolower($1)}')"
   [ "$got" = "$want" ] || err "checksum mismatch for $asset (got $got, want $want)"
 
-  chmod 0755 "$tmp/$asset"
   install_binary "$tmp/$asset" "$INSTALL_DIR" "$BIN"
 
   printf 'installed %s %s -> %s\n' "$BIN" "$VERSION" "$INSTALL_DIR/$BIN"
   post_install_path_notice "$BIN" "$INSTALL_DIR"
 }
 
-# Move the staged binary into place, escalating with sudo only when needed.
+# Install the staged binary (mode 0755), escalating with sudo only when needed.
+# Using install(1) under sudo gives the binary root ownership in system dirs.
 install_binary() {
   src="$1"
   dir="$2"
   bin="$3"
   if mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; then
-    mv "$src" "$dir/$bin"
+    install -m 0755 "$src" "$dir/$bin"
   elif command -v sudo >/dev/null 2>&1; then
     printf 'note: %s is not writable; escalating with sudo\n' "$dir"
     sudo mkdir -p "$dir"
-    sudo mv "$src" "$dir/$bin"
+    sudo install -m 0755 "$src" "$dir/$bin"
   else
     err "$dir is not writable and sudo is unavailable; set OCR_INSTALL_DIR to a writable path"
   fi
@@ -87,8 +85,10 @@ post_install_path_notice() {
 sha256() {
   if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1"
-  else
+  elif command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$1"
+  else
+    err "shasum or sha256sum is required for checksum verification"
   fi
 }
 
