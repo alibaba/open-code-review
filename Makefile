@@ -30,7 +30,7 @@ build:
 	$(GO) build -ldflags "$(LD_FLAGS)" -o $(DIST_DIR)/$(BINARY_NAME) ./cmd/opencodereview
 
 test:
-	$(GO) test -v -race -count=1 ./...
+	LC_ALL=C $(GO) test -v -race -count=1 ./...
 
 clean:
 	rm -rf $(DIST_DIR)

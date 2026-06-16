@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"text/tabwriter"
 	"time"
 
 	"github.com/open-code-review/open-code-review/internal/config/testconnection"
@@ -89,10 +91,14 @@ func runLLMTest() error {
 func runLLMProviders() {
 	providers := llm.ListProviders()
 	fmt.Println("\nBuilt-in providers:")
-	fmt.Printf("  %-14s %-10s %s\n", "NAME", "PROTOCOL", "BASE URL")
-	fmt.Printf("  %-14s %-10s %s\n", "----", "--------", "--------")
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "  NAME\tPROTOCOL\tBASE URL\n")
+	fmt.Fprintf(w, "  ----\t--------\t--------\n")
 	for _, p := range providers {
-		fmt.Printf("  %-14s %-10s %s\n", p.Name, p.Protocol, p.BaseURL)
+		fmt.Fprintf(w, "  %s\t%s\t%s\n", p.Name, p.Protocol, p.BaseURL)
+	}
+	if err := w.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to flush output: %v\n", err)
 	}
 	fmt.Println("\nUse 'ocr config provider' to configure a provider interactively.")
 	fmt.Println("Use 'ocr config set provider <name>' to switch providers non-interactively.")

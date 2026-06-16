@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"sort"
 	"testing"
 )
 
@@ -39,7 +40,10 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "openai", "dashscope"}
+	expected := []string{"anthropic", "dashscope", "deepseek", "kimi", "mimo", "minimax", "openai", "volcengine", "z-ai"}
+	if len(providers) != len(expected) {
+		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
+	}
 	for i, name := range expected {
 		if providers[i].Name != name {
 			t.Errorf("providers[%d].Name = %q, want %q", i, providers[i].Name, name)
@@ -64,6 +68,33 @@ func TestLookupProvider_ReturnsCopyOfModels(t *testing.T) {
 	p2, _ := LookupProvider("anthropic")
 	if p2.Models[0] == "mutated" {
 		t.Error("LookupProvider returns a reference to Models slice, should return a copy")
+	}
+}
+
+func TestLookupProvider_PreservesModelOrder(t *testing.T) {
+	p, ok := LookupProvider("anthropic")
+	if !ok {
+		t.Fatal("anthropic not found")
+	}
+	expected := []string{"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"}
+	if len(p.Models) != len(expected) {
+		t.Fatalf("expected %d models, got %d", len(expected), len(p.Models))
+	}
+	for i, model := range expected {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
+}
+
+func TestListProviders_ReturnsSortedProviders(t *testing.T) {
+	providers := ListProviders()
+	names := make([]string, len(providers))
+	for i, p := range providers {
+		names[i] = p.Name
+	}
+	if !sort.StringsAreSorted(names) {
+		t.Errorf("providers are not sorted: %v", names)
 	}
 }
 
