@@ -225,9 +225,29 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	if entry.Model != "" {
 		model = entry.Model
 	}
+
+	// Build available model list for validation.
+	var availableModels []string
+	if isPreset {
+		availableModels = append(availableModels, preset.Models...)
+	}
+	availableModels = append(availableModels, entry.Models...)
+
+	// Apply model override with validation.
 	if modelOverride != "" {
+		if len(availableModels) > 0 {
+			if !modelListContains(availableModels, modelOverride) {
+				return ResolvedEndpoint{}, false, fmt.Errorf(
+					"model %q is not available for provider %q; available models: %s",
+					modelOverride,
+					cfg.Provider,
+					strings.Join(availableModels, ", "),
+				)
+			}
+		}
 		model = modelOverride
 	}
+
 	if model == "" {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no model configured; run 'ocr config model' to select one or pass --model", cfg.Provider)
 	}
@@ -414,6 +434,17 @@ func defaultAuthHeader(protocol string) string {
 		return "authorization"
 	}
 	return ""
+}
+
+// modelListContains checks if a model exists in the available models list.
+func modelListContains(models []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, model := range models {
+		if strings.TrimSpace(model) == target {
+			return true
+		}
+	}
+	return false
 }
 
 // NormalizeAuthHeader normalizes an auth header value to a canonical form.
