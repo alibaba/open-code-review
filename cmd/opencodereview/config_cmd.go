@@ -297,14 +297,10 @@ func parseModelListValue(value string) ([]string, error) {
 
 	if strings.HasPrefix(value, "[") {
 		var models []string
-		if err := json.Unmarshal([]byte(value), &models); err != nil {
-			if !strings.HasSuffix(value, "]") {
-				return nil, err
-			}
-			value = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(value, "["), "]"))
-			return normalizeModelList(strings.Split(value, ",")), nil
+		if err := json.Unmarshal([]byte(value), &models); err == nil {
+			return normalizeModelList(models), nil
 		}
-		return normalizeModelList(models), nil
+		value = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(value, "["), "]"))
 	}
 
 	return normalizeModelList(strings.Split(value, ",")), nil
