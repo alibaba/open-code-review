@@ -152,6 +152,31 @@ export OCR_USE_ANTHROPIC=true
 
 Claude Code 환경 변수(`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`)와도 호환되며, `~/.zshrc` / `~/.bashrc`의 export도 파싱합니다.
 
+### Google Vertex AI에서 Claude 사용
+
+OCR은 Google Application Default Credentials(ADC)를 사용해 Vertex AI의 Claude를 호출할 수 있습니다. Anthropic API key나 custom LLM URL은 필요하지 않습니다.
+
+```bash
+export OCR_USE_ANTHROPIC_VERTEX=true
+export OCR_LLM_MODEL=claude-sonnet-4-6
+export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project
+export CLOUD_ML_REGION=global
+
+gcloud auth application-default login
+ocr llm test
+```
+
+OCR 전용 alias인 `OCR_VERTEX_PROJECT_ID`와 `OCR_VERTEX_REGION`도 지원합니다. project ID는 `GOOGLE_CLOUD_PROJECT`로도 fallback됩니다. 선택한 GCP project는 Vertex AI API가 활성화되어 있어야 하며 대상 Claude model에 접근할 수 있어야 합니다.
+
+같은 설정은 기존 `llm` 설정에도 저장할 수 있습니다.
+
+```bash
+ocr config set llm.use_anthropic_vertex true
+ocr config set llm.vertex_project_id your-gcp-project
+ocr config set llm.vertex_region global
+ocr config set llm.model claude-sonnet-4-6
+```
+
 > **CC-Switch 사용자 참고**: [CC-Switch](https://github.com/farion1231/cc-switch)를 [routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service)와 함께 사용한다면, 추가 설정 없이 `llm.url`을 CC-Switch proxy 주소로 지정할 수 있습니다.
 > - **Claude** provider: `llm.url`을 `http://127.0.0.1:15721`로 설정
 > - **Codex** provider: `llm.url`을 `http://127.0.0.1:15721/v1`로 설정
@@ -414,6 +439,9 @@ Config file: `~/.opencodereview/config.json`
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
+| `llm.use_anthropic_vertex` | boolean | Google Vertex AI에서 Claude 사용 |
+| `llm.vertex_project_id` | string | Google Cloud project ID |
+| `llm.vertex_region` | string | Vertex AI region |
 | `language` | string | `English` \| `Chinese` (default: Chinese) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -431,6 +459,9 @@ Config file: `~/.opencodereview/config.json`
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` 또는 `authorization`) |
 | `OCR_LLM_MODEL` | Model name |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
+| `OCR_USE_ANTHROPIC_VERTEX` | Google Vertex AI의 Claude 활성화 |
+| `OCR_VERTEX_PROJECT_ID` | Google Cloud project ID. `ANTHROPIC_VERTEX_PROJECT_ID`와 `GOOGLE_CLOUD_PROJECT`도 지원 |
+| `OCR_VERTEX_REGION` | Vertex AI region. `CLOUD_ML_REGION`도 지원 |
 
 ## Telemetry
 

@@ -139,7 +139,7 @@ func TestSetConfigValueLegacyVertexFields(t *testing.T) {
 		t.Fatalf("set vertex_region: %v", err)
 	}
 
-	if !cfg.Llm.UseVertex || cfg.Llm.VertexProjectID != "test-project" || cfg.Llm.VertexRegion != "global" {
+	if !cfg.Llm.UseAnthropicVertex || cfg.Llm.VertexProjectID != "test-project" || cfg.Llm.VertexRegion != "global" {
 		t.Errorf("Llm Vertex config = %#v", cfg.Llm)
 	}
 }

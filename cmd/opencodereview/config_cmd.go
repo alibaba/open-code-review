@@ -102,15 +102,15 @@ type Config struct {
 }
 
 type LlmConfig struct {
-	URL             string         `json:"url,omitempty"`
-	AuthToken       string         `json:"auth_token,omitempty"`
-	AuthHeader      string         `json:"auth_header,omitempty"`
-	Model           string         `json:"model,omitempty"`
-	UseAnthropic    *bool          `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol
-	UseVertex       bool           `json:"use_anthropic_vertex,omitempty"`
-	VertexProjectID string         `json:"vertex_project_id,omitempty"`
-	VertexRegion    string         `json:"vertex_region,omitempty"`
-	ExtraBody       map[string]any `json:"extra_body,omitempty"`
+	URL                string         `json:"url,omitempty"`
+	AuthToken          string         `json:"auth_token,omitempty"`
+	AuthHeader         string         `json:"auth_header,omitempty"`
+	Model              string         `json:"model,omitempty"`
+	UseAnthropic       *bool          `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol
+	UseAnthropicVertex bool           `json:"use_anthropic_vertex,omitempty"`
+	VertexProjectID    string         `json:"vertex_project_id,omitempty"`
+	VertexRegion       string         `json:"vertex_region,omitempty"`
+	ExtraBody          map[string]any `json:"extra_body,omitempty"`
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -220,12 +220,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid boolean for llm.use_anthropic: %w", err)
 		}
 		cfg.Llm.UseAnthropic = &b
-	case "llm.use_anthropic_vertex", "llm.UseVertex":
+	case "llm.use_anthropic_vertex", "llm.UseAnthropicVertex":
 		b, err := strconv.ParseBool(value)
 		if err != nil {
 			return fmt.Errorf("invalid boolean for llm.use_anthropic_vertex: %w", err)
 		}
-		cfg.Llm.UseVertex = b
+		cfg.Llm.UseAnthropicVertex = b
 	case "llm.vertex_project_id", "llm.VertexProjectID":
 		cfg.Llm.VertexProjectID = value
 	case "llm.vertex_region", "llm.VertexRegion":

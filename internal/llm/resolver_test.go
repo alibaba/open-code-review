@@ -264,8 +264,8 @@ func TestResolveEndpoint_VertexEnvironment(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("OCR_USE_ANTHROPIC_VERTEX", "true")
 	t.Setenv("OCR_LLM_MODEL", "claude-sonnet-4-6")
-	t.Setenv("ANTHROPIC_VERTEX_PROJECT_ID", "test-project")
-	t.Setenv("CLOUD_ML_REGION", "us-central1")
+	t.Setenv("ANTHROPIC_VERTEX_PROJECT_ID", " test-project ")
+	t.Setenv("CLOUD_ML_REGION", " us-central1 ")
 
 	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
 	if err != nil {
@@ -291,19 +291,27 @@ func TestResolveEndpoint_VertexEnvironment(t *testing.T) {
 	}
 }
 
-func TestResolveEndpoint_VertexEnvironmentRequiresRegion(t *testing.T) {
+func TestResolveEndpoint_IncompleteVertexEnvironmentFallsBack(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("OCR_USE_ANTHROPIC_VERTEX", "true")
 	t.Setenv("OCR_LLM_MODEL", "claude-sonnet-4-6")
 	t.Setenv("OCR_VERTEX_PROJECT_ID", "test-project")
+	t.Setenv("OCR_LLM_URL", "https://api.anthropic.com/v1/messages")
+	t.Setenv("OCR_LLM_TOKEN", "sk-test")
 
-	_, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
-	if err == nil {
-		t.Fatal("expected error for missing Vertex region")
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Vertex != nil {
+		t.Fatal("incomplete Vertex environment should fall back")
+	}
+	if ep.Source != "OCR environment" {
+		t.Errorf("Source = %q, want %q", ep.Source, "OCR environment")
 	}
 }
 
-func TestResolveEndpoint_VertexEnvironmentPrecedesConfig(t *testing.T) {
+func TestResolveEndpoint_ConfigPrecedesVertexEnvironment(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("OCR_USE_ANTHROPIC_VERTEX", "true")
 	t.Setenv("OCR_LLM_MODEL", "claude-sonnet-4-6")
@@ -324,11 +332,11 @@ func TestResolveEndpoint_VertexEnvironmentPrecedesConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ep.Vertex == nil {
-		t.Fatal("Vertex config should not be nil")
+	if ep.Vertex != nil {
+		t.Fatal("config provider should take precedence over Vertex environment")
 	}
-	if ep.Source != "OCR Vertex environment" {
-		t.Errorf("Source = %q, want %q", ep.Source, "OCR Vertex environment")
+	if ep.Source != "provider:openai" {
+		t.Errorf("Source = %q, want %q", ep.Source, "provider:openai")
 	}
 }
 
@@ -337,10 +345,10 @@ func TestResolveEndpoint_LegacyVertexConfig(t *testing.T) {
 
 	cfg := configFile{
 		Llm: llmFileConfig{
-			Model:           "claude-sonnet-4-6",
-			UseVertex:       true,
-			VertexProjectID: "test-project",
-			VertexRegion:    "global",
+			Model:              "claude-sonnet-4-6",
+			UseAnthropicVertex: true,
+			VertexProjectID:    "test-project",
+			VertexRegion:       "global",
 		},
 	}
 	data, _ := json.Marshal(cfg)

@@ -495,6 +495,8 @@ func NewAnthropicVertexClient(ctx context.Context, cfg ClientConfig) (client *An
 		cfg.Timeout = 5 * time.Minute
 	}
 
+	// The SDK auth helper may panic while loading ADC; surface it as a normal
+	// client initialization error so CLI commands can report actionable output.
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			client = nil

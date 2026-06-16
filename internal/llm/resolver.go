@@ -57,8 +57,8 @@ func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
 		name string
 		fn   func() (ResolvedEndpoint, bool, error)
 	}{
-		{"OCR Vertex environment", tryOCRVertexEnv},
 		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath) }},
+		{"OCR Vertex environment", tryOCRVertexEnv},
 		{"OCR environment", tryOCREnv},
 		{"Claude Code environment", tryCCEnv},
 		{"Shell rc file", tryShellRC},
@@ -94,14 +94,8 @@ func tryOCRVertexEnv() (ResolvedEndpoint, bool, error) {
 		model := os.Getenv(envOCRLLMModel)
 		projectID := firstNonEmpty(os.Getenv(envOCRVertexProject), os.Getenv(envCCVertexProject), os.Getenv(envGoogleProject))
 		region := firstNonEmpty(os.Getenv(envOCRVertexRegion), os.Getenv(envCCVertexRegion))
-		if model == "" {
-			return ResolvedEndpoint{}, false, fmt.Errorf("%s is required when %s is enabled", envOCRLLMModel, envOCRUseVertex)
-		}
-		if projectID == "" {
-			return ResolvedEndpoint{}, false, fmt.Errorf("%s or %s is required when %s is enabled", envOCRVertexProject, envCCVertexProject, envOCRUseVertex)
-		}
-		if region == "" {
-			return ResolvedEndpoint{}, false, fmt.Errorf("%s or %s is required when %s is enabled", envOCRVertexRegion, envCCVertexRegion, envOCRUseVertex)
+		if model == "" || projectID == "" || region == "" {
+			return ResolvedEndpoint{}, false, nil
 		}
 		return ResolvedEndpoint{
 			URL:      vertexBaseURL(region),
@@ -151,15 +145,15 @@ func tryOCREnv() (ResolvedEndpoint, bool, error) {
 
 // llmFileConfig represents the llm section in config.json.
 type llmFileConfig struct {
-	URL             string         `json:"url,omitempty"`
-	AuthToken       string         `json:"auth_token,omitempty"`
-	AuthHeader      string         `json:"auth_header,omitempty"`
-	Model           string         `json:"model,omitempty"`
-	UseAnthropic    *bool          `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
-	UseVertex       bool           `json:"use_anthropic_vertex,omitempty"`
-	VertexProjectID string         `json:"vertex_project_id,omitempty"`
-	VertexRegion    string         `json:"vertex_region,omitempty"`
-	ExtraBody       map[string]any `json:"extra_body,omitempty"`
+	URL                string         `json:"url,omitempty"`
+	AuthToken          string         `json:"auth_token,omitempty"`
+	AuthHeader         string         `json:"auth_header,omitempty"`
+	Model              string         `json:"model,omitempty"`
+	UseAnthropic       *bool          `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
+	UseAnthropicVertex bool           `json:"use_anthropic_vertex,omitempty"`
+	VertexProjectID    string         `json:"vertex_project_id,omitempty"`
+	VertexRegion       string         `json:"vertex_region,omitempty"`
+	ExtraBody          map[string]any `json:"extra_body,omitempty"`
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
@@ -305,7 +299,7 @@ func tryProviderConfig(cfg configFile) (ResolvedEndpoint, bool, error) {
 
 // tryLegacyLlmConfig resolves an endpoint from the legacy llm config block.
 func tryLegacyLlmConfig(cfg configFile) (ResolvedEndpoint, bool, error) {
-	if cfg.Llm.UseVertex {
+	if cfg.Llm.UseAnthropicVertex {
 		if cfg.Llm.Model == "" {
 			return ResolvedEndpoint{}, false, fmt.Errorf("llm.model is required when llm.use_anthropic_vertex is enabled")
 		}
@@ -498,8 +492,9 @@ func isTruthy(value string) bool {
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
 		}
 	}
 	return ""

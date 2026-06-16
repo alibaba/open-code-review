@@ -152,6 +152,31 @@ export OCR_USE_ANTHROPIC=true
 
 Инструмент также совместим с переменными окружения Claude Code (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) и разбирает `~/.zshrc` / `~/.bashrc` в поисках соответствующих export'ов.
 
+### Claude через Google Vertex AI
+
+OCR может вызывать Claude через Vertex AI с помощью Google Application Default Credentials (ADC). Ключ Anthropic API и пользовательский LLM URL не требуются:
+
+```bash
+export OCR_USE_ANTHROPIC_VERTEX=true
+export OCR_LLM_MODEL=claude-sonnet-4-6
+export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project
+export CLOUD_ML_REGION=global
+
+gcloud auth application-default login
+ocr llm test
+```
+
+Также поддерживаются OCR-алиасы `OCR_VERTEX_PROJECT_ID` и `OCR_VERTEX_REGION`. Для project ID также используется fallback на `GOOGLE_CLOUD_PROJECT`. В выбранном GCP-проекте должен быть включён Vertex AI API и доступ к нужной модели Claude.
+
+Эту же настройку можно сохранить в существующей секции `llm`:
+
+```bash
+ocr config set llm.use_anthropic_vertex true
+ocr config set llm.vertex_project_id your-gcp-project
+ocr config set llm.vertex_region global
+ocr config set llm.model claude-sonnet-4-6
+```
+
 > **Примечание для пользователей CC-Switch**: если вы используете [CC-Switch](https://github.com/farion1231/cc-switch) с включённым [routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service), можно указать в `llm.url` адрес прокси CC-Switch без дополнительной настройки:
 > - для провайдера **Claude**: установите `llm.url` в `http://127.0.0.1:15721`
 > - для провайдера **Codex**: установите `llm.url` в `http://127.0.0.1:15721/v1`
@@ -451,6 +476,9 @@ OCR разрешает правила ревью по цепочке приор�
 | `llm.auth_header` | string | Только для Anthropic: `x-api-key` \| `authorization` |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
+| `llm.use_anthropic_vertex` | boolean | Использовать Claude через Google Vertex AI |
+| `llm.vertex_project_id` | string | ID проекта Google Cloud |
+| `llm.vertex_region` | string | Регион Vertex AI |
 | `language` | string | `English` \| `Chinese` (по умолчанию: Chinese) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -468,6 +496,9 @@ OCR разрешает правила ревью по цепочке приор�
 | `OCR_LLM_AUTH_HEADER` | Заголовок авторизации Anthropic (`x-api-key` или `authorization`) |
 | `OCR_LLM_MODEL` | Имя модели |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
+| `OCR_USE_ANTHROPIC_VERTEX` | Включить Claude через Google Vertex AI |
+| `OCR_VERTEX_PROJECT_ID` | ID проекта Google Cloud; также поддерживаются `ANTHROPIC_VERTEX_PROJECT_ID` и `GOOGLE_CLOUD_PROJECT` |
+| `OCR_VERTEX_REGION` | Регион Vertex AI; также поддерживается `CLOUD_ML_REGION` |
 
 
 ## Телеметрия
