@@ -152,6 +152,31 @@ export OCR_USE_ANTHROPIC=true
 
 It is also compatible with Claude Code environment variables (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) and parses `~/.zshrc` / `~/.bashrc` for those exports.
 
+### Claude on Google Vertex AI
+
+OCR can use Claude through Vertex AI with Google Application Default Credentials (ADC). No Anthropic API key or custom LLM URL is required:
+
+```bash
+export OCR_USE_ANTHROPIC_VERTEX=true
+export OCR_LLM_MODEL=claude-sonnet-4-6
+export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project
+export CLOUD_ML_REGION=global
+
+gcloud auth application-default login
+ocr llm test
+```
+
+`OCR_VERTEX_PROJECT_ID` and `OCR_VERTEX_REGION` are supported as OCR-specific aliases. `GOOGLE_CLOUD_PROJECT` is also accepted as a project ID fallback. The selected GCP project must have the Vertex AI API enabled and access to the requested Claude model.
+
+The same setup can be stored in the legacy `llm` configuration:
+
+```bash
+ocr config set llm.use_anthropic_vertex true
+ocr config set llm.vertex_project_id your-gcp-project
+ocr config set llm.vertex_region global
+ocr config set llm.model claude-sonnet-4-6
+```
+
 > **Note for CC-Switch Users**: If you are using [CC-Switch](https://github.com/farion1231/cc-switch) with [routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service) enabled, you can point `llm.url` to the CC-Switch proxy address without additional configuration:
 > - For **Claude** provider: set `llm.url` to `http://127.0.0.1:15721`
 > - For **Codex** provider: set `llm.url` to `http://127.0.0.1:15721/v1`
@@ -458,6 +483,9 @@ Config file: `~/.opencodereview/config.json`
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
+| `llm.use_anthropic_vertex` | boolean | Use Claude through Google Vertex AI |
+| `llm.vertex_project_id` | string | Google Cloud project ID |
+| `llm.vertex_region` | string | Vertex AI region |
 | `language` | string | `English` \| `Chinese` (default: Chinese) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -475,6 +503,9 @@ Environment variables take precedence over the config file.
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` or `authorization`) |
 | `OCR_LLM_MODEL` | Model name |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
+| `OCR_USE_ANTHROPIC_VERTEX` | Enable Claude on Google Vertex AI |
+| `OCR_VERTEX_PROJECT_ID` | Google Cloud project ID; aliases `ANTHROPIC_VERTEX_PROJECT_ID` and `GOOGLE_CLOUD_PROJECT` are supported |
+| `OCR_VERTEX_REGION` | Vertex AI region; `CLOUD_ML_REGION` is also supported |
 
 
 ## Telemetry

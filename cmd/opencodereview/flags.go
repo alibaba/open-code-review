@@ -289,5 +289,5 @@ Examples:
   ocr config set language English
   ocr config set telemetry.enabled true
 
-Supported keys: provider, model, providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging`)
+Supported keys: provider, model, providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.use_anthropic_vertex, llm.vertex_project_id, llm.vertex_region, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging`)
 }

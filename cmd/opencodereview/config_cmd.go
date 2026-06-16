@@ -102,12 +102,15 @@ type Config struct {
 }
 
 type LlmConfig struct {
-	URL          string         `json:"url,omitempty"`
-	AuthToken    string         `json:"auth_token,omitempty"`
-	AuthHeader   string         `json:"auth_header,omitempty"`
-	Model        string         `json:"model,omitempty"`
-	UseAnthropic *bool          `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol
-	ExtraBody    map[string]any `json:"extra_body,omitempty"`
+	URL             string         `json:"url,omitempty"`
+	AuthToken       string         `json:"auth_token,omitempty"`
+	AuthHeader      string         `json:"auth_header,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	UseAnthropic    *bool          `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol
+	UseVertex       bool           `json:"use_anthropic_vertex,omitempty"`
+	VertexProjectID string         `json:"vertex_project_id,omitempty"`
+	VertexRegion    string         `json:"vertex_region,omitempty"`
+	ExtraBody       map[string]any `json:"extra_body,omitempty"`
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -217,6 +220,16 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid boolean for llm.use_anthropic: %w", err)
 		}
 		cfg.Llm.UseAnthropic = &b
+	case "llm.use_anthropic_vertex", "llm.UseVertex":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for llm.use_anthropic_vertex: %w", err)
+		}
+		cfg.Llm.UseVertex = b
+	case "llm.vertex_project_id", "llm.VertexProjectID":
+		cfg.Llm.VertexProjectID = value
+	case "llm.vertex_region", "llm.VertexRegion":
+		cfg.Llm.VertexRegion = value
 	case "language", "Language":
 		cfg.Language = value
 	case "telemetry.enabled", "telemetry.Enabled":
@@ -246,7 +259,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging", key)
+		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.use_anthropic_vertex, llm.vertex_project_id, llm.vertex_region, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging", key)
 	}
 	return nil
 }

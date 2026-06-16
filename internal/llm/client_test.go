@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
 func TestNewOpenAIClient_URLNormalization(t *testing.T) {
@@ -348,6 +349,52 @@ func TestAnthropicClient_DefaultsToAuthorizationHeader(t *testing.T) {
 	}
 	if gotXAPIKey != "" {
 		t.Errorf("X-Api-Key = %q, want empty", gotXAPIKey)
+	}
+}
+
+func TestNewLLMClient_Vertex(t *testing.T) {
+	original := vertexGoogleAuthOption
+	t.Cleanup(func() { vertexGoogleAuthOption = original })
+
+	var gotRegion, gotProject string
+	vertexGoogleAuthOption = func(_ context.Context, region, projectID string, _ ...string) option.RequestOption {
+		gotRegion = region
+		gotProject = projectID
+		return option.WithBaseURL("https://vertex.example.com")
+	}
+
+	client, err := NewLLMClient(context.Background(), ResolvedEndpoint{
+		URL:      "https://us-central1-aiplatform.googleapis.com",
+		Model:    "claude-sonnet-4-6",
+		Protocol: "anthropic",
+		Vertex:   &VertexConfig{ProjectID: "test-project", Region: "us-central1"},
+	})
+	if err != nil {
+		t.Fatalf("NewLLMClient: %v", err)
+	}
+	if _, ok := client.(*AnthropicClient); !ok {
+		t.Fatalf("client type = %T, want *AnthropicClient", client)
+	}
+	if gotRegion != "us-central1" || gotProject != "test-project" {
+		t.Errorf("Vertex auth called with region=%q project=%q", gotRegion, gotProject)
+	}
+}
+
+func TestNewLLMClient_VertexAuthPanicBecomesError(t *testing.T) {
+	original := vertexGoogleAuthOption
+	t.Cleanup(func() { vertexGoogleAuthOption = original })
+
+	vertexGoogleAuthOption = func(context.Context, string, string, ...string) option.RequestOption {
+		panic("application default credentials not found")
+	}
+
+	_, err := NewLLMClient(context.Background(), ResolvedEndpoint{
+		Model:    "claude-sonnet-4-6",
+		Protocol: "anthropic",
+		Vertex:   &VertexConfig{ProjectID: "test-project", Region: "us-central1"},
+	})
+	if err == nil {
+		t.Fatal("expected Vertex authentication error")
 	}
 }
 

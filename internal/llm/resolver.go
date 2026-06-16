@@ -18,6 +18,13 @@ type ResolvedEndpoint struct {
 	AuthHeader string         // Anthropic auth header: "x-api-key" or "authorization"
 	Source     string         // human-readable config source label
 	ExtraBody  map[string]any // vendor-specific request body fields
+	Vertex     *VertexConfig  // Google Vertex AI transport settings
+}
+
+// VertexConfig holds the Google Vertex AI routing settings.
+type VertexConfig struct {
+	ProjectID string
+	Region    string
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -27,23 +34,30 @@ const (
 	envOCRLLMModel      = "OCR_LLM_MODEL"
 	envOCRLLMAuthHeader = "OCR_LLM_AUTH_HEADER"
 	envOCRUseAnthropic  = "OCR_USE_ANTHROPIC"
+	envOCRUseVertex     = "OCR_USE_ANTHROPIC_VERTEX"
+	envOCRVertexProject = "OCR_VERTEX_PROJECT_ID"
+	envOCRVertexRegion  = "OCR_VERTEX_REGION"
 )
 
 // Environment variable names from Claude Code configuration.
 const (
-	envCCBaseURL = "ANTHROPIC_BASE_URL"
-	envCCToken   = "ANTHROPIC_AUTH_TOKEN"
-	envCCModel   = "ANTHROPIC_MODEL"
+	envCCBaseURL       = "ANTHROPIC_BASE_URL"
+	envCCToken         = "ANTHROPIC_AUTH_TOKEN"
+	envCCModel         = "ANTHROPIC_MODEL"
+	envCCVertexProject = "ANTHROPIC_VERTEX_PROJECT_ID"
+	envCCVertexRegion  = "CLOUD_ML_REGION"
+	envGoogleProject   = "GOOGLE_CLOUD_PROJECT"
 )
 
-// ResolveEndpoint reads from 4 strategy sources in priority order.
-// Each strategy requires all three fields (URL, Token, Model) to be non-empty.
+// ResolveEndpoint reads from strategy sources in priority order.
+// Non-Vertex strategies require URL, token, and model; Vertex uses ADC plus project, region, and model.
 // Returns the first valid strategy's result.
 func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
 	strategies := []struct {
 		name string
 		fn   func() (ResolvedEndpoint, bool, error)
 	}{
+		{"OCR Vertex environment", tryOCRVertexEnv},
 		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath) }},
 		{"OCR environment", tryOCREnv},
 		{"Claude Code environment", tryCCEnv},
@@ -55,7 +69,7 @@ func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
 		if err != nil {
 			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
 		}
-		if ok && ep.URL != "" && ep.Token != "" && ep.Model != "" {
+		if ok && endpointComplete(ep) {
 			if ep.Source == "" {
 				ep.Source = s.name
 			}
@@ -64,7 +78,40 @@ func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
 		}
 	}
 
-	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
+	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; configure OCR LLM/Vertex environment variables, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL")
+}
+
+func endpointComplete(ep ResolvedEndpoint) bool {
+	if ep.Vertex != nil {
+		return ep.Model != "" && ep.Vertex.ProjectID != "" && ep.Vertex.Region != ""
+	}
+	return ep.URL != "" && ep.Token != "" && ep.Model != ""
+}
+
+// tryOCRVertexEnv reads OCR-specific Vertex AI environment variables.
+func tryOCRVertexEnv() (ResolvedEndpoint, bool, error) {
+	if isTruthy(os.Getenv(envOCRUseVertex)) {
+		model := os.Getenv(envOCRLLMModel)
+		projectID := firstNonEmpty(os.Getenv(envOCRVertexProject), os.Getenv(envCCVertexProject), os.Getenv(envGoogleProject))
+		region := firstNonEmpty(os.Getenv(envOCRVertexRegion), os.Getenv(envCCVertexRegion))
+		if model == "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("%s is required when %s is enabled", envOCRLLMModel, envOCRUseVertex)
+		}
+		if projectID == "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("%s or %s is required when %s is enabled", envOCRVertexProject, envCCVertexProject, envOCRUseVertex)
+		}
+		if region == "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("%s or %s is required when %s is enabled", envOCRVertexRegion, envCCVertexRegion, envOCRUseVertex)
+		}
+		return ResolvedEndpoint{
+			URL:      vertexBaseURL(region),
+			Model:    model,
+			Protocol: "anthropic",
+			Source:   "OCR Vertex environment",
+			Vertex:   &VertexConfig{ProjectID: projectID, Region: region},
+		}, true, nil
+	}
+	return ResolvedEndpoint{}, false, nil
 }
 
 // tryOCREnv reads OCR-specific environment variables.
@@ -104,12 +151,15 @@ func tryOCREnv() (ResolvedEndpoint, bool, error) {
 
 // llmFileConfig represents the llm section in config.json.
 type llmFileConfig struct {
-	URL          string         `json:"url,omitempty"`
-	AuthToken    string         `json:"auth_token,omitempty"`
-	AuthHeader   string         `json:"auth_header,omitempty"`
-	Model        string         `json:"model,omitempty"`
-	UseAnthropic *bool          `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
-	ExtraBody    map[string]any `json:"extra_body,omitempty"`
+	URL             string         `json:"url,omitempty"`
+	AuthToken       string         `json:"auth_token,omitempty"`
+	AuthHeader      string         `json:"auth_header,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	UseAnthropic    *bool          `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
+	UseVertex       bool           `json:"use_anthropic_vertex,omitempty"`
+	VertexProjectID string         `json:"vertex_project_id,omitempty"`
+	VertexRegion    string         `json:"vertex_region,omitempty"`
+	ExtraBody       map[string]any `json:"extra_body,omitempty"`
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
@@ -255,6 +305,26 @@ func tryProviderConfig(cfg configFile) (ResolvedEndpoint, bool, error) {
 
 // tryLegacyLlmConfig resolves an endpoint from the legacy llm config block.
 func tryLegacyLlmConfig(cfg configFile) (ResolvedEndpoint, bool, error) {
+	if cfg.Llm.UseVertex {
+		if cfg.Llm.Model == "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("llm.model is required when llm.use_anthropic_vertex is enabled")
+		}
+		if cfg.Llm.VertexProjectID == "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("llm.vertex_project_id is required when llm.use_anthropic_vertex is enabled")
+		}
+		if cfg.Llm.VertexRegion == "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("llm.vertex_region is required when llm.use_anthropic_vertex is enabled")
+		}
+		return ResolvedEndpoint{
+			URL:       vertexBaseURL(cfg.Llm.VertexRegion),
+			Model:     cfg.Llm.Model,
+			Protocol:  "anthropic",
+			Source:    "OCR config file",
+			ExtraBody: cfg.Llm.ExtraBody,
+			Vertex:    &VertexConfig{ProjectID: cfg.Llm.VertexProjectID, Region: cfg.Llm.VertexRegion},
+		}, true, nil
+	}
+
 	if cfg.Llm.URL == "" || cfg.Llm.AuthToken == "" || cfg.Llm.Model == "" {
 		return ResolvedEndpoint{}, false, nil
 	}
@@ -415,4 +485,35 @@ func ensureMessagesSuffix(rawURL string) string {
 		return rawURL
 	}
 	return u + "/v1/messages"
+}
+
+func isTruthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func vertexBaseURL(region string) string {
+	switch region {
+	case "global":
+		return "https://aiplatform.googleapis.com"
+	case "us":
+		return "https://aiplatform.us.rep.googleapis.com"
+	case "eu":
+		return "https://aiplatform.eu.rep.googleapis.com"
+	default:
+		return "https://" + region + "-aiplatform.googleapis.com"
+	}
 }

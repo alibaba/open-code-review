@@ -57,7 +57,10 @@ func runLLMTest() error {
 		timeout = time.Duration(task.Timeout) * time.Second
 	}
 
-	llmClient := llm.NewLLMClient(ep)
+	llmClient, err := llm.NewLLMClient(context.Background(), ep)
+	if err != nil {
+		return fmt.Errorf("create LLM client: %w", err)
+	}
 
 	messages := make([]llm.Message, 0, len(task.Messages))
 	for _, m := range task.Messages {

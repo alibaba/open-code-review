@@ -251,10 +251,111 @@ func clearAllEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_AUTH_HEADER", "OCR_USE_ANTHROPIC",
+		"OCR_USE_ANTHROPIC_VERTEX", "OCR_VERTEX_PROJECT_ID", "OCR_VERTEX_REGION",
 		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
+		"ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML_REGION", "GOOGLE_CLOUD_PROJECT",
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 	} {
 		t.Setenv(k, "")
+	}
+}
+
+func TestResolveEndpoint_VertexEnvironment(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_USE_ANTHROPIC_VERTEX", "true")
+	t.Setenv("OCR_LLM_MODEL", "claude-sonnet-4-6")
+	t.Setenv("ANTHROPIC_VERTEX_PROJECT_ID", "test-project")
+	t.Setenv("CLOUD_ML_REGION", "us-central1")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Vertex == nil {
+		t.Fatal("Vertex config should not be nil")
+	}
+	if ep.Vertex.ProjectID != "test-project" {
+		t.Errorf("ProjectID = %q, want %q", ep.Vertex.ProjectID, "test-project")
+	}
+	if ep.Vertex.Region != "us-central1" {
+		t.Errorf("Region = %q, want %q", ep.Vertex.Region, "us-central1")
+	}
+	if ep.Protocol != "anthropic" {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, "anthropic")
+	}
+	if ep.Token != "" {
+		t.Errorf("Token = %q, want empty for Vertex ADC", ep.Token)
+	}
+	if ep.URL != "https://us-central1-aiplatform.googleapis.com" {
+		t.Errorf("URL = %q", ep.URL)
+	}
+}
+
+func TestResolveEndpoint_VertexEnvironmentRequiresRegion(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_USE_ANTHROPIC_VERTEX", "true")
+	t.Setenv("OCR_LLM_MODEL", "claude-sonnet-4-6")
+	t.Setenv("OCR_VERTEX_PROJECT_ID", "test-project")
+
+	_, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err == nil {
+		t.Fatal("expected error for missing Vertex region")
+	}
+}
+
+func TestResolveEndpoint_VertexEnvironmentPrecedesConfig(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_USE_ANTHROPIC_VERTEX", "true")
+	t.Setenv("OCR_LLM_MODEL", "claude-sonnet-4-6")
+	t.Setenv("OCR_VERTEX_PROJECT_ID", "vertex-project")
+	t.Setenv("OCR_VERTEX_REGION", "us-central1")
+
+	cfg := configFile{
+		Provider: "openai",
+		Providers: map[string]providerEntryConfig{
+			"openai": {APIKey: "sk-openai-test", Model: "gpt-4o"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Vertex == nil {
+		t.Fatal("Vertex config should not be nil")
+	}
+	if ep.Source != "OCR Vertex environment" {
+		t.Errorf("Source = %q, want %q", ep.Source, "OCR Vertex environment")
+	}
+}
+
+func TestResolveEndpoint_LegacyVertexConfig(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			Model:           "claude-sonnet-4-6",
+			UseVertex:       true,
+			VertexProjectID: "test-project",
+			VertexRegion:    "global",
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Vertex == nil {
+		t.Fatal("Vertex config should not be nil")
+	}
+	if ep.URL != "https://aiplatform.googleapis.com" {
+		t.Errorf("URL = %q", ep.URL)
 	}
 }
 

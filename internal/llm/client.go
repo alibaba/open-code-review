@@ -12,6 +12,7 @@ import (
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	anthropicvertex "github.com/anthropics/anthropic-sdk-go/vertex"
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
@@ -185,24 +186,29 @@ type ClientConfig struct {
 	AuthHeader string         // Auth header name: "x-api-key", "authorization", or empty for protocol default
 	Timeout    time.Duration  // Request timeout
 	ExtraBody  map[string]any // Vendor-specific fields merged into every request body
+	Vertex     *VertexConfig  // Google Vertex AI transport settings
 }
 
 // --- Factory ---
 
 // NewLLMClient creates the appropriate client based on the resolved endpoint protocol.
 // protocol: "anthropic" -> AnthropicClient, anything else -> OpenAIClient.
-func NewLLMClient(ep ResolvedEndpoint) LLMClient {
+func NewLLMClient(ctx context.Context, ep ResolvedEndpoint) (LLMClient, error) {
 	cfg := ClientConfig{
 		URL:        ep.URL,
 		APIKey:     ep.Token,
 		Model:      ep.Model,
 		AuthHeader: ep.AuthHeader,
 		ExtraBody:  ep.ExtraBody,
+		Vertex:     ep.Vertex,
 	}
 	if ep.Protocol == "anthropic" {
-		return NewAnthropicClient(cfg)
+		if ep.Vertex != nil {
+			return NewAnthropicVertexClient(ctx, cfg)
+		}
+		return NewAnthropicClient(cfg), nil
 	}
-	return NewOpenAIClient(cfg)
+	return NewOpenAIClient(cfg), nil
 }
 
 // --- Token counting with tiktoken ---
@@ -469,6 +475,47 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 type AnthropicClient struct {
 	cfg ClientConfig
 	sdk anthropic.Client
+}
+
+var vertexGoogleAuthOption = anthropicvertex.WithGoogleAuth
+
+// NewAnthropicVertexClient creates an Anthropic client backed by Google Vertex AI.
+// Google Application Default Credentials are loaded by the official Anthropic SDK.
+func NewAnthropicVertexClient(ctx context.Context, cfg ClientConfig) (client *AnthropicClient, err error) {
+	if cfg.Vertex == nil {
+		return nil, fmt.Errorf("Vertex AI configuration is required")
+	}
+	if cfg.Vertex.ProjectID == "" {
+		return nil, fmt.Errorf("Vertex AI project ID is required")
+	}
+	if cfg.Vertex.Region == "" {
+		return nil, fmt.Errorf("Vertex AI region is required")
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 5 * time.Minute
+	}
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			client = nil
+			err = fmt.Errorf("initialize Google Vertex AI authentication: %v", recovered)
+		}
+	}()
+
+	vertexOption := vertexGoogleAuthOption(ctx, cfg.Vertex.Region, cfg.Vertex.ProjectID)
+	opts := []option.RequestOption{
+		option.WithoutEnvironmentDefaults(),
+		option.WithMaxRetries(5),
+		option.WithHeader("User-Agent", userAgent("claude-vertex")),
+		option.WithRequestTimeout(cfg.Timeout),
+		option.WithHeaderDel("X-Api-Key"),
+		vertexOption,
+	}
+
+	return &AnthropicClient{
+		cfg: cfg,
+		sdk: anthropic.NewClient(opts...),
+	}, nil
 }
 
 // NewAnthropicClient creates a new Anthropic Messages API client.

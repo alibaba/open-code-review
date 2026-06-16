@@ -126,6 +126,24 @@ func TestSetConfigValueProviderEntryExtraBody(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueLegacyVertexFields(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "llm.use_anthropic_vertex", "true"); err != nil {
+		t.Fatalf("set use_anthropic_vertex: %v", err)
+	}
+	if err := setConfigValue(cfg, "llm.vertex_project_id", "test-project"); err != nil {
+		t.Fatalf("set vertex_project_id: %v", err)
+	}
+	if err := setConfigValue(cfg, "llm.vertex_region", "global"); err != nil {
+		t.Fatalf("set vertex_region: %v", err)
+	}
+
+	if !cfg.Llm.UseVertex || cfg.Llm.VertexProjectID != "test-project" || cfg.Llm.VertexRegion != "global" {
+		t.Errorf("Llm Vertex config = %#v", cfg.Llm)
+	}
+}
+
 func TestSetConfigValueModelWithCustomProvider(t *testing.T) {
 	cfg := &Config{
 		Provider: "my-gateway",

@@ -152,6 +152,31 @@ export OCR_USE_ANTHROPIC=true
 
 同时兼容了 Claude Code 环境变量（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`），并解析 `~/.zshrc` / `~/.bashrc` 中的相关导出。
 
+### 通过 Google Vertex AI 使用 Claude
+
+OCR 可以通过 Google 应用默认凭据（ADC）调用 Vertex AI 上的 Claude，不需要 Anthropic API Key 或自定义 LLM URL：
+
+```bash
+export OCR_USE_ANTHROPIC_VERTEX=true
+export OCR_LLM_MODEL=claude-sonnet-4-6
+export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project
+export CLOUD_ML_REGION=global
+
+gcloud auth application-default login
+ocr llm test
+```
+
+也可以使用 OCR 专用别名 `OCR_VERTEX_PROJECT_ID` 和 `OCR_VERTEX_REGION`。项目 ID 还会回退读取 `GOOGLE_CLOUD_PROJECT`。所选 GCP 项目必须启用 Vertex AI API，并具有目标 Claude 模型的访问权限。
+
+同样可以写入已有的 `llm` 配置：
+
+```bash
+ocr config set llm.use_anthropic_vertex true
+ocr config set llm.vertex_project_id your-gcp-project
+ocr config set llm.vertex_region global
+ocr config set llm.model claude-sonnet-4-6
+```
+
 > **CC-Switch 用户特别提醒**：如果你使用 [CC-Switch](https://github.com/farion1231/cc-switch) 并开启了[路由服务](https://www.ccswitch.io/zh/docs?section=proxy&item=service)，可以将 `llm.url` 配置成 CC-Switch 启动的代理地址，无需额外配置：
 > - 如果路由的是 **Claude** 供应商：设置 `llm.url` 为 `http://127.0.0.1:15721`
 > - 如果路由的是 **Codex** 供应商：设置 `llm.url` 为 `http://127.0.0.1:15721/v1`
@@ -446,6 +471,9 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `llm.auth_header` | string | 仅 Anthropic：`x-api-key` \| `authorization` |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
+| `llm.use_anthropic_vertex` | boolean | 通过 Google Vertex AI 使用 Claude |
+| `llm.vertex_project_id` | string | Google Cloud 项目 ID |
+| `llm.vertex_region` | string | Vertex AI 区域 |
 | `language` | string | `English` \| `Chinese`（默认：Chinese） |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -463,6 +491,9 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `OCR_LLM_AUTH_HEADER` | Anthropic 认证头（`x-api-key` 或 `authorization`） |
 | `OCR_LLM_MODEL` | 模型名称 |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic，`false` = OpenAI |
+| `OCR_USE_ANTHROPIC_VERTEX` | 启用 Google Vertex AI 上的 Claude |
+| `OCR_VERTEX_PROJECT_ID` | Google Cloud 项目 ID；也支持 `ANTHROPIC_VERTEX_PROJECT_ID` 和 `GOOGLE_CLOUD_PROJECT` |
+| `OCR_VERTEX_REGION` | Vertex AI 区域；也支持 `CLOUD_ML_REGION` |
 
 
 ## 遥测
