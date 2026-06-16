@@ -127,6 +127,14 @@ func collectCustomProviders(cfg *Config) []customProviderListItem {
 
 func newProviderTUI(cfg *Config) providerTUIModel {
 	providers := llm.ListProviders()
+	sort.SliceStable(providers, func(i, j int) bool {
+		left := strings.ToLower(providers[i].DisplayName)
+		right := strings.ToLower(providers[j].DisplayName)
+		if left == right {
+			return providers[i].Name < providers[j].Name
+		}
+		return left < right
+	})
 
 	mi := textinput.New()
 	mi.Placeholder = "model name"

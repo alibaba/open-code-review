@@ -1,6 +1,8 @@
 package main
 
 import (
+	"sort"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -135,6 +137,21 @@ func TestProviderTUI_TabSwitchOnlyOnStepProvider(t *testing.T) {
 }
 
 // --- Official tab tests (updated from original) ---
+
+func TestProviderTUI_OfficialProvidersSortedByDisplayName(t *testing.T) {
+	m := newProviderTUI(&Config{})
+
+	displayNames := make([]string, len(m.providers))
+	normalized := make([]string, len(m.providers))
+	for i, p := range m.providers {
+		displayNames[i] = p.DisplayName
+		normalized[i] = strings.ToLower(p.DisplayName)
+	}
+
+	if !sort.StringsAreSorted(normalized) {
+		t.Errorf("provider display names are not sorted: %v", displayNames)
+	}
+}
 
 func TestProviderTUI_EscFromModelGoesBackToProvider(t *testing.T) {
 	m := newProviderTUI(&Config{})
