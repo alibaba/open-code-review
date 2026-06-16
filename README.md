@@ -20,7 +20,7 @@
 
 Open Code Review is an AI-powered code review CLI tool. It originated as Alibaba Group's internal official AI code review assistant — over the past two years, it has served tens of thousands of developers and identified millions of code defects. After thorough validation at massive scale, we incubated it into an open source project for the community. Simply configure a model endpoint to get started.
 
-It reads Git diffs, sends changed files to a configurable LLM via an agent with tool-use capabilities, and generates structured review comments with line-level precision. The agent can read full file contents, search the codebase, inspect other changed files for context, and produce deep reviews — not just surface-level diff feedback.
+It reads Git diffs, sends changed files to a configurable LLM via an agent with tool-use capabilities, and generates structured review comments with line-level precision. The agent can read full file contents, search the codebase, inspect other changed files for context, and produce deep reviews — not just surface-level diff feedback. Beyond diff review, `ocr scan` reviews entire files for auditing unfamiliar codebases or directories that have no meaningful diff.
 
 ![Highlights](imgs/highlights-en.png)
 
@@ -178,6 +178,10 @@ ocr review --from main --to feature-branch
 
 # Single commit
 ocr review --commit abc123
+
+# Full-file scan — review whole files instead of a diff (no git history needed)
+ocr scan                          # scan the entire repository
+ocr scan --path internal/agent    # scan a directory or specific files
 ```
 
 ### Integrate with Coding Agents
@@ -289,7 +293,8 @@ See the [`examples/`](./examples/) directory for integration examples:
 
 | Command | Alias | Description |
 |---------|-------|-------------|
-| `ocr review` | `ocr r` | Start a code review |
+| `ocr review` | `ocr r` | Start a diff-based code review |
+| `ocr scan` | `ocr s` | Review whole files (no diff required) |
 | `ocr rules check <file>` | — | Preview which review rule applies to a file path |
 | `ocr config provider` | — | Interactive provider setup (built-in, custom, or manual) |
 | `ocr config model` | — | Interactive model selection for the active provider |
@@ -307,6 +312,7 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `--from` | — | — | Source ref (e.g., `main`) |
 | `--to` | — | — | Target ref (e.g., `feature-branch`) |
 | `--commit` | `-c` | — | Single commit to review |
+| `--exclude` | — | — | Comma-separated gitignore-style patterns to skip; merged with rule.json excludes |
 | `--preview` | `-p` | `false` | Preview which files will be reviewed without running the LLM |
 | `--format` | `-f` | `text` | Output format: `text` or `json` |
 | `--concurrency` | — | `8` | Max concurrent file reviews |
@@ -317,6 +323,30 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `--max-tools` | — | built-in | Max tool call rounds per file; only takes effect when greater than template default |
 | `--max-git-procs` | — | built-in | Max concurrent git subprocesses |
 | `--tools` | — | — | Path to custom JSON tools config |
+
+### `ocr scan` Flags
+
+`ocr scan` reviews entire files rather than a diff — useful for auditing an unfamiliar
+codebase, a pre-migration sweep, or any directory with no meaningful diff. It works in
+non-git directories too (it falls back to a filesystem walk that honors `.gitignore`).
+
+| Flag | Shorthand | Default | Description |
+|------|-----------|---------|-------------|
+| `--path` | — | whole repo | Comma-separated dirs/files to scan |
+| `--exclude` | — | — | Comma-separated gitignore-style patterns to skip; merged with rule.json excludes |
+| `--preview` | `-p` | `false` | List which files would be scanned without running the LLM |
+| `--max-tokens-budget` | — | `0` (unlimited) | Cap total token usage; dispatch stops once exceeded |
+| `--no-plan` | — | `false` | Skip the per-file planning pre-pass |
+| `--no-dedup` | — | `false` | Skip per-batch de-duplication of similar comments |
+| `--no-summary` | — | `false` | Skip the project-level summary |
+| `--batch` | — | `by-language` | Batching strategy: `none`, `by-language`, or `by-directory` |
+| `--format` | `-f` | `text` | Output format: `text` or `json` (JSON includes a `project_summary` field) |
+| `--concurrency` | — | `8` | Max concurrent file scans |
+| `--rule` | — | — | Path to custom JSON review rules |
+| `--repo` | — | current dir | Repository or directory root to scan |
+
+Before each run, `ocr scan` prints a rough token-cost estimate. Use `--preview` to see the
+file list first, and `--max-tokens-budget` to cap spend on large repositories.
 
 ## Examples
 
@@ -348,6 +378,21 @@ ocr review --rule /path/to/my-rules.json
 # Preview which rule applies to a file
 ocr rules check src/main/java/com/example/Foo.java
 ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
+
+# Full-file scan: preview the file list first (no LLM calls)
+ocr scan --preview
+
+# Scan the whole repo, cap spend at ~500k tokens
+ocr scan --max-tokens-budget 500000
+
+# Scan a subdirectory, skipping generated/test files
+ocr scan --path internal --exclude '**/*_test.go,**/generated/**'
+
+# Scan a non-git directory with JSON output (includes project_summary)
+ocr scan --repo /path/to/plain/dir --format json
+
+# Fastest scan: skip planning, dedup, and the project summary
+ocr scan --no-plan --no-dedup --no-summary
 
 # View review session history in browser
 ocr viewer
