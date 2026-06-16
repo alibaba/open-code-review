@@ -37,6 +37,7 @@ const (
 	cpStepProtocol
 	cpStepBaseURL
 	cpStepModel
+	cpStepModels
 	cpStepAPIKey
 	cpStepAuthHeader
 )
@@ -59,6 +60,7 @@ type customProviderListItem struct {
 type providerTUIResult struct {
 	provider   string
 	model      string
+	models     []string
 	apiKey     string
 	isCustom   bool
 	isManual   bool
@@ -87,6 +89,7 @@ type providerTUIModel struct {
 	cpNameInput     textinput.Model
 	cpURLInput      textinput.Model
 	cpModelInput    textinput.Model
+	cpModelsInput   textinput.Model
 	cpAuthInput     textinput.Model
 
 	// --- tab: manual ---
@@ -124,6 +127,14 @@ func collectCustomProviders(cfg *Config) []customProviderListItem {
 
 func newProviderTUI(cfg *Config) providerTUIModel {
 	providers := llm.ListProviders()
+	sort.SliceStable(providers, func(i, j int) bool {
+		left := strings.ToLower(providers[i].DisplayName)
+		right := strings.ToLower(providers[j].DisplayName)
+		if left == right {
+			return providers[i].Name < providers[j].Name
+		}
+		return left < right
+	})
 
 	mi := textinput.New()
 	mi.Placeholder = "model name"
@@ -146,6 +157,10 @@ func newProviderTUI(cfg *Config) providerTUIModel {
 	cpModel := textinput.New()
 	cpModel.Placeholder = "model name"
 	cpModel.SetWidth(40)
+
+	cpModels := textinput.New()
+	cpModels.Placeholder = "optional comma-separated models"
+	cpModels.SetWidth(50)
 
 	cpAuth := textinput.New()
 	cpAuth.Placeholder = "optional, leave empty for default (Authorization)"
@@ -173,6 +188,7 @@ func newProviderTUI(cfg *Config) providerTUIModel {
 		cpNameInput:      cpName,
 		cpURLInput:       cpURL,
 		cpModelInput:     cpModel,
+		cpModelsInput:    cpModels,
 		cpAuthInput:      cpAuth,
 		manualURLInput:   manualURL,
 		manualModelInput: manualModel,
@@ -254,8 +270,64 @@ func (m providerTUIModel) currentProvider() llm.Provider {
 	return m.providers[m.officialIdx]
 }
 
+func (m providerTUIModel) selectedCustomProvider() (customProviderListItem, bool) {
+	if m.activeTab != tabCustom || m.customIdx >= len(m.customProviders) {
+		return customProviderListItem{}, false
+	}
+	return m.customProviders[m.customIdx], true
+}
+
+func (m providerTUIModel) modelProviderName() string {
+	if m.activeTab == tabCustom {
+		if cp, ok := m.selectedCustomProvider(); ok {
+			return cp.name + " (custom)"
+		}
+	}
+	provider := m.currentProvider()
+	if provider.DisplayName != "" {
+		return provider.DisplayName
+	}
+	return provider.Name
+}
+
 func (m providerTUIModel) models() []string {
-	return m.currentProvider().Models
+	switch m.activeTab {
+	case tabOfficial:
+		models := m.currentProvider().Models
+		if m.existingCfg != nil {
+			provider := m.currentProvider()
+			if entry, ok := m.existingCfg.Providers[provider.Name]; ok {
+				models = mergeModelLists(models, entry.Models)
+			}
+		}
+		return models
+	case tabCustom:
+		if cp, ok := m.selectedCustomProvider(); ok {
+			return cp.entry.Models
+		}
+	}
+	return nil
+}
+
+func (m *providerTUIModel) prepareModelSelection(currentModel string) {
+	m.modelIdx = 0
+	m.customModel = false
+	m.modelInput.Blur()
+	m.modelInput.SetValue("")
+
+	models := m.models()
+	if currentModel == "" {
+		return
+	}
+
+	for i, model := range models {
+		if model == currentModel {
+			m.modelIdx = i
+			return
+		}
+	}
+	m.modelIdx = len(models)
+	m.modelInput.SetValue(currentModel)
 }
 
 func (m providerTUIModel) isCustomModelItem(idx int) bool {
@@ -391,11 +463,7 @@ func (m providerTUIModel) updateAPIKeyInput(key string, msg tea.KeyPressMsg) (te
 	switch key {
 	case "esc":
 		m.apiKeyInput.Blur()
-		if m.activeTab == tabCustom {
-			m.step = stepProvider
-		} else {
-			m.step = stepModel
-		}
+		m.step = stepModel
 		return m, nil
 	case "enter":
 		m.confirmed = true
@@ -473,6 +541,10 @@ func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cpModelInput.Blur()
+		m.cpStep = cpStepModels
+		return m, m.cpModelsInput.Focus()
+	case cpStepModels:
+		m.cpModelsInput.Blur()
 		m.cpStep = cpStepAPIKey
 		m.apiKeyInput.SetValue("")
 		m.apiKeyMasked = false
@@ -497,6 +569,8 @@ func (m *providerTUIModel) blurCPStep() {
 		m.cpURLInput.Blur()
 	case cpStepModel:
 		m.cpModelInput.Blur()
+	case cpStepModels:
+		m.cpModelsInput.Blur()
 	case cpStepAPIKey:
 		m.apiKeyInput.Blur()
 	case cpStepAuthHeader:
@@ -512,6 +586,8 @@ func (m providerTUIModel) focusCPStep() tea.Cmd {
 		return m.cpURLInput.Focus()
 	case cpStepModel:
 		return m.cpModelInput.Focus()
+	case cpStepModels:
+		return m.cpModelsInput.Focus()
 	case cpStepAPIKey:
 		return m.apiKeyInput.Focus()
 	case cpStepAuthHeader:
@@ -529,6 +605,8 @@ func (m providerTUIModel) passThroughCPInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cpURLInput, cmd = m.cpURLInput.Update(msg)
 	case cpStepModel:
 		m.cpModelInput, cmd = m.cpModelInput.Update(msg)
+	case cpStepModels:
+		m.cpModelsInput, cmd = m.cpModelsInput.Update(msg)
 	case cpStepAPIKey:
 		if m.apiKeyMasked {
 			return m, nil
@@ -636,23 +714,13 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 		switch m.activeTab {
 		case tabOfficial:
 			m.step = stepModel
-			m.modelIdx = 0
+			currentModel := ""
 			if m.existingCfg != nil {
 				if entry, ok := m.existingCfg.Providers[m.currentProvider().Name]; ok && entry.Model != "" {
-					found := false
-					for i, model := range m.models() {
-						if model == entry.Model {
-							m.modelIdx = i
-							found = true
-							break
-						}
-					}
-					if !found {
-						m.modelIdx = len(m.models())
-						m.modelInput.SetValue(entry.Model)
-					}
+					currentModel = entry.Model
 				}
 			}
+			m.prepareModelSelection(currentModel)
 			return m, nil
 
 		case tabCustom:
@@ -664,22 +732,16 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 				m.cpNameInput.SetValue("")
 				m.cpURLInput.SetValue("")
 				m.cpModelInput.SetValue("")
+				m.cpModelsInput.SetValue("")
 				m.cpAuthInput.SetValue("")
 				m.apiKeyInput.SetValue("")
 				m.apiKeyMasked = false
 				return m, m.cpNameInput.Focus()
 			}
 			cp := m.customProviders[m.customIdx]
-			m.step = stepAPIKey
-			m.apiKeyMasked = false
-			m.apiKeyOriginal = ""
-			m.apiKeyInput.SetValue("")
-			if cp.entry.APIKey != "" {
-				m.apiKeyOriginal = cp.entry.APIKey
-				m.apiKeyMasked = true
-				m.apiKeyInput.SetValue(strings.Repeat("*", 20))
-			}
-			return m, m.apiKeyInput.Focus()
+			m.step = stepModel
+			m.prepareModelSelection(cp.entry.Model)
+			return m, nil
 
 		case tabManual:
 			m.inManualForm = true
@@ -742,29 +804,44 @@ func (m providerTUIModel) handleDown() (tea.Model, tea.Cmd) {
 }
 
 func (m *providerTUIModel) loadExistingAPIKey() {
-	p := m.currentProvider()
 	m.apiKeyMasked = false
 	m.apiKeyOriginal = ""
 	m.apiKeyInput.SetValue("")
-	if m.existingCfg != nil {
-		if entry, ok := m.existingCfg.Providers[p.Name]; ok && entry.APIKey != "" {
-			m.apiKeyOriginal = entry.APIKey
+	if m.activeTab == tabCustom {
+		if cp, ok := m.selectedCustomProvider(); ok && cp.entry.APIKey != "" {
+			m.apiKeyOriginal = cp.entry.APIKey
 			m.apiKeyMasked = true
 			m.apiKeyInput.SetValue(strings.Repeat("*", 20))
 		}
+		return
 	}
+	if m.existingCfg == nil {
+		return
+	}
+	p := m.currentProvider()
+	if entry, ok := m.existingCfg.Providers[p.Name]; ok && entry.APIKey != "" {
+		m.apiKeyOriginal = entry.APIKey
+		m.apiKeyMasked = true
+		m.apiKeyInput.SetValue(strings.Repeat("*", 20))
+	}
+}
+
+func (m providerTUIModel) selectedModelFromState() string {
+	if m.modelInput.Value() != "" && (m.customModel || m.isCustomModelItem(m.modelIdx)) {
+		return m.modelInput.Value()
+	}
+	models := m.models()
+	if m.modelIdx < len(models) {
+		return models[m.modelIdx]
+	}
+	return ""
 }
 
 func (m providerTUIModel) result() providerTUIResult {
 	switch m.activeTab {
 	case tabOfficial:
 		p := m.currentProvider()
-		model := ""
-		if m.modelInput.Value() != "" && (m.customModel || m.isCustomModelItem(m.modelIdx)) {
-			model = m.modelInput.Value()
-		} else if m.modelIdx < len(m.models()) {
-			model = m.models()[m.modelIdx]
-		}
+		model := m.selectedModelFromState()
 
 		apiKey := ""
 		if m.apiKeyMasked {
@@ -782,9 +859,14 @@ func (m providerTUIModel) result() providerTUIResult {
 	case tabCustom:
 		if m.creatingCustom {
 			protocol := cpProtocols[m.cpProtocolIdx]
+			models := mergeModelLists(
+				[]string{m.cpModelInput.Value()},
+				strings.Split(m.cpModelsInput.Value(), ","),
+			)
 			return providerTUIResult{
 				provider:   m.cpNameInput.Value(),
 				model:      m.cpModelInput.Value(),
+				models:     models,
 				apiKey:     m.apiKeyInput.Value(),
 				isCustom:   true,
 				url:        m.cpURLInput.Value(),
@@ -794,6 +876,10 @@ func (m providerTUIModel) result() providerTUIResult {
 		}
 		if m.customIdx < len(m.customProviders) {
 			cp := m.customProviders[m.customIdx]
+			model := m.selectedModelFromState()
+			if model == "" {
+				model = cp.entry.Model
+			}
 			apiKey := ""
 			if m.apiKeyMasked {
 				apiKey = m.apiKeyOriginal
@@ -802,7 +888,8 @@ func (m providerTUIModel) result() providerTUIResult {
 			}
 			return providerTUIResult{
 				provider:   cp.name,
-				model:      cp.entry.Model,
+				model:      model,
+				models:     mergeModelLists([]string{model}, cp.entry.Models),
 				apiKey:     apiKey,
 				isCustom:   true,
 				url:        cp.entry.URL,
@@ -964,6 +1051,7 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 		{"Protocol", cpProtocols[m.cpProtocolIdx], m.cpStep == cpStepProtocol},
 		{"Base URL", m.cpURLInput.Value(), m.cpStep == cpStepBaseURL},
 		{"Model", m.cpModelInput.Value(), m.cpStep == cpStepModel},
+		{"Models", m.cpModelsInput.Value(), m.cpStep == cpStepModels},
 		{"API Key", strings.Repeat("*", len(m.apiKeyInput.Value())), m.cpStep == cpStepAPIKey},
 		{"Auth Header", m.cpAuthInput.Value(), m.cpStep == cpStepAuthHeader},
 	}
@@ -990,6 +1078,8 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 				s.WriteString("    " + m.cpURLInput.View() + "\n")
 			case cpStepModel:
 				s.WriteString("    " + m.cpModelInput.View() + "\n")
+			case cpStepModels:
+				s.WriteString("    " + m.cpModelsInput.View() + "\n")
 			case cpStepAPIKey:
 				s.WriteString("    " + m.apiKeyInput.View() + "\n")
 			case cpStepAuthHeader:
@@ -1051,8 +1141,7 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 }
 
 func (m providerTUIModel) viewModel(s *strings.Builder) {
-	provider := m.currentProvider()
-	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", provider.DisplayName)))
+	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", m.modelProviderName())))
 	s.WriteString("\n\n")
 
 	models := m.models()

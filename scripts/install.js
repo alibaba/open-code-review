@@ -189,37 +189,46 @@ async function main() {
   }
 
   if (config.checksumPattern) {
+    const checksumUrl = buildUrl(config.checksumPattern, vars);
+    info("Verifying checksum...");
+    let shaContent;
     try {
-      const checksumUrl = buildUrl(config.checksumPattern, vars);
-      info("Verifying checksum...");
-      const shaContent = await downloadText(checksumUrl);
-      const actualSha = await computeChecksum(binaryDest);
+      shaContent = await downloadText(checksumUrl);
+    } catch (e) {
+      try { fs.unlinkSync(binaryDest); } catch (_) {}
+      throw new Error(`Failed to download checksum from ${checksumUrl}: ${e.message}`);
+    }
+    let actualSha;
+    try {
+      actualSha = await computeChecksum(binaryDest);
+    } catch (e) {
+      try { fs.unlinkSync(binaryDest); } catch (_) {}
+      throw new Error(`Failed to compute checksum for ${binaryDest}: ${e.message}`);
+    }
 
-      let verified = false;
-      for (const line of shaContent.split("\n")) {
-        const trimmed = line.trim();
-        if (trimmed.includes(`-${os}-${arch}`)) {
-          const expectedSha = trimmed.split(/\s+/)[0].toLowerCase();
-          if (expectedSha) {
-            if (actualSha !== expectedSha) {
-              throw new Error(
-                `Checksum mismatch! Expected: ${expectedSha}, Got: ${actualSha}`
-              );
-            }
-            info("Checksum verified.");
-            verified = true;
-            break;
+    let verified = false;
+    for (const line of shaContent.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed.includes(`-${os}-${arch}`)) {
+        const expectedSha = trimmed.split(/\s+/)[0].toLowerCase();
+        if (expectedSha) {
+          if (actualSha !== expectedSha) {
+            try { fs.unlinkSync(binaryDest); } catch (_) {}
+            throw new Error(
+              `Checksum mismatch! Expected: ${expectedSha}, Got: ${actualSha}`
+            );
           }
+          info("Checksum verified.");
+          verified = true;
+          break;
         }
       }
-      if (!verified) {
-        warn("No matching checksum entry found; skipping verification.");
-      }
-    } catch (e) {
-      if (e.message.includes("mismatch")) {
-        throw e;
-      }
-      warn(`Could not verify checksum: ${e.message}`);
+    }
+    if (!verified) {
+      try { fs.unlinkSync(binaryDest); } catch (_) {}
+      throw new Error(
+        `No matching checksum entry for ${os}-${arch} in ${checksumUrl}`
+      );
     }
   }
 

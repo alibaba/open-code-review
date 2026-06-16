@@ -24,3 +24,33 @@ func TestValidateReviewRefsRejectsOptionLikeRangeRef(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestParseReviewFlagsRejectsToWithoutFrom(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--to", "HEAD"})
+	if err == nil {
+		t.Fatal("expected --to without --from to fail")
+	}
+	if !strings.Contains(err.Error(), "--from is required when --to is specified") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseReviewFlagsRejectsFromWithoutTo(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--from", "main"})
+	if err == nil {
+		t.Fatal("expected --from without --to to fail")
+	}
+	if !strings.Contains(err.Error(), "--to is required when --from is specified") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseReviewFlagsAllowsFromAndTo(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--from", "main", "--to", "HEAD"})
+	if err != nil {
+		t.Fatalf("expected --from/--to to pass, got: %v", err)
+	}
+	if opts.from != "main" || opts.to != "HEAD" {
+		t.Fatalf("unexpected opts: from=%q to=%q", opts.from, opts.to)
+	}
+}

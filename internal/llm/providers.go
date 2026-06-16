@@ -52,6 +52,7 @@ var registry = []Provider{
 		Models: []string{
 			"qwen3.7-max",
 			"qwen3.7-plus",
+			"qwen3.6-plus",
 			"qwen3.6-flash",
 		},
 	},
@@ -76,6 +77,26 @@ var registry = []Provider{
 		Models: []string{
 			"deepseek-v4-pro",
 			"deepseek-v4-flash",
+		},
+	},
+	{
+		Name:        "tencent-tokenhub",
+		DisplayName: "Tencent TokenHub API",
+		Protocol:    "openai",
+		BaseURL:     "https://tokenhub.tencentmaas.com/v1",
+		EnvVar:      "TENCENT_TOKENHUB_API_KEY",
+		Models: []string{
+			"hy3-preview",
+		},
+	},
+	{
+		Name:        "hy-tokenplan",
+		DisplayName: "Tencent Hunyuan Token Plan API",
+		Protocol:    "openai",
+		BaseURL:     "https://api.lkeap.cloud.tencent.com/plan/v3",
+		EnvVar:      "TENCENT_HUNYUAN_TOKENPLAN_KEY",
+		Models: []string{
+			"hy3-preview",
 		},
 	},
 	{

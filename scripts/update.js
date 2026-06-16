@@ -4,7 +4,6 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const http = require("http");
 const https = require("https");
 const { spawnSync } = require("child_process");
 
@@ -85,14 +84,14 @@ function fetchLatestVersion(pkg) {
   if (!pkgName) return Promise.resolve(null);
   const encodedName = pkgName.replace(/\//g, "%2F");
   const url = `${registry.replace(/\/$/, "")}/${encodedName}/latest`;
-  const client = url.startsWith("https") ? https : http;
+  if (!url.startsWith("https://")) return Promise.resolve(null);
 
   return new Promise((resolve) => {
     const options = {
       headers: { "User-Agent": "ocr-updater", Accept: "application/json" },
       timeout: 15000,
     };
-    const req = client
+    const req = https
       .get(url, options, (res) => {
         if (res.statusCode !== 200) {
           res.resume();
@@ -173,26 +172,38 @@ async function main() {
     }
 
     if (config.checksumPattern) {
+      const checksumUrl = buildUrl(config.checksumPattern, vars);
+      let shaContent;
       try {
-        const checksumUrl = buildUrl(config.checksumPattern, vars);
-        const shaContent = await downloadText(checksumUrl);
-        const actualSha = await computeChecksum(tempPath);
-
-        let verified = false;
-        for (const line of shaContent.split("\n")) {
-          const trimmed = line.trim();
-          if (trimmed.includes(`-${platform}-${arch}`)) {
-            const expectedSha = trimmed.split(/\s+/)[0].toLowerCase();
-            if (expectedSha && actualSha !== expectedSha) {
-              fs.unlinkSync(tempPath);
-              return;
-            }
-            verified = true;
-            break;
-          }
-        }
+        shaContent = await downloadText(checksumUrl);
       } catch (_) {
-        // checksum fetch failed, continue with the download
+        fs.unlinkSync(tempPath);
+        return;
+      }
+      let actualSha;
+      try {
+        actualSha = await computeChecksum(tempPath);
+      } catch (_) {
+        fs.unlinkSync(tempPath);
+        return;
+      }
+
+      let verified = false;
+      for (const line of shaContent.split("\n")) {
+        const trimmed = line.trim();
+        if (trimmed.includes(`-${platform}-${arch}`)) {
+          const expectedSha = trimmed.split(/\s+/)[0].toLowerCase();
+          if (expectedSha && actualSha !== expectedSha) {
+            fs.unlinkSync(tempPath);
+            return;
+          }
+          verified = true;
+          break;
+        }
+      }
+      if (!verified) {
+        fs.unlinkSync(tempPath);
+        return;
       }
     }
 

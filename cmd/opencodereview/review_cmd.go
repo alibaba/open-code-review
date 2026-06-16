@@ -88,7 +88,7 @@ func runReview(args []string) error {
 		tpl.ApplyLanguage(appCfg.Language)
 	}
 
-	ep, err := llm.ResolveEndpoint(cfgPath)
+	ep, err := llm.ResolveEndpointWithModelOverride(cfgPath, opts.model)
 	if err != nil {
 		return fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
