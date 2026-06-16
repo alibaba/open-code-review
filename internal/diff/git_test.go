@@ -2,9 +2,11 @@ package diff
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
@@ -143,6 +145,160 @@ func TestCommitDiffTreatsOptionLikeRefAsRevision(t *testing.T) {
 		t.Fatal("option-like commit ref was interpreted as a git show option")
 	} else if !os.IsNotExist(statErr) {
 		t.Fatal(statErr)
+	}
+}
+
+func TestWorkspaceUntrackedSymlinkDoesNotReadExternalTarget(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write base.txt: %v", err)
+	}
+	runGitTest(t, repo, "add", "base.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "initial commit")
+
+	secret := "TOP_SECRET_ISSUE123_SHOULD_NOT_LEAK\n"
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte(secret), 0o644); err != nil {
+		t.Fatalf("write external secret: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(repo, "leaked_link")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	provider := NewWorkspaceProvider(repo, gitcmd.New(0))
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff returned error: %v", err)
+	}
+
+	var found bool
+	for _, d := range diffs {
+		if strings.Contains(d.Diff, secret) || strings.Contains(d.NewFileContent, secret) {
+			t.Fatalf("workspace diff leaked external symlink target content: %+v", d)
+		}
+		if d.NewPath == "leaked_link" {
+			found = true
+			if d.NewFileContent != outside {
+				t.Fatalf("NewFileContent = %q, want symlink target %q", d.NewFileContent, outside)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected diff for untracked symlink")
+	}
+}
+
+func TestWorkspaceTrackedFileChangedToSymlinkDoesNotReadExternalTarget(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	victim := filepath.Join(repo, "victim.txt")
+	if err := os.WriteFile(victim, []byte("original\n"), 0o644); err != nil {
+		t.Fatalf("write victim.txt: %v", err)
+	}
+	runGitTest(t, repo, "add", "victim.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "initial commit")
+
+	secret := "TRACKED_SYMLINK_SECRET_SHOULD_NOT_LEAK\n"
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte(secret), 0o644); err != nil {
+		t.Fatalf("write external secret: %v", err)
+	}
+	if err := os.Remove(victim); err != nil {
+		t.Fatalf("remove victim.txt: %v", err)
+	}
+	if err := os.Symlink(outside, victim); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	provider := NewWorkspaceProvider(repo, gitcmd.New(0))
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff returned error: %v", err)
+	}
+
+	var foundSymlinkAdd bool
+	for _, d := range diffs {
+		if strings.Contains(d.Diff, secret) || strings.Contains(d.NewFileContent, secret) {
+			t.Fatalf("workspace diff leaked external symlink target content: %+v", d)
+		}
+		if d.NewPath == "victim.txt" && d.IsNew {
+			foundSymlinkAdd = true
+			if d.NewFileContent != outside {
+				t.Fatalf("NewFileContent = %q, want symlink target %q", d.NewFileContent, outside)
+			}
+		}
+	}
+	if !foundSymlinkAdd {
+		t.Fatal("expected new-file diff for tracked file changed to symlink")
+	}
+}
+
+// TestRangeDiffDetectsRename guards against issue #99: when a file is renamed
+// on the target branch, `ocr review --from master --to BRANCH` must recognize
+// the rename and read content at the NEW path. Before the fix the rename could
+// surface as delete(old)+add(new) (e.g. diff.renames=false) and the parser's
+// broken /dev/null detection sent the deleted half into `git show ref:oldpath`
+// -> "WARNING: cannot read file ... exit status 128".
+func TestRangeDiffDetectsRename(t *testing.T) {
+	repo := initRepoWithChange(t)
+
+	// Reset the working-tree modification left by the helper.
+	runGitTest(t, repo, "checkout", "--", "sample.txt")
+	// Simulate a user config where git does NOT detect renames on its own;
+	// the provider must force --find-renames.
+	runGitTest(t, repo, "config", "diff.renames", "false")
+
+	// Commit a file large enough for git's similarity detection to work
+	// (tiny files fall below the rename threshold even for 1-line edits).
+	var content strings.Builder
+	for i := 1; i <= 50; i++ {
+		fmt.Fprintf(&content, "line%d\n", i)
+	}
+	orig := filepath.Join(repo, "orig.txt")
+	if err := os.WriteFile(orig, []byte(content.String()), 0o644); err != nil {
+		t.Fatalf("write orig.txt: %v", err)
+	}
+	runGitTest(t, repo, "add", "orig.txt")
+	runGitTest(t, repo, "commit", "-q", "-m", "add orig.txt")
+
+	// Rename on a feature branch, with a small edit (like the issue repro).
+	runGitTest(t, repo, "checkout", "-q", "-b", "feature")
+	runGitTest(t, repo, "mv", "orig.txt", "renamed.txt")
+	edited := strings.Replace(content.String(), "line25\n", "line25-edited\n", 1)
+	if err := os.WriteFile(filepath.Join(repo, "renamed.txt"), []byte(edited), 0o644); err != nil {
+		t.Fatalf("edit renamed.txt: %v", err)
+	}
+	runGitTest(t, repo, "add", "-A")
+	runGitTest(t, repo, "commit", "-q", "-m", "rename orig.txt")
+
+	runner := gitcmd.New(0)
+	provider := NewProvider(repo, "HEAD~1", "feature", runner)
+
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff (range, rename) returned error: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected exactly 1 diff for a rename, got %d: %+v", len(diffs), diffs)
+	}
+	d := diffs[0]
+	if !d.IsRenamed {
+		t.Errorf("IsRenamed = false, want true")
+	}
+	if d.OldPath != "orig.txt" || d.NewPath != "renamed.txt" {
+		t.Errorf("OldPath/NewPath = %q/%q, want orig.txt/renamed.txt", d.OldPath, d.NewPath)
+	}
+	if d.NewFileContent == "" {
+		t.Errorf("NewFileContent is empty: content at new path was not read at ref")
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
+	"github.com/open-code-review/open-code-review/internal/pathutil"
 )
 
 // ReviewMode represents the active review mode.
@@ -88,17 +89,13 @@ func (fr *FileReader) readFromDisk(path string) (string, error) {
 }
 
 func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
-	repoRoot, err := filepath.Abs(fr.RepoDir)
-	if err != nil {
-		return "", fmt.Errorf("resolve repository path %q: %w", fr.RepoDir, err)
-	}
-	repoRoot, err = filepath.EvalSymlinks(repoRoot)
+	repoRoot, err := pathutil.CanonicalPath(fr.RepoDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve repository path %q: %w", fr.RepoDir, err)
 	}
 
 	fullPath := filepath.Join(repoRoot, path)
-	if !pathWithinBase(repoRoot, fullPath) {
+	if !pathutil.WithinBase(repoRoot, fullPath) {
 		return "", fmt.Errorf("file path %q is outside repository", path)
 	}
 
@@ -109,18 +106,10 @@ func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
 		}
 		return "", fmt.Errorf("resolve file %q: %w", path, err)
 	}
-	if !pathWithinBase(repoRoot, resolvedPath) {
+	if !pathutil.WithinBase(repoRoot, resolvedPath) {
 		return "", fmt.Errorf("file path %q is outside repository", path)
 	}
 	return resolvedPath, nil
-}
-
-func pathWithinBase(base, target string) bool {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)))
 }
 
 func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (string, error) {

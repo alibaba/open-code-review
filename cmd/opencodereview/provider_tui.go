@@ -156,7 +156,7 @@ func newProviderTUI(cfg *Config) providerTUIModel {
 
 	cpAuth := textinput.New()
 	cpAuth.Placeholder = "optional, leave empty for default (Authorization)"
-	cpAuth.SetWidth(40)
+	cpAuth.SetWidth(55)
 
 	manualURL := textinput.New()
 	manualURL.Placeholder = "enter your API base URL"

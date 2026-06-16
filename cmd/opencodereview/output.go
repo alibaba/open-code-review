@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/open-code-review/open-code-review/internal/agent"
 	"github.com/open-code-review/open-code-review/internal/model"
@@ -47,7 +48,7 @@ func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		if w.Type == "subtask_error" {
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "[ocr] WARNING [%s] %s: %s\n", w.Type, w.File, w.Message)
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING [%s] %s: %s\n", w.Type, sanitizeTerminal(w.File), sanitizeTerminal(w.Message))
 	}
 }
 
@@ -57,10 +58,10 @@ func renderComment(comment model.LlmComment) {
 		return
 	}
 
-	fmt.Printf("\n\033[2m─── %s:%d-%d ───\033[0m\n", comment.Path, comment.StartLine, comment.EndLine)
+	fmt.Printf("\n\033[2m─── %s:%d-%d ───\033[0m\n", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine)
 
 	if comment.Content != "" {
-		for _, ln := range wrapByRunes(comment.Content, 100) {
+		for _, ln := range wrapByRunes(sanitizeTerminal(comment.Content), 100) {
 			fmt.Printf("%s\n", ln)
 		}
 		fmt.Println()
@@ -70,11 +71,11 @@ func renderComment(comment model.LlmComment) {
 		for _, dl := range lines {
 			switch dl.Type {
 			case suggestdiff.DiffAdded:
-				printDiffLine("+", dl.Content, "\033[92m", "\033[48;2;0;60;0m")
+				printDiffLine("+", sanitizeTerminal(dl.Content), "\033[92m", "\033[48;2;0;60;0m")
 			case suggestdiff.DiffDeleted:
-				printDiffLine("-", dl.Content, "\033[91m", "\033[48;2;70;0;0m")
+				printDiffLine("-", sanitizeTerminal(dl.Content), "\033[91m", "\033[48;2;70;0;0m")
 			case suggestdiff.DiffContext:
-				printDiffLine(" ", dl.Content, "\033[2m", "\033[48;2;38;38;38m")
+				printDiffLine(" ", sanitizeTerminal(dl.Content), "\033[2m", "\033[48;2;38;38;38m")
 			}
 		}
 	}
@@ -144,6 +145,17 @@ func visibleRunesLen(runes []rune) int {
 		}
 	}
 	return n
+}
+
+func sanitizeTerminal(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '\t' || r == '\n' || !unicode.IsControl(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func splitToLines(s string) []string {
@@ -250,8 +262,8 @@ func outputPreviewText(p *agent.DiffPreview) {
 
 	maxPathLen := 0
 	for _, e := range p.Entries {
-		if len(e.Path) > maxPathLen {
-			maxPathLen = len(e.Path)
+		if n := len(sanitizeTerminal(e.Path)); n > maxPathLen {
+			maxPathLen = n
 		}
 	}
 	if maxPathLen < 20 {
@@ -269,7 +281,7 @@ func outputPreviewText(p *agent.DiffPreview) {
 				continue
 			}
 			fmt.Printf("  %s  "+pathFmt+" \033[32m+%-4d\033[0m \033[31m-%-4d\033[0m\n",
-				statusBadge(e.Status), e.Path, e.Insertions, e.Deletions)
+				statusBadge(e.Status), sanitizeTerminal(e.Path), e.Insertions, e.Deletions)
 		}
 	}
 
@@ -280,7 +292,7 @@ func outputPreviewText(p *agent.DiffPreview) {
 				continue
 			}
 			fmt.Printf("  %s  "+pathFmt+" \033[2m(%s)\033[0m\n",
-				statusBadge(e.Status), e.Path, e.ExcludeReason)
+				statusBadge(e.Status), sanitizeTerminal(e.Path), sanitizeTerminal(string(e.ExcludeReason)))
 		}
 	}
 

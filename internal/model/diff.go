@@ -9,6 +9,7 @@ type Diff struct {
 	IsBinary       bool   `json:"is_binary"`
 	IsDeleted      bool   `json:"is_deleted"`
 	IsNew          bool   `json:"is_new"`
+	IsRenamed      bool   `json:"is_renamed"`
 	Insertions     int64  `json:"insertions"`
 	Deletions      int64  `json:"deletions"`
 }

@@ -127,6 +127,8 @@ func diffStatus(d model.Diff) string {
 		return "added"
 	case d.IsDeleted:
 		return "deleted"
+	case d.IsRenamed:
+		return "renamed"
 	case d.OldPath != d.NewPath && d.OldPath != "" && d.OldPath != "/dev/null":
 		return "renamed"
 	default:

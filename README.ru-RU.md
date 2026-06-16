@@ -113,18 +113,22 @@ sudo cp dist/opencodereview /usr/local/bin/ocr
 
 **Перед запуском ревью необходимо настроить LLM.**
 
+**Вариант A: интерактивная настройка (рекомендуется)**
+
 ```bash
-# Вариант A: настройка через CLI
+ocr config provider          # Выбрать встроенного провайдера или добавить пользовательский
+ocr config model             # Выбрать модель для активного провайдера
+```
+
+![Provider setup](imgs/providers.jpg)
+
+**Вариант B: ручная настройка**
+
+```bash
 ocr config set llm.url https://api.anthropic.com/v1/messages
 ocr config set llm.auth_token your-api-key-here
 ocr config set llm.model claude-opus-4-6
 ocr config set llm.use_anthropic true
-
-# Вариант B: переменные окружения (наивысший приоритет)
-export OCR_LLM_URL=https://api.anthropic.com/v1/messages
-export OCR_LLM_TOKEN=your-api-key-here
-export OCR_LLM_MODEL=claude-opus-4-6
-export OCR_USE_ANTHROPIC=true
 ```
 
 Конфигурация хранится в `~/.opencodereview/config.json`.
@@ -133,11 +137,18 @@ export OCR_USE_ANTHROPIC=true
 
 ```bash
 ocr config set llm.auth_header x-api-key
-# или
-export OCR_LLM_AUTH_HEADER=x-api-key
 ```
 
 Поддерживаемые значения: `x-api-key`, `authorization` (алиас: `bearer`). Прочие значения отклоняются с ошибкой.
+
+**Вариант C: переменные окружения (наивысший приоритет)**
+
+```bash
+export OCR_LLM_URL=https://api.anthropic.com/v1/messages
+export OCR_LLM_TOKEN=your-api-key-here
+export OCR_LLM_MODEL=claude-opus-4-6
+export OCR_USE_ANTHROPIC=true
+```
 
 Инструмент также совместим с переменными окружения Claude Code (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) и разбирает `~/.zshrc` / `~/.bashrc` в поисках соответствующих export'ов.
 
@@ -280,8 +291,11 @@ ocr review \
 |---------|-------|----------|
 | `ocr review` | `ocr r` | Запустить код-ревью |
 | `ocr rules check <file>` | — | Показать, какое правило ревью применяется к пути файла |
+| `ocr config provider` | — | Интерактивная настройка провайдера (встроенный, пользовательский или ручной) |
+| `ocr config model` | — | Интерактивный выбор модели для активного провайдера |
 | `ocr config set <key> <value>` | — | Установить значения конфигурации |
 | `ocr llm test` | — | Проверить подключение к LLM |
+| `ocr llm providers` | — | Показать список встроенных LLM-провайдеров |
 | `ocr viewer` | `ocr v` | Запустить WebUI-просмотрщик сессий на `localhost:5483` |
 | `ocr version` | — | Показать информацию о версии |
 
@@ -308,6 +322,11 @@ ocr review \
 ## Примеры
 
 ```bash
+# Интерактивная настройка провайдера и модели
+ocr config provider
+ocr config model
+ocr llm providers
+
 # Показать, какие файлы попадут в ревью (без вызовов LLM)
 ocr review --preview
 ocr review -c abc123 -p
