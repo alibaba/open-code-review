@@ -833,3 +833,208 @@ func TestResolveEndpointWithModelOverride_LegacyConfigNoValidation(t *testing.T)
 		t.Errorf("Model = %q, want %q", ep.Model, "any-override-model")
 	}
 }
+
+func TestParseExtraHeaders(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    map[string]string
+		wantErr bool
+	}{
+		{
+			name:  "empty string returns nil",
+			input: "",
+			want:  nil,
+		},
+		{
+			name:  "single pair",
+			input: "X-Custom-Header=value1",
+			want:  map[string]string{"X-Custom-Header": "value1"},
+		},
+		{
+			name:  "multiple pairs",
+			input: "X-Custom-Header=value1,X-Another=value2",
+			want: map[string]string{
+				"X-Custom-Header": "value1",
+				"X-Another":       "value2",
+			},
+		},
+		{
+			name:  "pairs with whitespace are trimmed",
+			input: "  X-Header  =  spaced-value  , X-Two = val ",
+			want: map[string]string{
+				"X-Header": "spaced-value",
+				"X-Two":    "val",
+			},
+		},
+		{
+			name:  "trailing comma is ignored",
+			input: "X-Header=value,",
+			want:  map[string]string{"X-Header": "value"},
+		},
+		{
+			name:  "empty pairs between commas are skipped",
+			input: "X-Header=value,, ,X-Two=val2",
+			want: map[string]string{
+				"X-Header": "value",
+				"X-Two":    "val2",
+			},
+		},
+		{
+			name:  "value can contain equals sign",
+			input: "X-Header=a=b=c",
+			want:  map[string]string{"X-Header": "a=b=c"},
+		},
+		{
+			name:    "pair without equals sign is error",
+			input:   "X-Header-no-equals",
+			wantErr: true,
+		},
+		{
+			name:    "empty key is error",
+			input:   "=value",
+			wantErr: true,
+		},
+		{
+			name:    "empty key with whitespace is error",
+			input:   "  =value",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseExtraHeaders(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !mapsEqual(got, tt.want) {
+				t.Errorf("ParseExtraHeaders(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func mapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
+}
+
+func TestResolveEndpoint_OCREnvExtraHeaders(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages")
+	t.Setenv("OCR_LLM_TOKEN", "test-token")
+	t.Setenv("OCR_LLM_MODEL", "claude-opus-4-6")
+	t.Setenv("OCR_LLM_EXTRA_HEADERS", "X-Custom-Header=my-value,X-Another=second")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.ExtraHeaders == nil {
+		t.Fatal("ExtraHeaders should not be nil")
+	}
+	if v, ok := ep.ExtraHeaders["X-Custom-Header"]; !ok || v != "my-value" {
+		t.Errorf("ExtraHeaders[\"X-Custom-Header\"] = %q, want %q", v, "my-value")
+	}
+	if v, ok := ep.ExtraHeaders["X-Another"]; !ok || v != "second" {
+		t.Errorf("ExtraHeaders[\"X-Another\"] = %q, want %q", v, "second")
+	}
+}
+
+func TestResolveEndpoint_OCREnvExtraHeadersEmpty(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages")
+	t.Setenv("OCR_LLM_TOKEN", "test-token")
+	t.Setenv("OCR_LLM_MODEL", "claude-opus-4-6")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ep.ExtraHeaders) != 0 {
+		t.Errorf("ExtraHeaders should be empty, got %v", ep.ExtraHeaders)
+	}
+}
+
+func TestResolveEndpoint_OCREnvExtraHeadersInvalid(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages")
+	t.Setenv("OCR_LLM_TOKEN", "test-token")
+	t.Setenv("OCR_LLM_MODEL", "claude-opus-4-6")
+	t.Setenv("OCR_LLM_EXTRA_HEADERS", "no-equals-sign")
+
+	_, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err == nil {
+		t.Fatal("expected error for invalid extra headers")
+	}
+	if !strings.Contains(err.Error(), "extra header") {
+		t.Errorf("error should mention extra header, got: %v", err)
+	}
+}
+
+func TestResolveEndpoint_ProviderExtraHeaders(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {
+				APIKey:       "sk-ant-test",
+				Model:        "claude-sonnet-4-6",
+				ExtraHeaders: map[string]string{"X-Org-ID": "org-123"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.ExtraHeaders == nil {
+		t.Fatal("ExtraHeaders should not be nil")
+	}
+	if v, ok := ep.ExtraHeaders["X-Org-ID"]; !ok || v != "org-123" {
+		t.Errorf("ExtraHeaders[\"X-Org-ID\"] = %q, want %q", v, "org-123")
+	}
+}
+
+func TestResolveEndpoint_LegacyLlmExtraHeaders(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:          "https://api.example.com/v1/messages",
+			AuthToken:    "legacy-token",
+			Model:        "claude-opus-4-6",
+			ExtraHeaders: map[string]string{"X-Legacy": "yes"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v, ok := ep.ExtraHeaders["X-Legacy"]; !ok || v != "yes" {
+		t.Errorf("ExtraHeaders[\"X-Legacy\"] = %q, want %q", v, "yes")
+	}
+}

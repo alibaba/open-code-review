@@ -156,13 +156,14 @@ func deleteCustomProvider(cfg *Config, name string) (bool, error) {
 
 // ProviderEntry holds per-provider configuration in the providers map.
 type ProviderEntry struct {
-	APIKey     string         `json:"api_key,omitempty"`
-	URL        string         `json:"url,omitempty"`
-	Protocol   string         `json:"protocol,omitempty"`
-	Model      string         `json:"model,omitempty"`
-	Models     []string       `json:"models,omitempty"`
-	AuthHeader string         `json:"auth_header,omitempty"`
-	ExtraBody  map[string]any `json:"extra_body,omitempty"`
+	APIKey       string            `json:"api_key,omitempty"`
+	URL          string            `json:"url,omitempty"`
+	Protocol     string            `json:"protocol,omitempty"`
+	Model        string            `json:"model,omitempty"`
+	Models       []string          `json:"models,omitempty"`
+	AuthHeader   string            `json:"auth_header,omitempty"`
+	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
 
 // Config represents the user-level configuration file (~/.opencodereview/config.json).
@@ -177,12 +178,13 @@ type Config struct {
 }
 
 type LlmConfig struct {
-	URL          string         `json:"url,omitempty"`
-	AuthToken    string         `json:"auth_token,omitempty"`
-	AuthHeader   string         `json:"auth_header,omitempty"`
-	Model        string         `json:"model,omitempty"`
-	UseAnthropic *bool          `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol
-	ExtraBody    map[string]any `json:"extra_body,omitempty"`
+	URL          string            `json:"url,omitempty"`
+	AuthToken    string            `json:"auth_token,omitempty"`
+	AuthHeader   string            `json:"auth_header,omitempty"`
+	Model        string            `json:"model,omitempty"`
+	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol
+	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -284,6 +286,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return err
 		}
 		cfg.Llm.AuthHeader = normalized
+	case "llm.extra_headers":
+		parsed, err := llm.ParseExtraHeaders(value)
+		if err != nil {
+			return err
+		}
+		cfg.Llm.ExtraHeaders = parsed
 	case "llm.model", "llm.Model":
 		cfg.Llm.Model = value
 	case "llm.use_anthropic", "llm.UseAnthropic":
@@ -321,7 +329,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body", key)
+		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers", key)
 	}
 	return nil
 }
@@ -357,8 +365,14 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 			return fmt.Errorf("invalid JSON for %s: %w", key, err)
 		}
 		entry.ExtraBody = m
+	case "extra_headers":
+		parsed, err := llm.ParseExtraHeaders(value)
+		if err != nil {
+			return fmt.Errorf("invalid extra headers for %s: %w", key, err)
+		}
+		entry.ExtraHeaders = parsed
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers", field)
 	}
 	return nil
 }

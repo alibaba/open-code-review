@@ -179,12 +179,13 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	URL        string         // Full API endpoint URL
-	APIKey     string         // Bearer token / API key
-	Model      string         // Default model override
-	AuthHeader string         // Auth header name: "x-api-key", "authorization", or empty for protocol default
-	Timeout    time.Duration  // Request timeout
-	ExtraBody  map[string]any // Vendor-specific fields merged into every request body
+	URL          string            // Full API endpoint URL
+	APIKey       string            // Bearer token / API key
+	Model        string            // Default model override
+	AuthHeader   string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
+	Timeout      time.Duration     // Request timeout
+	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
+	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
 }
 
 // --- Factory ---
@@ -193,11 +194,12 @@ type ClientConfig struct {
 // protocol: "anthropic" -> AnthropicClient, anything else -> OpenAIClient.
 func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 	cfg := ClientConfig{
-		URL:        ep.URL,
-		APIKey:     ep.Token,
-		Model:      ep.Model,
-		AuthHeader: ep.AuthHeader,
-		ExtraBody:  ep.ExtraBody,
+		URL:          ep.URL,
+		APIKey:       ep.Token,
+		Model:        ep.Model,
+		AuthHeader:   ep.AuthHeader,
+		ExtraBody:    ep.ExtraBody,
+		ExtraHeaders: ep.ExtraHeaders,
 	}
 	if ep.Protocol == "anthropic" {
 		return NewAnthropicClient(cfg)
@@ -291,15 +293,20 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 
 	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/chat/completions")
 
+	opts := []openaiopt.RequestOption{
+		openaiopt.WithAPIKey(cfg.APIKey),
+		openaiopt.WithBaseURL(sdkBaseURL),
+		openaiopt.WithMaxRetries(5),
+		openaiopt.WithHeader("User-Agent", userAgent("")),
+		openaiopt.WithRequestTimeout(cfg.Timeout),
+	}
+	for k, v := range cfg.ExtraHeaders {
+		opts = append(opts, openaiopt.WithHeader(k, v))
+	}
+
 	return &OpenAIClient{
 		cfg: cfg,
-		sdk: openai.NewClient(
-			openaiopt.WithAPIKey(cfg.APIKey),
-			openaiopt.WithBaseURL(sdkBaseURL),
-			openaiopt.WithMaxRetries(5),
-			openaiopt.WithHeader("User-Agent", userAgent("")),
-			openaiopt.WithRequestTimeout(cfg.Timeout),
-		),
+		sdk: openai.NewClient(opts...),
 	}
 }
 
@@ -508,6 +515,10 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 			option.WithHeaderDel("X-Api-Key"),
 			option.WithHeader(authHeader, cfg.APIKey),
 		)
+	}
+
+	for k, v := range cfg.ExtraHeaders {
+		opts = append(opts, option.WithHeader(k, v))
 	}
 
 	return &AnthropicClient{
