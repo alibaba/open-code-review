@@ -40,7 +40,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "dashscope", "deepseek", "kimi", "mimo", "minimax", "openai", "volcengine", "z-ai"}
+	expected := []string{"anthropic", "dashscope", "deepseek", "hy-tokenplan", "kimi", "mimo", "minimax", "openai", "tencent-tokenhub", "volcengine", "z-ai"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}

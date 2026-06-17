@@ -40,14 +40,23 @@ const (
 // Each strategy requires all three fields (URL, Token, Model) to be non-empty.
 // Returns the first valid strategy's result.
 func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
+	return ResolveEndpointWithModelOverride(configPath, "")
+}
+
+// ResolveEndpointWithModelOverride resolves an endpoint like ResolveEndpoint,
+// but uses modelOverride as the request model when it is non-empty. The override
+// can also supply the otherwise required model for a configured endpoint.
+func ResolveEndpointWithModelOverride(configPath, modelOverride string) (ResolvedEndpoint, error) {
+	modelOverride = strings.TrimSpace(modelOverride)
+
 	strategies := []struct {
 		name string
 		fn   func() (ResolvedEndpoint, bool, error)
 	}{
-		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath) }},
-		{"OCR environment", tryOCREnv},
-		{"Claude Code environment", tryCCEnv},
-		{"Shell rc file", tryShellRC},
+		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath, modelOverride) }},
+		{"OCR environment", func() (ResolvedEndpoint, bool, error) { return tryOCREnv(modelOverride) }},
+		{"Claude Code environment", func() (ResolvedEndpoint, bool, error) { return tryCCEnv(modelOverride) }},
+		{"Shell rc file", func() (ResolvedEndpoint, bool, error) { return tryShellRC(modelOverride) }},
 	}
 
 	for _, s := range strategies {
@@ -68,10 +77,13 @@ func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
 }
 
 // tryOCREnv reads OCR-specific environment variables.
-func tryOCREnv() (ResolvedEndpoint, bool, error) {
+func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	url := os.Getenv(envOCRLLMURL)
 	token := os.Getenv(envOCRLLMToken)
 	model := os.Getenv(envOCRLLMModel)
+	if modelOverride != "" {
+		model = modelOverride
+	}
 	if url == "" || token == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
 	}
@@ -118,6 +130,7 @@ type providerEntryConfig struct {
 	URL        string         `json:"url,omitempty"`
 	Protocol   string         `json:"protocol,omitempty"`
 	Model      string         `json:"model,omitempty"`
+	Models     []string       `json:"models,omitempty"`
 	AuthHeader string         `json:"auth_header,omitempty"`
 	ExtraBody  map[string]any `json:"extra_body,omitempty"`
 }
@@ -131,7 +144,7 @@ type configFile struct {
 }
 
 // tryOCRConfig reads the OCR config file.
-func tryOCRConfig(path string) (ResolvedEndpoint, bool, error) {
+func tryOCRConfig(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -146,14 +159,14 @@ func tryOCRConfig(path string) (ResolvedEndpoint, bool, error) {
 	}
 
 	if cfg.Provider != "" {
-		return tryProviderConfig(cfg)
+		return tryProviderConfig(cfg, modelOverride)
 	}
 
-	return tryLegacyLlmConfig(cfg)
+	return tryLegacyLlmConfig(cfg, modelOverride)
 }
 
 // tryProviderConfig resolves an endpoint from the provider-based configuration.
-func tryProviderConfig(cfg configFile) (ResolvedEndpoint, bool, error) {
+func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, bool, error) {
 	preset, isPreset := LookupProvider(cfg.Provider)
 
 	var entry providerEntryConfig
@@ -212,8 +225,31 @@ func tryProviderConfig(cfg configFile) (ResolvedEndpoint, bool, error) {
 	if entry.Model != "" {
 		model = entry.Model
 	}
+
+	// Build available model list for validation.
+	var availableModels []string
+	if isPreset {
+		availableModels = append(availableModels, preset.Models...)
+	}
+	availableModels = append(availableModels, entry.Models...)
+
+	// Apply model override with validation.
+	if modelOverride != "" {
+		if len(availableModels) > 0 {
+			if !modelListContains(availableModels, modelOverride) {
+				return ResolvedEndpoint{}, false, fmt.Errorf(
+					"model %q is not available for provider %q; available models: %s",
+					modelOverride,
+					cfg.Provider,
+					strings.Join(availableModels, ", "),
+				)
+			}
+		}
+		model = modelOverride
+	}
+
 	if model == "" {
-		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no model configured; run 'ocr config model' to select one", cfg.Provider)
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no model configured; run 'ocr config model' to select one or pass --model", cfg.Provider)
 	}
 
 	if protocol == "anthropic" {
@@ -254,8 +290,12 @@ func tryProviderConfig(cfg configFile) (ResolvedEndpoint, bool, error) {
 }
 
 // tryLegacyLlmConfig resolves an endpoint from the legacy llm config block.
-func tryLegacyLlmConfig(cfg configFile) (ResolvedEndpoint, bool, error) {
-	if cfg.Llm.URL == "" || cfg.Llm.AuthToken == "" || cfg.Llm.Model == "" {
+func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, bool, error) {
+	model := cfg.Llm.Model
+	if modelOverride != "" {
+		model = modelOverride
+	}
+	if cfg.Llm.URL == "" || cfg.Llm.AuthToken == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
 	}
 
@@ -281,14 +321,17 @@ func tryLegacyLlmConfig(cfg configFile) (ResolvedEndpoint, bool, error) {
 		}
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: cfg.Llm.Model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody}, true, nil
+	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody}, true, nil
 }
 
 // tryCCEnv reads Claude Code environment variables.
-func tryCCEnv() (ResolvedEndpoint, bool, error) {
+func tryCCEnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	baseURL := os.Getenv(envCCBaseURL)
 	token := os.Getenv(envCCToken)
 	model := os.Getenv(envCCModel)
+	if modelOverride != "" {
+		model = modelOverride
+	}
 	if baseURL == "" || token == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
 	}
@@ -300,10 +343,10 @@ func tryCCEnv() (ResolvedEndpoint, bool, error) {
 }
 
 // tryShellRC parses ~/.zshrc and ~/.bashrc for ANTHROPIC_* exports.
-func tryShellRC() (ResolvedEndpoint, bool, error) {
+func tryShellRC(modelOverride string) (ResolvedEndpoint, bool, error) {
 	files := shellRCFiles()
 	for _, f := range files {
-		ep, ok, err := parseShellRC(f)
+		ep, ok, err := parseShellRC(f, modelOverride)
 		if err != nil || ok {
 			return ep, ok, err
 		}
@@ -339,7 +382,7 @@ func stripModelSuffix(model string) string {
 	return modelSuffixRe.ReplaceAllString(model, "")
 }
 
-func parseShellRC(path string) (ResolvedEndpoint, bool, error) {
+func parseShellRC(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ResolvedEndpoint{}, false, nil
@@ -371,6 +414,9 @@ func parseShellRC(path string) (ResolvedEndpoint, bool, error) {
 			model = value
 		}
 	}
+	if modelOverride != "" {
+		model = modelOverride
+	}
 
 	if baseURL == "" || token == "" || model == "" {
 		return ResolvedEndpoint{}, false, nil
@@ -388,6 +434,17 @@ func defaultAuthHeader(protocol string) string {
 		return "authorization"
 	}
 	return ""
+}
+
+// modelListContains checks if a model exists in the available models list.
+func modelListContains(models []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, model := range models {
+		if strings.TrimSpace(model) == target {
+			return true
+		}
+	}
+	return false
 }
 
 // NormalizeAuthHeader normalizes an auth header value to a canonical form.

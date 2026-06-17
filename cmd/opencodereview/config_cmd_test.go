@@ -81,6 +81,80 @@ func TestSetConfigValueProviderEntry(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueProviderEntryNonPresetWritesCustomProvider(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "providers.my-gateway.url", "https://gateway.internal.com/v1"); err != nil {
+		t.Fatalf("setConfigValue url: %v", err)
+	}
+
+	if cfg.Providers != nil {
+		if _, ok := cfg.Providers["my-gateway"]; ok {
+			t.Fatal("non-preset providers.<name> should be stored in CustomProviders, not Providers")
+		}
+	}
+	if cfg.CustomProviders["my-gateway"].URL != "https://gateway.internal.com/v1" {
+		t.Errorf("custom provider URL = %q", cfg.CustomProviders["my-gateway"].URL)
+	}
+}
+
+func TestSetConfigValueProviderEntryModelsJSON(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "custom_providers.my-gateway.models", `["llama-3-70b","llama-3-8b","llama-3-70b"]`); err != nil {
+		t.Fatalf("setConfigValue models: %v", err)
+	}
+
+	got := cfg.CustomProviders["my-gateway"].Models
+	want := []string{"llama-3-70b", "llama-3-8b"}
+	if len(got) != len(want) {
+		t.Fatalf("models length = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("models[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSetConfigValueProviderEntryModelsCommaSeparated(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "custom_providers.my-gateway.models", " llama-3-70b, llama-3-8b ,, llama-3-70b "); err != nil {
+		t.Fatalf("setConfigValue models: %v", err)
+	}
+
+	got := cfg.CustomProviders["my-gateway"].Models
+	want := []string{"llama-3-70b", "llama-3-8b"}
+	if len(got) != len(want) {
+		t.Fatalf("models length = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("models[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSetConfigValueProviderEntryModelsUnquotedBracketList(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "custom_providers.my-gateway.models", "[llama-3-70b,llama-3-8b]"); err != nil {
+		t.Fatalf("setConfigValue models: %v", err)
+	}
+
+	got := cfg.CustomProviders["my-gateway"].Models
+	want := []string{"llama-3-70b", "llama-3-8b"}
+	if len(got) != len(want) {
+		t.Fatalf("models length = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("models[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestSetConfigValueProviderEntryProtocol(t *testing.T) {
 	cfg := &Config{}
 

@@ -319,6 +319,7 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `--timeout` | — | `10` | Concurrent task timeout in minutes |
 | `--audience` | — | `human` | `human` (show progress) or `agent` (summary only) |
 | `--background` | `-b` | — | Optional requirement/business context for the review; auto-filled from commit message when using `--commit` |
+| `--model` | — | — | Select or override the LLM model for this review |
 | `--rule` | — | — | Path to custom JSON review rules |
 | `--max-tools` | — | built-in | Max tool call rounds per file; only takes effect when greater than template default |
 | `--max-git-procs` | — | built-in | Max concurrent git subprocesses |
@@ -368,6 +369,10 @@ ocr review --from main --to my-feature --concurrency 4
 
 # Review a specific commit with verbose JSON output
 ocr review --commit abc123 --format json --audience agent
+
+# Select or override model for this review
+ocr review --model claude-opus-4-6
+ocr review --commit abc123 --model claude-sonnet-4-6
 
 # Provide requirement context for more targeted review
 ocr review --background "Adding rate limiting to the login API"
@@ -496,14 +501,15 @@ Config file: `~/.opencodereview/config.json`
 | `providers.<name>.url` | string | Provider base URL override |
 | `providers.<name>.protocol` | string | `anthropic` \| `openai` |
 | `providers.<name>.model` | string | Model name for the provider |
+| `providers.<name>.models` | array | Optional provider model list for interactive selection |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
-| `custom_providers.<name>.*` | — | Same fields as `providers.<name>.*` |
+| `custom_providers.<name>.*` | — | Same fields as `providers.<name>.*`, including optional `models` |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
-| `language` | string | `English` \| `Chinese` (default: Chinese) |
+| `language` | string | Any language name, e.g. `English`, `Chinese` (default: `English`) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
 | `telemetry.otlp_endpoint` | string | OTLP collector address |

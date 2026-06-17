@@ -311,6 +311,7 @@ ocr review \
 | `--timeout` | — | `10` | 同時実行タスクのタイムアウト（分） |
 | `--audience` | — | `human` | `human`（進捗を表示）または`agent`（サマリーのみ） |
 | `--background` | `-b` | — | レビューのための任意の要件/ビジネスコンテキスト。`--commit`使用時に未指定の場合、コミットメッセージから自動取得 |
+| `--model` | — | — | このレビューでLLMモデルを選択または上書き |
 | `--rule` | — | — | カスタムJSONレビュールールへのパス |
 | `--max-tools` | — | 組み込み値 | ファイルごとのツール呼び出しラウンドの上限。テンプレートのデフォルトより大きい場合のみ有効 |
 | `--max-git-procs` | — | 組み込み値 | gitサブプロセスの最大同時実行数 |
@@ -336,6 +337,10 @@ ocr review --from main --to my-feature --concurrency 4
 
 # 特定のコミットを詳細なJSON出力でレビュー
 ocr review --commit abc123 --format json --audience agent
+
+# このレビューでモデルを選択またはオーバーライド
+ocr review --model claude-opus-4-6
+ocr review --commit abc123 --model claude-sonnet-4-6
 
 # 要件コンテキストを提供してより的確なレビューを実施
 ocr review --background "ログインAPIにレート制限を追加"
@@ -449,14 +454,15 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `providers.<name>.url` | string | プロバイダーのベースURLオーバーライド |
 | `providers.<name>.protocol` | string | `anthropic` \| `openai` |
 | `providers.<name>.model` | string | プロバイダーのモデル名 |
+| `providers.<name>.models` | array | 対話的選択に使う任意のプロバイダーモデル一覧 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
-| `custom_providers.<name>.*` | — | `providers.<name>.*`と同じフィールド |
+| `custom_providers.<name>.*` | — | 任意の`models`を含む`providers.<name>.*`と同じフィールド |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropicのみ：`x-api-key` \| `authorization` |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
-| `language` | string | `English` \| `Chinese`（デフォルト：Chinese） |
+| `language` | string | 任意の言語名、例：`English`、`Chinese`（デフォルト：`English`） |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
 | `telemetry.otlp_endpoint` | string | OTLPコレクターのアドレス |

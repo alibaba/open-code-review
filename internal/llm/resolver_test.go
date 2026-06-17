@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -365,6 +366,36 @@ func TestResolveEndpoint_ProviderEntryModelOverridesDefault(t *testing.T) {
 	}
 }
 
+func TestResolveEndpointWithModelOverride_CustomProviderWithoutConfiguredModel(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "openai",
+				Models:   []string{"llama-3-70b", "llama-3-8b"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpointWithModelOverride(cfgPath, "llama-3-8b")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Model != "llama-3-8b" {
+		t.Errorf("Model = %q, want %q", ep.Model, "llama-3-8b")
+	}
+	if ep.Source != "provider:my-gateway" {
+		t.Errorf("Source = %q, want %q", ep.Source, "provider:my-gateway")
+	}
+}
+
 func TestResolveEndpoint_ProviderAPIKeyEnvFallback(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "env-api-key")
@@ -608,5 +639,197 @@ func TestResolveEndpoint_ProviderExtraBody(t *testing.T) {
 	}
 	if _, ok := ep.ExtraBody["thinking"]; !ok {
 		t.Error("ExtraBody missing 'thinking' key")
+	}
+}
+
+func TestResolveEndpointWithModelOverride_ValidModelInPresetList(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-sonnet-4-6"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpointWithModelOverride(cfgPath, "claude-opus-4-8")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want %q", ep.Model, "claude-opus-4-8")
+	}
+}
+
+func TestResolveEndpointWithModelOverride_InvalidModelInPresetList(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-sonnet-4-6"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpointWithModelOverride(cfgPath, "claude-opsu-4-6")
+	if err == nil {
+		t.Fatal("expected error for invalid model override")
+	}
+	if !strings.Contains(err.Error(), "not available for provider") {
+		t.Errorf("error message should mention model unavailability, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "available models:") {
+		t.Errorf("error message should list available models, got: %v", err)
+	}
+}
+
+func TestResolveEndpointWithModelOverride_ValidModelInCustomProviderList(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "openai",
+				Models:   []string{"llama-3-70b", "llama-3-8b"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpointWithModelOverride(cfgPath, "llama-3-8b")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Model != "llama-3-8b" {
+		t.Errorf("Model = %q, want %q", ep.Model, "llama-3-8b")
+	}
+}
+
+func TestResolveEndpointWithModelOverride_InvalidModelInCustomProviderList(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "openai",
+				Models:   []string{"llama-3-70b", "llama-3-8b"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpointWithModelOverride(cfgPath, "gpt-4")
+	if err == nil {
+		t.Fatal("expected error for invalid model override in custom provider")
+	}
+	if !strings.Contains(err.Error(), "not available for provider") {
+		t.Errorf("error message should mention model unavailability, got: %v", err)
+	}
+}
+
+func TestResolveEndpointWithModelOverride_NoValidationWhenNoModelList(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "openai",
+				// No Models list, so any model override should be accepted.
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpointWithModelOverride(cfgPath, "any-model-name")
+	if err != nil {
+		t.Fatalf("unexpected error when no model list exists: %v", err)
+	}
+	if ep.Model != "any-model-name" {
+		t.Errorf("Model = %q, want %q", ep.Model, "any-model-name")
+	}
+}
+
+func TestResolveEndpointWithModelOverride_MergesPresetAndEntryModels(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {
+				APIKey: "sk-ant-test",
+				Models: []string{"custom-model-1", "custom-model-2"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	// Should accept both preset models and entry models.
+	ep1, err := ResolveEndpointWithModelOverride(cfgPath, "claude-opus-4-8")
+	if err != nil {
+		t.Fatalf("unexpected error for preset model: %v", err)
+	}
+	if ep1.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want %q", ep1.Model, "claude-opus-4-8")
+	}
+
+	ep2, err := ResolveEndpointWithModelOverride(cfgPath, "custom-model-1")
+	if err != nil {
+		t.Fatalf("unexpected error for entry model: %v", err)
+	}
+	if ep2.Model != "custom-model-1" {
+		t.Errorf("Model = %q, want %q", ep2.Model, "custom-model-1")
+	}
+
+	// Should reject models not in either list.
+	_, err = ResolveEndpointWithModelOverride(cfgPath, "invalid-model")
+	if err == nil {
+		t.Fatal("expected error for model not in preset or entry lists")
+	}
+}
+
+func TestResolveEndpointWithModelOverride_LegacyConfigNoValidation(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:       "https://api.example.com/v1/messages",
+			AuthToken: "legacy-token",
+			Model:     "configured-model",
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	// Legacy config has no model list, so any override should be accepted.
+	ep, err := ResolveEndpointWithModelOverride(cfgPath, "any-override-model")
+	if err != nil {
+		t.Fatalf("unexpected error for legacy config override: %v", err)
+	}
+	if ep.Model != "any-override-model" {
+		t.Errorf("Model = %q, want %q", ep.Model, "any-override-model")
 	}
 }

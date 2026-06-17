@@ -46,7 +46,7 @@ func runReview(args []string) error {
 		return runPreview(cc, opts)
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath)
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
 	if err != nil {
 		return err
 	}

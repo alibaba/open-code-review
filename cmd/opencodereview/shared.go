@@ -117,10 +117,11 @@ type llmRuntime struct {
 }
 
 // loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
-// from the user's default config path (applying any configured language to
-// tpl), resolves the LLM endpoint, and returns the runtime bundle. tpl is
-// mutated in place when an app language is configured.
-func loadLLMRuntime(tpl *template.Template, toolConfigPath string) (*llmRuntime, error) {
+// from the user's default config path (applying the configured language to
+// tpl — defaulting when the config file is absent), resolves the LLM
+// endpoint (honoring modelOverride from --model when non-empty), and
+// returns the runtime bundle. tpl is mutated in place.
+func loadLLMRuntime(tpl *template.Template, toolConfigPath, modelOverride string) (*llmRuntime, error) {
 	toolEntries, err := toolsconfig.Load(toolConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("load tools: %w", err)
@@ -136,11 +137,15 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string) (*llmRuntime,
 	if err != nil {
 		return nil, fmt.Errorf("load app config: %w", err)
 	}
+	// Apply the language directive even when the config file is missing
+	// (upstream #fix: ApplyLanguage with empty lang falls back to default).
+	var lang string
 	if appCfg != nil {
-		tpl.ApplyLanguage(appCfg.Language)
+		lang = appCfg.Language
 	}
+	tpl.ApplyLanguage(lang)
 
-	ep, err := llm.ResolveEndpoint(cfgPath)
+	ep, err := llm.ResolveEndpointWithModelOverride(cfgPath, modelOverride)
 	if err != nil {
 		return nil, fmt.Errorf("resolve LLM endpoint: %w", err)
 	}

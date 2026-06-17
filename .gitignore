@@ -5,6 +5,7 @@
 *.iws
 
 dist/
+npm/*/bin/
 .claude/plans
 .claude/settings.local.json
 

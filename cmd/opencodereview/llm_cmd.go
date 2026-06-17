@@ -48,9 +48,11 @@ func runLLMTest() error {
 	if err != nil {
 		return fmt.Errorf("load test task config: %w", err)
 	}
+	var lang string
 	if appCfg != nil {
-		task.ApplyLanguage(appCfg.Language)
+		lang = appCfg.Language
 	}
+	task.ApplyLanguage(lang)
 
 	timeout := 30 * time.Second
 	if task.Timeout > 0 {
@@ -70,7 +72,7 @@ func runLLMTest() error {
 		return llmClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 			Model:     ep.Model,
 			Messages:  messages,
-			MaxTokens: 256,
+			MaxTokens: 2048,
 		})
 	}()
 	if err != nil {
@@ -84,7 +86,13 @@ func runLLMTest() error {
 	fmt.Printf("Source: %s\n", ep.Source)
 	fmt.Printf("URL:    %s\n", ep.URL)
 	fmt.Printf("Model:  %s\n", model)
-	fmt.Printf("%s\n", resp.Content())
+
+	content := resp.Content()
+	if content == "" {
+		content = "(empty response)"
+	}
+	fmt.Printf("%s\n", content)
+	fmt.Println("✓ Connection test successful")
 	return nil
 }
 

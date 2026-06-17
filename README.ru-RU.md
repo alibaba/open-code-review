@@ -113,18 +113,22 @@ sudo cp dist/opencodereview /usr/local/bin/ocr
 
 **Перед запуском ревью необходимо настроить LLM.**
 
+**Вариант A: интерактивная настройка (рекомендуется)**
+
 ```bash
-# Вариант A: настройка через CLI
+ocr config provider          # Выбрать встроенного провайдера или добавить пользовательский
+ocr config model             # Выбрать модель для активного провайдера
+```
+
+![Provider setup](imgs/providers.jpg)
+
+**Вариант B: ручная настройка**
+
+```bash
 ocr config set llm.url https://api.anthropic.com/v1/messages
 ocr config set llm.auth_token your-api-key-here
 ocr config set llm.model claude-opus-4-6
 ocr config set llm.use_anthropic true
-
-# Вариант B: переменные окружения (наивысший приоритет)
-export OCR_LLM_URL=https://api.anthropic.com/v1/messages
-export OCR_LLM_TOKEN=your-api-key-here
-export OCR_LLM_MODEL=claude-opus-4-6
-export OCR_USE_ANTHROPIC=true
 ```
 
 Конфигурация хранится в `~/.opencodereview/config.json`.
@@ -133,11 +137,18 @@ export OCR_USE_ANTHROPIC=true
 
 ```bash
 ocr config set llm.auth_header x-api-key
-# или
-export OCR_LLM_AUTH_HEADER=x-api-key
 ```
 
 Поддерживаемые значения: `x-api-key`, `authorization` (алиас: `bearer`). Прочие значения отклоняются с ошибкой.
+
+**Вариант C: переменные окружения (наивысший приоритет)**
+
+```bash
+export OCR_LLM_URL=https://api.anthropic.com/v1/messages
+export OCR_LLM_TOKEN=your-api-key-here
+export OCR_LLM_MODEL=claude-opus-4-6
+export OCR_USE_ANTHROPIC=true
+```
 
 Инструмент также совместим с переменными окружения Claude Code (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) и разбирает `~/.zshrc` / `~/.bashrc` в поисках соответствующих export'ов.
 
@@ -280,8 +291,11 @@ ocr review \
 |---------|-------|----------|
 | `ocr review` | `ocr r` | Запустить код-ревью |
 | `ocr rules check <file>` | — | Показать, какое правило ревью применяется к пути файла |
+| `ocr config provider` | — | Интерактивная настройка провайдера (встроенный, пользовательский или ручной) |
+| `ocr config model` | — | Интерактивный выбор модели для активного провайдера |
 | `ocr config set <key> <value>` | — | Установить значения конфигурации |
 | `ocr llm test` | — | Проверить подключение к LLM |
+| `ocr llm providers` | — | Показать список встроенных LLM-провайдеров |
 | `ocr viewer` | `ocr v` | Запустить WebUI-просмотрщик сессий на `localhost:5483` |
 | `ocr version` | — | Показать информацию о версии |
 
@@ -299,6 +313,7 @@ ocr review \
 | `--timeout` | — | `10` | Таймаут конкурентной задачи в минутах |
 | `--audience` | — | `human` | `human` (показывать прогресс) или `agent` (только сводка) |
 | `--background` | `-b` | — | Необязательный контекст требований/бизнес-логики для ревью; при `--commit` автоматически заполняется из сообщения коммита |
+| `--model` | — | — | Выбрать или переопределить LLM-модель для этого ревью |
 | `--rule` | — | — | Путь к пользовательским JSON-правилам ревью |
 | `--max-tools` | — | встроенное | Максимум раундов вызова инструментов на файл; действует, только если больше значения шаблона по умолчанию |
 | `--max-git-procs` | — | встроенное | Максимум одновременных git-подпроцессов |
@@ -307,6 +322,11 @@ ocr review \
 ## Примеры
 
 ```bash
+# Интерактивная настройка провайдера и модели
+ocr config provider
+ocr config model
+ocr llm providers
+
 # Показать, какие файлы попадут в ревью (без вызовов LLM)
 ocr review --preview
 ocr review -c abc123 -p
@@ -319,6 +339,10 @@ ocr review --from main --to my-feature --concurrency 4
 
 # Ревью конкретного коммита с подробным JSON-выводом
 ocr review --commit abc123 --format json --audience agent
+
+# Выбрать или переопределить модель для этого ревью
+ocr review --model claude-opus-4-6
+ocr review --commit abc123 --model claude-sonnet-4-6
 
 # Передать контекст требований для более прицельного ревью
 ocr review --background "Добавляем rate limiting в API логина"
@@ -427,12 +451,20 @@ OCR разрешает правила ревью по цепочке приор�
 
 | Ключ | Тип | Пример |
 |------|-----|--------|
+| `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
+| `providers.<name>.api_key` | string | API-ключ провайдера |
+| `providers.<name>.url` | string | Переопределение base URL провайдера |
+| `providers.<name>.protocol` | string | `anthropic` \| `openai` |
+| `providers.<name>.model` | string | Имя модели провайдера |
+| `providers.<name>.models` | array | Необязательный список моделей для интерактивного выбора |
+| `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
+| `custom_providers.<name>.*` | — | Те же поля, что и `providers.<name>.*`, включая необязательное `models` |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Только для Anthropic: `x-api-key` \| `authorization` |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
-| `language` | string | `English` \| `Chinese` (по умолчанию: Chinese) |
+| `language` | string | Любое название языка, например `English`, `Chinese` (по умолчанию: `English`) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
 | `telemetry.otlp_endpoint` | string | Адрес OTLP-коллектора |

@@ -6,8 +6,16 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
-const IS_WINDOWS = process.platform === "win32";
-const binaryPath = path.join(__dirname, IS_WINDOWS ? "opencodereview.exe" : "opencodereview");
+const { resolveNativeBinary } = require("../scripts/platform");
+
+const resolved = resolveNativeBinary();
+if (!resolved) {
+  console.error(
+    "[ERROR] OpenCodeReview binary not found. Run: npm install -g @alibaba-group/open-code-review"
+  );
+  process.exit(1);
+}
+const binaryPath = resolved.path;
 
 if (!process.env.OCR_NO_UPDATE) {
   const stateDir = path.join(os.homedir(), ".opencodereview");
