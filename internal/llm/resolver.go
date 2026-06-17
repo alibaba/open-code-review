@@ -113,7 +113,7 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 		}
 	}
 
-	extraHeaders := make(map[string]string)
+	var extraHeaders map[string]string
 	if extraHeadersRaw := os.Getenv(envOCRLLMExtraHeaders); extraHeadersRaw != "" {
 		var err error
 		extraHeaders, err = ParseExtraHeaders(extraHeadersRaw)
