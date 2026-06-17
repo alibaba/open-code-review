@@ -48,9 +48,11 @@ func runLLMTest() error {
 	if err != nil {
 		return fmt.Errorf("load test task config: %w", err)
 	}
+	var lang string
 	if appCfg != nil {
-		task.ApplyLanguage(appCfg.Language)
+		lang = appCfg.Language
 	}
+	task.ApplyLanguage(lang)
 
 	timeout := 30 * time.Second
 	if task.Timeout > 0 {
