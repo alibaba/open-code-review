@@ -210,7 +210,20 @@ ocr config set custom_providers.my-gateway.model gpt-4o
 |----|------|
 | `providers.<name>.auth_header` | 认证头：`x-api-key` 或 `authorization`（默认 `authorization`） |
 | `providers.<name>.extra_body` | 合并到请求体的自定义 JSON 字段 |
+| `providers.<name>.extra_headers` | 逗号分隔的 `key=value` 键值对，为每个请求添加自定义 HTTP 头 |
 | `providers.<name>.models` | 用于交互式选择的模型列表 |
+
+**`extra_headers`（可选）：** 为每个 LLM API 请求添加自定义 HTTP 头。适用于代理、网关或需要额外头的企业端点（例如组织 ID、链路追踪 ID）。格式为逗号分隔的 `key=value` 键值对：
+
+```bash
+ocr config set llm.extra_headers "X-Org-ID=org-123,X-Trace-Id=trace-abc"
+```
+
+也可以按供应商单独设置额外头：
+
+```bash
+ocr config set providers.anthropic.extra_headers "X-Org-ID=org-123"
+```
 
 **环境变量（优先级最高）**
 
@@ -597,10 +610,14 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `providers.<name>.model` | string | 供应商模型名称 |
 | `providers.<name>.models` | array | 用于交互式选择的可选供应商模型列表 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
+| `providers.<name>.extra_body` | object | 合并到每个请求体的 JSON 对象 |
+| `providers.<name>.extra_headers` | string | 逗号分隔的 `key=value` HTTP 头 |
 | `custom_providers.<name>.*` | — | 与 `providers.<name>.*` 相同的字段，包括可选的 `models` |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | 仅 Anthropic：`x-api-key` \| `authorization` |
+| `llm.extra_body` | object | 合并到每个请求体的 JSON 对象 |
+| `llm.extra_headers` | string | 逗号分隔的 `key=value` HTTP 头 |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
 | `language` | string | 任意语言名称，例如 `English`、`Chinese`（默认：`English`） |
@@ -618,6 +635,7 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `OCR_LLM_URL` | LLM API 端点 URL |
 | `OCR_LLM_TOKEN` | API 密钥 / 认证令牌 |
 | `OCR_LLM_AUTH_HEADER` | Anthropic 认证头（`x-api-key` 或 `authorization`） |
+| `OCR_LLM_EXTRA_HEADERS` | 逗号分隔的 `key=value` HTTP 头 |
 | `OCR_LLM_MODEL` | 模型名称 |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic，`false` = OpenAI |
 

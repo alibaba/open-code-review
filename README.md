@@ -210,7 +210,20 @@ Optional settings:
 |-----|-------------|
 | `providers.<name>.auth_header` | Auth header: `x-api-key` or `authorization` (default: `authorization`) |
 | `providers.<name>.extra_body` | Custom JSON fields merged into the request body |
+| `providers.<name>.extra_headers` | Comma-separated `key=value` pairs of custom HTTP headers added to every request |
 | `providers.<name>.models` | Model list for interactive selection |
+
+**`extra_headers` (optional):** Adds custom HTTP headers to every LLM API request. Useful for proxies, gateways, or enterprise endpoints that require additional headers (e.g. organization IDs, tracing IDs). Format is comma-separated `key=value` pairs:
+
+```bash
+ocr config set llm.extra_headers "X-Org-ID=org-123,X-Trace-Id=trace-abc"
+```
+
+You can also set extra headers per-provider:
+
+```bash
+ocr config set providers.anthropic.extra_headers "X-Org-ID=org-123"
+```
 
 **Environment variables (highest priority)**
 
@@ -612,10 +625,14 @@ Config file: `~/.opencodereview/config.json`
 | `providers.<name>.model` | string | Model name for the provider |
 | `providers.<name>.models` | array | Optional provider model list for interactive selection |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
+| `providers.<name>.extra_body` | object | JSON object merged into every request body |
+| `providers.<name>.extra_headers` | string | Comma-separated `key=value` HTTP headers |
 | `custom_providers.<name>.*` | — | Same fields as `providers.<name>.*`, including optional `models` |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |
+| `llm.extra_body` | object | JSON object merged into every request body |
+| `llm.extra_headers` | string | Comma-separated `key=value` HTTP headers |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
 | `language` | string | Any language name, e.g. `English`, `Chinese` (default: `English`) |
@@ -633,6 +650,7 @@ Environment variables take precedence over the config file.
 | `OCR_LLM_URL` | LLM API endpoint URL |
 | `OCR_LLM_TOKEN` | API key / auth token |
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` or `authorization`) |
+| `OCR_LLM_EXTRA_HEADERS` | Comma-separated `key=value` HTTP headers |
 | `OCR_LLM_MODEL` | Model name |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
 

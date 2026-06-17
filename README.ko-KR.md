@@ -210,7 +210,20 @@ ocr config set custom_providers.my-gateway.model gpt-4o
 |----|------|
 | `providers.<name>.auth_header` | 인증 header: `x-api-key` 또는 `authorization` (기본값: `authorization`) |
 | `providers.<name>.extra_body` | 요청 body에 병합되는 커스텀 JSON 필드 |
+| `providers.<name>.extra_headers` | 쉼표로 구분된 `key=value` 쌍, 각 요청에 추가되는 커스텀 HTTP 헤더 |
 | `providers.<name>.models` | 대화형 선택용 model 목록 |
+
+**`extra_headers` (선택사항):** 모든 LLM API 요청에 커스텀 HTTP 헤더를 추가합니다. 프록시, 게이트웨이, 추가 헤더가 필요한 엔터프라이즈 엔드포인트(조직 ID, 트레이싱 ID 등)에 유용합니다. 형식은 쉼표로 구분된 `key=value` 쌍입니다:
+
+```bash
+ocr config set llm.extra_headers "X-Org-ID=org-123,X-Trace-Id=trace-abc"
+```
+
+provider 별로 추가 헤더를 설정할 수도 있습니다:
+
+```bash
+ocr config set providers.anthropic.extra_headers "X-Org-ID=org-123"
+```
 
 **환경 변수 (가장 높은 우선순위)**
 
@@ -565,10 +578,14 @@ Config file: `~/.opencodereview/config.json`
 | `providers.<name>.model` | string | Provider의 model 이름 |
 | `providers.<name>.models` | array | 대화형 선택에 사용할 optional provider model 목록 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
+| `providers.<name>.extra_body` | object | 모든 요청 본문에 병합되는 JSON 객체 |
+| `providers.<name>.extra_headers` | string | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `custom_providers.<name>.*` | — | optional `models`를 포함한 `providers.<name>.*`과 동일한 필드 |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |
+| `llm.extra_body` | object | 모든 요청 본문에 병합되는 JSON 객체 |
+| `llm.extra_headers` | string | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
 | `language` | string | 임의의 언어 이름, 예: `English`, `Chinese` (기본값: `English`) |
@@ -586,6 +603,7 @@ Config file: `~/.opencodereview/config.json`
 | `OCR_LLM_URL` | LLM API endpoint URL |
 | `OCR_LLM_TOKEN` | API key / auth token |
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` 또는 `authorization`) |
+| `OCR_LLM_EXTRA_HEADERS` | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `OCR_LLM_MODEL` | Model name |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
 

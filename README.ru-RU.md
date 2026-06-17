@@ -210,7 +210,20 @@ ocr config set custom_providers.my-gateway.model gpt-4o
 |------|----------|
 | `providers.<name>.auth_header` | Заголовок аутентификации: `x-api-key` или `authorization` (по умолчанию: `authorization`) |
 | `providers.<name>.extra_body` | Пользовательские JSON-поля, добавляемые в тело запроса |
+| `providers.<name>.extra_headers` | Пары `key=value`, разделённые запятыми — пользовательские HTTP-заголовки для каждого запроса |
 | `providers.<name>.models` | Список моделей для интерактивного выбора |
+
+**`extra_headers` (необязательно):** добавляет пользовательские HTTP-заголовки к каждому запросу к LLM API. Полезно для прокси, шлюзов или корпоративных эндпоинтов, требующих дополнительных заголовков (например, ID организации, ID трассировки). Формат — пары `key=value`, разделённые запятыми:
+
+```bash
+ocr config set llm.extra_headers "X-Org-ID=org-123,X-Trace-Id=trace-abc"
+```
+
+Дополнительные заголовки также можно задать для отдельного провайдера:
+
+```bash
+ocr config set providers.anthropic.extra_headers "X-Org-ID=org-123"
+```
 
 **Переменные окружения (наивысший приоритет)**
 
@@ -609,10 +622,14 @@ OCR разрешает правила ревью по цепочке приор�
 | `providers.<name>.model` | string | Имя модели провайдера |
 | `providers.<name>.models` | array | Необязательный список моделей для интерактивного выбора |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
+| `providers.<name>.extra_body` | object | JSON-объект, добавляемый в каждое тело запроса |
+| `providers.<name>.extra_headers` | string | HTTP-заголовки `key=value` через запятую |
 | `custom_providers.<name>.*` | — | Те же поля, что и `providers.<name>.*`, включая необязательное `models` |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Только для Anthropic: `x-api-key` \| `authorization` |
+| `llm.extra_body` | object | JSON-объект, добавляемый в каждое тело запроса |
+| `llm.extra_headers` | string | HTTP-заголовки `key=value` через запятую |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
 | `language` | string | Любое название языка, например `English`, `Chinese` (по умолчанию: `English`) |
@@ -630,6 +647,7 @@ OCR разрешает правила ревью по цепочке приор�
 | `OCR_LLM_URL` | URL эндпоинта LLM API |
 | `OCR_LLM_TOKEN` | API-ключ / токен авторизации |
 | `OCR_LLM_AUTH_HEADER` | Заголовок авторизации Anthropic (`x-api-key` или `authorization`) |
+| `OCR_LLM_EXTRA_HEADERS` | HTTP-заголовки `key=value` через запятую |
 | `OCR_LLM_MODEL` | Имя модели |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
 

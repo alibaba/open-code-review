@@ -210,7 +210,20 @@ ocr config set custom_providers.my-gateway.model gpt-4o
 |------|------|
 | `providers.<name>.auth_header` | 認証ヘッダー：`x-api-key`または`authorization`（デフォルト：`authorization`） |
 | `providers.<name>.extra_body` | リクエストボディにマージされるカスタムJSONフィールド |
+| `providers.<name>.extra_headers` | カンマ区切りの `key=value` ペアで、各リクエストに追加されるカスタムHTTPヘッダー |
 | `providers.<name>.models` | 対話的選択用のモデルリスト |
+
+**`extra_headers`（オプション）：** すべてのLLM APIリクエストにカスタムHTTPヘッダーを追加します。プロキシ、ゲートウェイ、追加ヘッダーを必要とするエンタープライズエンドポイント（組織ID、トレースIDなど）に便利です。形式はカンマ区切りの `key=value` ペアです：
+
+```bash
+ocr config set llm.extra_headers "X-Org-ID=org-123,X-Trace-Id=trace-abc"
+```
+
+プロバイダーごとに追加ヘッダーを設定することもできます：
+
+```bash
+ocr config set providers.anthropic.extra_headers "X-Org-ID=org-123"
+```
 
 **環境変数（最優先）**
 
@@ -607,10 +620,14 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `providers.<name>.model` | string | プロバイダーのモデル名 |
 | `providers.<name>.models` | array | 対話的選択に使う任意のプロバイダーモデル一覧 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
+| `providers.<name>.extra_body` | object | すべてのリクエストボディにマージされるJSONオブジェクト |
+| `providers.<name>.extra_headers` | string | カンマ区切りの `key=value` HTTPヘッダー |
 | `custom_providers.<name>.*` | — | 任意の`models`を含む`providers.<name>.*`と同じフィールド |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropicのみ：`x-api-key` \| `authorization` |
+| `llm.extra_body` | object | すべてのリクエストボディにマージされるJSONオブジェクト |
+| `llm.extra_headers` | string | カンマ区切りの `key=value` HTTPヘッダー |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
 | `language` | string | 任意の言語名、例：`English`、`Chinese`（デフォルト：`English`） |
@@ -628,6 +645,7 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `OCR_LLM_URL` | LLM APIエンドポイントURL |
 | `OCR_LLM_TOKEN` | APIキー / 認証トークン |
 | `OCR_LLM_AUTH_HEADER` | Anthropic認証ヘッダー（`x-api-key`または`authorization`） |
+| `OCR_LLM_EXTRA_HEADERS` | カンマ区切りの `key=value` HTTPヘッダー |
 | `OCR_LLM_MODEL` | モデル名 |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic、`false` = OpenAI |
 
