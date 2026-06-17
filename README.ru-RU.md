@@ -492,7 +492,7 @@ OCR разрешает правила ревью по цепочке приор�
 | `llm.use_anthropic_vertex` | boolean | Использовать Claude через Google Vertex AI |
 | `llm.vertex_project_id` | string | ID проекта Google Cloud |
 | `llm.vertex_region` | string | Регион Vertex AI |
-| `language` | string | `English` \| `Chinese` (по умолчанию: Chinese) |
+| `language` | string | Любое название языка, например `English`, `Chinese` (по умолчанию: `English`) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
 | `telemetry.otlp_endpoint` | string | Адрес OTLP-коллектора |

@@ -100,7 +100,13 @@ else
         "make -C \"$PROJECT_ROOT\" dist"
 fi
 
-# ── (version is injected temporarily during patch_package_json below) ────────
+# ── Publish platform-specific packages ────────────────────────────────────────
+if [ "$SKIP_PUBLISH" = "1" ]; then
+    warn "Skipping platform packages (OCR_SKIP_PUBLISH=1)"
+else
+    run_step "Publishing platform packages" \
+        "bash \"$SCRIPT_DIR/publish-platform.sh\""
+fi
 
 # ── Upload to git-based release repo (optional) ──────────────────────────────
 upload_to_git_repo() {
@@ -188,9 +194,22 @@ patch_package_json() {
     jq --arg v "$NPM_VERSION" '.version = $v' "$tmp" > "${tmp}.new" && mv "${tmp}.new" "$tmp"
     info "  version → ${NPM_VERSION}"
 
+    # Pin optionalDependencies (platform packages) to the same version
+    if jq -e '.optionalDependencies' "$tmp" >/dev/null 2>&1; then
+        jq --arg v "$NPM_VERSION" '.optionalDependencies |= with_entries(.value = $v)' "$tmp" > "${tmp}.new" && mv "${tmp}.new" "$tmp"
+        info "  optionalDependencies → all pinned to ${NPM_VERSION}"
+    fi
+
     if [ -n "${OCR_PKG_NAME:-}" ]; then
-        jq --arg n "$OCR_PKG_NAME" '.name = $n' "$tmp" > "${tmp}.new" && mv "${tmp}.new" "$tmp"
+        local new_scope="${OCR_PKG_NAME%%/*}"
+        jq --arg n "$OCR_PKG_NAME" --arg s "$new_scope" '
+          .name = $n |
+          if .optionalDependencies then
+            .optionalDependencies |= with_entries(.key |= sub("^@[^/]+"; $s))
+          else . end
+        ' "$tmp" > "${tmp}.new" && mv "${tmp}.new" "$tmp"
         info "  name → ${OCR_PKG_NAME}"
+        info "  optionalDependencies scope → ${new_scope}"
     fi
 
     if [ -n "${OCR_PUBLISH_REGISTRY:-}" ]; then
@@ -235,7 +254,7 @@ do_publish() {
     fi
 
     info "Publishing ${pkg_name}@${NPM_VERSION} ..."
-    npm publish ${registry_args[@]+"${registry_args[@]}"}
+    npm publish ${registry_args[@]+"${registry_args[@]}"} || die "npm publish failed"
     success "Published ${pkg_name}@${NPM_VERSION}"
 }
 

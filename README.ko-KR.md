@@ -448,7 +448,7 @@ Config file: `~/.opencodereview/config.json`
 | `llm.use_anthropic_vertex` | boolean | Google Vertex AI에서 Claude 사용 |
 | `llm.vertex_project_id` | string | Google Cloud project ID |
 | `llm.vertex_region` | string | Vertex AI region |
-| `language` | string | `English` \| `Chinese` (default: Chinese) |
+| `language` | string | 임의의 언어 이름, 예: `English`, `Chinese` (기본값: `English`) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
 | `telemetry.otlp_endpoint` | string | OTLP collector address |

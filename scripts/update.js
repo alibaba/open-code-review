@@ -147,6 +147,12 @@ async function main() {
   cleanupTemp();
 
   try {
+    const { resolveNativeBinary } = require("./platform");
+    const resolved = resolveNativeBinary();
+    if (resolved && resolved.fromPlatformPkg) {
+      info("Binary managed by platform package, skipping auto-update.");
+      return;
+    }
     const installedVersion = getInstalledVersion();
     if (!installedVersion) return;
 

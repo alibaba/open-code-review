@@ -1,0 +1,23 @@
+{
+  "name": "@alibaba-group/ocr-darwin-x64",
+  "version": "0.0.0",
+  "description": "Platform binary for open-code-review (darwin x64)",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/"
+  ],
+  "preferUnplugged": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alibaba/open-code-review.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

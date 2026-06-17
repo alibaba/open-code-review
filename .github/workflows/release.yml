@@ -93,13 +93,58 @@ jobs:
       - name: Install jq
         run: apt-get update && apt-get install -y jq
 
-      - name: Inject version from tag
-        run: jq --arg v "${GITHUB_REF_NAME#v}" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
 
       - name: Configure npm registry
         run: echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish platform packages
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PLATFORMS="darwin-arm64:opencodereview-darwin-arm64:opencodereview
+          darwin-x64:opencodereview-darwin-amd64:opencodereview
+          linux-arm64:opencodereview-linux-arm64:opencodereview
+          linux-x64:opencodereview-linux-amd64:opencodereview
+          win32-arm64:opencodereview-windows-arm64.exe:opencodereview.exe
+          win32-x64:opencodereview-windows-amd64.exe:opencodereview.exe"
+
+          for entry in $PLATFORMS; do
+            platform_dir="${entry%%:*}"
+            rest="${entry#*:}"
+            dist_binary="${rest%%:*}"
+            dest_name="${rest#*:}"
+            pkg_dir="./npm/$platform_dir"
+            mkdir -p "$pkg_dir/bin"
+            cp "$dist_binary" "$pkg_dir/bin/$dest_name"
+            chmod 755 "$pkg_dir/bin/$dest_name" 2>/dev/null || true
+
+            jq --arg v "$VERSION" '.version = $v' "$pkg_dir/package.json" > "$pkg_dir/package.json.tmp"
+            mv "$pkg_dir/package.json.tmp" "$pkg_dir/package.json"
+
+            pkg_name=$(jq -r '.name' "$pkg_dir/package.json")
+            already=$(npm view "${pkg_name}@${VERSION}" version 2>/dev/null || true)
+            if [ "$already" = "$VERSION" ]; then
+              echo "Skip: ${pkg_name}@${VERSION} already published"
+            else
+              npm publish "$pkg_dir" --access public
+              echo "Published: ${pkg_name}@${VERSION}"
+            fi
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Inject version and optionalDependencies
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '
+            .version = $v |
+            .optionalDependencies |= with_entries(.value = $v)
+          ' package.json > package.json.tmp && mv package.json.tmp package.json
 
       - name: Publish to npm
         run: npm publish --access public

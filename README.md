@@ -492,7 +492,7 @@ Config file: `~/.opencodereview/config.json`
 | `llm.use_anthropic_vertex` | boolean | Use Claude through Google Vertex AI |
 | `llm.vertex_project_id` | string | Google Cloud project ID |
 | `llm.vertex_region` | string | Vertex AI region |
-| `language` | string | `English` \| `Chinese` (default: Chinese) |
+| `language` | string | Any language name, e.g. `English`, `Chinese` (default: `English`) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
 | `telemetry.otlp_endpoint` | string | OTLP collector address |

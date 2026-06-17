@@ -1,6 +1,7 @@
 cmd/
 internal/
 dist/
+npm/
 pages/
 Makefile
 go.mod

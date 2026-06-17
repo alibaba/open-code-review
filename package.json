@@ -20,6 +20,14 @@
     "urlPattern": "https://github.com/alibaba/open-code-review/releases/download/v{version}/opencodereview-{os}-{arch}",
     "checksumPattern": "https://github.com/alibaba/open-code-review/releases/download/v{version}/sha256sum.txt"
   },
+  "optionalDependencies": {
+    "@alibaba-group/ocr-darwin-arm64": "0.0.0",
+    "@alibaba-group/ocr-darwin-x64": "0.0.0",
+    "@alibaba-group/ocr-linux-arm64": "0.0.0",
+    "@alibaba-group/ocr-linux-x64": "0.0.0",
+    "@alibaba-group/ocr-win32-arm64": "0.0.0",
+    "@alibaba-group/ocr-win32-x64": "0.0.0"
+  },
   "engines": {
     "node": ">=14"
   },

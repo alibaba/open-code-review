@@ -480,7 +480,7 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `llm.use_anthropic_vertex` | boolean | 通过 Google Vertex AI 使用 Claude |
 | `llm.vertex_project_id` | string | Google Cloud 项目 ID |
 | `llm.vertex_region` | string | Vertex AI 区域 |
-| `language` | string | `English` \| `Chinese`（默认：Chinese） |
+| `language` | string | 任意语言名称，例如 `English`、`Chinese`（默认：`English`） |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
 | `telemetry.otlp_endpoint` | string | OTLP 采集器地址 |

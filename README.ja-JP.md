@@ -490,7 +490,7 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `llm.use_anthropic_vertex` | boolean | Google Vertex AIでClaudeを使用 |
 | `llm.vertex_project_id` | string | Google CloudプロジェクトID |
 | `llm.vertex_region` | string | Vertex AIリージョン |
-| `language` | string | `English` \| `Chinese`（デフォルト：Chinese） |
+| `language` | string | 任意の言語名、例：`English`、`Chinese`（デフォルト：`English`） |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
 | `telemetry.otlp_endpoint` | string | OTLPコレクターのアドレス |

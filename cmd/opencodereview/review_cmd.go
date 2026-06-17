@@ -84,9 +84,11 @@ func runReview(args []string) error {
 	if err != nil {
 		return fmt.Errorf("load app config: %w", err)
 	}
+	var lang string
 	if appCfg != nil {
-		tpl.ApplyLanguage(appCfg.Language)
+		lang = appCfg.Language
 	}
+	tpl.ApplyLanguage(lang)
 
 	ep, err := llm.ResolveEndpointWithModelOverride(cfgPath, opts.model)
 	if err != nil {

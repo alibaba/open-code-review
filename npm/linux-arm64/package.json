@@ -1,0 +1,23 @@
+{
+  "name": "@alibaba-group/ocr-linux-arm64",
+  "version": "0.0.0",
+  "description": "Platform binary for open-code-review (linux arm64)",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/"
+  ],
+  "preferUnplugged": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alibaba/open-code-review.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

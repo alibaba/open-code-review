@@ -6,8 +6,7 @@ const path = require("path");
 const https = require("https");
 const crypto = require("crypto");
 
-const IS_WINDOWS = process.platform === "win32";
-const BINARY_NAME = IS_WINDOWS ? "opencodereview.exe" : "opencodereview";
+const { IS_WINDOWS, BINARY_FILENAME: BINARY_NAME, resolveNativeBinary } = require("./platform");
 
 const packageRoot = path.join(__dirname, "..");
 const binDir = path.join(packageRoot, "bin");
@@ -153,6 +152,13 @@ function computeChecksum(filePath) {
 async function main() {
   info("OpenCodeReview Installer");
   info("=========================");
+
+  const existing = resolveNativeBinary();
+  if (existing && existing.fromPlatformPkg) {
+    info("Binary provided by platform package, skipping download.");
+    info(`  ${existing.path}`);
+    return;
+  }
 
   const { os, arch } = detectPlatform();
   info(`Detected platform: ${os}/${arch}`);
