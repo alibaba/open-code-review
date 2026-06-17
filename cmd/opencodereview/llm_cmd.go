@@ -70,7 +70,7 @@ func runLLMTest() error {
 		return llmClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 			Model:     ep.Model,
 			Messages:  messages,
-			MaxTokens: 256,
+			MaxTokens: 2048,
 		})
 	}()
 	if err != nil {
