@@ -34,7 +34,7 @@ const (
 	envOCRLLMModel      = "OCR_LLM_MODEL"
 	envOCRLLMAuthHeader = "OCR_LLM_AUTH_HEADER"
 	envOCRUseAnthropic  = "OCR_USE_ANTHROPIC"
-	envOCRUseVertex     = "OCR_USE_ANTHROPIC_VERTEX"
+	envOCRUseVertex     = "OCR_USE_VERTEX"
 	envOCRVertexProject = "OCR_VERTEX_PROJECT_ID"
 	envOCRVertexRegion  = "OCR_VERTEX_REGION"
 )

@@ -157,7 +157,7 @@ export OCR_USE_ANTHROPIC=true
 OCR 可以通过 Google 应用默认凭据（ADC）调用 Vertex AI 上的 Claude，不需要 Anthropic API Key 或自定义 LLM URL：
 
 ```bash
-export OCR_USE_ANTHROPIC_VERTEX=true
+export OCR_USE_VERTEX=true
 export OCR_LLM_MODEL=claude-sonnet-4-6
 export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project
 export CLOUD_ML_REGION=global
@@ -497,7 +497,7 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `OCR_LLM_AUTH_HEADER` | Anthropic 认证头（`x-api-key` 或 `authorization`） |
 | `OCR_LLM_MODEL` | 模型名称 |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic，`false` = OpenAI |
-| `OCR_USE_ANTHROPIC_VERTEX` | 启用 Google Vertex AI 上的 Claude |
+| `OCR_USE_VERTEX` | 启用 Vertex AI 模式 |
 | `OCR_VERTEX_PROJECT_ID` | Google Cloud 项目 ID；也支持 `ANTHROPIC_VERTEX_PROJECT_ID` 和 `GOOGLE_CLOUD_PROJECT` |
 | `OCR_VERTEX_REGION` | Vertex AI 区域；也支持 `CLOUD_ML_REGION` |
 

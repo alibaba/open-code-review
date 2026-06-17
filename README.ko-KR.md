@@ -157,7 +157,7 @@ Claude Code 환경 변수(`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROP
 OCR은 Google Application Default Credentials(ADC)를 사용해 Vertex AI의 Claude를 호출할 수 있습니다. Anthropic API key나 custom LLM URL은 필요하지 않습니다.
 
 ```bash
-export OCR_USE_ANTHROPIC_VERTEX=true
+export OCR_USE_VERTEX=true
 export OCR_LLM_MODEL=claude-sonnet-4-6
 export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project
 export CLOUD_ML_REGION=global
@@ -465,7 +465,7 @@ Config file: `~/.opencodereview/config.json`
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` 또는 `authorization`) |
 | `OCR_LLM_MODEL` | Model name |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
-| `OCR_USE_ANTHROPIC_VERTEX` | Google Vertex AI의 Claude 활성화 |
+| `OCR_USE_VERTEX` | Vertex AI 모드 활성화 |
 | `OCR_VERTEX_PROJECT_ID` | Google Cloud project ID. `ANTHROPIC_VERTEX_PROJECT_ID`와 `GOOGLE_CLOUD_PROJECT`도 지원 |
 | `OCR_VERTEX_REGION` | Vertex AI region. `CLOUD_ML_REGION`도 지원 |
 

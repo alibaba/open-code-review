@@ -157,7 +157,7 @@ It is also compatible with Claude Code environment variables (`ANTHROPIC_BASE_UR
 OCR can use Claude through Vertex AI with Google Application Default Credentials (ADC). No Anthropic API key or custom LLM URL is required:
 
 ```bash
-export OCR_USE_ANTHROPIC_VERTEX=true
+export OCR_USE_VERTEX=true
 export OCR_LLM_MODEL=claude-sonnet-4-6
 export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project
 export CLOUD_ML_REGION=global
@@ -509,7 +509,7 @@ Environment variables take precedence over the config file.
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` or `authorization`) |
 | `OCR_LLM_MODEL` | Model name |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
-| `OCR_USE_ANTHROPIC_VERTEX` | Enable Claude on Google Vertex AI |
+| `OCR_USE_VERTEX` | Enable Vertex AI mode |
 | `OCR_VERTEX_PROJECT_ID` | Google Cloud project ID; aliases `ANTHROPIC_VERTEX_PROJECT_ID` and `GOOGLE_CLOUD_PROJECT` are supported |
 | `OCR_VERTEX_REGION` | Vertex AI region; `CLOUD_ML_REGION` is also supported |
 

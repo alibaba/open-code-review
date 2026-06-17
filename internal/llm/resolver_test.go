@@ -252,7 +252,7 @@ func clearAllEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_AUTH_HEADER", "OCR_USE_ANTHROPIC",
-		"OCR_USE_ANTHROPIC_VERTEX", "OCR_VERTEX_PROJECT_ID", "OCR_VERTEX_REGION",
+		"OCR_USE_VERTEX", "OCR_VERTEX_PROJECT_ID", "OCR_VERTEX_REGION",
 		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
 		"ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML_REGION", "GOOGLE_CLOUD_PROJECT",
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
@@ -263,7 +263,7 @@ func clearAllEnv(t *testing.T) {
 
 func TestResolveEndpoint_VertexEnvironment(t *testing.T) {
 	clearAllEnv(t)
-	t.Setenv("OCR_USE_ANTHROPIC_VERTEX", "true")
+	t.Setenv("OCR_USE_VERTEX", "true")
 	t.Setenv("OCR_LLM_MODEL", "claude-sonnet-4-6")
 	t.Setenv("ANTHROPIC_VERTEX_PROJECT_ID", " test-project ")
 	t.Setenv("CLOUD_ML_REGION", " us-central1 ")
@@ -294,7 +294,7 @@ func TestResolveEndpoint_VertexEnvironment(t *testing.T) {
 
 func TestResolveEndpoint_IncompleteVertexEnvironmentFallsBack(t *testing.T) {
 	clearAllEnv(t)
-	t.Setenv("OCR_USE_ANTHROPIC_VERTEX", "true")
+	t.Setenv("OCR_USE_VERTEX", "true")
 	t.Setenv("OCR_LLM_MODEL", "claude-sonnet-4-6")
 	t.Setenv("OCR_VERTEX_PROJECT_ID", "test-project")
 	t.Setenv("OCR_LLM_URL", "https://api.anthropic.com/v1/messages")
@@ -314,7 +314,7 @@ func TestResolveEndpoint_IncompleteVertexEnvironmentFallsBack(t *testing.T) {
 
 func TestResolveEndpoint_ConfigPrecedesVertexEnvironment(t *testing.T) {
 	clearAllEnv(t)
-	t.Setenv("OCR_USE_ANTHROPIC_VERTEX", "true")
+	t.Setenv("OCR_USE_VERTEX", "true")
 	t.Setenv("OCR_LLM_MODEL", "claude-sonnet-4-6")
 	t.Setenv("OCR_VERTEX_PROJECT_ID", "vertex-project")
 	t.Setenv("OCR_VERTEX_REGION", "us-central1")

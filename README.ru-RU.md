@@ -157,7 +157,7 @@ export OCR_USE_ANTHROPIC=true
 OCR может вызывать Claude через Vertex AI с помощью Google Application Default Credentials (ADC). Ключ Anthropic API и пользовательский LLM URL не требуются:
 
 ```bash
-export OCR_USE_ANTHROPIC_VERTEX=true
+export OCR_USE_VERTEX=true
 export OCR_LLM_MODEL=claude-sonnet-4-6
 export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project
 export CLOUD_ML_REGION=global
@@ -509,7 +509,7 @@ OCR разрешает правила ревью по цепочке приор�
 | `OCR_LLM_AUTH_HEADER` | Заголовок авторизации Anthropic (`x-api-key` или `authorization`) |
 | `OCR_LLM_MODEL` | Имя модели |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
-| `OCR_USE_ANTHROPIC_VERTEX` | Включить Claude через Google Vertex AI |
+| `OCR_USE_VERTEX` | Включить режим Vertex AI |
 | `OCR_VERTEX_PROJECT_ID` | ID проекта Google Cloud; также поддерживаются `ANTHROPIC_VERTEX_PROJECT_ID` и `GOOGLE_CLOUD_PROJECT` |
 | `OCR_VERTEX_REGION` | Регион Vertex AI; также поддерживается `CLOUD_ML_REGION` |
 
