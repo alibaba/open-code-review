@@ -91,7 +91,7 @@ func runLLMTest() error {
 	if content == "" {
 		content = "(empty response)"
 	}
-	fmt.Printf("\n%s\n", content)
+	fmt.Printf("%s\n", content)
 	fmt.Println("✓ Connection test successful")
 	return nil
 }
