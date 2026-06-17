@@ -286,7 +286,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return err
 		}
 		cfg.Llm.AuthHeader = normalized
-	case "llm.extra_headers":
+	case "llm.extra_headers", "llm.ExtraHeaders":
 		parsed, err := llm.ParseExtraHeaders(value)
 		if err != nil {
 			return err
