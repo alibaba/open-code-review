@@ -293,6 +293,13 @@ Examples:
   ocr config set llm.auth_header x-api-key
   ocr config set llm.model claude-opus-4-6
   ocr config set llm.extra_body '{"thinking":{"type":"disabled"}}'
+
+  # OpenAI Responses-compatible endpoint
+  ocr config set llm.url https://api.openai.com/v1/responses
+  ocr config set llm.auth_token "$OPENAI_API_KEY"
+  ocr config set llm.model gpt-5.5
+  ocr config set llm.use_anthropic false
+
   ocr config set language English
   ocr config set telemetry.enabled true
 

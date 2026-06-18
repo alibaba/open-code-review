@@ -29,14 +29,14 @@ func TestBuildGrepArgs_CommitMode(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "abc1234"})
 	args := p.buildGrepArgs("myFunc", false, false, []string{"pkg/"})
 
-	assertContainsInOrder(t, args, "-e", "myFunc", "--end-of-options", "abc1234", "--", "pkg/")
+	assertContainsInOrder(t, args, "-e", "myFunc", "abc1234", "--", "pkg/")
 }
 
-func TestBuildGrepArgs_RefUsesEndOfOptions(t *testing.T) {
+func TestBuildGrepArgs_RefIsPositional(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "-O./pwn.sh"})
 	args := p.buildGrepArgs("myFunc", false, false, nil)
 
-	assertContainsInOrder(t, args, "-e", "myFunc", "--end-of-options", "-O./pwn.sh", "--")
+	assertContainsInOrder(t, args, "-e", "myFunc", "-O./pwn.sh", "--")
 }
 
 func TestBuildGrepArgs_PatternStartingWithDash(t *testing.T) {
@@ -207,7 +207,9 @@ func TestGitGrep_OptionLikeRefDoesNotLaunchPager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result, "unable to resolve revision") && !strings.Contains(result, "Not a valid object name") {
+	if !strings.Contains(result, "unable to resolve revision") &&
+		!strings.Contains(result, "Not a valid object name") &&
+		!strings.Contains(result, "Needed a single revision") {
 		t.Fatalf("expected invalid revision error, got: %s", result)
 	}
 	if _, err := os.Stat(proofPath); err == nil {

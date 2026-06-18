@@ -246,12 +246,35 @@ func TestResolveEndpoint_OCREnvOpenAIIgnoresAuthHeader(t *testing.T) {
 	}
 }
 
+func TestResolveEndpoint_OCREnvCompatibilityNames(t *testing.T) {
+	t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/responses")
+	t.Setenv("OCR_LLM_TOKEN", "")
+	t.Setenv("OCR_LLM_AUTH_TOKEN", "compat-token")
+	t.Setenv("OCR_LLM_MODEL", "gpt-5.5")
+	t.Setenv("OCR_USE_ANTHROPIC", "")
+	t.Setenv("OCR_LLM_USE_ANTHROPIC", "false")
+	t.Setenv("ANTHROPIC_BASE_URL", "")
+	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_MODEL", "")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Token != "compat-token" {
+		t.Fatalf("token = %q, want compatibility token", ep.Token)
+	}
+	if ep.Protocol != "openai" {
+		t.Fatalf("protocol = %q, want openai", ep.Protocol)
+	}
+}
+
 // --- Provider-based resolution tests ---
 
 func clearAllEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_AUTH_HEADER", "OCR_USE_ANTHROPIC",
+		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_AUTH_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_AUTH_HEADER", "OCR_USE_ANTHROPIC", "OCR_LLM_USE_ANTHROPIC",
 		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 	} {

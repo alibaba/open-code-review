@@ -16,14 +16,20 @@ type UsageInfo struct {
 
 var promptTokensPaths = []string{
 	"usage.prompt_tokens",      // OpenAI standard
+	"usage.input_tokens",       // OpenAI Responses API
 	"prompt_tokens",            // flat at root
+	"input_tokens",             // flat Responses-style
 	"data.usage.prompt_tokens", // wrapped in data layer
+	"data.usage.input_tokens",  // wrapped Responses-style
 }
 
 var completionTokensPaths = []string{
 	"usage.completion_tokens",      // OpenAI standard
+	"usage.output_tokens",          // OpenAI Responses API
 	"completion_tokens",            // flat at root
+	"output_tokens",                // flat Responses-style
 	"data.usage.completion_tokens", // wrapped in data layer
+	"data.usage.output_tokens",     // wrapped Responses-style
 }
 
 var cacheReadTokensPaths = []string{

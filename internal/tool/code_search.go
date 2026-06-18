@@ -50,6 +50,10 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 }
 
 func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, pathspec []string) []string {
+	return p.buildGrepArgsForRef(searchText, caseSensitive, usePerlRegexp, p.FileReader.Ref, pathspec)
+}
+
+func (p *CodeSearchProvider) buildGrepArgsForRef(searchText string, caseSensitive bool, usePerlRegexp bool, ref string, pathspec []string) []string {
 	cmdArgs := []string{"--no-pager", "grep"}
 
 	if !caseSensitive {
@@ -66,8 +70,7 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 
 	cmdArgs = append(cmdArgs, "-e", searchText)
 
-	if ref := p.FileReader.Ref; ref != "" {
-		cmdArgs = append(cmdArgs, "--end-of-options")
+	if ref != "" {
 		cmdArgs = append(cmdArgs, ref)
 	}
 
@@ -75,6 +78,40 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	cmdArgs = append(cmdArgs, pathspec...)
 
 	return cmdArgs
+}
+
+func (p *CodeSearchProvider) resolveGrepRef(parentCtx context.Context, ref string) (string, string, error) {
+	ctx, cancel := context.WithTimeout(parentCtx, gitGrepTimeout)
+	defer cancel()
+
+	cmdArgs := []string{"rev-parse", "--verify", "--end-of-options", ref + "^{tree}"}
+	var stdout, stderr string
+	var err error
+	if p.FileReader.Runner != nil {
+		stdout, stderr, err = p.FileReader.Runner.RunSplit(ctx, p.FileReader.RepoDir, cmdArgs...)
+	} else {
+		cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+		cmd.Dir = p.FileReader.RepoDir
+
+		var stdoutBuf, stderrBuf bytes.Buffer
+		cmd.Stdout = &stdoutBuf
+		cmd.Stderr = &stderrBuf
+
+		err = cmd.Run()
+		stdout = stdoutBuf.String()
+		stderr = stderrBuf.String()
+	}
+	if ctx.Err() != nil && err != nil {
+		return "", "", ctx.Err()
+	}
+	if err != nil {
+		detail := strings.TrimSpace(stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(stdout)
+		}
+		return "", detail, err
+	}
+	return strings.TrimSpace(stdout), "", nil
 }
 
 func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []string) (string, string, error) {
@@ -104,7 +141,25 @@ func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []str
 }
 
 func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, caseSensitive bool, usePerlRegexp bool, pathspec []string) (string, error) {
-	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, pathspec)
+	ref := p.FileReader.Ref
+	if ref != "" {
+		resolvedRef, errStr, err := p.resolveGrepRef(ctx, ref)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return "code_search timed out. Try narrowing file_patterns to a more specific path.", nil
+			}
+			if errors.Is(err, context.Canceled) {
+				return "", err
+			}
+			if errStr == "" {
+				errStr = err.Error()
+			}
+			return fmt.Sprintf("Error: %s", strings.TrimSpace(errStr)), nil
+		}
+		ref = resolvedRef
+	}
+
+	cmdArgs := p.buildGrepArgsForRef(searchText, caseSensitive, usePerlRegexp, ref, pathspec)
 
 	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)
 

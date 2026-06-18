@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -49,6 +50,167 @@ func TestNewOpenAIClient_URLNormalization(t *testing.T) {
 				t.Errorf("got URL %q, want %q", client.cfg.URL, tt.wantURL)
 			}
 		})
+	}
+}
+
+func TestNewOpenAIResponsesClient_URLNormalization(t *testing.T) {
+	tests := []struct {
+		name     string
+		inputURL string
+		wantURL  string
+	}{
+		{
+			name:     "base URL without trailing slash",
+			inputURL: "https://api.example.com/v1",
+			wantURL:  "https://api.example.com/v1/responses",
+		},
+		{
+			name:     "full URL already has responses",
+			inputURL: "https://api.example.com/v1/responses",
+			wantURL:  "https://api.example.com/v1/responses",
+		},
+		{
+			name:     "preserves Azure api version query",
+			inputURL: "https://example.cognitiveservices.azure.com/openai?api-version=2025-04-01-preview",
+			wantURL:  "https://example.cognitiveservices.azure.com/openai/responses?api-version=2025-04-01-preview",
+		},
+		{
+			name:     "recognizes responses before query",
+			inputURL: "https://example.cognitiveservices.azure.com/openai/responses?api-version=2025-04-01-preview",
+			wantURL:  "https://example.cognitiveservices.azure.com/openai/responses?api-version=2025-04-01-preview",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewOpenAIResponsesClient(ClientConfig{URL: tt.inputURL})
+			if client.cfg.URL != tt.wantURL {
+				t.Errorf("got URL %q, want %q", client.cfg.URL, tt.wantURL)
+			}
+		})
+	}
+}
+
+func TestNewLLMClient_UsesResponsesClientForResponsesEndpoint(t *testing.T) {
+	client := NewLLMClient(ResolvedEndpoint{
+		URL:      "https://api.example.com/v1/responses?api-version=2025-04-01-preview",
+		Token:    "test-token",
+		Model:    "gpt-5.5",
+		Protocol: "openai",
+	})
+	if _, ok := client.(*OpenAIResponsesClient); !ok {
+		t.Fatalf("client type = %T, want *OpenAIResponsesClient", client)
+	}
+}
+
+func TestOpenAIResponsesClient_RequestAndResponseMapping(t *testing.T) {
+	var gotPath string
+	var gotQuery string
+	var gotAPIKey string
+	var gotAuthorization string
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotAPIKey = r.Header.Get("api-key")
+		gotAuthorization = r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "resp_test",
+			"model": "gpt-5.5",
+			"output": [
+				{
+					"type": "message",
+					"role": "assistant",
+					"content": [{"type": "output_text", "text": "looks good"}],
+					"stop_reason": "stop"
+				},
+				{
+					"type": "function_call",
+					"call_id": "call_test",
+					"name": "lookup",
+					"arguments": "{\"q\":\"x\"}"
+				}
+			],
+			"usage": {"input_tokens": 3, "output_tokens": 4, "total_tokens": 7}
+		}`))
+	}))
+	defer server.Close()
+
+	temp := 0.2
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:    server.URL + "/openai/responses?api-version=2025-04-01-preview",
+		APIKey: "azure-key",
+		Model:  "gpt-5.5",
+		ExtraBody: map[string]any{
+			"reasoning": map[string]any{"effort": "low"},
+		},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{
+			{Role: "system", Content: "be terse"},
+			{Role: "user", Content: []ContentBlock{{Type: "text", Text: "hello"}}},
+		},
+		Tools: []ToolDef{{
+			Type: "function",
+			Function: FunctionDef{
+				Name:        "lookup",
+				Description: "search",
+				Parameters:  map[string]any{"type": "object"},
+			},
+		}},
+		Temperature: &temp,
+		MaxTokens:   42,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if gotPath != "/openai/responses" {
+		t.Errorf("path = %q, want /openai/responses", gotPath)
+	}
+	if gotQuery != "api-version=2025-04-01-preview" {
+		t.Errorf("query = %q, want api-version query", gotQuery)
+	}
+	if gotAPIKey != "azure-key" {
+		t.Errorf("api-key header = %q, want azure-key", gotAPIKey)
+	}
+	if gotAuthorization != "" {
+		t.Errorf("Authorization header = %q, want empty", gotAuthorization)
+	}
+	if gotBody["model"] != "gpt-5.5" {
+		t.Errorf("model = %v, want gpt-5.5", gotBody["model"])
+	}
+	if gotBody["max_output_tokens"] != float64(42) {
+		t.Errorf("max_output_tokens = %v, want 42", gotBody["max_output_tokens"])
+	}
+	input := gotBody["input"].([]any)
+	if input[1].(map[string]any)["content"] != "hello" {
+		t.Errorf("second input content = %v, want hello", input[1].(map[string]any)["content"])
+	}
+	if gotBody["reasoning"].(map[string]any)["effort"] != "low" {
+		t.Errorf("reasoning effort = %v, want low", gotBody["reasoning"])
+	}
+
+	if resp.Content() != "looks good" {
+		t.Errorf("content = %q, want looks good", resp.Content())
+	}
+	if len(resp.ToolCalls()) != 1 || resp.ToolCalls()[0].ID != "call_test" {
+		t.Fatalf("tool calls = %#v, want call_test", resp.ToolCalls())
+	}
+	if resp.Usage == nil || resp.Usage.PromptTokens != 3 || resp.Usage.CompletionTokens != 4 || resp.Usage.TotalTokens != 7 {
+		t.Fatalf("usage = %#v, want 3/4/7", resp.Usage)
+	}
+}
+
+func TestResponseContentAsString_Nil(t *testing.T) {
+	if got := responseContentAsString(nil); got != "" {
+		t.Fatalf("responseContentAsString(nil) = %q, want empty", got)
 	}
 }
 

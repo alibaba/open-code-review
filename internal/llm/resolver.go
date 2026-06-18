@@ -22,11 +22,13 @@ type ResolvedEndpoint struct {
 
 // Environment variable names for OCR-specific configuration.
 const (
-	envOCRLLMURL        = "OCR_LLM_URL"
-	envOCRLLMToken      = "OCR_LLM_TOKEN"
-	envOCRLLMModel      = "OCR_LLM_MODEL"
-	envOCRLLMAuthHeader = "OCR_LLM_AUTH_HEADER"
-	envOCRUseAnthropic  = "OCR_USE_ANTHROPIC"
+	envOCRLLMURL          = "OCR_LLM_URL"
+	envOCRLLMToken        = "OCR_LLM_TOKEN"
+	envOCRLLMAuthToken    = "OCR_LLM_AUTH_TOKEN"
+	envOCRLLMModel        = "OCR_LLM_MODEL"
+	envOCRLLMAuthHeader   = "OCR_LLM_AUTH_HEADER"
+	envOCRUseAnthropic    = "OCR_USE_ANTHROPIC"
+	envOCRLLMUseAnthropic = "OCR_LLM_USE_ANTHROPIC"
 )
 
 // Environment variable names from Claude Code configuration.
@@ -80,6 +82,9 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	url := os.Getenv(envOCRLLMURL)
 	token := os.Getenv(envOCRLLMToken)
+	if token == "" {
+		token = os.Getenv(envOCRLLMAuthToken)
+	}
 	model := os.Getenv(envOCRLLMModel)
 	if modelOverride != "" {
 		model = modelOverride
@@ -89,7 +94,7 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	}
 
 	useAnthropic := true // default true
-	if v := os.Getenv(envOCRUseAnthropic); v != "" {
+	if v := firstNonEmptyEnv(envOCRUseAnthropic, envOCRLLMUseAnthropic); v != "" {
 		lower := strings.ToLower(v)
 		useAnthropic = lower == "true" || lower == "1" || lower == "yes"
 	}
@@ -112,6 +117,15 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	}
 
 	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR environment"}, true, nil
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // llmFileConfig represents the llm section in config.json.

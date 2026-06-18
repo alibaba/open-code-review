@@ -1,11 +1,13 @@
 // Package llm provides LLM client interfaces supporting multiple protocols.
-// Supported protocols: Anthropic Messages API, OpenAI Chat Completions API.
+// Supported protocols: Anthropic Messages API, OpenAI Chat Completions API,
+// and OpenAI Responses API.
 package llm
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -190,7 +192,8 @@ type ClientConfig struct {
 // --- Factory ---
 
 // NewLLMClient creates the appropriate client based on the resolved endpoint protocol.
-// protocol: "anthropic" -> AnthropicClient, anything else -> OpenAIClient.
+// protocol: "anthropic" -> AnthropicClient; OpenAI /responses URLs -> OpenAIResponsesClient;
+// anything else -> OpenAIClient.
 func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 	cfg := ClientConfig{
 		URL:        ep.URL,
@@ -201,6 +204,9 @@ func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 	}
 	if ep.Protocol == "anthropic" {
 		return NewAnthropicClient(cfg)
+	}
+	if isResponsesEndpoint(ep.URL) {
+		return NewOpenAIResponsesClient(cfg)
 	}
 	return NewOpenAIClient(cfg)
 }
@@ -262,13 +268,52 @@ func CountTokensForModel(text string, modelName string) int {
 }
 
 func encodingForModel(modelName string) string {
-	lower := strings.ToLower(modelName)
-	switch {
-	case strings.Contains(lower, "o1") || strings.Contains(lower, "o3") || strings.Contains(lower, "o4"):
+	if isAdvancedReasoningModel(modelName) {
 		return "o200k_base"
-	default:
-		return "cl100k_base"
 	}
+	return "cl100k_base"
+}
+
+func isResponsesEndpoint(rawURL string) bool {
+	return hasURLPathSuffix(rawURL, "/responses")
+}
+
+func hasURLPathSuffix(rawURL, suffix string) bool {
+	if u, err := url.Parse(rawURL); err == nil && u.Path != "" {
+		return strings.HasSuffix(strings.TrimRight(u.Path, "/"), suffix)
+	}
+	return strings.HasSuffix(strings.TrimRight(rawURL, "/"), suffix)
+}
+
+func ensureURLPathSuffix(rawURL, suffix string) string {
+	if hasURLPathSuffix(rawURL, suffix) {
+		return rawURL
+	}
+	if u, err := url.Parse(rawURL); err == nil && u.Scheme != "" && u.Host != "" {
+		u.Path = strings.TrimRight(u.Path, "/") + suffix
+		return u.String()
+	}
+	return strings.TrimRight(rawURL, "/") + suffix
+}
+
+func isAzureOpenAIEndpoint(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return strings.Contains(host, ".openai.azure.com") ||
+		strings.Contains(host, ".cognitiveservices.azure.com") ||
+		u.Query().Get("api-version") != ""
+}
+
+func isAdvancedReasoningModel(model string) bool {
+	lower := strings.ToLower(model)
+	return strings.Contains(lower, "gpt-5") ||
+		strings.Contains(lower, "codex") ||
+		strings.Contains(lower, "o1") ||
+		strings.Contains(lower, "o3") ||
+		strings.Contains(lower, "o4")
 }
 
 // --- OpenAIClient ---

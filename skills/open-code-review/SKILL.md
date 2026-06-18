@@ -61,6 +61,17 @@ ocr config set llm.model claude-opus-4-6
 ocr config set llm.use_anthropic true
 ```
 
+For OpenAI Codex / GPT-5 reasoning models, use:
+
+```bash
+ocr config set llm.url https://api.openai.com/v1/responses
+ocr config set llm.auth_token <api-key>
+ocr config set llm.model gpt-5.5
+ocr config set llm.use_anthropic false
+```
+
+For Azure OpenAI Responses, use the full endpoint URL including the `api-version` query string.
+
 Stop here and ask the user to provide credentials — never invent or hardcode API keys.
 
 ## Workflow

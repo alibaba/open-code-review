@@ -147,6 +147,17 @@ ocr config set llm.model claude-opus-4-6
 ocr config set llm.use_anthropic true
 ```
 
+For OpenAI Responses-compatible endpoints, including Codex/GPT-5 reasoning endpoints:
+
+```bash
+ocr config set llm.url https://api.openai.com/v1/responses
+ocr config set llm.auth_token "$OPENAI_API_KEY"
+ocr config set llm.model gpt-5.5
+ocr config set llm.use_anthropic false
+```
+
+Azure OpenAI Responses endpoints are supported when `llm.url` is the full endpoint URL, including the `api-version` query string.
+
 Config is stored in `~/.opencodereview/config.json`.
 
 **`auth_header` (optional):** Controls which HTTP header carries the API key when using Anthropic. Defaults to `authorization` (Bearer token) if omitted. If you use a standard `sk-ant-*` API key, you must set it to `x-api-key`:
@@ -165,6 +176,8 @@ export OCR_LLM_TOKEN=your-api-key-here
 export OCR_LLM_MODEL=claude-opus-4-6
 export OCR_USE_ANTHROPIC=true
 ```
+
+Use `OCR_USE_ANTHROPIC=false` with `/responses` URLs for OpenAI Responses-compatible endpoints. `OCR_LLM_AUTH_TOKEN` and `OCR_LLM_USE_ANTHROPIC` are also accepted as compatibility aliases.
 
 It is also compatible with Claude Code environment variables (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) and parses `~/.zshrc` / `~/.bashrc` for those exports.
 
@@ -494,9 +507,11 @@ Environment variables take precedence over the config file.
 |----------|---------|
 | `OCR_LLM_URL` | LLM API endpoint URL |
 | `OCR_LLM_TOKEN` | API key / auth token |
+| `OCR_LLM_AUTH_TOKEN` | Compatibility alias for `OCR_LLM_TOKEN` |
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` or `authorization`) |
 | `OCR_LLM_MODEL` | Model name |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
+| `OCR_LLM_USE_ANTHROPIC` | Compatibility alias for `OCR_USE_ANTHROPIC` |
 
 
 ## Telemetry
