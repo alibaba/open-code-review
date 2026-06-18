@@ -3,7 +3,9 @@
 
 const fs = require("fs");
 const path = require("path");
+const http = require("http");
 const https = require("https");
+const tls = require("tls");
 const crypto = require("crypto");
 
 const IS_WINDOWS = process.platform === "win32";
@@ -23,6 +25,99 @@ function warn(msg) {
 
 function error(msg) {
   console.error(`[ERROR] ${msg}`);
+}
+
+const stateDirPath = path.join(require("os").homedir(), ".opencodereview");
+
+function getProxyUrl() {
+  // 1. env vars take highest priority
+  const proxy =
+    process.env.HTTPS_PROXY ||
+    process.env.HTTP_PROXY ||
+    process.env.https_proxy ||
+    process.env.http_proxy;
+  if (proxy) {
+    try {
+      return new URL(proxy);
+    } catch (_) {}
+  }
+
+  // 2. fallback: read from ~/.opencodereview/config.json
+  try {
+    const configPath = path.join(stateDirPath, "config.json");
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      if (config.proxy && config.proxy.url) {
+        return new URL(config.proxy.url);
+      }
+    }
+  } catch (_) {}
+
+  return null;
+}
+
+class HttpsProxyAgent extends https.Agent {
+  constructor(proxyUrl) {
+    super({ keepAlive: true });
+    this._proxyUrl = proxyUrl;
+  }
+
+  createConnection(options, callback) {
+    const proxyPort = this._proxyUrl.port || 3128;
+    const targetHost = options.hostname || options.host;
+    const targetPort = options.port || 443;
+
+    let done = false;
+    const doneOnce = (err, socket) => {
+      if (done) return;
+      done = true;
+      callback(err, socket);
+    };
+
+    const req = http.request({
+      hostname: this._proxyUrl.hostname,
+      port: proxyPort,
+      method: "CONNECT",
+      path: `${targetHost}:${targetPort}`,
+      headers: this._proxyUrl.username
+        ? {
+            "Proxy-Authorization":
+              "Basic " +
+              Buffer.from(
+                this._proxyUrl.username + ":" + (this._proxyUrl.password || "")
+              ).toString("base64"),
+          }
+        : {},
+    });
+
+    req.setTimeout(30000, () => {
+      req.destroy();
+      doneOnce(new Error(`Proxy CONNECT ${targetHost}:${targetPort} timed out`));
+    });
+
+    req.on("connect", (res, socket) => {
+      req.setTimeout(0); // clear timeout — CONNECT handshake is done
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        doneOnce(
+          new Error(`Proxy CONNECT ${targetHost}:${targetPort} returned ${res.statusCode}`)
+        );
+        return;
+      }
+      const tlsOpts = {
+        ...options,
+        socket,
+        servername: options.servername || targetHost,
+      };
+      const tlsSocket = tls.connect(tlsOpts, () =>
+        doneOnce(null, tlsSocket)
+      );
+      tlsSocket.on("error", (err) => doneOnce(err));
+    });
+
+    req.on("error", (err) => doneOnce(err));
+    req.end();
+  }
 }
 
 function detectPlatform() {
@@ -95,8 +190,14 @@ function download(url, maxRedirects = 10) {
   if (maxRedirects <= 0) {
     return Promise.reject(new Error(`Too many redirects fetching ${url}`));
   }
+
+  const proxyUrl = getProxyUrl();
+  const options = proxyUrl
+    ? { agent: new HttpsProxyAgent(proxyUrl) }
+    : {};
+
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+    https.get(url, options, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
         download(res.headers.location, maxRedirects - 1).then(resolve).catch(reject);
