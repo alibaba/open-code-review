@@ -2,11 +2,7 @@
 "use strict";
 
 const fs = require("fs");
-const path = require("path");
-const os = require("os");
-
-const configDir = path.join(os.homedir(), ".opencodereview");
-const configPath = path.join(configDir, "config.json");
+const { CONFIG_DIR, CONFIG_PATH } = require("./config-paths");
 
 function info(msg) {
   console.log(`[INFO]  ${msg}`);
@@ -17,20 +13,21 @@ function error(msg) {
 }
 
 function loadConfig() {
-  fs.mkdirSync(configDir, { recursive: true });
-  if (fs.existsSync(configPath)) {
+  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  if (fs.existsSync(CONFIG_PATH)) {
     try {
-      return JSON.parse(fs.readFileSync(configPath, "utf8"));
+      return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
     } catch (e) {
       error(`Failed to parse config.json: ${e.message}`);
-      return {};
+      error("Please fix or remove the corrupted file before retrying.");
+      process.exit(1);
     }
   }
   return {};
 }
 
 function saveConfig(config) {
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 4) + "\n");
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 4) + "\n");
 }
 
 function show() {
@@ -39,7 +36,7 @@ function show() {
     info(`Current proxy: ${config.proxy.url}`);
   } else {
     info("No proxy configured.");
-    info("Set one with: node scripts/setup-proxy.js http://127.0.0.1:7897");
+    info("Set one with: node scripts/setup-proxy.js set http://127.0.0.1:7897");
   }
 }
 

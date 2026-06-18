@@ -7,6 +7,7 @@ const http = require("http");
 const https = require("https");
 const tls = require("tls");
 const crypto = require("crypto");
+const { CONFIG_PATH } = require("./config-paths");
 
 const IS_WINDOWS = process.platform === "win32";
 const BINARY_NAME = IS_WINDOWS ? "opencodereview.exe" : "opencodereview";
@@ -27,8 +28,6 @@ function error(msg) {
   console.error(`[ERROR] ${msg}`);
 }
 
-const stateDirPath = path.join(require("os").homedir(), ".opencodereview");
-
 function getProxyUrl() {
   // 1. env vars take highest priority
   const proxy =
@@ -39,19 +38,23 @@ function getProxyUrl() {
   if (proxy) {
     try {
       return new URL(proxy);
-    } catch (_) {}
+    } catch (_) {
+      warn(`Ignoring invalid proxy env var: ${proxy}`);
+    }
   }
 
   // 2. fallback: read from ~/.opencodereview/config.json
   try {
-    const configPath = path.join(stateDirPath, "config.json");
-    if (fs.existsSync(configPath)) {
-      const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    if (fs.existsSync(CONFIG_PATH)) {
+      const config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
       if (config.proxy && config.proxy.url) {
-        return new URL(config.proxy.url);
+        const url = new URL(config.proxy.url);
+        return url;
       }
     }
-  } catch (_) {}
+  } catch (e) {
+    warn(`Failed to read proxy config from ${CONFIG_PATH}: ${e.message}`);
+  }
 
   return null;
 }
@@ -112,7 +115,10 @@ class HttpsProxyAgent extends https.Agent {
       const tlsSocket = tls.connect(tlsOpts, () =>
         doneOnce(null, tlsSocket)
       );
-      tlsSocket.on("error", (err) => doneOnce(err));
+      tlsSocket.on("error", (err) => {
+        socket.destroy();
+        doneOnce(err);
+      });
     });
 
     req.on("error", (err) => doneOnce(err));
@@ -183,6 +189,25 @@ function buildUrl(pattern, vars) {
     .replace(/\{arch\}/g, vars.arch);
 }
 
+let _cachedAgent = null;
+let _cachedProxyKey = null;
+
+function getProxyAgent() {
+  const proxyUrl = getProxyUrl();
+  if (!proxyUrl) {
+    _cachedAgent = null;
+    _cachedProxyKey = null;
+    return null;
+  }
+  const key = proxyUrl.href;
+  if (_cachedAgent && _cachedProxyKey === key) {
+    return _cachedAgent;
+  }
+  _cachedAgent = new HttpsProxyAgent(proxyUrl);
+  _cachedProxyKey = key;
+  return _cachedAgent;
+}
+
 function download(url, maxRedirects = 10) {
   if (!url.startsWith("https")) {
     return Promise.reject(new Error(`Refusing non-HTTPS download: ${url}`));
@@ -191,10 +216,8 @@ function download(url, maxRedirects = 10) {
     return Promise.reject(new Error(`Too many redirects fetching ${url}`));
   }
 
-  const proxyUrl = getProxyUrl();
-  const options = proxyUrl
-    ? { agent: new HttpsProxyAgent(proxyUrl) }
-    : {};
+  const agent = getProxyAgent();
+  const options = agent ? { agent } : {};
 
   return new Promise((resolve, reject) => {
     https.get(url, options, (res) => {
