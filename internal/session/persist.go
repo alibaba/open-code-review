@@ -96,12 +96,12 @@ func (jw *jsonlWriter) open() error {
 	}
 
 	sessionDir := filepath.Join(home, ".opencodereview", "sessions", encodeRepoPath(jw.repoDir))
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+	if err := os.MkdirAll(sessionDir, 0700); err != nil {
 		return fmt.Errorf("create session dir: %w", err)
 	}
 
 	filename := filepath.Join(sessionDir, jw.sessionID+".jsonl")
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("open session file: %w", err)
 	}

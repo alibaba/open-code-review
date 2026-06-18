@@ -118,7 +118,7 @@ jobs:
             rest="${entry#*:}"
             dist_binary="${rest%%:*}"
             dest_name="${rest#*:}"
-            pkg_dir="npm/$platform_dir"
+            pkg_dir="./npm/$platform_dir"
             mkdir -p "$pkg_dir/bin"
             cp "$dist_binary" "$pkg_dir/bin/$dest_name"
             chmod 755 "$pkg_dir/bin/$dest_name" 2>/dev/null || true

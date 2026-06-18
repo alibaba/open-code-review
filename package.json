@@ -5,6 +5,13 @@
   "bin": {
     "ocr": "bin/ocr.js"
   },
+  "files": [
+    "bin/ocr.js",
+    "scripts/install.js",
+    "scripts/update.js",
+    "scripts/platform.js",
+    "imgs/"
+  ],
   "scripts": {
     "postinstall": "node scripts/install.js",
     "test:github-actions": "node scripts/github-actions/post-review-comments.test.js"

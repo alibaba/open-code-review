@@ -191,6 +191,44 @@ func TestSetErrorWritesJSONL(t *testing.T) {
 	}
 }
 
+func TestSessionFilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permissions not enforced on Windows")
+	}
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	repoDir := t.TempDir()
+	sessionID := generateUUID()
+
+	jw, err := newJSONLWriter(sessionID, repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	if err != nil {
+		t.Fatalf("newJSONLWriter: %v", err)
+	}
+	jw.WriteSessionStart(time.Now())
+	defer jw.flushAndClose()
+
+	sessionDir := filepath.Join(tmpHome, ".opencodereview", "sessions", encodeRepoPath(repoDir))
+	sessionFile := filepath.Join(sessionDir, sessionID+".jsonl")
+
+	dirInfo, err := os.Stat(sessionDir)
+	if err != nil {
+		t.Fatalf("stat session dir: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != os.FileMode(0700) {
+		t.Errorf("session dir mode = %04o, want 0700", got)
+	}
+
+	fileInfo, err := os.Stat(sessionFile)
+	if err != nil {
+		t.Fatalf("stat session file: %v", err)
+	}
+	if got := fileInfo.Mode().Perm(); got != os.FileMode(0600) {
+		t.Errorf("session file mode = %04o, want 0600", got)
+	}
+}
+
 func TestSessionEndIncludesFailures(t *testing.T) {
 	repoDir := t.TempDir()
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})

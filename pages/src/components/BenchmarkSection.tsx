@@ -1,258 +1,414 @@
 import React, { useState } from 'react';
 import { useTranslation } from '../i18n';
+import { OcrIcon, ClaudeIcon, OpenAIIcon } from './icons';
 
-interface LeaderboardEntry {
-  rank: number;
-  medal?: string;
+interface BenchmarkEntry {
   model: string;
-  provider: string;
-  source: string;
-  sourceType: 'ocr' | 'claude';
+  company: string;
+  sourceType: 'ocr' | 'cc' | 'codex';
   version: string;
-  f1: string;
-  precision: string;
-  precisionFraction: string;
-  recall: string;
-  recallFraction: string;
-  tags: string[];
+  precision?: number;
+  precisionDetail?: string;
+  recall?: number;
+  recallDetail?: string;
+  f1?: number;
+  avgTime?: string;
+  avgInputToken?: string;
+  avgOutputToken?: string;
+  avgTotalToken?: string;
 }
 
-const leaderboardData: LeaderboardEntry[] = [
+const OCR_VERSION = 'v1.3.1';
+const CC_VERSION = 'v2.1.169';
+
+const sourceColorMap: Record<string, string> = {
+  ocr: 'text-brand-400',
+  cc: 'text-[#D97757]',
+  codex: 'text-[#10a37f]',
+};
+const sourceNameMap: Record<string, string> = {
+  ocr: 'Open Code Review',
+  cc: 'Claude Code',
+  codex: 'Codex',
+};
+
+const benchmarkData: BenchmarkEntry[] = [
   {
-    rank: 1,
-    medal: 'gold',
     model: 'Claude-4.6-Opus',
-    provider: 'Anthropic',
-    source: 'Open Code Review',
+    company: 'Anthropic',
     sourceType: 'ocr',
-    version: 'AVG (10)',
-    f1: '26.1%',
-    precision: '41.9%',
-    precisionFraction: '286/682',
-    recall: '19.0%',
-    recallFraction: '286/1505',
-    tags: ['Closed', 'Reproduced']
+    version: OCR_VERSION,
+    precision: 33.90,
+    precisionDetail: '301/889',
+    recall: 20.00,
+    recallDetail: '301/1505',
+    f1: 25.10,
+    avgTime: '1m23s',
+    avgInputToken: '375K',
+    avgOutputToken: '10K',
+    avgTotalToken: '385K',
   },
   {
-    rank: 2,
-    medal: 'silver',
-    model: 'Qwen-3.6-Plus',
-    provider: 'Alibaba',
-    source: 'Open Code Review',
+    model: 'Qwen3.7-Max',
+    company: 'Alibaba',
     sourceType: 'ocr',
-    version: 'AVG (3)',
-    f1: '21.9%',
-    precision: '38.6%',
-    precisionFraction: '231/597',
-    recall: '15.3%',
-    recallFraction: '231/1505',
-    tags: ['Reproduced', 'Closed']
+    version: OCR_VERSION,
+    precision: 25.20,
+    precisionDetail: '276/1096',
+    recall: 18.30,
+    recallDetail: '276/1505',
+    f1: 21.20,
+    avgTime: '4m41s',
+    avgInputToken: '587K',
+    avgOutputToken: '38K',
+    avgTotalToken: '625K',
   },
   {
-    rank: 3,
-    medal: 'bronze',
-    model: 'GLM-4.7',
-    provider: 'Zhipu AI',
-    source: 'Open Code Review',
+    model: 'GPT-5.5',
+    company: 'OpenAI',
     sourceType: 'ocr',
-    version: 'AVG (2)',
-    f1: '20.1%',
-    precision: '34.2%',
-    precisionFraction: '214/624',
-    recall: '14.2%',
-    recallFraction: '214/1505',
-    tags: ['Open Source', 'Reproduced']
+    version: OCR_VERSION,
+    precision: 32.10,
+    precisionDetail: '234/728',
+    recall: 15.50,
+    recallDetail: '234/1505',
+    f1: 21.00,
+    avgTime: '2m51s',
+    avgInputToken: '409K',
+    avgOutputToken: '13K',
+    avgTotalToken: '422K',
   },
   {
-    rank: 4,
-    medal: undefined,
-    model: 'Qwen3.5-27b-dense',
-    provider: 'Alibaba',
-    source: 'Open Code Review',
+    model: 'Claude-4.8-Opus',
+    company: 'Anthropic',
     sourceType: 'ocr',
-    version: 'AVG (3)',
-    f1: '19.5%',
-    precision: '28.1%',
-    precisionFraction: '225/799',
-    recall: '15.0%',
-    recallFraction: '225/1505',
-    tags: ['Open Source']
+    version: OCR_VERSION,
+    precision: 37.80,
+    precisionDetail: '176/465',
+    recall: 11.70,
+    recallDetail: '176/1505',
+    f1: 17.90,
+    avgTime: '1m6s',
+    avgInputToken: '342K',
+    avgOutputToken: '11K',
+    avgTotalToken: '352K',
   },
   {
-    rank: 5,
-    medal: undefined,
-    model: 'Claude-4.5-Sonnet',
-    provider: 'Anthropic',
-    source: 'Claude Code + Skills',
-    sourceType: 'claude',
-    version: 'v0',
-    f1: '15.5%',
-    precision: '30.0%',
-    precisionFraction: '157/523',
-    recall: '10.4%',
-    recallFraction: '157/1505',
-    tags: ['Closed', 'Reproduced']
+    model: 'Deepseek-V4-Pro',
+    company: 'DeepSeek',
+    sourceType: 'ocr',
+    version: OCR_VERSION,
+    precision: 30.60,
+    precisionDetail: '191/624',
+    recall: 12.70,
+    recallDetail: '191/1505',
+    f1: 17.90,
+    avgTime: '6m28s',
+    avgInputToken: '350K',
+    avgOutputToken: '44K',
+    avgTotalToken: '394K',
   },
   {
-    rank: 6,
-    medal: undefined,
-    model: 'Qwen3-Coder-480B-A35B-Instruct',
-    provider: 'Alibaba',
-    source: 'Claude Code + Skills',
-    sourceType: 'claude',
-    version: 'v0',
-    f1: '6.6%',
-    precision: '14.8%',
-    precisionFraction: '64/432',
-    recall: '4.3%',
-    recallFraction: '64/1505',
-    tags: ['Closed', 'Reproduced']
+    model: 'GLM-5.1',
+    company: 'Zhipu AI',
+    sourceType: 'ocr',
+    version: OCR_VERSION,
+    precision: 28.90,
+    precisionDetail: '237/820',
+    recall: 15.70,
+    recallDetail: '237/1505',
+    f1: 20.40,
+    avgTime: '4m11s',
+    avgInputToken: '707K',
+    avgOutputToken: '36K',
+    avgTotalToken: '743K',
   },
   {
-    rank: 7,
-    medal: undefined,
-    model: 'GLM-4.7',
-    provider: 'Zhipu AI',
-    source: 'Claude Code + Skills',
-    sourceType: 'claude',
-    version: 'v0',
-    f1: '6.6%',
-    precision: '11.2%',
-    precisionFraction: '70/623',
-    recall: '4.7%',
-    recallFraction: '70/1505',
-    tags: ['Closed', 'Reproduced']
+    model: 'Claude-4.6-Opus',
+    company: 'Anthropic',
+    sourceType: 'cc',
+    version: CC_VERSION,
+    precision: 7.23,
+    precisionDetail: '435/5980',
+    recall: 28.90,
+    recallDetail: '435/1505',
+    f1: 11.57,
+    avgTime: '13m6s',
+    avgInputToken: '5603K',
+    avgOutputToken: '60K',
+    avgTotalToken: '5664K',
   },
   {
-    rank: 8,
-    medal: undefined,
-    model: 'Deepseek-V3.2',
-    provider: 'DeepSeek',
-    source: 'Claude Code + Skills',
-    sourceType: 'claude',
-    version: 'v0',
-    f1: '6.4%',
-    precision: '10.4%',
-    precisionFraction: '69/661',
-    recall: '4.6%',
-    recallFraction: '69/1505',
-    tags: ['Closed', 'Reproduced']
-  }
+    model: 'Qwen3.7-Max',
+    company: 'Alibaba',
+    sourceType: 'cc',
+    version: CC_VERSION,
+    precision: 8.23,
+    precisionDetail: '351/4260',
+    recall: 23.37,
+    recallDetail: '351/1505',
+    f1: 12.17,
+    avgTime: '8m6s',
+    avgInputToken: '5108K',
+    avgOutputToken: '44K',
+    avgTotalToken: '5153K',
+  },
+  { model: 'Claude-4.8-Opus', company: 'Anthropic', sourceType: 'cc', version: CC_VERSION },
+  {
+    model: 'Deepseek-V4-Pro',
+    company: 'DeepSeek',
+    sourceType: 'cc',
+    version: CC_VERSION,
+    precision: 8.27,
+    precisionDetail: '243/2945',
+    recall: 16.13,
+    recallDetail: '243/1505',
+    f1: 10.93,
+    avgTime: '14m24s',
+    avgInputToken: '5389K',
+    avgOutputToken: '60K',
+    avgTotalToken: '5450K',
+  },
+  { model: 'GLM-5.1', company: 'Zhipu AI', sourceType: 'cc', version: CC_VERSION },
+  { model: 'GPT-5.5', company: 'OpenAI', sourceType: 'codex', version: '' },
 ];
 
 const medalIcons: Record<string, string> = {
   gold: '🥇',
   silver: '🥈',
-  bronze: '🥉'
+  bronze: '🥉',
 };
+
+function computeMedals(
+  entries: BenchmarkEntry[],
+  field: 'precision' | 'recall'
+): Map<number, string> {
+  const indexed = entries
+    .map((e, i) => ({ index: i, value: e[field] }))
+    .filter((e): e is { index: number; value: number } => e.value !== undefined)
+    .sort((a, b) => b.value - a.value);
+
+  const medals = new Map<number, string>();
+  const types = ['gold', 'silver', 'bronze'];
+  indexed.slice(0, 3).forEach((item, i) => {
+    medals.set(item.index, types[i]);
+  });
+  return medals;
+}
 
 const BenchmarkSection: React.FC = () => {
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
   const { t } = useTranslation();
 
+  const sortedData = [...benchmarkData].sort((a, b) => {
+    if (a.f1 == null && b.f1 == null) return 0;
+    if (a.f1 == null) return 1;
+    if (b.f1 == null) return -1;
+    return b.f1 - a.f1;
+  });
+
+  const precisionMedals = computeMedals(sortedData, 'precision');
+  const recallMedals = computeMedals(sortedData, 'recall');
+
+  const ranks = new Map<number, number>();
+  let rank = 0;
+  sortedData.forEach((entry, index) => {
+    if (entry.f1 != null) {
+      rank++;
+      ranks.set(index, rank);
+    }
+  });
+
   return (
     <section id="benchmark" className="py-24 relative noise-overlay">
-      {/* Ambient glow */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 w-[800px] h-[600px] rounded-full bg-brand-500/[0.02] blur-[140px] pointer-events-none"></div>
 
       <div className="relative z-10">
         <div className="section-divider mb-24"></div>
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-12">
-            <p className="text-slate-500 text-sm font-mono uppercase tracking-widest mb-3">{t('benchmark.sectionLabel')}</p>
+            <p className="text-slate-500 text-sm font-mono uppercase tracking-widest mb-3">
+              {t('benchmark.sectionLabel')}
+            </p>
             <h2 className="text-4xl font-bold text-white mb-4">
               {t('benchmark.title')}
             </h2>
-            <p className="text-slate-400 max-w-2xl mx-auto">
+            <p className="text-slate-400 max-w-4xl mx-auto">
               {t('benchmark.subtitle')}
             </p>
           </div>
 
           {/* Legend */}
-          <div className="mb-6 flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="w-3 h-3 rounded-sm bg-brand-500/20 border border-brand-500/40 inline-block"></span>
-              <span className="text-slate-400">{t('benchmark.legendOcr')}</span>
+          <div className="mb-6 flex items-center gap-5 flex-wrap">
+            <div className="flex items-center gap-1.5 text-xs">
+              <OcrIcon className="w-4 h-4 rounded-sm" />
+              <span className="text-brand-400 font-medium">Open Code Review · {OCR_VERSION}</span>
             </div>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="w-3 h-3 rounded-sm bg-slate-700 border border-slate-600 inline-block"></span>
-              <span className="text-slate-400">{t('benchmark.legendClaude')}</span>
+            <div className="flex items-center gap-1.5 text-xs">
+              <ClaudeIcon className="w-4 h-4" />
+              <span className="text-[#D97757] font-medium">Claude Code · {CC_VERSION} · /code-review</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <OpenAIIcon className="w-4 h-4" />
+              <span className="text-[#10a37f] font-medium">Codex · /code-review</span>
             </div>
           </div>
 
           {/* Table */}
           <div className="rounded-2xl overflow-hidden glass-strong gradient-border shadow-2xl shadow-black/30">
-            {/* Table header */}
-            <div className="grid grid-cols-12 gap-2 px-6 py-3 bg-dark-700/60 text-xs font-medium text-slate-500 uppercase tracking-wider">
-              <div className="col-span-1">{t('benchmark.colRank')}</div>
-              <div className="col-span-3">{t('benchmark.colModel')}</div>
-              <div className="col-span-2">{t('benchmark.colSource')}</div>
-              <div className="col-span-1">{t('benchmark.colVersion')}</div>
-              <div className="col-span-2 text-right">SEM.F1</div>
-              <div className="col-span-2 text-right">SEM.PRECISION</div>
-              <div className="col-span-1 text-right">SEM.RECALL</div>
+            {/* Header */}
+            <div className="grid grid-cols-[2.5rem_10rem_11rem_repeat(5,1fr)] gap-2 px-6 py-3 bg-dark-700/60 text-xs font-medium text-slate-500 uppercase tracking-wider">
+              <div>{t('benchmark.colRank')}</div>
+              <div>{t('benchmark.colModel')}</div>
+              <div>{t('benchmark.colSource')}</div>
+              <div>F1</div>
+              <div>{t('benchmark.colPrecision')}</div>
+              <div>{t('benchmark.colRecall')}</div>
+              <div>{t('benchmark.colAvgTime')}</div>
+              <div>{t('benchmark.colAvgToken')}</div>
             </div>
 
-            {leaderboardData.map((entry) => (
-              <div
-                key={entry.rank}
-                className={`leaderboard-row grid grid-cols-12 gap-2 px-6 py-4 items-center cursor-default ${
-                  entry.sourceType === 'ocr' ? 'bg-brand-500/3' : ''
-                } ${hoveredRow === entry.rank ? 'bg-brand-500/6' : ''}`}
-                onMouseEnter={() => setHoveredRow(entry.rank)}
-                onMouseLeave={() => setHoveredRow(null)}
-              >
-                <div className="col-span-1 flex items-center gap-2">
-                  {entry.medal ? (
-                    <span className="text-lg">{medalIcons[entry.medal]}</span>
-                  ) : (
-                    <span className="text-slate-500 font-mono text-sm w-6 text-center">{entry.rank}</span>
-                  )}
-                </div>
+            {/* Rows */}
+            {sortedData.map((entry, index) => {
+              const entryRank = ranks.get(index);
+              const hasData = entry.f1 != null;
+              const pMedal = precisionMedals.get(index);
+              const rMedal = recallMedals.get(index);
 
-                <div className="col-span-3">
-                  <div className="text-white text-sm font-medium">{entry.model}</div>
-                  <div className="text-slate-500 text-xs">{entry.provider}</div>
-                </div>
+              return (
+                <div
+                  key={`${entry.model}-${entry.sourceType}`}
+                  className={`leaderboard-row grid grid-cols-[2.5rem_10rem_11rem_repeat(5,1fr)] gap-2 px-6 py-4 items-center cursor-default ${
+                    hasData && entry.sourceType === 'ocr' ? 'bg-brand-500/3' : ''
+                  } ${hoveredRow === index ? 'bg-brand-500/6' : ''}`}
+                  onMouseEnter={() => setHoveredRow(index)}
+                  onMouseLeave={() => setHoveredRow(null)}
+                >
+                  {/* Rank */}
+                  <div>
+                    {entryRank != null ? (
+                      <span className="text-lg w-6 inline-block text-center">
+                        {entryRank <= 3 ? medalIcons[['gold', 'silver', 'bronze'][entryRank - 1]] : (
+                          <span className="text-slate-500 font-mono text-sm">{entryRank}</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="w-6 inline-flex items-center justify-center">
+                        <span className="w-3.5 h-3.5 rounded-full border-2 border-slate-600 border-t-brand-400 animate-spin" />
+                      </span>
+                    )}
+                  </div>
 
-                <div className="col-span-2">
-                  <span
-                    className={`px-2 py-0.5 rounded-md text-xs font-medium ${
-                      entry.sourceType === 'ocr'
-                        ? 'bg-brand-500/15 text-brand-400 border border-brand-500/25'
-                        : 'bg-slate-700/50 text-slate-400 border border-slate-600/40'
-                    }`}
-                  >
-                    {entry.source}
-                  </span>
-                </div>
+                  {/* Model + Company */}
+                  <div>
+                    <div className="text-white text-sm font-medium">{entry.model}</div>
+                    <div className="text-slate-500 text-xs mt-0.5">{entry.company}</div>
+                  </div>
 
-                <div className="col-span-1 text-slate-500 text-xs font-mono">{entry.version}</div>
+                  {/* Source */}
+                  <div className="flex items-center gap-2">
+                    {entry.sourceType === 'ocr' && <OcrIcon className="w-5 h-5 rounded shrink-0" />}
+                    {entry.sourceType === 'cc' && <ClaudeIcon className="w-5 h-5 shrink-0" />}
+                    {entry.sourceType === 'codex' && <OpenAIIcon className="w-5 h-5 shrink-0" />}
+                    <span className={`text-xs whitespace-nowrap ${sourceColorMap[entry.sourceType]}`}>
+                      {sourceNameMap[entry.sourceType]}
+                    </span>
+                  </div>
 
-                <div className="col-span-2 text-right">
-                  <span className={`text-sm font-bold ${entry.rank <= 3 ? 'text-brand-400' : 'text-white'}`}>
-                    {entry.f1}
-                  </span>
-                </div>
+                  {/* F1 */}
+                  <div>
+                    {entry.f1 != null ? (
+                      <span
+                        className={`text-sm font-bold ${
+                          entryRank != null && entryRank <= 3 ? 'text-brand-400' : 'text-white'
+                        }`}
+                      >
+                        {entry.f1.toFixed(2)}%
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 text-xs font-medium flex items-center gap-1.5">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-400/60 animate-pulse" />
+                        Running
+                      </span>
+                    )}
+                  </div>
 
-                <div className="col-span-2 text-right">
-                  <div className="text-slate-300 text-sm">{entry.precision}</div>
-                  <div className="text-slate-600 text-xs font-mono">{entry.precisionFraction}</div>
-                </div>
+                  {/* Precision with medal */}
+                  <div>
+                    {entry.precision != null ? (
+                      <div>
+                        <div className="inline-flex items-center gap-1">
+                          <span className="text-slate-300 text-sm">{entry.precision.toFixed(2)}%</span>
+                          <span className="w-5 inline-block text-center text-lg leading-none">
+                            {pMedal ? medalIcons[pMedal] : ''}
+                          </span>
+                        </div>
+                        {entry.precisionDetail && (
+                          <div className="text-slate-600 text-xs font-mono mt-0.5">{entry.precisionDetail}</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="h-4 w-16 rounded bg-slate-800 overflow-hidden relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-slate-700/50 to-transparent animate-[shimmer_2s_ease-in-out_infinite]" />
+                      </div>
+                    )}
+                  </div>
 
-                <div className="col-span-1 text-right">
-                  <div className="text-slate-300 text-sm">{entry.recall}</div>
-                  <div className="text-slate-600 text-xs font-mono">{entry.recallFraction}</div>
+                  {/* Recall with medal */}
+                  <div>
+                    {entry.recall != null ? (
+                      <div>
+                        <div className="inline-flex items-center gap-1">
+                          <span className="text-slate-300 text-sm">{entry.recall.toFixed(2)}%</span>
+                          <span className="w-5 inline-block text-center text-lg leading-none">
+                            {rMedal ? medalIcons[rMedal] : ''}
+                          </span>
+                        </div>
+                        {entry.recallDetail && (
+                          <div className="text-slate-600 text-xs font-mono mt-0.5">{entry.recallDetail}</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="h-4 w-16 rounded bg-slate-800 overflow-hidden relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-slate-700/50 to-transparent animate-[shimmer_2s_ease-in-out_infinite]" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Avg Time */}
+                  <div>
+                    {entry.avgTime ? (
+                      <span className="text-slate-400 text-sm font-mono">{entry.avgTime}</span>
+                    ) : (
+                      <div className="h-4 w-14 rounded bg-slate-800 overflow-hidden relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-slate-700/50 to-transparent animate-[shimmer_2s_ease-in-out_infinite]" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Avg Token */}
+                  <div>
+                    {entry.avgTotalToken ? (
+                      <div>
+                        <span className="text-slate-400 text-sm font-mono">{entry.avgTotalToken}</span>
+                        {entry.avgInputToken && (
+                          <div className="text-slate-600 text-xs font-mono mt-0.5">{entry.avgInputToken} / {entry.avgOutputToken}</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="h-4 w-14 rounded bg-slate-800 overflow-hidden relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-slate-700/50 to-transparent animate-[shimmer_2s_ease-in-out_infinite]" />
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
-          <div className="mt-6 text-center text-slate-600 text-xs">
-            {t('benchmark.footer')}
-          </div>
         </div>
       </div>
+
     </section>
   );
 };
