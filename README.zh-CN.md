@@ -213,10 +213,10 @@ ocr config set custom_providers.my-gateway.model gpt-4o
 | `providers.<name>.extra_headers` | 逗号分隔的 `key=value` 键值对，为每个请求添加自定义 HTTP 头 |
 | `providers.<name>.models` | 用于交互式选择的模型列表 |
 
-**`extra_headers`（可选）：** 为每个 LLM API 请求添加自定义 HTTP 头。适用于代理、网关或需要额外头的企业端点（例如组织 ID、链路追踪 ID）。格式为逗号分隔的 `key=value` 键值对：
+**`extra_headers`（可选）：** 为每个 LLM API 请求添加自定义 HTTP 头。适用于代理、网关或需要额外头的企业端点（例如组织 ID、链路追踪 ID）。格式为逗号分隔的 `key=value` 键值对。包含逗号的值请用双引号包裹：
 
 ```bash
-ocr config set llm.extra_headers "X-Org-ID=org-123,X-Trace-Id=trace-abc"
+ocr config set llm.extra_headers "X-Org-ID=org-123,X-Forwarded-For=\"1.2.3.4,5.6.7.8\""
 ```
 
 也可以按供应商单独设置额外头：

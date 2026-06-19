@@ -213,10 +213,10 @@ ocr config set custom_providers.my-gateway.model gpt-4o
 | `providers.<name>.extra_headers` | カンマ区切りの `key=value` ペアで、各リクエストに追加されるカスタムHTTPヘッダー |
 | `providers.<name>.models` | 対話的選択用のモデルリスト |
 
-**`extra_headers`（オプション）：** すべてのLLM APIリクエストにカスタムHTTPヘッダーを追加します。プロキシ、ゲートウェイ、追加ヘッダーを必要とするエンタープライズエンドポイント（組織ID、トレースIDなど）に便利です。形式はカンマ区切りの `key=value` ペアです：
+**`extra_headers`（オプション）：** すべてのLLM APIリクエストにカスタムHTTPヘッダーを追加します。プロキシ、ゲートウェイ、追加ヘッダーを必要とするエンタープライズエンドポイント（組織ID、トレースIDなど）に便利です。形式はカンマ区切りの `key=value` ペアです。カンマを含む値はダブルクォートで囲んでください：
 
 ```bash
-ocr config set llm.extra_headers "X-Org-ID=org-123,X-Trace-Id=trace-abc"
+ocr config set llm.extra_headers "X-Org-ID=org-123,X-Forwarded-For=\"1.2.3.4,5.6.7.8\""
 ```
 
 プロバイダーごとに追加ヘッダーを設定することもできます：

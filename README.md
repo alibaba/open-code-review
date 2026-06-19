@@ -213,10 +213,10 @@ Optional settings:
 | `providers.<name>.extra_headers` | Comma-separated `key=value` pairs of custom HTTP headers added to every request |
 | `providers.<name>.models` | Model list for interactive selection |
 
-**`extra_headers` (optional):** Adds custom HTTP headers to every LLM API request. Useful for proxies, gateways, or enterprise endpoints that require additional headers (e.g. organization IDs, tracing IDs). Format is comma-separated `key=value` pairs:
+**`extra_headers` (optional):** Adds custom HTTP headers to every LLM API request. Useful for proxies, gateways, or enterprise endpoints that require additional headers (e.g. organization IDs, tracing IDs). Format is comma-separated `key=value` pairs. Double-quote values that contain commas:
 
 ```bash
-ocr config set llm.extra_headers "X-Org-ID=org-123,X-Trace-Id=trace-abc"
+ocr config set llm.extra_headers "X-Org-ID=org-123,X-Forwarded-For=\"1.2.3.4,5.6.7.8\""
 ```
 
 You can also set extra headers per-provider:

@@ -213,10 +213,10 @@ ocr config set custom_providers.my-gateway.model gpt-4o
 | `providers.<name>.extra_headers` | 쉼표로 구분된 `key=value` 쌍, 각 요청에 추가되는 커스텀 HTTP 헤더 |
 | `providers.<name>.models` | 대화형 선택용 model 목록 |
 
-**`extra_headers` (선택사항):** 모든 LLM API 요청에 커스텀 HTTP 헤더를 추가합니다. 프록시, 게이트웨이, 추가 헤더가 필요한 엔터프라이즈 엔드포인트(조직 ID, 트레이싱 ID 등)에 유용합니다. 형식은 쉼표로 구분된 `key=value` 쌍입니다:
+**`extra_headers` (선택사항):** 모든 LLM API 요청에 커스텀 HTTP 헤더를 추가합니다. 프록시, 게이트웨이, 추가 헤더가 필요한 엔터프라이즈 엔드포인트(조직 ID, 트레이싱 ID 등)에 유용합니다. 형식은 쉼표로 구분된 `key=value` 쌍입니다. 쉼표가 포함된 값은 큰따옴표로 묶으세요:
 
 ```bash
-ocr config set llm.extra_headers "X-Org-ID=org-123,X-Trace-Id=trace-abc"
+ocr config set llm.extra_headers "X-Org-ID=org-123,X-Forwarded-For=\"1.2.3.4,5.6.7.8\""
 ```
 
 provider 별로 추가 헤더를 설정할 수도 있습니다:
