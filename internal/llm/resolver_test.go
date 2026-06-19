@@ -900,6 +900,26 @@ func TestParseExtraHeaders(t *testing.T) {
 			input:   "  =value",
 			wantErr: true,
 		},
+		{
+			name:    "reserved header authorization is rejected",
+			input:   "Authorization=Bearer token",
+			wantErr: true,
+		},
+		{
+			name:    "reserved header x-api-key is rejected",
+			input:   "x-api-key=secret",
+			wantErr: true,
+		},
+		{
+			name:    "reserved header content-type is rejected",
+			input:   "Content-Type=text/plain",
+			wantErr: true,
+		},
+		{
+			name:    "reserved header rejected even when mixed with valid ones",
+			input:   "X-Org=val,Authorization=bad",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -983,6 +1003,22 @@ func TestResolveEndpoint_OCREnvExtraHeadersInvalid(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "extra header") {
 		t.Errorf("error should mention extra header, got: %v", err)
+	}
+}
+
+func TestResolveEndpoint_OCREnvExtraHeadersReservedRejected(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://api.example.com/v1/messages")
+	t.Setenv("OCR_LLM_TOKEN", "test-token")
+	t.Setenv("OCR_LLM_MODEL", "claude-opus-4-6")
+	t.Setenv("OCR_LLM_EXTRA_HEADERS", "Authorization=oops")
+
+	_, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err == nil {
+		t.Fatal("expected error for reserved extra header")
+	}
+	if !strings.Contains(err.Error(), "reserved") {
+		t.Errorf("error should mention reserved header, got: %v", err)
 	}
 }
 

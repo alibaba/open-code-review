@@ -479,6 +479,15 @@ func NormalizeAuthHeader(header string) (string, error) {
 	}
 }
 
+// reservedHeaders are HTTP headers that extra_headers must not override.
+// They are managed by dedicated config fields (auth_header, auth_token) or set automatically by the SDK. 
+// Letting extra_headers clobber them would cause confusing auth/content-type failures with no clear error.
+var reservedHeaders = map[string]bool{
+	"authorization": true,
+	"x-api-key":     true,
+	"content-type":  true,
+}
+
 // ParseExtraHeaders parses a string of comma-separated key=value pairs into a dictionary.
 func ParseExtraHeaders(raw string) (map[string]string, error) {
 	if raw == "" {
@@ -498,6 +507,9 @@ func ParseExtraHeaders(raw string) (map[string]string, error) {
 		value := strings.TrimSpace(parts[1])
 		if key == "" {
 			return nil, fmt.Errorf("invalid extra header %q: empty header name", pair)
+		}
+		if reservedHeaders[strings.ToLower(key)] {
+			return nil, fmt.Errorf("extra header %q conflicts with a reserved header; use the dedicated config field instead", key)
 		}
 		result[key] = value
 	}

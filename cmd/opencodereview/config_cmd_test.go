@@ -247,6 +247,14 @@ func TestSetConfigValueLlmExtraHeadersInvalid(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueLlmExtraHeadersReservedRejected(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "llm.extra_headers", "Authorization=bad"); err == nil {
+		t.Fatal("expected error for reserved header, got nil")
+	}
+}
+
 func TestSetConfigValueProviderExtraHeaders(t *testing.T) {
 	cfg := &Config{}
 
