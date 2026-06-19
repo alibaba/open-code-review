@@ -88,7 +88,23 @@ npm install -g @alibaba-group/open-code-review
 
 **GitHub Release 사용**
 
-[GitHub Releases](https://github.com/alibaba/open-code-review/releases)에서 최신 binary를 다운로드합니다.
+명령 한 번으로 사용 중인 OS/아키텍처에 맞는 최신 binary를 설치합니다 (macOS / Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+```
+
+이 스크립트는 알맞은 릴리스 binary를 선택하고 SHA-256 체크섬을 검증한 뒤 `ocr`로 `/usr/local/bin`에 설치합니다. 설치 위치는 `OCR_INSTALL_DIR`로, 릴리스 버전은 `OCR_VERSION`으로 재정의할 수 있습니다:
+
+```bash
+OCR_INSTALL_DIR="$HOME/.local/bin" OCR_VERSION=v1.3.13 \
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh)"
+```
+
+<details>
+<summary>수동 다운로드 (Windows 포함 모든 플랫폼)</summary>
+
+[GitHub Releases](https://github.com/alibaba/open-code-review/releases)에서 사용 중인 플랫폼의 binary를 다운로드합니다.
 
 ```bash
 # macOS (Apple Silicon)
@@ -113,6 +129,8 @@ curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/dow
 # Windows (ARM64): ocr.exe를 PATH에 포함된 디렉터리로 이동하세요
 curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-arm64.exe
 ```
+
+</details>
 
 **소스에서 빌드**
 

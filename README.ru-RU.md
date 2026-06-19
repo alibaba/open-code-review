@@ -88,7 +88,23 @@ npm install -g @alibaba-group/open-code-review
 
 **Из GitHub Release**
 
-Скачайте свежий бинарный файл со страницы [GitHub Releases](https://github.com/alibaba/open-code-review/releases):
+Установите свежий бинарный файл для вашей ОС/архитектуры одной командой (macOS / Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+```
+
+Скрипт сам выбирает подходящий бинарный файл релиза, проверяет его контрольную сумму SHA-256 и устанавливает его как `ocr` в `/usr/local/bin`. Каталог установки можно переопределить через `OCR_INSTALL_DIR`, а версию релиза зафиксировать через `OCR_VERSION`:
+
+```bash
+OCR_INSTALL_DIR="$HOME/.local/bin" OCR_VERSION=v1.3.13 \
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh)"
+```
+
+<details>
+<summary>Ручная загрузка (все платформы, включая Windows)</summary>
+
+Скачайте бинарный файл для вашей платформы со страницы [GitHub Releases](https://github.com/alibaba/open-code-review/releases):
 
 ```bash
 # macOS (Apple Silicon)
@@ -113,6 +129,8 @@ curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/dow
 # Windows (ARM64) — переместите ocr.exe в каталог из вашего PATH
 curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-arm64.exe
 ```
+
+</details>
 
 **Из исходников**
 

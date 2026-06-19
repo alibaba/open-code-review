@@ -88,7 +88,23 @@ npm install -g @alibaba-group/open-code-review
 
 **GitHub Releaseから**
 
-[GitHub Releases](https://github.com/alibaba/open-code-review/releases)から最新のバイナリをダウンロードします：
+1 つのコマンドで、お使いの OS / アーキテクチャ向けの最新バイナリをインストールできます（macOS / Linux）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+```
+
+このスクリプトは適切なリリースバイナリを選択し、SHA-256 チェックサムを検証して、`ocr` として `/usr/local/bin` にインストールします。インストール先は `OCR_INSTALL_DIR` で、リリースバージョンは `OCR_VERSION` で上書きできます：
+
+```bash
+OCR_INSTALL_DIR="$HOME/.local/bin" OCR_VERSION=v1.3.13 \
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh)"
+```
+
+<details>
+<summary>手動ダウンロード（Windows を含む全プラットフォーム）</summary>
+
+[GitHub Releases](https://github.com/alibaba/open-code-review/releases)からお使いのプラットフォーム向けのバイナリをダウンロードします：
 
 ```bash
 # macOS (Apple Silicon)
@@ -113,6 +129,8 @@ curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/dow
 # Windows (ARM64) — ocr.exe を PATH の通ったディレクトリに移動してください
 curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-arm64.exe
 ```
+
+</details>
 
 **ソースから**
 
