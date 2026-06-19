@@ -920,6 +920,50 @@ func TestParseExtraHeaders(t *testing.T) {
 			input:   "X-Org=val,Authorization=bad",
 			wantErr: true,
 		},
+		{
+			name:  "quoted value with comma",
+			input: `X-Forwarded-For="1.2.3.4,5.6.7.8"`,
+			want:  map[string]string{"X-Forwarded-For": "1.2.3.4,5.6.7.8"},
+		},
+		{
+			name:  "quoted value with comma followed by another pair",
+			input: `X-Forwarded-For="1.2.3.4,5.6.7.8",X-Org=abc`,
+			want: map[string]string{
+				"X-Forwarded-For": "1.2.3.4,5.6.7.8",
+				"X-Org":           "abc",
+			},
+		},
+		{
+			name:  "multiple quoted values with commas",
+			input: `X-A="1,2",X-B="3,4"`,
+			want: map[string]string{
+				"X-A": "1,2",
+				"X-B": "3,4",
+			},
+		},
+		{
+			name:  "quoted empty value",
+			input: `X-Key=""`,
+			want:  map[string]string{"X-Key": ""},
+		},
+		{
+			name:  "quoted value preserves inner whitespace",
+			input: `X-Key=" spaced "`,
+			want:  map[string]string{"X-Key": " spaced "},
+		},
+		{
+			name:  "mix of quoted and unquoted values",
+			input: `X-A=plain,X-B="has,comma"`,
+			want: map[string]string{
+				"X-A": "plain",
+				"X-B": "has,comma",
+			},
+		},
+		{
+			name:    "unclosed quote is error",
+			input:   `X-Key="unterminated`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -480,7 +480,7 @@ func NormalizeAuthHeader(header string) (string, error) {
 }
 
 // reservedHeaders are HTTP headers that extra_headers must not override.
-// They are managed by dedicated config fields (auth_header, auth_token) or set automatically by the SDK. 
+// They are managed by dedicated config fields (auth_header, auth_token) or set automatically by the SDK.
 // Letting extra_headers clobber them would cause confusing auth/content-type failures with no clear error.
 var reservedHeaders = map[string]bool{
 	"authorization": true,
@@ -489,12 +489,21 @@ var reservedHeaders = map[string]bool{
 }
 
 // ParseExtraHeaders parses a string of comma-separated key=value pairs into a dictionary.
+// Values may be double-quoted to include commas, e.g. X-Forwarded-For="1.2.3.4,5.6.7.8".
+// Reserved header names (authorization, x-api-key, content-type) are rejected 
+// to prevent accidental override of auth or content-type set by the SDK.
 func ParseExtraHeaders(raw string) (map[string]string, error) {
 	if raw == "" {
 		return nil, nil
 	}
+
+	pairs, err := splitHeaderPairs(raw)
+	if err != nil {
+		return nil, err
+	}
+
 	result := make(map[string]string)
-	for _, pair := range strings.Split(raw, ",") {
+	for _, pair := range pairs {
 		pair = strings.TrimSpace(pair)
 		if pair == "" {
 			continue
@@ -511,9 +520,39 @@ func ParseExtraHeaders(raw string) (map[string]string, error) {
 		if reservedHeaders[strings.ToLower(key)] {
 			return nil, fmt.Errorf("extra header %q conflicts with a reserved header; use the dedicated config field instead", key)
 		}
+		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+			value = value[1 : len(value)-1]
+		}
 		result[key] = value
 	}
 	return result, nil
+}
+
+// splitHeaderPairs splits a comma-separated string while respecting double-quoted segments.
+// Commas inside quotes are part of the value, not pair separators.
+func splitHeaderPairs(raw string) ([]string, error) {
+	var pairs []string
+	var sb strings.Builder
+	inQuote := false
+	for _, c := range raw {
+		switch {
+		case c == '"':
+			inQuote = !inQuote
+			sb.WriteRune(c)
+		case c == ',' && !inQuote:
+			pairs = append(pairs, sb.String())
+			sb.Reset()
+		default:
+			sb.WriteRune(c)
+		}
+	}
+	if sb.Len() > 0 || len(pairs) == 0 {
+		pairs = append(pairs, sb.String())
+	}
+	if inQuote {
+		return nil, fmt.Errorf("unclosed quote in extra headers")
+	}
+	return pairs, nil
 }
 
 // ensureMessagesSuffix appends /v1/messages to base URLs that lack a versioned path.
