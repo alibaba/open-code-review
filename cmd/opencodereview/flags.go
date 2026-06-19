@@ -105,6 +105,12 @@ type reviewOptions struct {
 	audience       string // --audience: "human" (default) or "agent"
 	background     string // --background: optional requirement context
 	model          string // --model: override resolved LLM model for this review
+	rulesDir       string // --rules-dir: directory with enterprise/project rules
+	saveResult     bool   // --save-result: persist final review result for viewer
+	resultDir      string // --result-dir: root directory for persisted review results
+	resultProject  string // --result-project: display project name/path for persisted results
+	resultSource   string // --result-source-branch: source branch metadata for persisted results
+	resultTarget   string // --result-target-branch: target branch metadata for persisted results
 	concurrency    int
 	perFileTimeout int
 	maxTools       int
@@ -130,6 +136,12 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.audience, "audience", "human", "output audience: human (show progress) or agent (summary only)")
 	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the review")
 	a.StringVar(&opts.model, "model", "", "override LLM model for this review (e.g., claude-opus-4-6)")
+	a.StringVar(&opts.rulesDir, "rules-dir", "", "directory with enterprise/project review rules")
+	a.BoolVar(&opts.saveResult, "save-result", false, "persist final review result for the WebUI review viewer")
+	a.StringVar(&opts.resultDir, "result-dir", "", "review result storage root (default: ~/.opencodereview/reviews)")
+	a.StringVar(&opts.resultProject, "result-project", "", "project name/path for persisted review results (default: GitLab CI_PROJECT_PATH or repo basename)")
+	a.StringVar(&opts.resultSource, "result-source-branch", "", "source branch metadata for persisted review results")
+	a.StringVar(&opts.resultTarget, "result-target-branch", "", "target branch metadata for persisted review results")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be reviewed without running the LLM")
@@ -141,6 +153,12 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	opts.showHelp = a.showHelp
 	if opts.showHelp {
 		return opts, nil
+	}
+	if opts.resultDir == "" {
+		opts.resultDir = os.Getenv("OCR_REVIEWS_DIR")
+	}
+	if opts.rulesDir == "" {
+		opts.rulesDir = os.Getenv("OCR_RULES_DIR")
 	}
 
 	modeCount := 0
@@ -212,6 +230,9 @@ Examples:
   ocr review --preview
   ocr review -c abc123 -p
 
+  # Persist final review result for WebUI lookup
+  ocr review --from master --to dev-ref --save-result
+
 Flags:
   --audience string       output audience: human (show progress) or agent (summary only) (default "human")
   -b, --background string optional requirement/business context for the review
@@ -224,7 +245,15 @@ Flags:
   --model string          override LLM model for this review (e.g., claude-opus-4-6)
   -p, --preview           preview which files will be reviewed without running the LLM
   --repo string           root directory of the git repository (default: current dir)
+  --result-dir string     review result storage root (default: ~/.opencodereview/reviews)
+  --result-project string project name/path for persisted review results
+  --result-source-branch string
+                           source branch metadata for persisted review results
+  --result-target-branch string
+                           target branch metadata for persisted review results
   --rule string           path to JSON file with system review rules
+  --rules-dir string      directory with enterprise/project review rules
+  --save-result           persist final review result for the WebUI review viewer
   --timeout int           concurrent task timeout in minutes (default 10)
   --to string             target ref to end diff at (e.g., 'feature-branch')
   --tools string          path to JSON tools config file (default: embedded)`)

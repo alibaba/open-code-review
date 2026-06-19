@@ -13,6 +13,8 @@ MR Created/Updated → GitLab Pipeline Triggered → OCR Reviews Diff → Discus
 3. Runs `ocr review --from origin/<target> --to <commit_sha> --format json --audience agent` to analyze the diff (uses commit SHA to support fork MRs)
 4. Parses the JSON output and posts inline discussions on the MR using GitLab's Discussions API
 
+To persist review results for the WebUI/API viewer, add `--save-result` to the review command. OCR will automatically read GitLab CI metadata such as project path, MR IID, source branch, target branch, pipeline ID, and job ID from the environment. In containerized runners, use `--result-dir` or `OCR_REVIEWS_DIR` and mount that directory to persistent storage.
+
 ## Setup
 
 ### 1. Copy the pipeline file
@@ -40,6 +42,8 @@ Go to your project's **Settings → CI/CD → Variables** and add:
 | `OCR_LLM_AUTH_TOKEN` | Yes | Yes | API authentication token |
 | `OCR_LLM_MODEL` | No | No | Model name (defaults to `gpt-4o`) |
 | `GITLAB_API_TOKEN` | No | Yes | GitLab access token with `api` scope (falls back to `CI_JOB_TOKEN` if not set) |
+| `OCR_REVIEWS_DIR` | No | No | Mounted directory for saved review results, e.g. `/ocr-data/reviews` |
+| `OCR_RULES_DIR` | No | No | Mounted directory for enterprise rules, e.g. `/ocr-data/rules` |
 
 > **Note:** GitLab CI/CD does not support variables with values shorter than 8 characters, so `use_anthropic` cannot be set as a CI variable. The pipeline sets it to `false` by default. If you need to use Anthropic Claude models, you'll need to modify the `.gitlab-ci.yml` script directly.
 >
@@ -96,6 +100,61 @@ Use the `--rule` flag to pass a custom rules JSON file:
 ```yaml
 script:
   - ocr review --rule ./my-rules.json --from origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --to $CI_COMMIT_SHA
+```
+
+For shared enterprise rules, mount a rules directory and pass `--rules-dir` or set `OCR_RULES_DIR`:
+
+```text
+/ocr-data/rules/
+  global.json
+  projects/
+    group/
+      project/
+        rule.json
+```
+
+```yaml
+script:
+  - ocr review --rules-dir /ocr-data/rules --from origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --to $CI_COMMIT_SHA
+```
+
+OCR maps GitLab `CI_PROJECT_PATH=group/project` to `/ocr-data/rules/projects/group/project/rule.json`.
+
+### Persist review results for viewer/API
+
+If your runner uses containers, save results to a mounted path. The same path should be mounted into a long-running `ocr viewer` process.
+
+```yaml
+variables:
+  OCR_REVIEWS_DIR: /ocr-data/reviews
+  OCR_RULES_DIR: /ocr-data/rules
+
+script:
+  - |
+    ocr review \
+      --from origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME \
+      --to $CI_COMMIT_SHA \
+      --format json \
+      --audience agent \
+      --save-result \
+      --result-dir "$OCR_REVIEWS_DIR" \
+      --result-project "$CI_PROJECT_PATH" \
+      --result-source-branch "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" \
+      --result-target-branch "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+```
+
+Run the viewer as a separate service or VM/container with the same storage mounted:
+
+```bash
+ocr viewer --addr :5483 --reviews-dir /ocr-data/reviews
+```
+
+Useful JSON APIs:
+
+```text
+GET /api/reviews?project=group/project&source=feature/a&target=main
+GET /api/reviews/{encodedProject}?source=feature/a&target=main
+GET /api/reviews/{encodedProject}/{reviewID}
 ```
 
 ### Limit concurrency
@@ -169,13 +228,22 @@ script:
     # No existing review found - run OCR
     print("🔍 No existing OCR review found. Running review...")
     COMMIT_SHA = os.environ["CI_COMMIT_SHA"]
-    result = subprocess.run([
+    cmd = [
         "ocr", "review",
         "--from", f"origin/{TARGET_BRANCH}",
         "--to", COMMIT_SHA,
         "--format", "json",
-        "--audience", "agent"
-    ], capture_output=True, text=True)
+        "--audience", "agent",
+        "--save-result",
+        "--result-project", os.environ.get("CI_PROJECT_PATH", ""),
+        "--result-source-branch", SOURCE_BRANCH,
+        "--result-target-branch", TARGET_BRANCH
+    ]
+    if os.environ.get("OCR_REVIEWS_DIR"):
+        cmd.extend(["--result-dir", os.environ["OCR_REVIEWS_DIR"]])
+    if os.environ.get("OCR_RULES_DIR"):
+        cmd.extend(["--rules-dir", os.environ["OCR_RULES_DIR"]])
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     # Save output for the posting script
     with open("/tmp/ocr-result.json", "w") as f:
@@ -265,5 +333,3 @@ script:
   - cat /tmp/ocr-result.json
   - cat /tmp/ocr-stderr.log
 ```
-
-

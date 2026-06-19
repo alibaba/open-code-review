@@ -189,6 +189,11 @@ type ProjectRule struct {
 	Exclude []string           `json:"exclude,omitempty"`
 }
 
+type ResolverOptions struct {
+	CustomRulePath string
+	RulesDir       string
+}
+
 // FileFilter holds the merged user-configured include/exclude glob patterns
 // collected from all rule.json layers (custom, project, global).
 type FileFilter struct {
@@ -235,10 +240,12 @@ func (f *FileFilter) IsUserIncluded(path string) bool {
 
 // composedResolver implements Resolver with layered priority.
 type composedResolver struct {
-	custom  *ProjectRule // highest: --rule flag
-	project *ProjectRule // high: .opencodereview/rule.json
-	global  *ProjectRule // low: ~/.opencodereview/rule.json
-	system  *SystemRule  // lowest: embedded default
+	custom            *ProjectRule // highest: --rule flag
+	project           *ProjectRule // high: .opencodereview/rule.json
+	enterpriseProject *ProjectRule // shared: <rules-dir>/projects/<project>/rule.json
+	enterpriseGlobal  *ProjectRule // shared: <rules-dir>/global.json
+	global            *ProjectRule // low: ~/.opencodereview/rule.json
+	system            *SystemRule  // lowest: embedded default
 }
 
 // NewResolver builds a Resolver with the following priority:
@@ -249,14 +256,18 @@ type composedResolver struct {
 //
 // It also returns a FileFilter with the merged include/exclude patterns from all layers.
 func NewResolver(repoDir, customRulePath string) (Resolver, *FileFilter, error) {
+	return NewResolverWithOptions(repoDir, ResolverOptions{CustomRulePath: customRulePath})
+}
+
+func NewResolverWithOptions(repoDir string, opts ResolverOptions) (Resolver, *FileFilter, error) {
 	sysRule, err := LoadDefault()
 	if err != nil {
 		return nil, nil, err
 	}
 
 	var customRule *ProjectRule
-	if customRulePath != "" {
-		cr, err := loadRuleFile(customRulePath)
+	if opts.CustomRulePath != "" {
+		cr, err := loadRuleFile(opts.CustomRulePath)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -272,14 +283,29 @@ func NewResolver(repoDir, customRulePath string) (Resolver, *FileFilter, error) 
 		projectRule = pr
 	}
 
+	var enterpriseProjectRule, enterpriseGlobalRule *ProjectRule
+	if opts.RulesDir != "" {
+		enterpriseProjectRule, enterpriseGlobalRule, err = loadRulesDir(opts.RulesDir, repoDir)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	globalRule, err := loadGlobalRule()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	filter := buildFileFilter(customRule, projectRule, globalRule)
+	filter := buildFileFilter(customRule, projectRule, enterpriseProjectRule, enterpriseGlobalRule, globalRule)
 
-	return &composedResolver{custom: customRule, project: projectRule, global: globalRule, system: sysRule}, filter, nil
+	return &composedResolver{
+		custom:            customRule,
+		project:           projectRule,
+		enterpriseProject: enterpriseProjectRule,
+		enterpriseGlobal:  enterpriseGlobalRule,
+		global:            globalRule,
+		system:            sysRule,
+	}, filter, nil
 }
 
 // buildFileFilter picks the highest-priority layer that has any include/exclude
@@ -324,6 +350,60 @@ func loadGlobalRule() (*ProjectRule, error) {
 	return &pr, nil
 }
 
+func loadRulesDir(dir, repoDir string) (*ProjectRule, *ProjectRule, error) {
+	global, err := loadOptionalRuleFile(filepath.Join(dir, "global.json"), "enterprise global rule")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var project *ProjectRule
+	for _, path := range enterpriseProjectRulePaths(dir, repoDir) {
+		pr, err := loadOptionalRuleFile(path, "enterprise project rule")
+		if err != nil {
+			return nil, nil, err
+		}
+		if pr != nil {
+			project = pr
+			break
+		}
+	}
+	return project, global, nil
+}
+
+func enterpriseProjectRulePaths(dir, repoDir string) []string {
+	seen := map[string]bool{}
+	var paths []string
+	add := func(project string) {
+		project = strings.Trim(project, "/")
+		if project == "" || seen[project] {
+			return
+		}
+		seen[project] = true
+		paths = append(paths, filepath.Join(append([]string{dir, "projects"}, append(strings.Split(project, "/"), "rule.json")...)...))
+	}
+	add(os.Getenv("OCR_PROJECT"))
+	add(os.Getenv("CI_PROJECT_PATH"))
+	if repoDir != "" {
+		add(filepath.Base(repoDir))
+	}
+	return paths
+}
+
+func loadOptionalRuleFile(path, label string) (*ProjectRule, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s %s: %w", label, path, err)
+	}
+	var pr ProjectRule
+	if err := json.Unmarshal(data, &pr); err != nil {
+		return nil, fmt.Errorf("unmarshal %s %s: %w", label, path, err)
+	}
+	return &pr, nil
+}
+
 func loadRuleFile(path string) (*ProjectRule, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -360,6 +440,12 @@ func (c *composedResolver) Resolve(path string) string {
 	if rule := matchProjectRule(c.project, path); rule != "" {
 		return rule
 	}
+	if rule := matchProjectRule(c.enterpriseProject, path); rule != "" {
+		return rule
+	}
+	if rule := matchProjectRule(c.enterpriseGlobal, path); rule != "" {
+		return rule
+	}
 	if rule := matchProjectRule(c.global, path); rule != "" {
 		return rule
 	}
@@ -372,6 +458,12 @@ func (c *composedResolver) ResolveDetail(path string) RuleDetail {
 		return *detail
 	}
 	if detail := matchProjectRuleDetail(c.project, path, "project"); detail != nil {
+		return *detail
+	}
+	if detail := matchProjectRuleDetail(c.enterpriseProject, path, "enterprise_project"); detail != nil {
+		return *detail
+	}
+	if detail := matchProjectRuleDetail(c.enterpriseGlobal, path, "enterprise_global"); detail != nil {
 		return *detail
 	}
 	if detail := matchProjectRuleDetail(c.global, path, "global"); detail != nil {

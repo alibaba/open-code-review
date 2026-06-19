@@ -288,11 +288,29 @@ CI 통합의 핵심 명령:
 ```bash
 ocr review \
   --from "origin/main" \
-  --to "origin/feature-branch" \
+  --to "<commit_sha>" \
   --format json
 ```
 
+`--from` flag는 base로 branch ref(예: `origin/main`) 또는 commit SHA를 받을 수 있고, `--to`는 head로 commit SHA 또는 branch ref를 받을 수 있습니다. CI 환경에서는 fork PR/MR처럼 source branch가 `origin` remote에 없을 수 있으므로 `--to`에 commit SHA를 사용하는 것을 권장합니다.
+
 `--format json` flag는 CI script에서 파싱하기 좋은 machine-readable 결과를 출력합니다.
+
+WebUI나 downstream service에서 최종 review 결과를 조회해야 한다면 `--save-result`를 추가하세요. 기본 저장 위치는 `~/.opencodereview/reviews`입니다. GitLab Runner나 Jenkins agent처럼 containerized CI에서 실행하는 경우 `--result-dir` 또는 `OCR_REVIEWS_DIR`를 사용하고 해당 directory를 persistent storage로 mount하세요.
+
+```bash
+ocr review \
+  --from "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" \
+  --to "$CI_COMMIT_SHA" \
+  --format json \
+  --save-result \
+  --result-dir /ocr-data/reviews \
+  --result-project "$CI_PROJECT_PATH" \
+  --result-source-branch "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" \
+  --result-target-branch "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+```
+
+CI에서 enterprise shared rules를 사용하려면 rules directory를 mount하고 `--rules-dir /ocr-data/rules`를 전달하거나 `OCR_RULES_DIR=/ocr-data/rules`를 설정하세요.
 
 통합 예시는 [`examples/`](./examples/) 디렉터리를 참고하세요.
 
@@ -329,6 +347,12 @@ ocr review \
 | `--background` | `-b` | - | 리뷰를 위한 선택적 요구사항/비즈니스 컨텍스트. `--commit` 사용 시 미지정이면 commit message에서 자동 추출 |
 | `--model` | - | - | 이번 리뷰에서 LLM model 선택 또는 override |
 | `--rule` | - | - | custom JSON review rules 경로 |
+| `--rules-dir` | - | `OCR_RULES_DIR` | enterprise/project shared review rules directory |
+| `--save-result` | - | `false` | WebUI/API 조회를 위해 최종 review result 저장 |
+| `--result-dir` | - | `OCR_REVIEWS_DIR` 또는 `~/.opencodereview/reviews` | review result storage root |
+| `--result-project` | - | GitLab `CI_PROJECT_PATH` 또는 repo 이름 | 저장된 result의 project name/path |
+| `--result-source-branch` | - | GitLab MR source branch | 저장된 result의 source branch metadata |
+| `--result-target-branch` | - | GitLab MR target branch | 저장된 result의 target branch metadata |
 | `--max-tools` | - | built-in | 파일별 최대 tool call round. template default보다 클 때만 적용 |
 | `--max-git-procs` | - | built-in | 최대 동시 git subprocess 수 |
 | `--tools` | - | - | custom JSON tools config 경로 |
@@ -363,19 +387,25 @@ ocr review --background "로그인 API에 rate limiting 추가"
 
 # custom review rules 사용
 ocr review --rule /path/to/my-rules.json
+ocr review --rules-dir /ocr-data/rules
+
+# WebUI/API 조회를 위해 최종 review result 저장
+ocr review --from main --to my-feature --save-result --result-dir /ocr-data/reviews
 
 # 파일에 적용될 rule 미리보기
 ocr rules check src/main/java/com/example/Foo.java
 ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
+ocr rules check --rules-dir /ocr-data/rules src/main/java/com/example/Foo.java
 
-# browser에서 review session history 보기
+# browser에서 review session history와 저장된 review result 보기
 ocr viewer
 ocr viewer --addr :3000
+ocr viewer --addr :5483 --reviews-dir /ocr-data/reviews
 ```
 
 ### Viewer 보안
 
-viewer는 session JSONL 내용(LLM request messages와 responses)을 HTTP로 제공합니다. 모든 request에 대해 Host header allowlist를 적용합니다. loopback 이름(`localhost`, `127.0.0.0/8`, `::1`)과 실제 bind host는 항상 허용됩니다. wildcard bind(`--addr :3000`, `--addr 0.0.0.0:3000`)와 다른 non-loopback hostname은 `OCR_VIEWER_ALLOWED_HOSTS` 환경 변수에 comma-separated 값으로 추가해야 합니다.
+viewer는 session JSONL 내용(LLM request messages와 responses)과 저장된 review result를 HTTP로 제공합니다. 모든 request에 대해 Host header allowlist를 적용합니다. loopback 이름(`localhost`, `127.0.0.0/8`, `::1`)과 실제 bind host는 항상 허용됩니다. wildcard bind(`--addr :3000`, `--addr 0.0.0.0:3000`)와 다른 non-loopback hostname은 `OCR_VIEWER_ALLOWED_HOSTS` 환경 변수에 comma-separated 값으로 추가해야 합니다.
 
 ```bash
 OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
@@ -383,20 +413,53 @@ OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
 
 이 설정은 local viewer를 대상으로 하는 DNS rebinding 공격을 차단합니다.
 
+### 저장된 review result
+
+`ocr review --save-result`는 최종 review result를 JSON file로 저장합니다. result에는 project metadata, 사용 가능한 GitLab metadata, source/target branch, MR IID, pipeline/job ID, model 및 token usage, warnings, review comments가 포함됩니다.
+
+기본 저장 위치:
+
+```text
+~/.opencodereview/reviews/<encoded-project>/<review-id>.json
+```
+
+CI container에서는 mount된 path를 권장합니다.
+
+```bash
+export OCR_REVIEWS_DIR=/ocr-data/reviews
+ocr review --save-result --from origin/main --to "$CI_COMMIT_SHA"
+ocr viewer --addr :5483 --reviews-dir /ocr-data/reviews
+```
+
+viewer는 HTML page와 JSON API를 함께 제공합니다.
+
+| Endpoint | Description |
+|----------|-------------|
+| `/reviews` | 저장된 review result가 있는 project 목록 |
+| `/reviews/{project}?source=<branch>&target=<branch>` | branch filter로 단일 project review 탐색 |
+| `/reviews/{project}/{reviewID}` | review detail 표시 |
+| `/api/reviews?project=<project>&source=<branch>&target=<branch>` | project/source/target으로 filter 가능한 JSON list |
+| `/api/reviews/{project}?source=<branch>&target=<branch>` | encoded project별 JSON list |
+| `/api/reviews/{project}/{reviewID}` | JSON review detail |
+
 ## Review Rules
 
-OCR은 네 계층의 priority chain으로 review rule을 해석합니다. 각 계층은 first-match-wins 방식입니다. 파일 경로가 pattern에 match되면 해당 rule을 사용하고, 아니면 다음 계층으로 넘어갑니다.
+OCR은 layered priority chain으로 review rule을 해석합니다. 각 계층은 first-match-wins 방식입니다. 파일 경로가 pattern에 match되면 해당 rule을 사용하고, 아니면 다음 계층으로 넘어갑니다.
 
 | Priority | Source | Path | Description |
 |----------|--------|------|-------------|
 | 1 (highest) | `--rule` flag | User-specified path | CLI explicit override |
 | 2 | Project config | `<repoDir>/.opencodereview/rule.json` | project별 rule, git commit 가능 |
-| 3 | Global config | `~/.opencodereview/rule.json` | user-wide 개인 선호 |
-| 4 (lowest) | System default | Embedded `system_rules.json` | 일반 language와 file type을 다루는 built-in rule |
+| 3 | Enterprise project config | `<rules-dir>/projects/<project>/rule.json` | `--rules-dir` 또는 `OCR_RULES_DIR`의 project/team shared rules |
+| 4 | Enterprise global config | `<rules-dir>/global.json` | `--rules-dir` 또는 `OCR_RULES_DIR`의 organization-wide rules |
+| 5 | Global config | `~/.opencodereview/rule.json` | user-wide 개인 선호 |
+| 6 (lowest) | System default | Embedded `system_rules.json` | 일반 language와 file type을 다루는 built-in rule |
+
+Enterprise project lookup은 `OCR_PROJECT`, GitLab `CI_PROJECT_PATH`, repository directory name 순서로 project key를 사용합니다. 예: `CI_PROJECT_PATH=payments/order-service`는 `<rules-dir>/projects/payments/order-service/rule.json`으로 매핑됩니다.
 
 ### Rule File Format
 
-모든 계층은 같은 JSON format을 공유합니다.
+모든 custom rule 계층은 같은 JSON format을 공유합니다.
 
 ```json
 {
@@ -416,6 +479,17 @@ OCR은 네 계층의 priority chain으로 review rule을 해석합니다. 각 �
 - `path`는 `**` recursive matching과 `{java,kt}` brace expansion을 지원합니다.
 - 각 계층 안에서는 rule이 선언 순서대로 평가되며 첫 번째 match가 선택됩니다.
 - rule file이 없으면 조용히 건너뜁니다.
+
+Enterprise rules directory 예시:
+
+```text
+/ocr-data/rules/
+  global.json
+  projects/
+    payments/
+      order-service/
+        rule.json
+```
 
 ## Configuration Reference
 
@@ -453,6 +527,9 @@ Config file: `~/.opencodereview/config.json`
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` 또는 `authorization`) |
 | `OCR_LLM_MODEL` | Model name |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
+| `OCR_REVIEWS_DIR` | `ocr review --save-result`와 `ocr viewer --reviews-dir`의 default storage root |
+| `OCR_RULES_DIR` | `ocr review --rules-dir`와 `ocr rules check --rules-dir`의 default enterprise rules directory |
+| `OCR_PROJECT` | `<rules-dir>/projects/<project>/rule.json` resolving에 사용할 project key |
 
 ## Telemetry
 

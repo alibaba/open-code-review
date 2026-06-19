@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review Results - Open Code Review Viewer</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="breadcrumb"><a href="/">Open Code Review Viewer</a> &rsaquo; Review Results</nav>
+<main>
+<h2>Review Results</h2>
+{{if .Projects}}
+<table class="table">
+    <thead><tr><th>Project</th><th>Reviews</th><th>Last Review</th></tr></thead>
+    <tbody>
+    {{range .Projects}}
+        <tr>
+            <td><a href="/reviews/{{.EncodedKey}}">{{if .Project.Name}}{{.Project.Name}}{{else}}{{.EncodedKey}}{{end}}</a></td>
+            <td>{{.ReviewCount}}</td>
+            <td>{{formatTime .LastReview}}</td>
+        </tr>
+    {{end}}
+    </tbody>
+</table>
+{{else}}
+<p>No review result data found. Run <code>ocr review --save-result</code> first.</p>
+{{end}}
+</main>
+</body>
+</html>

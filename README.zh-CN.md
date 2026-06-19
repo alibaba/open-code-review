@@ -288,11 +288,29 @@ CI 集成的核心命令：
 ```bash
 ocr review \
   --from "origin/main" \
-  --to "origin/feature-branch" \
+  --to "<commit_sha>" \
   --format json
 ```
 
+`--from` 参数接受分支引用（如 `origin/main`）或提交 SHA 作为基准，`--to` 接受提交 SHA 或分支引用作为目标。在 CI 环境中，推荐将 `--to` 设置为提交 SHA，以正确处理 fork PR/MR 中源分支不在 `origin` remote 的情况。
+
 `--format json` 参数输出适合 CI 脚本解析的机器可读结果。
+
+如果需要为 WebUI 或下游服务持久化最终评审结果，添加 `--save-result`。默认结果写入 `~/.opencodereview/reviews`；在 GitLab Runner、Jenkins agent 等容器化 CI 中，应使用 `--result-dir` 或 `OCR_REVIEWS_DIR`，并将该目录挂载到持久化存储：
+
+```bash
+ocr review \
+  --from "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" \
+  --to "$CI_COMMIT_SHA" \
+  --format json \
+  --save-result \
+  --result-dir /ocr-data/reviews \
+  --result-project "$CI_PROJECT_PATH" \
+  --result-source-branch "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" \
+  --result-target-branch "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+```
+
+如果需要在 CI 中使用企业共享规则，挂载规则目录并传入 `--rules-dir /ocr-data/rules`，或设置 `OCR_RULES_DIR=/ocr-data/rules`。
 
 集成示例请参见 [`examples/`](./examples/) 目录：
 
@@ -329,6 +347,12 @@ ocr review \
 | `--background` | `-b` | — | 可选的需求/业务背景信息；使用 `--commit` 时如未指定则自动从 commit message 中提取 |
 | `--model` | — | — | 为本次审查选择或覆盖 LLM 模型 |
 | `--rule` | — | — | 自定义 JSON 审查规则路径 |
+| `--rules-dir` | — | `OCR_RULES_DIR` | 企业/项目共享审查规则目录 |
+| `--save-result` | — | `false` | 持久化最终评审结果，供 WebUI/API 查看 |
+| `--result-dir` | — | `OCR_REVIEWS_DIR` 或 `~/.opencodereview/reviews` | 评审结果存储根目录 |
+| `--result-project` | — | GitLab `CI_PROJECT_PATH` 或仓库名 | 持久化结果中的项目名称/路径 |
+| `--result-source-branch` | — | GitLab MR 源分支 | 持久化结果中的来源分支元数据 |
+| `--result-target-branch` | — | GitLab MR 目标分支 | 持久化结果中的目标分支元数据 |
 | `--max-tools` | — | 内置默认 | 每个文件的最大工具调用轮次；仅在大于模板默认值时生效 |
 | `--max-git-procs` | — | 内置默认 | 最大并发 git 子进程数 |
 | `--tools` | — | — | 自定义 JSON 工具配置路径 |
@@ -363,30 +387,79 @@ ocr review --background "为登录 API 添加限流"
 
 # 使用自定义审查规则
 ocr review --rule /path/to/my-rules.json
+ocr review --rules-dir /ocr-data/rules
+
+# 持久化最终评审结果，供 WebUI/API 查看
+ocr review --from main --to my-feature --save-result --result-dir /ocr-data/reviews
 
 # 预览某个文件路径生效的规则
 ocr rules check src/main/java/com/example/Foo.java
 ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
+ocr rules check --rules-dir /ocr-data/rules src/main/java/com/example/Foo.java
 
-# 在浏览器中查看审查会话历史
+# 在浏览器中查看审查会话历史和已保存的评审结果
 ocr viewer
 ocr viewer --addr :3000
+ocr viewer --addr :5483 --reviews-dir /ocr-data/reviews
 ```
+
+### Viewer 安全性
+
+viewer 会通过 HTTP 暴露 session JSONL 内容（LLM 请求消息和响应）以及已保存的评审结果。它会对每个请求强制校验 Host header：loopback 名称（`localhost`、`127.0.0.0/8`、`::1`）和实际绑定 host 总是允许；通配绑定（`--addr :3000`、`--addr 0.0.0.0:3000`）以及其他非 loopback hostname 需要通过 `OCR_VIEWER_ALLOWED_HOSTS` 环境变量以逗号分隔添加：
+
+```bash
+OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
+```
+
+这可以阻止针对本地 viewer 的 DNS rebinding 攻击。
+
+### 已保存的评审结果
+
+`ocr review --save-result` 会将最终评审结果写成 JSON 文件。结果包含项目元数据、可用的 GitLab 元数据、来源/目标分支、MR IID、pipeline/job ID、模型和 token 使用量、warnings 以及 review comments。
+
+默认存储位置：
+
+```text
+~/.opencodereview/reviews/<encoded-project>/<review-id>.json
+```
+
+在 CI 容器中，建议使用挂载目录：
+
+```bash
+export OCR_REVIEWS_DIR=/ocr-data/reviews
+ocr review --save-result --from origin/main --to "$CI_COMMIT_SHA"
+ocr viewer --addr :5483 --reviews-dir /ocr-data/reviews
+```
+
+viewer 同时提供 HTML 页面和 JSON API：
+
+| Endpoint | 描述 |
+|----------|------|
+| `/reviews` | 列出有已保存评审结果的项目 |
+| `/reviews/{project}?source=<branch>&target=<branch>` | 按来源/目标分支筛选并浏览单个项目的评审 |
+| `/reviews/{project}/{reviewID}` | 查看评审详情 |
+| `/api/reviews?project=<project>&source=<branch>&target=<branch>` | 跨项目 JSON 列表，支持项目/source/target 筛选 |
+| `/api/reviews/{project}?source=<branch>&target=<branch>` | 单个 encoded project 的 JSON 列表 |
+| `/api/reviews/{project}/{reviewID}` | JSON 评审详情 |
 
 ## 评审规则
 
-OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则：如果文件路径匹配到某个模式，则使用该规则；否则穿透到下一层。
+OCR 通过分层优先级链解析评审规则。每层采用首次匹配原则：如果文件路径匹配到某个模式，则使用该规则；否则穿透到下一层。
 
 | 优先级 | 来源 | 路径 | 描述 |
 |--------|------|------|------|
 | 1（最高） | `--rule` 参数 | 用户指定路径 | CLI 显式覆盖 |
 | 2 | 项目配置 | `<repoDir>/.opencodereview/rule.json` | 项目级规则，可提交到 git |
-| 3 | 全局配置 | `~/.opencodereview/rule.json` | 用户级个人偏好 |
-| 4（最低） | 系统默认 | 内嵌 `system_rules.json` | 覆盖常见语言和文件类型的内置规则 |
+| 3 | 企业项目配置 | `<rules-dir>/projects/<project>/rule.json` | 来自 `--rules-dir` 或 `OCR_RULES_DIR` 的项目/团队共享规则 |
+| 4 | 企业全局配置 | `<rules-dir>/global.json` | 来自 `--rules-dir` 或 `OCR_RULES_DIR` 的组织级共享规则 |
+| 5 | 全局配置 | `~/.opencodereview/rule.json` | 用户级个人偏好 |
+| 6（最低） | 系统默认 | 内嵌 `system_rules.json` | 覆盖常见语言和文件类型的内置规则 |
+
+企业项目规则查找会依次使用 `OCR_PROJECT`、GitLab `CI_PROJECT_PATH`、仓库目录名。比如 `CI_PROJECT_PATH=payments/order-service` 会映射到 `<rules-dir>/projects/payments/order-service/rule.json`。
 
 ### 规则文件格式
 
-第 1–3 层使用相同的 JSON 格式：
+所有自定义规则层使用相同的 JSON 格式：
 
 ```json
 {
@@ -406,6 +479,17 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 - `path` 支持 `**` 递归匹配和 `{java,kt}` 大括号展开。
 - 在每一层内，规则按声明顺序评估 —— 首次匹配生效。
 - 如果规则文件不存在，将被静默跳过。
+
+企业规则目录示例：
+
+```text
+/ocr-data/rules/
+  global.json
+  projects/
+    payments/
+      order-service/
+        rule.json
+```
 
 ### 路径过滤
 
@@ -434,7 +518,7 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 
 **生效逻辑：**
 
-- `include` 和 `exclude` 遵循与评审规则相同的优先级链（`--rule` > 项目配置 > 全局配置），取**最高优先级中配置了 include/exclude 的那一层**整体生效，不会跨层合并。
+- `include` 和 `exclude` 遵循与评审规则相同的优先级链（`--rule` > 项目配置 > 企业项目配置 > 企业全局配置 > 全局配置），取**最高优先级中配置了 include/exclude 的那一层**整体生效，不会跨层合并。
 - `exclude` 始终优先于 `include` —— 同时匹配两者的文件会被排除。
 - `include` 的作用是**绕过内置默认排除模式**（如测试文件），而非限制审查范围 —— 未匹配 `include` 的文件仍会正常进入后续的默认过滤判断。
 - 模式语法：支持 `**` 递归匹配、`*` 单级匹配和 `{a,b}` 大括号展开，匹配时不区分大小写。
@@ -485,6 +569,9 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `OCR_LLM_AUTH_HEADER` | Anthropic 认证头（`x-api-key` 或 `authorization`） |
 | `OCR_LLM_MODEL` | 模型名称 |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic，`false` = OpenAI |
+| `OCR_REVIEWS_DIR` | `ocr review --save-result` 和 `ocr viewer --reviews-dir` 的默认评审结果存储根目录 |
+| `OCR_RULES_DIR` | `ocr review --rules-dir` 和 `ocr rules check --rules-dir` 的默认企业规则目录 |
+| `OCR_PROJECT` | 用于解析 `<rules-dir>/projects/<project>/rule.json` 的项目 key |
 
 
 ## 遥测

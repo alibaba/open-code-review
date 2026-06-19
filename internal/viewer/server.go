@@ -14,9 +14,29 @@ import (
 var assets embed.FS
 
 func StartServer(addr string) error {
+	return StartServerWithOptions(ServerOptions{Addr: addr})
+}
+
+type ServerOptions struct {
+	Addr       string
+	ReviewsDir string
+}
+
+func StartServerWithOptions(opts ServerOptions) error {
+	addr := opts.Addr
+	if addr == "" {
+		addr = "localhost:5483"
+	}
 	root, err := SessionsRoot()
 	if err != nil {
 		return fmt.Errorf("resolve sessions root: %w", err)
+	}
+	reviewsRoot := opts.ReviewsDir
+	if reviewsRoot == "" {
+		reviewsRoot, err = ReviewsRoot()
+		if err != nil {
+			return fmt.Errorf("resolve reviews root: %w", err)
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -25,6 +45,46 @@ func StartServer(addr string) error {
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
 
 	// Routes
+	mux.HandleFunc("/reviews", func(w http.ResponseWriter, r *http.Request) {
+		handleReviewProjects(w, r, reviewsRoot)
+	})
+	mux.HandleFunc("/reviews/{project}", func(w http.ResponseWriter, r *http.Request) {
+		project := r.PathValue("project")
+		if strings.Contains(project, "..") || strings.Contains(project, "/") {
+			http.Error(w, "invalid project path", http.StatusBadRequest)
+			return
+		}
+		handleProjectReviews(w, r, reviewsRoot, project)
+	})
+	mux.HandleFunc("/reviews/{project}/{reviewID}", func(w http.ResponseWriter, r *http.Request) {
+		project := r.PathValue("project")
+		reviewID := r.PathValue("reviewID")
+		if strings.Contains(project, "..") || strings.Contains(reviewID, "..") {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		handleReviewDetail(w, r, reviewsRoot, project, reviewID)
+	})
+	mux.HandleFunc("/api/reviews", func(w http.ResponseWriter, r *http.Request) {
+		handleAPIReviews(w, r, reviewsRoot)
+	})
+	mux.HandleFunc("/api/reviews/{project}", func(w http.ResponseWriter, r *http.Request) {
+		project := r.PathValue("project")
+		if strings.Contains(project, "..") || strings.Contains(project, "/") {
+			http.Error(w, "invalid project path", http.StatusBadRequest)
+			return
+		}
+		handleAPIProjectReviews(w, r, reviewsRoot, project)
+	})
+	mux.HandleFunc("/api/reviews/{project}/{reviewID}", func(w http.ResponseWriter, r *http.Request) {
+		project := r.PathValue("project")
+		reviewID := r.PathValue("reviewID")
+		if strings.Contains(project, "..") || strings.Contains(reviewID, "..") {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		handleAPIReviewDetail(w, r, reviewsRoot, project, reviewID)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		handleRepos(w, r, root)
 	})

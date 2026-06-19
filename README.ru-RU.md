@@ -296,6 +296,22 @@ ocr review \
 
 Флаг `--format json` выводит машиночитаемый результат, удобный для разбора в CI-скриптах.
 
+Чтобы сохранять финальные результаты ревью для WebUI или внешнего сервиса, добавьте `--save-result`. По умолчанию результаты пишутся в `~/.opencodereview/reviews`; в контейнерном CI, например GitLab Runner или Jenkins agents, используйте `--result-dir` или `OCR_REVIEWS_DIR` и примонтируйте этот каталог к постоянному хранилищу:
+
+```bash
+ocr review \
+  --from "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" \
+  --to "$CI_COMMIT_SHA" \
+  --format json \
+  --save-result \
+  --result-dir /ocr-data/reviews \
+  --result-project "$CI_PROJECT_PATH" \
+  --result-source-branch "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" \
+  --result-target-branch "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+```
+
+Для общих корпоративных правил в CI примонтируйте каталог правил и передайте `--rules-dir /ocr-data/rules` либо задайте `OCR_RULES_DIR=/ocr-data/rules`.
+
 Примеры интеграции — в каталоге [`examples/`](./examples/):
 
 - [`github_actions/`](./examples/github_actions/) — пример интеграции с GitHub Actions
@@ -331,6 +347,12 @@ ocr review \
 | `--background` | `-b` | — | Необязательный контекст требований/бизнес-логики для ревью; при `--commit` автоматически заполняется из сообщения коммита |
 | `--model` | — | — | Выбрать или переопределить LLM-модель для этого ревью |
 | `--rule` | — | — | Путь к пользовательским JSON-правилам ревью |
+| `--rules-dir` | — | `OCR_RULES_DIR` | Каталог корпоративных/проектных правил ревью |
+| `--save-result` | — | `false` | Сохранить финальный результат ревью для WebUI/API |
+| `--result-dir` | — | `OCR_REVIEWS_DIR` или `~/.opencodereview/reviews` | Корневой каталог хранения результатов ревью |
+| `--result-project` | — | GitLab `CI_PROJECT_PATH` или имя repo | Имя/путь проекта в сохранённых результатах |
+| `--result-source-branch` | — | Source branch GitLab MR | Метаданные исходной ветки |
+| `--result-target-branch` | — | Target branch GitLab MR | Метаданные целевой ветки |
 | `--max-tools` | — | встроенное | Максимум раундов вызова инструментов на файл; действует, только если больше значения шаблона по умолчанию |
 | `--max-git-procs` | — | встроенное | Максимум одновременных git-подпроцессов |
 | `--tools` | — | — | Путь к пользовательскому JSON-конфигу инструментов |
@@ -365,19 +387,25 @@ ocr review --background "Добавляем rate limiting в API логина"
 
 # Использовать собственные правила ревью
 ocr review --rule /path/to/my-rules.json
+ocr review --rules-dir /ocr-data/rules
+
+# Сохранить финальные результаты ревью для WebUI/API
+ocr review --from main --to my-feature --save-result --result-dir /ocr-data/reviews
 
 # Посмотреть, какое правило применяется к файлу
 ocr rules check src/main/java/com/example/Foo.java
 ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
+ocr rules check --rules-dir /ocr-data/rules src/main/java/com/example/Foo.java
 
-# Открыть историю сессий ревью в браузере
+# Открыть историю сессий и сохранённые результаты ревью в браузере
 ocr viewer
 ocr viewer --addr :3000
+ocr viewer --addr :5483 --reviews-dir /ocr-data/reviews
 ```
 
 ### Безопасность viewer'а
 
-Viewer отдаёт содержимое сессионных JSONL-файлов (сообщения запросов к LLM и ответы) по HTTP. На каждый запрос применяется allowlist по заголовку Host: loopback-имена (`localhost`, `127.0.0.0/8`, `::1`) и конкретный хост привязки разрешены всегда. Wildcard-привязки (`--addr :3000`, `--addr 0.0.0.0:3000`) и прочие не-loopback имена хостов нужно добавлять через переменную окружения `OCR_VIEWER_ALLOWED_HOSTS` (через запятую):
+Viewer отдаёт содержимое сессионных JSONL-файлов (сообщения запросов к LLM и ответы) и сохранённые результаты ревью по HTTP. На каждый запрос применяется allowlist по заголовку Host: loopback-имена (`localhost`, `127.0.0.0/8`, `::1`) и конкретный хост привязки разрешены всегда. Wildcard-привязки (`--addr :3000`, `--addr 0.0.0.0:3000`) и прочие не-loopback имена хостов нужно добавлять через переменную окружения `OCR_VIEWER_ALLOWED_HOSTS` (через запятую):
 
 ```bash
 OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
@@ -385,20 +413,53 @@ OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
 
 Это блокирует атаки DNS rebinding на локальный viewer.
 
+### Сохранённые результаты ревью
+
+`ocr review --save-result` сохраняет финальный результат ревью в JSON-файл. Результат включает метаданные проекта, доступные метаданные GitLab, source/target branches, MR IID, pipeline/job ID, модель и расход токенов, warnings и review comments.
+
+Путь хранения по умолчанию:
+
+```text
+~/.opencodereview/reviews/<encoded-project>/<review-id>.json
+```
+
+В CI-контейнерах лучше использовать примонтированный путь:
+
+```bash
+export OCR_REVIEWS_DIR=/ocr-data/reviews
+ocr review --save-result --from origin/main --to "$CI_COMMIT_SHA"
+ocr viewer --addr :5483 --reviews-dir /ocr-data/reviews
+```
+
+Viewer предоставляет HTML-страницы и JSON API:
+
+| Endpoint | Описание |
+|----------|----------|
+| `/reviews` | Список проектов с сохранёнными результатами ревью |
+| `/reviews/{project}?source=<branch>&target=<branch>` | Просмотр ревью одного проекта с фильтрами веток |
+| `/reviews/{project}/{reviewID}` | Детали ревью |
+| `/api/reviews?project=<project>&source=<branch>&target=<branch>` | JSON-список по всем проектам с фильтрами project/source/target |
+| `/api/reviews/{project}?source=<branch>&target=<branch>` | JSON-список для одного encoded project |
+| `/api/reviews/{project}/{reviewID}` | JSON-детали ревью |
+
 ## Правила ревью
 
-OCR разрешает правила ревью по цепочке приоритетов из четырёх уровней. На каждом уровне действует принцип «первое совпадение побеждает»: если путь файла совпал с паттерном, используется это правило; иначе поиск продолжается на следующем уровне.
+OCR разрешает правила ревью по многоуровневой цепочке приоритетов. На каждом уровне действует принцип «первое совпадение побеждает»: если путь файла совпал с паттерном, используется это правило; иначе поиск продолжается на следующем уровне.
 
 | Приоритет | Источник | Путь | Описание |
 |-----------|----------|------|----------|
 | 1 (высший) | Флаг `--rule` | Путь, указанный пользователем | Явное переопределение из CLI |
 | 2 | Конфиг проекта | `<repoDir>/.opencodereview/rule.json` | Правила уровня проекта, можно коммитить в git |
-| 3 | Глобальный конфиг | `~/.opencodereview/rule.json` | Личные настройки пользователя |
-| 4 (низший) | Системные по умолчанию | Встроенный `system_rules.json` | Встроенные правила для распространённых языков и типов файлов |
+| 3 | Корпоративный конфиг проекта | `<rules-dir>/projects/<project>/rule.json` | Общие правила проекта/команды из `--rules-dir` или `OCR_RULES_DIR` |
+| 4 | Корпоративный глобальный конфиг | `<rules-dir>/global.json` | Общие правила организации из `--rules-dir` или `OCR_RULES_DIR` |
+| 5 | Глобальный конфиг | `~/.opencodereview/rule.json` | Личные настройки пользователя |
+| 6 (низший) | Системные по умолчанию | Встроенный `system_rules.json` | Встроенные правила для распространённых языков и типов файлов |
+
+Поиск корпоративных правил проекта использует первый доступный ключ проекта из `OCR_PROJECT`, GitLab `CI_PROJECT_PATH`, затем имени каталога репозитория. Например, `CI_PROJECT_PATH=payments/order-service` соответствует `<rules-dir>/projects/payments/order-service/rule.json`.
 
 ### Формат файла правил
 
-Уровни 1–3 используют один и тот же JSON-формат:
+Все пользовательские уровни правил используют один и тот же JSON-формат:
 
 ```json
 {
@@ -418,6 +479,17 @@ OCR разрешает правила ревью по цепочке приор�
 - `path` поддерживает рекурсивное сопоставление `**` и расширение фигурных скобок `{java,kt}`.
 - Внутри каждого уровня правила проверяются в порядке объявления — побеждает первое совпадение.
 - Если файл правил не существует, он молча пропускается.
+
+Пример каталога корпоративных правил:
+
+```text
+/ocr-data/rules/
+  global.json
+  projects/
+    payments/
+      order-service/
+        rule.json
+```
 
 ### Фильтрация путей
 
@@ -446,7 +518,7 @@ OCR разрешает правила ревью по цепочке приор�
 
 **Как это работает:**
 
-- `include` и `exclude` следуют той же цепочке приоритетов, что и правила ревью (`--rule` > конфиг проекта > глобальный конфиг). Действует **целиком самый приоритетный уровень, на котором include/exclude настроены** — паттерны разных уровней не объединяются.
+- `include` и `exclude` следуют той же цепочке приоритетов, что и правила ревью (`--rule` > конфиг проекта > корпоративный конфиг проекта > корпоративный глобальный конфиг > глобальный конфиг). Действует **целиком самый приоритетный уровень, на котором include/exclude настроены** — паттерны разных уровней не объединяются.
 - `exclude` всегда сильнее `include` — файл, совпавший с обоими, исключается.
 - `include` работает как **обход встроенных паттернов исключения по умолчанию** (например, тестовых файлов), а не как эксклюзивный allowlist: файлы, не совпавшие ни с одним паттерном `include`, всё равно обычным образом проходят проверки фильтра по умолчанию.
 - Синтаксис паттернов: поддерживаются рекурсивное сопоставление `**`, односегментное `*` и расширение фигурных скобок `{a,b}`. Сопоставление регистронезависимое.
@@ -497,6 +569,9 @@ OCR разрешает правила ревью по цепочке приор�
 | `OCR_LLM_AUTH_HEADER` | Заголовок авторизации Anthropic (`x-api-key` или `authorization`) |
 | `OCR_LLM_MODEL` | Имя модели |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
+| `OCR_REVIEWS_DIR` | Корневой каталог хранения по умолчанию для `ocr review --save-result` и `ocr viewer --reviews-dir` |
+| `OCR_RULES_DIR` | Корпоративный каталог правил по умолчанию для `ocr review --rules-dir` и `ocr rules check --rules-dir` |
+| `OCR_PROJECT` | Ключ проекта для разрешения `<rules-dir>/projects/<project>/rule.json` |
 
 
 ## Телеметрия

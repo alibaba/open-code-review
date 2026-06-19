@@ -296,6 +296,22 @@ The `--from` flag accepts a branch ref (e.g., `origin/main`) or commit SHA as th
 
 The `--format json` flag outputs machine-readable results suitable for parsing in CI scripts.
 
+To persist final review results for a WebUI or downstream service, add `--save-result`. By default results are written under `~/.opencodereview/reviews`; in containerized CI such as GitLab Runner or Jenkins agents, use `--result-dir` or `OCR_REVIEWS_DIR` and mount that directory to persistent storage:
+
+```bash
+ocr review \
+  --from "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" \
+  --to "$CI_COMMIT_SHA" \
+  --format json \
+  --save-result \
+  --result-dir /ocr-data/reviews \
+  --result-project "$CI_PROJECT_PATH" \
+  --result-source-branch "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" \
+  --result-target-branch "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+```
+
+For shared enterprise rules in CI, mount a rules directory and pass `--rules-dir /ocr-data/rules` or set `OCR_RULES_DIR=/ocr-data/rules`.
+
 See the [`examples/`](./examples/) directory for integration examples:
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions integration example
@@ -331,6 +347,12 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `--background` | `-b` | — | Optional requirement/business context for the review; auto-filled from commit message when using `--commit` |
 | `--model` | — | — | Select or override the LLM model for this review |
 | `--rule` | — | — | Path to custom JSON review rules |
+| `--rules-dir` | — | `OCR_RULES_DIR` | Directory with enterprise/project review rules |
+| `--save-result` | — | `false` | Persist final review result for the WebUI review viewer |
+| `--result-dir` | — | `OCR_REVIEWS_DIR` or `~/.opencodereview/reviews` | Review result storage root |
+| `--result-project` | — | GitLab `CI_PROJECT_PATH` or repo name | Project name/path for persisted results |
+| `--result-source-branch` | — | GitLab MR source branch | Source branch metadata for persisted results |
+| `--result-target-branch` | — | GitLab MR target branch | Target branch metadata for persisted results |
 | `--max-tools` | — | built-in | Max tool call rounds per file; only takes effect when greater than template default |
 | `--max-git-procs` | — | built-in | Max concurrent git subprocesses |
 | `--tools` | — | — | Path to custom JSON tools config |
@@ -365,19 +387,25 @@ ocr review --background "Adding rate limiting to the login API"
 
 # Use custom review rules
 ocr review --rule /path/to/my-rules.json
+ocr review --rules-dir /ocr-data/rules
+
+# Persist final review results for the WebUI/API
+ocr review --from main --to my-feature --save-result --result-dir /ocr-data/reviews
 
 # Preview which rule applies to a file
 ocr rules check src/main/java/com/example/Foo.java
 ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
+ocr rules check --rules-dir /ocr-data/rules src/main/java/com/example/Foo.java
 
-# View review session history in browser
+# View review session history and saved review results in browser
 ocr viewer
 ocr viewer --addr :3000
+ocr viewer --addr :5483 --reviews-dir /ocr-data/reviews
 ```
 
 ### Viewer security
 
-The viewer serves session JSONL contents (LLM request messages and responses) over HTTP. It enforces a Host-header allowlist on every request: loopback names (`localhost`, `127.0.0.0/8`, `::1`) and the concrete bind host are always allowed. Wildcard binds (`--addr :3000`, `--addr 0.0.0.0:3000`) and other non-loopback Hostnames must be added via the `OCR_VIEWER_ALLOWED_HOSTS` environment variable (comma-separated):
+The viewer serves session JSONL contents (LLM request messages and responses) and saved review results over HTTP. It enforces a Host-header allowlist on every request: loopback names (`localhost`, `127.0.0.0/8`, `::1`) and the concrete bind host are always allowed. Wildcard binds (`--addr :3000`, `--addr 0.0.0.0:3000`) and other non-loopback Hostnames must be added via the `OCR_VIEWER_ALLOWED_HOSTS` environment variable (comma-separated):
 
 ```bash
 OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
@@ -385,20 +413,53 @@ OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
 
 This blocks DNS-rebinding attacks against the local viewer.
 
+### Saved review results
+
+`ocr review --save-result` writes final review results as JSON files. The result includes project metadata, GitLab metadata when available, source/target branches, MR IID, pipeline/job IDs, model and token usage, warnings, and review comments.
+
+Default storage:
+
+```text
+~/.opencodereview/reviews/<encoded-project>/<review-id>.json
+```
+
+In CI containers, prefer a mounted path:
+
+```bash
+export OCR_REVIEWS_DIR=/ocr-data/reviews
+ocr review --save-result --from origin/main --to "$CI_COMMIT_SHA"
+ocr viewer --addr :5483 --reviews-dir /ocr-data/reviews
+```
+
+The viewer exposes both HTML pages and JSON APIs:
+
+| Endpoint | Description |
+|----------|-------------|
+| `/reviews` | List projects with saved review results |
+| `/reviews/{project}?source=<branch>&target=<branch>` | Browse one project's saved reviews with branch filters |
+| `/reviews/{project}/{reviewID}` | Show review details |
+| `/api/reviews?project=<project>&source=<branch>&target=<branch>` | JSON list across projects, filtered by project/source/target |
+| `/api/reviews/{project}?source=<branch>&target=<branch>` | JSON list for one encoded project |
+| `/api/reviews/{project}/{reviewID}` | JSON review detail |
+
 ## Review Rules
 
-OCR resolves review rules using a four-layer priority chain. Each layer uses first-match-wins: if a file path matches a pattern, that rule is used; otherwise it falls through to the next layer.
+OCR resolves review rules using a layered priority chain. Each layer uses first-match-wins: if a file path matches a pattern, that rule is used; otherwise it falls through to the next layer.
 
 | Priority | Source | Path | Description |
 |----------|--------|------|-------------|
 | 1 (highest) | `--rule` flag | User-specified path | CLI explicit override |
 | 2 | Project config | `<repoDir>/.opencodereview/rule.json` | Per-project rules, can be committed to git |
-| 3 | Global config | `~/.opencodereview/rule.json` | User-wide personal preferences |
-| 4 (lowest) | System default | Embedded `system_rules.json` | Built-in rules covering common languages and file types |
+| 3 | Enterprise project config | `<rules-dir>/projects/<project>/rule.json` | Shared per-project/team rules from `--rules-dir` or `OCR_RULES_DIR` |
+| 4 | Enterprise global config | `<rules-dir>/global.json` | Shared organization-wide rules from `--rules-dir` or `OCR_RULES_DIR` |
+| 5 | Global config | `~/.opencodereview/rule.json` | User-wide personal preferences |
+| 6 (lowest) | System default | Embedded `system_rules.json` | Built-in rules covering common languages and file types |
+
+Enterprise project lookup uses the first available project key from `OCR_PROJECT`, GitLab `CI_PROJECT_PATH`, then the repository directory name. For example, `CI_PROJECT_PATH=payments/order-service` maps to `<rules-dir>/projects/payments/order-service/rule.json`.
 
 ### Rule File Format
 
-Layers 1–3 share the same JSON format:
+All custom rule layers share the same JSON format:
 
 ```json
 {
@@ -418,6 +479,17 @@ Layers 1–3 share the same JSON format:
 - `path` supports `**` recursive matching and `{java,kt}` brace expansion.
 - Within each layer, rules are evaluated in declaration order — the first match wins.
 - If a rule file does not exist, it is silently skipped.
+
+Example enterprise rules directory:
+
+```text
+/ocr-data/rules/
+  global.json
+  projects/
+    payments/
+      order-service/
+        rule.json
+```
 
 ### Path Filtering
 
@@ -446,7 +518,7 @@ Rule files also support `include` and `exclude` fields to control which files en
 
 **How it works:**
 
-- `include` and `exclude` follow the same priority chain as review rules (`--rule` > project config > global config). The **highest-priority layer that has include/exclude configured** takes effect as a whole — patterns are not merged across layers.
+- `include` and `exclude` follow the same priority chain as review rules (`--rule` > project config > enterprise project config > enterprise global config > global config). The **highest-priority layer that has include/exclude configured** takes effect as a whole — patterns are not merged across layers.
 - `exclude` always wins over `include` — a file matching both is excluded.
 - `include` acts as a **bypass for built-in default exclude patterns** (e.g., test files), not as an exclusive allowlist — files not matching any `include` pattern still proceed through the default filter checks normally.
 - Pattern syntax: supports `**` recursive matching, `*` single-segment matching, and `{a,b}` brace expansion. Matching is case-insensitive.
@@ -497,6 +569,9 @@ Environment variables take precedence over the config file.
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` or `authorization`) |
 | `OCR_LLM_MODEL` | Model name |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
+| `OCR_REVIEWS_DIR` | Default storage root for `ocr review --save-result` and `ocr viewer --reviews-dir` |
+| `OCR_RULES_DIR` | Default enterprise rules directory for `ocr review --rules-dir` and `ocr rules check --rules-dir` |
+| `OCR_PROJECT` | Project key used to resolve `<rules-dir>/projects/<project>/rule.json` |
 
 
 ## Telemetry
