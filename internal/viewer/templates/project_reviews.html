@@ -30,7 +30,7 @@
             <td>{{if .Review.Mode}}{{.Review.Mode}}{{else}}-{{end}}</td>
             <td>{{.Review.CommentCount}}</td>
             <td>{{.Review.FilesReviewed}}</td>
-            <td><code>{{.Review.Model}}</code></td>
+            <td>{{if .Review.Model}}<code>{{.Review.Model}}</code>{{else}}-{{end}}</td>
             <td>{{formatTime .CreatedAt}}</td>
         </tr>
     {{end}}

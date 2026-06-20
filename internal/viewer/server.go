@@ -50,7 +50,7 @@ func StartServerWithOptions(opts ServerOptions) error {
 	})
 	mux.HandleFunc("/reviews/{project}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.PathValue("project")
-		if strings.Contains(project, "..") || strings.Contains(project, "/") {
+		if !isValidPathSegment(project) {
 			http.Error(w, "invalid project path", http.StatusBadRequest)
 			return
 		}
@@ -59,7 +59,7 @@ func StartServerWithOptions(opts ServerOptions) error {
 	mux.HandleFunc("/reviews/{project}/{reviewID}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.PathValue("project")
 		reviewID := r.PathValue("reviewID")
-		if strings.Contains(project, "..") || strings.Contains(reviewID, "..") {
+		if !isValidPathSegment(project) || !isValidPathSegment(reviewID) {
 			http.Error(w, "invalid path", http.StatusBadRequest)
 			return
 		}
@@ -70,7 +70,7 @@ func StartServerWithOptions(opts ServerOptions) error {
 	})
 	mux.HandleFunc("/api/reviews/{project}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.PathValue("project")
-		if strings.Contains(project, "..") || strings.Contains(project, "/") {
+		if !isValidPathSegment(project) {
 			http.Error(w, "invalid project path", http.StatusBadRequest)
 			return
 		}
@@ -79,7 +79,7 @@ func StartServerWithOptions(opts ServerOptions) error {
 	mux.HandleFunc("/api/reviews/{project}/{reviewID}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.PathValue("project")
 		reviewID := r.PathValue("reviewID")
-		if strings.Contains(project, "..") || strings.Contains(reviewID, "..") {
+		if !isValidPathSegment(project) || !isValidPathSegment(reviewID) {
 			http.Error(w, "invalid path", http.StatusBadRequest)
 			return
 		}
@@ -90,7 +90,7 @@ func StartServerWithOptions(opts ServerOptions) error {
 	})
 	mux.HandleFunc("/r/{repo}", func(w http.ResponseWriter, r *http.Request) {
 		repo := r.PathValue("repo")
-		if strings.Contains(repo, "..") || strings.Contains(repo, "/") {
+		if !isValidPathSegment(repo) {
 			http.Error(w, "invalid repo path", http.StatusBadRequest)
 			return
 		}
@@ -99,7 +99,7 @@ func StartServerWithOptions(opts ServerOptions) error {
 	mux.HandleFunc("/r/{repo}/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
 		repo := r.PathValue("repo")
 		sid := r.PathValue("sessionID")
-		if strings.Contains(repo, "..") || strings.Contains(sid, "..") {
+		if !isValidPathSegment(repo) || !isValidPathSegment(sid) {
 			http.Error(w, "invalid path", http.StatusBadRequest)
 			return
 		}
@@ -120,6 +120,13 @@ func StartServerWithOptions(opts ServerOptions) error {
 
 	fmt.Printf("\nOpen browser: http://%s\n", addr)
 	return srv.ListenAndServe()
+}
+
+func isValidPathSegment(segment string) bool {
+	return segment != "" &&
+		!strings.Contains(segment, "..") &&
+		!strings.Contains(segment, "/") &&
+		!strings.Contains(segment, `\`)
 }
 
 var cstZone = func() *time.Location {

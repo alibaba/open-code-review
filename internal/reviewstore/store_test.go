@@ -1,6 +1,7 @@
 package reviewstore
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -129,5 +130,46 @@ func TestListAllReviewsFiltersProjectAndBranches(t *testing.T) {
 	}
 	if reviews[0].Project.Name != "group/project" || reviews[0].Review.SourceBranch != "feature/a" {
 		t.Fatalf("unexpected review: %#v", reviews[0])
+	}
+}
+
+func TestLoadRejectsUnsafePathSegments(t *testing.T) {
+	root := t.TempDir()
+	tests := []struct {
+		name    string
+		project string
+		review  string
+	}{
+		{name: "project traversal", project: "..", review: "review-id"},
+		{name: "review traversal", project: "project", review: "../review-id"},
+		{name: "project slash", project: "project/child", review: "review-id"},
+		{name: "review slash", project: "project", review: "dir/review-id"},
+		{name: "project backslash", project: `project\child`, review: "review-id"},
+		{name: "review backslash", project: "project", review: `dir\review-id`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := Load(root, tt.project, tt.review); err == nil {
+				t.Fatal("Load succeeded, want invalid path error")
+			}
+		})
+	}
+}
+
+func TestListReviewsRejectsUnsafeProjectSegment(t *testing.T) {
+	root := t.TempDir()
+	for _, project := range []string{"..", "../project", "project/child", `project\child`} {
+		t.Run(project, func(t *testing.T) {
+			if _, err := ListReviews(root, project, ReviewFilter{}); err == nil {
+				t.Fatal("ListReviews succeeded, want invalid path error")
+			}
+		})
+	}
+}
+
+func TestGenerateIDPropagatesRandomReadError(t *testing.T) {
+	if _, err := generateIDFromReader(strings.NewReader("short")); err == nil {
+		t.Fatal("generateIDFromReader succeeded, want error")
 	}
 }

@@ -372,6 +372,32 @@ func TestNewResolver_RulesDirProjectAndGlobal(t *testing.T) {
 	}
 }
 
+func TestEnterpriseProjectRulePathsRejectTraversal(t *testing.T) {
+	t.Setenv("OCR_PROJECT", "../../outside")
+	t.Setenv("CI_PROJECT_PATH", `group\project`)
+
+	rulesDir := t.TempDir()
+	paths := enterpriseProjectRulePaths(rulesDir, "")
+	if len(paths) != 0 {
+		t.Fatalf("paths = %v, want none", paths)
+	}
+}
+
+func TestEnterpriseProjectRulePathsKeepsPathUnderProjectsDir(t *testing.T) {
+	t.Setenv("OCR_PROJECT", "group/project")
+	t.Setenv("CI_PROJECT_PATH", "")
+
+	rulesDir := t.TempDir()
+	paths := enterpriseProjectRulePaths(rulesDir, "")
+	if len(paths) != 1 {
+		t.Fatalf("paths len = %d, want 1: %v", len(paths), paths)
+	}
+	want := filepath.Join(rulesDir, "projects", "group", "project", "rule.json")
+	if paths[0] != want {
+		t.Fatalf("path = %q, want %q", paths[0], want)
+	}
+}
+
 func TestNewResolver_ProjectRuleOverridesRulesDir(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CI_PROJECT_PATH", "group/project")

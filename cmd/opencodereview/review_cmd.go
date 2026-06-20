@@ -170,9 +170,10 @@ func runReview(args []string) error {
 	if opts.saveResult {
 		path, err := saveReviewResult(repoDir, opts, ag, comments, warnings, duration)
 		if err != nil {
-			return fmt.Errorf("save review result: %w", err)
+			fmt.Fprintf(os.Stderr, "[ocr] warning: failed to save review result: %v\n", err)
+		} else {
+			warnReviewResultSaved(path)
 		}
-		warnReviewResultSaved(path)
 	}
 
 	// If no files were reviewed (e.g. workspace has no changes), inform the caller in JSON mode.

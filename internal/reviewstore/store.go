@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -81,6 +82,14 @@ type ReviewSummary struct {
 	Review    ReviewInfo
 }
 
+type reviewSummaryFile struct {
+	ID        string      `json:"id"`
+	CreatedAt time.Time   `json:"created_at"`
+	Project   ProjectInfo `json:"project"`
+	GitLab    GitLabInfo  `json:"gitlab,omitempty"`
+	Review    ReviewInfo  `json:"review"`
+}
+
 type ReviewFilter struct {
 	Project      string
 	SourceBranch string
@@ -104,7 +113,11 @@ func Save(root string, result Result) (string, error) {
 		}
 	}
 	if result.ID == "" {
-		result.ID = generateID()
+		id, err := generateID()
+		if err != nil {
+			return "", err
+		}
+		result.ID = id
 	}
 	if result.CreatedAt.IsZero() {
 		result.CreatedAt = time.Now().UTC()
@@ -163,6 +176,9 @@ func ListProjects(root string) ([]ProjectSummary, error) {
 }
 
 func ListReviews(root, encodedProject string, filter ReviewFilter) ([]ReviewSummary, error) {
+	if !isSafePathSegment(encodedProject) {
+		return nil, fmt.Errorf("invalid review path")
+	}
 	dir := filepath.Join(root, encodedProject)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -177,23 +193,18 @@ func ListReviews(root, encodedProject string, filter ReviewFilter) ([]ReviewSumm
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		result, err := Load(root, encodedProject, strings.TrimSuffix(entry.Name(), ".json"))
+		review, err := loadSummary(root, encodedProject, strings.TrimSuffix(entry.Name(), ".json"))
 		if err != nil {
+			log.Printf("[ocr] warning: skip review result %s/%s: %v", encodedProject, entry.Name(), err)
 			continue
 		}
-		if filter.SourceBranch != "" && result.Review.SourceBranch != filter.SourceBranch {
+		if filter.SourceBranch != "" && review.Review.SourceBranch != filter.SourceBranch {
 			continue
 		}
-		if filter.TargetBranch != "" && result.Review.TargetBranch != filter.TargetBranch {
+		if filter.TargetBranch != "" && review.Review.TargetBranch != filter.TargetBranch {
 			continue
 		}
-		reviews = append(reviews, ReviewSummary{
-			ID:        result.ID,
-			CreatedAt: result.CreatedAt,
-			Project:   result.Project,
-			GitLab:    result.GitLab,
-			Review:    result.Review,
-		})
+		reviews = append(reviews, review)
 	}
 
 	sort.Slice(reviews, func(i, j int) bool {
@@ -238,11 +249,10 @@ func ListAllReviews(root string, filter ReviewFilter) ([]ReviewSummary, error) {
 }
 
 func Load(root, encodedProject, reviewID string) (*Result, error) {
-	if strings.Contains(encodedProject, "..") || strings.Contains(reviewID, "..") ||
-		strings.Contains(encodedProject, "/") || strings.Contains(reviewID, "/") {
+	path, err := reviewResultPath(root, encodedProject, reviewID)
+	if err != nil {
 		return nil, fmt.Errorf("invalid review path")
 	}
-	path := filepath.Join(root, encodedProject, reviewID+".json")
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open review result: %w", err)
@@ -255,6 +265,31 @@ func Load(root, encodedProject, reviewID string) (*Result, error) {
 		return nil, fmt.Errorf("decode review result: %w", err)
 	}
 	return &result, nil
+}
+
+func loadSummary(root, encodedProject, reviewID string) (ReviewSummary, error) {
+	path, err := reviewResultPath(root, encodedProject, reviewID)
+	if err != nil {
+		return ReviewSummary{}, fmt.Errorf("invalid review path")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ReviewSummary{}, fmt.Errorf("open review result: %w", err)
+	}
+	defer f.Close()
+
+	var result reviewSummaryFile
+	dec := json.NewDecoder(f)
+	if err := dec.Decode(&result); err != nil {
+		return ReviewSummary{}, fmt.Errorf("decode review result summary: %w", err)
+	}
+	return ReviewSummary{
+		ID:        result.ID,
+		CreatedAt: result.CreatedAt,
+		Project:   result.Project,
+		GitLab:    result.GitLab,
+		Review:    result.Review,
+	}, nil
 }
 
 func ProjectKey(project ProjectInfo) string {
@@ -275,13 +310,40 @@ func matchesProjectFilter(encodedProject string, project ProjectInfo, filter str
 	return filter == encodedProject || filter == project.ID || filter == project.Name || filter == project.RepoDir
 }
 
-func generateID() string {
+func reviewResultPath(root, encodedProject, reviewID string) (string, error) {
+	if !isSafePathSegment(encodedProject) || !isSafePathSegment(reviewID) {
+		return "", fmt.Errorf("invalid review path")
+	}
+	root = filepath.Clean(root)
+	path := filepath.Clean(filepath.Join(root, encodedProject, reviewID+".json"))
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("invalid review path")
+	}
+	return path, nil
+}
+
+func isSafePathSegment(segment string) bool {
+	if segment == "" || segment == "." || segment == ".." {
+		return false
+	}
+	if strings.Contains(segment, "..") || strings.Contains(segment, "/") || strings.Contains(segment, `\`) {
+		return false
+	}
+	return !filepath.IsAbs(segment) && filepath.Base(segment) == segment
+}
+
+func generateID() (string, error) {
+	return generateIDFromReader(rand.Reader)
+}
+
+func generateIDFromReader(reader io.Reader) (string, error) {
 	b := make([]byte, 16)
-	if _, err := io.ReadFull(rand.Reader, b); err != nil {
-		return fmt.Sprintf("review-%d", time.Now().UnixNano())
+	if _, err := io.ReadFull(reader, b); err != nil {
+		return "", fmt.Errorf("generate review id: %w", err)
 	}
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }

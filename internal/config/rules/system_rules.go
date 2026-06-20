@@ -251,8 +251,10 @@ type composedResolver struct {
 // NewResolver builds a Resolver with the following priority:
 //  1. Custom rule file specified via --rule flag (first match wins)
 //  2. Project-local .opencodereview/rule.json (first match wins)
-//  3. Global ~/.opencodereview/rule.json (first match wins)
-//  4. Embedded system default rules
+//  3. Enterprise project rule from <rules-dir>/projects/<project>/rule.json
+//  4. Enterprise global rule from <rules-dir>/global.json
+//  5. Global ~/.opencodereview/rule.json (first match wins)
+//  6. Embedded system default rules
 //
 // It also returns a FileFilter with the merged include/exclude patterns from all layers.
 func NewResolver(repoDir, customRulePath string) (Resolver, *FileFilter, error) {
@@ -309,7 +311,8 @@ func NewResolverWithOptions(repoDir string, opts ResolverOptions) (Resolver, *Fi
 }
 
 // buildFileFilter picks the highest-priority layer that has any include/exclude
-// configured. Priority order: custom (--rule) > project > global.
+// configured. Priority order: custom > project > enterprise project >
+// enterprise global > global.
 func buildFileFilter(layers ...*ProjectRule) *FileFilter {
 	for _, pr := range layers {
 		if pr == nil {
@@ -378,8 +381,12 @@ func enterpriseProjectRulePaths(dir, repoDir string) []string {
 		if project == "" || seen[project] {
 			return
 		}
+		path, ok := enterpriseProjectRulePath(dir, project)
+		if !ok {
+			return
+		}
 		seen[project] = true
-		paths = append(paths, filepath.Join(append([]string{dir, "projects"}, append(strings.Split(project, "/"), "rule.json")...)...))
+		paths = append(paths, path)
 	}
 	add(os.Getenv("OCR_PROJECT"))
 	add(os.Getenv("CI_PROJECT_PATH"))
@@ -387,6 +394,32 @@ func enterpriseProjectRulePaths(dir, repoDir string) []string {
 		add(filepath.Base(repoDir))
 	}
 	return paths
+}
+
+func enterpriseProjectRulePath(dir, project string) (string, bool) {
+	parts := strings.Split(project, "/")
+	for _, part := range parts {
+		if !isSafeRulePathSegment(part) {
+			return "", false
+		}
+	}
+	base := filepath.Clean(filepath.Join(dir, "projects"))
+	path := filepath.Clean(filepath.Join(append([]string{base}, append(parts, "rule.json")...)...))
+	rel, err := filepath.Rel(base, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+		return "", false
+	}
+	return path, true
+}
+
+func isSafeRulePathSegment(segment string) bool {
+	if segment == "" || segment == "." || segment == ".." {
+		return false
+	}
+	if strings.Contains(segment, `\`) || filepath.IsAbs(segment) || filepath.Base(segment) != segment {
+		return false
+	}
+	return true
 }
 
 func loadOptionalRuleFile(path, label string) (*ProjectRule, error) {

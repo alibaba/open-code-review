@@ -138,7 +138,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.model, "model", "", "override LLM model for this review (e.g., claude-opus-4-6)")
 	a.StringVar(&opts.rulesDir, "rules-dir", "", "directory with enterprise/project review rules")
 	a.BoolVar(&opts.saveResult, "save-result", false, "persist final review result for the WebUI review viewer")
-	a.StringVar(&opts.resultDir, "result-dir", "", "review result storage root (default: ~/.opencodereview/reviews)")
+	a.StringVar(&opts.resultDir, "result-dir", "", "review result storage root (env: OCR_REVIEWS_DIR, default: ~/.opencodereview/reviews)")
 	a.StringVar(&opts.resultProject, "result-project", "", "project name/path for persisted review results (default: GitLab CI_PROJECT_PATH or repo basename)")
 	a.StringVar(&opts.resultSource, "result-source-branch", "", "source branch metadata for persisted review results")
 	a.StringVar(&opts.resultTarget, "result-target-branch", "", "target branch metadata for persisted review results")
@@ -245,7 +245,7 @@ Flags:
   --model string          override LLM model for this review (e.g., claude-opus-4-6)
   -p, --preview           preview which files will be reviewed without running the LLM
   --repo string           root directory of the git repository (default: current dir)
-  --result-dir string     review result storage root (default: ~/.opencodereview/reviews)
+  --result-dir string     review result storage root (env: OCR_REVIEWS_DIR, default: ~/.opencodereview/reviews)
   --result-project string project name/path for persisted review results
   --result-source-branch string
                            source branch metadata for persisted review results

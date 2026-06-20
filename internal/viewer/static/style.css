@@ -211,6 +211,8 @@ h3 { margin: 1.5rem 0 0.75rem; color: #24292e; }
     border-radius: 6px;
     padding: 0.75rem;
     overflow-x: auto;
+    overflow-y: auto;
+    max-height: 400px;
     font-size: 0.82rem;
 }
 

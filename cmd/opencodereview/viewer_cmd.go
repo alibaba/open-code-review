@@ -18,7 +18,7 @@ func parseViewerFlags(args []string) (viewerOptions, error) {
 
 	opts := viewerOptions{}
 	a.StringVar(&opts.addr, "addr", "localhost:5483", "listen address")
-	a.StringVar(&opts.reviewsDir, "reviews-dir", "", "review result storage root (default: ~/.opencodereview/reviews)")
+	a.StringVar(&opts.reviewsDir, "reviews-dir", "", "review result storage root (env: OCR_REVIEWS_DIR, default: ~/.opencodereview/reviews)")
 
 	if err := a.Parse(args); err != nil {
 		return opts, fmt.Errorf("parse flags: %w", err)
@@ -57,7 +57,7 @@ Usage:
 
 Flags:
   --addr <address>           listen address (default: localhost:5483)
-  --reviews-dir <path>       review result storage root (default: ~/.opencodereview/reviews)
+  --reviews-dir <path>       review result storage root (env: OCR_REVIEWS_DIR, default: ~/.opencodereview/reviews)
 
 Examples:
   ocr viewer                     # start on default port
