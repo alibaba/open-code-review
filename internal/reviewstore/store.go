@@ -2,7 +2,6 @@ package reviewstore
 
 import (
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -303,7 +302,24 @@ func ProjectKey(project ProjectInfo) string {
 	if key == "" {
 		key = "unknown"
 	}
-	return base64.RawURLEncoding.EncodeToString([]byte(key))
+	return encodeProjectKey(key)
+}
+
+func encodeProjectKey(key string) string {
+	if key == "" {
+		return "empty"
+	}
+	vol := filepath.VolumeName(key)
+	key = key[len(vol):]
+	key = strings.TrimLeft(key, "/\\")
+	key = strings.ReplaceAll(key, "/", "-")
+	key = strings.ReplaceAll(key, "\\", "-")
+	vol = strings.ReplaceAll(vol, ":", "_")
+	result := vol + key
+	if result == "" {
+		return "empty"
+	}
+	return result
 }
 
 func matchesProjectFilter(encodedProject string, project ProjectInfo, filter string) bool {
@@ -327,7 +343,7 @@ func isSafePathSegment(segment string) bool {
 	if segment == "" || segment == "." || segment == ".." {
 		return false
 	}
-	if strings.Contains(segment, "..") || strings.Contains(segment, "/") || strings.Contains(segment, `\`) {
+	if strings.Contains(segment, "/") || strings.Contains(segment, `\`) {
 		return false
 	}
 	return !filepath.IsAbs(segment) && filepath.Base(segment) == segment

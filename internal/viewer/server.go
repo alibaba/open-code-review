@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -124,9 +125,12 @@ func StartServerWithOptions(opts ServerOptions) error {
 
 func isValidPathSegment(segment string) bool {
 	return segment != "" &&
-		!strings.Contains(segment, "..") &&
+		segment != "." &&
+		segment != ".." &&
 		!strings.Contains(segment, "/") &&
-		!strings.Contains(segment, `\`)
+		!strings.Contains(segment, `\`) &&
+		!filepath.IsAbs(segment) &&
+		filepath.Base(segment) == segment
 }
 
 var cstZone = func() *time.Location {

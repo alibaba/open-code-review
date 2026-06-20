@@ -168,6 +168,51 @@ func TestListReviewsRejectsUnsafeProjectSegment(t *testing.T) {
 	}
 }
 
+func TestProjectKeyUsesReadablePathEncoding(t *testing.T) {
+	tests := []struct {
+		name    string
+		project ProjectInfo
+		want    string
+	}{
+		{
+			name:    "project name path",
+			project: ProjectInfo{Name: "group/project"},
+			want:    "group-project",
+		},
+		{
+			name:    "repo dir path",
+			project: ProjectInfo{RepoDir: "/Users/kite/Desktop/my-project"},
+			want:    "Users-kite-Desktop-my-project",
+		},
+		{
+			name:    "mixed separators",
+			project: ProjectInfo{Name: `group\project/service`},
+			want:    "group-project-service",
+		},
+		{
+			name:    "dotted name",
+			project: ProjectInfo{Name: "my..project"},
+			want:    "my..project",
+		},
+		{
+			name:    "fallback unknown",
+			project: ProjectInfo{},
+			want:    "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ProjectKey(tt.project); got != tt.want {
+				t.Fatalf("ProjectKey() = %q, want %q", got, tt.want)
+			}
+			if !isSafePathSegment(ProjectKey(tt.project)) {
+				t.Fatalf("ProjectKey() produced unsafe segment %q", ProjectKey(tt.project))
+			}
+		})
+	}
+}
+
 func TestGenerateIDPropagatesRandomReadError(t *testing.T) {
 	if _, err := generateIDFromReader(strings.NewReader("short")); err == nil {
 		t.Fatal("generateIDFromReader succeeded, want error")
