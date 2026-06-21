@@ -59,7 +59,10 @@ func runReview(args []string) error {
 		}
 	}
 
-	resolver, fileFilter, err := rules.NewResolver(repoDir, opts.rulePath)
+	resolver, fileFilter, err := rules.NewResolverWithOptions(repoDir, rules.ResolverOptions{
+		CustomRulePath: opts.rulePath,
+		RulesDir:       opts.rulesDir,
+	})
 	if err != nil {
 		return fmt.Errorf("load rules: %w", err)
 	}
@@ -162,6 +165,16 @@ func runReview(args []string) error {
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
 	}
+	warnings := ag.Warnings()
+
+	if opts.saveResult {
+		path, err := saveReviewResult(repoDir, opts, ag, comments, warnings, duration)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ocr] warning: failed to save review result: %v\n", err)
+		} else {
+			warnReviewResultSaved(path)
+		}
+	}
 
 	// If no files were reviewed (e.g. workspace has no changes), inform the caller in JSON mode.
 	if opts.outputFormat == "json" && len(comments) == 0 && ag.FilesReviewed() == 0 {
@@ -179,13 +192,13 @@ func runReview(args []string) error {
 	}
 
 	if opts.outputFormat == "json" {
-		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(), ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(), ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration)
+		return outputJSONWithWarnings(comments, warnings, ag.FilesReviewed(), ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(), ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration)
 	}
 	if opts.audience == "agent" {
-		outputTextWithWarnings(comments, ag.Warnings())
+		outputTextWithWarnings(comments, warnings)
 		return nil
 	}
-	outputTextWithWarnings(comments, ag.Warnings())
+	outputTextWithWarnings(comments, warnings)
 
 	return nil
 }

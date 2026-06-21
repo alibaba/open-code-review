@@ -25,6 +25,53 @@ main { max-width: 1200px; margin: 1.5rem auto; padding: 0 1rem; }
 h2 { margin-bottom: 1rem; color: #24292e; }
 h3 { margin: 1.5rem 0 0.75rem; color: #24292e; }
 
+.page-actions {
+    margin-bottom: 1rem;
+}
+.page-actions a {
+    color: #0366d6;
+    text-decoration: none;
+    font-weight: 600;
+}
+.page-actions a:hover { text-decoration: underline; }
+
+.filter-bar {
+    background: #fff;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.filter-bar label {
+    color: #586069;
+    font-size: 0.85rem;
+}
+.filter-bar input {
+    margin-left: 0.35rem;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+    min-width: 180px;
+}
+.filter-bar button {
+    border: 1px solid #1f6feb;
+    background: #0969da;
+    color: #fff;
+    border-radius: 4px;
+    padding: 0.38rem 0.8rem;
+    cursor: pointer;
+}
+.filter-bar a {
+    color: #0366d6;
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+
 .table {
     width: 100%;
     border-collapse: collapse;
@@ -129,6 +176,45 @@ h3 { margin: 1.5rem 0 0.75rem; color: #24292e; }
 
 /* ── Conversations Section ── */
 .conversations { margin-top: 0.5rem; }
+
+.review-comment {
+    background: #fff;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.review-comment-header {
+    background: #f6f8fa;
+    border-bottom: 1px solid #eaecef;
+    padding: 0.75rem 1rem;
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+.review-comment-body {
+    padding: 1rem;
+}
+.review-comment-body p {
+    margin-bottom: 0.85rem;
+    white-space: pre-wrap;
+}
+.code-pair {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 0.75rem;
+}
+.code-pair pre {
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 0.75rem;
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 400px;
+    font-size: 0.82rem;
+}
 
 /* File Accordion */
 .file-accordion {

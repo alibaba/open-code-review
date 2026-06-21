@@ -339,6 +339,96 @@ func TestNewResolver_CustomOverridesProject(t *testing.T) {
 	}
 }
 
+func TestNewResolver_RulesDirProjectAndGlobal(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CI_PROJECT_PATH", "group/project")
+
+	repoDir := t.TempDir()
+	rulesDir := t.TempDir()
+	projectDir := filepath.Join(rulesDir, "projects", "group", "project")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project rules: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "rule.json"), []byte(`{"rules":[{"path":"src/**/*.go","rule":"enterprise-project-go"}]}`), 0o644); err != nil {
+		t.Fatalf("write project rule: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rulesDir, "global.json"), []byte(`{"rules":[{"path":"**/*.go","rule":"enterprise-global-go"},{"path":"**/*.md","rule":"enterprise-global-md"}]}`), 0o644); err != nil {
+		t.Fatalf("write global rule: %v", err)
+	}
+
+	resolver, _, err := NewResolverWithOptions(repoDir, ResolverOptions{RulesDir: rulesDir})
+	if err != nil {
+		t.Fatalf("NewResolverWithOptions: %v", err)
+	}
+
+	if got := resolver.Resolve("src/main.go"); got != "enterprise-project-go" {
+		t.Errorf("project rule = %q", got)
+	}
+	if got := resolver.Resolve("cmd/main.go"); got != "enterprise-global-go" {
+		t.Errorf("global rule = %q", got)
+	}
+	if got := resolver.Resolve("README.md"); got != "enterprise-global-md" {
+		t.Errorf("global md rule = %q", got)
+	}
+}
+
+func TestEnterpriseProjectRulePathsRejectTraversal(t *testing.T) {
+	t.Setenv("OCR_PROJECT", "../../outside")
+	t.Setenv("CI_PROJECT_PATH", `group\project`)
+
+	rulesDir := t.TempDir()
+	paths := enterpriseProjectRulePaths(rulesDir, "")
+	if len(paths) != 0 {
+		t.Fatalf("paths = %v, want none", paths)
+	}
+}
+
+func TestEnterpriseProjectRulePathsKeepsPathUnderProjectsDir(t *testing.T) {
+	t.Setenv("OCR_PROJECT", "group/project")
+	t.Setenv("CI_PROJECT_PATH", "")
+
+	rulesDir := t.TempDir()
+	paths := enterpriseProjectRulePaths(rulesDir, "")
+	if len(paths) != 1 {
+		t.Fatalf("paths len = %d, want 1: %v", len(paths), paths)
+	}
+	want := filepath.Join(rulesDir, "projects", "group", "project", "rule.json")
+	if paths[0] != want {
+		t.Fatalf("path = %q, want %q", paths[0], want)
+	}
+}
+
+func TestNewResolver_ProjectRuleOverridesRulesDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CI_PROJECT_PATH", "group/project")
+
+	repoDir := t.TempDir()
+	ocrDir := filepath.Join(repoDir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir project rule dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(`{"rules":[{"path":"**/*.go","rule":"repo-go"}]}`), 0o644); err != nil {
+		t.Fatalf("write project rule: %v", err)
+	}
+
+	rulesDir := t.TempDir()
+	enterpriseDir := filepath.Join(rulesDir, "projects", "group", "project")
+	if err := os.MkdirAll(enterpriseDir, 0o755); err != nil {
+		t.Fatalf("mkdir enterprise rule dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(enterpriseDir, "rule.json"), []byte(`{"rules":[{"path":"**/*.go","rule":"enterprise-go"}]}`), 0o644); err != nil {
+		t.Fatalf("write enterprise rule: %v", err)
+	}
+
+	resolver, _, err := NewResolverWithOptions(repoDir, ResolverOptions{RulesDir: rulesDir})
+	if err != nil {
+		t.Fatalf("NewResolverWithOptions: %v", err)
+	}
+	if got := resolver.Resolve("main.go"); got != "repo-go" {
+		t.Errorf("expected repo-go, got %q", got)
+	}
+}
+
 func TestNewResolver_ProjectFileMalformed(t *testing.T) {
 	dir := t.TempDir()
 	ocrDir := filepath.Join(dir, ".opencodereview")

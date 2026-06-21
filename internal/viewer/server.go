@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -14,9 +15,29 @@ import (
 var assets embed.FS
 
 func StartServer(addr string) error {
+	return StartServerWithOptions(ServerOptions{Addr: addr})
+}
+
+type ServerOptions struct {
+	Addr       string
+	ReviewsDir string
+}
+
+func StartServerWithOptions(opts ServerOptions) error {
+	addr := opts.Addr
+	if addr == "" {
+		addr = "localhost:5483"
+	}
 	root, err := SessionsRoot()
 	if err != nil {
 		return fmt.Errorf("resolve sessions root: %w", err)
+	}
+	reviewsRoot := opts.ReviewsDir
+	if reviewsRoot == "" {
+		reviewsRoot, err = ReviewsRoot()
+		if err != nil {
+			return fmt.Errorf("resolve reviews root: %w", err)
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -25,12 +46,52 @@ func StartServer(addr string) error {
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
 
 	// Routes
+	mux.HandleFunc("/reviews", func(w http.ResponseWriter, r *http.Request) {
+		handleReviewProjects(w, r, reviewsRoot)
+	})
+	mux.HandleFunc("/reviews/{project}", func(w http.ResponseWriter, r *http.Request) {
+		project := r.PathValue("project")
+		if !isValidPathSegment(project) {
+			http.Error(w, "invalid project path", http.StatusBadRequest)
+			return
+		}
+		handleProjectReviews(w, r, reviewsRoot, project)
+	})
+	mux.HandleFunc("/reviews/{project}/{reviewID}", func(w http.ResponseWriter, r *http.Request) {
+		project := r.PathValue("project")
+		reviewID := r.PathValue("reviewID")
+		if !isValidPathSegment(project) || !isValidPathSegment(reviewID) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		handleReviewDetail(w, r, reviewsRoot, project, reviewID)
+	})
+	mux.HandleFunc("/api/reviews", func(w http.ResponseWriter, r *http.Request) {
+		handleAPIReviews(w, r, reviewsRoot)
+	})
+	mux.HandleFunc("/api/reviews/{project}", func(w http.ResponseWriter, r *http.Request) {
+		project := r.PathValue("project")
+		if !isValidPathSegment(project) {
+			http.Error(w, "invalid project path", http.StatusBadRequest)
+			return
+		}
+		handleAPIProjectReviews(w, r, reviewsRoot, project)
+	})
+	mux.HandleFunc("/api/reviews/{project}/{reviewID}", func(w http.ResponseWriter, r *http.Request) {
+		project := r.PathValue("project")
+		reviewID := r.PathValue("reviewID")
+		if !isValidPathSegment(project) || !isValidPathSegment(reviewID) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		handleAPIReviewDetail(w, r, reviewsRoot, project, reviewID)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		handleRepos(w, r, root)
 	})
 	mux.HandleFunc("/r/{repo}", func(w http.ResponseWriter, r *http.Request) {
 		repo := r.PathValue("repo")
-		if strings.Contains(repo, "..") || strings.Contains(repo, "/") {
+		if !isValidPathSegment(repo) {
 			http.Error(w, "invalid repo path", http.StatusBadRequest)
 			return
 		}
@@ -39,7 +100,7 @@ func StartServer(addr string) error {
 	mux.HandleFunc("/r/{repo}/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
 		repo := r.PathValue("repo")
 		sid := r.PathValue("sessionID")
-		if strings.Contains(repo, "..") || strings.Contains(sid, "..") {
+		if !isValidPathSegment(repo) || !isValidPathSegment(sid) {
 			http.Error(w, "invalid path", http.StatusBadRequest)
 			return
 		}
@@ -60,6 +121,16 @@ func StartServer(addr string) error {
 
 	fmt.Printf("\nOpen browser: http://%s\n", addr)
 	return srv.ListenAndServe()
+}
+
+func isValidPathSegment(segment string) bool {
+	return segment != "" &&
+		segment != "." &&
+		segment != ".." &&
+		!strings.Contains(segment, "/") &&
+		!strings.Contains(segment, `\`) &&
+		!filepath.IsAbs(segment) &&
+		filepath.Base(segment) == segment
 }
 
 var cstZone = func() *time.Location {

@@ -296,11 +296,29 @@ CI統合のコアコマンド：
 ```bash
 ocr review \
   --from "origin/main" \
-  --to "origin/feature-branch" \
+  --to "<commit_sha>" \
   --format json
 ```
 
+`--from`フラグはベースとしてブランチref（例：`origin/main`）またはコミットSHAを受け取り、`--to`はheadとしてコミットSHAまたはブランチrefを受け取ります。CI環境では、fork PR/MRのようにsource branchが`origin` remoteに存在しないケースに対応するため、`--to`にはコミットSHAを使うことを推奨します。
+
 `--format json`フラグは、CIスクリプトでのパースに適した機械可読な結果を出力します。
+
+WebUIや下流サービスで最終レビュー結果を参照する場合は、`--save-result`を追加します。デフォルトでは`~/.opencodereview/reviews`に保存されます。GitLab RunnerやJenkins agentなどのコンテナCIで実行する場合は、`--result-dir`または`OCR_REVIEWS_DIR`を使い、そのディレクトリを永続ストレージにマウントしてください。
+
+```bash
+ocr review \
+  --from "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" \
+  --to "$CI_COMMIT_SHA" \
+  --format json \
+  --save-result \
+  --result-dir /ocr-data/reviews \
+  --result-project "$CI_PROJECT_PATH" \
+  --result-source-branch "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" \
+  --result-target-branch "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+```
+
+CIで企業共有ルールを使う場合は、ルールディレクトリをマウントし、`--rules-dir /ocr-data/rules`を渡すか、`OCR_RULES_DIR=/ocr-data/rules`を設定します。
 
 統合例は[`examples/`](./examples/)ディレクトリを参照してください：
 
@@ -337,6 +355,12 @@ ocr review \
 | `--background` | `-b` | — | レビューのための任意の要件/ビジネスコンテキスト。`--commit`使用時に未指定の場合、コミットメッセージから自動取得 |
 | `--model` | — | — | このレビューでLLMモデルを選択または上書き |
 | `--rule` | — | — | カスタムJSONレビュールールへのパス |
+| `--rules-dir` | — | `OCR_RULES_DIR` | 企業/プロジェクト共有レビュールールのディレクトリ |
+| `--save-result` | — | `false` | WebUI/APIで参照するために最終レビュー結果を保存 |
+| `--result-dir` | — | `OCR_REVIEWS_DIR`または`~/.opencodereview/reviews` | レビュー結果の保存ルート |
+| `--result-project` | — | GitLab `CI_PROJECT_PATH`またはrepo名 | 保存結果のプロジェクト名/パス |
+| `--result-source-branch` | — | GitLab MR source branch | 保存結果のsource branchメタデータ |
+| `--result-target-branch` | — | GitLab MR target branch | 保存結果のtarget branchメタデータ |
 | `--max-tools` | — | 組み込み値 | ファイルごとのツール呼び出しラウンドの上限。テンプレートのデフォルトより大きい場合のみ有効 |
 | `--max-git-procs` | — | 組み込み値 | gitサブプロセスの最大同時実行数 |
 | `--tools` | — | — | カスタムJSONツール設定へのパス |
@@ -371,19 +395,25 @@ ocr review --background "ログインAPIにレート制限を追加"
 
 # カスタムレビュールールを使用
 ocr review --rule /path/to/my-rules.json
+ocr review --rules-dir /ocr-data/rules
+
+# WebUI/APIで参照するために最終レビュー結果を保存
+ocr review --from main --to my-feature --save-result --result-dir /ocr-data/reviews
 
 # ファイルに適用されるルールをプレビュー
 ocr rules check src/main/java/com/example/Foo.java
 ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
+ocr rules check --rules-dir /ocr-data/rules src/main/java/com/example/Foo.java
 
-# ブラウザでレビューセッション履歴を表示
+# ブラウザでレビューセッション履歴と保存済みレビュー結果を表示
 ocr viewer
 ocr viewer --addr :3000
+ocr viewer --addr :5483 --reviews-dir /ocr-data/reviews
 ```
 
 ### ビューアーのセキュリティ
 
-ビューアーはセッションのJSONLコンテンツ（LLMリクエストメッセージとレスポンス）をHTTPで配信します。すべてのリクエストに対してHostヘッダーの許可リストを強制します：ループバック名（`localhost`、`127.0.0.0/8`、`::1`）と実際のバインドホストは常に許可されます。ワイルドカードバインド（`--addr :3000`、`--addr 0.0.0.0:3000`）やその他の非ループバックのホスト名は、環境変数`OCR_VIEWER_ALLOWED_HOSTS`（カンマ区切り）で追加する必要があります：
+ビューアーはセッションのJSONLコンテンツ（LLMリクエストメッセージとレスポンス）と保存済みレビュー結果をHTTPで配信します。すべてのリクエストに対してHostヘッダーの許可リストを強制します：ループバック名（`localhost`、`127.0.0.0/8`、`::1`）と実際のバインドホストは常に許可されます。ワイルドカードバインド（`--addr :3000`、`--addr 0.0.0.0:3000`）やその他の非ループバックのホスト名は、環境変数`OCR_VIEWER_ALLOWED_HOSTS`（カンマ区切り）で追加する必要があります：
 
 ```bash
 OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
@@ -391,20 +421,53 @@ OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
 
 これにより、ローカルビューアーに対するDNSリバインディング攻撃をブロックします。
 
+### 保存済みレビュー結果
+
+`ocr review --save-result`は最終レビュー結果をJSONファイルとして保存します。結果には、プロジェクトメタデータ、利用可能なGitLabメタデータ、source/target branch、MR IID、pipeline/job ID、モデルとtoken使用量、warnings、review commentsが含まれます。
+
+デフォルトの保存先：
+
+```text
+~/.opencodereview/reviews/<encoded-project>/<review-id>.json
+```
+
+CIコンテナでは、マウントされたパスを使うことを推奨します：
+
+```bash
+export OCR_REVIEWS_DIR=/ocr-data/reviews
+ocr review --save-result --from origin/main --to "$CI_COMMIT_SHA"
+ocr viewer --addr :5483 --reviews-dir /ocr-data/reviews
+```
+
+viewerはHTMLページとJSON APIの両方を提供します：
+
+| Endpoint | 説明 |
+|----------|------|
+| `/reviews` | 保存済みレビュー結果を持つプロジェクト一覧 |
+| `/reviews/{project}?source=<branch>&target=<branch>` | branch filter付きで単一プロジェクトのレビューを表示 |
+| `/reviews/{project}/{reviewID}` | レビュー詳細を表示 |
+| `/api/reviews?project=<project>&source=<branch>&target=<branch>` | project/source/targetでfilterできるJSON一覧 |
+| `/api/reviews/{project}?source=<branch>&target=<branch>` | encoded projectごとのJSON一覧 |
+| `/api/reviews/{project}/{reviewID}` | JSONレビュー詳細 |
+
 ## レビュールール
 
-OCRは4層の優先度チェーンを使ってレビュールールを解決します。各層はファーストマッチ優先です：ファイルパスがパターンにマッチすればそのルールが使われ、マッチしなければ次の層にフォールスルーします。
+OCRは階層化された優先度チェーンを使ってレビュールールを解決します。各層はファーストマッチ優先です：ファイルパスがパターンにマッチすればそのルールが使われ、マッチしなければ次の層にフォールスルーします。
 
 | 優先度 | ソース | パス | 説明 |
 |----------|--------|------|-------------|
 | 1（最高） | `--rule`フラグ | ユーザー指定パス | CLIによる明示的なオーバーライド |
 | 2 | プロジェクト設定 | `<repoDir>/.opencodereview/rule.json` | プロジェクトごとのルール。gitにコミット可能 |
-| 3 | グローバル設定 | `~/.opencodereview/rule.json` | ユーザー全体の個人設定 |
-| 4（最低） | システムデフォルト | 組み込みの`system_rules.json` | 一般的な言語とファイルタイプをカバーする組み込みルール |
+| 3 | 企業プロジェクト設定 | `<rules-dir>/projects/<project>/rule.json` | `--rules-dir`または`OCR_RULES_DIR`からのプロジェクト/チーム共有ルール |
+| 4 | 企業グローバル設定 | `<rules-dir>/global.json` | `--rules-dir`または`OCR_RULES_DIR`からの組織全体ルール |
+| 5 | グローバル設定 | `~/.opencodereview/rule.json` | ユーザー全体の個人設定 |
+| 6（最低） | システムデフォルト | 組み込みの`system_rules.json` | 一般的な言語とファイルタイプをカバーする組み込みルール |
+
+企業プロジェクトルールの検索では、`OCR_PROJECT`、GitLab `CI_PROJECT_PATH`、リポジトリディレクトリ名の順にproject keyを使用します。例：`CI_PROJECT_PATH=payments/order-service`は`<rules-dir>/projects/payments/order-service/rule.json`にマップされます。
 
 ### ルールファイルの形式
 
-第1〜3層は同じJSON形式を共有します：
+すべてのカスタムルール層は同じJSON形式を共有します：
 
 ```json
 {
@@ -424,6 +487,17 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 - `path`は`**`による再帰マッチと`{java,kt}`のブレース展開をサポートします。
 - 各層の中では、ルールは宣言順に評価されます — 最初にマッチしたものが採用されます。
 - ルールファイルが存在しない場合は、何も出力せずスキップされます。
+
+企業ルールディレクトリの例：
+
+```text
+/ocr-data/rules/
+  global.json
+  projects/
+    payments/
+      order-service/
+        rule.json
+```
 
 ### パスフィルタリング
 
@@ -452,7 +526,7 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 
 **動作ロジック：**
 
-- `include`と`exclude`はレビュールールと同じ優先度チェーン（`--rule` > プロジェクト設定 > グローバル設定）に従います。**include/excludeが設定されている最も高い優先度の層**が一括で適用され、層を跨いだマージは行われません。
+- `include`と`exclude`はレビュールールと同じ優先度チェーン（`--rule` > プロジェクト設定 > 企業プロジェクト設定 > 企業グローバル設定 > グローバル設定）に従います。**include/excludeが設定されている最も高い優先度の層**が一括で適用され、層を跨いだマージは行われません。
 - `exclude`は常に`include`より優先されます — 両方にマッチするファイルは除外されます。
 - `include`は**組み込みデフォルト除外パターンをバイパスする**ためのものであり（例：テストファイル）、排他的な許可リストではありません — `include`パターンにマッチしないファイルも通常通りデフォルトフィルタチェックに進みます。
 - パターン構文：`**`再帰マッチ、`*`単一セグメントマッチ、`{a,b}`ブレース展開をサポート。マッチングは大文字小文字を区別しません。
@@ -503,6 +577,9 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `OCR_LLM_AUTH_HEADER` | Anthropic認証ヘッダー（`x-api-key`または`authorization`） |
 | `OCR_LLM_MODEL` | モデル名 |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic、`false` = OpenAI |
+| `OCR_REVIEWS_DIR` | `ocr review --save-result`と`ocr viewer --reviews-dir`のデフォルト保存ルート |
+| `OCR_RULES_DIR` | `ocr review --rules-dir`と`ocr rules check --rules-dir`のデフォルト企業ルールディレクトリ |
+| `OCR_PROJECT` | `<rules-dir>/projects/<project>/rule.json`を解決するためのproject key |
 
 
 ## テレメトリー

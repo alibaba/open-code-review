@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review Detail - Open Code Review Viewer</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="breadcrumb"><a href="/">Open Code Review Viewer</a> &rsaquo; <a href="/reviews">Review Results</a> &rsaquo; <a href="/reviews/{{.EncodedProject}}">{{.ProjectName}}</a> &rsaquo; Review {{.Result.ID | truncate 12}}</nav>
+<main>
+<div class="session-header">
+    <h2>Review: {{.Result.ID}}</h2>
+    <div class="meta">
+        <span><strong>Project:</strong> {{.ProjectName}}</span>
+        <span><strong>Mode:</strong> {{if .Result.Review.Mode}}{{.Result.Review.Mode}}{{else}}-{{end}}</span>
+        {{if .Result.Review.SourceBranch}}<span><strong>Source:</strong> <code>{{.Result.Review.SourceBranch}}</code></span>{{end}}
+        {{if .Result.Review.TargetBranch}}<span><strong>Target:</strong> <code>{{.Result.Review.TargetBranch}}</code></span>{{end}}
+        {{if .Result.Review.From}}<span><strong>From:</strong> <code>{{.Result.Review.From}}</code></span>{{end}}
+        {{if .Result.Review.To}}<span><strong>To:</strong> <code>{{.Result.Review.To}}</code></span>{{end}}
+        {{if .Result.Review.Commit}}<span><strong>Commit:</strong> <code>{{.Result.Review.Commit}}</code></span>{{end}}
+        <span><strong>Model:</strong> <code>{{.Result.Review.Model}}</code></span>
+        <span><strong>Created:</strong> {{formatTime .Result.CreatedAt}}</span>
+    </div>
+</div>
+
+<div class="token-summary">
+    <h3>Summary</h3>
+    <div class="token-stats">
+        <div class="token-item">
+            <div class="token-value">{{.Result.Review.CommentCount}}</div>
+            <div class="token-label">Comments</div>
+        </div>
+        <div class="token-item">
+            <div class="token-value">{{.Result.Review.FilesReviewed}}</div>
+            <div class="token-label">Files</div>
+        </div>
+        <div class="token-item">
+            <div class="token-value">{{.Result.Review.TotalTokens}}</div>
+            <div class="token-label">Tokens</div>
+        </div>
+        <div class="token-item">
+            <div class="token-value">{{.Result.Review.Duration}}</div>
+            <div class="token-label">Duration</div>
+        </div>
+    </div>
+    <div class="meta">
+        {{if .Result.GitLab.MergeRequestIID}}<span><strong>MR:</strong> !{{.Result.GitLab.MergeRequestIID}}</span>{{end}}
+        {{if .Result.GitLab.PipelineID}}<span><strong>Pipeline:</strong> {{.Result.GitLab.PipelineID}}</span>{{end}}
+        {{if .Result.GitLab.JobID}}<span><strong>Job:</strong> {{.Result.GitLab.JobID}}</span>{{end}}
+        {{if .Result.Review.SessionID}}<span><strong>Session:</strong> <code>{{.Result.Review.SessionID}}</code></span>{{end}}
+    </div>
+</div>
+
+{{if .Result.Comments}}
+<h3>Comments</h3>
+<div class="conversations">
+{{range .Result.Comments}}
+<div class="review-comment">
+    <div class="review-comment-header">
+        <span class="file-path">{{.Path}}</span>
+        <span class="file-count-badge">L{{.StartLine}}-{{.EndLine}}</span>
+    </div>
+    <div class="review-comment-body">
+        <p>{{.Content}}</p>
+        {{if .ExistingCode}}
+        <div class="code-pair">
+            <div>
+                <div class="tool-section-label">Existing</div>
+                <pre>{{.ExistingCode}}</pre>
+            </div>
+            {{if .SuggestionCode}}
+            <div>
+                <div class="tool-section-label">Suggestion</div>
+                <pre>{{.SuggestionCode}}</pre>
+            </div>
+            {{end}}
+        </div>
+        {{end}}
+    </div>
+</div>
+{{end}}
+</div>
+{{else}}
+<p>No comments generated. Looks good to me.</p>
+{{end}}
+
+{{if .Result.Warnings}}
+<h3>Warnings</h3>
+<table class="table">
+    <thead><tr><th>Type</th><th>File</th><th>Message</th></tr></thead>
+    <tbody>
+    {{range .Result.Warnings}}
+        <tr><td>{{.Type}}</td><td>{{.File}}</td><td>{{.Message}}</td></tr>
+    {{end}}
+    </tbody>
+</table>
+{{end}}
+</main>
+</body>
+</html>

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Reviews - Open Code Review Viewer</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="breadcrumb"><a href="/">Open Code Review Viewer</a> &rsaquo; <a href="/reviews">Review Results</a> &rsaquo; {{.ProjectName}}</nav>
+<main>
+<h2>Reviews: {{.ProjectName}}</h2>
+
+<form class="filter-bar" method="get" action="/reviews/{{.EncodedProject}}">
+    <label>Source <input type="text" name="source" value="{{.SourceBranch}}" placeholder="source branch"></label>
+    <label>Target <input type="text" name="target" value="{{.TargetBranch}}" placeholder="target branch"></label>
+    <button type="submit">Filter</button>
+    <a href="/reviews/{{.EncodedProject}}">Reset</a>
+</form>
+
+{{if .Reviews}}
+<table class="table">
+    <thead><tr><th>Review</th><th>Source</th><th>Target</th><th>Mode</th><th>Comments</th><th>Files</th><th>Model</th><th>Created At</th></tr></thead>
+    <tbody>
+    {{range .Reviews}}
+        <tr>
+            <td><a href="/reviews/{{$.EncodedProject}}/{{.ID}}">{{.ID | truncate 8}}…</a></td>
+            <td>{{if .Review.SourceBranch}}<code>{{.Review.SourceBranch}}</code>{{else}}-{{end}}</td>
+            <td>{{if .Review.TargetBranch}}<code>{{.Review.TargetBranch}}</code>{{else}}-{{end}}</td>
+            <td>{{if .Review.Mode}}{{.Review.Mode}}{{else}}-{{end}}</td>
+            <td>{{.Review.CommentCount}}</td>
+            <td>{{.Review.FilesReviewed}}</td>
+            <td>{{if .Review.Model}}<code>{{.Review.Model}}</code>{{else}}-{{end}}</td>
+            <td>{{formatTime .CreatedAt}}</td>
+        </tr>
+    {{end}}
+    </tbody>
+</table>
+{{else}}
+<p>No review results matched this filter.</p>
+{{end}}
+</main>
+</body>
+</html>

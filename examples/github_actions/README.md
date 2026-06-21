@@ -91,6 +91,52 @@ Use the `--rule` flag to pass a custom rules JSON file:
   run: ocr review --rule ./my-rules.json --from origin/${{ github.base_ref }} --to origin/${{ github.head_ref }}
 ```
 
+For shared enterprise rules, check out or mount a rules directory and pass `--rules-dir`:
+
+```text
+ocr-rules/
+  global.json
+  projects/
+    owner/
+      repo/
+        rule.json
+```
+
+```yaml
+- name: Run OCR review
+  env:
+    OCR_PROJECT: owner/repo
+  run: ocr review --rules-dir ./ocr-rules --from origin/${{ github.base_ref }} --to ${{ github.event.pull_request.head.sha }}
+```
+
+OCR looks up project rules using `OCR_PROJECT`, then CI provider project variables when available, then the repository directory name.
+
+### Persist review results
+
+Use `--save-result` to write final review results as JSON files. In GitHub Actions, upload the result directory as an artifact or sync it to external storage for a long-running `ocr viewer` service.
+
+```yaml
+- name: Run OCR review
+  env:
+    OCR_REVIEWS_DIR: /tmp/ocr-reviews
+  run: |
+    ocr review \
+      --from origin/${{ github.base_ref }} \
+      --to ${{ github.event.pull_request.head.sha }} \
+      --format json \
+      --save-result \
+      --result-dir "$OCR_REVIEWS_DIR" \
+      --result-project "${{ github.repository }}" \
+      --result-source-branch "${{ github.head_ref }}" \
+      --result-target-branch "${{ github.base_ref }}"
+
+- name: Upload OCR review results
+  uses: actions/upload-artifact@v4
+  with:
+    name: ocr-review-results
+    path: /tmp/ocr-reviews
+```
+
 ### Limit concurrency
 
 Adjust the `--concurrency` flag for large PRs to control the number of concurrent LLM requests:
