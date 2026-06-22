@@ -2,21 +2,20 @@
 package template
 
 import (
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
-// Template holds the diff-review task template configuration loaded from
-// task_template.json. Scan-mode fields live in ScanTemplate, not here.
+// Template holds the native agent task template configuration.
+// Scan-mode fields live in ScanTemplate, not here.
 type Template struct {
 	MainTask              LlmConversation  `json:"MAIN_TASK"`
 	PlanTask              *LlmConversation `json:"PLAN_TASK,omitempty"`
 	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	MaxTokens             int              `json:"MAX_TOKENS"`
-	ToolRequestWaitTimeMs int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
-	MaxSubtaskExecMinutes int              `json:"MAX_SUBTASK_EXECUTION_TIME_MINUTES"`
 	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask      *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
@@ -34,44 +33,99 @@ type ScanTemplate struct {
 	ToolRequestWaitTimeMs int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	MaxSubtaskExecMinutes int              `json:"MAX_SUBTASK_EXECUTION_TIME_MINUTES"`
-	// MaxFileSizeBytes is the per-file size cap (bytes) for enumeration.
-	// Defaults to 2 MiB when ≤ 0.
-	MaxFileSizeBytes int64 `json:"MAX_FILE_SIZE_BYTES,omitempty"`
-	// MaxTokensBudget caps total token usage (input+output) for one scan.
-	// Dispatch stops scheduling new batches once exceeded. 0 = unlimited.
-	MaxTokensBudget int64 `json:"MAX_TOKENS_BUDGET,omitempty"`
-	// BatchStrategy controls how files are grouped before per-batch dispatch.
-	// Supported values: "none" (each file is its own batch — v1 behavior),
-	// "by-language" (group by file extension), "by-directory" (group by
-	// first-level subdirectory under repoDir). Empty / unknown → "none".
-	BatchStrategy string `json:"BATCH_STRATEGY,omitempty"`
-	// BatchSize caps the number of files in a single batch. ≤ 0 → no cap.
-	// When a natural batch (e.g. all .go files) exceeds the cap it is sliced
-	// into BatchSize-sized chunks while preserving the strategy ordering.
-	BatchSize int `json:"BATCH_SIZE,omitempty"`
-	// DedupTask, when non-nil, is invoked at the end of each batch to merge
-	// near-duplicate comments produced within that batch.
-	DedupTask *LlmConversation `json:"DEDUP_TASK,omitempty"`
-	// DedupMinComments is the minimum number of comments a batch must
-	// produce before DedupTask is invoked. ≤ 0 → 2 (don't dedup a single
-	// comment; useless cost).
-	DedupMinComments int `json:"DEDUP_MIN_COMMENTS,omitempty"`
-	// ProjectSummaryTask, when non-nil, runs once after all batches finish
-	// and produces a markdown summary of cross-file patterns / hotspots.
-	ProjectSummaryTask *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
+	MaxFileSizeBytes      int64            `json:"MAX_FILE_SIZE_BYTES,omitempty"`
+	MaxTokensBudget       int64            `json:"MAX_TOKENS_BUDGET,omitempty"`
+	BatchStrategy         string           `json:"BATCH_STRATEGY,omitempty"`
+	BatchSize             int              `json:"BATCH_SIZE,omitempty"`
+	DedupTask             *LlmConversation `json:"DEDUP_TASK,omitempty"`
+	DedupMinComments      int              `json:"DEDUP_MIN_COMMENTS,omitempty"`
+	ProjectSummaryTask    *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
 }
 
-//go:embed task_template.json
-var defaultTemplate []byte
+//go:embed task_template.json prompts/*
+var templateFS embed.FS
 
 //go:embed scan_template.json
 var defaultScanTemplate []byte
 
-// LoadDefault parses the embedded task_template.json.
+type manifestMessage struct {
+	Role       string `json:"role"`
+	PromptFile string `json:"prompt_file"`
+}
+
+type manifestConversation struct {
+	Timeout  int               `json:"timeout"`
+	Messages []manifestMessage `json:"messages"`
+}
+
+type templateManifest struct {
+	MainTask              manifestConversation  `json:"MAIN_TASK"`
+	PlanTask              *manifestConversation `json:"PLAN_TASK,omitempty"`
+	MemoryCompressionTask manifestConversation  `json:"MEMORY_COMPRESSION_TASK"`
+	MaxTokens             int                   `json:"MAX_TOKENS"`
+	MaxToolRequestTimes   int                   `json:"MAX_TOOL_REQUEST_TIMES"`
+	PlanModeLineThreshold int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
+	ReLocationTask        *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
+	ReviewFilterTask      *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+}
+
+func resolveConversation(m manifestConversation) (LlmConversation, error) {
+	conv := LlmConversation{Timeout: m.Timeout}
+	conv.Messages = make([]ChatMessage, len(m.Messages))
+	for i, mm := range m.Messages {
+		data, err := templateFS.ReadFile("prompts/" + mm.PromptFile)
+		if err != nil {
+			return LlmConversation{}, fmt.Errorf("read prompt file %q: %w", mm.PromptFile, err)
+		}
+		conv.Messages[i] = ChatMessage{
+			Role:    mm.Role,
+			Content: strings.TrimRight(string(data), "\r\n"),
+		}
+	}
+	return conv, nil
+}
+
+func resolveOptionalConversation(m *manifestConversation, name string) (*LlmConversation, error) {
+	if m == nil {
+		return nil, nil
+	}
+	conv, err := resolveConversation(*m)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	return &conv, nil
+}
+
+// LoadDefault parses the embedded task_template.json and resolves prompt file references.
 func LoadDefault() (*Template, error) {
+	data, err := templateFS.ReadFile("task_template.json")
+	if err != nil {
+		return nil, fmt.Errorf("read embedded task_template.json: %w", err)
+	}
+	var m templateManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("unmarshal task_template manifest: %w", err)
+	}
+
 	var tpl Template
-	if err := json.Unmarshal(defaultTemplate, &tpl); err != nil {
-		return nil, fmt.Errorf("unmarshal default template: %w", err)
+	tpl.MaxTokens = m.MaxTokens
+	tpl.MaxToolRequestTimes = m.MaxToolRequestTimes
+	tpl.PlanModeLineThreshold = m.PlanModeLineThreshold
+
+	if tpl.MainTask, err = resolveConversation(m.MainTask); err != nil {
+		return nil, fmt.Errorf("MAIN_TASK: %w", err)
+	}
+	if tpl.PlanTask, err = resolveOptionalConversation(m.PlanTask, "PLAN_TASK"); err != nil {
+		return nil, err
+	}
+	if tpl.MemoryCompressionTask, err = resolveConversation(m.MemoryCompressionTask); err != nil {
+		return nil, fmt.Errorf("MEMORY_COMPRESSION_TASK: %w", err)
+	}
+	if tpl.ReLocationTask, err = resolveOptionalConversation(m.ReLocationTask, "RE_LOCATION_TASK"); err != nil {
+		return nil, err
+	}
+	if tpl.ReviewFilterTask, err = resolveOptionalConversation(m.ReviewFilterTask, "REVIEW_FILTER_TASK"); err != nil {
+		return nil, err
 	}
 	return &tpl, nil
 }

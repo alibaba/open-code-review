@@ -360,6 +360,7 @@ body {
   inset: -1px;
   border-radius: inherit;
   padding: 1px;
+  pointer-events: none;
   background: linear-gradient(135deg, #22c55e, #06b6d4, #8b5cf6, #22c55e);
   background-size: 300% 300%;
   animation: gradientShift 6s ease infinite;

@@ -35,13 +35,13 @@ const HighlightsSection: React.FC = () => {
     },
     {
       label: t('highlights.stat3Label'),
-      value: '1/5',
+      value: t('highlights.stat3Value'),
       caption: t('highlights.stat3Caption'),
       delay: 200,
     },
     {
       label: t('highlights.stat4Label'),
-      value: '26.1%',
+      value: t('highlights.stat4Value'),
       caption: t('highlights.stat4Caption'),
       delay: 300,
     },

@@ -14,7 +14,7 @@ export const zh: TranslationKeys = {
   'hero.description': 'Open Code Review 将阿里巴巴经大规模生产验证的代码评审 Agent 带入你的工作流。接入任意 LLM，数据完全私有，获得开发者真正愿意采纳的评审意见。',
   'hero.pill1': '采纳率 > 30%',
   'hero.pill2': '数据本地闭环',
-  'hero.pill3': 'Token 消耗仅 1/5',
+  'hero.pill3': 'Token 消耗仅 1/9',
   'hero.cta1': '快速开始',
   'hero.cta2': '查看基准测试',
   'hero.users': '2 万+ 活跃用户',
@@ -30,8 +30,10 @@ export const zh: TranslationKeys = {
   'highlights.stat2Value': '1M+',
   'highlights.stat2Caption': '累计运行代码评审任务',
   'highlights.stat3Label': 'Token 效率',
-  'highlights.stat3Caption': '相比通用 Agent + Skills 方案',
+  'highlights.stat3Value': '1/9',
+  'highlights.stat3Caption': '相比 Claude Code · 基于 1,000 次 PR 评审',
   'highlights.stat4Label': 'AACR-Bench',
+  'highlights.stat4Value': '25.1%',
   'highlights.stat4Caption': 'SEM.F1 基准测试得分',
 
   // Why Section
@@ -64,7 +66,10 @@ export const zh: TranslationKeys = {
   // Benchmark Section
   'benchmark.sectionLabel': '开放基准测试',
   'benchmark.title': '80+ 位资深工程师交叉标注验证',
-  'benchmark.subtitle': '基于真实场景的 CodeReview 基准测试，从 50 个热门开源仓库中精选 200 个真实的 PullRequest，覆盖 10 种编程语言、多种问题类型与不同的变更规模，并由 80+ 位资深工程师交叉标注完成。',
+  'benchmark.subtitlePreRepos': '基于真实场景的 CodeReview 基准测试，从 ',
+  'benchmark.subtitlePrePRs': ' 个热门开源仓库中精选 ',
+  'benchmark.subtitlePreLangs': ' 个真实的 PullRequest，覆盖 ',
+  'benchmark.subtitleEnd': ' 种编程语言、多种问题类型与不同的变更规模。',
   'benchmark.legendOcr': 'Open Code Review',
   'benchmark.legendCc': 'Claude Code · /code-review',
   'benchmark.colRank': '排名',

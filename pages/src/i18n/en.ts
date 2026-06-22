@@ -14,7 +14,7 @@ export const en: TranslationKeys = {
   'hero.description': 'Open Code Review brings Alibaba\'s battle-tested code review Agent into your workflow. Connect any LLM, keep data fully private, and get review comments developers actually adopt.',
   'hero.pill1': 'Adoption Rate > 30%',
   'hero.pill2': 'Data Stays Local',
-  'hero.pill3': 'Token Cost Only 1/5',
+  'hero.pill3': 'Token Cost Only 1/9',
   'hero.cta1': 'Quick Start',
   'hero.cta2': 'View Benchmark',
   'hero.users': '20K+ Active Users',
@@ -30,8 +30,10 @@ export const en: TranslationKeys = {
   'highlights.stat2Value': '1M+',
   'highlights.stat2Caption': 'Code review tasks executed',
   'highlights.stat3Label': 'Token Cost',
-  'highlights.stat3Caption': 'vs. generic Agent + Skills',
+  'highlights.stat3Value': '1/9',
+  'highlights.stat3Caption': 'vs. Claude Code · 1,000 PRs',
   'highlights.stat4Label': 'AACR-Bench',
+  'highlights.stat4Value': '25.1%',
   'highlights.stat4Caption': 'SEM.F1 benchmark score',
 
   // Why Section
@@ -64,7 +66,10 @@ export const en: TranslationKeys = {
   // Benchmark Section
   'benchmark.sectionLabel': 'Open Benchmark',
   'benchmark.title': 'Cross-Validated by 80+ Senior Engineers',
-  'benchmark.subtitle': 'A real-world CodeReview benchmark comprising 200 real PullRequests selected from 50 popular open-source repositories, covering 10 programming languages, diverse issue types, and varying changeset sizes, cross-annotated by 80+ senior engineers.',
+  'benchmark.subtitlePreRepos': 'A real-world CodeReview benchmark selecting from ',
+  'benchmark.subtitlePrePRs': ' popular open-source repositories, comprising ',
+  'benchmark.subtitlePreLangs': ' real PullRequests, covering ',
+  'benchmark.subtitleEnd': ' programming languages, diverse issue types, and varying changeset sizes.',
   'benchmark.legendOcr': 'Open Code Review',
   'benchmark.legendCc': 'Claude Code · /code-review',
   'benchmark.colRank': 'Rank',

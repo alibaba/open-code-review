@@ -91,6 +91,22 @@ Use the `--rule` flag to pass a custom rules JSON file:
   run: ocr review --rule ./my-rules.json --from origin/${{ github.base_ref }} --to origin/${{ github.head_ref }}
 ```
 
+### Adjust retry and delay settings
+
+When posting review comments individually (fallback mode), the workflow includes rate-limit handling with exponential backoff. The retry strategy follows GitHub's documented guidance for REST API rate limits — see [Rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2026-03-10) for details on primary/secondary rate limits and recommended retry behavior. You can configure the retry and delay behavior via **repository variables** (Settings → Secrets and variables → Actions → Variables):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OCR_RETRY_BASE_DELAY` | `60000` | Base delay (ms) for exponential backoff when no retry header is present (per GitHub's "at least one minute" recommendation for secondary limits) |
+| `OCR_RETRY_MAX_DELAY` | `300000` | Maximum delay (ms) cap applied to every computed wait, including retry-after and x-ratelimit-reset, so a far-future reset cannot stall the job past its timeout |
+| `OCR_MAX_RETRIES` | `3` | Maximum retry attempts per comment when rate-limited |
+| `OCR_SUCCESS_DELAY` | `2000` | Delay (ms) after a successful comment post to pace subsequent requests |
+| `OCR_FAILURE_DELAY` | `1000` | Delay (ms) after a non-rate-limit failure to pace subsequent requests |
+| `OCR_LOW_REMAINING_THRESHOLD` | `3` | When x-ratelimit-remaining is at or below this value, proactively increase request spacing to avoid hitting the limit |
+| `OCR_LOW_REMAINING_SPACING` | `10000` | Request spacing (ms) used when remaining quota is low |
+
+These variables are optional — if not configured, sensible defaults are used. Consider increasing delays for repositories with many concurrent workflows or large PRs that generate numerous review comments.
+
 ### Limit concurrency
 
 Adjust the `--concurrency` flag for large PRs to control the number of concurrent LLM requests:

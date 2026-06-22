@@ -20,6 +20,7 @@ interface BenchmarkEntry {
 
 const OCR_VERSION = 'v1.3.1';
 const CC_VERSION = 'v2.1.169';
+const CODEX_VERSION = 'v0.140.0';
 
 const sourceColorMap: Record<string, string> = {
   ocr: 'text-brand-400',
@@ -153,7 +154,21 @@ const benchmarkData: BenchmarkEntry[] = [
     avgOutputToken: '44K',
     avgTotalToken: '5153K',
   },
-  { model: 'Claude-4.8-Opus', company: 'Anthropic', sourceType: 'cc', version: CC_VERSION },
+  {
+    model: 'Claude-4.8-Opus',
+    company: 'Anthropic',
+    sourceType: 'cc',
+    version: CC_VERSION,
+    precision: 15.93,
+    precisionDetail: '191/1200',
+    recall: 12.70,
+    recallDetail: '191/1505',
+    f1: 14.13,
+    avgTime: '5m38s',
+    avgInputToken: '2,039K',
+    avgOutputToken: '23K',
+    avgTotalToken: '2,062K',
+  },
   {
     model: 'Deepseek-V4-Pro',
     company: 'DeepSeek',
@@ -169,8 +184,36 @@ const benchmarkData: BenchmarkEntry[] = [
     avgOutputToken: '60K',
     avgTotalToken: '5450K',
   },
-  { model: 'GLM-5.1', company: 'Zhipu AI', sourceType: 'cc', version: CC_VERSION },
-  { model: 'GPT-5.5', company: 'OpenAI', sourceType: 'codex', version: '' },
+  {
+    model: 'GLM-5.1',
+    company: 'Zhipu AI',
+    sourceType: 'cc',
+    version: CC_VERSION,
+    precision: 8.37,
+    precisionDetail: '313/3742',
+    recall: 20.80,
+    recallDetail: '313/1505',
+    f1: 11.93,
+    avgTime: '14m10s',
+    avgInputToken: '3,998K',
+    avgOutputToken: '39K',
+    avgTotalToken: '4,038K',
+  },
+  {
+    model: 'GPT-5.5',
+    company: 'OpenAI',
+    sourceType: 'codex',
+    version: CODEX_VERSION,
+    precision: 27.82,
+    precisionDetail: '74/266',
+    recall: 4.92,
+    recallDetail: '74/1505',
+    f1: 8.36,
+    avgTime: '2m58s',
+    avgInputToken: '520K',
+    avgOutputToken: '5K',
+    avgTotalToken: '525K',
+  },
 ];
 
 const medalIcons: Record<string, string> = {
@@ -196,15 +239,20 @@ function computeMedals(
   return medals;
 }
 
+type SortField = 'f1' | 'precision' | 'recall';
+
 const BenchmarkSection: React.FC = () => {
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
+  const [sortField, setSortField] = useState<SortField>('f1');
   const { t } = useTranslation();
 
   const sortedData = [...benchmarkData].sort((a, b) => {
-    if (a.f1 == null && b.f1 == null) return 0;
-    if (a.f1 == null) return 1;
-    if (b.f1 == null) return -1;
-    return b.f1 - a.f1;
+    const av = a[sortField];
+    const bv = b[sortField];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return bv - av;
   });
 
   const precisionMedals = computeMedals(sortedData, 'precision');
@@ -213,7 +261,7 @@ const BenchmarkSection: React.FC = () => {
   const ranks = new Map<number, number>();
   let rank = 0;
   sortedData.forEach((entry, index) => {
-    if (entry.f1 != null) {
+    if (entry[sortField] != null) {
       rank++;
       ranks.set(index, rank);
     }
@@ -234,7 +282,13 @@ const BenchmarkSection: React.FC = () => {
               {t('benchmark.title')}
             </h2>
             <p className="text-slate-400 max-w-4xl mx-auto">
-              {t('benchmark.subtitle')}
+              {t('benchmark.subtitlePreRepos')}
+              <span className="text-white font-semibold">50</span>
+              {t('benchmark.subtitlePrePRs')}
+              <span className="text-white font-semibold">200</span>
+              {t('benchmark.subtitlePreLangs')}
+              <span className="text-white font-semibold">10</span>
+              {t('benchmark.subtitleEnd')}
             </p>
           </div>
 
@@ -250,7 +304,7 @@ const BenchmarkSection: React.FC = () => {
             </div>
             <div className="flex items-center gap-1.5 text-xs">
               <OpenAIIcon className="w-4 h-4" />
-              <span className="text-[#10a37f] font-medium">Codex · /code-review</span>
+              <span className="text-[#10a37f] font-medium">Codex · {CODEX_VERSION} · /review</span>
             </div>
           </div>
 
@@ -261,9 +315,23 @@ const BenchmarkSection: React.FC = () => {
               <div>{t('benchmark.colRank')}</div>
               <div>{t('benchmark.colModel')}</div>
               <div>{t('benchmark.colSource')}</div>
-              <div>F1</div>
-              <div>{t('benchmark.colPrecision')}</div>
-              <div>{t('benchmark.colRecall')}</div>
+              {(['f1', 'precision', 'recall'] as const).map((field) => {
+                const labels: Record<SortField, string> = {
+                  f1: 'F1',
+                  precision: t('benchmark.colPrecision'),
+                  recall: t('benchmark.colRecall'),
+                };
+                return (
+                  <div
+                    key={field}
+                    className={`cursor-pointer select-none transition-colors hover:text-slate-300 ${sortField === field ? 'text-brand-400' : ''}`}
+                    onClick={() => setSortField(field)}
+                  >
+                    {labels[field]}
+                    <span className={`ml-1 ${sortField === field ? 'opacity-100' : 'opacity-30'}`}>▼</span>
+                  </div>
+                );
+              })}
               <div>{t('benchmark.colAvgTime')}</div>
               <div>{t('benchmark.colAvgToken')}</div>
             </div>
@@ -320,7 +388,7 @@ const BenchmarkSection: React.FC = () => {
                     {entry.f1 != null ? (
                       <span
                         className={`text-sm font-bold ${
-                          entryRank != null && entryRank <= 3 ? 'text-brand-400' : 'text-white'
+                          sortField === 'f1' && entryRank != null && entryRank <= 3 ? 'text-brand-400' : 'text-white'
                         }`}
                       >
                         {entry.f1.toFixed(2)}%

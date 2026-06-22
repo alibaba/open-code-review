@@ -4,6 +4,14 @@
   </a>
 </p>
 <p align="center">AI-агент код-ревью с открытым исходным кодом.</p>
+
+---
+
+<p align="center">
+  <a href="https://trendshift.io/repositories/41087" target="_blank">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 320px; height: 70px;" width="320" height="70" />
+  </a>
+</p>
 <p align="center">
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
@@ -23,6 +31,22 @@ Open Code Review — это CLI-инструмент для код-ревью н
 Инструмент читает git-диффы, отправляет изменённые файлы настраиваемой LLM через агента с поддержкой вызова инструментов (tool use) и генерирует структурированные ревью-комментарии с точностью до строки. Агент может читать полное содержимое файлов, искать по кодовой базе, заглядывать в другие изменённые файлы за контекстом и выполнять глубокое ревью — а не только давать поверхностные замечания по диффу.
 
 ![Highlights](imgs/highlights-en.png)
+
+## Бенчмарк
+
+> По сравнению с агентами общего назначения (Claude Code), Open Code Review при той же базовой модели достигает значительно более высоких показателей **Precision** и **F1**, потребляя лишь **~1/9 токенов** и выполняя ревью быстрее. При этом показатель Recall ниже, чем у агентов общего назначения — это осознанный компромисс в пользу точности и минимального шума.
+
+Бенчмарк на основе реальных код-ревью: **50** популярных open-source-репозиториев, **200** реальных Pull Request, **10** языков программирования — перекрёстная валидация 80+ старшими инженерами (**1 505** размеченных дефектов).
+
+| Метрика | Что измеряет | Почему важна |
+|---------|-------------|--------------|
+| **F1** | Гармоническое среднее precision и recall | Лучший единый показатель качества ревью |
+| **Precision** | % найденных проблем, являющихся реальными дефектами | Выше = меньше ложных срабатываний |
+| **Recall** | % реальных дефектов, которые были найдены | Выше = меньше пропущенных проблем |
+| **Avg Time** | Время выполнения одного ревью | Влияет на задержки в CI-пайплайне |
+| **Avg Token** | Суммарное потребление токенов за ревью | Прямо влияет на стоимость API |
+
+![Benchmark](imgs/benchmark-en.png)
 
 ## Почему Open Code Review?
 

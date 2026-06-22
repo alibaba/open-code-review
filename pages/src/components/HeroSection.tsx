@@ -158,7 +158,7 @@ const HeroSection: React.FC = () => {
           {/* F1 badge */}
           <div className="absolute -top-4 -right-4 floating-badge">
             <div className="rank-badge px-3 py-2 rounded-xl text-xs font-mono text-brand-400 backdrop-blur-md">
-              <div className="text-lg font-bold">F1: 26.1%</div>
+              <div className="text-lg font-bold">F1: {t('highlights.stat4Value')}</div>
               <div className="text-slate-500">{t('hero.badgeLabel')}</div>
             </div>
           </div>

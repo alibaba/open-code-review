@@ -4,6 +4,14 @@
   </a>
 </p>
 <p align="center">The open source AI code review agent.</p>
+
+---
+
+<p align="center">
+  <a href="https://trendshift.io/repositories/41087" target="_blank">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 320px; height: 70px;" width="320" height="70" />
+  </a>
+</p>
 <p align="center">
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
@@ -23,6 +31,22 @@ Open Code Review is an AI-powered code review CLI tool. It originated as Alibaba
 It reads Git diffs, sends changed files to a configurable LLM via an agent with tool-use capabilities, and generates structured review comments with line-level precision. The agent can read full file contents, search the codebase, inspect other changed files for context, and produce deep reviews — not just surface-level diff feedback. Beyond diff review, `ocr scan` reviews entire files for auditing unfamiliar codebases or directories that have no meaningful diff.
 
 ![Highlights](imgs/highlights-en.png)
+
+## Benchmark
+
+> Compared to general-purpose agents (Claude Code), Open Code Review achieves significantly higher **Precision** and **F1** with the same underlying model, while consuming only **~1/9 of the tokens** and completing reviews faster. Note that its Recall is lower than general-purpose agents — a deliberate trade-off favoring precision over noise.
+
+A real-world code review benchmark built from **50** popular open-source repositories, **200** real Pull Requests, and **10** programming languages — cross-validated by 80+ senior engineers (**1,505** annotated ground-truth issues).
+
+| Metric | What it measures | Why it matters |
+|--------|-----------------|----------------|
+| **F1** | Harmonic mean of precision and recall | Best single number for overall review quality |
+| **Precision** | % of reported issues that are real defects | Higher = fewer false alarms to triage |
+| **Recall** | % of real defects that are found | Higher = fewer issues slip through review |
+| **Avg Time** | Wall-clock time per review | Matters for CI pipeline latency |
+| **Avg Token** | Total tokens consumed per review | Directly impacts API cost |
+
+![Benchmark](imgs/benchmark-en.png)
 
 ## Why Open Code Review?
 

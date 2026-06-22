@@ -20,6 +20,7 @@ temp/
 
 # Ignore downloaded Go binary, but keep JS entry point
 !bin/ocr.js
+bin/ocr
 bin/opencodereview
 
 /opencodereview
