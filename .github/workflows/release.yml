@@ -61,6 +61,70 @@ jobs:
     container:
       image: ubuntu:24.04
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Trust workspace
+        run: git config --global safe.directory '*'
+
+      - name: Generate release notes from commits
+        id: notes
+        run: |
+          CURRENT_TAG="${GITHUB_REF_NAME}"
+          PREV_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            RANGE="$CURRENT_TAG"
+          else
+            RANGE="${PREV_TAG}..${CURRENT_TAG}"
+          fi
+
+          FEATS=""
+          FIXES=""
+          REFACTORS=""
+          DOCS=""
+          OTHERS=""
+
+          while IFS= read -r line; do
+            msg="${line#* }"
+            case "$msg" in
+              feat*)  FEATS="${FEATS}- ${msg}
+          ";;
+              fix*)   FIXES="${FIXES}- ${msg}
+          ";;
+              refactor*) REFACTORS="${REFACTORS}- ${msg}
+          ";;
+              docs*)  DOCS="${DOCS}- ${msg}
+          ";;
+              *)      OTHERS="${OTHERS}- ${msg}
+          ";;
+            esac
+          done < <(git log --oneline --no-merges "$RANGE")
+
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            if [ -n "$FEATS" ]; then
+              printf '## 🚀 Features\n\n%s\n' "$FEATS"
+            fi
+            if [ -n "$FIXES" ]; then
+              printf '## 🐛 Bug Fixes\n\n%s\n' "$FIXES"
+            fi
+            if [ -n "$REFACTORS" ]; then
+              printf '## 🔧 Refactoring\n\n%s\n' "$REFACTORS"
+            fi
+            if [ -n "$DOCS" ]; then
+              printf '## 📖 Documentation\n\n%s\n' "$DOCS"
+            fi
+            if [ -n "$OTHERS" ]; then
+              printf '## Other Changes\n\n%s\n' "$OTHERS"
+            fi
+            if [ -n "$PREV_TAG" ]; then
+              printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' "$GITHUB_REPOSITORY" "$PREV_TAG" "$CURRENT_TAG"
+            fi
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v4
         with:
           pattern: binary-*
@@ -72,10 +136,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          body: ${{ steps.notes.outputs.body }}
           files: |
             opencodereview-*
             sha256sum.txt
-          generate_release_notes: true
 
   npm-publish:
     needs: release
