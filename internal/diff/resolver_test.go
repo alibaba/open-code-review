@@ -117,6 +117,25 @@ import "fmt"`},
 	}
 }
 
+func TestResolveLineNumbers_FallbackToFileContent_BlankLines(t *testing.T) {
+	// Hunk match fails; fallback must match across blank lines in NewFileContent.
+	diffs := []model.Diff{{
+		NewPath:        "main.go",
+		NewFileContent: "package main\n\nfunc foo() {\n\n\treturn 1\n}",
+		Diff:           "@@ -1,2 +1,2 @@\n-old\n+new",
+	}}
+	comments := []model.LlmComment{{
+		Path:         "main.go",
+		ExistingCode: "func foo() {\n\treturn 1\n}",
+	}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 3 || cm.EndLine != 6 {
+		t.Errorf("fallback with blank lines: expected 3..6, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
 func TestResolveLineNumbers_NoMatchKeepsZero(t *testing.T) {
 	diffs := []model.Diff{
 		{NewPath: "test.go", Diff: testDiff},

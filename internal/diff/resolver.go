@@ -177,7 +177,9 @@ func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
 		return false
 	}
 
-	// Normalize file lines the same way as target (skip blanks) and track actual line numbers.
+	// Normalize file lines the same way as target: skip blanks so that
+	// blank lines in the source don't break the sliding-window match.
+	// "Consecutive" here means adjacent non-blank lines.
 	normalizedFileLines := make([]string, 0, len(fileLines))
 	fileLineNums := make([]int, 0, len(fileLines))
 	for i, line := range fileLines {
