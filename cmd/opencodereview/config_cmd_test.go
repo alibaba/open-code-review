@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -258,20 +257,11 @@ func TestUnsetCustomProvider(t *testing.T) {
 		t.Fatalf("saveConfig: %v", err)
 	}
 
+	if err := unsetCustomProvider(configPath, "my-gateway"); err != nil {
+		t.Fatalf("unsetCustomProvider: %v", err)
+	}
+
 	cfg, err := loadOrCreateConfig(configPath)
-	if err != nil {
-		t.Fatalf("loadOrCreateConfig: %v", err)
-	}
-
-	delete(cfg.CustomProviders, "my-gateway")
-	if len(cfg.CustomProviders) == 0 {
-		cfg.CustomProviders = nil
-	}
-	if err := saveConfig(configPath, cfg); err != nil {
-		t.Fatalf("saveConfig: %v", err)
-	}
-
-	cfg, err = loadOrCreateConfig(configPath)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -284,6 +274,9 @@ func TestUnsetCustomProvider(t *testing.T) {
 }
 
 func TestUnsetActiveCustomProvider(t *testing.T) {
+	dir := t.TempDir()
+	configPath := dir + "/config.json"
+
 	cfg := &Config{
 		Provider: "my-gateway",
 		Model:    "fallback-model",
@@ -292,21 +285,25 @@ func TestUnsetActiveCustomProvider(t *testing.T) {
 			"other-gateway": {URL: "https://other.example.com/v1", Protocol: "openai", Model: "other-model"},
 		},
 	}
-
-	name := "my-gateway"
-	if cfg.Provider == name {
-		cfg.Provider = ""
-		cfg.Model = ""
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
 	}
-	delete(cfg.CustomProviders, name)
 
+	if err := unsetCustomProvider(configPath, "my-gateway"); err != nil {
+		t.Fatalf("unsetCustomProvider: %v", err)
+	}
+
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
 	if cfg.Provider != "" {
 		t.Errorf("Provider = %q, want empty after deleting active provider", cfg.Provider)
 	}
 	if cfg.Model != "" {
 		t.Errorf("Model = %q, want empty after deleting active provider", cfg.Model)
 	}
-	if _, exists := cfg.CustomProviders[name]; exists {
+	if _, exists := cfg.CustomProviders["my-gateway"]; exists {
 		t.Error("my-gateway should have been deleted")
 	}
 	if _, exists := cfg.CustomProviders["other-gateway"]; !exists {
@@ -315,23 +312,30 @@ func TestUnsetActiveCustomProvider(t *testing.T) {
 }
 
 func TestUnsetInvalidKey(t *testing.T) {
+	dir := t.TempDir()
+	configPath := dir + "/config.json"
+
+	cfg := &Config{
+		CustomProviders: map[string]ProviderEntry{
+			"my-gateway": {URL: "https://gw.example.com/v1"},
+		},
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
 	tests := []struct {
-		key     string
+		name    string
 		wantErr bool
 	}{
-		{"custom_providers.my-gateway", false},
-		{"llm.url", true},
-		{"providers.anthropic", true},
-		{"custom_providers.", true},
-		{"custom_providers", true},
-		{"something", true},
+		{"my-gateway", false},
+		{"nonexistent", true},
 	}
 
 	for _, tt := range tests {
-		parts := strings.SplitN(tt.key, ".", 2)
-		isValid := len(parts) == 2 && parts[0] == "custom_providers" && parts[1] != ""
-		if isValid == tt.wantErr {
-			t.Errorf("key %q: valid=%v, wantErr=%v", tt.key, isValid, tt.wantErr)
+		err := unsetCustomProvider(configPath, tt.name)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("unsetCustomProvider(%q): err=%v, wantErr=%v", tt.name, err, tt.wantErr)
 		}
 	}
 }

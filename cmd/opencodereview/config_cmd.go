@@ -94,16 +94,40 @@ func runConfigUnset(key string) error {
 		return err
 	}
 
+	return unsetCustomProvider(configPath, name)
+}
+
+func unsetCustomProvider(configPath, name string) error {
 	cfg, err := loadOrCreateConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	wasActive, err := deleteCustomProvider(cfg, name)
+	if err != nil {
+		return err
+	}
+
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("Deleted custom provider %q.\n", name)
+	if wasActive {
+		fmt.Println("This was the active provider; 'provider' and 'model' have been cleared.")
+		fmt.Println("Run 'ocr config provider' to select a new provider.")
+	}
+	return nil
+}
+
+// deleteCustomProvider removes a custom provider from cfg in memory.
+// Returns true if the deleted provider was the active one.
+func deleteCustomProvider(cfg *Config, name string) (bool, error) {
 	if cfg.CustomProviders == nil {
-		return fmt.Errorf("custom provider %q not found", name)
+		return false, fmt.Errorf("custom provider %q not found", name)
 	}
 	if _, exists := cfg.CustomProviders[name]; !exists {
-		return fmt.Errorf("custom provider %q not found", name)
+		return false, fmt.Errorf("custom provider %q not found", name)
 	}
 
 	wasActive := cfg.Provider == name
@@ -117,16 +141,7 @@ func runConfigUnset(key string) error {
 		cfg.Model = ""
 	}
 
-	if err := saveConfig(configPath, cfg); err != nil {
-		return err
-	}
-
-	fmt.Printf("Deleted custom provider %q.\n", name)
-	if wasActive {
-		fmt.Println("This was the active provider; 'provider' and 'model' have been cleared.")
-		fmt.Println("Run 'ocr config provider' to select a new provider.")
-	}
-	return nil
+	return wasActive, nil
 }
 
 // ProviderEntry holds per-provider configuration in the providers map.

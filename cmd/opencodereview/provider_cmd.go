@@ -65,18 +65,14 @@ func runConfigProvider() error {
 func applyProviderDeletions(configPath string, cfg *Config, names []string) (bool, error) {
 	clearedActive := false
 	for _, name := range names {
-		if cfg.CustomProviders != nil {
-			delete(cfg.CustomProviders, name)
+		wasActive, err := deleteCustomProvider(cfg, name)
+		if err != nil {
+			continue
 		}
-		if cfg.Provider == name {
-			cfg.Provider = ""
-			cfg.Model = ""
+		if wasActive {
 			clearedActive = true
 		}
 		fmt.Printf("Deleted custom provider %q.\n", name)
-	}
-	if len(cfg.CustomProviders) == 0 {
-		cfg.CustomProviders = nil
 	}
 	if err := saveConfig(configPath, cfg); err != nil {
 		return false, err
