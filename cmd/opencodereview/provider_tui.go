@@ -669,8 +669,15 @@ func (m providerTUIModel) updateManualForm(key string, msg tea.KeyPressMsg) (tea
 func (m providerTUIModel) updateDeleteConfirm(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "y", "Y":
+		if m.deleteTargetIdx < 0 || m.deleteTargetIdx >= len(m.customProviders) {
+			m.confirmingDelete = false
+			return m, nil
+		}
 		m.deletedProviders = append(m.deletedProviders, m.deleteTargetName)
-		m.customProviders = append(m.customProviders[:m.deleteTargetIdx], m.customProviders[m.deleteTargetIdx+1:]...)
+		newList := make([]customProviderListItem, 0, len(m.customProviders)-1)
+		newList = append(newList, m.customProviders[:m.deleteTargetIdx]...)
+		newList = append(newList, m.customProviders[m.deleteTargetIdx+1:]...)
+		m.customProviders = newList
 		if m.customIdx >= len(m.customProviders) && m.customIdx > 0 {
 			m.customIdx = len(m.customProviders) - 1
 		}

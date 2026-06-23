@@ -233,7 +233,7 @@ Flags:
 // --- config subcommand ---
 
 type configAction struct {
-	subCmd string // "set"
+	subCmd string // "set", "unset"
 	key    string
 	value  string
 }
