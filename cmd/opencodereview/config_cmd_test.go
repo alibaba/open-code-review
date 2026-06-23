@@ -312,18 +312,6 @@ func TestUnsetActiveCustomProvider(t *testing.T) {
 }
 
 func TestUnsetInvalidKey(t *testing.T) {
-	dir := t.TempDir()
-	configPath := dir + "/config.json"
-
-	cfg := &Config{
-		CustomProviders: map[string]ProviderEntry{
-			"my-gateway": {URL: "https://gw.example.com/v1"},
-		},
-	}
-	if err := saveConfig(configPath, cfg); err != nil {
-		t.Fatalf("saveConfig: %v", err)
-	}
-
 	tests := []struct {
 		name    string
 		wantErr bool
@@ -333,9 +321,21 @@ func TestUnsetInvalidKey(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		err := unsetCustomProvider(configPath, tt.name)
-		if (err != nil) != tt.wantErr {
-			t.Errorf("unsetCustomProvider(%q): err=%v, wantErr=%v", tt.name, err, tt.wantErr)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := dir + "/config.json"
+			cfg := &Config{
+				CustomProviders: map[string]ProviderEntry{
+					"my-gateway": {URL: "https://gw.example.com/v1"},
+				},
+			}
+			if err := saveConfig(configPath, cfg); err != nil {
+				t.Fatalf("saveConfig: %v", err)
+			}
+			err := unsetCustomProvider(configPath, tt.name)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("unsetCustomProvider(%q): err=%v, wantErr=%v", tt.name, err, tt.wantErr)
+			}
+		})
 	}
 }

@@ -85,7 +85,7 @@ func runConfigSet(key, value string) error {
 func runConfigUnset(key string) error {
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[0] != "custom_providers" || parts[1] == "" {
-		return fmt.Errorf("unset only supports custom_providers.<name>\nUsage: ocr config unset custom_providers.<name>")
+		return fmt.Errorf("unset only supports custom_providers.<name>")
 	}
 	name := parts[1]
 

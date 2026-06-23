@@ -68,6 +68,7 @@ func applyProviderDeletions(configPath string, cfg *Config, names []string) (boo
 	for _, name := range names {
 		wasActive, err := deleteCustomProvider(cfg, name)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ocr] skip delete %q: %v\n", name, err)
 			continue
 		}
 		if wasActive {

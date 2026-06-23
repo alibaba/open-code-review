@@ -1087,6 +1087,8 @@ func (m providerTUIModel) viewCustomTab(s *strings.Builder) {
 	if m.confirmingDelete {
 		s.WriteString("\n")
 		prompt := fmt.Sprintf("  Delete %q?", m.deleteTargetName)
+		// existingCfg is the config snapshot from TUI startup; it reflects
+		// the on-disk active provider, not any in-session selection changes.
 		if m.existingCfg != nil && m.existingCfg.Provider == m.deleteTargetName {
 			prompt += " This is the active provider."
 		}
