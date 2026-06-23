@@ -16,6 +16,7 @@
   <a href="https://goreportcard.com/report/github.com/alibaba/open-code-review"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/13328/badge" /></a>
 </p>
 <p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | Русский
@@ -40,8 +41,8 @@ Open Code Review — это CLI-инструмент для код-ревью н
 | Метрика | Что измеряет | Почему важна |
 |---------|-------------|--------------|
 | **F1** | Гармоническое среднее precision и recall | Лучший единый показатель качества ревью |
-| **Precision** | % найденных проблем, являющихся реальными дефектами | Выше = меньше ложных срабатываний |
-| **Recall** | % реальных дефектов, которые были найдены | Выше = меньше пропущенных проблем |
+| **Precision** | Доля найденных проблем, являющихся реальными дефектами | Выше = меньше ложных срабатываний |
+| **Recall** | Доля реальных дефектов, которые были найдены | Выше = меньше пропущенных проблем |
 | **Avg Time** | Время выполнения одного ревью | Влияет на задержки в CI-пайплайне |
 | **Avg Token** | Суммарное потребление токенов за ревью | Прямо влияет на стоимость API |
 
@@ -95,7 +96,23 @@ npm install -g @alibaba-group/open-code-review
 
 **Из GitHub Release**
 
-Скачайте свежий бинарный файл со страницы [GitHub Releases](https://github.com/alibaba/open-code-review/releases):
+Установите свежий бинарный файл для вашей ОС/архитектуры одной командой (macOS / Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+```
+
+Скрипт сам выбирает подходящий бинарный файл релиза, проверяет его контрольную сумму SHA-256 и устанавливает его как `ocr` в `/usr/local/bin`. Каталог установки можно переопределить через `OCR_INSTALL_DIR`, а версию релиза зафиксировать через `OCR_VERSION`:
+
+```bash
+OCR_INSTALL_DIR="$HOME/.local/bin" OCR_VERSION=v1.3.13 \
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh)"
+```
+
+<details>
+<summary>Ручная загрузка (все платформы, включая Windows)</summary>
+
+Скачайте бинарный файл для вашей платформы со страницы [GitHub Releases](https://github.com/alibaba/open-code-review/releases):
 
 ```bash
 # macOS (Apple Silicon)
@@ -120,6 +137,8 @@ curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/dow
 # Windows (ARM64) — переместите ocr.exe в каталог из вашего PATH
 curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-arm64.exe
 ```
+
+</details>
 
 **Из исходников**
 

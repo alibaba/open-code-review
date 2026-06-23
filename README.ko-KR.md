@@ -16,6 +16,7 @@
   <a href="https://goreportcard.com/report/github.com/alibaba/open-code-review"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/13328/badge" /></a>
 </p>
 <p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | 한국어 | <a href="README.ru-RU.md">Русский</a>
@@ -95,7 +96,23 @@ npm install -g @alibaba-group/open-code-review
 
 **GitHub Release 사용**
 
-[GitHub Releases](https://github.com/alibaba/open-code-review/releases)에서 최신 binary를 다운로드합니다.
+명령 한 번으로 사용 중인 OS/아키텍처에 맞는 최신 binary를 설치합니다 (macOS / Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+```
+
+이 스크립트는 알맞은 릴리스 binary를 선택하고 SHA-256 체크섬을 검증한 뒤 `ocr`로 `/usr/local/bin`에 설치합니다. 설치 위치는 `OCR_INSTALL_DIR`로, 릴리스 버전은 `OCR_VERSION`으로 재정의할 수 있습니다:
+
+```bash
+OCR_INSTALL_DIR="$HOME/.local/bin" OCR_VERSION=v1.3.13 \
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh)"
+```
+
+<details>
+<summary>수동 다운로드 (Windows 포함 모든 플랫폼)</summary>
+
+[GitHub Releases](https://github.com/alibaba/open-code-review/releases)에서 사용 중인 플랫폼의 binary를 다운로드합니다.
 
 ```bash
 # macOS (Apple Silicon)
@@ -120,6 +137,8 @@ curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/dow
 # Windows (ARM64): ocr.exe를 PATH에 포함된 디렉터리로 이동하세요
 curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-arm64.exe
 ```
+
+</details>
 
 **소스에서 빌드**
 

@@ -16,6 +16,7 @@
   <a href="https://goreportcard.com/report/github.com/alibaba/open-code-review"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/13328/badge" /></a>
 </p>
 <p align="center">
   English | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a>
@@ -40,8 +41,8 @@ A real-world code review benchmark built from **50** popular open-source reposit
 | Metric | What it measures | Why it matters |
 |--------|-----------------|----------------|
 | **F1** | Harmonic mean of precision and recall | Best single number for overall review quality |
-| **Precision** | % of reported issues that are real defects | Higher = fewer false alarms to triage |
-| **Recall** | % of real defects that are found | Higher = fewer issues slip through review |
+| **Precision** | Proportion of reported issues that are real defects | Higher = fewer false alarms to triage |
+| **Recall** | Proportion of real defects that are found | Higher = fewer issues slip through review |
 | **Avg Time** | Wall-clock time per review | Matters for CI pipeline latency |
 | **Avg Token** | Total tokens consumed per review | Directly impacts API cost |
 
@@ -95,7 +96,23 @@ After installation, the `ocr` command is available globally.
 
 **From GitHub Release**
 
-Download the latest binary from [GitHub Releases](https://github.com/alibaba/open-code-review/releases):
+Install the latest binary for your OS/architecture with one command (macOS / Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+```
+
+The script picks the right release binary, verifies its SHA-256 checksum, and installs it as `ocr` in `/usr/local/bin`. Override the target with `OCR_INSTALL_DIR` or pin a release with `OCR_VERSION`:
+
+```bash
+OCR_INSTALL_DIR="$HOME/.local/bin" OCR_VERSION=v1.3.13 \
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh)"
+```
+
+<details>
+<summary>Manual download (all platforms, including Windows)</summary>
+
+Download the binary for your platform from [GitHub Releases](https://github.com/alibaba/open-code-review/releases):
 
 ```bash
 # macOS (Apple Silicon)
@@ -120,6 +137,8 @@ curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/dow
 # Windows (ARM64) — move ocr.exe to a directory in your PATH
 curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-arm64.exe
 ```
+
+</details>
 
 **From Source**
 

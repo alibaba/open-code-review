@@ -8,6 +8,8 @@
     "**/package.json": "package_json.md",
     "**/Cargo.toml": "cargo_toml.md",
     "**/*.{json,json5}": "json.md",
+    ".github/workflows/**/*.{yaml,yml}": "github_workflows.md",
+    ".github/**/*.{yaml,yml}": "github_config.md",
     "**/*.{yaml,yml}": "yaml.md",
     "**/*.java": "java.md",
     "**/*.ets": "arkts.md",
