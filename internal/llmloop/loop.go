@@ -280,11 +280,10 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
 	}
 
-	// Inject current file path as default for code_comment when not provided.
+	// Always inject the current file path for code_comment.
+	// The model sometimes hallucinates a path, so we override it.
 	if t == tool.CodeComment && newPath != "" {
-		if _, ok := args["path"]; !ok {
-			args["path"] = newPath
-		}
+		args["path"] = newPath
 	}
 
 	startTime := time.Now()
