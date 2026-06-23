@@ -12,7 +12,7 @@ import (
 
 func TestBuildGrepArgs_WorkspaceMode(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("myFunc", false, false, nil)
+	args := p.buildGrepArgs("myFunc", false, false, false, nil)
 
 	assertContainsInOrder(t, args, "-e", "myFunc", "--")
 	assertContains(t, args, "-i")
@@ -27,21 +27,21 @@ func TestBuildGrepArgs_WorkspaceMode(t *testing.T) {
 
 func TestBuildGrepArgs_CommitMode(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "abc1234"})
-	args := p.buildGrepArgs("myFunc", false, false, []string{"pkg/"})
+	args := p.buildGrepArgs("myFunc", false, false, false, []string{"pkg/"})
 
 	assertContainsInOrder(t, args, "-e", "myFunc", "--end-of-options", "abc1234", "--", "pkg/")
 }
 
 func TestBuildGrepArgs_RefUsesEndOfOptions(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "-O./pwn.sh"})
-	args := p.buildGrepArgs("myFunc", false, false, nil)
+	args := p.buildGrepArgs("myFunc", false, false, false, nil)
 
 	assertContainsInOrder(t, args, "-e", "myFunc", "--end-of-options", "-O./pwn.sh", "--")
 }
 
 func TestBuildGrepArgs_PatternStartingWithDash(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("-myOption", false, false, nil)
+	args := p.buildGrepArgs("-myOption", false, false, false, nil)
 
 	idx := slices.Index(args, "-e")
 	if idx < 0 || idx+1 >= len(args) || args[idx+1] != "-myOption" {
@@ -51,21 +51,21 @@ func TestBuildGrepArgs_PatternStartingWithDash(t *testing.T) {
 
 func TestBuildGrepArgs_CaseSensitive(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("foo", true, false, nil)
+	args := p.buildGrepArgs("foo", true, false, false, nil)
 
 	assertNotContains(t, args, "-i")
 }
 
 func TestBuildGrepArgs_CaseInsensitive(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("foo", false, false, nil)
+	args := p.buildGrepArgs("foo", false, false, false, nil)
 
 	assertContains(t, args, "-i")
 }
 
 func TestBuildGrepArgs_PerlRegexp(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("foo", false, true, nil)
+	args := p.buildGrepArgs("foo", false, true, false, nil)
 
 	assertContains(t, args, "-P")
 	assertNotContains(t, args, "-F")
@@ -73,7 +73,7 @@ func TestBuildGrepArgs_PerlRegexp(t *testing.T) {
 
 func TestBuildGrepArgs_FixedString(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
-	args := p.buildGrepArgs("foo", false, false, nil)
+	args := p.buildGrepArgs("foo", false, false, false, nil)
 
 	assertContains(t, args, "-F")
 	assertNotContains(t, args, "-E")
@@ -304,5 +304,57 @@ func assertContainsInOrder(t *testing.T, args []string, vals ...string) {
 	}
 	if idx != len(vals) {
 		t.Errorf("expected args to contain %v in order, got %v (matched up to index %d)", vals, args, idx)
+	}
+}
+
+// TestGitGrep_NonGitDirectoryFallback verifies code_search works in a plain
+// (non-git) directory by retrying git grep in --no-index mode instead of
+// failing with git's exit 128, while still honoring .gitignore.
+func TestGitGrep_NonGitDirectoryFallback(t *testing.T) {
+	dir := t.TempDir() // plain dir, no `git init`
+
+	write := func(rel, content string) {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("server.go", "package main\n\nfunc Handler() {}\n")
+	write("internal/svc.go", "package internal\n\nfunc Handler() {}\n")
+	write(".gitignore", "node_modules/\n")
+	write("node_modules/lib.js", "function Handler() {}\n") // excluded by .gitignore
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+
+	out, err := p.gitGrep(context.Background(), "Handler", false, false, nil)
+	if err != nil {
+		t.Fatalf("gitGrep should not error in a non-git dir, got: %v", err)
+	}
+	if !strings.Contains(out, "server.go") || !strings.Contains(out, "internal/svc.go") {
+		t.Errorf("expected matches in tracked-like files, got:\n%s", out)
+	}
+	if strings.Contains(out, "node_modules") {
+		t.Errorf("node_modules should be excluded via --exclude-standard, got:\n%s", out)
+	}
+}
+
+// TestGitGrep_NonGitDirectoryNoMatch verifies the no-match path in a non-git
+// dir returns the sentinel rather than an error.
+func TestGitGrep_NonGitDirectoryNoMatch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+
+	out, err := p.gitGrep(context.Background(), "nonexistentXYZ", false, false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "No matches found" {
+		t.Errorf("expected 'No matches found', got: %q", out)
 	}
 }

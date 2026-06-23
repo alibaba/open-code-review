@@ -49,8 +49,14 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 	return result, nil
 }
 
-func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, pathspec []string) []string {
+func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, noIndex bool, pathspec []string) []string {
 	cmdArgs := []string{"--no-pager", "grep"}
+
+	if noIndex {
+		// Non-git directory: search the working tree directly while still
+		// honoring .gitignore and skipping .git (via --exclude-standard).
+		cmdArgs = append(cmdArgs, "--no-index", "--exclude-standard")
+	}
 
 	if !caseSensitive {
 		cmdArgs = append(cmdArgs, "-i")
@@ -104,9 +110,18 @@ func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []str
 }
 
 func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, caseSensitive bool, usePerlRegexp bool, pathspec []string) (string, error) {
-	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, pathspec)
+	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
 
 	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)
+
+	// Non-git directory: `git grep` exits 128 with "not a git repository".
+	// `ocr scan` supports plain directories, so retry in --no-index mode, which
+	// searches the working tree directly while still honoring .gitignore.
+	// Ref-based search needs a real repo, so it is not retried.
+	if err != nil && p.FileReader.Ref == "" && strings.Contains(errStr, "not a git repository") {
+		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, true, pathspec)
+		outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
+	}
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
