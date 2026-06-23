@@ -114,8 +114,8 @@ func unsetCustomProvider(configPath, name string) error {
 
 	fmt.Printf("Deleted custom provider %q.\n", name)
 	if wasActive {
-		fmt.Println("This was the active provider; 'provider' and 'model' have been cleared.")
-		fmt.Println("Run 'ocr config provider' to select a new provider.")
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: active provider was deleted; 'provider' and 'model' have been cleared.\n")
+		fmt.Fprintf(os.Stderr, "[ocr] Run 'ocr config provider' to select a new provider.\n")
 	}
 	return nil
 }

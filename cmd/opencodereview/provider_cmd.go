@@ -37,7 +37,8 @@ func runConfigProvider() error {
 			return err
 		}
 		if clearedActive && !final.confirmed {
-			fmt.Println("Active provider was deleted. Run 'ocr config provider' to select a new one.")
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: active provider was deleted; 'provider' and 'model' have been cleared.\n")
+			fmt.Fprintf(os.Stderr, "[ocr] Run 'ocr config provider' to select a new provider.\n")
 		}
 	}
 
