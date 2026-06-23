@@ -47,6 +47,8 @@ func runConfig(args []string) error {
 	switch action.subCmd {
 	case "set":
 		return runConfigSet(action.key, action.value)
+	case "unset":
+		return runConfigUnset(action.key)
 	default:
 		return fmt.Errorf("unknown config sub-command: %s", action.subCmd)
 	}
@@ -77,6 +79,53 @@ func runConfigSet(key, value string) error {
 		displayValue = maskKey(value)
 	}
 	fmt.Printf("Set %s = %s\n", key, displayValue)
+	return nil
+}
+
+func runConfigUnset(key string) error {
+	parts := strings.SplitN(key, ".", 2)
+	if len(parts) != 2 || parts[0] != "custom_providers" || parts[1] == "" {
+		return fmt.Errorf("unset only supports custom_providers.<name>\nUsage: ocr config unset custom_providers.<name>")
+	}
+	name := parts[1]
+
+	configPath, err := defaultConfigPath()
+	if err != nil {
+		return err
+	}
+
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	if cfg.CustomProviders == nil {
+		return fmt.Errorf("custom provider %q not found", name)
+	}
+	if _, exists := cfg.CustomProviders[name]; !exists {
+		return fmt.Errorf("custom provider %q not found", name)
+	}
+
+	wasActive := cfg.Provider == name
+	delete(cfg.CustomProviders, name)
+	if len(cfg.CustomProviders) == 0 {
+		cfg.CustomProviders = nil
+	}
+
+	if wasActive {
+		cfg.Provider = ""
+		cfg.Model = ""
+	}
+
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("Deleted custom provider %q.\n", name)
+	if wasActive {
+		fmt.Println("This was the active provider; 'provider' and 'model' have been cleared.")
+		fmt.Println("Run 'ocr config provider' to select a new provider.")
+	}
 	return nil
 }
 

@@ -533,3 +533,166 @@ func TestCollectCustomProviders_SortedByName(t *testing.T) {
 		t.Errorf("second = %q, want %q", result[1].name, "zzz-provider")
 	}
 }
+
+// --- Delete custom provider tests ---
+
+func dKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: 'd'}
+}
+
+func yKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: 'y'}
+}
+
+func nKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: 'n'}
+}
+
+func TestProviderTUI_DeleteCustomProvider(t *testing.T) {
+	cfg := &Config{
+		Provider: "anthropic",
+		CustomProviders: map[string]ProviderEntry{
+			"my-llm": {URL: "https://custom.api/v1", Protocol: "openai", Model: "custom-model"},
+		},
+	}
+	m := newProviderTUI(cfg)
+
+	// Switch to custom tab
+	result, _ := m.Update(rightKey())
+	m2 := result.(providerTUIModel)
+	if m2.activeTab != tabCustom {
+		t.Fatalf("tab = %d, want %d", m2.activeTab, tabCustom)
+	}
+
+	// Select the existing provider (index 0), press d
+	m2.customIdx = 0
+	result, _ = m2.Update(dKey())
+	m3 := result.(providerTUIModel)
+	if !m3.confirmingDelete {
+		t.Fatal("pressing d should set confirmingDelete = true")
+	}
+	if m3.deleteTargetName != "my-llm" {
+		t.Errorf("deleteTargetName = %q, want %q", m3.deleteTargetName, "my-llm")
+	}
+
+	// Confirm with y
+	result, _ = m3.Update(yKey())
+	m4 := result.(providerTUIModel)
+	if m4.confirmingDelete {
+		t.Error("confirmingDelete should be false after y")
+	}
+	if len(m4.deletedProviders) != 1 || m4.deletedProviders[0] != "my-llm" {
+		t.Errorf("deletedProviders = %v, want [my-llm]", m4.deletedProviders)
+	}
+	if len(m4.customProviders) != 0 {
+		t.Errorf("customProviders length = %d, want 0", len(m4.customProviders))
+	}
+}
+
+func TestProviderTUI_DeleteCustomProviderCancel(t *testing.T) {
+	cfg := &Config{
+		CustomProviders: map[string]ProviderEntry{
+			"my-llm": {URL: "https://custom.api/v1", Protocol: "openai", Model: "custom-model"},
+		},
+	}
+	m := newProviderTUI(cfg)
+
+	// Switch to custom tab, select provider, press d
+	result, _ := m.Update(rightKey())
+	m2 := result.(providerTUIModel)
+	m2.customIdx = 0
+	result, _ = m2.Update(dKey())
+	m3 := result.(providerTUIModel)
+	if !m3.confirmingDelete {
+		t.Fatal("should be confirming delete")
+	}
+
+	// Cancel with n
+	result, _ = m3.Update(nKey())
+	m4 := result.(providerTUIModel)
+	if m4.confirmingDelete {
+		t.Error("confirmingDelete should be false after n")
+	}
+	if len(m4.deletedProviders) != 0 {
+		t.Error("deletedProviders should be empty after cancel")
+	}
+	if len(m4.customProviders) != 1 {
+		t.Error("customProviders should still have 1 entry after cancel")
+	}
+}
+
+func TestProviderTUI_DeleteOnAddOptionIgnored(t *testing.T) {
+	cfg := &Config{
+		CustomProviders: map[string]ProviderEntry{
+			"my-llm": {URL: "https://custom.api/v1", Protocol: "openai"},
+		},
+	}
+	m := newProviderTUI(cfg)
+
+	// Switch to custom tab
+	result, _ := m.Update(rightKey())
+	m2 := result.(providerTUIModel)
+
+	// Move to "Add" option (index 1, since there's 1 provider)
+	m2.customIdx = len(m2.customProviders)
+	result, _ = m2.Update(dKey())
+	m3 := result.(providerTUIModel)
+	if m3.confirmingDelete {
+		t.Error("pressing d on Add option should not trigger delete confirmation")
+	}
+}
+
+func TestProviderTUI_DeleteActiveCustomProvider(t *testing.T) {
+	cfg := &Config{
+		Provider: "my-llm",
+		CustomProviders: map[string]ProviderEntry{
+			"my-llm": {URL: "https://custom.api/v1", Protocol: "openai", Model: "custom-model"},
+		},
+	}
+	m := newProviderTUI(cfg)
+
+	// Should auto-select custom tab with active provider
+	if m.activeTab != tabCustom {
+		t.Fatalf("should auto-select custom tab, got %d", m.activeTab)
+	}
+
+	// Press d on the active provider
+	m.customIdx = 0
+	result, _ := m.Update(dKey())
+	m2 := result.(providerTUIModel)
+	if !m2.confirmingDelete {
+		t.Fatal("should be confirming delete")
+	}
+
+	// Confirm
+	result, _ = m2.Update(yKey())
+	m3 := result.(providerTUIModel)
+	if len(m3.deletedProviders) != 1 || m3.deletedProviders[0] != "my-llm" {
+		t.Errorf("deletedProviders = %v, want [my-llm]", m3.deletedProviders)
+	}
+}
+
+func TestProviderTUI_DeleteEscCancels(t *testing.T) {
+	cfg := &Config{
+		CustomProviders: map[string]ProviderEntry{
+			"my-llm": {URL: "https://custom.api/v1", Protocol: "openai"},
+		},
+	}
+	m := newProviderTUI(cfg)
+
+	result, _ := m.Update(rightKey())
+	m2 := result.(providerTUIModel)
+	m2.customIdx = 0
+	result, _ = m2.Update(dKey())
+	m3 := result.(providerTUIModel)
+
+	// Esc should cancel confirmation
+	result, _ = m3.Update(escKey())
+	m4 := result.(providerTUIModel)
+	if m4.confirmingDelete {
+		t.Error("Esc should cancel delete confirmation")
+	}
+	if len(m4.deletedProviders) != 0 {
+		t.Error("no providers should be deleted after Esc")
+	}
+}

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSetConfigValueAuthHeaderNormalizesKnownValues(t *testing.T) {
 	cfg := &Config{}
@@ -216,5 +219,119 @@ func TestSetConfigValueModelWithCustomProvider(t *testing.T) {
 	}
 	if cfg.Model != "" {
 		t.Errorf("top-level Model = %q, want empty (should write to custom provider entry)", cfg.Model)
+	}
+}
+
+// --- unset tests ---
+
+func TestParseConfigArgsUnset(t *testing.T) {
+	action, err := parseConfigArgs([]string{"unset", "custom_providers.my-gateway"})
+	if err != nil {
+		t.Fatalf("parseConfigArgs: %v", err)
+	}
+	if action.subCmd != "unset" {
+		t.Errorf("subCmd = %q, want %q", action.subCmd, "unset")
+	}
+	if action.key != "custom_providers.my-gateway" {
+		t.Errorf("key = %q, want %q", action.key, "custom_providers.my-gateway")
+	}
+}
+
+func TestParseConfigArgsUnsetMissingKey(t *testing.T) {
+	_, err := parseConfigArgs([]string{"unset"})
+	if err == nil {
+		t.Fatal("expected error for missing key")
+	}
+}
+
+func TestUnsetCustomProvider(t *testing.T) {
+	dir := t.TempDir()
+	configPath := dir + "/config.json"
+
+	cfg := &Config{
+		Provider: "anthropic",
+		CustomProviders: map[string]ProviderEntry{
+			"my-gateway": {URL: "https://gw.example.com/v1", Protocol: "openai", Model: "llama-3"},
+		},
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("loadOrCreateConfig: %v", err)
+	}
+
+	delete(cfg.CustomProviders, "my-gateway")
+	if len(cfg.CustomProviders) == 0 {
+		cfg.CustomProviders = nil
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	cfg, err = loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if cfg.CustomProviders != nil {
+		t.Errorf("CustomProviders should be nil after deleting the only entry, got %v", cfg.CustomProviders)
+	}
+	if cfg.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want %q (should be untouched)", cfg.Provider, "anthropic")
+	}
+}
+
+func TestUnsetActiveCustomProvider(t *testing.T) {
+	cfg := &Config{
+		Provider: "my-gateway",
+		Model:    "fallback-model",
+		CustomProviders: map[string]ProviderEntry{
+			"my-gateway":    {URL: "https://gw.example.com/v1", Protocol: "openai", Model: "llama-3"},
+			"other-gateway": {URL: "https://other.example.com/v1", Protocol: "openai", Model: "other-model"},
+		},
+	}
+
+	name := "my-gateway"
+	if cfg.Provider == name {
+		cfg.Provider = ""
+		cfg.Model = ""
+	}
+	delete(cfg.CustomProviders, name)
+
+	if cfg.Provider != "" {
+		t.Errorf("Provider = %q, want empty after deleting active provider", cfg.Provider)
+	}
+	if cfg.Model != "" {
+		t.Errorf("Model = %q, want empty after deleting active provider", cfg.Model)
+	}
+	if _, exists := cfg.CustomProviders[name]; exists {
+		t.Error("my-gateway should have been deleted")
+	}
+	if _, exists := cfg.CustomProviders["other-gateway"]; !exists {
+		t.Error("other-gateway should still exist")
+	}
+}
+
+func TestUnsetInvalidKey(t *testing.T) {
+	tests := []struct {
+		key     string
+		wantErr bool
+	}{
+		{"custom_providers.my-gateway", false},
+		{"llm.url", true},
+		{"providers.anthropic", true},
+		{"custom_providers.", true},
+		{"custom_providers", true},
+		{"something", true},
+	}
+
+	for _, tt := range tests {
+		parts := strings.SplitN(tt.key, ".", 2)
+		isValid := len(parts) == 2 && parts[0] == "custom_providers" && parts[1] != ""
+		if isValid == tt.wantErr {
+			t.Errorf("key %q: valid=%v, wantErr=%v", tt.key, isValid, tt.wantErr)
+		}
 	}
 }
