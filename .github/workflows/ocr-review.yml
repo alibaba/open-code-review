@@ -1,7 +1,7 @@
-# OpenCodeReview - GitHub Actions PR Auto-Review Demo
+# OpenCodeReview - GitHub Actions PR Auto-Review
 #
-# This workflow automatically reviews pull requests using OpenCodeReview
-# and posts review comments directly on the PR.
+# Reviews pull requests with OpenCodeReview and posts model-specific review
+# comments directly on the PR.
 #
 # Triggers:
 #   - PR opened (uses pull_request_target for fork secret access)
@@ -10,12 +10,13 @@
 #   OCR_LLM_URL        - LLM API endpoint (e.g., https://api.openai.com/v1/chat/completions)
 #   OCR_LLM_AUTH_TOKEN - Authentication token for the LLM API
 #
-# Optional secrets:
-#   OCR_LLM_MODEL      - Model name (default: gpt-4o)
+# Optional variables:
+#   OCR_LLM_MODELS     - Space/newline/comma separated model names
+#                        (default: glm-5.2-fp8 kimi-k2.7-code)
 #
 # Note: GITHUB_TOKEN is automatically provided by GitHub Actions.
 
-name: OpenCodeReview PR Review
+name: OCR
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -33,11 +34,14 @@ permissions:
   pull-requests: write
 
 jobs:
-  code-review:
+  review:
+    name: review
     runs-on: self-hosted
     container:
       image: node:20
     if: github.event_name == 'pull_request_target'
+    env:
+      OCR_LLM_MODELS: ${{ vars.OCR_LLM_MODELS || 'glm-5.2-fp8 kimi-k2.7-code' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -48,206 +52,211 @@ jobs:
       - name: Mark repository as safe directory
         run: git config --global --add safe.directory '*'
 
-      - name: Fetch PR head ref (ensures fork commits are available)
+      - name: Fetch PR head ref
         run: git fetch origin pull/${{ github.event.pull_request.number }}/head
 
-      - name: Install OpenCodeReview
+      - name: Install OCR
         run: npm install -g @alibaba-group/open-code-review
 
       - name: Configure OCR
         run: |
           ocr config set llm.url ${{ secrets.OCR_LLM_URL }}
           ocr config set llm.auth_token ${{ secrets.OCR_LLM_AUTH_TOKEN }}
-          ocr config set llm.model ${{ secrets.OCR_LLM_MODEL }}
           ocr config set llm.use_anthropic ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
           ocr config set llm.extra_body '{"enable_thinking": false}'
           ocr config set language English
 
-      - name: Run OpenCodeReview
-        id: review
+      - name: Run reviews
         run: |
+          set +e
+
           BASE_REF="${{ github.event.pull_request.base.ref }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          mkdir -p /tmp/ocr-results
 
           echo "Reviewing PR: ${HEAD_SHA} against origin/${BASE_REF}"
 
-          # Run OCR in range mode with JSON output
-          ocr review \
-            --from "origin/${BASE_REF}" \
-            --to "${HEAD_SHA}" \
-            --format json \
-            > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log || true
+          printf '%s\n' "$OCR_LLM_MODELS" | tr ',\n' '  ' | xargs -n1 | while read -r MODEL; do
+            [ -n "$MODEL" ] || continue
+            SAFE_MODEL=$(printf '%s' "$MODEL" | tr -c 'A-Za-z0-9_.-' '_')
 
-          echo "OCR review completed. Output:"
-          cat /tmp/ocr-result.json
-          echo "OCR review completed. Error log:"
-          cat /tmp/ocr-stderr.log
+            echo "Running OCR model: ${MODEL}"
+            ocr config set llm.model "$MODEL"
+            ocr review \
+              --from "origin/${BASE_REF}" \
+              --to "${HEAD_SHA}" \
+              --format json \
+              > "/tmp/ocr-results/${SAFE_MODEL}.json" \
+              2> "/tmp/ocr-results/${SAFE_MODEL}.stderr.log" || true
 
-      - name: Post review comments to PR
+            echo "OCR output for ${MODEL}:"
+            cat "/tmp/ocr-results/${SAFE_MODEL}.json" || true
+            echo "OCR error log for ${MODEL}:"
+            cat "/tmp/ocr-results/${SAFE_MODEL}.stderr.log" || true
+          done
+
+      - name: Post review comments
         uses: actions/github-script@v7
+        env:
+          OCR_LLM_MODELS: ${{ env.OCR_LLM_MODELS }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const path = '/tmp/ocr-result.json';
+            const models = String(process.env.OCR_LLM_MODELS || '')
+              .split(/[\s,]+/)
+              .map((model) => model.trim())
+              .filter(Boolean);
 
-            // Read OCR output
-            let result;
-            try {
-              const raw = fs.readFileSync(path, 'utf8');
-              result = JSON.parse(raw);
-            } catch (e) {
-              console.log('Failed to parse OCR output:', e.message);
-              // Post a simple comment if parsing fails
-              const stderr = fs.readFileSync('/tmp/ocr-stderr.log', 'utf8').trim();
-              if (stderr) {
+            for (const model of models) {
+              await postModelReview(model);
+            }
+
+            async function postModelReview(model) {
+              const safeModel = model.replace(/[^A-Za-z0-9_.-]/g, '_');
+              const resultPath = `/tmp/ocr-results/${safeModel}.json`;
+              const stderrPath = `/tmp/ocr-results/${safeModel}.stderr.log`;
+
+              let result;
+              try {
+                const raw = fs.readFileSync(resultPath, 'utf8');
+                result = JSON.parse(raw);
+              } catch (e) {
+                console.log(`Failed to parse OCR output for ${model}:`, e.message);
+                const stderr = readFileIfExists(stderrPath).trim();
+                if (stderr) {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: context.issue.number,
+                    body: `⚠️ **OpenCodeReview** (\`${model}\`) encountered an error:\n${fencedBlock(stderr)}`
+                  });
+                }
+                return;
+              }
+
+              const comments = result.comments || [];
+              const warnings = result.warnings || [];
+
+              if (comments.length === 0) {
+                const message = result.message || 'No comments generated. Looks good to me.';
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: context.issue.number,
-                  body: `⚠️ **OpenCodeReview** encountered an error:\n${fencedBlock(stderr)}`
+                  body: `✅ **OpenCodeReview** (\`${model}\`): ${message}`
+                });
+                return;
+              }
+
+              const prNumber = context.issue.number;
+              const commitSha = context.payload.pull_request.head.sha;
+              const reviewComments = [];
+              const commentsWithoutLine = [];
+
+              for (const comment of comments) {
+                const body = formatComment(comment, model);
+                const hasValidLine = (comment.start_line >= 1) || (comment.end_line >= 1);
+                if (!hasValidLine) {
+                  commentsWithoutLine.push({ comment, body });
+                  continue;
+                }
+
+                const reviewComment = {
+                  path: comment.path,
+                  body
+                };
+
+                if (comment.start_line >= 1 && comment.end_line >= 1 && comment.start_line !== comment.end_line) {
+                  reviewComment.start_line = comment.start_line;
+                  reviewComment.line = comment.end_line;
+                  reviewComment.start_side = 'RIGHT';
+                  reviewComment.side = 'RIGHT';
+                } else if (comment.end_line >= 1) {
+                  reviewComment.line = comment.end_line;
+                  reviewComment.side = 'RIGHT';
+                } else if (comment.start_line >= 1) {
+                  reviewComment.line = comment.start_line;
+                  reviewComment.side = 'RIGHT';
+                }
+
+                reviewComments.push({ comment, reviewComment });
+              }
+
+              const totalCount = comments.length;
+              const inlineCount = reviewComments.length;
+              const summaryCount = commentsWithoutLine.length;
+              let summaryBody = buildSummaryBody(model, totalCount, inlineCount, summaryCount, warnings);
+              summaryBody += formatSummaryComments(commentsWithoutLine, model);
+
+              let successCount = 0;
+              let failedCount = 0;
+              const failedComments = [];
+
+              try {
+                await github.rest.pulls.createReview({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  commit_id: commitSha,
+                  body: summaryBody,
+                  event: 'COMMENT',
+                  comments: reviewComments.map(({ reviewComment }) => reviewComment)
+                });
+                successCount = reviewComments.length;
+                console.log(`Successfully posted ${model} review with ${successCount} inline comments (${commentsWithoutLine.length} in summary)`);
+              } catch (e) {
+                console.log(`Failed to post ${model} review with inline comments:`, e.message);
+                console.log('Falling back to posting comments individually...');
+
+                for (const { comment, reviewComment } of reviewComments) {
+                  try {
+                    await github.rest.pulls.createReview({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: prNumber,
+                      commit_id: commitSha,
+                      body: '',
+                      event: 'COMMENT',
+                      comments: [reviewComment]
+                    });
+                    successCount++;
+                    console.log(`Successfully posted ${model} comment for ${reviewComment.path}`);
+                  } catch (innerE) {
+                    failedCount++;
+                    failedComments.push({ comment, error: innerE.message });
+                    console.log(`Failed to post ${model} comment for ${reviewComment.path}: ${innerE.message}`);
+                  }
+                }
+
+                let finalBody = buildSummaryBody(model, totalCount, successCount, commentsWithoutLine.length + failedComments.length, warnings);
+                finalBody += formatSummaryComments(commentsWithoutLine, model);
+                finalBody += `\n\n---\n\n📊 **Posting Statistics:**`;
+                finalBody += `\n- ✅ Successfully posted: ${successCount} comment(s)`;
+                if (failedCount > 0) {
+                  finalBody += `\n- ❌ Failed to post: ${failedCount} comment(s)`;
+                }
+
+                if (failedComments.length > 0) {
+                  finalBody += '\n\n---\n\n### ⚠️ Inline comments shown in summary';
+                  for (const { comment, error } of failedComments) {
+                    finalBody += '\n\n---\n\n';
+                    finalBody += formatCommentMarkdown(comment, model, error);
+                  }
+                }
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: finalBody
                 });
               }
-              return;
             }
 
-            const comments = result.comments || [];
-            const warnings = result.warnings || [];
+            function formatComment(comment, model) {
+              let body = `**OCR model:** \`${model}\`\n\n` + (comment.content || '');
 
-            // If no comments, post a summary
-            if (comments.length === 0) {
-              const message = result.message || 'No comments generated. Looks good to me.';
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `✅ **OpenCodeReview**: ${message}`
-              });
-              return;
-            }
-
-            // Prepare PR review with inline comments
-            const prNumber = context.issue.number;
-            let commitSha = context.payload.pull_request.head.sha;
-
-            // Build review comments array for the PR review API
-            // Only inline comments with line info can be posted via createReview
-            const reviewComments = [];
-            const commentsWithoutLine = [];
-
-            for (const comment of comments) {
-              const body = formatComment(comment);
-
-              // Check if comment has valid line information for inline comment (line >= 1)
-              const hasValidLine = (comment.start_line >= 1) || (comment.end_line >= 1);
-              if (!hasValidLine) {
-                commentsWithoutLine.push({ comment, body });
-                continue;
-              }
-
-              const reviewComment = {
-                path: comment.path,
-                body: body
-              };
-
-              // Use line range if available
-              if (comment.start_line >= 1 && comment.end_line >= 1 && comment.start_line !== comment.end_line) {
-                reviewComment.start_line = comment.start_line;
-                reviewComment.line = comment.end_line;
-                reviewComment.start_side = 'RIGHT';
-                reviewComment.side = 'RIGHT';
-              } else if (comment.end_line >= 1) {
-                reviewComment.line = comment.end_line;
-                reviewComment.side = 'RIGHT';
-              } else if (comment.start_line >= 1) {
-                reviewComment.line = comment.start_line;
-                reviewComment.side = 'RIGHT';
-              }
-
-              reviewComments.push({ comment, reviewComment });
-            }
-
-            // Submit as a single PR review with all comments
-            const totalCount = comments.length;
-            const inlineCount = reviewComments.length;
-            const summaryCount = commentsWithoutLine.length;
-            let summaryBody = buildSummaryBody(totalCount, inlineCount, summaryCount, warnings);
-
-            // Add comments without line info to summary body
-            summaryBody += formatSummaryComments(commentsWithoutLine);
-
-            // Statistics tracking
-            let successCount = 0;
-            let failedCount = 0;
-            const failedComments = [];
-
-            try {
-              await github.rest.pulls.createReview({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                commit_id: commitSha,
-                body: summaryBody,
-                event: 'COMMENT',
-                comments: reviewComments.map(({ reviewComment }) => reviewComment)
-              });
-              successCount = reviewComments.length;
-              console.log(`Successfully posted review with ${successCount} inline comments (${commentsWithoutLine.length} in summary)`);
-            } catch (e) {
-              console.log('Failed to post review with inline comments:', e.message);
-              console.log('Falling back to posting comments individually...');
-              
-              // Fallback: post comments one by one
-              for (const { comment, reviewComment } of reviewComments) {
-                try {
-                  await github.rest.pulls.createReview({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    pull_number: prNumber,
-                    commit_id: commitSha,
-                    body: '',
-                    event: 'COMMENT',
-                    comments: [reviewComment]
-                  });
-                  successCount++;
-                  console.log(`Successfully posted comment for ${reviewComment.path}`);
-                } catch (innerE) {
-                  failedCount++;
-                  failedComments.push({ comment, error: innerE.message });
-                  console.log(`Failed to post comment for ${reviewComment.path}: ${innerE.message}`);
-                }
-              }
-              
-              // Post summary comment with statistics
-              let finalBody = buildSummaryBody(totalCount, successCount, commentsWithoutLine.length + failedComments.length, warnings);
-              finalBody += formatSummaryComments(commentsWithoutLine);
-              finalBody += `\n\n---\n\n📊 **Posting Statistics:**`;
-              finalBody += `\n- ✅ Successfully posted: ${successCount} comment(s)`;
-              if (failedCount > 0) {
-                finalBody += `\n- ❌ Failed to post: ${failedCount} comment(s)`;
-              }
-              
-              // Add failed comments as summary content so review feedback is not lost.
-              if (failedComments.length > 0) {
-                finalBody += '\n\n---\n\n### ⚠️ Inline comments shown in summary';
-                for (const { comment, error } of failedComments) {
-                  finalBody += '\n\n---\n\n';
-                  finalBody += formatCommentMarkdown(comment, error);
-                }
-              }
-              
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: prNumber,
-                body: finalBody
-              });
-            }
-
-            function formatComment(comment) {
-              let body = comment.content || '';
-
-              // Add code suggestion if available
               if (comment.suggestion_code && comment.existing_code) {
                 body += '\n\n**Suggestion:**\n';
                 body += fencedBlock(comment.suggestion_code, 'suggestion');
@@ -256,12 +265,12 @@ jobs:
               return body;
             }
 
-            function formatCommentMarkdown(comment, error) {
+            function formatCommentMarkdown(comment, model, error) {
               let md = `### 📄 \`${comment.path}\``;
               if (comment.start_line && comment.end_line) {
                 md += ` (L${comment.start_line}-L${comment.end_line})`;
               }
-              md += '\n\n';
+              md += `\n\n**OCR model:** \`${model}\`\n\n`;
               if (error) {
                 md += `⚠️ GitHub could not post this as an inline comment: ${error}\n\n`;
               }
@@ -277,8 +286,8 @@ jobs:
               return md;
             }
 
-            function buildSummaryBody(totalCount, inlineCount, summaryCount, warnings) {
-              let body = `🔍 **OpenCodeReview** found **${totalCount}** issue(s) in this PR.`;
+            function buildSummaryBody(model, totalCount, inlineCount, summaryCount, warnings) {
+              let body = `🔍 **OpenCodeReview** (\`${model}\`) found **${totalCount}** issue(s) in this PR.`;
               if (totalCount > 0) {
                 body += `\n- ✅ ${inlineCount} posted as inline comment(s)`;
                 body += `\n- 📝 ${summaryCount} posted as summary`;
@@ -289,13 +298,21 @@ jobs:
               return body;
             }
 
-            function formatSummaryComments(summaryComments) {
+            function formatSummaryComments(summaryComments, model) {
               let body = '';
               for (const { comment } of summaryComments) {
                 body += '\n\n---\n\n';
-                body += formatCommentMarkdown(comment);
+                body += formatCommentMarkdown(comment, model);
               }
               return body;
+            }
+
+            function readFileIfExists(path) {
+              try {
+                return fs.readFileSync(path, 'utf8');
+              } catch {
+                return '';
+              }
             }
 
             function fencedBlock(content, language = '') {
