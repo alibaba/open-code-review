@@ -123,7 +123,7 @@ export class GitService {
     const root = await this.repoRoot();
     if (!root || !sha) return [];
     try {
-      const out = await runGit(root, ['show', '--name-status', '--format=', sha]);
+      const out = await runGit(root, ['show', '--name-status', '--format=', '--', sha]);
       const files = parseNameStatus(out);
       this.trace(`getCommitFiles(${sha}): files=${files.length}`);
       return files;
