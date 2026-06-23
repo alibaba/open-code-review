@@ -248,7 +248,10 @@ func (p *Provider) gitLs(ctx context.Context, args ...string) ([]string, error) 
 	} else {
 		cmd := exec.CommandContext(ctx, "git", cmdArgs...)
 		cmd.Dir = p.repoDir
-		raw, runErr := cmd.CombinedOutput()
+		// Use Output (stdout only), not CombinedOutput: with -z, git emits
+		// NUL-delimited paths on stdout, and merging stderr in would corrupt
+		// the filename parsing below.
+		raw, runErr := cmd.Output()
 		out, err = string(raw), runErr
 	}
 	if err != nil {

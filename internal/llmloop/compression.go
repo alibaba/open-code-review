@@ -35,9 +35,10 @@ type partitionResult struct {
 
 // compressionJob tracks an in-flight background compression operation.
 type compressionJob struct {
-	done    chan struct{}
-	rebuilt []llm.Message
-	cancel  context.CancelFunc
+	done        chan struct{}
+	rebuilt     []llm.Message
+	cancel      context.CancelFunc
+	snapshotLen int // message count when the snapshot was taken
 }
 
 // CountMessagesTokens returns the rough token count of msgs by summing the
@@ -217,7 +218,10 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 	if err != nil {
 		rec.SetError(err, duration)
 		fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
-		return msgs[:part.frozenEnd], fmt.Errorf("memory compression: %w", err)
+		// Return msgs unchanged: truncating to frozenEnd would discard all
+		// conversation context, which is worse than staying over the token
+		// limit temporarily.
+		return msgs, fmt.Errorf("memory compression: %w", err)
 	}
 	rec.SetResponse(resp, duration)
 	if resp.Usage != nil {
@@ -229,7 +233,9 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 
 	rawSummary := stripMarkdownFences(resp.Content())
 	if rawSummary == "" {
-		return msgs[:part.frozenEnd], nil
+		// Empty summary: keep the original conversation rather than dropping
+		// everything below the frozen zone.
+		return msgs, nil
 	}
 
 	rebuilt := make([]llm.Message, 2)
@@ -252,20 +258,27 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, messages []llm.Mes
 
 	asyncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 
-	job := &compressionJob{done: make(chan struct{}), cancel: cancel}
+	job := &compressionJob{done: make(chan struct{}), cancel: cancel, snapshotLen: len(messages)}
 	r.compressionMu.Lock()
 	r.pendingJob = job
 	r.compressionMu.Unlock()
 
 	go func() {
 		defer cancel()
-		rebuilt, _ := r.runCompression(asyncCtx, msgSnapshot, filePath)
+		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, filePath)
 
 		r.compressionMu.Lock()
 		defer r.compressionMu.Unlock()
 
 		if r.pendingJob != job {
 			return // cancelled or superseded
+		}
+		if err != nil {
+			// Compression failed — abandon the job rather than applying a
+			// truncated/unmodified snapshot over live messages.
+			r.pendingJob = nil
+			close(job.done)
+			return
 		}
 		job.rebuilt = rebuilt
 		close(job.done)
@@ -286,13 +299,23 @@ func (r *Runner) tryApplyPendingCompression(messages *[]llm.Message) bool {
 
 	select {
 	case <-job.done:
+		applied := false
 		r.compressionMu.Lock()
 		if r.pendingJob == job && job.rebuilt != nil {
-			*messages = job.rebuilt
+			rebuilt := job.rebuilt
+			// Preserve any messages appended after the snapshot was taken —
+			// the background job only compressed messages[:snapshotLen].
+			if job.snapshotLen < len(*messages) {
+				rebuilt = append(rebuilt, (*messages)[job.snapshotLen:]...)
+			}
+			*messages = rebuilt
+			applied = true
+		}
+		if r.pendingJob == job {
 			r.pendingJob = nil
 		}
 		r.compressionMu.Unlock()
-		return true
+		return applied
 	default:
 		return false
 	}
