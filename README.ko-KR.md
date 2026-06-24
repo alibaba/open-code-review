@@ -331,6 +331,7 @@ ocr review \
 
 - [`github_actions/`](./examples/github_actions/): GitHub Actions 통합 예시
 - [`gitlab_ci/`](./examples/gitlab_ci/): GitLab CI 통합 예시
+- [`gitflic_ci/`](./examples/gitflic_ci/): GitFlic CI 통합 예시
 
 ## Commands
 

@@ -331,6 +331,7 @@ ocr review \
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions統合の例
 - [`gitlab_ci/`](./examples/gitlab_ci/) — GitLab CI統合の例
+- [`gitflic_ci/`](./examples/gitflic_ci/) — GitFlic CI統合の例
 
 ## コマンド
 
