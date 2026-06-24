@@ -111,6 +111,12 @@ type providerTUIModel struct {
 	existingCfg *Config
 	confirmed   bool
 	cancelled   bool
+
+	// --- delete confirmation ---
+	confirmingDelete bool
+	deleteTargetIdx  int
+	deleteTargetName string
+	deletedProviders []string
 }
 
 func collectCustomProviders(cfg *Config) []customProviderListItem {
@@ -370,6 +376,10 @@ func (m providerTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateManualForm(key, msg)
 		}
 
+		if m.step == stepProvider && m.confirmingDelete {
+			return m.updateDeleteConfirm(key)
+		}
+
 		switch key {
 		case "ctrl+c":
 			m.cancelled = true
@@ -411,6 +421,14 @@ func (m providerTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			if m.step == stepProvider {
 				m.activeTab = (m.activeTab + 1) % tabCount
+			}
+			return m, nil
+
+		case "d":
+			if m.step == stepProvider && m.activeTab == tabCustom && !m.creatingCustom && m.customIdx < len(m.customProviders) {
+				m.confirmingDelete = true
+				m.deleteTargetIdx = m.customIdx
+				m.deleteTargetName = m.customProviders[m.customIdx].name
 			}
 			return m, nil
 		}
@@ -646,6 +664,33 @@ func (m providerTUIModel) updateManualForm(key string, msg tea.KeyPressMsg) (tea
 	default:
 		return m.passThroughManualInput(msg)
 	}
+}
+
+func (m providerTUIModel) updateDeleteConfirm(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "y", "Y":
+		if m.deleteTargetIdx < 0 || m.deleteTargetIdx >= len(m.customProviders) {
+			m.confirmingDelete = false
+			return m, nil
+		}
+		m.deletedProviders = append(m.deletedProviders, m.deleteTargetName)
+		newList := make([]customProviderListItem, 0, len(m.customProviders)-1)
+		newList = append(newList, m.customProviders[:m.deleteTargetIdx]...)
+		newList = append(newList, m.customProviders[m.deleteTargetIdx+1:]...)
+		m.customProviders = newList
+		if m.customIdx >= len(m.customProviders) && m.customIdx > 0 {
+			m.customIdx = len(m.customProviders) - 1
+		}
+		m.confirmingDelete = false
+		return m, nil
+	case "n", "N", "esc":
+		m.confirmingDelete = false
+		return m, nil
+	case "ctrl+c":
+		m.cancelled = true
+		return m, tea.Quit
+	}
+	return m, nil
 }
 
 func (m providerTUIModel) handleManualFormEnter() (tea.Model, tea.Cmd) {
@@ -968,6 +1013,10 @@ func (m providerTUIModel) viewProvider(s *strings.Builder) {
 	s.WriteString("\n")
 	if m.creatingCustom || m.inManualForm {
 		s.WriteString(tuiHelpStyle.Render("  Enter Confirm · Esc Back"))
+	} else if m.confirmingDelete {
+		s.WriteString(tuiHelpStyle.Render("  y Confirm · n/Esc Cancel"))
+	} else if m.activeTab == tabCustom && m.customIdx < len(m.customProviders) {
+		s.WriteString(tuiHelpStyle.Render("  Enter Select · d Delete · Tab/Arrow Navigate · Esc Cancel"))
 	} else {
 		s.WriteString(tuiHelpStyle.Render("  Enter to select · Tab/Arrow keys to navigate · Esc to cancel"))
 	}
@@ -1034,6 +1083,19 @@ func (m providerTUIModel) viewCustomTab(s *strings.Builder) {
 		s.WriteString(cursor + tuiDimStyle.Render(addLabel))
 	}
 	s.WriteString("\n")
+
+	if m.confirmingDelete {
+		s.WriteString("\n")
+		prompt := fmt.Sprintf("  Delete %q?", m.deleteTargetName)
+		// existingCfg is the config snapshot from TUI startup; it reflects
+		// the on-disk active provider, not any in-session selection changes.
+		if m.existingCfg != nil && m.existingCfg.Provider == m.deleteTargetName {
+			prompt += " This is the active provider."
+		}
+		prompt += " (y/n)"
+		s.WriteString(tuiSelectedItemStyle.Render(prompt))
+		s.WriteString("\n")
+	}
 }
 
 func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {

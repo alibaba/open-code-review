@@ -1,10 +1,11 @@
-# OpenCodeReview - GitHub Actions PR Auto-Review Demo
+# OpenCodeReview - GitHub Actions PR Auto-Review Pipeline
 #
 # This workflow automatically reviews pull requests using OpenCodeReview
 # and posts review comments directly on the PR.
 #
 # Triggers:
 #   - PR opened (uses pull_request_target for fork secret access)
+#   - Comment on PR containing '/open-code-review' or '@open-code-review'
 #
 # Required secrets:
 #   OCR_LLM_URL        - LLM API endpoint (e.g., https://api.openai.com/v1/chat/completions)
@@ -12,8 +13,34 @@
 #
 # Optional secrets:
 #   OCR_LLM_MODEL      - Model name (default: gpt-4o)
+#   OCR_LLM_USE_ANTHROPIC - Set to 'true' if using Anthropic Claude models
+#
+# Optional variables (for retry/delay tuning):
+# The retry strategy follows GitHub's documented guidance for REST API rate limits:
+#   https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api
+#   - Primary rate limit exhausted (x-ratelimit-remaining=0): wait until x-ratelimit-reset.
+#   - Secondary rate limit with a retry-after header: wait exactly that long.
+#   - Secondary rate limit with NO header: wait at least one minute, then use
+#     exponential backoff on continued failures.
+#
+#   OCR_RETRY_BASE_DELAY     - Base delay (ms) for exponential backoff when no retry
+#                             header is present (default: 60000, per GitHub's
+#                             "at least one minute" recommendation for secondary limits).
+#   OCR_RETRY_MAX_DELAY     - Maximum delay (ms) cap applied to EVERY computed wait,
+#                             including retry-after and x-ratelimit-reset, so a far-future
+#                             reset cannot stall the job past its timeout (default: 300000 = 5 min).
+#   OCR_MAX_RETRIES         - Max retry attempts per comment when rate-limited (default: 3).
+#   OCR_SUCCESS_DELAY       - Delay (ms) between successful comment posts to pace requests (default: 2000).
+#   OCR_FAILURE_DELAY       - Delay (ms) after a non-retryable failure to pace subsequent requests (default: 1000).
+#   OCR_LOW_REMAINING_THRESHOLD - When x-ratelimit-remaining is at or below this value,
+#                             proactively increase request spacing to avoid hitting the limit
+#                             (default: 3; GitHub best practice is to watch the header and slow down).
+#   OCR_LOW_REMAINING_SPACING - Request spacing (ms) used when remaining quota is low
+#                             (default: 10000 = 10s).
 #
 # Note: GITHUB_TOKEN is automatically provided by GitHub Actions.
+# Note: The workflow also configures llm.extra_body to '{"thinking": {"type": "disabled"}}'
+#   to disable thinking mode for compatibility with various LLM providers.
 
 name: OpenCodeReview PR Review
 
@@ -182,7 +209,7 @@ jobs:
             const failedComments = [];
 
             try {
-              await github.rest.pulls.createReview({
+              const batchRes = await github.rest.pulls.createReview({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: prNumber,
@@ -193,28 +220,85 @@ jobs:
               });
               successCount = reviewComments.length;
               console.log(`Successfully posted review with ${successCount} inline comments (${commentsWithoutLine.length} in summary)`);
+              logRateLimitQuota(batchRes, 'after batch createReview');
             } catch (e) {
               console.log('Failed to post review with inline comments:', e.message);
-              console.log('Falling back to posting comments individually...');
+              console.log('Falling back to posting comments individually with rate-limit-aware retry...');
               
-              // Fallback: post comments one by one
+              // Fallback: post comments one by one with delay to avoid secondary rate limits.
+              // GitHub enforces ~80 content-generating requests per minute; spacing calls
+              // helps stay under that threshold. Retry/wait durations are derived from the
+              // rate-limit response headers per GitHub's documented strategy.
+              const MAX_RETRIES = parseInt(process.env.OCR_MAX_RETRIES, 10) || 3;
+              const SUCCESS_DELAY = parseInt(process.env.OCR_SUCCESS_DELAY, 10) || 2000; // delay after successful post
+              const FAILURE_DELAY = parseInt(process.env.OCR_FAILURE_DELAY, 10) || 1000; // delay after non-retryable failure
+              const LOW_REMAINING_THRESHOLD = parseInt(process.env.OCR_LOW_REMAINING_THRESHOLD, 10) || 3;
+              const LOW_REMAINING_SPACING = parseInt(process.env.OCR_LOW_REMAINING_SPACING, 10) || 10000;
+
+              // If the batch itself was rate-limited, honor its rate-limit headers
+              // (retry-after / x-ratelimit-reset) before retrying per-comment,
+              // otherwise the first per-comment call re-hits the same wall immediately.
+              const batchRetry = computeRetryDelayMs(e, 0);
+              if (batchRetry != null) {
+                const secs = (batchRetry.delayMs / 1000).toFixed(1);
+                console.log(
+                  `Batch createReview was rate-limited (HTTP ${e.status}). ` +
+                  `Cooling down ${secs}s via '${batchRetry.source}' (${batchRetry.detail}) before per-comment retry.`
+                );
+                await sleep(batchRetry.delayMs);
+              }
+
               for (const { comment, reviewComment } of reviewComments) {
-                try {
-                  await github.rest.pulls.createReview({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    pull_number: prNumber,
-                    commit_id: commitSha,
-                    body: '',
-                    event: 'COMMENT',
-                    comments: [reviewComment]
-                  });
-                  successCount++;
-                  console.log(`Successfully posted comment for ${reviewComment.path}`);
-                } catch (innerE) {
-                  failedCount++;
-                  failedComments.push({ comment, error: innerE.message });
-                  console.log(`Failed to post comment for ${reviewComment.path}: ${innerE.message}`);
+                let posted = false;
+                for (let attempt = 0; attempt <= MAX_RETRIES && !posted; attempt++) {
+                  try {
+                    const res = await github.rest.pulls.createReview({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: prNumber,
+                      commit_id: commitSha,
+                      body: '',
+                      event: 'COMMENT',
+                      comments: [reviewComment]
+                    });
+                    successCount++;
+                    posted = true;
+                    console.log(`Successfully posted comment for ${reviewComment.path}`);
+                    // Proactive throttle: if remaining quota is low, slow down to
+                    // avoid hitting the limit (GitHub best practice: watch the header).
+                    const remaining = logRateLimitQuota(res, `after ${reviewComment.path}`);
+                    const lowQuota = remaining != null && remaining <= LOW_REMAINING_THRESHOLD;
+                    if (lowQuota) {
+                      console.log(`[rate-limit] quota low (remaining=${remaining} <= ${LOW_REMAINING_THRESHOLD}); increasing spacing to ${LOW_REMAINING_SPACING}ms.`);
+                      await sleep(LOW_REMAINING_SPACING);
+                    } else {
+                      await sleep(SUCCESS_DELAY);
+                    }
+                  } catch (innerE) {
+                    // Decide whether to retry and how long to wait, based on GitHub's
+                    // rate-limit documentation (retry-after / x-ratelimit-* headers).
+                    const retryInfo = computeRetryDelayMs(innerE, attempt);
+                    const willRetry = retryInfo != null && attempt < MAX_RETRIES;
+                    if (willRetry) {
+                      const secs = (retryInfo.delayMs / 1000).toFixed(1);
+                      console.log(
+                        `Rate-limited/transient error on ${reviewComment.path} ` +
+                        `(HTTP ${innerE.status}, attempt ${attempt + 1}/${MAX_RETRIES}). ` +
+                        `Waiting ${secs}s via '${retryInfo.source}' (${retryInfo.detail}). ` +
+                        `Error: ${innerE.message}`
+                      );
+                      await sleep(retryInfo.delayMs);
+                    } else {
+                      failedCount++;
+                      failedComments.push({ comment, error: innerE.message });
+                      const reason = retryInfo == null ? 'non-retryable error' : 'rate-limit retries exhausted';
+                      console.log(`Failed to post comment for ${reviewComment.path} (${reason}, HTTP ${innerE.status || 'n/a'}): ${innerE.message}`);
+                      // After exhausting retries use the success-style pace delay;
+                      // for other errors use the shorter failure pace delay.
+                      await sleep(retryInfo == null ? FAILURE_DELAY : SUCCESS_DELAY);
+                      break;
+                    }
+                  }
                 }
               }
               
@@ -242,6 +326,115 @@ jobs:
                 issue_number: prNumber,
                 body: finalBody
               });
+            }
+
+            function sleep(ms) {
+              return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            // Case-insensitive header lookup. Octokit normalizes response headers to
+            // lowercase, but this defensive check also handles original casing so that
+            // quota logging and retry delay computation never silently miss a header.
+            function getHeader(headers, name) {
+              const v = headers[name] != null ? headers[name] : headers[name.toLowerCase()];
+              return v != null ? String(v).trim() : undefined;
+            }
+
+            // Decide whether an error is worth retrying and, if so, how long to wait.
+            // Implements GitHub's documented rate-limit retry strategy using the
+            // response headers (retry-after, x-ratelimit-remaining, x-ratelimit-reset).
+            // Returns { delayMs, source, detail } when retryable, or null otherwise.
+            // See: https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api
+            function computeRetryDelayMs(error, attempt) {
+              if (!error) return null;
+              const status = error.status;
+              const message = String(error.message || '');
+              const isRateLimit = status === 429 || (status === 403 && /rate limit|abuse|secondary/i.test(message));
+              const isTransient = (status >= 500 && status < 600) || status === 408;
+              if (!isRateLimit && !isTransient) return null;
+
+              const headers = ((error.response || {}).headers) || {};
+              const header = (name) => getHeader(headers, name);
+              const nowSec = Math.floor(Date.now() / 1000);
+
+              // The absolute maximum wait for any single retry. Header-derived waits
+              // (retry-after / x-ratelimit-reset) are GitHub's recommended durations,
+              // but capping them prevents a far-future reset from stalling the CI job
+              // past its timeout. When we cap, the next retry may re-hit the limit.
+              const cap = parseInt(process.env.OCR_RETRY_MAX_DELAY, 10) || 300000;
+              const base = parseInt(process.env.OCR_RETRY_BASE_DELAY, 10) || 60000;
+
+              // { rawMs, source, detail } describing the recommended wait before cap.
+              let info = null;
+
+              if (isRateLimit) {
+                // (1) Honor "retry-after" when present (seconds, or an HTTP-date).
+                const retryAfter = header('retry-after');
+                if (retryAfter) {
+                  const secs = Number(retryAfter);
+                  if (!isNaN(secs) && secs >= 0) {
+                    info = { rawMs: secs * 1000, source: 'retry-after', detail: `${secs}s (from header)` };
+                  } else {
+                    const dateMs = Date.parse(retryAfter);
+                    if (!isNaN(dateMs)) {
+                      info = { rawMs: Math.max(0, dateMs - Date.now()), source: 'retry-after (HTTP-date)', detail: retryAfter };
+                    }
+                  }
+                }
+
+                // (2) Primary limit exhausted (x-ratelimit-remaining=0): wait until reset.
+                if (!info) {
+                  const remaining = header('x-ratelimit-remaining');
+                  const reset = header('x-ratelimit-reset');
+                  if (reset != null && Number(remaining) === 0) {
+                    const rawMs = Math.max(0, Number(reset) - nowSec) * 1000;
+                    info = { rawMs, source: 'x-ratelimit-reset', detail: `remaining=0, reset epoch=${reset} (in ${Math.ceil(rawMs / 1000)}s)` };
+                  }
+                }
+
+                // (3) Secondary limit with no retry hint: docs say wait at least one
+                //     minute, then increase exponentially between retries.
+                if (!info) {
+                  const backoff = Math.min(base * Math.pow(2, attempt), cap);
+                  const jitter = Math.floor(Math.random() * 1000);
+                  info = { rawMs: backoff + jitter, source: 'exponential-backoff', detail: `base=${base}ms*2^${attempt} (cap ${cap}ms) +${jitter}ms jitter` };
+                }
+              } else {
+                // Transient server error (5xx / 408): back off without the 60s floor.
+                // Use a shorter base than the rate-limit path: server hiccups are
+                // typically short-lived, so a 2s initial wait (doubling per retry)
+                // is sufficient and avoids stalling the CI job unnecessarily.
+                const transientBase = 2000;
+                const backoff = Math.min(transientBase * Math.pow(2, attempt), cap);
+                const jitter = Math.floor(Math.random() * 1000);
+                info = { rawMs: backoff + jitter, source: 'transient-backoff', detail: `base=${transientBase}ms*2^${attempt} (cap ${cap}ms) +${jitter}ms jitter (HTTP ${status})` };
+              }
+
+              // Apply the universal cap to header-derived waits too.
+              const delayMs = Math.min(info.rawMs, cap);
+              if (delayMs < info.rawMs) {
+                info.detail += ` [CAPPED to ${cap}ms; GitHub recommended ${Math.ceil(info.rawMs / 1000)}s]`;
+              }
+              return { delayMs, source: info.source, detail: info.detail };
+            }
+
+            // Best-effort logging of remaining rate-limit quota from a successful response.
+            // Returns the parsed x-ratelimit-remaining value (or null) for proactive throttling.
+            function logRateLimitQuota(response, tag) {
+              try {
+                const h = (response && response.headers) || {};
+                const header = (name) => getHeader(h, name);
+                const remaining = header('x-ratelimit-remaining');
+                const limit = header('x-ratelimit-limit');
+                const reset = header('x-ratelimit-reset');
+                if (remaining != null) {
+                  console.log(
+                    `[rate-limit] ${tag}: remaining=${remaining}/${limit != null ? limit : '?'}` +
+                    (reset != null ? `, reset epoch=${reset}` : '')
+                  );
+                }
+                return remaining != null ? Number(remaining) : null;
+              } catch (_) { return null; }
             }
 
             function formatComment(comment) {

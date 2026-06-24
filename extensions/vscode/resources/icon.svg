@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" role="img" aria-label="Code review">
+  <!-- 活动栏图标按单色蒙版渲染：只有不透明形状会被填充为主题色，
+       因此背景必须透明，且用 fill-rule:evenodd 挖出负空间。 -->
+  <path fill="#000000" fill-rule="evenodd" d="
+    M 12 2
+    L 18.5 4.4
+    Q 19.5 4.8 19.5 5.9
+    L 19.5 16.8
+    Q 19.5 17.6 18.9 18.1
+    L 12 23
+    L 5.1 18.1
+    Q 4.5 17.6 4.5 16.8
+    L 4.5 5.9
+    Q 4.5 4.8 5.5 4.4
+    Z
+    M 12 8.2
+    A 3.8 3.8 0 1 0 12 15.8
+    A 3.8 3.8 0 1 0 12 8.2
+    Z"/>
+  <circle cx="12" cy="12" r="1.7" fill="#000000"/>
+</svg>

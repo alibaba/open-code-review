@@ -47,6 +47,8 @@ func runConfig(args []string) error {
 	switch action.subCmd {
 	case "set":
 		return runConfigSet(action.key, action.value)
+	case "unset":
+		return runConfigUnset(action.key)
 	default:
 		return fmt.Errorf("unknown config sub-command: %s", action.subCmd)
 	}
@@ -78,6 +80,68 @@ func runConfigSet(key, value string) error {
 	}
 	fmt.Printf("Set %s = %s\n", key, displayValue)
 	return nil
+}
+
+func runConfigUnset(key string) error {
+	parts := strings.SplitN(key, ".", 2)
+	if len(parts) != 2 || parts[0] != "custom_providers" || parts[1] == "" {
+		return fmt.Errorf("unset only supports custom_providers.<name>")
+	}
+	name := parts[1]
+
+	configPath, err := defaultConfigPath()
+	if err != nil {
+		return err
+	}
+
+	return unsetCustomProvider(configPath, name)
+}
+
+func unsetCustomProvider(configPath, name string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	wasActive, err := deleteCustomProvider(cfg, name)
+	if err != nil {
+		return err
+	}
+
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("Deleted custom provider %q.\n", name)
+	if wasActive {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: active provider was deleted; 'provider' and 'model' have been cleared.\n")
+		fmt.Fprintf(os.Stderr, "[ocr] Run 'ocr config provider' to select a new provider.\n")
+	}
+	return nil
+}
+
+// deleteCustomProvider removes a custom provider from cfg in memory.
+// Returns true if the deleted provider was the active one.
+func deleteCustomProvider(cfg *Config, name string) (bool, error) {
+	if cfg.CustomProviders == nil {
+		return false, fmt.Errorf("custom provider %q not found", name)
+	}
+	if _, exists := cfg.CustomProviders[name]; !exists {
+		return false, fmt.Errorf("custom provider %q not found", name)
+	}
+
+	wasActive := cfg.Provider == name
+	delete(cfg.CustomProviders, name)
+	if len(cfg.CustomProviders) == 0 {
+		cfg.CustomProviders = nil
+	}
+
+	if wasActive {
+		cfg.Provider = ""
+		cfg.Model = ""
+	}
+
+	return wasActive, nil
 }
 
 // ProviderEntry holds per-provider configuration in the providers map.

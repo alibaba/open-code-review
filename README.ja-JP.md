@@ -19,6 +19,13 @@
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/13328/badge" /></a>
 </p>
 <p align="center">
+  <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
+  <a href="#supported-platforms"><img alt="macOS" src="https://img.shields.io/badge/macOS-supported-blue.svg" /></a>
+  <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
+  <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+</p>
+<p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | 日本語 | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a>
 </p>
 
@@ -334,6 +341,7 @@ ocr review \
 | `ocr config provider` | — | 対話的プロバイダーセットアップ（ビルトイン、カスタム、手動） |
 | `ocr config model` | — | アクティブなプロバイダーの対話的モデル選択 |
 | `ocr config set <key> <value>` | — | 設定値をセット |
+| `ocr config unset custom_providers.<name>` | — | カスタムプロバイダーを削除 |
 | `ocr llm test` | — | LLMの疎通テスト |
 | `ocr llm providers` | — | ビルトインLLMプロバイダーを一覧表示 |
 | `ocr viewer` | `ocr v` | `localhost:5483`でWebUIセッションビューアーを起動 |
@@ -366,6 +374,9 @@ ocr review \
 ocr config provider
 ocr config model
 ocr llm providers
+
+# カスタムプロバイダーを削除
+ocr config unset custom_providers.my-gateway
 
 # レビュー対象ファイルをプレビュー（LLM呼び出しなし）
 ocr review --preview

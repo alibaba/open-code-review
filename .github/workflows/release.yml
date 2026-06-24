@@ -61,6 +61,9 @@ jobs:
     container:
       image: ubuntu:24.04
     steps:
+      - name: Install git
+        run: apt-get update && apt-get install -y git
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -70,6 +73,7 @@ jobs:
 
       - name: Generate release notes from commits
         id: notes
+        shell: bash
         run: |
           CURRENT_TAG="${GITHUB_REF_NAME}"
           PREV_TAG=$(git describe --tags --abbrev=0 "${CURRENT_TAG}^" 2>/dev/null || echo "")

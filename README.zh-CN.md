@@ -19,6 +19,13 @@
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/13328/badge" /></a>
 </p>
 <p align="center">
+  <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
+  <a href="#supported-platforms"><img alt="macOS" src="https://img.shields.io/badge/macOS-supported-blue.svg" /></a>
+  <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
+  <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+</p>
+<p align="center">
   <a href="README.md">English</a> | 简体中文 | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a>
 </p>
 
@@ -334,6 +341,7 @@ ocr review \
 | `ocr config provider` | — | 交互式供应商设置（内置、自定义或手动） |
 | `ocr config model` | — | 为当前供应商交互式选择模型 |
 | `ocr config set <key> <value>` | — | 设置配置项 |
+| `ocr config unset custom_providers.<name>` | — | 删除自定义供应商 |
 | `ocr llm test` | — | 测试 LLM 连通性 |
 | `ocr llm providers` | — | 列出内置 LLM 供应商 |
 | `ocr viewer` | `ocr v` | 启动 WebUI 会话查看器，地址 `localhost:5483` |
@@ -366,6 +374,9 @@ ocr review \
 ocr config provider
 ocr config model
 ocr llm providers
+
+# 删除自定义供应商
+ocr config unset custom_providers.my-gateway
 
 # 预览将被审查的文件（不调用 LLM）
 ocr review --preview

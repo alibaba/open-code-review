@@ -19,6 +19,13 @@
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/13328/badge" /></a>
 </p>
 <p align="center">
+  <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
+  <a href="#supported-platforms"><img alt="macOS" src="https://img.shields.io/badge/macOS-supported-blue.svg" /></a>
+  <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
+  <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+</p>
+<p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | Русский
 </p>
 
@@ -336,6 +343,7 @@ ocr review \
 | `ocr config provider` | — | Интерактивная настройка провайдера (встроенный, пользовательский или ручной) |
 | `ocr config model` | — | Интерактивный выбор модели для активного провайдера |
 | `ocr config set <key> <value>` | — | Установить значения конфигурации |
+| `ocr config unset custom_providers.<name>` | — | Удалить пользовательского провайдера |
 | `ocr llm test` | — | Проверить подключение к LLM |
 | `ocr llm providers` | — | Показать список встроенных LLM-провайдеров |
 | `ocr viewer` | `ocr v` | Запустить WebUI-просмотрщик сессий на `localhost:5483` |
@@ -368,6 +376,9 @@ ocr review \
 ocr config provider
 ocr config model
 ocr llm providers
+
+# Удалить пользовательского провайдера
+ocr config unset custom_providers.my-gateway
 
 # Показать, какие файлы попадут в ревью (без вызовов LLM)
 ocr review --preview
