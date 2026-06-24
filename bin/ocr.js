@@ -32,7 +32,7 @@ if (!process.env.OCR_NO_UPDATE) {
   const stateDir = path.join(os.homedir(), ".opencodereview");
   const tsFile = path.join(stateDir, "last-update-check");
   const cooldownMs =
-    (parseInt(process.env.OCR_UPDATE_INTERVAL, 10) || 30) * 60 * 1000;
+    (parseInt(process.env.OCR_UPDATE_INTERVAL, 10) || 18) * 60 * 1000;
 
   let shouldCheck = true;
   try {

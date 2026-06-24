@@ -341,6 +341,7 @@ ocr review \
 | `ocr config provider` | — | 対話的プロバイダーセットアップ（ビルトイン、カスタム、手動） |
 | `ocr config model` | — | アクティブなプロバイダーの対話的モデル選択 |
 | `ocr config set <key> <value>` | — | 設定値をセット |
+| `ocr config unset custom_providers.<name>` | — | カスタムプロバイダーを削除 |
 | `ocr llm test` | — | LLMの疎通テスト |
 | `ocr llm providers` | — | ビルトインLLMプロバイダーを一覧表示 |
 | `ocr viewer` | `ocr v` | `localhost:5483`でWebUIセッションビューアーを起動 |
@@ -373,6 +374,9 @@ ocr review \
 ocr config provider
 ocr config model
 ocr llm providers
+
+# カスタムプロバイダーを削除
+ocr config unset custom_providers.my-gateway
 
 # レビュー対象ファイルをプレビュー（LLM呼び出しなし）
 ocr review --preview

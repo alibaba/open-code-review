@@ -341,6 +341,7 @@ ocr review \
 | `ocr config provider` | - | 대화형 provider 설정 (built-in, custom, 수동) |
 | `ocr config model` | - | 활성 provider의 대화형 model 선택 |
 | `ocr config set <key> <value>` | - | config 값 설정 |
+| `ocr config unset custom_providers.<name>` | - | custom provider 삭제 |
 | `ocr llm test` | - | LLM 연결 테스트 |
 | `ocr llm providers` | - | built-in LLM provider 목록 표시 |
 | `ocr viewer` | `ocr v` | `localhost:5483`에서 WebUI session viewer 실행 |
@@ -373,6 +374,9 @@ ocr review \
 ocr config provider
 ocr config model
 ocr llm providers
+
+# custom provider 삭제
+ocr config unset custom_providers.my-gateway
 
 # 리뷰 대상 파일 미리보기(LLM call 없음)
 ocr review --preview

@@ -343,6 +343,7 @@ ocr review \
 | `ocr config provider` | — | Интерактивная настройка провайдера (встроенный, пользовательский или ручной) |
 | `ocr config model` | — | Интерактивный выбор модели для активного провайдера |
 | `ocr config set <key> <value>` | — | Установить значения конфигурации |
+| `ocr config unset custom_providers.<name>` | — | Удалить пользовательского провайдера |
 | `ocr llm test` | — | Проверить подключение к LLM |
 | `ocr llm providers` | — | Показать список встроенных LLM-провайдеров |
 | `ocr viewer` | `ocr v` | Запустить WebUI-просмотрщик сессий на `localhost:5483` |
@@ -375,6 +376,9 @@ ocr review \
 ocr config provider
 ocr config model
 ocr llm providers
+
+# Удалить пользовательского провайдера
+ocr config unset custom_providers.my-gateway
 
 # Показать, какие файлы попадут в ревью (без вызовов LLM)
 ocr review --preview

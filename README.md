@@ -343,6 +343,7 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `ocr config provider` | — | Interactive provider setup (built-in, custom, or manual) |
 | `ocr config model` | — | Interactive model selection for the active provider |
 | `ocr config set <key> <value>` | — | Set configuration values |
+| `ocr config unset custom_providers.<name>` | — | Delete a custom provider |
 | `ocr llm test` | — | Test LLM connectivity |
 | `ocr llm providers` | — | List built-in LLM providers |
 | `ocr viewer` | `ocr v` | Launch WebUI session viewer on `localhost:5483` |
@@ -375,6 +376,9 @@ See the [`examples/`](./examples/) directory for integration examples:
 ocr config provider
 ocr config model
 ocr llm providers
+
+# Delete a custom provider
+ocr config unset custom_providers.my-gateway
 
 # Preview which files will be reviewed (no LLM calls)
 ocr review --preview

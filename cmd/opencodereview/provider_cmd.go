@@ -30,7 +30,22 @@ func runConfigProvider() error {
 	}
 
 	final := finalModel.(providerTUIModel)
+
+	if len(final.deletedProviders) > 0 {
+		clearedActive, err := applyProviderDeletions(configPath, cfg, final.deletedProviders)
+		if err != nil {
+			return err
+		}
+		if clearedActive && !final.confirmed {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: active provider was deleted; 'provider' and 'model' have been cleared.\n")
+			fmt.Fprintf(os.Stderr, "[ocr] Run 'ocr config provider' to select a new provider.\n")
+		}
+	}
+
 	if !final.confirmed {
+		if len(final.deletedProviders) > 0 {
+			return nil
+		}
 		fmt.Println("Cancelled.")
 		return nil
 	}
@@ -46,6 +61,25 @@ func runConfigProvider() error {
 	}
 
 	return applyOfficialProviderConfig(configPath, cfg, result)
+}
+
+func applyProviderDeletions(configPath string, cfg *Config, names []string) (bool, error) {
+	clearedActive := false
+	for _, name := range names {
+		wasActive, err := deleteCustomProvider(cfg, name)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ocr] skip delete %q: %v\n", name, err)
+			continue
+		}
+		if wasActive {
+			clearedActive = true
+		}
+		fmt.Printf("Deleted custom provider %q.\n", name)
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		return false, err
+	}
+	return clearedActive, nil
 }
 
 func applyManualConfig(configPath string, cfg *Config, result providerTUIResult) error {
