@@ -105,6 +105,7 @@ type reviewOptions struct {
 	outputFormat   string
 	audience       string // --audience: "human" (default) or "agent"
 	background     string // --background: optional requirement context
+	backgroundFile string // --background-file: path to a Markdown file used as background
 	model          string // --model: override resolved LLM model for this review
 	concurrency    int
 	perFileTimeout int
@@ -131,6 +132,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
 	a.StringVar(&opts.audience, "audience", "human", "output audience: human (show progress) or agent (summary only)")
 	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the review")
+	a.StringVarP(&opts.backgroundFile, "background-file", "B", "", "optional requirement/business context from a Markdown file (combined with --background; inline value appears first when both are set)")
 	a.StringVar(&opts.model, "model", "", "override LLM model for this review (e.g., claude-opus-4-6)")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
@@ -214,22 +216,28 @@ Examples:
   ocr review --preview
   ocr review -c abc123 -p
 
+  # Provide requirement/business context inline, from a Markdown file, or both
+  ocr review --background "Adding rate limiting to the login API"
+  ocr review --background-file ./docs/requirements.md
+  ocr review --background "Focus on auth" --background-file ./docs/requirements.md
+
 Flags:
-  --audience string       output audience: human (show progress) or agent (summary only) (default "human")
-  -b, --background string optional requirement/business context for the review
-  -c, --commit string     single commit hash or tag to review (vs its parent)
-  -f, --format string     output format: text or json (default "text")
-  --concurrency int       max concurrent file reviews (default 8)
-  --max-git-procs int     max concurrent git subprocesses (default 16)
-  --from string           source ref to start diff from (e.g., 'main')
-  --max-tools int         max tool call rounds per file (0 = template default; min 10)
-  --model string          override LLM model for this review (e.g., claude-opus-4-6)
-  -p, --preview           preview which files will be reviewed without running the LLM
-  --repo string           root directory of the git repository (default: current dir)
-  --rule string           path to JSON file with system review rules
-  --timeout int           concurrent task timeout in minutes (default 10)
-  --to string             target ref to end diff at (e.g., 'feature-branch')
-  --tools string          path to JSON tools config file (default: embedded)`)
+  --audience string             output audience: human (show progress) or agent (summary only) (default "human")
+  -b, --background string       optional requirement/business context for the review
+  -B, --background-file string  path to a Markdown file used as review background (combined with --background; inline value appears first when both are set)
+  -c, --commit string           single commit hash or tag to review (vs its parent)
+  -f, --format string           output format: text or json (default "text")
+  --concurrency int             max concurrent file reviews (default 8)
+  --max-git-procs int           max concurrent git subprocesses (default 16)
+  --from string                 source ref to start diff from (e.g., 'main')
+  --max-tools int               max tool call rounds per file (0 = template default; min 10)
+  --model string                override LLM model for this review (e.g., claude-opus-4-6)
+  -p, --preview                 preview which files will be reviewed without running the LLM
+  --repo string                 root directory of the git repository (default: current dir)
+  --rule string                 path to JSON file with system review rules
+  --timeout int                 concurrent task timeout in minutes (default 10)
+  --to string                   target ref to end diff at (e.g., 'feature-branch')
+  --tools string                path to JSON tools config file (default: embedded)`)
 }
 
 // --- config subcommand ---

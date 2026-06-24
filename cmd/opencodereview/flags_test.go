@@ -5,6 +5,20 @@ import (
 	"time"
 )
 
+func TestParseReviewFlagsBackgroundFile(t *testing.T) {
+	for _, flag := range []string{"--background-file", "-B"} {
+		t.Run(flag, func(t *testing.T) {
+			opts, err := parseReviewFlags([]string{flag, "./docs/req.md"})
+			if err != nil {
+				t.Fatalf("parseReviewFlags: %v", err)
+			}
+			if opts.backgroundFile != "./docs/req.md" {
+				t.Errorf("backgroundFile = %q, want %q", opts.backgroundFile, "./docs/req.md")
+			}
+		})
+	}
+}
+
 func TestParseReviewFlagsModelOverride(t *testing.T) {
 	opts, err := parseReviewFlags([]string{"--model", "claude-opus-4-6"})
 	if err != nil {

@@ -449,6 +449,7 @@ JSON出力ではこの2つのフィールドは`content`や`start_line`などと
 | `--timeout` | — | `10` | 同時実行タスクのタイムアウト（分） |
 | `--audience` | — | `human` | `human`（進捗を表示）または`agent`（サマリーのみ） |
 | `--background` | `-b` | — | レビューのための任意の要件/ビジネスコンテキスト。`--commit`使用時に未指定の場合、コミットメッセージから自動取得 |
+| `--background-file` | `-B` | — | Markdownファイルから読み込む任意の要件/ビジネスコンテキスト。`--background`と併用した場合はインラインの値が先に配置されます |
 | `--model` | — | — | このレビューでLLMモデルを選択または上書き |
 | `--rule` | — | — | カスタムJSONレビュールールへのパス |
 | `--max-tools` | — | 組み込み値 | ファイルごとのツール呼び出しラウンドの上限。テンプレートのデフォルトより大きい場合のみ有効 |
@@ -506,6 +507,12 @@ ocr review --commit abc123 --model claude-sonnet-4-6
 
 # 要件コンテキストを提供してより的確なレビューを実施
 ocr review --background "ログインAPIにレート制限を追加"
+
+# Markdownファイルから要件コンテキストを提供
+ocr review --background-file ./docs/my_business_context.md
+
+# インラインのコンテキストとローカルのコンテキストファイルを組み合わせる（両方が使用されます）
+ocr review --background "認証に注目" --background-file ./docs/my_business_context.md
 
 # カスタムレビュールールを使用
 ocr review --rule /path/to/my-rules.json

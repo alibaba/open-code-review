@@ -451,6 +451,7 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `--timeout` | — | `10` | Concurrent task timeout in minutes |
 | `--audience` | — | `human` | `human` (show progress) or `agent` (summary only) |
 | `--background` | `-b` | — | Optional requirement/business context for the review; auto-filled from commit message when using `--commit` |
+| `--background-file` | `-B` | — | Optional requirement/business context from a Markdown file; Combined with `--background` the inline value is given first |
 | `--model` | — | — | Select or override the LLM model for this review |
 | `--rule` | — | — | Path to custom JSON review rules |
 | `--max-tools` | — | built-in | Max tool call rounds per file; only takes effect when greater than template default |
@@ -511,6 +512,12 @@ ocr review --commit abc123 --model claude-sonnet-4-6
 
 # Provide requirement context for more targeted review
 ocr review --background "Adding rate limiting to the login API"
+
+# Provide requirement context from a Markdown file
+ocr review --background-file ./docs/my_business_context.md
+
+# Combine inline context with a local context file (both are used)
+ocr review --background "Focus on auth" --background-file ./docs/my_business_context.md
 
 # Use custom review rules
 ocr review --rule /path/to/my-rules.json

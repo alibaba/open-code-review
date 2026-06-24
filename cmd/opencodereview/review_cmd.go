@@ -46,6 +46,17 @@ func runReview(args []string) error {
 		}
 	}
 
+	// Only touch the background when --background-file is set, so the existing
+	// --background behaviour (raw, unsanitised) is preserved for users who do
+	// not opt into the file-based context.
+	if opts.backgroundFile != "" {
+		fileBackground, err := loadBackgroundFile(opts.backgroundFile)
+		if err != nil {
+			return err
+		}
+		opts.background = mergeBackground(opts.background, fileBackground)
+	}
+
 	if opts.preview {
 		return runPreview(cc, opts)
 	}

@@ -449,6 +449,7 @@ JSON 출력에서 두 field는 `content`, `start_line` 등과 같은 수준의 s
 | `--timeout` | - | `10` | 동시 task timeout(분) |
 | `--audience` | - | `human` | `human`(progress 표시) 또는 `agent`(summary only) |
 | `--background` | `-b` | - | 리뷰를 위한 선택적 요구사항/비즈니스 컨텍스트. `--commit` 사용 시 미지정이면 commit message에서 자동 추출 |
+| `--background-file` | `-B` | - | Markdown 파일에서 읽어오는 선택적 요구사항/비즈니스 컨텍스트. `--background`와 함께 사용하면 inline 값이 먼저 배치됩니다 |
 | `--model` | - | - | 이번 리뷰에서 LLM model 선택 또는 override |
 | `--rule` | - | - | custom JSON review rules 경로 |
 | `--max-tools` | - | built-in | 파일별 최대 tool call round. template default보다 클 때만 적용 |
@@ -506,6 +507,12 @@ ocr review --commit abc123 --model claude-sonnet-4-6
 
 # 요구사항 컨텍스트를 제공하여 더 정확한 리뷰 수행
 ocr review --background "로그인 API에 rate limiting 추가"
+
+# Markdown 파일에서 요구사항 컨텍스트 제공
+ocr review --background-file ./docs/my_business_context.md
+
+# inline 컨텍스트와 로컬 컨텍스트 파일을 함께 사용(둘 다 적용됨)
+ocr review --background "인증에 집중" --background-file ./docs/my_business_context.md
 
 # custom review rules 사용
 ocr review --rule /path/to/my-rules.json
