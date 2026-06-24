@@ -156,6 +156,50 @@
     }
   },
   {
+    "name": "code_graph_context",
+    "plan_task": true,
+    "main_task": true,
+    "definition": {
+      "name": "code_graph_context",
+      "description": "Use this optional structural-code tool when text search is not enough and you need to understand symbols, callers, callees, or impact radius. Prefer this tool for changes to public functions, APIs, interfaces, method signatures, shared utilities, route handlers, data models, security/auth logic, concurrency/lifecycle code, or when a risk depends on how other files call the changed symbol. Do not use it for simple literal text lookup; use code_search instead. This tool is only available when a compatible CodeGraph index is detected for the repository.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "explore",
+              "search",
+              "callers",
+              "callees",
+              "impact"
+            ],
+            "description": "Structural query mode. Use search to find symbols, explore for source plus relationship context, callers/callees for dependency direction, and impact to estimate what may be affected by changing a symbol. Defaults to explore."
+          },
+          "query": {
+            "type": "string",
+            "description": "A symbol name, file path, or concise structural query. Prefer exact function/type/class/interface names when available."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Optional symbol kind filter for mode=search, such as function, method, class, interface, type, variable, route, or component."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of symbols or relationships to return for search/callers/callees. Defaults to 12, maximum 30."
+          },
+          "max_files": {
+            "type": "integer",
+            "description": "Maximum number of source files to include for mode=explore. Defaults to 4, maximum 8."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  {
     "name": "file_find",
     "plan_task": true,
     "main_task": true,

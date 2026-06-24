@@ -68,9 +68,16 @@ func runReview(args []string) error {
 		return runPreview(repoDir, opts, fileFilter)
 	}
 
+	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
+	ref, _ := mode.RefValue(opts.to, opts.commit)
+
 	toolEntries, err := toolsconfig.Load(opts.toolConfigPath)
 	if err != nil {
 		return fmt.Errorf("load tools: %w", err)
+	}
+	codeGraph := detectCodeGraphForReview(repoDir, ref)
+	if !codeGraph.Available {
+		toolEntries = toolsconfig.FilterByName(toolEntries, tool.CodeGraph.Name())
 	}
 	planToolDefs := agent.BuildToolDefs(toolEntries, true)
 	mainToolDefs := agent.BuildToolDefs(toolEntries, false)
@@ -101,15 +108,13 @@ func runReview(args []string) error {
 	gitRunner := gitcmd.New(opts.maxGitProcs)
 
 	collector := tool.NewCommentCollector()
-	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
-	ref, _ := mode.RefValue(opts.to, opts.commit)
 	fileReader := &tool.FileReader{
 		RepoDir: repoDir,
 		Mode:    mode,
 		Ref:     ref,
 		Runner:  gitRunner,
 	}
-	tools := buildToolRegistry(collector, fileReader)
+	tools := buildToolRegistry(collector, fileReader, codeGraph)
 
 	ag := agent.New(agent.Args{
 		RepoDir:               repoDir,
@@ -269,12 +274,48 @@ func runPreview(repoDir string, opts reviewOptions, fileFilter *rules.FileFilter
 	return nil
 }
 
-func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {
+func detectCodeGraphForReview(repoDir, ref string) tool.CodeGraphAvailability {
+	codeGraph := tool.DetectCodeGraph(repoDir)
+	if !codeGraph.Available || ref == "" {
+		return codeGraph
+	}
+
+	head, err := resolveCommit(repoDir, "HEAD")
+	if err != nil {
+		codeGraph.Available = false
+		codeGraph.Reason = "cannot resolve HEAD for CodeGraph ref compatibility check"
+		return codeGraph
+	}
+	target, err := resolveCommit(repoDir, ref)
+	if err != nil {
+		codeGraph.Available = false
+		codeGraph.Reason = "cannot resolve review target ref for CodeGraph compatibility check"
+		return codeGraph
+	}
+	if head != target {
+		codeGraph.Available = false
+		codeGraph.Reason = "CodeGraph index is for current checkout, which differs from review target ref"
+	}
+	return codeGraph
+}
+
+func resolveCommit(repoDir, ref string) (string, error) {
+	out, err := runGitCmd(repoDir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader, codeGraph tool.CodeGraphAvailability) *tool.Registry {
 	reg := tool.NewRegistry()
 	reg.Register(tool.NewFileRead(fr))
 	reg.Register(tool.NewFileFind(fr))
 	reg.Register(tool.NewFileReadDiff(tool.DiffMap{}))
 	reg.Register(tool.NewCodeSearch(fr))
+	if codeGraph.Available {
+		reg.Register(tool.NewCodeGraph(fr.RepoDir, codeGraph.BinPath))
+	}
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	return reg
 }

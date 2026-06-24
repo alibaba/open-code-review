@@ -39,6 +39,25 @@ func Load(path string) ([]ToolConfigEntry, error) {
 	return tools, nil
 }
 
+// FilterByName returns entries excluding any tool whose name appears in names.
+func FilterByName(entries []ToolConfigEntry, names ...string) []ToolConfigEntry {
+	if len(names) == 0 {
+		return entries
+	}
+	excluded := make(map[string]bool, len(names))
+	for _, name := range names {
+		excluded[name] = true
+	}
+	out := make([]ToolConfigEntry, 0, len(entries))
+	for _, entry := range entries {
+		if excluded[entry.Name] {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 // ToolDefsByPhase returns the parsed tool definitions filtered by phase.
 // planOnly=true returns only tools with plan_task:true.
 // planOnly=false returns only tools with main_task:true.

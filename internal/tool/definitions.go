@@ -18,6 +18,7 @@ var (
 	FileFind     = Tool{name: "file_find"}
 	FileReadDiff = Tool{name: "file_read_diff"}
 	CodeSearch   = Tool{name: "code_search"}
+	CodeGraph    = Tool{name: "code_graph_context"}
 )
 
 func OfName(name string) Tool {
@@ -30,7 +31,7 @@ func OfName(name string) Tool {
 }
 
 func allTools() []Tool {
-	return []Tool{Unknown, TaskDone, CodeComment, FileRead, FileFind, FileReadDiff, CodeSearch}
+	return []Tool{Unknown, TaskDone, CodeComment, FileRead, FileFind, FileReadDiff, CodeSearch, CodeGraph}
 }
 
 // Name returns the tool's identifier name.
