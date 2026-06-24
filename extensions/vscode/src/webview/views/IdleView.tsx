@@ -12,10 +12,12 @@ interface Props {
   onRequestModeFiles: (mode: ReviewMode, from?: string, to?: string, commit?: string) => void;
   onOpenFile: (file: FileChange, mode: ReviewMode, from?: string, to?: string, commit?: string) => void;
   onStart: (options: CliRunOptions) => void;
+  onOpenConfig: () => void;
+  onOpenCustomProviders: () => void;
   running?: boolean;
 }
 
-export function IdleView({ gitState, modeFiles, filesLoading, configured, onModeChange, onRequestModeFiles, onOpenFile, onStart, running }: Props) {
+export function IdleView({ gitState, modeFiles, filesLoading, configured, onModeChange, onRequestModeFiles, onOpenFile, onStart, onOpenConfig, onOpenCustomProviders, running }: Props) {
   const [mode, setMode] = useState<ReviewMode>('workspace');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -42,6 +44,15 @@ export function IdleView({ gitState, modeFiles, filesLoading, configured, onMode
   const selectionReady =
     mode === 'workspace' || (mode === 'branch' && !!from && !!to) || (mode === 'commit' && !!commit);
   const canReview = configured && !running && !loading && selectionReady && files.length > 0;
+  const primaryDisabled = configured ? !canReview : running || loading;
+
+  const handlePrimary = () => {
+    if (!configured) {
+      onOpenConfig();
+      return;
+    }
+    onStart({ mode, from, to, commit, customPrompt: prompt });
+  };
 
   return (
     <div class="setup">
@@ -87,11 +98,19 @@ export function IdleView({ gitState, modeFiles, filesLoading, configured, onMode
       <textarea class="mode-param-input" rows={3} placeholder="自定义审查提示词（可选）"
         value={prompt} onInput={(e) => setPrompt((e.target as HTMLTextAreaElement).value)} />
 
+      {configured && (
+        <div class="setup-secondary">
+          <button type="button" class="link-btn" onClick={onOpenCustomProviders}>管理自定义 Provider</button>
+          <span class="setup-secondary-sep">·</span>
+          <button type="button" class="link-btn" onClick={onOpenConfig}>模型配置</button>
+        </div>
+      )}
+
       {loading ? (
         <div class="primary-btn skeleton-btn"><div class="skeleton-bar" style={{ width: '40%' }} /></div>
       ) : (
-        <button class="primary-btn" disabled={!canReview}
-          onClick={() => onStart({ mode, from, to, commit, customPrompt: prompt })}>
+        <button class={`primary-btn${!configured ? ' configure' : ''}`} disabled={primaryDisabled}
+          onClick={handlePrimary}>
           {!configured ? '请先配置模型'
             : running ? '审查中…'
             : !selectionReady ? (mode === 'branch' ? '请选择对比分支' : '请选择提交')

@@ -1,14 +1,14 @@
 import { useEffect, useReducer } from 'preact/hooks';
 import { reducer, initialState } from './store';
 import { bridge } from './bridge';
-import { ReviewMode, CliRunOptions, FileChange } from '../shared/types';
+import { isConfigReady } from '../shared/configUtils';
+import { CliRunOptions, FileChange, ReviewMode } from '../shared/types';
 import { IdleView } from './views/IdleView';
 import { RunningView } from './views/RunningView';
 import { DoneView } from './views/DoneView';
 import { EmptyView } from './views/EmptyView';
 import { CancelledView } from './views/CancelledView';
 import { FailedView } from './views/FailedView';
-import { ConfigView } from './views/ConfigView';
 import './styles/global.css';
 
 export function App() {
@@ -19,7 +19,7 @@ export function App() {
     bridge.post({ type: 'ready' });
   }, []);
 
-  const configured = Boolean(state.config);
+  const configured = isConfigReady(state.config);
   const start = (options: CliRunOptions) => {
     dispatch({ type: 'startReview', mode: options.mode });
     bridge.post({ type: 'startReview', options });
@@ -36,20 +36,16 @@ export function App() {
     bridge.post({ type: 'openFileDiff', path: file.path, status: file.status, mode, from, to, commit });
   };
 
-  const openConfig = () => {
-    dispatch({ type: 'openConfig' });
-    dispatch({ type: 'checkingCli' });
-    bridge.post({ type: 'checkCli' });
-  };
-
   return (
     <div class="ocr-root">
-      <button class="config-fab" onClick={openConfig} title="模型配置">⚙</button>
-
       <div class="action-region">
         <IdleView gitState={state.gitState} modeFiles={state.modeFiles} filesLoading={state.filesLoading}
           configured={configured} onModeChange={onModeChange} onRequestModeFiles={requestModeFiles}
-          onOpenFile={openFile} onStart={start}
+          onOpenFile={openFile}           onStart={start} onOpenConfig={() => bridge.post({ type: 'openConfigPanel' })}
+          onOpenCustomProviders={() => bridge.post({
+            type: 'openConfigPanel',
+            focus: { step: 2, tab: 'custom', customView: 'list' },
+          })}
           running={state.view === 'running'} />
 
         {state.view !== 'idle' && (
@@ -67,21 +63,6 @@ export function App() {
           </div>
         )}
       </div>
-
-      {state.configOpen && (
-        <ConfigView
-          config={state.config}
-          cliStatus={state.cliStatus}
-          installing={state.installing}
-          installLogs={state.installLogs}
-          connTest={state.connTest}
-          onInstall={() => { dispatch({ type: 'installingCli' }); bridge.post({ type: 'installCli' }); }}
-          onCheckCli={() => { dispatch({ type: 'checkingCli' }); bridge.post({ type: 'checkCli' }); }}
-          onTest={() => { dispatch({ type: 'testingConn' }); bridge.post({ type: 'testConnection' }); }}
-          onSave={(entries) => entries.forEach((e) => bridge.post({ type: 'setConfig', key: e.key, value: e.value }))}
-          onClose={() => dispatch({ type: 'closeConfig' })}
-        />
-      )}
     </div>
   );
 }

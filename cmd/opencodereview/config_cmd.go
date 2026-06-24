@@ -20,6 +20,14 @@ func defaultConfigPath() (string, error) {
 	return filepath.Join(home, ".opencodereview", "config.json"), nil
 }
 
+// resolveConfigPath returns OCR_CONFIG_PATH when set, otherwise the default user config path.
+func resolveConfigPath() (string, error) {
+	if p := strings.TrimSpace(os.Getenv("OCR_CONFIG_PATH")); p != "" {
+		return p, nil
+	}
+	return defaultConfigPath()
+}
+
 func runConfig(args []string) error {
 	if len(args) == 0 {
 		printConfigUsage()

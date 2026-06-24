@@ -1,20 +1,64 @@
 import { spawn } from 'child_process';
-import { CliResult, CliRunOptions, LogLine } from '../../shared/types';
+import { CliResult, CliRunOptions, EnvCheckResult, LogLine } from '../../shared/types';
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from './cliParse';
 import { getShellEnv, resolveBin } from './shellEnv';
 
 export class CliService {
   private current: ReturnType<typeof spawn> | null = null;
+  private envCache: { env: EnvCheckResult; at: number } | null = null;
+  private static ENV_CACHE_TTL_MS = 5 * 60 * 1000;
 
   constructor(private cliPath: string = 'ocr') {}
 
+  invalidateEnvironmentCache(): void {
+    this.envCache = null;
+  }
+
+  getCachedEnvironment(): EnvCheckResult | null {
+    if (!this.envCache) return null;
+    if (Date.now() - this.envCache.at > CliService.ENV_CACHE_TTL_MS) {
+      this.envCache = null;
+      return null;
+    }
+    return this.envCache.env;
+  }
+
   async isAvailable(): Promise<boolean> {
+    const env = await this.checkEnvironment();
+    return env.ocr.ok;
+  }
+
+  private probeCommand(bin: string, args: string[]): Promise<{ ok: boolean; version?: string }> {
     return new Promise((resolve) => {
-      const p = spawn(resolveBin(this.cliPath), ['--version'], { env: getShellEnv() });
+      const proc = spawn(resolveBin(bin), args, { env: getShellEnv() });
+      let stdout = '';
       let errored = false;
-      p.on('error', () => { errored = true; resolve(false); });
-      p.on('close', () => { if (!errored) resolve(true); });
+      proc.stdout?.on('data', (d) => { stdout += d.toString(); });
+      proc.on('error', () => { errored = true; resolve({ ok: false }); });
+      proc.on('close', (code) => {
+        if (errored || code !== 0) {
+          resolve({ ok: false });
+          return;
+        }
+        const version = stdout.trim().split('\n')[0]?.trim();
+        resolve({ ok: true, version: version || undefined });
+      });
     });
+  }
+
+  async checkEnvironment(force = false): Promise<EnvCheckResult> {
+    if (!force) {
+      const cached = this.getCachedEnvironment();
+      if (cached) return cached;
+    }
+    const node = await this.probeCommand('node', ['--version']);
+    const npm = node.ok ? await this.probeCommand('npm', ['--version']) : { ok: false };
+    const ocr = node.ok && npm.ok
+      ? await this.probeCommand(this.cliPath, ['--version'])
+      : { ok: false };
+    const env = { node, npm, ocr };
+    this.envCache = { env, at: Date.now() };
+    return env;
   }
 
   /** 全局安装 ocr CLI，流式回显 npm 日志，按 exit code 返回是否成功。 */
@@ -47,15 +91,24 @@ export class CliService {
       proc.on('close', (code) => {
         emitLines('', 'info', true);
         onLog({ text: code === 0 ? '✓ 安装完成' : `✗ 安装失败 (exit ${code})`, level: code === 0 ? 'info' : 'error' });
+        if (code === 0) this.invalidateEnvironmentCache();
         resolve(code === 0);
       });
     });
   }
 
   /** 运行任意参数，流式回调日志，结束返回 stdout 全文。退出码非 0 时 reject，并带上 CLI 报错文本。 */
-  runRaw(args: string[], cwd: string, onLog: (l: LogLine) => void): Promise<string> {
+  runRaw(
+    args: string[],
+    cwd: string,
+    onLog: (l: LogLine) => void,
+    envExtra?: Record<string, string>,
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const proc = spawn(resolveBin(this.cliPath), args, { cwd, env: getShellEnv() });
+      const proc = spawn(resolveBin(this.cliPath), args, {
+        cwd,
+        env: envExtra ? { ...getShellEnv(), ...envExtra } : getShellEnv(),
+      });
       this.current = proc;
       let stdout = '';
       let stderr = '';
@@ -82,9 +135,16 @@ export class CliService {
     return parseCliResult(stdout);
   }
 
-  async testConnection(): Promise<{ ok: boolean; message?: string }> {
+  async testConnection(options?: { configPath?: string; home?: string }): Promise<{ ok: boolean; message?: string }> {
+    const envExtra: Record<string, string> = {};
+    if (options?.home) {
+      envExtra.HOME = options.home;
+      if (process.platform === 'win32') envExtra.USERPROFILE = options.home;
+    }
+    if (options?.configPath) envExtra.OCR_CONFIG_PATH = options.configPath;
+    const env = Object.keys(envExtra).length > 0 ? envExtra : undefined;
     try {
-      await this.runRaw(['llm', 'test'], process.cwd(), () => {});
+      await this.runRaw(['llm', 'test'], process.cwd(), () => {}, env);
       return { ok: true };
     } catch (e) {
       return { ok: false, message: e instanceof Error ? e.message : String(e) };

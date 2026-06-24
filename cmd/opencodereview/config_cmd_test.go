@@ -218,3 +218,14 @@ func TestSetConfigValueModelWithCustomProvider(t *testing.T) {
 		t.Errorf("top-level Model = %q, want empty (should write to custom provider entry)", cfg.Model)
 	}
 }
+
+func TestResolveConfigPathUsesEnvOverride(t *testing.T) {
+	t.Setenv("OCR_CONFIG_PATH", "/tmp/ocr-test-config.json")
+	path, err := resolveConfigPath()
+	if err != nil {
+		t.Fatalf("resolveConfigPath: %v", err)
+	}
+	if path != "/tmp/ocr-test-config.json" {
+		t.Errorf("path = %q, want %q", path, "/tmp/ocr-test-config.json")
+	}
+}

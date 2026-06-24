@@ -47,4 +47,27 @@ const webviewConfig = {
   devtool: 'source-map',
 };
 
-module.exports = [extensionConfig, webviewConfig];
+/** @type {import('webpack').Configuration} */
+const configPanelConfig = {
+  name: 'configPanel',
+  target: 'web',
+  entry: { configPanel: './src/webview/configPanel.tsx' },
+  output: {
+    path: path.resolve(__dirname, 'out'),
+    filename: '[name].js',
+  },
+  resolve: { extensions: ['.ts', '.tsx', '.js'] },
+  module: {
+    rules: [
+      {
+        test: /\.tsx?$/,
+        exclude: /node_modules/,
+        use: { loader: 'ts-loader', options: { configFile: 'tsconfig.webview.json' } },
+      },
+      { test: /\.css$/, use: ['style-loader', 'css-loader'] },
+    ],
+  },
+  devtool: 'source-map',
+};
+
+module.exports = [extensionConfig, webviewConfig, configPanelConfig];

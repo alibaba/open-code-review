@@ -29,7 +29,7 @@ func runLLM(args []string) error {
 }
 
 func runLLMTest() error {
-	cfgPath, err := defaultConfigPath()
+	cfgPath, err := resolveConfigPath()
 	if err != nil {
 		return err
 	}
