@@ -48,7 +48,9 @@ code-review:
     - |
       ocr config set llm.url $OCR_LLM_URL
       ocr config set llm.auth_token $OCR_LLM_AUTH_TOKEN
-      ocr config set llm.model $OCR_LLM_MODEL
+      if [ -n "$OCR_LLM_MODEL" ]; then
+        ocr config set llm.model "$OCR_LLM_MODEL"
+      fi
       ocr config set llm.use_anthropic false
       ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
 
@@ -70,4 +72,13 @@ code-review:
     # post_review.py recomputes the old-side line for each comment from the
     # merge-base diff, which the GitFlic Discussions API requires for inline
     # (code) comments.
-    - python3 post_review.py /tmp/ocr-result.json
+    #
+    # The review step above ends with `|| true`, so a failed `ocr review` (bad
+    # token, network error) leaves an empty or partial file. Skip posting in
+    # that case instead of feeding invalid JSON to post_review.py.
+    - |
+      if [ ! -s /tmp/ocr-result.json ]; then
+        echo "OCR review produced no output, skipping post."
+        exit 0
+      fi
+      python3 post_review.py /tmp/ocr-result.json

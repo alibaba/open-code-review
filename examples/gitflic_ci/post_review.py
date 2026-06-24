@@ -342,6 +342,10 @@ def make_poster(api_url, token, owner, project, mr):
                 resp.read()
         except urllib.error.HTTPError as e:
             snippet = e.read(512).decode("utf-8", "replace").strip()
+            # Some APIs echo request details back in error bodies; never let the
+            # token reach the CI log if GitFlic does that.
+            if token:
+                snippet = snippet.replace(token, "***")
             raise RuntimeError("gitflic API %s %s: %s" % (e.code, e.reason, snippet))
 
     return post
@@ -389,7 +393,11 @@ def load_diffs_by_path(repo, from_ref, to_ref):
 
 def load_review_result(path):
     """Read the JSON produced by `ocr review --format json` (path '-' = stdin)."""
-    data = sys.stdin.read() if path == "-" else open(path, encoding="utf-8").read()
+    if path == "-":
+        data = sys.stdin.read()
+    else:
+        with open(path, encoding="utf-8") as f:
+            data = f.read()
     return json.loads(data)
 
 
