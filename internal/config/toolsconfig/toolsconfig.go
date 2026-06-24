@@ -39,8 +39,8 @@ func Load(path string) ([]ToolConfigEntry, error) {
 	return tools, nil
 }
 
-// FilterByName returns entries excluding any tool whose name appears in names.
-func FilterByName(entries []ToolConfigEntry, names ...string) []ToolConfigEntry {
+// ExcludeByName returns entries excluding any tool whose name appears in names.
+func ExcludeByName(entries []ToolConfigEntry, names ...string) []ToolConfigEntry {
 	if len(names) == 0 {
 		return entries
 	}

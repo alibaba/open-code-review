@@ -77,7 +77,7 @@ func runReview(args []string) error {
 	}
 	codeGraph := detectCodeGraphForReview(repoDir, ref)
 	if !codeGraph.Available {
-		toolEntries = toolsconfig.FilterByName(toolEntries, tool.CodeGraph.Name())
+		toolEntries = toolsconfig.ExcludeByName(toolEntries, tool.CodeGraphContext.Name())
 	}
 	planToolDefs := agent.BuildToolDefs(toolEntries, true)
 	mainToolDefs := agent.BuildToolDefs(toolEntries, false)

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -46,7 +47,7 @@ func NewCodeGraph(repoDir, binPath string) *CodeGraphProvider {
 	return &CodeGraphProvider{RepoDir: repoDir, BinPath: binPath}
 }
 
-func (p *CodeGraphProvider) Tool() Tool { return CodeGraph }
+func (p *CodeGraphProvider) Tool() Tool { return CodeGraphContext }
 
 func (p *CodeGraphProvider) Execute(ctx context.Context, args map[string]any) (string, error) {
 	mode := stringArg(args, "mode")
@@ -77,15 +78,15 @@ func (p *CodeGraphProvider) Execute(ctx context.Context, args map[string]any) (s
 		if kind := strings.TrimSpace(stringArg(args, "kind")); kind != "" {
 			cmdArgs = append(cmdArgs, "-k", kind)
 		}
-		cmdArgs = append(cmdArgs, query)
+		cmdArgs = append(cmdArgs, "--", query)
 	case "explore":
-		cmdArgs = []string{"explore", "-p", p.RepoDir, "--max-files", strconv.Itoa(maxFiles), query}
+		cmdArgs = []string{"explore", "-p", p.RepoDir, "--max-files", strconv.Itoa(maxFiles), "--", query}
 	case "callers":
-		cmdArgs = []string{"callers", "-p", p.RepoDir, "-l", strconv.Itoa(limit), query}
+		cmdArgs = []string{"callers", "-p", p.RepoDir, "-l", strconv.Itoa(limit), "--", query}
 	case "callees":
-		cmdArgs = []string{"callees", "-p", p.RepoDir, "-l", strconv.Itoa(limit), query}
+		cmdArgs = []string{"callees", "-p", p.RepoDir, "-l", strconv.Itoa(limit), "--", query}
 	case "impact":
-		cmdArgs = []string{"impact", "-p", p.RepoDir, query}
+		cmdArgs = []string{"impact", "-p", p.RepoDir, "--", query}
 	default:
 		return fmt.Sprintf("Error: unsupported mode %q. Supported modes: search, explore, callers, callees, impact", mode), nil
 	}
@@ -110,7 +111,7 @@ func (p *CodeGraphProvider) run(parentCtx context.Context, args ...string) (stri
 
 	err := cmd.Run()
 	if ctx.Err() != nil {
-		return "code_graph_context timed out. Try using mode=search with a specific symbol, or reduce max_files/limit.", nil
+		return codeGraphTimeoutMessage(stdout.String(), stderr.String()), nil
 	}
 
 	out := strings.TrimSpace(stdout.String())
@@ -127,13 +128,33 @@ func (p *CodeGraphProvider) run(parentCtx context.Context, args ...string) (stri
 		out += "\nWarning: " + stripANSI(errOut)
 	}
 	out = stripANSI(out)
-	if len(out) > codeGraphMaxOutput {
-		out = out[:codeGraphMaxOutput] + "\n\n[truncated: CodeGraph output exceeded tool limit]"
-	}
+	out = truncateToolOutput(out)
 	if out == "" {
 		return "No structural context found", nil
 	}
 	return out, nil
+}
+
+func truncateToolOutput(out string) string {
+	if len(out) <= codeGraphMaxOutput {
+		return out
+	}
+	truncated := out[:codeGraphMaxOutput]
+	for len(truncated) > 0 && !utf8.ValidString(truncated) {
+		truncated = truncated[:len(truncated)-1]
+	}
+	return truncated + "\n\n[truncated: CodeGraph output exceeded tool limit]"
+}
+
+func codeGraphTimeoutMessage(stdout, stderr string) string {
+	msg := "code_graph_context timed out. Try using mode=search with a specific symbol, or reduce max_files/limit."
+	if partial := strings.TrimSpace(stdout); partial != "" {
+		msg += "\n\nPartial output:\n" + truncateToolOutput(stripANSI(partial))
+	}
+	if partialErr := strings.TrimSpace(stderr); partialErr != "" {
+		msg += "\n\nPartial error output:\n" + truncateToolOutput(stripANSI(partialErr))
+	}
+	return msg
 }
 
 // DetectCodeGraph checks whether CodeGraph can be used for repoDir. A negative

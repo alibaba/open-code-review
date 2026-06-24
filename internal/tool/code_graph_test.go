@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestCodeGraphExecuteExplore(t *testing.T) {
@@ -27,7 +28,7 @@ printf '\033[32mSymbol: Foo\033[0m\n'
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result, "args:explore -p "+dir+" --max-files 2 Foo") {
+	if !strings.Contains(result, "args:explore -p "+dir+" --max-files 2 -- Foo") {
 		t.Fatalf("unexpected command args: %s", result)
 	}
 	if strings.Contains(result, "\033[") {
@@ -57,7 +58,7 @@ printf '%s\n' "$*"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result, "query -p "+dir+" -l 12 -k function Foo") {
+	if !strings.Contains(result, "query -p "+dir+" -l 12 -k function -- Foo") {
 		t.Fatalf("expected out-of-range limit to fall back to default, got: %s", result)
 	}
 }
@@ -83,6 +84,24 @@ func TestDetectCodeGraphMissingDB(t *testing.T) {
 	}
 	if result.Reason == "" {
 		t.Fatal("expected unavailable reason")
+	}
+}
+
+func TestTruncateToolOutputPreservesUTF8(t *testing.T) {
+	prefix := strings.Repeat("a", codeGraphMaxOutput-1)
+	result := truncateToolOutput(prefix + "界")
+	if !strings.Contains(result, "[truncated: CodeGraph output exceeded tool limit]") {
+		t.Fatalf("expected truncation marker, got: %s", result)
+	}
+	if !utf8.ValidString(result) {
+		t.Fatalf("expected valid UTF-8, got: %q", result)
+	}
+}
+
+func TestCodeGraphTimeoutMessageIncludesPartialOutput(t *testing.T) {
+	result := codeGraphTimeoutMessage("partial stdout\n", "partial stderr\n")
+	if !strings.Contains(result, "timed out") || !strings.Contains(result, "partial stdout") || !strings.Contains(result, "partial stderr") {
+		t.Fatalf("expected timeout message with partial output, got: %s", result)
 	}
 }
 
