@@ -195,7 +195,7 @@ type jsonOutput struct {
 	Status         string               `json:"status"`
 	Message        string               `json:"message,omitempty"`
 	Summary        *jsonSummary         `json:"summary,omitempty"`
-	ToolCalls      *jsonToolCalls       `json:"tool_calls,omitempty"`
+	ToolCalls      *jsonToolCalls       `json:"tool_calls"`
 	Comments       []model.LlmComment   `json:"comments"`
 	Warnings       []agent.AgentWarning `json:"warnings,omitempty"`
 	ProjectSummary string               `json:"project_summary,omitempty"`
@@ -269,6 +269,9 @@ func outputJSONNoFiles() error {
 		Status:   "skipped",
 		Message:  "No supported files changed.",
 		Comments: []model.LlmComment{},
+		ToolCalls: &jsonToolCalls{
+			ByTool: map[string]int64{},
+		},
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
