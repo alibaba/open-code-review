@@ -268,12 +268,12 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		return tool.Complete()
 	}
 
-	r.recordToolCall(t.Name())
-
 	p := lookupTool(r.deps.Tools, t)
 	if p == nil {
 		return tool.Of(tool.NotAvailableMsg)
 	}
+
+	r.recordToolCall(t.Name())
 
 	var args map[string]any
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {

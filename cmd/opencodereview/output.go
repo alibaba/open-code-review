@@ -232,15 +232,17 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		},
 		ProjectSummary: projectSummary,
 	}
-	if len(toolCalls) > 0 {
-		var total int64
-		for _, v := range toolCalls {
-			total += v
-		}
-		out.ToolCalls = &jsonToolCalls{
-			Total:  total,
-			ByTool: toolCalls,
-		}
+	var total int64
+	for _, v := range toolCalls {
+		total += v
+	}
+	byTool := toolCalls
+	if byTool == nil {
+		byTool = make(map[string]int64)
+	}
+	out.ToolCalls = &jsonToolCalls{
+		Total:  total,
+		ByTool: byTool,
 	}
 	if len(comments) == 0 {
 		if hasSubtaskErrors(warnings) {
