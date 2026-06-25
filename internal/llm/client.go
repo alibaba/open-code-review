@@ -299,9 +299,6 @@ func (r *LLMRouter) order() []int {
 	for i := range r.members {
 		if t, ok := r.cooldown[i]; ok {
 			if now.Before(t) {
-	for i := range r.members {
-		if t, ok := r.cooldown[i]; ok {
-			if now.Before(t) {
 				parked = append(parked, i)
 			} else {
 				delete(r.cooldown, i)
