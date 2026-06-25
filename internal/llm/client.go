@@ -299,12 +299,17 @@ func (r *LLMRouter) order() []int {
 	for i := range r.members {
 		if t, ok := r.cooldown[i]; ok {
 			if now.Before(t) {
+	for i := range r.members {
+		if t, ok := r.cooldown[i]; ok {
+			if now.Before(t) {
 				parked = append(parked, i)
-				continue
+			} else {
+				delete(r.cooldown, i)
+				live = append(live, i)
 			}
-			delete(r.cooldown, i) // expired: drop the entry so the map stays bounded
+		} else {
+			live = append(live, i)
 		}
-		live = append(live, i)
 	}
 	return append(live, parked...)
 }
