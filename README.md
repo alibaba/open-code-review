@@ -24,6 +24,7 @@
   <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
   English | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | <a href="README.ru-RU.md">Русский</a>
@@ -315,7 +316,39 @@ This integration does not change OCR's internal LLM backend and does not require
 
 Korean guide: [`plugins/open-code-review/CODEX.ko-KR.md`](plugins/open-code-review/CODEX.ko-KR.md)
 
-#### Option 4: Copy the Command File Directly
+#### Option 4: Install as a Cursor Plugin
+
+For [Cursor](https://www.cursor.com/), install the Open Code Review plugin from this repository:
+
+```
+cursor-plugin marketplace add alibaba/open-code-review
+```
+
+Or add the marketplace manually. In Cursor, open `/plugins`, search for `Open Code Review`, and install it.
+
+For a local checkout or fork:
+
+```
+cursor-plugin marketplace add .
+```
+
+After installation, invoke it in Cursor:
+
+```text
+@Open Code Review review my current changes
+@Open Code Review review this branch against main
+@Open Code Review review and fix high-confidence issues
+```
+
+This registers a Cursor skill that runs the local OCR CLI:
+
+```bash
+ocr review --audience agent
+```
+
+This integration does not change OCR's internal LLM backend. OCR itself still requires the `ocr` CLI to be installed and configured as described in the CLI setup section.
+
+#### Option 5: Copy the Command File Directly
 
 For a quick setup without any package manager, simply copy the command file to use the `/open-code-review` slash command in Claude Code.
 
