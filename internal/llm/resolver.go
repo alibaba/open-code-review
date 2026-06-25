@@ -19,6 +19,7 @@ type ResolvedEndpoint struct {
 	Source       string            // human-readable config source label
 	ExtraBody    map[string]any    // vendor-specific request body fields
 	ExtraHeaders map[string]string // extra HTTP headers for the LLM request
+	MaxRetries   int               // optional per-endpoint SDK retry budget (0 = default); set low for router members
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -148,34 +149,127 @@ type providerEntryConfig struct {
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
 
+// modelRef is one entry of the ordered routing pool: which configured provider to
+// use and (optionally) which of its models. An empty Model falls back to the
+// provider's default model.
+type modelRef struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model,omitempty"`
+}
+
+// routingConfig is the multi-model namespace: an ordered pool plus a selection
+// policy. Grouping these under `routing` (vs a bare top-level list) gives the policy
+// and future per-pool knobs a stable home, and avoids colliding with
+// providers.<name>.models (which is a provider's model catalog, not a routing pool).
+type routingConfig struct {
+	Models []modelRef `json:"models,omitempty"` // ordered pool; index 0 is primary
+	Policy string     `json:"policy,omitempty"` // selection policy; only "priority" supported today
+}
+
 type configFile struct {
 	Provider        string                         `json:"provider,omitempty"`
 	Model           string                         `json:"model,omitempty"`
+	Routing         routingConfig                  `json:"routing,omitempty"`
 	Providers       map[string]providerEntryConfig `json:"providers,omitempty"`
 	CustomProviders map[string]providerEntryConfig `json:"custom_providers,omitempty"`
 	Llm             llmFileConfig                  `json:"llm,omitempty"`
 }
 
-// tryOCRConfig reads the OCR config file.
-func tryOCRConfig(path, modelOverride string) (ResolvedEndpoint, bool, error) {
+// loadConfigFile reads + parses the OCR config file. ok=false (nil err) when absent.
+func loadConfigFile(path string) (configFile, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ResolvedEndpoint{}, false, nil
+			return configFile{}, false, nil
 		}
-		return ResolvedEndpoint{}, false, err
+		return configFile{}, false, err
 	}
-
 	var cfg configFile
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return ResolvedEndpoint{}, false, fmt.Errorf("parse config: %w", err)
+		return configFile{}, false, fmt.Errorf("parse config: %w", err)
+	}
+	return cfg, true, nil
+}
+
+// tryOCRConfig resolves a single endpoint from the config file (the primary, for
+// callers that want one client). `provider` wins when set; otherwise `models[0]`
+// (the pool's primary); otherwise the legacy `llm` block.
+func tryOCRConfig(path, modelOverride string) (ResolvedEndpoint, bool, error) {
+	cfg, ok, err := loadConfigFile(path)
+	if err != nil || !ok {
+		return ResolvedEndpoint{}, false, err
 	}
 
 	if cfg.Provider != "" {
 		return tryProviderConfig(cfg, modelOverride)
 	}
+	if len(cfg.Routing.Models) > 0 {
+		ep, err := resolveModelRef(cfg, cfg.Routing.Models[0])
+		if err != nil {
+			return ResolvedEndpoint{}, false, err
+		}
+		return ep, true, nil
+	}
 
 	return tryLegacyLlmConfig(cfg, modelOverride)
+}
+
+// resolveModelRef resolves one pool entry, reusing tryProviderConfig by pinning it to
+// this entry's provider. ref.Model is passed as the model override so it wins over the
+// provider's default and is validated against the provider's available models.
+func resolveModelRef(cfg configFile, ref modelRef) (ResolvedEndpoint, error) {
+	if ref.Provider == "" {
+		return ResolvedEndpoint{}, fmt.Errorf("models[] entry missing required 'provider' field")
+	}
+	sub := cfg
+	sub.Provider = ref.Provider
+	sub.Routing = routingConfig{}
+	ep, ok, err := tryProviderConfig(sub, ref.Model)
+	if err != nil {
+		return ResolvedEndpoint{}, err
+	}
+	if !ok || ep.URL == "" || ep.Token == "" || ep.Model == "" {
+		return ResolvedEndpoint{}, fmt.Errorf("models[] entry {provider:%q model:%q} did not resolve to a complete endpoint", ref.Provider, ref.Model)
+	}
+	ep.Model = stripModelSuffix(ep.Model)
+	return ep, nil
+}
+
+// ResolveModels resolves the full ordered model pool for the router.
+func ResolveModels(configPath string) ([]ResolvedEndpoint, error) {
+	return ResolveModelsWithModelOverride(configPath, "")
+}
+
+// ResolveModelsWithModelOverride returns the ordered pool of endpoints. An explicit
+// modelOverride (--model) bypasses the pool and pins a single endpoint. Without it, a
+// config `models` list resolves to the whole chain; otherwise it falls back to the
+// single-endpoint resolution (env / single provider / legacy / shell), wrapped as a
+// one-element pool — so existing configs behave exactly as before.
+func ResolveModelsWithModelOverride(configPath, modelOverride string) ([]ResolvedEndpoint, error) {
+	if strings.TrimSpace(modelOverride) == "" {
+		if cfg, ok, err := loadConfigFile(configPath); err != nil {
+			return nil, err
+		} else if ok && len(cfg.Routing.Models) > 0 {
+			if pol := strings.TrimSpace(cfg.Routing.Policy); pol != "" && pol != "priority" {
+				return nil, fmt.Errorf("unsupported routing.policy %q (only \"priority\" is supported)", pol)
+			}
+			eps := make([]ResolvedEndpoint, 0, len(cfg.Routing.Models))
+			for _, ref := range cfg.Routing.Models {
+				ep, err := resolveModelRef(cfg, ref)
+				if err != nil {
+					return nil, err
+				}
+				eps = append(eps, ep)
+			}
+			return eps, nil
+		}
+	}
+
+	ep, err := ResolveEndpointWithModelOverride(configPath, modelOverride)
+	if err != nil {
+		return nil, err
+	}
+	return []ResolvedEndpoint{ep}, nil
 }
 
 // tryProviderConfig resolves an endpoint from the provider-based configuration.

@@ -5,7 +5,9 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -186,6 +188,8 @@ type ClientConfig struct {
 	Timeout      time.Duration     // Request timeout
 	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
 	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
+	MaxRetries   int               // SDK in-provider retry budget; 0 → default. Lowered for router members so a
+	// rate-limited model fails fast to the next instead of burning the full backoff.
 }
 
 // --- Factory ---
@@ -200,11 +204,135 @@ func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 		AuthHeader:   ep.AuthHeader,
 		ExtraBody:    ep.ExtraBody,
 		ExtraHeaders: ep.ExtraHeaders,
+		MaxRetries:   ep.MaxRetries,
 	}
 	if ep.Protocol == "anthropic" {
 		return NewAnthropicClient(cfg)
 	}
 	return NewOpenAIClient(cfg)
+}
+
+func maxRetriesOrDefault(n int) int {
+	if n > 0 {
+		return n
+	}
+	return 5 // SDK default budget when caller doesn't constrain it
+}
+
+// --- Multi-model router ---
+
+// Tunables for LLMRouter. A router member that returns a fallover-worthy error is
+// parked for routerCooldown so concurrent subtasks skip it instead of each re-hitting
+// a model that's down/throttled. Members get a low retry budget so a rate-limited
+// model fails fast to the next rather than burning the full SDK backoff.
+const (
+	routerMemberRetries = 2
+	routerCooldown      = 30 * time.Second
+)
+
+type routerMember struct {
+	client LLMClient
+	label  string // "protocol/model" for logs
+}
+
+// LLMRouter is an LLMClient over an ordered pool of models. On a fallover-worthy
+// failure (rate limit / 5xx / network) it advances to the next member; client-side
+// errors (bad request / payload too large) short-circuit since another model would
+// fail identically. Cooldown state is shared across concurrent CompletionsWithCtx
+// calls (one ocr run's per-file subtasks), so a throttled model is skipped fleet-wide.
+// Selection is strict priority order today; the order() seam is where a weighted /
+// capability policy would plug in.
+type LLMRouter struct {
+	members  []routerMember
+	mu       sync.Mutex
+	cooldown map[int]time.Time // member index → parked-until
+}
+
+// NewLLMRouter builds an LLMClient from an ordered pool. A pool of one returns a
+// plain client (no router overhead, unchanged single-model behavior).
+func NewLLMRouter(eps []ResolvedEndpoint) LLMClient {
+	if len(eps) == 1 {
+		return NewLLMClient(eps[0])
+	}
+	members := make([]routerMember, len(eps))
+	for i, ep := range eps {
+		if ep.MaxRetries == 0 {
+			ep.MaxRetries = routerMemberRetries
+		}
+		members[i] = routerMember{client: NewLLMClient(ep), label: ep.Protocol + "/" + ep.Model}
+	}
+	return &LLMRouter{members: members, cooldown: make(map[int]time.Time)}
+}
+
+func (r *LLMRouter) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	var lastErr error
+	for _, i := range r.order() {
+		resp, err := r.members[i].client.CompletionsWithCtx(ctx, req)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		if !shouldFallover(err) {
+			return nil, err
+		}
+		r.park(i)
+		log.Printf("[llm-router] %s failed (%v) — trying next model", r.members[i].label, err)
+	}
+	return nil, fmt.Errorf("all %d models exhausted; last error: %w", len(r.members), lastErr)
+}
+
+// order returns member indices in priority order with non-parked first; parked ones
+// are appended (not dropped) so an all-parked pool is still attempted as last resort.
+func (r *LLMRouter) order() []int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	live := make([]int, 0, len(r.members))
+	parked := make([]int, 0)
+	for i := range r.members {
+		if t, ok := r.cooldown[i]; ok && now.Before(t) {
+			parked = append(parked, i)
+		} else {
+			live = append(live, i)
+		}
+	}
+	return append(live, parked...)
+}
+
+func (r *LLMRouter) park(i int) {
+	r.mu.Lock()
+	r.cooldown[i] = time.Now().Add(routerCooldown)
+	r.mu.Unlock()
+}
+
+// shouldFallover reports whether err warrants trying the next model. Availability
+// failures (rate limit, server, network) → yes; a caller-cancelled context or a
+// client-side request error (same payload fails on every model) → no.
+func shouldFallover(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var aerr *anthropic.Error
+	if errors.As(err, &aerr) {
+		return falloverStatus(aerr.StatusCode)
+	}
+	var oerr *openai.Error
+	if errors.As(err, &oerr) {
+		return falloverStatus(oerr.StatusCode)
+	}
+	return true // unknown (network blip / timeout / parse) → next model may succeed
+}
+
+func falloverStatus(code int) bool {
+	switch code {
+	case 400, 413, 422:
+		return false // bad request / payload too large / unprocessable: deterministic across models
+	default:
+		return true // 401/403/404/408/409/429/5xx: a different provider/key/capacity may differ
+	}
 }
 
 // --- Token counting with tiktoken ---
@@ -296,7 +424,7 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
 		openaiopt.WithBaseURL(sdkBaseURL),
-		openaiopt.WithMaxRetries(5),
+		openaiopt.WithMaxRetries(maxRetriesOrDefault(cfg.MaxRetries)),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 	}
@@ -499,7 +627,7 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 
 	opts := []option.RequestOption{
 		option.WithBaseURL(sdkBaseURL),
-		option.WithMaxRetries(5),
+		option.WithMaxRetries(maxRetriesOrDefault(cfg.MaxRetries)),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
 	}

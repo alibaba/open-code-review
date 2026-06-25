@@ -667,6 +667,8 @@ Config file: `~/.opencodereview/config.json`
 | `providers.<name>.extra_body` | object | JSON object merged into every request body |
 | `providers.<name>.extra_headers` | string | Comma-separated `key=value` HTTP headers |
 | `custom_providers.<name>.*` | — | Same fields as `providers.<name>.*`, including optional `models` |
+| `routing.models` | array | Ordered model pool for failover: `[{provider, model}]` (see [Multi-model fallback](#multi-model-fallback)) |
+| `routing.policy` | string | Selection policy; `priority` (default, only value today) |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |
@@ -692,6 +694,32 @@ Environment variables take precedence over the config file.
 | `OCR_LLM_EXTRA_HEADERS` | Comma-separated `key=value` HTTP headers |
 | `OCR_LLM_MODEL` | Model name |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
+
+### Multi-model fallback
+
+By default a review uses a single model (`provider` + `model`). To survive rate limits and provider outages, configure an ordered `routing.models` pool — the reviewer tries each in order and falls over to the next when one is rate-limited, returns a server error, or times out:
+
+```json
+{
+  "providers": {
+    "anthropic": { "api_key": "sk-ant-...", "model": "claude-opus-4-6" },
+    "deepseek":  { "api_key": "sk-...",     "model": "deepseek-v3" }
+  },
+  "routing": {
+    "models": [
+      { "provider": "anthropic", "model": "claude-opus-4-6" },
+      { "provider": "deepseek",  "model": "deepseek-v3" }
+    ],
+    "policy": "priority"
+  }
+}
+```
+
+- Each entry references a configured provider (for credentials / endpoint) and a model; an omitted `model` uses the provider's default.
+- `routing.policy` selects how the pool is ordered. Only `priority` is supported today (first entry is primary); the field is reserved for future policies (e.g. weighted), and an unknown value is rejected rather than silently ignored.
+- A rate-limited or unavailable model is briefly parked so concurrent per-file reviews skip it instead of each re-hitting it.
+- Failover triggers on availability errors (rate limit, 5xx, network/timeout). Client-side errors (bad request, payload too large) do **not** trigger failover, since another model would fail identically.
+- Without `routing.models`, behavior is unchanged. `--model` pins a single model and bypasses the pool.
 
 
 ## Telemetry
