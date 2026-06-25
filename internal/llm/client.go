@@ -272,6 +272,13 @@ func (r *LLMRouter) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*C
 			return resp, nil
 		}
 		lastErr = err
+		if ctx.Err() != nil {
+			// The shared ctx is canceled or past its deadline: the overall budget is
+			// exhausted and no other member can succeed (they all use this ctx). Stop
+			// here rather than burning fallover attempts. A per-request timeout (ctx
+			// still live) is NOT caught here and still falls over below.
+			return nil, ctx.Err()
+		}
 		if !shouldFallover(err) {
 			return nil, err
 		}
@@ -290,11 +297,14 @@ func (r *LLMRouter) order() []int {
 	live := make([]int, 0, len(r.members))
 	parked := make([]int, 0)
 	for i := range r.members {
-		if t, ok := r.cooldown[i]; ok && now.Before(t) {
-			parked = append(parked, i)
-		} else {
-			live = append(live, i)
+		if t, ok := r.cooldown[i]; ok {
+			if now.Before(t) {
+				parked = append(parked, i)
+				continue
+			}
+			delete(r.cooldown, i) // expired: drop the entry so the map stays bounded
 		}
+		live = append(live, i)
 	}
 	return append(live, parked...)
 }

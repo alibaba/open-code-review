@@ -85,6 +85,22 @@ func TestLLMRouter_AllExhausted(t *testing.T) {
 	}
 }
 
+func TestLLMRouter_StopsWhenContextDone(t *testing.T) {
+	c0 := &fakeClient{err: errors.New("boom")}
+	c1 := &fakeClient{resp: &ChatResponse{ID: "ok"}}
+	r := newRouter(routerMember{c0, "a"}, routerMember{c1, "b"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // shared budget exhausted — no member can succeed
+
+	if _, err := r.CompletionsWithCtx(ctx, ChatRequest{}); err == nil {
+		t.Fatal("expected error when ctx is done, got nil")
+	}
+	if c1.calls != 0 {
+		t.Fatalf("fell over despite done ctx: c1.calls=%d, want 0", c1.calls)
+	}
+}
+
 func TestShouldFallover(t *testing.T) {
 	cases := []struct {
 		name string
