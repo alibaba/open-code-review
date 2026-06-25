@@ -61,13 +61,13 @@ func TestApplyDedupGroups_KeepCanonicalContentWhenNoMergedContent(t *testing.T) 
 func TestApplyDedupGroups_RejectsBadShapes(t *testing.T) {
 	originals := []model.LlmComment{cmt("a.go", "x"), cmt("b.go", "y")}
 	cases := map[string]string{
-		"empty input":      ``,
-		"non-json":         `not json at all`,
-		"missing id":       `{"groups": [{"members": ["c-0"]}]}`,                   // c-1 not covered
-		"duplicate id":     `{"groups": [{"members": ["c-0", "c-0"]}, {"members": ["c-1"]}]}`,
-		"unknown id":       `{"groups": [{"members": ["c-0"]}, {"members": ["c-99"]}]}`,
-		"empty members":    `{"groups": [{"members": []}, {"members": ["c-0", "c-1"]}]}`,
-		"missing one":      `{"groups": [{"members": ["c-1"]}]}`, // c-0 missing
+		"empty input":   ``,
+		"non-json":      `not json at all`,
+		"missing id":    `{"groups": [{"members": ["c-0"]}]}`, // c-1 not covered
+		"duplicate id":  `{"groups": [{"members": ["c-0", "c-0"]}, {"members": ["c-1"]}]}`,
+		"unknown id":    `{"groups": [{"members": ["c-0"]}, {"members": ["c-99"]}]}`,
+		"empty members": `{"groups": [{"members": []}, {"members": ["c-0", "c-1"]}]}`,
+		"missing one":   `{"groups": [{"members": ["c-1"]}]}`, // c-0 missing
 	}
 	for name, raw := range cases {
 		t.Run(name, func(t *testing.T) {

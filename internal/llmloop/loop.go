@@ -48,6 +48,8 @@ type Runner struct {
 	totalCacheWriteTokens int64
 	warningsMu            sync.Mutex
 	warnings              []AgentWarning
+	toolCallsMu           sync.Mutex
+	toolCalls             map[string]int64
 	compressionMu         sync.Mutex
 	pendingJob            *compressionJob
 }
@@ -92,6 +94,26 @@ func (r *Runner) RecordWarning(warningType, file, message string) {
 		Type:    warningType,
 	})
 	r.warningsMu.Unlock()
+}
+
+// ToolCalls returns a snapshot of the per-tool call counts.
+func (r *Runner) ToolCalls() map[string]int64 {
+	r.toolCallsMu.Lock()
+	defer r.toolCallsMu.Unlock()
+	out := make(map[string]int64, len(r.toolCalls))
+	for k, v := range r.toolCalls {
+		out[k] = v
+	}
+	return out
+}
+
+func (r *Runner) recordToolCall(name string) {
+	r.toolCallsMu.Lock()
+	if r.toolCalls == nil {
+		r.toolCalls = make(map[string]int64)
+	}
+	r.toolCalls[name]++
+	r.toolCallsMu.Unlock()
 }
 
 // RecordUsage adds the prompt/completion/cache tokens reported by an LLM
@@ -245,6 +267,8 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 	if t == tool.TaskDone {
 		return tool.Complete()
 	}
+
+	r.recordToolCall(t.Name())
 
 	p := lookupTool(r.deps.Tools, t)
 	if p == nil {

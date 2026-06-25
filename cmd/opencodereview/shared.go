@@ -230,6 +230,7 @@ type ResultProvider interface {
 	// scan's PROJECT_SUMMARY_TASK. Empty for review mode and for scans
 	// that skipped / failed the summary phase.
 	ProjectSummary() string
+	ToolCalls() map[string]int64
 }
 
 // emitRunResult is the post-LLM-run finalization shared by `ocr review` and
@@ -275,7 +276,7 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary())
+			ag.ProjectSummary(), ag.ToolCalls())
 	}
 	outputTextWithWarnings(comments, ag.Warnings())
 	if summary := ag.ProjectSummary(); summary != "" {

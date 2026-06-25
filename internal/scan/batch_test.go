@@ -59,8 +59,8 @@ func TestGroupBatches_ByLanguage(t *testing.T) {
 	// Within a batch, input order is preserved.
 	want := [][]string{
 		{"cmd/main.go", "internal/scan/agent.go", "internal/scan/preview.go"}, // .go
-		{"docs/README.md", "docs/intro.md"},                                  // .md
-		{"scripts/build.sh"},                                                 // .sh
+		{"docs/README.md", "docs/intro.md"},                                   // .md
+		{"scripts/build.sh"},                                                  // .sh
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
@@ -69,18 +69,18 @@ func TestGroupBatches_ByLanguage(t *testing.T) {
 
 func TestGroupBatches_ByDirectory(t *testing.T) {
 	items := itemList(
-		"README.md",         // <root>
-		"cmd/main.go",       // cmd
-		"internal/a/x.go",   // internal
-		"internal/b/y.go",   // internal
-		"cmd/scan.go",       // cmd
-		"LICENSE",           // <root>
+		"README.md",       // <root>
+		"cmd/main.go",     // cmd
+		"internal/a/x.go", // internal
+		"internal/b/y.go", // internal
+		"cmd/scan.go",     // cmd
+		"LICENSE",         // <root>
 	)
 	got := batchPaths(groupBatches(items, BatchByDirectory, 0))
 	want := [][]string{
-		{"README.md", "LICENSE"},                  // <root>
-		{"cmd/main.go", "cmd/scan.go"},            // cmd
-		{"internal/a/x.go", "internal/b/y.go"},    // internal
+		{"README.md", "LICENSE"},               // <root>
+		{"cmd/main.go", "cmd/scan.go"},         // cmd
+		{"internal/a/x.go", "internal/b/y.go"}, // internal
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
@@ -118,13 +118,13 @@ func TestGroupBatches_Empty(t *testing.T) {
 
 func TestLanguageKey_ExtensionlessAndDotfiles(t *testing.T) {
 	cases := map[string]string{
-		"Makefile":              "<no-ext>",
-		"src/Dockerfile":        "<no-ext>",
-		".gitignore":            "<no-ext>", // dotfile w/o extension
-		".github/CODEOWNERS":    "<no-ext>",
-		"cmd/main.go":           ".go",
-		"docs/README.MD":        ".md",
-		"a/b/c.Test.go":         ".go",
+		"Makefile":           "<no-ext>",
+		"src/Dockerfile":     "<no-ext>",
+		".gitignore":         "<no-ext>", // dotfile w/o extension
+		".github/CODEOWNERS": "<no-ext>",
+		"cmd/main.go":        ".go",
+		"docs/README.MD":     ".md",
+		"a/b/c.Test.go":      ".go",
 	}
 	for path, want := range cases {
 		got := languageKey(model.ScanItem{Path: path})

@@ -30,8 +30,8 @@ func TestEstimateCost_ScalesWithContentAndPhases(t *testing.T) {
 	items := []model.ScanItem{
 		{Path: "a.go", Content: strings.Repeat("token ", 500)}, // ~non-trivial
 		{Path: "b.go", Content: strings.Repeat("x ", 300)},
-		{Path: "bin.dat", IsBinary: true},  // skipped
-		{Path: "empty.go", Content: ""},    // skipped
+		{Path: "bin.dat", IsBinary: true}, // skipped
+		{Path: "empty.go", Content: ""},   // skipped
 	}
 
 	// Plan off, dedup off, summary off → only MAIN_TASK cost.

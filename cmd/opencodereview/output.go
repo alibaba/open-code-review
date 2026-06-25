@@ -186,10 +186,16 @@ type jsonSummary struct {
 	Elapsed          string `json:"elapsed"`
 }
 
+type jsonToolCalls struct {
+	Total  int64            `json:"total"`
+	ByTool map[string]int64 `json:"by_tool"`
+}
+
 type jsonOutput struct {
 	Status         string               `json:"status"`
 	Message        string               `json:"message,omitempty"`
 	Summary        *jsonSummary         `json:"summary,omitempty"`
+	ToolCalls      *jsonToolCalls       `json:"tool_calls,omitempty"`
 	Comments       []model.LlmComment   `json:"comments"`
 	Warnings       []agent.AgentWarning `json:"warnings,omitempty"`
 	ProjectSummary string               `json:"project_summary,omitempty"`
@@ -210,7 +216,7 @@ func outputJSON(comments []model.LlmComment) error {
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
-	duration time.Duration, projectSummary string) error {
+	duration time.Duration, projectSummary string, toolCalls map[string]int64) error {
 	out := jsonOutput{
 		Status:   "success",
 		Comments: comments,
@@ -225,6 +231,16 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			Elapsed:          duration.Round(time.Second).String(),
 		},
 		ProjectSummary: projectSummary,
+	}
+	if len(toolCalls) > 0 {
+		var total int64
+		for _, v := range toolCalls {
+			total += v
+		}
+		out.ToolCalls = &jsonToolCalls{
+			Total:  total,
+			ByTool: toolCalls,
+		}
 	}
 	if len(comments) == 0 {
 		if hasSubtaskErrors(warnings) {

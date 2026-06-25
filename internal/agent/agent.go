@@ -35,7 +35,6 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 	return llmloop.NewCommentWorkerPool(workerCount)
 }
 
-
 // Args holds all dependencies and configuration needed to run a review session.
 type Args struct {
 	// RepoDir is the root of the git repository.
@@ -256,6 +255,9 @@ func (a *Agent) ProjectSummary() string { return "" }
 
 // Warnings returns a copy of non-fatal warnings recorded during review.
 func (a *Agent) Warnings() []AgentWarning { return a.runner.Warnings() }
+
+// ToolCalls returns per-tool call counts accumulated during review.
+func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 
 // recordWarning adds a non-fatal warning to the agent's warning list.
 func (a *Agent) recordWarning(warningType, file, message string) {
@@ -775,7 +777,6 @@ func formatToolDefs(toolDefs []llm.ToolDef) string {
 	return sb.String()
 }
 
-
 // findDiff returns the Diff for the given file path, or nil if not found.
 func (a *Agent) findDiff(path string) *model.Diff {
 	for i := range a.diffs {
@@ -785,7 +786,6 @@ func (a *Agent) findDiff(path string) *model.Diff {
 	}
 	return nil
 }
-
 
 // BuildToolDefs converts toolsconfig.ToolConfigEntry slice into []llm.ToolDef,
 // filtering by phase (planOnly=true for plan_task, false for main_task).

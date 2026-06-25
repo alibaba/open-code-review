@@ -77,16 +77,16 @@ func TestBudgetGate_StopsBeforeExceeding(t *testing.T) {
 	fake := &fakeBudgetClient{perCallTokens: perCall}
 
 	a := NewAgent(Args{
-		Template:          budgetTestTemplate(),
-		LLMClient:         fake,
-		CommentCollector:  tool.NewCommentCollector(),
-		Tools:             tool.NewRegistry(),
-		MaxConcurrency:    1, // serialize so the gate is deterministic
-		MaxTokensBudget:   120_000,
-		Session:           session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: session.ReviewModeFullScan}),
-		SkipPlan:          true,
-		SkipDedup:         true,
-		SkipSummary:       true,
+		Template:         budgetTestTemplate(),
+		LLMClient:        fake,
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1, // serialize so the gate is deterministic
+		MaxTokensBudget:  120_000,
+		Session:          session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: session.ReviewModeFullScan}),
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
 	})
 	a.items = makeScanItems(10)
 	a.args.Tools.Freeze()

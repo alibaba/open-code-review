@@ -180,6 +180,9 @@ func (a *Agent) TotalCacheWriteTokens() int64 {
 // Warnings returns the warnings recorded by the LLM runner.
 func (a *Agent) Warnings() []llmloop.AgentWarning { return a.runner.Warnings() }
 
+// ToolCalls returns per-tool call counts accumulated during scan.
+func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
+
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
 }

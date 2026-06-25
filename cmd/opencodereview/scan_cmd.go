@@ -19,26 +19,26 @@ import (
 //
 // Bare `ocr scan` (no --path) scans the entire repository; --path narrows.
 type scanOptions struct {
-	toolConfigPath string
-	rulePath       string
-	repoDir        string
-	paths          string // comma-separated relative paths; empty = whole repo
-	excludes       string // comma-separated gitignore-style exclude patterns
-	outputFormat   string
-	audience       string
-	background     string
-	concurrency    int
-	perFileTimeout int
-	maxTools       int
-	maxGitProcs    int
-	preview        bool
-	noPlan         bool   // --no-plan: skip the PLAN_TASK pre-pass per file
-	noDedup        bool   // --no-dedup: skip the per-batch DEDUP_TASK
-	noSummary      bool   // --no-summary: skip the post-run PROJECT_SUMMARY_TASK
-	batch          string // --batch: override scan template's BATCH_STRATEGY
-	maxTokensBudget int   // --max-tokens-budget: cap total token usage; 0 = unlimited
-	model          string // --model: override resolved LLM model for this scan
-	showHelp       bool
+	toolConfigPath  string
+	rulePath        string
+	repoDir         string
+	paths           string // comma-separated relative paths; empty = whole repo
+	excludes        string // comma-separated gitignore-style exclude patterns
+	outputFormat    string
+	audience        string
+	background      string
+	concurrency     int
+	perFileTimeout  int
+	maxTools        int
+	maxGitProcs     int
+	preview         bool
+	noPlan          bool   // --no-plan: skip the PLAN_TASK pre-pass per file
+	noDedup         bool   // --no-dedup: skip the per-batch DEDUP_TASK
+	noSummary       bool   // --no-summary: skip the post-run PROJECT_SUMMARY_TASK
+	batch           string // --batch: override scan template's BATCH_STRATEGY
+	maxTokensBudget int    // --max-tokens-budget: cap total token usage; 0 = unlimited
+	model           string // --model: override resolved LLM model for this scan
+	showHelp        bool
 }
 
 func parseScanFlags(args []string) (scanOptions, error) {
