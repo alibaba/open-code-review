@@ -35,10 +35,6 @@ export type HostToWebview =
   | { type: 'stateChange'; state: ReviewState; error?: string }
   | { type: 'reviewDone'; result: CliResult }
   | { type: 'config'; config: OcrConfig | null }
-  | { type: 'connectionResult'; ok: boolean; message?: string }
-  | { type: 'cliStatus'; installed: boolean }
-  | { type: 'installLog'; line: LogLine }
-  | { type: 'installDone'; ok: boolean }
   | { type: 'commentSync'; comments: CommentSyncState[] };
 
 export type ConfigPanelHostToWebview =

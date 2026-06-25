@@ -6,7 +6,7 @@ import { getShellEnv, resolveBin } from './shellEnv';
 export class CliService {
   private current: ReturnType<typeof spawn> | null = null;
   private envCache: { env: EnvCheckResult; at: number } | null = null;
-  private static ENV_CACHE_TTL_MS = 5 * 60 * 1000;
+  private static readonly ENV_CACHE_TTL_MS = 5 * 60 * 1000;
 
   constructor(private cliPath: string = 'ocr') {}
 

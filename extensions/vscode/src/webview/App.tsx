@@ -42,7 +42,7 @@ export function App() {
       <div class="action-region">
         <IdleView gitState={state.gitState} modeFiles={state.modeFiles} filesLoading={state.filesLoading}
           configured={configured} onModeChange={onModeChange} onRequestModeFiles={requestModeFiles}
-          onOpenFile={openFile}           onStart={start} onOpenConfig={() => bridge.post({ type: 'openConfigPanel' })}
+          onOpenFile={openFile} onStart={start} onOpenConfig={() => bridge.post({ type: 'openConfigPanel' })}
           onOpenCustomProviders={() => bridge.post({
             type: 'openConfigPanel',
             focus: { step: 2, tab: 'custom', customView: 'list' },
