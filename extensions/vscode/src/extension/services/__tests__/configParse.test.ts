@@ -40,6 +40,12 @@ describe('parseConfig', () => {
   it('空字符串 → null', () => {
     expect(parseConfig('')).toBeNull();
   });
+
+  it('providers 为数组时忽略', () => {
+    const cfg = parseConfig(JSON.stringify({ providers: ['bad'], custom_providers: [] }));
+    expect(cfg?.providers).toEqual({});
+    expect(cfg?.customProviders).toEqual({});
+  });
 });
 
 describe('toConfigSetArgs', () => {

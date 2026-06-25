@@ -3,6 +3,22 @@ import { GitState, ReviewMode, CliRunOptions, FileChange } from '../../shared/ty
 import { FileList } from '../components/FileList';
 import { Select } from '../components/Select';
 
+function getPrimaryLabel(params: {
+  configured: boolean;
+  running?: boolean;
+  selectionReady: boolean;
+  mode: ReviewMode;
+  filesCount: number;
+}): string {
+  if (!params.configured) return '请先配置模型';
+  if (params.running) return '审查中…';
+  if (!params.selectionReady) {
+    return params.mode === 'branch' ? '请选择对比分支' : '请选择提交';
+  }
+  if (params.filesCount === 0) return '无可审查文件';
+  return '审查所有变更';
+}
+
 interface Props {
   gitState: GitState;
   modeFiles: FileChange[];
@@ -111,11 +127,7 @@ export function IdleView({ gitState, modeFiles, filesLoading, configured, onMode
       ) : (
         <button class={`primary-btn${!configured ? ' configure' : ''}`} disabled={primaryDisabled}
           onClick={handlePrimary}>
-          {!configured ? '请先配置模型'
-            : running ? '审查中…'
-            : !selectionReady ? (mode === 'branch' ? '请选择对比分支' : '请选择提交')
-            : files.length === 0 ? '无可审查文件'
-            : '审查所有变更'}
+          {getPrimaryLabel({ configured, running, selectionReady, mode, filesCount: files.length })}
         </button>
       )}
     </div>

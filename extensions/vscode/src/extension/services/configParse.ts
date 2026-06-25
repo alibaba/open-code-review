@@ -16,7 +16,7 @@ function parseProviderEntry(raw: Record<string, unknown> | undefined): ProviderE
 }
 
 function parseProviderMap(raw: Record<string, unknown> | undefined): Record<string, ProviderEntry> {
-  if (!raw || typeof raw !== 'object') return {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const out: Record<string, ProviderEntry> = {};
   for (const [name, entry] of Object.entries(raw)) {
     out[name] = parseProviderEntry(entry as Record<string, unknown>);

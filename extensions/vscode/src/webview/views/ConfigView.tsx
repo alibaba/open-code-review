@@ -13,6 +13,7 @@ import { Select } from '../components/Select';
 interface Props {
   layout?: 'modal' | 'panel';
   panelFocus?: ConfigPanelFocus | null;
+  skipEnvCheck?: boolean;
   config: OcrConfig | null;
   cliStatus: CliStatus;
   installing: boolean;
@@ -48,6 +49,7 @@ function resolvePanelState(config: OcrConfig | null, panelFocus?: ConfigPanelFoc
 export function ConfigView({
   layout = 'modal',
   panelFocus = null,
+  skipEnvCheck = false,
   config, cliStatus, envCheck = null, installing, installLogs, connTest,
   onInstall, onCheckCli, onCheckEnv, onCopy, onTest, onSave, onClearConnTest,
   onDeleteCustomProvider, onActivateCustomProvider, onClose,
@@ -66,7 +68,7 @@ export function ConfigView({
     setTab(next.tab);
     setCustomView(next.customView);
     setCustomSelection(next.customSelection);
-  }, [panelFocus]);
+  }, [panelFocus, config, onClearConnTest]);
 
   const wide = layout === 'panel';
   const stepper = (
@@ -87,6 +89,7 @@ export function ConfigView({
       layout={layout}
       cliStatus={cliStatus}
       envCheck={envCheck}
+      skipEnvCheck={skipEnvCheck}
       installing={installing}
       installLogs={installLogs}
       onInstall={onInstall}
@@ -391,7 +394,6 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
 
       <FormItem
         label="API 密钥"
-        span={wide ? 1 : 1}
         hint={`也可通过环境变量 ${preset.envVar} 提供密钥`}
       >
         <PasswordInput

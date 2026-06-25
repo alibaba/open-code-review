@@ -7,9 +7,10 @@ import { ConfigService } from '../services/ConfigService';
 
 const PANEL_VIEW_TYPE = 'ocr.configPanel';
 
-export class ConfigPanelProvider {
+export class ConfigPanelProvider implements vscode.Disposable {
   private panel?: vscode.WebviewPanel;
   private pendingFocus?: ConfigPanelFocus;
+  private messageDisposable?: vscode.Disposable;
 
   constructor(
     private extensionUri: vscode.Uri,
@@ -36,8 +37,21 @@ export class ConfigPanelProvider {
     this.panel.iconPath = new vscode.ThemeIcon('sparkle');
 
     this.panel.webview.html = this.html(this.panel.webview);
-    this.panel.webview.onDidReceiveMessage((msg: WebviewToHost) => this.handle(msg));
-    this.panel.onDidDispose(() => { this.panel = undefined; });
+    this.messageDisposable = this.panel.webview.onDidReceiveMessage((msg: WebviewToHost) => {
+      void this.handle(msg);
+    });
+    this.panel.onDidDispose(() => {
+      this.messageDisposable?.dispose();
+      this.messageDisposable = undefined;
+      this.panel = undefined;
+    });
+  }
+
+  dispose(): void {
+    this.messageDisposable?.dispose();
+    this.messageDisposable = undefined;
+    this.panel?.dispose();
+    this.panel = undefined;
   }
 
   private post(msg: ConfigPanelHostToWebview): void {
@@ -50,6 +64,15 @@ export class ConfigPanelProvider {
   }
 
   private async handle(msg: WebviewToHost): Promise<void> {
+    try {
+      await this.handleMessage(msg);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.post({ type: 'panelError', message });
+    }
+  }
+
+  private async handleMessage(msg: WebviewToHost): Promise<void> {
     switch (msg.type) {
       case 'readyConfigPanel': {
         const focus = this.pendingFocus;

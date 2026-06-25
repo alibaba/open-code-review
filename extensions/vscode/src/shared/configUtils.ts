@@ -133,22 +133,6 @@ export function buildCustomCreateSaveEntries(params: {
   return entries;
 }
 
-export function buildCustomEditSaveEntries(
-  providerName: string,
-  model: string,
-  apiKey: string,
-  apiKeyChanged: boolean,
-): ConfigEntry[] {
-  const entries: ConfigEntry[] = [
-    { key: 'provider', value: providerName },
-    { key: `custom_providers.${providerName}.model`, value: model },
-  ];
-  if (apiKeyChanged && apiKey.trim()) {
-    entries.push({ key: `custom_providers.${providerName}.api_key`, value: apiKey.trim() });
-  }
-  return entries;
-}
-
 export function buildCustomUpdateSaveEntries(params: {
   name: string;
   protocol: string;

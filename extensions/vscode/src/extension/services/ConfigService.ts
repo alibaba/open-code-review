@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { ConfigEntry } from '../../shared/configUtils';
@@ -61,8 +61,8 @@ export class ConfigService {
       delete raw.custom_providers;
     }
     if (raw.provider === name) {
-      raw.provider = '';
-      raw.model = '';
+      delete raw.provider;
+      delete raw.model;
     }
     return this.writeRaw(raw);
   }
@@ -70,7 +70,7 @@ export class ConfigService {
   /** 在隔离的临时 HOME 上运行 ocr llm test，不修改 ~/.opencodereview/config.json。 */
   async testWithEntries(entries: ConfigEntry[]): Promise<{ ok: boolean; message?: string }> {
     const draft = applyConfigEntries(this.readRaw(), entries);
-    const testHome = join(tmpdir(), `ocr-test-home-${process.pid}-${Date.now()}`);
+    const testHome = mkdtempSync(join(tmpdir(), 'ocr-test-home-'));
     const configDir = join(testHome, '.opencodereview');
     const configPath = join(configDir, 'config.json');
     mkdirSync(configDir, { recursive: true, mode: 0o700 });

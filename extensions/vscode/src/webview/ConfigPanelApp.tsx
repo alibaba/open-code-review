@@ -13,15 +13,17 @@ export function ConfigPanelApp() {
   const [state, dispatch] = useReducer(configPanelReducer, configPanelInitialState);
 
   useEffect(() => {
-    bridge.onMessage((msg) => dispatch(msg));
+    const unsub = bridge.onMessage((msg) => dispatch(msg));
     bridge.post({ type: 'readyConfigPanel' });
+    return unsub;
   }, []);
 
   useEffect(() => {
+    if (state.skipEnvCheck) return;
     if (state.envCheck !== null) return;
     if (state.cliStatus === 'checking') return;
     runEnvCheck(dispatch);
-  }, [state.envCheck, state.cliStatus]);
+  }, [state.envCheck, state.cliStatus, state.skipEnvCheck]);
 
   useEffect(() => {
     if (!state.copyHint) return;
@@ -29,12 +31,20 @@ export function ConfigPanelApp() {
     return () => clearTimeout(t);
   }, [state.copyHint]);
 
+  useEffect(() => {
+    if (!state.errorHint) return;
+    const t = setTimeout(() => dispatch({ type: 'clearErrorHint' }), 5000);
+    return () => clearTimeout(t);
+  }, [state.errorHint]);
+
   return (
     <div class="config-panel-root">
       {state.copyHint && <div class="config-toast">{state.copyHint}</div>}
+      {state.errorHint && <div class="config-toast error">{state.errorHint}</div>}
       <ConfigView
         layout="panel"
         panelFocus={state.panelFocus}
+        skipEnvCheck={state.skipEnvCheck}
         config={state.config}
         cliStatus={state.cliStatus}
         envCheck={state.envCheck}

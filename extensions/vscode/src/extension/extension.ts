@@ -25,7 +25,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const viewReg = vscode.window.registerWebviewViewProvider(SIDEBAR_VIEW_ID, sidebar);
   const cmdReg = registerCommands(comments, () => configPanel.open());
 
-  disposables.push(viewReg, cmdReg, comments, output);
+  disposables.push(viewReg, cmdReg, comments, output, configPanel);
   context.subscriptions.push(...disposables);
 }
 

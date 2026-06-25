@@ -15,8 +15,9 @@ export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
 
   useEffect(() => {
-    bridge.onMessage((msg) => dispatch(msg));
+    const unsub = bridge.onMessage((msg) => dispatch(msg));
     bridge.post({ type: 'ready' });
+    return unsub;
   }, []);
 
   const configured = isConfigReady(state.config);

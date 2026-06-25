@@ -49,5 +49,6 @@ export type ConfigPanelHostToWebview =
   | { type: 'cliStatus'; installed: boolean }
   | { type: 'environmentResult'; env: EnvCheckResult }
   | { type: 'copyDone' }
+  | { type: 'panelError'; message: string }
   | { type: 'installLog'; line: LogLine }
   | { type: 'installDone'; ok: boolean };

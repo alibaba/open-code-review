@@ -15,6 +15,7 @@ export interface ConfigPanelState {
   installLogs: LogLine[];
   connTest: ConnTest;
   copyHint: string;
+  errorHint: string;
 }
 
 export const configPanelInitialState: ConfigPanelState = {
@@ -27,6 +28,7 @@ export const configPanelInitialState: ConfigPanelState = {
   installLogs: [],
   connTest: { status: 'idle' },
   copyHint: '',
+  errorHint: '',
 };
 
 export type ConfigPanelLocalAction =
@@ -34,7 +36,8 @@ export type ConfigPanelLocalAction =
   | { type: 'installingCli' }
   | { type: 'testingConn' }
   | { type: 'clearConnTest' }
-  | { type: 'clearCopyHint' };
+  | { type: 'clearCopyHint' }
+  | { type: 'clearErrorHint' };
 
 function envToCliStatus(env: EnvCheckResult): CliStatus {
   return env.node.ok && env.npm.ok && env.ocr.ok ? 'installed' : 'missing';
@@ -90,6 +93,10 @@ export function configPanelReducer(
       return { ...state, copyHint: '已复制到剪贴板' };
     case 'clearCopyHint':
       return { ...state, copyHint: '' };
+    case 'clearErrorHint':
+      return { ...state, errorHint: '' };
+    case 'panelError':
+      return { ...state, errorHint: msg.message };
     case 'connectionResult':
       return { ...state, connTest: { status: msg.ok ? 'ok' : 'fail', message: msg.message } };
     default:

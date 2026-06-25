@@ -9,7 +9,9 @@ export const bridge = {
   post(msg: WebviewToHost): void {
     vscode.postMessage(msg);
   },
-  onMessage(handler: (msg: HostToWebview) => void): void {
-    window.addEventListener('message', (e) => handler(e.data as HostToWebview));
+  onMessage(handler: (msg: HostToWebview) => void): () => void {
+    const listener = (e: MessageEvent) => handler(e.data as HostToWebview);
+    window.addEventListener('message', listener);
+    return () => window.removeEventListener('message', listener);
   },
 };

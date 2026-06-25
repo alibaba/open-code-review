@@ -14,6 +14,7 @@ interface Props {
   layout?: 'modal' | 'panel';
   cliStatus: CliStatus;
   envCheck: EnvCheckResult | null;
+  skipEnvCheck?: boolean;
   installing: boolean;
   installLogs: LogLine[];
   onInstall: () => void;
@@ -36,7 +37,7 @@ function resolveStepState(
 }
 
 export function EnvSetupGuide({
-  layout, cliStatus, envCheck, installing, installLogs,
+  layout, cliStatus, envCheck, skipEnvCheck = false, installing, installLogs,
   onInstall, onCheckEnv, onCopy, onNext,
 }: Props) {
   const checking = cliStatus === 'checking' || cliStatus === 'unknown';
@@ -63,6 +64,19 @@ export function EnvSetupGuide({
     return (
       <div class="wizard-body">
         <EnvChecklist env={envCheck} />
+        <div class={`form-footer${layout === 'panel' ? ' page-footer' : ''}`}>
+          <div class={`form-actions${layout === 'panel' ? ' panel-actions' : ''}`}>
+            <button type="button" class="btn-primary" onClick={onNext}>继续配置 Provider</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (cliStatus === 'installed' && skipEnvCheck) {
+    return (
+      <div class="wizard-body">
+        <p class="env-guide-lead">环境已就绪，可继续配置 Provider。</p>
         <div class={`form-footer${layout === 'panel' ? ' page-footer' : ''}`}>
           <div class={`form-actions${layout === 'panel' ? ' panel-actions' : ''}`}>
             <button type="button" class="btn-primary" onClick={onNext}>继续配置 Provider</button>
