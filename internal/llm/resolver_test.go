@@ -916,6 +916,11 @@ func TestParseExtraHeaders(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "reserved header user-agent is rejected",
+			input:   "User-Agent=custom-agent",
+			wantErr: true,
+		},
+		{
 			name:    "reserved header rejected even when mixed with valid ones",
 			input:   "X-Org=val,Authorization=bad",
 			wantErr: true,

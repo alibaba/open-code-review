@@ -486,11 +486,12 @@ var reservedHeaders = map[string]bool{
 	"authorization": true,
 	"x-api-key":     true,
 	"content-type":  true,
+	"user-agent":    true,
 }
 
 // ParseExtraHeaders parses a string of comma-separated key=value pairs into a dictionary.
 // Values may be double-quoted to include commas, e.g. X-Forwarded-For="1.2.3.4,5.6.7.8".
-// Reserved header names (authorization, x-api-key, content-type) are rejected 
+// Reserved header names (authorization, x-api-key, content-type, user-agent) are rejected 
 // to prevent accidental override of auth or content-type set by the SDK.
 func ParseExtraHeaders(raw string) (map[string]string, error) {
 	if raw == "" {
