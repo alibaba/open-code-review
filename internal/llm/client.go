@@ -265,6 +265,13 @@ func NewLLMRouter(eps []ResolvedEndpoint) LLMClient {
 }
 
 func (r *LLMRouter) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	// Each member is its own provider/model endpoint. The caller pins req.Model to the
+	// primary's model name, and member clients prefer req.Model over their own cfg.Model
+	// — so forwarding it verbatim sends the primary's name to every member. After a
+	// cross-provider fallover that name is unknown to the new provider → a client-side
+	// 400/404 that shouldFallover short-circuits, failing the whole request. Clear it so
+	// each member uses its configured model. (req is by value; this is our local copy.)
+	req.Model = ""
 	var lastErr error
 	for _, i := range r.order() {
 		resp, err := r.members[i].client.CompletionsWithCtx(ctx, req)

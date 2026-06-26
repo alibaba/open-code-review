@@ -16,13 +16,15 @@ import (
 // fakeClient is a programmable LLMClient for router tests: it records call count and
 // returns a fixed resp/err.
 type fakeClient struct {
-	calls int
-	resp  *ChatResponse
-	err   error
+	calls    int
+	gotModel string // req.Model seen on the most recent call
+	resp     *ChatResponse
+	err      error
 }
 
-func (f *fakeClient) CompletionsWithCtx(context.Context, ChatRequest) (*ChatResponse, error) {
+func (f *fakeClient) CompletionsWithCtx(_ context.Context, req ChatRequest) (*ChatResponse, error) {
 	f.calls++
+	f.gotModel = req.Model
 	return f.resp, f.err
 }
 
@@ -68,6 +70,21 @@ func TestLLMRouter_ClientErrorShortCircuits(t *testing.T) {
 	}
 	if c1.calls != 0 {
 		t.Fatalf("next model tried on client-side error: c1.calls=%d, want 0", c1.calls)
+	}
+}
+
+// The caller pins req.Model to the primary's model name; the router must not forward it
+// to members, or a cross-provider fallover would send an unknown model name and 400.
+func TestLLMRouter_ClearsCallerModel(t *testing.T) {
+	c0 := &fakeClient{err: errors.New("network blip")} // fall over to c1
+	c1 := &fakeClient{resp: &ChatResponse{ID: "ok"}}
+	r := newRouter(routerMember{c0, "a"}, routerMember{c1, "b"})
+
+	if _, err := r.CompletionsWithCtx(context.Background(), ChatRequest{Model: "primary-model"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c0.gotModel != "" || c1.gotModel != "" {
+		t.Fatalf("router forwarded caller model: c0=%q c1=%q, want both empty", c0.gotModel, c1.gotModel)
 	}
 }
 
