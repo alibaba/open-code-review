@@ -67,7 +67,7 @@ jobs:
     if: github.event_name == 'pull_request_target'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0  # Full history needed for merge-base diff
           ref: ${{ github.event.pull_request.head.sha }}
@@ -111,7 +111,7 @@ jobs:
           cat /tmp/ocr-stderr.log
 
       - name: Post review comments to PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |

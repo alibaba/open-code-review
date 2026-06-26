@@ -16,7 +16,7 @@ jobs:
     container:
       image: golang:1.26.4
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Trust workspace
         run: git config --global safe.directory '*'
