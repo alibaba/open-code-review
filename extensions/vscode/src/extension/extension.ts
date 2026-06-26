@@ -22,7 +22,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const configPanel = new ConfigPanelProvider(extensionUri, cli, config, (cfg) => sidebar.pushConfig(cfg));
   sidebar.bindConfigPanel((focus) => configPanel.open(focus));
 
-  const viewReg = vscode.window.registerWebviewViewProvider(SIDEBAR_VIEW_ID, sidebar);
+  const viewReg = vscode.window.registerWebviewViewProvider(
+    SIDEBAR_VIEW_ID,
+    sidebar,
+    { webviewOptions: { retainContextWhenHidden: true } },
+  );
   const cmdReg = registerCommands(comments, () => configPanel.open());
 
   disposables.push(viewReg, cmdReg, comments, output, configPanel);
