@@ -290,7 +290,13 @@ func (r *LLMRouter) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*C
 			return nil, err
 		}
 		r.park(i)
-		log.Printf("[llm-router] %s failed (%v) — trying next model", r.members[i].label, err)
+		if isAuthError(err) {
+			// 401/403 still falls over (the next member has its own key), but a healthy
+			// fallback would otherwise silently mask a broken primary key. Log it loudly.
+			log.Printf("[llm-router] %s auth error (%v) — likely a misconfigured api_key for this provider; trying next model", r.members[i].label, err)
+		} else {
+			log.Printf("[llm-router] %s failed (%v) — trying next model", r.members[i].label, err)
+		}
 	}
 	return nil, fmt.Errorf("all %d models exhausted; last error: %w", len(r.members), lastErr)
 }
@@ -352,6 +358,21 @@ func falloverStatus(code int) bool {
 	default:
 		return true // 401/403/404/408/409/429/5xx: a different provider/key/capacity may differ
 	}
+}
+
+// isAuthError reports whether err is a 401/403 from a provider — almost always a
+// misconfigured api_key rather than a transient failure. Used only to escalate the
+// fallover log; it does not change fallover behavior (the next member has its own key).
+func isAuthError(err error) bool {
+	var aerr *anthropic.Error
+	if errors.As(err, &aerr) {
+		return aerr.StatusCode == 401 || aerr.StatusCode == 403
+	}
+	var oerr *openai.Error
+	if errors.As(err, &oerr) {
+		return oerr.StatusCode == 401 || oerr.StatusCode == 403
+	}
+	return false
 }
 
 // --- Token counting with tiktoken ---

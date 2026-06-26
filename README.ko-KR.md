@@ -620,6 +620,8 @@ Config file: `~/.opencodereview/config.json`
 | `providers.<name>.extra_body` | object | 모든 요청 본문에 병합되는 JSON 객체 |
 | `providers.<name>.extra_headers` | string | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `custom_providers.<name>.*` | — | optional `models`를 포함한 `providers.<name>.*`과 동일한 필드 |
+| `routing.models` | array | 페일오버용 정렬된 모델 풀: `[{provider, model}]` ([다중 모델 페일오버](#다중-모델-페일오버) 참조) |
+| `routing.policy` | string | 선택 정책; `priority` (기본값, 현재 유일한 값) |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |
@@ -645,6 +647,32 @@ Config file: `~/.opencodereview/config.json`
 | `OCR_LLM_EXTRA_HEADERS` | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `OCR_LLM_MODEL` | Model name |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
+
+### 다중 모델 페일오버
+
+기본적으로 리뷰는 단일 모델(`provider` + `model`)을 사용합니다. 속도 제한과 공급자 장애에 대응하려면 정렬된 `routing.models` 풀을 구성하세요. 리뷰어는 각 모델을 순서대로 시도하고, 어떤 모델이 속도 제한에 걸리거나 서버 오류를 반환하거나 타임아웃되면 다음 모델로 페일오버합니다:
+
+```json
+{
+  "providers": {
+    "anthropic": { "api_key": "sk-ant-...", "model": "claude-opus-4-6" },
+    "deepseek":  { "api_key": "sk-...",     "model": "deepseek-v3" }
+  },
+  "routing": {
+    "models": [
+      { "provider": "anthropic", "model": "claude-opus-4-6" },
+      { "provider": "deepseek",  "model": "deepseek-v3" }
+    ],
+    "policy": "priority"
+  }
+}
+```
+
+- 각 항목은 구성된 공급자(자격 증명 / 엔드포인트용)와 모델을 참조합니다. `model`을 생략하면 공급자의 기본 모델을 사용합니다.
+- `routing.policy`는 풀의 정렬 방식을 선택합니다. 현재는 `priority`만 지원되며(첫 번째 항목이 기본), 이 필드는 향후 정책(예: weighted)을 위해 예약되어 있고, 알 수 없는 값은 조용히 무시되지 않고 거부됩니다.
+- 속도 제한에 걸렸거나 사용할 수 없는 모델은 잠시 보류되어, 동시에 실행되는 파일별 리뷰가 다시 시도하지 않고 건너뜁니다.
+- 페일오버는 가용성 오류(속도 제한, 5xx, 네트워크 / 타임아웃)에서 발생합니다. 클라이언트 측 오류(잘못된 요청, 페이로드 초과)에서는 발생하지 않습니다. 다른 모델도 동일하게 실패하기 때문입니다.
+- `routing.models`가 없으면 동작은 변경되지 않습니다. `--model`은 단일 모델을 고정하고 풀을 우회합니다.
 
 ## Telemetry
 

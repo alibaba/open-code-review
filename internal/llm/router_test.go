@@ -139,6 +139,27 @@ func TestShouldFallover(t *testing.T) {
 	}
 }
 
+func TestIsAuthError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"openai 401", &openai.Error{StatusCode: 401}, true},
+		{"openai 403", &openai.Error{StatusCode: 403}, true},
+		{"openai 429", &openai.Error{StatusCode: 429}, false},
+		{"anthropic 401", &anthropic.Error{StatusCode: 401}, true},
+		{"anthropic 500", &anthropic.Error{StatusCode: 500}, false},
+		{"unknown", errors.New("boom"), false},
+	}
+	for _, c := range cases {
+		if got := isAuthError(c.err); got != c.want {
+			t.Errorf("%s: isAuthError=%v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestNewLLMRouter_SinglePoolNoRouter(t *testing.T) {
 	ep := ResolvedEndpoint{URL: "https://x.example.com", Protocol: "openai", Model: "m", Token: "t"}
 	if _, isRouter := NewLLMRouter([]ResolvedEndpoint{ep}).(*LLMRouter); isRouter {

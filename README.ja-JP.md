@@ -662,6 +662,8 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `providers.<name>.extra_body` | object | すべてのリクエストボディにマージされるJSONオブジェクト |
 | `providers.<name>.extra_headers` | string | カンマ区切りの `key=value` HTTPヘッダー |
 | `custom_providers.<name>.*` | — | 任意の`models`を含む`providers.<name>.*`と同じフィールド |
+| `routing.models` | array | フェイルオーバー用の順序付きモデルプール：`[{provider, model}]`（[マルチモデルフェイルオーバー](#マルチモデルフェイルオーバー)を参照） |
+| `routing.policy` | string | 選択ポリシー；`priority`（デフォルト、現時点で唯一の値） |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropicのみ：`x-api-key` \| `authorization` |
@@ -687,6 +689,32 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `OCR_LLM_EXTRA_HEADERS` | カンマ区切りの `key=value` HTTPヘッダー |
 | `OCR_LLM_MODEL` | モデル名 |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic、`false` = OpenAI |
+
+### マルチモデルフェイルオーバー
+
+デフォルトでは、レビューは単一のモデル（`provider` + `model`）を使用します。レート制限やプロバイダー障害に耐えるには、順序付きの `routing.models` プールを設定します。レビュアーは各モデルを順番に試し、あるモデルがレート制限・サーバーエラー・タイムアウトになると次のモデルへフェイルオーバーします：
+
+```json
+{
+  "providers": {
+    "anthropic": { "api_key": "sk-ant-...", "model": "claude-opus-4-6" },
+    "deepseek":  { "api_key": "sk-...",     "model": "deepseek-v3" }
+  },
+  "routing": {
+    "models": [
+      { "provider": "anthropic", "model": "claude-opus-4-6" },
+      { "provider": "deepseek",  "model": "deepseek-v3" }
+    ],
+    "policy": "priority"
+  }
+}
+```
+
+- 各エントリは、設定済みのプロバイダー（認証情報 / エンドポイント用）とモデルを参照します。`model` を省略した場合はプロバイダーのデフォルトモデルを使用します。
+- `routing.policy` はプールの順序付け方法を選択します。現在サポートされているのは `priority` のみ（最初のエントリがプライマリ）で、このフィールドは将来のポリシー（例：weighted）のために予約されており、未知の値は暗黙に無視されるのではなく拒否されます。
+- レート制限中または利用不可のモデルは一時的に保留され、並行するファイル単位のレビューが再ヒットせずスキップできます。
+- フェイルオーバーは可用性エラー（レート制限、5xx、ネットワーク / タイムアウト）で発生します。クライアント側エラー（不正なリクエスト、ペイロード過大）では発生しません。別のモデルでも同様に失敗するためです。
+- `routing.models` がなければ動作は変わりません。`--model` は単一モデルを固定し、プールをバイパスします。
 
 
 ## テレメトリー
