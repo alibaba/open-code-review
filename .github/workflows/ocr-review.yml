@@ -67,7 +67,7 @@ jobs:
     if: github.event_name == 'pull_request_target'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Full history needed for merge-base diff
           ref: ${{ github.event.pull_request.head.sha }}
