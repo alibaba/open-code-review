@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
@@ -19,6 +21,7 @@ type ResolvedEndpoint struct {
 	Source       string            // human-readable config source label
 	ExtraBody    map[string]any    // vendor-specific request body fields
 	ExtraHeaders map[string]string // extra HTTP headers for the LLM request
+	Timeout      time.Duration     // per-request HTTP timeout; 0 means use default (5 min)
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -28,6 +31,7 @@ const (
 	envOCRLLMModel        = "OCR_LLM_MODEL"
 	envOCRLLMAuthHeader   = "OCR_LLM_AUTH_HEADER"
 	envOCRLLMExtraHeaders = "OCR_LLM_EXTRA_HEADERS"
+	envOCRLLMTimeout      = "OCR_LLM_TIMEOUT"
 	envOCRUseAnthropic    = "OCR_USE_ANTHROPIC"
 )
 
@@ -122,7 +126,18 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 		}
 	}
 
-	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR environment", ExtraHeaders: extraHeaders}, true, nil
+	var timeout time.Duration
+	if timeoutStr := os.Getenv(envOCRLLMTimeout); timeoutStr != "" {
+		timeoutSec, err := strconv.Atoi(strings.TrimSpace(timeoutStr))
+		if err != nil {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR_LLM_TIMEOUT must be an integer (seconds): %w", err)
+		}
+		if timeoutSec > 0 {
+			timeout = time.Duration(timeoutSec) * time.Second
+		}
+	}
+
+	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR environment", ExtraHeaders: extraHeaders, Timeout: timeout}, true, nil
 }
 
 // llmFileConfig represents the llm section in config.json.
@@ -132,6 +147,7 @@ type llmFileConfig struct {
 	AuthHeader   string            `json:"auth_header,omitempty"`
 	Model        string            `json:"model,omitempty"`
 	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
+	TimeoutSec   int               `json:"timeout_sec,omitempty"`  // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
@@ -144,6 +160,7 @@ type providerEntryConfig struct {
 	Model        string            `json:"model,omitempty"`
 	Models       []string          `json:"models,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
+	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
@@ -288,6 +305,11 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	extraBody = entry.ExtraBody
 	extraHeaders := entry.ExtraHeaders
 
+	var timeout time.Duration
+	if entry.TimeoutSec > 0 {
+		timeout = time.Duration(entry.TimeoutSec) * time.Second
+	}
+
 	if protocol == "anthropic" {
 		url = ensureMessagesSuffix(url)
 	}
@@ -301,6 +323,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		Source:       "provider:" + cfg.Provider,
 		ExtraBody:    extraBody,
 		ExtraHeaders: extraHeaders,
+		Timeout:      timeout,
 	}, true, nil
 }
 
@@ -336,7 +359,12 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders}, true, nil
+	var timeout time.Duration
+	if cfg.Llm.TimeoutSec > 0 {
+		timeout = time.Duration(cfg.Llm.TimeoutSec) * time.Second
+	}
+
+	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders, Timeout: timeout}, true, nil
 }
 
 // tryCCEnv reads Claude Code environment variables.
