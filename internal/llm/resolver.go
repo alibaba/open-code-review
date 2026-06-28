@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -75,11 +76,57 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 				ep.Source = s.name
 			}
 			ep.Model = stripModelSuffix(ep.Model)
+			// OCR_LLM_TIMEOUT is a global override: applies regardless of
+			// which strategy resolved the endpoint, and takes precedence
+			// over config-file values when set.
+			if envTimeout, ok := parseTimeoutEnv(); ok {
+				ep.Timeout = envTimeout
+			}
 			return ep, nil
 		}
 	}
 
 	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
+}
+
+// parseTimeoutEnv reads and validates the OCR_LLM_TIMEOUT environment variable.
+// Returns the parsed duration and true if set, or 0 and false if unset/empty.
+// Rejects negative values and values that would overflow time.Duration.
+func parseTimeoutEnv() (time.Duration, bool) {
+	raw := strings.TrimSpace(os.Getenv(envOCRLLMTimeout))
+	if raw == "" {
+		return 0, false
+	}
+	sec, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	if sec < 0 {
+		return 0, false
+	}
+	// Guard against overflow: time.Duration is int64 nanoseconds.
+	maxSec := int64(math.MaxInt64 / int64(time.Second))
+	if int64(sec) > maxSec {
+		return 0, false
+	}
+	return time.Duration(sec) * time.Second, true
+}
+
+// validateTimeoutSec converts a config-file timeout (in seconds) to time.Duration.
+// Returns 0 for zero input (use default). Rejects negative values and overflow.
+func validateTimeoutSec(sec int) (time.Duration, error) {
+	if sec == 0 {
+		return 0, nil
+	}
+	if sec < 0 {
+		return 0, fmt.Errorf("timeout_sec must be non-negative, got %d", sec)
+	}
+	// Guard against overflow: time.Duration is int64 nanoseconds.
+	maxSec := int64(math.MaxInt64 / int64(time.Second))
+	if int64(sec) > maxSec {
+		return 0, fmt.Errorf("timeout_sec %d overflows time.Duration (max %d)", sec, maxSec)
+	}
+	return time.Duration(sec) * time.Second, nil
 }
 
 // tryOCREnv reads OCR-specific environment variables.
@@ -126,18 +173,10 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 		}
 	}
 
-	var timeout time.Duration
-	if timeoutStr := os.Getenv(envOCRLLMTimeout); timeoutStr != "" {
-		timeoutSec, err := strconv.Atoi(strings.TrimSpace(timeoutStr))
-		if err != nil {
-			return ResolvedEndpoint{}, false, fmt.Errorf("OCR_LLM_TIMEOUT must be an integer (seconds): %w", err)
-		}
-		if timeoutSec > 0 {
-			timeout = time.Duration(timeoutSec) * time.Second
-		}
-	}
+	// Note: OCR_LLM_TIMEOUT is applied globally in ResolveEndpointWithModelOverride,
+	// not here, so it works regardless of which strategy resolves the endpoint.
 
-	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR environment", ExtraHeaders: extraHeaders, Timeout: timeout}, true, nil
+	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR environment", ExtraHeaders: extraHeaders}, true, nil
 }
 
 // llmFileConfig represents the llm section in config.json.
@@ -305,9 +344,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	extraBody = entry.ExtraBody
 	extraHeaders := entry.ExtraHeaders
 
-	var timeout time.Duration
-	if entry.TimeoutSec > 0 {
-		timeout = time.Duration(entry.TimeoutSec) * time.Second
+	timeout, err := validateTimeoutSec(entry.TimeoutSec)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 	}
 
 	if protocol == "anthropic" {
@@ -359,9 +398,9 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 	}
 
-	var timeout time.Duration
-	if cfg.Llm.TimeoutSec > 0 {
-		timeout = time.Duration(cfg.Llm.TimeoutSec) * time.Second
+	timeout, err := validateTimeoutSec(cfg.Llm.TimeoutSec)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}
 
 	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders, Timeout: timeout}, true, nil

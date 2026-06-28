@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStripModelSuffix(t *testing.T) {
@@ -1121,5 +1122,169 @@ func TestResolveEndpoint_LegacyLlmExtraHeaders(t *testing.T) {
 	}
 	if v, ok := ep.ExtraHeaders["X-Legacy"]; !ok || v != "yes" {
 		t.Errorf("ExtraHeaders[\"X-Legacy\"] = %q, want %q", v, "yes")
+	}
+}
+
+func TestParseTimeoutEnv(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		want    time.Duration
+		wantOK  bool
+	}{
+		{"empty", "", 0, false},
+		{"valid 120", "120", 120 * time.Second, true},
+		{"valid 60", "60", 60 * time.Second, true},
+		{"zero", "0", 0, true},
+		{"negative", "-5", 0, false},
+		{"non-integer", "abc", 0, false},
+		{"with spaces", " 90 ", 90 * time.Second, true},
+		{"overflow", "99999999999999", 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OCR_LLM_TIMEOUT", tt.value)
+			got, ok := parseTimeoutEnv()
+			if ok != tt.wantOK {
+				t.Errorf("parseTimeoutEnv() ok = %v, want %v", ok, tt.wantOK)
+			}
+			if got != tt.want {
+				t.Errorf("parseTimeoutEnv() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateTimeoutSec(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   int
+		want    time.Duration
+		wantErr bool
+	}{
+		{"zero", 0, 0, false},
+		{"positive 60", 60, 60 * time.Second, false},
+		{"positive 300", 300, 300 * time.Second, false},
+		{"negative -1", -1, 0, true},
+		{"negative -100", -100, 0, true},
+		{"max safe", 9223372036, 9223372036 * time.Second, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := validateTimeoutSec(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateTimeoutSec(%d) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Errorf("validateTimeoutSec(%d) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveEndpoint_EnvTimeoutGlobalOverride(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://api.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "test-token")
+	t.Setenv("OCR_LLM_MODEL", "mimo-v2.5-pro")
+	t.Setenv("OCR_USE_ANTHROPIC", "false")
+	t.Setenv("OCR_LLM_TIMEOUT", "90")
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Timeout != 90*time.Second {
+		t.Errorf("Timeout = %v, want %v", ep.Timeout, 90*time.Second)
+	}
+}
+
+func TestResolveEndpoint_ConfigTimeoutSec(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:        "https://api.example.com/v1/messages",
+			AuthToken:  "test-token",
+			Model:      "claude-opus-4-6",
+			TimeoutSec: 120,
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Timeout != 120*time.Second {
+		t.Errorf("Timeout = %v, want %v", ep.Timeout, 120*time.Second)
+	}
+}
+
+func TestResolveEndpoint_NegativeConfigTimeoutSec(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:        "https://api.example.com/v1/messages",
+			AuthToken:  "test-token",
+			Model:      "claude-opus-4-6",
+			TimeoutSec: -5,
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for negative timeout_sec, got nil")
+	}
+	if !strings.Contains(err.Error(), "non-negative") {
+		t.Errorf("error %q should mention non-negative", err.Error())
+	}
+}
+
+func TestNewLLMClient_TimeoutForwarded(t *testing.T) {
+	ep := ResolvedEndpoint{
+		URL:     "https://api.example.com/v1",
+		Token:   "test-token",
+		Model:   "test-model",
+		Timeout: 2 * time.Minute,
+	}
+
+	client := NewLLMClient(ep)
+	if client == nil {
+		t.Fatal("NewLLMClient returned nil")
+	}
+
+	// Verify the client was created (we can't easily inspect the internal timeout,
+	// but we can verify the client is functional and was constructed without error).
+	if oc, ok := client.(*OpenAIClient); ok {
+		if oc.cfg.Timeout != 2*time.Minute {
+			t.Errorf("OpenAIClient cfg.Timeout = %v, want %v", oc.cfg.Timeout, 2*time.Minute)
+		}
+	} else {
+		t.Errorf("expected *OpenAIClient, got %T", client)
+	}
+}
+
+func TestNewLLMClient_DefaultTimeout(t *testing.T) {
+	ep := ResolvedEndpoint{
+		URL:   "https://api.example.com/v1",
+		Token: "test-token",
+		Model: "test-model",
+		// Timeout not set — should default to 5 minutes
+	}
+
+	client := NewLLMClient(ep)
+	if oc, ok := client.(*OpenAIClient); ok {
+		if oc.cfg.Timeout != 5*time.Minute {
+			t.Errorf("OpenAIClient cfg.Timeout = %v, want default %v", oc.cfg.Timeout, 5*time.Minute)
+		}
 	}
 }
