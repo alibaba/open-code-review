@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -347,6 +348,21 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		go func(d model.Diff) {
 			defer wg.Done()
 			defer func() { <-sem }() // release
+			// A panic while reviewing one file must be isolated exactly like an
+			// error return: counted in subtaskFailed and recorded as a
+			// subtask_error warning, so other files still complete and the
+			// all-failed rollup below stays correct. Registered before the
+			// timeout-cancel defer, so cancel() still runs first on unwind and
+			// fileCtx is already cancelled here — use the parent ctx for telemetry.
+			defer func() {
+				if r := recover(); r != nil {
+					atomic.AddInt64(&a.subtaskFailed, 1)
+					fmt.Fprintf(stdout.Writer(), "[ocr] Subtask panic for %s: %v\n%s\n", d.NewPath, r, debug.Stack())
+					telemetry.ErrorEvent(ctx, "subtask.panic", fmt.Errorf("panic: %v", r),
+						telemetry.AnyToAttr("file.path", d.NewPath))
+					a.recordWarning("subtask_error", d.NewPath, fmt.Sprintf("panic: %v", r))
+				}
+			}()
 
 			var fileCtx context.Context
 			var cancel context.CancelFunc
