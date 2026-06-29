@@ -79,7 +79,11 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 			// OCR_LLM_TIMEOUT is a global override: applies regardless of
 			// which strategy resolved the endpoint, and takes precedence
 			// over config-file values when set.
-			if envTimeout, ok := parseTimeoutEnv(); ok {
+			envTimeout, ok, err := parseTimeoutEnv()
+			if err != nil {
+				return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
+			}
+			if ok {
 				ep.Timeout = envTimeout
 			}
 			return ep, nil
@@ -91,25 +95,22 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 
 // parseTimeoutEnv reads and validates the OCR_LLM_TIMEOUT environment variable.
 // Returns the parsed duration and true if set, or 0 and false if unset/empty.
-// Rejects negative values and values that would overflow time.Duration.
-func parseTimeoutEnv() (time.Duration, bool) {
+// Returns an error for invalid values (non-integer, negative, overflow) to give
+// the user clear feedback instead of silently falling back to the default.
+func parseTimeoutEnv() (time.Duration, bool, error) {
 	raw := strings.TrimSpace(os.Getenv(envOCRLLMTimeout))
 	if raw == "" {
-		return 0, false
+		return 0, false, nil
 	}
 	sec, err := strconv.Atoi(raw)
 	if err != nil {
-		return 0, false
+		return 0, false, fmt.Errorf("OCR_LLM_TIMEOUT must be an integer (seconds): %w", err)
 	}
-	if sec < 0 {
-		return 0, false
+	d, err := validateTimeoutSec(sec)
+	if err != nil {
+		return 0, false, fmt.Errorf("OCR_LLM_TIMEOUT: %w", err)
 	}
-	// Guard against overflow: time.Duration is int64 nanoseconds.
-	maxSec := int64(math.MaxInt64 / int64(time.Second))
-	if int64(sec) > maxSec {
-		return 0, false
-	}
-	return time.Duration(sec) * time.Second, true
+	return d, true, nil
 }
 
 // validateTimeoutSec converts a config-file timeout (in seconds) to time.Duration.
@@ -172,9 +173,6 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", err)
 		}
 	}
-
-	// Note: OCR_LLM_TIMEOUT is applied globally in ResolveEndpointWithModelOverride,
-	// not here, so it works regardless of which strategy resolves the endpoint.
 
 	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR environment", ExtraHeaders: extraHeaders}, true, nil
 }

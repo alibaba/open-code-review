@@ -1131,21 +1131,25 @@ func TestParseTimeoutEnv(t *testing.T) {
 		value   string
 		want    time.Duration
 		wantOK  bool
+		wantErr bool
 	}{
-		{"empty", "", 0, false},
-		{"valid 120", "120", 120 * time.Second, true},
-		{"valid 60", "60", 60 * time.Second, true},
-		{"zero", "0", 0, true},
-		{"negative", "-5", 0, false},
-		{"non-integer", "abc", 0, false},
-		{"with spaces", " 90 ", 90 * time.Second, true},
-		{"overflow", "99999999999999", 0, false},
+		{"empty", "", 0, false, false},
+		{"valid 120", "120", 120 * time.Second, true, false},
+		{"valid 60", "60", 60 * time.Second, true, false},
+		{"zero", "0", 0, true, false},
+		{"negative", "-5", 0, false, true},
+		{"non-integer", "abc", 0, false, true},
+		{"with spaces", " 90 ", 90 * time.Second, true, false},
+		{"overflow", "99999999999999", 0, false, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("OCR_LLM_TIMEOUT", tt.value)
-			got, ok := parseTimeoutEnv()
+			got, ok, err := parseTimeoutEnv()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseTimeoutEnv() error = %v, wantErr %v", err, tt.wantErr)
+			}
 			if ok != tt.wantOK {
 				t.Errorf("parseTimeoutEnv() ok = %v, want %v", ok, tt.wantOK)
 			}
@@ -1286,5 +1290,159 @@ func TestNewLLMClient_DefaultTimeout(t *testing.T) {
 		if oc.cfg.Timeout != 5*time.Minute {
 			t.Errorf("OpenAIClient cfg.Timeout = %v, want default %v", oc.cfg.Timeout, 5*time.Minute)
 		}
+	}
+}
+
+func TestResolveEndpoint_ProviderConfigTimeoutSec(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {
+				APIKey:     "sk-ant-test",
+				Model:      "claude-sonnet-4-6",
+				TimeoutSec: 180,
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Timeout != 180*time.Second {
+		t.Errorf("Timeout = %v, want %v", ep.Timeout, 180*time.Second)
+	}
+}
+
+func TestResolveEndpoint_ProviderConfigNegativeTimeoutSec(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {
+				APIKey:     "sk-ant-test",
+				Model:      "claude-sonnet-4-6",
+				TimeoutSec: -10,
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for negative provider timeout_sec")
+	}
+	if !strings.Contains(err.Error(), "non-negative") {
+		t.Errorf("error %q should mention non-negative", err.Error())
+	}
+}
+
+func TestResolveEndpoint_EnvTimeoutOverridesConfigTimeout(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_TIMEOUT", "60")
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:        "https://api.example.com/v1/messages",
+			AuthToken:  "test-token",
+			Model:      "claude-opus-4-6",
+			TimeoutSec: 120,
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// OCR_LLM_TIMEOUT (60s) should override config timeout_sec (120s)
+	if ep.Timeout != 60*time.Second {
+		t.Errorf("Timeout = %v, want %v (env should override config)", ep.Timeout, 60*time.Second)
+	}
+}
+
+func TestResolveEndpoint_EnvTimeoutOverridesProviderTimeout(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_TIMEOUT", "45")
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {
+				APIKey:     "sk-ant-test",
+				Model:      "claude-sonnet-4-6",
+				TimeoutSec: 300,
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// OCR_LLM_TIMEOUT (45s) should override provider timeout_sec (300s)
+	if ep.Timeout != 45*time.Second {
+		t.Errorf("Timeout = %v, want %v (env should override provider config)", ep.Timeout, 45*time.Second)
+	}
+}
+
+func TestResolveEndpoint_InvalidEnvTimeoutWithConfig(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_TIMEOUT", "invalid")
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:       "https://api.example.com/v1/messages",
+			AuthToken: "test-token",
+			Model:     "claude-opus-4-6",
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for invalid OCR_LLM_TIMEOUT")
+	}
+	if !strings.Contains(err.Error(), "OCR_LLM_TIMEOUT") {
+		t.Errorf("error %q should mention OCR_LLM_TIMEOUT", err.Error())
+	}
+}
+
+func TestResolveEndpoint_NegativeEnvTimeoutWithConfig(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_TIMEOUT", "-30")
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:       "https://api.example.com/v1/messages",
+			AuthToken: "test-token",
+			Model:     "claude-opus-4-6",
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for negative OCR_LLM_TIMEOUT")
+	}
+	if !strings.Contains(err.Error(), "OCR_LLM_TIMEOUT") {
+		t.Errorf("error %q should mention OCR_LLM_TIMEOUT", err.Error())
 	}
 }
