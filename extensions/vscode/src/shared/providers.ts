@@ -96,6 +96,17 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     models: ['glm-5.2', 'glm-5.1', 'glm-5-turbo', 'glm-4.7'],
   },
   {
+    // GLM Coding Plan (智谱编程套餐). Dedicated coding endpoint bills against
+    // the subscription quota instead of the pay-as-you-go wallet. The same key
+    // authenticates both endpoints, so Z_AI_API_KEY is reused.
+    name: 'z-ai-coding',
+    displayName: 'Z.AI Coding Plan API',
+    protocol: 'openai',
+    baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    envVar: 'Z_AI_API_KEY',
+    models: ['glm-5.2', 'glm-5.1', 'glm-5-turbo', 'glm-4.7'],
+  },
+  {
     name: 'mimo',
     displayName: 'Xiaomi MiMo API',
     protocol: 'openai',
