@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -79,6 +80,7 @@ func parseTemplate(name string) (*template.Template, error) {
 		"formatDuration": formatDuration,
 		"formatTime":     formatTime,
 		"truncate":       truncateText,
+		"formatNumber":   formatNumber,
 		"add":            func(a, b int) int { return a + b },
 		"cardCount": func(tasks map[TaskType][]*TaskCard) int {
 			n := 0
@@ -162,6 +164,51 @@ func staticFS() fs.FS {
 		panic(err)
 	}
 	return sub
+}
+
+func formatNumber(n int) string {
+	var display string
+	switch {
+	case n >= 1_000_000:
+		if n%1_000_000 == 0 {
+			display = fmt.Sprintf("%dM", n/1_000_000)
+		} else {
+			display = trimFloatSuffix(fmt.Sprintf("%.2fM", float64(n)/1_000_000))
+		}
+	case n >= 1_000:
+		if n%1_000 == 0 {
+			display = fmt.Sprintf("%dK", n/1_000)
+		} else {
+			display = trimFloatSuffix(fmt.Sprintf("%.2fK", float64(n)/1_000))
+		}
+	default:
+		display = strconv.Itoa(n)
+	}
+	return display
+}
+
+// trimFloatSuffix removes trailing zeros and the trailing dot from a
+// floating-point string like "1.10K" → "1.1K", "1.00K" → "1K".
+func trimFloatSuffix(s string) string {
+	// Find the dot position before the suffix (K/M).
+	// Input is always "%d.%dX" or "%dX".
+	dot := strings.LastIndexByte(s, '.')
+	if dot < 0 {
+		return s
+	}
+	// Find the suffix letter (K or M) — it's always the last character.
+	suffix := s[len(s)-1]
+	mantissa := s[:len(s)-1] // strip suffix
+
+	// Trim trailing zeros from the fractional part.
+	i := len(mantissa) - 1
+	for i >= 0 && mantissa[i] == '0' {
+		i--
+	}
+	if i >= 0 && mantissa[i] == '.' {
+		i-- // also trim the dot if whole fractional part was zeros
+	}
+	return mantissa[:i+1] + string(suffix)
 }
 
 func formatDuration(seconds float64) string {
