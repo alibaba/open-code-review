@@ -88,12 +88,12 @@ func (c *Client) Close() error {
 
 func contentToText(contents []mcp.Content) string {
 	var parts []string
-	for _, c := range contents {
-		switch v := c.(type) {
+	for _, item := range contents {
+		switch v := item.(type) {
 		case *mcp.TextContent:
 			parts = append(parts, v.Text)
 		default:
-			parts = append(parts, fmt.Sprintf("[unsupported content type: %T]", c))
+			parts = append(parts, fmt.Sprintf("[unsupported content type: %T]", item))
 		}
 	}
 	if len(parts) == 0 {
