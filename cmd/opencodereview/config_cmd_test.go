@@ -445,6 +445,236 @@ func TestMergeModelLists(t *testing.T) {
 	}
 }
 
+func TestSetMCPServerValue_Command(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.command", "npx"); err != nil {
+		t.Fatalf("setMCPServerValue: %v", err)
+	}
+	if cfg.MCPServers["my-server"].Command != "npx" {
+		t.Errorf("Command = %q, want %q", cfg.MCPServers["my-server"].Command, "npx")
+	}
+}
+
+func TestSetMCPServerValue_CommandEmpty(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.command", ""); err == nil {
+		t.Fatal("expected error for empty command")
+	}
+}
+
+func TestSetMCPServerValue_Args(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.args", `["--port","8080"]`); err != nil {
+		t.Fatalf("setMCPServerValue: %v", err)
+	}
+	args := cfg.MCPServers["my-server"].Args
+	if len(args) != 2 || args[0] != "--port" || args[1] != "8080" {
+		t.Errorf("Args = %v", args)
+	}
+}
+
+func TestSetMCPServerValue_ArgsInvalidJSON(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.args", "not-json"); err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestSetMCPServerValue_Env(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.env", `["FOO=bar","BAZ=qux"]`); err != nil {
+		t.Fatalf("setMCPServerValue: %v", err)
+	}
+	env := cfg.MCPServers["my-server"].Env
+	if len(env) != 2 || env[0] != "FOO=bar" {
+		t.Errorf("Env = %v", env)
+	}
+}
+
+func TestSetMCPServerValue_EnvInvalidJSON(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.env", "not-json"); err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestSetMCPServerValue_EnvInvalidFormat(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.env", `["NOEQUALS"]`); err == nil {
+		t.Fatal("expected error for env entry without KEY=VALUE format")
+	}
+}
+
+func TestSetMCPServerValue_Tools(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.tools", `["search","read","search"]`); err != nil {
+		t.Fatalf("setMCPServerValue: %v", err)
+	}
+	tools := cfg.MCPServers["my-server"].Tools
+	if len(tools) != 2 || tools[0] != "search" || tools[1] != "read" {
+		t.Errorf("Tools = %v (expected deduped)", tools)
+	}
+}
+
+func TestSetMCPServerValue_ToolsInvalidJSON(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.tools", "not-json"); err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestSetMCPServerValue_ToolsEmptyName(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.tools", `["search",""]`); err == nil {
+		t.Fatal("expected error for empty tool name")
+	}
+}
+
+func TestSetMCPServerValue_Setup(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.setup", "init-script.sh"); err != nil {
+		t.Fatalf("setMCPServerValue: %v", err)
+	}
+	if cfg.MCPServers["my-server"].Setup != "init-script.sh" {
+		t.Errorf("Setup = %q", cfg.MCPServers["my-server"].Setup)
+	}
+}
+
+func TestSetMCPServerValue_UnknownField(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.unknown", "val"); err == nil {
+		t.Fatal("expected error for unknown field")
+	}
+}
+
+func TestSetMCPServerValue_InvalidKey(t *testing.T) {
+	cfg := &Config{}
+	tests := []string{
+		"mcp_servers",
+		"mcp_servers.",
+		"mcp_servers..command",
+		"mcp_servers.name",
+	}
+	for _, key := range tests {
+		if err := setMCPServerValue(cfg, key, "val"); err == nil {
+			t.Errorf("expected error for key %q", key)
+		}
+	}
+}
+
+func TestSetMCPServerValue_ExistingServer(t *testing.T) {
+	cfg := &Config{
+		MCPServers: map[string]MCPServerConfig{
+			"srv": {Command: "old-cmd"},
+		},
+	}
+	if err := setMCPServerValue(cfg, "mcp_servers.srv.command", "new-cmd"); err != nil {
+		t.Fatalf("setMCPServerValue: %v", err)
+	}
+	if cfg.MCPServers["srv"].Command != "new-cmd" {
+		t.Errorf("Command = %q, want %q", cfg.MCPServers["srv"].Command, "new-cmd")
+	}
+}
+
+func TestUnsetMCPServer(t *testing.T) {
+	dir := t.TempDir()
+	configPath := dir + "/config.json"
+
+	cfg := &Config{
+		MCPServers: map[string]MCPServerConfig{
+			"srv1": {Command: "cmd1"},
+			"srv2": {Command: "cmd2"},
+		},
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	if err := unsetMCPServer(configPath, "srv1"); err != nil {
+		t.Fatalf("unsetMCPServer: %v", err)
+	}
+
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if _, exists := cfg.MCPServers["srv1"]; exists {
+		t.Error("srv1 should have been deleted")
+	}
+	if _, exists := cfg.MCPServers["srv2"]; !exists {
+		t.Error("srv2 should still exist")
+	}
+}
+
+func TestUnsetMCPServer_LastEntry(t *testing.T) {
+	dir := t.TempDir()
+	configPath := dir + "/config.json"
+
+	cfg := &Config{
+		MCPServers: map[string]MCPServerConfig{
+			"only": {Command: "cmd"},
+		},
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	if err := unsetMCPServer(configPath, "only"); err != nil {
+		t.Fatalf("unsetMCPServer: %v", err)
+	}
+
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if cfg.MCPServers != nil {
+		t.Errorf("MCPServers should be nil after deleting last entry, got %v", cfg.MCPServers)
+	}
+}
+
+func TestUnsetMCPServer_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	configPath := dir + "/config.json"
+
+	cfg := &Config{}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	if err := unsetMCPServer(configPath, "nonexistent"); err == nil {
+		t.Fatal("expected error for nil MCPServers")
+	}
+
+	cfg = &Config{
+		MCPServers: map[string]MCPServerConfig{
+			"other": {Command: "cmd"},
+		},
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	if err := unsetMCPServer(configPath, "nonexistent"); err == nil {
+		t.Fatal("expected error for missing server")
+	}
+}
+
+func TestRunConfigUnset_UnknownPrefix(t *testing.T) {
+	if err := runConfigUnset("providers.anthropic"); err == nil {
+		t.Fatal("expected error for unsupported prefix")
+	}
+}
+
+func TestSetConfigValueMCPServer(t *testing.T) {
+	cfg := &Config{}
+	if err := setConfigValue(cfg, "mcp_servers.my-server.command", "npx"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.MCPServers["my-server"].Command != "npx" {
+		t.Errorf("Command = %q", cfg.MCPServers["my-server"].Command)
+	}
+}
+
 func TestEnsureTelemetry(t *testing.T) {
 	cfg := &Config{}
 	if cfg.Telemetry != nil {
