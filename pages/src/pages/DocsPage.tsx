@@ -60,6 +60,7 @@ const sectionDefs: Section[] = [
   { id: 'review', labelKey: 'docs.review' },
   { id: 'scan', labelKey: 'docs.scan' },
   { id: 'viewer', labelKey: 'docs.viewer' },
+  { id: 'mcp', labelKey: 'docs.mcp' },
   { id: 'env', labelKey: 'docs.env' },
 ];
 
@@ -188,6 +189,19 @@ const DocsPage: React.FC = () => {
   const subTitle: React.CSSProperties = { fontSize: 15, fontWeight: 600, color: '#FFFFFF', margin: '24px 0 8px 0', lineHeight: '24px', fontFamily };
   const desc: React.CSSProperties = { fontSize: 14, color: 'rgba(255,255,255,0.6)', lineHeight: '24px', margin: '0 0 12px 0', fontFamily };
   const sectionSpacing: React.CSSProperties = { marginBottom: 56, display: 'flex', flexDirection: 'column' as const, alignItems: 'stretch' };
+  const mcpConfigCommands = `# Add an MCP server
+ocr config set mcp_servers.<name>.command <command>
+ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
+ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
+ocr config set mcp_servers.<name>.tools '["tool_name"]'
+ocr config set mcp_servers.<name>.setup '<setup command>'
+
+# Delete an MCP server
+ocr config unset mcp_servers.<name>`;
+  const mcpCodeGraphCommands = `ocr config set mcp_servers.codegraph.command codegraph
+ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
+ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
+ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'`;
 
   return (
     <div style={{ minHeight: '100vh', background: '#000000', paddingTop: 72, fontFamily: 'PingFang SC, -apple-system, BlinkMacSystemFont, sans-serif' }}>
@@ -586,6 +600,50 @@ const DocsPage: React.FC = () => {
               <p style={desc}>{t('docs.viewerDesc')}</p>
               <CodeBlock code="ocr viewer" onCopy={() => handleCopy('ocr viewer')} />
               <p style={{ ...desc, marginTop: 12 }}>{t('docs.viewerNote')}</p>
+            </section>
+
+            {/* ─── MCP Server ─── */}
+            <section id="mcp" style={{ ...sectionSpacing, scrollMarginTop: 100 }}>
+              <p style={sectionTitle}>{t('docs.mcpTitle')}</p>
+              <p style={desc}>{t('docs.mcpDesc')}</p>
+
+              <p style={subTitle}>{t('docs.mcpConfig')}</p>
+              <CodeBlock code={mcpConfigCommands} onCopy={() => handleCopy(mcpConfigCommands)} />
+
+              <p style={subTitle}>{t('docs.mcpFields')}</p>
+              <div style={{ display: 'flex', flexDirection: 'column', alignSelf: 'stretch', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)' }}>
+                  <div style={{ width: 140, flexShrink: 0, padding: '10px 12px' }}><span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>{t('docs.mcpFieldCol')}</span></div>
+                  <div style={{ width: 100, flexShrink: 0, padding: '10px 12px' }}><span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>{t('docs.mcpRequiredCol')}</span></div>
+                  <div style={{ flex: 1, padding: '10px 12px' }}><span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>{t('docs.mcpDescCol')}</span></div>
+                </div>
+                {[
+                  ['command', t('docs.mcpYes'), t('docs.mcpFieldCommandDesc')],
+                  ['args', t('docs.mcpNo'), t('docs.mcpFieldArgsDesc')],
+                  ['env', t('docs.mcpNo'), t('docs.mcpFieldEnvDesc')],
+                  ['tools', t('docs.mcpNo'), t('docs.mcpFieldToolsDesc')],
+                  ['setup', t('docs.mcpNo'), t('docs.mcpFieldSetupDesc')],
+                ].map(([field, required, d], idx, arr) => (
+                  <div key={field} style={{ display: 'flex', borderBottom: idx < arr.length - 1 ? '1px solid rgba(255,255,255,0.16)' : 'none' }}>
+                    <div style={{ width: 140, flexShrink: 0, display: 'flex', alignItems: 'center', padding: '10px 12px' }}>
+                      <span style={{ fontSize: 12, fontFamily: 'Menlo, monospace', color: 'rgba(255,255,255,0.7)' }}>{field}</span>
+                    </div>
+                    <div style={{ width: 100, flexShrink: 0, display: 'flex', alignItems: 'center', padding: '10px 12px' }}>
+                      <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)' }}>{required}</span>
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '10px 12px' }}>
+                      <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)' }}>{d}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <p style={{ ...desc, fontSize: 12 }}>
+                {t('docs.mcpNote')}
+              </p>
+
+              <p style={subTitle}>{t('docs.mcpExample')}</p>
+              <CodeBlock code={mcpCodeGraphCommands} onCopy={() => handleCopy(mcpCodeGraphCommands)} />
             </section>
 
             {/* ─── Claude Code Integration ─── */}
