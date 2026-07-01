@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -217,7 +216,7 @@ func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repo
 		if serverCfg.Setup != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Running setup for MCP server %q: %s\n", name, serverCfg.Setup)
 			setupCtx, setupCancel := context.WithTimeout(ctx, 5*time.Minute)
-			setupCmd := exec.CommandContext(setupCtx, "sh", "-c", serverCfg.Setup)
+			setupCmd := shellCommand(setupCtx, serverCfg.Setup)
 			setupCmd.Dir = repoDir
 			configureProcessGroup(setupCmd)
 			output, err := setupCmd.CombinedOutput()
