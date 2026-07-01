@@ -360,6 +360,17 @@ const DocsPage: React.FC = () => {
                 </div>
                 <CodeBlock code="ocr review --audience agent" onCopy={() => handleCopy('ocr review --audience agent')} />
               </div>
+              {/* Dry-Run Preview */}
+              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <IconBox icon={docCheckCircleIcon} />
+                  <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.reviewPreviewLabel')}</span>
+                    <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.reviewPreviewDesc')}</p>
+                  </div>
+                </div>
+                <CodeBlock code="ocr review --preview" onCopy={() => handleCopy('ocr review --preview')} />
+              </div>
 
               <p style={subTitle}>{t('docs.reviewFlags')}</p>
               {/* Flags table */}
@@ -467,10 +478,6 @@ const DocsPage: React.FC = () => {
                 </div>
                 <CodeBlock code="ocr scan --preview" onCopy={() => handleCopy('ocr scan --preview')} />
               </div>
-
-              <p style={subTitle}>{t('docs.scanPreview')}</p>
-              <p style={desc}>{t('docs.scanPreviewDesc').replace(/<\/?code>/g, '')}</p>
-              <CodeBlock code="ocr scan --preview" onCopy={() => handleCopy('ocr scan --preview')} />
 
               <p style={subTitle}>{t('docs.scanBatching')}</p>
               <p style={desc}>{t('docs.scanBatchingDesc').replace(/<\/?code>/g, '')}</p>
