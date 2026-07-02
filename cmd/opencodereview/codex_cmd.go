@@ -44,8 +44,20 @@ func runCodex(args []string) error {
 }
 
 func runCodexWithWriter(args []string, writer io.Writer) error {
+	return runAgentCommandsWithWriter("codex", args, writer)
+}
+
+func runAgent(args []string) error {
+	return runAgentWithWriter(args, stdout.Writer())
+}
+
+func runAgentWithWriter(args []string, writer io.Writer) error {
+	return runAgentCommandsWithWriter("agent", args, writer)
+}
+
+func runAgentCommandsWithWriter(command string, args []string, writer io.Writer) error {
 	if len(args) == 0 {
-		printCodexUsage(writer)
+		printAgentCommandUsage(writer, command)
 		return nil
 	}
 	switch args[0] {
@@ -66,10 +78,10 @@ func runCodexWithWriter(args []string, writer io.Writer) error {
 	case "context":
 		return runCodexContext(context.Background(), args[1:], writer)
 	case "-h", "--help":
-		printCodexUsage(writer)
+		printAgentCommandUsage(writer, command)
 		return nil
 	default:
-		return fmt.Errorf("unknown codex command: %s", args[0])
+		return fmt.Errorf("unknown %s command: %s", command, args[0])
 	}
 }
 
@@ -440,16 +452,20 @@ func writeCodexPreview(writer io.Writer, bundle *reviewbundle.Bundle) {
 }
 
 func printCodexUsage(writer io.Writer) {
+	printAgentCommandUsage(writer, "codex")
+}
+
+func printAgentCommandUsage(writer io.Writer, command string) {
 	fmt.Fprintln(writer, `Usage:
-  ocr codex prepare [options]
-  ocr codex validate-comments --bundle FILE --comments FILE [options]
-  ocr codex report --bundle FILE --comments FILE [options]
-  ocr codex context read|find|diff|search --bundle FILE [options]
+  ocr `+command+` prepare [options]
+  ocr `+command+` validate-comments --bundle FILE --comments FILE [options]
+  ocr `+command+` report --bundle FILE --comments FILE [options]
+  ocr `+command+` context read|find|diff|search --bundle FILE [options]
 
 Commands:
-  prepare             Build a deterministic review bundle without invoking an OCR LLM
-  validate-comments   Validate Codex findings against immutable bundle evidence
-  report              Render validated Codex findings as Markdown, text, or JSON
+  prepare             Build deterministic review input without invoking an OCR LLM
+  validate-comments   Validate agent findings against immutable bundle evidence
+  report              Render validated agent findings as Markdown, text, or JSON
   context             Read target-aware repository context without an LLM`)
 }
 

@@ -152,6 +152,34 @@ func TestCodexUnknownSubcommand(t *testing.T) {
 	}
 }
 
+func TestAgentAliasPrepareEmitsBundle(t *testing.T) {
+	repository := initCodexRepository(t)
+	writeCodexFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	t.Setenv("HOME", t.TempDir())
+
+	var output bytes.Buffer
+	err := runAgentWithWriter([]string{"prepare", "--repo", repository}, &output)
+	if err != nil {
+		t.Fatalf("runAgentWithWriter() error = %v", err)
+	}
+	var bundle reviewbundle.Bundle
+	if err := json.Unmarshal(output.Bytes(), &bundle); err != nil {
+		t.Fatalf("decode stdout bundle: %v\n%s", err, output.String())
+	}
+	if bundle.SchemaVersion != reviewbundle.BundleSchemaVersion ||
+		bundle.Target.Mode != reviewbundle.TargetWorkspace {
+		t.Fatalf("unexpected bundle: %+v", bundle)
+	}
+}
+
+func TestAgentAliasUnknownSubcommand(t *testing.T) {
+	var output bytes.Buffer
+	err := runAgentWithWriter([]string{"unknown"}, &output)
+	if err == nil || !strings.Contains(err.Error(), "unknown agent command") {
+		t.Fatalf("error = %v, want unknown agent command", err)
+	}
+}
+
 func TestCodexValidateCommentsEmitsStructuredResult(t *testing.T) {
 	repository := initCodexRepository(t)
 	writeCodexFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
@@ -357,6 +385,19 @@ func TestCodexDispatchIsRegistered(t *testing.T) {
 	err := dispatch()
 	if err == nil || !strings.Contains(err.Error(), "--to is required") {
 		t.Fatalf("dispatch() error = %v, want codex prepare validation error", err)
+	}
+}
+
+func TestAgentDispatchIsRegistered(t *testing.T) {
+	originalArgs := os.Args
+	os.Args = []string{"ocr", "agent", "prepare", "--from", "main"}
+	t.Cleanup(func() {
+		os.Args = originalArgs
+	})
+
+	err := dispatch()
+	if err == nil || !strings.Contains(err.Error(), "--to is required") {
+		t.Fatalf("dispatch() error = %v, want agent prepare validation error", err)
 	}
 }
 
