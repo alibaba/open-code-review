@@ -3,6 +3,9 @@ package reviewbundle
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
 	"github.com/open-code-review/open-code-review/internal/tool"
@@ -18,10 +21,12 @@ type ContextResult struct {
 
 // ContextService exposes target-aware read-only repository tools.
 type ContextService struct {
-	repoDir string
-	bundle  *Bundle
-	runner  *gitcmd.Runner
-	reader  *tool.FileReader
+	repoDir   string
+	bundle    *Bundle
+	runner    *gitcmd.Runner
+	reader    *tool.FileReader
+	readyOnce sync.Once
+	readyErr  error
 }
 
 // NewContextService binds all subsequent operations to one bundle identity.
@@ -155,11 +160,10 @@ func (service *ContextService) Search(
 	}
 	patternArguments := make([]any, 0, len(patterns))
 	for _, pattern := range patterns {
-		cleaned, safe := cleanProtocolPath(pattern)
-		if !safe {
+		if !safeSearchPattern(pattern) {
 			return ContextResult{}, &ProtocolError{Code: "path_escape", Message: "file pattern must stay inside the repository"}
 		}
-		patternArguments = append(patternArguments, cleaned)
+		patternArguments = append(patternArguments, pattern)
 	}
 	result, err := tool.NewCodeSearch(service.reader).Execute(ctx, map[string]any{
 		"search_text":     query,
@@ -173,19 +177,35 @@ func (service *ContextService) Search(
 	return service.result("search", result), nil
 }
 
+func safeSearchPattern(pattern string) bool {
+	if pattern == "" || filepath.IsAbs(pattern) || strings.ContainsRune(pattern, '\x00') {
+		return false
+	}
+	for _, part := range strings.Split(filepath.ToSlash(pattern), "/") {
+		if part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 func (service *ContextService) ready(ctx context.Context) error {
-	if service.bundle == nil {
-		return fmt.Errorf("bundle is required")
-	}
-	if service.repoDir == "" {
-		return fmt.Errorf("repository directory is required")
-	}
-	result := ValidationResult{Errors: make([]ValidationNotice, 0)}
-	validateFreshTarget(ctx, &result, service.bundle, service.repoDir, service.runner)
-	if len(result.Errors) > 0 {
-		return &ProtocolError{Code: "stale_bundle", Message: result.Errors[0].Message}
-	}
-	return nil
+	service.readyOnce.Do(func() {
+		if service.bundle == nil {
+			service.readyErr = fmt.Errorf("bundle is required")
+			return
+		}
+		if service.repoDir == "" {
+			service.readyErr = fmt.Errorf("repository directory is required")
+			return
+		}
+		result := ValidationResult{Errors: make([]ValidationNotice, 0)}
+		validateFreshTarget(ctx, &result, service.bundle, service.repoDir, service.runner)
+		if len(result.Errors) > 0 {
+			service.readyErr = &ProtocolError{Code: "stale_bundle", Message: result.Errors[0].Message}
+		}
+	})
+	return service.readyErr
 }
 
 func (service *ContextService) result(operation, result string) ContextResult {

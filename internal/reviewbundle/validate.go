@@ -1,7 +1,6 @@
 package reviewbundle
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -104,7 +103,6 @@ func validateFreshTarget(
 					nil,
 					"scan file changed after bundle creation",
 				)
-				return
 			}
 		}
 		return
@@ -227,12 +225,20 @@ func validateCommentContent(
 			return
 		}
 	}
-	count := bytes.Count(content, []byte(comment.ExistingCode))
-	if count > 1 {
+	if countStandaloneSnippet(content, comment.ExistingCode) > 1 {
 		addValidationError(result, "ambiguous_existing_code", path, &index, "existing_code occurs more than once")
 		return
 	}
 	addValidationError(result, "existing_code_mismatch", path, &index, "existing_code does not match the supplied line range")
+}
+
+func countStandaloneSnippet(content []byte, snippet string) int {
+	if snippet == "" {
+		return 0
+	}
+	normalizedContent := "\n" + strings.TrimSuffix(string(content), "\n") + "\n"
+	normalizedSnippet := "\n" + strings.Trim(snippet, "\n") + "\n"
+	return strings.Count(normalizedContent, normalizedSnippet)
 }
 
 func cleanProtocolPath(path string) (string, bool) {

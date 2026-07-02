@@ -75,7 +75,7 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	cmdArgs = append(cmdArgs, "-e", searchText)
 
 	if ref := p.FileReader.Ref; ref != "" {
-		cmdArgs = append(cmdArgs, ref)
+		cmdArgs = append(cmdArgs, "--end-of-options", ref)
 	}
 
 	cmdArgs = append(cmdArgs, "--")

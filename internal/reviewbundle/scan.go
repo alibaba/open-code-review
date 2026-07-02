@@ -3,6 +3,7 @@ package reviewbundle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -107,17 +108,16 @@ func PrepareScan(ctx context.Context, options ScanOptions) (*ScanManifest, []byt
 		options.BatchSize,
 	)
 	for batchIndex, batch := range batches {
-		bundle, err := buildScanBundle(
+		if err := appendScanBundles(
+			manifest,
 			batch,
 			batchIndex,
 			manifest.TargetHash,
 			detailResolver,
 			maxBundleSize,
-		)
-		if err != nil {
+		); err != nil {
 			return nil, nil, err
 		}
-		manifest.Bundles = append(manifest.Bundles, *bundle)
 	}
 	manifestID, err := computeManifestID(manifest)
 	if err != nil {
@@ -136,6 +136,16 @@ func filterAndBudgetScanItems(
 	items []model.ScanItem,
 	options ScanOptions,
 ) ([]model.ScanItem, bool) {
+	if options.MaxTokenBudget > 0 {
+		sort.SliceStable(items, func(i, j int) bool {
+			left := scan.EstimateItemTokens(items[i], true)
+			right := scan.EstimateItemTokens(items[j], true)
+			if left != right {
+				return left < right
+			}
+			return items[i].Path < items[j].Path
+		})
+	}
 	included := make([]model.ScanItem, 0, len(items))
 	var budgetUsed int64
 	budgetTruncated := false
@@ -158,7 +168,32 @@ func filterAndBudgetScanItems(
 		budgetUsed += estimated
 		included = append(included, item)
 	}
+	sort.Slice(included, func(i, j int) bool { return included[i].Path < included[j].Path })
 	return included, budgetTruncated
+}
+
+func appendScanBundles(
+	manifest *ScanManifest,
+	items []model.ScanItem,
+	batchIndex int,
+	targetHash string,
+	resolver rules.DetailResolver,
+	maxBundleSize int64,
+) error {
+	bundle, err := buildScanBundle(items, batchIndex, targetHash, resolver, maxBundleSize)
+	if err == nil {
+		manifest.Bundles = append(manifest.Bundles, *bundle)
+		return nil
+	}
+	var protocolError *ProtocolError
+	if !errors.As(err, &protocolError) || protocolError.Code != "bundle_too_large" || len(items) <= 1 {
+		return err
+	}
+	midpoint := len(items) / 2
+	if err := appendScanBundles(manifest, items[:midpoint], batchIndex, targetHash, resolver, maxBundleSize); err != nil {
+		return err
+	}
+	return appendScanBundles(manifest, items[midpoint:], batchIndex, targetHash, resolver, maxBundleSize)
 }
 
 func buildScanBundle(

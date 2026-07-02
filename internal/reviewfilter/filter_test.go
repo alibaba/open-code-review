@@ -26,10 +26,10 @@ func TestExcludeReasonPreservesNativeOrdering(t *testing.T) {
 			want:       model.ExcludeUserRule,
 		},
 		{
-			name:       "explicit include overrides extension allowlist",
+			name:       "explicit include still respects extension allowlist",
 			fileFilter: &rules.FileFilter{Include: []string{"docs/**"}},
 			change:     model.Diff{NewPath: "docs/notes.unsupported"},
-			want:       model.ExcludeNone,
+			want:       model.ExcludeExtension,
 		},
 		{
 			name:       "include list excludes non-matching files",

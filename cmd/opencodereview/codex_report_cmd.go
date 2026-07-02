@@ -176,5 +176,5 @@ func printCodexReportUsage(writer io.Writer) {
 	fmt.Fprintln(writer, `Usage:
   ocr codex report --bundle FILE --comments FILE
                    [--validation FILE] [--format markdown|text|json]
-                   [--output FILE]`)
+                   [--output FILE] [--repo PATH] [--session-id ID]`)
 }

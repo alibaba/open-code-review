@@ -58,7 +58,8 @@ func TestContextRejectsStaleWorkspaceAndPathEscape(t *testing.T) {
 		t.Fatal("Read(path escape) error = nil")
 	}
 	writeTargetFile(t, repository, "base.go", "package sample\n\nvar changedAgain = true\n")
-	_, err = service.Search(context.Background(), "changed", false, false, nil)
+	staleService := NewContextService(repository, bundle, gitcmd.New(2))
+	_, err = staleService.Search(context.Background(), "changed", false, false, nil)
 	var protocolError *ProtocolError
 	if !errors.As(err, &protocolError) || protocolError.Code != "stale_bundle" {
 		t.Fatalf("Search(stale) error = %v, want stale_bundle", err)

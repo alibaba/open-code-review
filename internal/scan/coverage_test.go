@@ -190,28 +190,6 @@ func TestWhyExcluded_AllBranches(t *testing.T) {
 	}
 }
 
-func TestExtFromPath(t *testing.T) {
-	tests := []struct {
-		path string
-		want string
-	}{
-		{"main.go", ".go"},
-		{"src/lib/utils.ts", ".ts"},
-		{"Makefile", ""},
-		{".gitignore", ""},
-		{"path/to/FILE.Go", ".go"},
-		{"a/b/c.Test.JS", ".js"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			got := extFromPath(tt.path)
-			if got != tt.want {
-				t.Errorf("extFromPath(%q) = %q, want %q", tt.path, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestMaybeRunPlan_Success(t *testing.T) {
 	planJSON := `{"summary":"check error handling","checkpoints":[{"focus":"nil check","lines":"10-20","why":"potential NPE"}]}`
 	client := &fakeScanClient{

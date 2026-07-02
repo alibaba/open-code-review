@@ -42,7 +42,7 @@ func LoadComments(reader io.Reader) (*Comments, error) {
 		return nil, fmt.Errorf("invalid comments schema: bundle_id is required")
 	}
 	if comments.Comments == nil {
-		return nil, fmt.Errorf("invalid comments schema: comments must be an array")
+		return nil, fmt.Errorf("invalid comments schema: comments field is required and must be an array")
 	}
 	return &comments, nil
 }

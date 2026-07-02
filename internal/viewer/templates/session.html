@@ -108,7 +108,7 @@
         <tr>
             <td>{{.Event}}</td>
             <td>{{if .BundleID}}<code>{{.BundleID}}</code>{{else}}-{{end}}</td>
-            <td>{{.DurationMS}} ms</td>
+            <td>{{if .DurationMS}}{{.DurationMS}} ms{{else}}-{{end}}</td>
             <td>{{if .Error}}{{.Error}}{{else}}-{{end}}</td>
         </tr>
     {{end}}

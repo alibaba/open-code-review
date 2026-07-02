@@ -43,6 +43,8 @@ func sortedComments(comments *Comments) *Comments {
 	result := *comments
 	result.Comments = make([]ReviewComment, len(comments.Comments))
 	copy(result.Comments, comments.Comments)
+	result.Warnings = make([]ProtocolNotice, len(comments.Warnings))
+	copy(result.Warnings, comments.Warnings)
 	sort.SliceStable(result.Comments, func(i, j int) bool {
 		left, right := result.Comments[i], result.Comments[j]
 		if priorityRank(left.Priority) != priorityRank(right.Priority) {
@@ -148,6 +150,13 @@ func writeMarkdownValidation(output *bytes.Buffer, validation *ValidationResult)
 			fmt.Fprintf(output, "\n- `%s`: %s\n", notice.Code, notice.Message)
 		}
 	}
+	if len(validation.Warnings) > 0 {
+		fmt.Fprintln(output)
+		fmt.Fprintln(output, "## Validation warnings")
+		for _, notice := range validation.Warnings {
+			fmt.Fprintf(output, "\n- `%s`: %s\n", notice.Code, notice.Message)
+		}
+	}
 }
 
 func writeMarkdownNotices(output *bytes.Buffer, title string, notices []ProtocolNotice) {
@@ -176,6 +185,11 @@ func renderTextReport(
 		fmt.Fprintln(&output, "Validation: INVALID")
 		for _, notice := range validation.Errors {
 			fmt.Fprintf(&output, "ERROR %s: %s\n", notice.Code, notice.Message)
+		}
+	}
+	if validation != nil && len(validation.Warnings) > 0 {
+		for _, notice := range validation.Warnings {
+			fmt.Fprintf(&output, "WARNING %s: %s\n", notice.Code, notice.Message)
 		}
 	}
 	for _, comment := range comments.Comments {

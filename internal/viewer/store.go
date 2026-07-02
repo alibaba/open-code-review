@@ -93,6 +93,12 @@ type SessionSummary struct {
 	TokenUsageAvailable bool
 }
 
+const defaultControlPlane = "ocr-llm"
+
+func newDefaultSessionSummary() SessionSummary {
+	return SessionSummary{ControlPlane: defaultControlPlane, TokenUsageAvailable: true}
+}
+
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
 func ListSessions(root, encodedRepo string) ([]SessionSummary, error) {
 	repoDir := filepath.Join(root, encodedRepo)
@@ -129,7 +135,7 @@ func peekSession(path string) (SessionSummary, error) {
 	}
 	defer f.Close()
 
-	summary := SessionSummary{ControlPlane: "ocr-llm", TokenUsageAvailable: true}
+	summary := newDefaultSessionSummary()
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
@@ -282,7 +288,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	defer f.Close()
 
 	vs := &ViewSession{
-		Summary:     SessionSummary{ControlPlane: "ocr-llm", TokenUsageAvailable: true},
+		Summary:     newDefaultSessionSummary(),
 		Files:       make([]*FileGroup, 0),
 		CodexEvents: make([]CodexEvent, 0),
 	}

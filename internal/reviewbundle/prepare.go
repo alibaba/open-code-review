@@ -171,7 +171,11 @@ func internRule(
 	if existing, ok := ruleIDs[key]; ok {
 		return existing
 	}
-	ruleID := "rule-" + strings.TrimPrefix(key, "sha256:")[:16]
+	hashSuffix := strings.TrimPrefix(key, "sha256:")
+	ruleID := "rule-" + hashSuffix[:16]
+	if _, exists := ruleTable[ruleID]; exists {
+		ruleID = "rule-" + hashSuffix
+	}
 	ruleIDs[key] = ruleID
 	ruleTable[ruleID] = Rule{
 		Source:  detail.Source,
@@ -208,6 +212,7 @@ func hashDiffs(changes []model.Diff) string {
 }
 
 func computeBundleID(bundle *Bundle) (string, error) {
+	// Only scalar identity fields are changed on this shallow copy.
 	canonical := *bundle
 	canonical.BundleID = ""
 	canonical.Contract.BundleSizeBytes = 0
@@ -220,17 +225,19 @@ func computeBundleID(bundle *Bundle) (string, error) {
 
 func marshalWithStableSize(bundle *Bundle) ([]byte, error) {
 	var encoded []byte
-	for range 4 {
+	sizes := make([]int64, 0, 8)
+	for range 8 {
 		var err error
 		encoded, err = json.Marshal(bundle)
 		if err != nil {
 			return nil, fmt.Errorf("marshal review bundle: %w", err)
 		}
 		size := int64(len(encoded))
+		sizes = append(sizes, size)
 		if bundle.Contract.BundleSizeBytes == size {
 			return encoded, nil
 		}
 		bundle.Contract.BundleSizeBytes = size
 	}
-	return nil, fmt.Errorf("stabilize encoded bundle size")
+	return nil, fmt.Errorf("stabilize encoded bundle size; observed sizes: %v", sizes)
 }

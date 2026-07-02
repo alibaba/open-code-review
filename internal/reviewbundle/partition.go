@@ -95,10 +95,10 @@ type partitionPacker struct {
 }
 
 func newPartitionPacker(full *Bundle, maxBundleSize int64) *partitionPacker {
-	empty, encoded, err := buildDiffPartition(full, nil, maxBundleSize)
+	_, encoded, err := buildDiffPartition(full, nil, maxBundleSize)
 	estimated := int64(4096)
 	if err == nil {
-		estimated = int64(len(encoded)) + empty.Contract.BundleSizeBytes
+		estimated = int64(len(encoded))
 	}
 	return &partitionPacker{
 		files:         make([]File, 0),
@@ -112,7 +112,7 @@ func (packer *partitionPacker) estimateAddition(full *Bundle, file File) (int64,
 	if err != nil {
 		return 0, fmt.Errorf("marshal partition file estimate: %w", err)
 	}
-	estimate := int64(len(encodedFile) + len(file.RuleID) + 128)
+	estimate := int64(len(encodedFile) + 128)
 	if _, seen := packer.ruleIDs[file.RuleID]; !seen {
 		if rule, exists := full.Rules[file.RuleID]; exists {
 			encodedRule, err := json.Marshal(rule)

@@ -75,7 +75,9 @@ func TestReportIncludesValidationFailures(t *testing.T) {
 		Errors: []ValidationNotice{{
 			Code: "stale_bundle", Message: "target changed",
 		}},
-		Warnings: []ValidationNotice{},
+		Warnings: []ValidationNotice{{
+			Code: "outside_changed_hunk", Message: "line is outside changed hunk",
+		}},
 	}
 	report, err := RenderReport(
 		bundle,
@@ -86,7 +88,8 @@ func TestReportIncludesValidationFailures(t *testing.T) {
 		t.Fatalf("RenderReport() error = %v", err)
 	}
 	if !strings.Contains(string(report), "INVALID") ||
-		!strings.Contains(string(report), "stale_bundle") {
+		!strings.Contains(string(report), "stale_bundle") ||
+		!strings.Contains(string(report), "outside_changed_hunk") {
 		t.Fatalf("report missing validation failure:\n%s", report)
 	}
 }
