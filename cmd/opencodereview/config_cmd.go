@@ -435,21 +435,11 @@ func ensureModelInList(models []string, model string) []string {
 	if model == "" {
 		return models
 	}
-	if modelListContains(models, model) {
+	if llm.ModelListContains(models, model) {
 		return models
 	}
 	out := append([]string(nil), models...)
 	return append(out, model)
-}
-
-func modelListContains(models []string, target string) bool {
-	target = strings.TrimSpace(target)
-	for _, model := range models {
-		if model == target {
-			return true
-		}
-	}
-	return false
 }
 
 func setProviderValue(cfg *Config, key, value string) error {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -547,6 +548,12 @@ func TestNewModelTUI(t *testing.T) {
 		t.Skip("no providers")
 	}
 	m := newModelTUI(p[0], "")
+	if m.isCustomProvider {
+		t.Error("preset provider test helper should set isCustomProvider=false")
+	}
+	if len(m.registryModels) == 0 {
+		t.Error("registryModels should be populated for preset provider")
+	}
 	if m.modelIdx != 0 {
 		t.Errorf("modelIdx = %d, want 0 for empty currentModel", m.modelIdx)
 	}
@@ -861,6 +868,447 @@ func TestModelTUI_View_CustomModel(t *testing.T) {
 	}
 }
 
+func officialConfigModelTUI(t *testing.T, configPath string, extraModels []string) modelTUIModel {
+	t.Helper()
+	preset, ok := llm.LookupProvider("dashscope")
+	if !ok {
+		t.Skip("dashscope provider not in registry")
+	}
+	models := []string{"qwen3.7-max"}
+	models = append(models, extraModels...)
+	cfg := &Config{
+		Provider: "dashscope",
+		Model:    "qwen3.7-max",
+		Providers: map[string]ProviderEntry{
+			"dashscope": {
+				Model:  "qwen3.7-max",
+				Models: models,
+			},
+		},
+	}
+	provider := preset
+	provider.Models = mergeModelLists(preset.Models, cfg.Providers["dashscope"].Models)
+	return newModelTUIConfig(modelTUIConfig{
+		Provider:       provider,
+		RegistryModels: preset.Models,
+		ExistingCfg:    cfg,
+		ConfigPath:     configPath,
+		ProviderName:   "dashscope",
+		IsCustom:       false,
+	})
+}
+
+func customConfigModelTUI(t *testing.T, configPath string, models []string) modelTUIModel {
+	t.Helper()
+	cfg := &Config{
+		Provider: "my-llm",
+		Model:    "m1",
+		CustomProviders: map[string]ProviderEntry{
+			"my-llm": {
+				URL:      "https://custom.api/v1",
+				Protocol: "openai",
+				Model:    "m1",
+				Models:   append([]string(nil), models...),
+			},
+		},
+	}
+	provider := llm.Provider{
+		Name:        "my-llm",
+		DisplayName: "my-llm (custom)",
+		Models:      mergeModelLists(models),
+	}
+	return newModelTUIConfig(modelTUIConfig{
+		Provider:     provider,
+		CurrentModel: "m1",
+		ExistingCfg:  cfg,
+		ConfigPath:   configPath,
+		ProviderName: "my-llm",
+		IsCustom:     true,
+	})
+}
+
+func asModelTUIModel(t *testing.T, m tea.Model) modelTUIModel {
+	t.Helper()
+	switch v := m.(type) {
+	case modelTUIModel:
+		return v
+	case *modelTUIModel:
+		return *v
+	default:
+		t.Fatalf("expected modelTUIModel, got %T", m)
+		return modelTUIModel{}
+	}
+}
+
+func modelTUIEnterCustomModelName(t *testing.T, m modelTUIModel, name string) modelTUIModel {
+	t.Helper()
+	m.modelIdx = len(m.displayModels())
+	result, _ := m.Update(enterKey())
+	m2 := result.(modelTUIModel)
+	if !m2.customModel {
+		t.Fatal("expected customModel after enter on custom item")
+	}
+	m2.modelInput.SetValue(name)
+	result, _ = m2.Update(enterKey())
+	return result.(modelTUIModel)
+}
+
+func modelTUIIdxForName(t *testing.T, m modelTUIModel, name string) int {
+	t.Helper()
+	for i, model := range m.displayModels() {
+		if model == name {
+			return i
+		}
+	}
+	t.Fatalf("model %q not found in %v", name, m.displayModels())
+	return -1
+}
+
+func TestModelTUI_Official_AddCustomModelStaysOnList(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	m := officialConfigModelTUI(t, configPath, nil)
+	m3 := modelTUIEnterCustomModelName(t, m, "new-model")
+
+	if m3.confirmed {
+		t.Error("adding a model should not confirm and quit")
+	}
+	if m3.customModel {
+		t.Error("customModel should be cleared after add")
+	}
+	got := m3.existingCfg.Providers["dashscope"].Models
+	if !llm.ModelListContains(got, "new-model") {
+		t.Errorf("Models = %v, want new-model appended", got)
+	}
+	if m3.existingCfg.Model != "qwen3.7-max" {
+		t.Errorf("cfg.Model = %q, want active model unchanged", m3.existingCfg.Model)
+	}
+	diskCfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("load disk config: %v", err)
+	}
+	if !llm.ModelListContains(diskCfg.Providers["dashscope"].Models, "new-model") {
+		t.Errorf("disk Models = %v, want new-model persisted", diskCfg.Providers["dashscope"].Models)
+	}
+}
+
+func TestModelTUI_Official_ListEnterConfirmsSelection(t *testing.T) {
+	m := officialConfigModelTUI(t, "", nil)
+	m2 := modelTUIEnterCustomModelName(t, m, "picked-model")
+	m2.modelIdx = modelTUIIdxForName(t, m2, "picked-model")
+	result, _ := m2.Update(enterKey())
+	m3 := result.(modelTUIModel)
+	if !m3.confirmed {
+		t.Error("enter on list item should confirm selection")
+	}
+	if m3.selectedModel() != "picked-model" {
+		t.Errorf("selectedModel() = %q, want picked-model", m3.selectedModel())
+	}
+}
+
+func TestModelTUI_CustomProvider_AddCustomModelStaysOnList(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	m := customConfigModelTUI(t, configPath, []string{"m1"})
+	m3 := modelTUIEnterCustomModelName(t, m, "new-custom-model")
+
+	if m3.confirmed {
+		t.Error("adding a model should not confirm and quit")
+	}
+	if !llm.ModelListContains(m3.existingCfg.CustomProviders["my-llm"].Models, "new-custom-model") {
+		t.Errorf("Models = %v, want new-custom-model appended", m3.existingCfg.CustomProviders["my-llm"].Models)
+	}
+	if m3.existingCfg.CustomProviders["my-llm"].Model != "m1" {
+		t.Errorf("entry.Model = %q, want active model unchanged", m3.existingCfg.CustomProviders["my-llm"].Model)
+	}
+	if !m3.savedInSession {
+		t.Error("savedInSession should be true after add")
+	}
+}
+
+func TestModelTUI_EscCancelWithoutChangesNoSavedInSession(t *testing.T) {
+	m := officialConfigModelTUI(t, "", nil)
+	result, _ := m.Update(escKey())
+	m2 := result.(modelTUIModel)
+	if !m2.cancelled {
+		t.Fatal("esc should cancel")
+	}
+	if m2.savedInSession {
+		t.Error("savedInSession should be false when no add/delete occurred")
+	}
+}
+
+func TestModelTUI_DeleteSetsSavedInSession(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	m := customConfigModelTUI(t, configPath, []string{"m1", "aaa"})
+	m.modelIdx = modelTUIIdxForName(t, m, "aaa")
+	m.deleteModelName = "aaa"
+	m.confirmingDeleteModel = true
+
+	result, _ := m.confirmDeleteCustomProviderModel()
+	m2 := asModelTUIModel(t, result)
+	if !m2.savedInSession {
+		t.Error("savedInSession should be true after delete")
+	}
+}
+
+func TestModelTUI_AddCustomModelRejectsDuplicate(t *testing.T) {
+	m := officialConfigModelTUI(t, "", []string{"dup-model"})
+	m.modelIdx = len(m.displayModels())
+	result, _ := m.Update(enterKey())
+	m2 := result.(modelTUIModel)
+	m2.modelInput.SetValue("dup-model")
+	result, _ = m2.Update(enterKey())
+	m3 := result.(modelTUIModel)
+	if m3.formError != "Already in list: dup-model" {
+		t.Errorf("formError = %q, want duplicate message", m3.formError)
+	}
+	if !m3.customModel {
+		t.Error("customModel should stay open after duplicate reject")
+	}
+}
+
+func TestModelTUI_Official_DeleteUserAddedModel(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	m := officialConfigModelTUI(t, configPath, []string{"my-custom-model"})
+	m.modelIdx = modelTUIIdxForName(t, m, "my-custom-model")
+
+	result, _ := m.Update(dKey())
+	m2 := result.(modelTUIModel)
+	if !m2.confirmingDeleteModel {
+		t.Fatal("pressing d on user-added model should set confirmingDeleteModel = true")
+	}
+
+	result, _ = m2.Update(yKey())
+	m3 := result.(modelTUIModel)
+	got := m3.existingCfg.Providers["dashscope"].Models
+	if len(got) != 1 || got[0] != "qwen3.7-max" {
+		t.Errorf("Models = %v, want [qwen3.7-max]", got)
+	}
+
+	diskCfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("load disk config: %v", err)
+	}
+	if len(diskCfg.Providers["dashscope"].Models) != 1 {
+		t.Errorf("disk Models = %v, want [qwen3.7-max]", diskCfg.Providers["dashscope"].Models)
+	}
+}
+
+func TestModelTUI_Official_DeleteBuiltInModelIgnored(t *testing.T) {
+	m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
+	m.modelIdx = modelTUIIdxForName(t, m, "qwen3.7-max")
+
+	result, _ := m.Update(dKey())
+	m2 := result.(modelTUIModel)
+	if m2.confirmingDeleteModel {
+		t.Error("pressing d on built-in model should not trigger delete confirmation")
+	}
+}
+
+func TestIsUserAddedOfficialModelName_RegistryDuplicateNotUserAdded(t *testing.T) {
+	preset, ok := llm.LookupProvider("dashscope")
+	if !ok {
+		t.Skip("dashscope provider not in registry")
+	}
+	cfg := &Config{
+		Providers: map[string]ProviderEntry{
+			"dashscope": {Models: []string{"qwen3.7-max", "my-custom-model"}},
+		},
+	}
+	if isUserAddedOfficialModelName("qwen3.7-max", "dashscope", preset.Models, cfg) {
+		t.Error("registry model should not be treated as user-added even when listed in config")
+	}
+	if !isUserAddedOfficialModelName("my-custom-model", "dashscope", preset.Models, cfg) {
+		t.Error("config-only model should be user-added")
+	}
+}
+
+func TestModelTUI_Official_RegistryModelNotDeletable(t *testing.T) {
+	m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
+	m.modelIdx = modelTUIIdxForName(t, m, "qwen3.7-max")
+
+	if m.isUserAddedModel("qwen3.7-max") {
+		t.Error("qwen3.7-max should not be user-added when it is in the registry")
+	}
+
+	result, _ := m.Update(dKey())
+	m2 := result.(modelTUIModel)
+	if m2.confirmingDeleteModel {
+		t.Error("pressing d on registry model should not trigger delete confirmation")
+	}
+}
+
+func TestModelTUI_Official_DeleteOnCustomModelInputIgnored(t *testing.T) {
+	m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
+	m.modelIdx = len(m.displayModels())
+
+	result, _ := m.Update(dKey())
+	m2 := result.(modelTUIModel)
+	if m2.confirmingDeleteModel {
+		t.Error("pressing d on Enter custom model name... should not trigger delete confirmation")
+	}
+}
+
+func TestModelTUI_CustomProvider_DeleteOnCustomModelInputIgnored(t *testing.T) {
+	m := customConfigModelTUI(t, "", []string{"m1", "aaa"})
+	m.modelIdx = len(m.displayModels())
+
+	result, _ := m.Update(dKey())
+	m2 := result.(modelTUIModel)
+	if m2.confirmingDeleteModel {
+		t.Error("pressing d on Enter custom model name... should not trigger delete confirmation")
+	}
+}
+
+func TestModelTUI_Official_UserAddedModelShowsDeleteHint(t *testing.T) {
+	m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
+
+	m.modelIdx = modelTUIIdxForName(t, m, "qwen3.7-max")
+	got := stripANSI(m.View().Content)
+	if strings.Contains(got, "d Delete") {
+		t.Errorf("built-in model should not show d Delete hint; got:\n%s", got)
+	}
+
+	m.modelIdx = modelTUIIdxForName(t, m, "my-custom-model")
+	got = stripANSI(m.View().Content)
+	if !strings.Contains(got, "d Delete") {
+		t.Errorf("user-added model should show d Delete hint; got:\n%s", got)
+	}
+}
+
+func TestModelTUI_CustomProvider_ShowsDeleteHint(t *testing.T) {
+	m := customConfigModelTUI(t, "", []string{"m1", "aaa"})
+
+	m.modelIdx = len(m.displayModels())
+	got := stripANSI(m.View().Content)
+	if strings.Contains(got, "d Delete") {
+		t.Errorf("custom input row should not show d Delete hint; got:\n%s", got)
+	}
+
+	m.modelIdx = modelTUIIdxForName(t, m, "aaa")
+	got = stripANSI(m.View().Content)
+	if !strings.Contains(got, "d Delete") {
+		t.Errorf("custom model row should show d Delete hint; got:\n%s", got)
+	}
+}
+
+func TestModelTUI_CustomProvider_DeleteClearsCustomInput(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	m := customConfigModelTUI(t, configPath, []string{"m1", "aaa"})
+	m.modelIdx = modelTUIIdxForName(t, m, "aaa")
+	m.customModel = true
+	m.modelInput.SetValue("aaa")
+	m.deleteModelName = "aaa"
+	m.confirmingDeleteModel = true
+
+	result, _ := m.confirmDeleteCustomProviderModel()
+	m2 := asModelTUIModel(t, result)
+
+	if m2.customModel {
+		t.Error("customModel should be false after delete")
+	}
+	if m2.modelInput.Value() != "" {
+		t.Errorf("modelInput = %q, want empty after delete", m2.modelInput.Value())
+	}
+}
+
+func TestModelTUI_CustomProvider_DeleteModelViaDKey(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	m := customConfigModelTUI(t, configPath, []string{"m1", "aaa"})
+	m.modelIdx = modelTUIIdxForName(t, m, "aaa")
+
+	result, _ := m.Update(dKey())
+	m2 := result.(modelTUIModel)
+	if !m2.confirmingDeleteModel || m2.deleteModelName != "aaa" {
+		t.Fatalf("after d: confirming=%v deleteModelName=%q", m2.confirmingDeleteModel, m2.deleteModelName)
+	}
+
+	result, _ = m2.Update(yKey())
+	m3 := result.(modelTUIModel)
+	got := m3.existingCfg.CustomProviders["my-llm"].Models
+	if len(got) != 1 || got[0] != "m1" {
+		t.Errorf("Models = %v, want [m1]", got)
+	}
+}
+
+func TestModelTUI_CustomProvider_DeleteCancel(t *testing.T) {
+	m := customConfigModelTUI(t, "", []string{"m1", "aaa"})
+	m.modelIdx = modelTUIIdxForName(t, m, "aaa")
+
+	result, _ := m.Update(dKey())
+	m2 := result.(modelTUIModel)
+	result, _ = m2.Update(nKey())
+	m3 := result.(modelTUIModel)
+	if m3.confirmingDeleteModel {
+		t.Error("confirmingDeleteModel should be false after n")
+	}
+	got := m3.existingCfg.CustomProviders["my-llm"].Models
+	if len(got) != 2 {
+		t.Errorf("Models = %v, want unchanged", got)
+	}
+}
+
+func TestModelTUI_Official_DeleteCancel(t *testing.T) {
+	cancelKeys := []struct {
+		name string
+		key  tea.KeyPressMsg
+	}{
+		{"n", nKey()},
+		{"esc", escKey()},
+	}
+	for _, tc := range cancelKeys {
+		t.Run(tc.name, func(t *testing.T) {
+			m := officialConfigModelTUI(t, "", []string{"my-custom-model"})
+			m.modelIdx = modelTUIIdxForName(t, m, "my-custom-model")
+
+			result, _ := m.Update(dKey())
+			m2 := result.(modelTUIModel)
+			if !m2.confirmingDeleteModel {
+				t.Fatal("expected confirmingDeleteModel after d")
+			}
+
+			result, _ = m2.Update(tc.key)
+			m3 := result.(modelTUIModel)
+			if m3.confirmingDeleteModel {
+				t.Error("confirmingDeleteModel should be false after cancel")
+			}
+			got := m3.existingCfg.Providers["dashscope"].Models
+			if len(got) != 2 || got[1] != "my-custom-model" {
+				t.Errorf("Models = %v, want model unchanged", got)
+			}
+		})
+	}
+}
+
+func TestModelTUI_Official_DeleteActiveUserModelClearsCfg(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	m := officialConfigModelTUI(t, configPath, []string{"my-custom-model"})
+	m.existingCfg.Model = "my-custom-model"
+	m.existingCfg.Providers["dashscope"] = ProviderEntry{
+		Model:  "my-custom-model",
+		Models: []string{"qwen3.7-max", "my-custom-model"},
+	}
+	m.modelIdx = modelTUIIdxForName(t, m, "my-custom-model")
+
+	result, _ := m.Update(dKey())
+	m2 := result.(modelTUIModel)
+	result, _ = m2.Update(yKey())
+	m3 := result.(modelTUIModel)
+
+	if m3.existingCfg.Providers["dashscope"].Model != "" {
+		t.Errorf("entry.Model = %q, want empty", m3.existingCfg.Providers["dashscope"].Model)
+	}
+	if m3.existingCfg.Model != "" {
+		t.Errorf("cfg.Model = %q, want empty", m3.existingCfg.Model)
+	}
+}
+
 // --- result() tests ---
 
 func TestResult_OfficialTab(t *testing.T) {
@@ -1146,15 +1594,23 @@ func TestProviderTUIView_ManualTab_WithExistingConfig(t *testing.T) {
 func TestProviderTUIView_StepModel_CustomTabDeleteHelp(t *testing.T) {
 	cfg := &Config{
 		CustomProviders: map[string]ProviderEntry{
-			"cp": {URL: "http://cp", Models: []string{"m1"}},
+			"cp": {URL: "http://cp", Models: []string{"m1", "m2"}},
 		},
 	}
 	m := newProviderTUI(cfg, "")
 	m.step = stepModel
 	m.activeTab = tabCustom
 	m.customIdx = 0
-	v := m.View()
-	if !strings.Contains(v.Content, "Delete") {
-		t.Errorf("expected delete help for custom tab model view")
+
+	m.modelIdx = len(m.models())
+	got := stripANSI(m.View().Content)
+	if strings.Contains(got, "d Delete") {
+		t.Errorf("custom input row should not show d Delete hint; got:\n%s", got)
+	}
+
+	m.modelIdx = 0
+	got = stripANSI(m.View().Content)
+	if !strings.Contains(got, "d Delete") {
+		t.Errorf("custom model row should show d Delete hint; got:\n%s", got)
 	}
 }

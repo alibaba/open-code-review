@@ -311,7 +311,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	// Apply model override with validation.
 	if modelOverride != "" {
 		if len(availableModels) > 0 {
-			if !modelListContains(availableModels, modelOverride) {
+			if !ModelListContains(availableModels, modelOverride) {
 				return ResolvedEndpoint{}, false, fmt.Errorf(
 					"model %q is not available for provider %q; available models: %s",
 					modelOverride,
@@ -524,8 +524,8 @@ func defaultAuthHeader(protocol string) string {
 	return ""
 }
 
-// modelListContains checks if a model exists in the available models list.
-func modelListContains(models []string, target string) bool {
+// ModelListContains reports whether target matches any entry in models (trimmed).
+func ModelListContains(models []string, target string) bool {
 	target = strings.TrimSpace(target)
 	for _, model := range models {
 		if strings.TrimSpace(model) == target {

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/open-code-review/open-code-review/internal/llm"
 )
 
 func escKey() tea.KeyPressMsg {
@@ -1210,6 +1212,380 @@ func TestProviderTUI_OfficialTab_CustomModelInput_RejectsDuplicate(t *testing.T)
 	}
 }
 
+func officialDashscopeModelTUI(t *testing.T, configPath string, extraModels []string) providerTUIModel {
+	t.Helper()
+	models := []string{"qwen3.7-max"}
+	models = append(models, extraModels...)
+	cfg := &Config{
+		Provider: "dashscope",
+		Model:    "qwen3.7-max",
+		Providers: map[string]ProviderEntry{
+			"dashscope": {
+				Model:  "qwen3.7-max",
+				Models: models,
+			},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "dashscope" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepModel
+	return m
+}
+
+func customStepfunModelTUI(t *testing.T, configPath string, models []string) providerTUIModel {
+	t.Helper()
+	if len(models) == 0 {
+		models = []string{"step-3.5-flash"}
+	}
+	cfg := &Config{
+		Provider: "stepfun",
+		Model:    models[0],
+		CustomProviders: map[string]ProviderEntry{
+			"stepfun": {
+				URL:      "https://api.stepfun.com/v1",
+				Protocol: "openai",
+				Model:    models[0],
+				Models:   models,
+			},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabCustom
+	for i, cp := range m.customProviders {
+		if cp.name == "stepfun" {
+			m.customIdx = i
+			break
+		}
+	}
+	m.step = stepModel
+	return m
+}
+
+func modelIdxForName(t *testing.T, m providerTUIModel, name string) int {
+	t.Helper()
+	for i, model := range m.models() {
+		if model == name {
+			return i
+		}
+	}
+	t.Fatalf("model %q not found in %v", name, m.models())
+	return -1
+}
+
+func TestProviderTUI_OfficialTab_DeleteUserAddedModel(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	m := officialDashscopeModelTUI(t, configPath, []string{"my-custom-model"})
+	m.modelIdx = modelIdxForName(t, m, "my-custom-model")
+
+	result, _ := m.Update(dKey())
+	m2 := result.(providerTUIModel)
+	if !m2.confirmingDeleteModel {
+		t.Fatal("pressing d on user-added model should set confirmingDeleteModel = true")
+	}
+	if m2.deleteModelName != "my-custom-model" {
+		t.Errorf("deleteModelName = %q, want my-custom-model", m2.deleteModelName)
+	}
+
+	result, _ = m2.Update(yKey())
+	m3 := result.(providerTUIModel)
+	if m3.confirmingDeleteModel {
+		t.Error("confirmingDeleteModel should be false after y")
+	}
+	got := m3.existingCfg.Providers["dashscope"].Models
+	if len(got) != 1 || got[0] != "qwen3.7-max" {
+		t.Errorf("Models = %v, want [qwen3.7-max]", got)
+	}
+	if !m3.savedInSession {
+		t.Error("savedInSession should be true after delete")
+	}
+
+	diskCfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("load disk config: %v", err)
+	}
+	if len(diskCfg.Providers["dashscope"].Models) != 1 {
+		t.Errorf("disk Models = %v, want [qwen3.7-max]", diskCfg.Providers["dashscope"].Models)
+	}
+}
+
+func TestProviderTUI_OfficialTab_DeleteBuiltInModelIgnored(t *testing.T) {
+	m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
+	m.modelIdx = modelIdxForName(t, m, "qwen3.7-max")
+
+	result, _ := m.Update(dKey())
+	m2 := result.(providerTUIModel)
+	if m2.confirmingDeleteModel {
+		t.Error("pressing d on built-in model should not trigger delete confirmation")
+	}
+}
+
+func TestProviderTUI_OfficialTab_RegistryModelNotDeletable(t *testing.T) {
+	m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
+	m.modelIdx = modelIdxForName(t, m, "qwen3.7-max")
+
+	if m.isUserAddedOfficialModel("qwen3.7-max") {
+		t.Error("qwen3.7-max should not be user-added when it is in the registry")
+	}
+
+	result, _ := m.Update(dKey())
+	m2 := result.(providerTUIModel)
+	if m2.confirmingDeleteModel {
+		t.Error("pressing d on registry model should not trigger delete confirmation")
+	}
+}
+
+func TestProviderTUI_OfficialTab_DeleteOnCustomModelInputIgnored(t *testing.T) {
+	m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
+	m.modelIdx = len(m.models())
+
+	result, _ := m.Update(dKey())
+	m2 := result.(providerTUIModel)
+	if m2.confirmingDeleteModel {
+		t.Error("pressing d on Enter custom model name... should not trigger delete confirmation")
+	}
+}
+
+func TestProviderTUI_CustomTab_DeleteOnCustomModelInputIgnored(t *testing.T) {
+	m := customStepfunModelTUI(t, "", []string{"step-3.5-flash", "aaa"})
+	m.modelIdx = len(m.models())
+
+	result, _ := m.Update(dKey())
+	m2 := result.(providerTUIModel)
+	if m2.confirmingDeleteModel {
+		t.Error("pressing d on Enter custom model name... should not trigger delete confirmation")
+	}
+}
+
+func TestProviderTUI_CustomTab_ModelShowsDeleteHint(t *testing.T) {
+	m := customStepfunModelTUI(t, "", []string{"step-3.5-flash", "aaa"})
+
+	m.modelIdx = len(m.models())
+	got := stripANSI(m.View().Content)
+	if strings.Contains(got, "d Delete") {
+		t.Errorf("custom input row should not show d Delete hint; got:\n%s", got)
+	}
+
+	m.modelIdx = modelIdxForName(t, m, "aaa")
+	got = stripANSI(m.View().Content)
+	if !strings.Contains(got, "d Delete") {
+		t.Errorf("custom model row should show d Delete hint; got:\n%s", got)
+	}
+}
+
+func TestProviderTUI_OfficialTab_UserAddedModelShowsDeleteHint(t *testing.T) {
+	m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
+
+	m.modelIdx = modelIdxForName(t, m, "qwen3.7-max")
+	got := stripANSI(m.View().Content)
+	if strings.Contains(got, "d Delete") {
+		t.Errorf("built-in model should not show d Delete hint; got:\n%s", got)
+	}
+
+	m.modelIdx = modelIdxForName(t, m, "my-custom-model")
+	got = stripANSI(m.View().Content)
+	if !strings.Contains(got, "d Delete") {
+		t.Errorf("user-added model should show d Delete hint; got:\n%s", got)
+	}
+}
+
+func TestProviderTUI_OfficialTab_DeleteModelPreservesActiveModel(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	m := officialDashscopeModelTUI(t, configPath, []string{"my-custom-model"})
+	m.existingCfg.Model = "qwen3.7-max"
+	m.existingCfg.Providers["dashscope"] = ProviderEntry{
+		Model:  "qwen3.7-max",
+		Models: []string{"qwen3.7-max", "my-custom-model"},
+	}
+	m.modelIdx = modelIdxForName(t, m, "my-custom-model")
+
+	result, _ := m.Update(dKey())
+	m2 := result.(providerTUIModel)
+	result, _ = m2.Update(yKey())
+	m3 := result.(providerTUIModel)
+
+	if m3.existingCfg.Providers["dashscope"].Model != "qwen3.7-max" {
+		t.Errorf("entry.Model = %q, want qwen3.7-max", m3.existingCfg.Providers["dashscope"].Model)
+	}
+	if m3.existingCfg.Model != "qwen3.7-max" {
+		t.Errorf("cfg.Model = %q, want qwen3.7-max", m3.existingCfg.Model)
+	}
+}
+
+func TestProviderTUI_OfficialTab_DeleteUserAddedModelCancel(t *testing.T) {
+	cancelKeys := []struct {
+		name string
+		key  tea.KeyPressMsg
+	}{
+		{"n", nKey()},
+		{"esc", escKey()},
+	}
+	for _, tc := range cancelKeys {
+		t.Run(tc.name, func(t *testing.T) {
+			m := officialDashscopeModelTUI(t, "", []string{"my-custom-model"})
+			m.modelIdx = modelIdxForName(t, m, "my-custom-model")
+
+			result, _ := m.Update(dKey())
+			m2 := result.(providerTUIModel)
+			if !m2.confirmingDeleteModel {
+				t.Fatal("expected confirmingDeleteModel after d")
+			}
+
+			result, _ = m2.Update(tc.key)
+			m3 := result.(providerTUIModel)
+			if m3.confirmingDeleteModel {
+				t.Error("confirmingDeleteModel should be false after cancel")
+			}
+			got := m3.existingCfg.Providers["dashscope"].Models
+			if len(got) != 2 || got[1] != "my-custom-model" {
+				t.Errorf("Models = %v, want model unchanged", got)
+			}
+		})
+	}
+}
+
+func TestProviderTUI_OfficialTab_DeleteActiveUserModelClearsCfg(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	m := officialDashscopeModelTUI(t, configPath, []string{"my-custom-model"})
+	m.existingCfg.Model = "my-custom-model"
+	m.existingCfg.Providers["dashscope"] = ProviderEntry{
+		Model:  "my-custom-model",
+		Models: []string{"qwen3.7-max", "my-custom-model"},
+	}
+	m.modelIdx = modelIdxForName(t, m, "my-custom-model")
+
+	result, _ := m.Update(dKey())
+	m2 := result.(providerTUIModel)
+	result, _ = m2.Update(yKey())
+	m3 := result.(providerTUIModel)
+
+	if m3.existingCfg.Providers["dashscope"].Model != "" {
+		t.Errorf("entry.Model = %q, want empty", m3.existingCfg.Providers["dashscope"].Model)
+	}
+	if m3.existingCfg.Model != "" {
+		t.Errorf("cfg.Model = %q, want empty", m3.existingCfg.Model)
+	}
+}
+
+func TestOfficialSelectedModelUsesRegistryNotStaleMerge(t *testing.T) {
+	registry := []string{"built-in"}
+	deletedCustom := "my-custom"
+	staleMerged := mergeModelLists(registry, []string{deletedCustom})
+
+	if llm.ModelListContains(registry, deletedCustom) {
+		t.Fatal("test setup: custom name should not be in registry")
+	}
+	if !llm.ModelListContains(staleMerged, deletedCustom) {
+		t.Fatal("test setup: stale merge should still list deleted custom name")
+	}
+	// runConfigModel must use registryModels, not staleMerged, or re-selected custom
+	// names would skip ensureModelInList when still present in the pre-TUI merge.
+	if llm.ModelListContains(staleMerged, deletedCustom) && llm.ModelListContains(registry, deletedCustom) {
+		t.Error("would skip persisting re-selected custom model")
+	}
+	if llm.ModelListContains(registry, deletedCustom) {
+		t.Error("registry-only check must not treat custom model as built-in")
+	}
+}
+
+func TestProviderTUI_CustomTab_DeleteModelSkipsSavedInSessionWhenNoModelDeleted(t *testing.T) {
+	m := customStepfunModelTUI(t, "", []string{"step-3.5-flash", "aaa"})
+	m.modelIdx = len(m.models()) // out of range — no model row selected
+	m.deleteModelName = "aaa"
+	m.confirmingDeleteModel = true
+
+	result, _ := m.confirmDeleteCustomModel()
+	m2 := result.(providerTUIModel)
+	if m2.savedInSession {
+		t.Error("savedInSession should be false when modelIdx is out of range")
+	}
+}
+
+func TestProviderTUI_CustomTab_DeleteModelViaDKey(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "stepfun",
+		Model:    "step-3.5-flash",
+		CustomProviders: map[string]ProviderEntry{
+			"stepfun": {
+				URL:      "https://api.stepfun.com/v1",
+				Protocol: "openai",
+				Model:    "step-3.5-flash",
+				Models:   []string{"step-3.5-flash", "aaa"},
+			},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabCustom
+	for i, cp := range m.customProviders {
+		if cp.name == "stepfun" {
+			m.customIdx = i
+			break
+		}
+	}
+	m.step = stepModel
+	m.modelIdx = modelIdxForName(t, m, "aaa")
+
+	result, _ := m.Update(dKey())
+	m2 := result.(providerTUIModel)
+	if !m2.confirmingDeleteModel || m2.deleteModelName != "aaa" {
+		t.Fatalf("after d: confirming=%v deleteModelName=%q", m2.confirmingDeleteModel, m2.deleteModelName)
+	}
+
+	result, _ = m2.Update(yKey())
+	m3 := result.(providerTUIModel)
+	got := m3.existingCfg.CustomProviders["stepfun"].Models
+	if len(got) != 1 || got[0] != "step-3.5-flash" {
+		t.Errorf("Models = %v, want [step-3.5-flash]", got)
+	}
+
+	diskCfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("load disk config: %v", err)
+	}
+	if len(diskCfg.CustomProviders["stepfun"].Models) != 1 {
+		t.Errorf("disk Models = %v, want [step-3.5-flash]", diskCfg.CustomProviders["stepfun"].Models)
+	}
+}
+
+func TestProviderTUI_PersistCustomModelName_SaveFailureRollsBack(t *testing.T) {
+	blockPath := filepath.Join(t.TempDir(), "blocked")
+	if err := os.Mkdir(blockPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := officialDashscopeModelTUI(t, blockPath, nil)
+	before := append([]string(nil), m.existingCfg.Providers["dashscope"].Models...)
+	m.modelIdx = len(m.models())
+	m.customModel = true
+	m.modelInput.SetValue("failed-model")
+	m.modelInput.Focus()
+
+	result, _ := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.formError == "" {
+		t.Fatal("expected formError on save failure")
+	}
+	if !strings.Contains(m2.formError, "failed to save") {
+		t.Errorf("formError = %q, want save failure message", m2.formError)
+	}
+	got := m2.existingCfg.Providers["dashscope"].Models
+	if len(got) != len(before) {
+		t.Errorf("Models = %v, want unchanged %v", got, before)
+	}
+	if m2.savedInSession {
+		t.Error("savedInSession should be false after failed persist")
+	}
+}
+
 func TestProviderTUI_ManualFormPassesKToAuthHeaderInput(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
@@ -1429,6 +1805,41 @@ func TestProviderTUI_ApiKeyPasteReplacesMaskedKey(t *testing.T) {
 	}
 	if r := m2.result(); r.apiKey != "sk-new-pasted-key" {
 		t.Errorf("result().apiKey = %q, want pasted key", r.apiKey)
+	}
+}
+
+func TestProviderTUI_ManualTokenPasteReplacesMaskedToken(t *testing.T) {
+	cfg := &Config{
+		Llm: LlmConfig{
+			URL:       "https://example.com/v1",
+			Model:     "m",
+			AuthToken: "old-token-secret",
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabManual
+	m.inManualForm = true
+	m.manualStep = manualStepAuthToken
+	m.manualTokenMasked = true
+	m.manualTokenOriginal = "old-token-secret"
+	m.manualTokenInput.SetValue(maskedSecretPlaceholder())
+	m.manualTokenInput.Focus()
+
+	if !m.manualTokenMasked {
+		t.Fatal("expected masked token on load")
+	}
+
+	result, _ := m.Update(tea.PasteMsg{Content: "new-pasted-token"})
+	m2 := result.(providerTUIModel)
+
+	if m2.manualTokenMasked {
+		t.Fatal("paste should unmask the token field")
+	}
+	if got := m2.manualTokenInput.Value(); got != "new-pasted-token" {
+		t.Errorf("input value = %q, want pasted token", got)
+	}
+	if r := m2.result(); r.apiKey != "new-pasted-token" {
+		t.Errorf("result().apiKey = %q, want pasted token", r.apiKey)
 	}
 }
 

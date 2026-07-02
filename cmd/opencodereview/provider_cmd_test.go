@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -201,5 +202,53 @@ func TestApplyOfficialProviderConfig_MissingFields(t *testing.T) {
 	err := applyOfficialProviderConfig("", &Config{}, providerTUIResult{provider: "", model: ""})
 	if err == nil {
 		t.Fatal("expected error for missing provider/model")
+	}
+}
+
+func TestPrintWizardCancelled(t *testing.T) {
+	tests := []struct {
+		name           string
+		savedInSession bool
+		scope          string
+		want           string
+	}{
+		{
+			name:           "no changes",
+			savedInSession: false,
+			scope:          "Configuration changes",
+			want:           "Cancelled.\n",
+		},
+		{
+			name:           "provider wizard kept changes",
+			savedInSession: true,
+			scope:          "Configuration changes",
+			want:           "Cancelled. (Configuration changes made during this session were kept.)\n",
+		},
+		{
+			name:           "model wizard kept changes",
+			savedInSession: true,
+			scope:          "Model list changes",
+			want:           "Cancelled. (Model list changes made during this session were kept.)\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			old := os.Stdout
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			os.Stdout = w
+			printWizardCancelled(tc.savedInSession, tc.scope)
+			w.Close()
+			os.Stdout = old
+			got, err := io.ReadAll(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("output = %q, want %q", string(got), tc.want)
+			}
+		})
 	}
 }

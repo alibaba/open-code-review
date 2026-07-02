@@ -32,13 +32,9 @@ func runConfigProvider() error {
 	final := finalModel.(providerTUIModel)
 
 	if !final.confirmed {
-		// TUI persists changes (create/edit/model/add/delete) directly to disk
-		// during the session, so the on-disk file is already up to date for any
-		// savedInSession operation. No additional post-TUI apply step is needed.
-		if final.savedInSession {
-			return nil
-		}
-		fmt.Println("Cancelled.")
+		// TUI persists changes during the session; Esc only abandons the final
+		// provider/API-key confirmation step.
+		printWizardCancelled(final.savedInSession, "Configuration changes")
 		return nil
 	}
 
@@ -53,6 +49,16 @@ func runConfigProvider() error {
 	}
 
 	return applyOfficialProviderConfig(configPath, cfg, result)
+}
+
+// printWizardCancelled prints the standard Esc-cancel message for config wizards.
+// changesDescription is a short noun phrase, e.g. "Configuration changes".
+func printWizardCancelled(savedInSession bool, changesDescription string) {
+	if savedInSession {
+		fmt.Printf("Cancelled. (%s made during this session were kept.)\n", changesDescription)
+		return
+	}
+	fmt.Println("Cancelled.")
 }
 
 func applyProviderDeletions(configPath string, cfg *Config, names []string) (bool, error) {
@@ -274,8 +280,10 @@ func runConfigModel() error {
 	currentModel := ""
 	provider := llm.Provider{Name: cfg.Provider, DisplayName: cfg.Provider}
 	isCustom := false
+	registryModels := []string(nil)
 	if preset, isPreset := llm.LookupProvider(cfg.Provider); isPreset {
 		provider = preset
+		registryModels = append([]string(nil), preset.Models...)
 		if entry, ok := cfg.Providers[cfg.Provider]; ok {
 			currentModel = activeModelForProvider(cfg, cfg.Provider, entry)
 			provider.Models = mergeModelLists(provider.Models, entry.Models)
@@ -293,7 +301,15 @@ func runConfigModel() error {
 		provider.Models = mergeModelLists(entry.Models)
 	}
 
-	m := newModelTUI(provider, currentModel)
+	m := newModelTUIConfig(modelTUIConfig{
+		Provider:       provider,
+		CurrentModel:   currentModel,
+		RegistryModels: registryModels,
+		ExistingCfg:    cfg,
+		ConfigPath:     configPath,
+		ProviderName:   cfg.Provider,
+		IsCustom:       isCustom,
+	})
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
@@ -302,7 +318,7 @@ func runConfigModel() error {
 
 	final := finalModel.(modelTUIModel)
 	if final.cancelled {
-		fmt.Println("Cancelled.")
+		printWizardCancelled(final.savedInSession, "Model list changes")
 		return nil
 	}
 
@@ -325,7 +341,9 @@ func runConfigModel() error {
 		}
 		entry := cfg.Providers[cfg.Provider]
 		entry.Model = selectedModel
-		if !modelListContains(provider.Models, selectedModel) {
+		// Use registry-only list: provider.Models was captured before the TUI and
+		// may include stale entry.Models from add/delete during the session.
+		if !llm.ModelListContains(registryModels, selectedModel) {
 			entry.Models = ensureModelInList(entry.Models, selectedModel)
 		}
 		cfg.Providers[cfg.Provider] = entry

@@ -330,12 +330,97 @@ func (m providerTUIModel) modelProviderName() string {
 	return provider.Name
 }
 
+func isUserAddedOfficialModelName(name, providerName string, registryModels []string, cfg *Config) bool {
+	if providerName == "" || cfg == nil {
+		return false
+	}
+	if llm.ModelListContains(registryModels, name) {
+		return false
+	}
+	entry, ok := cfg.Providers[providerName]
+	if !ok {
+		return false
+	}
+	return llm.ModelListContains(entry.Models, name)
+}
+
+func registryModelsForProvider(name string, fallback []string) []string {
+	if preset, ok := llm.LookupProvider(name); ok {
+		return append([]string(nil), preset.Models...)
+	}
+	if len(fallback) == 0 {
+		return nil
+	}
+	return append([]string(nil), fallback...)
+}
+
+func applyModelDeleteToEntry(entry ProviderEntry, name string) ProviderEntry {
+	entry.Models = removeModels(entry.Models, []string{name})
+	if entry.Model == name {
+		entry.Model = ""
+	}
+	return entry
+}
+
+func clearCfgActiveModelIfDeleted(cfg *Config, providerName, name string) {
+	if cfg != nil && cfg.Provider == providerName && cfg.Model == name {
+		cfg.Model = ""
+	}
+}
+
+func rollbackCfgActiveModel(cfg *Config, providerName, prevModel string) {
+	if cfg != nil && cfg.Provider == providerName {
+		cfg.Model = prevModel
+	}
+}
+
+func (m *modelTUIModel) rollbackModelDelete(prevEntry ProviderEntry, prevCfgModel string) {
+	if m.existingCfg == nil {
+		return
+	}
+	if m.isCustomProvider {
+		m.existingCfg.CustomProviders[m.providerName] = prevEntry
+		m.syncModelsFromConfig()
+	} else {
+		m.existingCfg.Providers[m.providerName] = prevEntry
+	}
+	rollbackCfgActiveModel(m.existingCfg, m.providerName, prevCfgModel)
+}
+
+func (m providerTUIModel) isUserAddedOfficialModel(name string) bool {
+	if m.activeTab != tabOfficial {
+		return false
+	}
+	provider := m.currentProvider()
+	return isUserAddedOfficialModelName(name, provider.Name, registryModelsForProvider(provider.Name, provider.Models), m.existingCfg)
+}
+
+// cursorOnDeletableModel reports whether the model-step cursor is on a row that
+// can be deleted (not on "Enter custom model name...").
+func (m providerTUIModel) cursorOnDeletableModel() bool {
+	if m.step != stepModel || m.confirmingDeleteModel {
+		return false
+	}
+	models := m.models()
+	if m.modelIdx >= len(models) {
+		return false
+	}
+	switch m.activeTab {
+	case tabCustom:
+		return m.customIdx < len(m.customProviders)
+	case tabOfficial:
+		return m.isUserAddedOfficialModel(models[m.modelIdx])
+	default:
+		return false
+	}
+}
+
 func (m providerTUIModel) models() []string {
 	switch m.activeTab {
 	case tabOfficial:
-		models := m.currentProvider().Models
+		provider := m.currentProvider()
+		models := registryModelsForProvider(provider.Name, provider.Models)
 		if m.existingCfg != nil {
-			provider := m.currentProvider()
 			if entry, ok := m.existingCfg.Providers[provider.Name]; ok {
 				models = mergeModelLists(models, entry.Models)
 			}
@@ -530,12 +615,11 @@ func (m providerTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.deleteTargetName = m.customProviders[m.customIdx].name
 				return m, nil
 			}
-			if m.step == stepModel && m.activeTab == tabCustom && m.customIdx < len(m.customProviders) {
+			if m.step == stepModel && m.cursorOnDeletableModel() {
 				models := m.models()
-				if m.modelIdx < len(models) {
-					m.confirmingDeleteModel = true
-					m.deleteModelName = models[m.modelIdx]
-				}
+				m.confirmingDeleteModel = true
+				m.deleteModelName = models[m.modelIdx]
+				return m, nil
 			}
 			return m, nil
 
@@ -584,11 +668,9 @@ func (m providerTUIModel) updateCustomModelInput(key string, msg tea.KeyPressMsg
 		if name == "" {
 			return m, nil
 		}
-		for _, existing := range m.models() {
-			if existing == name {
-				m.formError = fmt.Sprintf("Already in list: %s", name)
-				return m, nil
-			}
+		if llm.ModelListContains(m.models(), name) {
+			m.formError = fmt.Sprintf("Already in list: %s", name)
+			return m, nil
 		}
 		m.formError = ""
 		persisted, err := m.persistCustomModelName(name)
@@ -646,9 +728,11 @@ func (m *providerTUIModel) persistCustomModelName(name string) (bool, error) {
 		m.customProviders[m.customIdx] = cp
 		if m.configPath != "" {
 			if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-				m.existingCfg.CustomProviders[cp.name] = prevEntry
-				cp.entry = prevEntry
-				m.customProviders[m.customIdx] = cp
+				if !m.reloadConfigAfterSaveFailure() {
+					m.existingCfg.CustomProviders[cp.name] = prevEntry
+					cp.entry = prevEntry
+					m.customProviders[m.customIdx] = cp
+				}
 				return false, fmt.Errorf("failed to save models: %w", err)
 			}
 		}
@@ -672,7 +756,9 @@ func (m *providerTUIModel) persistCustomModelName(name string) (bool, error) {
 		// at display time, unlike custom tab where customProviders is the sole list.
 		if m.configPath != "" {
 			if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-				m.existingCfg.Providers[provider.Name] = prevEntry
+				if !m.reloadConfigAfterSaveFailure() {
+					m.existingCfg.Providers[provider.Name] = prevEntry
+				}
 				return false, fmt.Errorf("failed to save models: %w", err)
 			}
 		}
@@ -1255,50 +1341,14 @@ func (m providerTUIModel) updateDeleteConfirm(key string) (tea.Model, tea.Cmd) {
 func (m providerTUIModel) updateDeleteModelConfirm(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "y", "Y":
-		if m.customIdx >= len(m.customProviders) {
+		switch m.activeTab {
+		case tabCustom:
+			return m.confirmDeleteCustomModel()
+		case tabOfficial:
+			return m.confirmDeleteOfficialModel()
+		default:
 			m.confirmingDeleteModel = false
-			return m, nil
 		}
-		models := m.models()
-		if m.modelIdx < len(models) {
-			cp := m.customProviders[m.customIdx]
-			cp.entry.Models = removeModels(cp.entry.Models, []string{m.deleteModelName})
-			if cp.entry.Model == m.deleteModelName {
-				cp.entry.Model = ""
-			}
-			if m.existingCfg != nil && m.existingCfg.Provider == cp.name &&
-				m.existingCfg.Model == m.deleteModelName {
-				m.existingCfg.Model = ""
-			}
-			m.customProviders[m.customIdx] = cp
-			if m.existingCfg != nil {
-				if m.existingCfg.CustomProviders == nil {
-					m.existingCfg.CustomProviders = make(map[string]ProviderEntry)
-				}
-				m.existingCfg.CustomProviders[cp.name] = cp.entry
-			}
-			if m.configPath != "" {
-				if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-					if reloaded, reloadErr := loadOrCreateConfig(m.configPath); reloadErr == nil {
-						m.existingCfg = reloaded
-						m.customProviders = collectCustomProviders(reloaded)
-					}
-					m.formError = fmt.Sprintf("failed to save: %v", err)
-					m.confirmingDeleteModel = false
-					return m, nil
-				}
-			}
-			updated := m.models()
-			if m.modelIdx >= len(updated) {
-				if len(updated) > 0 {
-					m.modelIdx = len(updated) - 1
-				} else {
-					m.modelIdx = 0
-				}
-			}
-		}
-		m.savedInSession = true
-		m.confirmingDeleteModel = false
 		return m, nil
 	case "n", "N", "esc":
 		m.confirmingDeleteModel = false
@@ -1308,6 +1358,118 @@ func (m providerTUIModel) updateDeleteModelConfirm(key string) (tea.Model, tea.C
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+func (m providerTUIModel) confirmDeleteCustomModel() (tea.Model, tea.Cmd) {
+	if m.customIdx >= len(m.customProviders) {
+		m.confirmingDeleteModel = false
+		return m, nil
+	}
+	models := m.models()
+	if m.modelIdx < len(models) {
+		cp := m.customProviders[m.customIdx]
+		prevEntry := cloneProviderEntry(cp.entry)
+		prevCfgModel := ""
+		if m.existingCfg != nil && m.existingCfg.Provider == cp.name {
+			prevCfgModel = m.existingCfg.Model
+		}
+		cp.entry = applyModelDeleteToEntry(cp.entry, m.deleteModelName)
+		clearCfgActiveModelIfDeleted(m.existingCfg, cp.name, m.deleteModelName)
+		m.customProviders[m.customIdx] = cp
+		if m.existingCfg != nil {
+			if m.existingCfg.CustomProviders == nil {
+				m.existingCfg.CustomProviders = make(map[string]ProviderEntry)
+			}
+			m.existingCfg.CustomProviders[cp.name] = cp.entry
+		}
+		if m.configPath != "" {
+			if err := saveConfig(m.configPath, m.existingCfg); err != nil {
+				if !m.reloadConfigAfterSaveFailure() {
+					cp.entry = prevEntry
+					m.customProviders[m.customIdx] = cp
+					if m.existingCfg != nil {
+						m.existingCfg.CustomProviders[cp.name] = prevEntry
+						rollbackCfgActiveModel(m.existingCfg, cp.name, prevCfgModel)
+					}
+				}
+				m.formError = fmt.Sprintf("failed to save: %v", err)
+				m.adjustModelIdxAfterDelete()
+				m.confirmingDeleteModel = false
+				return m, nil
+			}
+		}
+		m.adjustModelIdxAfterDelete()
+		m.savedInSession = true
+	}
+	m.confirmingDeleteModel = false
+	return m, nil
+}
+
+func (m providerTUIModel) confirmDeleteOfficialModel() (tea.Model, tea.Cmd) {
+	if !m.isUserAddedOfficialModel(m.deleteModelName) {
+		m.confirmingDeleteModel = false
+		return m, nil
+	}
+	provider := m.currentProvider()
+	if m.existingCfg == nil || provider.Name == "" {
+		m.confirmingDeleteModel = false
+		return m, nil
+	}
+	if m.existingCfg.Providers == nil {
+		m.existingCfg.Providers = make(map[string]ProviderEntry)
+	}
+	prevEntry := cloneProviderEntry(m.existingCfg.Providers[provider.Name])
+	prevCfgModel := ""
+	if m.existingCfg.Provider == provider.Name {
+		prevCfgModel = m.existingCfg.Model
+	}
+	entry := applyModelDeleteToEntry(m.existingCfg.Providers[provider.Name], m.deleteModelName)
+	clearCfgActiveModelIfDeleted(m.existingCfg, provider.Name, m.deleteModelName)
+	m.existingCfg.Providers[provider.Name] = entry
+	if m.configPath != "" {
+		if err := saveConfig(m.configPath, m.existingCfg); err != nil {
+			if !m.reloadConfigAfterSaveFailure() {
+				m.existingCfg.Providers[provider.Name] = prevEntry
+				rollbackCfgActiveModel(m.existingCfg, provider.Name, prevCfgModel)
+			}
+			m.formError = fmt.Sprintf("failed to save: %v", err)
+			m.adjustModelIdxAfterDelete()
+			m.confirmingDeleteModel = false
+			return m, nil
+		}
+	}
+	m.adjustModelIdxAfterDelete()
+	// In-memory delete succeeded; configPath may be empty in tests (no disk write).
+	m.savedInSession = true
+	m.confirmingDeleteModel = false
+	return m, nil
+}
+
+func (m *providerTUIModel) adjustModelIdxAfterDelete() {
+	updated := m.models()
+	if m.modelIdx >= len(updated) {
+		if len(updated) > 0 {
+			m.modelIdx = len(updated) - 1
+		} else {
+			m.modelIdx = 0
+		}
+	}
+}
+
+// reloadConfigAfterSaveFailure reloads on-disk config and refreshes derived
+// provider TUI state so the UI matches persisted data after a failed save.
+// Returns false when reload could not run (e.g. missing/invalid config path).
+func (m *providerTUIModel) reloadConfigAfterSaveFailure() bool {
+	if m.configPath == "" {
+		return false
+	}
+	reloaded, err := loadOrCreateConfig(m.configPath)
+	if err != nil {
+		return false
+	}
+	m.existingCfg = reloaded
+	m.customProviders = collectCustomProviders(reloaded)
+	return true
 }
 
 func (m providerTUIModel) handleManualFormEnter() (tea.Model, tea.Cmd) {
@@ -1647,11 +1809,28 @@ func listCursorPrefix(isCursor bool) string {
 	return "    "
 }
 
+func listCursorPrefixForModel(isCursor, userAdded bool) string {
+	if !isCursor {
+		return "    "
+	}
+	if userAdded {
+		return "  " + tuiUserModelCursorStyle.Render(tuiCursor) + " "
+	}
+	return listCursorPrefix(true)
+}
+
 func renderListName(name string, isCursor bool) string {
 	if isCursor {
 		return tuiSelectedItemStyle.Render(name)
 	}
 	return tuiItemStyle.Render(name)
+}
+
+func renderModelName(name string, isCursor, userAdded bool) string {
+	if isCursor && userAdded {
+		return tuiUserModelSelectedStyle.Render(name)
+	}
+	return renderListName(name, isCursor)
 }
 
 // --- View ---
@@ -1744,8 +1923,11 @@ func (m providerTUIModel) viewCustomTab(s *strings.Builder) {
 	for i, cp := range m.customProviders {
 		isCursor := i == m.customIdx
 		activeModel := m.customProviderActiveModel(cp)
+		// userAdded here means "green highlight when selected" for user-managed rows.
+		highlight := isCursor
 
-		s.WriteString(listCursorPrefix(isCursor) + renderListName(cp.name, isCursor))
+		s.WriteString(listCursorPrefixForModel(isCursor, highlight))
+		s.WriteString(renderModelName(cp.name, isCursor, highlight))
 		if activeModel != "" {
 			s.WriteString("  " + tuiDimStyle.Render("("+activeModel+")"))
 		}
@@ -1935,7 +2117,16 @@ func (m providerTUIModel) viewModel(s *strings.Builder) {
 
 	for i, model := range models {
 		isCursor := i == m.modelIdx
-		s.WriteString(listCursorPrefix(isCursor) + renderListName(model, isCursor))
+		if m.activeTab == tabOfficial {
+			userAdded := m.isUserAddedOfficialModel(model)
+			s.WriteString(listCursorPrefixForModel(isCursor, userAdded))
+			s.WriteString(renderModelName(model, isCursor, userAdded))
+		} else {
+			// Custom tab: all models are user-managed; pass isCursor as userAdded
+			// so green highlight applies only to the selected row (not registry semantics).
+			s.WriteString(listCursorPrefixForModel(isCursor, isCursor))
+			s.WriteString(renderModelName(model, isCursor, isCursor))
+		}
 		s.WriteString("\n")
 	}
 
@@ -1965,7 +2156,7 @@ func (m providerTUIModel) viewModel(s *strings.Builder) {
 		s.WriteString("  " + tuiSelectedItemStyle.Render(fmt.Sprintf("Delete %q? (y/n)", m.deleteModelName)))
 		s.WriteString("\n")
 		s.WriteString(tuiHelpStyle.Render("  y Confirm · n/Esc Cancel"))
-	} else if m.activeTab == tabCustom && m.customIdx < len(m.customProviders) {
+	} else if m.cursorOnDeletableModel() {
 		s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  d Delete  Esc Back"))
 	} else {
 		s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  Esc Back"))
@@ -2073,6 +2264,13 @@ var (
 				Bold(true).
 				Foreground(lipgloss.Color("12"))
 
+	tuiUserModelSelectedStyle = lipgloss.NewStyle().
+					Bold(true).
+					Foreground(lipgloss.Color("10"))
+
+	tuiUserModelCursorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("10"))
+
 	tuiItemStyle = lipgloss.NewStyle()
 
 	tuiDimStyle = lipgloss.NewStyle().
@@ -2094,6 +2292,16 @@ var (
 
 // --- Model-only TUI (for `ocr config model`) ---
 
+type modelTUIConfig struct {
+	Provider       llm.Provider
+	CurrentModel   string
+	RegistryModels []string
+	ExistingCfg    *Config
+	ConfigPath     string
+	ProviderName   string
+	IsCustom       bool
+}
+
 type modelTUIModel struct {
 	width  int
 	height int
@@ -2105,40 +2313,219 @@ type modelTUIModel struct {
 	modelInput  textinput.Model
 	activeModel string
 
+	registryModels   []string
+	existingCfg      *Config
+	configPath       string
+	providerName     string
+	isCustomProvider bool
+
+	confirmingDeleteModel bool
+	deleteModelName       string
+	formError             string
+
 	confirmed bool
 	cancelled bool
+
+	// savedInSession is true after a model add/delete was persisted during the session.
+	savedInSession bool
 }
 
+// newModelTUI builds a model-only TUI for tests. It has no config path or existing
+// config, so add/delete/persist operations are unavailable — use newModelTUIConfig
+// in production (ocr config model). IsCustom follows whether the provider is a preset.
 func newModelTUI(provider llm.Provider, currentModel string) modelTUIModel {
+	registryModels := append([]string(nil), provider.Models...)
+	isCustom := true
+	if preset, ok := llm.LookupProvider(provider.Name); ok {
+		isCustom = false
+		registryModels = append([]string(nil), preset.Models...)
+	}
+	return newModelTUIConfig(modelTUIConfig{
+		Provider:       provider,
+		CurrentModel:   currentModel,
+		ProviderName:   provider.Name,
+		RegistryModels: registryModels,
+		IsCustom:       isCustom,
+	})
+}
+
+func newModelTUIConfig(cfg modelTUIConfig) modelTUIModel {
 	mi := textinput.New()
 	mi.Placeholder = "model name(s), comma-separated"
 	mi.SetWidth(50)
 
 	m := modelTUIModel{
-		provider:    provider,
-		models:      provider.Models,
-		width:       80,
-		height:      24,
-		modelInput:  mi,
-		activeModel: currentModel,
+		provider:         cfg.Provider,
+		width:            80,
+		height:           24,
+		modelInput:       mi,
+		activeModel:      cfg.CurrentModel,
+		registryModels:   append([]string(nil), cfg.RegistryModels...),
+		existingCfg:      cfg.ExistingCfg,
+		configPath:       cfg.ConfigPath,
+		providerName:     cfg.ProviderName,
+		isCustomProvider: cfg.IsCustom,
 	}
 
-	if currentModel != "" {
+	if cfg.IsCustom {
+		m.models = append([]string(nil), cfg.Provider.Models...)
+	}
+
+	if cfg.CurrentModel != "" {
 		found := false
-		for i, model := range m.models {
-			if model == currentModel {
+		models := m.displayModels()
+		for i, model := range models {
+			if model == cfg.CurrentModel {
 				m.modelIdx = i
 				found = true
 				break
 			}
 		}
 		if !found {
-			m.modelIdx = len(m.models)
-			m.modelInput.SetValue(currentModel)
+			m.modelIdx = len(models)
+			m.modelInput.SetValue(cfg.CurrentModel)
 		}
 	}
 
 	return m
+}
+
+func (m modelTUIModel) displayModels() []string {
+	// Custom providers store the list in m.models (updated on add/delete).
+	// Official providers derive the list from registry + config on each call.
+	if m.isCustomProvider {
+		return m.models
+	}
+	models := append([]string(nil), m.registryModels...)
+	if m.existingCfg != nil && m.providerName != "" {
+		if entry, ok := m.existingCfg.Providers[m.providerName]; ok {
+			models = mergeModelLists(models, entry.Models)
+		}
+	}
+	return models
+}
+
+func (m modelTUIModel) isUserAddedModel(name string) bool {
+	if m.isCustomProvider {
+		// Custom providers have no llm registry; every model comes from config and
+		// is user-managed. List membership guards confirm against stale names.
+		return llm.ModelListContains(m.displayModels(), name)
+	}
+	return isUserAddedOfficialModelName(name, m.providerName, m.registryModels, m.existingCfg)
+}
+
+func (m modelTUIModel) cursorOnUserAddedModel() bool {
+	if m.confirmingDeleteModel {
+		return false
+	}
+	models := m.displayModels()
+	if m.modelIdx >= len(models) {
+		return false
+	}
+	if m.isCustomProvider {
+		return true
+	}
+	return m.isUserAddedModel(models[m.modelIdx])
+}
+
+func (m *modelTUIModel) adjustModelIdxAfterDelete() {
+	m.syncModelsFromConfig()
+	models := m.displayModels()
+	if m.modelIdx >= len(models) {
+		if len(models) > 0 {
+			m.modelIdx = len(models) - 1
+		} else {
+			m.modelIdx = 0
+		}
+	}
+}
+
+// reloadConfigAfterSaveFailure reloads on-disk config so in-memory state matches
+// persisted data after a failed save. Returns false when reload could not run.
+func (m *modelTUIModel) reloadConfigAfterSaveFailure() bool {
+	if m.configPath == "" {
+		return false
+	}
+	reloaded, err := loadOrCreateConfig(m.configPath)
+	if err != nil {
+		return false
+	}
+	m.existingCfg = reloaded
+	m.syncModelsFromConfig()
+	return true
+}
+
+func (m *modelTUIModel) syncModelsFromConfig() {
+	if !m.isCustomProvider || m.existingCfg == nil || m.providerName == "" {
+		return
+	}
+	if entry, ok := m.existingCfg.CustomProviders[m.providerName]; ok {
+		m.models = append([]string(nil), entry.Models...)
+	}
+}
+
+func (m *modelTUIModel) refreshModelSelectionAfterAdd(name string) {
+	models := m.displayModels()
+	for i, model := range models {
+		if model == name {
+			m.modelIdx = i
+			return
+		}
+	}
+	if len(models) > 0 {
+		m.modelIdx = len(models) - 1
+	} else {
+		m.modelIdx = 0
+	}
+}
+
+// persistAddedModelName appends a model to the provider's Models list in config
+// and saves to disk. It does not change the active model.
+func (m *modelTUIModel) persistAddedModelName(name string) error {
+	if name == "" {
+		return fmt.Errorf("model name must not be empty")
+	}
+	if m.existingCfg == nil || m.providerName == "" {
+		return fmt.Errorf("config not available")
+	}
+	if m.isCustomProvider {
+		if m.existingCfg.CustomProviders == nil {
+			m.existingCfg.CustomProviders = make(map[string]ProviderEntry)
+		}
+		entry := m.existingCfg.CustomProviders[m.providerName]
+		prevEntry := cloneProviderEntry(entry)
+		entry.Models = ensureModelInList(entry.Models, name)
+		m.existingCfg.CustomProviders[m.providerName] = entry
+		if m.configPath != "" {
+			if err := saveConfig(m.configPath, m.existingCfg); err != nil {
+				if !m.reloadConfigAfterSaveFailure() {
+					m.existingCfg.CustomProviders[m.providerName] = prevEntry
+					m.models = append([]string(nil), prevEntry.Models...)
+				}
+				return fmt.Errorf("failed to save models: %w", err)
+			}
+		}
+		m.models = append([]string(nil), entry.Models...)
+		m.savedInSession = true
+		return nil
+	}
+	if m.existingCfg.Providers == nil {
+		m.existingCfg.Providers = make(map[string]ProviderEntry)
+	}
+	entry := m.existingCfg.Providers[m.providerName]
+	prevEntry := cloneProviderEntry(entry)
+	entry.Models = ensureModelInList(entry.Models, name)
+	m.existingCfg.Providers[m.providerName] = entry
+	if m.configPath != "" {
+		if err := saveConfig(m.configPath, m.existingCfg); err != nil {
+			if !m.reloadConfigAfterSaveFailure() {
+				m.existingCfg.Providers[m.providerName] = prevEntry
+			}
+			return fmt.Errorf("failed to save models: %w", err)
+		}
+	}
+	m.savedInSession = true
+	return nil
 }
 
 func (m modelTUIModel) Init() tea.Cmd {
@@ -2146,11 +2533,11 @@ func (m modelTUIModel) Init() tea.Cmd {
 }
 
 func (m modelTUIModel) isCustomItem(idx int) bool {
-	return idx == len(m.models)
+	return idx == len(m.displayModels())
 }
 
 func (m modelTUIModel) itemCount() int {
-	return len(m.models) + 1
+	return len(m.displayModels()) + 1
 }
 
 func (m modelTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -2163,6 +2550,10 @@ func (m modelTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		key := msg.String()
 
+		if m.confirmingDeleteModel {
+			return m.updateDeleteModelConfirm(key)
+		}
+
 		if m.customModel {
 			switch key {
 			case "esc":
@@ -2171,14 +2562,28 @@ func (m modelTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.modelInput.SetValue("")
 				return m, nil
 			case "enter":
-				if m.modelInput.Value() != "" {
-					m.confirmed = true
-					return m, tea.Quit
+				name := strings.TrimSpace(m.modelInput.Value())
+				if name == "" {
+					return m, nil
 				}
+				if llm.ModelListContains(m.displayModels(), name) {
+					m.formError = fmt.Sprintf("Already in list: %s", name)
+					return m, nil
+				}
+				m.formError = ""
+				if err := m.persistAddedModelName(name); err != nil {
+					m.formError = err.Error()
+					return m, nil
+				}
+				m.customModel = false
+				m.modelInput.Blur()
+				m.modelInput.SetValue("")
+				m.refreshModelSelectionAfterAdd(name)
 				return m, nil
 			default:
 				var cmd tea.Cmd
 				m.modelInput, cmd = m.modelInput.Update(msg)
+				m.formError = ""
 				return m, cmd
 			}
 		}
@@ -2208,6 +2613,13 @@ func (m modelTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.modelIdx = 0
 			}
 			return m, nil
+		case "d":
+			if m.cursorOnUserAddedModel() {
+				models := m.displayModels()
+				m.confirmingDeleteModel = true
+				m.deleteModelName = models[m.modelIdx]
+			}
+			return m, nil
 		}
 
 	default:
@@ -2220,12 +2632,116 @@ func (m modelTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *modelTUIModel) updateDeleteModelConfirm(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "y", "Y":
+		return m.confirmDeleteModel()
+	case "n", "N", "esc":
+		m.confirmingDeleteModel = false
+		return *m, nil
+	case "ctrl+c":
+		m.cancelled = true
+		return *m, tea.Quit
+	}
+	return *m, nil
+}
+
+func (m *modelTUIModel) confirmDeleteModel() (tea.Model, tea.Cmd) {
+	if m.isCustomProvider {
+		return m.confirmDeleteCustomProviderModel()
+	}
+	return m.confirmDeleteOfficialModel()
+}
+
+func (m *modelTUIModel) confirmDeleteCustomProviderModel() (tea.Model, tea.Cmd) {
+	if !m.isUserAddedModel(m.deleteModelName) {
+		m.confirmingDeleteModel = false
+		return *m, nil
+	}
+	if m.existingCfg == nil || m.providerName == "" {
+		m.confirmingDeleteModel = false
+		return *m, nil
+	}
+	if m.existingCfg.CustomProviders == nil {
+		m.existingCfg.CustomProviders = make(map[string]ProviderEntry)
+	}
+	prevEntry := cloneProviderEntry(m.existingCfg.CustomProviders[m.providerName])
+	prevCfgModel := ""
+	if m.existingCfg.Provider == m.providerName {
+		prevCfgModel = m.existingCfg.Model
+	}
+	entry := applyModelDeleteToEntry(m.existingCfg.CustomProviders[m.providerName], m.deleteModelName)
+	clearCfgActiveModelIfDeleted(m.existingCfg, m.providerName, m.deleteModelName)
+	m.existingCfg.CustomProviders[m.providerName] = entry
+	if m.configPath != "" {
+		if err := saveConfig(m.configPath, m.existingCfg); err != nil {
+			if !m.reloadConfigAfterSaveFailure() {
+				m.rollbackModelDelete(prevEntry, prevCfgModel)
+			}
+			m.formError = fmt.Sprintf("failed to save: %v", err)
+			m.adjustModelIdxAfterDelete()
+			m.confirmingDeleteModel = false
+			return *m, nil
+		}
+	}
+	m.adjustModelIdxAfterDelete()
+	m.resetCustomModelInput()
+	m.savedInSession = true
+	m.confirmingDeleteModel = false
+	return *m, nil
+}
+
+func (m *modelTUIModel) confirmDeleteOfficialModel() (tea.Model, tea.Cmd) {
+	if !m.isUserAddedModel(m.deleteModelName) {
+		m.confirmingDeleteModel = false
+		return *m, nil
+	}
+	if m.existingCfg == nil || m.providerName == "" {
+		m.confirmingDeleteModel = false
+		return *m, nil
+	}
+	if m.existingCfg.Providers == nil {
+		m.existingCfg.Providers = make(map[string]ProviderEntry)
+	}
+	prevEntry := cloneProviderEntry(m.existingCfg.Providers[m.providerName])
+	prevCfgModel := ""
+	if m.existingCfg.Provider == m.providerName {
+		prevCfgModel = m.existingCfg.Model
+	}
+	entry := applyModelDeleteToEntry(m.existingCfg.Providers[m.providerName], m.deleteModelName)
+	clearCfgActiveModelIfDeleted(m.existingCfg, m.providerName, m.deleteModelName)
+	m.existingCfg.Providers[m.providerName] = entry
+	if m.configPath != "" {
+		if err := saveConfig(m.configPath, m.existingCfg); err != nil {
+			if !m.reloadConfigAfterSaveFailure() {
+				m.rollbackModelDelete(prevEntry, prevCfgModel)
+			}
+			m.formError = fmt.Sprintf("failed to save: %v", err)
+			m.adjustModelIdxAfterDelete()
+			m.confirmingDeleteModel = false
+			return *m, nil
+		}
+	}
+	m.adjustModelIdxAfterDelete()
+	m.resetCustomModelInput()
+	m.savedInSession = true
+	m.confirmingDeleteModel = false
+	return *m, nil
+}
+
+func (m *modelTUIModel) resetCustomModelInput() {
+	m.customModel = false
+	m.modelInput.SetValue("")
+	m.modelInput.Blur()
+}
+
 func (m modelTUIModel) selectedModel() string {
 	if m.customModel || m.isCustomItem(m.modelIdx) {
 		return m.modelInput.Value()
 	}
-	if m.modelIdx < len(m.models) {
-		return m.models[m.modelIdx]
+	models := m.displayModels()
+	if m.modelIdx < len(models) {
+		return models[m.modelIdx]
 	}
 	return ""
 }
@@ -2236,13 +2752,22 @@ func (m modelTUIModel) View() tea.View {
 	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", m.provider.DisplayName)))
 	s.WriteString("\n\n")
 
-	for i, model := range m.models {
+	models := m.displayModels()
+	for i, model := range models {
 		isCursor := i == m.modelIdx
-		s.WriteString(listCursorPrefix(isCursor) + renderListName(model, isCursor))
+		if m.isCustomProvider {
+			// All models are user-managed; isCursor drives green highlight on selection.
+			s.WriteString(listCursorPrefixForModel(isCursor, isCursor))
+			s.WriteString(renderModelName(model, isCursor, isCursor))
+		} else {
+			userAdded := m.isUserAddedModel(model)
+			s.WriteString(listCursorPrefixForModel(isCursor, userAdded))
+			s.WriteString(renderModelName(model, isCursor, userAdded))
+		}
 		s.WriteString("\n")
 	}
 
-	customIdx := len(m.models)
+	customIdx := len(models)
 	isCursor := m.modelIdx == customIdx
 	customLabel := "Enter custom model name..."
 	if isCursor {
@@ -2258,8 +2783,23 @@ func (m modelTUIModel) View() tea.View {
 		s.WriteString("\n")
 	}
 
+	if m.formError != "" {
+		s.WriteString("\n")
+		s.WriteString(tuiErrorStyle.Render("  " + m.formError))
+		s.WriteString("\n")
+	}
+
 	s.WriteString("\n")
-	s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  Esc Cancel"))
+
+	if m.confirmingDeleteModel {
+		s.WriteString("  " + tuiSelectedItemStyle.Render(fmt.Sprintf("Delete %q? (y/n)", m.deleteModelName)))
+		s.WriteString("\n")
+		s.WriteString(tuiHelpStyle.Render("  y Confirm · n/Esc Cancel"))
+	} else if m.cursorOnUserAddedModel() {
+		s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  d Delete  Esc Cancel"))
+	} else {
+		s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  Esc Cancel"))
+	}
 	s.WriteString("\n")
 
 	v := tea.NewView(s.String())
