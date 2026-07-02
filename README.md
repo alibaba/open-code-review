@@ -323,12 +323,15 @@ Install and enable `Open Code Review`, then start a new Codex thread and invoke 
 
 This registers a Codex-owned review skill. OCR supplies deterministic review
 evidence and target-aware context; Codex performs all planning, reasoning,
-prioritization, reporting, and explicitly requested fixes:
+prioritization, reporting, and explicitly requested fixes.
+
+The host-agnostic command surface is `ocr agent ...`; `ocr codex ...` remains a
+Codex compatibility alias for existing plugin integrations:
 
 ```bash
-ocr codex prepare --format json
-ocr codex validate-comments --bundle /tmp/bundle.json --comments /tmp/comments.json --output /tmp/validation.json
-ocr codex report --bundle /tmp/bundle.json --comments /tmp/comments.json --validation /tmp/validation.json --format markdown
+ocr agent prepare --format json
+ocr agent validate-comments --bundle /tmp/bundle.json --comments /tmp/comments.json --output /tmp/validation.json
+ocr agent report --bundle /tmp/bundle.json --comments /tmp/comments.json --validation /tmp/validation.json --format markdown
 ```
 
 The Codex-owned path does not initialize OCR's LLM backend and requires no OCR

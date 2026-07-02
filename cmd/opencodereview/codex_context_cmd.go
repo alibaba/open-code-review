@@ -32,17 +32,26 @@ type codexContextOptions struct {
 }
 
 func runCodexContext(ctx context.Context, args []string, writer io.Writer) error {
+	return runCodexContextForCommand(ctx, "codex", args, writer)
+}
+
+func runCodexContextForCommand(
+	ctx context.Context,
+	command string,
+	args []string,
+	writer io.Writer,
+) error {
 	started := time.Now()
 	if len(args) == 0 {
-		printCodexContextUsage(writer)
+		printCodexContextUsage(writer, command)
 		return nil
 	}
-	options, err := parseCodexContextFlags(args[0], args[1:])
+	options, err := parseCodexContextFlags(command, args[0], args[1:])
 	if err != nil {
 		return err
 	}
 	if options.showHelp {
-		printCodexContextUsage(writer)
+		printCodexContextUsage(writer, command)
 		return nil
 	}
 	bundleContent, err := os.ReadFile(options.bundlePath)
@@ -118,8 +127,8 @@ func executeContextOperation(
 	}
 }
 
-func parseCodexContextFlags(operation string, args []string) (codexContextOptions, error) {
-	flags := newOcrFlagSet("ocr codex context " + operation)
+func parseCodexContextFlags(command string, operation string, args []string) (codexContextOptions, error) {
+	flags := newOcrFlagSet("ocr " + command + " context " + operation)
 	options := codexContextOptions{operation: operation, bundleIndex: -1}
 	flags.StringVar(&options.repoDir, "repo", "", "repository root")
 	flags.StringVar(&options.bundlePath, "bundle", "", "review bundle JSON path")
@@ -131,7 +140,7 @@ func parseCodexContextFlags(operation string, args []string) (codexContextOption
 	flags.IntVar(&options.maxGitProcs, "max-git-procs", 16, "maximum concurrent git subprocesses")
 	flags.BoolVar(&options.caseSensitive, "case-sensitive", false, "use case-sensitive matching")
 	flags.BoolVar(&options.usePerlRegexp, "perl-regexp", false, "use Perl-compatible search regex")
-	flags.StringVar(&options.sessionID, "session-id", "", "explicit Codex-owned session ID")
+	flags.StringVar(&options.sessionID, "session-id", "", agentSessionIDHelp(command))
 	flags.IntVar(&options.bundleIndex, "bundle-index", -1, "scan manifest bundle index")
 	if err := flags.Parse(args); err != nil {
 		return options, fmt.Errorf("parse flags: %w", err)
@@ -161,10 +170,10 @@ func parseCodexContextFlags(operation string, args []string) (codexContextOption
 	return options, nil
 }
 
-func printCodexContextUsage(writer io.Writer) {
+func printCodexContextUsage(writer io.Writer, command string) {
 	fmt.Fprintln(writer, `Usage:
-  ocr codex context read --bundle FILE --path FILE [--start-line N --max-lines N]
-  ocr codex context find --bundle FILE --query NAME
-  ocr codex context diff --bundle FILE --path FILE[,FILE]
-  ocr codex context search --bundle FILE --query TEXT [--file-pattern PATTERNS]`)
+  ocr `+command+` context read --bundle FILE --path FILE [--start-line N --max-lines N]
+  ocr `+command+` context find --bundle FILE --query NAME
+  ocr `+command+` context diff --bundle FILE --path FILE[,FILE]
+  ocr `+command+` context search --bundle FILE --query TEXT [--file-pattern PATTERNS]`)
 }

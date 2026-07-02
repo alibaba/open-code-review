@@ -180,6 +180,33 @@ func TestAgentAliasUnknownSubcommand(t *testing.T) {
 	}
 }
 
+func TestAgentAliasHelpUsesAgentCommandName(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"prepare", []string{"prepare", "--help"}, "ocr agent prepare"},
+		{"validate", []string{"validate-comments", "--help"}, "ocr agent validate-comments"},
+		{"report", []string{"report", "--help"}, "ocr agent report"},
+		{"context", []string{"context"}, "ocr agent context read"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			if err := runAgentWithWriter(tc.args, &output); err != nil {
+				t.Fatalf("runAgentWithWriter() error = %v", err)
+			}
+			if !strings.Contains(output.String(), tc.want) {
+				t.Fatalf("help output missing %q:\n%s", tc.want, output.String())
+			}
+			if strings.Contains(output.String(), "ocr codex") {
+				t.Fatalf("agent help leaked codex command name:\n%s", output.String())
+			}
+		})
+	}
+}
+
 func TestCodexValidateCommentsEmitsStructuredResult(t *testing.T) {
 	repository := initCodexRepository(t)
 	writeCodexFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")

@@ -28,13 +28,22 @@ func runCodexValidateComments(
 	args []string,
 	writer io.Writer,
 ) error {
+	return runCodexValidateCommentsForCommand(ctx, "codex", args, writer)
+}
+
+func runCodexValidateCommentsForCommand(
+	ctx context.Context,
+	command string,
+	args []string,
+	writer io.Writer,
+) error {
 	started := time.Now()
-	options, err := parseCodexValidateFlags(args)
+	options, err := parseCodexValidateFlags(command, args)
 	if err != nil {
 		return err
 	}
 	if options.showHelp {
-		printCodexValidateUsage(writer)
+		printCodexValidateUsage(writer, command)
 		return nil
 	}
 	commentsFile, err := os.Open(options.commentsPath)
@@ -94,15 +103,15 @@ func runCodexValidateComments(
 	return err
 }
 
-func parseCodexValidateFlags(args []string) (codexValidateOptions, error) {
-	flags := newOcrFlagSet("ocr codex validate-comments")
+func parseCodexValidateFlags(command string, args []string) (codexValidateOptions, error) {
+	flags := newOcrFlagSet("ocr " + command + " validate-comments")
 	options := codexValidateOptions{}
 	flags.StringVar(&options.repoDir, "repo", "", "root directory of the git repository")
 	flags.StringVar(&options.bundlePath, "bundle", "", "review bundle JSON path")
-	flags.StringVar(&options.commentsPath, "comments", "", "Codex comments JSON path")
+	flags.StringVar(&options.commentsPath, "comments", "", agentCommentsHelp(command))
 	flags.StringVar(&options.outputPath, "output", "", "explicit validation output path")
 	flags.IntVar(&options.maxGitProcs, "max-git-procs", 16, "maximum concurrent git subprocesses")
-	flags.StringVar(&options.sessionID, "session-id", "", "explicit Codex-owned session ID")
+	flags.StringVar(&options.sessionID, "session-id", "", agentSessionIDHelp(command))
 	if err := flags.Parse(args); err != nil {
 		return options, fmt.Errorf("parse flags: %w", err)
 	}
@@ -119,8 +128,8 @@ func parseCodexValidateFlags(args []string) (codexValidateOptions, error) {
 	return options, nil
 }
 
-func printCodexValidateUsage(writer io.Writer) {
+func printCodexValidateUsage(writer io.Writer, command string) {
 	fmt.Fprintln(writer, `Usage:
-  ocr codex validate-comments --bundle FILE --comments FILE
+  ocr `+command+` validate-comments --bundle FILE --comments FILE
                               [--repo PATH] [--output FILE]`)
 }

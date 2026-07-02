@@ -24,13 +24,17 @@ type codexReportOptions struct {
 }
 
 func runCodexReport(args []string, writer io.Writer) error {
+	return runCodexReportForCommand("codex", args, writer)
+}
+
+func runCodexReportForCommand(command string, args []string, writer io.Writer) error {
 	started := time.Now()
-	options, err := parseCodexReportFlags(args)
+	options, err := parseCodexReportFlags(command, args)
 	if err != nil {
 		return err
 	}
 	if options.showHelp {
-		printCodexReportUsage(writer)
+		printCodexReportUsage(writer, command)
 		return nil
 	}
 	bundle, comments, err := loadCodexInputs(options.bundlePath, options.commentsPath)
@@ -85,16 +89,16 @@ func runCodexReport(args []string, writer io.Writer) error {
 	return err
 }
 
-func parseCodexReportFlags(args []string) (codexReportOptions, error) {
-	flags := newOcrFlagSet("ocr codex report")
+func parseCodexReportFlags(command string, args []string) (codexReportOptions, error) {
+	flags := newOcrFlagSet("ocr " + command + " report")
 	options := codexReportOptions{}
 	flags.StringVar(&options.bundlePath, "bundle", "", "review bundle JSON path")
-	flags.StringVar(&options.commentsPath, "comments", "", "Codex comments JSON path")
+	flags.StringVar(&options.commentsPath, "comments", "", agentCommentsHelp(command))
 	flags.StringVar(&options.validationPath, "validation", "", "optional validation result JSON path")
 	flags.StringVar(&options.outputPath, "output", "", "explicit report output path")
 	flags.StringVarP(&options.format, "format", "f", "markdown", "markdown, text, or json")
 	flags.StringVar(&options.repoDir, "repo", "", "repository root for session persistence")
-	flags.StringVar(&options.sessionID, "session-id", "", "explicit Codex-owned session ID")
+	flags.StringVar(&options.sessionID, "session-id", "", agentSessionIDHelp(command))
 	if err := flags.Parse(args); err != nil {
 		return options, fmt.Errorf("parse flags: %w", err)
 	}
@@ -172,9 +176,9 @@ func loadValidationResult(path string) (*reviewbundle.ValidationResult, error) {
 	return &result, nil
 }
 
-func printCodexReportUsage(writer io.Writer) {
+func printCodexReportUsage(writer io.Writer, command string) {
 	fmt.Fprintln(writer, `Usage:
-  ocr codex report --bundle FILE --comments FILE
+  ocr `+command+` report --bundle FILE --comments FILE
                    [--validation FILE] [--format markdown|text|json]
                    [--output FILE] [--repo PATH] [--session-id ID]`)
 }

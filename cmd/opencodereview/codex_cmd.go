@@ -62,21 +62,21 @@ func runAgentCommandsWithWriter(command string, args []string, writer io.Writer)
 	}
 	switch args[0] {
 	case "prepare":
-		options, err := parseCodexPrepareFlags(args[1:])
+		options, err := parseCodexPrepareFlags(command, args[1:])
 		if err != nil {
 			return err
 		}
 		if options.showHelp {
-			printCodexPrepareUsage(writer)
+			printCodexPrepareUsage(writer, command)
 			return nil
 		}
 		return executeCodexPrepare(context.Background(), options, writer)
 	case "validate-comments":
-		return runCodexValidateComments(context.Background(), args[1:], writer)
+		return runCodexValidateCommentsForCommand(context.Background(), command, args[1:], writer)
 	case "report":
-		return runCodexReport(args[1:], writer)
+		return runCodexReportForCommand(command, args[1:], writer)
 	case "context":
-		return runCodexContext(context.Background(), args[1:], writer)
+		return runCodexContextForCommand(context.Background(), command, args[1:], writer)
 	case "-h", "--help":
 		printAgentCommandUsage(writer, command)
 		return nil
@@ -85,8 +85,8 @@ func runAgentCommandsWithWriter(command string, args []string, writer io.Writer)
 	}
 }
 
-func parseCodexPrepareFlags(args []string) (codexPrepareOptions, error) {
-	flags := newOcrFlagSet("ocr codex prepare")
+func parseCodexPrepareFlags(command string, args []string) (codexPrepareOptions, error) {
+	flags := newOcrFlagSet("ocr " + command + " prepare")
 	options := codexPrepareOptions{}
 	flags.StringVar(&options.repoDir, "repo", "", "root directory of the git repository")
 	flags.StringVar(&options.rulePath, "rule", "", "path to a custom review rule file")
@@ -114,7 +114,7 @@ func parseCodexPrepareFlags(args []string) (codexPrepareOptions, error) {
 	flags.IntVar(&options.maxTokenBudget, "max-tokens-budget", 0, "hard scan token estimate budget")
 	flags.StringVar(&options.batchStrategy, "batch", "by-language", "scan grouping strategy")
 	flags.IntVar(&options.batchSize, "batch-size", 50, "maximum files per scan bundle")
-	flags.StringVar(&options.sessionID, "session-id", "", "explicit Codex-owned session ID")
+	flags.StringVar(&options.sessionID, "session-id", "", agentSessionIDHelp(command))
 	flags.BoolVar(&options.scan, "scan", false, "prepare full-file scan bundles")
 	flags.BoolVar(&options.split, "split", false, "emit a manifest of size-bounded diff bundles")
 	flags.BoolVarP(&options.preview, "preview", "p", false, "show the file manifest without patches")
@@ -469,13 +469,27 @@ Commands:
   context             Read target-aware repository context without an LLM`)
 }
 
-func printCodexPrepareUsage(writer io.Writer) {
+func printCodexPrepareUsage(writer io.Writer, command string) {
 	fmt.Fprintln(writer, `Usage:
-  ocr codex prepare [--repo PATH] [--from REF --to REF | --commit REF]
+  ocr `+command+` prepare [--repo PATH] [--from REF --to REF | --commit REF]
                     [--rule PATH] [--exclude PATTERNS] [--preview]
                     [--output PATH] [--max-bundle-bytes N] [--split]
-  ocr codex prepare --scan [--repo PATH] [--path PATHS]
+  ocr `+command+` prepare --scan [--repo PATH] [--path PATHS]
                     [--include PATTERNS] [--exclude PATTERNS]
                     [--batch none|by-language|by-directory] [--batch-size N]
                     [--max-tokens-budget N] [--max-file-size-bytes N]`)
+}
+
+func agentSessionIDHelp(command string) string {
+	if command == "codex" {
+		return "explicit Codex-owned session ID"
+	}
+	return "explicit host-agent session ID"
+}
+
+func agentCommentsHelp(command string) string {
+	if command == "codex" {
+		return "Codex comments JSON path"
+	}
+	return "agent comments JSON path"
 }
