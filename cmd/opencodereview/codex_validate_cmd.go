@@ -23,14 +23,6 @@ type codexValidateOptions struct {
 	showHelp     bool
 }
 
-func runCodexValidateComments(
-	ctx context.Context,
-	args []string,
-	writer io.Writer,
-) error {
-	return runCodexValidateCommentsForCommand(ctx, "codex", args, writer)
-}
-
 func runCodexValidateCommentsForCommand(
 	ctx context.Context,
 	command string,

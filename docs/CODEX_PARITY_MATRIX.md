@@ -25,7 +25,7 @@
 | none/language/directory batching | exported native grouping implementation | `scan/batch_test.go`, `reviewbundle/scan_test.go` |
 | scan dedup/project summary | Codex second pass; Skill requires traceability and partial-scope disclosure | Skill static test |
 | session/history | opt-in `--session-id`, correlated JSONL | `session/codex_test.go` |
-| viewer | `codex-owned` records and unavailable-token semantics | `viewer/codex_test.go` |
+| viewer | `agent` records and unavailable-token semantics | `viewer/codex_test.go` |
 | telemetry/trace facts | files, findings, warnings, partial, duration, context calls, validation | session tests |
 | native OCR compatibility | `ocr review`/`ocr scan` code paths retained | full `go test ./...` |
 | no OCR LLM in Codex path | agent commands do not load runtime/client/provider | source boundary scan |

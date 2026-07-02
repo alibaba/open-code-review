@@ -23,10 +23,6 @@ type codexReportOptions struct {
 	showHelp       bool
 }
 
-func runCodexReport(args []string, writer io.Writer) error {
-	return runCodexReportForCommand("codex", args, writer)
-}
-
 func runCodexReportForCommand(command string, args []string, writer io.Writer) error {
 	started := time.Now()
 	options, err := parseCodexReportFlags(command, args)

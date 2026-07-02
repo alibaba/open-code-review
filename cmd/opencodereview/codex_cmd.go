@@ -39,14 +39,6 @@ type codexPrepareOptions struct {
 	showHelp       bool
 }
 
-func runCodex(args []string) error {
-	return runCodexWithWriter(args, stdout.Writer())
-}
-
-func runCodexWithWriter(args []string, writer io.Writer) error {
-	return runAgentCommandsWithWriter("codex", args, writer)
-}
-
 func runAgent(args []string) error {
 	return runAgentWithWriter(args, stdout.Writer())
 }
@@ -239,7 +231,7 @@ func executeCodexPrepare(
 		MaxBundleSize: int64(options.maxBundleBytes),
 	})
 	if err != nil {
-		return fmt.Errorf("prepare Codex review bundle: %w", err)
+		return fmt.Errorf("prepare agent review bundle: %w", err)
 	}
 	if err := recordCodexEvent(
 		repoDir,
@@ -310,7 +302,7 @@ func executeCodexDiffPartition(
 	if options.preview {
 		fmt.Fprintf(
 			writer,
-			"Codex diff manifest preview: %d files, %d bundle(s)\n",
+			"Agent diff manifest preview: %d files, %d bundle(s)\n",
 			manifest.Summary.TotalFiles,
 			len(manifest.Bundles),
 		)
@@ -345,7 +337,7 @@ func executeCodexScanPrepare(
 		BatchSize:        options.batchSize,
 	})
 	if err != nil {
-		return fmt.Errorf("prepare Codex scan manifest: %w", err)
+		return fmt.Errorf("prepare agent scan manifest: %w", err)
 	}
 	if err := recordCodexEvent(
 		repoDir,
@@ -365,7 +357,7 @@ func executeCodexScanPrepare(
 	if options.preview {
 		fmt.Fprintf(
 			writer,
-			"Codex scan preview: %d files (%d included, %d skipped), %d bundle(s), ~%d tokens\n",
+			"Agent scan preview: %d files (%d included, %d skipped), %d bundle(s), ~%d tokens\n",
 			manifest.Summary.TotalFiles,
 			manifest.Summary.ReviewableFiles,
 			manifest.Summary.ExcludedFiles,
@@ -397,7 +389,7 @@ func recordCodexEvent(
 	}
 	recorder, err := session.OpenCodexRecorder(repoDir, sessionID, bundleID)
 	if err != nil {
-		return fmt.Errorf("open Codex session: %w", err)
+		return fmt.Errorf("open agent session: %w", err)
 	}
 	if finalize {
 		return recorder.Finalize(details)
@@ -427,7 +419,7 @@ func writePrivateFile(path string, content []byte) error {
 func writeCodexPreview(writer io.Writer, bundle *reviewbundle.Bundle) {
 	fmt.Fprintf(
 		writer,
-		"Codex review bundle preview: %d files (%d reviewable, %d excluded), +%d -%d\n",
+		"Agent review bundle preview: %d files (%d reviewable, %d excluded), +%d -%d\n",
 		bundle.Summary.TotalFiles,
 		bundle.Summary.ReviewableFiles,
 		bundle.Summary.ExcludedFiles,
@@ -449,10 +441,6 @@ func writeCodexPreview(writer io.Writer, bundle *reviewbundle.Bundle) {
 			file.Deletions,
 		)
 	}
-}
-
-func printCodexUsage(writer io.Writer) {
-	printAgentCommandUsage(writer, "codex")
 }
 
 func printAgentCommandUsage(writer io.Writer, command string) {
@@ -481,15 +469,9 @@ func printCodexPrepareUsage(writer io.Writer, command string) {
 }
 
 func agentSessionIDHelp(command string) string {
-	if command == "codex" {
-		return "explicit Codex-owned session ID"
-	}
 	return "explicit host-agent session ID"
 }
 
 func agentCommentsHelp(command string) string {
-	if command == "codex" {
-		return "Codex comments JSON path"
-	}
 	return "agent comments JSON path"
 }

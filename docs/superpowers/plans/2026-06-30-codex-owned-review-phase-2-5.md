@@ -4,7 +4,7 @@
 
 **Goal:** Complete the no-LLM Codex review path with comment validation, reporting, target-aware context, scan manifests, run records, viewer compatibility, and the final Skill cutover while preserving every native OCR command.
 
-**Architecture:** Extend the agent-neutral `internal/reviewbundle` protocol with strict loaders, deterministic validation/reporting, target-bound context, scan manifests, and Codex-owned run records. Reuse native diff, scan provider, filtering, rules, Git runner, and viewer storage primitives; keep `ocr review` and `ocr scan` unchanged. The CLI remains read-only except for explicit `--output` and `--session` persistence.
+**Architecture:** Extend the agent-neutral `internal/reviewbundle` protocol with strict loaders, deterministic validation/reporting, target-bound context, scan manifests, and agent run records. Reuse native diff, scan provider, filtering, rules, Git runner, and viewer storage primitives; keep `ocr review` and `ocr scan` unchanged. The CLI remains read-only except for explicit `--output` and `--session` persistence.
 
 **Tech Stack:** Go 1.25, standard-library JSON/Markdown, existing OCR diff/scan/tool/session/viewer packages, JSON Schema, and Go tests.
 
@@ -142,7 +142,7 @@ Add scan target/protocol fields, full-file evidence hashes, grouping metadata, e
 
 Extend `ocr agent prepare` with `--scan`, repeatable/comma-separated `--path`, `--include`, `--max-file-size-bytes`, `--max-tokens-budget`, `--batch`, and `--batch-size`. Run focused scan and native scan tests.
 
-### Task 5: Persist Codex-owned runs and make viewer records compatible
+### Task 5: Persist agent runs and make viewer records compatible
 
 **Files:**
 - Create: `internal/session/codex.go`
@@ -154,7 +154,7 @@ Extend `ocr agent prepare` with `--scan`, repeatable/comma-separated `--path`, `
 
 - [x] **Step 1: Write failing session/viewer tests**
 
-Assert opt-in persistence, mode `codex-owned`, bundle/findings/validation/report correlation IDs, file counts, durations, warnings, partial failures, context calls, unavailable token metrics, restrictive permissions, and unchanged parsing of native `ocr-llm` sessions.
+Assert opt-in persistence, mode `agent`, bundle/findings/validation/report correlation IDs, file counts, durations, warnings, partial failures, context calls, unavailable token metrics, restrictive permissions, and unchanged parsing of native `ocr-llm` sessions.
 
 - [x] **Step 2: Verify RED**
 

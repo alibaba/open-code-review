@@ -48,9 +48,6 @@ func dispatch() error {
 		return runReview(args[1:])
 	case "agent":
 		return runAgent(args[1:])
-	case "codex":
-		// Hidden compatibility entrypoint for early Codex plugin adapters.
-		return runCodex(args[1:])
 	case "scan", "s":
 		return runScan(args[1:])
 	case "config":

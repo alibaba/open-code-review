@@ -83,7 +83,7 @@ func renderMarkdownReport(
 	validation *ValidationResult,
 ) []byte {
 	var output bytes.Buffer
-	fmt.Fprintln(&output, "# Codex Code Review")
+	fmt.Fprintln(&output, "# Agent Code Review")
 	fmt.Fprintln(&output)
 	fmt.Fprintf(&output, "- Bundle: %s\n", markdownCode(bundle.BundleID))
 	fmt.Fprintf(
@@ -179,7 +179,7 @@ func renderTextReport(
 	validation *ValidationResult,
 ) []byte {
 	var output bytes.Buffer
-	fmt.Fprintf(&output, "Codex Code Review\nBundle: %s\nFindings: %d\n", bundle.BundleID, len(comments.Comments))
+	fmt.Fprintf(&output, "Agent Code Review\nBundle: %s\nFindings: %d\n", bundle.BundleID, len(comments.Comments))
 	if validation == nil {
 		fmt.Fprintln(&output, "Validation: not supplied")
 	} else if validation.Valid {

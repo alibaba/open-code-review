@@ -31,10 +31,6 @@ type codexContextOptions struct {
 	bundleIndex   int
 }
 
-func runCodexContext(ctx context.Context, args []string, writer io.Writer) error {
-	return runCodexContextForCommand(ctx, "codex", args, writer)
-}
-
 func runCodexContextForCommand(
 	ctx context.Context,
 	command string,

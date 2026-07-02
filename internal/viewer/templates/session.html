@@ -86,7 +86,7 @@
     </table>
     {{end}}
     {{else}}
-    <p>Token usage is not available for this Codex-owned run.</p>
+    <p>Token usage is not available for this agent run.</p>
     {{end}}
 </div>
 
@@ -100,7 +100,7 @@
 {{end}}
 
 {{if .Session.CodexEvents}}
-<h3>Codex workflow events</h3>
+<h3>Agent workflow events</h3>
 <table class="token-table">
     <thead><tr><th>Event</th><th>Bundle</th><th>Duration</th><th>Error</th></tr></thead>
     <tbody>

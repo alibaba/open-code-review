@@ -13,7 +13,7 @@ import (
 
 var safeCodexRunID = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
-// CodexEvent contains only metrics supplied by the Codex-owned workflow.
+// CodexEvent contains only metrics supplied by the host-agent workflow.
 type CodexEvent struct {
 	Files           int      `json:"files,omitempty"`
 	Findings        int      `json:"findings,omitempty"`
@@ -26,7 +26,7 @@ type CodexEvent struct {
 	Error           string   `json:"error,omitempty"`
 }
 
-// CodexRecorder appends viewer-compatible Codex-owned events.
+// CodexRecorder appends viewer-compatible host-agent events.
 type CodexRecorder struct {
 	mu       sync.Mutex
 	path     string
@@ -67,9 +67,9 @@ func OpenCodexRecorder(repoDir, runID, bundleID string) (*CodexRecorder, error) 
 		"sessionId":    runID,
 		"timestamp":    recorder.started.UTC().Format(time.RFC3339),
 		"cwd":          repoDir,
-		"model":        "Codex",
-		"reviewMode":   "codex_owned",
-		"controlPlane": "codex-owned",
+		"model":        "host-agent",
+		"reviewMode":   "agent",
+		"controlPlane": "agent",
 		"bundleId":     bundleID,
 		"tokenUsage":   "not_available",
 	}); err != nil {
@@ -83,9 +83,9 @@ func (recorder *CodexRecorder) Path() string {
 	return recorder.path
 }
 
-// Record appends one correlated Codex workflow event.
+// Record appends one correlated host-agent workflow event.
 func (recorder *CodexRecorder) Record(event string, details CodexEvent) error {
-	record := codexEventRecord(recorder, "codex_event", details)
+	record := codexEventRecord(recorder, "agent_event", details)
 	record["event"] = event
 	return recorder.write(record)
 }
@@ -117,7 +117,7 @@ func codexEventRecord(
 	fields["type"] = recordType
 	fields["sessionId"] = recorder.runID
 	fields["timestamp"] = time.Now().UTC().Format(time.RFC3339)
-	fields["controlPlane"] = "codex-owned"
+	fields["controlPlane"] = "agent"
 	fields["bundleId"] = recorder.bundleID
 	fields["tokenUsage"] = "not_available"
 	return fields
@@ -154,7 +154,7 @@ func (recorder *CodexRecorder) write(record map[string]any) error {
 	defer recorder.mu.Unlock()
 	encoded, err := json.Marshal(record)
 	if err != nil {
-		return fmt.Errorf("marshal Codex session record: %w", err)
+		return fmt.Errorf("marshal agent session record: %w", err)
 	}
 	file, err := os.OpenFile(
 		recorder.path,
@@ -162,14 +162,14 @@ func (recorder *CodexRecorder) write(record map[string]any) error {
 		0o600,
 	)
 	if err != nil {
-		return fmt.Errorf("open Codex session: %w", err)
+		return fmt.Errorf("open agent session: %w", err)
 	}
 	if _, err := file.Write(append(encoded, '\n')); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("write Codex session: %w", err)
+		return fmt.Errorf("write agent session: %w", err)
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("close Codex session: %w", err)
+		return fmt.Errorf("close agent session: %w", err)
 	}
 	return nil
 }

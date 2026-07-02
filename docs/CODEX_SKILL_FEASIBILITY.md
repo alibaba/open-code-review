@@ -874,7 +874,7 @@ partial/skipped 范围和分片 context 已实现。
 ### Phase 4：补齐 session、viewer 和可观测性
 
 实施状态：**已完成**。显式 `--session-id` 关联 prepare/context/validation/report，
-viewer 可区分 `codex-owned` 与 `ocr-llm`，未知 token 指标记录为
+viewer 可区分 `agent` 与 `ocr-llm`，未知 token 指标记录为
 `not_available`。
 
 交付：
@@ -889,7 +889,7 @@ viewer 可区分 `codex-owned` 与 `ocr-llm`，未知 token 指标记录为
 - 不伪造 Codex 未提供的 token 数据；
 - 传统 OCR session/history/viewer 完全保持兼容；
 - Codex 路径可以从最终报告追溯到 bundle 和验证结果；
-- 用户可以识别一次运行是 `ocr-llm` 还是 `codex-owned`。
+- 用户可以识别一次运行是 `ocr-llm` 还是 `agent`。
 
 ### Phase 5：100% 对等验收与 Skill 切换
 

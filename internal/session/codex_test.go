@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestCodexRecorderPersistsCorrelatedReadOnlyRun(t *testing.T) {
+func TestCodexRecorderPersistsCorrelatedReadOnlyAgentRun(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	repository := t.TempDir()
 	recorder, err := OpenCodexRecorder(repository, "run-123", "sha256:bundle")
@@ -49,12 +49,18 @@ func TestCodexRecorderPersistsCorrelatedReadOnlyRun(t *testing.T) {
 	if len(records) != 3 {
 		t.Fatalf("records = %d, want start, event, end", len(records))
 	}
-	if records[0]["controlPlane"] != "codex-owned" ||
+	if records[0]["controlPlane"] != "agent" ||
+		records[0]["model"] != "host-agent" ||
+		records[0]["reviewMode"] != "agent" ||
 		records[0]["bundleId"] != "sha256:bundle" ||
 		records[0]["tokenUsage"] != "not_available" {
 		t.Fatalf("session start = %+v", records[0])
 	}
-	if records[1]["event"] != "prepare" || records[2]["type"] != "session_end" {
+	if records[1]["type"] != "agent_event" ||
+		records[1]["controlPlane"] != "agent" ||
+		records[1]["event"] != "prepare" ||
+		records[2]["type"] != "session_end" ||
+		records[2]["controlPlane"] != "agent" {
 		t.Fatalf("records = %+v", records)
 	}
 }

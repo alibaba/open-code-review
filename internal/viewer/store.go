@@ -211,7 +211,7 @@ type ViewSession struct {
 	CodexEvents []CodexEvent
 }
 
-// CodexEvent is a read-only viewer representation of one Codex workflow event.
+// CodexEvent is a read-only viewer representation of one host-agent workflow event.
 type CodexEvent struct {
 	Event      string
 	BundleID   string
@@ -333,7 +333,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 			parseCodexSessionStartFields(rec, &vs.Summary)
 
-		case "codex_event":
+		case "agent_event", "codex_event":
 			event, _ := rec["event"].(string)
 			bundleID, _ := rec["bundleId"].(string)
 			errorMessage, _ := rec["error"].(string)

@@ -13,14 +13,14 @@ import (
 )
 
 func TestCodexPrepareEmitsBundleWithoutLLMConfiguration(t *testing.T) {
-	repository := initCodexRepository(t)
-	writeCodexFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	repository := initAgentRepository(t)
+	writeAgentFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
 	t.Setenv("HOME", t.TempDir())
 
 	var output bytes.Buffer
-	err := runCodexWithWriter([]string{"prepare", "--repo", repository}, &output)
+	err := runAgentWithWriter([]string{"prepare", "--repo", repository}, &output)
 	if err != nil {
-		t.Fatalf("runCodexWithWriter() error = %v", err)
+		t.Fatalf("runAgentWithWriter() error = %v", err)
 	}
 	var bundle reviewbundle.Bundle
 	if err := json.Unmarshal(output.Bytes(), &bundle); err != nil {
@@ -33,18 +33,18 @@ func TestCodexPrepareEmitsBundleWithoutLLMConfiguration(t *testing.T) {
 }
 
 func TestCodexPrepareWritesOnlyExplicitOutputWithRestrictedMode(t *testing.T) {
-	repository := initCodexRepository(t)
-	writeCodexFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	repository := initAgentRepository(t)
+	writeAgentFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
 	outputPath := filepath.Join(t.TempDir(), "bundle.json")
 
 	var stdout bytes.Buffer
-	err := runCodexWithWriter([]string{
+	err := runAgentWithWriter([]string{
 		"prepare",
 		"--repo", repository,
 		"--output", outputPath,
 	}, &stdout)
 	if err != nil {
-		t.Fatalf("runCodexWithWriter() error = %v", err)
+		t.Fatalf("runAgentWithWriter() error = %v", err)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty with --output", stdout.String())
@@ -67,16 +67,16 @@ func TestCodexPrepareWritesOnlyExplicitOutputWithRestrictedMode(t *testing.T) {
 }
 
 func TestCodexPreparePreviewOmitsPatchBodies(t *testing.T) {
-	repository := initCodexRepository(t)
-	writeCodexFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	repository := initAgentRepository(t)
+	writeAgentFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
 
 	var output bytes.Buffer
-	err := runCodexWithWriter(
+	err := runAgentWithWriter(
 		[]string{"prepare", "--repo", repository, "--preview"},
 		&output,
 	)
 	if err != nil {
-		t.Fatalf("runCodexWithWriter() error = %v", err)
+		t.Fatalf("runAgentWithWriter() error = %v", err)
 	}
 	if !strings.Contains(output.String(), "main.go") {
 		t.Fatalf("preview missing file: %s", output.String())
@@ -88,7 +88,7 @@ func TestCodexPreparePreviewOmitsPatchBodies(t *testing.T) {
 
 func TestCodexPrepareRejectsConflictingTargets(t *testing.T) {
 	var output bytes.Buffer
-	err := runCodexWithWriter(
+	err := runAgentWithWriter(
 		[]string{"prepare", "--from", "main", "--to", "HEAD", "--commit", "HEAD"},
 		&output,
 	)
@@ -98,11 +98,11 @@ func TestCodexPrepareRejectsConflictingTargets(t *testing.T) {
 }
 
 func TestCodexPrepareRejectsOversizedOutput(t *testing.T) {
-	repository := initCodexRepository(t)
-	writeCodexFile(t, repository, "main.go", "package sample\n// "+strings.Repeat("x", 1024)+"\n")
+	repository := initAgentRepository(t)
+	writeAgentFile(t, repository, "main.go", "package sample\n// "+strings.Repeat("x", 1024)+"\n")
 
 	var output bytes.Buffer
-	err := runCodexWithWriter([]string{
+	err := runAgentWithWriter([]string{
 		"prepare",
 		"--repo", repository,
 		"--max-bundle-bytes", "128",
@@ -116,9 +116,9 @@ func TestCodexPrepareRejectsOversizedOutput(t *testing.T) {
 }
 
 func TestCodexPrepareSplitEmitsLargeDiffManifest(t *testing.T) {
-	repository := initCodexRepository(t)
+	repository := initAgentRepository(t)
 	for _, name := range []string{"one.go", "two.go"} {
-		writeCodexFile(
+		writeAgentFile(
 			t,
 			repository,
 			name,
@@ -126,7 +126,7 @@ func TestCodexPrepareSplitEmitsLargeDiffManifest(t *testing.T) {
 		)
 	}
 	var output bytes.Buffer
-	err := runCodexWithWriter([]string{
+	err := runAgentWithWriter([]string{
 		"prepare",
 		"--repo", repository,
 		"--split",
@@ -146,15 +146,15 @@ func TestCodexPrepareSplitEmitsLargeDiffManifest(t *testing.T) {
 
 func TestCodexUnknownSubcommand(t *testing.T) {
 	var output bytes.Buffer
-	err := runCodexWithWriter([]string{"unknown"}, &output)
-	if err == nil || !strings.Contains(err.Error(), "unknown codex command") {
+	err := runAgentWithWriter([]string{"unknown"}, &output)
+	if err == nil || !strings.Contains(err.Error(), "unknown agent command") {
 		t.Fatalf("error = %v, want unknown command", err)
 	}
 }
 
 func TestAgentAliasPrepareEmitsBundle(t *testing.T) {
-	repository := initCodexRepository(t)
-	writeCodexFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	repository := initAgentRepository(t)
+	writeAgentFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
 	t.Setenv("HOME", t.TempDir())
 
 	var output bytes.Buffer
@@ -208,10 +208,10 @@ func TestAgentAliasHelpUsesAgentCommandName(t *testing.T) {
 }
 
 func TestCodexValidateCommentsEmitsStructuredResult(t *testing.T) {
-	repository := initCodexRepository(t)
-	writeCodexFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	repository := initAgentRepository(t)
+	writeAgentFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
 	bundlePath := filepath.Join(t.TempDir(), "bundle.json")
-	if err := runCodexWithWriter([]string{
+	if err := runAgentWithWriter([]string{
 		"prepare", "--repo", repository, "--output", bundlePath,
 	}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("prepare bundle: %v", err)
@@ -240,7 +240,7 @@ func TestCodexValidateCommentsEmitsStructuredResult(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	err = runCodexWithWriter([]string{
+	err = runAgentWithWriter([]string{
 		"validate-comments",
 		"--repo", repository,
 		"--bundle", bundlePath,
@@ -259,11 +259,11 @@ func TestCodexValidateCommentsEmitsStructuredResult(t *testing.T) {
 }
 
 func TestCodexReportEmitsMarkdown(t *testing.T) {
-	repository := initCodexRepository(t)
-	writeCodexFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	repository := initAgentRepository(t)
+	writeAgentFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
 	directory := t.TempDir()
 	bundlePath := filepath.Join(directory, "bundle.json")
-	if err := runCodexWithWriter([]string{
+	if err := runAgentWithWriter([]string{
 		"prepare", "--repo", repository, "--output", bundlePath,
 	}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("prepare bundle: %v", err)
@@ -287,10 +287,10 @@ func TestCodexReportEmitsMarkdown(t *testing.T) {
 		Comments:      []reviewbundle.ReviewComment{},
 	}
 	commentsPath := filepath.Join(directory, "comments.json")
-	writeCodexJSON(t, commentsPath, comments)
+	writeAgentJSON(t, commentsPath, comments)
 
 	var output bytes.Buffer
-	err = runCodexWithWriter([]string{
+	err = runAgentWithWriter([]string{
 		"report",
 		"--bundle", bundlePath,
 		"--comments", commentsPath,
@@ -299,23 +299,23 @@ func TestCodexReportEmitsMarkdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("report: %v", err)
 	}
-	if !strings.Contains(output.String(), "# Codex Code Review") ||
+	if !strings.Contains(output.String(), "# Agent Code Review") ||
 		!strings.Contains(output.String(), "No findings.") {
 		t.Fatalf("unexpected report:\n%s", output.String())
 	}
 }
 
 func TestCodexContextReadReturnsBundleEnvelope(t *testing.T) {
-	repository := initCodexRepository(t)
-	writeCodexFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	repository := initAgentRepository(t)
+	writeAgentFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
 	bundlePath := filepath.Join(t.TempDir(), "bundle.json")
-	if err := runCodexWithWriter([]string{
+	if err := runAgentWithWriter([]string{
 		"prepare", "--repo", repository, "--output", bundlePath,
 	}, &bytes.Buffer{}); err != nil {
 		t.Fatalf("prepare bundle: %v", err)
 	}
 	var output bytes.Buffer
-	err := runCodexWithWriter([]string{
+	err := runAgentWithWriter([]string{
 		"context", "read",
 		"--repo", repository,
 		"--bundle", bundlePath,
@@ -337,12 +337,12 @@ func TestCodexContextReadReturnsBundleEnvelope(t *testing.T) {
 
 func TestCodexPrepareScanWorksWithoutGitOrLLMConfiguration(t *testing.T) {
 	directory := t.TempDir()
-	writeCodexFile(t, directory, "main.go", "package sample\n\nfunc Main() {}\n")
-	writeCodexFile(t, directory, "README.md", "# Sample\n")
+	writeAgentFile(t, directory, "main.go", "package sample\n\nfunc Main() {}\n")
+	writeAgentFile(t, directory, "README.md", "# Sample\n")
 	t.Setenv("HOME", t.TempDir())
 
 	var output bytes.Buffer
-	err := runCodexWithWriter([]string{
+	err := runAgentWithWriter([]string{
 		"prepare",
 		"--scan",
 		"--repo", directory,
@@ -367,7 +367,7 @@ func TestCodexPrepareScanWorksWithoutGitOrLLMConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	output.Reset()
-	err = runCodexWithWriter([]string{
+	err = runAgentWithWriter([]string{
 		"context", "read",
 		"--repo", directory,
 		"--bundle", manifestPath,
@@ -381,14 +381,14 @@ func TestCodexPrepareScanWorksWithoutGitOrLLMConfiguration(t *testing.T) {
 		t.Fatalf("scan context output:\n%s", output.String())
 	}
 	commentsPath := filepath.Join(t.TempDir(), "scan-comments.json")
-	writeCodexJSON(t, commentsPath, reviewbundle.Comments{
+	writeAgentJSON(t, commentsPath, reviewbundle.Comments{
 		SchemaVersion: reviewbundle.CommentsSchemaVersion,
 		BundleID:      manifest.Bundles[0].BundleID,
 		Summary:       reviewbundle.CommentsSummary{FilesReviewed: 1, IssuesFound: 0},
 		Comments:      []reviewbundle.ReviewComment{},
 	})
 	output.Reset()
-	err = runCodexWithWriter([]string{
+	err = runAgentWithWriter([]string{
 		"validate-comments",
 		"--repo", directory,
 		"--bundle", manifestPath,
@@ -402,19 +402,6 @@ func TestCodexPrepareScanWorksWithoutGitOrLLMConfiguration(t *testing.T) {
 	}
 }
 
-func TestCodexDispatchIsRegistered(t *testing.T) {
-	originalArgs := os.Args
-	os.Args = []string{"ocr", "codex", "prepare", "--from", "main"}
-	t.Cleanup(func() {
-		os.Args = originalArgs
-	})
-
-	err := dispatch()
-	if err == nil || !strings.Contains(err.Error(), "--to is required") {
-		t.Fatalf("dispatch() error = %v, want codex prepare validation error", err)
-	}
-}
-
 func TestAgentDispatchIsRegistered(t *testing.T) {
 	originalArgs := os.Args
 	os.Args = []string{"ocr", "agent", "prepare", "--from", "main"}
@@ -425,6 +412,19 @@ func TestAgentDispatchIsRegistered(t *testing.T) {
 	err := dispatch()
 	if err == nil || !strings.Contains(err.Error(), "--to is required") {
 		t.Fatalf("dispatch() error = %v, want agent prepare validation error", err)
+	}
+}
+
+func TestCodexDispatchIsNotRegistered(t *testing.T) {
+	originalArgs := os.Args
+	os.Args = []string{"ocr", "codex", "prepare"}
+	t.Cleanup(func() {
+		os.Args = originalArgs
+	})
+
+	err := dispatch()
+	if err == nil || !strings.Contains(err.Error(), "unknown command: codex") {
+		t.Fatalf("dispatch() error = %v, want unknown command", err)
 	}
 }
 
@@ -478,20 +478,20 @@ func TestCodexSkillsUseCodexOwnedWorkflow(t *testing.T) {
 	}
 }
 
-func initCodexRepository(t *testing.T) string {
+func initAgentRepository(t *testing.T) string {
 	t.Helper()
 	repository := t.TempDir()
-	runCodexGit(t, repository, "init", "-q")
-	runCodexGit(t, repository, "config", "user.email", "tests@example.com")
-	runCodexGit(t, repository, "config", "user.name", "OCR Tests")
-	runCodexGit(t, repository, "config", "commit.gpgsign", "false")
-	writeCodexFile(t, repository, "main.go", "package sample\n")
-	runCodexGit(t, repository, "add", "main.go")
-	runCodexGit(t, repository, "commit", "-m", "initial")
+	runAgentGit(t, repository, "init", "-q")
+	runAgentGit(t, repository, "config", "user.email", "tests@example.com")
+	runAgentGit(t, repository, "config", "user.name", "OCR Tests")
+	runAgentGit(t, repository, "config", "commit.gpgsign", "false")
+	writeAgentFile(t, repository, "main.go", "package sample\n")
+	runAgentGit(t, repository, "add", "main.go")
+	runAgentGit(t, repository, "commit", "-m", "initial")
 	return repository
 }
 
-func writeCodexFile(t *testing.T, repository, name, content string) {
+func writeAgentFile(t *testing.T, repository, name, content string) {
 	t.Helper()
 	path := filepath.Join(repository, filepath.FromSlash(name))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -502,7 +502,7 @@ func writeCodexFile(t *testing.T, repository, name, content string) {
 	}
 }
 
-func writeCodexJSON(t *testing.T, path string, value any) {
+func writeAgentJSON(t *testing.T, path string, value any) {
 	t.Helper()
 	content, err := json.Marshal(value)
 	if err != nil {
@@ -513,7 +513,7 @@ func writeCodexJSON(t *testing.T, path string, value any) {
 	}
 }
 
-func runCodexGit(t *testing.T, repository string, arguments ...string) string {
+func runAgentGit(t *testing.T, repository string, arguments ...string) string {
 	t.Helper()
 	command := exec.Command("git", arguments...)
 	command.Dir = repository

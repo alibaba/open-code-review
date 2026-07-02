@@ -232,7 +232,7 @@ Expected: FAIL because the command is not registered.
 
 - [x] **Step 3: Implement command parsing and output**
 
-Implement `runCodex`, `parseCodexPrepareFlags`, and `runCodexPrepare`. Reuse `loadCommonContext` only for deterministic template/rules/repository state; never call `loadLLMRuntime`, create an LLM client, read model credentials, modify source files, or commit. Default output is JSON on stdout, and explicit output uses a user-selected path with restrictive permissions.
+Implement `runAgent`, `parseCodexPrepareFlags`, and `executeCodexPrepare`. Reuse `loadCommonContext` only for deterministic template/rules/repository state; never call `loadLLMRuntime`, create an LLM client, read model credentials, modify source files, or commit. Default output is JSON on stdout, and explicit output uses a user-selected path with restrictive permissions.
 
 - [x] **Step 4: Update usage and run focused tests**
 
