@@ -6,7 +6,7 @@ require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.7
 	charm.land/lipgloss/v2 v2.0.4
-	github.com/anthropics/anthropic-sdk-go v1.52.0
+	github.com/anthropics/anthropic-sdk-go v1.55.1
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/openai/openai-go/v3 v3.41.0
