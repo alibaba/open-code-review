@@ -86,6 +86,47 @@ func TestRegistry_GetAfterFreeze(t *testing.T) {
 	}
 }
 
+func TestIsReserved(t *testing.T) {
+	reserved := []string{"unknown", "task_done", "code_comment", "file_read", "file_find", "file_read_diff", "code_search"}
+	for _, name := range reserved {
+		if !IsReserved(name) {
+			t.Errorf("IsReserved(%q) = false, want true", name)
+		}
+	}
+
+	nonReserved := []string{"custom_tool", "my_tool", "search", ""}
+	for _, name := range nonReserved {
+		if IsReserved(name) {
+			t.Errorf("IsReserved(%q) = true, want false", name)
+		}
+	}
+}
+
+func TestDynamic(t *testing.T) {
+	tool := Dynamic("my_custom_tool")
+	if tool.Name() != "my_custom_tool" {
+		t.Errorf("Dynamic().Name() = %q, want %q", tool.Name(), "my_custom_tool")
+	}
+}
+
+func TestDynamic_PanicsOnEmpty(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for empty name")
+		}
+	}()
+	Dynamic("")
+}
+
+func TestDynamic_PanicsOnReserved(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for reserved name")
+		}
+	}()
+	Dynamic("file_read")
+}
+
 type dummyProvider struct{}
 
 func (d *dummyProvider) Tool() Tool { return CodeSearch }

@@ -8,6 +8,17 @@ import docDownloadIcon from '../assets/icons/doc-download.svg';
 import docCheckCircleIcon from '../assets/icons/doc-check-circle.svg';
 import docEditIcon from '../assets/icons/doc-edit.svg';
 import docContentsIcon from '../assets/icons/doc-contents.svg';
+import {
+  SparkContrastView2Line,
+  SparkHistoryLine,
+  SparkDocumentLine,
+  SparkCode02Line,
+  SparkAgentLine,
+  SparkVisibleLine,
+  SparkScanLine,
+  SparkTargetLine,
+  SparkFileCodeLine,
+} from '@agentscope-ai/icons';
 
 /* Toast - same as QuickStartSection */
 const Toast: React.FC<{ message: string; visible: boolean }> = ({ message, visible }) =>
@@ -47,7 +58,9 @@ const sectionDefs: Section[] = [
   { id: 'install', labelKey: 'docs.install' },
   { id: 'config', labelKey: 'docs.config' },
   { id: 'review', labelKey: 'docs.review' },
+  { id: 'scan', labelKey: 'docs.scan' },
   { id: 'viewer', labelKey: 'docs.viewer' },
+  { id: 'mcp', labelKey: 'docs.mcp' },
   { id: 'env', labelKey: 'docs.env' },
 ];
 
@@ -82,7 +95,14 @@ const CodeBlock: React.FC<{ code: string; onCopy?: () => void }> = ({ code, onCo
 /* ─── Icon box (32x32, rgba(255,255,255,0.04) bg, rounded 6px) ─── */
 const IconBox: React.FC<{ icon: string }> = ({ icon }) => (
   <div style={{ width: 32, height: 32, display: 'flex', flex: 'none', justifyContent: 'center', alignItems: 'center', background: 'rgba(255,255,255,0.04)', borderRadius: 6 }}>
-    <img src={icon} style={{ width: 16, height: 16 }} />
+    <img src={icon} alt="" style={{ width: 16, height: 16 }} />
+  </div>
+);
+
+/* ─── Spark Icon box (same style, wraps React icon component) ─── */
+const SparkIconBox: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div style={{ width: 32, height: 32, display: 'flex', flex: 'none', justifyContent: 'center', alignItems: 'center', background: 'rgba(255,255,255,0.04)', borderRadius: 6, color: 'rgba(255,255,255,0.8)' }}>
+    {children}
   </div>
 );
 
@@ -117,7 +137,11 @@ const DocsPage: React.FC = () => {
     textarea.select();
     const success = document.execCommand('copy');
     document.body.removeChild(textarea);
-    if (success) setToastVisible(true);
+    if (success) {
+      setToastVisible(true);
+    } else {
+      console.warn('[DocsPage] copy to clipboard failed');
+    }
   };
 
   useEffect(() => {
@@ -165,6 +189,16 @@ const DocsPage: React.FC = () => {
   const subTitle: React.CSSProperties = { fontSize: 15, fontWeight: 600, color: '#FFFFFF', margin: '24px 0 8px 0', lineHeight: '24px', fontFamily };
   const desc: React.CSSProperties = { fontSize: 14, color: 'rgba(255,255,255,0.6)', lineHeight: '24px', margin: '0 0 12px 0', fontFamily };
   const sectionSpacing: React.CSSProperties = { marginBottom: 56, display: 'flex', flexDirection: 'column' as const, alignItems: 'stretch' };
+  const mcpAddCommands = `ocr config set mcp_servers.<name>.command <command>
+ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
+ocr config set mcp_servers.<name>.tools '["tool_name"]'
+ocr config set mcp_servers.<name>.setup '<setup command>'
+ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'`;
+  const mcpDeleteCommands = `ocr config unset mcp_servers.<name>`;
+  const mcpCodeGraphCommands = `ocr config set mcp_servers.codegraph.command codegraph
+ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
+ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
+ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'`;
 
   return (
     <div style={{ minHeight: '100vh', background: '#000000', paddingTop: 72, fontFamily: 'PingFang SC, -apple-system, BlinkMacSystemFont, sans-serif' }}>
@@ -301,7 +335,7 @@ const DocsPage: React.FC = () => {
               {/* Branch Diff Mode */}
               <div style={{ marginBottom: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <IconBox icon={docDownloadIcon} />
+                  <SparkIconBox><SparkContrastView2Line size={16} /></SparkIconBox>
                   <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                     <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.reviewBranch')}</span>
                     <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.reviewBranchDesc')}</p>
@@ -312,7 +346,7 @@ const DocsPage: React.FC = () => {
               {/* Single Commit Mode */}
               <div style={{ marginBottom: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <IconBox icon={docDownloadIcon} />
+                  <SparkIconBox><SparkHistoryLine size={16} /></SparkIconBox>
                   <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                     <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.reviewCommit')}</span>
                     <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.reviewCommitDesc')}</p>
@@ -325,7 +359,7 @@ const DocsPage: React.FC = () => {
               {/* Review with Requirement Context */}
               <div style={{ marginBottom: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <IconBox icon={docEditIcon} />
+                  <SparkIconBox><SparkDocumentLine size={16} /></SparkIconBox>
                   <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                     <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.reviewBackground')}</span>
                     <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.reviewBackgroundDesc')}</p>
@@ -336,7 +370,7 @@ const DocsPage: React.FC = () => {
               {/* JSON Output */}
               <div style={{ marginBottom: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <IconBox icon={docDownloadIcon} />
+                  <SparkIconBox><SparkCode02Line size={16} /></SparkIconBox>
                   <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                     <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.reviewJson')}</span>
                     <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.reviewJsonDesc')}</p>
@@ -347,13 +381,24 @@ const DocsPage: React.FC = () => {
               {/* Agent Mode */}
               <div style={{ marginBottom: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <IconBox icon={docDownloadIcon} />
+                  <SparkIconBox><SparkAgentLine size={16} /></SparkIconBox>
                   <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
                     <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.reviewAgent')}</span>
                     <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.reviewAgentDesc')}</p>
                   </div>
                 </div>
                 <CodeBlock code="ocr review --audience agent" onCopy={() => handleCopy('ocr review --audience agent')} />
+              </div>
+              {/* Dry-Run Preview */}
+              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <SparkIconBox><SparkVisibleLine size={16} /></SparkIconBox>
+                  <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.reviewPreviewLabel')}</span>
+                    <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.reviewPreviewDesc')}</p>
+                  </div>
+                </div>
+                <CodeBlock code="ocr review --preview" onCopy={() => handleCopy('ocr review --preview')} />
               </div>
 
               <p style={subTitle}>{t('docs.reviewFlags')}</p>
@@ -396,12 +441,210 @@ const DocsPage: React.FC = () => {
               </p>
             </section>
 
+            {/* ─── ocr scan ─── */}
+            <section id="scan" style={{ ...sectionSpacing, scrollMarginTop: 100 }}>
+              <p style={sectionTitle}>{t('docs.scanTitle')}</p>
+              <p style={desc}>{t('docs.scanDesc').replace(/<\/?code>/g, '')}</p>
+
+              <p style={subTitle}>{t('docs.scanVsTitle')}</p>
+              <div style={{ marginBottom: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <SparkIconBox><SparkContrastView2Line size={16} /></SparkIconBox>
+                  <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.scanVsReviewLabel')}</span>
+                    <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.scanVsReview').replace(/<\/?code>/g, '')}</p>
+                  </div>
+                </div>
+              </div>
+              <div style={{ marginBottom: 24, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <SparkIconBox><SparkScanLine size={16} /></SparkIconBox>
+                  <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.scanVsScanLabel')}</span>
+                    <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.scanVsScan').replace(/<\/?code>/g, '')}</p>
+                  </div>
+                </div>
+              </div>
+
+              <p style={subTitle}>{t('docs.scanUsage')}</p>
+              <div style={{ marginBottom: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <SparkIconBox><SparkScanLine size={16} /></SparkIconBox>
+                  <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.scanUsageWhole')}</span>
+                    <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.scanUsageWholeDesc')}</p>
+                  </div>
+                </div>
+                <CodeBlock code="ocr scan" onCopy={() => handleCopy('ocr scan')} />
+              </div>
+              <div style={{ marginBottom: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <SparkIconBox><SparkTargetLine size={16} /></SparkIconBox>
+                  <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.scanUsagePath')}</span>
+                    <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.scanUsagePathDesc')}</p>
+                  </div>
+                </div>
+                <CodeBlock code="ocr scan --path internal/agent" onCopy={() => handleCopy('ocr scan --path internal/agent')} />
+              </div>
+              <div style={{ marginBottom: 12, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <SparkIconBox><SparkFileCodeLine size={16} /></SparkIconBox>
+                  <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.scanUsageFile')}</span>
+                    <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.scanUsageFileDesc')}</p>
+                  </div>
+                </div>
+                <CodeBlock code="ocr scan --path internal/agent/agent.go,internal/diff/scan.go" onCopy={() => handleCopy('ocr scan --path internal/agent/agent.go,internal/diff/scan.go')} />
+              </div>
+              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <SparkIconBox><SparkVisibleLine size={16} /></SparkIconBox>
+                  <div style={{ display: 'flex', flex: 1, flexDirection: 'column' }}>
+                    <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.scanUsagePreviewLabel')}</span>
+                    <p style={{ margin: 0, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: '20px' }}>{t('docs.scanUsagePreviewDesc')}</p>
+                  </div>
+                </div>
+                <CodeBlock code="ocr scan --preview" onCopy={() => handleCopy('ocr scan --preview')} />
+              </div>
+
+              <p style={subTitle}>{t('docs.scanBatching')}</p>
+              <p style={desc}>{t('docs.scanBatchingDesc').replace(/<\/?code>/g, '')}</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
+                {[
+                  [t('docs.scanBatchingNone'), t('docs.scanBatchingNoneDesc')],
+                  [t('docs.scanBatchingLang'), t('docs.scanBatchingLangDesc')],
+                  [t('docs.scanBatchingDir'), t('docs.scanBatchingDirDesc')],
+                ].map(([name, d]) => (
+                  <div key={name} style={{ display: 'flex', alignSelf: 'stretch', justifyContent: 'space-between', alignItems: 'center', background: '#000000', borderRadius: 6, padding: '4px 16px', border: '1px solid rgba(255,255,255,0.16)' }}>
+                    <p style={{ margin: 0, fontSize: 13, fontFamily: 'Menlo, monospace', color: 'rgba(255,255,255,0.8)' }}>
+                      <span style={{ color: '#2BDE5E' }}>{name}</span>
+                      <span style={{ color: 'rgba(255,255,255,0.4)', marginLeft: 12 }}>{d}</span>
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <CodeBlock code="ocr scan --batch by-directory" onCopy={() => handleCopy('ocr scan --batch by-directory')} />
+
+              <p style={subTitle}>{t('docs.scanToggles')}</p>
+              <p style={desc}>{t('docs.scanTogglesDesc')}</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 }}>
+                {[
+                  ['--no-plan', t('docs.scanTogglesPlanDesc')],
+                  ['--no-dedup', t('docs.scanTogglesDedupDesc')],
+                  ['--no-summary', t('docs.scanTogglesSummaryDesc')],
+                ].map(([flag, d]) => (
+                  <div key={flag} style={{ display: 'flex', alignSelf: 'stretch', justifyContent: 'flex-start', alignItems: 'center', background: '#000000', borderRadius: 6, padding: '8px 16px', border: '1px solid rgba(255,255,255,0.16)' }}>
+                    <span style={{ fontSize: 13, fontFamily: 'Menlo, monospace', color: '#2BDE5E', flexShrink: 0, marginRight: 12 }}>{flag}</span>
+                    <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', lineHeight: '20px' }}>{d}</span>
+                  </div>
+                ))}
+              </div>
+              <CodeBlock code="ocr scan --no-plan --no-dedup --no-summary" onCopy={() => handleCopy('ocr scan --no-plan --no-dedup --no-summary')} />
+
+              <p style={subTitle}>{t('docs.scanBudget')}</p>
+              <p style={desc}>{t('docs.scanBudgetDesc').replace(/<\/?code>/g, '')}</p>
+              <CodeBlock code="ocr scan --max-tokens-budget 500000" onCopy={() => handleCopy('ocr scan --max-tokens-budget 500000')} />
+
+              <p style={subTitle}>{t('docs.scanFlags')}</p>
+              <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 8, border: '1px solid rgba(255,255,255,0.16)', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.16)' }}>
+                  <div style={{ width: 160, flexShrink: 0, padding: '10px 12px' }}><span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>{t('docs.scanFlagCol1')}</span></div>
+                  <div style={{ flex: 1, padding: '10px 12px' }}><span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>{t('docs.scanFlagCol2')}</span></div>
+                  <div style={{ width: 120, flexShrink: 0, padding: '10px 12px' }}><span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>{t('docs.scanFlagCol3')}</span></div>
+                </div>
+                {[
+                  ['--path', t('docs.scanFlag1Desc'), t('docs.scanFlag1Default')],
+                  ['--exclude', t('docs.scanFlag2Desc'), '—'],
+                  ['-p, --preview', t('docs.scanFlag3Desc'), 'false'],
+                  ['--max-tokens-budget', t('docs.scanFlag4Desc'), '0'],
+                  ['--no-plan', t('docs.scanFlag5Desc'), 'false'],
+                  ['--no-dedup', t('docs.scanFlag6Desc'), 'false'],
+                  ['--no-summary', t('docs.scanFlag7Desc'), 'false'],
+                  ['--batch', t('docs.scanFlag8Desc'), 'by-language'],
+                  ['-f, --format', t('docs.scanFlag9Desc'), 'text'],
+                  ['--concurrency', t('docs.scanFlag10Desc'), '8'],
+                  ['--timeout', t('docs.scanFlag11Desc'), '10'],
+                  ['--audience', t('docs.scanFlag12Desc'), 'human'],
+                  ['-b, --background', t('docs.scanFlag13Desc'), '—'],
+                  ['--max-tools', t('docs.scanFlag14Desc'), t('docs.scanFlag14Default')],
+                  ['--max-git-procs', t('docs.scanFlag15Desc'), '16'],
+                  ['--rule', t('docs.scanFlag16Desc'), '—'],
+                  ['--tools', t('docs.scanFlag17Desc'), t('docs.scanFlag17Default')],
+                  ['--repo', t('docs.scanFlag18Desc'), t('docs.scanFlag18Default')],
+                ].map(([flag, d, def], idx, arr) => (
+                  <div key={idx} style={{ display: 'flex', borderBottom: idx < arr.length - 1 ? '1px solid rgba(255,255,255,0.16)' : 'none' }}>
+                    <div style={{ width: 160, flexShrink: 0, display: 'flex', alignItems: 'center', padding: '10px 12px' }}>
+                      <span style={{ fontSize: 12, fontFamily: 'Menlo, monospace', color: 'rgba(255,255,255,0.7)' }}>{flag}</span>
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '10px 12px' }}>
+                      <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)' }}>{d}</span>
+                    </div>
+                    <div style={{ width: 120, flexShrink: 0, display: 'flex', alignItems: 'center', padding: '10px 12px' }}>
+                      <span style={{ fontSize: 12, fontFamily: 'Menlo, monospace', color: 'rgba(255,255,255,0.5)' }}>{def}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p style={{ ...desc, marginTop: 16, fontSize: 12 }}>
+                {t('docs.scanNote').replace(/<\/?code>/g, '')}
+              </p>
+            </section>
+
             {/* ─── Viewer ─── */}
             <section id="viewer" style={{ ...sectionSpacing, scrollMarginTop: 100 }}>
               <p style={sectionTitle}>{t('docs.viewerTitle')}</p>
               <p style={desc}>{t('docs.viewerDesc')}</p>
               <CodeBlock code="ocr viewer" onCopy={() => handleCopy('ocr viewer')} />
               <p style={{ ...desc, marginTop: 12 }}>{t('docs.viewerNote')}</p>
+            </section>
+
+            {/* ─── MCP Server ─── */}
+            <section id="mcp" style={{ ...sectionSpacing, scrollMarginTop: 100 }}>
+              <p style={sectionTitle}>{t('docs.mcpTitle')}</p>
+              <p style={desc}>{t('docs.mcpDesc')}</p>
+
+              <p style={subTitle}>{t('docs.mcpConfig')}</p>
+              <CodeBlock code={mcpAddCommands} onCopy={() => handleCopy(mcpAddCommands)} />
+              <p style={{ ...desc, marginTop: 12 }}>{t('docs.mcpConfigLocation')}</p>
+
+              <p style={subTitle}>{t('docs.mcpDelete')}</p>
+              <CodeBlock code={mcpDeleteCommands} onCopy={() => handleCopy(mcpDeleteCommands)} />
+
+              <p style={subTitle}>{t('docs.mcpFields')}</p>
+              <div style={{ display: 'flex', flexDirection: 'column', alignSelf: 'stretch', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 8, overflow: 'hidden', marginBottom: 16 }}>
+                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.04)' }}>
+                  <div style={{ width: 140, flexShrink: 0, padding: '10px 12px' }}><span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>{t('docs.mcpFieldCol')}</span></div>
+                  <div style={{ width: 100, flexShrink: 0, padding: '10px 12px' }}><span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>{t('docs.mcpRequiredCol')}</span></div>
+                  <div style={{ flex: 1, padding: '10px 12px' }}><span style={{ fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>{t('docs.mcpDescCol')}</span></div>
+                </div>
+                {[
+                  ['command', t('docs.mcpYes'), t('docs.mcpFieldCommandDesc')],
+                  ['args', t('docs.mcpNo'), t('docs.mcpFieldArgsDesc')],
+                  ['tools', t('docs.mcpNo'), t('docs.mcpFieldToolsDesc')],
+                  ['setup', t('docs.mcpNo'), t('docs.mcpFieldSetupDesc')],
+                  ['env', t('docs.mcpNo'), t('docs.mcpFieldEnvDesc')],
+                ].map(([field, required, d], idx, arr) => (
+                  <div key={field} style={{ display: 'flex', borderBottom: idx < arr.length - 1 ? '1px solid rgba(255,255,255,0.16)' : 'none' }}>
+                    <div style={{ width: 140, flexShrink: 0, display: 'flex', alignItems: 'center', padding: '10px 12px' }}>
+                      <span style={{ fontSize: 12, fontFamily: 'Menlo, monospace', color: 'rgba(255,255,255,0.7)' }}>{field}</span>
+                    </div>
+                    <div style={{ width: 100, flexShrink: 0, display: 'flex', alignItems: 'center', padding: '10px 12px' }}>
+                      <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)' }}>{required}</span>
+                    </div>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '10px 12px' }}>
+                      <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)' }}>{d}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <p style={{ ...desc, fontSize: 12 }}>
+                {t('docs.mcpNote')}
+              </p>
+
+              <p style={subTitle}>{t('docs.mcpExample')}</p>
+              <CodeBlock code={mcpCodeGraphCommands} onCopy={() => handleCopy(mcpCodeGraphCommands)} />
             </section>
 
             {/* ─── Claude Code Integration ─── */}

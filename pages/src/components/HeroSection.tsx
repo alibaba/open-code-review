@@ -1,146 +1,170 @@
-import React from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
 import ColorBends from './ColorBends';
-import lineIcon from '../assets/icons/icon-terminal-prompt.svg';
+import docDownloadIcon from '../assets/icons/doc-download-green.svg';
+import copyIcon from '../assets/icons/icon-copy.svg';
+
+
+const TC = {
+  brand: '#756BFF',
+  cmd: '#E2BA64',
+  path: '#67BAFA',
+  success: '#48AA84',
+  action: '#D553F6',
+  text: '#e4e4e7',
+  dim: 'rgba(255,255,255,0.5)',
+};
 
 const terminalLines = [
   {
     num: 1,
-    hasIcon: true,
     content: (
       <span>
-        <span style={{ color: '#756BFF' }}>$ ocr re</span>
-        <span style={{ color: '#e4e4e7' }}>v</span>
-        <span style={{ color: '#E2BA64' }}>iew --from</span>
-        <span style={{ color: '#e4e4e7' }}> </span>
-        <span style={{ color: '#67BAFA' }}>mai</span>
-        <span style={{ color: '#e4e4e7' }}>n --to feature-auth</span>
+        <span style={{ color: TC.success }}>$</span>
+        <span style={{ color: TC.success }}> ocr </span>
+        <span style={{ color: TC.success }}>review</span>
       </span>
     ),
   },
   {
     num: 2,
-    hasIcon: true,
     content: (
       <span>
-        <span style={{ color: '#e4e4e7' }}>[o</span>
-        <span style={{ color: '#756BFF' }}>cr] R</span>
-        <span style={{ color: '#e4e4e7' }}>e</span>
-        <span style={{ color: '#67BAFA' }}>v</span>
-        <span style={{ color: '#e4e4e7' }}>iew</span>
-        <span style={{ color: '#67BAFA' }}>ing</span>
-        <span style={{ color: '#e4e4e7' }}> </span>
-        <span style={{ color: '#67BAFA' }}>5 file</span>
-        <span style={{ color: '#e4e4e7' }}>(s) in /home/user/project</span>
+        <span style={{ color: TC.brand }}>[ocr]</span>
+        <span style={{ color: TC.text }}> Reviewing </span>
+        <span style={{ color: TC.path }}>5</span>
+        <span style={{ color: TC.text }}> file(s) in </span>
+        <span style={{ color: TC.path }}>/home/user/project</span>
       </span>
     ),
   },
   {
     num: 3,
-    hasIcon: true,
     content: (
       <span>
-        <span style={{ color: '#e4e4e7' }}>[o</span>
-        <span style={{ color: '#D553F6' }}>cr]</span>
-        <span style={{ color: '#e4e4e7' }}> ▶ </span>
-        <span style={{ color: '#756BFF' }}>fi</span>
-        <span style={{ color: '#e4e4e7' }}>l</span>
-        <span style={{ color: '#67BAFA' }}>e</span>
-        <span style={{ color: '#e4e4e7' }}>_re</span>
-        <span style={{ color: '#48AA84' }}>a</span>
-        <span style={{ color: '#e4e4e7' }}>d </span>
-        <span style={{ color: '#67BAFA' }}>"</span>
-        <span style={{ color: '#e4e4e7' }}>int</span>
-        <span style={{ color: '#67BAFA' }}>e</span>
-        <span style={{ color: '#e4e4e7' }}>rna</span>
-        <span style={{ color: '#48AA84' }}>l</span>
-        <span style={{ color: '#e4e4e7' }}>/a</span>
-        <span style={{ color: '#67BAFA' }}>u</span>
-        <span style={{ color: '#e4e4e7' }}>th/login.go"</span>
+        <span style={{ color: TC.brand }}>[ocr]</span>
+        <span style={{ color: TC.action }}> ▶ </span>
+        <span style={{ color: TC.cmd }}>file_read</span>
+        <span style={{ color: TC.text }}> </span>
+        <span style={{ color: TC.path }}>"internal/auth/login.go"</span>
       </span>
     ),
   },
   {
     num: 4,
-    hasIcon: true,
     content: (
       <span>
-        <span style={{ color: '#e4e4e7' }}>[ocr</span>
-        <span style={{ color: '#D553F6' }}> ] ✔</span>
-        <span style={{ color: '#e4e4e7' }}> f</span>
-        <span style={{ color: '#756BFF' }}>ile</span>
-        <span style={{ color: '#e4e4e7' }}>_</span>
-        <span style={{ color: '#67BAFA' }}>r</span>
-        <span style={{ color: '#e4e4e7' }}>ead</span>
-        <span style={{ color: '#e4e4e7' }}> (1</span>
-        <span style={{ color: '#67BAFA' }}>5</span>
-        <span style={{ color: '#e4e4e7' }}>ms)</span>
+        <span style={{ color: TC.brand }}>[ocr]</span>
+        <span style={{ color: TC.success }}> ✔ </span>
+        <span style={{ color: TC.cmd }}>file_read</span>
+        <span style={{ color: TC.dim }}> (15ms)</span>
       </span>
     ),
   },
   {
     num: 5,
-    hasIcon: true,
     content: (
       <span>
-        <span style={{ color: '#e4e4e7' }}>[ocr]</span>
-        <span style={{ color: '#D553F6' }}> ▶</span>
-        <span style={{ color: '#e4e4e7' }}> co</span>
-        <span style={{ color: '#67BAFA' }}>de_</span>
-        <span style={{ color: '#e4e4e7' }}>s</span>
-        <span style={{ color: '#67BAFA' }}>e</span>
-        <span style={{ color: '#e4e4e7' }}>arch</span>
-        <span style={{ color: '#67BAFA' }}> "p</span>
-        <span style={{ color: '#e4e4e7' }}>a</span>
-        <span style={{ color: '#67BAFA' }}>s</span>
-        <span style={{ color: '#e4e4e7' }}>swo</span>
-        <span style={{ color: '#48AA84' }}>r</span>
-        <span style={{ color: '#e4e4e7' }}>d.*hash"</span>
+        <span style={{ color: TC.brand }}>[ocr]</span>
+        <span style={{ color: TC.action }}> ▶ </span>
+        <span style={{ color: TC.cmd }}>code_search</span>
+        <span style={{ color: TC.text }}> </span>
+        <span style={{ color: TC.path }}>"password.*hash"</span>
       </span>
     ),
   },
   {
     num: 6,
-    hasIcon: true,
     content: (
       <span>
-        <span style={{ color: '#e4e4e7' }}>[ocr] ✔ c</span>
-        <span style={{ color: '#67BAFA' }}>ode</span>
-        <span style={{ color: '#e4e4e7' }}>_</span>
-        <span style={{ color: '#67BAFA' }}>s</span>
-        <span style={{ color: '#e4e4e7' }}>ear</span>
-        <span style={{ color: '#67BAFA' }}>ch</span>
-        <span style={{ color: '#e4e4e7' }}> (</span>
-        <span style={{ color: '#67BAFA' }}>8</span>
-        <span style={{ color: '#e4e4e7' }}>ms)</span>
+        <span style={{ color: TC.brand }}>[ocr]</span>
+        <span style={{ color: TC.success }}> ✔ </span>
+        <span style={{ color: TC.cmd }}>code_search</span>
+        <span style={{ color: TC.dim }}> (8ms)</span>
       </span>
     ),
   },
-  { num: 7, hasIcon: false, content: <span style={{ color: '#e4e4e7' }}>[ocr] Plan completed for internal/auth/login.go</span> },
-  { num: 8, hasIcon: false, content: <span style={{ color: '#e4e4e7' }}>─── internal/auth/login.go:42-55 ───</span> },
-  { num: 9, hasIcon: false, content: <span style={{ color: '#e4e4e7' }}>Consider using bcrypt cost factor ≥ 12 for password hashing.</span> },
   {
-    num: 10,
-    hasIcon: false,
+    num: 7,
     content: (
       <span>
-        <span style={{ color: '#e4e4e7' }}>[o</span>
-        <span style={{ color: '#D553F6' }}>cr] Su</span>
-        <span style={{ color: '#e4e4e7' }}>m</span>
-        <span style={{ color: '#67BAFA' }}>mar</span>
-        <span style={{ color: '#e4e4e7' }}>y: 5 file(s), 3 comment(s), ~8421 tokens, 12.5s</span>
+        <span style={{ color: TC.brand }}>[ocr]</span>
+        <span style={{ color: TC.text }}> Plan completed for </span>
+        <span style={{ color: TC.path }}>internal/auth/login.go</span>
       </span>
     ),
   },
-  { num: 11, hasIcon: false, content: <span style={{ color: '#e4e4e7' }}>｜</span> },
+  {
+    num: 8,
+    content: (
+      <span>
+        <span style={{ color: TC.brand }}>[ocr]</span>
+        <span style={{ color: TC.text }}> Summary: </span>
+        <span style={{ color: TC.path }}>5</span>
+        <span style={{ color: TC.text }}> file(s), </span>
+        <span style={{ color: TC.path }}>3</span>
+        <span style={{ color: TC.text }}> comment(s), ~8421 tokens, 12.5s</span>
+      </span>
+    ),
+  },
+  { num: 9, content: <span>&nbsp;</span> },
+  { num: 10, content: <span style={{ color: TC.dim }}>─── internal/auth/login.go:42-45 ───</span> },
+  { num: 11, content: <span style={{ color: TC.text }}>Consider using bcrypt cost factor ≥ 12 for password hashing.</span> },
+  { num: 12, content: <span className="terminal-cursor" style={{ color: TC.text }}>｜</span> },
 ];
+
+const INSTALL_CMD = 'npm i -g @alibaba-group/open-code-review';
 
 const HeroSection: React.FC = () => {
   const { t } = useTranslation();
   const { isMobile, isTablet } = useResponsive();
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setToastVisible(true);
+  };
+
+  const fallbackCopy = (text: string) => {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const success = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (success) {
+      showToast(t('hero.copied'));
+    } else {
+      showToast(t('hero.copyFailed'));
+    }
+  };
+
+  const handleCopy = useCallback(async (text: string) => {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast(t('hero.copied'));
+      } catch {
+        fallbackCopy(text);
+      }
+    } else {
+      fallbackCopy(text);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    if (!toastVisible) return;
+    const timer = setTimeout(() => setToastVisible(false), 1200);
+    return () => clearTimeout(timer);
+  }, [toastVisible]);
 
   return (
+    <>
     <section
       style={{
         width: '100vw',
@@ -206,6 +230,33 @@ const HeroSection: React.FC = () => {
           maxWidth: isMobile ? '100%' : 742,
         }}
       >
+        {/* Install Badge */}
+        <div
+          style={{
+            width: 'auto',
+            height: 32,
+            background: 'rgba(0,0,0,0.8)',
+            borderRadius: 500,
+            border: '1px solid rgba(255,255,255,0.16)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '0 12px',
+            marginBottom: isMobile ? 8 : 0,
+          }}
+        >
+          <img src={docDownloadIcon} alt="" style={{ width: 16, height: 16, flexShrink: 0 }} />
+          <p className="install-text-shimmer" style={{ fontSize: 12, fontWeight: 400, margin: 0, letterSpacing: '0.2px', whiteSpace: 'nowrap' }}>
+            {INSTALL_CMD}
+          </p>
+          <img
+            src={copyIcon}
+            alt="Copy"
+            style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
+            onClick={() => handleCopy(INSTALL_CMD)}
+          />
+        </div>
+
         {/* Title */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <h1
@@ -331,10 +382,9 @@ const HeroSection: React.FC = () => {
               >
                 <div
                   style={{
-                    width: 58,
+                    width: 38,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 10,
                     paddingLeft: 15,
                     flexShrink: 0,
                   }}
@@ -342,7 +392,6 @@ const HeroSection: React.FC = () => {
                   <span style={{ width: 19, color: 'rgba(255,255,255,0.3)', fontSize: 'clamp(10px, 1.8vw, 13px)', fontFamily: 'Menlo, monospace' }}>
                     {line.num}
                   </span>
-                  {line.hasIcon && <img src={lineIcon} alt="" style={{ width: 15, height: 15 }} />}
                 </div>
                 <span style={{ fontSize: 'clamp(10px, 1.8vw, 15px)', fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'nowrap' }}>
                   {line.content}
@@ -353,6 +402,26 @@ const HeroSection: React.FC = () => {
         </div>
       </div>
     </section>
+    {toastVisible && ReactDOM.createPortal(
+      <div style={{
+        position: 'fixed',
+        top: 88,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        background: 'rgba(255,255,255,0.1)',
+        border: '1px solid rgba(255,255,255,0.2)',
+        color: 'rgba(255,255,255,0.85)',
+        padding: '5px 14px',
+        borderRadius: 6,
+        fontSize: 12,
+        zIndex: 9999,
+        backdropFilter: 'blur(8px)',
+      }}>
+        {toastMessage}
+      </div>,
+      document.body
+    )}
+    </>
   );
 };
 

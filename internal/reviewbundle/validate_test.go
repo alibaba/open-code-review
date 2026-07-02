@@ -2,6 +2,7 @@ package reviewbundle
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -55,6 +56,52 @@ func TestLoadCommentsRejectsMissingRequiredFields(t *testing.T) {
 				t.Fatalf("LoadComments() error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadBundleRejectsTamperedBundleID(t *testing.T) {
+	bundle := validIdentifiedBundle(t)
+	encoded, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatalf("marshal bundle: %v", err)
+	}
+	var tampered map[string]any
+	if err := json.Unmarshal(encoded, &tampered); err != nil {
+		t.Fatalf("decode bundle: %v", err)
+	}
+	tampered["summary"] = map[string]any{"total_files": 999}
+	encoded, err = json.Marshal(tampered)
+	if err != nil {
+		t.Fatalf("marshal tampered bundle: %v", err)
+	}
+	_, err = LoadBundle(strings.NewReader(string(encoded)))
+	if err == nil || !strings.Contains(err.Error(), "bundle_id does not match") {
+		t.Fatalf("LoadBundle(tampered) error = %v, want bundle_id mismatch", err)
+	}
+}
+
+func TestLoadScanManifestRejectsTamperedNestedBundleID(t *testing.T) {
+	bundle := validIdentifiedBundle(t)
+	bundle.Summary.TotalFiles = 999
+	manifest := &ScanManifest{
+		SchemaVersion: ScanManifestSchemaVersion,
+		TargetHash:    "sha256:target",
+		BatchStrategy: "none",
+		BatchSize:     1,
+		Bundles:       []Bundle{*bundle},
+	}
+	manifestID, err := computeManifestID(manifest)
+	if err != nil {
+		t.Fatalf("compute manifest id: %v", err)
+	}
+	manifest.ManifestID = manifestID
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	_, err = LoadScanManifest(strings.NewReader(string(encoded)))
+	if err == nil || !strings.Contains(err.Error(), "bundle 0 bundle_id does not match") {
+		t.Fatalf("LoadScanManifest(tampered nested bundle) error = %v, want nested bundle_id mismatch", err)
 	}
 }
 
@@ -162,6 +209,18 @@ func validationBundle() *Bundle {
 		}},
 		Contract: DefaultContract(),
 	}
+}
+
+func validIdentifiedBundle(t *testing.T) *Bundle {
+	t.Helper()
+	bundle := validationBundle()
+	bundle.BundleID = ""
+	bundleID, err := computeBundleID(bundle)
+	if err != nil {
+		t.Fatalf("compute bundle id: %v", err)
+	}
+	bundle.BundleID = bundleID
+	return bundle
 }
 
 func assertValidationCode(t *testing.T, notices []ValidationNotice, code string) {

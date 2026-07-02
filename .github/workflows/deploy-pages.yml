@@ -20,7 +20,7 @@ jobs:
   build:
     runs-on: self-hosted
     container:
-      image: node:20
+      image: node:24
     steps:
       - uses: actions/checkout@v4
 
@@ -51,7 +51,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: self-hosted
     container:
-      image: node:20
+      image: node:24
     needs: build
     steps:
       - name: Deploy to GitHub Pages

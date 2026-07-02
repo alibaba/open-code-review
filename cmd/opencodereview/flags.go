@@ -275,6 +275,7 @@ func printConfigUsage() {
 Usage:
   ocr config set <key> <value>
   ocr config unset custom_providers.<name>  Delete a custom provider
+  ocr config unset mcp_servers.<name>       Delete an MCP server
   ocr config provider                       Interactive provider setup
   ocr config model                          Interactive model selection
 
@@ -301,6 +302,14 @@ Examples:
   # Delete a custom provider
   ocr config unset custom_providers.my-gateway
 
+  # MCP server configuration (stdio transport)
+  ocr config set mcp_servers.codegraph.command npx
+  ocr config set mcp_servers.codegraph.args '["-y","@anthropic/codegraph-mcp"]'
+  ocr config set mcp_servers.codegraph.env '["CODEGRAPH_TOKEN=xxx"]'
+
+  # Delete an MCP server
+  ocr config unset mcp_servers.codegraph
+
   # Legacy endpoint configuration
   ocr config set llm.url https://xx/v1/openai/chat/completions
   ocr config set llm.auth_token xxxxxxxxxx
@@ -310,6 +319,7 @@ Examples:
   ocr config set language English
   ocr config set telemetry.enabled true
 
-Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging
-Provider fields: api_key, url, protocol, model, models, auth_header, extra_body`)
+Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging
+Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers
+MCP server fields: command, args, env, tools, setup`)
 }

@@ -23,6 +23,13 @@ func LoadBundle(reader io.Reader) (*Bundle, error) {
 	if bundle.BundleID == "" {
 		return nil, fmt.Errorf("invalid bundle schema: bundle_id is required")
 	}
+	computedID, err := computeBundleID(&bundle)
+	if err != nil {
+		return nil, fmt.Errorf("verify bundle_id: %w", err)
+	}
+	if bundle.BundleID != computedID {
+		return nil, fmt.Errorf("invalid bundle schema: bundle_id does not match bundle content")
+	}
 	return &bundle, nil
 }
 
@@ -106,6 +113,22 @@ func LoadScanManifest(reader io.Reader) (*ScanManifest, error) {
 	}
 	if manifest.Bundles == nil {
 		return nil, fmt.Errorf("invalid scan manifest schema: bundles is required")
+	}
+	for index := range manifest.Bundles {
+		computedID, err := computeBundleID(&manifest.Bundles[index])
+		if err != nil {
+			return nil, fmt.Errorf("verify scan bundle %d: %w", index, err)
+		}
+		if manifest.Bundles[index].BundleID != computedID {
+			return nil, fmt.Errorf("invalid scan manifest schema: bundle %d bundle_id does not match bundle content", index)
+		}
+	}
+	computedID, err := computeManifestID(&manifest)
+	if err != nil {
+		return nil, fmt.Errorf("verify manifest_id: %w", err)
+	}
+	if manifest.ManifestID != computedID {
+		return nil, fmt.Errorf("invalid scan manifest schema: manifest_id does not match manifest content")
 	}
 	return &manifest, nil
 }

@@ -9,6 +9,7 @@ package llmloop
 
 import (
 	"fmt"
+	"runtime/debug"
 	"sync"
 
 	"github.com/open-code-review/open-code-review/internal/model"
@@ -55,6 +56,14 @@ func (p *CommentWorkerPool) Submit(f func() ([]model.LlmComment, error)) {
 	p.wg.Go(func() {
 		p.semaphore <- struct{}{}
 		defer func() { <-p.semaphore }()
+		// Contain a panic in the submitted work so one bad unit of work cannot
+		// crash the whole process. The work that panics contributes no comments;
+		// the semaphore is still released via the defer above.
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(stdout.Writer(), "[ocr] CommentWorkerPool panic: %v\n%s\n", r, debug.Stack())
+			}
+		}()
 
 		comments, err := f()
 		if err != nil {
@@ -68,6 +77,16 @@ func (p *CommentWorkerPool) Submit(f func() ([]model.LlmComment, error)) {
 
 // Await blocks until all submitted work has completed and returns
 // aggregated results from every Submit call so far.
+//
+// A panic in submitted work is recovered and logged inside Submit (see the
+// recover defer there) but is not surfaced here as an error or reflected in
+// the returned count — a unit that panics contributes no comments and is
+// indistinguishable from one that produced zero.
+//
+// Concurrency contract: Await must not run concurrently with Submit. Submit
+// calls wg.Go (which does wg.Add(1) synchronously), so a Submit racing Await
+// would risk sync.WaitGroup's "Add called concurrently with Wait" panic.
+// Callers must ensure every Submit has returned before calling Await.
 func (p *CommentWorkerPool) Await() []model.LlmComment {
 	p.wg.Wait()
 	return p.results

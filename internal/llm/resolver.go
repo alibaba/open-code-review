@@ -3,10 +3,13 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
@@ -19,6 +22,11 @@ type ResolvedEndpoint struct {
 	Source       string            // human-readable config source label
 	ExtraBody    map[string]any    // vendor-specific request body fields
 	ExtraHeaders map[string]string // extra HTTP headers for the LLM request
+	// Timeout is the per-request HTTP timeout; 0 means use the client default (5 min).
+	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
+	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
+	// knob; users can still override via OCR_LLM_TIMEOUT.
+	Timeout time.Duration
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -28,7 +36,12 @@ const (
 	envOCRLLMModel        = "OCR_LLM_MODEL"
 	envOCRLLMAuthHeader   = "OCR_LLM_AUTH_HEADER"
 	envOCRLLMExtraHeaders = "OCR_LLM_EXTRA_HEADERS"
-	envOCRUseAnthropic    = "OCR_USE_ANTHROPIC"
+	// envOCRLLMTimeout is a global override applied in ResolveEndpointWithModelOverride
+	// after any strategy resolves, rather than inside tryOCREnv like other OCR_LLM_* vars.
+	// This lets it override timeout for all resolution paths (OCR env, config file,
+	// provider config, Claude Code env, shell RC).
+	envOCRLLMTimeout   = "OCR_LLM_TIMEOUT"
+	envOCRUseAnthropic = "OCR_USE_ANTHROPIC"
 )
 
 // Environment variable names from Claude Code configuration.
@@ -71,11 +84,58 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 				ep.Source = s.name
 			}
 			ep.Model = stripModelSuffix(ep.Model)
+			// OCR_LLM_TIMEOUT is a global override: applies regardless of
+			// which strategy resolved the endpoint, and takes precedence
+			// over config-file values when set.
+			envTimeout, ok, err := parseTimeoutEnv()
+			if err != nil {
+				return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
+			}
+			if ok {
+				ep.Timeout = envTimeout
+			}
 			return ep, nil
 		}
 	}
 
 	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
+}
+
+// parseTimeoutEnv reads and validates the OCR_LLM_TIMEOUT environment variable.
+// Returns the parsed duration and true if set, or 0 and false if unset/empty.
+// Returns an error for invalid values (non-integer, negative, overflow) to give
+// the user clear feedback instead of silently falling back to the default.
+func parseTimeoutEnv() (time.Duration, bool, error) {
+	raw := strings.TrimSpace(os.Getenv(envOCRLLMTimeout))
+	if raw == "" {
+		return 0, false, nil
+	}
+	sec, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false, fmt.Errorf("OCR_LLM_TIMEOUT must be an integer (seconds): %w", err)
+	}
+	d, err := validateTimeoutSec(sec)
+	if err != nil {
+		return 0, false, fmt.Errorf("OCR_LLM_TIMEOUT: %w", err)
+	}
+	return d, true, nil
+}
+
+// validateTimeoutSec converts a config-file timeout (in seconds) to time.Duration.
+// Returns 0 for zero input (use default). Rejects negative values and overflow.
+func validateTimeoutSec(sec int) (time.Duration, error) {
+	if sec == 0 {
+		return 0, nil
+	}
+	if sec < 0 {
+		return 0, fmt.Errorf("timeout_sec must be non-negative, got %d", sec)
+	}
+	// Guard against overflow: time.Duration is int64 nanoseconds.
+	maxSec := int64(math.MaxInt64 / int64(time.Second))
+	if int64(sec) > maxSec {
+		return 0, fmt.Errorf("timeout_sec %d overflows time.Duration (max %d)", sec, maxSec)
+	}
+	return time.Duration(sec) * time.Second, nil
 }
 
 // tryOCREnv reads OCR-specific environment variables.
@@ -132,6 +192,7 @@ type llmFileConfig struct {
 	AuthHeader   string            `json:"auth_header,omitempty"`
 	Model        string            `json:"model,omitempty"`
 	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
+	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
@@ -144,6 +205,7 @@ type providerEntryConfig struct {
 	Model        string            `json:"model,omitempty"`
 	Models       []string          `json:"models,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
+	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
@@ -288,6 +350,11 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	extraBody = entry.ExtraBody
 	extraHeaders := entry.ExtraHeaders
 
+	timeout, err := validateTimeoutSec(entry.TimeoutSec)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+	}
+
 	if protocol == "anthropic" {
 		url = ensureMessagesSuffix(url)
 	}
@@ -301,6 +368,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		Source:       "provider:" + cfg.Provider,
 		ExtraBody:    extraBody,
 		ExtraHeaders: extraHeaders,
+		Timeout:      timeout,
 	}, true, nil
 }
 
@@ -336,7 +404,12 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders}, true, nil
+	timeout, err := validateTimeoutSec(cfg.Llm.TimeoutSec)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
+	}
+
+	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders, Timeout: timeout}, true, nil
 }
 
 // tryCCEnv reads Claude Code environment variables.

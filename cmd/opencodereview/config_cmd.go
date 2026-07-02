@@ -94,17 +94,23 @@ func runConfigSet(key, value string) error {
 
 func runConfigUnset(key string) error {
 	parts := strings.SplitN(key, ".", 2)
-	if len(parts) != 2 || parts[0] != "custom_providers" || parts[1] == "" {
-		return fmt.Errorf("unset only supports custom_providers.<name>")
+	if len(parts) != 2 || parts[1] == "" {
+		return fmt.Errorf("unset supports custom_providers.<name> and mcp_servers.<name>")
 	}
-	name := parts[1]
 
 	configPath, err := defaultConfigPath()
 	if err != nil {
 		return err
 	}
 
-	return unsetCustomProvider(configPath, name)
+	switch parts[0] {
+	case "custom_providers":
+		return unsetCustomProvider(configPath, parts[1])
+	case "mcp_servers":
+		return unsetMCPServer(configPath, parts[1])
+	default:
+		return fmt.Errorf("unset supports custom_providers.<name> and mcp_servers.<name>")
+	}
 }
 
 func unsetCustomProvider(configPath, name string) error {
@@ -127,6 +133,32 @@ func unsetCustomProvider(configPath, name string) error {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: active provider was deleted; 'provider' and 'model' have been cleared.\n")
 		fmt.Fprintf(os.Stderr, "[ocr] Run 'ocr config provider' to select a new provider.\n")
 	}
+	return nil
+}
+
+func unsetMCPServer(configPath, name string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	if cfg.MCPServers == nil {
+		return fmt.Errorf("MCP server %q not found", name)
+	}
+	if _, exists := cfg.MCPServers[name]; !exists {
+		return fmt.Errorf("MCP server %q not found", name)
+	}
+
+	delete(cfg.MCPServers, name)
+	if len(cfg.MCPServers) == 0 {
+		cfg.MCPServers = nil
+	}
+
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Printf("Deleted MCP server %q.\n", name)
 	return nil
 }
 
@@ -166,15 +198,25 @@ type ProviderEntry struct {
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
 
+// MCPServerConfig holds configuration for a single MCP server (stdio transport).
+type MCPServerConfig struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+	Env     []string `json:"env,omitempty"`
+	Tools   []string `json:"tools,omitempty"`
+	Setup   string   `json:"setup,omitempty"`
+}
+
 // Config represents the user-level configuration file (~/.opencodereview/config.json).
 type Config struct {
-	Provider        string                   `json:"provider,omitempty"`
-	Model           string                   `json:"model,omitempty"`
-	Providers       map[string]ProviderEntry `json:"providers,omitempty"`
-	CustomProviders map[string]ProviderEntry `json:"custom_providers,omitempty"`
-	Llm             LlmConfig                `json:"llm,omitempty"`
-	Language        string                   `json:"language,omitempty"`
-	Telemetry       *TelemetryConfig         `json:"telemetry,omitempty"`
+	Provider        string                     `json:"provider,omitempty"`
+	Model           string                     `json:"model,omitempty"`
+	Providers       map[string]ProviderEntry   `json:"providers,omitempty"`
+	CustomProviders map[string]ProviderEntry   `json:"custom_providers,omitempty"`
+	Llm             LlmConfig                  `json:"llm,omitempty"`
+	Language        string                     `json:"language,omitempty"`
+	Telemetry       *TelemetryConfig           `json:"telemetry,omitempty"`
+	MCPServers      map[string]MCPServerConfig `json:"mcp_servers,omitempty"`
 }
 
 type LlmConfig struct {
@@ -233,6 +275,9 @@ func setConfigValue(cfg *Config, key, value string) error {
 	}
 	if strings.HasPrefix(key, "custom_providers.") {
 		return setCustomProviderValue(cfg, key, value)
+	}
+	if strings.HasPrefix(key, "mcp_servers.") {
+		return setMCPServerValue(cfg, key, value)
 	}
 
 	switch key {
@@ -329,7 +374,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers", key)
+		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nMCP server fields: command, args, env, tools, setup", key)
 	}
 	return nil
 }
@@ -488,6 +533,70 @@ func setCustomProviderField(cfg *Config, name, field, key, value string) error {
 		return err
 	}
 	cfg.CustomProviders[name] = entry
+	return nil
+}
+
+func setMCPServerValue(cfg *Config, key, value string) error {
+	parts := strings.SplitN(key, ".", 3)
+	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
+		return fmt.Errorf("invalid MCP server key %q: expected mcp_servers.<name>.<field>", key)
+	}
+	name, field := parts[1], parts[2]
+
+	if cfg.MCPServers == nil {
+		cfg.MCPServers = make(map[string]MCPServerConfig)
+	}
+	entry := cfg.MCPServers[name]
+
+	switch field {
+	case "command":
+		if value == "" {
+			return fmt.Errorf("MCP server command cannot be empty")
+		}
+		entry.Command = value
+	case "args":
+		var args []string
+		if err := json.Unmarshal([]byte(value), &args); err != nil {
+			return fmt.Errorf("invalid JSON array for %s: %w", key, err)
+		}
+		entry.Args = args
+	case "env":
+		var env []string
+		if err := json.Unmarshal([]byte(value), &env); err != nil {
+			return fmt.Errorf("invalid JSON array for %s: %w", key, err)
+		}
+		for _, e := range env {
+			idx := strings.Index(e, "=")
+			if idx <= 0 {
+				return fmt.Errorf("invalid env entry %q: must be in KEY=VALUE format", e)
+			}
+		}
+		entry.Env = env
+	case "tools":
+		var tools []string
+		if err := json.Unmarshal([]byte(value), &tools); err != nil {
+			return fmt.Errorf("invalid JSON array for %s: %w", key, err)
+		}
+		seen := make(map[string]struct{}, len(tools))
+		filtered := make([]string, 0, len(tools))
+		for _, t := range tools {
+			if t == "" {
+				return fmt.Errorf("tool names in %s must not be empty", key)
+			}
+			if _, dup := seen[t]; dup {
+				continue
+			}
+			seen[t] = struct{}{}
+			filtered = append(filtered, t)
+		}
+		entry.Tools = filtered
+	case "setup":
+		entry.Setup = value
+	default:
+		return fmt.Errorf("unknown MCP server field %q: supported fields are command, args, env, tools, setup", field)
+	}
+
+	cfg.MCPServers[name] = entry
 	return nil
 }
 

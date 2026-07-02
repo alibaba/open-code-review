@@ -260,8 +260,32 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 // resolution / re-location.
 func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.ToolCall, rec *session.TaskRecord) tool.TaskCheckpoint {
 	t := tool.OfName(call.Function.Name)
+
 	if !t.IsKnown() {
-		return tool.Of(tool.NotAvailableMsg)
+		p, ok := r.deps.Tools.Get(call.Function.Name)
+		if !ok {
+			return tool.Of(tool.NotAvailableMsg)
+		}
+		r.recordToolCall(call.Function.Name)
+		var dynArgs map[string]any
+		if err := json.Unmarshal([]byte(call.Function.Arguments), &dynArgs); err != nil {
+			return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", call.Function.Name, err))
+		}
+		telemetry.PrintToolCallStarted(call.Function.Name, dynArgs)
+		startTime := time.Now()
+		result, err := p.Execute(ctx, dynArgs)
+		dur := time.Since(startTime)
+		if err != nil {
+			telemetry.RecordToolCall(ctx, call.Function.Name, dur, false)
+			telemetry.PrintToolCallError(call.Function.Name, err)
+			return tool.Of(fmt.Sprintf("Error executing tool %s: %v", call.Function.Name, err))
+		}
+		telemetry.RecordToolCall(ctx, call.Function.Name, dur, true)
+		telemetry.PrintToolCallFinished(call.Function.Name, dur)
+		if rec != nil {
+			rec.AddToolResult(call.Function.Name, call.Function.Arguments, result)
+		}
+		return tool.Of(result)
 	}
 
 	if t == tool.TaskDone {

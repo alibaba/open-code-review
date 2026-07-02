@@ -94,6 +94,25 @@ func TestReportIncludesValidationFailures(t *testing.T) {
 	}
 }
 
+func TestReportRejectsValidationBundleMismatch(t *testing.T) {
+	bundle := validationBundle()
+	comments := &Comments{
+		SchemaVersion: CommentsSchemaVersion,
+		BundleID:      bundle.BundleID,
+		Summary:       CommentsSummary{},
+		Comments:      []ReviewComment{},
+	}
+	validation := &ValidationResult{
+		SchemaVersion: "codex-review-validation/v1",
+		BundleID:      "sha256:other",
+		Valid:         true,
+	}
+	_, err := RenderReport(bundle, comments, ReportOptions{Format: "markdown", Validation: validation})
+	if err == nil || !strings.Contains(err.Error(), "validation bundle_id mismatch") {
+		t.Fatalf("RenderReport() error = %v, want validation bundle mismatch", err)
+	}
+}
+
 func TestReportEscapesBackticksAndTextWarnings(t *testing.T) {
 	bundle := validationBundle()
 	comments := &Comments{

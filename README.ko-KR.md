@@ -404,6 +404,7 @@ ocr review \
 
 - [`github_actions/`](./examples/github_actions/): GitHub Actions 통합 예시
 - [`gitlab_ci/`](./examples/gitlab_ci/): GitLab CI 통합 예시
+- [`gitflic_ci/`](./examples/gitflic_ci/): GitFlic CI 통합 예시
 
 ## Commands
 
@@ -620,15 +621,22 @@ Config file: `~/.opencodereview/config.json`
 | `providers.<name>.models` | array | 대화형 선택에 사용할 optional provider model 목록 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
 | `providers.<name>.extra_body` | object | 모든 요청 본문에 병합되는 JSON 객체 |
+| `providers.<name>.timeout_sec` | integer | 요청당 HTTP timeout(초), 기본값 `300` |
 | `providers.<name>.extra_headers` | string | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `custom_providers.<name>.*` | — | optional `models`를 포함한 `providers.<name>.*`과 동일한 필드 |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |
 | `llm.extra_body` | object | 모든 요청 본문에 병합되는 JSON 객체 |
+| `llm.timeout_sec` | integer | 요청당 HTTP timeout(초), 기본값 `300` |
 | `llm.extra_headers` | string | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
+| `mcp_servers.<name>.command` | string | MCP 서버를 시작하는 명령어 |
+| `mcp_servers.<name>.args` | array | MCP 서버의 커맨드라인 인수 |
+| `mcp_servers.<name>.env` | array | 환경 변수 (`KEY=VALUE` 형식) |
+| `mcp_servers.<name>.tools` | array | 허용할 도구 이름 (비어 있으면 모든 도구 허용) |
+| `mcp_servers.<name>.setup` | string | 서버 시작 전에 실행할 설정 명령어 |
 | `language` | string | 임의의 언어 이름, 예: `English`, `Chinese` (기본값: `English`) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -636,6 +644,43 @@ Config file: `~/.opencodereview/config.json`
 | `telemetry.content_logging` | boolean | telemetry에 prompt 포함 여부 |
 
 환경 변수는 config file보다 우선합니다.
+
+### MCP Server
+
+Open Code Review는 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 서버를 지원하여 리뷰 에이전트가 stdio 전송을 통해 코드 리뷰 중에 외부 도구를 사용할 수 있습니다.
+
+CLI로 MCP 서버를 설정합니다:
+
+```bash
+# MCP 서버 추가
+ocr config set mcp_servers.<name>.command <command>
+ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
+ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
+ocr config set mcp_servers.<name>.tools '["tool_name"]'
+ocr config set mcp_servers.<name>.setup '<setup command>'
+
+# MCP 서버 삭제
+ocr config unset mcp_servers.<name>
+```
+
+| 필드 | 필수 | 설명 |
+|------|------|------|
+| `command` | 예 | MCP 서버를 시작하는 실행 명령어 |
+| `args` | 아니오 | 서버에 전달할 커맨드라인 인수 |
+| `env` | 아니오 | 환경 변수 (`KEY=VALUE` 형식) |
+| `tools` | 아니오 | 허용할 도구 이름. 비어 있으면 서버의 모든 도구 사용 가능 |
+| `setup` | 아니오 | 서버 시작 전에 실행할 셸 명령어 (예: 인덱스 빌드) |
+
+> **참고:** MCP 도구의 이름이 내장 도구와 충돌하면 경고와 함께 건너뜁니다. `setup` 명령어의 타임아웃은 5분입니다.
+
+**예시: [CodeGraph](https://github.com/nicholasgasior/codegraph)를 추가하여 코드 구조 분석 강화**
+
+```bash
+ocr config set mcp_servers.codegraph.command codegraph
+ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
+ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
+ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+```
 
 ### Environment Variables
 
@@ -646,6 +691,7 @@ Config file: `~/.opencodereview/config.json`
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` 또는 `authorization`) |
 | `OCR_LLM_EXTRA_HEADERS` | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `OCR_LLM_MODEL` | Model name |
+| `OCR_LLM_TIMEOUT` | 요청당 HTTP timeout(초), config file의 `timeout_sec`를 override |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
 
 ## Telemetry

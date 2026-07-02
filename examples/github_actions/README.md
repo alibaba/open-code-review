@@ -93,7 +93,13 @@ Use the `--rule` flag to pass a custom rules JSON file:
 
 ### Adjust retry and delay settings
 
-When posting review comments individually (fallback mode), the workflow includes rate-limit handling with exponential backoff. The retry strategy follows GitHub's documented guidance for REST API rate limits — see [Rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2026-03-10) for details on primary/secondary rate limits and recommended retry behavior. You can configure the retry and delay behavior via **repository variables** (Settings → Secrets and variables → Actions → Variables):
+When posting review comments individually (fallback mode), the workflow includes rate-limit handling with exponential backoff. The retry strategy follows GitHub's documented guidance for REST API rate limits — see [Rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2026-03-10) for details on primary/secondary rate limits and recommended retry behavior:
+
+- **Primary rate limit exhausted** (`x-ratelimit-remaining=0`): wait until `x-ratelimit-reset`.
+- **Secondary rate limit with a `retry-after` header**: wait exactly that long.
+- **Secondary rate limit with no header**: wait at least one minute, then use exponential backoff on continued failures.
+
+You can configure the retry and delay behavior via **repository variables** (Settings → Secrets and variables → Actions → Variables):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -104,8 +110,18 @@ When posting review comments individually (fallback mode), the workflow includes
 | `OCR_FAILURE_DELAY` | `1000` | Delay (ms) after a non-rate-limit failure to pace subsequent requests |
 | `OCR_LOW_REMAINING_THRESHOLD` | `3` | When x-ratelimit-remaining is at or below this value, proactively increase request spacing to avoid hitting the limit |
 | `OCR_LOW_REMAINING_SPACING` | `10000` | Request spacing (ms) used when remaining quota is low |
+| `OCR_READ_SUCCESS_DELAY` | `500` | Delay (ms) after a successful read API call (`listReviews` / `listReviewComments` / `listIssueComments`) used for the idempotency check. Reads are cheaper than writes, so the default is shorter |
+| `OCR_READ_LOW_REMAINING_SPACING` | `5000` | Request spacing (ms) for read calls when remaining quota is low |
 
 These variables are optional — if not configured, sensible defaults are used. Consider increasing delays for repositories with many concurrent workflows or large PRs that generate numerous review comments.
+
+#### Idempotency: avoiding duplicate review comments
+
+When the batch `createReview` call fails with a `5xx` error, the request may still have landed on the GitHub server (the response was simply lost). Before retrying per-comment, the workflow queries existing reviews and review comments — each tagged with a per-run HTML comment (e.g. `<!-- ocr-<runId>-<attempt>-<token> -->`) — and only retries the comments that are actually missing. This prevents duplicate review posts.
+
+The same idempotency check is applied to the summary comment: before posting, the workflow verifies whether a summary with the same run tag already exists, and skips posting if so.
+
+If the read API itself is unavailable (rate-limited or `5xx`), the check returns *unknown* rather than assuming the comment was not posted. In that case the workflow **skips retrying** to avoid risking a duplicate, and surfaces the uncertainty in the summary instead of silently producing duplicates.
 
 ### Limit concurrency
 

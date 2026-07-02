@@ -47,6 +47,16 @@ a {
   background: rgba(255,255,255,0.3);
 }
 
+/* Terminal cursor blink */
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.terminal-cursor {
+  animation: cursor-blink 1s step-end infinite;
+}
+
 /* UseCases card hover effect */
 @property --sweep-angle {
   syntax: '<angle>';
@@ -109,4 +119,38 @@ a {
 
 .usecase-card:hover::after {
   opacity: 1;
+}
+
+/* Install badge text shimmer */
+@keyframes text-shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+.install-text-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.6) 0%,
+    rgba(255,255,255,0.6) 40%,
+    #ffffff 50%,
+    rgba(255,255,255,0.6) 60%,
+    rgba(255,255,255,0.6) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: text-shimmer 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .install-text-shimmer {
+    animation: none;
+    background: #ffffff;
+    -webkit-text-fill-color: #ffffff;
+  }
 }

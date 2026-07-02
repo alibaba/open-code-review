@@ -204,13 +204,26 @@ func TestCodexValidateCommentsEmitsStructuredResult(t *testing.T) {
 }
 
 func TestCodexReportEmitsMarkdown(t *testing.T) {
-	bundle := reviewbundle.Bundle{
-		SchemaVersion: reviewbundle.BundleSchemaVersion,
-		BundleID:      "sha256:report",
-		Summary:       reviewbundle.Summary{TotalFiles: 1, ReviewableFiles: 1},
-		Contract:      reviewbundle.DefaultContract(),
-		Files:         []reviewbundle.File{},
-		Rules:         map[string]reviewbundle.Rule{},
+	repository := initCodexRepository(t)
+	writeCodexFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	directory := t.TempDir()
+	bundlePath := filepath.Join(directory, "bundle.json")
+	if err := runCodexWithWriter([]string{
+		"prepare", "--repo", repository, "--output", bundlePath,
+	}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("prepare bundle: %v", err)
+	}
+	bundleFile, err := os.Open(bundlePath)
+	if err != nil {
+		t.Fatalf("open bundle: %v", err)
+	}
+	bundle, loadErr := reviewbundle.LoadBundle(bundleFile)
+	closeErr := bundleFile.Close()
+	if loadErr != nil {
+		t.Fatalf("load bundle: %v", loadErr)
+	}
+	if closeErr != nil {
+		t.Fatalf("close bundle: %v", closeErr)
 	}
 	comments := reviewbundle.Comments{
 		SchemaVersion: reviewbundle.CommentsSchemaVersion,
@@ -218,14 +231,11 @@ func TestCodexReportEmitsMarkdown(t *testing.T) {
 		Summary:       reviewbundle.CommentsSummary{FilesReviewed: 1, IssuesFound: 0},
 		Comments:      []reviewbundle.ReviewComment{},
 	}
-	directory := t.TempDir()
-	bundlePath := filepath.Join(directory, "bundle.json")
 	commentsPath := filepath.Join(directory, "comments.json")
-	writeCodexJSON(t, bundlePath, bundle)
 	writeCodexJSON(t, commentsPath, comments)
 
 	var output bytes.Buffer
-	err := runCodexWithWriter([]string{
+	err = runCodexWithWriter([]string{
 		"report",
 		"--bundle", bundlePath,
 		"--comments", commentsPath,

@@ -404,6 +404,7 @@ ocr review \
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions 集成示例
 - [`gitlab_ci/`](./examples/gitlab_ci/) — GitLab CI 集成示例
+- [`gitflic_ci/`](./examples/gitflic_ci/) — GitFlic CI 集成示例
 
 ## 命令
 
@@ -652,15 +653,22 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `providers.<name>.models` | array | 用于交互式选择的可选供应商模型列表 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
 | `providers.<name>.extra_body` | object | 合并到每个请求体的 JSON 对象 |
+| `providers.<name>.timeout_sec` | integer | 每次请求的 HTTP 超时时间（秒），默认 `300` |
 | `providers.<name>.extra_headers` | string | 逗号分隔的 `key=value` HTTP 头 |
 | `custom_providers.<name>.*` | — | 与 `providers.<name>.*` 相同的字段，包括可选的 `models` |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | 仅 Anthropic：`x-api-key` \| `authorization` |
 | `llm.extra_body` | object | 合并到每个请求体的 JSON 对象 |
+| `llm.timeout_sec` | integer | 每次请求的 HTTP 超时时间（秒），默认 `300` |
 | `llm.extra_headers` | string | 逗号分隔的 `key=value` HTTP 头 |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
+| `mcp_servers.<name>.command` | string | 启动 MCP 服务器的命令 |
+| `mcp_servers.<name>.args` | array | MCP 服务器的命令行参数 |
+| `mcp_servers.<name>.env` | array | 环境变量，`KEY=VALUE` 格式 |
+| `mcp_servers.<name>.tools` | array | 允许使用的工具名称（为空则允许所有工具） |
+| `mcp_servers.<name>.setup` | string | 启动服务器前运行的初始化命令 |
 | `language` | string | 任意语言名称，例如 `English`、`Chinese`（默认：`English`） |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -668,6 +676,43 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `telemetry.content_logging` | boolean | 在遥测数据中包含提示词 |
 
 环境变量优先级高于配置文件。
+
+### MCP Server
+
+Open Code Review 支持 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，允许评审 Agent 在代码评审过程中通过 stdio 传输协议调用外部工具。
+
+通过 CLI 配置 MCP 服务器：
+
+```bash
+# 添加 MCP 服务器
+ocr config set mcp_servers.<name>.command <command>
+ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
+ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
+ocr config set mcp_servers.<name>.tools '["tool_name"]'
+ocr config set mcp_servers.<name>.setup '<setup command>'
+
+# 删除 MCP 服务器
+ocr config unset mcp_servers.<name>
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `command` | 是 | 启动 MCP 服务器的可执行命令 |
+| `args` | 否 | 传递给服务器的命令行参数 |
+| `env` | 否 | 环境变量，`KEY=VALUE` 格式 |
+| `tools` | 否 | 允许使用的工具名称；为空则服务器的所有工具均可用 |
+| `setup` | 否 | 启动服务器前运行的 shell 命令（例如构建索引） |
+
+> **注意：** 如果 MCP 工具的名称与内置工具冲突，该工具将被跳过并输出警告。`setup` 命令的超时时间为 5 分钟。
+
+**示例：添加 [CodeGraph](https://github.com/nicholasgasior/codegraph) 增强代码结构分析能力**
+
+```bash
+ocr config set mcp_servers.codegraph.command codegraph
+ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
+ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
+ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+```
 
 ### 环境变量
 
@@ -678,6 +723,7 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `OCR_LLM_AUTH_HEADER` | Anthropic 认证头（`x-api-key` 或 `authorization`） |
 | `OCR_LLM_EXTRA_HEADERS` | 逗号分隔的 `key=value` HTTP 头 |
 | `OCR_LLM_MODEL` | 模型名称 |
+| `OCR_LLM_TIMEOUT` | 每次请求的 HTTP 超时时间（秒），覆盖配置文件中的 `timeout_sec` |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic，`false` = OpenAI |
 
 

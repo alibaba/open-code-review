@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -83,6 +85,13 @@ func (service *ContextService) Read(
 	if maxLines > 500 {
 		maxLines = 500
 	}
+	if service.bundle.Target.Mode == TargetScan {
+		result, err := service.readScanFile(cleaned, startLine, maxLines)
+		if err != nil {
+			return ContextResult{}, err
+		}
+		return service.result("read", result), nil
+	}
 	endLine := startLine + maxLines - 1
 	result, err := tool.NewFileRead(service.reader).Execute(ctx, map[string]any{
 		"file_path":  cleaned,
@@ -103,6 +112,9 @@ func (service *ContextService) Find(
 ) (ContextResult, error) {
 	if err := service.ready(ctx); err != nil {
 		return ContextResult{}, err
+	}
+	if service.bundle.Target.Mode == TargetScan {
+		return service.result("find", service.findScanFiles(query, caseSensitive)), nil
 	}
 	result, err := tool.NewFileFind(service.reader).Execute(ctx, map[string]any{
 		"query_name":     query,
@@ -165,6 +177,13 @@ func (service *ContextService) Search(
 		}
 		patternArguments = append(patternArguments, pattern)
 	}
+	if service.bundle.Target.Mode == TargetScan {
+		result, err := service.searchScanFiles(query, caseSensitive, usePerlRegexp, patterns)
+		if err != nil {
+			return ContextResult{}, err
+		}
+		return service.result("search", result), nil
+	}
 	result, err := tool.NewCodeSearch(service.reader).Execute(ctx, map[string]any{
 		"search_text":     query,
 		"case_sensitive":  caseSensitive,
@@ -187,6 +206,178 @@ func safeSearchPattern(pattern string) bool {
 		}
 	}
 	return true
+}
+
+func (service *ContextService) scanFile(path string) (File, bool) {
+	for _, file := range service.bundle.Files {
+		if file.Path == path {
+			return file, true
+		}
+	}
+	return File{}, false
+}
+
+func (service *ContextService) readScanFile(path string, startLine int, maxLines int) (string, error) {
+	file, ok := service.scanFile(path)
+	if !ok {
+		return "", fmt.Errorf("file %q is not present in the scan bundle", path)
+	}
+	lines := splitSourceLines([]byte(file.Content))
+	totalLines := len(lines)
+	if startLine-1 > totalLines || (totalLines > 0 && startLine-1 >= totalLines) {
+		return "", fmt.Errorf("file %q has only %d lines, requested range starting at %d", path, totalLines, startLine)
+	}
+	end := startLine - 1 + maxLines
+	if end > totalLines {
+		end = totalLines
+	}
+	truncated := totalLines-(startLine-1) > 500
+	displayEnd := startLine - 1
+	if end > startLine-1 {
+		displayEnd = end
+	}
+	var output strings.Builder
+	output.WriteString(fmt.Sprintf("File: %s (Total lines: %d)\n", path, totalLines))
+	output.WriteString(fmt.Sprintf("IS_TRUNCATED: %t\n", truncated))
+	output.WriteString(fmt.Sprintf("LINE_RANGE: %d-%d\n", startLine, displayEnd))
+	for index, line := range lines[startLine-1 : end] {
+		output.WriteString(fmt.Sprintf("%d|%s\n", startLine+index, line))
+	}
+	if truncated {
+		output.WriteString("\nNote: Results truncated to 500 lines. Please narrow your line range.\n")
+	}
+	return output.String(), nil
+}
+
+func (service *ContextService) findScanFiles(query string, caseSensitive bool) string {
+	if strings.TrimSpace(query) == "" {
+		return "// The file was not found"
+	}
+	needle := query
+	if !caseSensitive {
+		needle = strings.ToLower(needle)
+	}
+	var matched []string
+	for _, file := range service.bundle.Files {
+		base := file.Path
+		if index := strings.LastIndex(base, "/"); index >= 0 {
+			base = base[index+1:]
+		}
+		haystack := base
+		if !caseSensitive {
+			haystack = strings.ToLower(haystack)
+		}
+		if strings.Contains(haystack, needle) {
+			matched = append(matched, file.Path)
+		}
+	}
+	sort.Strings(matched)
+	if len(matched) == 0 {
+		return "// The file was not found"
+	}
+	if len(matched) > 100 {
+		matched = matched[:100]
+	}
+	return strings.Join(matched, "\n")
+}
+
+func (service *ContextService) searchScanFiles(
+	query string,
+	caseSensitive bool,
+	useRegexp bool,
+	patterns []string,
+) (string, error) {
+	matcher, err := scanSearchMatcher(query, caseSensitive, useRegexp)
+	if err != nil {
+		return "", err
+	}
+	type match struct {
+		line int
+		text string
+	}
+	fileMatches := make(map[string][]match)
+	var paths []string
+	count := 0
+	for _, file := range service.bundle.Files {
+		if !scanPatternMatches(file.Path, patterns) {
+			continue
+		}
+		for index, line := range splitSourceLines([]byte(file.Content)) {
+			if matcher(line) {
+				if _, ok := fileMatches[file.Path]; !ok {
+					paths = append(paths, file.Path)
+				}
+				fileMatches[file.Path] = append(fileMatches[file.Path], match{line: index + 1, text: line})
+				count++
+				if count >= 100 {
+					break
+				}
+			}
+		}
+		if count >= 100 {
+			break
+		}
+	}
+	if count == 0 {
+		return "No matches found", nil
+	}
+	sort.Strings(paths)
+	var output strings.Builder
+	if count >= 100 {
+		output.WriteString("Note: The results have been truncated. Only showing first 100 results.\n")
+	}
+	for _, path := range paths {
+		matches := fileMatches[path]
+		output.WriteString(fmt.Sprintf("File: %s\nMatch lines: %d\n", path, len(matches)))
+		for _, match := range matches {
+			output.WriteString(fmt.Sprintf("%d|%s\n", match.line, match.text))
+		}
+		output.WriteString("\n")
+	}
+	return output.String(), nil
+}
+
+func scanSearchMatcher(query string, caseSensitive bool, useRegexp bool) (func(string) bool, error) {
+	if strings.TrimSpace(query) == "" {
+		return func(string) bool { return false }, nil
+	}
+	if useRegexp {
+		expression := query
+		if !caseSensitive {
+			expression = "(?i)" + expression
+		}
+		compiled, err := regexp.Compile(expression)
+		if err != nil {
+			return nil, err
+		}
+		return compiled.MatchString, nil
+	}
+	needle := query
+	if !caseSensitive {
+		needle = strings.ToLower(needle)
+	}
+	return func(line string) bool {
+		if !caseSensitive {
+			line = strings.ToLower(line)
+		}
+		return strings.Contains(line, needle)
+	}, nil
+}
+
+func scanPatternMatches(path string, patterns []string) bool {
+	if len(patterns) == 0 {
+		return true
+	}
+	for _, pattern := range patterns {
+		if matched, _ := filepath.Match(pattern, path); matched {
+			return true
+		}
+		// ponytail: minimal git-pathspec compatibility; expand if scan search needs full pathspec semantics.
+		if strings.HasPrefix(pattern, "*.") && strings.HasSuffix(path, strings.TrimPrefix(pattern, "*")) {
+			return true
+		}
+	}
+	return false
 }
 
 func (service *ContextService) ready(ctx context.Context) error {

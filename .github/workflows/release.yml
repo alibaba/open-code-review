@@ -160,7 +160,7 @@ jobs:
     needs: release
     runs-on: self-hosted
     container:
-      image: node:20
+      image: node:24
     permissions:
       contents: read
     steps:

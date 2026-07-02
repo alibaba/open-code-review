@@ -22,6 +22,9 @@ func RenderReport(bundle *Bundle, comments *Comments, options ReportOptions) ([]
 	if comments.BundleID != bundle.BundleID {
 		return nil, fmt.Errorf("bundle_id mismatch")
 	}
+	if options.Validation != nil && options.Validation.BundleID != bundle.BundleID {
+		return nil, fmt.Errorf("validation bundle_id mismatch")
+	}
 	sorted := sortedComments(comments)
 	switch options.Format {
 	case "json":

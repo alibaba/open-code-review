@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/open-code-review/open-code-review/internal/agent"
+	"github.com/open-code-review/open-code-review/internal/mcp"
 	"github.com/open-code-review/open-code-review/internal/telemetry"
 	"github.com/open-code-review/open-code-review/internal/tool"
 )
@@ -60,6 +62,19 @@ func runReview(args []string) error {
 		Runner:  cc.GitRunner,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
+
+	mcpClients := initMCPClients(context.Background(), rt.AppCfg, tools, cc.RepoDir, Version)
+	defer func() {
+		for _, mc := range mcpClients {
+			if err := mc.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to close MCP server %q: %v\n", mc.Name(), err)
+			}
+		}
+	}()
+
+	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
+	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
+	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
 
 	ag := agent.New(agent.Args{
 		RepoDir:               cc.RepoDir,
@@ -178,6 +193,58 @@ func runPreview(cc *commonContext, opts reviewOptions) error {
 
 	outputPreviewText(preview)
 	return nil
+}
+
+func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {
+	if cfg == nil || len(cfg.MCPServers) == 0 {
+		return nil
+	}
+
+	mcpNames := make([]string, 0, len(cfg.MCPServers))
+	for name := range cfg.MCPServers {
+		mcpNames = append(mcpNames, name)
+	}
+	sort.Strings(mcpNames)
+
+	var clients []*mcp.Client
+	for _, name := range mcpNames {
+		serverCfg := cfg.MCPServers[name]
+		if serverCfg.Command == "" {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: MCP server %q has no command configured, skipping\n", name)
+			continue
+		}
+		if serverCfg.Setup != "" {
+			fmt.Fprintf(os.Stderr, "[ocr] Running setup for MCP server %q: %s\n", name, serverCfg.Setup)
+			setupCtx, setupCancel := context.WithTimeout(ctx, 5*time.Minute)
+			setupCmd := shellCommand(setupCtx, serverCfg.Setup)
+			setupCmd.Dir = repoDir
+			configureProcessGroup(setupCmd)
+			output, err := setupCmd.CombinedOutput()
+			setupCancel()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[ocr] ERROR: MCP server %q setup command failed.\n", name)
+				fmt.Fprintf(os.Stderr, "[ocr]   Command: %s\n", serverCfg.Setup)
+				fmt.Fprintf(os.Stderr, "[ocr]   Working directory: %s\n", repoDir)
+				fmt.Fprintf(os.Stderr, "[ocr]   Error: %v\n", err)
+				if len(output) > 0 {
+					fmt.Fprintf(os.Stderr, "[ocr]   Output:\n%s\n", string(output))
+				}
+				fmt.Fprintf(os.Stderr, "[ocr]   Skipping MCP server %q — review will proceed without it.\n", name)
+				continue
+			}
+		}
+
+		initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
+		mc, err := mcp.NewClient(initCtx, name, serverCfg.Command, serverCfg.Args, serverCfg.Env, repoDir, version)
+		initCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to start MCP server %q: %v\n", name, err)
+			continue
+		}
+		clients = append(clients, mc)
+		mcp.RegisterAll(tools, mc, serverCfg.Tools)
+	}
+	return clients
 }
 
 func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *tool.Registry {

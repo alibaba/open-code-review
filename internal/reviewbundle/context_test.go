@@ -93,3 +93,38 @@ func TestContextFindAndSearchUseTargetAwareTools(t *testing.T) {
 		t.Fatalf("Search() = %+v, %v", searched, err)
 	}
 }
+
+func TestScanContextStaysInsideBundle(t *testing.T) {
+	repository := initPrepareRepository(t)
+	writeTargetFile(t, repository, "only.go", "package sample\n\nfunc InBundle() {}\n")
+	writeTargetFile(t, repository, "other.go", "package sample\n\nfunc OutsideBundle() {}\n")
+	bundle := &Bundle{
+		SchemaVersion: BundleSchemaVersion,
+		BundleID:      "sha256:scan",
+		Target:        Target{Mode: TargetScan},
+		Files: []File{{
+			Path:          "only.go",
+			Reviewable:    true,
+			Content:       "package sample\n\nfunc InBundle() {}\n",
+			ContentSHA256: hashFields([]byte("package sample\n\nfunc InBundle() {}\n")),
+		}},
+		Contract: DefaultContract(),
+	}
+	service := NewContextService(repository, bundle, gitcmd.New(2))
+
+	read, err := service.Read(context.Background(), "only.go", 1, 5)
+	if err != nil || !strings.Contains(read.Result, "InBundle") {
+		t.Fatalf("Read(in bundle) = %+v, %v", read, err)
+	}
+	if _, err := service.Read(context.Background(), "other.go", 1, 5); err == nil {
+		t.Fatal("Read(outside scan bundle) error = nil")
+	}
+	found, err := service.Find(context.Background(), "other.go", true)
+	if err != nil || strings.Contains(found.Result, "other.go") {
+		t.Fatalf("Find(outside scan bundle) = %+v, %v", found, err)
+	}
+	searched, err := service.Search(context.Background(), "OutsideBundle", true, false, nil)
+	if err != nil || strings.Contains(searched.Result, "other.go") || strings.Contains(searched.Result, "OutsideBundle") {
+		t.Fatalf("Search(outside scan bundle) = %+v, %v", searched, err)
+	}
+}

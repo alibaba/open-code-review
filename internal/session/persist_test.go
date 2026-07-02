@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+func init() { UseTestSessions() }
+
 func TestEncodeRepoPath(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -127,7 +129,7 @@ func sessionJSONLPath(t *testing.T, repoDir, sessionID string) string {
 	if err != nil {
 		t.Fatalf("home dir: %v", err)
 	}
-	return filepath.Join(home, ".opencodereview", "sessions", encodeRepoPath(repoDir), sessionID+".jsonl")
+	return filepath.Join(home, ".opencodereview", "test-sessions", encodeRepoPath(repoDir), sessionID+".jsonl")
 }
 
 func TestSetErrorIncrementsCounter(t *testing.T) {
@@ -209,7 +211,7 @@ func TestSessionFilePermissions(t *testing.T) {
 	jw.WriteSessionStart(time.Now())
 	defer jw.flushAndClose()
 
-	sessionDir := filepath.Join(tmpHome, ".opencodereview", "sessions", encodeRepoPath(repoDir))
+	sessionDir := filepath.Join(tmpHome, ".opencodereview", "test-sessions", encodeRepoPath(repoDir))
 	sessionFile := filepath.Join(sessionDir, sessionID+".jsonl")
 
 	dirInfo, err := os.Stat(sessionDir)

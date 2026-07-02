@@ -404,6 +404,7 @@ ocr review \
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions統合の例
 - [`gitlab_ci/`](./examples/gitlab_ci/) — GitLab CI統合の例
+- [`gitflic_ci/`](./examples/gitflic_ci/) — GitFlic CI統合の例
 
 ## コマンド
 
@@ -662,15 +663,22 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `providers.<name>.models` | array | 対話的選択に使う任意のプロバイダーモデル一覧 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
 | `providers.<name>.extra_body` | object | すべてのリクエストボディにマージされるJSONオブジェクト |
+| `providers.<name>.timeout_sec` | integer | リクエストごとのHTTPタイムアウト（秒）、デフォルト `300` |
 | `providers.<name>.extra_headers` | string | カンマ区切りの `key=value` HTTPヘッダー |
 | `custom_providers.<name>.*` | — | 任意の`models`を含む`providers.<name>.*`と同じフィールド |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropicのみ：`x-api-key` \| `authorization` |
 | `llm.extra_body` | object | すべてのリクエストボディにマージされるJSONオブジェクト |
+| `llm.timeout_sec` | integer | リクエストごとのHTTPタイムアウト（秒）、デフォルト `300` |
 | `llm.extra_headers` | string | カンマ区切りの `key=value` HTTPヘッダー |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
+| `mcp_servers.<name>.command` | string | MCPサーバーを起動するコマンド |
+| `mcp_servers.<name>.args` | array | MCPサーバーのコマンドライン引数 |
+| `mcp_servers.<name>.env` | array | 環境変数（`KEY=VALUE`形式） |
+| `mcp_servers.<name>.tools` | array | 許可するツール名（空の場合はすべてのツール） |
+| `mcp_servers.<name>.setup` | string | サーバー起動前に実行するセットアップコマンド |
 | `language` | string | 任意の言語名、例：`English`、`Chinese`（デフォルト：`English`） |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -678,6 +686,43 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `telemetry.content_logging` | boolean | テレメトリーにプロンプトを含める |
 
 環境変数は設定ファイルより優先されます。
+
+### MCPサーバー
+
+Open Code Reviewは[Model Context Protocol (MCP)](https://modelcontextprotocol.io/)サーバーをサポートしており、レビューエージェントがstdioトランスポートを介してコードレビュー中に外部ツールを使用できます。
+
+CLIからMCPサーバーを設定します：
+
+```bash
+# MCPサーバーを追加
+ocr config set mcp_servers.<name>.command <command>
+ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
+ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
+ocr config set mcp_servers.<name>.tools '["tool_name"]'
+ocr config set mcp_servers.<name>.setup '<setup command>'
+
+# MCPサーバーを削除
+ocr config unset mcp_servers.<name>
+```
+
+| フィールド | 必須 | 説明 |
+|-----------|------|------|
+| `command` | はい | MCPサーバーを起動する実行コマンド |
+| `args` | いいえ | サーバーに渡すコマンドライン引数 |
+| `env` | いいえ | 環境変数（`KEY=VALUE`形式） |
+| `tools` | いいえ | 許可するツール名。空の場合、サーバーのすべてのツールが利用可能 |
+| `setup` | いいえ | サーバー起動前に実行するシェルコマンド（例：インデックスの構築） |
+
+> **注意：** MCPツールの名前が組み込みツールと競合する場合、そのツールは警告付きでスキップされます。`setup`コマンドのタイムアウトは5分です。
+
+**例：[CodeGraph](https://github.com/nicholasgasior/codegraph)を追加してコード構造分析を強化**
+
+```bash
+ocr config set mcp_servers.codegraph.command codegraph
+ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
+ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
+ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+```
 
 ### 環境変数
 
@@ -688,6 +733,7 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `OCR_LLM_AUTH_HEADER` | Anthropic認証ヘッダー（`x-api-key`または`authorization`） |
 | `OCR_LLM_EXTRA_HEADERS` | カンマ区切りの `key=value` HTTPヘッダー |
 | `OCR_LLM_MODEL` | モデル名 |
+| `OCR_LLM_TIMEOUT` | リクエストごとのHTTPタイムアウト（秒）、設定ファイルの `timeout_sec` を上書き |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic、`false` = OpenAI |
 
 
