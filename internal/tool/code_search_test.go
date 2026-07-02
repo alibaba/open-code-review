@@ -124,6 +124,15 @@ func getHeadCommit(t *testing.T, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
+func runCodeSearchGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
 func TestGitGrep_WorkspaceMode_Found(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
@@ -196,6 +205,26 @@ func TestGitGrep_CommitMode_WithPathspec(t *testing.T) {
 	}
 	if result2 != "No matches found" {
 		t.Errorf("expected 'No matches found' when pathspec excludes match, got: %s", result2)
+	}
+}
+
+func TestGitGrep_CommitMode_SymbolicRefPreservesSearchBehavior(t *testing.T) {
+	dir := setupTestRepo(t)
+	runCodeSearchGit(t, dir, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "hello.go"), []byte("package main\n\nfunc BranchOnly() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runCodeSearchGit(t, dir, "add", "hello.go")
+	runCodeSearchGit(t, dir, "commit", "-m", "feature")
+	runCodeSearchGit(t, dir, "checkout", "master")
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "feature", Mode: ModeRange})
+	result, err := p.gitGrep(context.Background(), "BranchOnly", false, false, []string{"hello.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "hello.go") || !strings.Contains(result, "BranchOnly") {
+		t.Errorf("expected branch ref search result, got: %s", result)
 	}
 }
 
