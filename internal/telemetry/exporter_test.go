@@ -20,6 +20,8 @@ func TestParseOTLPEndpoint(t *testing.T) {
 		{"uppercase HTTP scheme strips and is insecure", "HTTP://192.0.2.1:4317", "192.0.2.1:4317", true},
 		{"mixed-case Https scheme strips and keeps TLS", "Https://otel.example.com:4317", "otel.example.com:4317", false},
 		{"endpoint shorter than scheme prefix is unchanged", "ht", "ht", false},
+		{"http scheme with trailing slash is trimmed", "http://192.0.2.1:4317/", "192.0.2.1:4317", true},
+		{"https scheme with trailing slash is trimmed", "https://otel.example.com:4317/", "otel.example.com:4317", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

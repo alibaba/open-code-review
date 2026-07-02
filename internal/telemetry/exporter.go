@@ -29,13 +29,16 @@ func newStdoutMetricExporter() (sdkmetric.Exporter, error) {
 // parseOTLPEndpoint strips a http:// or https:// scheme from the endpoint and
 // reports whether the connection should be insecure (plaintext gRPC).
 // Scheme matching is case-insensitive per RFC 3986. A bare host:port (no
-// scheme) is left unchanged and defaults to TLS.
+// scheme) is left unchanged and defaults to TLS. Any trailing slash left
+// over from a URL-style endpoint (e.g. "http://localhost:4317/") is
+// trimmed, since otlptracegrpc/otlpmetricgrpc's WithEndpoint expects a bare
+// host:port with no path.
 func parseOTLPEndpoint(endpoint string) (addr string, insecure bool) {
 	switch {
 	case len(endpoint) >= 7 && strings.EqualFold(endpoint[:7], "http://"):
-		return endpoint[7:], true
+		return strings.TrimRight(endpoint[7:], "/"), true
 	case len(endpoint) >= 8 && strings.EqualFold(endpoint[:8], "https://"):
-		return endpoint[8:], false
+		return strings.TrimRight(endpoint[8:], "/"), false
 	default:
 		return endpoint, false
 	}
