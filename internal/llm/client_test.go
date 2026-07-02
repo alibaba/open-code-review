@@ -351,5 +351,221 @@ func TestAnthropicClient_DefaultsToAuthorizationHeader(t *testing.T) {
 	}
 }
 
+func TestAnthropicClient_ExtraHeadersSent(t *testing.T) {
+	var gotCustomHeader string
+	var gotOrgID string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustomHeader = r.Header.Get("X-Custom-Header")
+		gotOrgID = r.Header.Get("X-Org-ID")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "test-key",
+		Model:  "claude-test",
+		ExtraHeaders: map[string]string{
+			"X-Custom-Header": "custom-val",
+			"X-Org-ID":        "org-abc",
+		},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotCustomHeader != "custom-val" {
+		t.Errorf("X-Custom-Header = %q, want %q", gotCustomHeader, "custom-val")
+	}
+	if gotOrgID != "org-abc" {
+		t.Errorf("X-Org-ID = %q, want %q", gotOrgID, "org-abc")
+	}
+}
+
+func TestOpenAIClient_ExtraHeadersSent(t *testing.T) {
+	var gotCustomHeader string
+	var gotOrgID string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCustomHeader = r.Header.Get("X-Custom-Header")
+		gotOrgID = r.Header.Get("X-Org-ID")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-test",
+			"object":"chat.completion",
+			"model":"gpt-test",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-test",
+		ExtraHeaders: map[string]string{
+			"X-Custom-Header": "custom-val",
+			"X-Org-ID":        "org-abc",
+		},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotCustomHeader != "custom-val" {
+		t.Errorf("X-Custom-Header = %q, want %q", gotCustomHeader, "custom-val")
+	}
+	if gotOrgID != "org-abc" {
+		t.Errorf("X-Org-ID = %q, want %q", gotOrgID, "org-abc")
+	}
+}
+
+func TestAnthropicClient_NoExtraHeadersWhenEmpty(t *testing.T) {
+	var customHeaders http.Header
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		customHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "test-key",
+		Model:  "claude-test",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	for k := range customHeaders {
+		if k == "X-Custom-Header" || k == "X-Org-Id" {
+			t.Errorf("unexpected custom header %q sent", k)
+		}
+	}
+}
+
 // Verify the SDK constant is accessible (compile-time check).
 var _ anthropic.CacheControlEphemeralParam = anthropic.NewCacheControlEphemeralParam()
+
+func TestCountTokens(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want int
+	}{
+		{"empty", "", 0},
+		{"single word", "hello", 1},
+		{"sentence", "The quick brown fox jumps over the lazy dog.", 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CountTokens(tt.text)
+			if tt.want == 0 && got != 0 {
+				t.Errorf("CountTokens(%q) = %d, want 0", tt.text, got)
+			}
+			if tt.want > 0 && got == 0 {
+				t.Errorf("CountTokens(%q) = 0, expected > 0", tt.text)
+			}
+		})
+	}
+}
+
+func TestCountTokensForModel(t *testing.T) {
+	text := "Hello, world! This is a test."
+	base := CountTokensForModel(text, "gpt-4")
+	o1 := CountTokensForModel(text, "o1-mini")
+
+	if base == 0 {
+		t.Error("cl100k_base should produce non-zero tokens")
+	}
+	if o1 == 0 {
+		t.Error("o200k_base should produce non-zero tokens")
+	}
+
+	if CountTokensForModel("", "gpt-4") != 0 {
+		t.Error("empty text should return 0")
+	}
+}
+
+func TestEncodingForModel(t *testing.T) {
+	tests := []struct {
+		model string
+		want  string
+	}{
+		{"gpt-4", "cl100k_base"},
+		{"claude-3-opus", "cl100k_base"},
+		{"", "cl100k_base"},
+		{"o1-preview", "o200k_base"},
+		{"o3-mini", "o200k_base"},
+		{"o4-mini", "o200k_base"},
+		{"GPT-O1", "o200k_base"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			got := encodingForModel(tt.model)
+			if got != tt.want {
+				t.Errorf("encodingForModel(%q) = %q, want %q", tt.model, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStripThinkTags(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"no tags", "hello world", "hello world"},
+		{"open only", "<think>partial", "partial"},
+		{"close only", "partial</think>", "partial"},
+		{"both tags", "<think>reasoning here</think>answer", "reasoning hereanswer"},
+		{"multiple tags", "<think>a</think>b<think>c</think>d", "abcd"},
+		{"empty", "", ""},
+		{"tags only", "<think></think>", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripThinkTags(tt.input)
+			if got != tt.want {
+				t.Errorf("stripThinkTags(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

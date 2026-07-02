@@ -1,36 +1,31 @@
-import React, { useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import React from 'react';
 import Navbar from './Navbar';
-import HeroSection from './HeroSection';
-import HighlightsSection from './HighlightsSection';
-import WhySection from './WhySection';
-import FeaturesSection from './FeaturesSection';
-import BenchmarkSection from './BenchmarkSection';
-import QuickStartSection from './QuickStartSection';
 
-const LandingPage: React.FC = () => {
-  const location = useLocation();
+interface LandingPageProps {
+  children: React.ReactNode;
+}
 
-  useEffect(() => {
-    const scrollTo = (location.state as { scrollTo?: string })?.scrollTo;
-    if (scrollTo) {
-      const el = document.getElementById(scrollTo);
-      if (el) {
-        setTimeout(() => el.scrollIntoView({ behavior: 'smooth' }), 100);
-      }
-      window.history.replaceState({}, '');
-    }
-  }, [location.state]);
-
+const LandingPage: React.FC<LandingPageProps> = ({ children }) => {
   return (
-    <div className="min-h-screen bg-dark-900 noise-overlay">
-      <Navbar />
-      <HeroSection />
-      <HighlightsSection />
-      <WhySection />
-      <FeaturesSection />
-      <BenchmarkSection />
-      <QuickStartSection />
+    <div
+      style={{
+        width: '100%',
+        background: '#000000',
+        overflowX: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 1440,
+          margin: '0 auto',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <Navbar />
+        {children}
+      </div>
     </div>
   );
 };

@@ -1,85 +1,163 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useTranslation } from '../i18n';
+import { useResponsive } from '../hooks/useResponsive';
+
+// 从字符串中解析数字和前后缀
+function parseStatValue(value: string): { prefix: string; number: number; suffix: string } {
+  // 匹配 "> 30%" 等格式
+  const match = value.match(/^([^\d]*?)(\d+)(.*)$/);
+  if (match) {
+    return { prefix: match[1], number: parseInt(match[2], 10), suffix: match[3] };
+  }
+  return { prefix: '', number: 0, suffix: value };
+}
+
+function useCountUp(target: number, duration: number = 1200, isActive: boolean) {
+  const [current, setCurrent] = useState(0);
+  const rafRef = useRef<number>(0);
+  const startTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (!isActive) return;
+    startTimeRef.current = performance.now();
+
+    const animate = (now: number) => {
+      const elapsed = now - startTimeRef.current;
+      const progress = Math.min(elapsed / duration, 1);
+      // easeOutExpo
+      const eased = progress === 1 ? 1 : 1 - Math.pow(2, -10 * progress);
+      setCurrent(Math.round(eased * target));
+      if (progress < 1) {
+        rafRef.current = requestAnimationFrame(animate);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [isActive, target, duration]);
+
+  return current;
+}
+
+const CountUpValue: React.FC<{ value: string; isVisible: boolean }> = ({ value, isVisible }) => {
+  const { prefix, number, suffix } = parseStatValue(value);
+  const count = useCountUp(number, 2000, isVisible);
+
+  if (number === 0) {
+    // 无法解析数字，直接显示原文
+    return <>{value}</>;
+  }
+
+  return <>{prefix}{isVisible ? count : 0}{suffix}</>;
+};
 
 const HighlightsSection: React.FC = () => {
   const { t } = useTranslation();
+  const { isMobile, isTablet } = useResponsive();
   const sectionRef = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          setVisible(true);
-          observer.disconnect();
+          setIsVisible(true);
+          observer.unobserve(entry.target);
         }
       },
       { threshold: 0.3 }
     );
-    if (sectionRef.current) observer.observe(sectionRef.current);
+    if (sectionRef.current) {
+      observer.observe(sectionRef.current);
+    }
     return () => observer.disconnect();
   }, []);
 
   const stats = [
-    {
-      label: t('highlights.stat1Label'),
-      value: t('highlights.stat1Value'),
-      caption: t('highlights.stat1Caption'),
-      delay: 0,
-    },
-    {
-      label: t('highlights.stat2Label'),
-      value: t('highlights.stat2Value'),
-      caption: t('highlights.stat2Caption'),
-      delay: 100,
-    },
-    {
-      label: t('highlights.stat3Label'),
-      value: t('highlights.stat3Value'),
-      caption: t('highlights.stat3Caption'),
-      delay: 200,
-    },
-    {
-      label: t('highlights.stat4Label'),
-      value: t('highlights.stat4Value'),
-      caption: t('highlights.stat4Caption'),
-      delay: 300,
-    },
+    { value: t('highlights.stat1Value'), label: t('highlights.stat1Label'), caption: t('highlights.stat1Caption') },
+    { value: t('highlights.stat2Value'), label: t('highlights.stat2Label'), caption: t('highlights.stat2Caption') },
+    { value: t('highlights.stat3Value'), label: t('highlights.stat3Label'), caption: t('highlights.stat3Caption') },
+    { value: t('highlights.stat4Value'), label: t('highlights.stat4Label'), caption: t('highlights.stat4Caption') },
+    { value: t('highlights.stat5Value'), label: t('highlights.stat5Label'), caption: t('highlights.stat5Caption') },
   ];
 
   return (
-    <section ref={sectionRef} className="relative py-16 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-b from-dark-900 via-dark-800/50 to-dark-900 pointer-events-none"></div>
-
-      <div className="relative z-10 max-w-7xl mx-auto px-6">
-        <div className="highlight-card rounded-2xl p-1">
-          <div className="rounded-2xl bg-dark-900/80 backdrop-blur-md p-10 md:p-14">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10 md:gap-8 lg:gap-0 lg:divide-x lg:divide-dark-500/40">
-              {stats.map((stat, i) => (
-                <article
-                  key={i}
-                  className={`flex flex-col items-center lg:items-start lg:px-10 xl:px-14 first:lg:pl-0 last:lg:pr-0 transition-all duration-700 ${
-                    visible
-                      ? 'opacity-100 translate-y-0'
-                      : 'opacity-0 translate-y-6'
-                  }`}
-                  style={{ transitionDelay: `${stat.delay}ms` }}
-                >
-                  <header className="flex items-center gap-3 mb-4">
-                    <span className="block w-8 h-px bg-gradient-to-r from-brand-400 to-transparent"></span>
-                    <span className="text-xs font-medium uppercase tracking-widest text-slate-500 whitespace-nowrap">
-                      {stat.label}
-                    </span>
-                  </header>
-                  <p className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-brand-400 to-cyan-400 bg-clip-text text-transparent leading-tight">
-                    {stat.value}
-                  </p>
-                  <p className="mt-2 text-sm text-slate-400">{stat.caption}</p>
-                </article>
-              ))}
+    <section
+      id="highlights"
+      ref={sectionRef}
+      style={{
+        width: '100%',
+        display: 'flex',
+        justifyContent: 'center',
+        padding: isMobile ? '60px 20px' : isTablet ? '80px 40px' : '80px 120px',
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 1200,
+          display: 'flex',
+          justifyContent: isMobile ? 'center' : 'space-between',
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+          gap: isMobile ? 32 : isTablet ? 24 : 0,
+        }}
+      >
+        {stats.map((stat, i) => (
+          <div
+            key={i}
+            style={{
+              width: isMobile ? '45%' : 164,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+            }}
+          >
+            <span
+              style={{
+                color: '#FFFFFF',
+                fontSize: 40,
+                fontWeight: 600,
+                lineHeight: '48px',
+              }}
+            >
+              <CountUpValue value={stat.value} isVisible={isVisible} />
+            </span>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                marginTop: 8,
+              }}
+            >
+              <p
+                style={{
+                  color: 'rgba(255,255,255,0.8)',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  letterSpacing: '0.5px',
+                  textTransform: 'uppercase',
+                  margin: 0,
+                }}
+              >
+                {stat.label}
+              </p>
+              <p
+                style={{
+                  color: 'rgba(255,255,255,0.4)',
+                  fontSize: 12,
+                  textAlign: 'center',
+                  lineHeight: '16px',
+                  marginTop: 4,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {stat.caption}
+              </p>
             </div>
           </div>
-        </div>
+        ))}
       </div>
     </section>
   );

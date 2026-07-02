@@ -101,6 +101,7 @@ type reviewOptions struct {
 	from           string
 	to             string
 	commit         string
+	excludes       string // --exclude: comma-separated gitignore-style patterns
 	outputFormat   string
 	audience       string // --audience: "human" (default) or "agent"
 	background     string // --background: optional requirement context
@@ -124,6 +125,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.from, "from", "", "source ref to start diff from (e.g., 'main')")
 	a.StringVar(&opts.to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
 	a.StringVarP(&opts.commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
+	a.StringVar(&opts.excludes, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 	a.StringVarP(&opts.outputFormat, "format", "f", "text", "output format: text or json")
 	a.IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file reviews")
 	a.IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
@@ -233,7 +235,7 @@ Flags:
 // --- config subcommand ---
 
 type configAction struct {
-	subCmd string // "set"
+	subCmd string // "set", "unset"
 	key    string
 	value  string
 }
@@ -254,8 +256,16 @@ func parseConfigArgs(args []string) (configAction, error) {
 			key:    args[1],
 			value:  args[2],
 		}, nil
+	case "unset":
+		if len(args) < 2 {
+			return configAction{}, fmt.Errorf("usage: ocr config unset custom_providers.<name>\ne.g., ocr config unset custom_providers.my-gateway")
+		}
+		return configAction{
+			subCmd: "unset",
+			key:    args[1],
+		}, nil
 	default:
-		return configAction{}, fmt.Errorf("unknown config sub-command: %s\nAvailable: set, provider, model", subCmd)
+		return configAction{}, fmt.Errorf("unknown config sub-command: %s\nAvailable: set, unset, provider, model", subCmd)
 	}
 }
 
@@ -264,8 +274,10 @@ func printConfigUsage() {
 
 Usage:
   ocr config set <key> <value>
-  ocr config provider              Interactive provider setup
-  ocr config model                 Interactive model selection
+  ocr config unset custom_providers.<name>  Delete a custom provider
+  ocr config unset mcp_servers.<name>       Delete an MCP server
+  ocr config provider                       Interactive provider setup
+  ocr config model                          Interactive model selection
 
 Examples:
   # Provider setup (interactive)
@@ -287,6 +299,17 @@ Examples:
   ocr config set custom_providers.my-gateway.models '["llama-3-70b","llama-3-8b"]'
   ocr config set custom_providers.my-gateway.api_key "$MY_API_KEY"
 
+  # Delete a custom provider
+  ocr config unset custom_providers.my-gateway
+
+  # MCP server configuration (stdio transport)
+  ocr config set mcp_servers.codegraph.command npx
+  ocr config set mcp_servers.codegraph.args '["-y","@anthropic/codegraph-mcp"]'
+  ocr config set mcp_servers.codegraph.env '["CODEGRAPH_TOKEN=xxx"]'
+
+  # Delete an MCP server
+  ocr config unset mcp_servers.codegraph
+
   # Legacy endpoint configuration
   ocr config set llm.url https://xx/v1/openai/chat/completions
   ocr config set llm.auth_token xxxxxxxxxx
@@ -296,6 +319,7 @@ Examples:
   ocr config set language English
   ocr config set telemetry.enabled true
 
-Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging
-Provider fields: api_key, url, protocol, model, models, auth_header, extra_body`)
+Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging
+Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers
+MCP server fields: command, args, env, tools, setup`)
 }

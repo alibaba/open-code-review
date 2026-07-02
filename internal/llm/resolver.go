@@ -3,29 +3,44 @@ package llm
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
 type ResolvedEndpoint struct {
-	URL        string
-	Token      string
-	Model      string
-	Protocol   string         // "anthropic", "openai", "codex", or "claude"
-	AuthHeader string         // Anthropic auth header: "x-api-key" or "authorization"
-	Source     string         // human-readable config source label
-	ExtraBody  map[string]any // vendor-specific request body fields
+	URL          string
+	Token        string
+	Model        string
+	Protocol     string            // "anthropic", "openai", "codex", or "claude"
+	AuthHeader   string            // Anthropic auth header: "x-api-key" or "authorization"
+	Source       string            // human-readable config source label
+	ExtraBody    map[string]any    // vendor-specific request body fields
+	ExtraHeaders map[string]string // extra HTTP headers for the LLM request
+	// Timeout is the per-request HTTP timeout; 0 means use the client default (5 min).
+	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
+	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
+	// knob; users can still override via OCR_LLM_TIMEOUT.
+	Timeout time.Duration
 }
 
 // Environment variable names for OCR-specific configuration.
 const (
-	envOCRLLMURL        = "OCR_LLM_URL"
-	envOCRLLMToken      = "OCR_LLM_TOKEN"
-	envOCRLLMModel      = "OCR_LLM_MODEL"
-	envOCRLLMAuthHeader = "OCR_LLM_AUTH_HEADER"
+	envOCRLLMURL          = "OCR_LLM_URL"
+	envOCRLLMToken        = "OCR_LLM_TOKEN"
+	envOCRLLMModel        = "OCR_LLM_MODEL"
+	envOCRLLMAuthHeader   = "OCR_LLM_AUTH_HEADER"
+	envOCRLLMExtraHeaders = "OCR_LLM_EXTRA_HEADERS"
+	// envOCRLLMTimeout is a global override applied in ResolveEndpointWithModelOverride
+	// after any strategy resolves, rather than inside tryOCREnv like other OCR_LLM_* vars.
+	// This lets it override timeout for all resolution paths (OCR env, config file,
+	// provider config, Claude Code env, shell RC).
+	envOCRLLMTimeout    = "OCR_LLM_TIMEOUT"
 	envOCRUseAnthropic  = "OCR_USE_ANTHROPIC"
 	envOCRLLMProtocol   = "OCR_LLM_PROTOCOL"
 	envOCRCodexRuntime  = "OCR_CODEX_RUNTIME"
@@ -81,6 +96,16 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 				ep.Source = s.name
 			}
 			ep.Model = stripModelSuffix(ep.Model)
+			// OCR_LLM_TIMEOUT is a global override: applies regardless of
+			// which strategy resolved the endpoint, and takes precedence
+			// over config-file values when set.
+			envTimeout, ok, err := parseTimeoutEnv()
+			if err != nil {
+				return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
+			}
+			if ok {
+				ep.Timeout = envTimeout
+			}
 			return ep, nil
 		}
 	}
@@ -93,6 +118,43 @@ func endpointComplete(ep ResolvedEndpoint) bool {
 		return true
 	}
 	return ep.URL != "" && ep.Token != "" && ep.Model != ""
+}
+
+// parseTimeoutEnv reads and validates the OCR_LLM_TIMEOUT environment variable.
+// Returns the parsed duration and true if set, or 0 and false if unset/empty.
+// Returns an error for invalid values (non-integer, negative, overflow) to give
+// the user clear feedback instead of silently falling back to the default.
+func parseTimeoutEnv() (time.Duration, bool, error) {
+	raw := strings.TrimSpace(os.Getenv(envOCRLLMTimeout))
+	if raw == "" {
+		return 0, false, nil
+	}
+	sec, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false, fmt.Errorf("OCR_LLM_TIMEOUT must be an integer (seconds): %w", err)
+	}
+	d, err := validateTimeoutSec(sec)
+	if err != nil {
+		return 0, false, fmt.Errorf("OCR_LLM_TIMEOUT: %w", err)
+	}
+	return d, true, nil
+}
+
+// validateTimeoutSec converts a config-file timeout (in seconds) to time.Duration.
+// Returns 0 for zero input (use default). Rejects negative values and overflow.
+func validateTimeoutSec(sec int) (time.Duration, error) {
+	if sec == 0 {
+		return 0, nil
+	}
+	if sec < 0 {
+		return 0, fmt.Errorf("timeout_sec must be non-negative, got %d", sec)
+	}
+	// Guard against overflow: time.Duration is int64 nanoseconds.
+	maxSec := int64(math.MaxInt64 / int64(time.Second))
+	if int64(sec) > maxSec {
+		return 0, fmt.Errorf("timeout_sec %d overflows time.Duration (max %d)", sec, maxSec)
+	}
+	return time.Duration(sec) * time.Second, nil
 }
 
 // tryOCREnv reads OCR-specific environment variables.
@@ -157,7 +219,16 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 		}
 	}
 
-	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR environment"}, true, nil
+	var extraHeaders map[string]string
+	if extraHeadersRaw := os.Getenv(envOCRLLMExtraHeaders); extraHeadersRaw != "" {
+		var err error
+		extraHeaders, err = ParseExtraHeaders(extraHeadersRaw)
+		if err != nil {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", err)
+		}
+	}
+
+	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR environment", ExtraHeaders: extraHeaders}, true, nil
 }
 
 // normalizeProtocol validates an explicit protocol selection. Empty means
@@ -174,26 +245,30 @@ func normalizeProtocol(raw string) (string, error) {
 
 // llmFileConfig represents the llm section in config.json.
 type llmFileConfig struct {
-	URL           string         `json:"url,omitempty"`
-	AuthToken     string         `json:"auth_token,omitempty"`
-	AuthHeader    string         `json:"auth_header,omitempty"`
-	Model         string         `json:"model,omitempty"`
-	Protocol      string         `json:"protocol,omitempty"`
-	CodexRuntime  string         `json:"codex_runtime,omitempty"`
-	ClaudeRuntime string         `json:"claude_runtime,omitempty"`
-	UseAnthropic  *bool          `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
-	ExtraBody     map[string]any `json:"extra_body,omitempty"`
+	URL           string            `json:"url,omitempty"`
+	AuthToken     string            `json:"auth_token,omitempty"`
+	AuthHeader    string            `json:"auth_header,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	Protocol      string            `json:"protocol,omitempty"`
+	CodexRuntime  string            `json:"codex_runtime,omitempty"`
+	ClaudeRuntime string            `json:"claude_runtime,omitempty"`
+	UseAnthropic  *bool             `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false
+	TimeoutSec    int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
+	ExtraBody     map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders  map[string]string `json:"extra_headers,omitempty"`
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
 type providerEntryConfig struct {
-	APIKey     string         `json:"api_key,omitempty"`
-	URL        string         `json:"url,omitempty"`
-	Protocol   string         `json:"protocol,omitempty"`
-	Model      string         `json:"model,omitempty"`
-	Models     []string       `json:"models,omitempty"`
-	AuthHeader string         `json:"auth_header,omitempty"`
-	ExtraBody  map[string]any `json:"extra_body,omitempty"`
+	APIKey       string            `json:"api_key,omitempty"`
+	URL          string            `json:"url,omitempty"`
+	Protocol     string            `json:"protocol,omitempty"`
+	Model        string            `json:"model,omitempty"`
+	Models       []string          `json:"models,omitempty"`
+	AuthHeader   string            `json:"auth_header,omitempty"`
+	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
+	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
 
 type configFile struct {
@@ -334,19 +409,27 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 
 	extraBody = entry.ExtraBody
+	extraHeaders := entry.ExtraHeaders
+
+	timeout, err := validateTimeoutSec(entry.TimeoutSec)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+	}
 
 	if protocol == "anthropic" {
 		url = ensureMessagesSuffix(url)
 	}
 
 	return ResolvedEndpoint{
-		URL:        url,
-		Token:      apiKey,
-		Model:      model,
-		Protocol:   protocol,
-		AuthHeader: authHeader,
-		Source:     "provider:" + cfg.Provider,
-		ExtraBody:  extraBody,
+		URL:          url,
+		Token:        apiKey,
+		Model:        model,
+		Protocol:     protocol,
+		AuthHeader:   authHeader,
+		Source:       "provider:" + cfg.Provider,
+		ExtraBody:    extraBody,
+		ExtraHeaders: extraHeaders,
+		Timeout:      timeout,
 	}, true, nil
 }
 
@@ -412,7 +495,12 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody}, true, nil
+	timeout, err := validateTimeoutSec(cfg.Llm.TimeoutSec)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
+	}
+
+	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders, Timeout: timeout}, true, nil
 }
 
 func codexRuntimeExtraBody(runtime string, base map[string]any) (map[string]any, error) {
@@ -617,6 +705,83 @@ func NormalizeAuthHeader(header string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported auth_header value %q; expected \"x-api-key\" or \"authorization\"", header)
 	}
+}
+
+// reservedHeaders are HTTP headers that extra_headers must not override.
+// They are managed by dedicated config fields (auth_header, auth_token) or set automatically by the SDK.
+// Letting extra_headers clobber them would cause confusing auth/content-type failures with no clear error.
+var reservedHeaders = map[string]bool{
+	"authorization": true,
+	"x-api-key":     true,
+	"content-type":  true,
+	"user-agent":    true,
+}
+
+// ParseExtraHeaders parses a string of comma-separated key=value pairs into a dictionary.
+// Values may be double-quoted to include commas, e.g. X-Forwarded-For="1.2.3.4,5.6.7.8".
+// Reserved header names (authorization, x-api-key, content-type, user-agent) are rejected
+// to prevent accidental override of auth or content-type set by the SDK.
+func ParseExtraHeaders(raw string) (map[string]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+
+	pairs, err := splitHeaderPairs(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]string)
+	for _, pair := range pairs {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid extra header %q: expected key=value", pair)
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		if key == "" {
+			return nil, fmt.Errorf("invalid extra header %q: empty header name", pair)
+		}
+		if reservedHeaders[strings.ToLower(key)] {
+			return nil, fmt.Errorf("extra header %q conflicts with a reserved header; use the dedicated config field instead", key)
+		}
+		if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+			value = value[1 : len(value)-1]
+		}
+		result[key] = value
+	}
+	return result, nil
+}
+
+// splitHeaderPairs splits a comma-separated string while respecting double-quoted segments.
+// Commas inside quotes are part of the value, not pair separators.
+func splitHeaderPairs(raw string) ([]string, error) {
+	var pairs []string
+	var sb strings.Builder
+	inQuote := false
+	for _, c := range raw {
+		switch {
+		case c == '"':
+			inQuote = !inQuote
+			sb.WriteRune(c)
+		case c == ',' && !inQuote:
+			pairs = append(pairs, sb.String())
+			sb.Reset()
+		default:
+			sb.WriteRune(c)
+		}
+	}
+	if sb.Len() > 0 || len(pairs) == 0 {
+		pairs = append(pairs, sb.String())
+	}
+	if inQuote {
+		return nil, fmt.Errorf("unclosed quote in extra headers")
+	}
+	return pairs, nil
 }
 
 // ensureMessagesSuffix appends /v1/messages to base URLs that lack a versioned path.

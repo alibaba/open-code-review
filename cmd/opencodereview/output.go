@@ -186,12 +186,19 @@ type jsonSummary struct {
 	Elapsed          string `json:"elapsed"`
 }
 
+type jsonToolCalls struct {
+	Total  int64            `json:"total"`
+	ByTool map[string]int64 `json:"by_tool"`
+}
+
 type jsonOutput struct {
-	Status   string               `json:"status"`
-	Message  string               `json:"message,omitempty"`
-	Summary  *jsonSummary         `json:"summary,omitempty"`
-	Comments []model.LlmComment   `json:"comments"`
-	Warnings []agent.AgentWarning `json:"warnings,omitempty"`
+	Status         string               `json:"status"`
+	Message        string               `json:"message,omitempty"`
+	Summary        *jsonSummary         `json:"summary,omitempty"`
+	ToolCalls      *jsonToolCalls       `json:"tool_calls"`
+	Comments       []model.LlmComment   `json:"comments"`
+	Warnings       []agent.AgentWarning `json:"warnings,omitempty"`
+	ProjectSummary string               `json:"project_summary,omitempty"`
 }
 
 func outputJSON(comments []model.LlmComment) error {
@@ -208,7 +215,8 @@ func outputJSON(comments []model.LlmComment) error {
 }
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
-	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64, duration time.Duration) error {
+	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
+	duration time.Duration, projectSummary string, toolCalls map[string]int64) error {
 	out := jsonOutput{
 		Status:   "success",
 		Comments: comments,
@@ -222,6 +230,19 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			CacheWriteTokens: cacheWriteTokens,
 			Elapsed:          duration.Round(time.Second).String(),
 		},
+		ProjectSummary: projectSummary,
+	}
+	var total int64
+	for _, v := range toolCalls {
+		total += v
+	}
+	byTool := toolCalls
+	if byTool == nil {
+		byTool = make(map[string]int64)
+	}
+	out.ToolCalls = &jsonToolCalls{
+		Total:  total,
+		ByTool: byTool,
 	}
 	if len(comments) == 0 {
 		if hasSubtaskErrors(warnings) {
@@ -248,6 +269,9 @@ func outputJSONNoFiles() error {
 		Status:   "skipped",
 		Message:  "No supported files changed.",
 		Comments: []model.LlmComment{},
+		ToolCalls: &jsonToolCalls{
+			ByTool: map[string]int64{},
+		},
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
@@ -311,6 +335,8 @@ func statusBadge(status string) string {
 		return "\033[36m[R]\033[0m"
 	case "binary":
 		return "\033[35m[B]\033[0m"
+	case "scan":
+		return "\033[34m[S]\033[0m"
 	default:
 		return "[?]"
 	}

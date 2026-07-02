@@ -1,146 +1,216 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import React, { useState, useRef, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
-import logoSvg from '../../logo.svg';
+import { useResponsive } from '../hooks/useResponsive';
+import socialIcon from '../assets/icons/icon-github.svg';
+import brandIcon from '../assets/images/brandicon.svg';
+
+import type { Language } from '../i18n/types';
+
+const LANG_OPTIONS: { value: Language; label: string }[] = [
+  { value: 'en', label: 'English' },
+  { value: 'zh', label: '中文' },
+  { value: 'ja', label: '日本語' },
+];
+
+const navTabs = [
+  { path: '/', labelKey: 'navbar.features' },
+  { path: '/benchmark', labelKey: 'navbar.benchmark' },
+  { path: '/quickstart', labelKey: 'navbar.quickstart' },
+  { path: '/docs', labelKey: 'navbar.docs' },
+];
 
 const Navbar: React.FC = () => {
-  const [isScrolled, setIsScrolled] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { language, setLanguage, t } = useTranslation();
+  const { isMobile } = useResponsive();
   const location = useLocation();
   const navigate = useNavigate();
-  const isDocsPage = location.pathname === '/docs';
-  const { t, language, setLanguage } = useTranslation();
-
-  const navItems = [
-    { label: t('navbar.features'), id: 'features' },
-    { label: t('navbar.benchmark'), id: 'benchmark' },
-    { label: t('navbar.quickstart'), id: 'quickstart' }
-  ];
-
-  const navigateToSection = (sectionId: string) => {
-    navigate('/', { state: { scrollTo: sectionId } });
-    setIsMobileMenuOpen(false);
-  };
+  const [langOpen, setLangOpen] = useState(false);
+  const langRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleScroll = () => setIsScrolled(window.scrollY > 20);
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    const handler = (e: MouseEvent) => {
+      if (langRef.current && !langRef.current.contains(e.target as Node)) setLangOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const scrollToSection = (sectionId: string) => {
-    const element = document.getElementById(sectionId);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
-    setIsMobileMenuOpen(false);
-  };
-
-  const toggleLanguage = () => {
-    setLanguage(language === 'en' ? 'zh' : 'en');
-  };
+  const currentPath = location.pathname;
 
   return (
     <nav
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        isScrolled || isDocsPage
-          ? 'bg-dark-900/80 backdrop-blur-xl border-b border-dark-600/30 shadow-lg shadow-black/20'
-          : 'bg-transparent'
-      }`}
+      style={{
+        width: '100%',
+        height: isMobile ? 56 : 72,
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderBottom: '1px solid rgba(61,61,61,0.6)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        zIndex: 100,
+        willChange: 'transform',
+      }}
     >
-      {/* Top edge glow */}
-      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-brand-500/10 to-transparent opacity-0 group-hover:opacity-100"></div>
-
-      <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-3">
-          <img src={logoSvg} alt="OpenCodeReview" className="w-8 h-8 rounded-lg" />
-          <span className="font-bold text-lg tracking-tight">
-            <span className="text-white">Open Code Review</span>
-          </span>
-        </Link>
-
-        <div className="hidden md:flex items-center gap-8">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => isDocsPage ? navigateToSection(item.id) : scrollToSection(item.id)}
-              className="nav-link text-slate-400 hover:text-white text-sm font-medium transition-colors"
-            >
-              {item.label}
-            </button>
-          ))}
-          <Link
-            to="/docs"
-            className={`nav-link text-sm font-medium transition-colors flex items-center gap-1 ${
-              isDocsPage ? 'text-brand-400' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <i className="fa-solid fa-book text-xs"></i>
-            {t('navbar.docs')}
-          </Link>
+      <div
+        style={{
+          width: '100%',
+          maxWidth: 1440,
+          height: isMobile ? 56 : 72,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: isMobile ? '0 16px' : '0 32px',
+        }}
+      >
+        {/* Logo */}
+        <div
+          style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
+          onClick={() => navigate('/')}
+        >
+          <img src={brandIcon} alt="Open Code Review" style={{ height: isMobile ? 20 : 24 }} />
         </div>
 
-        <div className="hidden md:flex items-center gap-3">
-          <button
-            onClick={toggleLanguage}
-            className="text-slate-400 hover:text-white text-sm font-medium px-3 py-1.5 rounded-lg border border-dark-600/30 hover:border-slate-500/50 transition-all"
-          >
-            {language === 'en' ? '中文' : 'EN'}
-          </button>
+        {/* Nav Tabs - hidden on mobile */}
+        {!isMobile && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {navTabs.map((tab) => {
+              const isActive = currentPath === tab.path;
+              return (
+                <button
+                  key={tab.path}
+                  onClick={() => navigate(tab.path)}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s',
+                  }}
+                >
+                  <span
+                    style={{
+                      color: '#FFFFFF',
+                      fontSize: 14,
+                      lineHeight: '20px',
+                      opacity: isActive ? 1 : 0.6,
+                      fontWeight: isActive ? 500 : 400,
+                    }}
+                  >
+                    {t(tab.labelKey)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Right section */}
+        <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', gap: 16 }}>
+          {/* Language Switcher */}
+          <div ref={langRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <button
+              onClick={() => setLangOpen(v => !v)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'none',
+                border: '1px solid #FFFFFF',
+                borderRadius: 4,
+                cursor: 'pointer',
+                opacity: 0.6,
+                padding: 0,
+                width: 18,
+                height: 18,
+                boxSizing: 'border-box' as const,
+              }}
+            >
+              <span style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: '#FFFFFF',
+                lineHeight: '18px',
+                textAlign: 'center' as const,
+                width: '100%',
+                fontFamily: language === 'ja' ? "'Hiragino Sans', sans-serif" : "'PingFang SC', -apple-system, sans-serif",
+              }}>
+                {language === 'en' ? 'En' : language === 'zh' ? '中' : 'あ'}
+              </span>
+            </button>
+            {langOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: 0,
+                  marginTop: 8,
+                  background: '#1a1a1a',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: 8,
+                  padding: 4,
+                  zIndex: 200,
+                  minWidth: 100,
+                }}
+              >
+                {LANG_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => { setLanguage(opt.value); setLangOpen(false); }}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      padding: '8px 12px',
+                      background: opt.value === language ? 'rgba(255,255,255,0.08)' : 'transparent',
+                      border: 'none',
+                      borderRadius: 6,
+                      color: opt.value === language ? '#fff' : 'rgba(255,255,255,0.6)',
+                      fontSize: 13,
+                      textAlign: 'left' as const,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <a
             href="https://github.com/alibaba/open-code-review"
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-secondary text-brand-400 text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2"
+            style={{ display: 'flex', alignItems: 'center', opacity: 0.6 }}
           >
-            <i className="fa-brands fa-github"></i>
-            GitHub
+            <img src={socialIcon} alt="Social" style={{ width: 20, height: 20 }} />
           </a>
           <button
-            onClick={() => isDocsPage ? navigateToSection('quickstart') : scrollToSection('quickstart')}
-            className="btn-primary text-dark-900 text-sm font-semibold px-4 py-2 rounded-lg"
+            onClick={() => navigate('/quickstart')}
+            style={{
+              height: 32,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 12px',
+              background: '#ffffff',
+              border: '1px solid #EBEBEB',
+              borderRadius: 6,
+              color: 'rgba(0,0,0,0.77)',
+              fontSize: isMobile ? 12 : 14,
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
           >
             {t('navbar.getStarted')}
           </button>
         </div>
-
-        <button
-          className="md:hidden text-slate-400 hover:text-white"
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-        >
-          <i className={`fa-solid ${isMobileMenuOpen ? 'fa-xmark' : 'fa-bars'} text-lg`}></i>
-        </button>
       </div>
-
-      {isMobileMenuOpen && (
-        <div className="md:hidden bg-dark-900/95 backdrop-blur-xl border-b border-dark-600/30 px-6 py-4 flex flex-col gap-4">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => isDocsPage ? navigateToSection(item.id) : scrollToSection(item.id)}
-              className="text-slate-400 hover:text-white text-sm font-medium text-left transition-colors"
-            >
-              {item.label}
-            </button>
-          ))}
-          <Link
-            to="/docs"
-            onClick={() => setIsMobileMenuOpen(false)}
-            className={`text-sm font-medium text-left transition-colors flex items-center gap-1 ${
-              isDocsPage ? 'text-brand-400' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <i className="fa-solid fa-book text-xs"></i>
-            {t('navbar.docs')}
-          </Link>
-          <button
-            onClick={toggleLanguage}
-            className="text-slate-400 hover:text-white text-sm font-medium text-left transition-colors"
-          >
-            {language === 'en' ? '切换到中文' : 'Switch to English'}
-          </button>
-        </div>
-      )}
     </nav>
   );
 };

@@ -1,0 +1,1833 @@
+<!--
+  OCR VSCode 插件 UI 原型
+  ========================
+  双击此文件在浏览器中打开即可查看。
+
+  使用方式：
+  - 点击顶部切换条切换 6 种状态（空闲 / 审查中 / 完成 / 无问题 / 已取消 / 失败）
+  - 点击 配置:* 切换 3 种配置视图（引导 / 列表 / 表单）
+  - 点击 ⚙ 进入配置管理
+  - 点击 ▾ 切换模型
+  - 点击 ▶ 重放 重放流式日志动画
+  - hover 状态栏右上角出现"重置"，点击清空所有本地数据
+
+  设计规范：silent-night-ui/style-reference.md
+  产品设计：docs/superpowers/specs/2026-06-04-ocr-vscode-ui-design.md
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OCR · VSCode 插件 UI 原型</title>
+<style>
+/* === 1. CSS Variables (silent-night-ui §1) === */
+:root {
+  --bg: #0a0d12;
+  --bg-soft: #11151a;
+  --bg-deeper: #06090d;
+  --card: #14181e;
+  --card-soft: #1a1f27;
+  --card-quiet: #20262f;
+  --card-deeper: #0d1015;
+  --ink: #ececec;
+  --ink-soft: #b8b8b2;
+  --ink-quiet: #7e828a;
+  --ink-faint: #4f535b;
+  --moon: #f3f3ef;
+  --moon-soft: #b8b8b3;
+  --moon-quiet: #6b6f76;
+  --moon-faint: #4a4f56;
+  --mint: #45e6a4;
+  --mint-soft: #8ff0c2;
+  --mint-glow: rgba(69, 230, 164, 0.35);
+  --mint-tint: rgba(69, 230, 164, 0.10);
+  --rule: rgba(255, 255, 255, 0.07);
+  --rule-soft: rgba(255, 255, 255, 0.04);
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, 'Helvetica Neue', 'PingFang SC', 'Noto Sans SC', sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, 'PingFang SC', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Berkeley Mono', Consolas, Menlo, monospace;
+}
+
+/* === 2. Global Base (silent-night-ui §2) === */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+  height: 100vh;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(ellipse at 20% -10%, rgba(69,230,164,0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 90% 10%, rgba(120,140,200,0.04) 0%, transparent 45%),
+    radial-gradient(ellipse at 50% 100%, rgba(69,230,164,0.03) 0%, transparent 50%);
+}
+body::after {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.025) 1px, transparent 0);
+  background-size: 28px 28px;
+}
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+::selection { background: var(--mint-tint); color: var(--mint); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+
+/* === 3. VSCode Chrome Layout === */
+.vscode-chrome {
+  position: relative; z-index: 1;
+  display: flex;
+  height: 100vh;
+  background: var(--bg);
+}
+.activity-bar {
+  width: 48px; flex-shrink: 0;
+  background: var(--bg-deeper);
+  border-right: 1px solid var(--rule);
+  display: flex; flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 6px;
+}
+.activity-bar .ab-icon {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: var(--card);
+  opacity: 0.5;
+}
+.activity-bar .ab-icon.active {
+  opacity: 1;
+  background: var(--card-quiet);
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+.sidebar {
+  width: 360px; flex-shrink: 0;
+  background: var(--card);
+  border-right: 1px solid var(--rule);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+.editor-stub {
+  flex: 1;
+  background: var(--bg-soft);
+  display: flex;
+  position: relative;
+  overflow: hidden;
+}
+.editor-stub-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+.editor-stub-text {
+  font-size: 12px;
+  color: var(--ink-faint);
+  letter-spacing: 0.05em;
+}
+/* Editor: fake code lines */
+.editor-code {
+  width: 100%;
+  padding: 12px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--ink-faint);
+  overflow-y: auto;
+  display: none;
+}
+.editor-code.active { display: block; }
+.editor-code .ln {
+  display: inline-block;
+  width: 32px;
+  text-align: right;
+  margin-right: 16px;
+  color: var(--ink-faint);
+  opacity: 0.5;
+  user-select: none;
+}
+.editor-code .code-line { color: var(--ink-soft); }
+.editor-code .code-line .kw { color: #c586c0; }
+.editor-code .code-line .fn { color: #dcdcaa; }
+.editor-code .code-line .str { color: #ce9178; }
+.editor-code .code-line .cm { color: var(--ink-faint); font-style: italic; }
+.editor-code .code-line .tp { color: #4ec9b0; }
+.editor-code .code-highlight {
+  background: rgba(69, 230, 164, 0.08);
+  display: block;
+  margin: 0 -16px;
+  padding: 0 16px;
+  border-left: 2px solid var(--mint);
+}
+/* Editor: inline review panel (positioned after highlighted line) */
+.review-panel {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--mint);
+  display: none;
+  margin: 0 -16px;
+  padding: 0;
+}
+.review-panel.active { display: block; }
+.review-panel-header {
+  display: flex; align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--rule-soft);
+  font-size: 12px;
+  color: var(--ink-soft);
+  gap: 8px;
+}
+.review-panel-title { flex: 1; font-weight: 500; }
+.review-panel-nav {
+  display: flex; gap: 2px;
+}
+.review-panel-nav button {
+  background: transparent;
+  border: none;
+  color: var(--ink-quiet);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--font);
+  transition: background-color 0.15s, color 0.15s;
+}
+.review-panel-nav button:hover { background: var(--card-quiet); color: var(--ink); }
+.review-panel-body {
+  padding: 12px 16px;
+}
+.rp-status {
+  font-size: 11.5px;
+  color: var(--ink-quiet);
+  margin-bottom: 8px;
+}
+.rp-status .rp-tag {
+  color: #e6a845;
+  font-weight: 600;
+}
+.rp-comment {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.65;
+  margin-bottom: 14px;
+}
+.rp-actions {
+  display: flex; gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule-soft);
+}
+.rp-action {
+  background: none; border: none;
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--mint);
+  cursor: pointer;
+  padding: 0;
+  transition: opacity 0.15s;
+}
+.rp-action:hover { opacity: 0.7; }
+
+/* === 4. Status Bar === */
+.status-bar {
+  display: flex; align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+  gap: 8px;
+  flex-shrink: 0;
+  position: relative;
+}
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 8px var(--mint-glow);
+  animation: pulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.status-dot.dim {
+  background: var(--ink-faint);
+  box-shadow: none;
+  animation: none;
+}
+.status-model {
+  font-size: 12.5px; font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.status-sep { color: var(--ink-faint); font-size: 12px; }
+.status-provider {
+  font-size: 12px;
+  color: var(--ink-quiet);
+  white-space: nowrap;
+}
+.status-dropdown-trigger {
+  background: none; border: none;
+  color: var(--ink-quiet);
+  font-size: 11px; cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+.status-dropdown-trigger:hover {
+  background: var(--card-quiet);
+  color: var(--ink-soft);
+}
+.status-spacer { flex: 1; }
+.status-gear {
+  background: none; border: none;
+  color: var(--ink-quiet);
+  font-size: 14px; cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: background-color 0.2s, color 0.2s;
+}
+.status-gear:hover {
+  background: var(--card-quiet);
+  color: var(--ink);
+}
+.status-reset {
+  background: none; border: none;
+  color: var(--ink-faint);
+  font-size: 9px; cursor: pointer;
+  padding: 2px 4px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.status-bar:hover .status-reset { opacity: 1; }
+
+.model-dropdown {
+  position: absolute;
+  top: 100%; left: 14px; right: 14px;
+  background: var(--card-soft);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 6px;
+  z-index: 20;
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.6);
+  display: none;
+}
+.model-dropdown.open { display: block; }
+.model-dropdown-group {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 8px 10px 4px;
+  font-weight: 600;
+}
+.model-dropdown-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.model-dropdown-item:hover {
+  background: var(--card-quiet);
+  color: var(--ink);
+}
+.model-dropdown-item .md-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: transparent;
+  flex-shrink: 0;
+}
+.model-dropdown-item.active { color: var(--ink); font-weight: 600; }
+.model-dropdown-item.active .md-dot {
+  background: var(--mint);
+  box-shadow: 0 0 6px var(--mint-glow);
+}
+
+/* === 5. Setup Region === */
+.setup {
+  padding: 14px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--rule);
+}
+.setup-label {
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-quiet);
+  font-weight: 600;
+  margin-bottom: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.setup-label::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 6px var(--mint-glow);
+}
+.mode-tabs {
+  display: flex;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 3px;
+  margin-bottom: 12px;
+  gap: 2px;
+}
+.mode-tab {
+  flex: 1;
+  padding: 6px 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-quiet);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+  text-align: center;
+}
+.mode-tab:hover { color: var(--ink-soft); background: var(--card-soft); }
+.mode-tab.active {
+  background: var(--card-quiet);
+  color: var(--ink);
+  font-weight: 600;
+}
+.mode-params { display: none; margin-bottom: 12px; }
+.mode-params.active { display: block; }
+.mode-param-label {
+  font-size: 11px;
+  color: var(--ink-quiet);
+  margin-bottom: 4px;
+}
+.mode-param-label:not(:first-child) { margin-top: 8px; }
+.mode-param-input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.mode-param-input:focus { border-color: var(--mint); }
+.mode-param-input::placeholder { color: var(--ink-faint); }
+.mode-param-select {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%237e828a'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+  cursor: pointer;
+}
+.mode-param-select:focus { border-color: var(--mint); }
+.mode-param-select option {
+  background: var(--card-soft);
+  color: var(--ink);
+}
+.commit-list { margin-top: 8px; }
+.commit-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+.commit-row:hover { background: var(--card-soft); }
+.commit-row.active { background: var(--mint-tint); }
+.commit-radio {
+  appearance: none; -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-top: 1px;
+  position: relative;
+  transition: border-color 0.15s;
+}
+.commit-row.active .commit-radio {
+  border-color: var(--mint);
+}
+.commit-row.active .commit-radio::after {
+  content: '';
+  position: absolute;
+  left: 3px; top: 3px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--mint);
+}
+.commit-info { flex: 1; min-width: 0; }
+.commit-msg {
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+.commit-meta {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  margin-top: 1px;
+}
+.commit-meta .commit-sha { color: var(--ink-quiet); }
+.files-label {
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-quiet);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.file-list { margin-bottom: 14px; }
+.file-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 4px;
+  border-radius: 6px;
+  transition: background-color 0.15s;
+  cursor: pointer;
+}
+.file-row:hover { background: var(--card-soft); }
+.file-row input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.file-row input[type="checkbox"]:checked {
+  background: var(--mint);
+  border-color: var(--mint);
+}
+.file-row input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3.5px; top: 1px;
+  width: 4px; height: 7px;
+  border: solid #0a1010;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+.file-name {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--ink);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-badge {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.file-badge.added { color: var(--mint); background: var(--mint-tint); }
+.file-badge.modified { color: var(--ink-quiet); background: rgba(255,255,255,0.05); }
+.file-badge.deleted { color: var(--ink-faint); background: rgba(255,255,255,0.03); }
+.primary-btn {
+  width: 100%;
+  padding: 10px 16px;
+  background: var(--mint);
+  color: #0a1010;
+  border: none;
+  border-radius: 10px;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.primary-btn:hover { background: var(--mint-soft); }
+.primary-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* === 6. Action Region === */
+.action-region {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+}
+.action-idle,
+.action-running,
+.action-done,
+.action-empty,
+.action-cancelled,
+.action-failed { display: none; }
+
+body[data-state="idle"] .action-idle { display: block; }
+body[data-state="running"] .action-running { display: block; }
+body[data-state="done"] .action-done { display: block; }
+body[data-state="empty"] .action-empty { display: block; }
+body[data-state="cancelled"] .action-cancelled { display: block; }
+body[data-state="failed"] .action-failed { display: block; }
+
+.idle-note {
+  text-align: center;
+  padding: 40px 20px;
+  font-size: 12.5px;
+  color: var(--ink-faint);
+  line-height: 1.6;
+}
+
+/* Running: Log Viewer */
+.log-viewer {
+  background: var(--bg-deeper);
+  border: 1px solid var(--rule-soft);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.75;
+  color: var(--ink-soft);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.log-line { white-space: pre-wrap; word-break: break-all; }
+.log-line.hidden { display: none; }
+.log-line .log-tag { color: var(--ink-quiet); }
+.log-line .log-file { color: var(--mint); }
+.log-line .log-dim { color: var(--ink-faint); }
+.log-line .log-warn { color: #e6a845; }
+.log-cursor {
+  display: inline-block;
+  width: 6px; height: 13px;
+  background: var(--mint);
+  vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+  margin-left: 2px;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.cancel-pill {
+  display: inline-flex; align-items: center;
+  padding: 5px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  font-family: var(--font);
+  font-size: 11.5px;
+  color: var(--ink-quiet);
+  cursor: pointer;
+  margin-top: 12px;
+  float: right;
+  transition: background-color 0.2s, color 0.2s;
+}
+.cancel-pill:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--ink-soft);
+}
+
+.replay-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--ink-quiet);
+  cursor: pointer;
+  margin-top: 8px;
+  transition: background-color 0.2s, color 0.2s;
+}
+.replay-btn:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--ink-soft);
+}
+.replay-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Done: Summary */
+.done-summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  background: var(--mint-tint);
+  border-radius: 10px;
+  margin-bottom: 14px;
+  font-size: 12.5px;
+  color: var(--mint);
+  font-weight: 500;
+}
+.done-summary .ds-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mint); flex-shrink: 0;
+}
+
+/* Comment Card */
+.comment-card {
+  background: var(--card-soft);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 10px;
+  transition: opacity 0.3s, max-height 0.3s, padding 0.3s, margin 0.3s;
+  max-height: 400px;
+  overflow: hidden;
+}
+.comment-card.dismissed {
+  opacity: 0; max-height: 0;
+  padding: 0 14px; margin-bottom: 0;
+}
+.comment-header {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px; flex-wrap: wrap;
+}
+.comment-file {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+.comment-line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-quiet);
+  background: var(--card-quiet);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.severity-pill {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.severity-pill.critical { background: var(--mint-tint); color: var(--mint); }
+.severity-pill.warn { background: var(--card-quiet); color: var(--ink-soft); }
+.severity-pill.info { background: rgba(255,255,255,0.04); color: var(--ink-quiet); }
+.comment-body {
+  font-size: 13px; line-height: 1.6;
+  color: var(--ink); margin-bottom: 10px;
+}
+.comment-actions { display: flex; gap: 6px; }
+.comment-actions button {
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--ink-quiet);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+.comment-actions button:hover {
+  background: var(--card-quiet);
+  color: var(--ink-soft);
+  border-color: rgba(255,255,255,0.12);
+}
+
+.empty-note { text-align: center; padding: 40px 20px; }
+.empty-note .en-dot {
+  display: inline-block;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 8px var(--mint-glow);
+  margin-bottom: 14px;
+}
+.empty-note .en-text {
+  font-size: 13px; color: var(--mint); font-weight: 500;
+}
+
+.cancelled-note {
+  padding: 12px 14px;
+  border-left: 2.5px solid var(--ink-faint);
+  border-radius: 0 10px 10px 0;
+  background: var(--card-soft);
+  margin-bottom: 14px;
+  font-size: 12.5px;
+  color: var(--ink-quiet);
+  line-height: 1.5;
+}
+
+.failed-card {
+  background: var(--card-soft);
+  border-radius: 12px;
+  padding: 18px;
+  text-align: center;
+}
+.failed-card .fc-msg {
+  font-size: 13px; color: var(--ink-soft);
+  margin-bottom: 14px; line-height: 1.6;
+}
+.retry-pill {
+  display: inline-flex; align-items: center;
+  padding: 6px 18px;
+  background: var(--mint);
+  color: #0a1010;
+  border: none;
+  border-radius: 999px;
+  font-family: var(--font);
+  font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.retry-pill:hover { background: var(--mint-soft); }
+
+/* === 7. Config Overlay === */
+.config-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--card);
+  z-index: 10;
+  display: none;
+  flex-direction: column;
+  overflow-y: auto;
+}
+body[data-config="empty"] .config-overlay,
+body[data-config="list"] .config-overlay,
+body[data-config="form"] .config-overlay { display: flex; }
+
+.config-empty,
+.config-list,
+.config-form { display: none; }
+body[data-config="empty"] .config-empty { display: block; }
+body[data-config="list"] .config-list { display: block; }
+body[data-config="form"] .config-form { display: block; }
+
+.config-empty {
+  padding: 60px 24px;
+  text-align: center;
+}
+.config-empty .ce-dot {
+  display: inline-block;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 12px var(--mint-glow);
+  margin-bottom: 20px;
+}
+.config-empty .ce-label {
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-quiet);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.config-empty .ce-title {
+  font-size: 17px; font-weight: 600;
+  color: var(--ink); margin-bottom: 10px;
+}
+.config-empty .ce-desc {
+  font-size: 12.5px; color: var(--ink-quiet);
+  line-height: 1.6; margin-bottom: 28px;
+  max-width: 260px; margin-left: auto; margin-right: auto;
+}
+.config-empty .ce-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 10px 24px;
+  background: var(--mint); color: #0a1010;
+  border: none; border-radius: 10px;
+  font-family: var(--font);
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.config-empty .ce-btn:hover { background: var(--mint-soft); }
+
+.config-list { padding: 14px; }
+.config-list-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.config-list-title {
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-quiet);
+  font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+.config-list-title::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 6px var(--mint-glow);
+}
+.config-list-close {
+  background: none; border: none;
+  color: var(--ink-quiet);
+  font-size: 16px; cursor: pointer;
+  padding: 4px 8px; border-radius: 6px;
+  transition: background-color 0.2s, color 0.2s;
+}
+.config-list-close:hover { background: var(--card-quiet); color: var(--ink); }
+.provider-card {
+  background: var(--card-soft);
+  border-radius: 12px;
+  padding: 14px; margin-bottom: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  display: flex; align-items: center; gap: 10px;
+}
+.provider-card:hover { background: var(--card-quiet); }
+.provider-card .pc-name {
+  font-size: 13px; font-weight: 600;
+  color: var(--ink); flex: 1;
+}
+.provider-card .pc-models { font-size: 11px; color: var(--ink-quiet); }
+.provider-card .pc-active {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 6px var(--mint-glow);
+}
+.config-add-btn {
+  width: 100%; padding: 10px;
+  background: transparent;
+  border: 1px dashed var(--rule);
+  border-radius: 10px;
+  font-family: var(--font);
+  font-size: 12.5px; color: var(--ink-quiet);
+  cursor: pointer; margin-top: 8px;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+.config-add-btn:hover {
+  background: var(--card-soft);
+  color: var(--ink-soft);
+  border-color: rgba(255,255,255,0.12);
+}
+
+.config-form { padding: 14px; }
+.config-form-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 18px;
+}
+.config-form-title {
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-quiet);
+  font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+.config-form-title::before {
+  content: '';
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--mint);
+  box-shadow: 0 0 6px var(--mint-glow);
+}
+.form-group { margin-bottom: 14px; }
+.form-label {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-quiet);
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: block;
+}
+.form-label .optional {
+  font-weight: 400; text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink-faint); font-size: 10.5px;
+}
+.form-input {
+  width: 100%; padding: 8px 12px;
+  background: var(--card-soft);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  font-family: var(--font);
+  font-size: 13px; color: var(--ink);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.form-input:focus {
+  border-color: var(--mint);
+  box-shadow: 0 0 0 2px var(--mint-tint);
+}
+.form-input::placeholder { color: var(--ink-faint); }
+
+.model-rows { margin-bottom: 8px; }
+.model-row-entry {
+  display: grid;
+  grid-template-columns: 1fr 1fr 28px;
+  gap: 6px; margin-bottom: 6px;
+  align-items: center;
+}
+.model-row-entry .form-input { padding: 7px 10px; font-size: 12px; }
+.model-row-delete {
+  background: none; border: none;
+  color: var(--ink-faint);
+  font-size: 14px; cursor: pointer;
+  padding: 4px; border-radius: 4px;
+  transition: color 0.15s;
+  text-align: center;
+}
+.model-row-delete:hover { color: var(--mint); }
+.model-add-btn {
+  background: none; border: none;
+  color: var(--ink-quiet);
+  font-size: 12px; cursor: pointer;
+  padding: 4px 0;
+  transition: color 0.15s;
+}
+.model-add-btn:hover { color: var(--mint); }
+
+.advanced-section { margin-bottom: 18px; }
+.advanced-section summary {
+  font-size: 12px; color: var(--ink-quiet);
+  cursor: pointer; list-style: none;
+  padding: 6px 0;
+  transition: color 0.15s;
+}
+.advanced-section summary::-webkit-details-marker { display: none; }
+.advanced-section summary:hover { color: var(--ink-soft); }
+.advanced-section .adv-content { padding: 10px 0; }
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.toggle-label { font-size: 12.5px; color: var(--ink-soft); }
+.toggle-switch {
+  position: relative;
+  width: 36px; height: 20px;
+  background: var(--card-quiet);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  border: none; padding: 0;
+}
+.toggle-switch.on { background: var(--mint); }
+.toggle-switch .toggle-knob {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.toggle-switch.on .toggle-knob { transform: translateX(16px); }
+
+.form-actions { display: flex; gap: 8px; margin-top: 20px; }
+.form-actions .btn-cancel {
+  flex: 1; padding: 9px;
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  font-family: var(--font);
+  font-size: 12.5px; color: var(--ink-quiet);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+.form-actions .btn-cancel:hover { background: var(--card-soft); color: var(--ink-soft); }
+.form-actions .btn-save {
+  flex: 1; padding: 9px;
+  background: var(--mint); color: #0a1010;
+  border: none; border-radius: 8px;
+  font-family: var(--font);
+  font-size: 12.5px; font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.form-actions .btn-save:hover { background: var(--mint-soft); }
+
+/* === 8. Demo Switcher === */
+.demo-switcher {
+  position: fixed;
+  top: 10px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex; gap: 4px;
+  padding: 4px;
+  background: rgba(10,13,18,0.9);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+}
+.demo-chip {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink-quiet);
+  font-family: var(--font);
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s, color 0.15s;
+}
+.demo-chip:hover { background: var(--card-quiet); color: var(--ink-soft); }
+.demo-chip.active { background: var(--mint-tint); color: var(--mint); font-weight: 600; }
+.demo-sep { width: 1px; background: var(--rule); margin: 4px 2px; }
+
+/* === 9. State-dependent adjustments === */
+body[data-state="failed"] .status-dot {
+  background: var(--ink-faint); box-shadow: none; animation: none;
+}
+body[data-state="running"] .setup { opacity: 0.6; pointer-events: none; }
+</style>
+</head>
+<body data-state="idle" data-config="" data-mode="workspace">
+
+<!-- 状态切换条 -->
+<div class="demo-switcher">
+  <button class="demo-chip active" data-target="state:idle" onclick="switchState('idle')">空闲</button>
+  <button class="demo-chip" data-target="state:running" onclick="switchState('running')">审查中</button>
+  <button class="demo-chip" data-target="state:done" onclick="switchState('done')">完成</button>
+  <button class="demo-chip" data-target="state:empty" onclick="switchState('empty')">无问题</button>
+  <button class="demo-chip" data-target="state:cancelled" onclick="switchState('cancelled')">已取消</button>
+  <button class="demo-chip" data-target="state:failed" onclick="switchState('failed')">失败</button>
+  <div class="demo-sep"></div>
+  <button class="demo-chip" data-target="config:empty" onclick="switchConfig('empty')">配置:引导</button>
+  <button class="demo-chip" data-target="config:list" onclick="switchConfig('list')">配置:列表</button>
+  <button class="demo-chip" data-target="config:form" onclick="switchConfig('form')">配置:表单</button>
+</div>
+
+<!-- VSCode Chrome -->
+<div class="vscode-chrome">
+  <aside class="activity-bar">
+    <div class="ab-icon active"></div>
+    <div class="ab-icon"></div>
+    <div class="ab-icon"></div>
+    <div class="ab-icon"></div>
+  </aside>
+
+  <aside class="sidebar">
+    <!-- 状态栏 -->
+    <div class="status-bar">
+      <span class="status-dot"></span>
+      <span class="status-model">claude-opus-4-7</span>
+      <span class="status-sep">&middot;</span>
+      <span class="status-provider">Anthropic</span>
+      <button class="status-dropdown-trigger" onclick="toggleDropdown()">&#9662;</button>
+      <span class="status-spacer"></span>
+      <button class="status-reset" onclick="resetAll()">重置</button>
+      <button class="status-gear" onclick="toggleConfig()">&#9881;</button>
+      <div class="model-dropdown" id="modelDropdown">
+        <div class="model-dropdown-group">Anthropic</div>
+        <div class="model-dropdown-item active" onclick="selectModel(this, 'claude-opus-4-7', 'Anthropic')">
+          <span class="md-dot"></span>claude-opus-4-7
+        </div>
+        <div class="model-dropdown-item" onclick="selectModel(this, 'claude-sonnet-4-6', 'Anthropic')">
+          <span class="md-dot"></span>claude-sonnet-4-6
+        </div>
+        <div class="model-dropdown-group">OpenAI</div>
+        <div class="model-dropdown-item" onclick="selectModel(this, 'gpt-5', 'OpenAI')">
+          <span class="md-dot"></span>gpt-5
+        </div>
+        <div class="model-dropdown-item" onclick="selectModel(this, 'o3', 'OpenAI')">
+          <span class="md-dot"></span>o3
+        </div>
+      </div>
+    </div>
+
+    <!-- 准备区 -->
+    <div class="setup">
+      <div class="setup-label">新建审查</div>
+      <div class="mode-tabs">
+        <button class="mode-tab active" data-mode="workspace" onclick="switchMode('workspace')">工作区</button>
+        <button class="mode-tab" data-mode="branch" onclick="switchMode('branch')">分支对比</button>
+        <button class="mode-tab" data-mode="commit" onclick="switchMode('commit')">单次提交</button>
+      </div>
+      <div class="mode-params" id="modeParamsWorkspace"></div>
+      <div class="mode-params" id="modeParamsBranch">
+        <div class="mode-param-label">基础引用</div>
+        <select class="mode-param-select">
+          <option value="main" selected>main</option>
+          <option value="develop">develop</option>
+          <option value="release/v2.1">release/v2.1</option>
+          <option value="v2.0.0">v2.0.0 (tag)</option>
+        </select>
+        <div class="mode-param-label">目标引用</div>
+        <select class="mode-param-select">
+          <option value="feature-branch" selected>feature-branch</option>
+          <option value="HEAD">HEAD</option>
+          <option value="fix/login-redirect">fix/login-redirect</option>
+          <option value="develop">develop</option>
+        </select>
+      </div>
+      <div class="mode-params" id="modeParamsCommit">
+        <div class="mode-param-label">分支</div>
+        <select class="mode-param-select">
+          <option value="feature-branch" selected>feature-branch</option>
+          <option value="main">main</option>
+          <option value="develop">develop</option>
+          <option value="fix/login-redirect">fix/login-redirect</option>
+        </select>
+        <div class="mode-param-label">提交历史</div>
+        <div class="commit-list">
+          <label class="commit-row active" onclick="selectCommit(this)">
+            <input type="radio" name="commitSelect" class="commit-radio" checked>
+            <div class="commit-info">
+              <div class="commit-msg">feat: 添加用户权限校验逻辑</div>
+              <div class="commit-meta"><span class="commit-sha">a3f7c21</span> · 2 小时前</div>
+            </div>
+          </label>
+          <label class="commit-row" onclick="selectCommit(this)">
+            <input type="radio" name="commitSelect" class="commit-radio">
+            <div class="commit-info">
+              <div class="commit-msg">fix: 修复登录态过期后的重定向问题</div>
+              <div class="commit-meta"><span class="commit-sha">e8b4d09</span> · 5 小时前</div>
+            </div>
+          </label>
+          <label class="commit-row" onclick="selectCommit(this)">
+            <input type="radio" name="commitSelect" class="commit-radio">
+            <div class="commit-info">
+              <div class="commit-msg">refactor: 提取公共请求拦截器</div>
+              <div class="commit-meta"><span class="commit-sha">1c92f5a</span> · 昨天</div>
+            </div>
+          </label>
+          <label class="commit-row" onclick="selectCommit(this)">
+            <input type="radio" name="commitSelect" class="commit-radio">
+            <div class="commit-info">
+              <div class="commit-msg">chore: 更新依赖版本</div>
+              <div class="commit-meta"><span class="commit-sha">7df3e82</span> · 2 天前</div>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="files-label">待审查文件 (<span id="fileCount">3</span>)</div>
+      <div class="file-list" id="fileList">
+        <label class="file-row">
+          <input type="checkbox" checked onchange="updateFileCount()">
+          <span class="file-name">CHANGELOG.md</span>
+          <span class="file-badge modified">M</span>
+        </label>
+        <label class="file-row">
+          <input type="checkbox" checked onchange="updateFileCount()">
+          <span class="file-name">README.md</span>
+          <span class="file-badge modified">M</span>
+        </label>
+        <label class="file-row">
+          <input type="checkbox" checked onchange="updateFileCount()">
+          <span class="file-name">src/api.ts</span>
+          <span class="file-badge added">A</span>
+        </label>
+      </div>
+      <textarea class="mode-param-input" id="customPrompt" rows="3" style="resize:vertical; margin-bottom:10px; font-family:var(--font); line-height:1.5;" placeholder="自定义审查提示词（可选）— 例如：重点关注安全漏洞和性能问题"></textarea>
+      <button class="primary-btn" id="reviewBtn" onclick="startReview()">审查所有变更</button>
+    </div>
+
+    <!-- 执行区 -->
+    <div class="action-region">
+      <!-- 空闲 -->
+      <div class="action-idle">
+        <div class="idle-note">准备就绪 &middot; 选择上方文件开始审查</div>
+      </div>
+
+      <!-- 审查中 -->
+      <div class="action-running">
+        <div class="log-viewer" id="logViewer">
+          <div class="log-line"><span class="log-tag">[ocr]</span> 3 file(s) changed, reviewing 3 in <span class="log-file">/workspace/my-project</span></div>
+          <div class="log-line"><span class="log-tag">[ocr]</span> Skipping <span class="log-file">package-lock.json</span> <span class="log-dim">— filtered by path/extension rules</span></div>
+          <div class="log-line"><span class="log-tag">[ocr]</span> Filtered 3 file(s) by include/exclude rules</div>
+          <div class="log-line"><span class="log-tag">[ocr]</span> Reviewing <span class="log-file">src/api.ts</span> <span class="log-dim">(142 lines)</span></div>
+          <div class="log-line"><span class="log-tag">[llm]</span> <span class="log-warn">Retrying in 1.46s</span> <span class="log-dim">(attempt 1/3)</span></div>
+          <div class="log-line"><span class="log-tag">[ocr]</span> Reviewing <span class="log-file">CHANGELOG.md</span> <span class="log-dim">(58 lines)</span></div>
+          <div class="log-line"><span class="log-tag">[ocr]</span> Reviewing <span class="log-file">README.md</span> <span class="log-dim">(35 lines)</span></div>
+          <div class="log-line"><span class="log-tag">[ocr]</span> Generating summary...</div>
+          <div class="log-line"><span class="log-tag">[ocr]</span> Summary: 3 file(s) reviewed, 4 comment(s), ~8120 token(s) used <span class="log-dim">(input: ~7200, output: ~920)</span>, 12s elapsed</div>
+        </div>
+        <button class="replay-btn" onclick="startReplay()">&#9654; 重放</button>
+        <button class="cancel-pill" onclick="cancelReview()">取消</button>
+        <div style="clear:both"></div>
+      </div>
+
+      <!-- 完成（有评论） -->
+      <div class="action-done">
+        <div class="done-summary">
+          <span class="ds-dot"></span>
+          <span id="doneSummaryText">5 条评论 &middot; 3 个文件 &middot; 24秒</span>
+        </div>
+        <div id="commentList">
+          <div class="comment-card">
+            <div class="comment-header">
+              <span class="comment-file">src/api.ts</span>
+              <span class="comment-line">L42</span>
+              <span class="severity-pill critical">严重</span>
+            </div>
+            <div class="comment-body">SQL 查询通过字符串拼接构造，存在注入风险。请使用参数化查询。</div>
+            <div class="comment-actions">
+              <button onclick="openFile('src/api.ts', 42)">打开</button>
+              <button onclick="copyComment(this)">复制</button>
+              <button onclick="dismissComment(this)">忽略</button>
+            </div>
+          </div>
+          <div class="comment-card">
+            <div class="comment-header">
+              <span class="comment-file">src/api.ts</span>
+              <span class="comment-line">L88</span>
+              <span class="severity-pill warn">警告</span>
+            </div>
+            <div class="comment-body">异步请求缺少错误处理。如果 API 不可达，将抛出未捕获的 Promise 异常。</div>
+            <div class="comment-actions">
+              <button onclick="openFile('src/api.ts', 88)">打开</button>
+              <button onclick="copyComment(this)">复制</button>
+              <button onclick="dismissComment(this)">忽略</button>
+            </div>
+          </div>
+          <div class="comment-card">
+            <div class="comment-header">
+              <span class="comment-file">src/api.ts</span>
+              <span class="comment-line">L120</span>
+              <span class="severity-pill warn">警告</span>
+            </div>
+            <div class="comment-body">重试逻辑使用了固定延迟，建议改为指数退避以避免在服务中断时对服务器造成压力。</div>
+            <div class="comment-actions">
+              <button onclick="openFile('src/api.ts', 120)">打开</button>
+              <button onclick="copyComment(this)">复制</button>
+              <button onclick="dismissComment(this)">忽略</button>
+            </div>
+          </div>
+          <div class="comment-card">
+            <div class="comment-header">
+              <span class="comment-file">CHANGELOG.md</span>
+              <span class="comment-line">L15</span>
+              <span class="severity-pill info">提示</span>
+            </div>
+            <div class="comment-body">版本日期格式与之前的条目不一致，建议统一使用 ISO 8601（YYYY-MM-DD）格式。</div>
+            <div class="comment-actions">
+              <button onclick="openFile('CHANGELOG.md', 15)">打开</button>
+              <button onclick="copyComment(this)">复制</button>
+              <button onclick="dismissComment(this)">忽略</button>
+            </div>
+          </div>
+          <div class="comment-card">
+            <div class="comment-header">
+              <span class="comment-file">README.md</span>
+              <span class="comment-line">L8</span>
+              <span class="severity-pill info">提示</span>
+            </div>
+            <div class="comment-body">安装命令引用了已废弃的包名，请更新为当前的 npm 包。</div>
+            <div class="comment-actions">
+              <button onclick="openFile('README.md', 8)">打开</button>
+              <button onclick="copyComment(this)">复制</button>
+              <button onclick="dismissComment(this)">忽略</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 无问题 -->
+      <div class="action-empty">
+        <div class="empty-note">
+          <div class="en-dot"></div>
+          <div class="en-text">未发现问题 &middot; 3 个文件已通过</div>
+        </div>
+      </div>
+
+      <!-- 已取消 -->
+      <div class="action-cancelled">
+        <div class="cancelled-note">审查已取消 &middot; 耗时 12秒 &middot; 已审查 2/3 个文件 &middot; 发现 2 条评论</div>
+        <div class="comment-card">
+          <div class="comment-header">
+            <span class="comment-file">src/api.ts</span>
+            <span class="comment-line">L42</span>
+            <span class="severity-pill critical">严重</span>
+          </div>
+          <div class="comment-body">SQL 查询通过字符串拼接构造，存在注入风险。请使用参数化查询。</div>
+          <div class="comment-actions">
+            <button onclick="openFile('src/api.ts', 42)">打开</button>
+            <button onclick="copyComment(this)">复制</button>
+            <button onclick="dismissComment(this)">忽略</button>
+          </div>
+        </div>
+        <div class="comment-card">
+          <div class="comment-header">
+            <span class="comment-file">src/api.ts</span>
+            <span class="comment-line">L88</span>
+            <span class="severity-pill warn">警告</span>
+          </div>
+          <div class="comment-body">异步请求缺少错误处理。</div>
+          <div class="comment-actions">
+            <button onclick="openFile('src/api.ts', 88)">打开</button>
+            <button onclick="copyComment(this)">复制</button>
+            <button onclick="dismissComment(this)">忽略</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 失败 -->
+      <div class="action-failed">
+        <div class="failed-card">
+          <div class="fc-msg">无法连接 LLM 服务。<br>请检查 API Key 和网络连接。</div>
+          <button class="retry-pill" onclick="retryReview()">重试</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 配置覆盖层 -->
+    <div class="config-overlay">
+      <!-- 配置引导（空状态） -->
+      <div class="config-empty">
+        <div class="ce-dot"></div>
+        <div class="ce-label">配置</div>
+        <div class="ce-title">连接模型以开始使用</div>
+        <div class="ce-desc">添加一个 LLM 提供商和 API Key 来开始代码审查。</div>
+        <button class="ce-btn" onclick="showConfigForm()">+ 添加提供商</button>
+      </div>
+
+      <!-- 配置列表 -->
+      <div class="config-list">
+        <div class="config-list-header">
+          <span class="config-list-title">提供商</span>
+          <button class="config-list-close" onclick="closeConfig()">&times;</button>
+        </div>
+        <div id="providerList">
+          <div class="provider-card" onclick="editProvider('Anthropic')">
+            <span class="pc-name">Anthropic</span>
+            <span class="pc-models">2 个模型</span>
+            <span class="pc-active"></span>
+          </div>
+          <div class="provider-card" onclick="editProvider('OpenAI')">
+            <span class="pc-name">OpenAI</span>
+            <span class="pc-models">2 个模型</span>
+          </div>
+        </div>
+        <button class="config-add-btn" onclick="showConfigForm()">+ 添加提供商</button>
+      </div>
+
+      <!-- 配置表单 -->
+      <div class="config-form">
+        <div class="config-form-header">
+          <span class="config-form-title" id="configFormTitle">添加提供商</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">提供商名称</label>
+          <input class="form-input" type="text" placeholder="如 OpenAI、DeepSeek" id="formProviderName">
+        </div>
+        <div class="form-group">
+          <label class="form-label">接口地址</label>
+          <input class="form-input" type="text" placeholder="https://api.openai.com/v1" id="formBaseUrl">
+        </div>
+        <div class="form-group">
+          <label class="form-label">API 密钥 <span class="optional">(可选)</span></label>
+          <input class="form-input" type="password" placeholder="sk-..." id="formApiKey">
+        </div>
+        <div class="form-group">
+          <label class="form-label">模型列表</label>
+          <div class="model-rows" id="modelRows">
+            <div class="model-row-entry">
+              <input class="form-input" type="text" placeholder="模型 ID">
+              <input class="form-input" type="text" placeholder="显示名称">
+              <button class="model-row-delete" onclick="deleteModelRow(this)">&times;</button>
+            </div>
+          </div>
+          <button class="model-add-btn" onclick="addModelRow()">+ 添加模型</button>
+        </div>
+        <details class="advanced-section">
+          <summary>&#9656; 高级设置</summary>
+          <div class="adv-content">
+            <div class="toggle-row">
+              <span class="toggle-label">使用 Anthropic 协议</span>
+              <button class="toggle-switch" onclick="this.classList.toggle('on')">
+                <span class="toggle-knob"></span>
+              </button>
+            </div>
+          </div>
+        </details>
+        <div class="form-actions">
+          <button class="btn-cancel" onclick="cancelConfigForm()">取消</button>
+          <button class="btn-save" onclick="saveConfigForm()">保存</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="editor-stub">
+    <div class="editor-stub-placeholder" id="editorPlaceholder">
+      <span class="editor-stub-text">(编辑器区域 · 仅原型展示)</span>
+    </div>
+    <div class="editor-code" id="editorCode">
+      <div><span class="ln">38</span><span class="code-line"><span class="kw">import</span> { Request, Response } <span class="kw">from</span> <span class="str">'express'</span>;</span></div>
+      <div><span class="ln">39</span><span class="code-line"></span></div>
+      <div><span class="ln">40</span><span class="code-line"><span class="kw">export async function</span> <span class="fn">getUser</span>(req: <span class="tp">Request</span>, res: <span class="tp">Response</span>) {</span></div>
+      <div><span class="ln">41</span><span class="code-line">  <span class="kw">const</span> userId = req.params.id;</span></div>
+      <div class="code-highlight"><span class="ln">42</span><span class="code-line">  <span class="kw">const</span> result = <span class="kw">await</span> db.<span class="fn">query</span>(<span class="str">`SELECT * FROM users WHERE id = ${</span>userId<span class="str">}`</span>);</span></div>
+      <div class="review-panel" id="reviewPanel">
+        <div class="review-panel-header">
+          <span class="review-panel-title" id="rpTitle">Code Review (1 / 5) — src/api.ts:L42</span>
+          <div class="review-panel-nav">
+            <button onclick="navReviewComment(-1)" title="上一个">&#8593;</button>
+            <button onclick="navReviewComment(1)" title="下一个">&#8595;</button>
+            <button onclick="closeReviewPanel()" title="关闭">&#215;</button>
+          </div>
+        </div>
+        <div class="review-panel-body">
+          <div class="rp-status"><span class="rp-tag">[未处理]</span></div>
+          <div class="rp-comment" id="rpComment">SQL 查询通过字符串拼接构造，存在注入风险。请使用参数化查询。</div>
+          <div class="rp-actions">
+            <button class="rp-action" onclick="applyAndNext()">应用并下一个</button>
+            <button class="rp-action" onclick="skipAndNext()">忽略并下一个</button>
+            <button class="rp-action" onclick="reportAndNext()">误报并下一个</button>
+          </div>
+        </div>
+      </div>
+      <div><span class="ln">43</span><span class="code-line">  <span class="kw">if</span> (!result.rows.length) {</span></div>
+      <div><span class="ln">44</span><span class="code-line">    <span class="kw">return</span> res.<span class="fn">status</span>(404).<span class="fn">json</span>({ error: <span class="str">'Not found'</span> });</span></div>
+      <div><span class="ln">45</span><span class="code-line">  }</span></div>
+      <div><span class="ln">46</span><span class="code-line">  <span class="kw">return</span> res.<span class="fn">json</span>(result.rows[0]);</span></div>
+      <div><span class="ln">47</span><span class="code-line">}</span></div>
+      <div><span class="ln">48</span><span class="code-line"></span></div>
+      <div><span class="ln">49</span><span class="code-line"><span class="cm">// TODO: add input validation</span></span></div>
+      <div><span class="ln">50</span><span class="code-line"><span class="kw">export async function</span> <span class="fn">updateUser</span>(req: <span class="tp">Request</span>, res: <span class="tp">Response</span>) {</span></div>
+    </div>
+  </main>
+</div>
+
+<script>
+/* === 状态机 === */
+var STORAGE_KEY = 'ocrPrototype';
+
+function switchState(state) {
+  document.body.dataset.state = state;
+  document.body.dataset.config = '';
+  closeReviewPanel();
+  updateDemoChips();
+}
+
+function switchConfig(view) {
+  document.body.dataset.config = view;
+  updateDemoChips();
+}
+
+function updateDemoChips() {
+  var state = document.body.dataset.state;
+  var config = document.body.dataset.config;
+  document.querySelectorAll('.demo-chip').forEach(function(chip) {
+    chip.classList.remove('active');
+    var target = chip.getAttribute('data-target');
+    if (!target) return;
+    if (target === 'state:' + state && !config) chip.classList.add('active');
+    if (config && target === 'config:' + config) chip.classList.add('active');
+  });
+}
+
+/* === 状态栏 === */
+function toggleDropdown() {
+  document.getElementById('modelDropdown').classList.toggle('open');
+}
+
+function selectModel(el, model, provider) {
+  document.querySelectorAll('.model-dropdown-item').forEach(function(i) { i.classList.remove('active'); });
+  el.classList.add('active');
+  document.querySelector('.status-model').textContent = model;
+  document.querySelector('.status-provider').textContent = provider;
+  document.getElementById('modelDropdown').classList.remove('open');
+  saveState();
+}
+
+/* === 准备区 === */
+function switchMode(mode) {
+  document.querySelectorAll('.mode-tab').forEach(function(t) {
+    t.classList.toggle('active', t.dataset.mode === mode);
+  });
+  document.getElementById('modeParamsWorkspace').className = 'mode-params' + (mode === 'workspace' ? ' active' : '');
+  document.getElementById('modeParamsBranch').className = 'mode-params' + (mode === 'branch' ? ' active' : '');
+  document.getElementById('modeParamsCommit').className = 'mode-params' + (mode === 'commit' ? ' active' : '');
+  document.body.dataset.mode = mode;
+  saveState();
+}
+
+function selectCommit(row) {
+  document.querySelectorAll('.commit-row').forEach(function(r) { r.classList.remove('active'); });
+  row.classList.add('active');
+  row.querySelector('.commit-radio').checked = true;
+}
+
+function updateFileCount() {
+  var checked = document.querySelectorAll('.file-list input[type="checkbox"]:checked').length;
+  var total = document.querySelectorAll('.file-list input[type="checkbox"]').length;
+  document.getElementById('fileCount').textContent = checked;
+  var btn = document.getElementById('reviewBtn');
+  btn.textContent = checked === total ? '审查所有变更' : '审查 ' + checked + ' 个变更';
+  btn.disabled = checked === 0;
+}
+
+var _reviewTimer = null;
+
+function _runLogAnimation() {
+  var lines = document.querySelectorAll('#logViewer .log-line');
+  var viewer = document.getElementById('logViewer');
+  lines.forEach(function(l) { l.classList.add('hidden'); });
+  var i = 0;
+  _reviewTimer = setInterval(function() {
+    if (i < lines.length) {
+      lines[i].classList.remove('hidden');
+      viewer.scrollTop = viewer.scrollHeight;
+      i++;
+    } else {
+      clearInterval(_reviewTimer);
+      _reviewTimer = null;
+      setTimeout(function() {
+        document.body.dataset.state = 'done';
+      }, 600);
+    }
+  }, 400);
+}
+
+function startReview() {
+  document.body.dataset.state = 'running';
+  _runLogAnimation();
+}
+
+/* === 执行区 === */
+function cancelReview() {
+  if (_reviewTimer) { clearInterval(_reviewTimer); _reviewTimer = null; }
+  document.body.dataset.state = 'cancelled';
+}
+
+function retryReview() {
+  document.body.dataset.state = 'running';
+  _runLogAnimation();
+}
+
+var _currentReviewIdx = 0;
+
+function _getCommentCards() {
+  return Array.prototype.slice.call(document.querySelectorAll('#commentList .comment-card:not(.dismissed)'));
+}
+
+function openFile(file, line) {
+  var cards = _getCommentCards();
+  var clickedCard = event ? event.target.closest('.comment-card') : null;
+  _currentReviewIdx = clickedCard ? cards.indexOf(clickedCard) : 0;
+  if (_currentReviewIdx < 0) _currentReviewIdx = 0;
+  _showReviewPanel(_currentReviewIdx);
+}
+
+function _showReviewPanel(idx) {
+  var cards = _getCommentCards();
+  if (!cards.length) return;
+  if (idx < 0) idx = 0;
+  if (idx >= cards.length) idx = cards.length - 1;
+  _currentReviewIdx = idx;
+  var card = cards[idx];
+  var file = card.querySelector('.comment-file').textContent;
+  var line = card.querySelector('.comment-line').textContent;
+  var body = card.querySelector('.comment-body').textContent;
+  var sev = card.querySelector('.severity-pill');
+  var sevText = sev ? sev.textContent : '';
+
+  document.getElementById('rpTitle').textContent = 'Code Review (' + (idx + 1) + ' / ' + cards.length + ') — ' + file + ':' + line;
+  document.getElementById('rpComment').textContent = body;
+  document.getElementById('editorPlaceholder').style.display = 'none';
+  document.getElementById('editorCode').classList.add('active');
+  document.getElementById('reviewPanel').classList.add('active');
+}
+
+function navReviewComment(dir) {
+  _showReviewPanel(_currentReviewIdx + dir);
+}
+
+function closeReviewPanel() {
+  document.getElementById('reviewPanel').classList.remove('active');
+  document.getElementById('editorCode').classList.remove('active');
+  document.getElementById('editorPlaceholder').style.display = '';
+}
+
+function applyAndNext() {
+  var cards = _getCommentCards();
+  if (cards[_currentReviewIdx]) dismissComment(cards[_currentReviewIdx].querySelector('.comment-actions button:last-child'));
+  cards = _getCommentCards();
+  if (cards.length) { _showReviewPanel(Math.min(_currentReviewIdx, cards.length - 1)); }
+  else { closeReviewPanel(); }
+}
+
+function skipAndNext() {
+  var cards = _getCommentCards();
+  if (_currentReviewIdx < cards.length - 1) _showReviewPanel(_currentReviewIdx + 1);
+}
+
+function reportAndNext() {
+  applyAndNext();
+}
+
+function copyComment(btn) {
+  var card = btn.closest('.comment-card');
+  var text = card.querySelector('.comment-body').textContent;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function() {
+      btn.textContent = '已复制';
+      setTimeout(function() { btn.textContent = '复制'; }, 1500);
+    });
+  } else {
+    btn.textContent = '已复制';
+    setTimeout(function() { btn.textContent = '复制'; }, 1500);
+  }
+}
+
+function dismissComment(btn) {
+  var card = btn.closest('.comment-card');
+  card.classList.add('dismissed');
+  setTimeout(function() {
+    var visible = document.querySelectorAll('.action-done .comment-card:not(.dismissed)').length;
+    var summaryEl = document.getElementById('doneSummaryText');
+    if (summaryEl) {
+      summaryEl.textContent = visible + ' 条评论 · 3 个文件 · 24秒';
+    }
+  }, 350);
+}
+
+/* === 重放（仅在 running 状态下回放日志，不跳转） === */
+function startReplay() {
+  if (_reviewTimer) return;
+  var lines = document.querySelectorAll('#logViewer .log-line');
+  var replayBtn = document.querySelector('.replay-btn');
+  replayBtn.disabled = true;
+  lines.forEach(function(l) { l.classList.add('hidden'); });
+  var viewer = document.getElementById('logViewer');
+  var i = 0;
+  var interval = setInterval(function() {
+    if (i < lines.length) {
+      lines[i].classList.remove('hidden');
+      viewer.scrollTop = viewer.scrollHeight;
+      i++;
+    } else {
+      clearInterval(interval);
+      replayBtn.disabled = false;
+    }
+  }, 350);
+}
+
+/* === 配置 === */
+function toggleConfig() {
+  var current = document.body.dataset.config;
+  if (current) {
+    closeConfig();
+  } else {
+    document.body.dataset.config = 'list';
+  }
+}
+
+function closeConfig() {
+  document.body.dataset.config = '';
+}
+
+function showConfigForm() {
+  document.body.dataset.config = 'form';
+  document.getElementById('configFormTitle').textContent = '添加提供商';
+  document.getElementById('formProviderName').value = '';
+  document.getElementById('formBaseUrl').value = '';
+  document.getElementById('formApiKey').value = '';
+}
+
+function cancelConfigForm() {
+  document.body.dataset.config = 'list';
+}
+
+function saveConfigForm() {
+  document.body.dataset.config = 'list';
+  document.body.dataset.state = 'idle';
+  saveState();
+}
+
+function editProvider(name) {
+  document.getElementById('formProviderName').value = name;
+  document.body.dataset.config = 'form';
+  document.getElementById('configFormTitle').textContent = '编辑提供商';
+}
+
+function addModelRow() {
+  var rows = document.getElementById('modelRows');
+  var entry = document.createElement('div');
+  entry.className = 'model-row-entry';
+  entry.innerHTML = '<input class="form-input" type="text" placeholder="模型 ID"><input class="form-input" type="text" placeholder="显示名称"><button class="model-row-delete" onclick="deleteModelRow(this)">×</button>';
+  rows.appendChild(entry);
+}
+
+function deleteModelRow(btn) {
+  var row = btn.closest('.model-row-entry');
+  var rows = document.getElementById('modelRows');
+  if (rows.children.length > 1) {
+    row.remove();
+  }
+}
+
+/* === 持久化 === */
+function loadState() {
+  try {
+    var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    document.body.dataset.state = saved.state || 'idle';
+    document.body.dataset.config = saved.config || '';
+    if (saved.activeModel) {
+      document.querySelector('.status-model').textContent = saved.activeModel;
+    }
+    if (saved.activeProvider) {
+      document.querySelector('.status-provider').textContent = saved.activeProvider;
+    }
+    switchMode(saved.mode || 'workspace');
+  } catch(e) {
+    document.body.dataset.state = 'idle';
+    switchMode('workspace');
+  }
+  updateDemoChips();
+}
+
+function saveState() {
+  var data = {
+    state: document.body.dataset.state,
+    config: document.body.dataset.config,
+    activeModel: document.querySelector('.status-model').textContent,
+    activeProvider: document.querySelector('.status-provider').textContent,
+    mode: document.body.dataset.mode || 'workspace'
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function resetAll() {
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+}
+
+/* === 全局点击 === */
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.status-bar')) {
+    document.getElementById('modelDropdown').classList.remove('open');
+  }
+});
+
+/* === 状态变更监听 === */
+var observer = new MutationObserver(function(mutations) {
+  mutations.forEach(function(m) {
+    if (m.attributeName === 'data-state' || m.attributeName === 'data-config') {
+      saveState();
+      updateDemoChips();
+    }
+  });
+});
+observer.observe(document.body, { attributes: true });
+
+/* === 初始化 === */
+loadState();
+</script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: self-hosted
+    timeout-minutes: 15
+    container:
+      image: golang:1.26.4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Test with coverage
+        run: |
+          go test -v -race -count=1 -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | grep total: | awk '{print $3}'
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total: | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: ${COVERAGE}%"
+          if awk "BEGIN {exit !($COVERAGE < 80)}"; then
+            echo "FAIL: Coverage ${COVERAGE}% is below 80% threshold"
+            exit 1
+          fi
+          echo "PASS: Coverage ${COVERAGE}% meets 80% threshold"
+
+      - name: Build
+        run: go build -o /dev/null ./cmd/opencodereview

@@ -330,6 +330,111 @@ func TestExecute_Truncation(t *testing.T) {
 	}
 }
 
+func TestFileReadProvider_Tool(t *testing.T) {
+	p := NewFileRead(&FileReader{RepoDir: "/tmp"})
+	if p.Tool() != FileRead {
+		t.Errorf("Tool() = %v, want FileRead", p.Tool())
+	}
+}
+
+func TestExecute_EmptyFilePath(t *testing.T) {
+	fr := &FileReader{RepoDir: t.TempDir(), Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	got, err := p.Execute(context.Background(), map[string]any{"file_path": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "Error: file_path is required" {
+		t.Errorf("Execute() = %q, want file_path required error", got)
+	}
+}
+
+func TestExecute_InvalidLineRange(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "test.txt", "a\nb\nc\n")
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	_, err := p.Execute(context.Background(), map[string]any{
+		"file_path":  "test.txt",
+		"start_line": float64(5),
+		"end_line":   float64(2),
+	})
+	if err == nil {
+		t.Error("expected error for invalid line range")
+	}
+}
+
+func TestExecute_StartBeyondTotalLines(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "short.txt", "one\n")
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	_, err := p.Execute(context.Background(), map[string]any{
+		"file_path":  "short.txt",
+		"start_line": float64(100),
+		"end_line":   float64(200),
+	})
+	if err == nil {
+		t.Error("expected error for start beyond total lines")
+	}
+}
+
+func TestExecute_MissingFile(t *testing.T) {
+	fr := &FileReader{RepoDir: t.TempDir(), Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	_, err := p.Execute(context.Background(), map[string]any{"file_path": "missing.txt"})
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestExecute_CommitMode(t *testing.T) {
+	dir := setupTestRepo(t)
+	commit := getHeadCommit(t, dir)
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit}
+	p := NewFileRead(fr)
+
+	got, err := p.Execute(context.Background(), map[string]any{"file_path": "hello.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "package main") {
+		t.Errorf("expected file content, got: %s", got)
+	}
+	if !strings.Contains(got, "IS_TRUNCATED: false") {
+		t.Error("expected IS_TRUNCATED: false")
+	}
+}
+
+func TestExecute_DefaultStartLine(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "d.txt", "a\nb\nc\n")
+
+	fr := &FileReader{RepoDir: dir, Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	got, err := p.Execute(context.Background(), map[string]any{
+		"file_path":  "d.txt",
+		"start_line": float64(0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "LINE_RANGE: 1-") {
+		t.Errorf("expected default start_line=1, got: %s", got)
+	}
+}
+
+// setupTestRepo is already defined in code_search_test.go (same package)
+// getHeadCommit is already defined in code_search_test.go (same package)
+
 func TestExecute_WithEndLine(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "c.txt", "a\nb\nc\nd\ne\n")

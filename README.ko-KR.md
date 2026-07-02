@@ -1,14 +1,30 @@
-<p align="center">
+<div align="center">
   <a href="https://alibaba.github.io/open-code-review/">
-    <img src="imgs/logo.svg" alt="OpenCodeReview logo" width="240" height="240">
+    <img src="imgs/logo-core.svg" alt="OpenCodeReview logo" width="180" />
+  </a>
+  <h1>OpenCodeReview</h1>
+</div>
+
+<p align="center">
+  <a href="https://trendshift.io/repositories/41087" target="_blank">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/41087/weekly?language=Go" alt="alibaba%2Fopen-code-review | Trendshift" style="width: 320px; height: 70px;" width="320" height="70" />
   </a>
 </p>
-<p align="center">오픈 소스 AI 코드 리뷰 에이전트.</p>
 <p align="center">
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://goreportcard.com/report/github.com/alibaba/open-code-review"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
+  <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
+  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
+</p>
+<p align="center">
+  <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
+  <a href="#supported-platforms"><img alt="macOS" src="https://img.shields.io/badge/macOS-supported-blue.svg" /></a>
+  <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
+  <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | 한국어 | <a href="README.ru-RU.md">Русский</a>
@@ -20,9 +36,27 @@
 
 Open Code Review는 AI 기반 코드 리뷰 CLI 도구입니다. Alibaba Group의 내부 공식 AI 코드 리뷰 어시스턴트에서 시작했으며, 지난 2년 동안 수만 명의 개발자에게 제공되어 수백만 건의 코드 결함을 찾아냈습니다. 대규모 환경에서 충분히 검증한 뒤 커뮤니티를 위해 오픈 소스 프로젝트로 공개했습니다. 모델 endpoint만 설정하면 바로 사용할 수 있습니다.
 
-이 도구는 Git diff를 읽고, 변경 파일을 tool-use 기능을 가진 agent를 통해 설정 가능한 LLM으로 전달한 뒤, 라인 단위 위치 정보가 포함된 구조화된 리뷰 코멘트를 생성합니다. agent는 전체 파일 내용 읽기, 코드베이스 검색, 다른 변경 파일 확인 등을 통해 맥락을 확보하고 표면적인 diff 피드백이 아닌 깊이 있는 리뷰를 수행할 수 있습니다.
+이 도구는 Git diff를 읽고, 변경 파일을 tool-use 기능을 가진 agent를 통해 설정 가능한 LLM으로 전달한 뒤, 라인 단위 위치 정보가 포함된 구조화된 리뷰 코멘트를 생성합니다. agent는 전체 파일 내용 읽기, 코드베이스 검색, 다른 변경 파일 확인 등을 통해 맥락을 확보하고 표면적인 diff 피드백이 아닌 깊이 있는 리뷰를 수행할 수 있습니다. diff 리뷰 외에도 `ocr scan`은 전체 파일을 리뷰할 수 있어, 익숙하지 않은 코드베이스를 감사하거나 의미 있는 diff가 없는 디렉터리를 검토하는 데 유용합니다.
+
+자세한 내용은 [공식 웹사이트](https://alibaba.github.io/open-code-review/)를 참조하세요.
 
 ![Highlights](imgs/highlights-en.png)
+
+## 벤치마크
+
+> 범용 Agent(Claude Code)와 비교할 때, Open Code Review는 동일한 기반 모델에서 유의미하게 높은 **정밀도(Precision)**와 **F1 점수**를 달성하며, 토큰 소비량은 **약 1/9** 수준이고 리뷰 속도도 더 빠릅니다. 다만 재현율(Recall)은 범용 Agent보다 낮습니다 — 이는 노이즈를 줄이고 정밀도를 우선하는 설계적 트레이드오프입니다.
+
+실제 코드 리뷰 기반 벤치마크. **50**개 인기 오픈소스 저장소에서 **200**개 실제 Pull Request를 엄선하고, **10**개 프로그래밍 언어를 커버 — 80명 이상의 시니어 엔지니어가 교차 검증(**1,505**개 어노테이션된 결함).
+
+| 지표 | 측정 내용 | 중요한 이유 |
+|------|-----------|-------------|
+| **F1** | 정밀도와 재현율의 조화 평균 | 리뷰 품질을 나타내는 최적의 단일 지표 |
+| **정밀도 (Precision)** | 보고된 이슈 중 실제 결함 비율 | 높을수록 확인할 오탐이 적음 |
+| **재현율 (Recall)** | 실제 결함 중 발견된 비율 | 높을수록 놓치는 이슈가 적음 |
+| **평균 시간 (Avg Time)** | 리뷰당 실제 소요 시간 | CI 파이프라인 대기 시간에 영향 |
+| **평균 토큰 (Avg Token)** | 리뷰당 총 토큰 소비량 | API 비용에 직접 영향 |
+
+![Benchmark](imgs/benchmark-en.png)
 
 ## 왜 Open Code Review인가?
 
@@ -72,7 +106,23 @@ npm install -g @alibaba-group/open-code-review
 
 **GitHub Release 사용**
 
-[GitHub Releases](https://github.com/alibaba/open-code-review/releases)에서 최신 binary를 다운로드합니다.
+명령 한 번으로 사용 중인 OS/아키텍처에 맞는 최신 binary를 설치합니다 (macOS / Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+```
+
+이 스크립트는 알맞은 릴리스 binary를 선택하고 SHA-256 체크섬을 검증한 뒤 `ocr`로 `/usr/local/bin`에 설치합니다. 설치 위치는 `OCR_INSTALL_DIR`로, 릴리스 버전은 `OCR_VERSION`으로 재정의할 수 있습니다:
+
+```bash
+OCR_INSTALL_DIR="$HOME/.local/bin" OCR_VERSION=v1.3.13 \
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh)"
+```
+
+<details>
+<summary>수동 다운로드 (Windows 포함 모든 플랫폼)</summary>
+
+[GitHub Releases](https://github.com/alibaba/open-code-review/releases)에서 사용 중인 플랫폼의 binary를 다운로드합니다.
 
 ```bash
 # macOS (Apple Silicon)
@@ -98,6 +148,8 @@ curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/dow
 curl -Lo ocr.exe https://github.com/alibaba/open-code-review/releases/latest/download/opencodereview-windows-arm64.exe
 ```
 
+</details>
+
 **소스에서 빌드**
 
 ```bash
@@ -113,6 +165,8 @@ sudo cp dist/opencodereview /usr/local/bin/ocr
 
 **코드 리뷰를 실행하기 전에 반드시 LLM을 설정해야 합니다.**
 
+OCR은 통합 **Provider** 시스템으로 LLM 설정을 관리합니다. 다양한 주요 provider가 내장되어 있으며, 프라이빗 배포 또는 기타 호환 엔드포인트에 연결하기 위한 커스텀 provider 추가도 지원합니다. 설정은 `~/.opencodereview/config.json`에 저장됩니다.
+
 **Option A: 대화형 설정 (권장)**
 
 ```bash
@@ -122,26 +176,60 @@ ocr config model             # 활성 provider의 model 선택
 
 ![Provider setup](imgs/providers.jpg)
 
-**Option B: 수동 설정**
+대화형 UI가 provider 선택, API key 입력, model 설정을 안내하며, 완료 후 자동으로 연결 테스트를 수행합니다.
+
+`ocr llm providers`를 실행하면 모든 built-in provider를 확인할 수 있습니다. Built-in provider에는 API URL과 프로토콜이 사전 설정되어 있어 API key만 제공하면 바로 사용할 수 있습니다. 해당 환경 변수(예: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)가 이미 설정되어 있으면 API key가 자동으로 읽힙니다.
+
+**커스텀 provider**도 대화형 UI에서 추가할 수 있습니다 — provider 이름, API URL, 프로토콜 타입(`anthropic` 또는 `openai`), API key를 입력합니다.
+
+**Option B: CLI 설정 (CI/CD 등 비대화형 환경용)**
+
+`ocr config set` 명령으로 provider 설정을 직접 작성합니다. 스크립트 및 자동화에 적합합니다.
+
+Built-in provider 사용:
 
 ```bash
-ocr config set llm.url https://api.anthropic.com/v1/messages
-ocr config set llm.auth_token your-api-key-here
-ocr config set llm.model claude-opus-4-6
-ocr config set llm.use_anthropic true
+ocr config set provider anthropic
+ocr config set providers.anthropic.api_key your-api-key-here
+ocr config set providers.anthropic.model claude-sonnet-4-6
 ```
 
-config는 `~/.opencodereview/config.json`에 저장됩니다.
-
-**`auth_header` (선택사항):** Anthropic 사용 시 API key를 전송할 HTTP header를 제어합니다. 생략하면 기본값은 `authorization` (Bearer token)입니다. 표준 `sk-ant-*` API key를 사용하는 경우 `x-api-key`로 설정해야 합니다:
+커스텀 provider 사용 (프라이빗 게이트웨이 또는 기타 호환 엔드포인트):
 
 ```bash
-ocr config set llm.auth_header x-api-key
+ocr config set provider my-gateway
+ocr config set custom_providers.my-gateway.url https://my-llm-gateway.internal/v1
+ocr config set custom_providers.my-gateway.protocol openai
+ocr config set custom_providers.my-gateway.api_key your-api-key-here
+ocr config set custom_providers.my-gateway.model gpt-4o
 ```
 
-지원되는 값: `x-api-key`, `authorization` (별칭: `bearer`). 그 외 값은 오류로 처리됩니다.
+> 커스텀 provider에서는 `url`과 `protocol`이 필수입니다. 지원 프로토콜: `anthropic`, `openai`.
 
-**Option C: 환경 변수(가장 높은 우선순위)**
+선택 설정:
+
+| 키 | 설명 |
+|----|------|
+| `providers.<name>.auth_header` | 인증 header: `x-api-key` 또는 `authorization` (기본값: `authorization`) |
+| `providers.<name>.extra_body` | 요청 body에 병합되는 커스텀 JSON 필드 |
+| `providers.<name>.extra_headers` | 쉼표로 구분된 `key=value` 쌍, 각 요청에 추가되는 커스텀 HTTP 헤더 |
+| `providers.<name>.models` | 대화형 선택용 model 목록 |
+
+**`extra_headers` (선택사항):** 모든 LLM API 요청에 커스텀 HTTP 헤더를 추가합니다. 프록시, 게이트웨이, 추가 헤더가 필요한 엔터프라이즈 엔드포인트(조직 ID, 트레이싱 ID 등)에 유용합니다. 형식은 쉼표로 구분된 `key=value` 쌍입니다. 쉼표가 포함된 값은 큰따옴표로 묶으세요:
+
+```bash
+ocr config set llm.extra_headers "X-Org-ID=org-123,X-Forwarded-For=\"1.2.3.4,5.6.7.8\""
+```
+
+provider 별로 추가 헤더를 설정할 수도 있습니다:
+
+```bash
+ocr config set providers.anthropic.extra_headers "X-Org-ID=org-123"
+```
+
+**환경 변수 (가장 높은 우선순위)**
+
+환경 변수는 설정 파일의 값을 덮어씁니다. 설정 파일 작성이 불편한 CI/CD 시나리오에 적합합니다:
 
 ```bash
 export OCR_LLM_URL=https://api.anthropic.com/v1/messages
@@ -152,12 +240,10 @@ export OCR_USE_ANTHROPIC=true
 
 Claude Code 환경 변수(`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`)와도 호환되며, `~/.zshrc` / `~/.bashrc`의 export도 파싱합니다.
 
-> **CC-Switch 사용자 참고**: [CC-Switch](https://github.com/farion1231/cc-switch)를 [routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service)와 함께 사용한다면, 추가 설정 없이 `llm.url`을 CC-Switch proxy 주소로 지정할 수 있습니다.
-> - **Claude** provider: `llm.url`을 `http://127.0.0.1:15721`로 설정
-> - **Codex** provider: `llm.url`을 `http://127.0.0.1:15721/v1`로 설정
-> - provider 설정에 맞게 `llm.model` 설정
-> - `llm.auth_token`은 아무 값이나 사용할 수 있음
-> - `extra_body` 설정은 그대로 적용됨
+> **CC-Switch 사용자 참고**: [CC-Switch](https://github.com/farion1231/cc-switch)를 [routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service)와 함께 사용한다면, provider의 `url`을 CC-Switch proxy 주소로 지정하여 추가 설정 없이 사용할 수 있습니다:
+> - **Claude** provider: `providers.anthropic.url`을 `http://127.0.0.1:15721`로 설정
+> - **Codex** provider: 해당 provider의 `url`을 `http://127.0.0.1:15721/v1`로 설정
+> - `api_key`는 아무 값이나 사용 가능, `extra_body` 설정은 그대로 적용됨
 
 **2. 연결 테스트**
 
@@ -178,6 +264,10 @@ ocr review --from main --to feature-branch
 
 # 단일 commit
 ocr review --commit abc123
+
+# 전체 파일 스캔 — diff 대신 파일 전체를 리뷰 (git 이력 불필요)
+ocr scan                          # 전체 repository 스캔
+ocr scan --path internal/agent    # 디렉터리 또는 특정 파일 스캔
 ```
 
 ### Coding Agent와 통합
@@ -241,7 +331,39 @@ ocr review --audience agent
 
 한국어 가이드: [`plugins/open-code-review/CODEX.ko-KR.md`](plugins/open-code-review/CODEX.ko-KR.md)
 
-#### Option 4: Command 파일 직접 복사
+#### Option 4: Cursor Plugin으로 설치
+
+[Cursor](https://www.cursor.com/)에서는 이 repository에서 Open Code Review plugin을 설치합니다:
+
+```
+cursor-plugin marketplace add alibaba/open-code-review
+```
+
+수동으로 marketplace를 추가할 수도 있습니다. Cursor에서 `/plugins`를 열고 `Open Code Review`를 검색하여 설치합니다.
+
+local checkout이나 fork에서는 다음을 사용할 수 있습니다:
+
+```
+cursor-plugin marketplace add .
+```
+
+설치 후, Cursor에서 다음과 같이 호출합니다:
+
+```text
+@Open Code Review review my current changes
+@Open Code Review review this branch against main
+@Open Code Review review and fix high-confidence issues
+```
+
+이 plugin은 local OCR CLI를 실행하는 Cursor skill을 등록합니다:
+
+```bash
+ocr review --audience agent
+```
+
+이 통합은 OCR의 내부 LLM backend를 변경하지 않습니다. OCR 자체는 CLI 설정 섹션에 설명된 대로 `ocr` CLI 설치와 설정이 필요합니다.
+
+#### Option 5: Command 파일 직접 복사
 
 package manager 없이 빠르게 설정하려면 command 파일을 복사해 Claude Code에서 `/open-code-review` slash command를 사용할 수 있습니다.
 
@@ -282,16 +404,19 @@ ocr review \
 
 - [`github_actions/`](./examples/github_actions/): GitHub Actions 통합 예시
 - [`gitlab_ci/`](./examples/gitlab_ci/): GitLab CI 통합 예시
+- [`gitflic_ci/`](./examples/gitflic_ci/): GitFlic CI 통합 예시
 
 ## Commands
 
 | Command | Alias | Description |
 |---------|-------|-------------|
-| `ocr review` | `ocr r` | 코드 리뷰 시작 |
+| `ocr review` | `ocr r` | diff 기반 코드 리뷰 시작 |
+| `ocr scan` | `ocr s` | 전체 파일 리뷰 (diff 불필요) |
 | `ocr rules check <file>` | - | 파일 경로에 적용될 리뷰 rule 미리보기 |
 | `ocr config provider` | - | 대화형 provider 설정 (built-in, custom, 수동) |
 | `ocr config model` | - | 활성 provider의 대화형 model 선택 |
 | `ocr config set <key> <value>` | - | config 값 설정 |
+| `ocr config unset custom_providers.<name>` | - | custom provider 삭제 |
 | `ocr llm test` | - | LLM 연결 테스트 |
 | `ocr llm providers` | - | built-in LLM provider 목록 표시 |
 | `ocr viewer` | `ocr v` | `localhost:5483`에서 WebUI session viewer 실행 |
@@ -305,6 +430,7 @@ ocr review \
 | `--from` | - | - | Source ref 예: `main` |
 | `--to` | - | - | Target ref 예: `feature-branch` |
 | `--commit` | `-c` | - | 리뷰할 단일 commit |
+| `--exclude` | - | - | 건너뛸 파일의 쉼표 구분 gitignore 스타일 패턴; rule.json의 excludes와 병합 |
 | `--preview` | `-p` | `false` | LLM 실행 없이 리뷰 대상 파일 미리보기 |
 | `--format` | `-f` | `text` | Output format: `text` 또는 `json` |
 | `--concurrency` | - | `8` | 최대 동시 파일 리뷰 수 |
@@ -317,6 +443,27 @@ ocr review \
 | `--max-git-procs` | - | built-in | 최대 동시 git subprocess 수 |
 | `--tools` | - | - | custom JSON tools config 경로 |
 
+### `ocr scan` Flags
+
+`ocr scan`은 diff가 아닌 전체 파일을 리뷰합니다 — 익숙하지 않은 코드베이스 감사, 마이그레이션 전 스캔, 의미 있는 diff가 없는 디렉터리 등에 유용합니다. 비-git 디렉터리에서도 작동합니다 (`.gitignore`를 따르는 파일 시스템 탐색으로 폴백).
+
+| Flag | Shorthand | Default | Description |
+|------|-----------|---------|-------------|
+| `--path` | - | 전체 repo | 스캔할 쉼표 구분 디렉터리/파일 |
+| `--exclude` | - | - | 건너뛸 파일의 쉼표 구분 gitignore 스타일 패턴; rule.json의 excludes와 병합 |
+| `--preview` | `-p` | `false` | LLM 실행 없이 스캔 대상 파일 목록 표시 |
+| `--max-tokens-budget` | - | `0` (무제한) | 총 토큰 사용량 제한; 초과 시 dispatch 중단 |
+| `--no-plan` | - | `false` | 파일별 planning 사전 처리 건너뛰기 |
+| `--no-dedup` | - | `false` | 배치별 유사 comment 중복 제거 건너뛰기 |
+| `--no-summary` | - | `false` | 프로젝트 수준 요약 건너뛰기 |
+| `--batch` | - | `by-language` | 배치 전략: `none`, `by-language`, 또는 `by-directory` |
+| `--format` | `-f` | `text` | Output format: `text` 또는 `json` (JSON에 `project_summary` 필드 포함) |
+| `--concurrency` | - | `8` | 최대 동시 파일 스캔 수 |
+| `--rule` | - | - | custom JSON review rules 경로 |
+| `--repo` | - | current dir | 스캔할 repository 또는 디렉터리 루트 |
+
+각 실행 전에 `ocr scan`은 대략적인 토큰 비용 추정치를 출력합니다. `--preview`로 먼저 파일 목록을 확인하고, `--max-tokens-budget`으로 대규모 repository의 비용을 제한할 수 있습니다.
+
 ## Examples
 
 ```bash
@@ -324,6 +471,9 @@ ocr review \
 ocr config provider
 ocr config model
 ocr llm providers
+
+# custom provider 삭제
+ocr config unset custom_providers.my-gateway
 
 # 리뷰 대상 파일 미리보기(LLM call 없음)
 ocr review --preview
@@ -351,6 +501,21 @@ ocr review --rule /path/to/my-rules.json
 # 파일에 적용될 rule 미리보기
 ocr rules check src/main/java/com/example/Foo.java
 ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
+
+# 전체 파일 스캔: 먼저 파일 목록 미리보기 (LLM call 없음)
+ocr scan --preview
+
+# 전체 repo 스캔, 비용을 ~500k 토큰으로 제한
+ocr scan --max-tokens-budget 500000
+
+# 하위 디렉터리 스캔, 생성/테스트 파일 건너뛰기
+ocr scan --path internal --exclude '**/*_test.go,**/generated/**'
+
+# 비-git 디렉터리를 JSON output으로 스캔 (project_summary 포함)
+ocr scan --repo /path/to/plain/dir --format json
+
+# 가장 빠른 스캔: planning, 중복 제거, 프로젝트 요약 건너뛰기
+ocr scan --no-plan --no-dedup --no-summary
 
 # browser에서 review session history 보기
 ocr viewer
@@ -387,7 +552,8 @@ OCR은 네 계층의 priority chain으로 review rule을 해석합니다. 각 �
   "rules": [
     {
       "path": "force-api/**/*.java",
-      "rule": "All new methods must validate required parameters for null values"
+      "rule": "All new methods must validate required parameters for null values",
+      "merge_system_rule": true
     },
     {
       "path": "**/*mapper*.xml",
@@ -398,8 +564,48 @@ OCR은 네 계층의 priority chain으로 review rule을 해석합니다. 각 �
 ```
 
 - `path`는 `**` recursive matching과 `{java,kt}` brace expansion을 지원합니다.
+- `merge_system_rule`은 optional입니다. `true`이면 매칭된 built-in system rule을 이 user rule과 병합합니다.
 - 각 계층 안에서는 rule이 선언 순서대로 평가되며 첫 번째 match가 선택됩니다.
 - rule file이 없으면 조용히 건너뜁니다.
+
+**`rule` 필드는 인라인 콘텐츠와 파일 경로를 모두 지원합니다.** 시스템이 다음 순서로 자동 판별합니다:
+
+1. 값에 줄바꿈이 포함된 경우 → **인라인 콘텐츠** (여러 줄 규칙은 파일 경로로 간주되지 않습니다).
+2. 값이 한 줄이고 공백이 없으며 `.md` / `.txt` / `.markdown`으로 끝나는 경우 → **파일 경로**.
+   - 절대 경로(`/`로 시작)는 그대로 사용됩니다.
+   - 상대 경로는 프로젝트 루트에서 확인합니다. 경로 탐색(예: `../../etc/passwd.md`)은 차단됩니다. 없으면 `[WARN]`을 출력하고 규칙이 지워집니다 (인라인으로 폴백 없음).
+   - 파일은 유효성 검사를 통과해야 합니다: 허용된 확장자, ≤ 512 KB, 심볼릭 링크 해석 후 대상도 허용된 확장자여야 합니다. 검증 실패 시 규칙이 지워집니다.
+3. 그 외의 경우 → **인라인 콘텐츠**.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*mapper*.xml",
+      "rule": "docs/sql-rules.md"
+    },
+    {
+      "path": "**/*.java",
+      "rule": "Always check for null safety and resource leaks"
+    },
+    {
+      "path": "**/*.go",
+      "rule": "shared/go-concurrency.md"
+    },
+    {
+      "path": "**/*.py",
+      "rule": "/Users/me/team-rules/python.md"
+    }
+  ]
+}
+```
+
+- `docs/sql-rules.md` — 상대 경로, `<project>/docs/sql-rules.md`에서 로드.
+- `Always check for null safety…` — 인라인 문자열, 그대로 사용.
+- `shared/go-concurrency.md` — 상대 경로, 동일하게 해결.
+- `/Users/me/team-rules/python.md` — 절대 경로, 그대로 사용.
+
+> 절대 경로는 프로젝트 외부 파일에 접근할 수 있으며, 이는 의도된 설계입니다. `rule.json`은 프로젝트 메인테이너가 작성하는 신뢰된 입력입니다. 팀은 공유 규칙을 공통 경로(예: `/opt/company-rules/`)에 두어 각 프로젝트에 복사할 필요가 없습니다.
 
 ## Configuration Reference
 
@@ -414,12 +620,23 @@ Config file: `~/.opencodereview/config.json`
 | `providers.<name>.model` | string | Provider의 model 이름 |
 | `providers.<name>.models` | array | 대화형 선택에 사용할 optional provider model 목록 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
+| `providers.<name>.extra_body` | object | 모든 요청 본문에 병합되는 JSON 객체 |
+| `providers.<name>.timeout_sec` | integer | 요청당 HTTP timeout(초), 기본값 `300` |
+| `providers.<name>.extra_headers` | string | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `custom_providers.<name>.*` | — | optional `models`를 포함한 `providers.<name>.*`과 동일한 필드 |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |
+| `llm.extra_body` | object | 모든 요청 본문에 병합되는 JSON 객체 |
+| `llm.timeout_sec` | integer | 요청당 HTTP timeout(초), 기본값 `300` |
+| `llm.extra_headers` | string | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
+| `mcp_servers.<name>.command` | string | MCP 서버를 시작하는 명령어 |
+| `mcp_servers.<name>.args` | array | MCP 서버의 커맨드라인 인수 |
+| `mcp_servers.<name>.env` | array | 환경 변수 (`KEY=VALUE` 형식) |
+| `mcp_servers.<name>.tools` | array | 허용할 도구 이름 (비어 있으면 모든 도구 허용) |
+| `mcp_servers.<name>.setup` | string | 서버 시작 전에 실행할 설정 명령어 |
 | `language` | string | 임의의 언어 이름, 예: `English`, `Chinese` (기본값: `English`) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -428,6 +645,43 @@ Config file: `~/.opencodereview/config.json`
 
 환경 변수는 config file보다 우선합니다.
 
+### MCP Server
+
+Open Code Review는 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 서버를 지원하여 리뷰 에이전트가 stdio 전송을 통해 코드 리뷰 중에 외부 도구를 사용할 수 있습니다.
+
+CLI로 MCP 서버를 설정합니다:
+
+```bash
+# MCP 서버 추가
+ocr config set mcp_servers.<name>.command <command>
+ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
+ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
+ocr config set mcp_servers.<name>.tools '["tool_name"]'
+ocr config set mcp_servers.<name>.setup '<setup command>'
+
+# MCP 서버 삭제
+ocr config unset mcp_servers.<name>
+```
+
+| 필드 | 필수 | 설명 |
+|------|------|------|
+| `command` | 예 | MCP 서버를 시작하는 실행 명령어 |
+| `args` | 아니오 | 서버에 전달할 커맨드라인 인수 |
+| `env` | 아니오 | 환경 변수 (`KEY=VALUE` 형식) |
+| `tools` | 아니오 | 허용할 도구 이름. 비어 있으면 서버의 모든 도구 사용 가능 |
+| `setup` | 아니오 | 서버 시작 전에 실행할 셸 명령어 (예: 인덱스 빌드) |
+
+> **참고:** MCP 도구의 이름이 내장 도구와 충돌하면 경고와 함께 건너뜁니다. `setup` 명령어의 타임아웃은 5분입니다.
+
+**예시: [CodeGraph](https://github.com/nicholasgasior/codegraph)를 추가하여 코드 구조 분석 강화**
+
+```bash
+ocr config set mcp_servers.codegraph.command codegraph
+ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
+ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
+ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+```
+
 ### Environment Variables
 
 | Variable | Purpose |
@@ -435,7 +689,9 @@ Config file: `~/.opencodereview/config.json`
 | `OCR_LLM_URL` | LLM API endpoint URL |
 | `OCR_LLM_TOKEN` | API key / auth token |
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` 또는 `authorization`) |
+| `OCR_LLM_EXTRA_HEADERS` | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `OCR_LLM_MODEL` | Model name |
+| `OCR_LLM_TIMEOUT` | 요청당 HTTP timeout(초), config file의 `timeout_sec`를 override |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
 
 ## Telemetry

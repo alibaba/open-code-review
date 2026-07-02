@@ -32,6 +32,10 @@ module.exports = {
       {
         test: /\.svg$/,
         type: 'asset/resource'
+      },
+      {
+        test: /\.(png|jpg|jpeg|gif)$/,
+        type: 'asset/resource'
       }
     ]
   },
@@ -40,10 +44,12 @@ module.exports = {
   },
   devServer: {
     port: 3030,
+    host: '0.0.0.0',
+    allowedHosts: 'all',
     static: { directory: __dirname },
     historyApiFallback: {
       index: '/index.html',
-      rewrites: [{ from: /^\/_p\/\d+\//, to: '/index.html' }]
+      rewrites: [{ from: /^\/\_p\/\d+\//, to: '/index.html' }]
     }
   },
   plugins: [

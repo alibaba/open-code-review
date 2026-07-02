@@ -98,6 +98,21 @@ script:
   - ocr review --rule ./my-rules.json --from origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --to $CI_COMMIT_SHA
 ```
 
+### Adjust retry and delay settings
+
+When posting review discussions, the script includes rate-limit handling with exponential backoff (with jitter), `Retry-After` header support, and proactive throttling based on GitLab's `RateLimit-Remaining` response header. All API requests — including summary notes and MR version fetches — use the same retry logic. See [GitLab Rate Limits](https://docs.gitlab.com/security/rate_limits/) for details on GitLab's rate-limiting policies and recommended handling. You can configure the retry and delay behavior via **CI/CD Variables** (Settings → CI/CD → Variables):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OCR_RETRY_BASE_DELAY` | `2000` | Base delay (ms) for exponential backoff when a rate-limit error is hit |
+| `OCR_MAX_RETRIES` | `3` | Maximum retry attempts per discussion when rate-limited |
+| `OCR_MAX_RETRY_DELAY` | `60000` | Maximum delay (ms) per single retry, caps both `Retry-After` and backoff |
+| `OCR_SUCCESS_DELAY` | `2000` | Delay (ms) after a successful discussion post to pace subsequent requests |
+| `OCR_FAILURE_DELAY` | `1000` | Delay (ms) after a non-rate-limit failure to pace subsequent requests |
+| `OCR_RATE_LIMIT_THRESHOLD` | `10` | Proactively slow down when GitLab `RateLimit-Remaining` is at/below this value (set `0` to disable) |
+
+These variables are optional — if not configured, sensible defaults are used. Consider increasing delays for self-hosted GitLab instances with aggressive rate-limit configurations or for large MRs that generate numerous review comments. The `OCR_RATE_LIMIT_THRESHOLD` variable enables proactive throttling: when GitLab reports low remaining quota in the `RateLimit-Remaining` response header, the script automatically doubles the pacing delay to avoid hitting 429 errors.
+
 ### Limit concurrency
 
 Adjust the `--concurrency` flag for large MRs to control the number of concurrent LLM requests:

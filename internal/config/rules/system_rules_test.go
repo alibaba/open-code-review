@@ -249,6 +249,36 @@ func TestNewResolver_ProjectRuleHighestPriority(t *testing.T) {
 	}
 }
 
+func TestNewResolver_ProjectRuleFirstMatchWinsWithinFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	// Project rule file:
+	//   <repo>/.opencodereview/rule.json
+	// Path under test:
+	//   internal/config/rules/system_rules.go -> matches both project entries.
+	// This verifies declaration order inside one JSON rule file: the first
+	// matching entry wins even when a later entry is more specific.
+	dir := t.TempDir()
+	ocrDir := filepath.Join(dir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"internal/**/*.go","rule":"first-go-rule"},{"path":"internal/config/**/*.go","rule":"second-config-rule"}]}`
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	got := resolver.Resolve("internal/config/rules/system_rules.go")
+	if got != "first-go-rule" {
+		t.Fatalf("expected first matching project rule, got %q", got)
+	}
+}
+
 func TestNewResolver_ProjectRuleFallsBackToSystem(t *testing.T) {
 	dir := t.TempDir()
 	ocrDir := filepath.Join(dir, ".opencodereview")
@@ -292,6 +322,194 @@ func TestNewResolver_CustomRuleOverridesDefault(t *testing.T) {
 	got = resolver.Resolve("readme.md")
 	if !strings.Contains(got, "Correctness") {
 		t.Errorf("expected system default rule, got %q", truncate(got, 80))
+	}
+}
+
+func TestNewResolver_EmptyRuleSkippedAndFallsBack(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	dir := t.TempDir()
+	ocrDir := filepath.Join(dir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":""},{"path":"internal/**/*.go","rule":"second-rule"}]}`
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	// main.go matches the first entry (empty rule) — should skip it and fall
+	// back to system rule instead of returning "".
+	got := resolver.Resolve("main.go")
+	if got == "" {
+		t.Fatal("expected fallback to system rule, got empty string")
+	}
+
+	// internal/pkg/foo.go matches both entries — the empty first entry should
+	// be skipped, and the second entry should win.
+	got = resolver.Resolve("internal/pkg/foo.go")
+	if got != "second-rule" {
+		t.Fatalf("expected second-rule, got %q", got)
+	}
+}
+
+func TestNewResolver_EmptyRuleMergeSystemRuleReturnsSystemOnly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	dir := t.TempDir()
+	ocrDir := filepath.Join(dir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":"","merge_system_rule":true}]}`
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	systemRule, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+	wantSystemRule := systemRule.Resolve("main.go")
+
+	got := resolver.Resolve("main.go")
+	if got != wantSystemRule {
+		t.Fatalf("expected system rule only, got %q", truncate(got, 120))
+	}
+	if strings.Contains(got, "User-Specific Rules") {
+		t.Fatal("should not contain User-Specific Rules header when user rule is empty")
+	}
+}
+
+func TestNewResolver_ProjectRuleReplacesSystemRuleByDefault(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	// Project rule file:
+	//   <repo>/.opencodereview/rule.json
+	// Path under test:
+	//   main.go -> matches the project **/*.go rule.
+	// This verifies the default behavior: a user rule replaces the system rule
+	// unless the matched rule entry opts into merge_system_rule.
+	dir := t.TempDir()
+	ocrDir := filepath.Join(dir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":"project-go-rule"}]}`
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	got := resolver.Resolve("main.go")
+	if got != "project-go-rule" {
+		t.Fatalf("expected only project rule when merge is disabled, got %q", got)
+	}
+}
+
+func TestNewResolver_ProjectRuleMergesSystemRule(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	// Project rule file:
+	//   <repo>/.opencodereview/rule.json
+	// Path under test:
+	//   main.go -> matches both the system Go rule and the project **/*.go rule.
+	// This verifies merge_system_rule keeps both rules without depending on the
+	// exact merge markdown or ordering.
+	dir := t.TempDir()
+	ocrDir := filepath.Join(dir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"**/*.go","rule":"project-go-rule","merge_system_rule":true}]}`
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	systemRule, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+	wantSystemRule := systemRule.Resolve("main.go")
+	wantUserRule := "project-go-rule"
+
+	got := resolver.Resolve("main.go")
+	systemIdx := strings.Index(got, wantSystemRule)
+	if systemIdx < 0 {
+		t.Fatalf("expected merged system rule, got %q", truncate(got, 120))
+	}
+	userIdx := strings.Index(got, wantUserRule)
+	if userIdx < 0 {
+		t.Fatalf("expected merged project rule, got %q", truncate(got, 120))
+	}
+}
+
+func TestNewResolver_MergeSystemRuleKeepsRulePriority(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	// Project rule file:
+	//   <repo>/.opencodereview/rule.json
+	// Custom rule file:
+	//   <custom>/custom_rules.json, passed as --rule equivalent.
+	// Path under test:
+	//   main.go -> matches custom main.go first, then project **/*.go.
+	// This verifies merging does not change layer priority: custom still wins.
+	repoDir := t.TempDir()
+	ocrDir := filepath.Join(repoDir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	projectRule := `{"rules":[{"path":"**/*.go","rule":"project-go-rule"}]}`
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(projectRule), 0o644); err != nil {
+		t.Fatalf("write rule.json: %v", err)
+	}
+
+	customDir := t.TempDir()
+	customRule := `{"rules":[{"path":"main.go","rule":"custom-main-rule","merge_system_rule":true}]}`
+	customPath := filepath.Join(customDir, "custom_rules.json")
+	if err := os.WriteFile(customPath, []byte(customRule), 0o644); err != nil {
+		t.Fatalf("write custom rule: %v", err)
+	}
+
+	resolver, _, err := NewResolver(repoDir, customPath)
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+
+	systemRule, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+	wantSystemRule := systemRule.Resolve("main.go")
+
+	got := resolver.Resolve("main.go")
+	if !strings.Contains(got, wantSystemRule) {
+		t.Fatalf("expected merged system rule, got %q", truncate(got, 120))
+	}
+	if !strings.Contains(got, "custom-main-rule") {
+		t.Fatalf("expected custom rule to win, got %q", truncate(got, 120))
+	}
+	if strings.Contains(got, "project-go-rule") {
+		t.Fatalf("project rule should not be merged when custom rule matches first, got %q", truncate(got, 120))
 	}
 }
 
@@ -613,6 +831,52 @@ func TestResolveDetail_ProjectOverridesSystem(t *testing.T) {
 	}
 }
 
+func TestResolveDetail_MergeSystemRule(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	// Project rule file:
+	//   <repo>/.opencodereview/rule.json
+	// Path under test:
+	//   src/main/foo.java -> matches both the system Java rule and the project rule.
+	// This verifies ResolveDetail reports the matched user rule metadata while
+	// returning merged rule text when the entry sets merge_system_rule.
+	dir := t.TempDir()
+	ocrDir := filepath.Join(dir, ".opencodereview")
+	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	ruleJSON := `{"rules":[{"path":"src/**/*.java","rule":"project-java-rule","merge_system_rule":true}]}`
+	if err := os.WriteFile(filepath.Join(ocrDir, "rule.json"), []byte(ruleJSON), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	resolver, _, err := NewResolver(dir, "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	systemRule, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+	wantSystemRule := systemRule.Resolve("src/main/foo.java")
+
+	detail := dr.ResolveDetail("src/main/foo.java")
+	if detail.Source != "project" {
+		t.Errorf("expected source 'project', got %q", detail.Source)
+	}
+	if detail.Pattern != "src/**/*.java" {
+		t.Errorf("expected pattern 'src/**/*.java', got %q", detail.Pattern)
+	}
+	if !strings.Contains(detail.Rule, wantSystemRule) {
+		t.Fatalf("expected merged system rule, got %q", truncate(detail.Rule, 120))
+	}
+	if !strings.Contains(detail.Rule, "project-java-rule") {
+		t.Fatalf("expected merged project rule, got %q", truncate(detail.Rule, 120))
+	}
+}
+
 func TestResolveDetail_CustomOverridesAll(t *testing.T) {
 	// Project rule
 	repoDir := t.TempDir()
@@ -679,5 +943,408 @@ func TestNewResolver_BraceExpansionInProjectRule(t *testing.T) {
 				t.Errorf("Resolve(%q) = %q, want containing %q", tt.path, truncate(got, 80), tt.want)
 			}
 		})
+	}
+}
+
+// ── resolveRuleEntries tests ──
+
+func TestResolveRuleEntries_BasicFile(t *testing.T) {
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "sql-rules.md")
+	if err := os.WriteFile(ruleFile, []byte("Check for SQL injection\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.xml", Rule: "sql-rules.md"},
+		{Path: "**/*.go", Rule: "Always check for nil"},
+	}
+	resolveRuleEntries(entries, dir)
+
+	if entries[0].Rule != "Check for SQL injection" {
+		t.Errorf("expected file content, got %q", entries[0].Rule)
+	}
+	if entries[1].Rule != "Always check for nil" {
+		t.Errorf("inline rule should not change, got %q", entries[1].Rule)
+	}
+}
+
+func TestResolveRuleEntries_MultiLineInline(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file with the same name as the inline rule to make sure
+	// multi-line detection prevents file lookup.
+	if err := os.WriteFile(filepath.Join(dir, "security.md"), []byte("file content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.ts", Rule: "security.md\nBut this is multi-line\nso it should stay inline"},
+	}
+	resolveRuleEntries(entries, dir)
+
+	if entries[0].Rule != "security.md\nBut this is multi-line\nso it should stay inline" {
+		t.Errorf("multi-line rule should stay inline, got %q", entries[0].Rule)
+	}
+}
+
+func TestResolveRuleEntries_MissingFile(t *testing.T) {
+	dir := t.TempDir()
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.xml", Rule: "nonexistent.md"},
+	}
+	resolveRuleEntries(entries, dir)
+
+	// Missing file should clear the rule.
+	if entries[0].Rule != "" {
+		t.Errorf("missing file should clear rule, got %q", entries[0].Rule)
+	}
+}
+
+func TestResolveRuleEntries_AbsolutePath(t *testing.T) {
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "my-rule.md")
+	if err := os.WriteFile(ruleFile, []byte("absolute rule content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Use an absolute path pointing to a file in a different directory.
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: ruleFile},
+	}
+	resolveRuleEntries(entries, "/some/other/repo")
+
+	if entries[0].Rule != "absolute rule content" {
+		t.Errorf("expected absolute file content, got %q", entries[0].Rule)
+	}
+}
+
+func TestResolveRuleEntries_TooLarge(t *testing.T) {
+	dir := t.TempDir()
+	big := make([]byte, 513*1024)
+	for i := range big {
+		big[i] = 'a'
+	}
+	bigFile := filepath.Join(dir, "big.md")
+	if err := os.WriteFile(bigFile, big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "big.md"},
+	}
+	resolveRuleEntries(entries, dir)
+
+	if entries[0].Rule != "" {
+		t.Errorf("oversized file should clear rule, got %q", entries[0].Rule)
+	}
+}
+
+func TestResolveRuleEntries_RelativePath(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, "shared.md"), []byte("repo-level"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "shared.md"},
+	}
+	resolveRuleEntries(entries, repoDir)
+
+	if entries[0].Rule != "repo-level" {
+		t.Errorf("repo-level should win, got %q", entries[0].Rule)
+	}
+}
+
+func TestResolveRuleEntries_EmptyRule(t *testing.T) {
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: ""},
+		{Path: "**/*.ts", Rule: "  "},
+		{Path: "**/*.java", Rule: "\t\n"},
+	}
+	resolveRuleEntries(entries, "/tmp")
+
+	if entries[0].Rule != "" {
+		t.Errorf("empty rule should stay empty, got %q", entries[0].Rule)
+	}
+	if entries[1].Rule != "  " {
+		t.Errorf("whitespace-only rule should stay unchanged, got %q", entries[1].Rule)
+	}
+	if entries[2].Rule != "\t\n" {
+		t.Errorf("whitespace+newline rule should stay unchanged, got %q", entries[2].Rule)
+	}
+}
+
+func TestResolveRuleEntries_SymlinkSafety(t *testing.T) {
+	dir := t.TempDir()
+	sensitiveFile := filepath.Join(dir, "secret.json")
+	if err := os.WriteFile(sensitiveFile, []byte("SECRET"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a symlink with .md extension pointing to a .json file.
+	// The extension check on the resolved path should reject .json.
+	symlinkPath := filepath.Join(dir, "evil.md")
+	if err := os.Symlink(sensitiveFile, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "evil.md"},
+	}
+	resolveRuleEntries(entries, dir)
+	// The symlink target is .json, which is not in the whitelist.
+	// The rule should be cleared.
+	if entries[0].Rule != "" {
+		t.Errorf("symlink to non-whitelisted file should clear rule, got %q", entries[0].Rule)
+	}
+}
+
+func TestResolveRuleEntries_TxtExtension(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "rules.txt"), []byte("rule from txt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "rules.txt"},
+	}
+	resolveRuleEntries(entries, dir)
+
+	if entries[0].Rule != "rule from txt" {
+		t.Errorf(".txt should be accepted, got %q", entries[0].Rule)
+	}
+}
+
+func TestResolveRuleEntries_MarkdownExtension(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "rules.markdown"), []byte("rule from markdown"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "rules.markdown"},
+	}
+	resolveRuleEntries(entries, dir)
+
+	if entries[0].Rule != "rule from markdown" {
+		t.Errorf(".markdown should be accepted, got %q", entries[0].Rule)
+	}
+}
+
+func TestResolveRuleEntries_SubdirectoryPath(t *testing.T) {
+	dir := t.TempDir()
+	docsDir := filepath.Join(dir, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docsDir, "my-rule.md"), []byte("nested rule"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "docs/my-rule.md"},
+	}
+	resolveRuleEntries(entries, dir)
+
+	if entries[0].Rule != "nested rule" {
+		t.Errorf("subdirectory path should work, got %q", entries[0].Rule)
+	}
+}
+
+// ── looksLikeFilePath tests ──
+
+func TestLooksLikeFilePath_InlineContent(t *testing.T) {
+	tests := []string{
+		"Check for null pointers",
+		"Always validate input",
+		"security",
+		"xss",
+	}
+	for _, s := range tests {
+		if looksLikeFilePath(s) {
+			t.Errorf("looksLikeFilePath(%q) should be false", s)
+		}
+	}
+}
+
+func TestLooksLikeFilePath_MultiLine(t *testing.T) {
+	s := "line1\nline2\nline3"
+	if looksLikeFilePath(s) {
+		t.Errorf("multi-line should be false")
+	}
+}
+
+func TestLooksLikeFilePath_FileExtensions(t *testing.T) {
+	tests := []string{
+		"rules.md",
+		"doc.txt",
+		"doc.markdown",
+		"DOC.MD",
+		"path/to/file.md",
+	}
+	for _, s := range tests {
+		if !looksLikeFilePath(s) {
+			t.Errorf("looksLikeFilePath(%q) should be true", s)
+		}
+	}
+}
+
+func TestLooksLikeFilePath_WithSpaces(t *testing.T) {
+	// Values containing spaces are inline, not file paths.
+	tests := []string{
+		"Follow rules from team.md",
+		"Ensure output is in .md",
+		"use .txt format",
+	}
+	for _, s := range tests {
+		if looksLikeFilePath(s) {
+			t.Errorf("looksLikeFilePath(%q) should be false (contains space)", s)
+		}
+	}
+}
+
+func TestLooksLikeFilePath_PathWithoutExtension(t *testing.T) {
+	// Paths without .md/.txt/.markdown are NOT treated as file paths.
+	tests := []string{
+		"docs/security",
+		"shared/rules/go",
+		"Use HTTP/2 for all requests",
+	}
+	for _, s := range tests {
+		if looksLikeFilePath(s) {
+			t.Errorf("looksLikeFilePath(%q) should be false (no .md/.txt/.markdown)", s)
+		}
+	}
+}
+
+// ── readRuleFileSafe tests ──
+
+func TestReadRuleFileSafe_NormalFile(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "test.md")
+	if err := os.WriteFile(f, []byte("hello world\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := readRuleFileSafe(f)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "hello world" {
+		t.Errorf("expected 'hello world', got %q", content)
+	}
+}
+
+func TestReadRuleFileSafe_UnsupportedExt(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "test.json")
+	if err := os.WriteFile(f, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := readRuleFileSafe(f)
+	if err == nil {
+		t.Fatal("expected error for .json")
+	}
+}
+
+func TestReadRuleFileSafe_TooLarge(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "big.md")
+	big := make([]byte, 513*1024)
+	if err := os.WriteFile(f, big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := readRuleFileSafe(f)
+	if err == nil {
+		t.Fatal("expected error for oversized file")
+	}
+}
+
+func TestReadRuleFileSafe_Missing(t *testing.T) {
+	_, err := readRuleFileSafe("/nonexistent/path.md")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
+
+// ── path traversal tests ──
+
+func TestResolveRuleEntries_PathTraversalBlocked(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file outside the repo dir to prove it is NOT read.
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(outside, []byte("should not be read\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: outside},         // absolute path to outside — allowed
+		{Path: "**/*.ts", Rule: "../outside.md"}, // relative traversal — blocked
+	}
+	resolveRuleEntries(entries, dir)
+
+	// Absolute path to outside is allowed (explicit design choice).
+	if entries[0].Rule != "should not be read" {
+		t.Errorf("absolute path to outside should be allowed, got %q", entries[0].Rule)
+	}
+	// Relative traversal should be blocked and rule cleared.
+	if entries[1].Rule != "" {
+		t.Errorf("relative traversal should be blocked, got %q", entries[1].Rule)
+	}
+}
+
+func TestResolveRuleEntries_EmptyRepoDirRelative(t *testing.T) {
+	// When repoDir is empty and rule is relative, it should be rejected.
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "rules.md"},
+	}
+	resolveRuleEntries(entries, "")
+
+	if entries[0].Rule != "" {
+		t.Errorf("relative path with empty repoDir should be rejected, got %q", entries[0].Rule)
+	}
+}
+
+func TestResolveRuleEntries_EmptyRepoDirAbsolute(t *testing.T) {
+	dir := t.TempDir()
+	absFile := filepath.Join(dir, "abs.md")
+	if err := os.WriteFile(absFile, []byte("absolute content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: absFile},
+	}
+	resolveRuleEntries(entries, "")
+
+	if entries[0].Rule != "absolute content" {
+		t.Errorf("absolute path with empty repoDir should work, got %q", entries[0].Rule)
+	}
+}
+
+func TestResolveRuleEntries_GlobalRuleFileResolution(t *testing.T) {
+	// Simulate loadGlobalRule: repoDir = filepath.Dir(~/.opencodereview/rule.json)
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	globalRuleDir := filepath.Join(homeDir, ".opencodereview")
+	if err := os.MkdirAll(globalRuleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalRuleDir, "reusable.md"), []byte("global reusable rule\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "reusable.md"},
+	}
+	// repoDir = ~/.opencodereview (where rule.json lives)
+	resolveRuleEntries(entries, globalRuleDir)
+
+	if entries[0].Rule != "global reusable rule" {
+		t.Errorf("global rule file should be resolved, got %q", entries[0].Rule)
 	}
 }

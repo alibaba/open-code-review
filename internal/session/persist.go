@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+var sessionSubDir = "sessions"
+
 // jsonlWriter streams session records to a JSONL file under
 // $HOME/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl.
 // It is safe for concurrent use by multiple goroutines.
@@ -95,7 +97,7 @@ func (jw *jsonlWriter) open() error {
 		return fmt.Errorf("resolve home dir: %w", err)
 	}
 
-	sessionDir := filepath.Join(home, ".opencodereview", "sessions", encodeRepoPath(jw.repoDir))
+	sessionDir := filepath.Join(home, ".opencodereview", sessionSubDir, encodeRepoPath(jw.repoDir))
 	if err := os.MkdirAll(sessionDir, 0700); err != nil {
 		return fmt.Errorf("create session dir: %w", err)
 	}

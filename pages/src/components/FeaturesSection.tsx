@@ -1,86 +1,103 @@
 import React from 'react';
 import { useTranslation } from '../i18n';
+import { useResponsive } from '../hooks/useResponsive';
+import { useSectionTitleStyle } from '../hooks/useResponsiveStyle';
+import icon1 from '../assets/icons/icon-feature-architecture.svg';
+import icon2 from '../assets/icons/icon-feature-positioning.svg';
+import icon3 from '../assets/icons/icon-feature-multi-model.svg';
+import icon4 from '../assets/icons/icon-feature-concurrent.svg';
+import icon5 from '../assets/icons/icon-feature-compression.svg';
+import icon6 from '../assets/icons/icon-feature-rules.svg';
 
 const FeaturesSection: React.FC = () => {
   const { t } = useTranslation();
+  const { isMobile, isTablet } = useResponsive();
+  const titleStyle = useSectionTitleStyle();
 
   const features = [
-    {
-      icon: 'fa-robot',
-      color: 'text-brand-400',
-      bgColor: 'bg-brand-500/10',
-      title: t('features.feat1Title'),
-      description: t('features.feat1Desc'),
-    },
-    {
-      icon: 'fa-crosshairs',
-      color: 'text-cyan-400',
-      bgColor: 'bg-cyan-500/10',
-      title: t('features.feat2Title'),
-      description: t('features.feat2Desc'),
-    },
-    {
-      icon: 'fa-link',
-      color: 'text-purple-400',
-      bgColor: 'bg-purple-500/10',
-      title: t('features.feat3Title'),
-      description: t('features.feat3Desc'),
-    },
-    {
-      icon: 'fa-bolt',
-      color: 'text-yellow-400',
-      bgColor: 'bg-yellow-500/10',
-      title: t('features.feat4Title'),
-      description: t('features.feat4Desc'),
-    },
-    {
-      icon: 'fa-brain',
-      color: 'text-orange-400',
-      bgColor: 'bg-orange-500/10',
-      title: t('features.feat5Title'),
-      description: t('features.feat5Desc'),
-    },
-    {
-      icon: 'fa-scroll',
-      color: 'text-pink-400',
-      bgColor: 'bg-pink-500/10',
-      title: t('features.feat6Title'),
-      description: t('features.feat6Desc'),
-    },
+    { icon: icon1, title: t('features.feat1Title'), desc: t('features.feat1Desc') },
+    { icon: icon2, title: t('features.feat2Title'), desc: t('features.feat2Desc') },
+    { icon: icon3, title: t('features.feat3Title'), desc: t('features.feat3Desc') },
+    { icon: icon4, title: t('features.feat4Title'), desc: t('features.feat4Desc') },
+    { icon: icon5, title: t('features.feat5Title'), desc: t('features.feat5Desc') },
+    { icon: icon6, title: t('features.feat6Title'), desc: t('features.feat6Desc') },
   ];
 
   return (
-    <section id="features" className="py-24 relative noise-overlay">
-      {/* Ambient glow */}
-      <div className="absolute top-1/3 right-1/4 w-[500px] h-[500px] rounded-full bg-purple-500/[0.02] blur-[100px] pointer-events-none"></div>
-      <div className="absolute bottom-1/3 left-1/4 w-[400px] h-[400px] rounded-full bg-cyan-500/[0.02] blur-[80px] pointer-events-none"></div>
+    <section
+      id="features"
+      style={{
+        width: '100%',
+        display: 'flex',
+        justifyContent: 'center',
+        padding: isMobile ? '60px 20px' : isTablet ? '80px 40px' : '80px 0',
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{ width: '100%', maxWidth: 1200, display: 'flex', flexDirection: 'column', gap: isMobile ? 32 : 48 }}>
+        {/* Header */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <span style={{ color: '#2BDE5E', fontSize: 16, fontWeight: 500, lineHeight: '22px', letterSpacing: '0.48px' }}>
+            {t('features.sectionBadge')}
+          </span>
+          <h2 style={{ color: '#FFFFFF', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
+            {t('features.title')}
+          </h2>
+          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, textAlign: 'center', lineHeight: '24px', margin: 0, maxWidth: 646 }}>
+            {t('features.subtitle')}
+          </p>
+        </div>
 
-      <div className="relative z-10">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
-            {/* Section pill badge */}
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-700/50 bg-dark-700/30 backdrop-blur-sm mb-6">
-              <span className="text-xs text-slate-400 font-medium tracking-wide">{t('features.sectionBadge')}</span>
-            </div>
-            <h2 className="text-4xl font-bold text-white mb-4">
-              {t('features.title')}
-            </h2>
-            <p className="text-slate-400 max-w-2xl mx-auto">
-              {t('features.subtitle')}
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {features.map((feature) => (
-              <div key={feature.icon} className="feature-card rounded-2xl p-6 group glass">
-                <div className={`w-12 h-12 rounded-xl ${feature.bgColor} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                  <i className={`fa-solid ${feature.icon} ${feature.color} text-lg`}></i>
-                </div>
-                <h3 className="text-white font-semibold text-lg mb-2">{feature.title}</h3>
-                <p className="text-slate-400 text-sm leading-relaxed">{feature.description}</p>
+        {/* Grid */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr' : isTablet ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
+            border: '1px solid rgba(255,255,255,0.16)',
+            borderRadius: 8,
+          }}
+        >
+          {features.map((feat, i) => {
+            const cols = isMobile ? 1 : isTablet ? 2 : 3;
+            const isLastCol = (i % cols) === cols - 1;
+            const isLastRow = i >= features.length - (features.length % cols || cols);
+            return (
+            <div
+              key={i}
+              style={{
+                padding: isMobile ? '24px 20px' : '32px 28px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 16,
+                borderRight: isLastCol ? 'none' : '1px solid rgba(255,255,255,0.16)',
+                borderBottom: isLastRow ? 'none' : '1px solid rgba(255,255,255,0.16)',
+                minHeight: isMobile ? undefined : 272,
+              }}
+            >
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  borderRadius: 8,
+                  border: '1px solid rgba(255,255,255,0.16)',
+                }}
+              >
+                <img src={feat.icon} alt="" style={{ width: 24, height: 24 }} />
               </div>
-            ))}
-          </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <p style={{ color: '#FFFFFF', fontSize: 16, fontWeight: 500, margin: 0, maxWidth: 352 }}>
+                  {feat.title}
+                </p>
+                <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14, lineHeight: '20px', margin: 0, maxWidth: 352 }}>
+                  {feat.desc}
+                </p>
+              </div>
+            </div>
+            );
+          })}
         </div>
       </div>
     </section>

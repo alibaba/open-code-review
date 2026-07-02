@@ -178,8 +178,9 @@ func expandBraces(s string) []string {
 
 // ProjectRuleEntry is a single entry in .opencodereview/rule.json.
 type ProjectRuleEntry struct {
-	Path string `json:"path"`
-	Rule string `json:"rule"`
+	Path            string `json:"path"`
+	Rule            string `json:"rule"`
+	MergeSystemRule bool   `json:"merge_system_rule,omitempty"`
 }
 
 // ProjectRule holds rules loaded from <repoDir>/.opencodereview/rule.json.
@@ -279,7 +280,12 @@ func NewResolver(repoDir, customRulePath string) (Resolver, *FileFilter, error) 
 
 	filter := buildFileFilter(customRule, projectRule, globalRule)
 
-	return &composedResolver{custom: customRule, project: projectRule, global: globalRule, system: sysRule}, filter, nil
+	return &composedResolver{
+		custom:  customRule,
+		project: projectRule,
+		global:  globalRule,
+		system:  sysRule,
+	}, filter, nil
 }
 
 // buildFileFilter picks the highest-priority layer that has any include/exclude
@@ -321,6 +327,7 @@ func loadGlobalRule() (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal global rule: %w", err)
 	}
+	resolveRuleEntries(pr.Rules, filepath.Dir(path))
 	return &pr, nil
 }
 
@@ -333,6 +340,7 @@ func loadRuleFile(path string) (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal rule file %s: %w", path, err)
 	}
+	resolveRuleEntries(pr.Rules, filepath.Dir(path))
 	return &pr, nil
 }
 
@@ -349,68 +357,197 @@ func loadProjectRule(repoDir string) (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal project rule: %w", err)
 	}
+	resolveRuleEntries(pr.Rules, repoDir)
 	return &pr, nil
 }
 
-// Resolve checks each layer in priority order; first match wins.
+// Resolve checks each layer in priority order; first match wins. User rules
+// replace the system rule by default; rules with merge_system_rule keep the
+// matched system rule alongside the user rule.
 func (c *composedResolver) Resolve(path string) string {
-	if rule := matchProjectRule(c.custom, path); rule != "" {
-		return rule
-	}
-	if rule := matchProjectRule(c.project, path); rule != "" {
-		return rule
-	}
-	if rule := matchProjectRule(c.global, path); rule != "" {
-		return rule
+	for _, layer := range []*ProjectRule{c.custom, c.project, c.global} {
+		if entry := matchProjectRuleEntry(layer, path); entry != nil {
+			if entry.MergeSystemRule {
+				return c.mergeWithSystemRule(path, entry.Rule)
+			}
+			return entry.Rule
+		}
 	}
 	return c.system.Resolve(path)
 }
 
+func (c *composedResolver) mergeWithSystemRule(path, rule string) string {
+	systemRule := c.system.Resolve(path)
+
+	if systemRule == "" {
+		return rule
+	}
+	if rule == "" {
+		return systemRule
+	}
+
+	return "## System-Specific Rules (Mandatory)\n\n" +
+		systemRule +
+		"\n\n---\n\n" +
+		"## User-Specific Rules (Mandatory)\n\n" +
+		rule
+}
+
 // ResolveDetail returns the matched rule along with its source layer and pattern.
+// When a user rule sets merge_system_rule, Rule contains the merged system+user
+// rule text while Source and Pattern still describe the user rule that won the
+// priority chain.
 func (c *composedResolver) ResolveDetail(path string) RuleDetail {
-	if detail := matchProjectRuleDetail(c.custom, path, "custom"); detail != nil {
+	if detail := c.matchProjectRuleDetail(c.custom, path, "custom"); detail != nil {
 		return *detail
 	}
-	if detail := matchProjectRuleDetail(c.project, path, "project"); detail != nil {
+	if detail := c.matchProjectRuleDetail(c.project, path, "project"); detail != nil {
 		return *detail
 	}
-	if detail := matchProjectRuleDetail(c.global, path, "global"); detail != nil {
+	if detail := c.matchProjectRuleDetail(c.global, path, "global"); detail != nil {
 		return *detail
 	}
 	return c.system.resolveDetail(path)
 }
 
-func matchProjectRule(pr *ProjectRule, path string) string {
-	if pr == nil {
-		return ""
+func (c *composedResolver) matchProjectRuleDetail(pr *ProjectRule, path string, source string) *RuleDetail {
+	entry := matchProjectRuleEntry(pr, path)
+	if entry == nil {
+		return nil
 	}
-	lowerPath := strings.ToLower(path)
-	for _, entry := range pr.Rules {
-		expanded := expandBraces(entry.Path)
-		for _, p := range expanded {
-			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {
-				return entry.Rule
-			}
-		}
+	rule := entry.Rule
+	if entry.MergeSystemRule {
+		rule = c.mergeWithSystemRule(path, rule)
 	}
-	return ""
+	return &RuleDetail{Rule: rule, Source: source, Pattern: entry.Path}
 }
 
-func matchProjectRuleDetail(pr *ProjectRule, path, source string) *RuleDetail {
+func matchProjectRuleEntry(pr *ProjectRule, path string) *ProjectRuleEntry {
 	if pr == nil {
 		return nil
 	}
 	lowerPath := strings.ToLower(path)
-	for _, entry := range pr.Rules {
-		if entry.Rule == "" {
+	for i := range pr.Rules {
+		entry := &pr.Rules[i]
+		if entry.Rule == "" && !entry.MergeSystemRule {
 			continue
 		}
 		expanded := expandBraces(entry.Path)
 		for _, p := range expanded {
 			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {
-				return &RuleDetail{Rule: entry.Rule, Source: source, Pattern: entry.Path}
+				return entry
 			}
 		}
 	}
 	return nil
+}
+
+// allowedRuleExts is the set of file extensions permitted for rule file references.
+var allowedRuleExts = map[string]bool{".md": true, ".txt": true, ".markdown": true}
+
+// looksLikeFilePath returns true when s is likely a file path (not inline content).
+// Heuristic: multi-line text is always inline; single-line text without spaces
+// ending in .md/.txt/.markdown is treated as a file path. Values containing spaces
+// (e.g. "Follow rules from team.md") are treated as inline to avoid false positives.
+func looksLikeFilePath(s string) bool {
+	if strings.Contains(s, "\n") {
+		return false
+	}
+	if strings.Contains(s, " ") {
+		return false
+	}
+	return allowedRuleExts[strings.ToLower(filepath.Ext(s))]
+}
+
+// resolveRuleEntries scans each entry's Rule field. When the value looks like a file
+// path, it reads the file content and replaces the Rule. Absolute paths are used
+// directly; relative paths are resolved against repoDir only. Multi-line and short
+// inline rules are left unchanged. If the file cannot be read, the Rule is cleared
+// (set to empty) and a warning is emitted.
+func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string) {
+	for i := range entries {
+		e := &entries[i]
+		if strings.TrimSpace(e.Rule) == "" || !looksLikeFilePath(e.Rule) {
+			continue
+		}
+		if content := tryReadRuleFile(e.Rule, repoDir); content != nil {
+			e.Rule = *content
+		} else {
+			e.Rule = ""
+		}
+	}
+}
+
+// tryReadRuleFile attempts to read a rule file. Absolute paths are used directly.
+// Relative paths are resolved against repoDir and validated to stay within repoDir.
+// Returns nil when the file cannot be read safely or does not exist.
+func tryReadRuleFile(rule string, repoDir string) *string {
+	if repoDir == "" {
+		if !filepath.IsAbs(rule) {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot resolve relative rule path %q without a repo dir\n", rule)
+			return nil
+		}
+	}
+	if filepath.IsAbs(rule) {
+		content, err := readRuleFileSafe(rule)
+		if err == nil {
+			return &content
+		}
+		if os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: rule file not found: %s\n", rule)
+		} else {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read rule file %s: %v\n", rule, err)
+		}
+		return nil
+	}
+
+	// Relative path: resolve against repoDir, validate no traversal.
+	resolved := filepath.Clean(filepath.Join(repoDir, rule))
+	cleanRepo := filepath.Clean(repoDir)
+	if !strings.HasPrefix(resolved, cleanRepo+string(os.PathSeparator)) {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: rule file path escapes repo dir: %s\n", rule)
+		return nil
+	}
+
+	content, err := readRuleFileSafe(resolved)
+	if err == nil {
+		return &content
+	}
+	if os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: rule file not found: %s\n", rule)
+	} else {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read rule file %s: %v\n", resolved, err)
+	}
+	return nil
+}
+
+// readRuleFileSafe reads and validates a rule file. It enforces extension whitelist
+// (.md / .txt / .markdown), a 512 KB size cap, and resolves symlinks before checking
+// the path. Symlinks are resolved first, then size is checked via Stat before reading.
+// Returns the trimmed content on success.
+func readRuleFileSafe(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+
+	if !allowedRuleExts[strings.ToLower(filepath.Ext(resolved))] {
+		return "", fmt.Errorf("unsupported extension %q, only .md/.txt/.markdown allowed", filepath.Ext(resolved))
+	}
+
+	const maxSize = 512 * 1024
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if info.Size() > maxSize {
+		return "", fmt.Errorf("file too large (%d bytes, max %d)", info.Size(), maxSize)
+	}
+
+	content, err := os.ReadFile(resolved)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimRight(string(content), "\n"), nil
 }

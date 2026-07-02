@@ -7,22 +7,13 @@ const os = require("os");
 const https = require("https");
 const { spawnSync } = require("child_process");
 
-const {
-  IS_WINDOWS,
-  BINARY_NAME,
-  detectPlatform,
-  loadPackageJson,
-  buildUrl,
-  downloadText,
-  downloadBinary,
-  computeChecksum,
-} = require("./install.js");
-const packageRoot = path.join(__dirname, "..");
-const binDir = path.join(packageRoot, "bin");
-const binaryPath = path.join(binDir, BINARY_NAME);
+const { resolveNativeBinary } = require("./platform");
+const { loadPackageJson } = require("./install.js");
+
 const stateDir = path.join(os.homedir(), ".opencodereview");
 const tsFile = path.join(stateDir, "last-update-check");
 const lockFile = path.join(stateDir, "update.lock");
+const hintFile = path.join(stateDir, "update-available");
 
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 
@@ -65,9 +56,9 @@ function releaseLock() {
   } catch (_) {}
 }
 
-function getInstalledVersion() {
+function getInstalledVersion(binPath) {
   try {
-    const result = spawnSync(binaryPath, ["version"], {
+    const result = spawnSync(binPath, ["version"], {
       encoding: "utf8",
       timeout: 3000,
     });
@@ -118,24 +109,30 @@ function fetchLatestVersion(pkg) {
   });
 }
 
+const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
 function semverGt(a, b) {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
+  const pa = a.replace(/-.*$/, "").split(".").map(Number);
+  const pb = b.replace(/-.*$/, "").split(".").map(Number);
   for (let i = 0; i < 3; i++) {
     if ((pa[i] || 0) > (pb[i] || 0)) return true;
     if ((pa[i] || 0) < (pb[i] || 0)) return false;
   }
+  const aPre = a.includes("-");
+  const bPre = b.includes("-");
+  if (bPre && !aPre) return true;
   return false;
 }
 
-function cleanupTemp() {
+function writeHint(latestVersion, pkgName) {
   try {
-    const files = fs.readdirSync(binDir);
-    for (const f of files) {
-      if (f.startsWith(".opencodereview.tmp.")) {
-        fs.unlinkSync(path.join(binDir, f));
-      }
-    }
+    fs.writeFileSync(hintFile, JSON.stringify({ version: latestVersion, pkg: pkgName }));
+  } catch (_) {}
+}
+
+function removeHint() {
+  try {
+    fs.unlinkSync(hintFile);
   } catch (_) {}
 }
 
@@ -144,97 +141,38 @@ async function main() {
 
   if (!acquireLock()) return;
 
-  cleanupTemp();
-
   try {
-    const { resolveNativeBinary } = require("./platform");
     const resolved = resolveNativeBinary();
-    if (resolved && resolved.fromPlatformPkg) {
-      info("Binary managed by platform package, skipping auto-update.");
-      return;
-    }
-    const installedVersion = getInstalledVersion();
+    if (!resolved) return;
+
+    const installedVersion = getInstalledVersion(resolved.path);
     if (!installedVersion) return;
 
     const pkg = loadPackageJson();
     const latestVersion = await fetchLatestVersion(pkg);
     if (!latestVersion) return;
 
-    if (!semverGt(latestVersion, installedVersion)) return;
+    if (!SEMVER_RE.test(latestVersion)) return;
 
-    const { os: platform, arch } = detectPlatform();
-    const config = pkg.ocrConfig;
-
-    const vars = { version: latestVersion, os: platform, arch };
-    let downloadUrl = buildUrl(config.urlPattern, vars);
-    if (IS_WINDOWS) {
-      downloadUrl += ".exe";
+    if (!semverGt(latestVersion, installedVersion)) {
+      removeHint();
+      return;
     }
 
-    const tempPath = path.join(binDir, `.opencodereview.tmp.${process.pid}`);
-    await downloadBinary(downloadUrl, tempPath);
-    if (!IS_WINDOWS) {
-      fs.chmodSync(tempPath, 0o755);
-    }
+    const pkgName = pkg.name;
+    const IS_WINDOWS = process.platform === "win32";
+    const result = spawnSync("npm", ["i", "-g", `${pkgName}@${latestVersion}`], {
+      encoding: "utf8",
+      timeout: 120000,
+      shell: IS_WINDOWS,
+    });
 
-    if (config.checksumPattern) {
-      const checksumUrl = buildUrl(config.checksumPattern, vars);
-      let shaContent;
-      try {
-        shaContent = await downloadText(checksumUrl);
-      } catch (_) {
-        fs.unlinkSync(tempPath);
-        return;
-      }
-      let actualSha;
-      try {
-        actualSha = await computeChecksum(tempPath);
-      } catch (_) {
-        fs.unlinkSync(tempPath);
-        return;
-      }
-
-      let verified = false;
-      for (const line of shaContent.split("\n")) {
-        const trimmed = line.trim();
-        if (trimmed.includes(`-${platform}-${arch}`)) {
-          const expectedSha = trimmed.split(/\s+/)[0].toLowerCase();
-          if (expectedSha && actualSha !== expectedSha) {
-            fs.unlinkSync(tempPath);
-            return;
-          }
-          verified = true;
-          break;
-        }
-      }
-      if (!verified) {
-        fs.unlinkSync(tempPath);
-        return;
-      }
-    }
-
-    if (IS_WINDOWS) {
-      const oldPath = binaryPath + ".old";
-      try { fs.unlinkSync(oldPath); } catch (_) {}
-      try {
-        fs.renameSync(binaryPath, oldPath);
-      } catch (e) {
-        if (fs.existsSync(binaryPath)) {
-          throw e;
-        }
-      }
-      try {
-        fs.renameSync(tempPath, binaryPath);
-      } catch (e) {
-        try { fs.renameSync(oldPath, binaryPath); } catch (_) {}
-        throw e;
-      }
-      try { fs.unlinkSync(oldPath); } catch (_) {}
+    if (result.status === 0) {
+      removeHint();
     } else {
-      fs.renameSync(tempPath, binaryPath);
+      writeHint(latestVersion, pkgName);
     }
   } catch (_) {
-    cleanupTemp();
   } finally {
     releaseLock();
   }

@@ -8,37 +8,23 @@ import (
 	"github.com/open-code-review/open-code-review/internal/model"
 )
 
-// ExcludeReason describes why a file was excluded from review.
-type ExcludeReason string
+// ExcludeReason / DiffPreview / DiffPreviewEntry are now type aliases of
+// the mode-agnostic preview types in internal/model. Kept for backwards
+// compatibility with existing call sites; internal/scan returns the same
+// model.Preview shape directly.
+type ExcludeReason = model.ExcludeReason
+type DiffPreview = model.Preview
+type DiffPreviewEntry = model.PreviewEntry
 
+// Re-export the constants so callers can keep writing agent.ExcludeBinary.
 const (
-	ExcludeNone        ExcludeReason = ""
-	ExcludeUserRule    ExcludeReason = "user_exclude"
-	ExcludeExtension   ExcludeReason = "unsupported_ext"
-	ExcludeDefaultPath ExcludeReason = "default_path"
-	ExcludeDeleted     ExcludeReason = "deleted"
-	ExcludeBinary      ExcludeReason = "binary"
+	ExcludeNone        = model.ExcludeNone
+	ExcludeUserRule    = model.ExcludeUserRule
+	ExcludeExtension   = model.ExcludeExtension
+	ExcludeDefaultPath = model.ExcludeDefaultPath
+	ExcludeDeleted     = model.ExcludeDeleted
+	ExcludeBinary      = model.ExcludeBinary
 )
-
-// DiffPreviewEntry is one file's preview record.
-type DiffPreviewEntry struct {
-	Path          string        `json:"path"`
-	Status        string        `json:"status"`
-	Insertions    int64         `json:"insertions"`
-	Deletions     int64         `json:"deletions"`
-	WillReview    bool          `json:"will_review"`
-	ExcludeReason ExcludeReason `json:"exclude_reason,omitempty"`
-}
-
-// DiffPreview is the full preview result.
-type DiffPreview struct {
-	Entries         []DiffPreviewEntry `json:"files"`
-	TotalInsertions int64              `json:"total_insertions"`
-	TotalDeletions  int64              `json:"total_deletions"`
-	TotalFiles      int                `json:"total_files"`
-	ReviewableCount int                `json:"reviewable_count"`
-	ExcludedCount   int                `json:"excluded_count"`
-}
 
 // whyExcluded applies the filter algorithm as shouldReview but
 // returns the specific reason a file is excluded.

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
@@ -167,7 +168,7 @@ func (p *Provider) loadGitignorePatterns() []string {
 		return nil
 	}
 	var patterns []string
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -200,16 +201,11 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 // matchGitignorePattern checks if relPath matches a single .gitignore pattern.
 func matchGitignorePattern(relPath, pat string) bool {
 	// Directory-only patterns (trailing /)
-	if strings.HasSuffix(pat, "/") {
-		dirName := strings.TrimSuffix(pat, "/")
+	if before, ok := strings.CutSuffix(pat, "/"); ok {
+		dirName := before
 		// Match if any path segment equals the dir name
 		segments := strings.Split(relPath, "/")
-		for _, seg := range segments {
-			if seg == dirName {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(segments, dirName)
 	}
 
 	// Negation patterns are not needed for exclusion purposes

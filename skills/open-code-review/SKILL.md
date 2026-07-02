@@ -181,6 +181,8 @@ If the user wants project-specific rules, OCR resolves them in this priority ord
 3. `~/.opencodereview/rule.json`
 4. Built-in system defaults (lowest)
 
+By default, the first matching user rule replaces the built-in system rule. Set `merge_system_rule: true` on a rule entry when the matched system rule and user rule should both be included.
+
 Rule file format:
 
 ```json
@@ -188,7 +190,8 @@ Rule file format:
   "rules": [
     {
       "path": "**/*.java",
-      "rule": "All new methods must validate required parameters for null"
+      "rule": "All new methods must validate required parameters for null",
+      "merge_system_rule": true
     },
     {
       "path": "**/*mapper*.xml",
