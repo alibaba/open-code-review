@@ -7,6 +7,33 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 )
 
+func TestParseOTLPEndpoint(t *testing.T) {
+	cases := []struct {
+		name         string
+		endpoint     string
+		wantAddr     string
+		wantInsecure bool
+	}{
+		{"http scheme strips and is insecure", "http://192.0.2.1:4317", "192.0.2.1:4317", true},
+		{"https scheme strips and keeps TLS", "https://otel.example.com:4317", "otel.example.com:4317", false},
+		{"bare host:port unchanged and keeps TLS", "localhost:4317", "localhost:4317", false},
+		{"uppercase HTTP scheme strips and is insecure", "HTTP://192.0.2.1:4317", "192.0.2.1:4317", true},
+		{"mixed-case Https scheme strips and keeps TLS", "Https://otel.example.com:4317", "otel.example.com:4317", false},
+		{"endpoint shorter than scheme prefix is unchanged", "ht", "ht", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			addr, insecure := parseOTLPEndpoint(tc.endpoint)
+			if addr != tc.wantAddr {
+				t.Errorf("addr = %q, want %q", addr, tc.wantAddr)
+			}
+			if insecure != tc.wantInsecure {
+				t.Errorf("insecure = %v, want %v", insecure, tc.wantInsecure)
+			}
+		})
+	}
+}
+
 func TestNewStdoutTraceExporter(t *testing.T) {
 	exp, err := newStdoutTraceExporter()
 	if err != nil {
