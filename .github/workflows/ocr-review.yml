@@ -224,7 +224,7 @@ jobs:
             } catch (e) {
               console.log('Failed to post review with inline comments:', e.message);
               console.log('Falling back to posting comments individually with rate-limit-aware retry...');
-              
+
               // Fallback: post comments one by one with delay to avoid secondary rate limits.
               // GitHub enforces ~80 content-generating requests per minute; spacing calls
               // helps stay under that threshold. Retry/wait durations are derived from the
@@ -301,7 +301,7 @@ jobs:
                   }
                 }
               }
-              
+
               // Post summary comment with statistics
               let finalBody = buildSummaryBody(totalCount, successCount, commentsWithoutLine.length + failedComments.length, warnings);
               finalBody += formatSummaryComments(commentsWithoutLine);
@@ -319,7 +319,7 @@ jobs:
                   finalBody += formatCommentMarkdown(comment, error);
                 }
               }
-              
+
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,

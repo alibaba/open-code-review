@@ -106,4 +106,3 @@ ocr codex report --session-id review-20260630 --bundle /tmp/bundle.json --commen
 - `ocr review` 和 `ocr scan` 仍然保留给明确想走原生 OCR 外部 LLM 流程的用户。
 - 默认只读，只有明确要求修复时才修改文件。
 - 不要把 `ocr codex` 当成独立的智能体，它只是 Codex 的确定性数据面和工具面。
-

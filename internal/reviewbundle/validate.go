@@ -168,8 +168,8 @@ func validateOneComment(
 	if comment.Confidence < 0 || comment.Confidence > 1 {
 		addValidationError(result, "invalid_confidence", cleanPath, &commentIndex, "confidence must be between 0 and 1")
 	}
-	if comment.Title == "" || comment.Content == "" {
-		addValidationError(result, "invalid_comment", cleanPath, &commentIndex, "title and content are required")
+	if comment.Title == "" || comment.Content == "" || comment.Recommendation == "" {
+		addValidationError(result, "invalid_comment", cleanPath, &commentIndex, "title, content, and recommendation are required")
 	}
 	if !comment.FileLevelComment && (comment.StartLine < 1 || comment.EndLine < comment.StartLine) {
 		addValidationError(result, "invalid_line_range", cleanPath, &commentIndex, "line range must be one-based and ordered")

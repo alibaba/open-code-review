@@ -22,6 +22,42 @@ func TestLoadCommentsRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestLoadCommentsRejectsMissingRequiredFields(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "summary files reviewed",
+			input: `{"schema_version":"codex-review-comments/v1","bundle_id":"sha256:test","summary":{"issues_found":0},"comments":[]}`,
+			want:  "summary.files_reviewed",
+		},
+		{
+			name: "comment recommendation",
+			input: `{
+				"schema_version":"codex-review-comments/v1",
+				"bundle_id":"sha256:test",
+				"summary":{"files_reviewed":1,"issues_found":1},
+				"comments":[{
+					"path":"main.go","start_line":1,"end_line":1,
+					"priority":"medium","category":"bug","title":"title",
+					"content":"content","confidence":0.9
+				}]
+			}`,
+			want: "comments[0].recommendation",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadComments(strings.NewReader(tt.input))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("LoadComments() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateCommentsRejectsProtocolAndEvidenceErrors(t *testing.T) {
 	bundle := validationBundle()
 	comments := &Comments{
@@ -30,44 +66,48 @@ func TestValidateCommentsRejectsProtocolAndEvidenceErrors(t *testing.T) {
 		Summary:       CommentsSummary{FilesReviewed: 1, IssuesFound: 4},
 		Comments: []ReviewComment{
 			{
-				Path:       "../secret.go",
-				StartLine:  1,
-				EndLine:    1,
-				Priority:   "high",
-				Category:   "bug",
-				Title:      "escape",
-				Content:    "escape",
-				Confidence: 1,
+				Path:           "../secret.go",
+				StartLine:      1,
+				EndLine:        1,
+				Priority:       "high",
+				Category:       "bug",
+				Title:          "escape",
+				Content:        "escape",
+				Recommendation: "fix",
+				Confidence:     1,
 			},
 			{
-				Path:       "missing.go",
-				StartLine:  1,
-				EndLine:    1,
-				Priority:   "medium",
-				Category:   "test",
-				Title:      "missing",
-				Content:    "missing",
-				Confidence: 0.5,
+				Path:           "missing.go",
+				StartLine:      1,
+				EndLine:        1,
+				Priority:       "medium",
+				Category:       "test",
+				Title:          "missing",
+				Content:        "missing",
+				Recommendation: "fix",
+				Confidence:     0.5,
 			},
 			{
-				Path:       "main.go",
-				StartLine:  0,
-				EndLine:    2,
-				Priority:   "low",
-				Category:   "maintainability",
-				Title:      "range",
-				Content:    "range",
-				Confidence: 0.5,
+				Path:           "main.go",
+				StartLine:      0,
+				EndLine:        2,
+				Priority:       "low",
+				Category:       "maintainability",
+				Title:          "range",
+				Content:        "range",
+				Recommendation: "fix",
+				Confidence:     0.5,
 			},
 			{
-				Path:       "main.go",
-				StartLine:  1,
-				EndLine:    1,
-				Priority:   "urgent",
-				Category:   "style",
-				Title:      "enum",
-				Content:    "enum",
-				Confidence: 2,
+				Path:           "main.go",
+				StartLine:      1,
+				EndLine:        1,
+				Priority:       "urgent",
+				Category:       "style",
+				Title:          "enum",
+				Content:        "enum",
+				Recommendation: "fix",
+				Confidence:     2,
 			},
 		},
 	}
@@ -91,14 +131,15 @@ func TestValidateCommentsWarnsOutsideChangedHunk(t *testing.T) {
 		BundleID:      bundle.BundleID,
 		Summary:       CommentsSummary{FilesReviewed: 1, IssuesFound: 1},
 		Comments: []ReviewComment{{
-			Path:       "main.go",
-			StartLine:  9,
-			EndLine:    9,
-			Priority:   "medium",
-			Category:   "bug",
-			Title:      "context",
-			Content:    "context",
-			Confidence: 0.8,
+			Path:           "main.go",
+			StartLine:      9,
+			EndLine:        9,
+			Priority:       "medium",
+			Category:       "bug",
+			Title:          "context",
+			Content:        "context",
+			Recommendation: "fix",
+			Confidence:     0.8,
 		}},
 	}
 

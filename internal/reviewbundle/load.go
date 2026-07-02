@@ -1,6 +1,7 @@
 package reviewbundle
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,8 +28,15 @@ func LoadBundle(reader io.Reader) (*Bundle, error) {
 
 // LoadComments strictly decodes one external-comments protocol document.
 func LoadComments(reader io.Reader) (*Comments, error) {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("read comments: %w", err)
+	}
+	if err := validateCommentsShape(data); err != nil {
+		return nil, err
+	}
 	var comments Comments
-	if err := decodeStrict(reader, &comments); err != nil {
+	if err := decodeStrict(bytes.NewReader(data), &comments); err != nil {
 		return nil, fmt.Errorf("invalid comments schema: %w", err)
 	}
 	if comments.SchemaVersion != CommentsSchemaVersion {
@@ -45,6 +53,39 @@ func LoadComments(reader io.Reader) (*Comments, error) {
 		return nil, fmt.Errorf("invalid comments schema: comments field is required and must be an array")
 	}
 	return &comments, nil
+}
+
+func validateCommentsShape(data []byte) error {
+	var raw struct {
+		Summary  map[string]json.RawMessage   `json:"summary"`
+		Comments []map[string]json.RawMessage `json:"comments"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("invalid comments schema: %w", err)
+	}
+	if raw.Summary == nil {
+		return fmt.Errorf("invalid comments schema: summary field is required")
+	}
+	for _, field := range []string{"files_reviewed", "issues_found"} {
+		if _, ok := raw.Summary[field]; !ok {
+			return fmt.Errorf("invalid comments schema: summary.%s is required", field)
+		}
+	}
+	if raw.Comments == nil {
+		return fmt.Errorf("invalid comments schema: comments field is required and must be an array")
+	}
+	required := []string{
+		"path", "start_line", "end_line", "priority", "category",
+		"title", "content", "recommendation", "confidence",
+	}
+	for index, comment := range raw.Comments {
+		for _, field := range required {
+			if _, ok := comment[field]; !ok {
+				return fmt.Errorf("invalid comments schema: comments[%d].%s is required", index, field)
+			}
+		}
+	}
+	return nil
 }
 
 // LoadScanManifest strictly decodes one full-file scan manifest.
