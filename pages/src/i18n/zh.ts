@@ -248,6 +248,8 @@ export const zh: TranslationKeys = {
   'docs.mcpTitle': 'MCP Server',
   'docs.mcpDesc': 'Open Code Review 支持 Model Context Protocol (MCP) 服务器，允许审查 Agent 通过 stdio transport 在代码审查过程中使用外部工具。',
   'docs.mcpConfig': '配置 MCP Server',
+  'docs.mcpConfigLocation': 'MCP server 配置存储在 ~/.opencodereview/config.json。',
+  'docs.mcpDelete': '删除 MCP Server',
   'docs.mcpFields': '配置字段',
   'docs.mcpFieldCol': '字段',
   'docs.mcpRequiredCol': '必填',

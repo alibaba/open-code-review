@@ -246,6 +246,8 @@ export const en: TranslationKeys = {
   'docs.mcpTitle': 'MCP Server',
   'docs.mcpDesc': 'Open Code Review supports Model Context Protocol (MCP) servers, allowing the review agent to use external tools during code review via the stdio transport.',
   'docs.mcpConfig': 'Configure MCP Servers',
+  'docs.mcpConfigLocation': 'MCP server configuration is stored in ~/.opencodereview/config.json.',
+  'docs.mcpDelete': 'Delete MCP Servers',
   'docs.mcpFields': 'Configuration Fields',
   'docs.mcpFieldCol': 'Field',
   'docs.mcpRequiredCol': 'Required',
