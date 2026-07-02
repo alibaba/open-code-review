@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestViewerLoadsCodexOwnedSession(t *testing.T) {
+func TestViewerRejectsCodexOwnedSession(t *testing.T) {
 	root := t.TempDir()
 	repository := filepath.Join(root, "repo")
 	if err := os.MkdirAll(repository, 0o700); err != nil {
@@ -24,18 +24,12 @@ func TestViewerLoadsCodexOwnedSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
 	}
-	if len(summaries) != 1 || summaries[0].ControlPlane != "codex-owned" ||
-		summaries[0].BundleID != "sha256:bundle" ||
-		summaries[0].TokenUsageAvailable {
+	if len(summaries) != 0 {
 		t.Fatalf("summaries = %+v", summaries)
 	}
-	session, err := LoadSession(root, "repo", "run-1")
-	if err != nil {
-		t.Fatalf("LoadSession() error = %v", err)
-	}
-	if len(session.CodexEvents) != 1 ||
-		session.CodexEvents[0].Event != "context.search" {
-		t.Fatalf("session = %+v", session)
+	_, err = LoadSession(root, "repo", "run-1")
+	if err == nil || !strings.Contains(err.Error(), "legacy codex-owned") {
+		t.Fatalf("LoadSession() error = %v, want legacy codex-owned rejection", err)
 	}
 }
 

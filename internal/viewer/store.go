@@ -99,6 +99,11 @@ func newDefaultSessionSummary() SessionSummary {
 	return SessionSummary{ControlPlane: defaultControlPlane, TokenUsageAvailable: true}
 }
 
+func isLegacyCodexOwnedRecord(rec map[string]any) bool {
+	value, _ := rec["controlPlane"].(string)
+	return value == "codex-owned"
+}
+
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
 func ListSessions(root, encodedRepo string) ([]SessionSummary, error) {
 	repoDir := filepath.Join(root, encodedRepo)
@@ -149,6 +154,9 @@ func peekSession(path string) (SessionSummary, error) {
 			var rec map[string]any
 			if err := json.Unmarshal(line, &rec); err != nil {
 				continue
+			}
+			if isLegacyCodexOwnedRecord(rec) {
+				return SessionSummary{}, fmt.Errorf("legacy codex-owned session records are no longer supported")
 			}
 			if ts, ok := rec["timestamp"].(string); ok {
 				summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
@@ -307,6 +315,9 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 		switch typ {
 		case "session_start":
+			if isLegacyCodexOwnedRecord(rec) {
+				return nil, fmt.Errorf("legacy codex-owned session records are no longer supported")
+			}
 			if ts, ok := rec["timestamp"].(string); ok {
 				vs.Summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
 			}
@@ -333,7 +344,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 			parseCodexSessionStartFields(rec, &vs.Summary)
 
-		case "agent_event", "codex_event":
+		case "agent_event":
 			event, _ := rec["event"].(string)
 			bundleID, _ := rec["bundleId"].(string)
 			errorMessage, _ := rec["error"].(string)
