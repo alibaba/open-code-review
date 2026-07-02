@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -53,6 +54,7 @@ func OpenCodexRecorder(repoDir, runID, bundleID string) (*CodexRecorder, error) 
 	}
 	info, statErr := os.Stat(path)
 	if statErr == nil && info.Size() > 0 {
+		recorder.started = readCodexSessionStart(path, recorder.started)
 		return recorder, nil
 	}
 	if statErr != nil && !os.IsNotExist(statErr) {
@@ -119,6 +121,32 @@ func codexEventRecord(
 	fields["bundleId"] = recorder.bundleID
 	fields["tokenUsage"] = "not_available"
 	return fields
+}
+
+func readCodexSessionStart(path string, fallback time.Time) time.Time {
+	file, err := os.Open(path)
+	if err != nil {
+		return fallback
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var record map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
+			continue
+		}
+		if recordType, _ := record["type"].(string); recordType != "session_start" {
+			continue
+		}
+		timestamp, _ := record["timestamp"].(string)
+		started, err := time.Parse(time.RFC3339, timestamp)
+		if err != nil {
+			return fallback
+		}
+		return started
+	}
+	return fallback
 }
 
 func (recorder *CodexRecorder) write(record map[string]any) error {
