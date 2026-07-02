@@ -42,7 +42,7 @@ Use `json.Decoder.DisallowUnknownFields`, recompute target state with `ResolveTa
 
 - [x] **Step 4: Expose the CLI and verify GREEN**
 
-Add `ocr codex validate-comments --bundle FILE --comments FILE [--repo PATH] [--output FILE]`. Default output is JSON stdout; invalid comments produce a valid result with `valid:false`, not malformed output. Run `rtk go test ./internal/reviewbundle ./cmd/opencodereview -run 'TestCodex|TestValidate|TestLoad'`.
+Add `ocr agent validate-comments --bundle FILE --comments FILE [--repo PATH] [--output FILE]`. Default output is JSON stdout; invalid comments produce a valid result with `valid:false`, not malformed output. Run `rtk go test ./internal/reviewbundle ./cmd/opencodereview -run 'TestCodex|TestValidate|TestLoad'`.
 
 ### Task 2: Produce stable JSON, text, and Markdown reports
 
@@ -70,7 +70,7 @@ type ReportOptions struct { Format string; Validation *ValidationResult }
 func RenderReport(bundle *Bundle, comments *Comments, options ReportOptions) ([]byte, error)
 ```
 
-Expose `ocr codex report --bundle FILE --comments FILE --format markdown|text|json [--validation FILE] [--output FILE]`. Report generation never relocates or edits findings.
+Expose `ocr agent report --bundle FILE --comments FILE --format markdown|text|json [--validation FILE] [--output FILE]`. Report generation never relocates or edits findings.
 
 - [x] **Step 4: Verify GREEN**
 
@@ -99,7 +99,7 @@ Add a `ContextService` that validates bundle freshness before each call, constru
 
 - [x] **Step 4: Expose and verify CLI**
 
-Add `ocr codex context read|find|diff|search --bundle FILE` with operation-specific flags. Run `rtk go test ./internal/reviewbundle ./cmd/opencodereview -run 'TestCodex|TestContext'`.
+Add `ocr agent context read|find|diff|search --bundle FILE` with operation-specific flags. Run `rtk go test ./internal/reviewbundle ./cmd/opencodereview -run 'TestCodex|TestContext'`.
 
 ### Task 4: Add scan preparation, budgets, grouping, and manifests
 
@@ -140,7 +140,7 @@ Add scan target/protocol fields, full-file evidence hashes, grouping metadata, e
 
 - [x] **Step 5: Expose and verify CLI**
 
-Extend `ocr codex prepare` with `--scan`, repeatable/comma-separated `--path`, `--include`, `--max-file-size-bytes`, `--max-tokens-budget`, `--batch`, and `--batch-size`. Run focused scan and native scan tests.
+Extend `ocr agent prepare` with `--scan`, repeatable/comma-separated `--path`, `--include`, `--max-file-size-bytes`, `--max-tokens-budget`, `--batch`, and `--batch-size`. Run focused scan and native scan tests.
 
 ### Task 5: Persist Codex-owned runs and make viewer records compatible
 
@@ -182,7 +182,7 @@ Run `rtk go test ./internal/session ./internal/viewer ./cmd/opencodereview -run 
 
 - [x] **Step 1: Write static integration tests**
 
-Assert both Skills use `ocr codex prepare`, validation, report, target-aware context, scan planning/dedup/summary instructions, prompt-injection boundaries, and authorized-edit rules; reject default `ocr review`, `ocr scan`, `ocr llm test`, and provider requirements.
+Assert both Skills use `ocr agent prepare`, validation, report, target-aware context, scan planning/dedup/summary instructions, prompt-injection boundaries, and authorized-edit rules; reject default `ocr review`, `ocr scan`, `ocr llm test`, and provider requirements.
 
 - [x] **Step 2: Verify RED**
 

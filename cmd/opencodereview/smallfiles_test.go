@@ -218,6 +218,12 @@ func TestPrintTopLevelUsage(t *testing.T) {
 	if !strings.Contains(got, "OpenCodeReview") {
 		t.Errorf("expected usage text, got %q", got)
 	}
+	if !strings.Contains(got, "ocr agent prepare") {
+		t.Errorf("expected agent example, got %q", got)
+	}
+	if strings.Contains(got, "ocr codex") || strings.Contains(got, "  codex") {
+		t.Errorf("top-level usage exposes hidden codex command: %q", got)
+	}
 }
 
 func TestPrintViewerUsage(t *testing.T) {

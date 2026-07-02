@@ -49,6 +49,7 @@ func dispatch() error {
 	case "agent":
 		return runAgent(args[1:])
 	case "codex":
+		// Hidden compatibility entrypoint for early Codex plugin adapters.
 		return runCodex(args[1:])
 	case "scan", "s":
 		return runScan(args[1:])
@@ -77,7 +78,6 @@ Usage:
 Commands:
   review, r    Start a diff-based code review
   agent        Build deterministic inputs for host-agent-led review
-  codex        Build deterministic inputs for a Codex-led review
   scan, s      Scan entire files (no diff required)
   rules        Inspect and debug review rules
   config       Manage configuration settings
@@ -89,7 +89,6 @@ Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
   ocr agent prepare --from main --to HEAD  Build a host-agent review bundle
-  ocr codex prepare --from main --to HEAD  Build a Codex review bundle
   ocr scan                                 Scan every reviewable file in the repo
   ocr scan --path internal/agent           Scan a single directory
   ocr config provider                      Interactive provider setup
@@ -101,7 +100,6 @@ Examples:
 
 Use "ocr review -h" for more information about review.
 Use "ocr agent -h" for more information about agent.
-Use "ocr codex -h" for more information about codex.
 Use "ocr scan -h" for more information about scan.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.

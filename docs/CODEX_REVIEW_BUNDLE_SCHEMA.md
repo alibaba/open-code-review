@@ -51,7 +51,7 @@ scan 分片使用 `target.mode=scan`，`files[].content` 保存全文件证据�
 `by-directory` 分组复用原生 scan 实现。文件大小或 token 预算超限时必须出现在
 `skipped_files`，且 manifest 标记 `partial=true`；不得把跳过文件计入已评审范围。
 
-大型 diff 使用 `ocr codex prepare --split` 生成同一 manifest 协议，
+大型 diff 使用 `ocr agent prepare --split` 生成同一 manifest 协议，
 `batch_strategy=diff`；每个文件只进入一个满足大小上限的分片。单文件本身超过上限
 时仍返回 `bundle_too_large`，不得截断。
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a read-only, no-LLM `ocr codex prepare` command that emits a versioned review bundle for workspace, range, and commit targets without changing the native OCR review path.
+**Goal:** Add a read-only, no-LLM `ocr agent prepare` command that emits a versioned review bundle for workspace, range, and commit targets without changing the native OCR review path.
 
 **Architecture:** `internal/reviewbundle` owns the agent-neutral protocol, target resolution, stable hashing, rule deduplication, hunk metadata, and bundle-size enforcement. The CLI loads only deterministic repository/rule state, calls the preparer, and writes JSON to stdout unless `--output` is explicit. Existing diff providers remain the source of truth, while review filtering is extracted into an agent-neutral package shared by native review and bundle generation.
 
@@ -201,7 +201,7 @@ rtk go test ./internal/reviewbundle ./internal/diff ./internal/config/rules ./in
 
 Expected: PASS.
 
-### Task 4: Expose `ocr codex prepare` without loading an OCR LLM runtime
+### Task 4: Expose `ocr agent prepare` without loading an OCR LLM runtime
 
 **Files:**
 - Create: `cmd/opencodereview/codex_cmd.go`
@@ -282,7 +282,7 @@ Expected: exit code 0.
 
 - [x] **Step 4: Verify no-LLM and read-only boundaries**
 
-Inspect the Codex command dependency path and test repository status before and after `ocr codex prepare`. Confirm that it does not call `loadLLMRuntime`, write repository files without `--output`, modify source files, or affect the existing `review`/`scan` dispatch paths.
+Inspect the Codex command dependency path and test repository status before and after `ocr agent prepare`. Confirm that it does not call `loadLLMRuntime`, write repository files without `--output`, modify source files, or affect the existing `review`/`scan` dispatch paths.
 
 - [x] **Step 5: Record the implementation checkpoint**
 

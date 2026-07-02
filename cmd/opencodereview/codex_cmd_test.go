@@ -443,10 +443,10 @@ func TestCodexSkillsUseCodexOwnedWorkflow(t *testing.T) {
 	}
 	required := []string{
 		"Codex owns the review",
-		"ocr codex prepare",
-		"ocr codex validate-comments",
-		"ocr codex report",
-		"ocr codex context",
+		"ocr agent prepare",
+		"ocr agent validate-comments",
+		"ocr agent report",
+		"ocr agent context",
 		"codex-review-comments/v1",
 		"second-pass",
 		"deduplicate",
@@ -467,6 +467,7 @@ func TestCodexSkillsUseCodexOwnedWorkflow(t *testing.T) {
 		}
 		for _, forbidden := range []string{
 			"ocr llm test",
+			"ocr codex prepare",
 			"ocr review --audience agent",
 			"Requires a configured LLM",
 		} {

@@ -325,8 +325,8 @@ This registers a Codex-owned review skill. OCR supplies deterministic review
 evidence and target-aware context; Codex performs all planning, reasoning,
 prioritization, reporting, and explicitly requested fixes.
 
-The host-agnostic command surface is `ocr agent ...`; `ocr codex ...` remains a
-Codex compatibility alias for existing plugin integrations:
+The host-agnostic command surface is `ocr agent ...`; Codex is the first adapter
+using that shared deterministic layer:
 
 ```bash
 ocr agent prepare --format json
