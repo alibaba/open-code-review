@@ -41,6 +41,13 @@ func runCodexReport(args []string, writer io.Writer) error {
 	if err != nil {
 		return err
 	}
+	report, err := reviewbundle.RenderReport(bundle, comments, reviewbundle.ReportOptions{
+		Format:     options.format,
+		Validation: validation,
+	})
+	if err != nil {
+		return err
+	}
 	if options.sessionID != "" {
 		repoDir, _, resolveErr := resolveWorkingDir(options.repoDir, false)
 		if resolveErr != nil {
@@ -70,13 +77,6 @@ func runCodexReport(args []string, writer io.Writer) error {
 		); err != nil {
 			return err
 		}
-	}
-	report, err := reviewbundle.RenderReport(bundle, comments, reviewbundle.ReportOptions{
-		Format:     options.format,
-		Validation: validation,
-	})
-	if err != nil {
-		return err
 	}
 	if options.outputPath != "" {
 		return writePrivateFile(options.outputPath, report)

@@ -102,9 +102,14 @@ func codexEventRecord(
 	recordType string,
 	details CodexEvent,
 ) map[string]any {
-	content, _ := json.Marshal(details)
 	var fields map[string]any
-	_ = json.Unmarshal(content, &fields)
+	content, err := json.Marshal(details)
+	if err == nil {
+		err = json.Unmarshal(content, &fields)
+	}
+	if err != nil || fields == nil {
+		fields = make(map[string]any)
+	}
 	fields["uuid"] = generateUUID()
 	fields["parentUuid"] = nil
 	fields["type"] = recordType
@@ -130,10 +135,6 @@ func (recorder *CodexRecorder) write(record map[string]any) error {
 	)
 	if err != nil {
 		return fmt.Errorf("open Codex session: %w", err)
-	}
-	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("restrict Codex session: %w", err)
 	}
 	if _, err := file.Write(append(encoded, '\n')); err != nil {
 		_ = file.Close()

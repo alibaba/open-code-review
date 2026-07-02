@@ -156,6 +156,12 @@ func TestWhyExcluded_AllBranches(t *testing.T) {
 			want:   model.ExcludeNone,
 		},
 		{
+			name:   "include list excludes non-matching file",
+			item:   model.ScanItem{Path: "docs/readme.md", Content: "x"},
+			filter: &rules.FileFilter{Include: []string{"src/**"}},
+			want:   model.ExcludeUserRule,
+		},
+		{
 			name: "default excluded path",
 			item: model.ScanItem{Path: "pkg/handler_test.go", Content: "x"},
 			want: model.ExcludeDefaultPath,

@@ -90,3 +90,34 @@ func TestReportIncludesValidationFailures(t *testing.T) {
 		t.Fatalf("report missing validation failure:\n%s", report)
 	}
 }
+
+func TestReportEscapesBackticksAndTextWarnings(t *testing.T) {
+	bundle := validationBundle()
+	comments := &Comments{
+		SchemaVersion: CommentsSchemaVersion,
+		BundleID:      bundle.BundleID,
+		Summary:       CommentsSummary{FilesReviewed: 1, IssuesFound: 1},
+		Comments: []ReviewComment{{
+			Path: "main`weird.go", StartLine: 1, EndLine: 1,
+			Priority: "high", Category: "bug", Title: "Fence",
+			Content: "content", Recommendation: "fix", Confidence: 1,
+			ExistingCode: "````\ncode",
+		}},
+		Warnings: []ProtocolNotice{{Code: "partial", Message: "some scope skipped"}},
+	}
+	markdown, err := RenderReport(bundle, comments, ReportOptions{Format: "markdown"})
+	if err != nil {
+		t.Fatalf("RenderReport(markdown) error = %v", err)
+	}
+	if !strings.Contains(string(markdown), "`` main`weird.go:1 ``") ||
+		!strings.Contains(string(markdown), "`````") {
+		t.Fatalf("markdown report did not escape code spans/fences:\n%s", markdown)
+	}
+	text, err := RenderReport(bundle, comments, ReportOptions{Format: "text"})
+	if err != nil {
+		t.Fatalf("RenderReport(text) error = %v", err)
+	}
+	if !strings.Contains(string(text), "WARNING partial") {
+		t.Fatalf("text report missing warnings:\n%s", text)
+	}
+}

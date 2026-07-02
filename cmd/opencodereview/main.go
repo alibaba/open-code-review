@@ -96,6 +96,7 @@ Examples:
   ocr version                              Show version info
 
 Use "ocr review -h" for more information about review.
+Use "ocr codex -h" for more information about codex.
 Use "ocr scan -h" for more information about scan.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.

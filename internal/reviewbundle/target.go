@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"hash"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -52,9 +54,15 @@ func validateTargetSpec(spec TargetSpec) error {
 	if spec.Commit != "" && spec.From != "" {
 		return fmt.Errorf("only one review mode allowed (--from/--to or --commit)")
 	}
-	for flag, reference := range map[string]string{
-		"--from": spec.From, "--to": spec.To, "--commit": spec.Commit,
+	for _, ref := range []struct {
+		flag      string
+		reference string
+	}{
+		{"--from", spec.From},
+		{"--to", spec.To},
+		{"--commit", spec.Commit},
 	} {
+		flag, reference := ref.flag, ref.reference
 		if strings.HasPrefix(reference, "-") {
 			return fmt.Errorf("%s value %q is not a valid git ref: refs must not start with '-'", flag, reference)
 		}
@@ -105,7 +113,8 @@ func resolveRangeTarget(
 	spec TargetSpec,
 	runner *gitcmd.Runner,
 ) (Target, *WorkspaceState, error) {
-	if _, err := resolveCommit(ctx, repoDir, spec.From, runner); err != nil {
+	from, err := resolveCommit(ctx, repoDir, spec.From, runner)
+	if err != nil {
 		return Target{}, nil, fmt.Errorf("--from value %q is not a valid commit ref: %w", spec.From, err)
 	}
 	head, err := resolveCommit(ctx, repoDir, spec.To, runner)
@@ -113,7 +122,7 @@ func resolveRangeTarget(
 		return Target{}, nil, fmt.Errorf("--to value %q is not a valid commit ref: %w", spec.To, err)
 	}
 	mergeBaseBytes, err := gitOutput(
-		ctx, runner, repoDir, "merge-base", "--end-of-options", spec.From, spec.To,
+		ctx, runner, repoDir, "merge-base", "--end-of-options", from, head,
 	)
 	if err != nil {
 		return Target{}, nil, fmt.Errorf("resolve merge-base between %s and %s: %w", spec.From, spec.To, err)
@@ -124,8 +133,8 @@ func resolveRangeTarget(
 	}
 	return Target{
 		Mode:         TargetRange,
-		From:         spec.From,
-		To:           spec.To,
+		From:         from,
+		To:           head,
 		BaseSHA:      mergeBase,
 		HeadSHA:      head,
 		MergeBaseSHA: mergeBase,
@@ -153,7 +162,7 @@ func resolveCommitTarget(
 	}
 	return Target{
 		Mode:    TargetCommit,
-		Commit:  reference,
+		Commit:  head,
 		BaseSHA: base,
 		HeadSHA: head,
 	}, nil, nil
@@ -187,7 +196,8 @@ func hashUntracked(ctx context.Context, repoDir string, runner *gitcmd.Runner) (
 	}
 	paths := splitNUL(output)
 	sort.Strings(paths)
-	fields := make([][]byte, 0, len(paths)*3)
+	hasher := sha256.New()
+	var length [8]byte
 	for _, path := range paths {
 		fullPath := filepath.Join(repoDir, filepath.FromSlash(path))
 		info, statErr := os.Lstat(fullPath)
@@ -195,25 +205,34 @@ func hashUntracked(ctx context.Context, repoDir string, runner *gitcmd.Runner) (
 			return "", fmt.Errorf("stat untracked file %s: %w", path, statErr)
 		}
 		fileType := "regular"
-		var content []byte
 		if info.Mode()&os.ModeSymlink != 0 {
 			fileType = "symlink"
 			target, readErr := os.Readlink(fullPath)
 			if readErr != nil {
 				return "", fmt.Errorf("read untracked symlink %s: %w", path, readErr)
 			}
-			content = []byte(target)
+			writeHashFields(hasher, length, []byte(path), []byte(fileType), []byte(target))
 		} else if info.Mode().IsRegular() {
-			content, statErr = os.ReadFile(fullPath)
-			if statErr != nil {
-				return "", fmt.Errorf("read untracked file %s: %w", path, statErr)
+			writeHashFields(hasher, length, []byte(path), []byte(fileType))
+			binary.BigEndian.PutUint64(length[:], uint64(info.Size()))
+			_, _ = hasher.Write(length[:])
+			file, openErr := os.Open(fullPath)
+			if openErr != nil {
+				return "", fmt.Errorf("read untracked file %s: %w", path, openErr)
+			}
+			if _, copyErr := io.Copy(hasher, file); copyErr != nil {
+				_ = file.Close()
+				return "", fmt.Errorf("read untracked file %s: %w", path, copyErr)
+			}
+			if closeErr := file.Close(); closeErr != nil {
+				return "", fmt.Errorf("close untracked file %s: %w", path, closeErr)
 			}
 		} else {
 			fileType = info.Mode().Type().String()
+			writeHashFields(hasher, length, []byte(path), []byte(fileType), nil)
 		}
-		fields = append(fields, []byte(path), []byte(fileType), content)
 	}
-	return hashFields(fields...), nil
+	return "sha256:" + hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func splitNUL(content []byte) []string {
@@ -242,10 +261,14 @@ func gitOutput(
 func hashFields(fields ...[]byte) string {
 	hasher := sha256.New()
 	var length [8]byte
+	writeHashFields(hasher, length, fields...)
+	return "sha256:" + hex.EncodeToString(hasher.Sum(nil))
+}
+
+func writeHashFields(hasher hash.Hash, length [8]byte, fields ...[]byte) {
 	for _, field := range fields {
 		binary.BigEndian.PutUint64(length[:], uint64(len(field)))
 		_, _ = hasher.Write(length[:])
 		_, _ = hasher.Write(field)
 	}
-	return "sha256:" + hex.EncodeToString(hasher.Sum(nil))
 }

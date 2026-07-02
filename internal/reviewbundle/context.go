@@ -75,6 +75,9 @@ func (service *ContextService) Read(
 	if maxLines <= 0 {
 		maxLines = 200
 	}
+	if maxLines > 500 {
+		maxLines = 500
+	}
 	endLine := startLine + maxLines - 1
 	result, err := tool.NewFileRead(service.reader).Execute(ctx, map[string]any{
 		"file_path":  cleaned,
@@ -152,10 +155,11 @@ func (service *ContextService) Search(
 	}
 	patternArguments := make([]any, 0, len(patterns))
 	for _, pattern := range patterns {
-		if _, safe := cleanProtocolPath(pattern); !safe {
+		cleaned, safe := cleanProtocolPath(pattern)
+		if !safe {
 			return ContextResult{}, &ProtocolError{Code: "path_escape", Message: "file pattern must stay inside the repository"}
 		}
-		patternArguments = append(patternArguments, pattern)
+		patternArguments = append(patternArguments, cleaned)
 	}
 	result, err := tool.NewCodeSearch(service.reader).Execute(ctx, map[string]any{
 		"search_text":     query,

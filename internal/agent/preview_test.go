@@ -240,25 +240,22 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 			// matching an include pattern returns ExcludeNone before that check.
 			expected: ExcludeNone,
 		},
-		// --- Include is additive, NOT exclusive ---
+		// --- Include is exclusive ---
 		// When include patterns are configured, files that do NOT match them
-		// still fall through to the default checks. If extension is valid and
-		// path is not default-excluded, they are still reviewed.
+		// are filtered out by the user rule.
 		{
-			name: "non-included file with valid extension still reviewed (additive semantics)",
+			name: "non-included file with valid extension is excluded",
 			diff: model.Diff{
 				NewPath: "vendor/baz.go",
 			},
-			// .go is a supported extension and vendor/baz.go does not hit
-			// IsExcludedPath, so it falls through to ExcludeNone.
-			expected: ExcludeNone,
+			expected: ExcludeUserRule,
 		},
 		{
-			name: "non-included file in non-excluded directory still reviewed",
+			name: "non-included file in non-excluded directory is excluded",
 			diff: model.Diff{
 				NewPath: "internal/handler.go",
 			},
-			expected: ExcludeNone,
+			expected: ExcludeUserRule,
 		},
 		{
 			name: "include check overrides extension exclusion",
@@ -272,17 +269,15 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 			diff: model.Diff{
 				NewPath: "src/notes.txt",
 			},
-			expected: ExcludeExtension,
+			expected: ExcludeUserRule,
 		},
-		// --- Default-path exclusion still applies to non-included files ---
+		// --- Include exclusion happens before default-path exclusion ---
 		{
-			name: "non-included test file excluded by default path",
+			name: "non-included test file excluded by user include rule",
 			diff: model.Diff{
 				NewPath: "internal/handler_test.go",
 			},
-			// Does not match include patterns, falls through.
-			// IsExcludedPath matches *_test.go → ExcludeDefaultPath.
-			expected: ExcludeDefaultPath,
+			expected: ExcludeUserRule,
 		},
 	}
 
@@ -319,11 +314,11 @@ func TestWhyExcluded_IncludeBypassesDefaultPath(t *testing.T) {
 			expected: ExcludeNone,
 		},
 		{
-			name: "non-test file still reviewed via default checks",
+			name: "non-test file is excluded by include rule",
 			diff: model.Diff{
 				NewPath: "main.go",
 			},
-			expected: ExcludeNone,
+			expected: ExcludeUserRule,
 		},
 	}
 
@@ -367,11 +362,11 @@ func TestWhyExcluded_IncludeAndExcludeInteraction(t *testing.T) {
 			expected: ExcludeUserRule,
 		},
 		{
-			name: "file outside include with valid ext still reviewed (additive)",
+			name: "file outside include is excluded",
 			diff: model.Diff{
 				NewPath: "lib/utils.go",
 			},
-			expected: ExcludeNone,
+			expected: ExcludeUserRule,
 		},
 	}
 

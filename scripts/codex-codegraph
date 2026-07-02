@@ -2,8 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_JSON="${ROOT//\\/\\\\}"
+ROOT_JSON="${ROOT_JSON//\"/\\\"}"
 
 exec codex --yolo -C "$ROOT" \
 	-c 'mcp_servers.codegraph.command="codegraph"' \
-	-c "mcp_servers.codegraph.args=[\"serve\",\"--mcp\",\"--path\",\"$ROOT\"]" \
+	-c "mcp_servers.codegraph.args=[\"serve\",\"--mcp\",\"--path\",\"$ROOT_JSON\"]" \
 	"$@"

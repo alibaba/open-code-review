@@ -80,7 +80,7 @@ func renderMarkdownReport(
 	var output bytes.Buffer
 	fmt.Fprintln(&output, "# Codex Code Review")
 	fmt.Fprintln(&output)
-	fmt.Fprintf(&output, "- Bundle: `%s`\n", markdownCode(bundle.BundleID))
+	fmt.Fprintf(&output, "- Bundle: %s\n", markdownCode(bundle.BundleID))
 	fmt.Fprintf(
 		&output,
 		"- Scope: %d reviewable / %d total files\n",
@@ -103,7 +103,7 @@ func renderMarkdownReport(
 			)
 			fmt.Fprintf(
 				&output,
-				"`%s` · %s · confidence %.2f\n\n",
+				"%s · %s · confidence %.2f\n\n",
 				markdownCode(commentLocation(comment)),
 				comment.Category,
 				comment.Confidence,
@@ -193,6 +193,12 @@ func renderTextReport(
 			fmt.Fprintf(&output, "Recommendation: %s\n", comment.Recommendation)
 		}
 	}
+	if len(comments.Warnings) > 0 {
+		fmt.Fprintln(&output, "\nWarnings:")
+		for _, notice := range comments.Warnings {
+			fmt.Fprintf(&output, "WARNING %s: %s\n", notice.Code, notice.Message)
+		}
+	}
 	return output.Bytes()
 }
 
@@ -207,7 +213,14 @@ func commentLocation(comment ReviewComment) string {
 }
 
 func markdownCode(value string) string {
-	return strings.ReplaceAll(value, "`", "\\`")
+	if !strings.Contains(value, "`") {
+		return "`" + value + "`"
+	}
+	fence := "``"
+	for strings.Contains(value, fence) {
+		fence += "`"
+	}
+	return fence + " " + value + " " + fence
 }
 
 func escapeMarkdownHeading(value string) string {
@@ -216,8 +229,8 @@ func escapeMarkdownHeading(value string) string {
 
 func writeFencedCode(output *bytes.Buffer, code string) {
 	fence := "```"
-	if strings.Contains(code, fence) {
-		fence = "````"
+	for strings.Contains(code, fence) {
+		fence += "`"
 	}
 	fmt.Fprintln(output, fence)
 	fmt.Fprintln(output, code)

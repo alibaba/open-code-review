@@ -8,7 +8,7 @@
     "schema_version": {"const": "codex-review-bundle/v1"},
     "bundle_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "target": {"$ref": "#/$defs/target"},
-    "workspace_state": {"$ref": "#/$defs/workspaceState"},
+    "workspace_state": {"$ref": "#/$defs/workspace_state"},
     "summary": {"$ref": "#/$defs/summary"},
     "rules": {
       "type": "object",
@@ -34,7 +34,7 @@
         "diff_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
       }
     },
-    "workspaceState": {
+    "workspace_state": {
       "type": "object",
       "additionalProperties": false,
       "required": ["head_sha", "staged_sha256", "unstaged_sha256", "untracked_sha256"],

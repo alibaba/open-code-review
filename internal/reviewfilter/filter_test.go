@@ -32,6 +32,12 @@ func TestExcludeReasonPreservesNativeOrdering(t *testing.T) {
 			want:       model.ExcludeNone,
 		},
 		{
+			name:       "include list excludes non-matching files",
+			fileFilter: &rules.FileFilter{Include: []string{"docs/**"}},
+			change:     model.Diff{NewPath: "src/main.go"},
+			want:       model.ExcludeUserRule,
+		},
+		{
 			name:   "unsupported extension",
 			change: model.Diff{NewPath: "notes.unsupported"},
 			want:   model.ExcludeExtension,

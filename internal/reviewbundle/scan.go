@@ -76,10 +76,11 @@ func PrepareScan(ctx context.Context, options ScanOptions) (*ScanManifest, []byt
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
 
+	batchStrategy := scan.ParseBatchStrategy(options.BatchStrategy)
 	manifest := &ScanManifest{
 		SchemaVersion: ScanManifestSchemaVersion,
 		Root:          options.RepoDir,
-		BatchStrategy: string(scan.ParseBatchStrategy(options.BatchStrategy)),
+		BatchStrategy: string(batchStrategy),
 		BatchSize:     options.BatchSize,
 		SkippedFiles:  make([]ScanSkippedFile, 0),
 		Bundles:       make([]Bundle, 0),
@@ -90,19 +91,19 @@ func PrepareScan(ctx context.Context, options ScanOptions) (*ScanManifest, []byt
 		})
 	}
 	manifest.Summary.TotalFiles = len(items) + len(providerSkipped)
-	included := filterAndBudgetScanItems(manifest, items, options)
+	included, budgetTruncated := filterAndBudgetScanItems(manifest, items, options)
 	manifest.EstimatedTokens = scan.EstimateTokens(included, true, true, true).TotalTokens
 	manifest.Summary.ReviewableFiles = len(included)
 	manifest.Summary.ExcludedFiles = manifest.Summary.TotalFiles - len(included)
 	for _, item := range included {
 		manifest.Summary.Insertions += int64(item.LineCount)
 	}
-	manifest.Partial = len(manifest.SkippedFiles) > 0
-	manifest.TargetHash = hashScanItems(items)
+	manifest.Partial = budgetTruncated
+	manifest.TargetHash = hashScanItems(included)
 
 	batches := scan.GroupBatches(
 		included,
-		scan.ParseBatchStrategy(options.BatchStrategy),
+		batchStrategy,
 		options.BatchSize,
 	)
 	for batchIndex, batch := range batches {
@@ -134,9 +135,10 @@ func filterAndBudgetScanItems(
 	manifest *ScanManifest,
 	items []model.ScanItem,
 	options ScanOptions,
-) []model.ScanItem {
+) ([]model.ScanItem, bool) {
 	included := make([]model.ScanItem, 0, len(items))
 	var budgetUsed int64
+	budgetTruncated := false
 	for _, item := range items {
 		reason := scan.ExcludeReason(item, options.FileFilter)
 		if reason != model.ExcludeNone {
@@ -147,6 +149,7 @@ func filterAndBudgetScanItems(
 		}
 		estimated := scan.EstimateItemTokens(item, true)
 		if options.MaxTokenBudget > 0 && budgetUsed+estimated > options.MaxTokenBudget {
+			budgetTruncated = true
 			manifest.SkippedFiles = append(manifest.SkippedFiles, ScanSkippedFile{
 				Path: item.Path, Reason: "token_budget", EstimatedTokens: estimated,
 			})
@@ -155,7 +158,7 @@ func filterAndBudgetScanItems(
 		budgetUsed += estimated
 		included = append(included, item)
 	}
-	return included
+	return included, budgetTruncated
 }
 
 func buildScanBundle(

@@ -28,6 +28,9 @@ func (f Filter) ExcludeReason(change model.Diff) model.ExcludeReason {
 	if f.FileFilter != nil && f.FileFilter.HasInclude() && f.FileFilter.IsUserIncluded(path) {
 		return model.ExcludeNone
 	}
+	if f.FileFilter != nil && f.FileFilter.HasInclude() {
+		return model.ExcludeUserRule
+	}
 
 	extension := extensionFromPath(path)
 	if extension != "" && !allowedext.IsAllowedExt(extension) {

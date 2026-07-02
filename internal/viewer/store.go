@@ -168,15 +168,7 @@ func peekSession(path string) (SessionSummary, error) {
 			if v, ok := rec["diffCommit"].(string); ok {
 				summary.DiffCommit = v
 			}
-			if value, ok := rec["controlPlane"].(string); ok {
-				summary.ControlPlane = value
-			}
-			if value, ok := rec["bundleId"].(string); ok {
-				summary.BundleID = value
-			}
-			if value, ok := rec["tokenUsage"].(string); ok && value == "not_available" {
-				summary.TokenUsageAvailable = false
-			}
+			parseCodexSessionStartFields(rec, &summary)
 		}
 	}
 
@@ -333,15 +325,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			if v, ok := rec["diffCommit"].(string); ok {
 				vs.Summary.DiffCommit = v
 			}
-			if value, ok := rec["controlPlane"].(string); ok {
-				vs.Summary.ControlPlane = value
-			}
-			if value, ok := rec["bundleId"].(string); ok {
-				vs.Summary.BundleID = value
-			}
-			if value, ok := rec["tokenUsage"].(string); ok && value == "not_available" {
-				vs.Summary.TokenUsageAvailable = false
-			}
+			parseCodexSessionStartFields(rec, &vs.Summary)
 
 		case "codex_event":
 			event, _ := rec["event"].(string)
@@ -539,4 +523,16 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs.Summary.SessionID = sessionID
 	return vs, scanner.Err()
+}
+
+func parseCodexSessionStartFields(rec map[string]any, summary *SessionSummary) {
+	if value, ok := rec["controlPlane"].(string); ok {
+		summary.ControlPlane = value
+	}
+	if value, ok := rec["bundleId"].(string); ok {
+		summary.BundleID = value
+	}
+	if value, ok := rec["tokenUsage"].(string); ok && value == "not_available" {
+		summary.TokenUsageAvailable = false
+	}
 }

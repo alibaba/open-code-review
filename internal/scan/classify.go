@@ -3,7 +3,7 @@ package scan
 import (
 	"strings"
 
-	"github.com/open-code-review/open-code-review/internal/config/allowlist"
+	allowedext "github.com/open-code-review/open-code-review/internal/config/allowlist"
 	"github.com/open-code-review/open-code-review/internal/config/rules"
 	"github.com/open-code-review/open-code-review/internal/model"
 )
@@ -16,12 +16,15 @@ func ExcludeReason(item model.ScanItem, fileFilter *rules.FileFilter) model.Excl
 	if fileFilter != nil && fileFilter.IsUserExcluded(item.Path) {
 		return model.ExcludeUserRule
 	}
+	if fileFilter != nil && fileFilter.HasInclude() && fileFilter.IsUserIncluded(item.Path) {
+		return model.ExcludeNone
+	}
+	if fileFilter != nil && fileFilter.HasInclude() {
+		return model.ExcludeUserRule
+	}
 	extension := scanExtension(item.Path)
 	if extension != "" && !allowedext.IsAllowedExt(extension) {
 		return model.ExcludeExtension
-	}
-	if fileFilter != nil && fileFilter.HasInclude() && fileFilter.IsUserIncluded(item.Path) {
-		return model.ExcludeNone
 	}
 	if allowedext.IsExcludedPath(item.Path) {
 		return model.ExcludeDefaultPath

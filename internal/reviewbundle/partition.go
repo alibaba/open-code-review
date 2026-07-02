@@ -33,38 +33,46 @@ func PreparePartitioned(
 		SkippedFiles:  make([]ScanSkippedFile, 0),
 		Bundles:       make([]Bundle, 0),
 	}
-	var current []File
+	current := newPartitionPacker(full, maxBundleSize)
 	for _, file := range full.Files {
-		candidate := append(append([]File(nil), current...), file)
-		_, encoded, buildErr := buildDiffPartition(full, candidate, maxBundleSize)
-		if buildErr != nil {
-			return nil, nil, buildErr
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		default:
 		}
-		if int64(len(encoded)) <= maxBundleSize {
-			current = candidate
-			continue
+		addedSize, err := current.estimateAddition(full, file)
+		if err != nil {
+			return nil, nil, err
 		}
-		if len(current) == 0 {
-			return nil, nil, singleFilePartitionError(file.Path, len(encoded), maxBundleSize)
+		if len(current.files) > 0 && current.estimatedSize+addedSize > maxBundleSize {
+			previous, encoded, buildErr := buildDiffPartition(full, current.files, maxBundleSize)
+			if buildErr != nil {
+				return nil, nil, buildErr
+			}
+			if int64(len(encoded)) > maxBundleSize {
+				return nil, nil, partitionSizeError(len(encoded), maxBundleSize)
+			}
+			manifest.Bundles = append(manifest.Bundles, *previous)
+			current = newPartitionPacker(full, maxBundleSize)
 		}
-		previous, _, buildErr := buildDiffPartition(full, current, maxBundleSize)
-		if buildErr != nil {
-			return nil, nil, buildErr
-		}
-		manifest.Bundles = append(manifest.Bundles, *previous)
-		current = []File{file}
-		_, singleEncoded, buildErr := buildDiffPartition(full, current, maxBundleSize)
-		if buildErr != nil {
-			return nil, nil, buildErr
-		}
-		if int64(len(singleEncoded)) > maxBundleSize {
-			return nil, nil, singleFilePartitionError(file.Path, len(singleEncoded), maxBundleSize)
+		current.add(file, addedSize)
+		if len(current.files) == 1 && current.estimatedSize > maxBundleSize {
+			_, singleEncoded, buildErr := buildDiffPartition(full, current.files, maxBundleSize)
+			if buildErr != nil {
+				return nil, nil, buildErr
+			}
+			if int64(len(singleEncoded)) > maxBundleSize {
+				return nil, nil, singleFilePartitionError(file.Path, len(singleEncoded), maxBundleSize)
+			}
 		}
 	}
-	if len(current) > 0 {
-		bundle, _, buildErr := buildDiffPartition(full, current, maxBundleSize)
+	if len(current.files) > 0 {
+		bundle, encoded, buildErr := buildDiffPartition(full, current.files, maxBundleSize)
 		if buildErr != nil {
 			return nil, nil, buildErr
+		}
+		if int64(len(encoded)) > maxBundleSize {
+			return nil, nil, partitionSizeError(len(encoded), maxBundleSize)
 		}
 		manifest.Bundles = append(manifest.Bundles, *bundle)
 	}
@@ -78,6 +86,49 @@ func PreparePartitioned(
 		return nil, nil, err
 	}
 	return manifest, encoded, nil
+}
+
+type partitionPacker struct {
+	files         []File
+	ruleIDs       map[string]struct{}
+	estimatedSize int64
+}
+
+func newPartitionPacker(full *Bundle, maxBundleSize int64) *partitionPacker {
+	empty, encoded, err := buildDiffPartition(full, nil, maxBundleSize)
+	estimated := int64(4096)
+	if err == nil {
+		estimated = int64(len(encoded)) + empty.Contract.BundleSizeBytes
+	}
+	return &partitionPacker{
+		files:         make([]File, 0),
+		ruleIDs:       make(map[string]struct{}),
+		estimatedSize: estimated,
+	}
+}
+
+func (packer *partitionPacker) estimateAddition(full *Bundle, file File) (int64, error) {
+	encodedFile, err := json.Marshal(file)
+	if err != nil {
+		return 0, fmt.Errorf("marshal partition file estimate: %w", err)
+	}
+	estimate := int64(len(encodedFile) + len(file.RuleID) + 128)
+	if _, seen := packer.ruleIDs[file.RuleID]; !seen {
+		if rule, exists := full.Rules[file.RuleID]; exists {
+			encodedRule, err := json.Marshal(rule)
+			if err != nil {
+				return 0, fmt.Errorf("marshal partition rule estimate: %w", err)
+			}
+			estimate += int64(len(encodedRule) + len(file.RuleID) + 128)
+		}
+	}
+	return estimate, nil
+}
+
+func (packer *partitionPacker) add(file File, estimatedSize int64) {
+	packer.files = append(packer.files, file)
+	packer.ruleIDs[file.RuleID] = struct{}{}
+	packer.estimatedSize += estimatedSize
 }
 
 func buildDiffPartition(
@@ -128,6 +179,17 @@ func singleFilePartitionError(path string, size int, maximum int64) error {
 		Message: fmt.Sprintf(
 			"file %s requires a %d-byte bundle; maximum is %d",
 			path,
+			size,
+			maximum,
+		),
+	}
+}
+
+func partitionSizeError(size int, maximum int64) error {
+	return &ProtocolError{
+		Code: "bundle_too_large",
+		Message: fmt.Sprintf(
+			"estimated partition produced a %d-byte bundle; maximum is %d",
 			size,
 			maximum,
 		),

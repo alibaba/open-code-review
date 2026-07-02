@@ -69,8 +69,9 @@ func ValidateComments(
 	for _, file := range bundle.Files {
 		files[file.Path] = file
 	}
+	contentCache := make(map[string][]byte)
 	for index := range comments.Comments {
-		validateOneComment(ctx, &result, bundle, files, comments.Comments[index], index, repoDir, runner)
+		validateOneComment(ctx, &result, bundle, files, contentCache, comments.Comments[index], index, repoDir, runner)
 	}
 	if comments.Summary.IssuesFound != len(comments.Comments) {
 		addValidationError(
@@ -139,6 +140,7 @@ func validateOneComment(
 	result *ValidationResult,
 	bundle *Bundle,
 	files map[string]File,
+	contentCache map[string][]byte,
 	comment ReviewComment,
 	index int,
 	repoDir string,
@@ -157,6 +159,7 @@ func validateOneComment(
 	}
 	if !file.Reviewable {
 		addValidationError(result, "excluded_path", cleanPath, &commentIndex, "path was excluded from review")
+		return
 	}
 	if !slices.Contains(bundle.Contract.AllowedPriorities, comment.Priority) {
 		addValidationError(result, "invalid_priority", cleanPath, &commentIndex, "priority is not allowed by the bundle contract")
@@ -180,7 +183,7 @@ func validateOneComment(
 		addValidationWarning(result, "outside_changed_hunk", cleanPath, &commentIndex, "comment points outside a changed hunk")
 	}
 	if repoDir != "" {
-		validateCommentContent(ctx, result, bundle, comment, cleanPath, commentIndex, repoDir, runner)
+		validateCommentContent(ctx, result, bundle, files, contentCache, comment, cleanPath, commentIndex, repoDir, runner)
 	}
 }
 
@@ -188,18 +191,25 @@ func validateCommentContent(
 	ctx context.Context,
 	result *ValidationResult,
 	bundle *Bundle,
+	files map[string]File,
+	contentCache map[string][]byte,
 	comment ReviewComment,
 	path string,
 	index int,
 	repoDir string,
 	runner *gitcmd.Runner,
 ) {
-	content, err := readTargetFile(ctx, bundle, repoDir, path, runner)
-	if err != nil {
-		addValidationError(result, "unknown_path", path, &index, fmt.Sprintf("cannot read target file: %v", err))
-		return
+	content, ok := contentCache[path]
+	if !ok {
+		var err error
+		content, err = readTargetFile(ctx, bundle, repoDir, path, runner)
+		if err != nil {
+			addValidationError(result, "unknown_path", path, &index, fmt.Sprintf("cannot read target file: %v", err))
+			return
+		}
+		contentCache[path] = content
 	}
-	if hashFields(content) != bundleFileHash(bundle, path) {
+	if hashFields(content) != files[path].ContentSHA256 {
 		addValidationError(result, "stale_bundle", path, &index, "file content changed after bundle creation")
 		return
 	}
@@ -271,15 +281,6 @@ func readTargetFile(
 		return nil, fmt.Errorf("resolved path escapes repository")
 	}
 	return os.ReadFile(resolved)
-}
-
-func bundleFileHash(bundle *Bundle, path string) string {
-	for _, file := range bundle.Files {
-		if file.Path == path {
-			return file.ContentSHA256
-		}
-	}
-	return ""
 }
 
 func splitSourceLines(content []byte) []string {

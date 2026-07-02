@@ -107,7 +107,7 @@
     {{range .Session.CodexEvents}}
         <tr>
             <td>{{.Event}}</td>
-            <td><code>{{.BundleID}}</code></td>
+            <td>{{if .BundleID}}<code>{{.BundleID}}</code>{{else}}-{{end}}</td>
             <td>{{.DurationMS}} ms</td>
             <td>{{if .Error}}{{.Error}}{{else}}-{{end}}</td>
         </tr>

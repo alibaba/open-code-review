@@ -115,7 +115,7 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	if p.FileReader.Ref != "" {
 		resolvedRef, err := p.resolveGrepRef(ctx)
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return "", err
 			}
 			return fmt.Sprintf("Error: invalid git ref %q: %v", p.FileReader.Ref, err), nil

@@ -60,8 +60,11 @@ func LoadScanManifest(reader io.Reader) (*ScanManifest, error) {
 			ScanManifestSchemaVersion,
 		)
 	}
-	if manifest.ManifestID == "" || manifest.Bundles == nil {
-		return nil, fmt.Errorf("invalid scan manifest schema: manifest_id and bundles are required")
+	if manifest.ManifestID == "" {
+		return nil, fmt.Errorf("invalid scan manifest schema: manifest_id is required")
+	}
+	if manifest.Bundles == nil {
+		return nil, fmt.Errorf("invalid scan manifest schema: bundles is required")
 	}
 	return &manifest, nil
 }
