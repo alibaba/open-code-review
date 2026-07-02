@@ -232,50 +232,50 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 			expected: ExcludeNone,
 		},
 		{
-			name: "include pattern still respects default-path exclusion for test files",
+			name: "include pattern bypasses default-path exclusion for test files",
 			diff: model.Diff{
 				NewPath: "src/foo/bar_test.go",
 			},
-			expected: ExcludeDefaultPath,
+			expected: ExcludeNone,
 		},
-		// --- Include is exclusive ---
+		// --- Include is additive, NOT exclusive ---
 		// When include patterns are configured, files that do NOT match them
-		// are filtered out by the user rule.
+		// still fall through to the default checks.
 		{
-			name: "non-included file with valid extension is excluded",
+			name: "non-included file with valid extension still reviewed",
 			diff: model.Diff{
 				NewPath: "vendor/baz.go",
 			},
-			expected: ExcludeUserRule,
+			expected: ExcludeNone,
 		},
 		{
-			name: "non-included file in non-excluded directory is excluded",
+			name: "non-included file in non-excluded directory still reviewed",
 			diff: model.Diff{
 				NewPath: "internal/handler.go",
 			},
-			expected: ExcludeUserRule,
+			expected: ExcludeNone,
 		},
 		{
-			name: "include check still respects extension exclusion",
+			name: "include check overrides extension exclusion",
 			diff: model.Diff{
 				NewPath: "internal/test.supportedext",
 			},
-			expected: ExcludeExtension,
+			expected: ExcludeNone,
 		},
 		{
 			name: "unsupported extension even if path looks like include dir",
 			diff: model.Diff{
 				NewPath: "src/notes.txt",
 			},
-			expected: ExcludeUserRule,
+			expected: ExcludeExtension,
 		},
-		// --- Include exclusion happens before default-path exclusion ---
+		// --- Default-path exclusion still applies to non-included files ---
 		{
-			name: "non-included test file excluded by user include rule",
+			name: "non-included test file excluded by default path",
 			diff: model.Diff{
 				NewPath: "internal/handler_test.go",
 			},
-			expected: ExcludeUserRule,
+			expected: ExcludeDefaultPath,
 		},
 	}
 
@@ -289,9 +289,8 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 	}
 }
 
-// TestWhyExcluded_IncludeRespectsDefaultPath verifies that include patterns
-// narrow scope without bypassing native safety filters.
-func TestWhyExcluded_IncludeRespectsDefaultPath(t *testing.T) {
+// TestWhyExcluded_IncludeBypassesDefaultPath verifies native review include behavior.
+func TestWhyExcluded_IncludeBypassesDefaultPath(t *testing.T) {
 	agent := New(Args{
 		FileFilter: &rules.FileFilter{
 			Include: []string{"**/*_test.go"},
@@ -304,18 +303,18 @@ func TestWhyExcluded_IncludeRespectsDefaultPath(t *testing.T) {
 		expected ExcludeReason
 	}{
 		{
-			name: "test file explicitly included still hits default-path exclusion",
+			name: "test file explicitly included overrides default-path exclusion",
 			diff: model.Diff{
 				NewPath: "foo_test.go",
 			},
-			expected: ExcludeDefaultPath,
+			expected: ExcludeNone,
 		},
 		{
-			name: "non-test file is excluded by include rule",
+			name: "non-test file still reviewed via default checks",
 			diff: model.Diff{
 				NewPath: "main.go",
 			},
-			expected: ExcludeUserRule,
+			expected: ExcludeNone,
 		},
 	}
 
@@ -359,11 +358,11 @@ func TestWhyExcluded_IncludeAndExcludeInteraction(t *testing.T) {
 			expected: ExcludeUserRule,
 		},
 		{
-			name: "file outside include is excluded",
+			name: "file outside include with valid ext still reviewed",
 			diff: model.Diff{
 				NewPath: "lib/utils.go",
 			},
-			expected: ExcludeUserRule,
+			expected: ExcludeNone,
 		},
 	}
 

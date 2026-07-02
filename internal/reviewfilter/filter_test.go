@@ -26,16 +26,16 @@ func TestExcludeReasonPreservesNativeOrdering(t *testing.T) {
 			want:       model.ExcludeUserRule,
 		},
 		{
-			name:       "explicit include still respects extension allowlist",
+			name:       "review include match bypasses extension allowlist",
 			fileFilter: &rules.FileFilter{Include: []string{"docs/**"}},
 			change:     model.Diff{NewPath: "docs/notes.unsupported"},
-			want:       model.ExcludeExtension,
+			want:       model.ExcludeNone,
 		},
 		{
-			name:       "include list excludes non-matching files",
+			name:       "review include list does not exclude non-matching files",
 			fileFilter: &rules.FileFilter{Include: []string{"docs/**"}},
 			change:     model.Diff{NewPath: "src/main.go"},
-			want:       model.ExcludeUserRule,
+			want:       model.ExcludeNone,
 		},
 		{
 			name:   "unsupported extension",
@@ -59,6 +59,55 @@ func TestExcludeReasonPreservesNativeOrdering(t *testing.T) {
 			filter := Filter{FileFilter: test.fileFilter}
 			if got := filter.ExcludeReason(test.change); got != test.want {
 				t.Fatalf("ExcludeReason() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestExcludeScanReasonPreservesNativeOrdering(t *testing.T) {
+	tests := []struct {
+		name       string
+		fileFilter *rules.FileFilter
+		path       string
+		isBinary   bool
+		want       model.ExcludeReason
+	}{
+		{
+			name:     "binary takes precedence",
+			path:     "main.go",
+			isBinary: true,
+			want:     model.ExcludeBinary,
+		},
+		{
+			name:       "user exclude",
+			fileFilter: &rules.FileFilter{Exclude: []string{"generated/**"}},
+			path:       "generated/main.go",
+			want:       model.ExcludeUserRule,
+		},
+		{
+			name:       "scan extension check stays before include match",
+			fileFilter: &rules.FileFilter{Include: []string{"docs/**"}},
+			path:       "docs/notes.unsupported",
+			want:       model.ExcludeExtension,
+		},
+		{
+			name:       "scan include list does not exclude non-matching files",
+			fileFilter: &rules.FileFilter{Include: []string{"docs/**"}},
+			path:       "src/main.go",
+			want:       model.ExcludeNone,
+		},
+		{
+			name: "default excluded path",
+			path: "internal/main_test.go",
+			want: model.ExcludeDefaultPath,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			filter := Filter{FileFilter: test.fileFilter}
+			if got := filter.ExcludeScanReason(test.path, test.isBinary); got != test.want {
+				t.Fatalf("ExcludeScanReason() = %q, want %q", got, test.want)
 			}
 		})
 	}

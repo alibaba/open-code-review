@@ -8,8 +8,5 @@ import (
 
 // ExcludeReason applies the native full-scan reviewability order.
 func ExcludeReason(item model.ScanItem, fileFilter *rules.FileFilter) model.ExcludeReason {
-	return reviewfilter.Filter{FileFilter: fileFilter}.ExcludeReason(model.Diff{
-		NewPath:  item.Path,
-		IsBinary: item.IsBinary,
-	})
+	return reviewfilter.Filter{FileFilter: fileFilter}.ExcludeScanReason(item.Path, item.IsBinary)
 }

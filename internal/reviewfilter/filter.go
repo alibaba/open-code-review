@@ -25,15 +25,34 @@ func (f Filter) ExcludeReason(change model.Diff) model.ExcludeReason {
 	if f.FileFilter != nil && f.FileFilter.IsUserExcluded(path) {
 		return model.ExcludeUserRule
 	}
-	if f.FileFilter != nil && f.FileFilter.HasInclude() {
-		if !f.FileFilter.IsUserIncluded(path) {
-			return model.ExcludeUserRule
-		}
+	if f.FileFilter != nil && f.FileFilter.HasInclude() && f.FileFilter.IsUserIncluded(path) {
+		return model.ExcludeNone
 	}
 
 	extension := extensionFromPath(path)
 	if extension != "" && !allowedext.IsAllowedExt(extension) {
 		return model.ExcludeExtension
+	}
+	if allowedext.IsExcludedPath(path) {
+		return model.ExcludeDefaultPath
+	}
+	return model.ExcludeNone
+}
+
+// ExcludeScanReason preserves the native full-scan filter ordering.
+func (f Filter) ExcludeScanReason(path string, isBinary bool) model.ExcludeReason {
+	if isBinary {
+		return model.ExcludeBinary
+	}
+	if f.FileFilter != nil && f.FileFilter.IsUserExcluded(path) {
+		return model.ExcludeUserRule
+	}
+	extension := extensionFromPath(path)
+	if extension != "" && !allowedext.IsAllowedExt(extension) {
+		return model.ExcludeExtension
+	}
+	if f.FileFilter != nil && f.FileFilter.HasInclude() && f.FileFilter.IsUserIncluded(path) {
+		return model.ExcludeNone
 	}
 	if allowedext.IsExcludedPath(path) {
 		return model.ExcludeDefaultPath
