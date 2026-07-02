@@ -169,16 +169,11 @@ var registry = []Provider{
 		},
 	},
 	{
-		// GLM Coding Plan (智谱编程套餐). Uses the dedicated coding endpoint so
-		// requests are billed against the subscription quota instead of the
-		// pay-as-you-go wallet. The same API key authenticates against both the
-		// generic (paas/v4) and coding (coding/paas/v4) endpoints, so Z_AI_API_KEY
-		// is reused; routing to the coding endpoint is what activates the plan.
 		Name:        "z-ai-coding",
 		DisplayName: "Z.AI Coding Plan API",
 		Protocol:    "openai",
 		BaseURL:     "https://open.bigmodel.cn/api/coding/paas/v4",
-		EnvVar:      "Z_AI_API_KEY",
+		EnvVar:      "Z_AI_CODING_API_KEY",
 		Models: []string{
 			"glm-5.2",
 			"glm-5.1",

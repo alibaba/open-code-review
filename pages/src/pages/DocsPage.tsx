@@ -284,21 +284,6 @@ const DocsPage: React.FC = () => {
                 onCopy={() => handleCopy('ocr llm test')}
               />
               <p style={{ ...desc, marginTop: 12 }}>{t('docs.configVerifyDesc')}</p>
-
-              {/* Provider-specific tip: Z.AI GLM Coding Plan */}
-              <div style={{ marginTop: 24, background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: 16, border: '1px solid rgba(255,255,255,0.16)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <IconBox icon={docCheckCircleIcon} />
-                  <span style={{ fontSize: 14, fontWeight: 500, color: '#FFFFFF' }}>{t('docs.configTipZaiTitle')}</span>
-                </div>
-                <p style={{ ...desc, marginBottom: 12 }}>{t('docs.configTipZaiDesc')}</p>
-                <p style={{ ...desc, fontWeight: 500, color: 'rgba(255,255,255,0.7)' }}>{t('docs.configTipZaiLabel')}</p>
-                <CodeBlock
-                  code="ocr config set providers.z-ai.url https://open.bigmodel.cn/api/coding/paas/v4"
-                  onCopy={() => handleCopy('ocr config set providers.z-ai.url https://open.bigmodel.cn/api/coding/paas/v4')}
-                />
-                <p style={{ ...desc, marginTop: 12, marginBottom: 0 }}>{t('docs.configTipZaiNote')}</p>
-              </div>
             </section>
 
             {/* ─── ocr review ─── */}
