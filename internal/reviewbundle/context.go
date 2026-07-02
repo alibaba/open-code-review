@@ -178,6 +178,12 @@ func (service *ContextService) Search(
 		patternArguments = append(patternArguments, pattern)
 	}
 	if service.bundle.Target.Mode == TargetScan {
+		if usePerlRegexp {
+			return ContextResult{}, &ProtocolError{
+				Code:    "unsupported_search_regex",
+				Message: "--perl-regexp is not supported for scan bundle context search",
+			}
+		}
 		result, err := service.searchScanFiles(query, caseSensitive, usePerlRegexp, patterns)
 		if err != nil {
 			return ContextResult{}, err
@@ -370,6 +376,9 @@ func scanPatternMatches(path string, patterns []string) bool {
 	}
 	for _, pattern := range patterns {
 		if matched, _ := filepath.Match(pattern, path); matched {
+			return true
+		}
+		if strings.HasPrefix(path, strings.TrimSuffix(pattern, "/")+"/") {
 			return true
 		}
 		// ponytail: minimal git-pathspec compatibility; expand if scan search needs full pathspec semantics.

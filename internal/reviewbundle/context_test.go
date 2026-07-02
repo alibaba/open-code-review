@@ -3,6 +3,8 @@ package reviewbundle
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -126,5 +128,67 @@ func TestScanContextStaysInsideBundle(t *testing.T) {
 	searched, err := service.Search(context.Background(), "OutsideBundle", true, false, nil)
 	if err != nil || strings.Contains(searched.Result, "other.go") || strings.Contains(searched.Result, "OutsideBundle") {
 		t.Fatalf("Search(outside scan bundle) = %+v, %v", searched, err)
+	}
+}
+
+func TestScanContextSearchRejectsPerlRegexp(t *testing.T) {
+	repository := t.TempDir()
+	content := "package sample\n\nfunc InBundle() {}\n"
+	if err := os.WriteFile(filepath.Join(repository, "only.go"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bundle := &Bundle{
+		SchemaVersion: BundleSchemaVersion,
+		BundleID:      "sha256:scan",
+		Target:        Target{Mode: TargetScan},
+		Files: []File{{
+			Path:          "only.go",
+			Reviewable:    true,
+			Content:       content,
+			ContentSHA256: hashFields([]byte(content)),
+		}},
+		Contract: DefaultContract(),
+	}
+	service := NewContextService(repository, bundle, gitcmd.New(2))
+
+	_, err := service.Search(context.Background(), `func (?=InBundle)`, true, true, nil)
+	var protocolError *ProtocolError
+	if !errors.As(err, &protocolError) || protocolError.Code != "unsupported_search_regex" {
+		t.Fatalf("Search(perl regexp in scan bundle) error = %v, want unsupported_search_regex", err)
+	}
+}
+
+func TestScanContextSearchMatchesDirectoryPattern(t *testing.T) {
+	repository := t.TempDir()
+	content := "package reviewbundle\n\nfunc scanSearchMatcher() {}\n"
+	if err := os.MkdirAll(filepath.Join(repository, "internal", "reviewbundle"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "internal", "reviewbundle", "context.go"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bundle := &Bundle{
+		SchemaVersion: BundleSchemaVersion,
+		BundleID:      "sha256:scan",
+		Target:        Target{Mode: TargetScan},
+		Files: []File{{
+			Path:          "internal/reviewbundle/context.go",
+			Reviewable:    true,
+			Content:       content,
+			ContentSHA256: hashFields([]byte(content)),
+		}},
+		Contract: DefaultContract(),
+	}
+	service := NewContextService(repository, bundle, gitcmd.New(2))
+
+	searched, err := service.Search(
+		context.Background(),
+		"scanSearchMatcher",
+		true,
+		false,
+		[]string{"internal/reviewbundle"},
+	)
+	if err != nil || !strings.Contains(searched.Result, "internal/reviewbundle/context.go") {
+		t.Fatalf("Search(directory pattern in scan bundle) = %+v, %v", searched, err)
 	}
 }
