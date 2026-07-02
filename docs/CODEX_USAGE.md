@@ -75,8 +75,8 @@ ocr codex prepare --scan --path internal --format json
 如果你手上已经有 bundle 和评论结果，可以继续做校验和报告：
 
 ```bash
-ocr codex validate-comments --bundle /tmp/bundle.json --comments /tmp/comments.json
-ocr codex report --bundle /tmp/bundle.json --comments /tmp/comments.json --format markdown
+ocr codex validate-comments --bundle /tmp/bundle.json --comments /tmp/comments.json --output /tmp/validation.json
+ocr codex report --bundle /tmp/bundle.json --comments /tmp/comments.json --validation /tmp/validation.json --format markdown
 ```
 
 如果需要补证据，可以用 target-aware context：
@@ -94,8 +94,8 @@ ocr codex context search --bundle /tmp/bundle.json --query example
 
 ```bash
 ocr codex prepare --session-id review-20260630 --format json
-ocr codex validate-comments --session-id review-20260630 --bundle /tmp/bundle.json --comments /tmp/comments.json
-ocr codex report --session-id review-20260630 --bundle /tmp/bundle.json --comments /tmp/comments.json --format markdown
+ocr codex validate-comments --session-id review-20260630 --bundle /tmp/bundle.json --comments /tmp/comments.json --output /tmp/validation.json
+ocr codex report --session-id review-20260630 --bundle /tmp/bundle.json --comments /tmp/comments.json --validation /tmp/validation.json --format markdown
 ```
 
 这只会在你显式指定时写入会话记录，不会默认污染工作区。
