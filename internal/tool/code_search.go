@@ -34,6 +34,9 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 	var patterns []string
 	for _, item := range filePatternsIface {
 		if s, ok := item.(string); ok && s != "" {
+			if strings.Contains(s, "..") {
+				return "Error: file_patterns must not contain ..", nil
+			}
 			patterns = append(patterns, s)
 		}
 	}
