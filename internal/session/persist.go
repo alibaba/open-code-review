@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/open-code-review/open-code-review/internal/model"
 )
 
 var sessionSubDir = "sessions"
@@ -19,31 +21,33 @@ var sessionSubDir = "sessions"
 // $HOME/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl.
 // It is safe for concurrent use by multiple goroutines.
 type jsonlWriter struct {
-	mu         sync.Mutex
-	sessionID  string
-	repoDir    string
-	gitBranch  string
-	model      string
-	reviewMode string
-	diffFrom   string
-	diffTo     string
-	diffCommit string
-	file       *os.File
-	writer     *bufio.Writer
-	lastUUID   string // tracks chain of records via parentUuid
+	mu          sync.Mutex
+	sessionID   string
+	repoDir     string
+	gitBranch   string
+	model       string
+	reviewMode  string
+	diffFrom    string
+	diffTo      string
+	diffCommit  string
+	resumedFrom string
+	file        *os.File
+	writer      *bufio.Writer
+	lastUUID    string // tracks chain of records via parentUuid
 }
 
 // newJSONLWriter creates and opens a new JSONL writer for the given session.
 func newJSONLWriter(sessionID, repoDir, gitBranch, model string, opts SessionOptions) (*jsonlWriter, error) {
 	jw := &jsonlWriter{
-		sessionID:  sessionID,
-		repoDir:    repoDir,
-		gitBranch:  gitBranch,
-		model:      model,
-		reviewMode: opts.ReviewMode,
-		diffFrom:   opts.DiffFrom,
-		diffTo:     opts.DiffTo,
-		diffCommit: opts.DiffCommit,
+		sessionID:   sessionID,
+		repoDir:     repoDir,
+		gitBranch:   gitBranch,
+		model:       model,
+		reviewMode:  opts.ReviewMode,
+		diffFrom:    opts.DiffFrom,
+		diffTo:      opts.DiffTo,
+		diffCommit:  opts.DiffCommit,
+		resumedFrom: opts.ResumedFrom,
 	}
 	if err := jw.open(); err != nil {
 		return nil, err
@@ -148,10 +152,62 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	if jw.diffCommit != "" {
 		rec["diffCommit"] = jw.diffCommit
 	}
+	if jw.resumedFrom != "" {
+		rec["resumedFrom"] = jw.resumedFrom
+	}
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
 	jw.writeRecordLocked(rec)
+	jw.lastUUID = uuid
+	return uuid
+}
+
+// WriteReviewItemDone writes a file-level resume checkpoint for a completed diff.
+func (jw *jsonlWriter) WriteReviewItemDone(filePath, oldPath, newPath, fingerprint string, comments []model.LlmComment) string {
+	return jw.writeReviewItemRecord("review_item_done", filePath, oldPath, newPath, fingerprint, "", "", comments)
+}
+
+// WriteReviewItemReused writes a checkpoint reused from a previous session.
+func (jw *jsonlWriter) WriteReviewItemReused(filePath, oldPath, newPath, fingerprint, sourceSessionID string, comments []model.LlmComment) string {
+	return jw.writeReviewItemRecord("review_item_reused", filePath, oldPath, newPath, fingerprint, sourceSessionID, "", comments)
+}
+
+// WriteReviewItemFailed writes a file-level checkpoint for a failed diff.
+func (jw *jsonlWriter) WriteReviewItemFailed(filePath, oldPath, newPath, fingerprint, errorMsg string) string {
+	return jw.writeReviewItemRecord("review_item_failed", filePath, oldPath, newPath, fingerprint, "", errorMsg, nil)
+}
+
+func (jw *jsonlWriter) writeReviewItemRecord(recordType, filePath, oldPath, newPath, fingerprint, sourceSessionID, errorMsg string, comments []model.LlmComment) string {
+	uuid := generateUUID()
+
+	jw.mu.Lock()
+	defer jw.mu.Unlock()
+	rec := map[string]any{
+		"uuid":        uuid,
+		"parentUuid":  jw.lastUUID,
+		"type":        recordType,
+		"sessionId":   jw.sessionID,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		"filePath":    filePath,
+		"oldPath":     oldPath,
+		"newPath":     newPath,
+		"fingerprint": fingerprint,
+		"model":       jw.model,
+	}
+	if len(comments) > 0 {
+		rec["comments"] = comments
+	}
+	if sourceSessionID != "" {
+		rec["sourceSessionId"] = sourceSessionID
+	}
+	if errorMsg != "" {
+		rec["error"] = errorMsg
+	}
+	jw.writeRecordLocked(rec)
+	if jw.writer != nil {
+		jw.writer.Flush()
+	}
 	jw.lastUUID = uuid
 	return uuid
 }

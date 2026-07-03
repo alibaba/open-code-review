@@ -10,6 +10,7 @@ import (
 	"github.com/open-code-review/open-code-review/internal/config/toolsconfig"
 	"github.com/open-code-review/open-code-review/internal/llm"
 	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/open-code-review/open-code-review/internal/session"
 	"github.com/open-code-review/open-code-review/internal/tool"
 )
 
@@ -404,6 +405,62 @@ func TestFilterLargeDiffs_ZeroMaxTokens(t *testing.T) {
 	kept := a.filterLargeDiffs(diffs)
 	if len(kept) != 1 {
 		t.Errorf("expected all kept when MaxTokens=0, got %d", len(kept))
+	}
+}
+
+func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
+	diffs := []model.Diff{
+		{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
+		{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
+	}
+	fp := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	resume := &session.ResumeState{
+		SessionID:  "old-session",
+		Model:      "anthropic-model",
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Items: map[string]session.ResumeItem{
+			fp: {
+				FilePath:    "a.go",
+				OldPath:     "a.go",
+				NewPath:     "a.go",
+				Fingerprint: fp,
+				Comments: []model.LlmComment{{
+					Path:    "a.go",
+					Content: "cached comment",
+				}},
+			},
+		},
+	}
+	collector := tool.NewCommentCollector()
+	sess := session.New(t.TempDir(), "feature", "openai-model", session.SessionOptions{
+		ReviewMode:  session.ReviewModeRange,
+		DiffFrom:    "main",
+		DiffTo:      "feature",
+		ResumedFrom: "old-session",
+	})
+	defer sess.Finalize()
+	a := New(Args{
+		From:             "main",
+		To:               "feature",
+		Model:            "openai-model",
+		CommentCollector: collector,
+		Resume:           resume,
+		Session:          sess,
+	})
+
+	toDispatch := a.applyResume(diffs)
+	if len(toDispatch) != 1 || toDispatch[0].NewPath != "b.go" {
+		t.Fatalf("toDispatch = %+v, want only b.go", toDispatch)
+	}
+	comments := collector.Comments()
+	if len(comments) != 1 || comments[0].Content != "cached comment" {
+		t.Fatalf("comments = %+v", comments)
+	}
+	info := a.ResumeInfo()
+	if info == nil || info.ReusedFiles != 1 || info.RerunFiles != 1 || info.PreviousModel != "anthropic-model" || info.CurrentModel != "openai-model" {
+		t.Fatalf("ResumeInfo = %+v", info)
 	}
 }
 

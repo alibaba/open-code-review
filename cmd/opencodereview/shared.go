@@ -253,6 +253,10 @@ type ResultProvider interface {
 	ToolCalls() map[string]int64
 }
 
+type resumeInfoProvider interface {
+	ResumeInfo() *agent.ResumeInfo
+}
+
 // emitRunResult is the post-LLM-run finalization shared by `ocr review` and
 // `ocr scan`: resolves comment line numbers, records telemetry, restores
 // stdout early for agent-text audiences so the summary is visible, prints
@@ -295,10 +299,14 @@ func emitRunResult(
 	}
 
 	if outputFormat == "json" {
+		var resumeInfo *agent.ResumeInfo
+		if p, ok := ag.(resumeInfoProvider); ok {
+			resumeInfo = p.ResumeInfo()
+		}
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID)
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo)
 	}
 	outputTextWithWarnings(comments, ag.Warnings())
 	if summary := ag.ProjectSummary(); summary != "" {

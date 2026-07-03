@@ -101,6 +101,7 @@ type reviewOptions struct {
 	from           string
 	to             string
 	commit         string
+	resume         string
 	excludes       string // --exclude: comma-separated gitignore-style patterns
 	outputFormat   string
 	audience       string // --audience: "human" (default) or "agent"
@@ -125,6 +126,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.from, "from", "", "source ref to start diff from (e.g., 'main')")
 	a.StringVar(&opts.to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
 	a.StringVarP(&opts.commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
+	a.StringVar(&opts.resume, "resume", "", "resume from a previous review session id")
 	a.StringVar(&opts.excludes, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 	a.StringVarP(&opts.outputFormat, "format", "f", "text", "output format: text or json")
 	a.IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file reviews")
@@ -203,6 +205,9 @@ Examples:
   ocr review --commit abc123
   ocr review -c abc123
 
+  # Resume a previous range review
+  ocr review --from master --to dev-ref --resume <session-id>
+
   # Output JSON format
   ocr review --format json
   ocr review -f json
@@ -226,6 +231,7 @@ Flags:
   --model string          override LLM model for this review (e.g., claude-opus-4-6)
   -p, --preview           preview which files will be reviewed without running the LLM
   --repo string           root directory of the git repository (default: current dir)
+  --resume string         resume from a previous review session id
   --rule string           path to JSON file with system review rules
   --timeout int           concurrent task timeout in minutes (default 10)
   --to string             target ref to end diff at (e.g., 'feature-branch')

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-code-review/open-code-review/internal/llm"
+	"github.com/open-code-review/open-code-review/internal/model"
 )
 
 // TaskType identifies the kind of LLM request within a file subtask.
@@ -42,6 +43,7 @@ type SessionHistory struct {
 	DiffFrom     string
 	DiffTo       string
 	DiffCommit   string
+	ResumedFrom  string
 	StartTime    time.Time
 	EndTime      time.Time
 	persist      *jsonlWriter
@@ -96,10 +98,11 @@ type ToolResultRecord struct {
 
 // SessionOptions holds optional metadata for a new session.
 type SessionOptions struct {
-	ReviewMode string
-	DiffFrom   string
-	DiffTo     string
-	DiffCommit string
+	ReviewMode  string
+	DiffFrom    string
+	DiffTo      string
+	DiffCommit  string
+	ResumedFrom string
 }
 
 // New creates a new SessionHistory with the given repo directory.
@@ -114,6 +117,7 @@ func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory 
 		DiffFrom:     opts.DiffFrom,
 		DiffTo:       opts.DiffTo,
 		DiffCommit:   opts.DiffCommit,
+		ResumedFrom:  opts.ResumedFrom,
 		StartTime:    time.Now(),
 		FileSessions: make(map[string]*FileSession),
 	}
@@ -145,6 +149,54 @@ func (sh *SessionHistory) GetOrCreateFileSession(filePath string) *FileSession {
 		sh.FileSessions[filePath] = fs
 	}
 	return fs
+}
+
+// RecordReviewItemDone persists the file-level checkpoint used by resume.
+func (sh *SessionHistory) RecordReviewItemDone(filePath, oldPath, newPath, fingerprint string, comments []model.LlmComment) {
+	if sh == nil {
+		return
+	}
+	if filePath == "" {
+		filePath = newPath
+	}
+	if filePath != "" {
+		sh.GetOrCreateFileSession(filePath)
+	}
+	if p := sh.persist; p != nil {
+		p.WriteReviewItemDone(filePath, oldPath, newPath, fingerprint, comments)
+	}
+}
+
+// RecordReviewItemReused records that this run reused a checkpoint from another session.
+func (sh *SessionHistory) RecordReviewItemReused(filePath, oldPath, newPath, fingerprint, sourceSessionID string, comments []model.LlmComment) {
+	if sh == nil {
+		return
+	}
+	if filePath == "" {
+		filePath = newPath
+	}
+	if filePath != "" {
+		sh.GetOrCreateFileSession(filePath)
+	}
+	if p := sh.persist; p != nil {
+		p.WriteReviewItemReused(filePath, oldPath, newPath, fingerprint, sourceSessionID, comments)
+	}
+}
+
+// RecordReviewItemFailed persists an incomplete file-level checkpoint.
+func (sh *SessionHistory) RecordReviewItemFailed(filePath, oldPath, newPath, fingerprint, errorMsg string) {
+	if sh == nil {
+		return
+	}
+	if filePath == "" {
+		filePath = newPath
+	}
+	if filePath != "" {
+		sh.GetOrCreateFileSession(filePath)
+	}
+	if p := sh.persist; p != nil {
+		p.WriteReviewItemFailed(filePath, oldPath, newPath, fingerprint, errorMsg)
+	}
 }
 
 // Finalize marks the session as complete, sets the end time, and persists

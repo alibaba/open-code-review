@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"runtime/debug"
@@ -113,6 +114,9 @@ type Args struct {
 	// Session is an optional session history instance for collecting conversation records.
 	// When nil, a default one is created automatically with git branch auto-detected from repoDir.
 	Session *session.SessionHistory
+
+	// Resume is an optional read-only checkpoint index from a previous review session.
+	Resume *session.ResumeState
 }
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
@@ -127,6 +131,16 @@ type Agent struct {
 	session         *session.SessionHistory
 	subtaskFailed   int64 // count of failed subtasks, accessed atomically
 	runner          *llmloop.Runner
+	resumeInfo      *ResumeInfo
+}
+
+// ResumeInfo summarizes file-level reuse for a resumed review.
+type ResumeInfo struct {
+	ResumedFrom   string `json:"resumed_from"`
+	ReusedFiles   int64  `json:"reused_files"`
+	RerunFiles    int64  `json:"rerun_files"`
+	PreviousModel string `json:"previous_model,omitempty"`
+	CurrentModel  string `json:"current_model,omitempty"`
 }
 
 // New creates a new Agent from the given arguments.
@@ -144,10 +158,11 @@ func New(args Args) *Agent {
 			mode = reviewModeString(args.From, args.To, args.Commit)
 		}
 		args.Session = session.New(args.RepoDir, gitBranch, args.Model, session.SessionOptions{
-			ReviewMode: mode,
-			DiffFrom:   args.From,
-			DiffTo:     args.To,
-			DiffCommit: args.Commit,
+			ReviewMode:  mode,
+			DiffFrom:    args.From,
+			DiffTo:      args.To,
+			DiffCommit:  args.Commit,
+			ResumedFrom: resumedFromSession(args.Resume),
 		})
 	}
 	a := &Agent{
@@ -223,6 +238,15 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 // Session returns the session history associated with this Agent.
 func (a *Agent) Session() *session.SessionHistory {
 	return a.session
+}
+
+// ResumeInfo returns resume metadata for output. Nil means this was not a resume run.
+func (a *Agent) ResumeInfo() *ResumeInfo {
+	if a.resumeInfo == nil {
+		return nil
+	}
+	info := *a.resumeInfo
+	return &info
 }
 
 // FilesReviewed returns the number of changed files included in this review.
@@ -327,6 +351,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	if len(a.diffs) == 0 {
 		return nil, fmt.Errorf("all diffs filtered out by token size")
 	}
+	toDispatch := a.applyResume(a.diffs)
 
 	var wg sync.WaitGroup
 
@@ -339,8 +364,8 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
 
 	var dispatched int64
-	for i := range a.diffs {
-		if a.diffs[i].IsDeleted {
+	for i := range toDispatch {
+		if toDispatch[i].IsDeleted {
 			continue
 		}
 		dispatched++
@@ -348,6 +373,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		sem <- struct{}{} // acquire semaphore
 
 		go func(d model.Diff) {
+			fingerprint := reviewItemFingerprint(a.reviewMode(), d)
 			defer wg.Done()
 			defer func() { <-sem }() // release
 			// A panic while reviewing one file must be isolated exactly like an
@@ -359,6 +385,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 			defer func() {
 				if r := recover(); r != nil {
 					atomic.AddInt64(&a.subtaskFailed, 1)
+					a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, fmt.Sprintf("panic: %v", r))
 					fmt.Fprintf(stdout.Writer(), "[ocr] Subtask panic for %s: %v\n%s\n", d.NewPath, r, debug.Stack())
 					telemetry.ErrorEvent(ctx, "subtask.panic", fmt.Errorf("panic: %v", r),
 						telemetry.AnyToAttr("file.path", d.NewPath))
@@ -377,18 +404,22 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 			if err := a.executeSubtask(fileCtx, d); err != nil {
 				atomic.AddInt64(&a.subtaskFailed, 1)
+				a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, err.Error())
 				fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for %s: %v\n", d.NewPath, err)
 				telemetry.ErrorEvent(fileCtx, "subtask.error", err,
 					telemetry.AnyToAttr("file.path", d.NewPath))
 				a.recordWarning("subtask_error", d.NewPath, err.Error())
+				return
 			}
-		}(a.diffs[i])
+			comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
+			a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+		}(toDispatch[i])
 	}
 
 	wg.Wait()
 
 	if dispatched == 0 {
-		return []model.LlmComment{}, nil
+		return a.args.CommentCollector.Comments(), nil
 	}
 
 	// All subtasks finished — collect comments from the global collector once.
@@ -402,6 +433,74 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	return a.args.CommentCollector.Comments(), nil
+}
+
+func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
+	resume := a.args.Resume
+	if resume == nil {
+		return diffs
+	}
+
+	mode := a.reviewMode()
+	toDispatch := make([]model.Diff, 0, len(diffs))
+	var reused int64
+	for _, d := range diffs {
+		if d.IsDeleted {
+			toDispatch = append(toDispatch, d)
+			continue
+		}
+		fingerprint := reviewItemFingerprint(mode, d)
+		item, ok := resume.Item(fingerprint)
+		if !ok {
+			toDispatch = append(toDispatch, d)
+			continue
+		}
+		for _, cm := range item.Comments {
+			a.args.CommentCollector.Add(cm)
+		}
+		a.session.RecordReviewItemReused(effectivePath(d), d.OldPath, d.NewPath, fingerprint, resume.SessionID, item.Comments)
+		reused++
+	}
+
+	rerun := countDispatchable(toDispatch)
+	a.resumeInfo = &ResumeInfo{
+		ResumedFrom:   resume.SessionID,
+		ReusedFiles:   reused,
+		RerunFiles:    rerun,
+		PreviousModel: resume.Model,
+		CurrentModel:  a.args.Model,
+	}
+	fmt.Fprintf(stdout.Writer(), "[ocr] Resume %s: reusing %d file(s), reviewing %d file(s)\n", resume.SessionID, reused, rerun)
+	return toDispatch
+}
+
+func countDispatchable(diffs []model.Diff) int64 {
+	var n int64
+	for _, d := range diffs {
+		if !d.IsDeleted {
+			n++
+		}
+	}
+	return n
+}
+
+func (a *Agent) reviewMode() string {
+	if a.args.ReviewMode != "" {
+		return a.args.ReviewMode
+	}
+	return reviewModeString(a.args.From, a.args.To, a.args.Commit)
+}
+
+func reviewItemFingerprint(mode string, d model.Diff) string {
+	sum := sha256.Sum256([]byte(mode + "\x00" + d.OldPath + "\x00" + d.NewPath + "\x00" + d.Diff))
+	return fmt.Sprintf("%x", sum)
+}
+
+func resumedFromSession(resume *session.ResumeState) string {
+	if resume == nil {
+		return ""
+	}
+	return resume.SessionID
 }
 
 // executeSubtask performs the Plan Phase + Main Loop for a single file.
