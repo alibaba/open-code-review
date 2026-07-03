@@ -67,57 +67,6 @@ agent の強みは、最も重要な部分に集約されます。
   （呼び出し頻度の分布、単一ツールの繰り返し率、各ツールが呼び出しチェーン全体に与える影響）。最終的に得られた
   専用の [6 ツール](../tools/) セットは、汎用 agent のツールキットよりも安定していて予測可能です。
 
-## パイプラインの連携
-
-```mermaid
-flowchart TD
-    Start["<b>ocr review --from main --to feature</b>"]
-    S1["<b>1. Resolve LLM endpoint</b><br/>config / env / shell rc"]
-    S2["<b>2. Load diffs from git</b><br/>workspace / commit / range"]
-    S3["<b>3. Filter files</b><br/>binary → user_exclude → user_include<br/>→ ext allowlist → default path"]
-    S4["<b>4. Drop diffs > 80% of MAX_TOKENS</b>"]
-    S5["<b>5. Dispatch per-file sub-agents</b> (concurrent)<br/><br/>For each file:<br/>&nbsp;&nbsp;a. Plan phase (if changed lines ≥ 50)<br/>&nbsp;&nbsp;b. Main loop: LLM → tool calls → … → task_done<br/>&nbsp;&nbsp;c. code_comment results collected (async via worker pool)<br/><br/>Memory compression triggers when context<br/>exceeds 60 % (async) or 80 % (sync) of MAX_TOKENS."]
-    S6["<b>6. Resolve line numbers</b><br/>from <code>existing_code</code> against diffs.<br/>Re-locate via LLM if needed."]
-    S7["<b>7. Emit text or JSON output</b><br/>(and persist session to disk)"]
-
-    Start --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
-```
-
-## プロジェクト構成
-
-```
-open-code-review/
-├── cmd/opencodereview/   # CLI エントリ：ディスパッチ、引数、コマンド
-├── internal/
-│   ├── agent/            # ファイルごとのサブ agent ループ + メモリ圧縮
-│   ├── config/
-│   │   ├── allowlist/    # デフォルトのファイル拡張子ホワイトリストと除外項目
-│   │   ├── rules/        # 階層型ルールパーサー、システムルールドキュメント
-│   │   ├── template/     # plan / main / memory_compression prompt
-│   │   ├── testconnection/ # 組み込みの `ocr llm test` タスク
-│   │   └── toolsconfig/  # モデルに送信するツール定義
-│   ├── diff/             # Git diff 解析、hunk 計算、再配置
-│   ├── gitcmd/           # Git サブプロセスランナー
-│   ├── llm/              # Anthropic + OpenAI プロトコル、リトライ、BPE token
-│   ├── model/            # diff / コメント のデータ構造
-│   ├── pathutil/         # パスユーティリティ
-│   ├── release/          # Release notes 生成
-│   ├── session/          # レビューセッションごとの JSONL 永続化
-│   ├── stdout/           # `--audience agent` 下でミュート可能な stdout writer
-│   ├── suggestdiff/      # "Apply suggestion" diff の構築
-│   ├── telemetry/        # OpenTelemetry span、metrics、exporter
-│   ├── tool/             # 6 つの組み込みツール + コメントコレクター
-│   └── viewer/           # `ocr viewer`——過去のセッション用のローカル Web UI
-├── pages/                # React ベースのマーケティング用ランディングページ（独立）
-├── plugins/              # Claude Code プラグインマニフェスト + コマンド
-├── extensions/           # エディタ拡張（VS Code）
-├── examples/             # CI レシピ（GitHub Actions、GitLab CI）
-├── skills/               # 汎用 agent Skill マニフェスト
-├── scripts/              # NPM インストール/更新ヘルパー、リリーススクリプト
-├── npm/                  # 各プラットフォーム向け optional dependency パッケージ
-└── bin/                  # NPM wrapper、シェルからバイナリを呼び出す
-```
-
 ## 関連項目
 
 - [クイックスタート](../quickstart/)——インストールして初回のレビューを完了します。

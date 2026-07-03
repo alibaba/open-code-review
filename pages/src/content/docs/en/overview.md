@@ -80,57 +80,6 @@ The agent's strengths are concentrated where they matter most:
   result is a purpose-built set of [six tools](../tools/) that is more stable
   and predictable than a generic agent toolkit.
 
-## How the pipeline fits together
-
-```mermaid
-flowchart TD
-    Start["<b>ocr review --from main --to feature</b>"]
-    S1["<b>1. Resolve LLM endpoint</b><br/>config / env / shell rc"]
-    S2["<b>2. Load diffs from git</b><br/>workspace / commit / range"]
-    S3["<b>3. Filter files</b><br/>binary → user_exclude → user_include<br/>→ ext allowlist → default path"]
-    S4["<b>4. Drop diffs > 80% of MAX_TOKENS</b>"]
-    S5["<b>5. Dispatch per-file sub-agents</b> (concurrent)<br/><br/>For each file:<br/>&nbsp;&nbsp;a. Plan phase (if changed lines ≥ 50)<br/>&nbsp;&nbsp;b. Main loop: LLM → tool calls → … → task_done<br/>&nbsp;&nbsp;c. code_comment results collected (async via worker pool)<br/><br/>Memory compression triggers when context<br/>exceeds 60 % (async) or 80 % (sync) of MAX_TOKENS."]
-    S6["<b>6. Resolve line numbers</b><br/>from <code>existing_code</code> against diffs.<br/>Re-locate via LLM if needed."]
-    S7["<b>7. Emit text or JSON output</b><br/>(and persist session to disk)"]
-
-    Start --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
-```
-
-## Project layout
-
-```
-open-code-review/
-├── cmd/opencodereview/   # CLI entry point: dispatch, flags, commands
-├── internal/
-│   ├── agent/            # Per-file sub-agent loop + memory compression
-│   ├── config/
-│   │   ├── allowlist/    # Default file-extension allowlist & exclusions
-│   │   ├── rules/        # Layered rule resolver, system rule docs
-│   │   ├── template/     # Plan / main / memory_compression prompts
-│   │   ├── testconnection/ # Built-in `ocr llm test` task
-│   │   └── toolsconfig/  # Tool definitions sent to the model
-│   ├── diff/             # Git diff parsing, hunk math, relocation
-│   ├── gitcmd/           # Git subprocess runner
-│   ├── llm/              # Anthropic + OpenAI protocols, retries, BPE tokens
-│   ├── model/            # Diff / Comment data structures
-│   ├── pathutil/         # Path utilities
-│   ├── release/          # Release-notes generation
-│   ├── session/          # JSONL persistence of every review session
-│   ├── stdout/           # Quiet-able stdout writer for `--audience agent`
-│   ├── suggestdiff/      # Build "Apply suggestion" diffs
-│   ├── telemetry/        # OpenTelemetry spans, metrics, exporters
-│   ├── tool/             # The six built-in tools + comment collector
-│   └── viewer/           # `ocr viewer` — local web UI for past sessions
-├── pages/                # React-based marketing landing page (separate)
-├── plugins/              # Claude Code plugin manifest + commands
-├── extensions/           # Editor extensions (VS Code)
-├── examples/             # CI recipes (GitHub Actions, GitLab CI)
-├── skills/               # Generic agent Skill manifest
-├── scripts/              # NPM install/update helpers, publish scripts
-├── npm/                  # Per-platform optional dependency packages
-└── bin/                  # NPM wrapper that shells out to the binary
-```
-
 ## See Also
 
 - [QuickStart](../quickstart/) — install and run your first review.

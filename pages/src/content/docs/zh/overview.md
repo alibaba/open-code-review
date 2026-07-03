@@ -66,57 +66,6 @@ agent 的优势集中在最关键的地方：
   （调用频次分布、单工具重复率、每个工具对整体调用链的影响）。最终得到一套
   专用 [六工具](../tools/) 集，比通用 agent 工具包更稳定、更可预测。
 
-## 流水线如何衔接
-
-```mermaid
-flowchart TD
-    Start["<b>ocr review --from main --to feature</b>"]
-    S1["<b>1. Resolve LLM endpoint</b><br/>config / env / shell rc"]
-    S2["<b>2. Load diffs from git</b><br/>workspace / commit / range"]
-    S3["<b>3. Filter files</b><br/>binary → user_exclude → user_include<br/>→ ext allowlist → default path"]
-    S4["<b>4. Drop diffs > 80% of MAX_TOKENS</b>"]
-    S5["<b>5. Dispatch per-file sub-agents</b> (concurrent)<br/><br/>For each file:<br/>&nbsp;&nbsp;a. Plan phase (if changed lines ≥ 50)<br/>&nbsp;&nbsp;b. Main loop: LLM → tool calls → … → task_done<br/>&nbsp;&nbsp;c. code_comment results collected (async via worker pool)<br/><br/>Memory compression triggers when context<br/>exceeds 60 % (async) or 80 % (sync) of MAX_TOKENS."]
-    S6["<b>6. Resolve line numbers</b><br/>from <code>existing_code</code> against diffs.<br/>Re-locate via LLM if needed."]
-    S7["<b>7. Emit text or JSON output</b><br/>(and persist session to disk)"]
-
-    Start --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
-```
-
-## 项目结构
-
-```
-open-code-review/
-├── cmd/opencodereview/   # CLI 入口：分发、参数、命令
-├── internal/
-│   ├── agent/            # 每文件子 agent 循环 + 记忆压缩
-│   ├── config/
-│   │   ├── allowlist/    # 默认文件扩展名白名单与排除项
-│   │   ├── rules/        # 分层规则解析器、系统规则文档
-│   │   ├── template/     # plan / main / memory_compression prompt
-│   │   ├── testconnection/ # 内置 `ocr llm test` 任务
-│   │   └── toolsconfig/  # 发送给模型的工具定义
-│   ├── diff/             # Git diff 解析、hunk 数学、重新定位
-│   ├── gitcmd/           # Git 子进程运行器
-│   ├── llm/              # Anthropic + OpenAI 协议、重试、BPE token
-│   ├── model/            # diff / 评论 数据结构
-│   ├── pathutil/         # 路径工具
-│   ├── release/          # Release notes 生成
-│   ├── session/          # 每次评审会话的 JSONL 持久化
-│   ├── stdout/           # `--audience agent` 下可静音的 stdout writer
-│   ├── suggestdiff/      # 构建 "Apply suggestion" diff
-│   ├── telemetry/        # OpenTelemetry span、metrics、exporter
-│   ├── tool/             # 六个内置工具 + 评论收集器
-│   └── viewer/           # `ocr viewer`——历史会话的本地 Web UI
-├── pages/                # 基于 React 的营销落地页（独立）
-├── plugins/              # Claude Code 插件清单 + 命令
-├── extensions/           # 编辑器扩展（VS Code）
-├── examples/             # CI 配方（GitHub Actions、GitLab CI）
-├── skills/               # 通用 agent Skill 清单
-├── scripts/              # NPM 安装/更新助手、发布脚本
-├── npm/                  # 各平台 optional dependency 包
-└── bin/                  # NPM wrapper，shell 调用二进制
-```
-
 ## 另见
 
 - [快速开始](../quickstart/)——安装并完成首次评审。
