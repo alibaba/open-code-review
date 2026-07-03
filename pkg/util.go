@@ -1,1 +1,3 @@
 package pkg
+
+func Util() {}
