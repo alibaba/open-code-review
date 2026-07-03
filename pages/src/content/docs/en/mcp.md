@@ -9,11 +9,6 @@ one or more external MCP servers, and the tools those servers expose
 become available to the review agent — right alongside the
 [built-in tools](../tools/) like `file_read` and `code_search`.
 
-This is the *client* side of MCP. OCR does **not** run as an MCP server
-that other agents call — see the note in
-[Integrations](../integrations/#what-about-mcp) for that direction. This
-page is about the opposite: giving OCR's own reviewer extra capabilities.
-
 ## When to use it
 
 Reach for an MCP server when the reviewer would benefit from context that
@@ -27,40 +22,11 @@ lives outside the diff:
   dependency checker as a tool the reviewer can invoke on demand.
 
 If all you need is a plain read of the repo, the built-in tools already
-cover it — MCP is for reaching *beyond* the checkout.
-
-## How it works
-
-- OCR connects to each configured server over the **stdio transport**: it
-  launches the server as a subprocess and speaks MCP over its
-  stdin/stdout.
-- The subprocess runs with its **working directory set to the repository
-  root**, and inherits OCR's environment plus any `env` you configure.
-- On startup OCR lists the server's tools and registers them into the same
-  tool registry the built-in tools use. Registered MCP tools are available
-  in **both the plan phase and the main task**.
-- Servers stay alive for the duration of the review and are shut down when
-  it finishes.
-
-If a server fails to start (or its `setup` command fails), OCR prints a
-warning and **continues the review without it** — a broken MCP server
-never blocks a review.
+cover it — MCP is for reaching beyond the checkout.
 
 ## Configuration
 
-MCP servers live under the `mcp_servers` key in your user config file
-(`~/.opencodereview/config.json`). Each entry is keyed by a name you
-choose and accepts these fields:
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `command` | string | ✓ | Executable that starts the MCP server (e.g. `npx`, `uvx`, an absolute path). |
-| `args` | string array | | Arguments passed to `command`. |
-| `env` | string array | | Extra environment variables in `KEY=VALUE` form. |
-| `tools` | string array | | Allowlist of tool names to register. Empty = register every tool the server offers. |
-| `setup` | string | | Shell command run once before the server starts (e.g. install deps). Runs in the repo root with a 5-minute timeout. |
-
-### With the CLI
+#### Adding an MCP server
 
 The `ocr config set` command writes these fields non-interactively. Array
 fields (`args`, `env`, `tools`) take a JSON array string:
@@ -72,15 +38,17 @@ ocr config set mcp_servers.docs.command npx
 # Arguments
 ocr config set mcp_servers.docs.args '["-y", "@acme/docs-mcp-server"]'
 
-# Environment variables (KEY=VALUE entries)
-ocr config set mcp_servers.docs.env '["DOCS_TOKEN=secret", "DOCS_REGION=eu"]'
-
 # Restrict which tools are exposed to the reviewer
 ocr config set mcp_servers.docs.tools '["search_docs", "get_page"]'
 
 # A setup command to run before the server starts
 ocr config set mcp_servers.docs.setup "npm install -g @acme/docs-mcp-server"
+
+# Environment variables (KEY=VALUE entries)
+ocr config set mcp_servers.docs.env '["DOCS_TOKEN=secret", "DOCS_REGION=eu"]'
 ```
+
+#### Removing an MCP server
 
 Remove a server with `unset`:
 
@@ -88,23 +56,15 @@ Remove a server with `unset`:
 ocr config unset mcp_servers.docs
 ```
 
-### By hand
+MCP servers live under the `mcp_servers` key in your user config file (`~/.opencodereview/config.json`).
 
-The same configuration as JSON:
-
-```json
-{
-  "mcp_servers": {
-    "docs": {
-      "command": "npx",
-      "args": ["-y", "@acme/docs-mcp-server"],
-      "env": ["DOCS_TOKEN=secret", "DOCS_REGION=eu"],
-      "tools": ["search_docs", "get_page"],
-      "setup": "npm install -g @acme/docs-mcp-server"
-    }
-  }
-}
-```
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `command` | string | ✓ | Executable that starts the MCP server (e.g. `npx`, `uvx`, an absolute path). |
+| `args` | string array | | Arguments passed to `command`. |
+| `tools` | string array | | Allowlist of tool names to register. Empty = register every tool the server offers. |
+| `setup` | string | | Shell command run once before the server starts (e.g. install deps). Runs in the repo root with a 5-minute timeout. |
+| `env` | string array | | Extra environment variables in `KEY=VALUE` form. |
 
 ## Filtering tools
 
