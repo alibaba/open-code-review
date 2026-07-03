@@ -223,6 +223,9 @@ func runScan(args []string) error {
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
+		if id := ag.SessionID(); id != "" {
+			fmt.Fprintf(os.Stderr, "[ocr] Session: %s\n", id)
+		}
 		return fmt.Errorf("scan failed: %w", err)
 	}
 

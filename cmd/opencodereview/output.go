@@ -248,6 +248,7 @@ type jsonOutput struct {
 	Warnings       []agent.AgentWarning `json:"warnings,omitempty"`
 	ProjectSummary string               `json:"project_summary,omitempty"`
 	Resume         *agent.ResumeInfo    `json:"resume,omitempty"`
+	SessionID      string               `json:"session_id,omitempty"`
 }
 
 func outputJSON(comments []model.LlmComment) error {
@@ -265,7 +266,7 @@ func outputJSON(comments []model.LlmComment) error {
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
-	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo) error {
+	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string) error {
 	out := jsonOutput{
 		Status:   "success",
 		TraceID:  traceID,
@@ -282,6 +283,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		},
 		ProjectSummary: projectSummary,
 		Resume:         resumeInfo,
+		SessionID:      sessionID,
 	}
 	var total int64
 	for _, v := range toolCalls {

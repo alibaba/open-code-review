@@ -131,6 +131,9 @@ func runReview(args []string) error {
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
+		if id := ag.SessionID(); id != "" {
+			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+		}
 		return fmt.Errorf("review failed: %w", err)
 	}
 
@@ -152,13 +155,13 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 	}
 	state, err := session.LoadResumeState(repoDir, opts.resume)
 	if err != nil {
-		return nil, fmt.Errorf("load resume session: %w", err)
+		return nil, fmt.Errorf("load resume session: %w (run 'ocr session list' to see available sessions)", err)
 	}
 	if err := state.ValidateOptions(current); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w (run 'ocr session list' to see available sessions)", err)
 	}
 	if state.CompletedCount() == 0 {
-		return nil, fmt.Errorf("resume session %q has no completed review items", opts.resume)
+		return nil, fmt.Errorf("resume session %q has no completed review items (run 'ocr session list' to see available sessions)", opts.resume)
 	}
 	return state, nil
 }

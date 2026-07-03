@@ -240,6 +240,14 @@ func (a *Agent) Session() *session.SessionHistory {
 	return a.session
 }
 
+// SessionID returns the current review's session id, or "" when no session has been created.
+func (a *Agent) SessionID() string {
+	if a == nil || a.session == nil {
+		return ""
+	}
+	return a.session.SessionID
+}
+
 // ResumeInfo returns resume metadata for output. Nil means this was not a resume run.
 func (a *Agent) ResumeInfo() *ResumeInfo {
 	if a.resumeInfo == nil {

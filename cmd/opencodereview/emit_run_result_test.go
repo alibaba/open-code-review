@@ -26,6 +26,7 @@ type mockResultProvider struct {
 	projectSummary   string
 	toolCalls        map[string]int64
 	resumeInfo       *agent.ResumeInfo
+	sessionID        string
 }
 
 func (m *mockResultProvider) Diffs() []model.Diff            { return m.diffs }
@@ -39,6 +40,7 @@ func (m *mockResultProvider) Warnings() []agent.AgentWarning { return m.warnings
 func (m *mockResultProvider) ProjectSummary() string         { return m.projectSummary }
 func (m *mockResultProvider) ToolCalls() map[string]int64    { return m.toolCalls }
 func (m *mockResultProvider) ResumeInfo() *agent.ResumeInfo  { return m.resumeInfo }
+func (m *mockResultProvider) SessionID() string              { return m.sessionID }
 
 func TestEmitRunResult_JSONNoFiles(t *testing.T) {
 	ag := &mockResultProvider{filesReviewed: 0}
@@ -262,5 +264,38 @@ func TestEmitRunResult_JSONNoFilesTraceID(t *testing.T) {
 	}
 	if out.TraceID != wantTraceID {
 		t.Errorf("trace_id = %q, want %q", out.TraceID, wantTraceID)
+	}
+}
+
+func TestEmitRunResult_TextIncludesSessionID(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 1, sessionID: "session-42"}
+	got := captureStdout(t, func() {
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	if !strings.Contains(got, "session-42") {
+		t.Errorf("expected session id in text output, got %q", got)
+	}
+	if !strings.Contains(got, "--resume session-42") {
+		t.Errorf("expected --resume hint in text output, got %q", got)
+	}
+}
+
+func TestEmitRunResult_JSONIncludesSessionID(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 1, sessionID: "session-99"}
+	got := captureStdout(t, func() {
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.SessionID != "session-99" {
+		t.Errorf("session_id = %q, want session-99", out.SessionID)
 	}
 }
