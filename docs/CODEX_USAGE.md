@@ -65,11 +65,25 @@ ocr agent prepare --from <base> --to <head> --format json
 # 指定提交
 ocr agent prepare --commit <sha> --format json
 
-# 大型变更分片
+# 预览范围（不写 LLM，不输出完整 patch）
+ocr agent prepare --preview
+
+# 写入私有 bundle 文件（0600）
+ocr agent prepare --output /tmp/bundle.json --format json
+
+# 大型变更分片（输出 manifest；每个分片仍需单独评审）
 ocr agent prepare --split --format json
 
 # 全量扫描
 ocr agent prepare --scan --path internal --format json
+
+# scan 调优
+ocr agent prepare --scan \
+  --path internal \
+  --batch by-language \
+  --max-file-size-bytes 1048576 \
+  --max-tokens-budget 200000 \
+  --format json
 ```
 
 如果你手上已经有 bundle 和评论结果，可以继续做校验和报告：
@@ -79,10 +93,13 @@ ocr agent validate-comments --bundle /tmp/bundle.json --comments /tmp/comments.j
 ocr agent report --bundle /tmp/bundle.json --comments /tmp/comments.json --validation /tmp/validation.json --format markdown
 ```
 
-如果需要补证据，可以用 target-aware context：
+`--bundle` 可以是单个 bundle，也可以是 scan/`--split` manifest；后一种情况下 OCR 会根据
+`comments.bundle_id` 自动选择对应分片。
+
+如果需要补证据，可以用 target-aware context。manifest 场景必须传 `--bundle-index`：
 
 ```bash
-ocr agent context read --bundle /tmp/bundle.json --path internal/example.go
+ocr agent context read --bundle /tmp/manifest.json --bundle-index 0 --path internal/example.go
 ocr agent context find --bundle /tmp/bundle.json --query ResolveTarget
 ocr agent context diff --bundle /tmp/bundle.json --path internal/example.go
 ocr agent context search --bundle /tmp/bundle.json --query example

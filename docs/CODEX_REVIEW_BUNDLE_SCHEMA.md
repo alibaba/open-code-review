@@ -8,7 +8,7 @@
 
 所有摘要均使用 SHA-256，小写十六进制，并带 `sha256:` 前缀。多个字段组合时，依次写入每个字段的 8 字节大端长度和原始字节，禁止仅用分隔符拼接。这样可以避免字段边界歧义。
 
-`diff_sha256` 覆盖 provider 返回顺序中的路径、旧路径和原始 patch。`content_sha256` 覆盖 provider 解析出的目标文件内容；删除文件覆盖空内容。规则摘要覆盖 `source`、`pattern` 与完整规则文本。
+`diff_sha256` 覆盖 provider 返回顺序中的路径、旧路径和原始 patch。`content_sha256` 覆盖 provider 解析出的目标文件内容；删除文件使用空字符串（`""`），因为目标内容不存在。规则摘要覆盖 `source`、`pattern` 与完整规则文本。
 
 `bundle_id` 覆盖以下规范 JSON，计算时 `bundle_id` 自身为空，且不包含时间戳：
 
@@ -17,7 +17,12 @@
 - summary；
 - 去重后的 rules；
 - files；
+- warnings（如存在）；
 - contract 中除 `bundle_size_bytes` 外的约束。
+
+实现使用 Go 的 `encoding/json` 默认字段顺序序列化 bundle 结构体；跨语言实现必须复现相同字段集合与 JSON 键名，而不是自行拼接子串。
+
+`manifest_id` 覆盖 manifest 规范 JSON，计算时清空 `manifest_id` 与 `root` 后做 SHA-256。`root` 是本地路径，不参与身份哈希。
 
 ## Target 语义
 
@@ -48,28 +53,43 @@ workspace state 分别记录当前 `HEAD`、staged diff、unstaged diff和按路
 
 scan 分片使用 `target.mode=scan`，`files[].content` 保存全文件证据，
 `content_sha256` 保存内容摘要，`patch` 为空。`none`、`by-language` 和
-`by-directory` 分组复用原生 scan 实现。文件大小或 token 预算超限时必须出现在
-`skipped_files`，且 manifest 标记 `partial=true`；不得把跳过文件计入已评审范围。
+`by-directory` 分组复用原生 scan 实现。文件大小、token 预算、过滤器或
+provider 跳过的文件必须出现在 `skipped_files`；只要存在跳过文件或预算截断，
+manifest 必须标记 `partial=true`；不得把跳过文件计入已评审范围。
 
 大型 diff 使用 `ocr agent prepare --split` 生成同一 manifest 协议，
 `batch_strategy=diff`；每个文件只进入一个满足大小上限的分片。单文件本身超过上限
-时仍返回 `bundle_too_large`，不得截断。
+时返回 `bundle_too_large` 并记入 `skipped_files`，manifest 标记 `partial=true`。
+diff 分片不会设置 scan 的 `estimated_tokens` 语义；`partial` 仅表示存在
+`skipped_files` 或无法完整装入任何分片的文件。
+
+若 diff 目标没有任何变更文件，manifest 的 `bundles` 可以为空数组，且
+`partial=false`。
 
 context 命令读取 manifest 时使用 `--bundle-index` 选择分片。评论校验和报告
 根据 `comments.bundle_id` 自动选择 manifest 中对应的分片。
 
-Phase 2 校验器保留以下错误码：
+Phase 2 校验器错误码：
 
 - `invalid_schema`
 - `bundle_id_mismatch`
 - `stale_bundle`
 - `unknown_path`
 - `path_escape`
+- `excluded_path`
+- `invalid_priority`
+- `invalid_category`
+- `invalid_confidence`
+- `invalid_comment`
+- `invalid_summary`
 - `invalid_line_range`
-- `outside_changed_hunk`
 - `existing_code_mismatch`
 - `ambiguous_existing_code`
 - `bundle_too_large`
+
+警告码：
+
+- `outside_changed_hunk`
 
 ## 安全边界
 

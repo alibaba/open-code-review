@@ -35,11 +35,14 @@ Codex owns the review. OCR is a deterministic, read-only context and validation 
 3. Review every reviewable file and apply its resolved rule. For scan manifests, process every bundle in order; explicitly report skipped or partial scope.
 4. Use target-aware context when evidence is missing:
 
+   When `--bundle` is a scan or `--split` manifest, pass `--bundle-index <n>` (0-based) to select one slice.
+   Use the same `--bundle` path for validate/report; OCR resolves the correct slice from `comments.bundle_id`.
+
    ```bash
-   ocr agent context read --bundle <bundle.json> --path <file>
-   ocr agent context find --bundle <bundle.json> --query <name>
-   ocr agent context diff --bundle <bundle.json> --path <file>
-   ocr agent context search --bundle <bundle.json> --query <text>
+   ocr agent context read --bundle <bundle-or-manifest.json> --bundle-index <n> --path <file>
+   ocr agent context find --bundle <bundle-or-manifest.json> --bundle-index <n> --query <name>
+   ocr agent context diff --bundle <bundle-or-manifest.json> --bundle-index <n> --path <file>
+   ocr agent context search --bundle <bundle-or-manifest.json> --bundle-index <n> --query <text>
    ```
 
    Range and commit context must come from the bundle target, not the current working tree. A `stale_bundle` error requires a fresh prepare.
@@ -49,7 +52,7 @@ Codex owns the review. OCR is a deterministic, read-only context and validation 
 7. Save the comments JSON outside the repository unless the user chose a path, then run:
 
    ```bash
-   ocr agent validate-comments --bundle <bundle.json> --comments <comments.json>
+   ocr agent validate-comments --bundle <bundle-or-manifest.json> --comments <comments.json> --output <validation.json>
    ```
 
    Resolve every validation error. Do not silently relocate, rewrite, or publish invalid findings.
@@ -57,9 +60,11 @@ Codex owns the review. OCR is a deterministic, read-only context and validation 
 8. Render stable output:
 
    ```bash
-   ocr agent report --bundle <bundle.json> --comments <comments.json> \
-     --validation <validation.json> --format markdown
+   ocr agent report --bundle <bundle-or-manifest.json> --comments <comments.json> \
+     --validation <validation.json> --format markdown --output <report.md>
    ```
+
+   Do not render a report when validation is invalid.
 
 9. If the user explicitly requested fixes, Codex edits only high-confidence confirmed issues, then runs targeted formatting, checks, and tests. Otherwise remain read-only.
 

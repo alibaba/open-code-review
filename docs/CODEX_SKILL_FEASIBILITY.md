@@ -230,10 +230,10 @@ Git/rules/tools ─┤
 
 | 原生 OCR 能力 | Codex 主导实现 | 强制级别 |
 |---|---|---:|
-| workspace staged/unstaged/untracked | `codex prepare` 同源 diff provider | 必须 |
+| workspace staged/unstaged/untracked | `ocr agent prepare` 同源 diff provider | 必须 |
 | range merge-base 比较 | `--from/--to`，记录 resolved merge base | 必须 |
 | commit review | `--commit` | 必须 |
-| preview | `codex prepare --preview` | 必须 |
+| preview | `ocr agent prepare --preview` | 必须 |
 | include/exclude/default allowlist | 复用现有过滤器并输出原因 | 必须 |
 | custom/project/global/system rules | 复用 resolver，保留来源和合并结果 | 必须 |
 | requirement background | Skill 将用户背景纳入 Codex 评审计划 | 必须 |
@@ -247,9 +247,9 @@ Git/rules/tools ─┤
 | 评论 reflection/filter | Codex 二次审查 + OCR 确定性校验 | 必须 |
 | 行号定位和 re-location | 复用 hunk/内容定位，Codex处理歧义 | 必须 |
 | suggestion 验证 | validator 做结构检查，Codex做语义检查 | 必须 |
-| text/JSON 输出 | `codex report` | 必须 |
+| text/JSON 输出 | `ocr agent report` | 必须 |
 | warnings/partial failure | bundle、validation 和 report 统一结构化警告 | 必须 |
-| scan 文件/目录/非 Git 目录 | `codex prepare --scan --path` | 必须 |
+| scan 文件/目录/非 Git 目录 | `ocr agent prepare --scan --path` | 必须 |
 | scan include/exclude | 复用 scan provider/filter | 必须 |
 | scan preview/cost estimate/budget | manifest 给出规模估算并执行硬预算 | 必须 |
 | scan batch strategy/size | 复用 none/by-language/by-directory | 必须 |
