@@ -19,7 +19,7 @@ no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL
 ANTHROPIC_MODEL must be set
 ```
 
-OCR ran the four-source resolution chain ([Configuration](../configuration/#endpoint-resolution))
+OCR ran the full endpoint-resolution chain ([Configuration](../configuration/#reuse-existing-environment-variables))
 and didn't find a complete `(URL, token, model)` triple. Either:
 
 - Run `ocr config set llm.url …` / `llm.auth_token …` / `llm.model …`

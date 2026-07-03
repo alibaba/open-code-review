@@ -17,7 +17,7 @@ no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL
 ANTHROPIC_MODEL must be set
 ```
 
-OCR 走完了四来源解析链（[配置](../configuration/#endpoint-resolution)）但没
+OCR 走完了整条端点解析链（[配置](../configuration/#复用已有的环境变量)）但没
 找到完整的 `(URL, token, model)` 三元组。要么：
 
 - 运行 `ocr config set llm.url …` / `llm.auth_token …` / `llm.model …` 填充

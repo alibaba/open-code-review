@@ -18,7 +18,7 @@ no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL
 ANTHROPIC_MODEL must be set
 ```
 
-OCR は 4 つのソースからなる解決チェーン（[設定](../configuration/#endpoint-resolution)）を
+OCR はエンドポイント解決チェーン全体（[設定](../configuration/#既存の環境変数を再利用する)）を
 たどりましたが、完全な `(URL, token, model)` の三つ組を見つけられませんでした。次のいずれかを
 行ってください。
 
