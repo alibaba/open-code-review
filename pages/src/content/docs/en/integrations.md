@@ -44,6 +44,10 @@ agent platform requires MCP specifically, wrap the CLI with a thin
 shim — a 30-line Node script that exposes a single `review` tool is
 enough.
 
+The reverse direction *is* supported: OCR can act as an MCP **client** and
+pull tools from external MCP servers into a review. See
+[MCP Servers](../mcp/).
+
 ## Tips that apply to every pattern
 
 - **Always pass `--audience agent`** when the caller is non-human.

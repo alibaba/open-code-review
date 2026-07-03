@@ -268,6 +268,7 @@ export const zh: TranslationKeys = {
   'docs.sidebar.reviewRules': '评审规则',
   'docs.sidebar.architecture': '架构',
   'docs.sidebar.tools': '工具',
+  'docs.sidebar.mcp': 'MCP 服务器',
   'docs.sidebar.viewer': '会话查看器',
   'docs.sidebar.telemetry': '遥测',
   'docs.sidebar.integrations': '集成',

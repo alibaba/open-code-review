@@ -8,6 +8,7 @@ import enCliReference from './en/cli-reference.md';
 import enReviewRules from './en/review-rules.md';
 import enArchitecture from './en/architecture.md';
 import enTools from './en/tools.md';
+import enMcp from './en/mcp.md';
 import enViewer from './en/viewer.md';
 import enTelemetry from './en/telemetry.md';
 import enIntegrations from './en/integrations.md';
@@ -26,6 +27,7 @@ import zhCliReference from './zh/cli-reference.md';
 import zhReviewRules from './zh/review-rules.md';
 import zhArchitecture from './zh/architecture.md';
 import zhTools from './zh/tools.md';
+import zhMcp from './zh/mcp.md';
 import zhViewer from './zh/viewer.md';
 import zhTelemetry from './zh/telemetry.md';
 import zhIntegrations from './zh/integrations.md';
@@ -44,6 +46,7 @@ import jaCliReference from './ja/cli-reference.md';
 import jaReviewRules from './ja/review-rules.md';
 import jaArchitecture from './ja/architecture.md';
 import jaTools from './ja/tools.md';
+import jaMcp from './ja/mcp.md';
 import jaViewer from './ja/viewer.md';
 import jaTelemetry from './ja/telemetry.md';
 import jaIntegrations from './ja/integrations.md';
@@ -62,6 +65,7 @@ export type DocSlug =
   | 'review-rules'
   | 'architecture'
   | 'tools'
+  | 'mcp'
   | 'viewer'
   | 'telemetry'
   | 'integrations'
@@ -80,6 +84,7 @@ const enDocs: Record<DocSlug, string> = {
   'review-rules': enReviewRules,
   'architecture': enArchitecture,
   'tools': enTools,
+  'mcp': enMcp,
   'viewer': enViewer,
   'telemetry': enTelemetry,
   'integrations': enIntegrations,
@@ -99,6 +104,7 @@ const zhDocs: Record<DocSlug, string> = {
   'review-rules': zhReviewRules,
   'architecture': zhArchitecture,
   'tools': zhTools,
+  'mcp': zhMcp,
   'viewer': zhViewer,
   'telemetry': zhTelemetry,
   'integrations': zhIntegrations,
@@ -118,6 +124,7 @@ const jaDocs: Record<DocSlug, string> = {
   'review-rules': jaReviewRules,
   'architecture': jaArchitecture,
   'tools': jaTools,
+  'mcp': jaMcp,
   'viewer': jaViewer,
   'telemetry': jaTelemetry,
   'integrations': jaIntegrations,

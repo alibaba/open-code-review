@@ -268,6 +268,7 @@ export const ja: TranslationKeys = {
   'docs.sidebar.reviewRules': 'レビュールール',
   'docs.sidebar.architecture': 'アーキテクチャ',
   'docs.sidebar.tools': 'ツール',
+  'docs.sidebar.mcp': 'MCP サーバー',
   'docs.sidebar.viewer': 'セッションビューア',
   'docs.sidebar.telemetry': 'テレメトリ',
   'docs.sidebar.integrations': '統合',

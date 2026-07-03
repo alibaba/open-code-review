@@ -266,6 +266,7 @@ export const en: TranslationKeys = {
   'docs.sidebar.reviewRules': 'Review Rules',
   'docs.sidebar.architecture': 'Architecture',
   'docs.sidebar.tools': 'Tools',
+  'docs.sidebar.mcp': 'MCP Servers',
   'docs.sidebar.viewer': 'Session Viewer',
   'docs.sidebar.telemetry': 'Telemetry',
   'docs.sidebar.integrations': 'Integrations',

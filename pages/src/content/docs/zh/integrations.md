@@ -38,6 +38,9 @@ OCR 目前不暴露 Model Context Protocol server。预期的集成方式是“a
 要求 MCP，用一个薄 shim 包裹 CLI——一个 30 行的 Node 脚本暴露单个 `review`
 工具就够了。
 
+反过来的方向**是**支持的：OCR 可以作为 MCP **客户端**，把外部 MCP server 的工具
+拉进一次审查。见 [MCP 服务器](../mcp/)。
+
 ## 适用于所有模式的提示
 
 - **始终传 `--audience agent`**，当调用方不是人时。否则进度行会污染待解析的输出。
