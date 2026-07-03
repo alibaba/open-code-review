@@ -14,6 +14,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".java", true},
 		{".ts", true},
 		{".tsx", true},
+		{".astro", true},
+		{".ASTRO", true},
 		{".py", true},
 		{".rs", true},
 		{".ets", true},

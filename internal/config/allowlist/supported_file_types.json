@@ -43,6 +43,7 @@
   ".less",
   ".html",
   ".htm",
+  ".astro",
   ".vue",
   ".svelte",
   ".xml",
