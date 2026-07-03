@@ -139,7 +139,7 @@ JSONL 转录包含发给 LLM 和从 LLM 收到的**一切**，包括 diff 中的
 OpenTelemetry exporter 是另一回事——如何让 prompt 内容不进入导出 trace 见
 [遥测](../telemetry/)。
 
-## 查看器不适用时
+## 查看器*不*适用时
 
 - 程序化后处理（CI、仪表盘）用 `ocr review --format json --audience agent`。
   查看器为人渲染，不为机器。

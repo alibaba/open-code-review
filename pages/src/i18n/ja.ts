@@ -102,6 +102,7 @@ export const ja: TranslationKeys = {
 
   // Docs Page
   'docs.toc': '目次',
+  'docs.overview': '概要',
   'docs.install': 'インストール',
   'docs.config': 'ocr config',
   'docs.review': 'ocr review',
@@ -109,6 +110,15 @@ export const ja: TranslationKeys = {
   'docs.viewer': 'ocr viewer',
   'docs.mcp': 'MCP Server',
   'docs.env': 'Claude Code 統合',
+  'docs.overviewTitle': '概要',
+  'docs.overviewDesc': '（略称 <code>ocr</code>）は AI 駆動のコードレビュー CLI ツールです。',
+  'docs.overviewFeatures': 'コア機能：',
+  'docs.overviewFeat1': 'ワークスペース変更、ブランチ差分、単一コミット、フルスキャンレビューモードをサポート',
+  'docs.overviewFeat2': 'Anthropic、OpenAI、DashScope、DeepSeek、Z.AI などの内蔵プロバイダーとカスタムプロバイダーをサポート',
+  'docs.overviewFeat3': 'カスタマイズ可能なタイムアウト付き並行レビュー',
+  'docs.overviewFeat4': '出力形式は text と json をサポート',
+  'docs.overviewFeat5': 'Claude Code ユーザーはゼロ設定',
+  'docs.overviewFeat6': 'WebUI ビューアーでレビュー結果を可視化',
   'docs.installTitle': 'インストール',
   'docs.installLabel': 'インストール',
   'docs.installVerifyLabel': 'インストール確認',
@@ -261,6 +271,7 @@ export const ja: TranslationKeys = {
   // Docs Sidebar
   'docs.sidebar.gettingStarted': '入門ガイド',
   'docs.sidebar.userGuide': '利用ガイド',
+  'docs.sidebar.overview': '概要',
   'docs.sidebar.quickstart': 'クイックスタート',
   'docs.sidebar.installation': 'インストール',
   'docs.sidebar.configuration': '設定',

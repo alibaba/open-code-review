@@ -75,7 +75,6 @@
   margin: 0 0 16px 0;
   overflow-x: auto;
   display: flex;
-  align-self: stretch;
   justify-content: space-between;
   align-items: center;
 }
@@ -239,4 +238,40 @@
 .docs-markdown pre::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.15);
   border-radius: 3px;
+}
+
+/* Copy button in code blocks */
+.code-copy-btn {
+  display: flex;
+  flex-shrink: 0;
+  justify-content: flex-start;
+  align-items: flex-start;
+  flex-direction: column;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  cursor: pointer;
+}
+
+/* Copy toast notification */
+.copy-toast {
+  position: fixed;
+  top: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.85);
+  padding: 5px 8px 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 9999;
+  backdrop-filter: blur(8px);
+}
+
+.copy-toast.visible {
+  opacity: 1;
 }

@@ -1,11 +1,11 @@
-import React, { useMemo, useEffect, useRef, useState, useCallback, useId } from 'react';
+import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { Marked, Renderer } from 'marked';
 import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import { useTranslation } from '../i18n';
 import copyIcon from '../assets/icons/icon-copy.svg';
-import { generateHeadingId } from '../utils/headingId';
+import { createHeadingIdGenerator } from '../utils/headingId';
 
 // Initialize mermaid with dark theme
 mermaid.initialize({
@@ -76,8 +76,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
   const html = useMemo(() => {
     // Custom renderer to generate heading IDs matching the TOC extraction logic
     const renderer = new Renderer();
+    const getHeadingId = createHeadingIdGenerator();
     renderer.heading = function ({ text, depth }: { text: string; depth: number }) {
-      const id = generateHeadingId(text);
+      const id = getHeadingId(text);
       // Escape id attribute value to prevent XSS
       const safeId = id.replace(/"/g, '&quot;');
       return `<h${depth} id="${safeId}">${text}</h${depth}>\n`;
@@ -110,7 +111,6 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
       // Create copy button matching reference HTML
       const btn = document.createElement('div');
       btn.className = 'code-copy-btn';
-      btn.style.cssText = 'display:flex;flex-shrink:0;justify-content:flex-start;align-items:flex-start;flex-direction:column;padding-top:4px;padding-bottom:4px;cursor:pointer;';
       btn.innerHTML = `<img src="${copyIcon}" alt="copy" style="width:16px;height:16px;" />`;
       btn.addEventListener('click', () => {
         const text = codeEl.textContent || '';
@@ -123,7 +123,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
     const mermaidBlocks = containerRef.current.querySelectorAll('code.language-mermaid');
     if (mermaidBlocks.length === 0) return;
 
-    const renderPromises = Array.from(mermaidBlocks).map(async (block) => {
+    Promise.all(Array.from(mermaidBlocks).map(async (block) => {
       const pre = block.parentElement;
       if (!pre) return;
       const code = block.textContent || '';
@@ -142,6 +142,8 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
         (block as HTMLElement).style.display = 'block';
         console.warn('[Mermaid] render failed:', e);
       }
+    })).catch((e) => {
+      console.warn('[Mermaid] unexpected render error:', e);
     });
 
     return () => { cancelled = true; };
@@ -156,26 +158,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
         style={{ width: '100%' }}
       />
       {ReactDOM.createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            top: 88,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: 'rgba(255,255,255,0.1)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            color: 'rgba(255,255,255,0.85)',
-            padding: '5px 8px 5px 10px',
-            borderRadius: 6,
-            fontSize: 12,
-            fontWeight: 500,
-            pointerEvents: 'none',
-            opacity: toastVisible ? 1 : 0,
-            transition: 'opacity 0.15s ease',
-            zIndex: 9999,
-            backdropFilter: 'blur(8px)',
-          }}
-        >
+        <div className={`copy-toast${toastVisible ? ' visible' : ''}`}>
           {t('quickstart.copied')}
         </div>,
         document.body

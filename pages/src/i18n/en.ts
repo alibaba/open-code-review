@@ -100,6 +100,7 @@ export const en: TranslationKeys = {
 
   // Docs Page (keep existing)
   'docs.toc': 'Table of Contents',
+  'docs.overview': 'Overview',
   'docs.install': 'Install',
   'docs.config': 'ocr config',
   'docs.review': 'ocr review',
@@ -107,6 +108,15 @@ export const en: TranslationKeys = {
   'docs.viewer': 'ocr viewer',
   'docs.mcp': 'MCP Server',
   'docs.env': 'Claude Code Integration',
+  'docs.overviewTitle': 'Overview',
+  'docs.overviewDesc': '(short <code>ocr</code>) is an AI-powered code review CLI tool.',
+  'docs.overviewFeatures': 'Core Features:',
+  'docs.overviewFeat1': 'Supports workspace, branch diff, single-commit, and full scan review modes',
+  'docs.overviewFeat2': 'Built-in Anthropic, OpenAI, DashScope, DeepSeek, Z.AI and custom provider support',
+  'docs.overviewFeat3': 'Concurrent review with customizable timeouts',
+  'docs.overviewFeat4': 'Output format supports text and json',
+  'docs.overviewFeat5': 'Zero config for Claude Code users',
+  'docs.overviewFeat6': 'WebUI viewer for visualizing review results',
   'docs.installTitle': 'Install',
   'docs.installLabel': 'Install',
   'docs.installVerifyLabel': 'Verify Installation',
@@ -259,7 +269,8 @@ export const en: TranslationKeys = {
   // Docs Sidebar
   'docs.sidebar.gettingStarted': 'Getting Started',
   'docs.sidebar.userGuide': 'User Guide',
-  'docs.sidebar.quickstart': 'QuickStart',
+  'docs.sidebar.overview': 'Overview',
+  'docs.sidebar.quickstart': 'Quick Start',
   'docs.sidebar.installation': 'Installation',
   'docs.sidebar.configuration': 'Configuration',
   'docs.sidebar.cliReference': 'CLI Reference',

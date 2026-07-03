@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { useResponsive } from '../hooks/useResponsive';
 import { getDocContent, getDocTitle, DocSlug, searchDocs } from '../content/docs';
-import { generateHeadingId } from '../utils/headingId';
+import { createHeadingIdGenerator } from '../utils/headingId';
 import docContentsIcon from '../assets/icons/doc-contents.svg';
 import searchIcon from '../assets/icons/icon-search.svg';
 import '../styles/docs-markdown.css';
@@ -28,6 +27,7 @@ const sidebarTree: SidebarGroup[] = [
   {
     groupLabelKey: 'docs.sidebar.gettingStarted',
     items: [
+      { id: 'sb-overview', labelKey: 'docs.sidebar.overview', slug: 'overview' },
       { id: 'sb-quickstart', labelKey: 'docs.sidebar.quickstart', slug: 'quickstart' },
       { id: 'sb-installation', labelKey: 'docs.sidebar.installation', slug: 'installation' },
       { id: 'sb-configuration', labelKey: 'docs.sidebar.configuration', slug: 'configuration' },
@@ -40,7 +40,6 @@ const sidebarTree: SidebarGroup[] = [
       { id: 'sb-rules', labelKey: 'docs.sidebar.reviewRules', slug: 'review-rules' },
       { id: 'sb-arch', labelKey: 'docs.sidebar.architecture', slug: 'architecture' },
       { id: 'sb-tools', labelKey: 'docs.sidebar.tools', slug: 'tools' },
-      { id: 'sb-mcp', labelKey: 'docs.sidebar.mcp', slug: 'mcp' },
       { id: 'sb-viewer', labelKey: 'docs.sidebar.viewer', slug: 'viewer' },
       { id: 'sb-telemetry', labelKey: 'docs.sidebar.telemetry', slug: 'telemetry' },
       {
@@ -70,6 +69,7 @@ const ChevronIcon: React.FC<{ expanded: boolean }> = ({ expanded }) => (
 /* ─── Extract headings from markdown for right TOC ─── */
 function extractHeadings(markdown: string): { id: string; text: string; level: number }[] {
   const headings: { id: string; text: string; level: number }[] = [];
+  const getHeadingId = createHeadingIdGenerator();
   const lines = markdown.split('\n');
   let inCodeBlock = false;
   for (const line of lines) {
@@ -86,7 +86,7 @@ function extractHeadings(markdown: string): { id: string; text: string; level: n
         .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
         .replace(/[`*_\[\]()]/g, '')
         .trim();
-      const id = generateHeadingId(text);
+      const id = getHeadingId(text);
       headings.push({ id, text, level });
     }
   }
@@ -110,24 +110,9 @@ function buildFlatDocList(): { slug: DocSlug; labelKey: string }[] {
 }
 
 const flatDocList = buildFlatDocList();
-const validSlugs = new Set<DocSlug>(flatDocList.map(d => d.slug));
-
-/* Dev-time invariant: every sidebar slug maps to exactly one URL, so duplicates
- * (two menu entries sharing a slug) would silently collide. Fail loudly in dev. */
-if (process.env.NODE_ENV !== 'production' && validSlugs.size !== flatDocList.length) {
-  const slugs = flatDocList.map(d => d.slug);
-  const dupes = [...new Set(slugs.filter((s, i) => slugs.indexOf(s) !== i))];
-  throw new Error(
-    `[docs] Duplicate sidebar slug(s) detected: ${dupes.join(', ')} — each doc must have a unique slug for routing.`
-  );
-}
 
 const DocsPage: React.FC = () => {
-  const { slug: slugParam } = useParams<{ slug?: string }>();
-  const navigate = useNavigate();
-  /* Active doc slug is derived from the URL param, falling back to quickstart */
-  const activeSlug: DocSlug =
-    slugParam && validSlugs.has(slugParam as DocSlug) ? (slugParam as DocSlug) : 'quickstart';
+  const [activeSlug, setActiveSlug] = useState<DocSlug>('overview');
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({ 'sb-integrations': false });
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [hoveredHeadingId, setHoveredHeadingId] = useState<string>('');
@@ -178,10 +163,10 @@ const DocsPage: React.FC = () => {
   }, []);
 
   const navigateToDoc = useCallback((slug: DocSlug) => {
-    navigate(`/docs/${slug}`);
+    setActiveSlug(slug);
     // Scroll page to top
     window.scrollTo(0, 0);
-  }, [navigate]);
+  }, []);
 
   /* Intercept clicks on internal doc links and convert to SPA navigation */
   const handleContentClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -210,7 +195,8 @@ const DocsPage: React.FC = () => {
     const slugMap: Record<string, DocSlug> = { 'ci': 'cicd' };
     const slug = (slugMap[lastSegment] || lastSegment) as DocSlug;
     // Verify it's a valid doc slug
-    if (validSlugs.has(slug)) {
+    const validSlugs = flatDocList.map(d => d.slug);
+    if (validSlugs.includes(slug)) {
       e.preventDefault();
       navigateToDoc(slug);
       // Handle anchor scroll after navigation with reliable retry

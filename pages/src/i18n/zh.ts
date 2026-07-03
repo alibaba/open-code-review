@@ -102,6 +102,7 @@ export const zh: TranslationKeys = {
 
   // Docs Page
   'docs.toc': '目录',
+  'docs.overview': '概览',
   'docs.install': '安装',
   'docs.config': 'ocr config',
   'docs.review': 'ocr review',
@@ -109,6 +110,15 @@ export const zh: TranslationKeys = {
   'docs.viewer': 'ocr viewer',
   'docs.mcp': 'MCP Server',
   'docs.env': 'Claude Code 集成',
+  'docs.overviewTitle': '概览',
+  'docs.overviewDesc': '（简称 <code>ocr</code>）是一款 AI 驱动的代码审查 CLI 工具。',
+  'docs.overviewFeatures': '核心功能：',
+  'docs.overviewFeat1': '支持工作区变更、分支差异、单次提交和全量扫描审查模式',
+  'docs.overviewFeat2': '内置 Anthropic、OpenAI、DashScope、DeepSeek、Z.AI 等主流供应商及自定义供应商支持',
+  'docs.overviewFeat3': '并发审查与可自定义超时',
+  'docs.overviewFeat4': '输出格式支持 text 和 json',
+  'docs.overviewFeat5': 'Claude Code 用户零配置',
+  'docs.overviewFeat6': 'WebUI 查看器可视化审查结果',
   'docs.installTitle': '安装',
   'docs.installLabel': '安装',
   'docs.installVerifyLabel': '验证安装',
@@ -261,6 +271,7 @@ export const zh: TranslationKeys = {
   // Docs Sidebar
   'docs.sidebar.gettingStarted': '入门指南',
   'docs.sidebar.userGuide': '使用指南',
+  'docs.sidebar.overview': '概览',
   'docs.sidebar.quickstart': '快速开始',
   'docs.sidebar.installation': '安装',
   'docs.sidebar.configuration': '配置',

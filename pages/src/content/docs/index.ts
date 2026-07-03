@@ -1,6 +1,7 @@
 /* Docs content index — imports all markdown files and provides a lookup by slug + language */
 
 // English docs
+import enOverview from './en/overview.md';
 import enQuickstart from './en/quickstart.md';
 import enInstallation from './en/installation.md';
 import enConfiguration from './en/configuration.md';
@@ -8,7 +9,6 @@ import enCliReference from './en/cli-reference.md';
 import enReviewRules from './en/review-rules.md';
 import enArchitecture from './en/architecture.md';
 import enTools from './en/tools.md';
-import enMcp from './en/mcp.md';
 import enViewer from './en/viewer.md';
 import enTelemetry from './en/telemetry.md';
 import enIntegrations from './en/integrations.md';
@@ -20,6 +20,7 @@ import enContributing from './en/contributing.md';
 import enFaq from './en/faq.md';
 
 // Chinese docs
+import zhOverview from './zh/overview.md';
 import zhQuickstart from './zh/quickstart.md';
 import zhInstallation from './zh/installation.md';
 import zhConfiguration from './zh/configuration.md';
@@ -27,7 +28,6 @@ import zhCliReference from './zh/cli-reference.md';
 import zhReviewRules from './zh/review-rules.md';
 import zhArchitecture from './zh/architecture.md';
 import zhTools from './zh/tools.md';
-import zhMcp from './zh/mcp.md';
 import zhViewer from './zh/viewer.md';
 import zhTelemetry from './zh/telemetry.md';
 import zhIntegrations from './zh/integrations.md';
@@ -38,26 +38,8 @@ import zhCicd from './zh/integrations/ci.md';
 import zhContributing from './zh/contributing.md';
 import zhFaq from './zh/faq.md';
 
-// Japanese docs
-import jaQuickstart from './ja/quickstart.md';
-import jaInstallation from './ja/installation.md';
-import jaConfiguration from './ja/configuration.md';
-import jaCliReference from './ja/cli-reference.md';
-import jaReviewRules from './ja/review-rules.md';
-import jaArchitecture from './ja/architecture.md';
-import jaTools from './ja/tools.md';
-import jaMcp from './ja/mcp.md';
-import jaViewer from './ja/viewer.md';
-import jaTelemetry from './ja/telemetry.md';
-import jaIntegrations from './ja/integrations.md';
-import jaAgentSkill from './ja/integrations/agent-skill.md';
-import jaClaudeCode from './ja/integrations/claude-code.md';
-import jaSubprocess from './ja/integrations/subprocess.md';
-import jaCicd from './ja/integrations/ci.md';
-import jaContributing from './ja/contributing.md';
-import jaFaq from './ja/faq.md';
-
 export type DocSlug =
+  | 'overview'
   | 'quickstart'
   | 'installation'
   | 'configuration'
@@ -65,7 +47,6 @@ export type DocSlug =
   | 'review-rules'
   | 'architecture'
   | 'tools'
-  | 'mcp'
   | 'viewer'
   | 'telemetry'
   | 'integrations'
@@ -77,6 +58,7 @@ export type DocSlug =
   | 'faq';
 
 const enDocs: Record<DocSlug, string> = {
+  'overview': enOverview,
   'quickstart': enQuickstart,
   'installation': enInstallation,
   'configuration': enConfiguration,
@@ -84,7 +66,6 @@ const enDocs: Record<DocSlug, string> = {
   'review-rules': enReviewRules,
   'architecture': enArchitecture,
   'tools': enTools,
-  'mcp': enMcp,
   'viewer': enViewer,
   'telemetry': enTelemetry,
   'integrations': enIntegrations,
@@ -97,6 +78,7 @@ const enDocs: Record<DocSlug, string> = {
 };
 
 const zhDocs: Record<DocSlug, string> = {
+  'overview': zhOverview,
   'quickstart': zhQuickstart,
   'installation': zhInstallation,
   'configuration': zhConfiguration,
@@ -104,7 +86,6 @@ const zhDocs: Record<DocSlug, string> = {
   'review-rules': zhReviewRules,
   'architecture': zhArchitecture,
   'tools': zhTools,
-  'mcp': zhMcp,
   'viewer': zhViewer,
   'telemetry': zhTelemetry,
   'integrations': zhIntegrations,
@@ -116,43 +97,31 @@ const zhDocs: Record<DocSlug, string> = {
   'faq': zhFaq,
 };
 
-const jaDocs: Record<DocSlug, string> = {
-  'quickstart': jaQuickstart,
-  'installation': jaInstallation,
-  'configuration': jaConfiguration,
-  'cli-reference': jaCliReference,
-  'review-rules': jaReviewRules,
-  'architecture': jaArchitecture,
-  'tools': jaTools,
-  'mcp': jaMcp,
-  'viewer': jaViewer,
-  'telemetry': jaTelemetry,
-  'integrations': jaIntegrations,
-  'agent-skill': jaAgentSkill,
-  'claude-code': jaClaudeCode,
-  'subprocess': jaSubprocess,
-  'cicd': jaCicd,
-  'contributing': jaContributing,
-  'faq': jaFaq,
-};
-
 const docsMap: Record<string, Record<DocSlug, string>> = {
   en: enDocs,
   zh: zhDocs,
-  ja: jaDocs,
+  ja: enDocs, // fallback to English for Japanese
 };
+
+/**
+ * Parse YAML frontmatter from markdown content.
+ * Returns frontmatter string and body, or null if no frontmatter found.
+ */
+function parseFrontmatter(md: string): { frontmatter: string; body: string } | null {
+  if (!md.startsWith('---')) return null;
+  const end = md.indexOf('---', 3);
+  if (end === -1) return null;
+  return {
+    frontmatter: md.slice(3, end),
+    body: md.slice(end + 3).trim(),
+  };
+}
 
 /**
  * Strip YAML frontmatter from markdown content
  */
 function stripFrontmatter(md: string): string {
-  if (md.startsWith('---')) {
-    const end = md.indexOf('---', 3);
-    if (end !== -1) {
-      return md.slice(end + 3).trim();
-    }
-  }
-  return md;
+  return parseFrontmatter(md)?.body ?? md;
 }
 
 /**
@@ -175,14 +144,10 @@ export function getDocContent(slug: DocSlug, language: string): string {
  * Get the title from frontmatter
  */
 export function getDocTitle(slug: DocSlug, language: string): string {
-  const raw = getRawContent(slug, language);
-  if (raw.startsWith('---')) {
-    const end = raw.indexOf('---', 3);
-    if (end !== -1) {
-      const fm = raw.slice(3, end);
-      const match = fm.match(/title:\s*(.+)/);
-      if (match) return match[1].trim();
-    }
+  const parsed = parseFrontmatter(getRawContent(slug, language));
+  if (parsed) {
+    const match = parsed.frontmatter.match(/title:\s*(.+)/);
+    if (match) return match[1].trim();
   }
   return slug;
 }
