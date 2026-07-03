@@ -38,6 +38,25 @@ import zhCicd from './zh/integrations/ci.md';
 import zhContributing from './zh/contributing.md';
 import zhFaq from './zh/faq.md';
 
+// Japanese docs
+import jaOverview from './ja/overview.md';
+import jaQuickstart from './ja/quickstart.md';
+import jaInstallation from './ja/installation.md';
+import jaConfiguration from './ja/configuration.md';
+import jaCliReference from './ja/cli-reference.md';
+import jaReviewRules from './ja/review-rules.md';
+import jaArchitecture from './ja/architecture.md';
+import jaTools from './ja/tools.md';
+import jaViewer from './ja/viewer.md';
+import jaTelemetry from './ja/telemetry.md';
+import jaIntegrations from './ja/integrations.md';
+import jaAgentSkill from './ja/integrations/agent-skill.md';
+import jaClaudeCode from './ja/integrations/claude-code.md';
+import jaSubprocess from './ja/integrations/subprocess.md';
+import jaCicd from './ja/integrations/ci.md';
+import jaContributing from './ja/contributing.md';
+import jaFaq from './ja/faq.md';
+
 export type DocSlug =
   | 'overview'
   | 'quickstart'
@@ -97,10 +116,30 @@ const zhDocs: Record<DocSlug, string> = {
   'faq': zhFaq,
 };
 
+const jaDocs: Record<DocSlug, string> = {
+  'overview': jaOverview,
+  'quickstart': jaQuickstart,
+  'installation': jaInstallation,
+  'configuration': jaConfiguration,
+  'cli-reference': jaCliReference,
+  'review-rules': jaReviewRules,
+  'architecture': jaArchitecture,
+  'tools': jaTools,
+  'viewer': jaViewer,
+  'telemetry': jaTelemetry,
+  'integrations': jaIntegrations,
+  'agent-skill': jaAgentSkill,
+  'claude-code': jaClaudeCode,
+  'subprocess': jaSubprocess,
+  'cicd': jaCicd,
+  'contributing': jaContributing,
+  'faq': jaFaq,
+};
+
 const docsMap: Record<string, Record<DocSlug, string>> = {
   en: enDocs,
   zh: zhDocs,
-  ja: enDocs, // fallback to English for Japanese
+  ja: jaDocs,
 };
 
 /**
