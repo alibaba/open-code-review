@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-code-review/open-code-review/internal/config/rules"
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
+	"github.com/open-code-review/open-code-review/internal/model"
 )
 
 type detailResolverStub struct{}
@@ -85,13 +86,19 @@ func TestPrepareWorkspaceBuildsDeterministicCompleteBundle(t *testing.T) {
 	files := make(map[string]File, len(first.Files))
 	for _, file := range first.Files {
 		files[file.Path] = file
-		if file.ContentSHA256 == "" || file.RuleID == "" {
+		if file.ContentSHA256 == "" && file.ExcludeReason != model.ExcludeDeleted {
 			t.Errorf("file missing hashes or rule: %+v", file)
+		}
+		if file.RuleID == "" {
+			t.Errorf("file missing rule id: %+v", file)
 		}
 	}
 	assertPreparedStatus(t, files, "base.go", "modified", true, "")
 	assertPreparedStatus(t, files, "staged.go", "modified", true, "")
 	assertPreparedStatus(t, files, "deleted.go", "deleted", false, "deleted")
+	if files["deleted.go"].ContentSHA256 != "" {
+		t.Fatalf("deleted.go content hash = %q, want empty", files["deleted.go"].ContentSHA256)
+	}
 	assertPreparedStatus(t, files, "renamed.go", "renamed", true, "")
 	assertPreparedStatus(t, files, "binary.bin", "binary", false, "binary")
 	assertPreparedStatus(t, files, "ignored_test.go", "added", false, "default_path")

@@ -140,6 +140,14 @@ func loadCodexBundleByID(path, bundleID string) (*reviewbundle.Bundle, error) {
 	}
 	bundle, bundleErr := reviewbundle.LoadBundle(bytes.NewReader(content))
 	if bundleErr == nil {
+		if bundle.BundleID != bundleID {
+			return nil, fmt.Errorf(
+				"bundle at %q has bundle_id %q, comments require %q",
+				path,
+				bundle.BundleID,
+				bundleID,
+			)
+		}
 		return bundle, nil
 	}
 	manifest, manifestErr := reviewbundle.LoadScanManifest(bytes.NewReader(content))

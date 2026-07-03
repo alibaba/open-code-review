@@ -134,6 +134,11 @@ func buildBundleEvidence(
 		ruleID := internRule(bundle.Rules, ruleIDs, detail)
 		hunks := convertHunks(diff.ParseHunks(change.Diff))
 
+		contentSHA256 := hashFields([]byte(change.NewFileContent))
+		if change.IsDeleted {
+			contentSHA256 = ""
+		}
+
 		bundle.Files = append(bundle.Files, File{
 			Path:          path,
 			OldPath:       change.OldPath,
@@ -142,7 +147,7 @@ func buildBundleEvidence(
 			ExcludeReason: excludeReason,
 			Insertions:    change.Insertions,
 			Deletions:     change.Deletions,
-			ContentSHA256: hashFields([]byte(change.NewFileContent)),
+			ContentSHA256: contentSHA256,
 			RuleID:        ruleID,
 			Patch:         change.Diff,
 			Hunks:         hunks,

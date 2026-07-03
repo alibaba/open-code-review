@@ -335,6 +335,97 @@ func TestCodexContextReadReturnsBundleEnvelope(t *testing.T) {
 	}
 }
 
+func TestCodexContextReadRejectsPathEscape(t *testing.T) {
+	repository := initAgentRepository(t)
+	writeAgentFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	bundlePath := filepath.Join(t.TempDir(), "bundle.json")
+	if err := runAgentWithWriter([]string{
+		"prepare", "--repo", repository, "--output", bundlePath,
+	}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("prepare bundle: %v", err)
+	}
+	var output bytes.Buffer
+	err := runAgentWithWriter([]string{
+		"context", "read",
+		"--repo", repository,
+		"--bundle", bundlePath,
+		"--path", "../etc/passwd",
+	}, &output)
+	if err == nil || !strings.Contains(err.Error(), "path_escape") {
+		t.Fatalf("error = %v, want path_escape", err)
+	}
+}
+
+func TestCodexValidateCommentsRejectsBundleIDMismatch(t *testing.T) {
+	repository := initAgentRepository(t)
+	writeAgentFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	directory := t.TempDir()
+	bundlePath := filepath.Join(directory, "bundle.json")
+	if err := runAgentWithWriter([]string{
+		"prepare", "--repo", repository, "--output", bundlePath,
+	}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("prepare bundle: %v", err)
+	}
+	bundleContent, err := os.ReadFile(bundlePath)
+	if err != nil {
+		t.Fatalf("read bundle: %v", err)
+	}
+	var bundle reviewbundle.Bundle
+	if err := json.Unmarshal(bundleContent, &bundle); err != nil {
+		t.Fatalf("decode bundle: %v", err)
+	}
+	comments := reviewbundle.Comments{
+		SchemaVersion: reviewbundle.CommentsSchemaVersion,
+		BundleID:      "sha256:wrong",
+		Summary:       reviewbundle.CommentsSummary{FilesReviewed: 1, IssuesFound: 0},
+		Comments:      []reviewbundle.ReviewComment{},
+	}
+	commentsPath := filepath.Join(directory, "comments.json")
+	writeAgentJSON(t, commentsPath, comments)
+
+	var output bytes.Buffer
+	err = runAgentWithWriter([]string{
+		"validate-comments",
+		"--repo", repository,
+		"--bundle", bundlePath,
+		"--comments", commentsPath,
+	}, &output)
+	if err == nil || !strings.Contains(err.Error(), "comments require") {
+		t.Fatalf("error = %v, want bundle_id mismatch", err)
+	}
+}
+
+func TestCodexReportRejectsBundleIDMismatch(t *testing.T) {
+	repository := initAgentRepository(t)
+	writeAgentFile(t, repository, "main.go", "package sample\n\nvar changed = true\n")
+	directory := t.TempDir()
+	bundlePath := filepath.Join(directory, "bundle.json")
+	if err := runAgentWithWriter([]string{
+		"prepare", "--repo", repository, "--output", bundlePath,
+	}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("prepare bundle: %v", err)
+	}
+	comments := reviewbundle.Comments{
+		SchemaVersion: reviewbundle.CommentsSchemaVersion,
+		BundleID:      "sha256:wrong",
+		Summary:       reviewbundle.CommentsSummary{FilesReviewed: 1, IssuesFound: 0},
+		Comments:      []reviewbundle.ReviewComment{},
+	}
+	commentsPath := filepath.Join(directory, "comments.json")
+	writeAgentJSON(t, commentsPath, comments)
+
+	var output bytes.Buffer
+	err := runAgentWithWriter([]string{
+		"report",
+		"--bundle", bundlePath,
+		"--comments", commentsPath,
+		"--format", "markdown",
+	}, &output)
+	if err == nil || !strings.Contains(err.Error(), "comments require") {
+		t.Fatalf("error = %v, want bundle_id mismatch", err)
+	}
+}
+
 func TestCodexPrepareScanWorksWithoutGitOrLLMConfiguration(t *testing.T) {
 	directory := t.TempDir()
 	writeAgentFile(t, directory, "main.go", "package sample\n\nfunc Main() {}\n")

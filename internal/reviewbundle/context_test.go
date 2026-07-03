@@ -68,6 +68,29 @@ func TestContextRejectsStaleWorkspaceAndPathEscape(t *testing.T) {
 	}
 }
 
+func TestContextReadyHonorsCancelledContext(t *testing.T) {
+	repository := initPrepareRepository(t)
+	writeTargetFile(t, repository, "base.go", "package sample\n\nvar changed = true\n")
+	bundle, _, err := Prepare(context.Background(), PrepareOptions{
+		RepoDir:       repository,
+		Resolver:      detailResolverStub{},
+		GitRunner:     gitcmd.New(2),
+		MaxBundleSize: DefaultMaxBundleBytes,
+	})
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	service := NewContextService(repository, bundle, gitcmd.New(2))
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := service.Read(cancelled, "base.go", 1, 3); err == nil {
+		t.Fatal("Read(cancelled) error = nil")
+	}
+	if _, err := service.Read(context.Background(), "base.go", 1, 3); err != nil {
+		t.Fatalf("Read(fresh context) error = %v, want success after cancelled call", err)
+	}
+}
+
 func TestContextFindAndSearchUseTargetAwareTools(t *testing.T) {
 	repository := initPrepareRepository(t)
 	base := strings.TrimSpace(runTargetGit(t, repository, "rev-parse", "HEAD"))

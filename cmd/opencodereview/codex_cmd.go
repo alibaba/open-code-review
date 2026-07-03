@@ -402,10 +402,6 @@ func writePrivateFile(path string, content []byte) error {
 	if err != nil {
 		return fmt.Errorf("open bundle output %s: %w", path, err)
 	}
-	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("restrict bundle output %s: %w", path, err)
-	}
 	if _, err := file.Write(content); err != nil {
 		_ = file.Close()
 		return fmt.Errorf("write bundle output %s: %w", path, err)

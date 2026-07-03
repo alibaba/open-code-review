@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
 	"github.com/open-code-review/open-code-review/internal/tool"
@@ -26,9 +25,7 @@ type ContextService struct {
 	repoDir   string
 	bundle    *Bundle
 	runner    *gitcmd.Runner
-	reader    *tool.FileReader
-	readyOnce sync.Once
-	readyErr  error
+	reader *tool.FileReader
 }
 
 // NewContextService binds all subsequent operations to one bundle identity.
@@ -390,22 +387,18 @@ func scanPatternMatches(path string, patterns []string) bool {
 }
 
 func (service *ContextService) ready(ctx context.Context) error {
-	service.readyOnce.Do(func() {
-		if service.bundle == nil {
-			service.readyErr = fmt.Errorf("bundle is required")
-			return
-		}
-		if service.repoDir == "" {
-			service.readyErr = fmt.Errorf("repository directory is required")
-			return
-		}
-		result := ValidationResult{Errors: make([]ValidationNotice, 0)}
-		validateFreshTarget(ctx, &result, service.bundle, service.repoDir, service.runner)
-		if len(result.Errors) > 0 {
-			service.readyErr = &ProtocolError{Code: "stale_bundle", Message: result.Errors[0].Message}
-		}
-	})
-	return service.readyErr
+	if service.bundle == nil {
+		return fmt.Errorf("bundle is required")
+	}
+	if service.repoDir == "" {
+		return fmt.Errorf("repository directory is required")
+	}
+	result := ValidationResult{Errors: make([]ValidationNotice, 0)}
+	validateFreshTarget(ctx, &result, service.bundle, service.repoDir, service.runner)
+	if len(result.Errors) > 0 {
+		return &ProtocolError{Code: "stale_bundle", Message: result.Errors[0].Message}
+	}
+	return nil
 }
 
 func (service *ContextService) result(operation, result string) ContextResult {
