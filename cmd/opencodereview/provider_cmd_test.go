@@ -205,6 +205,130 @@ func TestApplyOfficialProviderConfig_MissingFields(t *testing.T) {
 	}
 }
 
+func TestApplyOfficialProviderConfig_EmptyKeyClearsSavedAPIKey(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "sk-from-env")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {
+				APIKey: "old-saved-key",
+				Model:  "deepseek-v4-flash",
+			},
+		},
+	}
+
+	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
+		provider: "deepseek",
+		model:    "deepseek-v4-flash",
+		apiKey:   "",
+	})
+	if err != nil {
+		t.Fatalf("applyOfficialProviderConfig: %v", err)
+	}
+	if got := cfg.Providers["deepseek"].APIKey; got != "" {
+		t.Errorf("in-memory APIKey = %q, want empty", got)
+	}
+	diskCfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got := diskCfg.Providers["deepseek"].APIKey; got != "" {
+		t.Errorf("persisted APIKey = %q, want empty", got)
+	}
+}
+
+func TestApplyCustomProviderConfig_EmptyKeyClearsSavedAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "aaa",
+		Model:    "test",
+		CustomProviders: map[string]ProviderEntry{
+			"aaa": {
+				URL:      "https://example.com/v1",
+				Protocol: "openai",
+				APIKey:   "old-saved-key",
+				Model:    "test",
+				Models:   []string{"test"},
+			},
+		},
+	}
+
+	err := applyCustomProviderConfig(configPath, cfg, providerTUIResult{
+		provider: "aaa",
+		model:    "test",
+		models:   []string{"test"},
+		apiKey:   "",
+		isCustom: true,
+		url:      "https://example.com/v1",
+		protocol: "openai",
+	})
+	if err != nil {
+		t.Fatalf("applyCustomProviderConfig: %v", err)
+	}
+	if got := cfg.CustomProviders["aaa"].APIKey; got != "" {
+		t.Errorf("APIKey = %q, want empty", got)
+	}
+}
+
+func TestProviderTUIResult_ResolvedModel(t *testing.T) {
+	r := providerTUIResult{
+		provider: "baidu-qianfan",
+		model:    "glm-5",
+	}
+	if got := r.resolvedModel(); got != "glm-5" {
+		t.Errorf("resolvedModel() = %q, want glm-5", got)
+	}
+
+	r = providerTUIResult{
+		provider: "baidu-qianfan",
+		sessionModelPick: map[string]string{
+			"baidu-qianfan": "glm-5",
+		},
+	}
+	if got := r.resolvedModel(); got != "glm-5" {
+		t.Errorf("resolvedModel() from session pick = %q, want glm-5", got)
+	}
+
+	r = providerTUIResult{provider: "baidu-qianfan"}
+	if got := r.resolvedModel(); got != "" {
+		t.Errorf("resolvedModel() = %q, want empty", got)
+	}
+}
+
+func TestApplyOfficialProviderConfig_UsesSessionModelPick(t *testing.T) {
+	t.Setenv("QIANFAN_API_KEY", "sk-from-env")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+
+	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
+		provider: "baidu-qianfan",
+		apiKey:   "",
+		sessionModelPick: map[string]string{
+			"baidu-qianfan": "glm-5",
+		},
+	})
+	if err != nil {
+		t.Fatalf("applyOfficialProviderConfig: %v", err)
+	}
+	if cfg.Provider != "baidu-qianfan" {
+		t.Errorf("Provider = %q, want baidu-qianfan", cfg.Provider)
+	}
+	if cfg.Model != "glm-5" {
+		t.Errorf("Model = %q, want glm-5", cfg.Model)
+	}
+}
+
 func TestPrintWizardCancelled(t *testing.T) {
 	tests := []struct {
 		name           string

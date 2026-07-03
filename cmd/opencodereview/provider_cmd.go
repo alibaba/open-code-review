@@ -139,7 +139,8 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	if result.provider == "" {
 		return fmt.Errorf("provider name is required")
 	}
-	if result.model == "" {
+	model := result.resolvedModel()
+	if model == "" {
 		return fmt.Errorf("model is required")
 	}
 
@@ -148,11 +149,11 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	}
 
 	entry := cfg.CustomProviders[result.provider]
-	entry.Model = result.model
+	entry.Model = model
 	if len(result.models) > 0 {
 		entry.Models = append([]string(nil), result.models...)
 	}
-	entry.Models = ensureModelInList(entry.Models, result.model)
+	entry.Models = ensureModelInList(entry.Models, model)
 	if result.url != "" {
 		entry.URL = result.url
 	}
@@ -168,14 +169,16 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	}
 	if result.apiKey != "" {
 		entry.APIKey = result.apiKey
+	} else {
+		entry.APIKey = ""
 	}
 	cfg.CustomProviders[result.provider] = entry
 
 	if !result.isEdit {
 		cfg.Provider = result.provider
-		cfg.Model = result.model
+		cfg.Model = model
 	} else if cfg.Provider == result.provider {
-		cfg.Model = result.model
+		cfg.Model = model
 	}
 
 	if err := saveConfig(configPath, cfg); err != nil {
@@ -188,13 +191,13 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 		} else {
 			fmt.Printf("\nCustom provider %q updated (not currently active).\n", result.provider)
 		}
-		fmt.Printf("Model: %s\n", result.model)
+		fmt.Printf("Model: %s\n", model)
 		fmt.Println("\nTip: run 'ocr config model' to switch model later.")
 		return nil
 	}
 
 	fmt.Printf("\nProvider set to: %s (custom)\n", result.provider)
-	fmt.Printf("Model: %s\n", result.model)
+	fmt.Printf("Model: %s\n", model)
 
 	fmt.Println("\nTesting connection...")
 	if err := runLLMTest(); err != nil {
@@ -208,7 +211,11 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 }
 
 func applyOfficialProviderConfig(configPath string, cfg *Config, result providerTUIResult) error {
-	if result.provider == "" || result.model == "" {
+	if result.provider == "" {
+		return fmt.Errorf("provider and model are required")
+	}
+	model := result.resolvedModel()
+	if model == "" {
 		return fmt.Errorf("provider and model are required")
 	}
 
@@ -229,12 +236,15 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	}
 
 	entry := cfg.Providers[result.provider]
-	entry.Model = result.model
+	entry.Model = model
 	if len(result.models) > 0 {
 		entry.Models = mergeModelLists(entry.Models, result.models)
 	}
 	if result.apiKey != "" {
 		entry.APIKey = result.apiKey
+	} else {
+		// Confirmed empty key: clear saved api_key so resolver falls back to $ENV_VAR.
+		entry.APIKey = ""
 	}
 	cfg.Providers[result.provider] = entry
 
@@ -242,14 +252,14 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 		cfg.Model = ""
 	}
 	cfg.Provider = result.provider
-	cfg.Model = result.model
+	cfg.Model = model
 
 	if err := saveConfig(configPath, cfg); err != nil {
 		return err
 	}
 
 	fmt.Printf("\nProvider set to: %s\n", result.provider)
-	fmt.Printf("Model: %s\n", result.model)
+	fmt.Printf("Model: %s\n", model)
 
 	fmt.Println("\nTesting connection...")
 	if err := runLLMTest(); err != nil {

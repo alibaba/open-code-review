@@ -58,17 +58,50 @@ type customProviderListItem struct {
 }
 
 type providerTUIResult struct {
-	provider       string
-	model          string
-	models         []string
-	apiKey         string
-	isCustom       bool
-	isEdit         bool
-	editTargetName string
-	isManual       bool
-	url            string
-	protocol       string
-	authHeader     string
+	provider         string
+	model            string
+	models           []string
+	apiKey           string
+	isCustom         bool
+	isEdit           bool
+	editTargetName   string
+	isManual         bool
+	url              string
+	protocol         string
+	authHeader       string
+	sessionModelPick map[string]string
+}
+
+// resolvedModel returns the model to persist, falling back to the in-session pick
+// for the provider being finalized when result.model is empty.
+func (r providerTUIResult) resolvedModel() string {
+	if r.model != "" {
+		return r.model
+	}
+	if r.sessionModelPick != nil {
+		if pick, ok := r.sessionModelPick[r.provider]; ok && pick != "" {
+			return pick
+		}
+	}
+	return ""
+}
+
+func (m providerTUIModel) sessionModelPickFor(providerName string) string {
+	if providerName == "" || m.sessionModelPick == nil {
+		return ""
+	}
+	return m.sessionModelPick[providerName]
+}
+
+func (m providerTUIModel) sessionModelPickSnapshot() map[string]string {
+	if len(m.sessionModelPick) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m.sessionModelPick))
+	for k, v := range m.sessionModelPick {
+		out[k] = v
+	}
+	return out
 }
 
 type providerTUIModel struct {
@@ -120,6 +153,9 @@ type providerTUIModel struct {
 	cancelled      bool
 	formError      string
 	savedInSession bool
+	// sessionModelPick remembers model choices per provider during a wizard run
+	// without persisting inactive-provider selections to disk.
+	sessionModelPick map[string]string
 
 	// --- delete confirmation ---
 	confirmingDelete      bool
@@ -434,11 +470,18 @@ func (m providerTUIModel) models() []string {
 	return nil
 }
 
-func (m *providerTUIModel) prepareModelSelection(currentModel string) {
+func (m *providerTUIModel) prepareModelSelection(providerName, configModel string) {
 	m.modelIdx = 0
 	m.customModel = false
 	m.modelInput.Blur()
 	m.modelInput.SetValue("")
+
+	currentModel := configModel
+	if providerName != "" && m.sessionModelPick != nil {
+		if pick, ok := m.sessionModelPick[providerName]; ok && pick != "" {
+			currentModel = pick
+		}
+	}
 
 	models := m.models()
 	if currentModel == "" {
@@ -453,6 +496,32 @@ func (m *providerTUIModel) prepareModelSelection(currentModel string) {
 	}
 	m.modelIdx = len(models)
 	m.modelInput.SetValue(currentModel)
+}
+
+func (m providerTUIModel) providerNameForModelStep() string {
+	switch m.activeTab {
+	case tabOfficial:
+		return m.currentProvider().Name
+	case tabCustom:
+		if cp, ok := m.selectedCustomProvider(); ok {
+			return cp.name
+		}
+	}
+	return ""
+}
+
+func (m *providerTUIModel) recordSessionModelPick(model string) {
+	if model == "" {
+		return
+	}
+	name := m.providerNameForModelStep()
+	if name == "" {
+		return
+	}
+	if m.sessionModelPick == nil {
+		m.sessionModelPick = make(map[string]string)
+	}
+	m.sessionModelPick[name] = model
 }
 
 func (m *providerTUIModel) customProviderEntry(name string, fallback ProviderEntry) ProviderEntry {
@@ -472,43 +541,9 @@ func (m *providerTUIModel) syncSessionModelSelection() error {
 	if model == "" {
 		return nil
 	}
-
-	switch m.activeTab {
-	case tabCustom:
-		cp, ok := m.selectedCustomProvider()
-		if !ok {
-			return nil
-		}
-		entry := m.customProviderEntry(cp.name, cp.entry)
-		entry.Model = model
-		if m.existingCfg.CustomProviders == nil {
-			m.existingCfg.CustomProviders = make(map[string]ProviderEntry)
-		}
-		m.existingCfg.CustomProviders[cp.name] = entry
-		cp.entry = entry
-		m.customProviders[m.customIdx] = cp
-		if m.existingCfg.Provider == cp.name {
-			m.existingCfg.Model = model
-		}
-	case tabOfficial:
-		provider := m.currentProvider()
-		if m.existingCfg.Providers == nil {
-			m.existingCfg.Providers = make(map[string]ProviderEntry)
-		}
-		entry := m.existingCfg.Providers[provider.Name]
-		entry.Model = model
-		m.existingCfg.Providers[provider.Name] = entry
-		if m.existingCfg.Provider == provider.Name {
-			m.existingCfg.Model = model
-		}
-	}
-
-	if m.configPath != "" {
-		if err := saveConfig(m.configPath, m.existingCfg); err != nil {
-			return fmt.Errorf("failed to save: %w", err)
-		}
-	}
-	m.savedInSession = true
+	// Remember the pick for in-wizard navigation only; persist provider/model on
+	// final confirm (applyOfficialProviderConfig / applyCustomProviderConfig).
+	m.recordSessionModelPick(model)
 	return nil
 }
 
@@ -797,6 +832,15 @@ func (m *providerTUIModel) beginAPIKeyReplace() {
 	m.apiKeyInput.SetValue("")
 }
 
+// customAPIKeyForSave reports the API key to persist and whether the user edited
+// the field (vs left the masked placeholder untouched).
+func (m providerTUIModel) customAPIKeyForSave() (key string, edited bool) {
+	if m.apiKeyMasked {
+		return m.apiKeyOriginal, false
+	}
+	return strings.TrimSpace(m.apiKeyInput.Value()), true
+}
+
 // beginManualTokenReplace is the manual-tab equivalent of beginAPIKeyReplace.
 func (m *providerTUIModel) beginManualTokenReplace() {
 	if !m.manualTokenMasked {
@@ -818,6 +862,34 @@ func (m *providerTUIModel) refreshModelSelectionForCustom() {
 	m.modelIdx = len(models) // land on "Enter custom model name..."
 }
 
+func officialProviderEnvKeySet(p llm.Provider) bool {
+	return p.EnvVar != "" && os.Getenv(p.EnvVar) != ""
+}
+
+func officialAPIKeyRequiredError(p llm.Provider) string {
+	if p.EnvVar != "" {
+		return fmt.Sprintf("API key is required (or set $%s)", p.EnvVar)
+	}
+	return "API key is required"
+}
+
+func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
+	if m.apiKeyOriginal != "" {
+		return true, ""
+	}
+	if !m.apiKeyMasked && strings.TrimSpace(m.apiKeyInput.Value()) != "" {
+		return true, ""
+	}
+	if m.activeTab == tabOfficial {
+		p := m.currentProvider()
+		if officialProviderEnvKeySet(p) {
+			return true, ""
+		}
+		return false, officialAPIKeyRequiredError(p)
+	}
+	return false, "API key is required"
+}
+
 func (m providerTUIModel) updateAPIKeyInput(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc":
@@ -826,6 +898,11 @@ func (m providerTUIModel) updateAPIKeyInput(key string, msg tea.KeyPressMsg) (te
 		m.formError = ""
 		return m, nil
 	case "enter":
+		if ok, errMsg := m.apiKeyStepCanConfirm(); !ok {
+			m.formError = errMsg
+			return m, nil
+		}
+		m.formError = ""
 		m.confirmed = true
 		return m, tea.Quit
 	case "ctrl+c":
@@ -932,6 +1009,8 @@ func authHeaderFormError(raw string) string {
 	)
 }
 
+const manualAuthTokenRequiredError = "Auth token is required (whitespace-only input is not accepted)"
+
 func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 	switch m.cpStep {
 	case cpStepName:
@@ -984,11 +1063,14 @@ func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 			// Edit succeeded — drop the user into the model list for this provider.
 			m.editingCustom = false
 			m.editTargetName = ""
+			m.apiKeyInput.SetValue("")
+			m.apiKeyMasked = false
+			m.apiKeyOriginal = ""
 			if idx := m.findCustomIdx(r.provider); idx >= 0 {
 				m.customIdx = idx
 			}
 			m.step = stepModel
-			m.prepareModelSelection(m.customProviderEntry(r.provider, ProviderEntry{}).Model)
+			m.prepareModelSelection(r.provider, m.customProviderEntry(r.provider, ProviderEntry{}).Model)
 			return m, nil
 		}
 		if m.creatingCustom {
@@ -1029,9 +1111,7 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 		URL:        r.url,
 		Protocol:   r.protocol,
 		AuthHeader: r.authHeader,
-	}
-	if r.apiKey != "" {
-		entry.APIKey = r.apiKey
+		APIKey:     strings.TrimSpace(m.apiKeyInput.Value()),
 	}
 	m.existingCfg.CustomProviders[r.provider] = entry
 
@@ -1057,7 +1137,7 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 	// Drop into the model selection step so the user picks/adds a model for
 	// the newly created provider right away.
 	m.step = stepModel
-	m.prepareModelSelection("")
+	m.prepareModelSelection(r.provider, "")
 	return m, nil
 }
 
@@ -1134,8 +1214,8 @@ func (m *providerTUIModel) applyEditCustomProviderSave() error {
 	entry.URL = r.url
 	entry.Protocol = r.protocol
 	entry.AuthHeader = r.authHeader
-	if r.apiKey != "" {
-		entry.APIKey = r.apiKey
+	if key, edited := m.customAPIKeyForSave(); edited {
+		entry.APIKey = key
 	}
 	// If name changed, delete old key
 	if r.editTargetName != "" && r.editTargetName != r.provider {
@@ -1492,9 +1572,11 @@ func (m providerTUIModel) handleManualFormEnter() (tea.Model, tea.Cmd) {
 		m.manualStep = manualStepAuthToken
 		return m, m.manualTokenInput.Focus()
 	case manualStepAuthToken:
-		if m.manualTokenInput.Value() == "" && m.manualTokenOriginal == "" {
+		if strings.TrimSpace(m.manualTokenInput.Value()) == "" && m.manualTokenOriginal == "" {
+			m.formError = manualAuthTokenRequiredError
 			return m, nil
 		}
+		m.formError = ""
 		m.manualTokenInput.Blur()
 		m.manualStep = manualStepAuthHeader
 		return m, m.manualAuthHeaderInput.Focus()
@@ -1577,7 +1659,7 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 					currentModel = activeModelForProvider(m.existingCfg, m.currentProvider().Name, entry)
 				}
 			}
-			m.prepareModelSelection(currentModel)
+			m.prepareModelSelection(m.currentProvider().Name, currentModel)
 			return m, nil
 
 		case tabCustom:
@@ -1597,7 +1679,7 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 			cp := m.customProviders[m.customIdx]
 			m.step = stepModel
 			entry := m.customProviderEntry(cp.name, cp.entry)
-			m.prepareModelSelection(activeModelForProvider(m.existingCfg, cp.name, entry))
+			m.prepareModelSelection(cp.name, activeModelForProvider(m.existingCfg, cp.name, entry))
 			return m, nil
 
 		case tabManual:
@@ -1716,24 +1798,28 @@ func (m providerTUIModel) result() providerTUIResult {
 	case tabOfficial:
 		p := m.currentProvider()
 		model := m.selectedModelFromState()
+		if model == "" {
+			model = m.sessionModelPickFor(p.Name)
+		}
 
 		apiKey := ""
 		if m.apiKeyMasked {
 			apiKey = m.apiKeyOriginal
 		} else {
-			apiKey = m.apiKeyInput.Value()
+			apiKey = strings.TrimSpace(m.apiKeyInput.Value())
 		}
 
 		return providerTUIResult{
-			provider: p.Name,
-			model:    model,
-			apiKey:   apiKey,
+			provider:         p.Name,
+			model:            model,
+			apiKey:           apiKey,
+			sessionModelPick: m.sessionModelPickSnapshot(),
 		}
 
 	case tabCustom:
 		if m.creatingCustom || m.editingCustom {
 			protocol := cpProtocols[m.cpProtocolIdx]
-			apiKey := m.apiKeyInput.Value()
+			apiKey := strings.TrimSpace(m.apiKeyInput.Value())
 			if m.apiKeyMasked {
 				apiKey = m.apiKeyOriginal
 			}
@@ -1762,23 +1848,27 @@ func (m providerTUIModel) result() providerTUIResult {
 			cp := m.customProviders[m.customIdx]
 			model := m.selectedModelFromState()
 			if model == "" {
+				model = m.sessionModelPickFor(cp.name)
+			}
+			if model == "" {
 				model = cp.entry.Model
 			}
 			apiKey := ""
 			if m.apiKeyMasked {
 				apiKey = m.apiKeyOriginal
 			} else {
-				apiKey = m.apiKeyInput.Value()
+				apiKey = strings.TrimSpace(m.apiKeyInput.Value())
 			}
 			return providerTUIResult{
-				provider:   cp.name,
-				model:      model,
-				models:     append([]string(nil), cp.entry.Models...),
-				apiKey:     apiKey,
-				isCustom:   true,
-				url:        cp.entry.URL,
-				protocol:   cp.entry.Protocol,
-				authHeader: cp.entry.AuthHeader,
+				provider:         cp.name,
+				model:            model,
+				models:           append([]string(nil), cp.entry.Models...),
+				apiKey:           apiKey,
+				isCustom:         true,
+				url:              cp.entry.URL,
+				protocol:         cp.entry.Protocol,
+				authHeader:       cp.entry.AuthHeader,
+				sessionModelPick: m.sessionModelPickSnapshot(),
 			}
 		}
 		return providerTUIResult{}
@@ -2192,13 +2282,20 @@ func (m providerTUIModel) viewAPIKey(s *strings.Builder) {
 		provider := m.currentProvider()
 		if envKey := os.Getenv(provider.EnvVar); envKey != "" {
 			s.WriteString("\n")
-			s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  $%s is set", provider.EnvVar)))
+			hasSavedKey := m.apiKeyMasked && m.apiKeyOriginal != ""
+			s.WriteString(tuiDimStyle.Render(officialAPIKeyEnvSetHintLine(provider.EnvVar, hasSavedKey)))
 			s.WriteString("\n")
 		} else {
 			s.WriteString("\n")
 			s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  Tip: You can also set via env var %s", provider.EnvVar)))
 			s.WriteString("\n")
 		}
+	}
+
+	if m.formError != "" {
+		s.WriteString("\n")
+		s.WriteString(tuiErrorStyle.Render("  " + m.formError))
+		s.WriteString("\n")
 	}
 
 	s.WriteString("\n")
@@ -2246,6 +2343,17 @@ func savedSecretReplaceHint(original string) string {
 
 func savedSecretReplaceHintLine(original string) string {
 	return "  " + savedSecretReplaceHint(original)
+}
+
+func officialAPIKeyEnvSetHint(envVar string, hasSavedKey bool) string {
+	if hasSavedKey {
+		return fmt.Sprintf("$%s is set; used only when no key is saved here.", envVar)
+	}
+	return fmt.Sprintf("$%s is set. Leave empty to use it; enter a key here to override.", envVar)
+}
+
+func officialAPIKeyEnvSetHintLine(envVar string, hasSavedKey bool) string {
+	return "  " + officialAPIKeyEnvSetHint(envVar, hasSavedKey)
 }
 
 // --- Styles ---

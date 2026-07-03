@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1522,6 +1523,269 @@ func TestSyncSessionModelSelection_EmptyModel(t *testing.T) {
 	err := m.syncSessionModelSelection()
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestSyncSessionModelSelection_CrossOfficialProviderNoPersist(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "baidu-qianfan" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.modelIdx = 0
+	for i, name := range m.models() {
+		if name == "glm-5" {
+			m.modelIdx = i
+			break
+		}
+	}
+
+	if err := m.syncSessionModelSelection(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.savedInSession {
+		t.Error("savedInSession should be false when browsing a non-active provider")
+	}
+	if _, err := os.Stat(configPath); err == nil {
+		t.Fatal("config file should not be written for cross-provider navigation")
+	}
+	if got := cfg.Providers["baidu-qianfan"].Model; got != "" {
+		t.Errorf("in-memory baidu model = %q, want empty", got)
+	}
+}
+
+func TestSyncSessionModelSelection_ActiveOfficialProviderDefersPersist(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabOfficial
+	for i, name := range m.models() {
+		if name == "deepseek-v4-pro" {
+			m.modelIdx = i
+			break
+		}
+	}
+
+	if err := m.syncSessionModelSelection(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.savedInSession {
+		t.Error("savedInSession should be false before wizard confirm")
+	}
+	if got := m.sessionModelPick["deepseek"]; got != "deepseek-v4-pro" {
+		t.Errorf("sessionModelPick = %q, want deepseek-v4-pro", got)
+	}
+	if _, err := os.Stat(configPath); err == nil {
+		t.Fatal("config file should not be written before wizard confirm")
+	}
+	if cfg.Model != "deepseek-v4-flash" {
+		t.Errorf("cfg.Model = %q, want deepseek-v4-flash", cfg.Model)
+	}
+}
+
+func TestSyncSessionModelSelection_CrossCustomProviderNoPersist(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "stepfun",
+		Model:    "step-3.5-flash",
+		CustomProviders: map[string]ProviderEntry{
+			"stepfun": {
+				URL:    "https://api.stepfun.com/v1",
+				Model:  "step-3.5-flash",
+				Models: []string{"step-3.5-flash", "step-3.7-flash"},
+			},
+			"other": {
+				URL:    "https://example.com/v1",
+				Model:  "step-3.7-flash",
+				Models: []string{"step-3.7-flash"},
+			},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabCustom
+	for i, cp := range m.customProviders {
+		if cp.name == "other" {
+			m.customIdx = i
+			break
+		}
+	}
+	m.modelIdx = 0
+
+	if err := m.syncSessionModelSelection(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.savedInSession {
+		t.Error("savedInSession should be false when browsing a non-active custom provider")
+	}
+	if _, err := os.Stat(configPath); err == nil {
+		t.Fatal("config file should not be written for cross-provider navigation")
+	}
+}
+
+func TestSyncSessionModelSelection_RecordsSessionPickForInactiveOfficialProvider(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "baidu-qianfan" {
+			m.officialIdx = i
+			break
+		}
+	}
+	for i, name := range m.models() {
+		if name == "glm-5" {
+			m.modelIdx = i
+			break
+		}
+	}
+
+	if err := m.syncSessionModelSelection(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.savedInSession {
+		t.Error("savedInSession should be false for inactive provider")
+	}
+	if got := m.sessionModelPick["baidu-qianfan"]; got != "glm-5" {
+		t.Errorf("sessionModelPick = %q, want glm-5", got)
+	}
+	if _, err := os.Stat(configPath); err == nil {
+		t.Fatal("config file should not be written for inactive provider")
+	}
+}
+
+func TestProviderTUI_ResultUsesSessionModelPickWhenSelectionEmpty(t *testing.T) {
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "baidu-qianfan" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.sessionModelPick = map[string]string{"baidu-qianfan": "glm-5"}
+	m.modelIdx = 9999 // force selectedModelFromState() empty
+
+	r := m.result()
+	if r.model != "glm-5" {
+		t.Errorf("result().model = %q, want glm-5", r.model)
+	}
+	if got := r.resolvedModel(); got != "glm-5" {
+		t.Errorf("resolvedModel() = %q, want glm-5", got)
+	}
+}
+
+func TestApiKeyStepCanConfirm_OfficialEmptyWithoutEnv(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	m.step = stepAPIKey
+
+	ok, errMsg := m.apiKeyStepCanConfirm()
+	if ok {
+		t.Fatal("expected confirmation to be blocked")
+	}
+	if errMsg != "API key is required (or set $DEEPSEEK_API_KEY)" {
+		t.Errorf("errMsg = %q", errMsg)
+	}
+}
+
+func TestApiKeyStepCanConfirm_OfficialEmptyWithEnv(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "sk-from-env")
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	m.step = stepAPIKey
+
+	ok, errMsg := m.apiKeyStepCanConfirm()
+	if !ok {
+		t.Fatalf("expected confirmation allowed, errMsg = %q", errMsg)
+	}
+}
+
+func TestApiKeyStepCanConfirm_CustomEmpty(t *testing.T) {
+	cfg := &Config{
+		Provider: "stepfun",
+		CustomProviders: map[string]ProviderEntry{
+			"stepfun": {APIKey: ""},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabCustom
+	m.customIdx = 0
+	m.step = stepAPIKey
+
+	ok, errMsg := m.apiKeyStepCanConfirm()
+	if ok {
+		t.Fatal("expected confirmation to be blocked")
+	}
+	if errMsg != "API key is required" {
+		t.Errorf("errMsg = %q", errMsg)
+	}
+}
+
+func TestApiKeyStepCanConfirm_MaskedSavedKey(t *testing.T) {
+	cfg := &Config{
+		Provider: "deepseek",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {APIKey: "keep-me"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	m.step = stepAPIKey
+	m.loadExistingAPIKey()
+
+	ok, errMsg := m.apiKeyStepCanConfirm()
+	if !ok {
+		t.Fatalf("expected confirmation allowed, errMsg = %q", errMsg)
 	}
 }
 

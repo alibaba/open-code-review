@@ -445,10 +445,75 @@ func TestProviderTUI_ManualFormRequiresTokenOnFirstSetup(t *testing.T) {
 	m.manualTokenInput.SetValue("")
 	m.manualTokenInput.Focus()
 
-	result, _ := m.Update(enterKey())
+	result, cmd := m.Update(enterKey())
 	m2 := result.(providerTUIModel)
 	if m2.manualStep != manualStepAuthToken {
 		t.Errorf("should stay on auth token step, got %d", m2.manualStep)
+	}
+	if m2.formError != manualAuthTokenRequiredError {
+		t.Errorf("formError = %q, want %q", m2.formError, manualAuthTokenRequiredError)
+	}
+	if cmd != nil {
+		t.Error("Enter with empty token should not quit")
+	}
+}
+
+func TestProviderTUI_ManualFormRejectsWhitespaceOnlyToken(t *testing.T) {
+	m := newProviderTUI(&Config{}, "")
+	m.inManualForm = true
+	m.manualStep = manualStepAuthToken
+	m.manualTokenInput.SetValue("   ")
+	m.manualTokenInput.Focus()
+
+	result, cmd := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.manualStep != manualStepAuthToken {
+		t.Errorf("should stay on auth token step, got %d", m2.manualStep)
+	}
+	if m2.formError != manualAuthTokenRequiredError {
+		t.Errorf("formError = %q, want %q", m2.formError, manualAuthTokenRequiredError)
+	}
+	if cmd != nil {
+		t.Error("Enter with whitespace-only token should not quit")
+	}
+}
+
+func TestProviderTUI_SessionModelPickSurvivesOfficialProviderSwitch(t *testing.T) {
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "baidu-qianfan" {
+			m.officialIdx = i
+			break
+		}
+	}
+
+	result, _ := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	m2.modelIdx = modelIdxForName(t, m2, "glm-5")
+
+	result, _ = m2.Update(enterKey())
+	m3 := result.(providerTUIModel)
+	if got := m3.sessionModelPick["baidu-qianfan"]; got != "glm-5" {
+		t.Errorf("sessionModelPick = %q, want glm-5", got)
+	}
+
+	result, _ = m3.Update(escKey())
+	m4 := result.(providerTUIModel)
+	result, _ = m4.Update(escKey())
+	m5 := result.(providerTUIModel)
+
+	result, _ = m5.Update(enterKey())
+	m6 := result.(providerTUIModel)
+	if got := m6.models()[m6.modelIdx]; got != "glm-5" {
+		t.Errorf("model cursor = %q, want glm-5", got)
 	}
 }
 
@@ -680,6 +745,180 @@ func TestProviderTUI_EditCustomProviderSaveRejectsDuplicateRename(t *testing.T) 
 	}
 	if cfg.CustomProviders["other"].URL != "https://other.example.com" {
 		t.Errorf("provider 'other' URL = %q, want unchanged", cfg.CustomProviders["other"].URL)
+	}
+}
+
+func TestApplyEditCustomProviderSave_ClearsAPIKeyWhenEditedEmpty(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		CustomProviders: map[string]ProviderEntry{
+			"aaa": {
+				URL:      "https://example.com/v1",
+				Protocol: "anthropic",
+				APIKey:   "old-saved-key",
+				Model:    "test",
+				Models:   []string{"test"},
+			},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabCustom
+	m.editingCustom = true
+	m.editTargetName = "aaa"
+	m.cpProtocolIdx = 0
+	m.cpNameInput.SetValue("aaa")
+	m.cpURLInput.SetValue("https://example.com/v1")
+	m.beginAPIKeyReplace()
+
+	if err := m.applyEditCustomProviderSave(); err != nil {
+		t.Fatalf("applyEditCustomProviderSave: %v", err)
+	}
+	if got := cfg.CustomProviders["aaa"].APIKey; got != "" {
+		t.Errorf("APIKey = %q, want empty", got)
+	}
+	diskCfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got := diskCfg.CustomProviders["aaa"].APIKey; got != "" {
+		t.Errorf("persisted APIKey = %q, want empty", got)
+	}
+}
+
+func TestApplyEditCustomProviderSave_PreservesAPIKeyWhenMasked(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		CustomProviders: map[string]ProviderEntry{
+			"aaa": {
+				URL:      "https://example.com/v1",
+				Protocol: "anthropic",
+				APIKey:   "keep-me",
+			},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabCustom
+	m.customIdx = 0
+	m.enterEditCustomProvider()
+
+	if err := m.applyEditCustomProviderSave(); err != nil {
+		t.Fatalf("applyEditCustomProviderSave: %v", err)
+	}
+	if got := cfg.CustomProviders["aaa"].APIKey; got != "keep-me" {
+		t.Errorf("APIKey = %q, want keep-me", got)
+	}
+}
+
+func TestProviderTUI_EditCustomClearKey_NoMaskedOnStepAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		CustomProviders: map[string]ProviderEntry{
+			"aaa": {
+				URL:      "https://example.com/v1",
+				Protocol: "anthropic",
+				APIKey:   "old-saved-key",
+				Model:    "test",
+				Models:   []string{"test", "aaa"},
+			},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabCustom
+	for i, cp := range m.customProviders {
+		if cp.name == "aaa" {
+			m.customIdx = i
+			break
+		}
+	}
+	m.enterEditCustomProvider()
+	m.cpStep = cpStepAPIKey
+	m.beginAPIKeyReplace()
+	m.cpStep = cpStepAuthHeader
+	m.cpAuthInput.SetValue("")
+	m.cpAuthInput.Focus()
+
+	result, _ := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.step != stepModel {
+		t.Fatalf("step = %d, want stepModel", m2.step)
+	}
+	if got := m2.customProviders[m2.customIdx].entry.APIKey; got != "" {
+		t.Errorf("saved APIKey = %q, want empty", got)
+	}
+
+	m2.modelIdx = modelIdxForName(t, m2, "test")
+	result, _ = m2.Update(enterKey())
+	m3 := result.(providerTUIModel)
+	if m3.step != stepAPIKey {
+		t.Fatalf("step = %d, want stepAPIKey", m3.step)
+	}
+	if m3.apiKeyMasked {
+		t.Error("apiKeyMasked should be false after clearing key in edit")
+	}
+	got := stripANSI(m3.View().Content)
+	if strings.Contains(got, "Type or paste to replace the saved key") {
+		t.Errorf("view should not show replace hint; got:\n%s", got)
+	}
+}
+
+func TestProviderTUI_ReenterEditAfterClearKey_ShowsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		CustomProviders: map[string]ProviderEntry{
+			"aaa": {
+				URL:      "https://example.com/v1",
+				Protocol: "anthropic",
+				APIKey:   "old-saved-key",
+			},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabCustom
+	m.customIdx = 0
+	m.editingCustom = true
+	m.editTargetName = "aaa"
+	m.cpProtocolIdx = 0
+	m.cpNameInput.SetValue("aaa")
+	m.cpURLInput.SetValue("https://example.com/v1")
+	m.beginAPIKeyReplace()
+	if err := m.applyEditCustomProviderSave(); err != nil {
+		t.Fatalf("applyEditCustomProviderSave: %v", err)
+	}
+
+	m.enterEditCustomProvider()
+	if m.apiKeyMasked {
+		t.Error("apiKeyMasked should be false when key was cleared")
+	}
+	if got := m.apiKeyInput.Value(); got != "" {
+		t.Errorf("apiKeyInput = %q, want empty", got)
+	}
+}
+
+func TestCustomAPIKeyForSave(t *testing.T) {
+	m := providerTUIModel{
+		apiKeyMasked:   true,
+		apiKeyOriginal: "keep-me",
+	}
+	key, edited := m.customAPIKeyForSave()
+	if edited {
+		t.Fatal("masked key should not count as edited")
+	}
+	if key != "keep-me" {
+		t.Errorf("key = %q, want keep-me", key)
+	}
+
+	m.apiKeyMasked = false
+	m.apiKeyInput.SetValue("  ")
+	key, edited = m.customAPIKeyForSave()
+	if !edited {
+		t.Fatal("cleared field should count as edited")
+	}
+	if key != "" {
+		t.Errorf("key = %q, want empty", key)
 	}
 }
 
@@ -1767,6 +2006,78 @@ func TestProviderTUI_ViewAPIKey_FreshHidesReplaceHint(t *testing.T) {
 	}
 }
 
+func TestOfficialAPIKeyEnvSetHint(t *testing.T) {
+	const envVar = "DEEPSEEK_API_KEY"
+	if got := officialAPIKeyEnvSetHint(envVar, false); got != "$DEEPSEEK_API_KEY is set. Leave empty to use it; enter a key here to override." {
+		t.Errorf("no saved key hint = %q", got)
+	}
+	if got := officialAPIKeyEnvSetHint(envVar, true); got != "$DEEPSEEK_API_KEY is set; used only when no key is saved here." {
+		t.Errorf("saved key hint = %q", got)
+	}
+}
+
+func TestProviderTUI_ViewAPIKey_EnvSetNoSavedKey(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "sk-from-env")
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "deepseek" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepAPIKey
+	m.loadExistingAPIKey()
+	m.apiKeyInput.Focus()
+
+	got := stripANSI(m.View().Content)
+	want := "$DEEPSEEK_API_KEY is set. Leave empty to use it; enter a key here to override."
+	if !strings.Contains(got, want) {
+		t.Errorf("view missing env hint; want %q; got:\n%s", want, got)
+	}
+}
+
+func TestProviderTUI_ViewAPIKey_EnvSetWithSavedKey(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "sk-from-env")
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {APIKey: "sk-secret-1234567890abcd", Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "deepseek" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepAPIKey
+	m.loadExistingAPIKey()
+	m.apiKeyInput.Focus()
+
+	got := stripANSI(m.View().Content)
+	if !strings.Contains(got, "Type or paste to replace the saved key") {
+		t.Errorf("view missing replace hint; got:\n%s", got)
+	}
+	want := "$DEEPSEEK_API_KEY is set; used only when no key is saved here."
+	if !strings.Contains(got, want) {
+		t.Errorf("view missing env hint; want %q; got:\n%s", want, got)
+	}
+	if strings.Contains(got, "Leave empty to use it") {
+		t.Errorf("saved-key view should not show empty-env hint; got:\n%s", got)
+	}
+}
+
 func TestProviderTUI_ApiKeyPasteReplacesMaskedKey(t *testing.T) {
 	cfg := &Config{
 		Provider: "stepfun",
@@ -1885,9 +2196,352 @@ func TestProviderTUI_ApiKeyEnterWithoutEditKeepsOriginal(t *testing.T) {
 	m.customIdx = 0
 	m.step = stepAPIKey
 	m.loadExistingAPIKey()
+	m.apiKeyInput.Focus()
 
 	if r := m.result(); r.apiKey != "keep-me" {
 		t.Fatalf("before edit result().apiKey = %q", r.apiKey)
+	}
+
+	result, cmd := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if !m2.confirmed {
+		t.Error("Enter without edit should confirm")
+	}
+	if cmd == nil {
+		t.Error("Enter without edit should quit")
+	}
+	if r := m2.result(); r.apiKey != "keep-me" {
+		t.Errorf("after Enter result().apiKey = %q, want keep-me", r.apiKey)
+	}
+}
+
+func TestProviderTUI_ApiKeyClearSavedKeyReturnsEmpty(t *testing.T) {
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {APIKey: "old-saved-key", Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "deepseek" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepAPIKey
+	m.loadExistingAPIKey()
+	m.beginAPIKeyReplace()
+
+	if r := m.result(); r.apiKey != "" {
+		t.Errorf("result().apiKey = %q, want empty after clearing saved key", r.apiKey)
+	}
+}
+
+func TestProviderTUI_ApiKeyResultTrimSpace(t *testing.T) {
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "deepseek" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepAPIKey
+	m.apiKeyInput.SetValue("   ")
+
+	if r := m.result(); r.apiKey != "" {
+		t.Errorf("result().apiKey = %q, want empty for whitespace-only input", r.apiKey)
+	}
+}
+
+func TestProviderTUI_OfficialApiKeyEmptyWithoutEnvBlocksEnter(t *testing.T) {
+	cfg := &Config{
+		Provider: "dashscope",
+		Model:    "qwen3.7-max",
+		Providers: map[string]ProviderEntry{
+			"dashscope": {},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "dashscope" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepAPIKey
+	m.loadExistingAPIKey()
+	m.apiKeyInput.Focus()
+
+	t.Setenv("DASHSCOPE_API_KEY", "")
+
+	result, cmd := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.step != stepAPIKey {
+		t.Errorf("step = %d, want stepAPIKey", m2.step)
+	}
+	if m2.formError != "API key is required (or set $DASHSCOPE_API_KEY)" {
+		t.Errorf("formError = %q", m2.formError)
+	}
+	if cmd != nil {
+		t.Error("Enter without key or env should not quit")
+	}
+}
+
+func TestProviderTUI_OfficialApiKeyEmptyWithEnvAllowsEnter(t *testing.T) {
+	cfg := &Config{
+		Provider: "dashscope",
+		Model:    "qwen3.7-max",
+		Providers: map[string]ProviderEntry{
+			"dashscope": {},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "dashscope" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepAPIKey
+	m.loadExistingAPIKey()
+	m.apiKeyInput.Focus()
+
+	t.Setenv("DASHSCOPE_API_KEY", "sk-from-env")
+
+	result, cmd := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if !m2.confirmed {
+		t.Error("Enter with env set should confirm")
+	}
+	if cmd == nil {
+		t.Error("Enter with env set should quit")
+	}
+	if m2.formError != "" {
+		t.Errorf("formError = %q, want empty", m2.formError)
+	}
+}
+
+func TestProviderTUI_CustomExistingApiKeyEmptyBlocksEnter(t *testing.T) {
+	cfg := &Config{
+		Provider: "stepfun",
+		CustomProviders: map[string]ProviderEntry{
+			"stepfun": {APIKey: "old-key"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabCustom
+	m.customIdx = 0
+	m.step = stepAPIKey
+	m.loadExistingAPIKey()
+	m.apiKeyInput.Focus()
+	m.beginAPIKeyReplace()
+
+	result, cmd := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.step != stepAPIKey {
+		t.Errorf("step = %d, want stepAPIKey", m2.step)
+	}
+	if m2.formError != "API key is required" {
+		t.Errorf("formError = %q, want %q", m2.formError, "API key is required")
+	}
+	if cmd != nil {
+		t.Error("Enter with cleared key should not quit")
+	}
+}
+
+func TestProviderTUI_CustomCreateApiKeyOptional(t *testing.T) {
+	m := newProviderTUI(&Config{}, "")
+	m.activeTab = tabCustom
+	m.creatingCustom = true
+	m.cpStep = cpStepAPIKey
+	m.apiKeyInput.SetValue("")
+	m.apiKeyInput.Focus()
+
+	result, _ := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.cpStep != cpStepAuthHeader {
+		t.Errorf("cpStep = %d, want cpStepAuthHeader", m2.cpStep)
+	}
+	if m2.formError != "" {
+		t.Errorf("formError = %q, want empty for optional API key", m2.formError)
+	}
+}
+
+func TestProviderTUI_ViewAPIKey_ShowsFormError(t *testing.T) {
+	cfg := &Config{
+		Provider: "dashscope",
+		Model:    "qwen3.7-max",
+		Providers: map[string]ProviderEntry{
+			"dashscope": {},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "dashscope" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepAPIKey
+	m.loadExistingAPIKey()
+	m.formError = "API key is required (or set $DASHSCOPE_API_KEY)"
+	m.apiKeyInput.Focus()
+
+	got := stripANSI(m.View().Content)
+	if !strings.Contains(got, "API key is required (or set $DASHSCOPE_API_KEY)") {
+		t.Errorf("view missing formError; got:\n%s", got)
+	}
+}
+
+func TestProviderTUI_CancelIncompleteOfficialProviderSwitch_NoPersistedChanges(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "baidu-qianfan" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepModel
+	m.modelIdx = modelIdxForName(t, m, "glm-5")
+
+	result, _ := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.savedInSession {
+		t.Error("savedInSession should be false for cross-provider navigation")
+	}
+	if m2.step != stepAPIKey {
+		t.Fatalf("step = %d, want stepAPIKey", m2.step)
+	}
+
+	result, _ = m2.Update(escKey())
+	m3 := result.(providerTUIModel)
+	result, _ = m3.Update(escKey())
+	m4 := result.(providerTUIModel)
+	result, cmd := m4.Update(escKey())
+	m5 := result.(providerTUIModel)
+	if !m5.cancelled {
+		t.Error("expected cancelled = true")
+	}
+	if m5.savedInSession {
+		t.Error("savedInSession should remain false after cancel")
+	}
+	if cmd == nil {
+		t.Error("expected tea.Quit on final Esc")
+	}
+	if _, err := os.Stat(configPath); err == nil {
+		diskCfg, err := loadOrCreateConfig(configPath)
+		if err != nil {
+			t.Fatalf("load config: %v", err)
+		}
+		if diskCfg.Provider != "deepseek" {
+			t.Errorf("Provider = %q, want deepseek", diskCfg.Provider)
+		}
+		if entry, ok := diskCfg.Providers["baidu-qianfan"]; ok && entry.Model != "" {
+			t.Errorf("baidu-qianfan model = %q, want no cross-provider draft persisted", entry.Model)
+		}
+	}
+}
+
+func TestProviderTUI_SameOfficialProviderModelChange_DefersPersistUntilConfirm(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabOfficial
+	m.step = stepModel
+	m.modelIdx = modelIdxForName(t, m, "deepseek-v4-pro")
+
+	result, _ := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.savedInSession {
+		t.Error("savedInSession should be false before API key confirm")
+	}
+	if m2.step != stepAPIKey {
+		t.Fatalf("step = %d, want stepAPIKey", m2.step)
+	}
+	if _, err := os.Stat(configPath); err == nil {
+		t.Fatal("config should not be written before wizard confirm")
+	}
+	if cfg.Model != "deepseek-v4-flash" {
+		t.Errorf("cfg.Model = %q, want deepseek-v4-flash", cfg.Model)
+	}
+}
+
+func TestProviderTUI_OfficialModelChangeBlockedAtAPIKey_KeepsGlobalModel(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "anthropic",
+		Model:    "claude-opus-4-8",
+		Providers: map[string]ProviderEntry{
+			"anthropic": {
+				Model:  "claude-opus-4-8",
+				APIKey: "sk-test-key",
+			},
+		},
+	}
+	m := newProviderTUI(cfg, configPath)
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "anthropic" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepModel
+	m.modelIdx = modelIdxForName(t, m, "claude-opus-4-7")
+
+	result, _ := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	m2.beginAPIKeyReplace()
+
+	result, cmd := m2.Update(enterKey())
+	m3 := result.(providerTUIModel)
+	if cmd != nil {
+		t.Error("Enter without key or env should not quit")
+	}
+	if m3.step != stepAPIKey {
+		t.Fatalf("step = %d, want stepAPIKey", m3.step)
+	}
+	if cfg.Model != "claude-opus-4-8" {
+		t.Errorf("cfg.Model = %q, want claude-opus-4-8", cfg.Model)
+	}
+	if got := cfg.Providers["anthropic"].Model; got != "claude-opus-4-8" {
+		t.Errorf("providers.anthropic.Model = %q, want claude-opus-4-8", got)
+	}
+	if _, err := os.Stat(configPath); err == nil {
+		t.Fatal("config should not be written when API key validation fails")
 	}
 }
 
