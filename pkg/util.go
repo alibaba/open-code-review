@@ -1,3 +1,1 @@
 package pkg
-
-func Util() {}
