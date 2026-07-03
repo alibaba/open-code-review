@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
@@ -109,9 +110,24 @@ function buildFlatDocList(): { slug: DocSlug; labelKey: string }[] {
 }
 
 const flatDocList = buildFlatDocList();
+const validSlugs = new Set<DocSlug>(flatDocList.map(d => d.slug));
+
+/* Dev-time invariant: every sidebar slug maps to exactly one URL, so duplicates
+ * (two menu entries sharing a slug) would silently collide. Fail loudly in dev. */
+if (process.env.NODE_ENV !== 'production' && validSlugs.size !== flatDocList.length) {
+  const slugs = flatDocList.map(d => d.slug);
+  const dupes = [...new Set(slugs.filter((s, i) => slugs.indexOf(s) !== i))];
+  throw new Error(
+    `[docs] Duplicate sidebar slug(s) detected: ${dupes.join(', ')} — each doc must have a unique slug for routing.`
+  );
+}
 
 const DocsPage: React.FC = () => {
-  const [activeSlug, setActiveSlug] = useState<DocSlug>('quickstart');
+  const { slug: slugParam } = useParams<{ slug?: string }>();
+  const navigate = useNavigate();
+  /* Active doc slug is derived from the URL param, falling back to quickstart */
+  const activeSlug: DocSlug =
+    slugParam && validSlugs.has(slugParam as DocSlug) ? (slugParam as DocSlug) : 'quickstart';
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({ 'sb-integrations': false });
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [hoveredHeadingId, setHoveredHeadingId] = useState<string>('');
@@ -162,10 +178,10 @@ const DocsPage: React.FC = () => {
   }, []);
 
   const navigateToDoc = useCallback((slug: DocSlug) => {
-    setActiveSlug(slug);
+    navigate(`/docs/${slug}`);
     // Scroll page to top
     window.scrollTo(0, 0);
-  }, []);
+  }, [navigate]);
 
   /* Intercept clicks on internal doc links and convert to SPA navigation */
   const handleContentClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -194,8 +210,7 @@ const DocsPage: React.FC = () => {
     const slugMap: Record<string, DocSlug> = { 'ci': 'cicd' };
     const slug = (slugMap[lastSegment] || lastSegment) as DocSlug;
     // Verify it's a valid doc slug
-    const validSlugs = flatDocList.map(d => d.slug);
-    if (validSlugs.includes(slug)) {
+    if (validSlugs.has(slug)) {
       e.preventDefault();
       navigateToDoc(slug);
       // Handle anchor scroll after navigation with reliable retry

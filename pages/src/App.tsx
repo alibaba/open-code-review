@@ -23,6 +23,7 @@ const App: React.FC = () => {
         <Route path="/benchmark" element={<LandingPage><BenchmarkPage /></LandingPage>} />
         <Route path="/quickstart" element={<LandingPage><QuickStartPage /></LandingPage>} />
         <Route path="/docs" element={<DocsPage />} />
+        <Route path="/docs/:slug" element={<DocsPage />} />
       </Routes>
     </>
   );
