@@ -42,14 +42,4 @@ After confirming that the facts visible in the diff are accurate, determine whet
 
 ### Output
 
-Return all incorrect review comment IDs directly, without any explanation. Use JSON array format:
-
-```json
-["id-xxx", "id-yyy"]
-```
-
-If there are no review comments that can be confirmed as incorrect, return an empty array:
-
-```json
-[]
-```
+Call the `submit_filter_result` tool with the IDs of all review comments that can be confirmed as incorrect, without any explanation.
