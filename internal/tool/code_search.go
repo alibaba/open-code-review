@@ -34,6 +34,9 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 	var patterns []string
 	for _, item := range filePatternsIface {
 		if s, ok := item.(string); ok && s != "" {
+			if hasTraversalPathComponent(s) {
+				return "Error: file_patterns must not contain ..", nil
+			}
 			patterns = append(patterns, s)
 		}
 	}
@@ -83,6 +86,15 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	cmdArgs = append(cmdArgs, pathspec...)
 
 	return cmdArgs
+}
+
+func hasTraversalPathComponent(pathspec string) bool {
+	for _, part := range strings.Split(pathspec, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []string) (string, string, error) {

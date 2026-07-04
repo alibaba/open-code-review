@@ -433,6 +433,54 @@ func TestCodeSearchProvider_Execute_WithFilePatterns(t *testing.T) {
 	}
 }
 
+func TestCodeSearchProvider_Execute_RejectsTraversalPattern(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	tests := []struct {
+		name    string
+		pattern string
+		want    string
+	}{
+		{name: "leading parent", pattern: "../pkg", want: "Error: file_patterns must not contain .."},
+		{name: "middle parent", pattern: "pkg/../internal", want: "Error: file_patterns must not contain .."},
+		{name: "trailing parent", pattern: "pkg/..", want: "Error: file_patterns must not contain .."},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := p.Execute(context.Background(), map[string]any{
+				"search_text":   "Hello",
+				"file_patterns": []any{test.pattern},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Errorf("Execute() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestCodeSearchProvider_Execute_AllowsDoubleDotInFilename(t *testing.T) {
+	dir := setupTestRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "foo..bar.go"), []byte("package main\n\nfunc DoubleDotName() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	got, err := p.Execute(context.Background(), map[string]any{
+		"search_text":   "DoubleDotName",
+		"file_patterns": []any{"foo..bar.go"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "foo..bar.go") {
+		t.Errorf("expected foo..bar.go in result, got: %s", got)
+	}
+}
+
 func TestCodeSearchProvider_Execute_CaseSensitive(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
