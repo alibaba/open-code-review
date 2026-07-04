@@ -140,15 +140,15 @@ func peekSession(path string) (SessionSummary, error) {
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
 
-	var lastSessionEnd []byte
+	var lastSessionEnd map[string]any
 	for scanner.Scan() {
 		line := scanner.Bytes()
+		var rec map[string]any
+		if err := json.Unmarshal(line, &rec); err != nil {
+			continue
+		}
 
 		if summary.Timestamp.IsZero() {
-			var rec map[string]any
-			if err := json.Unmarshal(line, &rec); err != nil {
-				continue
-			}
 			if ts, ok := rec["timestamp"].(string); ok {
 				summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
 			}
@@ -175,33 +175,25 @@ func peekSession(path string) (SessionSummary, error) {
 			}
 			parseAgentSessionStartFields(rec, &summary)
 		}
-		var rec map[string]any
-		if err := json.Unmarshal(line, &rec); err == nil {
-			if typ, _ := rec["type"].(string); typ == "session_end" {
-				lastSessionEnd = append([]byte(nil), line...)
-			}
+		if typ, _ := rec["type"].(string); typ == "session_end" {
+			lastSessionEnd = rec
 		}
 	}
 
-	if len(lastSessionEnd) > 0 {
-		var rec map[string]any
-		if err := json.Unmarshal(lastSessionEnd, &rec); err == nil {
-			if typ, _ := rec["type"].(string); typ == "session_end" {
-				if dur, ok := rec["duration_seconds"].(float64); ok {
-					summary.DurationSec = dur
-				}
-				if files, ok := rec["files_reviewed"].([]any); ok {
-					summary.FilesReviewed = make([]string, 0, len(files))
-					for _, fv := range files {
-						if s, ok := fv.(string); ok {
-							summary.FilesReviewed = append(summary.FilesReviewed, s)
-						}
-					}
-				}
-				if f, ok := rec["llm_failures"].(float64); ok {
-					summary.LLMFailures = int(f)
+	if lastSessionEnd != nil {
+		if dur, ok := lastSessionEnd["duration_seconds"].(float64); ok {
+			summary.DurationSec = dur
+		}
+		if files, ok := lastSessionEnd["files_reviewed"].([]any); ok {
+			summary.FilesReviewed = make([]string, 0, len(files))
+			for _, fv := range files {
+				if s, ok := fv.(string); ok {
+					summary.FilesReviewed = append(summary.FilesReviewed, s)
 				}
 			}
+		}
+		if f, ok := lastSessionEnd["llm_failures"].(float64); ok {
+			summary.LLMFailures = int(f)
 		}
 	}
 	summary.FileCount = len(summary.FilesReviewed)
@@ -221,11 +213,16 @@ type AgentEvent struct {
 	Event           string
 	BundleID        string
 	DurationMS      int64
+	HasDurationMS   bool
 	Error           string
 	Files           int
+	HasFiles        bool
 	Findings        int
+	HasFindings     bool
 	Warnings        int
+	HasWarnings     bool
 	ContextCalls    int
+	HasContextCalls bool
 	Partial         bool
 	ValidationValid *bool
 }
@@ -365,23 +362,29 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			bundleID, _ := rec["bundleId"].(string)
 			errorMessage, _ := rec["error"].(string)
 			duration := int64(0)
+			hasDuration := false
 			if value, ok := rec["duration_ms"].(float64); ok {
 				duration = int64(value)
+				hasDuration = true
 			}
 			agentEvent := AgentEvent{
-				Event: event, BundleID: bundleID, DurationMS: duration, Error: errorMessage,
+				Event: event, BundleID: bundleID, DurationMS: duration, HasDurationMS: hasDuration, Error: errorMessage,
 			}
 			if value, ok := rec["files"].(float64); ok {
 				agentEvent.Files = int(value)
+				agentEvent.HasFiles = true
 			}
 			if value, ok := rec["findings"].(float64); ok {
 				agentEvent.Findings = int(value)
+				agentEvent.HasFindings = true
 			}
 			if value, ok := rec["warnings"].(float64); ok {
 				agentEvent.Warnings = int(value)
+				agentEvent.HasWarnings = true
 			}
 			if value, ok := rec["context_calls"].(float64); ok {
 				agentEvent.ContextCalls = int(value)
+				agentEvent.HasContextCalls = true
 			}
 			if value, ok := rec["partial"].(bool); ok {
 				agentEvent.Partial = value

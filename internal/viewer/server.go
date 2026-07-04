@@ -45,7 +45,7 @@ func StartServer(addr string) error {
 			return
 		}
 		if err := ValidateSessionID(sid); err != nil {
-			http.Error(w, "invalid session path", http.StatusBadRequest)
+			http.Error(w, "invalid session ID", http.StatusBadRequest)
 			return
 		}
 		handleSession(w, r, root, repo, sid)

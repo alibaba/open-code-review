@@ -60,12 +60,20 @@ func writeLengthPrefixedStream(hasher hash.Hash, reader io.Reader, size int64) e
 	if _, err := hasher.Write(length[:]); err != nil {
 		return err
 	}
-	written, err := io.Copy(hasher, reader)
+	written, err := io.Copy(hasher, io.LimitReader(reader, size))
 	if err != nil {
 		return err
 	}
 	if written != size {
 		return fmt.Errorf("file size changed while hashing")
+	}
+	var extra [1]byte
+	extraRead, extraErr := reader.Read(extra[:])
+	if extraRead > 0 {
+		return fmt.Errorf("file size changed while hashing")
+	}
+	if extraErr != nil && extraErr != io.EOF {
+		return extraErr
 	}
 	return nil
 }

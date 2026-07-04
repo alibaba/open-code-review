@@ -73,6 +73,10 @@ func ValidateComments(
 	}
 	contentCache := make(map[string][]byte)
 	for index := range comments.Comments {
+		if err := ctx.Err(); err != nil {
+			addValidationError(&result, "validation_canceled", "", nil, err.Error())
+			break
+		}
 		validateOneComment(ctx, &result, bundle, files, contentCache, comments.Comments[index], index, repoDir, runner)
 	}
 	if comments.Summary.IssuesFound != len(comments.Comments) {
@@ -262,6 +266,7 @@ func validateCommentContent(
 		contentCache[path] = content
 	}
 	if hashFields(content) != files[path].ContentSHA256 {
+		delete(contentCache, path)
 		addValidationError(result, "stale_bundle", path, &index, "file content changed after bundle creation")
 		return
 	}
@@ -302,7 +307,7 @@ func countStandaloneSnippet(content []byte, snippet string) int {
 	if snippet == "" {
 		return 0
 	}
-	normalizedContent := "\n" + strings.TrimSuffix(string(content), "\n") + "\n"
+	normalizedContent := "\n" + strings.TrimRight(string(content), "\n") + "\n"
 	normalizedSnippet := "\n" + strings.Trim(snippet, "\n") + "\n"
 	return strings.Count(normalizedContent, normalizedSnippet)
 }

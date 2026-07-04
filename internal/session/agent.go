@@ -14,6 +14,8 @@ import (
 
 var safeAgentRunID = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
+const maxAgentSessionLineBytes = 10 * 1024 * 1024
+
 // AgentEvent contains only metrics supplied by the host-agent workflow.
 type AgentEvent struct {
 	Files           int      `json:"files,omitempty"`
@@ -23,7 +25,7 @@ type AgentEvent struct {
 	Partial         bool     `json:"partial,omitempty"`
 	DurationMS      int64    `json:"duration_ms,omitempty"`
 	ValidationValid *bool    `json:"validation_valid,omitempty"`
-	FilesReviewed   []string `json:"files_reviewed,omitempty"`
+	FilesReviewed   []string `json:"files_reviewed"`
 	Error           string   `json:"error,omitempty"`
 }
 
@@ -161,6 +163,9 @@ func agentEventRecord(
 	if err != nil || fields == nil {
 		fields = make(map[string]any)
 	}
+	if details.FilesReviewed == nil {
+		fields["files_reviewed"] = []string{}
+	}
 	fields["uuid"] = generateUUID()
 	fields["parentUuid"] = nil
 	fields["type"] = recordType
@@ -183,7 +188,7 @@ func readAgentSessionStart(path string, fallback time.Time) time.Time {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	scanner := newAgentSessionScanner(file)
 	for scanner.Scan() {
 		var record map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
@@ -209,7 +214,7 @@ func readAgentSessionBundleID(path string) (string, error) {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	scanner := newAgentSessionScanner(file)
 	for scanner.Scan() {
 		var record map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
@@ -231,7 +236,7 @@ func agentSessionHasEnd(path string) bool {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	scanner := newAgentSessionScanner(file)
 	for scanner.Scan() {
 		var record map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
@@ -264,12 +269,25 @@ func (recorder *AgentRecorder) writeExclusiveStart(record map[string]any) error 
 		return fmt.Errorf("lock agent session: %w", err)
 	}
 	if _, err := file.Write(append(encoded, '\n')); err != nil {
-		unlockSessionFile(file)
-		_ = file.Close()
+		unlockErr := unlockSessionFile(file)
+		closeErr := file.Close()
+		if unlockErr != nil {
+			return fmt.Errorf("unlock agent session after write failure: %w", unlockErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("close agent session after write failure: %w", closeErr)
+		}
 		return fmt.Errorf("write agent session: %w", err)
 	}
-	unlockSessionFile(file)
-	return file.Close()
+	unlockErr := unlockSessionFile(file)
+	closeErr := file.Close()
+	if unlockErr != nil {
+		return fmt.Errorf("unlock agent session: %w", unlockErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close agent session: %w", closeErr)
+	}
+	return nil
 }
 
 func (recorder *AgentRecorder) write(record map[string]any, skipIfEnded bool) error {
@@ -329,7 +347,7 @@ func agentSessionFileHasEnd(file *os.File) (bool, error) {
 	if _, err := file.Seek(0, 0); err != nil {
 		return false, fmt.Errorf("seek agent session: %w", err)
 	}
-	scanner := bufio.NewScanner(file)
+	scanner := newAgentSessionScanner(file)
 	for scanner.Scan() {
 		var record map[string]any
 		if err := json.Unmarshal(scanner.Bytes(), &record); err != nil {
@@ -343,4 +361,10 @@ func agentSessionFileHasEnd(file *os.File) (bool, error) {
 		return false, fmt.Errorf("scan agent session: %w", err)
 	}
 	return false, nil
+}
+
+func newAgentSessionScanner(file *os.File) *bufio.Scanner {
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 1024*1024), maxAgentSessionLineBytes)
+	return scanner
 }

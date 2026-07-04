@@ -28,8 +28,12 @@ func filterOversizedDiffs(diffs []model.Diff, maxTokens int) ([]model.Diff, []Pr
 		}
 		tokens := llm.CountTokens(diff.Diff)
 		if tokens > limit {
+			if path == "" {
+				path = "<unknown>"
+			}
 			warnings = append(warnings, ProtocolNotice{
 				Code: "oversized_diff",
+				Path: path,
 				Message: fmt.Sprintf(
 					"%s (~%d tokens) exceeds 80%% of max review tokens (%d)",
 					path,

@@ -34,7 +34,7 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 	var patterns []string
 	for _, item := range filePatternsIface {
 		if s, ok := item.(string); ok && s != "" {
-			if strings.Contains(s, "..") {
+			if pathPatternHasParentTraversal(s) {
 				return "Error: file_patterns must not contain ..", nil
 			}
 			patterns = append(patterns, s)
@@ -50,6 +50,15 @@ func (p *CodeSearchProvider) Execute(ctx context.Context, args map[string]any) (
 		return "", fmt.Errorf("code_search failed: %w", err)
 	}
 	return result, nil
+}
+
+func pathPatternHasParentTraversal(pattern string) bool {
+	for _, part := range strings.Split(strings.ReplaceAll(pattern, "\\", "/"), "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool, usePerlRegexp bool, noIndex bool, pathspec []string) []string {

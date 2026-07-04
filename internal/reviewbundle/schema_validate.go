@@ -16,7 +16,7 @@ var (
 func validateEmbeddedDocument(schemaBytes []byte, document []byte, label string) error {
 	var instance any
 	if err := json.Unmarshal(document, &instance); err != nil {
-		return fmt.Errorf("invalid %s schema: %w", label, err)
+		return fmt.Errorf("invalid %s document: %w", label, err)
 	}
 	resolved, err := cachedResolvedSchema(schemaBytes, label)
 	if err != nil {
@@ -31,10 +31,12 @@ func validateEmbeddedDocument(schemaBytes []byte, document []byte, label string)
 func cachedResolvedSchema(schemaBytes []byte, label string) (*jsonschema.Resolved, error) {
 	cacheKey := label + ":" + string(schemaBytes)
 	resolvedSchemaMu.Lock()
-	defer resolvedSchemaMu.Unlock()
 	if resolved, ok := resolvedSchemas[cacheKey]; ok {
+		resolvedSchemaMu.Unlock()
 		return resolved, nil
 	}
+	resolvedSchemaMu.Unlock()
+
 	var schema jsonschema.Schema
 	if err := json.Unmarshal(schemaBytes, &schema); err != nil {
 		return nil, fmt.Errorf("load %s schema: %w", label, err)
@@ -42,6 +44,11 @@ func cachedResolvedSchema(schemaBytes []byte, label string) (*jsonschema.Resolve
 	resolved, err := schema.Resolve(nil)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s schema: %w", label, err)
+	}
+	resolvedSchemaMu.Lock()
+	defer resolvedSchemaMu.Unlock()
+	if cached, ok := resolvedSchemas[cacheKey]; ok {
+		return cached, nil
 	}
 	resolvedSchemas[cacheKey] = resolved
 	return resolved, nil

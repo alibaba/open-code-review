@@ -111,15 +111,21 @@ func validateCommentsShape(data []byte) error {
 		}
 		fileLevel := false
 		if rawValue, ok := comment["file_level_comment"]; ok {
-			_ = json.Unmarshal(rawValue, &fileLevel)
+			if err := json.Unmarshal(rawValue, &fileLevel); err != nil {
+				return fmt.Errorf("invalid comments schema: comments[%d].file_level_comment must be a boolean", index)
+			}
 		}
 		if fileLevel {
 			var startLine, endLine int
 			if rawValue, ok := comment["start_line"]; ok {
-				_ = json.Unmarshal(rawValue, &startLine)
+				if err := json.Unmarshal(rawValue, &startLine); err != nil {
+					return fmt.Errorf("invalid comments schema: comments[%d].start_line must be an integer", index)
+				}
 			}
 			if rawValue, ok := comment["end_line"]; ok {
-				_ = json.Unmarshal(rawValue, &endLine)
+				if err := json.Unmarshal(rawValue, &endLine); err != nil {
+					return fmt.Errorf("invalid comments schema: comments[%d].end_line must be an integer", index)
+				}
 			}
 			if startLine != 0 || endLine != 0 {
 				return fmt.Errorf(

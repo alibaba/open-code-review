@@ -230,7 +230,10 @@ func (service *ContextService) readScanFile(path string, startLine int, maxLines
 	}
 	lines := splitSourceLines([]byte(file.Content))
 	totalLines := len(lines)
-	if startLine-1 > totalLines || (totalLines > 0 && startLine-1 >= totalLines) {
+	if totalLines == 0 {
+		return "", fmt.Errorf("file %q is empty", path)
+	}
+	if startLine > totalLines {
 		return "", fmt.Errorf("file %q has only %d lines, requested range starting at %d", path, totalLines, startLine)
 	}
 	end := startLine - 1 + maxLines
@@ -293,6 +296,9 @@ func (service *ContextService) searchScanFiles(
 	useRegexp bool,
 	patterns []string,
 ) (string, error) {
+	if err := validateScanSearchPatterns(patterns); err != nil {
+		return "", err
+	}
 	matcher, err := scanSearchMatcher(query, caseSensitive, useRegexp)
 	if err != nil {
 		return "", err
@@ -387,6 +393,17 @@ func scanPatternMatches(path string, patterns []string) bool {
 		}
 	}
 	return false
+}
+
+func validateScanSearchPatterns(patterns []string) error {
+	for _, pattern := range patterns {
+		if strings.HasPrefix(pattern, ":(exclude)") ||
+			strings.HasPrefix(pattern, ":!") ||
+			strings.HasPrefix(pattern, ":^") {
+			return fmt.Errorf("unsupported scan search pathspec %q: exclude patterns are not supported for scan bundles", pattern)
+		}
+	}
+	return nil
 }
 
 func (service *ContextService) ready(ctx context.Context) error {

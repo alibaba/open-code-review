@@ -22,7 +22,7 @@ func ReadProtocolFile(path string) ([]byte, error) {
 func validateProtocolDocumentSize(encoded []byte) error {
 	if int64(len(encoded)) > MaxProtocolDocumentBytes {
 		return &ProtocolError{
-			Code: "manifest_too_large",
+			Code: "document_too_large",
 			Message: fmt.Sprintf(
 				"document exceeds %d byte protocol limit (%d bytes); reduce scope or bundle count",
 				MaxProtocolDocumentBytes,
@@ -43,7 +43,7 @@ func (writer *protocolDocumentWriter) Write(data []byte) (int, error) {
 	writer.n += int64(len(data))
 	if writer.n > MaxProtocolDocumentBytes {
 		writer.limitErr = &ProtocolError{
-			Code: "manifest_too_large",
+			Code: "document_too_large",
 			Message: fmt.Sprintf(
 				"document exceeds %d byte protocol limit (%d bytes); reduce scope or bundle count",
 				MaxProtocolDocumentBytes,
@@ -66,10 +66,10 @@ func readLimited(reader io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(data)) > MaxProtocolDocumentBytes {
-		return nil, fmt.Errorf(
-			"document exceeds %d byte limit",
-			MaxProtocolDocumentBytes,
-		)
+		return nil, &ProtocolError{
+			Code:    "document_too_large",
+			Message: fmt.Sprintf("document exceeds %d byte protocol limit", MaxProtocolDocumentBytes),
+		}
 	}
 	return data, nil
 }

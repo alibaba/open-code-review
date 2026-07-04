@@ -167,14 +167,22 @@ func loadAgentBundleInputByID(
 	}
 	manifest, manifestErr := reviewbundle.LoadScanManifest(bytes.NewReader(content))
 	if manifestErr != nil {
-		return nil, nil, bundleErr
+		return nil, nil, fmt.Errorf(
+			"input is neither a standalone bundle nor a scan manifest: bundle load failed: %w; manifest load failed: %w",
+			bundleErr,
+			manifestErr,
+		)
 	}
 	for index := range manifest.Bundles {
 		if manifest.Bundles[index].BundleID == bundleID {
 			return &manifest.Bundles[index], manifest, nil
 		}
 	}
-	return nil, nil, fmt.Errorf("bundle_id %q is not present in scan manifest", bundleID)
+	return nil, nil, fmt.Errorf(
+		"standalone bundle load failed (%v); bundle_id %q is not present in scan manifest",
+		bundleErr,
+		bundleID,
+	)
 }
 
 func loadValidationResult(path string) (*reviewbundle.ValidationResult, error) {

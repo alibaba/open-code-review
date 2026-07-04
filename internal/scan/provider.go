@@ -132,7 +132,7 @@ func (p *Provider) EnumerateDetailed(
 			skipped = append(skipped, SkippedItem{Path: rel, Reason: "file_size"})
 			continue
 		}
-		binary, content, lineCount, err := readRegularFile(full)
+		binary, content, lineCount, err := readRegularFile(full, p.maxFileSizeBytes)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read %s: %v\n", rel, err)
 			skipped = append(skipped, SkippedItem{Path: rel, Reason: "unreadable"})
@@ -309,12 +309,15 @@ func countLines(content []byte) int {
 }
 
 // readRegularFile opens path once, sniffs for binary content, and reads the body.
-func readRegularFile(path string) (binary bool, content []byte, lineCount int, err error) {
+func readRegularFile(path string, maxBytes int64) (binary bool, content []byte, lineCount int, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return false, nil, 0, err
 	}
 	defer file.Close()
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxFileSizeBytes
+	}
 	sniff := make([]byte, binarySniffWindow)
 	read, err := io.ReadFull(file, sniff)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
@@ -323,31 +326,22 @@ func readRegularFile(path string) (binary bool, content []byte, lineCount int, e
 	if bytes.IndexByte(sniff[:read], 0) >= 0 {
 		return true, nil, 0, nil
 	}
+	if int64(read) > maxBytes {
+		return false, nil, 0, fmt.Errorf("file exceeds %d-byte scan limit", maxBytes)
+	}
 	var body bytes.Buffer
 	if read > 0 {
 		if _, err := body.Write(sniff[:read]); err != nil {
 			return false, nil, 0, err
 		}
 	}
-	if _, err := io.Copy(&body, file); err != nil {
+	remaining := maxBytes - int64(read)
+	if _, err := io.Copy(&body, io.LimitReader(file, remaining+1)); err != nil {
 		return false, nil, 0, err
 	}
 	content = body.Bytes()
+	if int64(len(content)) > maxBytes {
+		return false, nil, 0, fmt.Errorf("file exceeds %d-byte scan limit", maxBytes)
+	}
 	return false, content, countLines(content), nil
-}
-
-// isBinaryFile reads up to binarySniffWindow bytes from path and reports
-// whether they contain a NUL byte (git's "binary" heuristic).
-func isBinaryFile(path string) (bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	buf := make([]byte, binarySniffWindow)
-	n, err := io.ReadFull(f, buf)
-	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
-		return false, err
-	}
-	return bytes.IndexByte(buf[:n], 0) >= 0, nil
 }

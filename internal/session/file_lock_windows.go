@@ -2,8 +2,31 @@
 
 package session
 
-import "os"
+import (
+	"os"
 
-// Windows builds rely on per-process mutexes; cross-process JSONL locking is best-effort.
-func lockSessionFile(*os.File) error   { return nil }
-func unlockSessionFile(*os.File) error { return nil }
+	"golang.org/x/sys/windows"
+)
+
+func lockSessionFile(file *os.File) error {
+	var overlapped windows.Overlapped
+	return windows.LockFileEx(
+		windows.Handle(file.Fd()),
+		windows.LOCKFILE_EXCLUSIVE_LOCK,
+		0,
+		^uint32(0),
+		^uint32(0),
+		&overlapped,
+	)
+}
+
+func unlockSessionFile(file *os.File) error {
+	var overlapped windows.Overlapped
+	return windows.UnlockFileEx(
+		windows.Handle(file.Fd()),
+		0,
+		^uint32(0),
+		^uint32(0),
+		&overlapped,
+	)
+}

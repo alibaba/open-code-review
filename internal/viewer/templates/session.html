@@ -108,13 +108,13 @@
         <tr>
             <td>{{.Event}}</td>
             <td>{{if .BundleID}}<code>{{.BundleID}}</code>{{else}}-{{end}}</td>
-            <td>{{if .Files}}{{.Files}}{{else}}-{{end}}</td>
-            <td>{{if .Findings}}{{.Findings}}{{else}}-{{end}}</td>
-            <td>{{if .Warnings}}{{.Warnings}}{{else}}-{{end}}</td>
-            <td>{{if .ContextCalls}}{{.ContextCalls}}{{else}}-{{end}}</td>
+	            <td>{{if .HasFiles}}{{.Files}}{{else}}-{{end}}</td>
+	            <td>{{if .HasFindings}}{{.Findings}}{{else}}-{{end}}</td>
+	            <td>{{if .HasWarnings}}{{.Warnings}}{{else}}-{{end}}</td>
+	            <td>{{if .HasContextCalls}}{{.ContextCalls}}{{else}}-{{end}}</td>
             <td>{{if .Partial}}yes{{else}}-{{end}}</td>
             <td>{{.ValidationLabel}}</td>
-            <td>{{if .DurationMS}}{{.DurationMS}} ms{{else}}-{{end}}</td>
+	            <td>{{if .HasDurationMS}}{{.DurationMS}} ms{{else}}-{{end}}</td>
             <td>{{if .Error}}{{.Error}}{{else}}-{{end}}</td>
         </tr>
     {{end}}

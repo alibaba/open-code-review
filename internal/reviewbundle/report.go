@@ -167,14 +167,14 @@ func writeMarkdownValidation(output *bytes.Buffer, validation *ValidationResult)
 		fmt.Fprintln(output)
 		fmt.Fprintln(output, "## Validation errors")
 		for _, notice := range validation.Errors {
-			fmt.Fprintf(output, "\n- `%s`: %s\n", notice.Code, notice.Message)
+			fmt.Fprintf(output, "\n- `%s`: %s\n", notice.Code, escapeMarkdownBody(notice.Message))
 		}
 	}
 	if len(validation.Warnings) > 0 {
 		fmt.Fprintln(output)
 		fmt.Fprintln(output, "## Validation warnings")
 		for _, notice := range validation.Warnings {
-			fmt.Fprintf(output, "\n- `%s`: %s\n", notice.Code, notice.Message)
+			fmt.Fprintf(output, "\n- `%s`: %s\n", notice.Code, escapeMarkdownBody(notice.Message))
 		}
 	}
 }
@@ -279,10 +279,6 @@ func escapeMarkdownBody(value string) string {
 }
 
 func writeMarkdownBody(output *bytes.Buffer, value string) {
-	if strings.Contains(value, "```") {
-		writeFencedCode(output, value)
-		return
-	}
 	fmt.Fprintln(output, escapeMarkdownBody(value))
 }
 

@@ -30,7 +30,10 @@ func PreparePartitioned(
 		SkippedFiles:  make([]ScanSkippedFile, 0),
 		Bundles:       make([]Bundle, 0),
 	}
-	current := newPartitionPacker(base, maxBundleSize)
+	current, err := newPartitionPacker(base, maxBundleSize)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, file := range base.Files {
 		select {
 		case <-ctx.Done():
@@ -45,7 +48,10 @@ func PreparePartitioned(
 			if err := flushDiffPartition(ctx, manifest, base, current.files, maxBundleSize); err != nil {
 				return nil, nil, err
 			}
-			current = newPartitionPacker(base, maxBundleSize)
+			current, err = newPartitionPacker(base, maxBundleSize)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 		current.add(file, addedSize)
 	}
@@ -111,12 +117,7 @@ func appendDiffPartition(
 		size := 0
 		if len(files) == 1 {
 			path = files[0].Path
-			if files[0].Reviewable {
-				manifest.Summary.ReviewableFiles--
-				manifest.Summary.ExcludedFiles++
-				manifest.Summary.Insertions -= files[0].Insertions
-				manifest.Summary.Deletions -= files[0].Deletions
-			}
+			removeSkippedFileFromManifestSummary(&manifest.Summary, files[0])
 			if encoded != nil {
 				size = len(encoded)
 			}
@@ -147,16 +148,34 @@ type partitionPacker struct {
 	estimatedSize int64
 }
 
-func newPartitionPacker(full *Bundle, maxBundleSize int64) *partitionPacker {
+func newPartitionPacker(full *Bundle, maxBundleSize int64) (*partitionPacker, error) {
 	_, encoded, err := buildDiffPartition(full, nil, maxBundleSize)
-	estimated := int64(4096)
-	if err == nil {
-		estimated = int64(len(encoded))
+	if err != nil {
+		return nil, fmt.Errorf("estimate empty diff partition: %w", err)
 	}
 	return &partitionPacker{
 		files:         make([]File, 0),
 		ruleIDs:       make(map[string]struct{}),
-		estimatedSize: estimated,
+		estimatedSize: int64(len(encoded)),
+	}, nil
+}
+
+func removeSkippedFileFromManifestSummary(summary *Summary, file File) {
+	if file.Reviewable {
+		if summary.ReviewableFiles > 0 {
+			summary.ReviewableFiles--
+		}
+		summary.ExcludedFiles++
+	}
+	if summary.Insertions >= file.Insertions {
+		summary.Insertions -= file.Insertions
+	} else {
+		summary.Insertions = 0
+	}
+	if summary.Deletions >= file.Deletions {
+		summary.Deletions -= file.Deletions
+	} else {
+		summary.Deletions = 0
 	}
 }
 

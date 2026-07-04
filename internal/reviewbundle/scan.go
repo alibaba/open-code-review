@@ -179,10 +179,14 @@ func filterAndBudgetScanItems(
 	items []model.ScanItem,
 	options ScanOptions,
 ) ([]model.ScanItem, bool, error) {
+	tokenEstimates := make(map[string]int64, len(items))
 	if options.MaxTokenBudget > 0 {
+		for _, item := range items {
+			tokenEstimates[item.Path] = scan.EstimateItemTokens(item, true)
+		}
 		sort.SliceStable(items, func(i, j int) bool {
-			left := scan.EstimateItemTokens(items[i], true)
-			right := scan.EstimateItemTokens(items[j], true)
+			left := tokenEstimates[items[i].Path]
+			right := tokenEstimates[items[j].Path]
 			if left != right {
 				return left < right
 			}
@@ -205,7 +209,10 @@ func filterAndBudgetScanItems(
 			})
 			continue
 		}
-		estimated := scan.EstimateItemTokens(item, true)
+		estimated := tokenEstimates[item.Path]
+		if estimated == 0 {
+			estimated = scan.EstimateItemTokens(item, true)
+		}
 		if options.MaxTokenBudget > 0 && budgetUsed+estimated > options.MaxTokenBudget {
 			budgetTruncated = true
 			manifest.SkippedFiles = append(manifest.SkippedFiles, ScanSkippedFile{
@@ -240,25 +247,41 @@ func appendScanBundles(
 		return nil
 	}
 	var protocolError *ProtocolError
-	if !errors.As(err, &protocolError) || protocolError.Code != "bundle_too_large" || len(items) <= 1 {
-		if errors.As(err, &protocolError) && protocolError.Code == "bundle_too_large" && len(items) == 1 {
+	if !errors.As(err, &protocolError) || protocolError.Code != "bundle_too_large" {
+		return err
+	}
+	if len(items) <= 1 {
+		if len(items) == 1 {
 			manifest.SkippedFiles = append(manifest.SkippedFiles, ScanSkippedFile{
 				Path:   items[0].Path,
 				Reason: "bundle_too_large",
 			})
-			manifest.Summary.ReviewableFiles--
+			if manifest.Summary.ReviewableFiles > 0 {
+				manifest.Summary.ReviewableFiles--
+			}
 			manifest.Summary.ExcludedFiles++
-			manifest.Summary.Insertions -= int64(items[0].LineCount)
+			if manifest.Summary.Insertions >= int64(items[0].LineCount) {
+				manifest.Summary.Insertions -= int64(items[0].LineCount)
+			} else {
+				manifest.Summary.Insertions = 0
+			}
 			manifest.Partial = true
 			return nil
 		}
 		return err
 	}
 	midpoint := len(items) / 2
-	if err := appendScanBundles(ctx, manifest, items[:midpoint], batchIndex, targetHash, resolver, maxBundleSize); err != nil {
+	candidate := *manifest
+	candidate.SkippedFiles = append([]ScanSkippedFile(nil), manifest.SkippedFiles...)
+	candidate.Bundles = append([]Bundle(nil), manifest.Bundles...)
+	if err := appendScanBundles(ctx, &candidate, items[:midpoint], batchIndex, targetHash, resolver, maxBundleSize); err != nil {
 		return err
 	}
-	return appendScanBundles(ctx, manifest, items[midpoint:], batchIndex, targetHash, resolver, maxBundleSize)
+	if err := appendScanBundles(ctx, &candidate, items[midpoint:], batchIndex, targetHash, resolver, maxBundleSize); err != nil {
+		return err
+	}
+	*manifest = candidate
+	return nil
 }
 
 func buildScanBundle(

@@ -85,7 +85,7 @@ func runAgentValidateCommentsForCommand(
 		}
 	}
 	if options.sessionID != "" {
-		if err := recordAgentEvent(
+		recordAgentEventBestEffort(
 			repoDir,
 			options.sessionID,
 			bundle.BundleID,
@@ -98,9 +98,7 @@ func runAgentValidateCommentsForCommand(
 				ValidationValid: &result.Valid,
 			},
 			false,
-		); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: agent session not recorded: %v\n", err)
-		}
+		)
 	}
 	if !result.Valid {
 		return validationFailedError{}

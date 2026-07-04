@@ -24,7 +24,7 @@ func TestValidateProtocolDocumentSizeRejectsOversizedManifest(t *testing.T) {
 	encoded := make([]byte, MaxProtocolDocumentBytes+1)
 	err := validateProtocolDocumentSize(encoded)
 	var protocolError *ProtocolError
-	if !errors.As(err, &protocolError) || protocolError.Code != "manifest_too_large" {
-		t.Fatalf("validateProtocolDocumentSize() error = %v, want manifest_too_large", err)
+	if !errors.As(err, &protocolError) || protocolError.Code != "document_too_large" {
+		t.Fatalf("validateProtocolDocumentSize() error = %v, want document_too_large", err)
 	}
 }
