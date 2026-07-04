@@ -4,7 +4,7 @@ This directory provides two ready-to-use GitHub Actions workflow demos that inte
 
 ## Recommended: `ocr-review-reusable.yml`
 
-The simplest adoption path: this demo delegates every step — checkout, OCR install, review, comment posting, artifact upload — to the official reusable composite action at [`action/`](../../action/) via a single `uses: alibaba/open-code-review/action@v1` step. It covers both automatic PR review (`pull_request_target: opened/synchronize/reopened`) and on-demand re-review via comments (`/open-code-review` or `@open-code-review`). No inline scripts to maintain — upgrades are as simple as bumping the `@v1` tag.
+The simplest adoption path: this demo delegates every step — checkout, OCR install, review, comment posting, artifact upload — to the official reusable composite action at [`action.yml`](../../action.yml) via a single `uses: alibaba/open-code-review@v1` step. It covers both automatic PR review (`pull_request_target: opened/synchronize/reopened`) and on-demand re-review via comments (`/open-code-review` or `@open-code-review`). No inline scripts to maintain — upgrades are as simple as bumping the `@v1` tag.
 
 ```bash
 mkdir -p .github/workflows
@@ -14,7 +14,7 @@ cp ocr-review-reusable.yml .github/workflows/ocr-review.yml
 The core of the demo is a single action step:
 
 ```yaml
-- uses: alibaba/open-code-review/action@v1
+- uses: alibaba/open-code-review@v1
   with:
     llm_url: ${{ secrets.OCR_LLM_URL }}
     llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
@@ -22,7 +22,7 @@ The core of the demo is a single action step:
     llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
 ```
 
-See [`action/README.md`](../../action/README.md) for the full list of inputs, outputs, security guidance, and the four comment-posting modes (sticky summary
+See [`action.yml`](../../action.yml) for the full list of inputs, outputs, security guidance, and the four comment-posting modes (sticky summary
 + incremental).
 
 ## Full Control: `ocr-review.yml`
@@ -71,9 +71,9 @@ Go to your repository's **Settings → Secrets and variables → Actions**.
 
 ## Customization
 
-> These knobs are action inputs — they apply to `ocr-review-reusable.yml` and any workflow calling `alibaba/open-code-review/action@v1`. When using `ocr-review.yml`, edit the inline script directly.
+> These knobs are action inputs — they apply to `ocr-review-reusable.yml` and any workflow calling `alibaba/open-code-review@v1`. When using `ocr-review.yml`, edit the inline script directly.
 
-See [`action/README.md`](../../action/README.md) for the full input list. Workflow-level settings (triggers, keywords) are edited in the workflow file itself.
+See [`action.yml`](../../action.yml) for the full input list. Workflow-level settings (triggers, keywords) are edited in the workflow file itself.
 
 ### Change the trigger events
 
@@ -109,7 +109,7 @@ if: |
 ### Use a specific OCR version
 
 ```yaml
-- uses: alibaba/open-code-review/action@v1
+- uses: alibaba/open-code-review@v1
   with:
     ocr_version: 1.0.0
 ```
@@ -117,7 +117,7 @@ if: |
 ### Add custom review rules
 
 ```yaml
-- uses: alibaba/open-code-review/action@v1
+- uses: alibaba/open-code-review@v1
   with:
     rule: ./my-rules.json
 ```
@@ -153,7 +153,7 @@ jobs:
     env:
       OCR_MAX_RETRIES: 5
     steps:
-      - uses: alibaba/open-code-review/action@v1
+      - uses: alibaba/open-code-review@v1
         with:
           llm_url: ${{ secrets.OCR_LLM_URL }}
           # ...other inputs
@@ -172,7 +172,7 @@ If the read API itself is unavailable (rate-limited or `5xx`), the check returns
 ### Limit LLM concurrency
 
 ```yaml
-- uses: alibaba/open-code-review/action@v1
+- uses: alibaba/open-code-review@v1
   with:
     review_concurrency: 5
 ```
@@ -180,7 +180,7 @@ If the read API itself is unavailable (rate-limited or `5xx`), the check returns
 ### Provide background context
 
 ```yaml
-- uses: alibaba/open-code-review/action@v1
+- uses: alibaba/open-code-review@v1
   with:
     background: ${{ github.event.pull_request.title }}
 ```
@@ -194,7 +194,7 @@ Particularly useful when PR titles follow semantic conventions (e.g., `feat(auth
 > core.setOutput('title', pullRequest.title);
 > ```
 > ```yaml
-> - uses: alibaba/open-code-review/action@v1
+> - uses: alibaba/open-code-review@v1
 >   with:
 >     background: ${{ steps.pr-context.outputs.title || github.event.pull_request.title }}
 > ```
@@ -254,7 +254,7 @@ Mint a token with `actions/create-github-app-token` and pass it via the `github_
     app-id: ${{ secrets.GITHUB_APP_ID }}
     private-key: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}
 
-- uses: alibaba/open-code-review/action@v1
+- uses: alibaba/open-code-review@v1
   with:
     github_token: ${{ steps.app-token.outputs.token }}
     llm_url: ${{ secrets.OCR_LLM_URL }}
@@ -313,7 +313,7 @@ jobs:
     env:
       OCR_DEBUG: "1"
     steps:
-      - uses: alibaba/open-code-review/action@v1
+      - uses: alibaba/open-code-review@v1
         with:
           llm_url: ${{ secrets.OCR_LLM_URL }}
           # ...other inputs
