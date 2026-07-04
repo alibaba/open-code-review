@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	allowedext "github.com/open-code-review/open-code-review/internal/config/allowlist"
 	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/open-code-review/open-code-review/internal/reviewfilter"
 )
 
 // ExcludeReason / DiffPreview / DiffPreviewEntry are now type aliases of
@@ -29,31 +29,7 @@ const (
 // whyExcluded applies the filter algorithm as shouldReview but
 // returns the specific reason a file is excluded.
 func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
-	if d.IsBinary {
-		return ExcludeBinary
-	}
-
-	path := effectivePath(d)
-	f := a.args.FileFilter
-
-	if f != nil && f.IsUserExcluded(path) {
-		return ExcludeUserRule
-	}
-
-	if f != nil && f.HasInclude() && f.IsUserIncluded(path) {
-		return ExcludeNone
-	}
-
-	ext := a.extFromPath(path)
-	if ext != "" && !allowedext.IsAllowedExt(ext) {
-		return ExcludeExtension
-	}
-
-	if allowedext.IsExcludedPath(path) {
-		return ExcludeDefaultPath
-	}
-
-	return ExcludeNone
+	return reviewfilter.Filter{FileFilter: a.args.FileFilter}.ExcludeReason(d)
 }
 
 // Preview loads diffs and applies the filter algorithm, returning structured
@@ -99,25 +75,9 @@ func (a *Agent) Preview(ctx context.Context) (*DiffPreview, error) {
 }
 
 func effectivePath(d model.Diff) string {
-	if d.NewPath == "/dev/null" {
-		return d.OldPath
-	}
-	return d.NewPath
+	return reviewfilter.EffectivePath(d)
 }
 
 func diffStatus(d model.Diff) string {
-	switch {
-	case d.IsBinary:
-		return "binary"
-	case d.IsNew:
-		return "added"
-	case d.IsDeleted:
-		return "deleted"
-	case d.IsRenamed:
-		return "renamed"
-	case d.OldPath != d.NewPath && d.OldPath != "" && d.OldPath != "/dev/null":
-		return "renamed"
-	default:
-		return "modified"
-	}
+	return reviewfilter.Status(d)
 }

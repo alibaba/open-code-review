@@ -1,0 +1,9 @@
+{
+  "schema_version": "agent-review-comments/v1",
+  "bundle_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "summary": {
+    "files_reviewed": 0,
+    "issues_found": 0
+  },
+  "comments": []
+}

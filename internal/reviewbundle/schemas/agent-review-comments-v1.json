@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alibaba/open-code-review/schemas/agent-review-comments/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "bundle_id", "summary", "comments"],
+  "properties": {
+    "schema_version": {"const": "agent-review-comments/v1"},
+    "bundle_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "summary": {"$ref": "#/$defs/summary"},
+    "comments": {"type": "array", "items": {"$ref": "#/$defs/comment"}},
+    "warnings": {"type": "array", "items": {"$ref": "#/$defs/notice"}}
+  },
+  "$defs": {
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files_reviewed", "issues_found"],
+      "properties": {
+        "files_reviewed": {"type": "integer", "minimum": 0},
+        "issues_found": {"type": "integer", "minimum": 0}
+      }
+    },
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "start_line", "end_line", "priority", "category", "title", "content", "recommendation", "confidence"],
+      "properties": {
+        "path": {"type": "string"},
+        "start_line": {"type": "integer", "minimum": 0},
+        "end_line": {"type": "integer", "minimum": 0},
+        "priority": {"enum": ["high", "medium", "low"]},
+        "category": {"enum": ["bug", "security", "performance", "concurrency", "maintainability", "test"]},
+        "title": {"type": "string", "minLength": 1},
+        "content": {"type": "string", "minLength": 1},
+        "recommendation": {"type": "string", "minLength": 1},
+        "existing_code": {"type": "string"},
+        "suggestion_code": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "file_level_comment": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["file_level_comment"],
+            "properties": {"file_level_comment": {"const": true}}
+          },
+          "then": {
+            "properties": {
+              "start_line": {"const": 0},
+              "end_line": {"const": 0}
+            }
+          }
+        }
+      ]
+    },
+    "notice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"type": "string"},
+        "path": {"type": "string"},
+        "message": {"type": "string"}
+      }
+    }
+  }
+}

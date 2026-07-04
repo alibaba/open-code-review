@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -14,6 +16,39 @@ func TestSetConfigValueAuthHeaderNormalizesKnownValues(t *testing.T) {
 
 	if cfg.Llm.AuthHeader != "authorization" {
 		t.Errorf("AuthHeader = %q, want %q", cfg.Llm.AuthHeader, "authorization")
+	}
+}
+
+func TestRunConfigSetWritesDefaultConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := runConfigSet("llm.auth_token", "secret-token"); err != nil {
+		t.Fatalf("runConfigSet(auth token) error = %v", err)
+	}
+	if err := runConfigSet("provider", "anthropic"); err != nil {
+		t.Fatalf("runConfigSet(provider) error = %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(home, ".opencodereview", "config.json"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(content, &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.Llm.AuthToken != "secret-token" || cfg.Provider != "anthropic" {
+		t.Fatalf("config = %+v, want auth token and provider", cfg)
+	}
+}
+
+func TestRunConfigRejectsInteractiveExtraArguments(t *testing.T) {
+	if err := runConfig([]string{"provider", "anthropic"}); err == nil {
+		t.Fatal("runConfig(provider extra args) error = nil, want validation error")
+	}
+	if err := runConfig([]string{"model", "claude"}); err == nil {
+		t.Fatal("runConfig(model extra args) error = nil, want validation error")
 	}
 }
 

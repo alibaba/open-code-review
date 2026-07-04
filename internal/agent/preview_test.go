@@ -236,21 +236,16 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 			diff: model.Diff{
 				NewPath: "src/foo/bar_test.go",
 			},
-			// IMPORTANT: Even though *_test.go is excluded by IsExcludedPath,
-			// matching an include pattern returns ExcludeNone before that check.
 			expected: ExcludeNone,
 		},
 		// --- Include is additive, NOT exclusive ---
 		// When include patterns are configured, files that do NOT match them
-		// still fall through to the default checks. If extension is valid and
-		// path is not default-excluded, they are still reviewed.
+		// still fall through to the default checks.
 		{
-			name: "non-included file with valid extension still reviewed (additive semantics)",
+			name: "non-included file with valid extension still reviewed",
 			diff: model.Diff{
 				NewPath: "vendor/baz.go",
 			},
-			// .go is a supported extension and vendor/baz.go does not hit
-			// IsExcludedPath, so it falls through to ExcludeNone.
 			expected: ExcludeNone,
 		},
 		{
@@ -280,8 +275,6 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 			diff: model.Diff{
 				NewPath: "internal/handler_test.go",
 			},
-			// Does not match include patterns, falls through.
-			// IsExcludedPath matches *_test.go → ExcludeDefaultPath.
 			expected: ExcludeDefaultPath,
 		},
 	}
@@ -296,9 +289,7 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 	}
 }
 
-// TestWhyExcluded_IncludeBypassesDefaultPath verifies that a file matching
-// an include pattern is reviewed even when it would normally be excluded by
-// the default-path filter (e.g. test files, generated code patterns).
+// TestWhyExcluded_IncludeBypassesDefaultPath verifies native review include behavior.
 func TestWhyExcluded_IncludeBypassesDefaultPath(t *testing.T) {
 	agent := New(Args{
 		FileFilter: &rules.FileFilter{
@@ -367,7 +358,7 @@ func TestWhyExcluded_IncludeAndExcludeInteraction(t *testing.T) {
 			expected: ExcludeUserRule,
 		},
 		{
-			name: "file outside include with valid ext still reviewed (additive)",
+			name: "file outside include with valid ext still reviewed",
 			diff: model.Diff{
 				NewPath: "lib/utils.go",
 			},

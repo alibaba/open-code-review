@@ -40,8 +40,12 @@ func StartServer(addr string) error {
 	mux.HandleFunc("/r/{repo}/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
 		repo := r.PathValue("repo")
 		sid := r.PathValue("sessionID")
-		if strings.Contains(repo, "..") || strings.Contains(sid, "..") {
-			http.Error(w, "invalid path", http.StatusBadRequest)
+		if strings.Contains(repo, "..") || strings.Contains(repo, "/") {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		if err := ValidateSessionID(sid); err != nil {
+			http.Error(w, "invalid session path", http.StatusBadRequest)
 			return
 		}
 		handleSession(w, r, root, repo, sid)

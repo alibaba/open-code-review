@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alibaba/open-code-review/schemas/agent-review-bundle/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "bundle_id", "target", "summary", "rules", "files", "contract"],
+  "properties": {
+    "schema_version": {"const": "agent-review-bundle/v1"},
+    "bundle_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "target": {"$ref": "#/$defs/target"},
+    "workspace_state": {"$ref": "#/$defs/workspace_state"},
+    "summary": {"$ref": "#/$defs/summary"},
+    "rules": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/rule"}
+    },
+    "files": {"type": "array", "items": {"$ref": "#/$defs/file"}},
+    "contract": {"$ref": "#/$defs/contract"},
+    "warnings": {"type": "array", "items": {"$ref": "#/$defs/notice"}}
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "from", "to", "commit", "base_sha", "head_sha", "merge_base_sha", "diff_sha256"],
+      "properties": {
+        "mode": {"enum": ["workspace", "range", "commit", "scan"]},
+        "from": {"type": "string"},
+        "to": {"type": "string"},
+        "commit": {"type": "string"},
+        "base_sha": {"type": "string"},
+        "head_sha": {"type": "string"},
+        "merge_base_sha": {"type": "string"},
+        "diff_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "workspace_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["head_sha", "staged_sha256", "unstaged_sha256", "untracked_sha256"],
+      "properties": {
+        "head_sha": {"type": "string"},
+        "staged_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "unstaged_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "untracked_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_files", "reviewable_files", "excluded_files", "insertions", "deletions"],
+      "properties": {
+        "total_files": {"type": "integer", "minimum": 0},
+        "reviewable_files": {"type": "integer", "minimum": 0},
+        "excluded_files": {"type": "integer", "minimum": 0},
+        "insertions": {"type": "integer", "minimum": 0},
+        "deletions": {"type": "integer", "minimum": 0}
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "pattern", "content"],
+      "properties": {
+        "source": {"enum": ["custom", "project", "global", "system"]},
+        "pattern": {"type": "string"},
+        "content": {"type": "string"}
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "old_path", "status", "reviewable", "insertions", "deletions", "content_sha256", "rule_id", "patch", "hunks"],
+      "properties": {
+        "path": {"type": "string"},
+        "old_path": {"type": "string"},
+        "status": {"enum": ["modified", "added", "deleted", "renamed", "binary", "scan"]},
+        "reviewable": {"type": "boolean"},
+        "exclude_reason": {"enum": ["user_exclude", "unsupported_ext", "default_path", "deleted", "binary"]},
+        "insertions": {"type": "integer", "minimum": 0},
+        "deletions": {"type": "integer", "minimum": 0},
+        "content_sha256": {"type": "string", "pattern": "^(|sha256:[0-9a-f]{64})$"},
+        "rule_id": {"type": "string"},
+        "patch": {"type": "string"},
+        "content": {"type": "string"},
+        "hunks": {"type": "array", "items": {"$ref": "#/$defs/hunk"}}
+      }
+    },
+    "hunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["old_start", "old_count", "new_start", "new_count"],
+      "properties": {
+        "old_start": {"type": "integer", "minimum": 0},
+        "old_count": {"type": "integer", "minimum": 0},
+        "new_start": {"type": "integer", "minimum": 0},
+        "new_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["comment_schema", "line_numbers", "allowed_priorities", "allowed_categories", "max_bundle_bytes", "bundle_size_bytes", "requires_reflection"],
+      "properties": {
+        "comment_schema": {"const": "agent-review-comments/v1"},
+        "line_numbers": {"const": "one_based_new_file"},
+        "allowed_priorities": {"type": "array", "items": {"enum": ["high", "medium", "low"]}},
+        "allowed_categories": {"type": "array", "items": {"enum": ["bug", "security", "performance", "concurrency", "maintainability", "test"]}},
+        "max_bundle_bytes": {"type": "integer", "minimum": 0},
+        "bundle_size_bytes": {"type": "integer", "minimum": 0},
+        "requires_reflection": {"type": "boolean"}
+      }
+    },
+    "notice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"type": "string"},
+        "path": {"type": "string"},
+        "message": {"type": "string"}
+      }
+    }
+  }
+}

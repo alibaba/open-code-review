@@ -33,6 +33,11 @@ func parseBatchStrategy(s string) BatchStrategy {
 	}
 }
 
+// ParseBatchStrategy normalizes a public scan grouping value.
+func ParseBatchStrategy(value string) BatchStrategy {
+	return parseBatchStrategy(value)
+}
+
 // groupBatches partitions items according to strategy, then slices each
 // natural group into BatchSize-sized chunks (when size > 0). Within a batch
 // the input order is preserved; batches themselves are sorted by their
@@ -76,6 +81,11 @@ func groupBatches(items []model.ScanItem, strategy BatchStrategy, size int) [][]
 		}
 	}
 	return out
+}
+
+// GroupBatches deterministically partitions scan items using the native policy.
+func GroupBatches(items []model.ScanItem, strategy BatchStrategy, size int) [][]model.ScanItem {
+	return groupBatches(items, strategy, size)
 }
 
 // batchKeyFunc returns the grouping key extractor for a strategy.

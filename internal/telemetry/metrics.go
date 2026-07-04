@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -20,6 +21,7 @@ var (
 	mLLMDuration       metric.Float64Histogram
 	mToolCalls         metric.Int64Counter
 	mToolExecutionTime metric.Float64Histogram
+	mAgentEvents       metric.Int64Counter
 )
 
 func getMeter() metric.Meter {
@@ -65,9 +67,17 @@ func ensureMetrics() {
 	mToolExecutionTime, err = m.Float64Histogram("ocr.tool.execution_duration_seconds",
 		metric.WithUnit("s"), metric.WithDescription("Duration of tool executions"))
 	checkMetricErr(err)
+
+	mAgentEvents, err = m.Int64Counter("ocr.agent.events_total",
+		metric.WithDescription("Host-agent workflow events recorded by ocr agent"))
+	checkMetricErr(err)
 }
 
-func checkMetricErr(err error) {}
+func checkMetricErr(err error) {
+	if err != nil {
+		log.Printf("telemetry: metric registration failed: %v", err)
+	}
+}
 
 func RecordReviewDuration(ctx context.Context, dur time.Duration) {
 	if !IsEnabled() {
@@ -136,5 +146,15 @@ func RecordToolCall(ctx context.Context, name string, dur time.Duration, ok bool
 	}
 	if mToolExecutionTime != nil {
 		mToolExecutionTime.Record(ctx, dur.Seconds(), metric.WithAttributes(attribute.String("tool.name", name)))
+	}
+}
+
+func RecordAgentEvent(ctx context.Context, event string) {
+	if !IsEnabled() {
+		return
+	}
+	ensureMetrics()
+	if mAgentEvents != nil {
+		mAgentEvents.Add(ctx, 1, metric.WithAttributes(attribute.String("event", event)))
 	}
 }

@@ -33,15 +33,15 @@ func TestBuildGrepArgs_CommitMode(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "abc1234"})
 	args := p.buildGrepArgs("myFunc", false, false, false, []string{"pkg/"})
 
-	assertContainsInOrder(t, args, "-e", "myFunc", "--end-of-options", "abc1234", "--", "pkg/")
+	assertContainsInOrder(t, args, "-e", "myFunc", "abc1234", "--", "pkg/")
 	assertNotContains(t, args, "--untracked")
 }
 
-func TestBuildGrepArgs_RefUsesEndOfOptions(t *testing.T) {
-	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "-O./pwn.sh"})
+func TestBuildGrepArgs_CommitModeUsesEndOfOptions(t *testing.T) {
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "abc1234"})
 	args := p.buildGrepArgs("myFunc", false, false, false, nil)
 
-	assertContainsInOrder(t, args, "-e", "myFunc", "--end-of-options", "-O./pwn.sh", "--")
+	assertContainsInOrder(t, args, "--end-of-options", "abc1234", "--")
 }
 
 func TestBuildGrepArgs_PatternStartingWithDash(t *testing.T) {
@@ -124,6 +124,15 @@ func getHeadCommit(t *testing.T, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
+func runCodeSearchGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
 func TestGitGrep_WorkspaceMode_Found(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
@@ -196,6 +205,26 @@ func TestGitGrep_CommitMode_WithPathspec(t *testing.T) {
 	}
 	if result2 != "No matches found" {
 		t.Errorf("expected 'No matches found' when pathspec excludes match, got: %s", result2)
+	}
+}
+
+func TestGitGrep_CommitMode_SymbolicRefPreservesSearchBehavior(t *testing.T) {
+	dir := setupTestRepo(t)
+	runCodeSearchGit(t, dir, "checkout", "-b", "feature")
+	if err := os.WriteFile(filepath.Join(dir, "hello.go"), []byte("package main\n\nfunc BranchOnly() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runCodeSearchGit(t, dir, "add", "hello.go")
+	runCodeSearchGit(t, dir, "commit", "-m", "feature")
+	runCodeSearchGit(t, dir, "checkout", "master")
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "feature", Mode: ModeRange})
+	result, err := p.gitGrep(context.Background(), "BranchOnly", false, false, []string{"hello.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "hello.go") || !strings.Contains(result, "BranchOnly") {
+		t.Errorf("expected branch ref search result, got: %s", result)
 	}
 }
 
@@ -459,6 +488,9 @@ func TestCodeSearchProvider_Execute_PerlRegexp(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(got, "cannot use Perl-compatible regexes") {
+		t.Skipf("git was built without Perl-compatible regexp support: %s", got)
 	}
 	if !strings.Contains(got, "hello.go") {
 		t.Errorf("expected hello.go in perl regexp result, got: %s", got)

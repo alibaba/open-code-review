@@ -44,6 +44,12 @@ type Provider struct {
 	maxFileSizeBytes int64
 }
 
+// SkippedItem records a discovered scan path that could not be enumerated.
+type SkippedItem struct {
+	Path   string
+	Reason string
+}
+
 // NewProvider creates a Provider that enumerates the repository at repoDir.
 // If paths is non-empty each element must be a repo-relative path (file or
 // directory); only matching files are returned. maxFileSizeBytes <= 0 falls
@@ -75,9 +81,17 @@ func NewProvider(repoDir string, paths []string, runner *gitcmd.Runner, maxFileS
 // Enumerate returns one ScanItem per reviewable file. Binaries are emitted
 // with empty Content + IsBinary=true so previews can show them as excluded.
 func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
+	items, _, err := p.EnumerateDetailed(ctx)
+	return items, err
+}
+
+// EnumerateDetailed returns review candidates and explicit provider-level skips.
+func (p *Provider) EnumerateDetailed(
+	ctx context.Context,
+) ([]model.ScanItem, []SkippedItem, error) {
 	files, err := p.listFiles(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if len(p.paths) > 0 {
@@ -87,12 +101,13 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 	gitignorePatterns := diff.LoadGitignorePatterns(p.repoDir)
 
 	var out []model.ScanItem
+	var skipped []SkippedItem
 	for _, rel := range files {
 		// Per-iteration cancellation check: a large repo with thousands of
 		// files may take seconds to walk, and downstream Lstat / ReadFile
 		// each cost a syscall — abort early when ctx is cancelled.
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if rel == "" {
 			continue
@@ -104,43 +119,40 @@ func (p *Provider) Enumerate(ctx context.Context) ([]model.ScanItem, error) {
 		info, err := os.Lstat(full)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot stat %s: %v\n", rel, err)
+			skipped = append(skipped, SkippedItem{Path: rel, Reason: "unreadable"})
 			continue
 		}
 		if !info.Mode().IsRegular() {
+			skipped = append(skipped, SkippedItem{Path: rel, Reason: "non_regular"})
 			continue
 		}
 		if info.Size() > p.maxFileSizeBytes {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: skipping %s (%d bytes exceeds %d-byte scan limit; raise MaxTokens if the real concern is token budget, not memory)\n",
 				rel, info.Size(), p.maxFileSizeBytes)
+			skipped = append(skipped, SkippedItem{Path: rel, Reason: "file_size"})
 			continue
 		}
-		binary, err := isBinaryFile(full)
+		binary, content, lineCount, err := readRegularFile(full)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot sniff %s: %v\n", rel, err)
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read %s: %v\n", rel, err)
+			skipped = append(skipped, SkippedItem{Path: rel, Reason: "unreadable"})
 			continue
 		}
 		if binary {
-			// Emit placeholder so preview can display [B], but do not
-			// read the file body — saves memory on large binaries.
 			out = append(out, model.ScanItem{
 				Path:     rel,
 				IsBinary: true,
 			})
 			continue
 		}
-		content, err := os.ReadFile(full)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read %s: %v\n", rel, err)
-			continue
-		}
 		out = append(out, model.ScanItem{
 			Path:      rel,
 			Content:   string(content),
 			IsBinary:  false,
-			LineCount: countLines(content),
+			LineCount: lineCount,
 		})
 	}
-	return out, nil
+	return out, skipped, nil
 }
 
 // listFiles returns all source files under repoDir. In a git repo it uses
@@ -294,6 +306,34 @@ func countLines(content []byte) int {
 		n++
 	}
 	return n
+}
+
+// readRegularFile opens path once, sniffs for binary content, and reads the body.
+func readRegularFile(path string) (binary bool, content []byte, lineCount int, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return false, nil, 0, err
+	}
+	defer file.Close()
+	sniff := make([]byte, binarySniffWindow)
+	read, err := io.ReadFull(file, sniff)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return false, nil, 0, err
+	}
+	if bytes.IndexByte(sniff[:read], 0) >= 0 {
+		return true, nil, 0, nil
+	}
+	var body bytes.Buffer
+	if read > 0 {
+		if _, err := body.Write(sniff[:read]); err != nil {
+			return false, nil, 0, err
+		}
+	}
+	if _, err := io.Copy(&body, file); err != nil {
+		return false, nil, 0, err
+	}
+	content = body.Bytes()
+	return false, content, countLines(content), nil
 }
 
 // isBinaryFile reads up to binarySniffWindow bytes from path and reports

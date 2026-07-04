@@ -56,6 +56,11 @@ func estimateFileTokens(it model.ScanItem, planEnabled bool) int64 {
 	return total
 }
 
+// EstimateItemTokens returns the native per-file scan budget projection.
+func EstimateItemTokens(item model.ScanItem, planEnabled bool) int64 {
+	return estimateFileTokens(item, planEnabled)
+}
+
 func estimateCost(items []model.ScanItem, planEnabled, dedupEnabled, summaryEnabled bool) Estimate {
 	var est Estimate
 	var allCommentsApprox int64
@@ -97,6 +102,16 @@ func estimateCost(items []model.ScanItem, planEnabled, dedupEnabled, summaryEnab
 
 	est.TotalTokens = est.InputTokens + est.OutputTokens
 	return est
+}
+
+// EstimateTokens returns the native whole-scan budget projection.
+func EstimateTokens(
+	items []model.ScanItem,
+	planEnabled bool,
+	dedupEnabled bool,
+	summaryEnabled bool,
+) Estimate {
+	return estimateCost(items, planEnabled, dedupEnabled, summaryEnabled)
 }
 
 // String renders a one-line human-readable estimate. Money is intentionally

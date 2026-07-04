@@ -156,6 +156,18 @@ func TestWhyExcluded_AllBranches(t *testing.T) {
 			want:   model.ExcludeNone,
 		},
 		{
+			name:   "include list does not exclude non-matching file",
+			item:   model.ScanItem{Path: "docs/readme.md", Content: "x"},
+			filter: &rules.FileFilter{Include: []string{"src/**"}},
+			want:   model.ExcludeExtension,
+		},
+		{
+			name:   "include list does not exclude non-matching allowed file",
+			item:   model.ScanItem{Path: "internal/handler.go", Content: "x"},
+			filter: &rules.FileFilter{Include: []string{"src/**"}},
+			want:   model.ExcludeNone,
+		},
+		{
 			name: "default excluded path",
 			item: model.ScanItem{Path: "pkg/handler_test.go", Content: "x"},
 			want: model.ExcludeDefaultPath,
@@ -179,28 +191,6 @@ func TestWhyExcluded_AllBranches(t *testing.T) {
 			got := a.whyExcluded(tt.item)
 			if got != tt.want {
 				t.Errorf("whyExcluded(%q) = %q, want %q", tt.item.Path, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestExtFromPath(t *testing.T) {
-	tests := []struct {
-		path string
-		want string
-	}{
-		{"main.go", ".go"},
-		{"src/lib/utils.ts", ".ts"},
-		{"Makefile", ""},
-		{".gitignore", ""},
-		{"path/to/FILE.Go", ".go"},
-		{"a/b/c.Test.JS", ".js"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			got := extFromPath(tt.path)
-			if got != tt.want {
-				t.Errorf("extFromPath(%q) = %q, want %q", tt.path, got, tt.want)
 			}
 		})
 	}

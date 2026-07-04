@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alibaba/open-code-review/schemas/agent-review-manifest/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_id",
+    "root",
+    "target_hash",
+    "batch_strategy",
+    "batch_size",
+    "estimated_tokens",
+    "summary",
+    "partial",
+    "skipped_files",
+    "bundles"
+  ],
+  "properties": {
+    "schema_version": {"const": "agent-review-manifest/v1"},
+    "manifest_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "root": {"type": "string"},
+    "target_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "batch_strategy": {"enum": ["none", "by-language", "by-directory", "diff"]},
+    "batch_size": {"type": "integer", "minimum": 1},
+    "estimated_tokens": {"type": "integer", "minimum": 0},
+    "summary": {"$ref": "#/$defs/summary"},
+    "partial": {"type": "boolean"},
+    "skipped_files": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/skipped_file"}
+    },
+    "bundles": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/bundle_ref"}
+    },
+    "warnings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/notice"}
+    }
+  },
+  "$defs": {
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_files", "reviewable_files", "excluded_files", "insertions", "deletions"],
+      "properties": {
+        "total_files": {"type": "integer", "minimum": 0},
+        "reviewable_files": {"type": "integer", "minimum": 0},
+        "excluded_files": {"type": "integer", "minimum": 0},
+        "insertions": {"type": "integer", "minimum": 0},
+        "deletions": {"type": "integer", "minimum": 0}
+      }
+    },
+    "skipped_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "reason"],
+      "properties": {
+        "path": {"type": "string"},
+        "reason": {"type": "string"},
+        "estimated_tokens": {"type": "integer", "minimum": 0}
+      }
+    },
+    "bundle_ref": {
+      "type": "object",
+      "required": ["schema_version", "bundle_id", "target", "summary", "rules", "files", "contract"],
+      "properties": {
+        "schema_version": {"const": "agent-review-bundle/v1"},
+        "bundle_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "target": {"type": "object"},
+        "summary": {"type": "object"},
+        "rules": {"type": "object"},
+        "files": {"type": "array"},
+        "contract": {"type": "object"},
+        "warnings": {"type": "array"}
+      }
+    },
+    "notice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {"type": "string"},
+        "path": {"type": "string"},
+        "message": {"type": "string"}
+      }
+    }
+  }
+}

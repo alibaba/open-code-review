@@ -45,6 +45,17 @@ func TestParseBatchStrategy(t *testing.T) {
 	}
 }
 
+func TestPublicBatchHelpers(t *testing.T) {
+	if got := ParseBatchStrategy("BY-DIRECTORY"); got != BatchByDirectory {
+		t.Fatalf("ParseBatchStrategy() = %q, want %q", got, BatchByDirectory)
+	}
+	got := batchPaths(GroupBatches(itemList("root.go", "cmd/main.go", "cmd/app.go"), BatchByDirectory, 1))
+	want := [][]string{{"root.go"}, {"cmd/main.go"}, {"cmd/app.go"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GroupBatches() = %v, want %v", got, want)
+	}
+}
+
 func TestGroupBatches_ByLanguage(t *testing.T) {
 	items := itemList(
 		"cmd/main.go",

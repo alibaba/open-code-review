@@ -125,3 +125,18 @@ func TestResolveWorkingDir_GitRepo(t *testing.T) {
 	}
 	_ = isGit
 }
+
+func TestLoadCommonContextAllowsNonGitScanDirectory(t *testing.T) {
+	dir := t.TempDir()
+	cc, err := loadCommonContext(dir, "", 99, 2, false)
+	if err != nil {
+		t.Fatalf("loadCommonContext() error = %v", err)
+	}
+	if cc.RepoDir == "" || cc.IsGitRepo {
+		t.Fatalf("common context repo=%q isGit=%v, want non-git directory", cc.RepoDir, cc.IsGitRepo)
+	}
+	if cc.Template == nil || cc.Template.MaxToolRequestTimes != 99 ||
+		cc.Resolver == nil || cc.GitRunner == nil {
+		t.Fatalf("common context missing initialized fields: %+v", cc)
+	}
+}

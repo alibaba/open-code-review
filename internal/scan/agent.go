@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	allowedext "github.com/open-code-review/open-code-review/internal/config/allowlist"
 	"github.com/open-code-review/open-code-review/internal/config/rules"
 	"github.com/open-code-review/open-code-review/internal/config/template"
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
@@ -334,36 +333,7 @@ func (a *Agent) filterLargeScans(items []model.ScanItem) []model.ScanItem {
 
 // whyExcluded mirrors agent.whyExcluded but for ScanItem inputs.
 func (a *Agent) whyExcluded(it model.ScanItem) model.ExcludeReason {
-	if it.IsBinary {
-		return model.ExcludeBinary
-	}
-	path := it.Path
-	if a.args.FileFilter != nil && a.args.FileFilter.IsUserExcluded(path) {
-		return model.ExcludeUserRule
-	}
-	ext := extFromPath(path)
-	if ext != "" && !allowedext.IsAllowedExt(ext) {
-		return model.ExcludeExtension
-	}
-	if a.args.FileFilter != nil && a.args.FileFilter.HasInclude() && a.args.FileFilter.IsUserIncluded(path) {
-		return model.ExcludeNone
-	}
-	if allowedext.IsExcludedPath(path) {
-		return model.ExcludeDefaultPath
-	}
-	return model.ExcludeNone
-}
-
-func extFromPath(path string) string {
-	basename := path
-	if idx := strings.LastIndex(path, "/"); idx >= 0 {
-		basename = path[idx+1:]
-	}
-	dot := strings.LastIndex(basename, ".")
-	if dot <= 0 {
-		return ""
-	}
-	return strings.ToLower(basename[dot:])
+	return ExcludeReason(it, a.args.FileFilter)
 }
 
 // dispatchSubtasks groups items into batches per the configured strategy,

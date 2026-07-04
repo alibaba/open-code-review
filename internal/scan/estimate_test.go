@@ -88,6 +88,18 @@ func TestEstimateFileTokens(t *testing.T) {
 	}
 }
 
+func TestPublicEstimateHelpers(t *testing.T) {
+	item := model.ScanItem{Path: "main.go", Content: strings.Repeat("token ", 200)}
+	if got := EstimateItemTokens(item, true); got <= EstimateItemTokens(item, false) {
+		t.Fatalf("EstimateItemTokens(plan) = %d, want greater than no-plan estimate", got)
+	}
+	estimate := EstimateTokens([]model.ScanItem{item}, true, true, true)
+	if estimate.Files != 1 || estimate.TotalTokens == 0 ||
+		estimate.TotalTokens != estimate.InputTokens+estimate.OutputTokens {
+		t.Fatalf("EstimateTokens() = %+v", estimate)
+	}
+}
+
 func TestEstimateCost_EmptyItems(t *testing.T) {
 	est := estimateCost(nil, true, true, true)
 	if est.Files != 0 || est.TotalTokens != 0 {

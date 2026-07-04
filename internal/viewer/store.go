@@ -75,19 +75,28 @@ func DiscoverRepos(root string) ([]RepoInfo, error) {
 
 // SessionSummary is built from session_start and session_end records.
 type SessionSummary struct {
-	SessionID     string
-	Timestamp     time.Time
-	CWD           string
-	GitBranch     string
-	Model         string
-	ReviewMode    string
-	DiffFrom      string
-	DiffTo        string
-	DiffCommit    string
-	FilesReviewed []string
-	DurationSec   float64
-	FileCount     int
-	LLMFailures   int
+	SessionID           string
+	Timestamp           time.Time
+	CWD                 string
+	GitBranch           string
+	Model               string
+	ReviewMode          string
+	DiffFrom            string
+	DiffTo              string
+	DiffCommit          string
+	FilesReviewed       []string
+	DurationSec         float64
+	FileCount           int
+	LLMFailures         int
+	ControlPlane        string
+	BundleID            string
+	TokenUsageAvailable bool
+}
+
+const defaultControlPlane = "ocr-llm"
+
+func newDefaultSessionSummary() SessionSummary {
+	return SessionSummary{ControlPlane: defaultControlPlane, TokenUsageAvailable: true}
 }
 
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
@@ -126,15 +135,14 @@ func peekSession(path string) (SessionSummary, error) {
 	}
 	defer f.Close()
 
-	var summary SessionSummary
+	summary := newDefaultSessionSummary()
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
 
-	var lastLine []byte
+	var lastSessionEnd []byte
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		lastLine = append([]byte(nil), line...)
 
 		if summary.Timestamp.IsZero() {
 			var rec map[string]any
@@ -165,12 +173,19 @@ func peekSession(path string) (SessionSummary, error) {
 			if v, ok := rec["diffCommit"].(string); ok {
 				summary.DiffCommit = v
 			}
+			parseAgentSessionStartFields(rec, &summary)
+		}
+		var rec map[string]any
+		if err := json.Unmarshal(line, &rec); err == nil {
+			if typ, _ := rec["type"].(string); typ == "session_end" {
+				lastSessionEnd = append([]byte(nil), line...)
+			}
 		}
 	}
 
-	if len(lastLine) > 0 {
+	if len(lastSessionEnd) > 0 {
 		var rec map[string]any
-		if err := json.Unmarshal(lastLine, &rec); err == nil {
+		if err := json.Unmarshal(lastSessionEnd, &rec); err == nil {
 			if typ, _ := rec["type"].(string); typ == "session_end" {
 				if dur, ok := rec["duration_seconds"].(float64); ok {
 					summary.DurationSec = dur
@@ -195,9 +210,34 @@ func peekSession(path string) (SessionSummary, error) {
 
 // ViewSession holds fully parsed records for one session.
 type ViewSession struct {
-	Summary    SessionSummary
-	TokenUsage TokenUsageSummary
-	Files      []*FileGroup // ordered by file path
+	Summary     SessionSummary
+	TokenUsage  TokenUsageSummary
+	Files       []*FileGroup // ordered by file path
+	AgentEvents []AgentEvent
+}
+
+// AgentEvent is a read-only viewer representation of one host-agent workflow event.
+type AgentEvent struct {
+	Event           string
+	BundleID        string
+	DurationMS      int64
+	Error           string
+	Files           int
+	Findings        int
+	Warnings        int
+	ContextCalls    int
+	Partial         bool
+	ValidationValid *bool
+}
+
+func (event AgentEvent) ValidationLabel() string {
+	if event.ValidationValid == nil {
+		return "-"
+	}
+	if *event.ValidationValid {
+		return "yes"
+	}
+	return "no"
 }
 
 // TokenUsageSummary aggregates token counts across the session.
@@ -261,14 +301,24 @@ type ToolCallInfo struct {
 
 // LoadSession fully parses a JSONL file into a ViewSession.
 func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
+	if err := ValidateSessionID(sessionID); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(root, encodedRepo, sessionID+".jsonl")
+	if rel, err := filepath.Rel(root, path); err != nil || strings.HasPrefix(rel, "..") {
+		return nil, fmt.Errorf("invalid session path")
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open session file: %w", err)
 	}
 	defer f.Close()
 
-	vs := &ViewSession{Files: make([]*FileGroup, 0)}
+	vs := &ViewSession{
+		Summary:     newDefaultSessionSummary(),
+		Files:       make([]*FileGroup, 0),
+		AgentEvents: make([]AgentEvent, 0),
+	}
 	fileIndex := make(map[string]*FileGroup)
 
 	scanner := bufio.NewScanner(f)
@@ -308,6 +358,39 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			if v, ok := rec["diffCommit"].(string); ok {
 				vs.Summary.DiffCommit = v
 			}
+			parseAgentSessionStartFields(rec, &vs.Summary)
+
+		case "agent_event":
+			event, _ := rec["event"].(string)
+			bundleID, _ := rec["bundleId"].(string)
+			errorMessage, _ := rec["error"].(string)
+			duration := int64(0)
+			if value, ok := rec["duration_ms"].(float64); ok {
+				duration = int64(value)
+			}
+			agentEvent := AgentEvent{
+				Event: event, BundleID: bundleID, DurationMS: duration, Error: errorMessage,
+			}
+			if value, ok := rec["files"].(float64); ok {
+				agentEvent.Files = int(value)
+			}
+			if value, ok := rec["findings"].(float64); ok {
+				agentEvent.Findings = int(value)
+			}
+			if value, ok := rec["warnings"].(float64); ok {
+				agentEvent.Warnings = int(value)
+			}
+			if value, ok := rec["context_calls"].(float64); ok {
+				agentEvent.ContextCalls = int(value)
+			}
+			if value, ok := rec["partial"].(bool); ok {
+				agentEvent.Partial = value
+			}
+			if value, ok := rec["validation_valid"].(bool); ok {
+				valid := value
+				agentEvent.ValidationValid = &valid
+			}
+			vs.AgentEvents = append(vs.AgentEvents, agentEvent)
 
 		case "llm_request":
 			fp, _ := rec["filePath"].(string)
@@ -493,4 +576,16 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs.Summary.SessionID = sessionID
 	return vs, scanner.Err()
+}
+
+func parseAgentSessionStartFields(rec map[string]any, summary *SessionSummary) {
+	if value, ok := rec["controlPlane"].(string); ok {
+		summary.ControlPlane = value
+	}
+	if value, ok := rec["bundleId"].(string); ok {
+		summary.BundleID = value
+	}
+	if value, ok := rec["tokenUsage"].(string); ok && value == "not_available" {
+		summary.TokenUsageAvailable = false
+	}
 }
