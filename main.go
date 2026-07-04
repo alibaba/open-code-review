@@ -1,2 +1,3 @@
 package main
+
 func main() {}
