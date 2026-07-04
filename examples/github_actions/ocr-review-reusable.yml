@@ -11,7 +11,7 @@
 #   variable  OCR_LLM_USE_ANTHROPIC  'true' for Anthropic, 'false' for OpenAI-compatible
 #
 # For the full list of action inputs/outputs and the four comment-posting modes
-# (sticky / incremental), see action/README.md.
+# (sticky / incremental), see action.yml at the repo root.
 
 name: OpenCodeReview PR Review
 
@@ -98,7 +98,7 @@ jobs:
             core.setOutput('head_sha', pullRequest.head.sha);
 
       - name: Run OpenCodeReview
-        uses: alibaba/open-code-review/action@v1
+        uses: alibaba/open-code-review@v1
         with:
           llm_url: ${{ secrets.OCR_LLM_URL }}
           llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
