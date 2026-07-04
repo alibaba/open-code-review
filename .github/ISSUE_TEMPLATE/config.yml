@@ -1,8 +1,0 @@
-blank_issues_enabled: false
-contact_links:
-  - name: "\U0001F4AC Questions & Help"
-    url: https://github.com/alibaba/open-code-review/discussions/categories/q-a
-    about: Ask questions or get help with configuration in Discussions.
-  - name: "\U0001F4A1 Ideas & Feature Discussions"
-    url: https://github.com/alibaba/open-code-review/discussions/categories/ideas
-    about: Discuss feature ideas before opening a formal request.
