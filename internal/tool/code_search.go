@@ -72,7 +72,7 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 		cmdArgs = append(cmdArgs, "-F")
 	}
 
-	cmdArgs = append(cmdArgs, "-n", "--no-color")
+	cmdArgs = append(cmdArgs, "-n", "-z", "--no-color")
 	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount))
 
 	cmdArgs = append(cmdArgs, "-e", searchText)
@@ -143,9 +143,6 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 		}
 	}
 
-	lines := strings.Split(strings.TrimRight(outStr, "\n"), "\n")
-	truncated := len(lines) >= gitGrepMaxCount
-
 	type match struct {
 		lineNum int
 		content string
@@ -154,40 +151,53 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	var fileOrder []string
 	seen := make(map[string]bool)
 
-	hasRef := p.FileReader.Ref != ""
-	splitN := 3
-	offset := 0
-	if hasRef {
-		splitN = 4
-		offset = 1
+	refPrefix := ""
+	if searchProvider.FileReader.Ref != "" {
+		refPrefix = searchProvider.FileReader.Ref + ":"
 	}
 
 	var sb strings.Builder
-	if truncated {
-		sb.WriteString(fmt.Sprintf("Note: The results have been truncated. Only showing first %d results.\n", gitGrepMaxCount))
-	}
 
-	for _, line := range lines {
-		if line == "" {
-			continue
+	totalMatches := 0
+	rest := outStr
+	for rest != "" {
+		pathEnd := strings.IndexByte(rest, '\x00')
+		if pathEnd < 0 {
+			break
 		}
-		parts := strings.SplitN(line, ":", splitN)
-		if len(parts) < splitN {
-			continue
+		fname := strings.TrimPrefix(rest[:pathEnd], refPrefix)
+		rest = rest[pathEnd+1:]
+		lineEnd := strings.IndexByte(rest, '\x00')
+		if lineEnd < 0 {
+			break
 		}
-		fname := parts[offset]
+		lineText := rest[:lineEnd]
+		rest = rest[lineEnd+1:]
+		contentEnd := strings.IndexByte(rest, '\n')
+		content := rest
+		if contentEnd >= 0 {
+			content = rest[:contentEnd]
+			rest = rest[contentEnd+1:]
+		} else {
+			rest = ""
+		}
 		m := match{}
-		ln, parseErr := strconv.Atoi(parts[offset+1])
+		ln, parseErr := strconv.Atoi(lineText)
 		if parseErr != nil {
 			continue
 		}
 		m.lineNum = ln
-		m.content = parts[offset+2]
+		m.content = content
+		totalMatches++
 		if !seen[fname] {
 			seen[fname] = true
 			fileOrder = append(fileOrder, fname)
 		}
 		fileMatches[fname] = append(fileMatches[fname], m)
+	}
+
+	if totalMatches >= gitGrepMaxCount {
+		sb.WriteString(fmt.Sprintf("Note: The results have been truncated. Only showing first %d results.\n", gitGrepMaxCount))
 	}
 
 	for _, path := range fileOrder {
