@@ -145,6 +145,26 @@ func TestGitGrep_WorkspaceMode_Found(t *testing.T) {
 	}
 }
 
+func TestGitGrep_WorkspaceMode_ColonPath(t *testing.T) {
+	dir := setupTestRepo(t)
+	path := filepath.Join(dir, "dir", "a:b.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package main\n\nfunc ColonPath() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
+	result, err := p.gitGrep(context.Background(), "ColonPath", false, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "dir/a:b.go") || !strings.Contains(result, "ColonPath") {
+		t.Errorf("expected colon path match, got: %s", result)
+	}
+}
+
 func TestGitGrep_WorkspaceMode_NoMatch(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
@@ -488,6 +508,9 @@ func TestCodeSearchProvider_Execute_PerlRegexp(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(got, "cannot use Perl-compatible regexes") {
+		t.Skipf("git was built without Perl-compatible regexp support: %s", got)
 	}
 	if !strings.Contains(got, "hello.go") {
 		t.Errorf("expected hello.go in perl regexp result, got: %s", got)

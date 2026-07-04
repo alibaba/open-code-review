@@ -115,17 +115,33 @@ func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []str
 }
 
 func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, caseSensitive bool, usePerlRegexp bool, pathspec []string) (string, error) {
-	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
+	searchProvider := p
+	if p.FileReader.Ref != "" {
+		resolvedRef, err := p.resolveGrepRef(ctx)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return "", err
+			}
+			return fmt.Sprintf("Error: invalid git ref %q: %v", p.FileReader.Ref, err), nil
+		}
+		fileReader := *p.FileReader
+		fileReader.Ref = resolvedRef
+		providerCopy := *p
+		providerCopy.FileReader = &fileReader
+		searchProvider = &providerCopy
+	}
 
-	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)
+	cmdArgs := searchProvider.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
+
+	outStr, errStr, err := searchProvider.runGitGrep(ctx, cmdArgs)
 
 	// Non-git directory: `git grep` exits 128 with "not a git repository".
 	// `ocr scan` supports plain directories, so retry in --no-index mode, which
 	// searches the working tree directly while still honoring .gitignore.
 	// Ref-based search needs a real repo, so it is not retried.
 	if err != nil && p.FileReader.Ref == "" && isNotGitRepoError(err, errStr) {
-		cmdArgs = p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, true, pathspec)
-		outStr, errStr, err = p.runGitGrep(ctx, cmdArgs)
+		cmdArgs = searchProvider.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, true, pathspec)
+		outStr, errStr, err = searchProvider.runGitGrep(ctx, cmdArgs)
 	}
 
 	if err != nil {
@@ -151,15 +167,14 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	var fileOrder []string
 	seen := make(map[string]bool)
 
-	refPrefix := ""
-	if searchProvider.FileReader.Ref != "" {
-		refPrefix = searchProvider.FileReader.Ref + ":"
-	}
-
 	var sb strings.Builder
 
 	totalMatches := 0
 	rest := outStr
+	refPrefix := ""
+	if searchProvider.FileReader.Ref != "" {
+		refPrefix = searchProvider.FileReader.Ref + ":"
+	}
 	for rest != "" {
 		pathEnd := strings.IndexByte(rest, '\x00')
 		if pathEnd < 0 {
@@ -214,6 +229,32 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	}
 
 	return sb.String(), nil
+}
+
+func (p *CodeSearchProvider) resolveGrepRef(ctx context.Context) (string, error) {
+	arguments := []string{
+		"rev-parse",
+		"--verify",
+		"--end-of-options",
+		p.FileReader.Ref + "^{commit}",
+	}
+	var output []byte
+	var err error
+	if p.FileReader.Runner != nil {
+		output, err = p.FileReader.Runner.Output(ctx, p.FileReader.RepoDir, arguments...)
+	} else {
+		command := exec.CommandContext(ctx, "git", arguments...)
+		command.Dir = p.FileReader.RepoDir
+		output, err = command.Output()
+	}
+	if err != nil {
+		return "", err
+	}
+	resolved := strings.TrimSpace(string(output))
+	if resolved == "" {
+		return "", fmt.Errorf("resolved commit is empty")
+	}
+	return resolved, nil
 }
 
 func isNotGitRepoError(err error, stderr string) bool {
