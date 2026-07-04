@@ -1,8 +1,8 @@
 # OpenCodeReview - GitHub Actions PR Auto-Review Pipeline
 #
 # Reviews pull requests using the reusable composite action defined in
-# action/action.yml. See that file for the full list of inputs, outputs,
-# and implementation details (retry, idempotency, artifact upload, etc.).
+# action.yml at the repo root. See that file for the full list of inputs,
+# outputs, and implementation details (retry, idempotency, artifact upload, etc.).
 #
 # Triggers:
 #   - PR opened (uses pull_request_target for fork secret access)
@@ -40,7 +40,7 @@ jobs:
     if: github.event_name == 'pull_request_target'
     steps:
       - name: Run OpenCodeReview
-        uses: ./action
+        uses: ./
         with:
           llm_url: ${{ secrets.OCR_LLM_URL }}
           llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
@@ -48,6 +48,6 @@ jobs:
           llm_use_anthropic: ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
           llm_extra_body: '{"enable_thinking": false}'
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          sticky_summary: true
-          incremental: false
-          upload_artifacts: false
+          sticky_summary: 'true'
+          incremental: 'false'
+          upload_artifacts: 'true'
