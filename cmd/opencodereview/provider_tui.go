@@ -182,6 +182,17 @@ func (m providerTUIModel) customProviderActiveModel(cp customProviderListItem) s
 	return activeModelForProvider(m.existingCfg, cp.name, entry)
 }
 
+func (m providerTUIModel) officialProviderActiveModel(p llm.Provider) string {
+	if m.existingCfg == nil || m.existingCfg.Provider != p.Name {
+		return ""
+	}
+	entry := ProviderEntry{}
+	if m.existingCfg.Providers != nil {
+		entry = m.existingCfg.Providers[p.Name]
+	}
+	return activeModelForProvider(m.existingCfg, p.Name, entry)
+}
+
 func collectCustomProviders(cfg *Config) []customProviderListItem {
 	if cfg == nil || cfg.CustomProviders == nil {
 		return nil
@@ -1997,6 +2008,9 @@ func (m providerTUIModel) viewOfficialTab(s *strings.Builder) {
 	for i, p := range m.providers {
 		isCursor := i == m.officialIdx
 		s.WriteString(listCursorPrefix(isCursor) + renderListName(p.DisplayName, isCursor))
+		if activeModel := m.officialProviderActiveModel(p); activeModel != "" {
+			s.WriteString("  " + tuiDimStyle.Render("("+activeModel+")"))
+		}
 		s.WriteString("\n")
 	}
 }

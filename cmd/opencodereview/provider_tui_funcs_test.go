@@ -46,6 +46,73 @@ func TestCustomProviderActiveModel_MatchingProvider(t *testing.T) {
 	}
 }
 
+func TestOfficialProviderActiveModel_NilCfg(t *testing.T) {
+	m := providerTUIModel{existingCfg: nil}
+	got := m.officialProviderActiveModel(llm.Provider{Name: "anthropic"})
+	if got != "" {
+		t.Errorf("expected empty string for nil cfg, got %q", got)
+	}
+}
+
+func TestOfficialProviderActiveModel_DifferentProvider(t *testing.T) {
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	got := m.officialProviderActiveModel(llm.Provider{Name: "anthropic", DisplayName: "Anthropic Claude API"})
+	if got != "" {
+		t.Errorf("expected empty string for non-active provider, got %q", got)
+	}
+}
+
+func TestOfficialProviderActiveModel_MatchingProvider(t *testing.T) {
+	cfg := &Config{
+		Provider: "anthropic",
+		Model:    "claude-opus-4-8",
+		Providers: map[string]ProviderEntry{
+			"anthropic": {Model: "claude-opus-4-8"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	got := m.officialProviderActiveModel(llm.Provider{Name: "anthropic", DisplayName: "Anthropic Claude API"})
+	if got != "claude-opus-4-8" {
+		t.Errorf("expected claude-opus-4-8, got %q", got)
+	}
+}
+
+func TestOfficialProviderActiveModel_EmptyModel(t *testing.T) {
+	cfg := &Config{
+		Provider: "anthropic",
+		Providers: map[string]ProviderEntry{
+			"anthropic": {},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	got := m.officialProviderActiveModel(llm.Provider{Name: "anthropic"})
+	if got != "" {
+		t.Errorf("expected empty model, got %q", got)
+	}
+}
+
+func TestProviderTUIView_OfficialTab_ShowsActiveModelSuffix(t *testing.T) {
+	cfg := &Config{
+		Provider: "anthropic",
+		Model:    "claude-opus-4-8",
+		Providers: map[string]ProviderEntry{
+			"anthropic": {Model: "claude-opus-4-8"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	got := stripANSI(m.View().Content)
+	if !strings.Contains(got, "(claude-opus-4-8)") {
+		t.Errorf("view missing active model suffix; got:\n%s", got)
+	}
+}
+
 func TestModelProviderName_OfficialTab(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
 	name := m.modelProviderName()
