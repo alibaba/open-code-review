@@ -119,10 +119,23 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 	if !ok {
 		t.Fatal("openai not found")
 	}
-	if p.Protocol != "openai" {
-		t.Errorf("Protocol = %q, want %q", p.Protocol, "openai")
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
 	}
 	if p.AuthHeader != "" {
 		t.Errorf("AuthHeader = %q, want empty", p.AuthHeader)
+	}
+}
+
+// TestProviders_AllProtocolsCanonical verifies every registry entry uses a
+// canonical protocol constant — no stale "openai" / "anthropic" literals that
+// would bypass NormalizeProtocol downstream.
+func TestProviders_AllProtocolsCanonical(t *testing.T) {
+	for _, p := range ListProviders() {
+		switch p.Protocol {
+		case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses:
+		default:
+			t.Errorf("provider %q has non-canonical Protocol %q", p.Name, p.Protocol)
+		}
 	}
 }

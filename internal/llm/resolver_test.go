@@ -205,8 +205,8 @@ func TestResolveEndpoint_ConfigOpenAIIgnoresAuthHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ep.Protocol != "openai" {
-		t.Errorf("expected protocol %q, got %q", "openai", ep.Protocol)
+	if ep.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("expected protocol %q, got %q", ProtocolOpenAIChatCompletions, ep.Protocol)
 	}
 	if ep.AuthHeader != "" {
 		t.Errorf("expected empty auth header for OpenAI protocol, got %q", ep.AuthHeader)
@@ -239,8 +239,8 @@ func TestResolveEndpoint_OCREnvOpenAIIgnoresAuthHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ep.Protocol != "openai" {
-		t.Errorf("expected protocol %q, got %q", "openai", ep.Protocol)
+	if ep.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("expected protocol %q, got %q", ProtocolOpenAIChatCompletions, ep.Protocol)
 	}
 	if ep.AuthHeader != "" {
 		t.Errorf("expected empty auth header for OpenAI protocol, got %q", ep.AuthHeader)
@@ -252,7 +252,7 @@ func TestResolveEndpoint_OCREnvOpenAIIgnoresAuthHeader(t *testing.T) {
 func clearAllEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_AUTH_HEADER", "OCR_USE_ANTHROPIC",
+		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_AUTH_HEADER", "OCR_USE_ANTHROPIC", "OCR_LLM_PROTOCOL",
 		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 	} {
@@ -311,8 +311,8 @@ func TestResolveEndpoint_ProviderOpenAI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ep.Protocol != "openai" {
-		t.Errorf("Protocol = %q, want %q", ep.Protocol, "openai")
+	if ep.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, ProtocolOpenAIChatCompletions)
 	}
 	if ep.AuthHeader != "" {
 		t.Errorf("AuthHeader = %q, want empty", ep.AuthHeader)
@@ -478,8 +478,8 @@ func TestResolveEndpoint_CustomProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ep.Protocol != "openai" {
-		t.Errorf("Protocol = %q, want %q", ep.Protocol, "openai")
+	if ep.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, ProtocolOpenAIChatCompletions)
 	}
 	if ep.URL != "https://gateway.internal.com/v1" {
 		t.Errorf("URL = %q", ep.URL)
@@ -1444,5 +1444,216 @@ func TestResolveEndpoint_NegativeEnvTimeoutWithConfig(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "OCR_LLM_TIMEOUT") {
 		t.Errorf("error %q should mention OCR_LLM_TIMEOUT", err.Error())
+	}
+}
+
+// --- openai-responses / protocol normalization tests ---
+
+func TestResolveEndpoint_CustomProviderResponsesProtocol(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: ProtocolOpenAIResponses,
+				Model:    "gpt-5.4",
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Protocol != ProtocolOpenAIResponses {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, ProtocolOpenAIResponses)
+	}
+	// Resolver must NOT append /v1/messages to a non-anthropic URL.
+	if strings.Contains(ep.URL, "/v1/messages") {
+		t.Errorf("URL = %q, must not have /v1/messages appended for openai-responses", ep.URL)
+	}
+	if strings.Contains(ep.URL, "/chat/completions") {
+		t.Errorf("URL = %q, must not have /chat/completions appended (client handles its own suffix)", ep.URL)
+	}
+}
+
+func TestResolveEndpoint_CustomProviderChatCompletionsProtocol(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: ProtocolOpenAIChatCompletions,
+				Model:    "gpt-4o",
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, ProtocolOpenAIChatCompletions)
+	}
+}
+
+func TestResolveEndpoint_CustomProviderOpenAIAlias(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "openai", // legacy alias
+				Model:    "gpt-4o",
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q (alias should be normalized)", ep.Protocol, ProtocolOpenAIChatCompletions)
+	}
+}
+
+func TestResolveEndpoint_CustomProviderAnthropicVertexRejected(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "anthropic-vertex",
+				Model:    "claude-3",
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for anthropic-vertex (not yet implemented)")
+	}
+	if !strings.Contains(err.Error(), "not yet implemented") {
+		t.Errorf("error %q should mention 'not yet implemented'", err.Error())
+	}
+}
+
+func TestResolveEndpoint_LegacyLlmProtocolTakesPriorityOverUseAnthropic(t *testing.T) {
+	clearAllEnv(t)
+
+	// llm.protocol says responses, use_anthropic says anthropic. protocol wins.
+	useAnthropic := true
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:          "https://api.openai.com/v1",
+			AuthToken:    "tok",
+			Model:        "gpt-5.4",
+			Protocol:     ProtocolOpenAIResponses,
+			UseAnthropic: &useAnthropic,
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Protocol != ProtocolOpenAIResponses {
+		t.Errorf("Protocol = %q, want %q (llm.protocol should win over use_anthropic)", ep.Protocol, ProtocolOpenAIResponses)
+	}
+}
+
+func TestResolveEndpoint_OCREnvProtocolTakesPriorityOverUseAnthropic(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://api.openai.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "tok")
+	t.Setenv("OCR_LLM_MODEL", "gpt-5.4")
+	t.Setenv("OCR_USE_ANTHROPIC", "true")
+	t.Setenv("OCR_LLM_PROTOCOL", ProtocolOpenAIResponses)
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Protocol != ProtocolOpenAIResponses {
+		t.Errorf("Protocol = %q, want %q (OCR_LLM_PROTOCOL should win over OCR_USE_ANTHROPIC)", ep.Protocol, ProtocolOpenAIResponses)
+	}
+}
+
+func TestResolveEndpoint_OCREnvProtocolAlias(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://api.openai.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "tok")
+	t.Setenv("OCR_LLM_MODEL", "gpt-4o")
+	t.Setenv("OCR_LLM_PROTOCOL", "openai") // alias
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q (alias should be normalized)", ep.Protocol, ProtocolOpenAIChatCompletions)
+	}
+}
+
+func TestResolveEndpoint_OCREnvProtocolInvalid(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://api.openai.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "tok")
+	t.Setenv("OCR_LLM_MODEL", "gpt-4o")
+	t.Setenv("OCR_LLM_PROTOCOL", "grpc")
+
+	_, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err == nil {
+		t.Fatal("expected error for invalid OCR_LLM_PROTOCOL")
+	}
+	if !strings.Contains(err.Error(), "unsupported protocol") {
+		t.Errorf("error %q should mention unsupported protocol", err.Error())
+	}
+}
+
+// TestResolveEndpoint_ResponsesURLNotMutated makes sure the resolver leaves
+// openai-responses URLs alone — only anthropic gets /v1/messages appended.
+func TestResolveEndpoint_ResponsesURLNotMutated(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://api.openai.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "tok")
+	t.Setenv("OCR_LLM_MODEL", "gpt-5.4")
+	t.Setenv("OCR_LLM_PROTOCOL", ProtocolOpenAIResponses)
+
+	ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.URL != "https://api.openai.com/v1" {
+		t.Errorf("URL = %q, want %q (resolver must not mutate openai-responses URLs)", ep.URL, "https://api.openai.com/v1")
 	}
 }

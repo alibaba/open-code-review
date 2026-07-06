@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"testing"
+
+	"github.com/open-code-review/open-code-review/internal/llm"
 )
 
 func TestSetConfigValueAuthHeaderNormalizesKnownValues(t *testing.T) {
@@ -164,12 +166,46 @@ func TestSetConfigValueProviderEntryProtocol(t *testing.T) {
 	if err := setConfigValue(cfg, "custom_providers.custom.protocol", "openai"); err != nil {
 		t.Fatalf("setConfigValue: %v", err)
 	}
-	if cfg.CustomProviders["custom"].Protocol != "openai" {
-		t.Errorf("protocol = %q, want %q", cfg.CustomProviders["custom"].Protocol, "openai")
+	if cfg.CustomProviders["custom"].Protocol != llm.ProtocolOpenAIChatCompletions {
+		t.Errorf("protocol = %q, want %q (openai alias normalized)", cfg.CustomProviders["custom"].Protocol, llm.ProtocolOpenAIChatCompletions)
 	}
 
 	if err := setConfigValue(cfg, "custom_providers.custom.protocol", "invalid"); err == nil {
 		t.Fatal("expected error for invalid protocol")
+	}
+
+	if err := setConfigValue(cfg, "custom_providers.custom.protocol", "anthropic-vertex"); err == nil {
+		t.Fatal("expected error for not-yet-implemented protocol anthropic-vertex")
+	}
+
+	if err := setConfigValue(cfg, "custom_providers.custom.protocol", "openai-responses"); err != nil {
+		t.Fatalf("setConfigValue openai-responses: %v", err)
+	}
+	if cfg.CustomProviders["custom"].Protocol != llm.ProtocolOpenAIResponses {
+		t.Errorf("protocol = %q, want %q", cfg.CustomProviders["custom"].Protocol, llm.ProtocolOpenAIResponses)
+	}
+}
+
+func TestSetConfigValueLlmProtocol(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "llm.protocol", "openai-responses"); err != nil {
+		t.Fatalf("setConfigValue llm.protocol: %v", err)
+	}
+	if cfg.Llm.Protocol != llm.ProtocolOpenAIResponses {
+		t.Errorf("cfg.Llm.Protocol = %q, want %q", cfg.Llm.Protocol, llm.ProtocolOpenAIResponses)
+	}
+
+	// Alias normalization: "openai" -> openai-chat-completions
+	if err := setConfigValue(cfg, "llm.protocol", "openai"); err != nil {
+		t.Fatalf("setConfigValue llm.protocol (alias): %v", err)
+	}
+	if cfg.Llm.Protocol != llm.ProtocolOpenAIChatCompletions {
+		t.Errorf("cfg.Llm.Protocol = %q, want %q (alias normalized)", cfg.Llm.Protocol, llm.ProtocolOpenAIChatCompletions)
+	}
+
+	if err := setConfigValue(cfg, "llm.protocol", "grpc"); err == nil {
+		t.Fatal("expected error for invalid llm.protocol")
 	}
 }
 

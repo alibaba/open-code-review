@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -546,6 +547,58 @@ func TestEncodingForModel(t *testing.T) {
 	}
 }
 
+func TestNewLLMClient_Dispatch(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol string
+		want     string
+	}{
+		{"anthropic -> AnthropicClient", ProtocolAnthropic, "*llm.AnthropicClient"},
+		{"openai-chat-completions -> OpenAIClient", ProtocolOpenAIChatCompletions, "*llm.OpenAIClient"},
+		{"openai-responses -> OpenAIResponsesClient", ProtocolOpenAIResponses, "*llm.OpenAIResponsesClient"},
+		// Defensive default: an unnormalized/unknown protocol falls through to
+		// OpenAIClient (preserves the pre-refactor behavior where any
+		// non-anthropic protocol meant OpenAI).
+		{"empty protocol -> OpenAIClient (defensive default)", "", "*llm.OpenAIClient"},
+		{"unknown protocol -> OpenAIClient (defensive default)", "something-weird", "*llm.OpenAIClient"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ep := ResolvedEndpoint{
+				URL:      "https://api.example.com/v1",
+				Token:    "test-token",
+				Model:    "test-model",
+				Protocol: tt.protocol,
+			}
+			client := NewLLMClient(ep)
+			got := typeName(client)
+			if got != tt.want {
+				t.Errorf("NewLLMClient(protocol=%q) = %s, want %s", tt.protocol, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNewLLMClient_OpenAIAliasDispatchesToOpenAIClient verifies that the
+// "openai" alias, once normalized by the resolver, lands on the OpenAI Chat
+// Completions client (not Responses).
+func TestNewLLMClient_OpenAIAliasDispatchesToOpenAIClient(t *testing.T) {
+	ep := ResolvedEndpoint{
+		URL:      "https://api.example.com/v1",
+		Token:    "test-token",
+		Model:    "test-model",
+		Protocol: NormalizeProtocol("openai"),
+	}
+	client := NewLLMClient(ep)
+	if got := typeName(client); got != "*llm.OpenAIClient" {
+		t.Errorf("NormalizeProtocol(\"openai\") dispatched to %s, want *llm.OpenAIClient", got)
+	}
+}
+
+func typeName(v any) string {
+	return fmt.Sprintf("%T", v)
+}
+
 func TestStripThinkTags(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -569,3 +622,4 @@ func TestStripThinkTags(t *testing.T) {
 		})
 	}
 }
+

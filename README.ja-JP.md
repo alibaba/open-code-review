@@ -208,7 +208,7 @@ ocr config set custom_providers.my-gateway.api_key your-api-key-here
 ocr config set custom_providers.my-gateway.model gpt-4o
 ```
 
-> カスタムプロバイダーでは`url`と`protocol`が必須です。サポートされるプロトコル：`anthropic`、`openai`。
+> カスタムプロバイダーでは`url`と`protocol`が必須です。サポートされるプロトコル：`anthropic`、`openai-chat-completions`、`openai-responses`（エイリアス：`openai`）。
 
 オプション設定：
 
@@ -241,6 +241,17 @@ export OCR_LLM_TOKEN=your-api-key-here
 export OCR_LLM_MODEL=claude-opus-4-6
 export OCR_USE_ANTHROPIC=true
 ```
+
+OpenAI Responses API（GPT-5.x / o-シリーズモデル）を使うには、`OCR_USE_ANTHROPIC` の代わりに `OCR_LLM_PROTOCOL` を設定してください:
+
+```bash
+export OCR_LLM_URL=https://api.openai.com/v1
+export OCR_LLM_TOKEN=your-openai-key
+export OCR_LLM_MODEL=gpt-5.4
+export OCR_LLM_PROTOCOL=openai-responses
+```
+
+`OCR_LLM_PROTOCOL` は `anthropic`、`openai-chat-completions`、`openai-responses`（エイリアス `openai`）を受け付け、`OCR_USE_ANTHROPIC` と同時に設定した場合は優先されます。
 
 Claude Codeの環境変数（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`）とも互換性があり、`~/.zshrc` / `~/.bashrc`からこれらのexportをパースします。
 
@@ -662,7 +673,7 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
 | `providers.<name>.api_key` | string | プロバイダー固有のAPIキー |
 | `providers.<name>.url` | string | プロバイダーのベースURLオーバーライド |
-| `providers.<name>.protocol` | string | `anthropic` \| `openai` |
+| `providers.<name>.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses`（エイリアス: `openai`） |
 | `providers.<name>.model` | string | プロバイダーのモデル名 |
 | `providers.<name>.models` | array | 対話的選択に使う任意のプロバイダーモデル一覧 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
@@ -677,7 +688,8 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `llm.timeout_sec` | integer | リクエストごとのHTTPタイムアウト（秒）、デフォルト `300` |
 | `llm.extra_headers` | string | カンマ区切りの `key=value` HTTPヘッダー |
 | `llm.model` | string | `claude-opus-4-6` |
-| `llm.use_anthropic` | boolean | `true` \| `false` |
+| `llm.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses`（エイリアス: `openai`）；`llm.use_anthropic` より優先 |
+| `llm.use_anthropic` | boolean | `true` \| `false`（レガシー；`llm.protocol` を推奨） |
 | `mcp_servers.<name>.command` | string | MCPサーバーを起動するコマンド |
 | `mcp_servers.<name>.args` | array | MCPサーバーのコマンドライン引数 |
 | `mcp_servers.<name>.env` | array | 環境変数（`KEY=VALUE`形式） |
@@ -737,8 +749,18 @@ ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
 | `OCR_LLM_AUTH_HEADER` | Anthropic認証ヘッダー（`x-api-key`または`authorization`） |
 | `OCR_LLM_EXTRA_HEADERS` | カンマ区切りの `key=value` HTTPヘッダー |
 | `OCR_LLM_MODEL` | モデル名 |
+| `OCR_LLM_PROTOCOL` | プロトコル：`anthropic` \| `openai-chat-completions` \| `openai-responses`（エイリアス: `openai`）；`OCR_USE_ANTHROPIC` より優先 |
 | `OCR_LLM_TIMEOUT` | リクエストごとのHTTPタイムアウト（秒）、設定ファイルの `timeout_sec` を上書き |
-| `OCR_USE_ANTHROPIC` | `true` = Anthropic、`false` = OpenAI |
+| `OCR_USE_ANTHROPIC` | `true` = Anthropic、`false` = OpenAI Chat Completions（レガシー；`OCR_LLM_PROTOCOL` を推奨） |
+
+### OpenAI Responses API の注意事項
+
+`protocol: openai-responses` を使うとき、OCR は各ターンを完全に自己完結したリクエストとして送信します（ステートレス再再生 — `previous_response_id` は使用しない）。そのためエージェントループにプロトコル固有の変更は不要です。知っておくべき実装の詳細が 2 つあります:
+
+- **`store=false`**: リクエストは明示的にサーバー側のレスポンス保持を辞退し、プライバシーを保護します。`store=false` で OpenAI の自動 prefix caching が引き続き適用されるかはドキュメントが不明確です — キャッシュヒット率が気になる場合は `ocr viewer` セッション JSONL の `usage.input_tokens_details.cached_tokens` で確認してください。
+- **`prompt_cache_key`**: `sha256(instructions)[:32]` から派生し、system instructions を持つすべてのリクエストで送信されます。これにより OpenAI は同じプロンプトのリクエストを prefix マッチング用にバケット化できます。このキーにはビジネス上の意味はなく、ファイル単位のコンテンツも含まれません（ファイルのコンテンツはキャッシュ可能な prefix の後にあるため、ヒットに影響しません）。
+
+Phase フィールド（assistant メッセージの `commentary` / `final_answer`、`gpt-5.3-codex` 以降のモデルで使用）は現在レスポンスマッピング中に破棄されます。現在の GPT-5.x / o-シリーズモデルは Phase を生成しないため、短期的な影響はありません。これらのモデルがサポート対象に含まれる際にサポートが追加されます。
 
 
 ## テレメトリー

@@ -208,7 +208,7 @@ ocr config set custom_providers.my-gateway.api_key your-api-key-here
 ocr config set custom_providers.my-gateway.model gpt-4o
 ```
 
-> `url` and `protocol` are required for custom providers. Supported protocols: `anthropic`, `openai`.
+> `url` and `protocol` are required for custom providers. Supported protocols: `anthropic`, `openai-chat-completions`, `openai-responses` (alias: `openai`).
 
 Optional settings:
 
@@ -241,6 +241,17 @@ export OCR_LLM_TOKEN=your-api-key-here
 export OCR_LLM_MODEL=claude-opus-4-6
 export OCR_USE_ANTHROPIC=true
 ```
+
+To use the OpenAI Responses API (GPT-5.x / o-series), set `OCR_LLM_PROTOCOL` instead of `OCR_USE_ANTHROPIC`:
+
+```bash
+export OCR_LLM_URL=https://api.openai.com/v1
+export OCR_LLM_TOKEN=your-openai-key
+export OCR_LLM_MODEL=gpt-5.4
+export OCR_LLM_PROTOCOL=openai-responses
+```
+
+`OCR_LLM_PROTOCOL` accepts `anthropic`, `openai-chat-completions`, `openai-responses` (alias: `openai`), and takes priority over `OCR_USE_ANTHROPIC` when both are set.
 
 Also compatible with Claude Code environment variables (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) and parses `~/.zshrc` / `~/.bashrc` for those exports.
 
@@ -667,7 +678,7 @@ Config file: `~/.opencodereview/config.json`
 | `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
 | `providers.<name>.api_key` | string | Provider-specific API key |
 | `providers.<name>.url` | string | Provider base URL override |
-| `providers.<name>.protocol` | string | `anthropic` \| `openai` |
+| `providers.<name>.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses` (alias: `openai`) |
 | `providers.<name>.model` | string | Model name for the provider |
 | `providers.<name>.models` | array | Optional provider model list for interactive selection |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
@@ -682,7 +693,8 @@ Config file: `~/.opencodereview/config.json`
 | `llm.timeout_sec` | integer | Per-request HTTP timeout in seconds (default: `300`) |
 | `llm.extra_headers` | string | Comma-separated `key=value` HTTP headers |
 | `llm.model` | string | `claude-opus-4-6` |
-| `llm.use_anthropic` | boolean | `true` \| `false` |
+| `llm.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses` (alias: `openai`); takes priority over `llm.use_anthropic` |
+| `llm.use_anthropic` | boolean | `true` \| `false` (legacy; prefer `llm.protocol`) |
 | `mcp_servers.<name>.command` | string | Command to start the MCP server |
 | `mcp_servers.<name>.args` | array | Command-line arguments for the MCP server |
 | `mcp_servers.<name>.env` | array | Environment variables in `KEY=VALUE` format |
@@ -742,8 +754,18 @@ ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` or `authorization`) |
 | `OCR_LLM_EXTRA_HEADERS` | Comma-separated `key=value` HTTP headers |
 | `OCR_LLM_MODEL` | Model name |
+| `OCR_LLM_PROTOCOL` | Protocol: `anthropic` \| `openai-chat-completions` \| `openai-responses` (alias: `openai`); takes priority over `OCR_USE_ANTHROPIC` |
 | `OCR_LLM_TIMEOUT` | Per-request HTTP timeout in seconds (overrides config file `timeout_sec`) |
-| `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
+| `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI Chat Completions (legacy; prefer `OCR_LLM_PROTOCOL`) |
+
+### OpenAI Responses API Notes
+
+When using `protocol: openai-responses`, OCR sends each turn as a fully self-contained request (stateless replay — no `previous_response_id`) so the agent loop needs no protocol-specific changes. Two implementation details worth knowing:
+
+- **`store=false`**: requests explicitly opt out of server-side response retention for privacy. Whether OpenAI's automatic prefix caching still applies under `store=false` is not fully documented — verify by inspecting `usage.input_tokens_details.cached_tokens` in `ocr viewer` session JSONL if cache hit rate matters to you.
+- **`prompt_cache_key`**: derived from `sha256(instructions)[:32]` and sent on every request that has system instructions, so OpenAI can bucket same-prompt requests for prefix matching. The key carries no business semantics and excludes per-file content (which sits after the cacheable prefix anyway).
+
+Phase fields (`commentary` / `final_answer` on assistant messages, used by `gpt-5.3-codex` and later) are currently dropped during response mapping. Current GPT-5.x / o-series models do not produce Phase, so there's no short-term impact; support will be added when those models enter the supported list.
 
 
 ## Telemetry

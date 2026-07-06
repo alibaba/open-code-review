@@ -224,7 +224,8 @@ type LlmConfig struct {
 	AuthToken    string            `json:"auth_token,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
 	Model        string            `json:"model,omitempty"`
-	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol
+	Protocol     string            `json:"protocol,omitempty"`     // canonical protocol name; takes priority over UseAnthropic
+	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
@@ -339,6 +340,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		cfg.Llm.ExtraHeaders = parsed
 	case "llm.model", "llm.Model":
 		cfg.Llm.Model = value
+	case "llm.protocol", "llm.Protocol":
+		normalized := llm.NormalizeProtocol(value)
+		if err := llm.ValidateProtocol(normalized); err != nil {
+			return err
+		}
+		cfg.Llm.Protocol = normalized
 	case "llm.use_anthropic", "llm.UseAnthropic":
 		b, err := strconv.ParseBool(value)
 		if err != nil {
@@ -374,7 +381,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nMCP server fields: command, args, env, tools, setup", key)
+		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nMCP server fields: command, args, env, tools, setup", key)
 	}
 	return nil
 }
@@ -386,10 +393,11 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 	case "url":
 		entry.URL = value
 	case "protocol":
-		if value != "anthropic" && value != "openai" {
-			return fmt.Errorf("invalid protocol %q: must be \"anthropic\" or \"openai\"", value)
+		normalized := llm.NormalizeProtocol(value)
+		if err := llm.ValidateProtocol(normalized); err != nil {
+			return err
 		}
-		entry.Protocol = value
+		entry.Protocol = normalized
 	case "model":
 		entry.Model = value
 	case "models":

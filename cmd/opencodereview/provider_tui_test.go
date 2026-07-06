@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/open-code-review/open-code-review/internal/llm"
 )
 
 func escKey() tea.KeyPressMsg {
@@ -1291,5 +1293,213 @@ func TestApplyCustomProviderConfigNormalizesAuthHeader(t *testing.T) {
 	}
 	if got := cfg.CustomProviders["test-provider"].AuthHeader; got != "authorization" {
 		t.Errorf("AuthHeader = %q, want %q", got, "authorization")
+	}
+}
+
+// --- protocol normalization / openai-responses support ---
+
+func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
+	// The slice drives both Custom and Manual forms — every canonical protocol
+	// must appear, in canonical order, so the TUI result() picks up the right
+	// string for each index.
+	want := []string{
+		llm.ProtocolAnthropic,
+		llm.ProtocolOpenAIChatCompletions,
+		llm.ProtocolOpenAIResponses,
+	}
+	if len(cpProtocols) != len(want) {
+		t.Fatalf("cpProtocols has %d entries, want %d", len(cpProtocols), len(want))
+	}
+	for i, p := range want {
+		if cpProtocols[i] != p {
+			t.Errorf("cpProtocols[%d] = %q, want %q", i, cpProtocols[i], p)
+		}
+	}
+}
+
+func TestCpProtocolIndex(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol string
+		want     int
+	}{
+		{"canonical anthropic", llm.ProtocolAnthropic, 0},
+		{"canonical chat-completions", llm.ProtocolOpenAIChatCompletions, 1},
+		{"canonical responses", llm.ProtocolOpenAIResponses, 2},
+		{"alias openai normalizes to chat-completions", "openai", 1},
+		{"alias OPENAI case-insensitive", "OPENAI", 1},
+		{"empty defaults to chat-completions", "", 1},
+		{"unknown defaults to chat-completions", "grpc", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cpProtocolIndex(tt.protocol); got != tt.want {
+				t.Errorf("cpProtocolIndex(%q) = %d, want %d", tt.protocol, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewProviderTUI_ManualProtocolFromConfig(t *testing.T) {
+	t.Run("cfg.Llm.Protocol drives manualProtocolIdx (responses)", func(t *testing.T) {
+		cfg := &Config{
+			Llm: LlmConfig{
+				URL:      "https://api.openai.com/v1",
+				Protocol: llm.ProtocolOpenAIResponses,
+				Model:    "gpt-5.4",
+			},
+		}
+		m := newProviderTUI(cfg, "")
+		if m.manualProtocolIdx != 2 {
+			t.Errorf("manualProtocolIdx = %d, want 2 (openai-responses)", m.manualProtocolIdx)
+		}
+	})
+
+	t.Run("cfg.Llm.Protocol alias openai normalizes", func(t *testing.T) {
+		cfg := &Config{
+			Llm: LlmConfig{
+				URL:      "https://api.openai.com/v1",
+				Protocol: "openai",
+				Model:    "gpt-4o",
+			},
+		}
+		m := newProviderTUI(cfg, "")
+		if m.manualProtocolIdx != 1 {
+			t.Errorf("manualProtocolIdx = %d, want 1 (openai-chat-completions)", m.manualProtocolIdx)
+		}
+	})
+
+	t.Run("falls back to use_anthropic when Protocol empty", func(t *testing.T) {
+		f := false
+		cfg := &Config{
+			Llm: LlmConfig{
+				URL:          "https://api.openai.com/v1",
+				UseAnthropic: &f,
+				Model:        "gpt-4o",
+			},
+		}
+		m := newProviderTUI(cfg, "")
+		if m.manualProtocolIdx != 1 {
+			t.Errorf("manualProtocolIdx = %d, want 1 (openai from use_anthropic=false)", m.manualProtocolIdx)
+		}
+	})
+}
+
+func TestEnterEditCustomProvider_ProtocolIndex(t *testing.T) {
+	tests := []struct {
+		name     string
+		protocol string
+		wantIdx  int
+	}{
+		{"anthropic", llm.ProtocolAnthropic, 0},
+		{"openai-chat-completions", llm.ProtocolOpenAIChatCompletions, 1},
+		{"openai-responses", llm.ProtocolOpenAIResponses, 2},
+		{"legacy alias openai", "openai", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				CustomProviders: map[string]ProviderEntry{
+					"cp": {URL: "https://x.example.com", Protocol: tt.protocol},
+				},
+			}
+			m := newProviderTUI(cfg, "")
+			m.activeTab = tabCustom
+			m.customIdx = 0
+			m.enterEditCustomProvider()
+			if m.cpProtocolIdx != tt.wantIdx {
+				t.Errorf("cpProtocolIdx = %d, want %d", m.cpProtocolIdx, tt.wantIdx)
+			}
+		})
+	}
+}
+
+// TestApplyManualConfig_DoubleWritesProtocolAndUseAnthropic verifies the dual
+// write: cfg.Llm.Protocol always gets the canonical name, and UseAnthropic is
+// mirrored for the two protocols that have a boolean equivalent so older
+// binaries can still read the config.
+func TestApplyManualConfig_DoubleWritesProtocolAndUseAnthropic(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+
+	t.Run("responses writes Protocol only (no use_anthropic equivalent)", func(t *testing.T) {
+		cfg := &Config{}
+		result := providerTUIResult{
+			isManual: true,
+			url:      "https://example.com/v1",
+			model:    "gpt-5.4",
+			apiKey:   "tok",
+			protocol: llm.ProtocolOpenAIResponses,
+		}
+		if err := applyManualConfig(configPath, cfg, result); err != nil {
+			t.Fatalf("applyManualConfig: %v", err)
+		}
+		if cfg.Llm.Protocol != llm.ProtocolOpenAIResponses {
+			t.Errorf("Protocol = %q, want %q", cfg.Llm.Protocol, llm.ProtocolOpenAIResponses)
+		}
+		// UseAnthropic should not be set for responses (no boolean equivalent).
+		if cfg.Llm.UseAnthropic != nil {
+			t.Errorf("UseAnthropic = %v, want nil for responses protocol", *cfg.Llm.UseAnthropic)
+		}
+	})
+
+	t.Run("anthropic writes Protocol AND use_anthropic=true (back-compat)", func(t *testing.T) {
+		cfg := &Config{}
+		result := providerTUIResult{
+			isManual: true,
+			url:      "https://example.com/v1",
+			model:    "claude",
+			apiKey:   "tok",
+			protocol: llm.ProtocolAnthropic,
+		}
+		if err := applyManualConfig(configPath, cfg, result); err != nil {
+			t.Fatalf("applyManualConfig: %v", err)
+		}
+		if cfg.Llm.Protocol != llm.ProtocolAnthropic {
+			t.Errorf("Protocol = %q, want %q", cfg.Llm.Protocol, llm.ProtocolAnthropic)
+		}
+		if cfg.Llm.UseAnthropic == nil || !*cfg.Llm.UseAnthropic {
+			t.Error("UseAnthropic should be mirrored to true for anthropic")
+		}
+	})
+
+	t.Run("chat-completions writes Protocol AND use_anthropic=false (back-compat)", func(t *testing.T) {
+		cfg := &Config{}
+		result := providerTUIResult{
+			isManual: true,
+			url:      "https://example.com/v1",
+			model:    "gpt-4o",
+			apiKey:   "tok",
+			protocol: llm.ProtocolOpenAIChatCompletions,
+		}
+		if err := applyManualConfig(configPath, cfg, result); err != nil {
+			t.Fatalf("applyManualConfig: %v", err)
+		}
+		if cfg.Llm.Protocol != llm.ProtocolOpenAIChatCompletions {
+			t.Errorf("Protocol = %q, want %q", cfg.Llm.Protocol, llm.ProtocolOpenAIChatCompletions)
+		}
+		if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic {
+			t.Error("UseAnthropic should be mirrored to false for chat-completions")
+		}
+	})
+}
+
+// TestProviderTUIResult_ManualProtocolIsCanonical makes sure result() for the
+// Manual tab returns the canonical protocol name picked from cpProtocols.
+func TestProviderTUIResult_ManualProtocolIsCanonical(t *testing.T) {
+	cfg := &Config{}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabManual
+	m.inManualForm = true
+	m.manualURLInput.SetValue("https://example.com/v1")
+	m.manualModelInput.SetValue("m")
+	m.manualTokenInput.SetValue("t")
+
+	for i, want := range cpProtocols {
+		m.manualProtocolIdx = i
+		r := m.result()
+		if r.protocol != want {
+			t.Errorf("manualProtocolIdx=%d: result.protocol = %q, want %q", i, r.protocol, want)
+		}
 	}
 }
