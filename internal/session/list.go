@@ -69,6 +69,7 @@ type summaryRecord struct {
 	SourceSessionID string          `json:"sourceSessionId"`
 	Error           string          `json:"error"`
 	Comments        json.RawMessage `json:"comments"`
+	FilesReviewed   []string        `json:"files_reviewed"`
 	DurationSeconds float64         `json:"duration_seconds"`
 	LLMFailures     int64           `json:"llm_failures"`
 }
@@ -228,6 +229,9 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 		s.FailedFiles++
 	case "session_end":
 		s.Aborted = false
+		if s.CompletedFiles == 0 && s.ReusedFiles == 0 && s.FailedFiles == 0 && len(rec.FilesReviewed) > 0 {
+			s.CompletedFiles = len(rec.FilesReviewed)
+		}
 		if !ts.IsZero() {
 			s.EndTime = ts
 		}

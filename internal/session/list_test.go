@@ -111,6 +111,33 @@ func TestLoadDetail_ReturnsItems(t *testing.T) {
 	}
 }
 
+func TestLoadSummary_FallsBackToSessionEndFilesReviewed(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+
+	sh := New(repoDir, "main", "test-model", SessionOptions{
+		ReviewMode: ReviewModeWorkspace,
+	})
+	sh.GetOrCreateFileSession("legacy-a.go")
+	sh.GetOrCreateFileSession("legacy-b.go")
+	sh.Finalize()
+
+	summary, items, err := LoadDetail(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadDetail: %v", err)
+	}
+	if summary.CompletedFiles != 2 {
+		t.Fatalf("CompletedFiles = %d, want 2", summary.CompletedFiles)
+	}
+	if summary.ReusedFiles != 0 || summary.FailedFiles != 0 {
+		t.Fatalf("unexpected checkpoint counts: %+v", summary)
+	}
+	if len(items) != 0 {
+		t.Fatalf("legacy session should not synthesize item details, got %d", len(items))
+	}
+}
+
 func TestLoadSummary_MissingFile(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)

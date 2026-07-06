@@ -410,13 +410,20 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 				fileCtx = ctx
 			}
 
-			if err := a.executeSubtask(fileCtx, d); err != nil {
+			completed, skipReason, err := a.executeSubtask(fileCtx, d)
+			if err != nil {
 				atomic.AddInt64(&a.subtaskFailed, 1)
 				a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, err.Error())
 				fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for %s: %v\n", d.NewPath, err)
 				telemetry.ErrorEvent(fileCtx, "subtask.error", err,
 					telemetry.AnyToAttr("file.path", d.NewPath))
 				a.recordWarning("subtask_error", d.NewPath, err.Error())
+				return
+			}
+			if !completed {
+				if skipReason != "" {
+					a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, skipReason)
+				}
 				return
 			}
 			comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
@@ -512,7 +519,7 @@ func resumedFromSession(resume *session.ResumeState) string {
 }
 
 // executeSubtask performs the Plan Phase + Main Loop for a single file.
-func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
+func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute."+d.NewPath)
 	defer span.End()
 	telemetry.SetAttr(span, "file.path", d.NewPath)
@@ -521,7 +528,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 	telemetry.SetAttr(span, "lines.deleted", d.Deletions)
 
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return false, "", ctx.Err()
 	}
 
 	newPath := d.NewPath
@@ -555,7 +562,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 
 	// Phase 2: Main task loop
 	if len(a.args.Template.MainTask.Messages) == 0 {
-		return fmt.Errorf("main_task.messages is empty in template")
+		return false, "", fmt.Errorf("main_task.messages is empty in template")
 	}
 
 	rawMsgs := a.args.Template.MainTask.Messages
@@ -593,9 +600,10 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 			telemetry.AnyToAttr("file.path", newPath),
 			telemetry.AnyToAttr("tokens", tokenCount),
 			telemetry.AnyToAttr("max_tokens", maxAllowed))
-		return nil
+		return false, msg, nil
 	}
 
+	mainAttempted := a.args.Template.MaxToolRequestTimes > 0
 	err := func() error {
 		ctx, mainSpan := telemetry.StartSpan(ctx, "main.loop")
 		defer mainSpan.End()
@@ -616,7 +624,13 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 		}
 		a.executeReviewFilter(ctx, d, newPath)
 	}
-	return err
+	if err != nil {
+		return false, "", err
+	}
+	if !mainAttempted {
+		return false, "main_task did not run because max tool requests is 0", nil
+	}
+	return true, "", nil
 }
 
 // executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are

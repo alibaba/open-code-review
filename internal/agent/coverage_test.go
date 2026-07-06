@@ -412,9 +412,15 @@ func TestExecuteSubtask_EmptyMainTask(t *testing.T) {
 	})
 	a.currentDate = "2025-06-26 10:00"
 
-	err := a.executeSubtask(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x", Insertions: 1})
+	completed, skipReason, err := a.executeSubtask(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x", Insertions: 1})
 	if err == nil {
 		t.Fatal("expected error for empty main_task messages")
+	}
+	if completed {
+		t.Fatal("empty main_task should not complete review")
+	}
+	if skipReason != "" {
+		t.Fatalf("skipReason = %q, want empty on error", skipReason)
 	}
 	if !strings.Contains(err.Error(), "main_task.messages is empty") {
 		t.Errorf("unexpected error: %v", err)
@@ -442,9 +448,15 @@ func TestExecuteSubtask_TokenThresholdExceeded(t *testing.T) {
 	a.currentDate = "2025-06-26 10:00"
 	a.diffs = []model.Diff{{NewPath: "a.go", Diff: strings.Repeat("code ", 200), Insertions: 100}}
 
-	err := a.executeSubtask(context.Background(), a.diffs[0])
+	completed, skipReason, err := a.executeSubtask(context.Background(), a.diffs[0])
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if completed {
+		t.Fatal("token-threshold skip should not complete review")
+	}
+	if skipReason == "" {
+		t.Fatal("expected skip reason for token-threshold skip")
 	}
 
 	warnings := a.Warnings()
@@ -514,9 +526,15 @@ func TestExecuteSubtask_WithPlanPhase(t *testing.T) {
 	a.currentDate = "2025-06-26 10:00"
 	a.diffs = []model.Diff{{NewPath: "main.go", OldPath: "main.go", Diff: "+new code", Insertions: 5}}
 
-	err := a.executeSubtask(context.Background(), a.diffs[0])
+	completed, skipReason, err := a.executeSubtask(context.Background(), a.diffs[0])
 	if err != nil {
 		t.Fatalf("executeSubtask: %v", err)
+	}
+	if !completed {
+		t.Fatal("expected completed review")
+	}
+	if skipReason != "" {
+		t.Fatalf("skipReason = %q, want empty on completed review", skipReason)
 	}
 }
 
@@ -538,9 +556,15 @@ func TestExecuteSubtask_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := a.executeSubtask(ctx, model.Diff{NewPath: "a.go", Diff: "+x", Insertions: 1})
+	completed, skipReason, err := a.executeSubtask(ctx, model.Diff{NewPath: "a.go", Diff: "+x", Insertions: 1})
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
+	}
+	if completed {
+		t.Fatal("cancelled context should not complete review")
+	}
+	if skipReason != "" {
+		t.Fatalf("skipReason = %q, want empty on error", skipReason)
 	}
 }
 

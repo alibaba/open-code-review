@@ -557,6 +557,74 @@ func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {
 	}
 }
 
+func TestDispatchSubtasks_TokenThresholdSkipIsNotReusableCheckpoint(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+	sess := session.New(repoDir, "feature", "fake", session.SessionOptions{
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+	})
+
+	client := &fakeAgentClient{responses: []*llm.ChatResponse{
+		agentTaskDoneResponse(),
+	}}
+	a := New(Args{
+		From:      "main",
+		To:        "feature",
+		LLMClient: client,
+		Model:     "fake",
+		Session:   sess,
+		Template: template.Template{
+			MaxTokens:           100,
+			MaxToolRequestTimes: 5,
+			MainTask: template.LlmConversation{
+				Messages: []template.ChatMessage{
+					{Role: "user", Content: strings.Repeat("context ", 200) + "{{diff}}"},
+				},
+			},
+		},
+	})
+	diff := model.Diff{NewPath: "large-prompt.go", OldPath: "large-prompt.go", Diff: "+x", Insertions: 1}
+	a.diffs = []model.Diff{diff}
+	a.currentDate = "2025-06-26 10:00"
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if len(comments) != 0 {
+		t.Fatalf("expected no comments, got %d", len(comments))
+	}
+	if client.calls != 0 {
+		t.Fatalf("threshold skip should not call LLM, got %d calls", client.calls)
+	}
+	sess.Finalize()
+
+	state, err := session.LoadResumeState(repoDir, sess.SessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if state.CompletedCount() != 0 {
+		t.Fatalf("CompletedCount = %d, want 0", state.CompletedCount())
+	}
+	fp := reviewItemFingerprint(session.ReviewModeRange, diff)
+	if _, ok := state.Item(fp); ok {
+		t.Fatal("token-threshold skip was recorded as a reusable checkpoint")
+	}
+	summary, items, err := session.LoadDetail(repoDir, sess.SessionID)
+	if err != nil {
+		t.Fatalf("LoadDetail: %v", err)
+	}
+	if summary.CompletedFiles != 0 || summary.FailedFiles != 1 {
+		t.Fatalf("summary counts = completed %d failed %d, want completed 0 failed 1", summary.CompletedFiles, summary.FailedFiles)
+	}
+	if len(items) != 1 || items[0].Type != "failed" || !strings.Contains(items[0].Error, "prompt tokens") {
+		t.Fatalf("items = %+v, want one token-threshold failed item", items)
+	}
+}
+
 func TestDispatchSubtasks_AllDeleted(t *testing.T) {
 	client := &fakeAgentClient{}
 	a := New(Args{
