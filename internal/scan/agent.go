@@ -561,7 +561,8 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) error {
 		return nil
 	}
 
-	return a.runner.RunPerFile(ctx, messages, it.Path)
+	_, err := a.runner.RunPerFile(ctx, messages, it.Path)
+	return err
 }
 
 // maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable

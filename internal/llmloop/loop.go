@@ -144,8 +144,9 @@ func (r *Runner) CollectPendingComments() []model.LlmComment {
 // It sends messages with the configured tool definitions, executes any
 // tool calls returned by the model, and collects review comments until
 // task_done is called or limits are reached. Token usage and warnings
-// are aggregated on the Runner across all files.
-func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath string) error {
+// are aggregated on the Runner across all files. The returned bool is true
+// only when the model explicitly calls task_done.
+func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath string) (bool, error) {
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
@@ -153,7 +154,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 	for toolReqCount > 0 {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, ctx.Err()
 		default:
 		}
 
@@ -176,7 +177,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 			llmSpan.End()
 			telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
-			return fmt.Errorf("LLM completion error: %w", err)
+			return false, fmt.Errorf("LLM completion error: %w", err)
 		}
 		rec.SetResponse(resp, duration)
 		totalTokens := int64(0)
@@ -233,7 +234,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		}
 
 		if taskCompleted {
-			break
+			return true, nil
 		}
 		if !hasValidResult {
 			consecutiveEmptyRounds++
@@ -256,7 +257,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 	if toolReqCount <= 0 {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", newPath)
 	}
-	return nil
+	return false, nil
 }
 
 // executeToolCall dispatches a single tool call from the LLM response and

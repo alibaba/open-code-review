@@ -142,14 +142,23 @@ func TestRunSessionShow_JSON(t *testing.T) {
 func TestRunSessionShow_MissingID(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
-	// no id → prints usage, returns nil
 	got := captureStdout(t, func() {
-		if err := runSessionShow([]string{}); err != nil {
-			t.Fatalf("runSessionShow: %v", err)
+		if err := runSessionShow([]string{}); err == nil {
+			t.Fatal("expected error for missing session id")
 		}
 	})
 	if !strings.Contains(got, "session show") {
 		t.Errorf("expected usage output, got %q", got)
+	}
+}
+
+func TestTruncateUnicode(t *testing.T) {
+	got := truncate("错误原因：超过限制", 6)
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("expected ellipsis suffix, got %q", got)
+	}
+	if !strings.Contains(got, "错误") {
+		t.Fatalf("expected valid truncated unicode text, got %q", got)
 	}
 }
 

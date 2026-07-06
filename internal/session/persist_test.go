@@ -339,3 +339,17 @@ func TestResumeStateValidateOptionsRejectsMismatchedRange(t *testing.T) {
 		t.Fatal("expected mismatch error")
 	}
 }
+
+func TestResumeStateSessionStartKeepsRepoDirWhenCwdEmpty(t *testing.T) {
+	state := &ResumeState{RepoDir: "/repo/from/caller"}
+
+	state.applySessionStart(resumeRecord{
+		SessionID:  "s1",
+		ReviewMode: ReviewModeCommit,
+		DiffCommit: "abc123",
+	})
+
+	if state.RepoDir != "/repo/from/caller" {
+		t.Fatalf("RepoDir = %q, want caller-provided repo dir", state.RepoDir)
+	}
+}

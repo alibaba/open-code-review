@@ -79,7 +79,7 @@ Commands:
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
-  session      List and inspect saved review sessions
+  session, sessions  List and inspect saved review sessions
   version      Show version information
 
 Examples:

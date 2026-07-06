@@ -603,17 +603,17 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, string,
 		return false, msg, nil
 	}
 
-	mainAttempted := a.args.Template.MaxToolRequestTimes > 0
-	err := func() error {
+	mainCompleted, err := func() (bool, error) {
 		ctx, mainSpan := telemetry.StartSpan(ctx, "main.loop")
 		defer mainSpan.End()
 		telemetry.SetAttr(mainSpan, "file.path", newPath)
-		if err := a.runner.RunPerFile(ctx, messages, newPath); err != nil {
+		completed, err := a.runner.RunPerFile(ctx, messages, newPath)
+		if err != nil {
 			mainSpan.SetStatus(codes.Error, err.Error())
 			mainSpan.RecordError(err)
-			return err
+			return false, err
 		}
-		return nil
+		return completed, nil
 	}()
 	if err == nil {
 		// REVIEW_FILTER_TASK runs after the main loop and decides which of the
@@ -627,8 +627,8 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, string,
 	if err != nil {
 		return false, "", err
 	}
-	if !mainAttempted {
-		return false, "main_task did not run because max tool requests is 0", nil
+	if !mainCompleted {
+		return false, "main_task did not complete before stopping", nil
 	}
 	return true, "", nil
 }

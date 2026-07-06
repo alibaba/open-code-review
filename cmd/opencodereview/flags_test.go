@@ -32,6 +32,13 @@ func TestParseReviewFlagsResume(t *testing.T) {
 	}
 }
 
+func TestParseReviewFlags_PreviewWithResume(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--commit", "abc123", "--preview", "--resume", "session-123"})
+	if err == nil {
+		t.Fatal("expected error for --preview with --resume")
+	}
+}
+
 func TestParseReviewFlags_InvalidAudience(t *testing.T) {
 	_, err := parseReviewFlags([]string{"--audience", "robot"})
 	if err == nil {

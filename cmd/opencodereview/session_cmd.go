@@ -89,7 +89,7 @@ func runSessionShow(args []string) error {
 	rest := a.fs.Args()
 	if len(rest) == 0 {
 		printSessionShowUsage()
-		return nil
+		return fmt.Errorf("session show requires a session ID")
 	}
 	sessionID := rest[0]
 
@@ -252,10 +252,14 @@ func shortSessionID(id string) string {
 
 func truncate(s string, n int) string {
 	s = strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\t", " ")
-	if len(s) <= n {
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	if n <= 1 {
+		return "…"
+	}
+	return string(runes[:n-1]) + "…"
 }
 
 func printSessionUsage() {

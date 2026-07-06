@@ -99,9 +99,12 @@ func TestRunPerFile_TaskDoneImmediately(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review this file")}
-	err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, err := runner.RunPerFile(context.Background(), msgs, "main.go")
 	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
+	}
+	if !completed {
+		t.Fatal("expected task_done to complete RunPerFile")
 	}
 	if client.calls != 1 {
 		t.Errorf("expected 1 LLM call, got %d", client.calls)
@@ -123,9 +126,12 @@ func TestRunPerFile_ToolCallThenDone(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, err := runner.RunPerFile(context.Background(), msgs, "main.go")
 	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
+	}
+	if !completed {
+		t.Fatal("expected task_done to complete RunPerFile")
 	}
 	if client.calls != 2 {
 		t.Errorf("expected 2 LLM calls, got %d", client.calls)
@@ -149,9 +155,12 @@ func TestRunPerFile_ContextCancelled(t *testing.T) {
 	cancel()
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	err := runner.RunPerFile(ctx, msgs, "main.go")
+	completed, err := runner.RunPerFile(ctx, msgs, "main.go")
 	if err == nil {
 		t.Error("expected error for cancelled context")
+	}
+	if completed {
+		t.Fatal("cancelled context should not complete RunPerFile")
 	}
 }
 
@@ -179,12 +188,36 @@ func TestRunPerFile_UnknownTool(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, err := runner.RunPerFile(context.Background(), msgs, "main.go")
 	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
 	}
+	if !completed {
+		t.Fatal("expected task_done to complete RunPerFile")
+	}
 	if client.calls != 2 {
 		t.Errorf("expected 2 calls, got %d", client.calls)
+	}
+}
+
+func TestRunPerFile_MaxToolRequestsWithoutTaskDoneDoesNotComplete(t *testing.T) {
+	content := ""
+	client := &fakeClient{responses: []*llm.ChatResponse{{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
+		Model:   "fake",
+		Usage:   &llm.UsageInfo{PromptTokens: 5, CompletionTokens: 5},
+	}}}
+	deps := newTestDeps(client)
+	deps.Template.MaxToolRequestTimes = 1
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if completed {
+		t.Fatal("RunPerFile completed without task_done")
 	}
 }
 

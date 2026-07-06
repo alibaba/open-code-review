@@ -138,7 +138,9 @@ func (s *ResumeState) applySessionStart(rec resumeRecord) {
 	if rec.SessionID != "" {
 		s.SessionID = rec.SessionID
 	}
-	s.RepoDir = rec.Cwd
+	if rec.Cwd != "" {
+		s.RepoDir = rec.Cwd
+	}
 	s.GitBranch = rec.GitBranch
 	s.Model = rec.Model
 	s.ReviewMode = rec.ReviewMode
