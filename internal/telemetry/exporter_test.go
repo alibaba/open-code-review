@@ -103,3 +103,70 @@ func TestInitOTLPProviders_InvalidEndpoint(t *testing.T) {
 		t.Error("expected tracerProvider to be set (OTLP exporter creation is lazy)")
 	}
 }
+
+func TestInitOTLPHTTPProviders_InvalidEndpoint(t *testing.T) {
+	tracerProvider = nil
+	meterProvider = nil
+	shutdownFuncs = nil
+	defer func() {
+		for _, fn := range shutdownFuncs {
+			_ = fn(context.Background())
+		}
+		tracerProvider = nil
+		meterProvider = nil
+		shutdownFuncs = nil
+	}()
+
+	cfg := Config{
+		Exporter:     "otlp",
+		OTLPEndpoint: "localhost:0",
+		OTLPProtocol: "http/protobuf",
+	}
+	initOTLPHTTPProviders(context.Background(), resource.Default(), cfg)
+	if tracerProvider == nil {
+		t.Error("expected tracerProvider to be set (OTLP HTTP exporter creation is lazy)")
+	}
+}
+
+func TestInitOTLPProviders_ProtocolRouting(t *testing.T) {
+	cases := []struct {
+		name     string
+		protocol string
+	}{
+		{"grpc default", "grpc"},
+		{"empty defaults to grpc", ""},
+		{"http/protobuf", "http/protobuf"},
+		{"http/json", "http/json"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tracerProvider = nil
+			meterProvider = nil
+			shutdownFuncs = nil
+			defer func() {
+				for _, fn := range shutdownFuncs {
+					_ = fn(context.Background())
+				}
+				tracerProvider = nil
+				meterProvider = nil
+				shutdownFuncs = nil
+			}()
+
+			cfg := Config{
+				Exporter:     "otlp",
+				OTLPEndpoint: "localhost:0",
+				OTLPProtocol: tc.protocol,
+			}
+			initOTLPProviders(context.Background(), resource.Default(), cfg)
+			if tracerProvider == nil {
+				t.Error("expected tracerProvider to be set")
+			}
+			if meterProvider == nil {
+				t.Error("expected meterProvider to be set")
+			}
+			if len(shutdownFuncs) != 2 {
+				t.Errorf("expected 2 shutdown funcs, got %d", len(shutdownFuncs))
+			}
+		})
+	}
+}

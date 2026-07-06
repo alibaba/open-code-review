@@ -104,6 +104,9 @@ func runReview(args []string) error {
 
 	ctx, span := telemetry.StartSpan(context.Background(), "review.run")
 	defer span.End()
+	if telemetry.IsEnabled() {
+		fmt.Fprintf(os.Stderr, "[ocr] TraceID: %s\n", span.SpanContext().TraceID().String())
+	}
 	startTime := time.Now()
 
 	comments, err := ag.Run(ctx)
