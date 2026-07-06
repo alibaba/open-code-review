@@ -406,6 +406,15 @@ The `--from` flag accepts a branch ref (e.g., `origin/main`) or commit SHA as th
 
 The `--format json` flag outputs machine-readable results suitable for parsing in CI scripts.
 
+Each finding carries two structured fields so CI integrations can sort, group, filter, or gate builds without re-parsing comment text:
+
+| Field | Allowed values | Notes |
+|-------|----------------|-------|
+| `category` | `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other` | The category the issue belongs to. |
+| `severity` | `critical`, `high`, `medium`, `low` | The importance of the issue. |
+
+In JSON output the two fields appear as siblings alongside `content`, `start_line`, etc. In the terminal, they render as an inline `[category · severity]` badge before the comment, colored by severity.
+
 See the [`examples/`](./examples/) directory for integration examples:
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions integration example

@@ -404,6 +404,15 @@ ocr review \
 
 `--format json` flag는 CI script에서 파싱하기 좋은 machine-readable 결과를 출력합니다.
 
+각 finding에는 두 개의 구조화된 field가 포함되어, CI 통합에서 comment 텍스트를 다시 파싱하지 않고도 정렬·그룹화·필터링하거나 build를 gate할 수 있습니다:
+
+| Field | 허용 값 | 설명 |
+|-------|--------|------|
+| `category` | `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other` | 이슈가 속한 카테고리. |
+| `severity` | `critical`, `high`, `medium`, `low` | 이슈의 중요도. |
+
+JSON 출력에서 두 field는 `content`, `start_line` 등과 같은 수준의 sibling으로 나타납니다. 터미널에서는 comment 앞에 인라인 `[category · severity]` badge로 표시되며 severity에 따라 색상이 지정됩니다.
+
 통합 예시는 [`examples/`](./examples/) 디렉터리를 참고하세요.
 
 - [`github_actions/`](./examples/github_actions/): GitHub Actions 통합 예시

@@ -404,6 +404,15 @@ ocr review \
 
 `--format json` 参数输出适合 CI 脚本解析的机器可读结果。
 
+每条评审结果都带有两个结构化字段，便于 CI 集成在无需解析评论文本的情况下排序、分组、过滤或卡点构建：
+
+| 字段 | 允许的取值 | 说明 |
+|------|-----------|------|
+| `category` | `bug`、`security`、`performance`、`maintainability`、`test`、`style`、`documentation`、`other` | 问题所属的类别。 |
+| `severity` | `critical`、`high`、`medium`、`low` | 问题的严重程度。 |
+
+在 JSON 输出中，这两个字段与 `content`、`start_line` 等平级；在终端中，它们会以内联的 `[category · severity]` 徽章形式显示在评论前，并按严重程度着色。
+
 集成示例请参见 [`examples/`](./examples/) 目录：
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions 集成示例

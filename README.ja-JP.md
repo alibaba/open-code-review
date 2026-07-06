@@ -404,6 +404,15 @@ ocr review \
 
 `--format json`フラグは、CIスクリプトでのパースに適した機械可読な結果を出力します。
 
+各指摘には2つの構造化フィールドが付与され、CI統合はコメント本文を再パースせずに並べ替え・グループ化・フィルタリング・ビルドのゲート判定を行えます：
+
+| フィールド | 許可される値 | 説明 |
+|-----------|-------------|------|
+| `category` | `bug`、`security`、`performance`、`maintainability`、`test`、`style`、`documentation`、`other` | 指摘が属するカテゴリ。 |
+| `severity` | `critical`、`high`、`medium`、`low` | 指摘の重要度。 |
+
+JSON出力ではこの2つのフィールドは`content`や`start_line`などと同じ階層に並びます。ターミナルでは、コメントの前にインラインの`[category · severity]`バッジとして表示され、重要度に応じて色分けされます。
+
 統合例は[`examples/`](./examples/)ディレクトリを参照してください：
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions統合の例
