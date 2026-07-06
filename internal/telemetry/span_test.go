@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -137,4 +138,35 @@ func TestRecordToolResult_Error(t *testing.T) {
 func TestRecordToolResult_NilSpan(t *testing.T) {
 	RecordToolResult(nil, "tool", 100, nil)
 	RecordToolResult(nil, "tool", 100, fmt.Errorf("err"))
+}
+
+func TestStartLLMSpan(t *testing.T) {
+	setupEnabledTelemetry(t)
+	ctx, span := StartLLMSpan(context.Background(), "qwen-max")
+	if !span.SpanContext().IsValid() {
+		t.Error("expected valid span context")
+	}
+	if ctx == nil {
+		t.Error("expected non-nil context")
+	}
+	span.End()
+}
+
+func TestRecordLLMResult_Success(t *testing.T) {
+	setupEnabledTelemetry(t)
+	_, span := StartSpan(context.Background(), "test.llm")
+	RecordLLMResult(span, 500*time.Millisecond, 1200, nil)
+	span.End()
+}
+
+func TestRecordLLMResult_Error(t *testing.T) {
+	setupEnabledTelemetry(t)
+	_, span := StartSpan(context.Background(), "test.llm")
+	RecordLLMResult(span, 100*time.Millisecond, 0, errors.New("timeout"))
+	span.End()
+}
+
+func TestRecordLLMResult_NilSpan(t *testing.T) {
+	RecordLLMResult(nil, 100*time.Millisecond, 0, nil)
+	RecordLLMResult(nil, 100*time.Millisecond, 0, fmt.Errorf("err"))
 }

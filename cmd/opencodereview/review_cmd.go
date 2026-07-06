@@ -104,6 +104,10 @@ func runReview(args []string) error {
 
 	ctx, span := telemetry.StartSpan(context.Background(), "review.run")
 	defer span.End()
+	telemetry.SetAttr(span, "review.repo", cc.RepoDir)
+	telemetry.SetAttr(span, "review.from", opts.from)
+	telemetry.SetAttr(span, "review.to", opts.to)
+	telemetry.SetAttr(span, "review.model", rt.Model)
 	if telemetry.IsEnabled() {
 		fmt.Fprintf(os.Stderr, "[ocr] TraceID: %s\n", span.SpanContext().TraceID().String())
 	}

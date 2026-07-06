@@ -487,7 +487,12 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 		return nil
 	}
 
-	err := a.runner.RunPerFile(ctx, messages, newPath)
+	err := func() error {
+		ctx, mainSpan := telemetry.StartSpan(ctx, "main.loop")
+		defer mainSpan.End()
+		telemetry.SetAttr(mainSpan, "file.path", newPath)
+		return a.runner.RunPerFile(ctx, messages, newPath)
+	}()
 	if err == nil {
 		// REVIEW_FILTER_TASK runs after the main loop and decides which of the
 		// just-collected comments to drop. It needs to see comments produced by
@@ -503,6 +508,10 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 // executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are
 // provably incorrect based solely on the diff. Errors are logged and silently ignored.
 func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath string) {
+	ctx, span := telemetry.StartSpan(ctx, "review_filter.execute")
+	defer span.End()
+	telemetry.SetAttr(span, "file.path", newPath)
+
 	ft := a.args.Template.ReviewFilterTask
 	if ft == nil || len(ft.Messages) == 0 {
 		return
@@ -512,6 +521,7 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	if len(comments) == 0 {
 		return
 	}
+	telemetry.SetAttr(span, "comments.before", len(comments))
 
 	commentsJSON := buildFilterCommentsJSON(comments)
 
@@ -553,6 +563,7 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	}
 
 	a.args.CommentCollector.RemoveByPathAndIndices(newPath, indices)
+	telemetry.SetAttr(span, "comments.filtered", len(indices))
 	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for %s\n", len(indices), newPath)
 }
 
@@ -722,6 +733,10 @@ func (a *Agent) extFromPath(path string) string {
 // executePlanPhase runs the plan task for a single file, sending template messages
 // with resolved placeholders and collecting the LLM response as plan guidance.
 func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFiles, rule string) (string, error) {
+	ctx, span := telemetry.StartSpan(ctx, "plan.execute")
+	defer span.End()
+	telemetry.SetAttr(span, "file.path", newPath)
+
 	pt := a.args.Template.PlanTask
 	messages := make([]llm.Message, 0, len(pt.Messages))
 	for _, m := range pt.Messages {

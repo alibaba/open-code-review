@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -71,6 +72,28 @@ func RecordToolResult(span trace.Span, toolName string, durationMs int64, err er
 		span.SetStatus(codes.Error, err.Error())
 	} else {
 		SetAttr(span, "tool.status", "ok")
+	}
+}
+
+// StartLLMSpan creates a span for an LLM request with standard attributes.
+func StartLLMSpan(ctx context.Context, model string) (context.Context, trace.Span) {
+	return StartSpan(ctx, "llm.request",
+		trace.WithAttributes(attribute.String("llm.model", model)))
+}
+
+// RecordLLMResult sets the outcome of an LLM request on the span.
+func RecordLLMResult(span trace.Span, duration time.Duration, totalTokens int64, err error) {
+	if span == nil {
+		return
+	}
+	SetAttr(span, "llm.duration_ms", duration.Milliseconds())
+	SetAttr(span, "llm.total_tokens", totalTokens)
+	if err != nil {
+		SetAttr(span, "llm.status", "error")
+		SetAttr(span, "llm.error", err.Error())
+		span.SetStatus(codes.Error, err.Error())
+	} else {
+		SetAttr(span, "llm.status", "ok")
 	}
 }
 
