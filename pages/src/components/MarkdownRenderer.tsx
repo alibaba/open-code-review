@@ -142,7 +142,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
         // output directly.
         const wrapper = document.createElement('div');
         wrapper.className = 'mermaid-rendered';
-        // codeql[js/xss-through-dom] -- svg is mermaid's own strict-sanitized output, not raw user input
+        // codeql[js/xss-through-dom] -- svg is derived from user-controlled mermaid code, but mermaid
+        // renders it with securityLevel:'strict' (see initialize above), which sanitizes the output via
+        // DOMPurify (scripts/handlers stripped). The trust boundary relies on that setting staying 'strict'.
         wrapper.innerHTML = svg;
         pre.replaceWith(wrapper);
       } catch (e) {
