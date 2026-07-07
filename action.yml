@@ -195,8 +195,10 @@ runs:
         [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
         [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")
+        set +e
         ocr review "${ARGS[@]}" > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log
         OCR_EXIT_CODE=$?
+        set -e
         echo "OCR_EXIT_CODE=$OCR_EXIT_CODE" >> "$GITHUB_ENV"
         echo "=== OCR result ==="
         cat /tmp/ocr-result.json
@@ -204,7 +206,7 @@ runs:
         cat /tmp/ocr-stderr.log
 
     - name: Upload review artifacts
-      if: inputs.upload_artifacts == 'true'
+      if: ${{ always() && inputs.upload_artifacts == 'true' }}
       uses: actions/upload-artifact@v4
       with:
         name: ocr-review-result-${{ github.run_id }}-${{ github.run_attempt }}
