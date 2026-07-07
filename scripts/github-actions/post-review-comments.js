@@ -472,7 +472,7 @@ function setStatsOutputs(out, stats) {
 // ---- Summary posting (sticky vs new) ----
 
 async function postSummary({ github, owner, repo, prNumber, body, sticky, log }) {
-  const fullBody = `${SUMMARY_MARKER}\n${body}`;
+  const fullBody = body;
   if (sticky) {
     const existing = await findExistingSummaryComment({ github, owner, repo, prNumber, log });
     if (existing) {

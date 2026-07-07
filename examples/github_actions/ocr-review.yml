@@ -109,8 +109,8 @@ jobs:
     # Run on PR events, or on comments starting with trigger keywords
     if: |
       github.event_name == 'pull_request_target' ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/open-code-review')) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '@open-code-review'))
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && startsWith(github.event.comment.body, '/open-code-review')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && startsWith(github.event.comment.body, '@open-code-review'))
     steps:
       - name: Get PR context
         id: pr-context

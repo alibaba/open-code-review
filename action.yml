@@ -191,12 +191,12 @@ runs:
         OCR_RULE: ${{ inputs.rule }}
       shell: bash
       run: |
-        set -o pipefail
         ARGS=(--from "${MERGE_BASE}" --to "${HEAD_SHA}" --format json)
         [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
         [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")
-        ocr review "${ARGS[@]}" > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log && OCR_EXIT_CODE=0 || OCR_EXIT_CODE=$?
+        ocr review "${ARGS[@]}" > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log
+        OCR_EXIT_CODE=$?
         echo "OCR_EXIT_CODE=$OCR_EXIT_CODE" >> "$GITHUB_ENV"
         echo "=== OCR result ==="
         cat /tmp/ocr-result.json
@@ -224,6 +224,8 @@ runs:
       if: env.OCR_EXIT_CODE == '0'
       id: post
       uses: actions/github-script@v7
+      env:
+        OCR_INCREMENTAL_OVERLAP_THRESHOLD: ${{ inputs.incremental_overlap_threshold }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |
@@ -237,5 +239,5 @@ runs:
             stderrPath: '/tmp/ocr-stderr.log',
             stickySummary: ${{ inputs.sticky_summary == 'true' }},
             incremental: ${{ inputs.incremental == 'true' }},
-            incrementalOverlapThreshold: parseFloat('${{ inputs.incremental_overlap_threshold }}'),
+            incrementalOverlapThreshold: parseFloat(process.env.OCR_INCREMENTAL_OVERLAP_THRESHOLD),
           });
