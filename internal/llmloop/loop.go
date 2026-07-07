@@ -375,10 +375,12 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 			asyncCtx := context.WithoutCancel(ctx)
 			toolName := t.Name()
 			pool.Submit(func() ([]model.LlmComment, error) {
+				defer func() {
+					telemetry.RecordToolResult(toolSpan, toolName, time.Since(startTime).Milliseconds(), nil)
+					toolSpan.End()
+					telemetry.PrintToolCallFinished(toolName, time.Since(startTime))
+				}()
 				resolveAndCollect(asyncCtx)
-				telemetry.RecordToolResult(toolSpan, toolName, time.Since(startTime).Milliseconds(), nil)
-				toolSpan.End()
-				telemetry.PrintToolCallFinished(toolName, time.Since(startTime))
 				return []model.LlmComment{}, nil
 			})
 			telemetry.RecordToolCall(asyncCtx, toolName, time.Since(startTime), true)

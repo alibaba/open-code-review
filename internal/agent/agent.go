@@ -567,12 +567,12 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	a.runner.RecordUsage(resp.Usage)
 
 	indices := parseFilterResponse(resp.Content(), len(comments))
+	telemetry.SetAttr(span, "comments.filtered", len(indices))
 	if len(indices) == 0 {
 		return
 	}
 
 	a.args.CommentCollector.RemoveByPathAndIndices(newPath, indices)
-	telemetry.SetAttr(span, "comments.filtered", len(indices))
 	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for %s\n", len(indices), newPath)
 }
 

@@ -112,7 +112,7 @@ func runReview(args []string) error {
 	telemetry.SetAttr(span, "review.model", rt.Model)
 	var traceID string
 	if telemetry.IsEnabled() {
-		traceID = span.SpanContext().TraceID().String()
+		traceID = telemetry.TraceIDFromContext(ctx)
 		if opts.outputFormat != "json" {
 			fmt.Fprintf(os.Stderr, "[ocr] TraceID: %s\n", traceID)
 		}
@@ -126,7 +126,7 @@ func runReview(args []string) error {
 		return fmt.Errorf("review failed: %w", err)
 	}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, traceID)
+	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q)
 }
 
 func resolveRepoDir(input string) (string, error) {

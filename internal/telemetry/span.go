@@ -24,6 +24,16 @@ func StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) 
 	return getTracer().Start(ctx, name, opts...)
 }
 
+// TraceIDFromContext returns the hex-encoded trace ID of the span carried by
+// ctx, or "" if ctx carries no valid span (e.g. telemetry is disabled).
+func TraceIDFromContext(ctx context.Context) string {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.TraceID().IsValid() {
+		return ""
+	}
+	return sc.TraceID().String()
+}
+
 // EndSpan ends the span and records error status if present.
 func EndSpan(span trace.Span, err error) {
 	if err != nil {

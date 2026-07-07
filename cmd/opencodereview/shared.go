@@ -247,7 +247,6 @@ func emitRunResult(
 	startTime time.Time,
 	outputFormat, audience string,
 	q *quietHandle,
-	traceID string,
 ) error {
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
@@ -257,8 +256,10 @@ func emitRunResult(
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
 	}
 
+	traceID := telemetry.TraceIDFromContext(ctx)
+
 	if outputFormat == "json" && len(comments) == 0 && ag.FilesReviewed() == 0 {
-		return outputJSONNoFiles()
+		return outputJSONNoFiles(traceID)
 	}
 
 	// Agent-text audiences need stdout back before PrintTraceSummary so the

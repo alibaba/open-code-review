@@ -266,9 +266,10 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	return enc.Encode(out)
 }
 
-func outputJSONNoFiles() error {
+func outputJSONNoFiles(traceID string) error {
 	out := jsonOutput{
 		Status:   "skipped",
+		TraceID:  traceID,
 		Message:  "No supported files changed.",
 		Comments: []model.LlmComment{},
 		ToolCalls: &jsonToolCalls{
