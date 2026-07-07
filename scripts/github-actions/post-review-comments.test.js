@@ -321,14 +321,17 @@ async function testFailedInlineCommentsAreSummarized() {
   assert.match(body, /Line could not be resolved/);
   // The no-line comment now carries the same reason line as a posting failure.
   assert.match(body, /GitHub could not post this as an inline comment: No line information provided/);
-  // The old grouping heading is gone, and both summary comments appear in one
-  // continuous block BEFORE the Posting Statistics section.
+  // Posting statistics are merged into the leading summary header (the trailing
+  // "📊 Posting Statistics" section is gone), so the merged stats must appear
+  // BEFORE the per-comment renderings.
   assert.doesNotMatch(body, /Inline comments shown in summary/);
-  const statsIdx = body.indexOf("📊 **Posting Statistics:**");
+  assert.doesNotMatch(body, /📊 \*\*Posting Statistics:\*\*/);
+  const statsIdx = body.indexOf("❌ Failed to post inline");
   const noLineIdx = body.indexOf("No-line content with a fenced block");
   const failedIdx = body.indexOf("Failed inline content must remain visible");
-  assert.ok(statsIdx > noLineIdx, "no-line comment rendered before statistics");
-  assert.ok(statsIdx > failedIdx, "failed comment rendered before statistics");
+  assert.ok(statsIdx !== -1, "merged stats present in the header");
+  assert.ok(statsIdx < noLineIdx, "merged stats rendered before no-line comment");
+  assert.ok(statsIdx < failedIdx, "merged stats rendered before failed comment");
 }
 
 async function testWarningsListedAfterSummaryComments() {
@@ -689,7 +692,7 @@ async function testSummaryDoesNotDuplicateWhenAlreadyPosted() {
   assert.strictEqual(github.updatedComments[0].comment_id, 5, "the existing comment is the one updated");
   assert.strictEqual(outputs.comments_inline, "1");
   assert.strictEqual(outputs.summary_comment_url, "http://ex/u1");
-  assert.match(github.updatedComments[0].body, /Successfully posted: 1 comment/, "final body reflects the run outcome");
+  assert.match(github.updatedComments[0].body, /Successfully posted inline: 1 comment/, "final body reflects the run outcome");
 }
 
 // Cold-start ordering: on the first review on a PR, the summary issue comment
@@ -717,7 +720,7 @@ async function testSummaryAnchorCreatedBeforeReviewColdStart() {
   assert.ok(reviewIdx < finalizeIdx, "summary finalized AFTER the review");
   // The anchor body is a pre-review placeholder; the final body carries stats.
   assert.match(github.issueComments[0].body, /Posting review comments/);
-  assert.match(github.updatedComments[0].body, /Successfully posted: 1 comment/);
+  assert.match(github.updatedComments[0].body, /Successfully posted inline: 1 comment/);
 }
 
 // Cold start + non-sticky: the per-run summary is also anchored before the

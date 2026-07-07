@@ -413,27 +413,24 @@ async function runPostReviewComments({
 
   // ---- Finalize the summary with the complete body ----
   // Now that the review has landed (or failed per-comment), write the final
-  // summary body. All comments that did not go out as inline — whether because
-  // they had no line info or because posting failed — are rendered as one
-  // continuous block BEFORE the posting statistics, each carrying the reason it
-  // ended up in the summary (so the reader always knows why it is here).
-  let summaryBody = buildSummaryBody(stats.total, successCount, commentsWithoutLine.length + failedComments.length, warnings);
+  // summary body. Posting statistics are merged into the leading summary
+  // header (see buildSummaryBody), so here we only append the per-comment
+  // renderings: every comment that did not go out as inline — whether because
+  // it had no line info or because posting failed — is rendered as one
+  // continuous block, each carrying the reason it ended up in the summary (so
+  // the reader always knows why it is here).
+  let summaryBody = buildSummaryBody({
+    total: stats.total,
+    inline: successCount,
+    summary: commentsWithoutLine.length,
+    skipped: stats.skipped,
+    failed: failedCount,
+    warnings,
+  });
   summaryBody += formatSummaryComments(commentsWithoutLine);
   for (const { comment, error } of failedComments) {
     summaryBody += "\n\n---\n\n";
     summaryBody += formatCommentMarkdown(comment, error);
-  }
-
-  const extraStats = [];
-  extraStats.push(`\n- ✅ Successfully posted: ${successCount} comment(s)`);
-  if (stats.skipped > 0) {
-    extraStats.push(`\n- ⏭️ Skipped (overlap with history): ${stats.skipped} comment(s)`);
-  }
-  if (failedCount > 0) {
-    extraStats.push(`\n- ❌ Failed to post: ${failedCount} comment(s)`);
-  }
-  if (extraStats.length > 0) {
-    summaryBody += `\n\n---\n\n📊 **Posting Statistics:**` + extraStats.join("");
   }
   if (toSend.length === 0 && stats.skipped > 0) {
     summaryBody += "\n\n---\n\nℹ️ All inline comments overlapped with existing reviews; nothing new was posted.";
@@ -1039,13 +1036,34 @@ function formatCommentMarkdown(comment, error) {
   return md;
 }
 
-function buildSummaryBody(totalCount, inlineCount, summaryCount, warnings) {
-  let body = `🔍 **OpenCodeReview** found **${totalCount}** issue(s) in this PR.`;
-  if (totalCount > 0) {
-    body += `\n- ✅ ${inlineCount} posted as inline comment(s)`;
-    body += `\n- 📝 ${summaryCount} posted as summary`;
+// Merged summary header. All posting-outcome counts are surfaced here (and
+// ONLY here) so the numbers add up to the total and the reader no longer has
+// to reconcile two separately presented breakdowns (the old "posted as
+// inline / posted as summary" header vs. the trailing "Posting Statistics"
+// block, whose overlapping definitions made the summary hard to interpret).
+//
+// The four counts are mutually exclusive and, together with `inline`, sum to
+// `total`:
+//   inline  — comments that landed as review inline comments
+//   summary — comments without line info, rendered in the summary body below
+//   skipped — comments suppressed by incremental overlap filtering
+//   failed  — comments that had line info but could not be posted (also
+//             rendered in the body below, each tagged with its failure reason)
+function buildSummaryBody({ total, inline, summary, skipped, failed, warnings }) {
+  let body = `🔍 **OpenCodeReview** found **${total}** issue(s) in this PR.`;
+  if (total > 0) {
+    body += `\n- ✅ Successfully posted inline: ${inline} comment(s)`;
+    if (summary > 0) {
+      body += `\n- 📝 In summary (no line info): ${summary} comment(s)`;
+    }
+    if (skipped > 0) {
+      body += `\n- ⏭️ Skipped (overlap with history): ${skipped} comment(s)`;
+    }
+    if (failed > 0) {
+      body += `\n- ❌ Failed to post inline: ${failed} comment(s)`;
+    }
   }
-  if (warnings.length > 0) {
+  if (warnings && warnings.length > 0) {
     body += `\n\n⚠️ ${warnings.length} warning(s) occurred during review.`;
   }
   return body;
