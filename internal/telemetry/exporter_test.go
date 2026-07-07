@@ -136,7 +136,7 @@ func TestInitOTLPProviders_ProtocolRouting(t *testing.T) {
 		{"grpc default", "grpc"},
 		{"empty defaults to grpc", ""},
 		{"http/protobuf", "http/protobuf"},
-		{"http/json", "http/json"},
+		{"unknown falls back to grpc", "http/json"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

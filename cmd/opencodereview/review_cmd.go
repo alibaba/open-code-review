@@ -13,6 +13,8 @@ import (
 	"github.com/open-code-review/open-code-review/internal/mcp"
 	"github.com/open-code-review/open-code-review/internal/telemetry"
 	"github.com/open-code-review/open-code-review/internal/tool"
+
+	"go.opentelemetry.io/otel/codes"
 )
 
 func runReview(args []string) error {
@@ -115,7 +117,8 @@ func runReview(args []string) error {
 
 	comments, err := ag.Run(ctx)
 	if err != nil {
-		telemetry.SetAttr(span, "error", err.Error())
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
 		return fmt.Errorf("review failed: %w", err)
 	}
 

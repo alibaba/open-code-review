@@ -328,9 +328,10 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 
 		comments, errMsg := tool.ParseComments(args)
 		if errMsg != "" {
-			telemetry.RecordToolResult(toolSpan, t.Name(), time.Since(startTime).Milliseconds(), fmt.Errorf("%s", errMsg))
+			dur := time.Since(startTime)
+			telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), fmt.Errorf("%s", errMsg))
 			toolSpan.End()
-			telemetry.RecordToolCall(ctx, t.Name(), time.Since(startTime), false)
+			telemetry.RecordToolCall(ctx, t.Name(), dur, false)
 			return tool.Of(errMsg)
 		}
 
@@ -375,11 +376,11 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 			toolName := t.Name()
 			pool.Submit(func() ([]model.LlmComment, error) {
 				resolveAndCollect(asyncCtx)
+				telemetry.RecordToolResult(toolSpan, toolName, time.Since(startTime).Milliseconds(), nil)
+				toolSpan.End()
 				telemetry.PrintToolCallFinished(toolName, time.Since(startTime))
 				return []model.LlmComment{}, nil
 			})
-			telemetry.RecordToolResult(toolSpan, toolName, time.Since(startTime).Milliseconds(), nil)
-			toolSpan.End()
 			telemetry.RecordToolCall(asyncCtx, toolName, time.Since(startTime), true)
 			return tool.Of(tool.CommentSucceed)
 		}

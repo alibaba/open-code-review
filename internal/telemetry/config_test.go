@@ -65,7 +65,7 @@ func TestResolveEnv(t *testing.T) {
 			},
 		},
 		{
-			name: "otlp protocol override",
+			name: "otlp protocol passthrough",
 			envs: map[string]string{"OTEL_EXPORTER_OTLP_PROTOCOL": "http/json"},
 			check: func(t *testing.T, cfg Config) {
 				if cfg.OTLPProtocol != "http/json" {

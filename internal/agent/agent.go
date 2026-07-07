@@ -22,6 +22,8 @@ import (
 	"github.com/open-code-review/open-code-review/internal/stdout"
 	"github.com/open-code-review/open-code-review/internal/telemetry"
 	"github.com/open-code-review/open-code-review/internal/tool"
+
+	"go.opentelemetry.io/otel/codes"
 )
 
 // AgentWarning is re-exported from llmloop for backwards compatibility with
@@ -491,7 +493,12 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 		ctx, mainSpan := telemetry.StartSpan(ctx, "main.loop")
 		defer mainSpan.End()
 		telemetry.SetAttr(mainSpan, "file.path", newPath)
-		return a.runner.RunPerFile(ctx, messages, newPath)
+		if err := a.runner.RunPerFile(ctx, messages, newPath); err != nil {
+			mainSpan.SetStatus(codes.Error, err.Error())
+			mainSpan.RecordError(err)
+			return err
+		}
+		return nil
 	}()
 	if err == nil {
 		// REVIEW_FILTER_TASK runs after the main loop and decides which of the
@@ -552,6 +559,8 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))
 		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter failed for %s: %v\n", newPath, err)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
 		return
 	}
 	rec.SetResponse(resp, time.Since(startTime))
@@ -762,6 +771,8 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	})
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
 		return "", fmt.Errorf("plan request: %w", err)
 	}
 	rec.SetResponse(resp, time.Since(startTime))

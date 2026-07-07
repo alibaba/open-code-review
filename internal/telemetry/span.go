@@ -70,6 +70,7 @@ func RecordToolResult(span trace.Span, toolName string, durationMs int64, err er
 		SetAttr(span, "tool.status", "error")
 		SetAttr(span, "tool.error", err.Error())
 		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
 	} else {
 		SetAttr(span, "tool.status", "ok")
 	}
@@ -92,6 +93,7 @@ func RecordLLMResult(span trace.Span, duration time.Duration, totalTokens int64,
 		SetAttr(span, "llm.status", "error")
 		SetAttr(span, "llm.error", err.Error())
 		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
 	} else {
 		SetAttr(span, "llm.status", "ok")
 	}
