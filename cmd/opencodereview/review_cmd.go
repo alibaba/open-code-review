@@ -110,8 +110,12 @@ func runReview(args []string) error {
 	telemetry.SetAttr(span, "review.from", opts.from)
 	telemetry.SetAttr(span, "review.to", opts.to)
 	telemetry.SetAttr(span, "review.model", rt.Model)
+	var traceID string
 	if telemetry.IsEnabled() {
-		fmt.Fprintf(os.Stderr, "[ocr] TraceID: %s\n", span.SpanContext().TraceID().String())
+		traceID = span.SpanContext().TraceID().String()
+		if opts.outputFormat != "json" {
+			fmt.Fprintf(os.Stderr, "[ocr] TraceID: %s\n", traceID)
+		}
 	}
 	startTime := time.Now()
 
@@ -122,7 +126,7 @@ func runReview(args []string) error {
 		return fmt.Errorf("review failed: %w", err)
 	}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q)
+	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, traceID)
 }
 
 func resolveRepoDir(input string) (string, error) {

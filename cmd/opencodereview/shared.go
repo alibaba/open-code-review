@@ -247,6 +247,7 @@ func emitRunResult(
 	startTime time.Time,
 	outputFormat, audience string,
 	q *quietHandle,
+	traceID string,
 ) error {
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
@@ -276,7 +277,7 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls())
+			ag.ProjectSummary(), ag.ToolCalls(), traceID)
 	}
 	outputTextWithWarnings(comments, ag.Warnings())
 	if summary := ag.ProjectSummary(); summary != "" {

@@ -193,6 +193,7 @@ type jsonToolCalls struct {
 
 type jsonOutput struct {
 	Status         string               `json:"status"`
+	TraceID        string               `json:"trace_id,omitempty"`
 	Message        string               `json:"message,omitempty"`
 	Summary        *jsonSummary         `json:"summary,omitempty"`
 	ToolCalls      *jsonToolCalls       `json:"tool_calls"`
@@ -216,9 +217,10 @@ func outputJSON(comments []model.LlmComment) error {
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
-	duration time.Duration, projectSummary string, toolCalls map[string]int64) error {
+	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string) error {
 	out := jsonOutput{
 		Status:   "success",
+		TraceID:  traceID,
 		Comments: comments,
 		Summary: &jsonSummary{
 			FilesReviewed:    filesReviewed,

@@ -215,7 +215,7 @@ func runScan(args []string) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q)
+	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, "")
 }
 
 func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string) error {
