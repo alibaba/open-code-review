@@ -12,14 +12,12 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, rangeOf, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings } = require(path.join(__dirname, "post-review-comments.js"));
 
 // Make all retry/pacing delays effectively zero so tests run fast.
-// NOTE: computeRetryDelayMs reads OCR_RETRY_MAX_DELAY / OCR_RETRY_BASE_DELAY
-// with `parseInt(val) || default`, so "0" is falsy and falls back to the
-// 300000/60000 defaults (the very bug parseNonNegInt fixes elsewhere). Use
-// "1" instead so the cap is 1ms and any transient/rate-limit backoff sleep
-// is effectively instant.
+// computeRetryDelayMs reads OCR_RETRY_MAX_DELAY / OCR_RETRY_BASE_DELAY via
+// parseNonNegInt; "1" keeps the cap/base at 1ms so any transient/rate-limit
+// backoff sleep is effectively instant.
 process.env.OCR_MAX_RETRIES = "0";
 process.env.OCR_SUCCESS_DELAY = "0";
 process.env.OCR_FAILURE_DELAY = "0";
@@ -1179,13 +1177,6 @@ function testSafeFenceAndFencedBlock() {
   assert.ok(block.endsWith("````"));
 }
 
-function testRangeOf() {
-  assert.deepStrictEqual(rangeOf({ line: 10, start_line: 5 }), [5, 10]);
-  assert.deepStrictEqual(rangeOf({ line: 7 }), [7, 7]);
-  assert.deepStrictEqual(rangeOf({ start_line: 3 }), [3, 3]);
-  assert.strictEqual(rangeOf({}), null);
-}
-
 function testLineSpan() {
   assert.deepStrictEqual(lineSpan({ line: 10, start_line: 5 }), { start: 5, end: 10, multiline: true });
   assert.deepStrictEqual(lineSpan({ line: 7 }), { start: 7, end: 7, multiline: false });
@@ -1329,7 +1320,6 @@ async function main() {
   // Pure helpers
   testSafeFenceAndFencedBlock();
   testFormatWarnings();
-  testRangeOf();
   testLineSpan();
   testSameCommentSpan();
   testResolveThreshold();

@@ -38,6 +38,11 @@ concurrency:
           && github.event.issue.pull_request
           && github.event.comment.user.type != 'Bot'
           && (
+            github.event.comment.author_association == 'MEMBER'
+            || github.event.comment.author_association == 'OWNER'
+            || github.event.comment.author_association == 'COLLABORATOR'
+          )
+          && (
             startsWith(github.event.comment.body, '/open-code-review')
             || startsWith(github.event.comment.body, '@open-code-review')
           )
@@ -64,15 +69,23 @@ permissions:
 jobs:
   code-review:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Run on PR events, or on human-authored comments starting with trigger
     # keywords. Bot comments are excluded as a safety net: GITHUB_TOKEN already
     # suppresses events from bot-posted comments, but a PAT/App token would not.
+    # issue_comment triggers are further gated on author_association so only
+    # MEMBER/OWNER/COLLABORATOR users can spend LLM quota via re-review.
     if: |
       github.event_name == 'pull_request_target'
       || (
         github.event_name == 'issue_comment'
         && github.event.issue.pull_request
         && github.event.comment.user.type != 'Bot'
+        && (
+          github.event.comment.author_association == 'MEMBER'
+          || github.event.comment.author_association == 'OWNER'
+          || github.event.comment.author_association == 'COLLABORATOR'
+        )
         && (
           startsWith(github.event.comment.body, '/open-code-review')
           || startsWith(github.event.comment.body, '@open-code-review')
@@ -81,7 +94,7 @@ jobs:
     steps:
       - name: Get PR context
         id: pr-context
-        if: github.event_name != 'pull_request_target'
+        if: github.event_name == 'issue_comment'
         uses: actions/github-script@v7
         with:
           script: |

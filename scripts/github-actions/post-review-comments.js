@@ -82,7 +82,7 @@ async function runPostReviewComments({
     const stderr = safeRead(fs, stderrPath).trim();
     if (stderr) {
       const body = `${SUMMARY_MARKER}\n⚠️ **OpenCodeReview** encountered an error:\n${fencedBlock(stderr)}`;
-      const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary });
+      const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, log });
       stats.summaryUrl = posted.url;
     }
     setStatsOutputs(out, stats);
@@ -97,7 +97,7 @@ async function runPostReviewComments({
   if (comments.length === 0) {
     const message = result.message || "No comments generated. Looks good to me.";
     const body = `${SUMMARY_MARKER}\n✅ **OpenCodeReview**: ${message}`;
-    const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary });
+    const posted = await postSummary({ github, owner, repo, prNumber, body, sticky: stickySummary, log });
     stats.summaryUrl = posted.url;
     setStatsOutputs(out, stats);
     return;
@@ -471,10 +471,10 @@ function setStatsOutputs(out, stats) {
 
 // ---- Summary posting (sticky vs new) ----
 
-async function postSummary({ github, owner, repo, prNumber, body, sticky }) {
+async function postSummary({ github, owner, repo, prNumber, body, sticky, log }) {
   const fullBody = `${SUMMARY_MARKER}\n${body}`;
   if (sticky) {
-    const existing = await findExistingSummaryComment(github, owner, repo, prNumber);
+    const existing = await findExistingSummaryComment({ github, owner, repo, prNumber, log });
     if (existing) {
       const { data: updated } = await github.rest.issues.updateComment({
         owner,
@@ -494,13 +494,10 @@ async function postSummary({ github, owner, repo, prNumber, body, sticky }) {
   return { id: created.id, url: created.html_url, updated: false };
 }
 
-async function findExistingSummaryComment(github, owner, repo, prNumber) {
-  const { data: comments } = await github.rest.issues.listComments({
-    owner,
-    repo,
-    issue_number: prNumber,
-    per_page: 100,
-  });
+async function findExistingSummaryComment({ github, owner, repo, prNumber, log }) {
+  const comments = await readAllPages("listIssueComments", (page, per_page) =>
+    github.rest.issues.listComments({ owner, repo, issue_number: prNumber, per_page, page }), log
+  );
   // Issue comments are returned oldest-first; pick the newest matching.
   for (let i = comments.length - 1; i >= 0; i--) {
     const body = comments[i].body;
@@ -716,18 +713,6 @@ function sameCommentSpan(cur, other, threshold) {
   return overlap / union > threshold;
 }
 
-// Returns [start, end] inclusive line range, or null if not resolvable.
-// Handles both our own reviewComment shape ({start_line, line}) and GitHub's
-// historical comment shape ({start_line, line}; start_line null for single-line).
-function rangeOf(c) {
-  const start = num(c.start_line);
-  const end = num(c.line != null ? c.line : c.end_line);
-  if (start != null && end != null) return [Math.min(start, end), Math.max(start, end)];
-  if (end != null) return [end, end];
-  if (start != null) return [start, start];
-  return null;
-}
-
 function num(v) {
   if (v == null || v === "") return null;
   const n = Number(v);
@@ -775,8 +760,8 @@ function computeRetryDelayMs(error, attempt) {
   const header = (name) => getHeader(headers, name);
   const nowSec = Math.floor(Date.now() / 1000);
 
-  const cap = parseInt(process.env.OCR_RETRY_MAX_DELAY, 10) || 300000;
-  const base = parseInt(process.env.OCR_RETRY_BASE_DELAY, 10) || 60000;
+  const cap = parseNonNegInt(process.env.OCR_RETRY_MAX_DELAY, 300000);
+  const base = parseNonNegInt(process.env.OCR_RETRY_BASE_DELAY, 60000);
 
   let info = null;
 
@@ -927,14 +912,14 @@ async function readAllPages(tag, pageFn, log, maxPages = 50) {
   // partial data rather than failing the whole review.
   //
   // Caveat: this is NOT the same as a read failure. When the read API throws
-  // (rate limit, 5xx), isCommentAlreadyPosted and hasIssueCommentWithId catch
-  // it and return null (unknown), so the caller skips retrying and creates no
-  // duplicate. A truncated walk does not throw; it returns a partial set
-  // silently, so isCommentAlreadyPosted returns false (definitively "not
-  // posted") for any comment beyond the cap, and the retry loop will repost
-  // it, producing a duplicate. This tradeoff is accepted because the trigger
-  // is far outside expected usage; if that ceiling ever needs to rise, make
-  // maxPages configurable.
+  // (rate limit, 5xx), isCommentAlreadyPosted catches it and returns null
+  // (unknown), so the caller skips retrying and creates no duplicate. A
+  // truncated walk does not throw; it returns a partial set silently, so
+  // isCommentAlreadyPosted returns false (definitively "not posted") for any
+  // comment beyond the cap, and the retry loop will repost it, producing a
+  // duplicate. This tradeoff is accepted because the trigger is far outside
+  // expected usage; if that ceiling ever needs to rise, make maxPages
+  // configurable.
   if (page > maxPages) {
     log(`[${tag}] reached max page limit (${maxPages}); results may be incomplete.`);
   }
@@ -1004,38 +989,6 @@ async function isCommentAlreadyPosted({ github, owner, repo, prNumber, id, log }
     return posted.has(id);
   } catch (e) {
     log(`[isCommentAlreadyPosted] check failed for ${id} (${e.message}); treating as unknown to avoid duplicates.`);
-    return null;
-  }
-}
-
-// Check whether an issue comment with the given tag already exists. Used to
-// avoid posting a duplicate summary comment when a previous attempt within the
-// run already posted one. Returns true/false when the check succeeds, or null
-// when the read API is unavailable. Returning null (rather than defaulting to
-// false) lets the caller skip posting instead of silently risking a duplicate
-// summary comment.
-async function hasIssueCommentWithId({ github, owner, repo, issueNumber, id, log }) {
-  try {
-    const comments = await readAllPages("listIssueComments", (page, per_page) =>
-      github.rest.issues.listComments({ owner, repo, issue_number: issueNumber, per_page, page }), log
-    );
-    // `id` is a run-specific HTML comment like `<!-- ocr-summary-run:0-1 -->`.
-    // Match it as a literal substring: it already carries the `<!-- ... -->`
-    // wrapper and is parameterized by runId+runAttempt, so ordinary user
-    // content cannot trigger a false positive. (A regex of the form
-    // `<!--\s*<escaped id>\s*-->` would be wrong here: `id` already includes
-    // its own `<!--` / `-->` delimiters, so that pattern would require the tag
-    // to be double-wrapped and never match a normally-posted summary.)
-    // `id` is a run-specific HTML comment like `<!-- ocr-summary-run:0-1 -->`.
-    // Match it as a literal substring: it already carries the `<!-- ... -->`
-    // wrapper and is parameterized by runId+runAttempt, so ordinary user
-    // content cannot trigger a false positive. (A regex of the form
-    // `<!--\s*<escaped id>\s*-->` would be wrong here: `id` already includes
-    // its own `<!--` / `-->` delimiters, so that pattern would require the tag
-    // to be double-wrapped and never match a normally-posted summary.)
-    return comments.some((c) => (c.body || "").includes(id));
-  } catch (e) {
-    log(`[listIssueComments] check failed (${e.message}); treating as unknown to avoid duplicates.`);
     return null;
   }
 }
@@ -1199,7 +1152,6 @@ module.exports = {
   lineSpan,
   sameCommentSpan,
   resolveThreshold,
-  rangeOf,
   DEFAULT_OVERLAP_THRESHOLD,
   computeRetryDelayMs,
   getHeader,
@@ -1211,7 +1163,6 @@ module.exports = {
   findExistingBatchReview,
   getPostedCommentIds,
   isCommentAlreadyPosted,
-  hasIssueCommentWithId,
   newCommentId,
   formatComment,
   formatCommentMarkdown,

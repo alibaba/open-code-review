@@ -54,7 +54,10 @@ inputs:
     description: Path to a custom rules JSON file passed to `ocr review --rule`.
     required: false
   upload_artifacts:
-    description: Upload raw JSON result and stderr as workflow artifacts.
+    description: >-
+      Upload raw JSON result and stderr as workflow artifacts. Must be the
+      literal string 'true' or 'false' (quoted); the step gates on a string
+      comparison, so an unquoted YAML boolean will not match.
     required: false
     default: 'true'
   sticky_summary:
@@ -113,9 +116,14 @@ runs:
   steps:
     - name: Resolve PR refs
       shell: bash
+      env:
+        INPUT_BASE_REF: ${{ inputs.base_ref }}
+        INPUT_HEAD_SHA: ${{ inputs.head_sha }}
+        EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: |
-        BASE_REF="${{ inputs.base_ref || github.event.pull_request.base.ref }}"
-        HEAD_SHA="${{ inputs.head_sha || github.event.pull_request.head.sha }}"
+        BASE_REF="${INPUT_BASE_REF:-$EVENT_BASE_REF}"
+        HEAD_SHA="${INPUT_HEAD_SHA:-$EVENT_HEAD_SHA}"
         echo "BASE_REF=$BASE_REF" >> "$GITHUB_ENV"
         echo "HEAD_SHA=$HEAD_SHA" >> "$GITHUB_ENV"
         echo "PR base ref: $BASE_REF"
@@ -133,10 +141,11 @@ runs:
     - name: Fetch PR head (fork-safe)
       if: env.HEAD_SHA != ''
       shell: bash
+      env:
+        PR_NUM: ${{ github.event.pull_request.number || github.event.issue.number }}
       run: |
-        PR_NUM="${{ github.event.pull_request.number || github.event.issue.number }}"
         if [ -n "$PR_NUM" ]; then
-          git fetch origin "pull/${PR_NUM}/head" 2>/dev/null || true
+          git fetch origin "pull/${PR_NUM}/head"
         fi
 
     - name: Compute merge-base
@@ -154,8 +163,10 @@ runs:
 
     - name: Install OpenCodeReview
       shell: bash
+      env:
+        OCR_VERSION: ${{ inputs.ocr_version }}
       run: |
-        npm install -g "@alibaba-group/open-code-review@${{ inputs.ocr_version }}"
+        npm install -g "@alibaba-group/open-code-review@${OCR_VERSION}"
         echo "OpenCodeReview installed:"
         ocr version || true
 

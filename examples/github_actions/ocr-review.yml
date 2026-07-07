@@ -105,6 +105,7 @@ permissions:
 jobs:
   code-review:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Run on PR events, or on comments starting with trigger keywords
     if: |
       github.event_name == 'pull_request_target' ||
@@ -113,7 +114,7 @@ jobs:
     steps:
       - name: Get PR context
         id: pr-context
-        if: github.event_name != 'pull_request_target'
+        if: github.event_name == 'issue_comment'
         uses: actions/github-script@v7
         with:
           script: |
