@@ -785,7 +785,11 @@ Set `telemetry.content_logging` to include LLM prompts and responses in exported
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding guidelines, and how to submit pull requests.
+This project exists thanks to all the people who contribute. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding guidelines, and how to submit pull requests.
+
+<a href="https://github.com/alibaba/open-code-review/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
+</a>
 
 ## Star History
 
