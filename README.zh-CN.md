@@ -108,6 +108,18 @@ npm install -g @alibaba-group/open-code-review
 
 安装后，`ocr` 命令即可全局使用。
 
+**更新**
+
+如果通过 NPM 安装，可手动更新到最新版本：
+
+```bash
+npm install -g @alibaba-group/open-code-review@latest
+```
+
+通过 NPM 安装的 `ocr` 还会默认在后台检查新版本并自动升级；如需关闭自动更新，可设置 `OCR_NO_UPDATE=1`。
+
+如果通过安装脚本或手动下载二进制文件安装，重新运行对应的安装/下载命令即可替换为最新 release。需要固定版本时，可继续通过 `OCR_VERSION` 指定 release tag。
+
 **从 GitHub Release 下载**
 
 使用一条命令为你的操作系统/架构安装最新二进制文件（macOS / Linux）：

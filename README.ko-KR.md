@@ -108,6 +108,18 @@ npm install -g @alibaba-group/open-code-review
 
 설치 후 `ocr` 명령을 전역에서 사용할 수 있습니다.
 
+**업데이트**
+
+NPM으로 설치했다면 최신 버전으로 수동 업데이트할 수 있습니다:
+
+```bash
+npm install -g @alibaba-group/open-code-review@latest
+```
+
+NPM 설치의 `ocr`은 기본적으로 백그라운드에서 새 버전을 확인하고 자동으로 업데이트합니다. 자동 업데이트를 끄려면 `OCR_NO_UPDATE=1`을 설정하세요.
+
+설치 스크립트나 수동 다운로드한 binary로 설치했다면 같은 설치/다운로드 명령을 다시 실행해 로컬 binary를 최신 release로 교체할 수 있습니다. 특정 release tag로 고정해야 한다면 `OCR_VERSION`을 사용하세요.
+
 **GitHub Release 사용**
 
 명령 한 번으로 사용 중인 OS/아키텍처에 맞는 최신 binary를 설치합니다 (macOS / Linux):

@@ -108,6 +108,18 @@ npm install -g @alibaba-group/open-code-review
 
 After installation, the `ocr` command is available globally.
 
+**Update**
+
+If you installed via NPM, update manually to the latest version:
+
+```bash
+npm install -g @alibaba-group/open-code-review@latest
+```
+
+NPM installations also check for newer versions in the background by default and upgrade automatically. To disable auto-updates, set `OCR_NO_UPDATE=1`.
+
+If you installed with the install script or a manually downloaded binary, rerun the same install/download command to replace the local binary with the latest release. Use `OCR_VERSION` when you need to pin a specific release tag.
+
 **From GitHub Release**
 
 Install the latest binary for your OS/architecture with one command (macOS / Linux):
