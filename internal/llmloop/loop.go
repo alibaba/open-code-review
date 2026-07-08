@@ -376,9 +376,10 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 			toolName := t.Name()
 			pool.Submit(func() ([]model.LlmComment, error) {
 				defer func() {
-					telemetry.RecordToolResult(toolSpan, toolName, time.Since(startTime).Milliseconds(), nil)
+					dur := time.Since(startTime)
+					telemetry.RecordToolResult(toolSpan, toolName, dur.Milliseconds(), nil)
 					toolSpan.End()
-					telemetry.PrintToolCallFinished(toolName, time.Since(startTime))
+					telemetry.PrintToolCallFinished(toolName, dur)
 				}()
 				resolveAndCollect(asyncCtx)
 				return []model.LlmComment{}, nil
