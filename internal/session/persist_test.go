@@ -165,8 +165,11 @@ func TestSetErrorWritesJSONL(t *testing.T) {
 
 	if sh.persist != nil {
 		sh.persist.mu.Lock()
-		_ = sh.persist.writer.Flush()
+		err := sh.persist.writer.Flush()
 		sh.persist.mu.Unlock()
+		if err != nil {
+			t.Fatalf("flush: %v", err)
+		}
 	}
 
 	path := sessionJSONLPath(t, repoDir, sh.SessionID)

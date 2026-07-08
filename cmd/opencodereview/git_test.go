@@ -99,8 +99,15 @@ func TestResolveRepoDir_NotGitRepo(t *testing.T) {
 
 func TestResolveRepoDir_EmptyUsesWd(t *testing.T) {
 	dir := initTestGitRepo(t)
-	origDir, _ := os.Getwd()
-	defer func() { _ = os.Chdir(origDir) }()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(origDir); err != nil {
+			t.Errorf("restore chdir: %v", err)
+		}
+	}()
 	if err := os.Chdir(dir); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
