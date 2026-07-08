@@ -3,7 +3,7 @@
     color-scheme: light dark;
 
     /* Typography */
-    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --mono: "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", "DejaVu Sans Mono", ui-monospace, SFMono-Regular, Menlo, "Courier New", monospace;
 
     /* Surfaces */
     --bg: #f5f7fa;
@@ -104,6 +104,10 @@ body {
     color: var(--text);
     line-height: 1.6;
     padding-bottom: 2rem;
+}
+
+code, pre {
+    font-family: var(--mono);
 }
 
 nav.breadcrumb {
