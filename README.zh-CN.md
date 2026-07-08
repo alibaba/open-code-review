@@ -743,6 +743,15 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 设置 `telemetry.content_logging` 可在导出数据中包含 LLM 提示词和响应。
 
+**协议选择：** 通过环境变量 `OTEL_EXPORTER_OTLP_PROTOCOL` 选择导出协议：
+
+| 值 | 传输方式 | 说明 |
+|---|---|---|
+| `grpc`（默认） | gRPC | 默认端口 4317 |
+| `http/protobuf` | HTTP | 默认端口 4318 |
+
+**Endpoint 格式：** `telemetry.otlp_endpoint` 的值为 `host:port` 或 `http://host:port`，无需包含路径。SDK 会根据 [OTLP 规范](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request)自动追加信号路径（如 `/v1/traces`）。
+
 ## 贡献
 
 参见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) 了解开发环境搭建、编码规范以及如何提交 Pull Request。

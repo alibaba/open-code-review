@@ -755,6 +755,15 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 Установите `telemetry.content_logging`, чтобы включать промпты и ответы LLM в экспортируемые данные.
 
+**Выбор протокола:** Переменная окружения `OTEL_EXPORTER_OTLP_PROTOCOL` определяет протокол экспорта:
+
+| Значение | Транспорт | Описание |
+|---|---|---|
+| `grpc` (по умолчанию) | gRPC | Порт по умолчанию 4317 |
+| `http/protobuf` | HTTP | Порт по умолчанию 4318 |
+
+**Формат endpoint:** `telemetry.otlp_endpoint` принимает базовый URL в формате `host:port` или `http://host:port` без компонента пути. SDK автоматически добавляет путь сигнала (например, `/v1/traces`) в соответствии со [спецификацией OTLP](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request).
+
 ## Участие в разработке
 
 В [CONTRIBUTING.ru-RU.md](CONTRIBUTING.ru-RU.md) описаны настройка окружения разработки, рекомендации по коду и порядок отправки pull request'ов.

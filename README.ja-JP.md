@@ -753,6 +753,15 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 エクスポートデータにLLMのプロンプトとレスポンスを含めるには、`telemetry.content_logging`を設定してください。
 
+**プロトコル選択：** 環境変数 `OTEL_EXPORTER_OTLP_PROTOCOL` でエクスポートプロトコルを選択できます：
+
+| 値 | トランスポート | 説明 |
+|---|---|---|
+| `grpc`（デフォルト） | gRPC | デフォルトポート 4317 |
+| `http/protobuf` | HTTP | デフォルトポート 4318 |
+
+**Endpoint 形式：** `telemetry.otlp_endpoint` は `host:port` または `http://host:port` 形式のベースURLを指定します。パスを含める必要はありません。SDKが [OTLP仕様](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request)に従いシグナルパス（例：`/v1/traces`）を自動的に付加します。
+
 ## コントリビューション
 
 開発環境のセットアップ、コーディングガイドライン、プルリクエストの提出方法については[CONTRIBUTING.md](CONTRIBUTING.md)を参照してください。

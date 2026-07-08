@@ -710,6 +710,15 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 exported data에 LLM prompt와 response를 포함하려면 `telemetry.content_logging`을 설정합니다.
 
+**프로토콜 선택:** 환경 변수 `OTEL_EXPORTER_OTLP_PROTOCOL`로 export 프로토콜을 선택할 수 있습니다:
+
+| 값 | 전송 방식 | 설명 |
+|---|---|---|
+| `grpc` (기본값) | gRPC | 기본 포트 4317 |
+| `http/protobuf` | HTTP | 기본 포트 4318 |
+
+**Endpoint 형식:** `telemetry.otlp_endpoint`는 `host:port` 또는 `http://host:port` 형식의 base URL을 지정합니다. 경로를 포함할 필요가 없습니다. SDK가 [OTLP 사양](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request)에 따라 signal 경로(예: `/v1/traces`)를 자동으로 추가합니다.
+
 ## Contributing
 
 개발 환경 설정, coding guideline, pull request 제출 방법은 [CONTRIBUTING.ko-KR.md](CONTRIBUTING.ko-KR.md)를 참고하세요.

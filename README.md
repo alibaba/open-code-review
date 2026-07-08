@@ -758,6 +758,16 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 Set `telemetry.content_logging` to include LLM prompts and responses in exported data.
 
+**Protocol selection:** Set the environment variable `OTEL_EXPORTER_OTLP_PROTOCOL` to choose the export protocol:
+
+| Value | Transport | Notes |
+|---|---|---|
+| `grpc` (default) | gRPC | Default port 4317 |
+| `http/protobuf` | HTTP | Default port 4318 |
+
+**Endpoint format:** `telemetry.otlp_endpoint` expects a base URL in `host:port` or `http://host:port` format, without a path component. The SDK appends the signal path (e.g. `/v1/traces`) automatically per the [OTLP specification](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request).
+
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding guidelines, and how to submit pull requests.
