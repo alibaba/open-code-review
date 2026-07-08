@@ -268,6 +268,10 @@ ocr review --from main --to feature-branch
 # Single commit
 ocr review --commit abc123
 
+# Resume an interrupted range or commit review
+ocr session list
+ocr review --from main --to feature-branch --resume <session-id>
+
 # Full-file scan — review whole files instead of a diff (no git history needed)
 ocr scan                          # scan the entire repository
 ocr scan --path internal/agent    # scan a directory or specific files
@@ -433,6 +437,8 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `ocr config unset custom_providers.<name>` | — | Delete a custom provider |
 | `ocr llm test` | — | Test LLM connectivity |
 | `ocr llm providers` | — | List built-in LLM providers |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions |
+| `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints |
 | `ocr viewer` | `ocr v` | Launch WebUI session viewer on `localhost:5483` |
 | `ocr version` | — | Show version info |
 
@@ -446,6 +452,7 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `--commit` | `-c` | — | Single commit to review |
 | `--exclude` | — | — | Comma-separated gitignore-style patterns to skip; merged with rule.json excludes |
 | `--preview` | `-p` | `false` | Preview which files will be reviewed without running the LLM |
+| `--resume` | — | — | Resume from a previous compatible range or commit review session |
 | `--format` | `-f` | `text` | Output format: `text` or `json` |
 | `--concurrency` | — | `8` | Max concurrent file reviews |
 | `--timeout` | — | `10` | Concurrent task timeout in minutes |
@@ -454,8 +461,43 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `--model` | — | — | Select or override the LLM model for this review |
 | `--rule` | — | — | Path to custom JSON review rules |
 | `--max-tools` | — | built-in | Max tool call rounds per file; only takes effect when greater than template default |
-| `--max-git-procs` | — | built-in | Max concurrent git subprocesses |
-| `--tools` | — | — | Path to custom JSON tools config |
+| `--max-git-procs` | — | `16` | Max concurrent git subprocesses |
+| `--tools` | — | built-in | Path to custom JSON tools config |
+
+#### Resumable Reviews and Sessions
+
+Every `ocr review` run persists a local session log under
+`~/.opencodereview/sessions/`. Text output prints the session ID and JSON output
+includes `session_id`. If a range or commit review is interrupted, list the
+saved sessions and resume from the one that matches the same review target:
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+Resume is intentionally strict: it only supports branch-range and single-commit
+reviews, not workspace reviews, and the current `--from/--to` or `--commit`
+must match the saved session. `--preview` cannot be combined with `--resume`.
+
+When `--format json` is used, resumed runs include:
+
+- `session_id` — the current run's session ID
+- `resume.resumed_from` — the source session ID
+- `resume.reused_files` — files reused from saved checkpoints
+- `resume.rerun_files` — files reviewed again in the current run
+
+### `ocr session` Flags
+
+| Command | Flag | Default | Description |
+|---------|------|---------|-------------|
+| `ocr session list` | `--repo` | current dir | Repository whose sessions should be listed |
+| `ocr session list` | `--json` | `false` | Emit session summaries as JSON |
+| `ocr session list` | `--limit` | `20` | Cap listed sessions; use `0` for unlimited |
+| `ocr session show <id>` | `--repo` | current dir | Repository whose session should be inspected |
+| `ocr session show <id>` | `--json` | `false` | Emit session metadata and per-file items as JSON |
 
 ### `ocr scan` Flags
 
@@ -504,6 +546,12 @@ ocr review --from main --to my-feature --concurrency 4
 
 # Review a specific commit with verbose JSON output
 ocr review --commit abc123 --format json --audience agent
+
+# Resume an interrupted range or commit review
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to my-feature --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
 
 # Select or override model for this review
 ocr review --model claude-opus-4-6
