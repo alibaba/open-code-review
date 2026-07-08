@@ -268,6 +268,10 @@ ocr review --from main --to feature-branch
 # Один коммит
 ocr review --commit abc123
 
+# Возобновить прерванное ревью диапазона или одного коммита
+ocr session list
+ocr review --from main --to feature-branch --resume <session-id>
+
 # Полнофайловое сканирование — ревью целых файлов вместо диффа (история git не нужна)
 ocr scan                          # сканировать весь репозиторий
 ocr scan --path internal/agent    # сканировать каталог или конкретные файлы
@@ -433,6 +437,8 @@ ocr review \
 | `ocr config unset custom_providers.<name>` | — | Удалить пользовательского провайдера |
 | `ocr llm test` | — | Проверить подключение к LLM |
 | `ocr llm providers` | — | Показать список встроенных LLM-провайдеров |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | Показать сохранённые сессии ревью |
+| `ocr session show <id>` | `ocr sessions show <id>` | Показать одну сессию и её checkpoint'ы по файлам |
 | `ocr viewer` | `ocr v` | Запустить WebUI-просмотрщик сессий на `localhost:5483` |
 | `ocr version` | — | Показать информацию о версии |
 
@@ -446,6 +452,7 @@ ocr review \
 | `--commit` | `-c` | — | Один коммит для ревью |
 | `--exclude` | — | — | Паттерны в стиле gitignore через запятую для пропуска файлов; объединяются с excludes из rule.json |
 | `--preview` | `-p` | `false` | Показать, какие файлы попадут в ревью, без запуска LLM |
+| `--resume` | — | — | Возобновить предыдущую совместимую сессию ревью диапазона или одного коммита |
 | `--format` | `-f` | `text` | Формат вывода: `text` или `json` |
 | `--concurrency` | — | `8` | Максимум одновременных ревью файлов |
 | `--timeout` | — | `10` | Таймаут конкурентной задачи в минутах |
@@ -456,6 +463,43 @@ ocr review \
 | `--max-tools` | — | встроенное | Максимум раундов вызова инструментов на файл; действует, только если больше значения шаблона по умолчанию |
 | `--max-git-procs` | — | встроенное | Максимум одновременных git-подпроцессов |
 | `--tools` | — | — | Путь к пользовательскому JSON-конфигу инструментов |
+
+#### Возобновляемые ревью и сессии
+
+Каждый запуск `ocr review` сохраняет локальный журнал сессии в
+`~/.opencodereview/sessions/`. Успешный текстовый вывод остаётся сфокусированным
+на результате ревью и не печатает session ID. Сохранённые сессии можно найти через
+`ocr session list/show`, а `--format json` добавляет `session_id` в машиночитаемый
+вывод. Если ревью диапазона или одного коммита было прервано, выберите сохранённую
+сессию с тем же целевым ревью и возобновите её:
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+Возобновление намеренно строгое: поддерживаются только ревью диапазона веток и одного
+коммита, но не ревью рабочей копии. Текущие `--from/--to` или `--commit` должны
+совпадать с сохранённой сессией. `--preview` нельзя использовать вместе с `--resume`.
+
+При `--format json` возобновлённый запуск включает:
+
+- `session_id` — session ID текущего запуска
+- `resume.resumed_from` — исходный session ID
+- `resume.reused_files` — файлы, повторно использованные из сохранённых checkpoint'ов
+- `resume.rerun_files` — файлы, заново проверенные в текущем запуске
+
+### Флаги `ocr session`
+
+| Команда | Флаг | По умолчанию | Описание |
+|---------|------|--------------|----------|
+| `ocr session list` | `--repo` | текущий каталог | Репозиторий, для которого нужно показать сессии |
+| `ocr session list` | `--json` | `false` | Вывести сводки сессий в JSON |
+| `ocr session list` | `--limit` | `20` | Ограничить количество сессий; `0` означает без ограничения |
+| `ocr session show <id>` | `--repo` | текущий каталог | Репозиторий, сессию которого нужно посмотреть |
+| `ocr session show <id>` | `--json` | `false` | Вывести метаданные сессии и элементы по файлам в JSON |
 
 ### Флаги `ocr scan`
 
@@ -501,6 +545,12 @@ ocr review --from main --to my-feature --concurrency 4
 
 # Ревью конкретного коммита с подробным JSON-выводом
 ocr review --commit abc123 --format json --audience agent
+
+# Возобновить прерванное ревью диапазона или одного коммита
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to my-feature --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
 
 # Выбрать или переопределить модель для этого ревью
 ocr review --model claude-opus-4-6

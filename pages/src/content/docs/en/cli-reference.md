@@ -146,9 +146,11 @@ single commit introduced).
 ### Resuming interrupted reviews
 
 Every `ocr review` run persists a local session log under
-`~/.opencodereview/sessions/`. Text output prints the session ID and JSON
-output includes `session_id`. If a range or commit review is interrupted,
-list saved sessions and resume from one that matches the same review target:
+`~/.opencodereview/sessions/`. Successful text output stays focused on review
+results and does not print the session ID; use `ocr session list/show` to find
+saved sessions, or `--format json` to include `session_id` in machine-readable
+output. If a range or commit review is interrupted, list saved sessions and
+resume from one that matches the same review target:
 
 ```bash
 ocr session list

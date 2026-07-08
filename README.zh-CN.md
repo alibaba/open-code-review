@@ -268,6 +268,10 @@ ocr review --from main --to feature-branch
 # 单个提交
 ocr review --commit abc123
 
+# 恢复中断的区间或单 commit 评审
+ocr session list
+ocr review --from main --to feature-branch --resume <session-id>
+
 # 全量文件扫描 —— 审查整个文件而非 diff（无需 git 历史）
 ocr scan                          # 扫描整个仓库
 ocr scan --path internal/agent    # 扫描指定目录或文件
@@ -431,6 +435,8 @@ ocr review \
 | `ocr config unset custom_providers.<name>` | — | 删除自定义供应商 |
 | `ocr llm test` | — | 测试 LLM 连通性 |
 | `ocr llm providers` | — | 列出内置 LLM 供应商 |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话 |
+| `ocr session show <id>` | `ocr sessions show <id>` | 查看单个会话及其逐文件检查点 |
 | `ocr viewer` | `ocr v` | 启动 WebUI 会话查看器，地址 `localhost:5483` |
 | `ocr version` | — | 显示版本信息 |
 
@@ -444,6 +450,7 @@ ocr review \
 | `--commit` | `-c` | — | 审查单个提交 |
 | `--exclude` | — | — | 以逗号分隔的 gitignore 风格模式，用于跳过匹配文件；与 rule.json 中的 excludes 合并 |
 | `--preview` | `-p` | `false` | 预览将被审查的文件列表，不调用 LLM |
+| `--resume` | — | — | 从之前兼容的区间或单 commit 评审会话恢复 |
 | `--format` | `-f` | `text` | 输出格式：`text` 或 `json` |
 | `--concurrency` | — | `8` | 最大并发文件审查数 |
 | `--timeout` | — | `10` | 并发任务超时时间（分钟） |
@@ -454,6 +461,40 @@ ocr review \
 | `--max-tools` | — | 内置默认 | 每个文件的最大工具调用轮次；仅在大于模板默认值时生效 |
 | `--max-git-procs` | — | 内置默认 | 最大并发 git 子进程数 |
 | `--tools` | — | — | 自定义 JSON 工具配置路径 |
+
+#### 可恢复评审与会话
+
+每次 `ocr review` 都会在 `~/.opencodereview/sessions/` 下保存本地会话日志。
+正常完成的文本输出只展示评审结果，不打印 session ID；可使用
+`ocr session list/show` 查找已保存会话，或用 `--format json` 在机器可读输出中获取
+`session_id`。如果区间或单 commit 评审被中断，可列出保存的会话，并从匹配相同评审目标的会话恢复：
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+恢复逻辑是严格的：仅支持分支区间和单 commit 评审，不支持工作区评审；当前
+`--from/--to` 或 `--commit` 必须与保存的会话一致。`--preview` 不能与 `--resume` 同时使用。
+
+使用 `--format json` 时，恢复运行会包含：
+
+- `session_id` — 当前运行的 session ID
+- `resume.resumed_from` — 来源 session ID
+- `resume.reused_files` — 从已保存检查点复用的文件数
+- `resume.rerun_files` — 本次重新评审的文件数
+
+### `ocr session` 参数
+
+| 命令 | 参数 | 默认值 | 描述 |
+|------|------|--------|------|
+| `ocr session list` | `--repo` | 当前目录 | 要列出会话的仓库 |
+| `ocr session list` | `--json` | `false` | 以 JSON 输出会话摘要 |
+| `ocr session list` | `--limit` | `20` | 限制列出的会话数量；`0` 表示不限 |
+| `ocr session show <id>` | `--repo` | 当前目录 | 要查看会话的仓库 |
+| `ocr session show <id>` | `--json` | `false` | 以 JSON 输出会话元数据和逐文件条目 |
 
 ### `ocr scan` 参数
 
@@ -499,6 +540,12 @@ ocr review --from main --to my-feature --concurrency 4
 
 # 审查特定提交并以 JSON 格式输出详细信息
 ocr review --commit abc123 --format json --audience agent
+
+# 恢复中断的区间或单 commit 评审
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to my-feature --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
 
 # 为本次审查选择或覆盖模型
 ocr review --model claude-opus-4-6

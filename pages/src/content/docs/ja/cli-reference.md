@@ -135,9 +135,10 @@ ocr review -c abc123
 ### 中断したレビューの再開
 
 すべての `ocr review` 実行は、`~/.opencodereview/sessions/` 配下にローカル
-セッションログを保存します。テキスト出力には session ID が表示され、JSON 出力には
-`session_id` が含まれます。範囲または単一 commit レビューが中断された場合は、
-保存済みセッションを一覧表示し、同じレビュー対象に一致するセッションから再開します:
+セッションログを保存します。正常終了したテキスト出力はレビュー結果に集中し、session ID
+は表示しません。保存済みセッションは `ocr session list/show` で確認でき、
+`--format json` では機械可読出力に `session_id` が含まれます。範囲または単一 commit
+レビューが中断された場合は、保存済みセッションを一覧表示し、同じレビュー対象に一致するセッションから再開します:
 
 ```bash
 ocr session list

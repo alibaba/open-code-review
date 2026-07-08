@@ -251,9 +251,9 @@ type ResultProvider interface {
 	// that skipped / failed the summary phase.
 	ProjectSummary() string
 	ToolCalls() map[string]int64
-	// SessionID returns the persisted session identifier so callers can
-	// print it (used by --resume) or show it in JSON output. Returns ""
-	// when no session was created.
+	// SessionID returns the persisted session identifier so callers can show it
+	// in JSON output or failure diagnostics. Returns "" when no session was
+	// created.
 	SessionID() string
 }
 
@@ -300,9 +300,6 @@ func emitRunResult(
 		telemetry.PrintTraceSummary(ag.FilesReviewed(), int64(len(comments)),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration)
-		if id := ag.SessionID(); id != "" {
-			fmt.Printf("[ocr] Session: %s (resume with: --resume %s)\n", id, id)
-		}
 	}
 
 	if outputFormat == "json" {

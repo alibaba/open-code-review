@@ -139,8 +139,9 @@ ocr review -c abc123
 ### 恢复中断的评审
 
 每次 `ocr review` 都会在 `~/.opencodereview/sessions/` 下保存本地会话日志。
-文本输出会打印 session ID，JSON 输出会包含 `session_id`。如果区间或单 commit
-评审被中断，先列出已保存会话，再从与当前评审目标一致的会话恢复：
+正常完成的文本输出只展示评审结果，不打印 session ID；可使用
+`ocr session list/show` 查找已保存会话，或用 `--format json` 在机器可读输出中获取
+`session_id`。如果区间或单 commit 评审被中断，先列出已保存会话，再从与当前评审目标一致的会话恢复：
 
 ```bash
 ocr session list

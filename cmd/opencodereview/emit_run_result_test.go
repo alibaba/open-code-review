@@ -126,6 +126,19 @@ func TestEmitRunResult_TextNoComments(t *testing.T) {
 	}
 }
 
+func TestEmitRunResult_TextDoesNotPrintSuccessfulSessionHint(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 2, sessionID: "session-123"}
+	got := captureStdout(t, func() {
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	if strings.Contains(got, "session-123") || strings.Contains(got, "--resume") {
+		t.Fatalf("successful text output should not print session ID or resume hint, got %q", got)
+	}
+}
+
 func TestEmitRunResult_TextWithComments(t *testing.T) {
 	ag := &mockResultProvider{filesReviewed: 1}
 	comments := []model.LlmComment{{Path: "a.go", Content: "rename", StartLine: 5, EndLine: 10}}
@@ -264,22 +277,6 @@ func TestEmitRunResult_JSONNoFilesTraceID(t *testing.T) {
 	}
 	if out.TraceID != wantTraceID {
 		t.Errorf("trace_id = %q, want %q", out.TraceID, wantTraceID)
-	}
-}
-
-func TestEmitRunResult_TextIncludesSessionID(t *testing.T) {
-	ag := &mockResultProvider{filesReviewed: 1, sessionID: "session-42"}
-	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-	if !strings.Contains(got, "session-42") {
-		t.Errorf("expected session id in text output, got %q", got)
-	}
-	if !strings.Contains(got, "--resume session-42") {
-		t.Errorf("expected --resume hint in text output, got %q", got)
 	}
 }
 

@@ -268,6 +268,10 @@ ocr review --from main --to feature-branch
 # 単一コミット
 ocr review --commit abc123
 
+# 中断した範囲または単一 commit レビューを再開
+ocr session list
+ocr review --from main --to feature-branch --resume <session-id>
+
 # フルファイルスキャン — diffではなくファイル全体をレビュー（git履歴不要）
 ocr scan                          # リポジトリ全体をスキャン
 ocr scan --path internal/agent    # ディレクトリまたは特定のファイルをスキャン
@@ -431,6 +435,8 @@ JSON出力ではこの2つのフィールドは`content`や`start_line`などと
 | `ocr config unset custom_providers.<name>` | — | カスタムプロバイダーを削除 |
 | `ocr llm test` | — | LLMの疎通テスト |
 | `ocr llm providers` | — | ビルトインLLMプロバイダーを一覧表示 |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | 保存済みレビューセッションを一覧表示 |
+| `ocr session show <id>` | `ocr sessions show <id>` | 1つのセッションとファイル単位のチェックポイントを表示 |
 | `ocr viewer` | `ocr v` | `localhost:5483`でWebUIセッションビューアーを起動 |
 | `ocr version` | — | バージョン情報を表示 |
 
@@ -444,6 +450,7 @@ JSON出力ではこの2つのフィールドは`content`や`start_line`などと
 | `--commit` | `-c` | — | レビュー対象の単一コミット |
 | `--exclude` | — | — | カンマ区切りのgitignoreスタイルパターンでスキップ対象を指定；rule.jsonのexcludesとマージ |
 | `--preview` | `-p` | `false` | LLMを実行せずにレビュー対象ファイルをプレビュー |
+| `--resume` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開 |
 | `--format` | `-f` | `text` | 出力形式：`text`または`json` |
 | `--concurrency` | — | `8` | ファイルレビューの最大同時実行数 |
 | `--timeout` | — | `10` | 同時実行タスクのタイムアウト（分） |
@@ -454,6 +461,41 @@ JSON出力ではこの2つのフィールドは`content`や`start_line`などと
 | `--max-tools` | — | 組み込み値 | ファイルごとのツール呼び出しラウンドの上限。テンプレートのデフォルトより大きい場合のみ有効 |
 | `--max-git-procs` | — | 組み込み値 | gitサブプロセスの最大同時実行数 |
 | `--tools` | — | — | カスタムJSONツール設定へのパス |
+
+#### 再開可能なレビューとセッション
+
+すべての `ocr review` 実行は、`~/.opencodereview/sessions/` 配下にローカル
+セッションログを保存します。正常終了したテキスト出力はレビュー結果に集中し、session ID
+は表示しません。保存済みセッションは `ocr session list/show` で確認でき、
+`--format json` では機械可読出力に `session_id` が含まれます。範囲または単一 commit
+レビューが中断された場合は、保存済みセッションを一覧表示し、同じレビュー対象に一致するセッションから再開します:
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+再開は意図的に厳密です。範囲レビューと単一 commit レビューのみ対応し、ワークスペースレビューは再開できません。
+現在の `--from/--to` または `--commit` は保存済みセッションと一致する必要があります。`--preview` と `--resume` は併用できません。
+
+`--format json` を使用すると、再開した実行には次が含まれます:
+
+- `session_id` — 現在の実行の session ID
+- `resume.resumed_from` — 再開元の session ID
+- `resume.reused_files` — 保存済みチェックポイントから再利用したファイル数
+- `resume.rerun_files` — 現在の実行で再レビューしたファイル数
+
+### `ocr session`のフラグ
+
+| コマンド | フラグ | デフォルト | 説明 |
+|---------|------|---------|------|
+| `ocr session list` | `--repo` | カレントディレクトリ | 一覧表示するセッションのリポジトリ |
+| `ocr session list` | `--json` | `false` | セッション概要をJSONで出力 |
+| `ocr session list` | `--limit` | `20` | 一覧表示するセッション数の上限。`0` は無制限 |
+| `ocr session show <id>` | `--repo` | カレントディレクトリ | 確認するセッションのリポジトリ |
+| `ocr session show <id>` | `--json` | `false` | セッションメタデータとファイル単位の項目をJSONで出力 |
 
 ### `ocr scan`のフラグ
 
@@ -499,6 +541,12 @@ ocr review --from main --to my-feature --concurrency 4
 
 # 特定のコミットを詳細なJSON出力でレビュー
 ocr review --commit abc123 --format json --audience agent
+
+# 中断した範囲または単一 commit レビューを再開
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to my-feature --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
 
 # このレビューでモデルを選択またはオーバーライド
 ocr review --model claude-opus-4-6

@@ -268,6 +268,10 @@ ocr review --from main --to feature-branch
 # 단일 commit
 ocr review --commit abc123
 
+# 중단된 range 또는 단일 commit review 재개
+ocr session list
+ocr review --from main --to feature-branch --resume <session-id>
+
 # 전체 파일 스캔 — diff 대신 파일 전체를 리뷰 (git 이력 불필요)
 ocr scan                          # 전체 repository 스캔
 ocr scan --path internal/agent    # 디렉터리 또는 특정 파일 스캔
@@ -431,6 +435,8 @@ JSON 출력에서 두 field는 `content`, `start_line` 등과 같은 수준의 s
 | `ocr config unset custom_providers.<name>` | - | custom provider 삭제 |
 | `ocr llm test` | - | LLM 연결 테스트 |
 | `ocr llm providers` | - | built-in LLM provider 목록 표시 |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | 저장된 review session 목록 표시 |
+| `ocr session show <id>` | `ocr sessions show <id>` | 단일 session과 파일별 checkpoint 확인 |
 | `ocr viewer` | `ocr v` | `localhost:5483`에서 WebUI session viewer 실행 |
 | `ocr version` | - | version 정보 표시 |
 
@@ -444,6 +450,7 @@ JSON 출력에서 두 field는 `content`, `start_line` 등과 같은 수준의 s
 | `--commit` | `-c` | - | 리뷰할 단일 commit |
 | `--exclude` | - | - | 건너뛸 파일의 쉼표 구분 gitignore 스타일 패턴; rule.json의 excludes와 병합 |
 | `--preview` | `-p` | `false` | LLM 실행 없이 리뷰 대상 파일 미리보기 |
+| `--resume` | - | - | 이전의 호환되는 range 또는 단일 commit review session에서 재개 |
 | `--format` | `-f` | `text` | Output format: `text` 또는 `json` |
 | `--concurrency` | - | `8` | 최대 동시 파일 리뷰 수 |
 | `--timeout` | - | `10` | 동시 task timeout(분) |
@@ -454,6 +461,41 @@ JSON 출력에서 두 field는 `content`, `start_line` 등과 같은 수준의 s
 | `--max-tools` | - | built-in | 파일별 최대 tool call round. template default보다 클 때만 적용 |
 | `--max-git-procs` | - | built-in | 최대 동시 git subprocess 수 |
 | `--tools` | - | - | custom JSON tools config 경로 |
+
+#### Resumable Reviews and Sessions
+
+모든 `ocr review` 실행은 `~/.opencodereview/sessions/` 아래에 local session log를 저장합니다.
+정상 완료된 text output은 review 결과에 집중하며 session ID를 출력하지 않습니다.
+저장된 session은 `ocr session list/show`로 찾을 수 있고, `--format json`을 사용하면
+machine-readable output에 `session_id`가 포함됩니다. range 또는 단일 commit review가 중단된 경우,
+저장된 session을 나열한 뒤 동일한 review target과 일치하는 session에서 재개합니다.
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+Resume은 의도적으로 엄격합니다. branch range와 단일 commit review만 지원하고 workspace review는 지원하지 않습니다.
+현재 `--from/--to` 또는 `--commit`은 저장된 session과 일치해야 합니다. `--preview`와 `--resume`은 함께 사용할 수 없습니다.
+
+`--format json`을 사용하면 재개된 run에는 다음 field가 포함됩니다.
+
+- `session_id`: 현재 run의 session ID
+- `resume.resumed_from`: source session ID
+- `resume.reused_files`: 저장된 checkpoint에서 재사용한 파일 수
+- `resume.rerun_files`: 현재 run에서 다시 review한 파일 수
+
+### `ocr session` Flags
+
+| Command | Flag | Default | Description |
+|---------|------|---------|-------------|
+| `ocr session list` | `--repo` | current dir | session을 나열할 repository |
+| `ocr session list` | `--json` | `false` | session summary를 JSON으로 출력 |
+| `ocr session list` | `--limit` | `20` | 나열할 session 수 제한. `0`은 unlimited |
+| `ocr session show <id>` | `--repo` | current dir | 확인할 session의 repository |
+| `ocr session show <id>` | `--json` | `false` | session metadata와 파일별 item을 JSON으로 출력 |
 
 ### `ocr scan` Flags
 
@@ -499,6 +541,12 @@ ocr review --from main --to my-feature --concurrency 4
 
 # 특정 commit을 verbose JSON output으로 리뷰
 ocr review --commit abc123 --format json --audience agent
+
+# 중단된 range 또는 단일 commit review 재개
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to my-feature --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
 
 # 이번 리뷰에서 model 선택 또는 override
 ocr review --model claude-opus-4-6
