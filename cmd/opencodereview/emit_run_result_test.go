@@ -181,7 +181,7 @@ func TestEmitRunResult_NilQuietHandle(t *testing.T) {
 
 func TestEmitRunResult_JSONTraceIDFromContext(t *testing.T) {
 	tp := sdktrace.NewTracerProvider()
-	defer tp.Shutdown(context.Background())
+	defer func() { _ = tp.Shutdown(context.Background()) }()
 	otel.SetTracerProvider(tp)
 
 	ctx, span := tp.Tracer("test").Start(context.Background(), "test-root")
@@ -211,7 +211,7 @@ func TestEmitRunResult_JSONTraceIDFromContext(t *testing.T) {
 
 func TestEmitRunResult_JSONNoFilesTraceID(t *testing.T) {
 	tp := sdktrace.NewTracerProvider()
-	defer tp.Shutdown(context.Background())
+	defer func() { _ = tp.Shutdown(context.Background()) }()
 	otel.SetTracerProvider(tp)
 
 	ctx, span := tp.Tracer("test").Start(context.Background(), "test-root")

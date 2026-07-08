@@ -80,8 +80,10 @@ func TestQuietHandle_IdempotentRestore(t *testing.T) {
 func TestResolveWorkingDir_CurrentDir(t *testing.T) {
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
-	defer os.Chdir(origDir)
-	os.Chdir(dir)
+	defer func() { _ = os.Chdir(origDir) }()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
 
 	absPath, isGit, err := resolveWorkingDir("", false)
 	if err != nil {

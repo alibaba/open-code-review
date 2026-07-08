@@ -82,7 +82,7 @@ func TestHandleRepos_PermissionDenied(t *testing.T) {
 	if err := os.Chmod(root, 0000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(root, 0755) })
+	t.Cleanup(func() { _ = os.Chmod(root, 0755) })
 
 	req := httptest.NewRequest("GET", "/", nil)
 	rr := httptest.NewRecorder()

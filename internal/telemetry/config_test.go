@@ -103,7 +103,7 @@ func TestResolveEnv(t *testing.T) {
 			}
 			for _, k := range envKeys {
 				t.Setenv(k, "")
-				os.Unsetenv(k)
+				_ = os.Unsetenv(k)
 			}
 			for k, v := range tc.envs {
 				t.Setenv(k, v)
@@ -128,7 +128,9 @@ func TestLoadFromJSON(t *testing.T) {
 	t.Run("malformed json returns nil error", func(t *testing.T) {
 		tmp := t.TempDir()
 		path := filepath.Join(tmp, "config.json")
-		os.WriteFile(path, []byte("{invalid json"), 0644)
+		if err := os.WriteFile(path, []byte("{invalid json"), 0644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
 
 		cfg := DefaultConfig()
 		err := LoadFromJSON(&cfg, path)
@@ -140,7 +142,9 @@ func TestLoadFromJSON(t *testing.T) {
 	t.Run("no telemetry section", func(t *testing.T) {
 		tmp := t.TempDir()
 		path := filepath.Join(tmp, "config.json")
-		os.WriteFile(path, []byte(`{"other": "value"}`), 0644)
+		if err := os.WriteFile(path, []byte(`{"other": "value"}`), 0644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
 
 		cfg := DefaultConfig()
 		err := LoadFromJSON(&cfg, path)
@@ -163,7 +167,9 @@ func TestLoadFromJSON(t *testing.T) {
 				"content_logging": true
 			}
 		}`
-		os.WriteFile(path, []byte(data), 0644)
+		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
 
 		cfg := DefaultConfig()
 		err := LoadFromJSON(&cfg, path)
@@ -188,7 +194,9 @@ func TestLoadFromJSON(t *testing.T) {
 		tmp := t.TempDir()
 		path := filepath.Join(tmp, "config.json")
 		data := `{"telemetry": {"otlp_endpoint": "localhost:4317"}}`
-		os.WriteFile(path, []byte(data), 0644)
+		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
 
 		cfg := DefaultConfig()
 		err := LoadFromJSON(&cfg, path)
@@ -204,7 +212,9 @@ func TestLoadFromJSON(t *testing.T) {
 		tmp := t.TempDir()
 		path := filepath.Join(tmp, "config.json")
 		data := `{"telemetry": {"exporter": "otlp"}}`
-		os.WriteFile(path, []byte(data), 0644)
+		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
 
 		cfg := DefaultConfig()
 		cfg.Exporter = "custom"
@@ -227,7 +237,7 @@ func TestResolveConfig(t *testing.T) {
 		}
 		for _, k := range envKeys {
 			t.Setenv(k, "")
-			os.Unsetenv(k)
+			_ = os.Unsetenv(k)
 		}
 
 		cfg := ResolveConfig("")
@@ -240,7 +250,9 @@ func TestResolveConfig(t *testing.T) {
 		tmp := t.TempDir()
 		path := filepath.Join(tmp, "config.json")
 		data := `{"telemetry": {"enabled": false}}`
-		os.WriteFile(path, []byte(data), 0644)
+		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
 
 		t.Setenv("OCR_ENABLE_TELEMETRY", "1")
 

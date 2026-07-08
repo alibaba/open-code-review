@@ -161,7 +161,7 @@ func TestInitOTLPProviders_ProtocolRouting(t *testing.T) {
 				OTLPProtocol: tc.protocol,
 			}
 			initOTLPProviders(context.Background(), resource.Default(), cfg)
-			w.Close()
+			_ = w.Close()
 			os.Stderr = oldStderr
 
 			defer func() {
@@ -184,7 +184,7 @@ func TestInitOTLPProviders_ProtocolRouting(t *testing.T) {
 			}
 
 			var buf bytes.Buffer
-			io.Copy(&buf, r)
+			_, _ = io.Copy(&buf, r)
 			stderrOut := buf.String()
 			if tc.wantWarning {
 				if !strings.Contains(stderrOut, "falling back to gRPC") {

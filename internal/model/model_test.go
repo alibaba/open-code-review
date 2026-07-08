@@ -65,14 +65,18 @@ func TestPreviewEntry_ExcludeReasonOmitEmpty(t *testing.T) {
 	}
 	data, _ := json.Marshal(e)
 	var m map[string]any
-	json.Unmarshal(data, &m)
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if _, ok := m["exclude_reason"]; ok {
 		t.Error("expected exclude_reason to be omitted when empty")
 	}
 
 	e.ExcludeReason = ExcludeUserRule
 	data, _ = json.Marshal(e)
-	json.Unmarshal(data, &m)
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if m["exclude_reason"] != "user_exclude" {
 		t.Errorf("expected exclude_reason=user_exclude, got %v", m["exclude_reason"])
 	}

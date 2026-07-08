@@ -68,7 +68,7 @@ func TestNewClient_Stdio(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	if c.Name() != "test-srv" {
 		t.Errorf("Name() = %q, want %q", c.Name(), "test-srv")
