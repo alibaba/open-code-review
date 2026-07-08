@@ -49,12 +49,12 @@ func parseOTLPEndpoint(endpoint string) (addr string, insecure bool) {
 // initOTLPProviders dispatches to the gRPC or HTTP exporter based on cfg.OTLPProtocol.
 func initOTLPProviders(ctx context.Context, res *resource.Resource, cfg Config) {
 	switch cfg.OTLPProtocol {
-	case "http/protobuf":
+	case "http/protobuf", "http/json":
 		initOTLPHTTPProviders(ctx, res, cfg)
+	case "", "grpc":
+		initOTLPGRPCProviders(ctx, res, cfg)
 	default:
-		if cfg.OTLPProtocol != "" && cfg.OTLPProtocol != "grpc" {
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: unsupported OTLP protocol %q, falling back to gRPC\n", cfg.OTLPProtocol)
-		}
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: unsupported OTLP protocol %q, falling back to gRPC\n", cfg.OTLPProtocol)
 		initOTLPGRPCProviders(ctx, res, cfg)
 	}
 }

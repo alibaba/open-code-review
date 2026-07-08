@@ -551,19 +551,29 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
 	startTime := time.Now()
 
+	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
 		MaxTokens: a.args.Template.MaxTokens,
 	})
+	duration := time.Since(startTime)
 	if err != nil {
-		rec.SetError(err, time.Since(startTime))
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		rec.SetError(err, duration)
 		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter failed for %s: %v\n", newPath, err)
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
 		return
 	}
-	rec.SetResponse(resp, time.Since(startTime))
+	var totalTokens int64
+	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
+	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
 
 	indices := parseFilterResponse(resp.Content(), len(comments))
@@ -764,18 +774,28 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
 	startTime := time.Now()
 
+	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
 		MaxTokens: a.args.Template.MaxTokens,
 	})
+	duration := time.Since(startTime)
 	if err != nil {
-		rec.SetError(err, time.Since(startTime))
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		rec.SetError(err, duration)
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
 		return "", fmt.Errorf("plan request: %w", err)
 	}
-	rec.SetResponse(resp, time.Since(startTime))
+	var totalTokens int64
+	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
+	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
 	fmt.Fprintf(stdout.Writer(), "[ocr] Plan completed for %s\n", newPath)
 	return resp.Content(), nil

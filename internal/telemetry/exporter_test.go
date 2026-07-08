@@ -1,7 +1,11 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"os"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -130,19 +134,36 @@ func TestInitOTLPHTTPProviders_InvalidEndpoint(t *testing.T) {
 
 func TestInitOTLPProviders_ProtocolRouting(t *testing.T) {
 	cases := []struct {
-		name     string
-		protocol string
+		name        string
+		protocol    string
+		wantWarning bool // default branch emits a gRPC fallback warning
 	}{
-		{"grpc default", "grpc"},
-		{"empty defaults to grpc", ""},
-		{"http/protobuf", "http/protobuf"},
-		{"unknown falls back to grpc", "http/json"},
+		{"grpc default", "grpc", false},
+		{"empty defaults to grpc", "", false},
+		{"http/protobuf routes to http", "http/protobuf", false},
+		{"http/json routes to http", "http/json", false},
+		{"unknown falls back to grpc", "foo", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tracerProvider = nil
 			meterProvider = nil
 			shutdownFuncs = nil
+
+			// Capture stderr to assert on the fallback warning.
+			oldStderr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
+
+			cfg := Config{
+				Exporter:     "otlp",
+				OTLPEndpoint: "localhost:0",
+				OTLPProtocol: tc.protocol,
+			}
+			initOTLPProviders(context.Background(), resource.Default(), cfg)
+			w.Close()
+			os.Stderr = oldStderr
+
 			defer func() {
 				for _, fn := range shutdownFuncs {
 					_ = fn(context.Background())
@@ -152,12 +173,6 @@ func TestInitOTLPProviders_ProtocolRouting(t *testing.T) {
 				shutdownFuncs = nil
 			}()
 
-			cfg := Config{
-				Exporter:     "otlp",
-				OTLPEndpoint: "localhost:0",
-				OTLPProtocol: tc.protocol,
-			}
-			initOTLPProviders(context.Background(), resource.Default(), cfg)
 			if tracerProvider == nil {
 				t.Error("expected tracerProvider to be set")
 			}
@@ -166,6 +181,19 @@ func TestInitOTLPProviders_ProtocolRouting(t *testing.T) {
 			}
 			if len(shutdownFuncs) != 2 {
 				t.Errorf("expected 2 shutdown funcs, got %d", len(shutdownFuncs))
+			}
+
+			var buf bytes.Buffer
+			io.Copy(&buf, r)
+			stderrOut := buf.String()
+			if tc.wantWarning {
+				if !strings.Contains(stderrOut, "falling back to gRPC") {
+					t.Errorf("expected gRPC fallback warning in stderr, got %q", stderrOut)
+				}
+			} else {
+				if strings.Contains(stderrOut, "falling back to gRPC") {
+					t.Errorf("expected no fallback warning, got %q", stderrOut)
+				}
 			}
 		})
 	}

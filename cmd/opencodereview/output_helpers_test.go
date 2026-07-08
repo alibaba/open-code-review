@@ -168,7 +168,7 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "fail"}}
-	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "")
+	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace")
 	w.Close()
 	os.Stdout = old
 
@@ -186,6 +186,9 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	}
 	if !strings.Contains(out.Message, "errors") {
 		t.Errorf("message = %q, expected to mention errors", out.Message)
+	}
+	if out.TraceID != "abc123trace" {
+		t.Errorf("trace_id = %q, want abc123trace", out.TraceID)
 	}
 }
 
@@ -274,7 +277,7 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	comments := []model.LlmComment{{Path: "b.go", Content: "test"}}
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "c.go", Message: "failed"}}
-	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "")
+	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789")
 	w.Close()
 	os.Stdout = old
 
@@ -298,6 +301,9 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 	}
 	if out.ToolCalls == nil || out.ToolCalls.Total != 3 {
 		t.Errorf("ToolCalls.Total = %v", out.ToolCalls)
+	}
+	if out.TraceID != "trace-xyz-789" {
+		t.Errorf("trace_id = %q, want trace-xyz-789", out.TraceID)
 	}
 }
 
@@ -333,7 +339,7 @@ func TestOutputJSONNoFiles(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := outputJSONNoFiles("")
+	err := outputJSONNoFiles("test-trace-id-456")
 
 	w.Close()
 	os.Stdout = old
@@ -349,6 +355,9 @@ func TestOutputJSONNoFiles(t *testing.T) {
 	json.Unmarshal(buf.Bytes(), &out)
 	if out.Status != "skipped" {
 		t.Errorf("status = %q, want skipped", out.Status)
+	}
+	if out.TraceID != "test-trace-id-456" {
+		t.Errorf("trace_id = %q, want test-trace-id-456", out.TraceID)
 	}
 }
 
