@@ -406,6 +406,21 @@ ocr review \
 - [`gitlab_ci/`](./examples/gitlab_ci/) — GitLab CI統合の例
 - [`gitflic_ci/`](./examples/gitflic_ci/) — GitFlic CI統合の例
 
+#### GitHub Action
+
+GitHub 向けに、本リポジトリはリポジトリルートにすぐ使える composite Action（[`action.yml`](./action.yml)）を同梱しています。自分で `ocr review` をスクリプト化する代わりに、これを直接参照するだけで、checkout、OCR のインストール、レビューの実行、インラインコメントとサマリーコメントの投稿、アーティファクトのアップロード、再試行・冪等性までの全パイプラインを処理できます：
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+```
+
+再現性を高めるため、バージョンタグまたはコミット SHA に固定してください。完全なワークフローデモ、inputs/outputs の全一覧、コメント投稿モード（スティッキーサマリー、非破壊的なインクリメンタル投稿）については [`examples/github_actions/`](./examples/github_actions/) ディレクトリを参照してください。
+
 ## コマンド
 
 | コマンド | エイリアス | 説明 |

@@ -406,6 +406,21 @@ ocr review \
 - [`gitlab_ci/`](./examples/gitlab_ci/) — GitLab CI 集成示例
 - [`gitflic_ci/`](./examples/gitflic_ci/) — GitFlic CI 集成示例
 
+#### GitHub Action
+
+对于 GitHub，本仓库还在仓库根目录提供了一个开箱即用的 composite Action（[`action.yml`](./action.yml)）。你无需自己编写 `ocr review` 脚本，直接引用它即可完成完整流程——checkout、安装 OCR、执行审查、发布行内评论与汇总评论、上传 artifacts，以及重试与幂等处理：
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+```
+
+为保障可复现性，请固定到某个版本标签或 commit SHA。完整的 workflow 示例以及 inputs、outputs 与评论发布模式（置顶汇总、增量非破坏式发布）的完整列表，请参见 [`examples/github_actions/`](./examples/github_actions/) 目录。
+
 ## 命令
 
 | 命令 | 别名 | 描述 |

@@ -406,6 +406,21 @@ ocr review \
 - [`gitlab_ci/`](./examples/gitlab_ci/): GitLab CI 통합 예시
 - [`gitflic_ci/`](./examples/gitflic_ci/): GitFlic CI 통합 예시
 
+#### GitHub Action
+
+GitHub의 경우, 이 리포지터리는 루트에 바로 사용할 수 있는 composite Action([`action.yml`](./action.yml))을 제공합니다. 직접 `ocr review` 스크립트를 작성하는 대신 이를 참조하기만 하면 전체 파이프라인 — checkout, OCR 설치, review 실행, inline/summary comment 게시, artifact 업로드, 재시도 및 멱등성 — 을 모두 처리합니다:
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+```
+
+재현성을 위해 version tag나 commit SHA에 고정하세요. 전체 workflow 데모와 inputs/outputs, comment 게시 모드(sticky summary, incremental non-destructive posting)의 전체 목록은 [`examples/github_actions/`](./examples/github_actions/) 디렉터리를 참고하세요.
+
 ## Commands
 
 | Command | Alias | Description |
