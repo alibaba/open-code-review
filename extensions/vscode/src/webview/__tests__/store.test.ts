@@ -1,25 +1,33 @@
+import { describeActiveProvider, isConfigReady } from '../../shared/configUtils';
 import { initialState, reducer } from '../store';
+
+const baseConfig = {
+  provider: '',
+  model: '',
+  providers: {},
+  customProviders: {},
+  llm: { url: 'u', authToken: 't', model: 'm', useAnthropic: false },
+  language: 'Chinese',
+};
 
 describe('reducer', () => {
   it('init 设置 config 和 gitState', () => {
     const s = reducer(initialState, {
       type: 'init',
-      config: { llm: { url: 'u', authToken: '', model: 'm', useAnthropic: false }, language: 'Chinese' },
+      config: baseConfig,
       gitState: { branches: [], currentBranch: 'main', recentCommits: [], workspaceFiles: [] },
     });
     expect(s.config?.llm.model).toBe('m');
     expect(s.gitState.currentBranch).toBe('main');
-    expect(s.view).toBe('idle'); // 主界面始终是 idle（review 界面）
-    expect(s.configOpen).toBe(false); // 已配置 → 不弹配置浮层
+    expect(s.view).toBe('idle');
   });
 
-  it('init 时 config 为 null → 主界面仍是 idle，且不自动弹出配置浮层', () => {
+  it('init 时 config 为 null → 主界面仍是 idle', () => {
     const s = reducer(initialState, {
       type: 'init', config: null,
       gitState: { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] },
     });
     expect(s.view).toBe('idle');
-    expect(s.configOpen).toBe(false);
   });
 
   it('init / gitState / modeFiles 结束 loading；filesLoading action 开启 loading', () => {
@@ -36,20 +44,9 @@ describe('reducer', () => {
     expect(loaded.filesLoading).toBe(false);
   });
 
-  it('openConfig / closeConfig 切换配置浮层', () => {
-    const opened = reducer(initialState, { type: 'openConfig' });
-    expect(opened.configOpen).toBe(true);
-    const closed = reducer(opened, { type: 'closeConfig' });
-    expect(closed.configOpen).toBe(false);
-  });
-
-  it('config 保存后更新 config 并关闭浮层', () => {
-    const s = reducer({ ...initialState, configOpen: true }, {
-      type: 'config',
-      config: { llm: { url: 'u', authToken: 't', model: 'm', useAnthropic: false }, language: 'Chinese' },
-    });
+  it('config 消息更新 config', () => {
+    const s = reducer(initialState, { type: 'config', config: baseConfig });
     expect(s.config?.llm.model).toBe('m');
-    expect(s.configOpen).toBe(false);
   });
 
   it('stateChange running 清空旧日志并切到 running 视图', () => {
@@ -79,6 +76,73 @@ describe('reducer', () => {
   it('commentSync 更新评论状态映射', () => {
     const s = reducer(initialState, { type: 'commentSync', comments: [{ index: 0, status: 'applied' }] });
     expect(s.commentStatus[0]).toBe('applied');
+  });
+});
+
+describe('isConfigReady', () => {
+  it('legacy llm 配置需要 url/model/token', () => {
+    expect(isConfigReady({
+      ...baseConfig,
+      llm: { url: 'u', authToken: 't', model: 'm', useAnthropic: true },
+    })).toBe(true);
+    expect(isConfigReady({
+      ...baseConfig,
+      llm: { url: '', authToken: '', model: '', useAnthropic: true },
+    })).toBe(false);
+  });
+
+  it('official provider 需要 model', () => {
+    expect(isConfigReady({
+      ...baseConfig,
+      provider: 'anthropic',
+      providers: { anthropic: { model: 'claude-opus-4-6' } },
+    })).toBe(true);
+  });
+
+  it('custom provider 需要 url/protocol/apiKey/model', () => {
+    expect(isConfigReady({
+      ...baseConfig,
+      provider: 'my-llm',
+      customProviders: {
+        'my-llm': { url: 'https://x', protocol: 'openai', model: 'm', apiKey: 'k' },
+      },
+    })).toBe(true);
+  });
+});
+
+describe('describeActiveProvider', () => {
+  it('官方 provider', () => {
+    expect(describeActiveProvider({
+      ...baseConfig,
+      provider: 'anthropic',
+      providers: { anthropic: { model: 'claude-opus-4-8' } },
+    })).toMatchObject({
+      kind: 'official',
+      displayName: 'Anthropic Claude API',
+      model: 'claude-opus-4-8',
+    });
+  });
+
+  it('自定义 provider', () => {
+    expect(describeActiveProvider({
+      ...baseConfig,
+      provider: 'my-llm',
+      customProviders: {
+        'my-llm': { url: 'https://x', protocol: 'openai', model: 'gpt-4', apiKey: 'k' },
+      },
+    })).toMatchObject({
+      kind: 'custom',
+      displayName: 'my-llm',
+      model: 'gpt-4',
+      detail: 'https://x',
+    });
+  });
+
+  it('未配置时返回 null', () => {
+    expect(describeActiveProvider({
+      ...baseConfig,
+      llm: { url: '', authToken: '', model: '', useAnthropic: true },
+    })).toBeNull();
   });
 });
 

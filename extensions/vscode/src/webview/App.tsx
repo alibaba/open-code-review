@@ -1,25 +1,27 @@
+import { I18nContext, resolveLocale } from './I18nProvider';
 import { useEffect, useReducer } from 'preact/hooks';
 import { reducer, initialState } from './store';
 import { bridge } from './bridge';
-import { ReviewMode, CliRunOptions, FileChange } from '../shared/types';
+import { isConfigReady } from '../shared/configUtils';
+import { CliRunOptions, FileChange, ReviewMode } from '../shared/types';
 import { IdleView } from './views/IdleView';
 import { RunningView } from './views/RunningView';
 import { DoneView } from './views/DoneView';
 import { EmptyView } from './views/EmptyView';
 import { CancelledView } from './views/CancelledView';
 import { FailedView } from './views/FailedView';
-import { ConfigView } from './views/ConfigView';
 import './styles/global.css';
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
 
   useEffect(() => {
-    bridge.onMessage((msg) => dispatch(msg));
+    const unsub = bridge.onMessage((msg) => dispatch(msg));
     bridge.post({ type: 'ready' });
+    return unsub;
   }, []);
 
-  const configured = Boolean(state.config);
+  const configured = isConfigReady(state.config);
   const start = (options: CliRunOptions) => {
     dispatch({ type: 'startReview', mode: options.mode });
     bridge.post({ type: 'startReview', options });
@@ -36,52 +38,35 @@ export function App() {
     bridge.post({ type: 'openFileDiff', path: file.path, status: file.status, mode, from, to, commit });
   };
 
-  const openConfig = () => {
-    dispatch({ type: 'openConfig' });
-    dispatch({ type: 'checkingCli' });
-    bridge.post({ type: 'checkCli' });
-  };
-
   return (
-    <div class="ocr-root">
-      <button class="config-fab" onClick={openConfig} title="模型配置">⚙</button>
+    <I18nContext.Provider value={resolveLocale(state.locale)}>
+      <div class="ocr-root">
+        <div class="action-region">
+          <IdleView gitState={state.gitState} modeFiles={state.modeFiles} filesLoading={state.filesLoading}
+            configured={configured} onModeChange={onModeChange} onRequestModeFiles={requestModeFiles}
+            onOpenFile={openFile} onStart={start} onOpenConfig={() => bridge.post({ type: 'openConfigPanel' })}
+            onOpenCustomProviders={() => bridge.post({
+              type: 'openConfigPanel',
+              focus: { step: 2, tab: 'custom', customView: 'list' },
+            })}
+            running={state.view === 'running'} />
 
-      <div class="action-region">
-        <IdleView gitState={state.gitState} modeFiles={state.modeFiles} filesLoading={state.filesLoading}
-          configured={configured} onModeChange={onModeChange} onRequestModeFiles={requestModeFiles}
-          onOpenFile={openFile} onStart={start}
-          running={state.view === 'running'} />
-
-        {state.view !== 'idle' && (
-          <div class="result-region">
-            {state.view === 'running' && <RunningView logs={state.logs} onCancel={() => bridge.post({ type: 'cancelReview' })} />}
-            {state.view === 'done' && state.session.result && (
-              <DoneView result={state.session.result} commentStatus={state.commentStatus} logs={state.logs}
-                canJump={state.reviewMode === 'workspace'}
-                onOpen={(i) => bridge.post({ type: 'jumpToComment', index: i })}
-                onAction={(i, action) => bridge.post({ type: 'commentAction', index: i, action })} />
-            )}
-            {state.view === 'empty' && <EmptyView logs={state.logs} />}
-            {state.view === 'cancelled' && <CancelledView />}
-            {state.view === 'failed' && <FailedView error={state.session.error} onRetry={() => start({ mode: 'workspace' })} />}
-          </div>
-        )}
+          {state.view !== 'idle' && (
+            <div class="result-region">
+              {state.view === 'running' && <RunningView logs={state.logs} onCancel={() => bridge.post({ type: 'cancelReview' })} />}
+              {state.view === 'done' && state.session.result && (
+                <DoneView result={state.session.result} commentStatus={state.commentStatus} logs={state.logs}
+                  canJump={state.reviewMode === 'workspace'}
+                  onOpen={(i) => bridge.post({ type: 'jumpToComment', index: i })}
+                  onAction={(i, action) => bridge.post({ type: 'commentAction', index: i, action })} />
+              )}
+              {state.view === 'empty' && <EmptyView logs={state.logs} />}
+              {state.view === 'cancelled' && <CancelledView />}
+              {state.view === 'failed' && <FailedView error={state.session.error} onRetry={() => start({ mode: 'workspace' })} />}
+            </div>
+          )}
+        </div>
       </div>
-
-      {state.configOpen && (
-        <ConfigView
-          config={state.config}
-          cliStatus={state.cliStatus}
-          installing={state.installing}
-          installLogs={state.installLogs}
-          connTest={state.connTest}
-          onInstall={() => { dispatch({ type: 'installingCli' }); bridge.post({ type: 'installCli' }); }}
-          onCheckCli={() => { dispatch({ type: 'checkingCli' }); bridge.post({ type: 'checkCli' }); }}
-          onTest={() => { dispatch({ type: 'testingConn' }); bridge.post({ type: 'testConnection' }); }}
-          onSave={(entries) => entries.forEach((e) => bridge.post({ type: 'setConfig', key: e.key, value: e.value }))}
-          onClose={() => dispatch({ type: 'closeConfig' })}
-        />
-      )}
-    </div>
+    </I18nContext.Provider>
   );
 }

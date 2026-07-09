@@ -101,9 +101,12 @@ type reviewOptions struct {
 	from           string
 	to             string
 	commit         string
+	resume         string
+	excludes       string // --exclude: comma-separated gitignore-style patterns
 	outputFormat   string
 	audience       string // --audience: "human" (default) or "agent"
 	background     string // --background: optional requirement context
+	backgroundFile string // --background-file: path to a Markdown file used as background
 	model          string // --model: override resolved LLM model for this review
 	concurrency    int
 	perFileTimeout int
@@ -124,11 +127,14 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.from, "from", "", "source ref to start diff from (e.g., 'main')")
 	a.StringVar(&opts.to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
 	a.StringVarP(&opts.commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
+	a.StringVar(&opts.resume, "resume", "", "resume from a previous review session id")
+	a.StringVar(&opts.excludes, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 	a.StringVarP(&opts.outputFormat, "format", "f", "text", "output format: text or json")
 	a.IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file reviews")
 	a.IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
 	a.StringVar(&opts.audience, "audience", "human", "output audience: human (show progress) or agent (summary only)")
 	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the review")
+	a.StringVarP(&opts.backgroundFile, "background-file", "B", "", "optional requirement/business context from a Markdown file (combined with --background; inline value appears first when both are set)")
 	a.StringVar(&opts.model, "model", "", "override LLM model for this review (e.g., claude-opus-4-6)")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
@@ -159,6 +165,9 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	}
 	if opts.to != "" && opts.from == "" {
 		return opts, fmt.Errorf("--from is required when --to is specified")
+	}
+	if opts.preview && opts.resume != "" {
+		return opts, fmt.Errorf("--preview and --resume cannot be used together")
 	}
 
 	switch opts.audience {
@@ -201,6 +210,9 @@ Examples:
   ocr review --commit abc123
   ocr review -c abc123
 
+  # Resume a previous range review
+  ocr review --from master --to dev-ref --resume <session-id>
+
   # Output JSON format
   ocr review --format json
   ocr review -f json
@@ -212,22 +224,29 @@ Examples:
   ocr review --preview
   ocr review -c abc123 -p
 
+  # Provide requirement/business context inline, from a Markdown file, or both
+  ocr review --background "Adding rate limiting to the login API"
+  ocr review --background-file ./docs/requirements.md
+  ocr review --background "Focus on auth" --background-file ./docs/requirements.md
+
 Flags:
-  --audience string       output audience: human (show progress) or agent (summary only) (default "human")
-  -b, --background string optional requirement/business context for the review
-  -c, --commit string     single commit hash or tag to review (vs its parent)
-  -f, --format string     output format: text or json (default "text")
-  --concurrency int       max concurrent file reviews (default 8)
-  --max-git-procs int     max concurrent git subprocesses (default 16)
-  --from string           source ref to start diff from (e.g., 'main')
-  --max-tools int         max tool call rounds per file (0 = template default; min 10)
-  --model string          override LLM model for this review (e.g., claude-opus-4-6)
-  -p, --preview           preview which files will be reviewed without running the LLM
-  --repo string           root directory of the git repository (default: current dir)
-  --rule string           path to JSON file with system review rules
-  --timeout int           concurrent task timeout in minutes (default 10)
-  --to string             target ref to end diff at (e.g., 'feature-branch')
-  --tools string          path to JSON tools config file (default: embedded)`)
+  --audience string             output audience: human (show progress) or agent (summary only) (default "human")
+  -b, --background string       optional requirement/business context for the review
+  -B, --background-file string  path to a Markdown file used as review background (combined with --background; inline value appears first when both are set)
+  -c, --commit string           single commit hash or tag to review (vs its parent)
+  -f, --format string           output format: text or json (default "text")
+  --concurrency int             max concurrent file reviews (default 8)
+  --max-git-procs int           max concurrent git subprocesses (default 16)
+  --from string                 source ref to start diff from (e.g., 'main')
+  --max-tools int               max tool call rounds per file (0 = template default; min 10)
+  --model string                override LLM model for this review (e.g., claude-opus-4-6)
+  -p, --preview                 preview which files will be reviewed without running the LLM
+  --repo string                 root directory of the git repository (default: current dir)
+  --resume string               resume from a previous review session id
+  --rule string                 path to JSON file with system review rules
+  --timeout int                 concurrent task timeout in minutes (default 10)
+  --to string                   target ref to end diff at (e.g., 'feature-branch')
+  --tools string                path to JSON tools config file (default: embedded)`)
 }
 
 // --- config subcommand ---
@@ -273,6 +292,7 @@ func printConfigUsage() {
 Usage:
   ocr config set <key> <value>
   ocr config unset custom_providers.<name>  Delete a custom provider
+  ocr config unset mcp_servers.<name>       Delete an MCP server
   ocr config provider                       Interactive provider setup
   ocr config model                          Interactive model selection
 
@@ -299,6 +319,14 @@ Examples:
   # Delete a custom provider
   ocr config unset custom_providers.my-gateway
 
+  # MCP server configuration (stdio transport)
+  ocr config set mcp_servers.codegraph.command npx
+  ocr config set mcp_servers.codegraph.args '["-y","@anthropic/codegraph-mcp"]'
+  ocr config set mcp_servers.codegraph.env '["CODEGRAPH_TOKEN=xxx"]'
+
+  # Delete an MCP server
+  ocr config unset mcp_servers.codegraph
+
   # Legacy endpoint configuration
   ocr config set llm.url https://xx/v1/openai/chat/completions
   ocr config set llm.auth_token xxxxxxxxxx
@@ -308,6 +336,7 @@ Examples:
   ocr config set language English
   ocr config set telemetry.enabled true
 
-Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging
-Provider fields: api_key, url, protocol, model, models, auth_header, extra_body`)
+Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging
+Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers
+MCP server fields: command, args, env, tools, setup`)
 }

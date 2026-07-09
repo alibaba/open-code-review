@@ -1,4 +1,6 @@
+import { resolveLocale, toHtmlLang } from '../../shared/i18n';
 import * as vscode from 'vscode';
+import { ConfigPanelFocus } from '../../shared/configUtils';
 import { HostToWebview, WebviewToHost } from '../../shared/messages';
 import { FileChange } from '../../shared/types';
 import { CliService } from '../services/CliService';
@@ -10,6 +12,7 @@ import { CommentProvider } from './CommentProvider';
 export class SidebarProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private session?: ReviewSession;
+  private openConfigPanel?: (focus?: ConfigPanelFocus) => void;
 
   constructor(
     private extensionUri: vscode.Uri,
@@ -19,6 +22,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private comments: CommentProvider,
   ) {
     this.comments.onSync((states) => this.post({ type: 'commentSync', comments: states }));
+  }
+
+  bindConfigPanel(open: (focus?: ConfigPanelFocus) => void): void {
+    this.openConfigPanel = open;
+  }
+
+  pushConfig(config: ReturnType<ConfigService['read']>): void {
+    this.post({ type: 'config', config });
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -38,7 +49,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       case 'ready': {
         const config = this.config.read();
         const gitState = await this.git.getState('workspace');
-        this.post({ type: 'init', config, gitState });
+        const locale = resolveLocale(vscode.env.language);
+        this.post({ type: 'init', config, gitState, locale });
         break;
       }
       case 'getGitState': {
@@ -78,28 +90,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       case 'cancelReview':
         this.session?.cancel({ onState: (state) => this.post({ type: 'stateChange', state }) });
         break;
+      case 'openConfigPanel':
+        this.openConfigPanel?.(msg.focus);
+        break;
       case 'getConfig':
         this.post({ type: 'config', config: this.config.read() });
         break;
-      case 'setConfig':
-        await this.config.set(msg.key, msg.value);
-        this.post({ type: 'config', config: this.config.read() });
-        break;
-      case 'testConnection': {
-        const r = await this.cli.testConnection();
-        this.post({ type: 'connectionResult', ok: r.ok, message: r.message });
-        break;
-      }
-      case 'checkCli': {
-        this.post({ type: 'cliStatus', installed: await this.cli.isAvailable() });
-        break;
-      }
-      case 'installCli': {
-        const ok = await this.cli.install((line) => this.post({ type: 'installLog', line }));
-        this.post({ type: 'installDone', ok });
-        this.post({ type: 'cliStatus', installed: await this.cli.isAvailable() });
-        break;
-      }
       case 'jumpToComment':
         await this.comments.jumpTo(msg.index);
         break;
@@ -114,8 +110,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private html(webview: vscode.Webview): string {
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'out', 'webview.js'));
     const nonce = String(Date.now());
+    const resolved = resolveLocale(vscode.env.language);
+    const lang = toHtmlLang(resolved);
     return `<!DOCTYPE html>
-<html lang="zh-CN"><head>
+<html lang="${lang}"><head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
 </head><body><div id="root"></div>

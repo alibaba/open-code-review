@@ -13,10 +13,9 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
-  <a href="https://goreportcard.com/report/github.com/alibaba/open-code-review"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
-  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://www.bestpractices.dev/projects/13328/badge" /></a>
+  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
 </p>
 <p align="center">
   <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
@@ -24,6 +23,7 @@
   <a href="#supported-platforms"><img alt="Linux" src="https://img.shields.io/badge/Linux-supported-blue.svg" /></a>
   <a href="#supported-agents"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-blueviolet.svg" /></a>
   <a href="#supported-agents"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-blueviolet.svg" /></a>
+  <a href="#supported-agents"><img alt="Cursor" src="https://img.shields.io/badge/Cursor-supported-blueviolet.svg" /></a>
 </p>
 <p align="center">
   <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja-JP.md">日本語</a> | <a href="README.ko-KR.md">한국어</a> | Русский
@@ -35,7 +35,9 @@
 
 Open Code Review — это CLI-инструмент для код-ревью на основе ИИ. Он появился как внутренний официальный ИИ-ассистент код-ревью Alibaba Group: за последние два года им воспользовались десятки тысяч разработчиков, и он выявил миллионы дефектов в коде. После тщательной проверки в огромных масштабах мы превратили его в open-source-проект для сообщества. Чтобы начать работу, достаточно настроить эндпоинт модели.
 
-Инструмент читает git-диффы, отправляет изменённые файлы настраиваемой LLM через агента с поддержкой вызова инструментов (tool use) и генерирует структурированные ревью-комментарии с точностью до строки. Агент может читать полное содержимое файлов, искать по кодовой базе, заглядывать в другие изменённые файлы за контекстом и выполнять глубокое ревью — а не только давать поверхностные замечания по диффу.
+Инструмент читает git-диффы, отправляет изменённые файлы настраиваемой LLM через агента с поддержкой вызова инструментов (tool use) и генерирует структурированные ревью-комментарии с точностью до строки. Агент может читать полное содержимое файлов, искать по кодовой базе, заглядывать в другие изменённые файлы за контекстом и выполнять глубокое ревью — а не только давать поверхностные замечания по диффу. Помимо ревью диффов, `ocr scan` позволяет проверять файлы целиком — удобно для аудита незнакомой кодовой базы или каталогов без значимого диффа.
+
+Подробнее на [официальном сайте](https://alibaba.github.io/open-code-review/).
 
 ![Highlights](imgs/highlights-en.png)
 
@@ -89,6 +91,10 @@ Open Code Review — это CLI-инструмент для код-ревью н
 
 ## Как использовать
 
+### Предварительные требования
+
+- **Git >= 2.41** — Open Code Review использует Git для генерации diff, поиска по коду и операций с репозиторием.
+
 ### CLI
 
 #### Установка
@@ -100,6 +106,18 @@ npm install -g @alibaba-group/open-code-review
 ```
 
 После установки команда `ocr` доступна глобально.
+
+**Обновление**
+
+Если установка выполнена через NPM, обновите вручную до последней версии:
+
+```bash
+npm install -g @alibaba-group/open-code-review@latest
+```
+
+Установка через NPM также по умолчанию проверяет новые версии в фоне и обновляется автоматически. Чтобы отключить автообновления, задайте `OCR_NO_UPDATE=1`.
+
+Если вы устанавливали через install script или вручную скачанный бинарный файл, повторно запустите ту же команду установки/скачивания, чтобы заменить локальный бинарный файл последним релизом. Используйте `OCR_VERSION`, если нужно зафиксировать конкретный тег релиза.
 
 **Из GitHub Release**
 
@@ -162,6 +180,8 @@ sudo cp dist/opencodereview /usr/local/bin/ocr
 
 **Перед запуском ревью необходимо настроить LLM.**
 
+OCR управляет конфигурацией LLM через единую систему **провайдеров (Provider)**. Множество популярных провайдеров встроено, также поддерживается добавление пользовательских провайдеров для подключения к приватным развёртываниям или другим совместимым эндпоинтам. Конфигурация хранится в `~/.opencodereview/config.json`.
+
 **Вариант A: интерактивная настройка (рекомендуется)**
 
 ```bash
@@ -171,26 +191,60 @@ ocr config model             # Выбрать модель для активно
 
 ![Provider setup](imgs/providers.jpg)
 
-**Вариант B: ручная настройка**
+Интерактивный UI проведёт вас через выбор провайдера, ввод API-ключа и настройку модели, после чего автоматически проверит подключение.
+
+Выполните `ocr llm providers`, чтобы увидеть все встроенные провайдеры. У встроенных провайдеров предустановлены URL API и протокол — достаточно указать API-ключ. Если соответствующая переменная окружения уже задана (например, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), API-ключ будет подхвачен автоматически.
+
+**Пользовательские провайдеры** также добавляются через интерактивный UI — потребуется указать имя, URL API, тип протокола (`anthropic` или `openai`) и API-ключ.
+
+**Вариант B: настройка через CLI (для CI/CD и неинтерактивных сред)**
+
+Используйте `ocr config set` для записи конфигурации провайдера напрямую — подходит для скриптов и автоматизации.
+
+Использование встроенного провайдера:
 
 ```bash
-ocr config set llm.url https://api.anthropic.com/v1/messages
-ocr config set llm.auth_token your-api-key-here
-ocr config set llm.model claude-opus-4-6
-ocr config set llm.use_anthropic true
+ocr config set provider anthropic
+ocr config set providers.anthropic.api_key your-api-key-here
+ocr config set providers.anthropic.model claude-sonnet-4-6
 ```
 
-Конфигурация хранится в `~/.opencodereview/config.json`.
-
-**`auth_header` (необязательно):** определяет, в каком HTTP-заголовке передаётся API-ключ при работе с Anthropic. Если не задан, по умолчанию используется `authorization` (Bearer-токен). Если у вас стандартный API-ключ вида `sk-ant-*`, необходимо установить значение `x-api-key`:
+Использование пользовательского провайдера (приватный шлюз или другой совместимый эндпоинт):
 
 ```bash
-ocr config set llm.auth_header x-api-key
+ocr config set provider my-gateway
+ocr config set custom_providers.my-gateway.url https://my-llm-gateway.internal/v1
+ocr config set custom_providers.my-gateway.protocol openai
+ocr config set custom_providers.my-gateway.api_key your-api-key-here
+ocr config set custom_providers.my-gateway.model gpt-4o
 ```
 
-Поддерживаемые значения: `x-api-key`, `authorization` (алиас: `bearer`). Прочие значения отклоняются с ошибкой.
+> Для пользовательских провайдеров `url` и `protocol` обязательны. Поддерживаемые протоколы: `anthropic`, `openai`.
 
-**Вариант C: переменные окружения (наивысший приоритет)**
+Дополнительные настройки:
+
+| Ключ | Описание |
+|------|----------|
+| `providers.<name>.auth_header` | Заголовок аутентификации: `x-api-key` или `authorization` (по умолчанию: `authorization`) |
+| `providers.<name>.extra_body` | Пользовательские JSON-поля, добавляемые в тело запроса |
+| `providers.<name>.extra_headers` | Пары `key=value`, разделённые запятыми — пользовательские HTTP-заголовки для каждого запроса |
+| `providers.<name>.models` | Список моделей для интерактивного выбора |
+
+**`extra_headers` (необязательно):** добавляет пользовательские HTTP-заголовки к каждому запросу к LLM API. Полезно для прокси, шлюзов или корпоративных эндпоинтов, требующих дополнительных заголовков (например, ID организации, ID трассировки). Формат — пары `key=value`, разделённые запятыми. Значения с запятыми заключается в двойные кавычки:
+
+```bash
+ocr config set llm.extra_headers "X-Org-ID=org-123,X-Forwarded-For=\"1.2.3.4,5.6.7.8\""
+```
+
+Дополнительные заголовки также можно задать для отдельного провайдера:
+
+```bash
+ocr config set providers.anthropic.extra_headers "X-Org-ID=org-123"
+```
+
+**Переменные окружения (наивысший приоритет)**
+
+Переменные окружения переопределяют настройки из файла конфигурации — удобно в CI/CD, где запись в конфиг-файл затруднена:
 
 ```bash
 export OCR_LLM_URL=https://api.anthropic.com/v1/messages
@@ -199,14 +253,12 @@ export OCR_LLM_MODEL=claude-opus-4-6
 export OCR_USE_ANTHROPIC=true
 ```
 
-Инструмент также совместим с переменными окружения Claude Code (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) и разбирает `~/.zshrc` / `~/.bashrc` в поисках соответствующих export'ов.
+Также совместим с переменными окружения Claude Code (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) и разбирает `~/.zshrc` / `~/.bashrc` в поисках соответствующих export'ов.
 
-> **Примечание для пользователей CC-Switch**: если вы используете [CC-Switch](https://github.com/farion1231/cc-switch) с включённым [routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service), можно указать в `llm.url` адрес прокси CC-Switch без дополнительной настройки:
-> - для провайдера **Claude**: установите `llm.url` в `http://127.0.0.1:15721`
-> - для провайдера **Codex**: установите `llm.url` в `http://127.0.0.1:15721/v1`
-> - `llm.model` задайте в соответствии с настройками вашего провайдера
-> - `llm.auth_token` может быть любым
-> - настройки `extra_body` продолжают действовать
+> **Примечание для пользователей CC-Switch**: если вы используете [CC-Switch](https://github.com/farion1231/cc-switch) с включённым [routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service), можно указать в `url` провайдера адрес прокси CC-Switch без дополнительной настройки:
+> - Для провайдера **Claude**: установите `providers.anthropic.url` в `http://127.0.0.1:15721`
+> - Для провайдера **Codex**: установите `url` соответствующего провайдера в `http://127.0.0.1:15721/v1`
+> - `api_key` может быть любым, настройки `extra_body` продолжают действовать
 
 **2. Проверьте подключение**
 
@@ -227,6 +279,14 @@ ocr review --from main --to feature-branch
 
 # Один коммит
 ocr review --commit abc123
+
+# Возобновить прерванное ревью диапазона или одного коммита
+ocr session list
+ocr review --from main --to feature-branch --resume <session-id>
+
+# Полнофайловое сканирование — ревью целых файлов вместо диффа (история git не нужна)
+ocr scan                          # сканировать весь репозиторий
+ocr scan --path internal/agent    # сканировать каталог или конкретные файлы
 ```
 
 ### Интеграция с кодинг-агентами
@@ -290,7 +350,39 @@ ocr review --audience agent
 
 Руководство на корейском: [`plugins/open-code-review/CODEX.ko-KR.md`](plugins/open-code-review/CODEX.ko-KR.md)
 
-#### Вариант 4: просто скопировать файл команды
+#### Вариант 4: установка как плагин Cursor
+
+Для [Cursor](https://www.cursor.com/) установите плагин Open Code Review из этого репозитория:
+
+```
+cursor-plugin marketplace add alibaba/open-code-review
+```
+
+Или добавьте маркетплейс вручную. В Cursor откройте `/plugins`, найдите `Open Code Review` и установите.
+
+Для локального чекаута или форка:
+
+```
+cursor-plugin marketplace add .
+```
+
+После установки вызывайте плагин в Cursor:
+
+```text
+@Open Code Review review my current changes
+@Open Code Review review this branch against main
+@Open Code Review review and fix high-confidence issues
+```
+
+Это зарегистрирует Cursor-скилл, запускающий локальный CLI OCR:
+
+```bash
+ocr review --audience agent
+```
+
+Эта интеграция не меняет внутренний LLM-бэкенд OCR. Самому OCR по-прежнему нужен установленный и настроенный CLI `ocr`, как описано в разделе про настройку CLI.
+
+#### Вариант 5: просто скопировать файл команды
 
 Для быстрой настройки без пакетных менеджеров достаточно скопировать файл команды, чтобы использовать slash-команду `/open-code-review` в Claude Code.
 
@@ -329,16 +421,27 @@ ocr review \
 
 Флаг `--format json` выводит машиночитаемый результат, удобный для разбора в CI-скриптах.
 
+Каждое замечание содержит два структурированных поля, чтобы CI-интеграции могли сортировать, группировать, фильтровать замечания или блокировать сборку без повторного разбора текста комментария:
+
+| Поле | Допустимые значения | Примечание |
+|------|---------------------|------------|
+| `category` | `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other` | Категория, к которой относится замечание. |
+| `severity` | `critical`, `high`, `medium`, `low` | Важность замечания. |
+
+В JSON-выводе эти два поля располагаются рядом с `content`, `start_line` и др. В терминале они отображаются перед комментарием как встроенный бейдж `[category · severity]`, цвет которого определяется важностью.
+
 Примеры интеграции — в каталоге [`examples/`](./examples/):
 
 - [`github_actions/`](./examples/github_actions/) — пример интеграции с GitHub Actions
 - [`gitlab_ci/`](./examples/gitlab_ci/) — пример интеграции с GitLab CI
+- [`gitflic_ci/`](./examples/gitflic_ci/) — пример интеграции с GitFlic CI
 
 ## Команды
 
 | Команда | Алиас | Описание |
 |---------|-------|----------|
-| `ocr review` | `ocr r` | Запустить код-ревью |
+| `ocr review` | `ocr r` | Запустить код-ревью на основе диффа |
+| `ocr scan` | `ocr s` | Ревью целых файлов (дифф не нужен) |
 | `ocr rules check <file>` | — | Показать, какое правило ревью применяется к пути файла |
 | `ocr config provider` | — | Интерактивная настройка провайдера (встроенный, пользовательский или ручной) |
 | `ocr config model` | — | Интерактивный выбор модели для активного провайдера |
@@ -346,6 +449,8 @@ ocr review \
 | `ocr config unset custom_providers.<name>` | — | Удалить пользовательского провайдера |
 | `ocr llm test` | — | Проверить подключение к LLM |
 | `ocr llm providers` | — | Показать список встроенных LLM-провайдеров |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | Показать сохранённые сессии ревью |
+| `ocr session show <id>` | `ocr sessions show <id>` | Показать одну сессию и её checkpoint'ы по файлам |
 | `ocr viewer` | `ocr v` | Запустить WebUI-просмотрщик сессий на `localhost:5483` |
 | `ocr version` | — | Показать информацию о версии |
 
@@ -357,17 +462,78 @@ ocr review \
 | `--from` | — | — | Исходный ref (например, `main`) |
 | `--to` | — | — | Целевой ref (например, `feature-branch`) |
 | `--commit` | `-c` | — | Один коммит для ревью |
+| `--exclude` | — | — | Паттерны в стиле gitignore через запятую для пропуска файлов; объединяются с excludes из rule.json |
 | `--preview` | `-p` | `false` | Показать, какие файлы попадут в ревью, без запуска LLM |
+| `--resume` | — | — | Возобновить предыдущую совместимую сессию ревью диапазона или одного коммита |
 | `--format` | `-f` | `text` | Формат вывода: `text` или `json` |
 | `--concurrency` | — | `8` | Максимум одновременных ревью файлов |
 | `--timeout` | — | `10` | Таймаут конкурентной задачи в минутах |
 | `--audience` | — | `human` | `human` (показывать прогресс) или `agent` (только сводка) |
 | `--background` | `-b` | — | Необязательный контекст требований/бизнес-логики для ревью; при `--commit` автоматически заполняется из сообщения коммита |
+| `--background-file` | `-B` | — | Необязательный контекст требований/бизнес-логики из Markdown-файла; при совместном использовании с `--background` встроенное значение идёт первым |
 | `--model` | — | — | Выбрать или переопределить LLM-модель для этого ревью |
 | `--rule` | — | — | Путь к пользовательским JSON-правилам ревью |
 | `--max-tools` | — | встроенное | Максимум раундов вызова инструментов на файл; действует, только если больше значения шаблона по умолчанию |
 | `--max-git-procs` | — | встроенное | Максимум одновременных git-подпроцессов |
 | `--tools` | — | — | Путь к пользовательскому JSON-конфигу инструментов |
+
+#### Возобновляемые ревью и сессии
+
+Каждый запуск `ocr review` сохраняет локальный журнал сессии в
+`~/.opencodereview/sessions/`. Успешный текстовый вывод остаётся сфокусированным
+на результате ревью и не печатает session ID. Сохранённые сессии можно найти через
+`ocr session list/show`, а `--format json` добавляет `session_id` в машиночитаемый
+вывод. Если ревью диапазона или одного коммита было прервано, выберите сохранённую
+сессию с тем же целевым ревью и возобновите её:
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+Возобновление намеренно строгое: поддерживаются только ревью диапазона веток и одного
+коммита, но не ревью рабочей копии. Текущие `--from/--to` или `--commit` должны
+совпадать с сохранённой сессией. `--preview` нельзя использовать вместе с `--resume`.
+
+При `--format json` возобновлённый запуск включает:
+
+- `session_id` — session ID текущего запуска
+- `resume.resumed_from` — исходный session ID
+- `resume.reused_files` — файлы, повторно использованные из сохранённых checkpoint'ов
+- `resume.rerun_files` — файлы, заново проверенные в текущем запуске
+
+### Флаги `ocr session`
+
+| Команда | Флаг | По умолчанию | Описание |
+|---------|------|--------------|----------|
+| `ocr session list` | `--repo` | текущий каталог | Репозиторий, для которого нужно показать сессии |
+| `ocr session list` | `--json` | `false` | Вывести сводки сессий в JSON |
+| `ocr session list` | `--limit` | `20` | Ограничить количество сессий; `0` означает без ограничения |
+| `ocr session show <id>` | `--repo` | текущий каталог | Репозиторий, сессию которого нужно посмотреть |
+| `ocr session show <id>` | `--json` | `false` | Вывести метаданные сессии и элементы по файлам в JSON |
+
+### Флаги `ocr scan`
+
+`ocr scan` проверяет целые файлы, а не дифф — удобно для аудита незнакомой кодовой базы, предмиграционного сканирования или любого каталога без значимого диффа. Работает и в каталогах без git (используется обход файловой системы с учётом `.gitignore`).
+
+| Флаг | Короткая форма | По умолчанию | Описание |
+|------|----------------|--------------|----------|
+| `--path` | — | весь репозиторий | Каталоги/файлы для сканирования через запятую |
+| `--exclude` | — | — | Паттерны в стиле gitignore через запятую для пропуска файлов; объединяются с excludes из rule.json |
+| `--preview` | `-p` | `false` | Показать список файлов для сканирования без запуска LLM |
+| `--max-tokens-budget` | — | `0` (без ограничений) | Ограничить суммарное потребление токенов; при превышении диспетчеризация прекращается |
+| `--no-plan` | — | `false` | Пропустить предварительное планирование по файлам |
+| `--no-dedup` | — | `false` | Пропустить дедупликацию похожих комментариев в рамках батча |
+| `--no-summary` | — | `false` | Пропустить сводку на уровне проекта |
+| `--batch` | — | `by-language` | Стратегия батчинга: `none`, `by-language` или `by-directory` |
+| `--format` | `-f` | `text` | Формат вывода: `text` или `json` (JSON включает поле `project_summary`) |
+| `--concurrency` | — | `8` | Максимум одновременных сканирований файлов |
+| `--rule` | — | — | Путь к пользовательским JSON-правилам ревью |
+| `--repo` | — | текущий каталог | Корень репозитория или каталога для сканирования |
+
+Перед каждым запуском `ocr scan` выводит приблизительную оценку стоимости в токенах. Используйте `--preview`, чтобы сначала посмотреть список файлов, и `--max-tokens-budget`, чтобы ограничить расход на больших репозиториях.
 
 ## Примеры
 
@@ -393,6 +559,12 @@ ocr review --from main --to my-feature --concurrency 4
 # Ревью конкретного коммита с подробным JSON-выводом
 ocr review --commit abc123 --format json --audience agent
 
+# Возобновить прерванное ревью диапазона или одного коммита
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to my-feature --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+
 # Выбрать или переопределить модель для этого ревью
 ocr review --model claude-opus-4-6
 ocr review --commit abc123 --model claude-sonnet-4-6
@@ -400,12 +572,33 @@ ocr review --commit abc123 --model claude-sonnet-4-6
 # Передать контекст требований для более прицельного ревью
 ocr review --background "Добавляем rate limiting в API логина"
 
+# Передать контекст требований из Markdown-файла
+ocr review --background-file ./docs/my_business_context.md
+
+# Совместить встроенный контекст с локальным файлом контекста (используются оба)
+ocr review --background "Фокус на аутентификации" --background-file ./docs/my_business_context.md
+
 # Использовать собственные правила ревью
 ocr review --rule /path/to/my-rules.json
 
 # Посмотреть, какое правило применяется к файлу
 ocr rules check src/main/java/com/example/Foo.java
 ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
+
+# Полнофайловое сканирование: сначала просмотреть список файлов (без вызовов LLM)
+ocr scan --preview
+
+# Сканировать весь репозиторий, ограничив расход ~500k токенов
+ocr scan --max-tokens-budget 500000
+
+# Сканировать подкаталог, пропустив сгенерированные/тестовые файлы
+ocr scan --path internal --exclude '**/*_test.go,**/generated/**'
+
+# Сканировать каталог без git с JSON-выводом (включает project_summary)
+ocr scan --repo /path/to/plain/dir --format json
+
+# Самое быстрое сканирование: пропустить планирование, дедупликацию и сводку проекта
+ocr scan --no-plan --no-dedup --no-summary
 
 # Открыть историю сессий ревью в браузере
 ocr viewer
@@ -457,6 +650,45 @@ OCR разрешает правила ревью по цепочке приор�
 - `merge_system_rule` необязателен. Если указано `true`, совпавшее встроенное системное правило объединяется с этим пользовательским правилом.
 - Внутри каждого уровня правила проверяются в порядке объявления — побеждает первое совпадение.
 - Если файл правил не существует, он молча пропускается.
+
+**Поле `rule` поддерживает как встроенный текст, так и пути к файлам.** Система определяет тип автоматически:
+
+1. Если значение содержит переносы строк → **встроенный текст** (многострочные правила никогда не считаются путями).
+2. Если значение — одна строка, без пробелов, и заканчивается на `.md` / `.txt` / `.markdown` → **путь к файлу**.
+   - Абсолютные пути (начинающиеся с `/`) используются напрямую.
+   - Относительные пути проверяются в корне проекта. Выход за пределы директории (например, `../../etc/passwd.md`) блокируется. Если не найдены — выводится `[WARN]` и правило очищается (без fallback на inline).
+   - Файл должен пройти проверку: допустимое расширение, ≤ 512 KB, цель симлинка также должна иметь допустимое расширение. При ошибке проверки правило очищается.
+3. Иначе → **встроенный текст**.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*mapper*.xml",
+      "rule": "docs/sql-rules.md"
+    },
+    {
+      "path": "**/*.java",
+      "rule": "Always check for null safety and resource leaks"
+    },
+    {
+      "path": "**/*.go",
+      "rule": "shared/go-concurrency.md"
+    },
+    {
+      "path": "**/*.py",
+      "rule": "/Users/me/team-rules/python.md"
+    }
+  ]
+}
+```
+
+- `docs/sql-rules.md` — относительный путь, загружается из `<project>/docs/sql-rules.md`.
+- `Always check for null safety…` — встроенная строка, используется напрямую.
+- `shared/go-concurrency.md` — относительный путь, аналогично.
+- `/Users/me/team-rules/python.md` — абсолютный путь, используется напрямую.
+
+> Абсолютные пути могут указывать на файлы вне директории проекта — это сделано намеренно. `rule.json` пишут мейнтейнеры проекта, это доверенный ввод. Команды могут хранить общие правила по единому пути (например, `/opt/company-rules/`) и не копировать их в каждый проект.
 
 ### Фильтрация путей
 
@@ -513,12 +745,23 @@ OCR разрешает правила ревью по цепочке приор�
 | `providers.<name>.model` | string | Имя модели провайдера |
 | `providers.<name>.models` | array | Необязательный список моделей для интерактивного выбора |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
+| `providers.<name>.extra_body` | object | JSON-объект, добавляемый в каждое тело запроса |
+| `providers.<name>.timeout_sec` | integer | Таймаут HTTP-запроса в секундах, по умолчанию `300` |
+| `providers.<name>.extra_headers` | string | HTTP-заголовки `key=value` через запятую |
 | `custom_providers.<name>.*` | — | Те же поля, что и `providers.<name>.*`, включая необязательное `models` |
 | `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
 | `llm.auth_token` | string | `sk-xxxxxxx` |
 | `llm.auth_header` | string | Только для Anthropic: `x-api-key` \| `authorization` |
+| `llm.extra_body` | object | JSON-объект, добавляемый в каждое тело запроса |
+| `llm.timeout_sec` | integer | Таймаут HTTP-запроса в секундах, по умолчанию `300` |
+| `llm.extra_headers` | string | HTTP-заголовки `key=value` через запятую |
 | `llm.model` | string | `claude-opus-4-6` |
 | `llm.use_anthropic` | boolean | `true` \| `false` |
+| `mcp_servers.<name>.command` | string | Команда для запуска MCP-сервера |
+| `mcp_servers.<name>.args` | array | Аргументы командной строки для MCP-сервера |
+| `mcp_servers.<name>.env` | array | Переменные окружения в формате `KEY=VALUE` |
+| `mcp_servers.<name>.tools` | array | Разрешённые имена инструментов (пусто = все инструменты) |
+| `mcp_servers.<name>.setup` | string | Команда настройки перед запуском сервера |
 | `language` | string | Любое название языка, например `English`, `Chinese` (по умолчанию: `English`) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -527,6 +770,43 @@ OCR разрешает правила ревью по цепочке приор�
 
 Переменные окружения имеют приоритет над файлом конфигурации.
 
+### MCP-сервер
+
+Open Code Review поддерживает серверы [Model Context Protocol (MCP)](https://modelcontextprotocol.io/), позволяя агенту ревью использовать внешние инструменты во время проверки кода через stdio-транспорт.
+
+Настройка MCP-серверов через CLI:
+
+```bash
+# Добавить MCP-сервер
+ocr config set mcp_servers.<name>.command <command>
+ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
+ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
+ocr config set mcp_servers.<name>.tools '["tool_name"]'
+ocr config set mcp_servers.<name>.setup '<setup command>'
+
+# Удалить MCP-сервер
+ocr config unset mcp_servers.<name>
+```
+
+| Поле | Обязательно | Описание |
+|------|-------------|----------|
+| `command` | Да | Исполняемая команда для запуска MCP-сервера |
+| `args` | Нет | Аргументы командной строки для сервера |
+| `env` | Нет | Переменные окружения в формате `KEY=VALUE` |
+| `tools` | Нет | Разрешённые имена инструментов; если пусто — доступны все инструменты сервера |
+| `setup` | Нет | Shell-команда для выполнения перед запуском сервера (например, построение индекса) |
+
+> **Примечание:** Если имя MCP-инструмента конфликтует со встроенным инструментом, он будет пропущен с предупреждением. Таймаут команды `setup` составляет 5 минут.
+
+**Пример: добавление [CodeGraph](https://github.com/nicholasgasior/codegraph) для усиления анализа структуры кода**
+
+```bash
+ocr config set mcp_servers.codegraph.command codegraph
+ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
+ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
+ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+```
+
 ### Переменные окружения
 
 | Переменная | Назначение |
@@ -534,7 +814,9 @@ OCR разрешает правила ревью по цепочке приор�
 | `OCR_LLM_URL` | URL эндпоинта LLM API |
 | `OCR_LLM_TOKEN` | API-ключ / токен авторизации |
 | `OCR_LLM_AUTH_HEADER` | Заголовок авторизации Anthropic (`x-api-key` или `authorization`) |
+| `OCR_LLM_EXTRA_HEADERS` | HTTP-заголовки `key=value` через запятую |
 | `OCR_LLM_MODEL` | Имя модели |
+| `OCR_LLM_TIMEOUT` | Таймаут HTTP-запроса в секундах (переопределяет `timeout_sec` из файла конфигурации) |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI |
 
 
@@ -550,13 +832,22 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 Установите `telemetry.content_logging`, чтобы включать промпты и ответы LLM в экспортируемые данные.
 
+**Выбор протокола:** Переменная окружения `OTEL_EXPORTER_OTLP_PROTOCOL` определяет протокол экспорта:
+
+| Значение | Транспорт | Описание |
+|---|---|---|
+| `grpc` (по умолчанию) | gRPC | Порт по умолчанию 4317 |
+| `http/protobuf` | HTTP | Порт по умолчанию 4318 |
+
+**Формат endpoint:** `telemetry.otlp_endpoint` принимает базовый URL в формате `host:port` или `http://host:port` без компонента пути. SDK автоматически добавляет путь сигнала (например, `/v1/traces`) в соответствии со [спецификацией OTLP](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request).
+
 ## Участие в разработке
 
-В [CONTRIBUTING.ru-RU.md](CONTRIBUTING.ru-RU.md) описаны настройка окружения разработки, рекомендации по коду и порядок отправки pull request'ов.
+Этот проект существует благодаря всем, кто вносит свой вклад. В [CONTRIBUTING.ru-RU.md](CONTRIBUTING.ru-RU.md) описаны настройка окружения разработки, рекомендации по коду и порядок отправки pull request'ов.
 
-## История звёзд
-
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
+<a href="https://github.com/alibaba/open-code-review/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
+</a>
 
 ## Лицензия
 

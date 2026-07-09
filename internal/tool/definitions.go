@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // Tool represents a single review tool.
@@ -31,6 +32,27 @@ func OfName(name string) Tool {
 
 func allTools() []Tool {
 	return []Tool{Unknown, TaskDone, CodeComment, FileRead, FileFind, FileReadDiff, CodeSearch}
+}
+
+// IsReserved reports whether name matches any built-in tool name (including Unknown).
+func IsReserved(name string) bool {
+	for _, t := range allTools() {
+		if t.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Dynamic creates a Tool with the given name for dynamically discovered tools (e.g. MCP).
+func Dynamic(name string) Tool {
+	if name == "" {
+		panic("tool: Dynamic called with empty name")
+	}
+	if IsReserved(name) {
+		panic(fmt.Sprintf("tool: Dynamic called with reserved tool name %q", name))
+	}
+	return Tool{name: name}
 }
 
 // Name returns the tool's identifier name.

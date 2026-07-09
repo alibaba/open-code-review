@@ -1,0 +1,242 @@
+/* Docs Markdown dark theme styles — matching DocsPage design */
+.docs-markdown {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 24px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.docs-markdown h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0 0 24px 0;
+  line-height: 36px;
+}
+
+.docs-markdown h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #FFFFFF;
+  margin: 40px 0 16px 0;
+  line-height: 28px;
+}
+
+.docs-markdown h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #FFFFFF;
+  margin: 28px 0 12px 0;
+  line-height: 24px;
+}
+
+.docs-markdown h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 20px 0 8px 0;
+  line-height: 22px;
+}
+
+.docs-markdown p {
+  margin: 0 0 12px 0;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 24px;
+}
+
+.docs-markdown a {
+  color: #2BDE5E;
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+
+.docs-markdown a:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+/* Inline code */
+.docs-markdown code {
+  font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* Code blocks */
+.docs-markdown pre {
+  background: #000000;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  padding: 4px 16px;
+  margin: 0 0 16px 0;
+  overflow-x: auto;
+  display: flex;
+  align-self: stretch;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.docs-markdown pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  line-height: 22px;
+  color: rgba(255, 255, 255, 0.8);
+  white-space: pre;
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Lists */
+.docs-markdown ul,
+.docs-markdown ol {
+  margin: 0 0 16px 0;
+  padding-left: 24px;
+}
+
+.docs-markdown li {
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 24px;
+}
+
+.docs-markdown li > ul,
+.docs-markdown li > ol {
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
+/* Tables */
+.docs-markdown table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0 0 16px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.docs-markdown thead th {
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: left;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.docs-markdown thead th:first-child {
+  border-top-left-radius: 8px;
+}
+
+.docs-markdown thead th:last-child {
+  border-top-right-radius: 8px;
+}
+
+.docs-markdown tbody td {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  vertical-align: top;
+}
+
+.docs-markdown tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.docs-markdown tbody tr:last-child td:first-child {
+  border-bottom-left-radius: 8px;
+}
+
+.docs-markdown tbody tr:last-child td:last-child {
+  border-bottom-right-radius: 8px;
+}
+
+/* Blockquotes */
+.docs-markdown blockquote {
+  margin: 0 0 16px 0;
+  padding: 12px 16px;
+  border-left: 2px solid #2BDE5E;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 0 6px 6px 0;
+}
+
+.docs-markdown blockquote p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+}
+
+.docs-markdown blockquote p + p {
+  margin-top: 8px;
+}
+
+/* Horizontal rule */
+.docs-markdown hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 32px 0;
+}
+
+/* Strong / bold */
+.docs-markdown strong {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 600;
+}
+
+/* Em / italic */
+.docs-markdown em {
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Images */
+.docs-markdown img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+
+/* Mermaid code blocks — hide raw source (will be replaced by rendered SVG) */
+.docs-markdown pre code.language-mermaid {
+  display: none;
+}
+
+/* Rendered mermaid diagrams */
+.docs-markdown .mermaid-rendered {
+  margin: 16px 0;
+  padding: 24px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+}
+
+.docs-markdown .mermaid-rendered svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Scrollbar styling for code blocks */
+.docs-markdown pre::-webkit-scrollbar {
+  height: 6px;
+}
+
+.docs-markdown pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.docs-markdown pre::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}

@@ -9,7 +9,11 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/open-code-review/open-code-review/internal/model"
 )
+
+func init() { UseTestSessions() }
 
 func TestEncodeRepoPath(t *testing.T) {
 	tests := []struct {
@@ -107,7 +111,7 @@ func readJSONLRecords(t *testing.T, path string) []map[string]any {
 	if err != nil {
 		t.Fatalf("open jsonl: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var records []map[string]any
 	scanner := bufio.NewScanner(f)
@@ -127,7 +131,7 @@ func sessionJSONLPath(t *testing.T, repoDir, sessionID string) string {
 	if err != nil {
 		t.Fatalf("home dir: %v", err)
 	}
-	return filepath.Join(home, ".opencodereview", "sessions", encodeRepoPath(repoDir), sessionID+".jsonl")
+	return filepath.Join(home, ".opencodereview", "test-sessions", encodeRepoPath(repoDir), sessionID+".jsonl")
 }
 
 func TestSetErrorIncrementsCounter(t *testing.T) {
@@ -163,8 +167,11 @@ func TestSetErrorWritesJSONL(t *testing.T) {
 
 	if sh.persist != nil {
 		sh.persist.mu.Lock()
-		sh.persist.writer.Flush()
+		err := sh.persist.writer.Flush()
 		sh.persist.mu.Unlock()
+		if err != nil {
+			t.Fatalf("flush: %v", err)
+		}
 	}
 
 	path := sessionJSONLPath(t, repoDir, sh.SessionID)
@@ -209,7 +216,7 @@ func TestSessionFilePermissions(t *testing.T) {
 	jw.WriteSessionStart(time.Now())
 	defer jw.flushAndClose()
 
-	sessionDir := filepath.Join(tmpHome, ".opencodereview", "sessions", encodeRepoPath(repoDir))
+	sessionDir := filepath.Join(tmpHome, ".opencodereview", "test-sessions", encodeRepoPath(repoDir))
 	sessionFile := filepath.Join(sessionDir, sessionID+".jsonl")
 
 	dirInfo, err := os.Stat(sessionDir)
@@ -261,5 +268,91 @@ func TestSessionEndIncludesFailures(t *testing.T) {
 	}
 	if int64(failures) != 3 {
 		t.Errorf("llm_failures = %v, want 3", failures)
+	}
+}
+
+func TestReviewItemResumeRoundTrip(t *testing.T) {
+	repoDir := t.TempDir()
+	sh := New(repoDir, "feature", "new-model", SessionOptions{
+		ReviewMode:  ReviewModeRange,
+		DiffFrom:    "main",
+		DiffTo:      "feature",
+		ResumedFrom: "old-session",
+	})
+	comments := []model.LlmComment{{
+		Path:         "a.go",
+		Content:      "fix this",
+		ExistingCode: "old()",
+	}}
+	sh.RecordReviewItemDone("a.go", "a.go", "a.go", "fp-a", comments)
+	sh.RecordReviewItemFailed("b.go", "b.go", "b.go", "fp-b", "rate limit")
+	sh.Finalize()
+
+	state, err := LoadResumeState(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if state.SessionID != sh.SessionID {
+		t.Errorf("SessionID = %q, want %q", state.SessionID, sh.SessionID)
+	}
+	if state.ReviewMode != ReviewModeRange || state.DiffFrom != "main" || state.DiffTo != "feature" {
+		t.Errorf("metadata mismatch: %+v", state)
+	}
+	if state.CompletedCount() != 1 {
+		t.Fatalf("CompletedCount = %d, want 1", state.CompletedCount())
+	}
+	item, ok := state.Item("fp-a")
+	if !ok {
+		t.Fatal("missing fp-a")
+	}
+	if item.FilePath != "a.go" || len(item.Comments) != 1 || item.Comments[0].Content != "fix this" {
+		t.Errorf("item mismatch: %+v", item)
+	}
+	if _, ok := state.Item("fp-b"); ok {
+		t.Error("failed item should not be reusable")
+	}
+	if err := state.ValidateOptions(SessionOptions{ReviewMode: ReviewModeRange, DiffFrom: "main", DiffTo: "feature"}); err != nil {
+		t.Fatalf("ValidateOptions: %v", err)
+	}
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var foundStart bool
+	for _, r := range records {
+		if r["type"] == "session_start" {
+			foundStart = true
+			if r["resumedFrom"] != "old-session" {
+				t.Errorf("resumedFrom = %v, want old-session", r["resumedFrom"])
+			}
+		}
+	}
+	if !foundStart {
+		t.Fatal("missing session_start")
+	}
+}
+
+func TestResumeStateValidateOptionsRejectsMismatchedRange(t *testing.T) {
+	state := &ResumeState{
+		SessionID:  "s1",
+		ReviewMode: ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+	}
+	err := state.ValidateOptions(SessionOptions{ReviewMode: ReviewModeRange, DiffFrom: "main", DiffTo: "other"})
+	if err == nil {
+		t.Fatal("expected mismatch error")
+	}
+}
+
+func TestResumeStateSessionStartKeepsRepoDirWhenCwdEmpty(t *testing.T) {
+	state := &ResumeState{RepoDir: "/repo/from/caller"}
+
+	state.applySessionStart(resumeRecord{
+		SessionID:  "s1",
+		ReviewMode: ReviewModeCommit,
+		DiffCommit: "abc123",
+	})
+
+	if state.RepoDir != "/repo/from/caller" {
+		t.Fatalf("RepoDir = %q, want caller-provided repo dir", state.RepoDir)
 	}
 }

@@ -51,11 +51,37 @@
                 "suggestion_code": {
                   "type": "string",
                   "description": "Corresponding suggested code snippet, maintaining consistent code style."
+                },
+                "category": {
+                  "type": "string",
+                  "enum": [
+                    "bug",
+                    "security",
+                    "performance",
+                    "maintainability",
+                    "test",
+                    "style",
+                    "documentation",
+                    "other"
+                  ],
+                  "description": "The category the issue belongs to."
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "critical",
+                    "high",
+                    "medium",
+                    "low"
+                  ],
+                  "description": "The severity of the issue."
                 }
               },
               "required": [
                 "content",
-                "existing_code"
+                "existing_code",
+                "category",
+                "severity"
               ]
             }
           }

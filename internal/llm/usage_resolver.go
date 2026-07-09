@@ -27,16 +27,29 @@ var completionTokensPaths = []string{
 }
 
 var cacheReadTokensPaths = []string{
-	"usage.cache_read_input_tokens",                // Anthropic
-	"cache_read_input_tokens",                      // flat at root
-	"usage.prompt_tokens_details.cache_tokens_hit", // some providers
-	"usage.prompt_tokens_details.cache_tokens",     // some providers
+	"usage.cache_read_input_tokens",                  // Anthropic
+	"cache_read_input_tokens",                        // flat at root
+	"data.usage.cache_read_input_tokens",             // wrapped Anthropic-compatible proxy
+	"usage.prompt_tokens_details.cached_tokens",      // OpenAI-compatible providers
+	"data.usage.prompt_tokens_details.cached_tokens", // wrapped OpenAI-compatible providers
 }
 
 var cacheWriteTokensPaths = []string{
-	"usage.cache_creation_input_tokens", // Anthropic / proxy
-	"cache_creation_input_tokens",       // flat at root
+	"usage.cache_creation_input_tokens",                      // Anthropic / proxy
+	"cache_creation_input_tokens",                            // flat at root
+	"data.usage.cache_creation_input_tokens",                 // wrapped Anthropic-compatible proxy
+	"usage.prompt_tokens_details.cache_creation_tokens",      // ApexRoute / LLM Gateway — proxy normalization of Anthropic cache_creation_input_tokens
+	"data.usage.prompt_tokens_details.cache_creation_tokens", // wrapped proxy normalization
 }
+
+// anthropicCacheReadPathCount is the number of Anthropic-style cache read paths
+// at the start of cacheReadTokensPaths. OpenAI-style paths follow; under OpenAI
+// semantics cached tokens are already included in prompt_tokens.
+const anthropicCacheReadPathCount = 3
+
+// anthropicCacheWritePathCount is the number of Anthropic-style cache write paths
+// at the start of cacheWriteTokensPaths.
+const anthropicCacheWritePathCount = 3
 
 // totalTokensPaths is an ordered list of JSON paths to try when extracting
 // total token count from a response body. Paths are dot-separated keys that
@@ -44,7 +57,7 @@ var cacheWriteTokensPaths = []string{
 var totalTokensPaths = []string{
 	"usage.total_tokens",      // OpenAI standard
 	"total_tokens",            // flat at root
-	"data.usage.total_tokens", // wrapped in data layer (some proxy APIs)
+	"data.usage.total_tokens", // wrapped in data layer
 }
 
 // resolveUsage parses raw JSON bytes into a map and extracts token usage
@@ -58,8 +71,8 @@ func resolveUsage(raw []byte) *UsageInfo {
 	total, hasAny := probePath(rawBody, totalTokensPaths)
 	prompt, _ := probePath(rawBody, promptTokensPaths)
 	completion, _ := probePath(rawBody, completionTokensPaths)
-	cacheRead, _ := probePath(rawBody, cacheReadTokensPaths)
-	cacheWrite, _ := probePath(rawBody, cacheWriteTokensPaths)
+	cacheRead, cacheReadIdx, _ := probePathIndex(rawBody, cacheReadTokensPaths)
+	cacheWrite, cacheWriteIdx, _ := probePathIndex(rawBody, cacheWriteTokensPaths)
 
 	if !hasAny && prompt == 0 && completion == 0 {
 		return nil
@@ -74,8 +87,17 @@ func resolveUsage(raw []byte) *UsageInfo {
 	}
 
 	// If TotalTokens wasn't explicitly available but we have prompt+completion, compute it.
+	// Anthropic reports cache tokens separately from input_tokens, so include them in the
+	// fallback total. OpenAI prompt_tokens already includes cached_tokens, so only add cache
+	// counts when they came from Anthropic-style top-level fields.
 	if total == 0 && (prompt > 0 || completion > 0) {
-		ui.TotalTokens = prompt + completion + cacheRead + cacheWrite
+		ui.TotalTokens = prompt + completion
+		if cacheReadIdx >= 0 && cacheReadIdx < anthropicCacheReadPathCount {
+			ui.TotalTokens += cacheRead
+		}
+		if cacheWriteIdx >= 0 && cacheWriteIdx < anthropicCacheWritePathCount {
+			ui.TotalTokens += cacheWrite
+		}
 	}
 
 	return ui
@@ -84,7 +106,13 @@ func resolveUsage(raw []byte) *UsageInfo {
 // probePath walks through each candidate path in order, returning the first
 // int64 value found along with true. Returns (0, false) if none match.
 func probePath(root map[string]any, paths []string) (int64, bool) {
-	for _, p := range paths {
+	v, _, ok := probePathIndex(root, paths)
+	return v, ok
+}
+
+// probePathIndex is like probePath but also returns the index of the matched path.
+func probePathIndex(root map[string]any, paths []string) (int64, int, bool) {
+	for i, p := range paths {
 		parts := strings.Split(p, ".")
 
 		var current any = root
@@ -101,13 +129,13 @@ func probePath(root map[string]any, paths []string) (int64, bool) {
 
 		switch v := current.(type) {
 		case float64:
-			return int64(v), true
+			return int64(v), i, true
 		case int64:
-			return v, true
+			return v, i, true
 		case int:
-			return int64(v), true
+			return int64(v), i, true
 		}
 	next:
 	}
-	return 0, false
+	return 0, -1, false
 }

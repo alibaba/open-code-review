@@ -1,3 +1,4 @@
+import { t, resolveLocale } from '../../shared/i18n';
 import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import { GitState, CommitInfo, FileChange, ReviewMode } from '../../shared/types';
@@ -167,7 +168,7 @@ export class GitService {
     if (opts.mode === 'workspace') {
       left = api.toGitUri(fileUri, opts.status === 'added' ? emptyRef : 'HEAD');
       right = opts.status === 'deleted' ? api.toGitUri(fileUri, emptyRef) : fileUri;
-      label = '工作区 ↔ HEAD';
+      label = t(resolveLocale(vscode.env.language), 'ext.git.workspaceVsHead');
     } else if (opts.mode === 'commit' && opts.commit) {
       left = api.toGitUri(fileUri, opts.status === 'added' ? emptyRef : `${opts.commit}^`);
       right = opts.status === 'deleted' ? api.toGitUri(fileUri, emptyRef) : api.toGitUri(fileUri, opts.commit);
@@ -211,11 +212,13 @@ function runGit(cwd: string, args: string[]): Promise<string> {
 
 function formatRelative(date?: Date): string {
   if (!date) return '';
+  const locale = resolveLocale(vscode.env.language);
   const diff = Date.now() - date.getTime();
   const h = Math.floor(diff / 3.6e6);
-  if (h < 1) return '刚刚';
-  if (h < 24) return `${h} 小时前`;
+  if (h < 1) return t(locale, 'ext.git.justNow');
+  if (h === 1) return t(locale, 'ext.git.hourAgo');
+  if (h < 24) return t(locale, 'ext.git.hoursAgo').replace('{h}', String(h));
   const d = Math.floor(h / 24);
-  if (d === 1) return '昨天';
-  return `${d} 天前`;
+  if (d === 1) return t(locale, 'ext.git.yesterday');
+  return t(locale, 'ext.git.daysAgo').replace('{d}', String(d));
 }

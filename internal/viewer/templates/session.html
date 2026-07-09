@@ -32,28 +32,28 @@
     <h3>Token Usage</h3>
     <div class="token-stats">
         <div class="token-item">
-            <div class="token-value">{{.Session.TokenUsage.TotalPromptTokens}}</div>
+            <div class="token-value" title="{{.Session.TokenUsage.TotalPromptTokens}}">{{formatNumber .Session.TokenUsage.TotalPromptTokens}}</div>
             <div class="token-label">Prompt Tokens</div>
         </div>
         <div class="token-item">
-            <div class="token-value">{{.Session.TokenUsage.TotalCompletionTokens}}</div>
+            <div class="token-value" title="{{.Session.TokenUsage.TotalCompletionTokens}}">{{formatNumber .Session.TokenUsage.TotalCompletionTokens}}</div>
             <div class="token-label">Completion Tokens</div>
         </div>
         <div class="token-item">
-            <div class="token-value">{{add .Session.TokenUsage.TotalPromptTokens .Session.TokenUsage.TotalCompletionTokens}}</div>
+            <div class="token-value" title="{{add .Session.TokenUsage.TotalPromptTokens .Session.TokenUsage.TotalCompletionTokens}}">{{formatNumber (add .Session.TokenUsage.TotalPromptTokens .Session.TokenUsage.TotalCompletionTokens)}}</div>
             <div class="token-label">Total Tokens</div>
         </div>
         <div class="token-item">
-            <div class="token-value">{{.Session.TokenUsage.RequestCount}}</div>
+            <div class="token-value" title="{{.Session.TokenUsage.RequestCount}}">{{formatNumber .Session.TokenUsage.RequestCount}}</div>
             <div class="token-label">LLM Requests</div>
         </div>
         {{if or .Session.TokenUsage.TotalCacheReadTokens .Session.TokenUsage.TotalCacheWriteTokens}}
         <div class="token-item">
-            <div class="token-value">{{.Session.TokenUsage.TotalCacheReadTokens}}</div>
+            <div class="token-value" title="{{.Session.TokenUsage.TotalCacheReadTokens}}">{{formatNumber .Session.TokenUsage.TotalCacheReadTokens}}</div>
             <div class="token-label">Cache Read</div>
         </div>
         <div class="token-item">
-            <div class="token-value">{{.Session.TokenUsage.TotalCacheWriteTokens}}</div>
+            <div class="token-value" title="{{.Session.TokenUsage.TotalCacheWriteTokens}}">{{formatNumber .Session.TokenUsage.TotalCacheWriteTokens}}</div>
             <div class="token-label">Cache Write</div>
         </div>
         {{end}}
@@ -71,10 +71,10 @@
         {{range .}}
             <tr>
                 <td title="{{.FilePath}}">{{.FilePath | truncate 60}}</td>
-                <td>{{.PromptTokens}}</td>
-                <td>{{.CompletionTokens}}</td>
-                {{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<td>{{.CacheReadTokens}}</td><td>{{.CacheWriteTokens}}</td>{{end}}
-                <td><strong>{{add .PromptTokens .CompletionTokens}}</strong></td>
+                <td title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</td>
+                <td title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</td>
+                {{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<td title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</td><td title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</td>{{end}}
+                <td title="{{add .PromptTokens .CompletionTokens}}"><strong>{{formatNumber (add .PromptTokens .CompletionTokens)}}</strong></td>
             </tr>
         {{end}}
         </tbody>
@@ -112,7 +112,7 @@
                 <div class="card-header">
                     <span class="request-label">Request #{{.RequestNo}}</span>
                     {{if .Model}}<span class="badge badge-model">{{.Model}}</span>{{end}}
-                    {{if or .PromptTokens .CompletionTokens}}<span class="badge badge-tokens">P:{{.PromptTokens}} C:{{.CompletionTokens}}{{if or .CacheReadTokens .CacheWriteTokens}} CR:{{.CacheReadTokens}} CW:{{.CacheWriteTokens}}{{end}}</span>{{end}}
+                    {{if or .PromptTokens .CompletionTokens}}<span class="badge badge-tokens">P:<span title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</span> C:<span title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</span>{{if or .CacheReadTokens .CacheWriteTokens}} CR:<span title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</span> CW:<span title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</span>{{end}}</span>{{end}}
                     {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
                     {{if .Error}}<span class="badge badge-error">{{.Error}}</span>{{end}}
                 </div>

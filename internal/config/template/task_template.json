@@ -21,14 +21,14 @@
     ]
   },
   "REVIEW_FILTER_TASK": {
-    "timeout": 60,
+    "timeout": 180,
     "messages": [
       { "role": "system", "prompt_file": "review_filter_task_system.md" },
       { "role": "user", "prompt_file": "review_filter_task_user.md" }
     ]
   },
   "RE_LOCATION_TASK": {
-    "timeout": 60,
+    "timeout": 180,
     "messages": [
       { "role": "system", "prompt_file": "re_location_task_system.md" },
       { "role": "user", "prompt_file": "re_location_task_user.md" }

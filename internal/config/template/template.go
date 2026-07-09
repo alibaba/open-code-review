@@ -9,6 +9,7 @@ import (
 )
 
 // Template holds the native agent task template configuration.
+// Scan-mode fields live in ScanTemplate, not here.
 type Template struct {
 	MainTask              LlmConversation  `json:"MAIN_TASK"`
 	PlanTask              *LlmConversation `json:"PLAN_TASK,omitempty"`
@@ -20,8 +21,32 @@ type Template struct {
 	ReviewFilterTask      *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 }
 
+// ScanTemplate holds the full-file scan task template configuration loaded
+// from scan_template.json. Kept entirely separate from Template so the two
+// pipelines can evolve their prompts and budgets independently.
+type ScanTemplate struct {
+	MainTask              LlmConversation  `json:"MAIN_TASK"`
+	PlanTask              *LlmConversation `json:"PLAN_TASK,omitempty"`
+	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
+	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
+	MaxTokens             int              `json:"MAX_TOKENS"`
+	ToolRequestWaitTimeMs int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
+	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
+	MaxSubtaskExecMinutes int              `json:"MAX_SUBTASK_EXECUTION_TIME_MINUTES"`
+	MaxFileSizeBytes      int64            `json:"MAX_FILE_SIZE_BYTES,omitempty"`
+	MaxTokensBudget       int64            `json:"MAX_TOKENS_BUDGET,omitempty"`
+	BatchStrategy         string           `json:"BATCH_STRATEGY,omitempty"`
+	BatchSize             int              `json:"BATCH_SIZE,omitempty"`
+	DedupTask             *LlmConversation `json:"DEDUP_TASK,omitempty"`
+	DedupMinComments      int              `json:"DEDUP_MIN_COMMENTS,omitempty"`
+	ProjectSummaryTask    *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
+}
+
 //go:embed task_template.json prompts/*
 var templateFS embed.FS
+
+//go:embed scan_template.json
+var defaultScanTemplate []byte
 
 type manifestMessage struct {
 	Role       string `json:"role"`
@@ -105,6 +130,15 @@ func LoadDefault() (*Template, error) {
 	return &tpl, nil
 }
 
+// LoadScanDefault parses the embedded scan_template.json.
+func LoadScanDefault() (*ScanTemplate, error) {
+	var tpl ScanTemplate
+	if err := json.Unmarshal(defaultScanTemplate, &tpl); err != nil {
+		return nil, fmt.Errorf("unmarshal default scan template: %w", err)
+	}
+	return &tpl, nil
+}
+
 // applyLanguage appends instruction to all system-role messages in conv.
 func applyLanguage(conv *LlmConversation, instruction string) {
 	for i := range conv.Messages {
@@ -132,6 +166,25 @@ func (t *Template) ApplyLanguage(lang string) {
 	}
 	applyLanguage(&t.MemoryCompressionTask, instruction)
 }
+
+// ApplyLanguage injects a language directive into all system-role messages
+// of the scan template (MAIN_TASK, PLAN_TASK if set, DEDUP_TASK if set,
+// and MEMORY_COMPRESSION_TASK).
+func (t *ScanTemplate) ApplyLanguage(lang string) {
+	instruction := "\n\nAlways respond in " + resolveLang(lang) + "."
+	applyLanguage(&t.MainTask, instruction)
+	if t.PlanTask != nil {
+		applyLanguage(t.PlanTask, instruction)
+	}
+	if t.DedupTask != nil {
+		applyLanguage(t.DedupTask, instruction)
+	}
+	if t.ProjectSummaryTask != nil {
+		applyLanguage(t.ProjectSummaryTask, instruction)
+	}
+	applyLanguage(&t.MemoryCompressionTask, instruction)
+}
+
 func (t *Template) Validate() error {
 	if t.MaxTokens <= 0 {
 		return fmt.Errorf("max_tokens must be positive")
@@ -141,6 +194,20 @@ func (t *Template) Validate() error {
 	}
 	if len(t.MainTask.Messages) == 0 {
 		return fmt.Errorf("main_task.messages must not be empty")
+	}
+	return nil
+}
+
+// Validate checks that a ScanTemplate has the minimum fields populated.
+func (t *ScanTemplate) Validate() error {
+	if t.MaxTokens <= 0 {
+		return fmt.Errorf("scan: max_tokens must be positive")
+	}
+	if t.MaxToolRequestTimes <= 0 {
+		return fmt.Errorf("scan: max_tool_request_times must be positive")
+	}
+	if len(t.MainTask.Messages) == 0 {
+		return fmt.Errorf("scan: main_task.messages must not be empty")
 	}
 	return nil
 }

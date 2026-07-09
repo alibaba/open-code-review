@@ -1,3 +1,4 @@
+import { useT } from '../I18nProvider';
 import { ReviewComment, CommentStatus } from '../../shared/types';
 
 interface Props {
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export function CommentCard({ comment, index, status, canJump, onOpen, onAction }: Props) {
+  const t = useT();
   return (
     <div class={`comment-card${status !== 'pending' ? ' dismissed' : ''}`}>
       <div class="comment-header">
@@ -18,8 +20,8 @@ export function CommentCard({ comment, index, status, canJump, onOpen, onAction 
       </div>
       <div class="comment-body">{comment.content}</div>
       <div class="comment-actions">
-        {canJump && <button onClick={() => onOpen(index)}>查看</button>}
-        <button onClick={() => onAction(index, 'discard')}>忽略</button>
+        {canJump && <button onClick={() => onOpen(index)}>{t('cmp.comment.view')}</button>}
+        <button onClick={() => onAction(index, 'discard')}>{t('cmp.comment.discard')}</button>
       </div>
     </div>
   );

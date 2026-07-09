@@ -1,497 +1,258 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useTranslation } from '../i18n';
-import { OcrIcon, ClaudeIcon, OpenAIIcon } from './icons';
+import { useResponsive } from '../hooks/useResponsive';
+import { useSectionTitleStyle } from '../hooks/useResponsiveStyle';
+import ocrSourceIcon from '../assets/images/icon-ocr-source.svg';
+import claudeCodeIcon from '../assets/images/icon-claude-code.svg';
+import codexIcon from '../assets/images/icon-codex.svg';
+import sortIcon from '../assets/icons/icon-sort.svg';
+import trophyGold from '../assets/icons/trophy-gold.svg';
+import trophySilver from '../assets/icons/trophy-silver.svg';
+import trophyBronze from '../assets/icons/trophy-bronze.svg';
 
-interface BenchmarkEntry {
+const TROPHY_ICONS = [trophyGold, trophySilver, trophyBronze];
+
+interface BenchmarkRow {
   model: string;
-  company: string;
-  sourceType: 'ocr' | 'cc' | 'codex';
-  version: string;
-  precision?: number;
-  precisionDetail?: string;
-  recall?: number;
-  recallDetail?: string;
-  f1?: number;
-  avgTime?: string;
-  avgInputToken?: string;
-  avgOutputToken?: string;
-  avgTotalToken?: string;
-}
-
-const OCR_VERSION = 'v1.3.1';
-const CC_VERSION = 'v2.1.169';
-const CODEX_VERSION = 'v0.140.0';
-
-const sourceColorMap: Record<string, string> = {
-  ocr: 'text-brand-400',
-  cc: 'text-[#D97757]',
-  codex: 'text-[#10a37f]',
-};
-const sourceNameMap: Record<string, string> = {
-  ocr: 'Open Code Review',
-  cc: 'Claude Code',
-  codex: 'Codex',
-};
-
-const benchmarkData: BenchmarkEntry[] = [
-  {
-    model: 'Claude-4.6-Opus',
-    company: 'Anthropic',
-    sourceType: 'ocr',
-    version: OCR_VERSION,
-    precision: 33.90,
-    precisionDetail: '301/889',
-    recall: 20.00,
-    recallDetail: '301/1505',
-    f1: 25.10,
-    avgTime: '1m23s',
-    avgInputToken: '375K',
-    avgOutputToken: '10K',
-    avgTotalToken: '385K',
-  },
-  {
-    model: 'Qwen3.7-Max',
-    company: 'Alibaba',
-    sourceType: 'ocr',
-    version: OCR_VERSION,
-    precision: 25.20,
-    precisionDetail: '276/1096',
-    recall: 18.30,
-    recallDetail: '276/1505',
-    f1: 21.20,
-    avgTime: '4m41s',
-    avgInputToken: '587K',
-    avgOutputToken: '38K',
-    avgTotalToken: '625K',
-  },
-  {
-    model: 'GPT-5.5',
-    company: 'OpenAI',
-    sourceType: 'ocr',
-    version: OCR_VERSION,
-    precision: 32.10,
-    precisionDetail: '234/728',
-    recall: 15.50,
-    recallDetail: '234/1505',
-    f1: 21.00,
-    avgTime: '2m51s',
-    avgInputToken: '409K',
-    avgOutputToken: '13K',
-    avgTotalToken: '422K',
-  },
-  {
-    model: 'Claude-4.8-Opus',
-    company: 'Anthropic',
-    sourceType: 'ocr',
-    version: OCR_VERSION,
-    precision: 37.80,
-    precisionDetail: '176/465',
-    recall: 11.70,
-    recallDetail: '176/1505',
-    f1: 17.90,
-    avgTime: '1m6s',
-    avgInputToken: '342K',
-    avgOutputToken: '11K',
-    avgTotalToken: '352K',
-  },
-  {
-    model: 'Deepseek-V4-Pro',
-    company: 'DeepSeek',
-    sourceType: 'ocr',
-    version: OCR_VERSION,
-    precision: 30.60,
-    precisionDetail: '191/624',
-    recall: 12.70,
-    recallDetail: '191/1505',
-    f1: 17.90,
-    avgTime: '6m28s',
-    avgInputToken: '350K',
-    avgOutputToken: '44K',
-    avgTotalToken: '394K',
-  },
-  {
-    model: 'GLM-5.1',
-    company: 'Zhipu AI',
-    sourceType: 'ocr',
-    version: OCR_VERSION,
-    precision: 28.90,
-    precisionDetail: '237/820',
-    recall: 15.70,
-    recallDetail: '237/1505',
-    f1: 20.40,
-    avgTime: '4m11s',
-    avgInputToken: '707K',
-    avgOutputToken: '36K',
-    avgTotalToken: '743K',
-  },
-  {
-    model: 'GLM-5.2',
-    company: 'Zhipu AI',
-    sourceType: 'ocr',
-    version: OCR_VERSION,
-    precision: 32.30,
-    precisionDetail: '239/741',
-    recall: 15.90,
-    recallDetail: '239/1505',
-    f1: 21.30,
-    avgTime: '7m58s',
-    avgInputToken: '624K',
-    avgOutputToken: '58K',
-    avgTotalToken: '682K',
-  },
-  {
-    model: 'Claude-4.6-Opus',
-    company: 'Anthropic',
-    sourceType: 'cc',
-    version: CC_VERSION,
-    precision: 7.23,
-    precisionDetail: '435/5980',
-    recall: 28.90,
-    recallDetail: '435/1505',
-    f1: 11.57,
-    avgTime: '13m6s',
-    avgInputToken: '5603K',
-    avgOutputToken: '60K',
-    avgTotalToken: '5664K',
-  },
-  {
-    model: 'Qwen3.7-Max',
-    company: 'Alibaba',
-    sourceType: 'cc',
-    version: CC_VERSION,
-    precision: 8.23,
-    precisionDetail: '351/4260',
-    recall: 23.37,
-    recallDetail: '351/1505',
-    f1: 12.17,
-    avgTime: '8m6s',
-    avgInputToken: '5108K',
-    avgOutputToken: '44K',
-    avgTotalToken: '5153K',
-  },
-  {
-    model: 'Claude-4.8-Opus',
-    company: 'Anthropic',
-    sourceType: 'cc',
-    version: CC_VERSION,
-    precision: 15.93,
-    precisionDetail: '191/1200',
-    recall: 12.70,
-    recallDetail: '191/1505',
-    f1: 14.13,
-    avgTime: '5m38s',
-    avgInputToken: '2,039K',
-    avgOutputToken: '23K',
-    avgTotalToken: '2,062K',
-  },
-  {
-    model: 'Deepseek-V4-Pro',
-    company: 'DeepSeek',
-    sourceType: 'cc',
-    version: CC_VERSION,
-    precision: 8.27,
-    precisionDetail: '243/2945',
-    recall: 16.13,
-    recallDetail: '243/1505',
-    f1: 10.93,
-    avgTime: '14m24s',
-    avgInputToken: '5389K',
-    avgOutputToken: '60K',
-    avgTotalToken: '5450K',
-  },
-  {
-    model: 'GLM-5.1',
-    company: 'Zhipu AI',
-    sourceType: 'cc',
-    version: CC_VERSION,
-    precision: 8.37,
-    precisionDetail: '313/3742',
-    recall: 20.80,
-    recallDetail: '313/1505',
-    f1: 11.93,
-    avgTime: '14m10s',
-    avgInputToken: '3,998K',
-    avgOutputToken: '39K',
-    avgTotalToken: '4,038K',
-  },
-  {
-    model: 'GPT-5.5',
-    company: 'OpenAI',
-    sourceType: 'codex',
-    version: CODEX_VERSION,
-    precision: 27.82,
-    precisionDetail: '74/266',
-    recall: 4.92,
-    recallDetail: '74/1505',
-    f1: 8.36,
-    avgTime: '2m58s',
-    avgInputToken: '520K',
-    avgOutputToken: '5K',
-    avgTotalToken: '525K',
-  },
-];
-
-const medalIcons: Record<string, string> = {
-  gold: '🥇',
-  silver: '🥈',
-  bronze: '🥉',
-};
-
-function computeMedals(
-  entries: BenchmarkEntry[],
-  field: 'precision' | 'recall'
-): Map<number, string> {
-  const indexed = entries
-    .map((e, i) => ({ index: i, value: e[field] }))
-    .filter((e): e is { index: number; value: number } => e.value !== undefined)
-    .sort((a, b) => b.value - a.value);
-
-  const medals = new Map<number, string>();
-  const types = ['gold', 'silver', 'bronze'];
-  indexed.slice(0, 3).forEach((item, i) => {
-    medals.set(item.index, types[i]);
-  });
-  return medals;
+  provider: string;
+  source: string;
+  sourceIcon?: string;
+  f1: string;
+  f1Value: number;
+  precision: string;
+  precisionValue: number;
+  precisionDetail: string;
+  recall: string;
+  recallValue: number;
+  recallDetail: string;
+  avgTime: string;
+  avgToken: string;
+  tokenDetail: string;
+  precisionMedal?: number;  // 0=gold, 1=silver, 2=bronze
+  recallMedal?: number;     // 0=gold, 1=silver, 2=bronze
 }
 
 type SortField = 'f1' | 'precision' | 'recall';
+type SortOrder = 'desc' | 'asc';
+
+const rawRows: BenchmarkRow[] = [
+  { model: 'Claude-4.6-Opus', provider: 'Anthropic', source: 'Open Code Review', sourceIcon: ocrSourceIcon, f1: '25.10%', f1Value: 25.10, precision: '33.90%', precisionValue: 33.90, precisionDetail: '301/889', recall: '20.00%', recallValue: 20.00, recallDetail: '301/1505', avgTime: '1m23s', avgToken: '385K', tokenDetail: '375K / 10K', precisionMedal: 1 },
+  { model: 'GLM-5.2', provider: 'Zhipu AI', source: 'Open Code Review', sourceIcon: ocrSourceIcon, f1: '21.30%', f1Value: 21.30, precision: '32.30%', precisionValue: 32.30, precisionDetail: '239/741', recall: '15.90%', recallValue: 15.90, recallDetail: '239/1505', avgTime: '7m58s', avgToken: '682K', tokenDetail: '624K / 58K', precisionMedal: 2 },
+  { model: 'Qwen3.7-Max', provider: 'Alibaba', source: 'Open Code Review', sourceIcon: ocrSourceIcon, f1: '21.20%', f1Value: 21.20, precision: '25.20%', precisionValue: 25.20, precisionDetail: '276/1096', recall: '18.30%', recallValue: 18.30, recallDetail: '276/1505', avgTime: '4m41s', avgToken: '625K', tokenDetail: '587K / 38K' },
+  { model: 'GPT-5.5', provider: 'OpenAI', source: 'Open Code Review', sourceIcon: ocrSourceIcon, f1: '21.00%', f1Value: 21.00, precision: '32.10%', precisionValue: 32.10, precisionDetail: '234/728', recall: '15.50%', recallValue: 15.50, recallDetail: '234/1505', avgTime: '2m51s', avgToken: '422K', tokenDetail: '409K / 13K' },
+  { model: 'GLM-5.1', provider: 'Zhipu AI', source: 'Open Code Review', sourceIcon: ocrSourceIcon, f1: '20.40%', f1Value: 20.40, precision: '28.90%', precisionValue: 28.90, precisionDetail: '237/820', recall: '15.70%', recallValue: 15.70, recallDetail: '237/1505', avgTime: '4m11s', avgToken: '743K', tokenDetail: '707K / 36K' },
+  { model: 'Claude-4.8-Opus', provider: 'Anthropic', source: 'Open Code Review', sourceIcon: ocrSourceIcon, f1: '17.90%', f1Value: 17.90, precision: '37.80%', precisionValue: 37.80, precisionDetail: '176/465', recall: '11.70%', recallValue: 11.70, recallDetail: '176/1505', avgTime: '1m6s', avgToken: '352K', tokenDetail: '342K / 11K', precisionMedal: 0 },
+  { model: 'Deepseek-V4-Pro', provider: 'DeepSeek', source: 'Open Code Review', sourceIcon: ocrSourceIcon, f1: '17.90%', f1Value: 17.90, precision: '30.60%', precisionValue: 30.60, precisionDetail: '191/624', recall: '12.70%', recallValue: 12.70, recallDetail: '191/1505', avgTime: '6m28s', avgToken: '394K', tokenDetail: '350K / 44K' },
+  { model: 'Claude-4.8-Opus', provider: 'Anthropic', source: 'Claude Code', sourceIcon: claudeCodeIcon, f1: '14.13%', f1Value: 14.13, precision: '15.93%', precisionValue: 15.93, precisionDetail: '191/1200', recall: '12.70%', recallValue: 12.70, recallDetail: '191/1505', avgTime: '5m38s', avgToken: '2,062K', tokenDetail: '2,039K / 23K' },
+  { model: 'Qwen3.7-Max', provider: 'Alibaba', source: 'Claude Code', sourceIcon: claudeCodeIcon, f1: '12.17%', f1Value: 12.17, precision: '8.23%', precisionValue: 8.23, precisionDetail: '351/4260', recall: '23.37%', recallValue: 23.37, recallDetail: '351/1505', avgTime: '8m6s', avgToken: '5,153K', tokenDetail: '5,108K / 44K', recallMedal: 1 },
+  { model: 'GLM-5.1', provider: 'Zhipu AI', source: 'Claude Code', sourceIcon: claudeCodeIcon, f1: '11.93%', f1Value: 11.93, precision: '8.37%', precisionValue: 8.37, precisionDetail: '313/3742', recall: '20.80%', recallValue: 20.80, recallDetail: '313/1505', avgTime: '14m10s', avgToken: '4,038K', tokenDetail: '3,998K / 39K', recallMedal: 2 },
+  { model: 'Claude-4.6-Opus', provider: 'Anthropic', source: 'Claude Code', sourceIcon: claudeCodeIcon, f1: '11.57%', f1Value: 11.57, precision: '7.23%', precisionValue: 7.23, precisionDetail: '435/5980', recall: '28.90%', recallValue: 28.90, recallDetail: '435/1505', avgTime: '13m6s', avgToken: '5,664K', tokenDetail: '5,603K / 60K', recallMedal: 0 },
+  { model: 'Deepseek-V4-Pro', provider: 'DeepSeek', source: 'Claude Code', sourceIcon: claudeCodeIcon, f1: '10.93%', f1Value: 10.93, precision: '8.27%', precisionValue: 8.27, precisionDetail: '243/2945', recall: '16.13%', recallValue: 16.13, recallDetail: '243/1505', avgTime: '14m24s', avgToken: '5,450K', tokenDetail: '5,389K / 60K' },
+  { model: 'GPT-5.5', provider: 'OpenAI', source: 'Codex', sourceIcon: codexIcon, f1: '8.36%', f1Value: 8.36, precision: '27.82%', precisionValue: 27.82, precisionDetail: '74/266', recall: '4.92%', recallValue: 4.92, recallDetail: '74/1505', avgTime: '2m58s', avgToken: '525K', tokenDetail: '520K / 5K' },
+];
+
+const MEDAL_RANKS = ['🥇', '🥈', '🥉'];
 
 const BenchmarkSection: React.FC = () => {
-  const [hoveredRow, setHoveredRow] = useState<number | null>(null);
-  const [sortField, setSortField] = useState<SortField>('f1');
   const { t } = useTranslation();
+  const { isMobile, isTablet } = useResponsive();
+  const titleStyle = useSectionTitleStyle();
+  const [sortField, setSortField] = useState<SortField>('f1');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
-  const sortedData = [...benchmarkData].sort((a, b) => {
-    const av = a[sortField];
-    const bv = b[sortField];
-    if (av == null && bv == null) return 0;
-    if (av == null) return 1;
-    if (bv == null) return -1;
-    return bv - av;
-  });
+  const sortedRows = useMemo(() => {
+    const key = `${sortField}Value` as keyof BenchmarkRow;
+    const sorted = [...rawRows].sort((a, b) => {
+      const aVal = a[key] as number;
+      const bVal = b[key] as number;
+      return sortOrder === 'desc' ? bVal - aVal : aVal - bVal;
+    });
+    return sorted;
+  }, [sortField, sortOrder]);
 
-  const precisionMedals = computeMedals(sortedData, 'precision');
-  const recallMedals = computeMedals(sortedData, 'recall');
-
-  const ranks = new Map<number, number>();
-  let rank = 0;
-  sortedData.forEach((entry, index) => {
-    if (entry[sortField] != null) {
-      rank++;
-      ranks.set(index, rank);
+  const handleSort = useCallback((field: SortField) => {
+    if (sortField === field) {
+      setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortField(field);
+      setSortOrder('desc');
     }
-  });
+  }, [sortField]);
+
+  const sortableHeaders: { key: string; label: string; field?: SortField }[] = [
+    { key: 'rank', label: t('benchmark.colRank') },
+    { key: 'model', label: t('benchmark.colModel') },
+    { key: 'source', label: t('benchmark.colSource') },
+    { key: 'f1', label: t('benchmark.colF1'), field: 'f1' },
+    { key: 'precision', label: t('benchmark.colPrecision'), field: 'precision' },
+    { key: 'recall', label: t('benchmark.colRecall'), field: 'recall' },
+    { key: 'avgTime', label: t('benchmark.colAvgTime') },
+    { key: 'avgToken', label: t('benchmark.colAvgToken') },
+  ];
 
   return (
-    <section id="benchmark" className="py-24 relative noise-overlay">
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 w-[800px] h-[600px] rounded-full bg-brand-500/[0.02] blur-[140px] pointer-events-none"></div>
+    <section
+      id="benchmark"
+      style={{ width: '100%', display: 'flex', justifyContent: 'center', padding: isMobile ? '60px 20px' : isTablet ? '80px 40px' : '80px 0', overflow: 'hidden' }}
+    >
+      <div style={{ width: '100%', maxWidth: 1200, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: isMobile ? 32 : 48 }}>
+        {/* Header */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <span style={{ color: '#2BDE5E', fontSize: 16, fontWeight: 500, letterSpacing: '0.48px' }}>
+            {t('benchmark.sectionLabel')}
+          </span>
+          <h2 style={{ color: '#FFFFFF', fontSize: titleStyle.fontSize, fontWeight: 500, textAlign: 'center', lineHeight: titleStyle.lineHeight, letterSpacing: '0.96px', margin: 0, maxWidth: 758 }}>
+            {t('benchmark.title')}
+          </h2>
+          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 16, textAlign: 'center', lineHeight: '24px', margin: 0, maxWidth: 646 }}>
+            {t('benchmark.subtitle')}
+          </p>
+        </div>
 
-      <div className="relative z-10">
-        <div className="section-divider mb-24"></div>
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-12">
-            <p className="text-slate-500 text-sm font-mono uppercase tracking-widest mb-3">
-              {t('benchmark.sectionLabel')}
-            </p>
-            <h2 className="text-4xl font-bold text-white mb-4">
-              {t('benchmark.title')}
-            </h2>
-            <p className="text-slate-400 max-w-4xl mx-auto">
-              {t('benchmark.subtitlePreRepos')}
-              <span className="text-white font-semibold">50</span>
-              {t('benchmark.subtitlePrePRs')}
-              <span className="text-white font-semibold">200</span>
-              {t('benchmark.subtitlePreLangs')}
-              <span className="text-white font-semibold">10</span>
-              {t('benchmark.subtitleEnd')}
-            </p>
-          </div>
-
-          {/* Legend */}
-          <div className="mb-6 flex items-center gap-5 flex-wrap">
-            <div className="flex items-center gap-1.5 text-xs">
-              <OcrIcon className="w-4 h-4 rounded-sm" />
-              <span className="text-brand-400 font-medium">Open Code Review · {OCR_VERSION}</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-xs">
-              <ClaudeIcon className="w-4 h-4" />
-              <span className="text-[#D97757] font-medium">Claude Code · {CC_VERSION} · /code-review</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-xs">
-              <OpenAIIcon className="w-4 h-4" />
-              <span className="text-[#10a37f] font-medium">Codex · {CODEX_VERSION} · /review</span>
-            </div>
-          </div>
-
-          {/* Table */}
-          <div className="rounded-2xl overflow-hidden glass-strong gradient-border shadow-2xl shadow-black/30">
-            {/* Header */}
-            <div className="grid grid-cols-[2.5rem_10rem_11rem_repeat(5,1fr)] gap-2 px-6 py-3 bg-dark-700/60 text-xs font-medium text-slate-500 uppercase tracking-wider">
-              <div>{t('benchmark.colRank')}</div>
-              <div>{t('benchmark.colModel')}</div>
-              <div>{t('benchmark.colSource')}</div>
-              {(['f1', 'precision', 'recall'] as const).map((field) => {
-                const labels: Record<SortField, string> = {
-                  f1: 'F1',
-                  precision: t('benchmark.colPrecision'),
-                  recall: t('benchmark.colRecall'),
-                };
-                return (
-                  <div
-                    key={field}
-                    className={`cursor-pointer select-none transition-colors hover:text-slate-300 ${sortField === field ? 'text-brand-400' : ''}`}
-                    onClick={() => setSortField(field)}
-                  >
-                    {labels[field]}
-                    <span className={`ml-1 ${sortField === field ? 'opacity-100' : 'opacity-30'}`}>▼</span>
-                  </div>
-                );
-              })}
-              <div>{t('benchmark.colAvgTime')}</div>
-              <div>{t('benchmark.colAvgToken')}</div>
-            </div>
-
-            {/* Rows */}
-            {sortedData.map((entry, index) => {
-              const entryRank = ranks.get(index);
-              const hasData = entry.f1 != null;
-              const pMedal = precisionMedals.get(index);
-              const rMedal = recallMedals.get(index);
-
+        {/* Table */}
+        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 8, overflow: isMobile ? 'auto' : 'hidden' }}>
+          {/* Table Header */}
+          <div style={{
+            width: 1200,
+            minWidth: 1200,
+            display: 'flex',
+            alignItems: 'flex-start',
+            borderStyle: 'solid',
+            borderColor: 'rgba(255,255,255,0.16)',
+            borderTopWidth: 0,
+            borderBottomWidth: 1,
+            borderRightWidth: 0,
+            borderLeftWidth: 0,
+          }}>
+            {sortableHeaders.map((col, i) => {
+              const isActive = col.field === sortField;
+              const isSortable = !!col.field;
               return (
                 <div
-                  key={`${entry.model}-${entry.sourceType}`}
-                  className={`leaderboard-row grid grid-cols-[2.5rem_10rem_11rem_repeat(5,1fr)] gap-2 px-6 py-4 items-center cursor-default ${
-                    hasData && entry.sourceType === 'ocr' ? 'bg-brand-500/3' : ''
-                  } ${hoveredRow === index ? 'bg-brand-500/6' : ''}`}
-                  onMouseEnter={() => setHoveredRow(index)}
-                  onMouseLeave={() => setHoveredRow(null)}
+                  key={col.key}
+                  onClick={isSortable ? () => handleSort(col.field!) : undefined}
+                  style={{
+                    width: i === 0 ? 120 : i === 1 ? 200 : i === 2 ? 200 : undefined,
+                    flex: i > 2 ? 1 : undefined,
+                    height: 44,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: i === 0 ? '10px 20px' : '10px 12px',
+                    cursor: isSortable ? 'pointer' : 'default',
+                    userSelect: 'none',
+                  }}
                 >
-                  {/* Rank */}
-                  <div>
-                    {entryRank != null ? (
-                      <span className="text-lg w-6 inline-block text-center">
-                        {entryRank <= 3 ? medalIcons[['gold', 'silver', 'bronze'][entryRank - 1]] : (
-                          <span className="text-slate-500 font-mono text-sm">{entryRank}</span>
-                        )}
-                      </span>
-                    ) : (
-                      <span className="w-6 inline-flex items-center justify-center">
-                        <span className="w-3.5 h-3.5 rounded-full border-2 border-slate-600 border-t-brand-400 animate-spin" />
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Model + Company */}
-                  <div>
-                    <div className="text-white text-sm font-medium">{entry.model}</div>
-                    <div className="text-slate-500 text-xs mt-0.5">{entry.company}</div>
-                  </div>
-
-                  {/* Source */}
-                  <div className="flex items-center gap-2">
-                    {entry.sourceType === 'ocr' && <OcrIcon className="w-5 h-5 rounded shrink-0" />}
-                    {entry.sourceType === 'cc' && <ClaudeIcon className="w-5 h-5 shrink-0" />}
-                    {entry.sourceType === 'codex' && <OpenAIIcon className="w-5 h-5 shrink-0" />}
-                    <span className={`text-xs whitespace-nowrap ${sourceColorMap[entry.sourceType]}`}>
-                      {sourceNameMap[entry.sourceType]}
-                    </span>
-                  </div>
-
-                  {/* F1 */}
-                  <div>
-                    {entry.f1 != null ? (
-                      <span
-                        className={`text-sm font-bold ${
-                          sortField === 'f1' && entryRank != null && entryRank <= 3 ? 'text-brand-400' : 'text-white'
-                        }`}
-                      >
-                        {entry.f1.toFixed(2)}%
-                      </span>
-                    ) : (
-                      <span className="text-slate-500 text-xs font-medium flex items-center gap-1.5">
-                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-400/60 animate-pulse" />
-                        Running
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Precision with medal */}
-                  <div>
-                    {entry.precision != null ? (
-                      <div>
-                        <div className="inline-flex items-center gap-1">
-                          <span className="text-slate-300 text-sm">{entry.precision.toFixed(2)}%</span>
-                          <span className="w-5 inline-block text-center text-lg leading-none">
-                            {pMedal ? medalIcons[pMedal] : ''}
-                          </span>
-                        </div>
-                        {entry.precisionDetail && (
-                          <div className="text-slate-600 text-xs font-mono mt-0.5">{entry.precisionDetail}</div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="h-4 w-16 rounded bg-slate-800 overflow-hidden relative">
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-slate-700/50 to-transparent animate-[shimmer_2s_ease-in-out_infinite]" />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Recall with medal */}
-                  <div>
-                    {entry.recall != null ? (
-                      <div>
-                        <div className="inline-flex items-center gap-1">
-                          <span className="text-slate-300 text-sm">{entry.recall.toFixed(2)}%</span>
-                          <span className="w-5 inline-block text-center text-lg leading-none">
-                            {rMedal ? medalIcons[rMedal] : ''}
-                          </span>
-                        </div>
-                        {entry.recallDetail && (
-                          <div className="text-slate-600 text-xs font-mono mt-0.5">{entry.recallDetail}</div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="h-4 w-16 rounded bg-slate-800 overflow-hidden relative">
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-slate-700/50 to-transparent animate-[shimmer_2s_ease-in-out_infinite]" />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Avg Time */}
-                  <div>
-                    {entry.avgTime ? (
-                      <span className="text-slate-400 text-sm font-mono">{entry.avgTime}</span>
-                    ) : (
-                      <div className="h-4 w-14 rounded bg-slate-800 overflow-hidden relative">
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-slate-700/50 to-transparent animate-[shimmer_2s_ease-in-out_infinite]" />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Avg Token */}
-                  <div>
-                    {entry.avgTotalToken ? (
-                      <div>
-                        <span className="text-slate-400 text-sm font-mono">{entry.avgTotalToken}</span>
-                        {entry.avgInputToken && (
-                          <div className="text-slate-600 text-xs font-mono mt-0.5">{entry.avgInputToken} / {entry.avgOutputToken}</div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="h-4 w-14 rounded bg-slate-800 overflow-hidden relative">
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-slate-700/50 to-transparent animate-[shimmer_2s_ease-in-out_infinite]" />
-                      </div>
-                    )}
-                  </div>
+                  <span style={{
+                    color: isActive ? '#2BDE5E' : 'rgba(255,255,255,0.5)',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    letterSpacing: '0.5px',
+                    transition: 'color 0.2s ease',
+                  }}>
+                    {col.label}
+                  </span>
+                  {isSortable && (
+                    <img
+                      src={sortIcon}
+                      alt=""
+                      style={{
+                        width: 14,
+                        height: 14,
+                        opacity: isActive ? 1 : 0.5,
+                        transform: isActive && sortOrder === 'asc' ? 'rotate(180deg)' : 'none',
+                        transition: 'transform 0.2s ease, opacity 0.2s ease',
+                      }}
+                    />
+                  )}
                 </div>
               );
             })}
           </div>
 
+          {/* Table Rows */}
+          {sortedRows.map((row, idx) => {
+            const bgOpacity = idx === 0 ? 0.25 : idx === 1 ? 0.18 : idx === 2 ? 0.1 : 0;
+            const rankDisplay = idx < 3 ? MEDAL_RANKS[idx] : String(idx + 1);
+            return (
+              <div
+                key={`${row.model}-${row.source}`}
+                style={{
+                  width: 1200,
+                  minWidth: 1200,
+                  display: 'flex',
+                  alignItems: 'center',
+                  background: bgOpacity > 0 ? `rgba(43,222,94,${bgOpacity})` : 'transparent',
+                  borderStyle: 'solid',
+                  borderColor: 'rgba(255,255,255,0.16)',
+                  borderTopWidth: 0,
+                  borderBottomWidth: idx === sortedRows.length - 1 ? 0 : 1,
+                  borderRightWidth: 0,
+                  borderLeftWidth: 0,
+                  overflow: 'hidden',
+                }}
+              >
+                {/* Rank */}
+                <div style={{ width: 120, padding: '10px 20px' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: idx < 3 ? 18 : 14, fontFamily: 'Menlo, monospace' }}>
+                    {rankDisplay}
+                  </span>
+                </div>
+                {/* Model */}
+                <div style={{ width: 200, padding: '10px 12px', display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ color: '#FFFFFF', fontSize: 14, fontWeight: 500 }}>{row.model}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>{row.provider}</span>
+                </div>
+                {/* Source */}
+                <div style={{ width: 200, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {row.sourceIcon && <img src={row.sourceIcon} alt="" style={{ width: 20, height: 20 }} />}
+                  <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>{row.source}</span>
+                </div>
+                {/* F1 */}
+                <div style={{ flex: 1, padding: '10px 12px' }}>
+                  <span style={{ color: sortField === 'f1' ? '#2BDE5E' : '#FFFFFF', fontSize: 14, fontWeight: sortField === 'f1' ? 600 : 400 }}>
+                    {row.f1}
+                  </span>
+                </div>
+                {/* Precision */}
+                <div style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <span style={{ color: sortField === 'precision' ? '#2BDE5E' : '#FFFFFF', fontSize: 14, fontWeight: sortField === 'precision' ? 600 : 400 }}>
+                      {row.precision}
+                    </span>
+                    {row.precisionMedal !== undefined && <img src={TROPHY_ICONS[row.precisionMedal]} alt="" style={{ width: 16, height: 16, marginLeft: 4 }} />}
+                  </div>
+                  <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>{row.precisionDetail}</span>
+                </div>
+                {/* Recall */}
+                <div style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <span style={{ color: sortField === 'recall' ? '#2BDE5E' : '#FFFFFF', fontSize: 14, fontWeight: sortField === 'recall' ? 600 : 400 }}>
+                      {row.recall}
+                    </span>
+                    {row.recallMedal !== undefined && <img src={TROPHY_ICONS[row.recallMedal]} alt="" style={{ width: 16, height: 16, marginLeft: 4 }} />}
+                  </div>
+                  <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>{row.recallDetail}</span>
+                </div>
+                {/* Avg Time */}
+                <div style={{ flex: 1, padding: '10px 12px' }}>
+                  <span style={{ color: '#FFFFFF', fontSize: 14 }}>{row.avgTime}</span>
+                </div>
+                {/* Avg Token */}
+                <div style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ color: '#FFFFFF', fontSize: 14 }}>{row.avgToken}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11 }}>{row.tokenDetail}</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
-      </div>
 
+        {/* Footer note */}
+        <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12, textAlign: 'center', margin: 0, marginTop: -24 }}>
+          Open Code Review · v1.3.1 ｜ Claude Code · v2.1.169 · /code-review ｜ Codex · v0.140.0 · /review
+        </p>
+      </div>
     </section>
   );
 };

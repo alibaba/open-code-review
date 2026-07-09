@@ -1,3 +1,4 @@
+import { useT } from '../I18nProvider';
 import { FileChange } from '../../shared/types';
 
 const BADGE: Record<FileChange['status'], string> = {
@@ -7,9 +8,10 @@ const BADGE: Record<FileChange['status'], string> = {
 interface Props { files: FileChange[]; loading?: boolean; onOpenFile?: (file: FileChange) => void; }
 
 export function FileList({ files, loading, onOpenFile }: Props) {
+  const t = useT();
   return (
     <div class="file-list">
-      <div class="files-label">待审查文件 {loading ? '' : `(${files.length})`}</div>
+      <div class="files-label">{t('cmp.fileList.pending')} {loading ? '' : `(${files.length})`}</div>
       {loading ? (
         <div class="file-loading">
           {[68, 52, 60].map((w, i) => (
@@ -19,11 +21,11 @@ export function FileList({ files, loading, onOpenFile }: Props) {
           ))}
         </div>
       ) : files.length === 0 ? (
-        <div class="file-empty">无变更文件</div>
+        <div class="file-empty">{t('cmp.fileList.noChanges')}</div>
       ) : (
         <div class="file-scroll">
           {files.map((f) => (
-            <div class="file-row" key={f.path} title={onOpenFile ? '点击查看 diff' : undefined}
+            <div class="file-row" key={f.path} title={onOpenFile ? t('cmp.fileList.viewDiff') : undefined}
               onClick={onOpenFile ? () => onOpenFile(f) : undefined}>
               <span class="file-name">{f.path}</span>
               <span class={`file-badge ${f.status}`}>{BADGE[f.status]}</span>

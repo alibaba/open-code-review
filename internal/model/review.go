@@ -9,6 +9,12 @@ type LlmComment struct {
 	StartLine      int    `json:"start_line"`
 	EndLine        int    `json:"end_line"`
 	Thinking       string `json:"thinking,omitempty"`
+	// Category classifies the finding. One of:
+	// bug, security, performance, maintainability, test, style, documentation, other.
+	Category string `json:"category,omitempty"`
+	// Severity indicates the importance of the finding. One of:
+	// critical, high, medium, low.
+	Severity string `json:"severity,omitempty"`
 }
 
 // CodeReviewResult holds raw LLM-generated review suggestion for a code segment.

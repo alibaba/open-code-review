@@ -5,6 +5,11 @@ import App from './App';
 import { LanguageProvider } from './i18n';
 import './styles/index.css';
 
+if ('scrollRestoration' in history) {
+  history.scrollRestoration = 'manual';
+}
+window.scrollTo(0, 0);
+
 const rootElement = document.getElementById('root') as HTMLElement;
 const root = ReactDOM.createRoot(rootElement);
 

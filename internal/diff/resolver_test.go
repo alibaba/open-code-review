@@ -117,6 +117,115 @@ import "fmt"`},
 	}
 }
 
+func TestResolveLineNumbers_FallbackToFileContent_BlankLines(t *testing.T) {
+	// Hunk match fails; fallback must match across blank lines in NewFileContent.
+	diffs := []model.Diff{{
+		NewPath:        "main.go",
+		NewFileContent: "package main\n\nfunc foo() {\n\n\treturn 1\n}",
+		Diff:           "@@ -1,2 +1,2 @@\n-old\n+new",
+	}}
+	comments := []model.LlmComment{{
+		Path:         "main.go",
+		ExistingCode: "func foo() {\n\treturn 1\n}",
+	}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 3 || cm.EndLine != 6 {
+		t.Errorf("fallback with blank lines: expected 3..6, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveLineNumbers_FallbackToFileContent_MultipleBlankLines(t *testing.T) {
+	diffs := []model.Diff{{
+		NewPath:        "main.go",
+		NewFileContent: "a\n\n\nb\n\nc\n",
+		Diff:           "@@ -1,2 +1,2 @@\n-old\n+new",
+	}}
+	comments := []model.LlmComment{{
+		Path:         "main.go",
+		ExistingCode: "a\nb\nc",
+	}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 1 || cm.EndLine != 6 {
+		t.Errorf("multiple blank lines: expected 1..6, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveLineNumbers_FallbackToFileContent_LeadingBlanks(t *testing.T) {
+	diffs := []model.Diff{{
+		NewPath:        "main.go",
+		NewFileContent: "\n\nfoo\nbar\n",
+		Diff:           "@@ -1,2 +1,2 @@\n-old\n+new",
+	}}
+	comments := []model.LlmComment{{
+		Path:         "main.go",
+		ExistingCode: "foo\nbar",
+	}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 3 || cm.EndLine != 4 {
+		t.Errorf("leading blanks: expected 3..4, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveLineNumbers_FallbackToFileContent_CRLF(t *testing.T) {
+	diffs := []model.Diff{{
+		NewPath:        "main.go",
+		NewFileContent: "alpha\r\nbeta\r\ngamma\r\n",
+		Diff:           "@@ -1,2 +1,2 @@\n-old\n+new",
+	}}
+	comments := []model.LlmComment{{
+		Path:         "main.go",
+		ExistingCode: "beta\ngamma",
+	}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 2 || cm.EndLine != 3 {
+		t.Errorf("CRLF: expected 2..3, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveLineNumbers_FallbackToFileContent_FirstMatchWins(t *testing.T) {
+	diffs := []model.Diff{{
+		NewPath:        "main.go",
+		NewFileContent: "x\ny\nx\ny\n",
+		Diff:           "@@ -1,2 +1,2 @@\n-old\n+new",
+	}}
+	comments := []model.LlmComment{{
+		Path:         "main.go",
+		ExistingCode: "x\ny",
+	}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 1 || cm.EndLine != 2 {
+		t.Errorf("first match wins: expected 1..2, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveLineNumbers_FallbackToFileContent_AllBlankExistingCode(t *testing.T) {
+	diffs := []model.Diff{{
+		NewPath:        "main.go",
+		NewFileContent: "a\nb\nc\n",
+		Diff:           "@@ -1,2 +1,2 @@\n-old\n+new",
+	}}
+	comments := []model.LlmComment{{
+		Path:         "main.go",
+		ExistingCode: "\n\n\n",
+	}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 0 || cm.EndLine != 0 {
+		t.Errorf("all-blank existing code: expected 0..0, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
 func TestResolveLineNumbers_NoMatchKeepsZero(t *testing.T) {
 	diffs := []model.Diff{
 		{NewPath: "test.go", Diff: testDiff},

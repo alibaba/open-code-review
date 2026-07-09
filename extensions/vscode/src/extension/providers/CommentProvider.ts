@@ -1,3 +1,4 @@
+import { t, resolveLocale, SupportedLocale } from '../../shared/i18n';
 import * as vscode from 'vscode';
 import { ReviewComment, CommentStatus, CommentSyncState } from '../../shared/types';
 import { COMMENT_CONTROLLER_ID } from '../../shared/constants';
@@ -13,8 +14,11 @@ export class CommentProvider {
   private offsets = new LineOffsetTracker();
   private syncListeners: Array<(s: CommentSyncState[]) => void> = [];
 
+  private locale: SupportedLocale;
+
   constructor(private extensionUri: vscode.Uri) {
-    this.controller = vscode.comments.createCommentController(COMMENT_CONTROLLER_ID, 'Open Code Review');
+    this.locale = resolveLocale(vscode.env.language);
+    this.controller = vscode.comments.createCommentController(COMMENT_CONTROLLER_ID, t(this.locale, 'ext.commentController'));
   }
 
   onSync(fn: (s: CommentSyncState[]) => void): void {
@@ -58,10 +62,10 @@ export class CommentProvider {
         const body = this.renderBody(c, i, 'pending');
         const thread = this.controller.createCommentThread(doc.uri, range, [{
           body, mode: vscode.CommentMode.Preview,
-          author: { name: '⏳ [未处理]' },
+          author: { name: t(this.locale, 'ext.comment.pending') },
         }]);
         thread.canReply = false;
-        thread.label = `Code Review (${i + 1} / ${this.comments.length})`;
+        thread.label = `${t(this.locale, 'ext.comment.threadLabel')} (${i + 1} / ${this.comments.length})`;
         // 有代码建议 → 'pending'（显示应用+忽略）；无建议 → 'pendingNoSuggestion'（仅忽略）
         thread.contextValue = this.hasSuggestion(c) ? 'pending' : 'pendingNoSuggestion';
         thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
@@ -82,7 +86,7 @@ export class CommentProvider {
     if (this.hasSuggestion(c)) {
       md += `\n***\n\`\`\`diff\n${c.suggestionCode}\n\`\`\``;
     } else {
-      md += `\n***\n_💡 无代码建议，请手动处理_`;
+      md += `\n***\n${t(this.locale, 'ext.comment.noSuggestion')}`;
     }
     const s = new vscode.MarkdownString(md);
     s.isTrusted = true;
@@ -100,7 +104,7 @@ export class CommentProvider {
     const start = Math.max(0, this.offsets.adjusted(c.path, c.startLine) - 1);
     const end = Math.min(doc.lineCount - 1, this.offsets.adjusted(c.path, c.endLine) - 1);
     if (end < start) {
-      vscode.window.showErrorMessage('应用失败：代码位置已失效，请刷新后重试。');
+      vscode.window.showErrorMessage(t(this.locale, 'ext.comment.applyFailedStale'));
       return;
     }
     const range = new vscode.Range(start, 0, end, doc.lineAt(end).text.length);
@@ -113,7 +117,7 @@ export class CommentProvider {
     else edit.delete(uri, range);
     const ok = await vscode.workspace.applyEdit(edit);
     if (!ok) {
-      vscode.window.showErrorMessage('应用失败：无法修改文件，请检查文件是否被占用或处于只读状态。');
+      vscode.window.showErrorMessage(t(this.locale, 'ext.comment.applyFailedLocked'));
       return;
     }
     await doc.save();
@@ -129,7 +133,12 @@ export class CommentProvider {
     this.status.set(index, status);
     const thread = this.threads.get(index);
     if (thread) {
-      const label = { applied: '✅ [已应用]', discarded: '✅ [已忽略]', falsePositive: '✅ [已误报]', pending: '⏳ [未处理]' }[status];
+      const label = {
+        applied: t(this.locale, 'ext.comment.statusApplied'),
+        discarded: t(this.locale, 'ext.comment.statusDiscarded'),
+        falsePositive: t(this.locale, 'ext.comment.statusFalsePositive'),
+        pending: t(this.locale, 'ext.comment.pending'),
+      }[status];
       thread.comments = [{ ...thread.comments[0], author: { name: label }, body: this.renderBody(this.comments[index], index, status) }] as any;
       thread.contextValue = status;
       thread.collapsibleState = vscode.CommentThreadCollapsibleState.Collapsed;
@@ -141,7 +150,7 @@ export class CommentProvider {
     const thread = this.threads.get(index);
     if (!thread) {
       const c = this.comments[index];
-      if (c) vscode.window.showWarningMessage(`无法定位到 ${c.path}：该路径不是可打开的文件。`);
+      if (c) vscode.window.showWarningMessage(`${t(this.locale, 'ext.comment.jumpFailed')}${c.path}${t(this.locale, 'ext.comment.jumpNotAFile')}`);
       return;
     }
     await vscode.window.showTextDocument(thread.uri, { selection: thread.range, preview: false });

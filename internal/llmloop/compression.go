@@ -1,4 +1,4 @@
-package agent
+package llmloop
 
 import (
 	"context"
@@ -10,10 +10,9 @@ import (
 	"github.com/open-code-review/open-code-review/internal/llm"
 	"github.com/open-code-review/open-code-review/internal/session"
 	"github.com/open-code-review/open-code-review/internal/stdout"
-	"github.com/open-code-review/open-code-review/internal/tool"
 )
 
-// compression thresholds as fractions of MaxTokens.
+// Compression thresholds, as fractions of MaxTokens.
 const (
 	tokenSoftThreshold    = 0.60 // async background compression
 	tokenWarningThreshold = 0.80 // immediate sync compression
@@ -42,7 +41,19 @@ type compressionJob struct {
 	snapshotLen int // message count when the snapshot was taken
 }
 
-// groupIntoRounds parses messages[start:] into logical (assistant + tool_results) pairs.
+// CountMessagesTokens returns the rough token count of msgs by summing the
+// per-message text token count. Exported because both review and scan top
+// layers may want it for pre-flight checks.
+func CountMessagesTokens(msgs []llm.Message) int {
+	var total int
+	for _, m := range msgs {
+		total += llm.CountTokens(m.ExtractText())
+	}
+	return total
+}
+
+// groupIntoRounds parses messages[start:] into logical
+// (assistant + tool_results) pairs.
 func groupIntoRounds(messages []llm.Message, start int) []round {
 	var rounds []round
 	i := start
@@ -62,8 +73,9 @@ func groupIntoRounds(messages []llm.Message, start int) []round {
 	return rounds
 }
 
-// computeActiveZoneSize returns how many trailing rounds fit within the remaining
-// token budget after accounting for frozen zone and the compressed summary.
+// computeActiveZoneSize returns how many trailing rounds fit within the
+// remaining token budget after accounting for the frozen zone and the
+// compressed summary.
 func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int, reservedTokens int) int {
 	budget := int(float64(maxTokens)*tokenWarningThreshold) - reservedTokens
 	if budget <= 0 {
@@ -87,8 +99,8 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 }
 
 // partitionMessages divides messages into frozen, compress, and active zones.
-// Frozen zone is always messages[0:2]. Active zone preserves the K most recent
-// complete rounds based on available token budget.
+// Frozen zone is always messages[0:2]. Active zone preserves the K most
+// recent complete rounds based on available token budget.
 func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEstimate int) partitionResult {
 	result := partitionResult{frozenEnd: 2}
 	if len(messages) <= 2 {
@@ -122,104 +134,107 @@ func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEs
 	return result
 }
 
-// addNextMessage adds assistant + tool response messages to the conversation history.
-// Implements dual-threshold compression:
-//   - 60% of MaxTokens: trigger async background compression (non-blocking)
-//   - 80% of MaxTokens: perform synchronous compression immediately
-func (a *Agent) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]llm.Message, filePath string) bool {
-	maxAllowed := a.args.Template.MaxTokens
-	softLimit := int(float64(maxAllowed) * tokenSoftThreshold)
-	warnLimit := int(float64(maxAllowed) * tokenWarningThreshold)
+// StripMarkdownFences removes ```json and ``` wrappers some models add
+// around structured outputs. Exposed so callers (e.g. agent's review-filter
+// post-step) that parse LLM JSON output can reuse the same heuristic.
+func StripMarkdownFences(s string) string { return stripMarkdownFences(s) }
 
-	// Try to apply any completed async compression from a previous iteration.
-	a.tryApplyPendingCompression(messages)
-
-	tokenCount := countMessagesTokens(*messages)
-
-	// Hard threshold: synchronous compression.
-	if tokenCount > warnLimit {
-		a.cancelPendingCompression()
-		*messages, _ = a.runCompression(ctx, *messages, filePath)
-		tokenCount = countMessagesTokens(*messages)
+// stripMarkdownFences is the package-private workhorse used by the
+// internal compression code paths.
+func stripMarkdownFences(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+			s = s[nl+1:]
+		} else {
+			s = strings.TrimPrefix(s, "```json")
+			s = strings.TrimPrefix(s, "```")
+		}
 	}
-
-	// Soft threshold: async compression.
-	if tokenCount > softLimit && a.pendingJob == nil {
-		a.triggerAsyncCompression(ctx, *messages, filePath)
+	s = strings.TrimSpace(s)
+	if strings.HasSuffix(s, "```") {
+		s = strings.TrimSuffix(s, "```")
+		s = strings.TrimSpace(s)
 	}
-
-	// Add assistant message with tool_calls when present.
-	if len(toolCalls) > 0 {
-		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls))
-	} else if assistantContent != "" {
-		*messages = append(*messages, llm.NewTextMessage("assistant", assistantContent))
-	}
-
-	// Add tool response messages using Claude's tool_result format.
-	for _, r := range results {
-		*messages = append(*messages, llm.NewToolResultMessage(r.ToolCallID, r.Result))
-	}
-
-	// Final check: compress synchronously if still over warning limit.
-	finalCount := countMessagesTokens(*messages)
-	if finalCount > warnLimit {
-		a.cancelPendingCompression()
-		*messages, _ = a.runCompression(ctx, *messages, filePath)
-		finalCount = countMessagesTokens(*messages)
-	}
-
-	return finalCount < warnLimit
+	return s
 }
 
-// runCompression performs three-zone memory compression on the given messages.
-// It summarizes the compress zone while preserving the active zone intact.
-// Returns the rebuilt messages slice: [frozen] + [compressed_summary] + [active].
-func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
-	if len(a.args.Template.MemoryCompressionTask.Messages) == 0 || len(msgs) <= 2 {
+// buildMessageXML serializes msgs into the <message><content> form expected
+// by the MEMORY_COMPRESSION_TASK prompt template.
+func buildMessageXML(msgs []llm.Message) string {
+	var sb strings.Builder
+	for i, m := range msgs {
+		sb.WriteString(fmt.Sprintf("<message id=\"%d\" role=\"%s\">\n", i, m.Role))
+		sb.WriteString("    <content>\n")
+		sb.WriteString(fmt.Sprintf("      %s\n", m.ExtractText()))
+		sb.WriteString("    </content>\n")
+		sb.WriteString("</message>")
+		if i < len(msgs)-1 {
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
+}
+
+// copyMessages creates a shallow copy of a message slice.
+func copyMessages(msgs []llm.Message) []llm.Message {
+	out := make([]llm.Message, len(msgs))
+	copy(out, msgs)
+	return out
+}
+
+// runCompression performs three-zone memory compression on the given
+// messages, summarizing the compress zone while preserving the active zone
+// intact. Returns rebuilt as [frozen] + [compressed_summary appended to
+// the user prompt] + [active].
+func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
+	if len(r.deps.Template.MemoryCompressionTask.Messages) == 0 || len(msgs) <= 2 {
 		return msgs[:min(len(msgs), 2)], nil
 	}
 
-	part := partitionMessages(msgs, a.args.Template.MaxTokens, 0)
+	part := partitionMessages(msgs, r.deps.Template.MaxTokens, 0)
 	if part.compressEnd <= part.frozenEnd {
 		return msgs, nil
 	}
 
 	contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
 
-	compressionMsgs := make([]llm.Message, 0, len(a.args.Template.MemoryCompressionTask.Messages))
-	for _, m := range a.args.Template.MemoryCompressionTask.Messages {
+	compressionMsgs := make([]llm.Message, 0, len(r.deps.Template.MemoryCompressionTask.Messages))
+	for _, m := range r.deps.Template.MemoryCompressionTask.Messages {
 		content := strings.ReplaceAll(m.Content, "{{context}}", contextXML)
 		compressionMsgs = append(compressionMsgs, llm.NewTextMessage(m.Role, content))
 	}
 
 	startTime := time.Now()
-	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
-		Model:     a.args.Model,
+	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+		Model:     r.deps.Model,
 		Messages:  compressionMsgs,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: r.deps.Template.MaxTokens,
 	})
 	duration := time.Since(startTime)
 
-	fs := a.session.GetOrCreateFileSession(filePath)
+	fs := r.deps.Session.GetOrCreateFileSession(filePath)
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, compressionMsgs)
 	if err != nil {
 		rec.SetError(err, duration)
 		fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
-		// Intentionally return unmodified msgs: truncating to frozenEnd would
-		// discard all conversation context, which is worse than staying over
-		// the token limit temporarily.
+		// Return msgs unchanged: truncating to frozenEnd would discard all
+		// conversation context, which is worse than staying over the token
+		// limit temporarily.
 		return msgs, fmt.Errorf("memory compression: %w", err)
 	}
 	rec.SetResponse(resp, duration)
 	if resp.Usage != nil {
-		atomic.AddInt64(&a.totalInputTokens, resp.Usage.PromptTokens)
-		atomic.AddInt64(&a.totalOutputTokens, resp.Usage.CompletionTokens)
-		atomic.AddInt64(&a.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-		atomic.AddInt64(&a.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
+		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
+		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
+		atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
+		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
 	}
 
 	rawSummary := stripMarkdownFences(resp.Content())
 	if rawSummary == "" {
+		// Empty summary: keep the original conversation rather than dropping
+		// everything below the frozen zone.
 		return msgs, nil
 	}
 
@@ -228,9 +243,6 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
 
 	userMsg := rebuilt[1]
 	currentText := userMsg.ExtractText()
-	if idx := strings.Index(currentText, "\n\n<previous_review_summary>"); idx >= 0 {
-		currentText = currentText[:idx]
-	}
 	rebuilt[1] = llm.NewTextMessage(userMsg.Role, currentText+"\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
 
 	for i := part.compressEnd; i < len(msgs); i++ {
@@ -241,28 +253,30 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
 }
 
 // triggerAsyncCompression kicks off a background compression job.
-func (a *Agent) triggerAsyncCompression(ctx context.Context, messages []llm.Message, filePath string) {
+func (r *Runner) triggerAsyncCompression(ctx context.Context, messages []llm.Message, filePath string) {
 	msgSnapshot := copyMessages(messages)
 
 	asyncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 
 	job := &compressionJob{done: make(chan struct{}), cancel: cancel, snapshotLen: len(messages)}
-	a.compressionMu.Lock()
-	a.pendingJob = job
-	a.compressionMu.Unlock()
+	r.compressionMu.Lock()
+	r.pendingJob = job
+	r.compressionMu.Unlock()
 
 	go func() {
 		defer cancel()
-		rebuilt, err := a.runCompression(asyncCtx, msgSnapshot, filePath)
+		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, filePath)
 
-		a.compressionMu.Lock()
-		defer a.compressionMu.Unlock()
+		r.compressionMu.Lock()
+		defer r.compressionMu.Unlock()
 
-		if a.pendingJob != job {
+		if r.pendingJob != job {
 			return // cancelled or superseded
 		}
 		if err != nil {
-			a.pendingJob = nil
+			// Compression failed — abandon the job rather than applying a
+			// truncated/unmodified snapshot over live messages.
+			r.pendingJob = nil
 			close(job.done)
 			return
 		}
@@ -271,12 +285,13 @@ func (a *Agent) triggerAsyncCompression(ctx context.Context, messages []llm.Mess
 	}()
 }
 
-// tryApplyPendingCompression checks if a background compression completed
-// and swaps the rebuilt messages into place. Returns true if applied.
-func (a *Agent) tryApplyPendingCompression(messages *[]llm.Message) bool {
-	a.compressionMu.Lock()
-	job := a.pendingJob
-	a.compressionMu.Unlock()
+// tryApplyPendingCompression checks whether a background compression has
+// completed and swaps the rebuilt messages into place. Returns true if
+// applied.
+func (r *Runner) tryApplyPendingCompression(messages *[]llm.Message) bool {
+	r.compressionMu.Lock()
+	job := r.pendingJob
+	r.compressionMu.Unlock()
 
 	if job == nil {
 		return false
@@ -285,19 +300,21 @@ func (a *Agent) tryApplyPendingCompression(messages *[]llm.Message) bool {
 	select {
 	case <-job.done:
 		applied := false
-		a.compressionMu.Lock()
-		if a.pendingJob == job && job.rebuilt != nil {
+		r.compressionMu.Lock()
+		if r.pendingJob == job && job.rebuilt != nil {
 			rebuilt := job.rebuilt
+			// Preserve any messages appended after the snapshot was taken —
+			// the background job only compressed messages[:snapshotLen].
 			if job.snapshotLen < len(*messages) {
 				rebuilt = append(rebuilt, (*messages)[job.snapshotLen:]...)
 			}
 			*messages = rebuilt
 			applied = true
 		}
-		if a.pendingJob == job {
-			a.pendingJob = nil
+		if r.pendingJob == job {
+			r.pendingJob = nil
 		}
-		a.compressionMu.Unlock()
+		r.compressionMu.Unlock()
 		return applied
 	default:
 		return false
@@ -305,12 +322,12 @@ func (a *Agent) tryApplyPendingCompression(messages *[]llm.Message) bool {
 }
 
 // cancelPendingCompression aborts any in-flight background compression.
-func (a *Agent) cancelPendingCompression() {
-	a.compressionMu.Lock()
-	defer a.compressionMu.Unlock()
+func (r *Runner) cancelPendingCompression() {
+	r.compressionMu.Lock()
+	defer r.compressionMu.Unlock()
 
-	if a.pendingJob != nil {
-		a.pendingJob.cancel()
-		a.pendingJob = nil
+	if r.pendingJob != nil {
+		r.pendingJob.cancel()
+		r.pendingJob = nil
 	}
 }

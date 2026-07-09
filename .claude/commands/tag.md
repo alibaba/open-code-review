@@ -25,7 +25,7 @@ Create an annotated git tag with an auto-generated summary of changes since the 
 Run:
 
 ```bash
-git tag -a <new-version> -m "<summary>"
+git tag -s <new-version> -m "<summary>"
 ```
 
 Report the created tag and its message to the user.

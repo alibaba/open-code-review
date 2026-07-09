@@ -2,426 +2,155 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  -webkit-tap-highlight-color: transparent;
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
 html {
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
 }
 
 body {
-  background-color: #030712;
-  color: #f8fafc;
-  font-family: 'Inter', sans-serif;
+  padding: 0;
+  margin: 0;
+  background-color: #000000;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto, sans-serif;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* ========== Noise Texture Overlay ========== */
-.noise-overlay::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 9999;
-  opacity: 0.025;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 256px 256px;
+p {
+  margin: 0;
 }
 
-/* ========== Scrollbar ========== */
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0a0f1e;
+  background: #000;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: rgba(255,255,255,0.15);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #22c55e;
+  background: rgba(255,255,255,0.3);
 }
 
-/* ========== Grid Background ========== */
-.grid-bg {
-  background-image:
-    linear-gradient(rgba(34, 197, 94, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(34, 197, 94, 0.03) 1px, transparent 1px);
-  background-size: 60px 60px;
-}
-
-/* ========== Radial Glow Orbs ========== */
-.glow-orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-  pointer-events: none;
-  opacity: 0.5;
-}
-
-/* ========== Glow Effects ========== */
-.glow-green {
-  box-shadow:
-    0 0 30px rgba(34, 197, 94, 0.25),
-    0 0 60px rgba(34, 197, 94, 0.1);
-}
-
-.glow-green-sm {
-  box-shadow:
-    0 0 12px rgba(34, 197, 94, 0.3),
-    0 0 24px rgba(34, 197, 94, 0.1);
-}
-
-.glow-card {
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.3),
-    0 4px 16px rgba(0, 0, 0, 0.2);
-}
-
-.text-glow {
-  text-shadow:
-    0 0 20px rgba(34, 197, 94, 0.4),
-    0 0 40px rgba(34, 197, 94, 0.2);
-}
-
-.border-glow {
-  border-color: rgba(34, 197, 94, 0.4);
-  box-shadow:
-    0 0 0 1px rgba(34, 197, 94, 0.1) inset,
-    0 0 16px rgba(34, 197, 94, 0.06);
-}
-
-/* ========== Glassmorphism ========== */
-.glass {
-  background: rgba(15, 23, 42, 0.5);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.glass-strong {
-  background: rgba(15, 23, 42, 0.7);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-/* ========== Terminal Cursor Blink ========== */
-.terminal-cursor::after {
-  content: '|';
-  animation: blink 1s step-end infinite;
-  color: #22c55e;
-}
-
-@keyframes blink {
+/* Terminal cursor blink */
+@keyframes cursor-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
 
-/* ========== Stat Card (Enhanced) ========== */
-.stat-card {
-  background: linear-gradient(145deg, rgba(15, 23, 42, 0.9) 0%, rgba(10, 15, 30, 0.95) 100%);
-  border: 1px solid rgba(34, 197, 94, 0.1);
-  backdrop-filter: blur(8px);
-  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+.terminal-cursor {
+  animation: cursor-blink 1s step-end infinite;
+}
+
+/* UseCases card hover effect */
+@property --sweep-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: true;
+}
+
+.usecase-card {
   position: relative;
-  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.17);
+  border-radius: 8px;
+  background: transparent;
+  transition: border-color 0.4s ease;
 }
 
-.stat-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(34, 197, 94, 0.3), transparent);
-  opacity: 0;
-  transition: opacity 0.35s ease;
-}
-
-.stat-card:hover {
-  border-color: rgba(34, 197, 94, 0.3);
-  transform: translateY(-4px);
-  box-shadow:
-    0 12px 40px rgba(34, 197, 94, 0.12),
-    0 4px 16px rgba(0, 0, 0, 0.3);
-}
-
-.stat-card:hover::before {
-  opacity: 1;
-}
-
-/* ========== Feature Card (Enhanced) ========== */
-.feature-card {
-  background: linear-gradient(160deg, rgba(15, 23, 42, 0.7) 0%, rgba(10, 15, 30, 0.85) 100%);
-  border: 1px solid rgba(51, 65, 85, 0.4);
-  backdrop-filter: blur(6px);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  overflow: hidden;
-}
-
-.feature-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(34, 197, 94, 0.08) 0%, transparent 60%);
-  opacity: 0;
-  transition: opacity 0.4s ease;
-  pointer-events: none;
-}
-
-.feature-card:hover::before {
-  opacity: 1;
-}
-
-.feature-card:hover {
-  border-color: rgba(34, 197, 94, 0.25);
-  box-shadow:
-    0 8px 32px rgba(34, 197, 94, 0.08),
-    0 4px 16px rgba(0, 0, 0, 0.3);
-  transform: translateY(-4px);
-}
-
-/* ========== Nav Link ========== */
-.nav-link {
-  position: relative;
-  transition: color 0.2s ease;
-}
-
-.nav-link::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  left: 0;
-  width: 0;
-  height: 1px;
-  background: linear-gradient(90deg, #22c55e, #4ade80);
-  transition: width 0.3s ease;
-}
-
-.nav-link:hover::after {
-  width: 100%;
-}
-
-/* ========== Primary Button (Enhanced) ========== */
-.btn-primary {
-  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
-}
-
-.btn-primary::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-  transition: left 0.5s ease;
-}
-
-.btn-primary:hover::before {
-  left: 100%;
-}
-
-.btn-primary:hover {
-  box-shadow:
-    0 0 24px rgba(34, 197, 94, 0.5),
-    0 0 48px rgba(34, 197, 94, 0.2);
-  transform: translateY(-2px);
-}
-
-/* ========== Secondary Button ========== */
-.btn-secondary {
-  border: 1px solid rgba(34, 197, 94, 0.4);
-  background: rgba(34, 197, 94, 0.05);
-  backdrop-filter: blur(4px);
-  transition: all 0.3s ease;
-}
-
-.btn-secondary:hover {
-  background: rgba(34, 197, 94, 0.12);
-  border-color: rgba(34, 197, 94, 0.7);
-  box-shadow: 0 0 16px rgba(34, 197, 94, 0.15);
-}
-
-/* ========== Rank Badge ========== */
-.rank-badge {
-  background: linear-gradient(145deg, rgba(34, 197, 94, 0.15) 0%, rgba(22, 163, 74, 0.08) 100%);
-  border: 1px solid rgba(34, 197, 94, 0.25);
-  backdrop-filter: blur(8px);
-}
-
-/* ========== Leaderboard Row ========== */
-.leaderboard-row {
-  border-bottom: 1px solid rgba(51, 65, 85, 0.3);
-  transition: background 0.2s ease;
-}
-
-.leaderboard-row:hover {
-  background: rgba(34, 197, 94, 0.04);
-}
-
-/* ========== Tags ========== */
-.tag-open {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-  border: 1px solid rgba(34, 197, 94, 0.3);
-}
-
-.tag-closed {
-  background: rgba(239, 68, 68, 0.12);
-  color: #f87171;
-  border: 1px solid rgba(239, 68, 68, 0.25);
-}
-
-.tag-reproduced {
-  background: rgba(99, 102, 241, 0.12);
-  color: #a5b4fc;
-  border: 1px solid rgba(99, 102, 241, 0.25);
-}
-
-/* ========== Progress Bar ========== */
-.progress-bar {
-  background: linear-gradient(90deg, #22c55e, #4ade80);
-  border-radius: 2px;
-  height: 3px;
-  transition: width 1s ease;
-}
-
-/* ========== Section Divider (Enhanced) ========== */
-.section-divider {
-  background: linear-gradient(90deg, transparent, rgba(34, 197, 94, 0.2), transparent);
-  height: 1px;
-}
-
-.section-divider-soft {
-  background: linear-gradient(90deg, transparent, rgba(51, 65, 85, 0.3), transparent);
-  height: 1px;
-}
-
-/* ========== Code Block ========== */
-.code-block {
-  background: rgba(10, 15, 30, 0.9);
-  border: 1px solid rgba(51, 65, 85, 0.5);
-  border-left: 3px solid #22c55e;
-}
-
-/* ========== Highlight Card ========== */
-.highlight-card {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(6, 182, 212, 0.10), rgba(139, 92, 246, 0.08));
-  border-radius: 1rem;
-  position: relative;
-}
-
-.highlight-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.3), rgba(6, 182, 212, 0.2), rgba(139, 92, 246, 0.15));
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-}
-
-/* ========== Floating Badge ========== */
-.floating-badge {
-  animation: float 3s ease-in-out infinite;
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-8px); }
-}
-
-/* ========== Animated Gradient Border ========== */
-.gradient-border {
-  position: relative;
-}
-
-.gradient-border::after {
+.usecase-card::before {
   content: '';
   position: absolute;
   inset: -1px;
-  border-radius: inherit;
+  border-radius: 9px;
   padding: 1px;
-  pointer-events: none;
-  background: linear-gradient(135deg, #22c55e, #06b6d4, #8b5cf6, #22c55e);
-  background-size: 300% 300%;
-  animation: gradientShift 6s ease infinite;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  background: conic-gradient(
+    from var(--sweep-angle),
+    transparent 0%,
+    #31FF75 8%,
+    #33DDF7 16%,
+    rgba(55,252,170,0.79) 24%,
+    transparent 40%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   opacity: 0;
   transition: opacity 0.4s ease;
+  pointer-events: none;
+  z-index: 1;
 }
 
-.gradient-border:hover::after {
+.usecase-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.14) 0%, #141313 100%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.usecase-card:hover {
+  border-color: transparent;
+}
+
+.usecase-card:hover::before {
   opacity: 1;
 }
 
-@keyframes gradientShift {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
+.usecase-card:hover::after {
+  opacity: 1;
 }
 
-/* ========== Spotlight Effect ========== */
-.spotlight {
-  position: relative;
-  overflow: hidden;
+/* Install badge text shimmer */
+@keyframes text-shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
 }
 
-.spotlight::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, rgba(34, 197, 94, 0.03) 0%, transparent 70%);
-  pointer-events: none;
-  animation: spotlightRotate 10s linear infinite;
+.install-text-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.6) 0%,
+    rgba(255,255,255,0.6) 40%,
+    #ffffff 50%,
+    rgba(255,255,255,0.6) 60%,
+    rgba(255,255,255,0.6) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: text-shimmer 5s ease-in-out infinite;
 }
 
-@keyframes spotlightRotate {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-/* ========== Shimmer Animation ========== */
-@keyframes shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
-
-.shimmer {
-  position: relative;
-  overflow: hidden;
-}
-
-.shimmer::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 50%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(34, 197, 94, 0.03), transparent);
-  animation: shimmer 3s ease-in-out infinite;
+@media (prefers-reduced-motion: reduce) {
+  .install-text-shimmer {
+    animation: none;
+    background: #ffffff;
+    -webkit-text-fill-color: #ffffff;
+  }
 }

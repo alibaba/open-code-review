@@ -57,7 +57,7 @@ export function resolveBin(name: string): string {
   let resolved = name;
   try {
     const shell = process.env.SHELL || '/bin/zsh';
-    if (!/^[a-zA-Z0-9._\/-]+$/.test(name)) return name;
+    if (!/^[a-zA-Z0-9._/-]+$/.test(name)) return name;
     const res = spawnSync(shell, ['-ilc', `command -v '${name.replace(/'/g, "'\\''")}'`], {
       encoding: 'utf8',
       timeout: 5000,

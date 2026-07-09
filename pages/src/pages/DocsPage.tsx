@@ -1,455 +1,703 @@
-import React, { useState, useEffect, useRef } from 'react';
-import Navbar from '../components/Navbar';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
+import Navbar from '../components/Navbar';
+import Footer from '../components/Footer';
+import MarkdownRenderer from '../components/MarkdownRenderer';
+import { useResponsive } from '../hooks/useResponsive';
+import { getDocContent, getDocTitle, DocSlug, searchDocs } from '../content/docs';
+import { generateHeadingId } from '../utils/headingId';
+import docContentsIcon from '../assets/icons/doc-contents.svg';
+import searchIcon from '../assets/icons/icon-search.svg';
+import '../styles/docs-markdown.css';
 
-interface Section {
+/* ─── Sidebar tree data ─── */
+interface SidebarItem {
   id: string;
   labelKey: string;
+  slug: DocSlug;
+  children?: SidebarItem[];
 }
 
-const sectionDefs: Section[] = [
-  { id: 'overview', labelKey: 'docs.overview' },
-  { id: 'install', labelKey: 'docs.install' },
-  { id: 'config', labelKey: 'docs.config' },
-  { id: 'review', labelKey: 'docs.review' },
-  { id: 'viewer', labelKey: 'docs.viewer' },
-  { id: 'env', labelKey: 'docs.env' },
+interface SidebarGroup {
+  groupLabelKey: string;
+  items: SidebarItem[];
+}
+
+const sidebarTree: SidebarGroup[] = [
+  {
+    groupLabelKey: 'docs.sidebar.gettingStarted',
+    items: [
+      { id: 'sb-quickstart', labelKey: 'docs.sidebar.quickstart', slug: 'quickstart' },
+      { id: 'sb-installation', labelKey: 'docs.sidebar.installation', slug: 'installation' },
+      { id: 'sb-configuration', labelKey: 'docs.sidebar.configuration', slug: 'configuration' },
+    ],
+  },
+  {
+    groupLabelKey: 'docs.sidebar.userGuide',
+    items: [
+      { id: 'sb-cli', labelKey: 'docs.sidebar.cliReference', slug: 'cli-reference' },
+      { id: 'sb-rules', labelKey: 'docs.sidebar.reviewRules', slug: 'review-rules' },
+      { id: 'sb-arch', labelKey: 'docs.sidebar.architecture', slug: 'architecture' },
+      { id: 'sb-tools', labelKey: 'docs.sidebar.tools', slug: 'tools' },
+      { id: 'sb-mcp', labelKey: 'docs.sidebar.mcp', slug: 'mcp' },
+      { id: 'sb-viewer', labelKey: 'docs.sidebar.viewer', slug: 'viewer' },
+      { id: 'sb-telemetry', labelKey: 'docs.sidebar.telemetry', slug: 'telemetry' },
+      {
+        id: 'sb-integrations',
+        labelKey: 'docs.sidebar.integrations',
+        slug: 'integrations',
+        children: [
+          { id: 'sb-agent-skill', labelKey: 'docs.sidebar.agentSkill', slug: 'agent-skill' },
+          { id: 'sb-claude-code', labelKey: 'docs.sidebar.claudeCode', slug: 'claude-code' },
+          { id: 'sb-subprocess', labelKey: 'docs.sidebar.subprocess', slug: 'subprocess' },
+          { id: 'sb-cicd', labelKey: 'docs.sidebar.cicd', slug: 'cicd' },
+        ],
+      },
+      { id: 'sb-contributing', labelKey: 'docs.sidebar.contributing', slug: 'contributing' },
+      { id: 'sb-faq', labelKey: 'docs.sidebar.faq', slug: 'faq' },
+    ],
+  },
 ];
 
-const CodeBlock: React.FC<{ code: string; copied?: boolean; onCopy?: () => void; copyLabel?: string }> = ({ code, copied, onCopy, copyLabel }) => (
-  <div className="relative group/code">
-    <div className="code-block rounded-xl p-4 overflow-x-auto group-hover/code:border-brand-500/30 transition-colors duration-300">
-      <pre className="font-mono text-xs text-brand-400 whitespace-pre">{code}</pre>
-    </div>
-    {onCopy && (
-      <button
-        onClick={onCopy}
-        className="absolute top-2 right-3 text-slate-600 hover:text-brand-400 transition-colors text-xs flex items-center gap-1 opacity-60 group-hover/code:opacity-100"
-      >
-        <i className={`fa-solid ${copied ? 'fa-check text-brand-400' : 'fa-copy'}`}></i>
-        {copied ? '' : (copyLabel || '')}
-      </button>
-    )}
-  </div>
+/* ─── Chevron icon for expandable items ─── */
+const ChevronIcon: React.FC<{ expanded: boolean }> = ({ expanded }) => (
+  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0, transition: 'transform 0.2s', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+    <path d="M7.5 5L12.5 10L7.5 15" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
 );
 
-const DocSection: React.FC<{ id: string; title: string; children: React.ReactNode }> = ({ id, title, children }) => (
-  <section id={id} className="mb-16 scroll-mt-24">
-    <h2 className="text-2xl font-bold text-white mb-6 pb-2 border-b border-dark-600/30">{title}</h2>
-    {children}
-  </section>
-);
-
-const DocsPage: React.FC = () => {
-  const [activeSection, setActiveSection] = useState('overview');
-  const [mobileTocOpen, setMobileTocOpen] = useState(false);
-  const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
-  const lockedRef = useRef<string | null>(null);
-  const { t } = useTranslation();
-
-  const sections = sectionDefs.map(s => ({ ...s, label: t(s.labelKey) }));
-
-  const handleCopy = (code: string, key: string) => {
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(code).then(() => {
-        setCopiedIndex(key);
-        setTimeout(() => setCopiedIndex(null), 2000);
-      });
-    } else {
-      const textarea = document.createElement('textarea');
-      textarea.value = code;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      setCopiedIndex(key);
-      setTimeout(() => setCopiedIndex(null), 2000);
+/* ─── Extract headings from markdown for right TOC ─── */
+function extractHeadings(markdown: string): { id: string; text: string; level: number }[] {
+  const headings: { id: string; text: string; level: number }[] = [];
+  const lines = markdown.split('\n');
+  let inCodeBlock = false;
+  for (const line of lines) {
+    if (line.trim().startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      continue;
     }
-  };
+    if (inCodeBlock) continue;
+    const match = line.match(/^(#{2,3})\s+(.+)$/);
+    if (match) {
+      const level = match[1].length;
+      // Strip markdown link syntax [text](url) → text, then strip other formatting
+      const text = match[2]
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .replace(/[`*_\[\]()]/g, '')
+        .trim();
+      const id = generateHeadingId(text);
+      headings.push({ id, text, level });
+    }
+  }
+  return headings;
+}
 
-  useEffect(() => {
-    const THRESHOLD = 160;
-    const handleScroll = () => {
-      if (lockedRef.current) return;
-      let bestIndex = 0;
-      let bestTop = -Infinity;
-      for (let i = 0; i < sectionDefs.length; i++) {
-        const el = document.getElementById(sectionDefs[i].id);
-        if (!el) continue;
-        const top = el.getBoundingClientRect().top;
-        if (top <= THRESHOLD && top > bestTop) {
-          bestTop = top;
-          bestIndex = i;
+/* ─── Flat ordered list of all doc slugs for prev/next navigation ─── */
+function buildFlatDocList(): { slug: DocSlug; labelKey: string }[] {
+  const list: { slug: DocSlug; labelKey: string }[] = [];
+  for (const group of sidebarTree) {
+    for (const item of group.items) {
+      list.push({ slug: item.slug, labelKey: item.labelKey });
+      if (item.children) {
+        for (const child of item.children) {
+          list.push({ slug: child.slug, labelKey: child.labelKey });
         }
       }
-      setActiveSection(sectionDefs[bestIndex].id);
+    }
+  }
+  return list;
+}
+
+const flatDocList = buildFlatDocList();
+const validSlugs = new Set<DocSlug>(flatDocList.map(d => d.slug));
+
+/* Dev-time invariant: every sidebar slug maps to exactly one URL, so duplicates
+ * (two menu entries sharing a slug) would silently collide. Fail loudly in dev. */
+if (process.env.NODE_ENV !== 'production' && validSlugs.size !== flatDocList.length) {
+  const slugs = flatDocList.map(d => d.slug);
+  const dupes = [...new Set(slugs.filter((s, i) => slugs.indexOf(s) !== i))];
+  throw new Error(
+    `[docs] Duplicate sidebar slug(s) detected: ${dupes.join(', ')} — each doc must have a unique slug for routing.`
+  );
+}
+
+const DocsPage: React.FC = () => {
+  const { slug: slugParam } = useParams<{ slug?: string }>();
+  const navigate = useNavigate();
+  /* Active doc slug is derived from the URL param, falling back to quickstart */
+  const activeSlug: DocSlug =
+    slugParam && validSlugs.has(slugParam as DocSlug) ? (slugParam as DocSlug) : 'quickstart';
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({ 'sb-integrations': false });
+  const [activeHeadingId, setActiveHeadingId] = useState<string>('');
+  const [hoveredHeadingId, setHoveredHeadingId] = useState<string>('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchSelectedIdx, setSearchSelectedIdx] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const { t, language } = useTranslation();
+  const { isMobile } = useResponsive();
+  const contentRef = React.useRef<HTMLDivElement>(null);
+
+  const fontFamily = 'PingFang SC, -apple-system, BlinkMacSystemFont, sans-serif';
+
+  /* Get markdown content for current doc */
+  const docContent = useMemo(() => getDocContent(activeSlug, language), [activeSlug, language]);
+  const docTitle = useMemo(() => getDocTitle(activeSlug, language), [activeSlug, language]);
+  const headings = useMemo(() => extractHeadings(docContent), [docContent]);
+
+  /* Track active heading via IntersectionObserver */
+  useEffect(() => {
+    if (headings.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActiveHeadingId(entry.target.id);
+          }
+        }
+      },
+      { rootMargin: '-80px 0px -60% 0px', threshold: 0 }
+    );
+    const els = headings.map(h => document.getElementById(h.id)).filter(Boolean) as HTMLElement[];
+    els.forEach(el => observer.observe(el));
+    return () => observer.disconnect();
+  }, [headings]);
+
+  /* Prev/Next navigation */
+  const { prevDoc, nextDoc } = useMemo(() => {
+    const idx = flatDocList.findIndex(d => d.slug === activeSlug);
+    return {
+      prevDoc: idx > 0 ? flatDocList[idx - 1] : null,
+      nextDoc: idx < flatDocList.length - 1 ? flatDocList[idx + 1] : null,
     };
-    window.addEventListener('scroll', handleScroll);
-    return () => {
-      window.removeEventListener('scroll', handleScroll);
-      clearTimeout(unlockTimerRef.current);
-    };
+  }, [activeSlug]);
+
+  const toggleExpand = useCallback((id: string) => {
+    setExpandedItems(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
-  const unlockTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const navigateToDoc = useCallback((slug: DocSlug) => {
+    navigate(`/docs/${slug}`);
+    // Scroll page to top
+    window.scrollTo(0, 0);
+  }, [navigate]);
 
-  const scrollToSection = (id: string) => {
-    lockedRef.current = id;
-    clearTimeout(unlockTimerRef.current);
+  /* Intercept clicks on internal doc links and convert to SPA navigation */
+  const handleContentClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    const anchor = target.closest('a') as HTMLAnchorElement | null;
+    if (!anchor) return;
+    const href = anchor.getAttribute('href');
+    if (!href) return;
+    // Skip external links
+    if (href.startsWith('http://') || href.startsWith('https://')) return;
+    // Skip pure anchors (same-page scroll)
+    if (href.startsWith('#')) {
+      e.preventDefault();
+      const id = href.slice(1);
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    // Parse relative paths to extract slug
+    // Patterns: ../slug/, slug/, ../../slug/, ../slug/#anchor
+    const pathOnly = href.split('#')[0].replace(/\/+$/, ''); // remove trailing slash & anchor
+    const segments = pathOnly.split('/').filter(s => s !== '' && s !== '.' && s !== '..');
+    const lastSegment = segments[segments.length - 1];
+    if (!lastSegment) return;
+    // Map path segment to DocSlug (ci -> cicd)
+    const slugMap: Record<string, DocSlug> = { 'ci': 'cicd' };
+    const slug = (slugMap[lastSegment] || lastSegment) as DocSlug;
+    // Verify it's a valid doc slug
+    if (validSlugs.has(slug)) {
+      e.preventDefault();
+      navigateToDoc(slug);
+      // Handle anchor scroll after navigation with reliable retry
+      const anchor2 = href.split('#')[1];
+      if (anchor2) {
+        const tryScroll = (attempts: number) => {
+          const el = document.getElementById(anchor2);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else if (attempts < 10) {
+            requestAnimationFrame(() => tryScroll(attempts + 1));
+          }
+        };
+        requestAnimationFrame(() => tryScroll(0));
+      }
+    }
+  }, [navigateToDoc]);
+
+  const scrollToHeading = useCallback((id: string) => {
     const el = document.getElementById(id);
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-      window.history.pushState(null, '', `#${id}`);
+      const top = el.getBoundingClientRect().top + window.scrollY - 90;
+      window.scrollTo({ top, behavior: 'smooth' });
     }
-    setActiveSection(id);
-    unlockTimerRef.current = setTimeout(() => {
-      lockedRef.current = null;
-    }, 800);
-  };
+  }, []);
+
+  /* Check if a sidebar item or its children is active */
+  const isItemActive = useCallback((item: SidebarItem): boolean => {
+    if (item.slug === activeSlug) return true;
+    if (item.children) {
+      return item.children.some(child => child.slug === activeSlug);
+    }
+    return false;
+  }, [activeSlug]);
+
+  /* Auto-expand parent when a child is active */
+  useEffect(() => {
+    for (const group of sidebarTree) {
+      for (const item of group.items) {
+        if (item.children && item.children.some(c => c.slug === activeSlug)) {
+          setExpandedItems(prev => ({ ...prev, [item.id]: true }));
+        }
+      }
+    }
+  }, [activeSlug]);
+
+  /* Search results */
+  const searchResults = useMemo(() => searchDocs(searchQuery, language), [searchQuery, language]);
+
+  /* Reset selection when results change */
+  useEffect(() => {
+    setSearchSelectedIdx(0);
+  }, [searchResults]);
+
+  /* ⌘K / Ctrl+K keyboard shortcut */
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        // Don't intercept when focused in other input/textarea (unless search is already open)
+        const activeEl = document.activeElement;
+        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') && !searchOpen) return;
+        e.preventDefault();
+        setSearchOpen(prev => !prev);
+      }
+      if (e.key === 'Escape') {
+        setSearchOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [searchOpen]);
+
+  /* Focus input when search opens */
+  useEffect(() => {
+    if (searchOpen) {
+      setTimeout(() => searchInputRef.current?.focus(), 50);
+    } else {
+      setSearchQuery('');
+    }
+  }, [searchOpen]);
+
+  /* Handle search result selection */
+  const handleSearchSelect = useCallback((slug: DocSlug) => {
+    navigateToDoc(slug);
+    setSearchOpen(false);
+  }, [navigateToDoc]);
+
+  /* Keyboard navigation in search modal */
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSearchSelectedIdx(prev => Math.min(prev + 1, searchResults.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSearchSelectedIdx(prev => Math.max(prev - 1, 0));
+    } else if (e.key === 'Enter' && searchResults.length > 0) {
+      e.preventDefault();
+      handleSearchSelect(searchResults[searchSelectedIdx].slug);
+    }
+  }, [searchResults, searchSelectedIdx, handleSearchSelect]);
 
   return (
-    <div className="min-h-screen bg-dark-900 relative noise-overlay pt-16">
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute top-0 left-1/4 w-[800px] h-[600px] rounded-full bg-brand-500/[0.02] blur-[120px]"></div>
-      </div>
-
+    <div style={{ minHeight: '100vh', background: '#000000', paddingTop: 72, fontFamily }}>
       <Navbar />
+      {/* Main layout: left sidebar + content + right TOC */}
+      <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'flex-start', maxWidth: 1440, margin: '0 auto', minHeight: 'calc(100vh - 72px)' }}>
 
-      {/* Mobile TOC toggle */}
-      <div className="lg:hidden fixed top-16 right-4 z-50">
-        <button
-          className="text-slate-400 hover:text-white transition-colors text-sm flex items-center gap-2 bg-dark-900/80 backdrop-blur-xl border border-dark-600/30 rounded-lg px-3 py-1.5"
-          onClick={() => setMobileTocOpen(!mobileTocOpen)}
-        >
-          <i className="fa-solid fa-list-ul"></i>
-          {t('docs.toc')}
-        </button>
-      </div>
+        {/* ─── Left sidebar: tree navigation ─── */}
+        {!isMobile && (
+          <nav style={{
+            position: 'sticky',
+            top: 72,
+            width: 264,
+            flexShrink: 0,
+            height: 'calc(100vh - 72px)',
+            overflowY: 'auto',
+            paddingTop: 40,
+            paddingBottom: 40,
+            paddingRight: 12,
+            paddingLeft: 24,
+            borderRight: 'none',
+          }}>
+            {/* Search trigger button */}
+            <button
+              onClick={() => setSearchOpen(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                width: '100%',
+                padding: '8px 12px',
+                marginBottom: 20,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 8,
+                cursor: 'pointer',
+                color: 'rgba(255,255,255,0.4)',
+                fontSize: 14,
+                fontFamily,
+                outline: 'none',
+                transition: 'border-color 0.15s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)')}
+              onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)')}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <img src={searchIcon} alt="" style={{ width: 16, height: 16, opacity: 0.6 }} />
+                {t('docs.search.placeholder')}
+              </span>
+              <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', lineHeight: 1 }}>⌘K</span>
+            </button>
 
-      {/* Mobile TOC dropdown */}
-      {mobileTocOpen && (
-        <div className="lg:hidden fixed inset-0 z-[60] bg-black/60" onClick={() => setMobileTocOpen(false)}>
-          <div
-            className="bg-dark-900 border-r border-dark-600/30 w-64 max-h-full overflow-y-auto pt-16 pb-8 px-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ul className="space-y-1">
-              {sections.map((s) => (
-                <li key={s.id}>
+            {sidebarTree.map((group, gi) => (
+              <div key={gi} style={{ display: 'flex', flexDirection: 'column', marginBottom: 16 }}>
+                {/* Group header */}
+                <div style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '8px 12px 12px 12px',
+                }}>
+                  <span style={{ flexShrink: 0, fontSize: 14, fontWeight: 600, color: '#ffffff', fontFamily, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                    {t(group.groupLabelKey)}
+                  </span>
+                </div>
+                {/* Group items */}
+                {group.items.map((item) => {
+                  const isActive = item.slug === activeSlug;
+                  const hasChildren = item.children && item.children.length > 0;
+                  const isExpanded = expandedItems[item.id] ?? false;
+                  return (
+                    <React.Fragment key={item.id}>
+                      <div
+                        onClick={() => {
+                          navigateToDoc(item.slug);
+                        }}
+                        style={{
+                          height: 36,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          borderRadius: 6,
+                          padding: '10px 12px',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s',
+                          background: isActive ? 'rgba(43, 222, 94, 0.12)' : 'transparent',
+                        }}
+                      >
+                        <div style={{ display: 'flex', flex: 1, alignItems: 'center', gap: 8 }}>
+                          <span style={{
+                            flexShrink: 0,
+                            fontSize: 14,
+                            fontFamily,
+                            fontWeight: isActive ? 500 : 400,
+                            color: isActive ? '#2BDE5E' : 'rgba(255,255,255,0.7)',
+                            lineHeight: '22px',
+                            transition: 'color 0.2s',
+                          }}>
+                            {t(item.labelKey)}
+                          </span>
+                        </div>
+                        {hasChildren && (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpand(item.id);
+                            }}
+                            style={{ display: 'flex', alignItems: 'center', padding: 2 }}
+                          >
+                            <ChevronIcon expanded={isExpanded} />
+                          </div>
+                        )}
+                      </div>
+                      {/* Children (sub-items) */}
+                      {hasChildren && isExpanded && item.children!.map((child) => {
+                        const childActive = child.slug === activeSlug;
+                        return (
+                          <div
+                            key={child.id}
+                            onClick={() => navigateToDoc(child.slug)}
+                            style={{
+                              height: 36,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              borderRadius: 6,
+                              padding: '10px 12px 10px 28px',
+                              cursor: 'pointer',
+                              background: childActive ? 'rgba(43, 222, 94, 0.12)' : 'transparent',
+                            }}
+                          >
+                            <div style={{ display: 'flex', flex: 1, alignItems: 'center', gap: 8 }}>
+                              <span style={{
+                                flexShrink: 0,
+                                fontSize: 14,
+                                fontFamily,
+                                fontWeight: childActive ? 500 : 400,
+                                color: childActive ? '#2BDE5E' : 'rgba(255,255,255,0.7)',
+                                lineHeight: '22px',
+                                transition: 'color 0.2s',
+                              }}>
+                                {t(child.labelKey)}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
+        )}
+
+        {/* ─── Main content area ─── */}
+        <div ref={contentRef} onClick={handleContentClick} style={{ display: 'flex', flex: 1, flexDirection: 'column', minWidth: 0, padding: isMobile ? '32px 20px 80px' : '40px 48px 80px' }}>
+          {/* Doc title */}
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#FFFFFF', margin: '0 0 32px 0', lineHeight: '36px', fontFamily }}>
+            {docTitle}
+          </h1>
+          {/* Rendered markdown content */}
+          <MarkdownRenderer content={docContent} />
+
+          {/* ─── Prev / Next pagination ─── */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginTop: 56,
+          }}>
+            {prevDoc ? (
+              <button
+                onClick={() => navigateToDoc(prevDoc.slug)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: 0,
+                  transition: 'opacity 0.2s',
+                }}
+              >
+                <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>‹</span>
+                <span style={{ fontSize: 14, fontFamily, color: 'rgba(255,255,255,0.7)', fontWeight: 400 }}>
+                  {t(prevDoc.labelKey)}
+                </span>
+              </button>
+            ) : <span />}
+            {nextDoc ? (
+              <button
+                onClick={() => navigateToDoc(nextDoc.slug)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: 0,
+                  transition: 'opacity 0.2s',
+                }}
+              >
+                <span style={{ fontSize: 14, fontFamily, color: 'rgba(255,255,255,0.7)', fontWeight: 400 }}>
+                  {t(nextDoc.labelKey)}
+                </span>
+                <span style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>›</span>
+              </button>
+            ) : <span />}
+          </div>
+        </div>
+
+        {/* ─── Right sidebar: page TOC ─── */}
+        {!isMobile && headings.length > 0 && (
+          <div style={{
+            position: 'sticky',
+            top: 72,
+            width: 220,
+            flexShrink: 0,
+            height: 'calc(100vh - 72px)',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            paddingLeft: 20,
+            paddingRight: 24,
+            paddingTop: 40,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <img src={docContentsIcon} alt="" style={{ width: 20, height: 20 }} />
+              <span style={{ fontSize: 14, fontWeight: 500, color: 'rgba(255,255,255,0.5)', letterSpacing: '0.05em', position: 'relative', top: 1 }}>
+                {t('docs.toc')}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {headings.map((h, i) => {
+                const isActive = h.id === activeHeadingId;
+                const isHovered = h.id === hoveredHeadingId;
+                return (
                   <button
-                    onClick={() => { scrollToSection(s.id); setMobileTocOpen(false); }}
-                    className={`block w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                      activeSection === s.id ? 'text-brand-400 bg-brand-500/10 font-medium' : 'text-slate-400 hover:text-white hover:bg-dark-800/50'
-                    }`}
+                    key={i}
+                    onClick={() => scrollToHeading(h.id)}
+                    onMouseEnter={() => setHoveredHeadingId(h.id)}
+                    onMouseLeave={() => setHoveredHeadingId('')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontSize: 14,
+                      fontFamily: 'PingFang SC, -apple-system, sans-serif',
+                      fontWeight: isActive ? 500 : 400,
+                      color: isActive ? '#2BDE5E' : isHovered ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)',
+                      lineHeight: '22px',
+                      padding: 0,
+                      paddingLeft: h.level === 3 ? 16 : 0,
+                      transition: 'color 0.2s',
+                    }}
                   >
-                    {s.label}
+                    {h.text}
                   </button>
-                </li>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+      <Footer />
+
+      {/* Search Modal */}
+      {searchOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.6)',
+            zIndex: 9999,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            paddingTop: 120,
+          }}
+          onClick={() => setSearchOpen(false)}
+        >
+          <div
+            style={{
+              width: 560,
+              maxWidth: '90vw',
+              background: '#141414',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 12,
+              overflow: 'hidden',
+              boxShadow: '0 24px 48px rgba(0,0,0,0.4)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Search input */}
+            <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px' }}>
+              <img src={searchIcon} alt="" style={{ width: 16, height: 16, flexShrink: 0, opacity: 0.6 }} />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder={t('docs.search.placeholder')}
+                style={{
+                  flex: 1,
+                  marginLeft: 12,
+                  background: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  color: '#ffffff',
+                  fontSize: 14,
+                  fontFamily,
+                }}
+              />
+            </div>
+            {/* Results */}
+            <div style={{ maxHeight: 400, overflowY: 'auto', padding: searchQuery ? '8px 0' : '0' }}>
+              {searchQuery && searchResults.length === 0 && (
+                <div style={{ padding: '24px 16px', textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 14 }}>
+                  {t('docs.search.noResults')}
+                </div>
+              )}
+              {searchResults.map((result, idx) => (
+                <button
+                  key={result.slug}
+                  onClick={() => handleSearchSelect(result.slug)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    padding: '10px 16px',
+                    background: idx === searchSelectedIdx ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    outline: 'none',
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={() => setSearchSelectedIdx(idx)}
+                >
+                  <div style={{ color: '#ffffff', fontSize: 14, fontWeight: 500, fontFamily, marginBottom: 4 }}>
+                    {result.title}
+                  </div>
+                  <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontFamily, lineHeight: '18px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {result.snippet}
+                  </div>
+                </button>
               ))}
-            </ul>
+            </div>
+            {/* Footer hints */}
+            {searchResults.length > 0 && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 16px',
+                borderTop: '1px solid rgba(255,255,255,0.08)',
+                fontSize: 12,
+                color: 'rgba(255,255,255,0.35)',
+                fontFamily,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <kbd style={{ background: 'rgba(255,255,255,0.85)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: '#000000' }}>↑</kbd>
+                    <kbd style={{ background: 'rgba(255,255,255,0.85)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: '#000000' }}>↓</kbd>
+                    {t('docs.search.hint.select')}
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <kbd style={{ background: 'rgba(255,255,255,0.85)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: '#000000' }}>↵</kbd>
+                    {t('docs.search.hint.open')}
+                  </span>
+                </div>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <kbd style={{ background: 'rgba(255,255,255,0.85)', borderRadius: 3, padding: '0px 3px', fontSize: 9, color: '#000000' }}>esc</kbd>
+                  {t('docs.search.hint.close')}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
-
-      <div className="max-w-7xl mx-auto px-6 py-12 flex gap-12 relative z-10">
-        {/* Sidebar TOC — desktop */}
-        <aside className="hidden lg:block w-56 flex-shrink-0 sticky top-24 self-start max-h-[calc(100vh-120px)] overflow-y-auto">
-          <p className="text-slate-500 text-xs font-mono uppercase tracking-widest mb-4">{t('docs.toc')}</p>
-          <ul className="space-y-1 border-l border-dark-600/20 pl-4">
-            {sections.map((s) => (
-              <li key={s.id}>
-                <button
-                  onClick={() => scrollToSection(s.id)}
-                  className={`w-full text-left block py-1.5 text-sm transition-all border-l-2 -ml-4 pl-4 ${
-                    activeSection === s.id
-                      ? 'text-brand-400 border-brand-500 font-medium'
-                      : 'text-slate-500 border-transparent hover:text-slate-300 hover:border-slate-700'
-                  }`}
-                >
-                  {s.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </aside>
-
-        {/* Main content */}
-        <main className="flex-1 min-w-0 max-w-3xl">
-          {/* Overview */}
-          <DocSection id="overview" title={t('docs.overviewTitle')}>
-            <p className="text-slate-300 leading-relaxed mb-4">
-              <code className="text-brand-400 bg-dark-800/50 px-1.5 py-0.5 rounded text-sm font-mono">Open Code Review</code>{' '}
-              <span dangerouslySetInnerHTML={{ __html: t('docs.overviewDesc') }} />
-            </p>
-            <div className="glass rounded-xl p-5 mb-6">
-              <p className="text-slate-400 text-sm mb-3"><strong className="text-white">{t('docs.overviewFeatures')}</strong></p>
-              <ul className="space-y-2 text-sm text-slate-400">
-                {(['docs.overviewFeat1', 'docs.overviewFeat2', 'docs.overviewFeat3', 'docs.overviewFeat4', 'docs.overviewFeat5', 'docs.overviewFeat6'] as const).map((key) => (
-                  <li key={key} className="flex items-start gap-2"><i className="fa-solid fa-check text-brand-500 mt-1 text-xs"></i>{t(key)}</li>
-                ))}
-              </ul>
-            </div>
-          </DocSection>
-
-          {/* Install */}
-          <DocSection id="install" title={t('docs.installTitle')}>
-            <div className="space-y-4 mb-8">
-              <div className="feature-card rounded-xl p-4 glass">
-                <h4 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <i className="fa-solid fa-download text-brand-400 text-sm"></i>
-                  {t('docs.installLabel')}
-                </h4>
-                <CodeBlock
-                  code="npm i -g @alibaba-group/open-code-review"
-                  copied={copiedIndex === 'install'}
-                  onCopy={() => handleCopy('npm i -g @alibaba-group/open-code-review', 'install')}
-                  copyLabel={t('docs.copy')}
-                />
-              </div>
-              <div className="feature-card rounded-xl p-4 glass">
-                <h4 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <i className="fa-solid fa-circle-check text-brand-400 text-sm"></i>
-                  {t('docs.installVerifyLabel')}
-                </h4>
-                <CodeBlock
-                  code="ocr version"
-                  copied={copiedIndex === 'install-verify'}
-                  onCopy={() => handleCopy('ocr version', 'install-verify')}
-                  copyLabel={t('docs.copy')}
-                />
-              </div>
-            </div>
-          </DocSection>
-
-          {/* Config */}
-          <DocSection id="config" title={t('docs.configTitle')}>
-            <p className="text-slate-300 leading-relaxed mb-6" dangerouslySetInnerHTML={{ __html: t('docs.configDesc') }} />
-
-            <h3 className="text-lg font-semibold text-white mb-3">{t('docs.configInteractive')}</h3>
-            <p className="text-slate-400 text-sm mb-3">{t('docs.configInteractiveDesc')}</p>
-            <div className="space-y-3 mb-6">
-              <CodeBlock
-                code="ocr config provider"
-                copied={copiedIndex === 'config-provider'}
-                onCopy={() => handleCopy('ocr config provider', 'config-provider')}
-                copyLabel={t('docs.copy')}
-              />
-            </div>
-            <div className="space-y-3 mb-6">
-              <p className="text-slate-500 text-xs font-mono mb-2 ml-1">{t('docs.configModelSelect')}</p>
-              <p className="text-slate-400 text-sm mb-3">{t('docs.configModelSelectDesc')}</p>
-              <CodeBlock
-                code="ocr config model"
-                copied={copiedIndex === 'config-model'}
-                onCopy={() => handleCopy('ocr config model', 'config-model')}
-                copyLabel={t('docs.copy')}
-              />
-            </div>
-            <div className="space-y-3 mb-8">
-              <p className="text-slate-500 text-xs font-mono mb-2 ml-1">{t('docs.configListProviders')}</p>
-              <p className="text-slate-400 text-sm mb-3">{t('docs.configListProvidersDesc')}</p>
-              <CodeBlock
-                code="ocr llm providers"
-                copied={copiedIndex === 'config-providers-list'}
-                onCopy={() => handleCopy('ocr llm providers', 'config-providers-list')}
-                copyLabel={t('docs.copy')}
-              />
-            </div>
-
-            <h3 className="text-lg font-semibold text-white mb-3">{t('docs.configManual')}</h3>
-
-            <h4 className="text-base font-medium text-slate-300 mb-3">{t('docs.configCommand')}</h4>
-            <CodeBlock code="ocr config set &lt;key&gt; &lt;value&gt;" />
-
-            <h4 className="text-base font-medium text-slate-300 mb-3 mt-6">{t('docs.configExample')}</h4>
-            <div className="space-y-3 mb-8">
-              <CodeBlock
-                code={`ocr config set llm.url https://api.anthropic.com \\\n    && ocr config set llm.auth_token {{your-api-key}} \\\n    && ocr config set llm.model claude-opus-4-6 \\\n    && ocr config set llm.use_anthropic true  \\\n    && ocr config set language Chinese`}
-                copied={copiedIndex === 'config-examples'}
-                onCopy={() => handleCopy(`ocr config set llm.url https://api.anthropic.com \\\n    && ocr config set llm.auth_token {{your-api-key}} \\\n    && ocr config set llm.model claude-opus-4-6 \\\n    && ocr config set llm.use_anthropic true  \\\n    && ocr config set language Chinese`, 'config-examples')}
-                copyLabel={t('docs.copy')}
-              />
-            </div>
-
-            <h3 className="text-lg font-semibold text-white mb-3">{t('docs.configKeys')}</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {[
-                { key: 'llm.url', descKey: 'docs.configKeyUrl' },
-                { key: 'llm.auth_token', descKey: 'docs.configKeyToken' },
-                { key: 'llm.model', descKey: 'docs.configKeyModel' },
-                { key: 'llm.use_anthropic', descKey: 'docs.configKeyAnthropic' },
-                { key: 'llm.extra_body', descKey: 'docs.configKeyExtraBody' },
-                { key: 'language', descKey: 'docs.configKeyLanguage' },
-                { key: 'telemetry.enabled', descKey: 'docs.configKeyTelemetry' },
-              ].map(({ key, descKey }) => (
-                <div key={key} className="rounded-lg bg-dark-800/40 px-3 py-2 border border-dark-600/20">
-                  <code className="text-brand-400 font-mono text-sm">{key}</code>
-                  <span className="text-slate-500 text-sm ml-2">{t(descKey)}</span>
-                </div>
-              ))}
-            </div>
-
-            <h3 className="text-lg font-semibold text-white mb-3 mt-8">{t('docs.configVerify')}</h3>
-            <CodeBlock
-              code={`# Test LLM connection\nocr llm test`}
-            />
-            <p className="text-slate-400 text-sm mt-4">
-              {t('docs.configVerifyDesc')}
-            </p>
-          </DocSection>
-
-          {/* Review */}
-          <DocSection id="review" title={t('docs.reviewTitle')}>
-            <p className="text-slate-300 leading-relaxed mb-6" dangerouslySetInnerHTML={{ __html: t('docs.reviewDesc') }} />
-
-            <h3 className="text-lg font-semibold text-white mb-3">{t('docs.reviewModes')}</h3>
-            <div className="space-y-4 mb-8">
-              <div className="feature-card rounded-xl p-4 glass">
-                <h4 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <i className="fa-solid fa-pen-to-square text-brand-400 text-sm"></i>
-                  {t('docs.reviewWorkspace')}
-                </h4>
-                <p className="text-slate-400 text-sm mb-2">{t('docs.reviewWorkspaceDesc')}</p>
-                <CodeBlock code="ocr review" />
-              </div>
-              <div className="feature-card rounded-xl p-4 glass">
-                <h4 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <i className="fa-solid fa-code-branch text-brand-400 text-sm"></i>
-                  {t('docs.reviewBranch')}
-                </h4>
-                <p className="text-slate-400 text-sm mb-2">{t('docs.reviewBranchDesc')}</p>
-                <CodeBlock
-                  code="ocr review --from master --to dev-ref"
-                  copied={copiedIndex === 'review-branch'}
-                  onCopy={() => handleCopy('ocr review --from master --to dev-ref', 'review-branch')}
-                  copyLabel={t('docs.copy')}
-                />
-              </div>
-              <div className="feature-card rounded-xl p-4 glass">
-                <h4 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <i className="fa-solid fa-code-commit text-brand-400 text-sm"></i>
-                  {t('docs.reviewCommit')}
-                </h4>
-                <p className="text-slate-400 text-sm mb-2">{t('docs.reviewCommitDesc')}</p>
-                <CodeBlock
-                  code={`ocr review --commit abc123\nocr review -c abc123`}
-                  copied={copiedIndex === 'review-commit'}
-                  onCopy={() => handleCopy('ocr review -c abc123', 'review-commit')}
-                  copyLabel={t('docs.copy')}
-                />
-              </div>
-            </div>
-
-            <h3 className="text-lg font-semibold text-white mb-3">{t('docs.reviewAdvanced')}</h3>
-            <div className="space-y-4 mb-8">
-              <div className="feature-card rounded-xl p-4 glass">
-                <h4 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <i className="fa-solid fa-file-code text-brand-400 text-sm"></i>
-                  {t('docs.reviewBackground')}
-                </h4>
-                <p className="text-slate-400 text-sm mb-2">{t('docs.reviewBackgroundDesc')}</p>
-                <CodeBlock
-                  code={`ocr review --background "requirement context"\nocr review -b "requirement context"`}
-                  copied={copiedIndex === 'review-background'}
-                  onCopy={() => handleCopy('ocr review --background "requirement context"', 'review-background')}
-                  copyLabel={t('docs.copy')}
-                />
-              </div>
-              <div className="feature-card rounded-xl p-4 glass">
-                <h4 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <i className="fa-solid fa-file-code text-brand-400 text-sm"></i>
-                  {t('docs.reviewJson')}
-                </h4>
-                <p className="text-slate-400 text-sm mb-2">{t('docs.reviewJsonDesc')}</p>
-                <CodeBlock
-                  code={`ocr review --format json\nocr review -f json`}
-                  copied={copiedIndex === 'review-json'}
-                  onCopy={() => handleCopy('ocr review --format json', 'review-json')}
-                  copyLabel={t('docs.copy')}
-                />
-              </div>
-              <div className="feature-card rounded-xl p-4 glass">
-                <h4 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <i className="fa-solid fa-robot text-brand-400 text-sm"></i>
-                  {t('docs.reviewAgent')}
-                </h4>
-                <p className="text-slate-400 text-sm mb-2">{t('docs.reviewAgentDesc')}</p>
-                <CodeBlock
-                  code="ocr review --audience agent"
-                  copied={copiedIndex === 'review-agent'}
-                  onCopy={() => handleCopy('ocr review --audience agent', 'review-agent')}
-                  copyLabel={t('docs.copy')}
-                />
-              </div>
-            </div>
-
-            <h3 className="text-lg font-semibold text-white mb-3">{t('docs.reviewFlags')}</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-dark-600/30">
-                    <th className="text-left py-2 px-3 text-slate-400 font-mono text-xs">{t('docs.reviewFlagCol1')}</th>
-                    <th className="text-left py-2 px-3 text-slate-400 text-xs">{t('docs.reviewFlagCol2')}</th>
-                    <th className="text-left py-2 px-3 text-slate-400 text-xs">{t('docs.reviewFlagCol3')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    ['-c, --commit', t('docs.reviewFlag1Desc'), ''],
-                    ['--from', t('docs.reviewFlag2Desc'), ''],
-                    ['--to', t('docs.reviewFlag3Desc'), ''],
-                    ['-f, --format', t('docs.reviewFlag4Desc'), 'text'],
-                    ['--repo', t('docs.reviewFlag5Desc'), t('docs.reviewFlag5Default')],
-                    ['--rule', t('docs.reviewFlag6Desc'), t('docs.reviewFlag6Default')],
-                    ['--concurrency', t('docs.reviewFlag7Desc'), '8'],
-                    ['--timeout', t('docs.reviewFlag8Desc'), '10'],
-                    ['--audience', t('docs.reviewFlag9Desc'), 'human'],
-                    ['--max-tools', t('docs.reviewFlag10Desc'), t('docs.reviewFlag10Default')],
-                    ['--max-git-procs', t('docs.reviewFlag11Desc'), t('docs.reviewFlag10Default')],
-                  ].map(([flag, desc, def]) => (
-                    <tr key={flag} className="border-b border-dark-800/30 hover:bg-dark-800/20 transition-colors">
-                      <td className="py-2 px-3"><code className="text-brand-400 font-mono text-xs whitespace-nowrap">{flag}</code></td>
-                      <td className="py-2 px-3 text-slate-300">{desc}</td>
-                      <td className="py-2 px-3 text-slate-500 font-mono text-xs">{def || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-slate-500 text-xs mt-3" dangerouslySetInnerHTML={{ __html: t('docs.reviewNote') }} />
-          </DocSection>
-
-          {/* Viewer */}
-          <DocSection id="viewer" title={t('docs.viewerTitle')}>
-            <p className="text-slate-300 leading-relaxed mb-6">
-              {t('docs.viewerDesc')}
-            </p>
-
-            <CodeBlock code="ocr viewer" />
-            <p className="text-slate-400 text-sm mt-4">
-              {t('docs.viewerNote')}
-            </p>
-          </DocSection>
-
-          {/* Environment variables */}
-          <DocSection id="env" title={t('docs.envTitle')}>
-            <p className="text-slate-300 leading-relaxed mb-4" dangerouslySetInnerHTML={{ __html: t('docs.envDesc') }} />
-            <CodeBlock
-              code={`export ANTHROPIC_BASE_URL=https://api.anthropic.com
-export ANTHROPIC_AUTH_TOKEN=sk-ant-xxxxx
-export ANTHROPIC_MODEL=claude-opus-4-6
-
-${t('quickstart.commentEnvAuto')} ✨`}
-            />
-            <p className="text-slate-400 text-sm mt-4" dangerouslySetInnerHTML={{ __html: t('docs.envNote') }} />
-          </DocSection>
-
-          {/* Footer spacer */}
-          <div className="h-32"></div>
-        </main>
-      </div>
     </div>
   );
 };

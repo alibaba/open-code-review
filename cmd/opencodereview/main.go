@@ -46,6 +46,8 @@ func dispatch() error {
 		return nil
 	case "review", "r":
 		return runReview(args[1:])
+	case "scan", "s":
+		return runScan(args[1:])
 	case "config":
 		return runConfig(args[1:])
 	case "llm":
@@ -54,6 +56,8 @@ func dispatch() error {
 		return runRules(args[1:])
 	case "viewer":
 		return runViewer(args[1:])
+	case "session", "sessions":
+		return runSession(args[1:])
 	case "-h", "--help":
 		printTopLevelUsage()
 		return nil
@@ -69,27 +73,34 @@ Usage:
   ocr [command]
 
 Commands:
-  review, r    Start a code review
+  review, r    Start a diff-based code review
+  scan, s      Scan entire files (no diff required)
   rules        Inspect and debug review rules
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
+  session, sessions  List and inspect saved review sessions
   version      Show version information
 
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr scan                                 Scan every reviewable file in the repo
+  ocr scan --path internal/agent           Scan a single directory
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
+  ocr session list                         List saved review sessions
   ocr version                              Show version info
 
 Use "ocr review -h" for more information about review.
+Use "ocr scan -h" for more information about scan.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
+Use "ocr session -h" for more information about session inspection.
 
 GitHub: https://github.com/alibaba/open-code-review`)
 }

@@ -11,7 +11,7 @@ jobs:
   build:
     runs-on: self-hosted
     container:
-      image: golang:1.26.4
+      image: golang:1.26.5
     strategy:
       matrix:
         include:
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Trust workspace
-        run: git config --global safe.directory '*'
+        run: git config --global --replace-all safe.directory '*'
 
       - name: Build
         env:
@@ -58,6 +58,10 @@ jobs:
   release:
     needs: build
     runs-on: self-hosted
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     container:
       image: ubuntu:24.04
     steps:
@@ -69,7 +73,7 @@ jobs:
           fetch-depth: 0
 
       - name: Trust workspace
-        run: git config --global safe.directory '*'
+        run: git config --global --replace-all safe.directory '*'
 
       - name: Generate release notes from commits
         id: notes
@@ -145,18 +149,25 @@ jobs:
             opencodereview-*
             sha256sum.txt
 
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            opencodereview-*
+            sha256sum.txt
+
   npm-publish:
     needs: release
     runs-on: self-hosted
     container:
-      image: node:20
+      image: node:24
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
 
       - name: Trust workspace
-        run: git config --global safe.directory '*'
+        run: git config --global --replace-all safe.directory '*'
 
       - name: Install jq
         run: apt-get update && apt-get install -y jq

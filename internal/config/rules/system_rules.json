@@ -13,6 +13,7 @@
     "**/*.{yaml,yml}": "yaml.md",
     "**/*.java": "java.md",
     "**/*.ets": "arkts.md",
+    "**/*.astro": "astro.md",
     "**/*.{ts,js,tsx,jsx}": "ts_js_tsx_jsx.md",
     "**/*.{kt}": "kotlin.md",
     "**/*.rs": "rust.md",

@@ -117,6 +117,34 @@ body {
   flex-shrink: 0;
 }
 
+.setup-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.setup-secondary-sep {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.link-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--mint));
+  font-family: var(--font);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
 .mode-tabs {
   display: flex;
   background: var(--vscode-input-background, var(--card-deeper));
@@ -577,6 +605,16 @@ body {
   cursor: not-allowed;
 }
 
+.primary-btn.configure:not(:disabled) {
+  background: var(--card-soft);
+  color: var(--mint);
+  border: 1px solid var(--mint);
+}
+
+.primary-btn.configure:not(:disabled):hover {
+  background: var(--mint-tint);
+}
+
 .skeleton-btn {
   background: var(--fill-soft);
   pointer-events: none;
@@ -584,30 +622,6 @@ body {
 
 .skeleton-btn .skeleton-bar {
   height: 11px;
-}
-
-.config-fab {
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  z-index: 5;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  color: var(--ink-quiet);
-  font-size: 15px;
-  cursor: pointer;
-  transition: background-color 0.2s, color 0.2s;
-}
-
-.config-fab:hover {
-  background: var(--fill-soft);
-  color: var(--ink);
 }
 
 /* === 6. Action Region === */
@@ -1143,6 +1157,815 @@ body {
   border-color: var(--rule);
 }
 
+.provider-tab-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.provider-tab {
+  flex: 1;
+  padding: 8px 10px;
+  background: var(--card-soft);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--ink-quiet);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.provider-tab:hover {
+  background: var(--card-quiet);
+  color: var(--ink-soft);
+}
+
+.provider-tab.active {
+  background: var(--mint-tint);
+  border-color: var(--mint);
+  color: var(--mint);
+  font-weight: 600;
+}
+
+/* === Config Panel (editor area — antd page layout) === */
+.config-panel-root {
+  min-height: 100vh;
+  background: var(--vscode-editor-background, var(--bg));
+}
+
+.config-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.config-page-header {
+  padding: 20px 32px 16px;
+  border-bottom: 1px solid var(--vscode-widget-border, var(--rule));
+  background: var(--vscode-editor-background, var(--bg));
+}
+
+.config-page-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.config-page-meta {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-widget-border, var(--rule));
+  background: var(--vscode-input-background, var(--fill-soft));
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.config-page-meta-label {
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+  font-weight: 500;
+}
+
+.config-page-meta-value {
+  color: var(--vscode-foreground, var(--ink));
+  font-family: var(--font-mono, monospace);
+}
+
+.active-provider-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-widget-border, var(--rule));
+  background: var(--vscode-input-background, var(--fill-soft));
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.active-provider-banner.empty {
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+}
+
+.active-provider-label {
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+  font-size: 12px;
+}
+
+.active-provider-badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--vscode-badge-foreground, var(--ink));
+  background: var(--vscode-badge-background, rgba(127, 127, 127, 0.25));
+}
+
+.active-provider-name {
+  font-weight: 500;
+  color: var(--vscode-foreground, var(--ink));
+}
+
+.active-provider-dot {
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+}
+
+.active-provider-model {
+  color: var(--vscode-foreground, var(--ink));
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.active-provider-detail {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+  font-size: 12px;
+}
+
+.active-provider-empty-text {
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+}
+
+.config-page-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--vscode-foreground, var(--ink));
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.config-page-title::before {
+  display: none;
+}
+
+.config-page-desc {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+}
+
+.config-page-body {
+  flex: 1;
+  width: 100%;
+  padding: 24px 32px 32px;
+  box-sizing: border-box;
+}
+
+.config-page .config-stepper {
+  margin-bottom: 24px;
+}
+
+.config-page .wizard-body {
+  gap: 20px;
+}
+
+.config-page .env-checklist {
+  width: 100%;
+}
+
+.config-page .env-checking-banner {
+  width: 100%;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+/* Segmented control (antd) */
+.segmented-control {
+  display: flex;
+  width: 100%;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 6px;
+  background: var(--vscode-input-background, var(--fill-soft));
+  border: 1px solid var(--vscode-widget-border, var(--rule));
+  box-sizing: border-box;
+}
+
+.segmented-item {
+  flex: 1;
+  padding: 7px 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+}
+
+.segmented-item:hover {
+  color: var(--vscode-foreground, var(--ink));
+}
+
+.segmented-item.active {
+  background: var(--vscode-editor-background, var(--card));
+  color: var(--vscode-foreground, var(--ink));
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* Form grid */
+.provider-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px 24px;
+  width: 100%;
+}
+
+.form-item {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.modal-panel .form-item {
+  margin-bottom: 16px;
+}
+
+.provider-step .segmented-control {
+  margin-bottom: 4px;
+}
+
+.form-item.span-2 {
+  grid-column: 1 / -1;
+}
+
+.form-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-footer.page-footer {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--vscode-widget-border, var(--rule));
+}
+
+.form-footer.page-footer .form-actions {
+  justify-content: flex-end;
+}
+
+.form-meta {
+  font-size: 12px;
+  color: var(--ink-quiet);
+  padding: 8px 12px;
+  background: var(--fill-soft);
+  border-radius: 6px;
+}
+
+.form-meta code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.config-page .form-label {
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--vscode-foreground, var(--ink));
+  font-weight: 400;
+  margin-bottom: 8px;
+}
+
+.config-page .form-label .optional {
+  color: var(--vscode-descriptionForeground, var(--ink-faint));
+  font-size: 13px;
+}
+
+.config-page .form-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+}
+
+.config-page .form-hint code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.config-page .form-input,
+.config-page .select-trigger {
+  min-height: 32px;
+  padding: 4px 11px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: var(--font);
+  background: var(--vscode-input-background, var(--card-soft));
+  border-color: var(--vscode-input-border, var(--rule));
+}
+
+.config-page .select-value {
+  font-family: var(--font);
+  font-size: 14px;
+}
+
+.config-page .form-input:focus,
+.config-page .select.open .select-trigger {
+  border-color: var(--mint);
+  box-shadow: 0 0 0 2px var(--mint-tint);
+}
+
+.form-input-mt {
+  margin-top: 8px;
+}
+
+/* Ant Design buttons */
+.btn-default {
+  padding: 4px 15px;
+  min-height: 32px;
+  background: var(--vscode-button-secondaryBackground, transparent);
+  border: 1px solid var(--vscode-button-border, var(--rule));
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--vscode-foreground, var(--ink-soft));
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-default:hover:not(:disabled) {
+  color: var(--mint);
+  border-color: var(--mint);
+}
+
+.btn-default:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  padding: 4px 15px;
+  min-height: 32px;
+  background: var(--mint);
+  border: 1px solid var(--mint);
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 500;
+  color: #0a1010;
+  cursor: pointer;
+  transition: background-color 0.15s, opacity 0.15s;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--mint-soft);
+  border-color: var(--mint-soft);
+}
+
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.config-page .form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.config-page .form-actions .btn-default,
+.config-page .form-actions .btn-primary {
+  min-width: 88px;
+}
+
+.config-toast {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  padding: 8px 16px;
+  background: var(--card-quiet);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--mint);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.config-toast.error {
+  color: #e6a845;
+  border-color: rgba(230, 168, 69, 0.35);
+}
+
+/* Custom provider manager */
+.custom-provider-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.custom-provider-manager-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.custom-provider-manager-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--vscode-foreground, var(--ink));
+}
+
+.custom-provider-manager-desc {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+}
+
+.custom-provider-empty {
+  padding: 32px 16px;
+  text-align: center;
+  border: 1px dashed var(--vscode-widget-border, var(--rule));
+  border-radius: 8px;
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+}
+
+.custom-provider-empty p {
+  margin: 0 0 12px;
+}
+
+.custom-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.custom-provider-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--vscode-widget-border, var(--rule));
+  border-radius: 8px;
+  background: var(--vscode-input-background, var(--card-soft));
+}
+
+.custom-provider-card.active {
+  border-color: var(--mint);
+  box-shadow: 0 0 0 1px var(--mint-tint);
+}
+
+.custom-provider-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.custom-provider-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vscode-foreground, var(--ink));
+}
+
+.custom-provider-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--mint);
+  background: var(--mint-tint);
+}
+
+.custom-provider-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+  margin-bottom: 4px;
+}
+
+.custom-provider-card-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(420px, 100%);
+}
+
+.custom-provider-card-dot {
+  opacity: 0.6;
+}
+
+.custom-provider-card-model {
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+}
+
+.custom-provider-card-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-text {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--vscode-textLink-foreground, var(--mint));
+  cursor: pointer;
+}
+
+.btn-text:hover {
+  background: var(--vscode-toolbar-hoverBackground, var(--fill-soft));
+}
+
+.btn-text.danger {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.btn-text.back-link {
+  padding-left: 0;
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+}
+
+.btn-text.back-link:hover {
+  color: var(--vscode-foreground, var(--ink));
+}
+
+/* === Env Setup Guide === */
+.env-guide-lead {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-quiet);
+  line-height: 1.55;
+}
+
+.env-checking-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--fill-soft);
+  border: 1px solid var(--rule-soft);
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  align-self: center;
+}
+
+.env-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--rule);
+  border-top-color: var(--mint);
+  border-radius: 50%;
+  animation: env-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes env-spin {
+  to { transform: rotate(360deg); }
+}
+
+.env-checklist {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--card-soft);
+}
+
+.env-checklist-item {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--rule-soft);
+  font-size: 13px;
+}
+
+.env-checklist-item.last {
+  border-bottom: none;
+}
+
+.env-checklist-marker {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.env-checklist-item.loading .env-checklist-marker {
+  background: transparent;
+  border: 2px solid var(--rule);
+  border-top-color: var(--mint);
+  width: 12px;
+  height: 12px;
+  animation: env-spin 0.7s linear infinite;
+}
+
+.env-checklist-item.ok .env-checklist-marker {
+  background: var(--mint);
+  box-shadow: 0 0 0 3px var(--mint-tint);
+}
+
+.env-checklist-item.fail .env-checklist-marker {
+  background: #e6a845;
+}
+
+.env-checklist-label {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.env-checklist-meta {
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--ink-quiet);
+}
+
+.env-checklist-item.ok .env-checklist-meta {
+  color: var(--mint);
+}
+
+.env-checklist-item.fail .env-checklist-meta {
+  color: #e6a845;
+}
+
+.env-checklist-item.loading .env-checklist-meta {
+  color: var(--ink-faint);
+}
+
+.env-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.env-timeline-item {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 12px;
+  min-height: 48px;
+}
+
+.env-timeline-track {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 4px;
+}
+
+.env-timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+.env-timeline-item.ok .env-timeline-dot {
+  background: var(--mint);
+  box-shadow: 0 0 0 4px var(--mint-tint);
+}
+
+.env-timeline-item.fail .env-timeline-dot {
+  background: #e6a845;
+  box-shadow: 0 0 0 4px rgba(230, 168, 69, 0.12);
+}
+
+.env-timeline-item.pending .env-timeline-dot {
+  background: transparent;
+  border: 2px solid var(--rule);
+}
+
+.env-timeline-line {
+  flex: 1;
+  width: 1px;
+  margin-top: 6px;
+  min-height: 24px;
+  background: var(--rule);
+}
+
+.env-timeline-item.last .env-timeline-line {
+  display: none;
+}
+
+.env-timeline-content {
+  padding-bottom: 18px;
+}
+
+.env-timeline-item.last .env-timeline-content {
+  padding-bottom: 0;
+}
+
+.env-timeline-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+}
+
+.env-timeline-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.env-timeline-item.pending .env-timeline-title {
+  color: var(--ink-quiet);
+}
+
+.env-timeline-status {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.env-timeline-status.ok {
+  color: var(--mint);
+}
+
+.env-timeline-status.fail {
+  color: #e6a845;
+}
+
+.env-timeline-detail {
+  margin-top: 8px;
+}
+
+.env-timeline-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--ink-quiet);
+  line-height: 1.55;
+}
+
+.env-cmd-block {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--card-deeper);
+}
+
+.env-cmd-block code {
+  flex: 1;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+  word-break: break-all;
+  line-height: 1.45;
+}
+
+.env-cmd-copy {
+  flex-shrink: 0;
+  padding: 0 12px;
+  border: none;
+  border-left: 1px solid var(--rule);
+  background: var(--card-soft);
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--ink-quiet);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.env-cmd-copy:hover {
+  background: var(--card-quiet);
+  color: var(--ink);
+}
+
 /* === Config Modal === */
 .modal-backdrop {
   position: fixed;
@@ -1173,12 +1996,88 @@ body {
 
 .config-form-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 18px;
+  gap: 12px;
+  margin-bottom: 20px;
 }
 
-/* === Config Wizard === */
+.config-form-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.config-form-subtitle {
+  font-size: 12px;
+  color: var(--ink-quiet);
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 400;
+}
+
+.config-stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 20px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--fill-soft);
+  border: 1px solid var(--rule-soft);
+  box-sizing: border-box;
+}
+
+.config-step-pill {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--ink-quiet);
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.config-step-pill.active {
+  background: var(--card-quiet);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.config-step-pill.done {
+  color: var(--mint);
+}
+
+.config-step-num {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--fill);
+  color: var(--ink-quiet);
+}
+
+.config-step-pill.active .config-step-num {
+  background: var(--mint-tint);
+  color: var(--mint);
+}
+
+.config-step-pill.done .config-step-num {
+  background: var(--mint-tint);
+  color: var(--mint);
+}
+
+/* === Config Wizard (legacy modal) === */
 .wizard-steps {
   display: flex;
   align-items: center;
@@ -1336,6 +2235,46 @@ body {
 
 .form-input::placeholder {
   color: var(--ink-faint);
+}
+
+.password-input-wrap {
+  position: relative;
+  display: flex;
+  width: 100%;
+}
+
+.password-input-wrap .password-input {
+  flex: 1;
+  width: 100%;
+  padding-right: 36px;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, var(--ink-quiet));
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.password-toggle:hover {
+  color: var(--vscode-foreground, var(--ink));
+  background: var(--vscode-toolbar-hoverBackground, var(--fill-soft));
+}
+
+.config-page .password-input-wrap .form-input {
+  min-height: 32px;
 }
 
 .model-rows {

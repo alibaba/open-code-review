@@ -327,6 +327,7 @@ func loadGlobalRule() (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal global rule: %w", err)
 	}
+	resolveRuleEntries(pr.Rules, filepath.Dir(path))
 	return &pr, nil
 }
 
@@ -339,9 +340,15 @@ func loadRuleFile(path string) (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal rule file %s: %w", path, err)
 	}
+	resolveRuleEntries(pr.Rules, filepath.Dir(path))
 	return &pr, nil
 }
 
+// loadProjectRule reads <repoDir>/.opencodereview/rule.json. Since #287 anchored
+// RepoDir at the git top-level, `ocr review` from a monorepo subdirectory loads
+// the repo-root rule file — which is consistent, since rule entries match against
+// root-relative diff paths. A subproject-local rule.json under the subdirectory is
+// intentionally not consulted; put shared rules at the repo root, or pass --rule.
 func loadProjectRule(repoDir string) (*ProjectRule, error) {
 	path := filepath.Join(repoDir, ".opencodereview", "rule.json")
 	data, err := os.ReadFile(path)
@@ -355,6 +362,7 @@ func loadProjectRule(repoDir string) (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal project rule: %w", err)
 	}
+	resolveRuleEntries(pr.Rules, repoDir)
 	return &pr, nil
 }
 
@@ -437,4 +445,114 @@ func matchProjectRuleEntry(pr *ProjectRule, path string) *ProjectRuleEntry {
 		}
 	}
 	return nil
+}
+
+// allowedRuleExts is the set of file extensions permitted for rule file references.
+var allowedRuleExts = map[string]bool{".md": true, ".txt": true, ".markdown": true}
+
+// looksLikeFilePath returns true when s is likely a file path (not inline content).
+// Heuristic: multi-line text is always inline; single-line text without spaces
+// ending in .md/.txt/.markdown is treated as a file path. Values containing spaces
+// (e.g. "Follow rules from team.md") are treated as inline to avoid false positives.
+func looksLikeFilePath(s string) bool {
+	if strings.Contains(s, "\n") {
+		return false
+	}
+	if strings.Contains(s, " ") {
+		return false
+	}
+	return allowedRuleExts[strings.ToLower(filepath.Ext(s))]
+}
+
+// resolveRuleEntries scans each entry's Rule field. When the value looks like a file
+// path, it reads the file content and replaces the Rule. Absolute paths are used
+// directly; relative paths are resolved against repoDir only. Multi-line and short
+// inline rules are left unchanged. If the file cannot be read, the Rule is cleared
+// (set to empty) and a warning is emitted.
+func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string) {
+	for i := range entries {
+		e := &entries[i]
+		if strings.TrimSpace(e.Rule) == "" || !looksLikeFilePath(e.Rule) {
+			continue
+		}
+		if content := tryReadRuleFile(e.Rule, repoDir); content != nil {
+			e.Rule = *content
+		} else {
+			e.Rule = ""
+		}
+	}
+}
+
+// tryReadRuleFile attempts to read a rule file. Absolute paths are used directly.
+// Relative paths are resolved against repoDir and validated to stay within repoDir.
+// Returns nil when the file cannot be read safely or does not exist.
+func tryReadRuleFile(rule string, repoDir string) *string {
+	if repoDir == "" {
+		if !filepath.IsAbs(rule) {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot resolve relative rule path %q without a repo dir\n", rule)
+			return nil
+		}
+	}
+	if filepath.IsAbs(rule) {
+		content, err := readRuleFileSafe(rule)
+		if err == nil {
+			return &content
+		}
+		if os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: rule file not found: %s\n", rule)
+		} else {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read rule file %s: %v\n", rule, err)
+		}
+		return nil
+	}
+
+	// Relative path: resolve against repoDir, validate no traversal.
+	resolved := filepath.Clean(filepath.Join(repoDir, rule))
+	cleanRepo := filepath.Clean(repoDir)
+	if !strings.HasPrefix(resolved, cleanRepo+string(os.PathSeparator)) {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: rule file path escapes repo dir: %s\n", rule)
+		return nil
+	}
+
+	content, err := readRuleFileSafe(resolved)
+	if err == nil {
+		return &content
+	}
+	if os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: rule file not found: %s\n", rule)
+	} else {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read rule file %s: %v\n", resolved, err)
+	}
+	return nil
+}
+
+// readRuleFileSafe reads and validates a rule file. It enforces extension whitelist
+// (.md / .txt / .markdown), a 512 KB size cap, and resolves symlinks before checking
+// the path. Symlinks are resolved first, then size is checked via Stat before reading.
+// Returns the trimmed content on success.
+func readRuleFileSafe(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+
+	if !allowedRuleExts[strings.ToLower(filepath.Ext(resolved))] {
+		return "", fmt.Errorf("unsupported extension %q, only .md/.txt/.markdown allowed", filepath.Ext(resolved))
+	}
+
+	const maxSize = 512 * 1024
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if info.Size() > maxSize {
+		return "", fmt.Errorf("file too large (%d bytes, max %d)", info.Size(), maxSize)
+	}
+
+	content, err := os.ReadFile(resolved)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimRight(string(content), "\n"), nil
 }

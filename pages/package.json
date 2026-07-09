@@ -8,9 +8,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@agentscope-ai/icons": "^1.0.68",
+    "dompurify": "^3.4.11",
+    "marked": "^18.0.5",
+    "mermaid": "^11.16.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.8.0"
+    "react-router-dom": "^6.8.0",
+    "three": "^0.185.0"
   },
   "overrides": {
     "fast-uri": "^3.1.2"
@@ -20,8 +25,10 @@
     "@babel/preset-env": "^7.29.5",
     "@babel/preset-react": "^7.23.5",
     "@babel/preset-typescript": "^7.23.3",
+    "@types/dompurify": "^3.0.5",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "@types/three": "^0.185.0",
     "autoprefixer": "^10.4.16",
     "babel-loader": "^9.1.3",
     "css-loader": "^6.8.1",

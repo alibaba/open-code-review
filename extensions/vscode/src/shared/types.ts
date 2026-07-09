@@ -38,7 +38,20 @@ export interface CliResult {
   message?: string;
 }
 
+export interface ProviderEntry {
+  apiKey?: string;
+  url?: string;
+  protocol?: string;
+  model?: string;
+  models?: string[];
+  authHeader?: string;
+}
+
 export interface OcrConfig {
+  provider?: string;
+  model?: string;
+  providers: Record<string, ProviderEntry>;
+  customProviders: Record<string, ProviderEntry>;
   llm: {
     url: string;
     authToken: string;
@@ -70,6 +83,17 @@ export interface GitState {
 export interface LogLine {
   text: string;
   level: 'info' | 'warn' | 'error';
+}
+
+export interface EnvToolStatus {
+  ok: boolean;
+  version?: string;
+}
+
+export interface EnvCheckResult {
+  node: EnvToolStatus;
+  npm: EnvToolStatus;
+  ocr: EnvToolStatus;
 }
 
 export interface CliRunOptions {

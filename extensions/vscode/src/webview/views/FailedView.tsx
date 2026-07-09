@@ -1,11 +1,14 @@
+import { useT } from '../I18nProvider';
+
 interface Props { onRetry: () => void; error?: string; }
 export function FailedView({ onRetry, error }: Props) {
+  const t = useT();
   return (
     <div class="action-failed" style="display:block">
       <div class="failed-card">
-        <div class="fc-msg">审查失败。<br/>{error ? '请检查模型配置后重试。' : '请检查 API Key 和网络连接。'}</div>
+        <div class="fc-msg">{t('view.failed.title')}<br/>{error ? t('view.failed.checkConfig') : t('view.failed.checkApiKey')}</div>
         {error && <div class="fc-detail">{error}</div>}
-        <button class="retry-pill" onClick={onRetry}>重试</button>
+        <button class="retry-pill" onClick={onRetry}>{t('view.failed.retry')}</button>
       </div>
     </div>
   );

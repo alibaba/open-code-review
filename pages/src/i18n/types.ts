@@ -1,3 +1,3 @@
-export type Language = 'en' | 'zh';
+export type Language = 'en' | 'zh' | 'ja';
 
 export type TranslationKeys = Record<string, string>;
