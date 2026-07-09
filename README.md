@@ -408,6 +408,21 @@ See the [`examples/`](./examples/) directory for integration examples:
 - [`gitlab_ci/`](./examples/gitlab_ci/) — GitLab CI integration example
 - [`gitflic_ci/`](./examples/gitflic_ci/) — GitFlic CI integration example
 
+#### GitHub Action
+
+For GitHub, this repository also ships a ready-to-use composite Action at the repo root ([`action.yml`](./action.yml)). Instead of scripting `ocr review` yourself, reference it directly and it handles the full pipeline — checkout, OCR install, running the review, posting inline and summary comments, uploading artifacts, and retry/idempotency:
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+```
+
+Pin to a version tag or commit SHA for reproducibility. See the [`examples/github_actions/`](./examples/github_actions/) directory for a complete workflow demo and the full list of inputs, outputs, and comment-posting modes (sticky summary, incremental non-destructive posting).
+
 ## Commands
 
 | Command | Alias | Description |
