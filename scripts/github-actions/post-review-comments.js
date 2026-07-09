@@ -635,6 +635,9 @@ async function listExistingReviewComments(github, owner, repo, prNumber, log) {
     log(`[incremental] listing review comments failed (${e.message}); degrading to no history.`);
     return [];
   }
+  if (page > MAX_PAGES) {
+    log(`[incremental] listing review comments reached max page limit (${MAX_PAGES}); results may be incomplete.`);
+  }
   return all;
 }
 
