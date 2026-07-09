@@ -1783,6 +1783,17 @@ func (m providerTUIModel) handleManualFormEnter() (tea.Model, tea.Cmd) {
 		m.manualStep = manualStepExtraHeaders
 		return m, m.focusManualStep()
 	case manualStepExtraHeaders:
+		// Re-parse from input so saved Extra Body matches what the user sees if they
+		// edited the field after advancing from manualStepExtraBody (inline draft hints
+		// surface parse errors; formError stays empty to avoid duplicate messages).
+		extraBody, err := parseExtraBodyInput(m.manualExtraBodyInput.Value())
+		if err != nil {
+			m.formError = ""
+			m.manualExtraHeadersInput.Blur()
+			m.manualStep = manualStepExtraBody
+			return m, m.focusManualStep()
+		}
+		m.manualExtraBody = extraBody
 		extraHeaders, err := parseExtraHeadersInput(m.manualExtraHeadersInput.Value())
 		if err != nil {
 			m.formError = ""

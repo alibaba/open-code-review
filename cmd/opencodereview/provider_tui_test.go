@@ -2966,6 +2966,56 @@ func TestProviderTUI_CustomFormExtraHeadersReparsesExtraBodyFromInput(t *testing
 	}
 }
 
+func TestProviderTUI_ManualFormExtraHeadersReparsesExtraBodyFromInput(t *testing.T) {
+	m := newProviderTUI(&Config{}, "")
+	m.activeTab = tabManual
+	m = enterManualForm(m)
+	m.manualStep = manualStepExtraHeaders
+	m.manualExtraBody = map[string]any{"stale": true}
+	m.manualExtraBodyInput.SetValue(`{"enable_thinking":false}`)
+	m.manualExtraHeadersInput.SetValue(`{}`)
+	m.manualExtraHeadersInput.Focus()
+
+	result, _ := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.formError != "" {
+		t.Fatalf("unexpected formError: %q", m2.formError)
+	}
+	if !m2.confirmed {
+		t.Fatal("expected manual form confirmed")
+	}
+	got := m2.result().extraBody
+	if got["enable_thinking"] != false {
+		t.Fatalf("ExtraBody should come from input field, not stale cache: %#v", got)
+	}
+	if _, ok := got["stale"]; ok {
+		t.Fatal("stale cached extra body should not be persisted")
+	}
+}
+
+func TestProviderTUI_ManualFormExtraHeadersFallsBackToExtraBodyOnParseError(t *testing.T) {
+	m := newProviderTUI(&Config{}, "")
+	m.activeTab = tabManual
+	m = enterManualForm(m)
+	m.manualStep = manualStepExtraHeaders
+	m.manualExtraBody = nil
+	m.manualExtraBodyInput.SetValue(`{"enable_thinking": tru}`)
+	m.manualExtraHeadersInput.SetValue(`{"X-Org-ID":"org-123"}`)
+	m.manualExtraHeadersInput.Focus()
+
+	result, _ := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.manualStep != manualStepExtraBody {
+		t.Fatalf("manualStep = %d, want extra body after invalid extra body input", m2.manualStep)
+	}
+	if m2.formError != "" {
+		t.Fatalf("formError = %q, want empty (inline draft error only)", m2.formError)
+	}
+	if hint := extraBodyErrorFromDraft(m2.manualExtraBodyInput.Value()); hint == "" {
+		t.Fatal("expected inline extra body error hint")
+	}
+}
+
 func TestProviderTUI_CustomFormExtraHeadersFallsBackToExtraBodyOnParseError(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
 	m.activeTab = tabCustom

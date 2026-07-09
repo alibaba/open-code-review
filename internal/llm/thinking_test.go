@@ -1,6 +1,9 @@
 package llm
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTranslateThinking_Object_Off(t *testing.T) {
 	body := translateThinking("off", "deepseek", "deepseek-v4-pro")
@@ -203,6 +206,16 @@ func TestValidateModelsThinking_RejectsEmptyModelKey(t *testing.T) {
 	}
 	if err := ValidateModelsThinking(map[string]string{"   ": "off"}); err == nil {
 		t.Fatal("expected error for whitespace model key")
+	}
+}
+
+func TestValidateModelsThinking_RejectsCaseInsensitiveDuplicateKeys(t *testing.T) {
+	err := ValidateModelsThinking(map[string]string{"Model-A": "on", "model-a": "off"})
+	if err == nil {
+		t.Fatal("expected error for case-insensitive duplicate keys")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("error = %q, want ambiguous duplicate message", err)
 	}
 }
 

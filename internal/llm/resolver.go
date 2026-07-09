@@ -592,7 +592,7 @@ func ValidateExtraBody(m map[string]any) error {
 		return nil
 	}
 	for k := range m {
-		if isReservedExtraBodyKey(strings.ToLower(k)) {
+		if isReservedExtraBodyKey(k) {
 			return fmt.Errorf("extra_body must not set %q (case-insensitive; reserved for request payload)", k)
 		}
 	}

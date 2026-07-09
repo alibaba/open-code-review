@@ -51,10 +51,16 @@ func ValidateModelsThinkingMode(mode string) error {
 
 // ValidateModelsThinking validates every entry in a models_thinking map.
 func ValidateModelsThinking(m map[string]string) error {
+	seen := make(map[string]string, len(m))
 	for model, mode := range m {
 		if strings.TrimSpace(model) == "" {
 			return fmt.Errorf("models_thinking keys must be non-empty model names")
 		}
+		key := strings.ToLower(strings.TrimSpace(model))
+		if prev, dup := seen[key]; dup {
+			return fmt.Errorf("models_thinking has ambiguous keys %q and %q (case-insensitive duplicate)", prev, model)
+		}
+		seen[key] = model
 		if err := ValidateModelsThinkingMode(mode); err != nil {
 			return fmt.Errorf("models_thinking[%q]: %w", model, err)
 		}
