@@ -40,6 +40,7 @@ func runConfigProvider() error {
 
 	result := final.result()
 
+	// existingCfg is the same pointer as cfg (set in newProviderTUI).
 	if result.isManual {
 		return applyManualConfig(configPath, cfg, result)
 	}
@@ -115,6 +116,14 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	cfg.Llm.AuthHeader = authHeader
 	useAnthropic := result.protocol == "anthropic"
 	cfg.Llm.UseAnthropic = &useAnthropic
+	if err := llm.ValidateExtraBody(result.extraBody); err != nil {
+		return fmt.Errorf("invalid extra_body: %w", err)
+	}
+	if err := llm.ValidateExtraHeadersMap(result.extraHeaders); err != nil {
+		return fmt.Errorf("invalid extra_headers: %w", err)
+	}
+	cfg.Llm.ExtraBody = result.extraBody
+	cfg.Llm.ExtraHeaders = result.extraHeaders
 
 	if err := saveConfig(configPath, cfg); err != nil {
 		return err
@@ -171,6 +180,24 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 		entry.APIKey = result.apiKey
 	} else {
 		entry.APIKey = ""
+	}
+	if err := llm.ValidateExtraBody(result.extraBody); err != nil {
+		return fmt.Errorf("invalid extra_body: %w", err)
+	}
+	if err := llm.ValidateExtraHeadersMap(result.extraHeaders); err != nil {
+		return fmt.Errorf("invalid extra_headers: %w", err)
+	}
+	entry.ExtraBody = result.extraBody
+	entry.ExtraHeaders = result.extraHeaders
+	// modelThinkingModes is not merged here because the TUI disables
+	// thinking toggle for custom providers, so result.modelThinkingModes is always nil.
+	if err := llm.ValidateModelsThinking(entry.ModelsThinking); err != nil {
+		return fmt.Errorf("invalid models_thinking: %w", err)
+	}
+	beforeThinking := len(entry.ModelsThinking)
+	entry.ModelsThinking = llm.PruneModelsThinking(entry.ModelsThinking, allowedModelsForThinking(false, result.provider, entry))
+	if beforeThinking > len(entry.ModelsThinking) {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: some models_thinking entries were pruned for custom provider %q (thinking toggle is not supported for custom providers)\n", result.provider)
 	}
 	cfg.CustomProviders[result.provider] = entry
 
@@ -246,6 +273,12 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 		// Confirmed empty key: clear saved api_key so resolver falls back to $ENV_VAR.
 		entry.APIKey = ""
 	}
+	entry.ModelsThinking = llm.MergeModelsThinking(entry.ModelsThinking, result.modelThinkingModes)
+	if err := llm.ValidateModelsThinking(entry.ModelsThinking); err != nil {
+		return fmt.Errorf("invalid models_thinking: %w", err)
+	}
+	allowedModels := allowedModelsForThinking(true, result.provider, entry)
+	entry.ModelsThinking = llm.PruneModelsThinking(entry.ModelsThinking, allowedModels)
 	cfg.Providers[result.provider] = entry
 
 	if cfg.Provider != result.provider {
@@ -344,6 +377,10 @@ func runConfigModel() error {
 		entry := cfg.CustomProviders[cfg.Provider]
 		entry.Model = selectedModel
 		entry.Models = ensureModelInList(entry.Models, selectedModel)
+		if err := llm.ValidateModelsThinking(entry.ModelsThinking); err != nil {
+			return fmt.Errorf("invalid models_thinking: %w", err)
+		}
+		entry.ModelsThinking = llm.PruneModelsThinking(entry.ModelsThinking, allowedModelsForThinking(false, cfg.Provider, entry))
 		cfg.CustomProviders[cfg.Provider] = entry
 	} else {
 		if cfg.Providers == nil {
@@ -356,6 +393,12 @@ func runConfigModel() error {
 		if !llm.ModelListContains(registryModels, selectedModel) {
 			entry.Models = ensureModelInList(entry.Models, selectedModel)
 		}
+		entry.ModelsThinking = llm.MergeModelsThinking(entry.ModelsThinking, final.modelsThinkingSnapshotForSave())
+		if err := llm.ValidateModelsThinking(entry.ModelsThinking); err != nil {
+			return fmt.Errorf("invalid models_thinking: %w", err)
+		}
+		allowedModels := allowedModelsForThinking(true, cfg.Provider, entry)
+		entry.ModelsThinking = llm.PruneModelsThinking(entry.ModelsThinking, allowedModels)
 		cfg.Providers[cfg.Provider] = entry
 	}
 	cfg.Model = selectedModel

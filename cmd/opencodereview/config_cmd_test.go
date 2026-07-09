@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"testing"
+
+	"github.com/open-code-review/open-code-review/internal/llm"
 )
 
 func TestSetConfigValueAuthHeaderNormalizesKnownValues(t *testing.T) {
@@ -200,6 +202,111 @@ func TestSetConfigValueProviderEntryExtraBody(t *testing.T) {
 	}
 	if _, ok := cfg.Providers["anthropic"].ExtraBody["thinking"]; !ok {
 		t.Error("extra_body missing 'thinking' key")
+	}
+}
+
+func TestSetConfigValueProviderEntryModelsThinking(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "providers.anthropic.models_thinking", `{"claude-sonnet-4-6":"off"}`); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if got := cfg.Providers["anthropic"].ModelsThinking["claude-sonnet-4-6"]; got != "off" {
+		t.Fatalf("ModelsThinking = %#v", cfg.Providers["anthropic"].ModelsThinking)
+	}
+
+	if err := setConfigValue(cfg, "providers.anthropic.models_thinking", `{"m":"enabled"}`); err == nil {
+		t.Fatal("expected error for invalid models_thinking value")
+	}
+	if err := setConfigValue(cfg, "providers.anthropic.models_thinking", `{"":"off"}`); err == nil {
+		t.Fatal("expected error for empty models_thinking model key")
+	}
+
+	if err := setConfigValue(cfg, "providers.anthropic.models_thinking", ""); err != nil {
+		t.Fatalf("clear models_thinking: %v", err)
+	}
+	if cfg.Providers["anthropic"].ModelsThinking != nil {
+		t.Fatalf("empty input should clear models_thinking, got %#v", cfg.Providers["anthropic"].ModelsThinking)
+	}
+
+	if err := setConfigValue(cfg, "providers.anthropic.models_thinking", `{"Claude-Sonnet-4-6":"off"}`); err != nil {
+		t.Fatalf("mixed-case key: %v", err)
+	}
+	if got := cfg.Providers["anthropic"].ModelsThinking["claude-sonnet-4-6"]; got != llm.ModelsThinkingOff {
+		t.Fatalf("ModelsThinking key should be normalized to lowercase, got %#v", cfg.Providers["anthropic"].ModelsThinking)
+	}
+
+	if err := setConfigValue(cfg, "providers.anthropic.models_thinking", `{"claude-sonnet-4-6":"on"}`); err != nil {
+		t.Fatalf("all-on input should be accepted: %v", err)
+	}
+	if got := cfg.Providers["anthropic"].ModelsThinking["claude-sonnet-4-6"]; got != llm.ModelsThinkingOn {
+		t.Fatalf("ModelsThinking = %#v, want on", cfg.Providers["anthropic"].ModelsThinking)
+	}
+
+	if err := setConfigValue(cfg, "providers.anthropic.models_thinking", `{"stale-model":"off"}`); err == nil {
+		t.Fatal("expected error when models_thinking models are not in allowed list")
+	}
+
+	cfg.Providers["anthropic"] = ProviderEntry{Model: "claude-opus-4-8"}
+	if err := setConfigValue(cfg, "providers.anthropic.models_thinking", `{"claude-opus-4-8":"off"}`); err != nil {
+		t.Fatalf("active model not in preset list: %v", err)
+	}
+	if got := cfg.Providers["anthropic"].ModelsThinking["claude-opus-4-8"]; got != llm.ModelsThinkingOff {
+		t.Fatalf("entry.Model should be allowed for preset providers, got %#v", cfg.Providers["anthropic"].ModelsThinking)
+	}
+}
+
+func TestSetConfigValueProviderEntryModelPrunesModelsThinking(t *testing.T) {
+	cfg := &Config{
+		Providers: map[string]ProviderEntry{
+			"anthropic": {
+				Model:          "model-x",
+				ModelsThinking: map[string]string{"model-x": llm.ModelsThinkingOff},
+			},
+		},
+	}
+	if err := setConfigValue(cfg, "providers.anthropic.model", "model-y"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.Providers["anthropic"].ModelsThinking != nil {
+		t.Fatalf("stale model-x thinking entry should be pruned, got %#v", cfg.Providers["anthropic"].ModelsThinking)
+	}
+	if cfg.Providers["anthropic"].Model != "model-y" {
+		t.Fatalf("Model = %q", cfg.Providers["anthropic"].Model)
+	}
+}
+
+func TestSetConfigValueCustomProviderModelsThinking(t *testing.T) {
+	cfg := &Config{
+		CustomProviders: map[string]ProviderEntry{
+			"foo": {URL: "https://example.com/v1", Protocol: "openai", Model: "m"},
+		},
+	}
+	if err := setConfigValue(cfg, "custom_providers.foo.models_thinking", `{"m":"off"}`); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if got := cfg.CustomProviders["foo"].ModelsThinking["m"]; got != llm.ModelsThinkingOff {
+		t.Fatalf("ModelsThinking = %#v", cfg.CustomProviders["foo"].ModelsThinking)
+	}
+}
+
+func TestSetConfigValueCustomProviderNamedLikePreset_KeepsModelsThinking(t *testing.T) {
+	cfg := &Config{
+		CustomProviders: map[string]ProviderEntry{
+			"openai": {
+				URL:      "https://gw.example.com/v1",
+				Protocol: "openai",
+				Model:    "my-custom-model",
+				Models:   []string{"my-custom-model"},
+			},
+		},
+	}
+	if err := setConfigValue(cfg, "custom_providers.openai.models_thinking", `{"my-custom-model":"on"}`); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	got := cfg.CustomProviders["openai"].ModelsThinking
+	if got["my-custom-model"] != llm.ModelsThinkingOn {
+		t.Fatalf("ModelsThinking = %#v, want my-custom-model:on", got)
 	}
 }
 

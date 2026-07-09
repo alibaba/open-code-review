@@ -242,6 +242,35 @@ func TestCloneProviderEntry_NilExtraBody(t *testing.T) {
 	}
 }
 
+func TestCloneProviderEntry_PreservesModelsThinking(t *testing.T) {
+	orig := ProviderEntry{
+		Model:          "claude-sonnet-4-6",
+		ModelsThinking: map[string]string{"claude-sonnet-4-6": "off"},
+	}
+	clone := cloneProviderEntry(orig)
+	if clone.ModelsThinking["claude-sonnet-4-6"] != "off" {
+		t.Fatalf("ModelsThinking not cloned: %#v", clone.ModelsThinking)
+	}
+	clone.ModelsThinking["claude-sonnet-4-6"] = "on"
+	if orig.ModelsThinking["claude-sonnet-4-6"] != "off" {
+		t.Fatal("modifying clone should not affect original ModelsThinking")
+	}
+}
+
+func TestApplyModelDeleteToEntry_RemovesModelsThinking(t *testing.T) {
+	entry := ProviderEntry{
+		Models:         []string{"model-a", "model-b"},
+		ModelsThinking: map[string]string{"model-a": "off", "model-b": "off"},
+	}
+	got := applyModelDeleteToEntry(entry, "model-a")
+	if len(got.Models) != 1 || got.Models[0] != "model-b" {
+		t.Fatalf("Models = %#v", got.Models)
+	}
+	if len(got.ModelsThinking) != 1 || got.ModelsThinking["model-b"] != "off" {
+		t.Fatalf("ModelsThinking = %#v", got.ModelsThinking)
+	}
+}
+
 func TestCustomListCount(t *testing.T) {
 	cfg := &Config{
 		CustomProviders: map[string]ProviderEntry{
@@ -456,7 +485,7 @@ func TestWindowSizeMsg(t *testing.T) {
 
 func TestBlurManualStep_AllSteps(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
-	for _, step := range []manualStep{manualStepURL, manualStepProtocol, manualStepModel, manualStepAuthToken, manualStepAuthHeader} {
+	for _, step := range []manualStep{manualStepURL, manualStepProtocol, manualStepModel, manualStepAuthToken, manualStepAuthHeader, manualStepExtraBody, manualStepExtraHeaders} {
 		m.manualStep = step
 		m.blurManualStep()
 	}
@@ -464,9 +493,24 @@ func TestBlurManualStep_AllSteps(t *testing.T) {
 
 func TestFocusManualStep_AllSteps(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
-	for _, step := range []manualStep{manualStepURL, manualStepProtocol, manualStepModel, manualStepAuthToken, manualStepAuthHeader} {
+	textSteps := map[manualStep]func(providerTUIModel) bool{
+		manualStepURL:          func(m providerTUIModel) bool { return m.manualURLInput.Focused() },
+		manualStepModel:        func(m providerTUIModel) bool { return m.manualModelInput.Focused() },
+		manualStepAuthToken:    func(m providerTUIModel) bool { return m.manualTokenInput.Focused() },
+		manualStepAuthHeader:   func(m providerTUIModel) bool { return m.manualAuthHeaderInput.Focused() },
+		manualStepExtraBody:    func(m providerTUIModel) bool { return m.manualExtraBodyInput.Focused() },
+		manualStepExtraHeaders: func(m providerTUIModel) bool { return m.manualExtraHeadersInput.Focused() },
+	}
+	for step, focused := range textSteps {
 		m.manualStep = step
 		m.focusManualStep()
+		if !focused(m) {
+			t.Errorf("step %d should focus its input", step)
+		}
+	}
+	m.manualStep = manualStepProtocol
+	if cmd := m.focusManualStep(); cmd != nil {
+		t.Error("protocol step should not return a focus command")
 	}
 }
 
@@ -1862,7 +1906,7 @@ func TestProviderTUIView_CustomForm_AllSteps(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
 	m.activeTab = tabCustom
 	m.creatingCustom = true
-	for _, step := range []customProviderStep{cpStepName, cpStepBaseURL, cpStepAPIKey, cpStepAuthHeader, cpStepProtocol} {
+	for _, step := range []customProviderStep{cpStepName, cpStepBaseURL, cpStepAPIKey, cpStepAuthHeader, cpStepProtocol, cpStepExtraBody, cpStepExtraHeaders} {
 		m.cpStep = step
 		v := m.View()
 		if v.Content == "" {
@@ -1888,7 +1932,7 @@ func TestProviderTUIView_ManualForm_AllSteps(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
 	m.activeTab = tabManual
 	m.inManualForm = true
-	for _, step := range []manualStep{manualStepURL, manualStepProtocol, manualStepModel, manualStepAuthToken, manualStepAuthHeader} {
+	for _, step := range []manualStep{manualStepURL, manualStepProtocol, manualStepModel, manualStepAuthToken, manualStepAuthHeader, manualStepExtraBody, manualStepExtraHeaders} {
 		m.manualStep = step
 		v := m.View()
 		if v.Content == "" {
@@ -1943,5 +1987,251 @@ func TestProviderTUIView_StepModel_CustomTabDeleteHelp(t *testing.T) {
 	got = stripANSI(m.View().Content)
 	if !strings.Contains(got, "d Delete") {
 		t.Errorf("custom model row should show d Delete hint; got:\n%s", got)
+	}
+}
+
+func TestModelThinkingState_CurrentMode_InMemoryNormalized(t *testing.T) {
+	state := modelThinkingState{
+		providerName: "anthropic",
+		modes: map[string]string{
+			"anthropic:claude-sonnet-4-6": " OFF ",
+		},
+	}
+	if got := state.currentMode("claude-sonnet-4-6"); got != llm.ModelsThinkingOff {
+		t.Fatalf("currentMode = %q", got)
+	}
+}
+
+func TestModelThinkingState_CurrentMode_InMemoryCaseInsensitive(t *testing.T) {
+	state := modelThinkingState{
+		providerName: "anthropic",
+		modes: map[string]string{
+			"anthropic:claude-sonnet-4-6": llm.ModelsThinkingOff,
+		},
+	}
+	if got := state.currentMode("Claude-Sonnet-4-6"); got != llm.ModelsThinkingOff {
+		t.Fatalf("currentMode = %q", got)
+	}
+}
+
+func TestModelThinkingState_CurrentMode_InvalidFallsBackToPersisted(t *testing.T) {
+	state := modelThinkingState{
+		providerName: "anthropic",
+		modes: map[string]string{
+			"anthropic:claude-sonnet-4-6": "maybe",
+		},
+		loadPersisted: func(model string) (string, bool) {
+			return llm.ModelsThinkingOff, true
+		},
+	}
+	if got := state.currentMode("claude-sonnet-4-6"); got != llm.ModelsThinkingOff {
+		t.Fatalf("currentMode = %q", got)
+	}
+}
+
+func TestModelThinkingState_CurrentMode_EmptyModelDefaultsOn(t *testing.T) {
+	state := modelThinkingState{providerName: "anthropic"}
+	if got := state.currentMode("  "); got != llm.ModelsThinkingOn {
+		t.Fatalf("currentMode = %q", got)
+	}
+}
+
+func TestModelThinkingState_CurrentMode_ProviderIsolation(t *testing.T) {
+	// Same model name, different providers, should have different thinking modes.
+	state := modelThinkingState{
+		providerName: "dashscope",
+		modes: map[string]string{
+			"dashscope:deepseek-v4-pro": llm.ModelsThinkingOff,
+			"deepseek:deepseek-v4-pro":  llm.ModelsThinkingOn,
+		},
+	}
+	if got := state.currentMode("deepseek-v4-pro"); got != llm.ModelsThinkingOff {
+		t.Fatalf("dashscope deepseek-v4-pro currentMode = %q, want off", got)
+	}
+	stateDeepseek := modelThinkingState{
+		providerName: "deepseek",
+		modes: map[string]string{
+			"dashscope:deepseek-v4-pro": llm.ModelsThinkingOff,
+			"deepseek:deepseek-v4-pro":  llm.ModelsThinkingOn,
+		},
+	}
+	if got := stateDeepseek.currentMode("deepseek-v4-pro"); got != llm.ModelsThinkingOn {
+		t.Fatalf("deepseek deepseek-v4-pro currentMode = %q, want on", got)
+	}
+}
+
+func TestToggleModelThinkingMode_NormalizesModelKey(t *testing.T) {
+	modes := map[string]string{}
+	toggleModelThinkingMode(&modes, "anthropic", " Claude-Sonnet-4-6 ", llm.ModelsThinkingOn)
+	if modes["anthropic:claude-sonnet-4-6"] != llm.ModelsThinkingOff {
+		t.Fatalf("modes = %#v", modes)
+	}
+}
+
+func TestToggleModelThinkingMode_NilModesPointerNoPanic(t *testing.T) {
+	var modes map[string]string
+	toggleModelThinkingMode(nil, "anthropic", "claude-sonnet-4-6", llm.ModelsThinkingOn)
+	if modes != nil {
+		t.Fatalf("expected nil modes, got %#v", modes)
+	}
+}
+
+func TestTryToggleModelThinking_TogglesWhenSupported(t *testing.T) {
+	modes := map[string]string{}
+	state := modelThinkingState{
+		providerName: "deepseek",
+		allowToggle:  func() bool { return true },
+	}
+	if !tryToggleModelThinking(state, "deepseek-v4-pro", &modes) {
+		t.Fatal("expected toggle to succeed")
+	}
+	if modes["deepseek:deepseek-v4-pro"] != llm.ModelsThinkingOff {
+		t.Fatalf("modes = %#v", modes)
+	}
+}
+
+func TestTryToggleModelThinking_RejectsUnsupportedModel(t *testing.T) {
+	modes := map[string]string{}
+	state := modelThinkingState{
+		providerName: "dashscope",
+		allowToggle:  func() bool { return true },
+	}
+	if tryToggleModelThinking(state, "kimi-k2.7-code", &modes) {
+		t.Fatal("expected toggle to fail for thinking-only model")
+	}
+}
+
+func TestModelsThinkingSnapshotForSave_IncludesCurrentModelOn(t *testing.T) {
+	state := modelThinkingState{
+		providerName: "baidu-qianfan",
+		allowToggle:  func() bool { return true },
+	}
+	got := modelsThinkingSnapshotForSave(nil, state, "glm-5")
+	if got["glm-5"] != llm.ModelsThinkingOn {
+		t.Fatalf("snapshot = %#v, want glm-5:on", got)
+	}
+
+	got = modelsThinkingSnapshotForSave(map[string]string{
+		"baidu-qianfan:glm-5": llm.ModelsThinkingOff,
+	}, modelThinkingState{
+		providerName: "baidu-qianfan",
+		modes: map[string]string{
+			"baidu-qianfan:glm-5": llm.ModelsThinkingOff,
+		},
+		allowToggle: func() bool { return true },
+	}, "glm-5")
+	if got["glm-5"] != llm.ModelsThinkingOff {
+		t.Fatalf("snapshot = %#v, want glm-5:off", got)
+	}
+}
+
+func TestModelsThinkingSnapshotForSave_CollapsesMixedCaseKeys(t *testing.T) {
+	state := modelThinkingState{
+		providerName: "dashscope",
+		modes: map[string]string{
+			"dashscope:qwen3.7-max": llm.ModelsThinkingOff,
+		},
+		allowToggle: func() bool { return true },
+	}
+	got := modelsThinkingSnapshotForSave(map[string]string{
+		"dashscope:Qwen3.7-Max": llm.ModelsThinkingOff,
+	}, state, "qwen3.7-max")
+	if len(got) != 1 {
+		t.Fatalf("snapshot = %#v, want single normalized key", got)
+	}
+	if got["qwen3.7-max"] != llm.ModelsThinkingOff {
+		t.Fatalf("snapshot = %#v, want qwen3.7-max:off", got)
+	}
+	if _, dup := got["Qwen3.7-Max"]; dup {
+		t.Fatalf("snapshot should not keep mixed-case duplicate: %#v", got)
+	}
+}
+
+func TestProviderTUI_ModelsThinkingSnapshotUsesSessionModelPick(t *testing.T) {
+	cfg := &Config{
+		Provider: "dashscope-tokenplan",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"dashscope-tokenplan": {
+				Model: "deepseek-v4-flash",
+				ModelsThinking: map[string]string{
+					"glm-5":       "on",
+					"glm-5.1":     "off",
+					"qwen3.7-max": "on",
+				},
+			},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "dashscope-tokenplan" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepAPIKey
+	m.sessionModelPick = map[string]string{"dashscope-tokenplan": "deepseek-v4-flash"}
+	m.modelIdx = 9999 // stale cursor; result() still resolves model via sessionModelPick
+
+	r := m.result()
+	if r.model != "deepseek-v4-flash" {
+		t.Fatalf("result.model = %q, want deepseek-v4-flash", r.model)
+	}
+	if r.modelThinkingModes["deepseek-v4-flash"] != llm.ModelsThinkingOn {
+		t.Fatalf("modelThinkingModes = %#v, want deepseek-v4-flash:on", r.modelThinkingModes)
+	}
+}
+
+func TestProviderTUI_ModelsThinkingSnapshotUsesCustomModelRow(t *testing.T) {
+	cfg := &Config{
+		Provider: "dashscope-tokenplan",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"dashscope-tokenplan": {
+				Model: "deepseek-v4-flash",
+				ModelsThinking: map[string]string{
+					"glm-5": "on",
+				},
+			},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "dashscope-tokenplan" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepAPIKey
+	models := m.models()
+	m.modelIdx = len(models)
+	m.modelInput.SetValue("deepseek-v4-flash")
+
+	r := m.result()
+	if r.modelThinkingModes["deepseek-v4-flash"] != llm.ModelsThinkingOn {
+		t.Fatalf("modelThinkingModes = %#v, want deepseek-v4-flash:on", r.modelThinkingModes)
+	}
+}
+
+func TestModelThinkingModesSnapshot(t *testing.T) {
+	if got := modelThinkingModesSnapshot(nil, "anthropic"); got != nil {
+		t.Fatalf("snapshot = %#v", got)
+	}
+	src := map[string]string{
+		"anthropic:model-a": llm.ModelsThinkingOff,
+		"deepseek:model-b":  llm.ModelsThinkingOff,
+	}
+	got := modelThinkingModesSnapshot(src, "anthropic")
+	if got["model-a"] != llm.ModelsThinkingOff {
+		t.Fatalf("expected model-a in snapshot, got %#v", got)
+	}
+	if _, ok := got["model-b"]; ok {
+		t.Fatal("model-b should not be in anthropic snapshot")
+	}
+	got["model-a"] = llm.ModelsThinkingOn
+	if src["anthropic:model-a"] != llm.ModelsThinkingOff {
+		t.Fatal("snapshot should be a copy")
 	}
 }

@@ -5,7 +5,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/open-code-review/open-code-review/internal/llm"
 )
 
 func TestMaskKey(t *testing.T) {
@@ -205,6 +208,116 @@ func TestApplyOfficialProviderConfig_MissingFields(t *testing.T) {
 	}
 }
 
+func TestApplyManualConfig_RejectsReservedExtraBodyKey(t *testing.T) {
+	cfg := &Config{}
+	err := applyManualConfig("", cfg, providerTUIResult{
+		isManual:  true,
+		url:       "https://example.com/v1",
+		model:     "test-model",
+		protocol:  "openai",
+		extraBody: map[string]any{"model": "override"},
+	})
+	if err == nil {
+		t.Fatal("expected error for reserved extra_body key")
+	}
+	if !strings.Contains(err.Error(), "model") {
+		t.Fatalf("error = %q, want reserved key mention", err)
+	}
+}
+
+func TestApplyCustomProviderConfig_RejectsInvalidModelsThinking(t *testing.T) {
+	cfg := &Config{CustomProviders: make(map[string]ProviderEntry)}
+	cfg.CustomProviders["foo"] = ProviderEntry{
+		URL:            "https://example.com/v1",
+		Protocol:       "openai",
+		Model:          "m",
+		Models:         []string{"m"},
+		ModelsThinking: map[string]string{"m": "bogus"},
+	}
+	err := applyCustomProviderConfig("", cfg, providerTUIResult{
+		provider: "foo",
+		model:    "m",
+		models:   []string{"m"},
+		isCustom: true,
+		url:      "https://example.com/v1",
+		protocol: "openai",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid models_thinking mode")
+	}
+}
+
+func TestApplyOfficialProviderConfig_MergesModelsThinking(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-from-env")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "anthropic",
+		Model:    "claude-sonnet-4-6",
+		Providers: map[string]ProviderEntry{
+			"anthropic": {
+				APIKey: "sk-ant-test",
+				Model:  "claude-sonnet-4-6",
+				ModelsThinking: map[string]string{
+					"claude-opus-4-6": "off",
+				},
+			},
+		},
+	}
+
+	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
+		provider: "anthropic",
+		model:    "claude-sonnet-4-6",
+		apiKey:   "sk-ant-test",
+		modelThinkingModes: map[string]string{
+			"claude-opus-4-6":   "on",
+			"claude-sonnet-4-6": "off",
+		},
+	})
+	if err != nil {
+		t.Fatalf("applyOfficialProviderConfig: %v", err)
+	}
+
+	got := cfg.Providers["anthropic"].ModelsThinking
+	if got["claude-sonnet-4-6"] != "off" {
+		t.Fatalf("ModelsThinking = %#v, want claude-sonnet-4-6:off", got)
+	}
+	if got["claude-opus-4-6"] != llm.ModelsThinkingOn {
+		t.Fatalf("ModelsThinking = %#v, want claude-opus-4-6:on", got)
+	}
+}
+
+func TestApplyOfficialProviderConfig_PrunesStaleModelsThinking(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-from-env")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := &Config{
+		Provider: "anthropic",
+		Model:    "claude-sonnet-4-6",
+		Providers: map[string]ProviderEntry{
+			"anthropic": {
+				APIKey: "sk-ant-test",
+				Model:  "claude-sonnet-4-6",
+				ModelsThinking: map[string]string{
+					"removed-user-model": "off",
+				},
+			},
+		},
+	}
+
+	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
+		provider: "anthropic",
+		model:    "claude-sonnet-4-6",
+		apiKey:   "sk-ant-test",
+	})
+	if err != nil {
+		t.Fatalf("applyOfficialProviderConfig: %v", err)
+	}
+	if _, ok := cfg.Providers["anthropic"].ModelsThinking["removed-user-model"]; ok {
+		t.Fatalf("stale ModelsThinking should be pruned: %#v", cfg.Providers["anthropic"].ModelsThinking)
+	}
+}
+
 func TestApplyOfficialProviderConfig_EmptyKeyClearsSavedAPIKey(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "sk-from-env")
 	dir := t.TempDir()
@@ -374,5 +487,33 @@ func TestPrintWizardCancelled(t *testing.T) {
 				t.Errorf("output = %q, want %q", string(got), tc.want)
 			}
 		})
+	}
+}
+
+// TestProviderEntryModelsThinkingMerge documents the merge wiring used by
+// applyOfficialProviderConfig and runConfigModel for official providers.
+func TestProviderEntryModelsThinkingMerge(t *testing.T) {
+	entry := ProviderEntry{
+		ModelsThinking: map[string]string{
+			"model-a": "off",
+		},
+	}
+	entry.ModelsThinking = llm.MergeModelsThinking(entry.ModelsThinking, map[string]string{
+		"model-a": "on",
+		"model-b": "off",
+	})
+	got := entry.ModelsThinking
+	if got["model-a"] != llm.ModelsThinkingOn || got["model-b"] != "off" {
+		t.Fatalf("ModelsThinking = %#v, want model-a:on model-b:off", got)
+	}
+
+	entry = ProviderEntry{
+		Models:         []string{"model-a"},
+		ModelsThinking: map[string]string{"model-a": "off", "model-b": "off"},
+	}
+	entry.ModelsThinking = llm.PruneModelsThinking(entry.ModelsThinking, mergeModelLists([]string{"model-a"}, entry.Models))
+	got = entry.ModelsThinking
+	if len(got) != 1 || got["model-a"] != "off" {
+		t.Fatalf("PruneModelsThinking = %#v", got)
 	}
 }

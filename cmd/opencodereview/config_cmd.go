@@ -196,6 +196,10 @@ type ProviderEntry struct {
 	AuthHeader   string            `json:"auth_header,omitempty"`
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	// ModelsThinking maps model names to thinking mode overrides ("on" or "off").
+	// When a model has an entry, it takes precedence over extra_body at runtime.
+	// Models without an entry use extra_body as-is. Applied via llm.ApplyModelsThinking.
+	ModelsThinking map[string]string `json:"models_thinking,omitempty"`
 }
 
 // MCPServerConfig holds configuration for a single MCP server (stdio transport).
@@ -372,14 +376,17 @@ func setConfigValue(cfg *Config, key, value string) error {
 		if err := json.Unmarshal([]byte(value), &m); err != nil {
 			return fmt.Errorf("invalid JSON for llm.extra_body: %w", err)
 		}
+		if err := llm.ValidateExtraBody(m); err != nil {
+			return fmt.Errorf("invalid llm.extra_body: %w", err)
+		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nMCP server fields: command, args, env, tools, setup", key)
+		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, models_thinking\nMCP server fields: command, args, env, tools, setup", key)
 	}
 	return nil
 }
 
-func applyProviderField(entry *ProviderEntry, field, key, value string) error {
+func applyProviderField(entry *ProviderEntry, isPreset bool, providerName, field, key, value string) error {
 	switch field {
 	case "api_key":
 		entry.APIKey = value
@@ -392,12 +399,23 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 		entry.Protocol = value
 	case "model":
 		entry.Model = value
+		allowed := allowedModelsForThinking(isPreset, providerName, *entry)
+		before := len(entry.ModelsThinking)
+		entry.ModelsThinking = llm.PruneModelsThinking(entry.ModelsThinking, allowed)
+		if before > len(entry.ModelsThinking) {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: some models_thinking entries were pruned for provider %q after model change\n", providerName)
+		}
 	case "models":
 		models, err := parseModelListValue(value)
 		if err != nil {
 			return fmt.Errorf("invalid model list for %s: %w", key, err)
 		}
 		entry.Models = models
+		before := len(entry.ModelsThinking)
+		entry.ModelsThinking = llm.PruneModelsThinking(entry.ModelsThinking, allowedModelsForThinking(isPreset, providerName, *entry))
+		if before > len(entry.ModelsThinking) {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: some models_thinking entries were pruned for provider %q after models change\n", providerName)
+		}
 	case "auth_header":
 		normalized, err := llm.NormalizeAuthHeader(value)
 		if err != nil {
@@ -409,7 +427,46 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 		if err := json.Unmarshal([]byte(value), &m); err != nil {
 			return fmt.Errorf("invalid JSON for %s: %w", key, err)
 		}
+		if err := llm.ValidateExtraBody(m); err != nil {
+			return fmt.Errorf("invalid %s: %w", key, err)
+		}
 		entry.ExtraBody = m
+	case "models_thinking":
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			entry.ModelsThinking = nil
+			return nil
+		}
+		var m map[string]string
+		if err := json.Unmarshal([]byte(trimmed), &m); err != nil {
+			return fmt.Errorf("invalid JSON for %s: %w", key, err)
+		}
+		if err := llm.ValidateModelsThinking(m); err != nil {
+			return fmt.Errorf("invalid %s: %w", key, err)
+		}
+		// NormalizeModelsThinking and ApplyModelsThinking share the same key
+		// canonicalization (lowercase + trimmed) so persisted entries match runtime.
+		normalized, err := llm.NormalizeModelsThinking(m)
+		if err != nil {
+			return fmt.Errorf("invalid %s: %w", key, err)
+		}
+		allowed := allowedModelsForThinking(isPreset, providerName, *entry)
+		stored := llm.PruneModelsThinking(normalized, allowed)
+		if len(stored) == 0 && len(normalized) > 0 {
+			if len(allowed) == 0 {
+				// No models configured yet: keep entries so CLI set order is flexible.
+				// Prune runs when models/model is later set; until then entries still
+				// apply at runtime if the active model name matches a stored key.
+				stored = normalized
+				fmt.Fprintf(os.Stderr, "[ocr] WARNING: no models configured for provider %q yet; models_thinking entries are kept and will apply if a matching model name is used at runtime\n", providerName)
+			} else {
+				return fmt.Errorf("invalid %s: none of the specified models are available for provider %q", key, providerName)
+			}
+		}
+		if len(stored) < len(normalized) {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: some models in %s were not recognized for provider %q and were discarded\n", key, providerName)
+		}
+		entry.ModelsThinking = stored
 	case "extra_headers":
 		parsed, err := llm.ParseExtraHeaders(value)
 		if err != nil {
@@ -417,7 +474,7 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 		}
 		entry.ExtraHeaders = parsed
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, models_thinking", field)
 	}
 	return nil
 }
@@ -487,6 +544,27 @@ func ensureModelInList(models []string, model string) []string {
 	return append(out, model)
 }
 
+// allowedModelsForThinking returns model names that may have models_thinking entries.
+// isPreset reflects the config scope (providers.* vs custom_providers.*), not
+// LookupProvider(name), so a custom provider named like a preset is not mistaken
+// for the preset registry.
+func allowedModelsForThinking(isPreset bool, providerName string, entry ProviderEntry) []string {
+	if isPreset {
+		if preset, ok := llm.LookupProvider(providerName); ok {
+			models := mergeModelLists(preset.Models, entry.Models)
+			if entry.Model != "" {
+				models = ensureModelInList(models, entry.Model)
+			}
+			return models
+		}
+	}
+	models := mergeModelLists(entry.Models)
+	if entry.Model != "" {
+		models = ensureModelInList(models, entry.Model)
+	}
+	return models
+}
+
 func setProviderValue(cfg *Config, key, value string) error {
 	parts := strings.SplitN(key, ".", 3)
 	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
@@ -499,7 +577,7 @@ func setProviderValue(cfg *Config, key, value string) error {
 		cfg.Providers = make(map[string]ProviderEntry)
 	}
 	entry := cfg.Providers[parts[1]]
-	if err := applyProviderField(&entry, parts[2], key, value); err != nil {
+	if err := applyProviderField(&entry, true, parts[1], parts[2], key, value); err != nil {
 		return err
 	}
 	cfg.Providers[parts[1]] = entry
@@ -519,7 +597,7 @@ func setCustomProviderField(cfg *Config, name, field, key, value string) error {
 		cfg.CustomProviders = make(map[string]ProviderEntry)
 	}
 	entry := cfg.CustomProviders[name]
-	if err := applyProviderField(&entry, field, key, value); err != nil {
+	if err := applyProviderField(&entry, false, name, field, key, value); err != nil {
 		return err
 	}
 	cfg.CustomProviders[name] = entry

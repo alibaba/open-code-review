@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -208,6 +209,10 @@ type providerEntryConfig struct {
 	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	// ModelsThinking maps model names (case-insensitive) to thinking mode overrides.
+	// Valid values: "on" (enable thinking) or "off" (disable thinking).
+	// Only the active model's entry is applied at runtime; other keys are ignored.
+	ModelsThinking map[string]string `json:"models_thinking,omitempty"`
 }
 
 type configFile struct {
@@ -327,8 +332,8 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no model configured; run 'ocr config model' to select one or pass --model", cfg.Provider)
 	}
 
+	var err error
 	if protocol == "anthropic" {
-		var err error
 		ah := "authorization"
 		if isPreset && authHeader != "" {
 			ah = authHeader
@@ -347,7 +352,19 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		authHeader = ""
 	}
 
-	extraBody = entry.ExtraBody
+	if err = ValidateModelsThinking(entry.ModelsThinking); err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q models_thinking: %w", cfg.Provider, err)
+	}
+	if err = ValidateExtraBody(entry.ExtraBody); err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q extra_body: %w", cfg.Provider, err)
+	}
+	extraBody, err = ApplyModelsThinking(entry.ExtraBody, entry.ModelsThinking, cfg.Provider, model)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q models_thinking: %w", cfg.Provider, err)
+	}
+	if err = ValidateExtraHeadersMap(entry.ExtraHeaders); err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q extra_headers: %w", cfg.Provider, err)
+	}
 	extraHeaders := entry.ExtraHeaders
 
 	timeout, err := validateTimeoutSec(entry.TimeoutSec)
@@ -407,6 +424,13 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	timeout, err := validateTimeoutSec(cfg.Llm.TimeoutSec)
 	if err != nil {
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
+	}
+
+	if err = ValidateExtraBody(cfg.Llm.ExtraBody); err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file llm.extra_body: %w", err)
+	}
+	if err = ValidateExtraHeadersMap(cfg.Llm.ExtraHeaders); err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file llm.extra_headers: %w", err)
 	}
 
 	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders, Timeout: timeout}, true, nil
@@ -552,6 +576,29 @@ func NormalizeAuthHeader(header string) (string, error) {
 	}
 }
 
+func isReservedExtraBodyKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "model", "messages", "stream", "max_tokens", "max_completion_tokens", "system", "tools", "tool_choice", "stop":
+		return true
+	default:
+		return false
+	}
+}
+
+// ValidateExtraBody rejects top-level keys that would override core request payload fields.
+// Nested keys are allowed; only top-level reserved names are blocked.
+func ValidateExtraBody(m map[string]any) error {
+	if len(m) == 0 {
+		return nil
+	}
+	for k := range m {
+		if isReservedExtraBodyKey(strings.ToLower(k)) {
+			return fmt.Errorf("extra_body must not set %q (case-insensitive; reserved for request payload)", k)
+		}
+	}
+	return nil
+}
+
 // reservedHeaders are HTTP headers that extra_headers must not override.
 // They are managed by dedicated config fields (auth_header, auth_token) or set automatically by the SDK.
 // Letting extra_headers clobber them would cause confusing auth/content-type failures with no clear error.
@@ -600,6 +647,25 @@ func ParseExtraHeaders(raw string) (map[string]string, error) {
 		result[key] = value
 	}
 	return result, nil
+}
+
+// ValidateExtraHeadersMap rejects reserved header names in a parsed extra_headers map.
+// This is defense-in-depth for manually edited config.json; ParseExtraHeaders applies the same rules.
+func ValidateExtraHeadersMap(m map[string]string) error {
+	if len(m) == 0 {
+		return nil
+	}
+	var conflicts []string
+	for k := range m {
+		if reservedHeaders[strings.ToLower(k)] {
+			conflicts = append(conflicts, k)
+		}
+	}
+	if len(conflicts) > 0 {
+		sort.Strings(conflicts)
+		return fmt.Errorf("extra header(s) %s conflict with reserved headers; use the dedicated config field instead", strings.Join(conflicts, ", "))
+	}
+	return nil
 }
 
 // splitHeaderPairs splits a comma-separated string while respecting double-quoted segments.

@@ -71,6 +71,41 @@ func TestLookupProvider_ReturnsCopyOfModels(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_ReturnsCopyOfThinkingFields(t *testing.T) {
+	q1, ok := LookupProvider("baidu-qianfan")
+	if !ok {
+		t.Fatal("baidu-qianfan not found")
+	}
+	q1.ModelThinking["deepseek-v4-pro"] = ModelThinkingConfig{Style: ThinkingStyleEnableBool}
+
+	q2, _ := LookupProvider("baidu-qianfan")
+	if q2.ModelThinking["deepseek-v4-pro"].Style != ThinkingStyleObject {
+		t.Error("ModelThinking mutation leaked into registry")
+	}
+}
+
+func TestLookupProvider_ReturnsIsolatedModelThinkingMap(t *testing.T) {
+	original := registryMap["baidu-qianfan"]
+	defer func() { registryMap["baidu-qianfan"] = original }()
+
+	mutated := original
+	mutated.ModelThinking = map[string]ModelThinkingConfig{
+		"deepseek-v4-pro": {Style: ThinkingStyleObject},
+	}
+	registryMap["baidu-qianfan"] = mutated
+
+	p, ok := LookupProvider("baidu-qianfan")
+	if !ok {
+		t.Fatal("baidu-qianfan not found")
+	}
+	p.ModelThinking["deepseek-v4-pro"] = ModelThinkingConfig{Style: ThinkingStyleEnableBool}
+
+	got, _ := LookupProvider("baidu-qianfan")
+	if got.ModelThinking["deepseek-v4-pro"].Style != ThinkingStyleObject {
+		t.Fatal("ModelThinking mutation leaked into registry")
+	}
+}
+
 func TestLookupProvider_PreservesModelOrder(t *testing.T) {
 	p, ok := LookupProvider("anthropic")
 	if !ok {
@@ -124,5 +159,40 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 	}
 	if p.AuthHeader != "" {
 		t.Errorf("AuthHeader = %q, want empty", p.AuthHeader)
+	}
+}
+
+func TestProviderThinkingMeta_BuiltFromRegistry(t *testing.T) {
+	meta, ok := thinkingProviderIndex["dashscope"]
+	if !ok {
+		t.Fatal("dashscope thinking meta missing")
+	}
+	if meta.defaultStyle != ThinkingStyleEnableBool {
+		t.Fatalf("defaultStyle = %q", meta.defaultStyle)
+	}
+
+	qianfan, ok := thinkingProviderIndex["baidu-qianfan"]
+	if !ok {
+		t.Fatal("baidu-qianfan thinking meta missing")
+	}
+	if qianfan.modelOverrides["deepseek-v4-pro"].Style != ThinkingStyleObject {
+		t.Fatalf("deepseek override = %q", qianfan.modelOverrides["deepseek-v4-pro"].Style)
+	}
+	if qianfan.modelOverrides["glm-5.2"].Style != ThinkingStyleObject {
+		t.Fatalf("glm override = %q", qianfan.modelOverrides["glm-5.2"].Style)
+	}
+	if qianfan.modelOverrides["kimi-k2.6"].Style != ThinkingStyleObject {
+		t.Fatalf("kimi-k2.6 style = %q", qianfan.modelOverrides["kimi-k2.6"].Style)
+	}
+	if meta.modelOverrides["kimi-k2.7-code"].Policy != ThinkingPolicyAlwaysOn {
+		t.Fatalf("dashscope kimi-k2.7-code policy = %q", meta.modelOverrides["kimi-k2.7-code"].Policy)
+	}
+
+	mimo, ok := thinkingProviderIndex["mimo"]
+	if !ok {
+		t.Fatal("mimo thinking meta missing")
+	}
+	if mimo.defaultStyle != ThinkingStyleObject {
+		t.Fatalf("mimo defaultStyle = %q", mimo.defaultStyle)
 	}
 }

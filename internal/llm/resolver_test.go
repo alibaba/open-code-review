@@ -643,6 +643,89 @@ func TestResolveEndpoint_ProviderExtraBody(t *testing.T) {
 	}
 }
 
+func TestResolveEndpoint_ModelsThinking(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "deepseek",
+		Providers: map[string]providerEntryConfig{
+			"deepseek": {
+				APIKey: "sk-test",
+				Model:  "deepseek-v4-pro",
+				ModelsThinking: map[string]string{
+					"deepseek-v4-pro": "off",
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	thinking, ok := ep.ExtraBody["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("ExtraBody thinking = %#v, want disabled", ep.ExtraBody["thinking"])
+	}
+}
+
+func TestResolveEndpoint_InvalidModelsThinking(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "deepseek",
+		Providers: map[string]providerEntryConfig{
+			"deepseek": {
+				APIKey: "sk-test",
+				Model:  "deepseek-v4-pro",
+				ModelsThinking: map[string]string{
+					"deepseek-v4-pro": "bogus",
+				},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for invalid models_thinking")
+	}
+}
+
+func TestResolveEndpoint_ModelsThinking_OverridesExtraBody(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "dashscope",
+		Providers: map[string]providerEntryConfig{
+			"dashscope": {
+				APIKey: "sk-test",
+				Model:  "qwen3.7-max",
+				ModelsThinking: map[string]string{
+					"qwen3.7-max": "off",
+				},
+				ExtraBody: map[string]any{"enable_thinking": true},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.ExtraBody["enable_thinking"] != false {
+		t.Fatalf("ExtraBody = %#v, want models_thinking off to override extra_body", ep.ExtraBody)
+	}
+}
+
 func TestResolveEndpointWithModelOverride_ValidModelInPresetList(t *testing.T) {
 	clearAllEnv(t)
 
@@ -1069,6 +1152,76 @@ func TestResolveEndpoint_OCREnvExtraHeadersReservedRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "reserved") {
 		t.Errorf("error should mention reserved header, got: %v", err)
+	}
+}
+
+func TestValidateExtraHeadersMap(t *testing.T) {
+	if err := ValidateExtraHeadersMap(map[string]string{"X-Org-ID": "org-123"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := ValidateExtraHeadersMap(map[string]string{"Authorization": "bad"}); err == nil {
+		t.Fatal("expected reserved header error")
+	}
+}
+
+func TestValidateExtraBody(t *testing.T) {
+	if err := ValidateExtraBody(map[string]any{"enable_thinking": false}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := ValidateExtraBody(map[string]any{"model": "x"}); err == nil {
+		t.Fatal("expected reserved key error")
+	}
+}
+
+func TestResolveEndpoint_ProviderExtraBodyReservedRejected(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {
+				APIKey:    "sk-ant-test",
+				Model:     "claude-sonnet-4-6",
+				ExtraBody: map[string]any{"model": "override"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for reserved extra_body key in JSON config")
+	}
+	if !strings.Contains(err.Error(), "model") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestResolveEndpoint_ProviderExtraHeadersReservedRejected(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {
+				APIKey:       "sk-ant-test",
+				Model:        "claude-sonnet-4-6",
+				ExtraHeaders: map[string]string{"Authorization": "bad"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	os.WriteFile(cfgPath, data, 0644)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for reserved extra header in JSON config")
+	}
+	if !strings.Contains(err.Error(), "Authorization") {
+		t.Errorf("error = %v", err)
 	}
 }
 
