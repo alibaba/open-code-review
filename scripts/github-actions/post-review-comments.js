@@ -845,10 +845,12 @@ function logRateLimitQuota(response, tag, log) {
 // Throws on final failure so the caller can decide how to degrade.
 async function withRetry(tag, fn, log) {
   const MAX_RETRIES = parseNonNegInt(process.env.OCR_MAX_RETRIES, 3);
+  let lastErr;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       return await fn();
     } catch (e) {
+      lastErr = e;
       const retryInfo = computeRetryDelayMs(e, attempt);
       const willRetry = retryInfo != null && attempt < MAX_RETRIES;
       if (willRetry) {
@@ -864,6 +866,9 @@ async function withRetry(tag, fn, log) {
       }
     }
   }
+  throw lastErr != null
+    ? lastErr
+    : new Error(`withRetry(${tag}): exhausted retries with no error captured`);
 }
 
 // Read API wrapper with retry + proactive pacing. Read requests are cheaper
