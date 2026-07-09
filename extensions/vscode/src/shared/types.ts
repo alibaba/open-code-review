@@ -1,4 +1,8 @@
-export type ReviewMode = 'workspace' | 'branch' | 'commit';
+export enum ReviewMode {
+  Workspace = 'workspace',
+  Branch = 'branch',
+  Commit = 'commit',
+}
 
 export type ReviewState =
   | 'idle' | 'running' | 'done' | 'empty' | 'cancelled' | 'failed';

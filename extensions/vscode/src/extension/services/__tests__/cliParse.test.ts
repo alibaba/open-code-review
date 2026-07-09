@@ -1,28 +1,29 @@
 import { buildReviewArgs, extractCliError, parseCliResult, parseLogLine } from '../cliParse';
+import { ReviewMode } from '../../../shared/types';
 
 describe('buildReviewArgs', () => {
   it('workspace 模式加 --format json', () => {
-    expect(buildReviewArgs({ mode: 'workspace' }))
+    expect(buildReviewArgs({ mode: ReviewMode.Workspace }))
       .toEqual(['review', '--format', 'json']);
   });
 
   it('branch 模式加 --from/--to', () => {
-    expect(buildReviewArgs({ mode: 'branch', from: 'main', to: 'dev' }))
+    expect(buildReviewArgs({ mode: ReviewMode.Branch, from: 'main', to: 'dev' }))
       .toEqual(['review', '--from', 'main', '--to', 'dev', '--format', 'json']);
   });
 
   it('commit 模式加 --commit', () => {
-    expect(buildReviewArgs({ mode: 'commit', commit: 'abc123' }))
+    expect(buildReviewArgs({ mode: ReviewMode.Commit, commit: 'abc123' }))
       .toEqual(['review', '--commit', 'abc123', '--format', 'json']);
   });
 
   it('customPrompt 追加 --background', () => {
-    expect(buildReviewArgs({ mode: 'workspace', customPrompt: '关注安全' }))
+    expect(buildReviewArgs({ mode: ReviewMode.Workspace, customPrompt: '关注安全' }))
       .toEqual(['review', '--format', 'json', '--background', '关注安全']);
   });
 
   it('concurrency 追加 --concurrency', () => {
-    expect(buildReviewArgs({ mode: 'workspace', concurrency: 4 }))
+    expect(buildReviewArgs({ mode: ReviewMode.Workspace, concurrency: 4 }))
       .toEqual(['review', '--format', 'json', '--concurrency', '4']);
   });
 });

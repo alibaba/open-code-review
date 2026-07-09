@@ -1,4 +1,5 @@
 import { describeActiveProvider, isConfigReady } from '../../shared/configUtils';
+import { ReviewMode } from '../../shared/types';
 import { initialState, reducer } from '../store';
 
 const baseConfig = {
@@ -150,7 +151,7 @@ describe('modeFiles 消息', () => {
   it('保存 mode 对应文件列表', () => {
     const next = reducer(initialState, {
       type: 'modeFiles',
-      mode: 'branch',
+      mode: ReviewMode.Branch,
       files: [{ path: 'src/a.ts', status: 'modified' }],
     });
     expect(next.modeFiles).toEqual([{ path: 'src/a.ts', status: 'modified' }]);

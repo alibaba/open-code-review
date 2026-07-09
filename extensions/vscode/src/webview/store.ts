@@ -26,7 +26,7 @@ export const initialState: AppState = {
   logs: [],
   session: { state: 'idle', result: null },
   commentStatus: {},
-  reviewMode: 'workspace',
+  reviewMode: ReviewMode.Workspace,
   locale: 'en',
 };
 

@@ -20,7 +20,7 @@ interface Props {
 }
 
 export function IdleView({ gitState, modeFiles, filesLoading, configured, onModeChange, onRequestModeFiles, onOpenFile, onStart, onOpenConfig, onOpenCustomProviders, running }: Props) {
-  const [mode, setMode] = useState<ReviewMode>('workspace');
+  const [mode, setMode] = useState<ReviewMode>(ReviewMode.Workspace);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [commit, setCommit] = useState('');
@@ -31,7 +31,7 @@ export function IdleView({ gitState, modeFiles, filesLoading, configured, onMode
     if (!configured) return t('view.idle.configFirst');
     if (running) return t('view.idle.reviewing');
     if (!selectionReady) {
-      return mode === 'branch' ? t('view.idle.selectBranch') : t('view.idle.selectCommit');
+      return mode === ReviewMode.Branch ? t('view.idle.selectBranch') : t('view.idle.selectCommit');
     }
     if (files.length === 0) return t('view.idle.noFiles');
     return t('view.idle.reviewAll');
@@ -41,21 +41,21 @@ export function IdleView({ gitState, modeFiles, filesLoading, configured, onMode
 
   // 分支两端都选好后,拉取 diff 文件列表
   useEffect(() => {
-    if (mode === 'branch' && from && to) onRequestModeFiles('branch', from, to);
+    if (mode === ReviewMode.Branch && from && to) onRequestModeFiles(ReviewMode.Branch, from, to);
   }, [mode, from, to]);
 
   // 选中某 commit 后,拉取该 commit 文件列表
   useEffect(() => {
-    if (mode === 'commit' && commit) onRequestModeFiles('commit', undefined, undefined, commit);
+    if (mode === ReviewMode.Commit && commit) onRequestModeFiles(ReviewMode.Commit, undefined, undefined, commit);
   }, [mode, commit]);
 
-  const files = mode === 'workspace' ? gitState.workspaceFiles : modeFiles;
+  const files = mode === ReviewMode.Workspace ? gitState.workspaceFiles : modeFiles;
   // 仅在「确实发起了请求」时显示 loading:分支需选满两端,提交需选中 commit。
-  const willRequest = mode === 'workspace' || (mode === 'branch' && !!from && !!to) || (mode === 'commit' && !!commit);
+  const willRequest = mode === ReviewMode.Workspace || (mode === ReviewMode.Branch && !!from && !!to) || (mode === ReviewMode.Commit && !!commit);
   const loading = filesLoading && willRequest;
   // 可发起审查的前置条件:按 tab 校验选择已就绪,且有待审查文件、不在加载/审查中。
   const selectionReady =
-    mode === 'workspace' || (mode === 'branch' && !!from && !!to) || (mode === 'commit' && !!commit);
+    mode === ReviewMode.Workspace || (mode === ReviewMode.Branch && !!from && !!to) || (mode === ReviewMode.Commit && !!commit);
   const canReview = configured && !running && !loading && selectionReady && files.length > 0;
   const primaryDisabled = configured ? !canReview : running || loading;
 
@@ -70,14 +70,14 @@ export function IdleView({ gitState, modeFiles, filesLoading, configured, onMode
   return (
     <div class="setup">
       <div class="mode-tabs">
-        {(['workspace', 'branch', 'commit'] as ReviewMode[]).map((m) => (
+        {([ReviewMode.Workspace, ReviewMode.Branch, ReviewMode.Commit]).map((m) => (
           <button key={m} class={`mode-tab${mode === m ? ' active' : ''}`} onClick={() => switchMode(m)}>
-            {m === 'workspace' ? t('view.idle.workspace') : m === 'branch' ? t('view.idle.branch') : t('view.idle.commit')}
+            {m === ReviewMode.Workspace ? t('view.idle.workspace') : m === ReviewMode.Branch ? t('view.idle.branch') : t('view.idle.commit')}
           </button>
         ))}
       </div>
 
-      {mode === 'branch' && (
+      {mode === ReviewMode.Branch && (
         <div class="mode-params active">
           <div class="mode-param-label">{t('view.idle.baseRef')}</div>
           <Select value={from} placeholder={t('view.idle.chooseBranch')} onChange={setFrom}
@@ -88,7 +88,7 @@ export function IdleView({ gitState, modeFiles, filesLoading, configured, onMode
         </div>
       )}
 
-      {mode === 'commit' && (
+      {mode === ReviewMode.Commit && (
         <div class="mode-params active">
           <div class="files-label">{t('view.idle.commitHistory')}</div>
           <div class="commit-list">

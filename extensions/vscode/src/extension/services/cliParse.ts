@@ -1,11 +1,11 @@
-import { CliResult, CliRunOptions, LogLine, ReviewComment } from '../../shared/types';
+import { CliResult, CliRunOptions, LogLine, ReviewComment, ReviewMode } from '../../shared/types';
 
 export function buildReviewArgs(opts: CliRunOptions): string[] {
   const args: string[] = ['review'];
-  if (opts.mode === 'branch') {
+  if (opts.mode === ReviewMode.Branch) {
     if (opts.from) args.push('--from', opts.from);
     if (opts.to) args.push('--to', opts.to);
-  } else if (opts.mode === 'commit') {
+  } else if (opts.mode === ReviewMode.Commit) {
     if (opts.commit) args.push('--commit', opts.commit);
   }
   args.push('--format', 'json');
