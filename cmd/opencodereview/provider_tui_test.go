@@ -2169,7 +2169,7 @@ func TestProviderTUI_ApiKeyTypingShowsOneStarPerChar(t *testing.T) {
 	m.loadExistingAPIKey()
 	m.apiKeyInput.Focus()
 
-	for _, ch := range []rune("abc") {
+	for _, ch := range "abc" {
 		result, _ := m.Update(charKey(ch))
 		m = result.(providerTUIModel)
 	}

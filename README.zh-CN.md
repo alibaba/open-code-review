@@ -456,6 +456,7 @@ ocr review \
 | `--timeout` | — | `10` | 并发任务超时时间（分钟） |
 | `--audience` | — | `human` | `human`（显示进度）或 `agent`（仅输出摘要） |
 | `--background` | `-b` | — | 可选的需求/业务背景信息；使用 `--commit` 时如未指定则自动从 commit message 中提取 |
+| `--background-file` | `-B` | — | 来自 Markdown 文件的可选需求/业务背景信息；与 `--background` 同时使用时，内联内容排在前面 |
 | `--model` | — | — | 为本次审查选择或覆盖 LLM 模型 |
 | `--rule` | — | — | 自定义 JSON 审查规则路径 |
 | `--max-tools` | — | 内置默认 | 每个文件的最大工具调用轮次；仅在大于模板默认值时生效 |
@@ -553,6 +554,12 @@ ocr review --commit abc123 --model claude-sonnet-4-6
 
 # 提供需求背景以获得更有针对性的审查
 ocr review --background "为登录 API 添加限流"
+
+# 从 Markdown 文件提供需求背景
+ocr review --background-file ./docs/my_business_context.md
+
+# 将内联背景与本地背景文件结合使用（两者都会生效）
+ocr review --background "关注鉴权" --background-file ./docs/my_business_context.md
 
 # 使用自定义审查规则
 ocr review --rule /path/to/my-rules.json
@@ -809,11 +816,11 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 ## 贡献
 
-参见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) 了解开发环境搭建、编码规范以及如何提交 Pull Request。
+感谢所有为本项目做出贡献的人。参见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) 了解开发环境搭建、编码规范以及如何提交 Pull Request。
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
+<a href="https://github.com/alibaba/open-code-review/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
+</a>
 
 ## 许可证
 

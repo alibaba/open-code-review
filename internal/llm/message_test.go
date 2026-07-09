@@ -243,7 +243,9 @@ func TestParseShellRC_ModelOverride(t *testing.T) {
 export ANTHROPIC_AUTH_TOKEN="token"
 export ANTHROPIC_MODEL=claude-3-opus
 `
-	os.WriteFile(rcPath, []byte(content), 0644)
+	if err := os.WriteFile(rcPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write rc: %v", err)
+	}
 
 	ep, ok, err := parseShellRC(rcPath, "override-model")
 	if err != nil {
@@ -265,7 +267,9 @@ func TestParseShellRC_Incomplete(t *testing.T) {
 export ANTHROPIC_AUTH_TOKEN="token"
 # missing ANTHROPIC_MODEL
 `
-	os.WriteFile(rcPath, []byte(content), 0644)
+	if err := os.WriteFile(rcPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write rc: %v", err)
+	}
 
 	_, ok, err := parseShellRC(rcPath, "")
 	if err != nil {

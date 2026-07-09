@@ -405,7 +405,7 @@ func TestDiscoverRepos_SkipsUnreadableSubdir(t *testing.T) {
 	if err := os.Chmod(badRepo, 0000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(badRepo, 0755) })
+	t.Cleanup(func() { _ = os.Chmod(badRepo, 0755) })
 
 	repos, err := DiscoverRepos(root)
 	if err != nil {
@@ -439,7 +439,7 @@ func TestListSessions_SkipsUnreadableFiles(t *testing.T) {
 	if err := os.Chmod(badPath, 0000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(badPath, 0644) })
+	t.Cleanup(func() { _ = os.Chmod(badPath, 0644) })
 
 	sessions, err := ListSessions(root, "repo")
 	if err != nil {

@@ -14,7 +14,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 15
     container:
-      image: golang:1.26.4
+      image: golang:1.26.5
     steps:
       - uses: actions/checkout@v4
 

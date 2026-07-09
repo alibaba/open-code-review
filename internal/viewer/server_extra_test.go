@@ -167,7 +167,7 @@ func TestStaticFS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open style.css from staticFS: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 }
 
 func TestResolveAllowedHostsFromEnv(t *testing.T) {

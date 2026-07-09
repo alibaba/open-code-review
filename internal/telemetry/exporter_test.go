@@ -161,7 +161,9 @@ func TestInitOTLPProviders_ProtocolRouting(t *testing.T) {
 				OTLPProtocol: tc.protocol,
 			}
 			initOTLPProviders(context.Background(), resource.Default(), cfg)
-			w.Close()
+			if err := w.Close(); err != nil {
+				t.Fatalf("close stderr pipe: %v", err)
+			}
 			os.Stderr = oldStderr
 
 			defer func() {
@@ -184,7 +186,9 @@ func TestInitOTLPProviders_ProtocolRouting(t *testing.T) {
 			}
 
 			var buf bytes.Buffer
-			io.Copy(&buf, r)
+			if _, err := io.Copy(&buf, r); err != nil {
+				t.Fatalf("read stderr pipe: %v", err)
+			}
 			stderrOut := buf.String()
 			if tc.wantWarning {
 				if !strings.Contains(stderrOut, "falling back to gRPC") {

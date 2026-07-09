@@ -111,7 +111,7 @@ func readJSONLRecords(t *testing.T, path string) []map[string]any {
 	if err != nil {
 		t.Fatalf("open jsonl: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var records []map[string]any
 	scanner := bufio.NewScanner(f)
@@ -167,8 +167,11 @@ func TestSetErrorWritesJSONL(t *testing.T) {
 
 	if sh.persist != nil {
 		sh.persist.mu.Lock()
-		sh.persist.writer.Flush()
+		err := sh.persist.writer.Flush()
 		sh.persist.mu.Unlock()
+		if err != nil {
+			t.Fatalf("flush: %v", err)
+		}
 	}
 
 	path := sessionJSONLPath(t, repoDir, sh.SessionID)

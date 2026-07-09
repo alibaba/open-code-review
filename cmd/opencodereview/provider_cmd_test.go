@@ -364,7 +364,7 @@ func TestPrintWizardCancelled(t *testing.T) {
 			}
 			os.Stdout = w
 			printWizardCancelled(tc.savedInSession, tc.scope)
-			w.Close()
+			_ = w.Close()
 			os.Stdout = old
 			got, err := io.ReadAll(r)
 			if err != nil {

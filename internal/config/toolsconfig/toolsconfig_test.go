@@ -31,7 +31,9 @@ func TestLoad_CustomFile(t *testing.T) {
 	data := `[
 		{"name": "test_tool", "plan_task": true, "main_task": false, "definition": {"name": "test_tool"}}
 	]`
-	os.WriteFile(path, []byte(data), 0644)
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatalf("write tools.json: %v", err)
+	}
 
 	tools, err := Load(path)
 	if err != nil {
@@ -61,7 +63,9 @@ func TestLoad_FileNotFound(t *testing.T) {
 func TestLoad_InvalidJSON(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "tools.json")
-	os.WriteFile(path, []byte("not json"), 0644)
+	if err := os.WriteFile(path, []byte("not json"), 0644); err != nil {
+		t.Fatalf("write tools.json: %v", err)
+	}
 
 	_, err := Load(path)
 	if err == nil {

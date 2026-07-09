@@ -458,6 +458,7 @@ ocr review \
 | `--timeout` | — | `10` | Таймаут конкурентной задачи в минутах |
 | `--audience` | — | `human` | `human` (показывать прогресс) или `agent` (только сводка) |
 | `--background` | `-b` | — | Необязательный контекст требований/бизнес-логики для ревью; при `--commit` автоматически заполняется из сообщения коммита |
+| `--background-file` | `-B` | — | Необязательный контекст требований/бизнес-логики из Markdown-файла; при совместном использовании с `--background` встроенное значение идёт первым |
 | `--model` | — | — | Выбрать или переопределить LLM-модель для этого ревью |
 | `--rule` | — | — | Путь к пользовательским JSON-правилам ревью |
 | `--max-tools` | — | встроенное | Максимум раундов вызова инструментов на файл; действует, только если больше значения шаблона по умолчанию |
@@ -558,6 +559,12 @@ ocr review --commit abc123 --model claude-sonnet-4-6
 
 # Передать контекст требований для более прицельного ревью
 ocr review --background "Добавляем rate limiting в API логина"
+
+# Передать контекст требований из Markdown-файла
+ocr review --background-file ./docs/my_business_context.md
+
+# Совместить встроенный контекст с локальным файлом контекста (используются оба)
+ocr review --background "Фокус на аутентификации" --background-file ./docs/my_business_context.md
 
 # Использовать собственные правила ревью
 ocr review --rule /path/to/my-rules.json
@@ -824,11 +831,11 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 ## Участие в разработке
 
-В [CONTRIBUTING.ru-RU.md](CONTRIBUTING.ru-RU.md) описаны настройка окружения разработки, рекомендации по коду и порядок отправки pull request'ов.
+Этот проект существует благодаря всем, кто вносит свой вклад. В [CONTRIBUTING.ru-RU.md](CONTRIBUTING.ru-RU.md) описаны настройка окружения разработки, рекомендации по коду и порядок отправки pull request'ов.
 
-## История звёзд
-
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
+<a href="https://github.com/alibaba/open-code-review/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
+</a>
 
 ## Лицензия
 

@@ -113,7 +113,7 @@ func TestProvider_Execute_Integration(t *testing.T) {
 	}
 
 	c := &Client{name: "test-srv", session: session, tools: toolsResult.Tools}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	p := &Provider{toolName: "greet", client: c}
 	result, err := p.Execute(ctx, map[string]any{"name": "world"})
@@ -193,7 +193,7 @@ func TestNewClient_Integration(t *testing.T) {
 		session: session,
 		tools:   toolsResult.Tools,
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	if c.Name() != "test-srv" {
 		t.Errorf("Name() = %q", c.Name())
