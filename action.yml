@@ -114,6 +114,50 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Check git and Node.js
+      id: check_deps
+      shell: bash
+      run: |
+        if command -v git >/dev/null 2>&1; then
+          echo "git_installed=true" >> "$GITHUB_OUTPUT"
+          echo "git is already installed: $(git --version)"
+        else
+          echo "git_installed=false" >> "$GITHUB_OUTPUT"
+          echo "git is not installed"
+        fi
+        if command -v node >/dev/null 2>&1; then
+          echo "node_installed=true" >> "$GITHUB_OUTPUT"
+          echo "node is already installed: $(node --version)"
+        else
+          echo "node_installed=false" >> "$GITHUB_OUTPUT"
+          echo "node is not installed"
+        fi
+
+    - name: Install git
+      if: steps.check_deps.outputs.git_installed != 'true'
+      shell: bash
+      run: |
+        if command -v apt-get >/dev/null 2>&1; then
+          sudo apt-get update
+          sudo apt-get install -y git
+        elif command -v brew >/dev/null 2>&1; then
+          brew install git
+        elif command -v yum >/dev/null 2>&1; then
+          sudo yum install -y git
+        elif command -v apk >/dev/null 2>&1; then
+          sudo apk add --no-cache git
+        else
+          echo "::error::Unable to install git: no supported package manager found"
+          exit 1
+        fi
+        git --version
+
+    - name: Setup Node.js
+      if: steps.check_deps.outputs.node_installed != 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+
     - name: Resolve PR refs
       shell: bash
       env:
@@ -155,11 +199,6 @@ runs:
         MERGE_BASE=$(git merge-base "origin/${BASE_REF}" "${HEAD_SHA}" 2>/dev/null || echo "${HEAD_SHA}")
         echo "MERGE_BASE=$MERGE_BASE" >> "$GITHUB_ENV"
         echo "Reviewing ${HEAD_SHA} from merge-base ${MERGE_BASE} (base origin/${BASE_REF})"
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ inputs.node_version }}
 
     - name: Install OpenCodeReview
       shell: bash
@@ -231,12 +270,25 @@ runs:
       with:
         github-token: ${{ inputs.github_token }}
         script: |
-          const { runPostReviewComments } = require(`${{ github.action_path }}/scripts/github-actions/post-review-comments.js`);
+          // Locate the helper shipped alongside action.yml at runtime.
+          // GITHUB_ACTION_PATH: correct for published (remote) actions and for
+          // local actions when not running in a container.
+          // GITHUB_WORKSPACE: correct for local `uses: ./` actions — under
+          // self-hosted + container setups, GITHUB_ACTION_PATH points to the
+          // host path (invisible inside the container), whereas GITHUB_WORKSPACE
+          // is correctly mapped to /__w.
+          const fs = require('fs');
+          const path = require('path');
+          const REL = 'scripts/github-actions/post-review-comments.js';
+          const roots = [process.env.GITHUB_ACTION_PATH, process.env.GITHUB_WORKSPACE].filter(Boolean);
+          const helper = roots.map(r => path.resolve(r, REL)).find(p => fs.existsSync(p));
+          if (!helper) throw new Error(`Could not locate ${REL}; searched roots: ${roots.join(', ')}`);
+          const { runPostReviewComments } = require(helper);
           await runPostReviewComments({
             github,
             context,
             core,
-            fs: require('fs'),
+            fs,
             resultPath: '/tmp/ocr-result.json',
             stderrPath: '/tmp/ocr-stderr.log',
             stickySummary: ${{ inputs.sticky_summary == 'true' }},

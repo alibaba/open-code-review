@@ -40,6 +40,16 @@ jobs:
       image: node:24
     if: github.event_name == 'pull_request_target'
     steps:
+      # Materialize action.yml + scripts/ into the workspace so the local
+      # `uses: ./` action below can be resolved and loaded. For
+      # pull_request_target this checks out the trusted base branch; the
+      # composite action performs its own full checkout (fetch-depth: 0) later.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
       - name: Run OpenCodeReview
         uses: ./
         with:
