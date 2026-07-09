@@ -86,14 +86,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         break;
       case 'startReview': {
         this.session = new ReviewSession(this.cli, cwd);
-        // 仅工作区模式在编辑器内放置评论 thread；分支/提交模式代码不在工作区，会错位。
-        const inEditor = msg.options.mode === ReviewMode.Workspace;
         await this.session.run(msg.options, {
           onState: (state, error) => this.post({ type: 'stateChange', state, error }),
           onLog: (line) => this.post({ type: 'logLine', line }),
           onDone: (result) => {
-            this.post({ type: 'reviewDone', result });
-            if (result.comments.length) this.comments.show(result.comments, inEditor);
+            void (async () => {
+              if (result.comments.length) {
+                await this.comments.show(result.comments, {
+                  mode: msg.options.mode,
+                  from: msg.options.from,
+                  to: msg.options.to,
+                  commit: msg.options.commit,
+                });
+              }
+              this.post({ type: 'reviewDone', result });
+            })();
           },
         });
         break;

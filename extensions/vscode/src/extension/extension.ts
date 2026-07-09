@@ -16,7 +16,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const cli = new CliService('ocr');
   const config = new ConfigService(cli);
   const git = new GitService(output);
-  const comments = new CommentProvider(extensionUri);
+  const comments = new CommentProvider(extensionUri, git);
 
   const sidebar = new SidebarProvider(extensionUri, cli, config, git, comments);
   const configPanel = new ConfigPanelProvider(extensionUri, cli, config, (cfg) => sidebar.pushConfig(cfg));

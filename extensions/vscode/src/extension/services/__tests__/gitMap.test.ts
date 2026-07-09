@@ -1,4 +1,7 @@
 // src/extension/services/__tests__/gitMap.test.ts
+import { execFile } from 'child_process';
+import path from 'path';
+import { promisify } from 'util';
 import {
   buildWorkspaceFiles,
   branchRefCandidates,
@@ -201,5 +204,21 @@ describe('pickRepoRoot', () => {
   it('无 workspace 路径时退回第一个', () => {
     const roots = ['/a/repo', '/b/repo'];
     expect(pickRepoRoot(roots, undefined)).toBe('/a/repo');
+  });
+});
+
+describe('getCommitFiles: git show revision placement', () => {
+  const repoRoot = path.resolve(__dirname, '../../../../../..');
+  const execGit = (args: string[]) =>
+    promisify(execFile)('git', ['-c', 'core.quotepath=false', ...args], { cwd: repoRoot })
+      .then((r) => r.stdout.trim());
+
+  it('revision 必须在 -- 之前，否则会被当成 pathspec 导致空列表', async () => {
+    const good = await execGit(['show', '--name-status', '--format=', 'HEAD']);
+    const bad = await execGit(['show', '--name-status', '--format=', '--', 'HEAD']);
+    expect(good.length).toBeGreaterThan(0);
+    expect(bad).toBe('');
+    expect(parseNameStatus(good).length).toBeGreaterThan(0);
+    expect(parseNameStatus(bad)).toEqual([]);
   });
 });

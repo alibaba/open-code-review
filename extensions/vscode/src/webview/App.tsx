@@ -55,8 +55,8 @@ export function App() {
             <div class="result-region">
               {state.view === 'running' && <RunningView logs={state.logs} onCancel={() => bridge.post({ type: 'cancelReview' })} />}
               {state.view === 'done' && state.session.result && (
-                <DoneView result={state.session.result} commentStatus={state.commentStatus} logs={state.logs}
-                  canJump={state.reviewMode === ReviewMode.Workspace}
+                <DoneView result={state.session.result} commentStatus={state.commentStatus}
+                  commentJumpable={state.commentJumpable} logs={state.logs}
                   onOpen={(i) => bridge.post({ type: 'jumpToComment', index: i })}
                   onAction={(i, action) => bridge.post({ type: 'commentAction', index: i, action })} />
               )}

@@ -109,7 +109,11 @@ export interface CliRunOptions {
   concurrency?: number;
 }
 
+/** 审查完成后的评论挂载上下文（与 CliRunOptions 字段一致）。 */
+export type ReviewContext = Pick<CliRunOptions, 'mode' | 'from' | 'to' | 'commit'>;
+
 export interface CommentSyncState {
   index: number;
   status: CommentStatus;
+  jumpable?: boolean;
 }

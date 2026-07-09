@@ -1,7 +1,8 @@
 import { t, resolveLocale } from '../../shared/i18n';
 import * as vscode from 'vscode';
+import { readFile } from 'fs/promises';
 import { execFile } from 'child_process';
-import { GitState, FileChange, ReviewMode } from '../../shared/types';
+import { GitState, FileChange, ReviewMode, ReviewContext } from '../../shared/types';
 import { buildWorkspaceFiles, branchRefCandidates, parseNameStatus, pickRepoRoot } from './gitMap';
 
 const WORKSPACE_REFRESH_DEBOUNCE_MS = 300;
@@ -9,6 +10,7 @@ const WORKSPACE_REFRESH_DEBOUNCE_MS = 300;
 export class GitService {
   private api: any | null = null;
   private cache: GitState = { branches: [], currentBranch: '', recentCommits: [], workspaceFiles: [] };
+  private reviewFileStatus = new Map<string, FileChange['status']>();
 
   constructor(private log?: vscode.OutputChannel) {}
 
@@ -235,7 +237,7 @@ export class GitService {
     const root = await this.repoRoot();
     if (!root || !sha) return [];
     try {
-      const out = await runGit(root, ['show', '--name-status', '--format=', '--', sha]);
+      const out = await runGit(root, ['show', '--name-status', '--format=', sha]);
       const files = parseNameStatus(out);
       this.trace(`getCommitFiles(${sha}): files=${files.length}`);
       return files;
@@ -393,6 +395,97 @@ export class GitService {
     } catch {
       return null;
     }
+  }
+
+  /** 审查开始前缓存 commit/branch 模式下的文件状态，供评论挂载查询。 */
+  async prepareReviewFileStatus(ctx: ReviewContext): Promise<void> {
+    this.reviewFileStatus.clear();
+    if (ctx.mode === ReviewMode.Commit && ctx.commit) {
+      const files = await this.getCommitFiles(ctx.commit);
+      for (const f of files) this.reviewFileStatus.set(f.path, f.status);
+    } else if (ctx.mode === ReviewMode.Branch && ctx.from && ctx.to) {
+      const files = await this.getBranchDiff(ctx.from, ctx.to);
+      for (const f of files) this.reviewFileStatus.set(f.path, f.status);
+    }
+  }
+
+  async getReviewFileStatus(path: string): Promise<FileChange['status'] | null> {
+    return this.reviewFileStatus.get(path) ?? null;
+  }
+
+  async readFileAtRef(ref: string, relPath: string): Promise<string | null> {
+    const root = await this.repoRoot();
+    if (!root) return null;
+    try {
+      return await runGit(root, ['show', `${ref}:${relPath}`]);
+    } catch {
+      return null;
+    }
+  }
+
+  async readWorkspaceFile(relPath: string): Promise<string | null> {
+    const root = await this.repoRoot();
+    if (!root) return null;
+    try {
+      return await readFile(`${root}/${relPath}`, 'utf8');
+    } catch {
+      return null;
+    }
+  }
+
+  /** 构造评论挂载用的 diff 两侧 URI 与挂载 ref。 */
+  async buildCommentDiffUris(
+    relPath: string,
+    status: FileChange['status'],
+    ctx: ReviewContext,
+  ): Promise<{
+    left: vscode.Uri;
+    right: vscode.Uri;
+    title: string;
+    mountRef: string;
+    mountSide: 'left' | 'right';
+    leftRef: string | null;
+    rightRef: string | null;
+  } | null> {
+    const api = await this.ensureApi();
+    const root = await this.repoRoot();
+    if (!api || !root) return null;
+
+    if (ctx.mode === ReviewMode.Commit && ctx.commit) {
+      const parent = `${ctx.commit}^`;
+      const label = `${ctx.commit}^ ↔ ${ctx.commit}`;
+      const leftRef = status === 'added' ? null : parent;
+      const rightRef = status === 'deleted' ? null : ctx.commit;
+      const mountRef = status === 'deleted' ? parent : ctx.commit;
+      const mountSide: 'left' | 'right' = status === 'deleted' ? 'left' : 'right';
+      const left = await this.resolveDiffSide(api, root, relPath, leftRef, status, 'left');
+      const right = await this.resolveDiffSide(api, root, relPath, rightRef, status, 'right');
+      return { left, right, title: `${relPath} (${label})`, mountRef, mountSide, leftRef, rightRef };
+    }
+
+    if (ctx.mode === ReviewMode.Branch && ctx.from && ctx.to) {
+      const resolvedFrom = await this.resolveGitRef(root, ctx.from);
+      const resolvedTo = await this.resolveGitRef(root, ctx.to);
+      if (!resolvedFrom || !resolvedTo) return null;
+      const base = (await this.mergeBase(root, resolvedFrom, resolvedTo)) || resolvedFrom;
+      const label = `${resolvedFrom}...${resolvedTo}`;
+      const leftRef = status === 'added' ? null : base;
+      const rightRef = status === 'deleted' ? null : resolvedTo;
+      const mountRef = status === 'deleted' ? base : resolvedTo;
+      const mountSide: 'left' | 'right' = status === 'deleted' ? 'left' : 'right';
+      const left = await this.resolveDiffSide(api, root, relPath, leftRef, status, 'left');
+      const right = await this.resolveDiffSide(api, root, relPath, rightRef, status, 'right');
+      return { left, right, title: `${relPath} (${label})`, mountRef, mountSide, leftRef, rightRef };
+    }
+
+    return null;
+  }
+
+  async createGitFileUri(relPath: string, ref: string): Promise<vscode.Uri | null> {
+    const api = await this.ensureApi();
+    const root = await this.repoRoot();
+    if (!api || !root) return null;
+    return api.toGitUri(vscode.Uri.file(`${root}/${relPath}`), ref);
   }
 }
 
