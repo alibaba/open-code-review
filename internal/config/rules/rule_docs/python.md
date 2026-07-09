@@ -35,9 +35,10 @@
 - `assert` used for runtime validation of external input — assertions are stripped under `python -O`
 
 #### Identity and Equality Comparisons
-- Comparing against `None`, `True`, or `False` with `==`/`!=` instead of `is`/`is not`
-- Using `is`/`is not` to compare against literals such as strings, numbers, or tuples; this relies on implementation-specific interning rather than value equality — use `==`
+- Using `is`/`is not` to compare against literals such as strings, numbers, or tuples; this relies on implementation-specific interning rather than value equality — use `==` (a real correctness risk)
+- Comparing against `True`/`False` with `==`, where a truthy-but-not-`True` value (e.g. `1`, a non-empty container) would compare unequal; prefer a plain truthiness check
 - Reserve `is` for identity checks against singletons and sentinels
+- Comparing against `None` with `==`/`!=` rather than `is`/`is not` is a style preference; report as minor, not blocking
 
 #### Resource Management
 - Files, sockets, locks, or database connections opened without a `with` statement, risking leaks on early return or exception
