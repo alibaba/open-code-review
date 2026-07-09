@@ -33,6 +33,12 @@ inputs:
       written via `ocr config set llm.extra_body`.
     required: false
     default: '{"thinking": {"type": "disabled"}}'
+  language:
+    description: >-
+      Review output language, written via `ocr config set language`
+      (e.g. English, 中文). No env var exists for this.
+    required: false
+    default: 'English'
   llm_timeout:
     description: LLM request timeout in seconds (mapped to env OCR_LLM_TIMEOUT).
     required: false
@@ -212,9 +218,11 @@ runs:
     - name: Configure OCR
       env:
         OCR_EXTRA_BODY: ${{ inputs.llm_extra_body }}
+        OCR_LANGUAGE: ${{ inputs.language }}
       shell: bash
       run: |
         ocr config set llm.extra_body "$OCR_EXTRA_BODY"
+        ocr config set language "$OCR_LANGUAGE"
 
     - name: Run OpenCodeReview
       env:
