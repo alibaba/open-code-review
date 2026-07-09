@@ -2,7 +2,7 @@ name: OpenCodeReview PR Review
 description: >-
   AI-powered GitHub PR review with inline comments, sticky summary, and
   incremental non-destructive posting.
-author: stay-foolish-forever
+author: alibaba
 branding:
   icon: eye
   color: green
