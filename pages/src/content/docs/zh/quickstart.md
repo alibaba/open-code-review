@@ -16,6 +16,9 @@ sidebar:
 
 ```bash
 npm install -g @alibaba-group/open-code-review
+```
+
+```bash
 ocr version
 ```
 
