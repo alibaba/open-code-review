@@ -742,10 +742,6 @@ exported data에 LLM prompt와 response를 포함하려면 `telemetry.content_lo
   <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
 </a>
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
-
 ## License
 
 [Apache-2.0](LICENSE) Copyright 2026 Alibaba

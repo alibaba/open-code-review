@@ -785,10 +785,6 @@ ocr config set telemetry.otlp_endpoint localhost:4317
   <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
 </a>
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
-
 ## ライセンス
 
 [Apache-2.0](LICENSE) — Copyright 2026 Alibaba
