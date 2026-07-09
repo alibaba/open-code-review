@@ -68,7 +68,7 @@ export function ConfigView({
     setTab(next.tab);
     setCustomView(next.customView);
     setCustomSelection(next.customSelection);
-  }, [panelFocus, config, onClearConnTest]);
+  }, [panelFocus, config]);
 
   const wide = layout === 'panel';
   const t = useT();

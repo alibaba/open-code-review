@@ -113,8 +113,6 @@ export function IdleView({ gitState, modeFiles, filesLoading, configured, onMode
 
       {configured && (
         <div class="setup-secondary">
-          <button type="button" class="link-btn" onClick={onOpenCustomProviders}>{t('view.idle.manageCustom')}</button>
-          <span class="setup-secondary-sep">·</span>
           <button type="button" class="link-btn" onClick={onOpenConfig}>{t('view.idle.modelConfig')}</button>
         </div>
       )}
