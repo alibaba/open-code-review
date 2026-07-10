@@ -26,22 +26,17 @@ const (
 	ProtocolOpenAIResponses = "openai-responses"
 )
 
-// NormalizeProtocol maps legacy protocol aliases to their canonical names.
-// It is case-insensitive and returns canonical names for known aliases.
-// Empty string is returned as-is (the caller decides the default). Unknown
-// values are returned unchanged so that ValidateProtocol can surface a precise
-// error message rather than silently swallowing a typo.
-//
-// The alias "openai-chat-completions" -> ProtocolOpenAIChatCompletions ("openai")
-// exists for configs written during the short-lived naming experiment on this
-// branch; all existing production configs already use "openai".
+// NormalizeProtocol canonicalizes protocol names. It is case-insensitive and
+// trims whitespace. Empty string is returned as-is (the caller decides the
+// default). Unknown values are returned unchanged so that ValidateProtocol can
+// surface a precise error message rather than silently swallowing a typo.
 func NormalizeProtocol(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "":
 		return ""
 	case ProtocolAnthropic:
 		return ProtocolAnthropic
-	case ProtocolOpenAIChatCompletions, "openai-chat-completions":
+	case ProtocolOpenAIChatCompletions:
 		return ProtocolOpenAIChatCompletions
 	case ProtocolOpenAIResponses:
 		return ProtocolOpenAIResponses
@@ -51,10 +46,7 @@ func NormalizeProtocol(raw string) string {
 }
 
 // ValidateProtocol accepts the three canonical protocol names and rejects
-// everything else. It intentionally does NOT accept the "openai-chat-completions"
-// alias — callers must run the value through NormalizeProtocol first. This keeps
-// alias mapping centralized in NormalizeProtocol and lets the error message
-// enumerate the canonical names.
+// everything else.
 func ValidateProtocol(p string) error {
 	switch p {
 	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses:

@@ -196,14 +196,6 @@ func TestSetConfigValueLlmProtocol(t *testing.T) {
 		t.Errorf("cfg.Llm.Protocol = %q, want %q", cfg.Llm.Protocol, llm.ProtocolOpenAIResponses)
 	}
 
-	// Alias normalization: "openai-chat-completions" -> openai
-	if err := setConfigValue(cfg, "llm.protocol", "openai-chat-completions"); err != nil {
-		t.Fatalf("setConfigValue llm.protocol (alias): %v", err)
-	}
-	if cfg.Llm.Protocol != llm.ProtocolOpenAIChatCompletions {
-		t.Errorf("cfg.Llm.Protocol = %q, want %q (alias normalized)", cfg.Llm.Protocol, llm.ProtocolOpenAIChatCompletions)
-	}
-
 	if err := setConfigValue(cfg, "llm.protocol", "grpc"); err == nil {
 		t.Fatal("expected error for invalid llm.protocol")
 	}

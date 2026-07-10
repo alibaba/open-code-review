@@ -15,13 +15,10 @@ func TestNormalizeProtocol(t *testing.T) {
 		{"canonical anthropic is idempotent", ProtocolAnthropic, ProtocolAnthropic},
 		{"canonical openai is idempotent", ProtocolOpenAIChatCompletions, ProtocolOpenAIChatCompletions},
 		{"canonical openai-responses is idempotent", ProtocolOpenAIResponses, ProtocolOpenAIResponses},
-		{"alias openai-chat-completions normalizes to openai", "openai-chat-completions", ProtocolOpenAIChatCompletions},
-		{"alias OPENAI-CHAT-COMPLETIONS is case-insensitive", "OPENAI-CHAT-COMPLETIONS", ProtocolOpenAIChatCompletions},
-		{"alias with whitespace is trimmed", "  openai-chat-completions  ", ProtocolOpenAIChatCompletions},
 		{"anthropic case-insensitive", "ANTHROPIC", ProtocolAnthropic},
 		{"openai-responses case-insensitive", "OpenAI-Responses", ProtocolOpenAIResponses},
 		{"unknown passthrough lowercased", "gRPC", "grpc"},
-		{"reserved-but-unimplemented anthropic-vertex preserved", "anthropic-vertex", "anthropic-vertex"},
+		{"unknown anthropic-vertex preserved", "anthropic-vertex", "anthropic-vertex"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -42,9 +39,6 @@ func TestValidateProtocol(t *testing.T) {
 		{"anthropic ok", ProtocolAnthropic, false, ""},
 		{"openai ok", ProtocolOpenAIChatCompletions, false, ""},
 		{"openai-responses ok", ProtocolOpenAIResponses, false, ""},
-		// ValidateProtocol does NOT accept the "openai-chat-completions" alias
-		// — callers must run it through NormalizeProtocol first.
-		{"alias openai-chat-completions rejected", "openai-chat-completions", true, "unsupported protocol"},
 		{"empty rejected", "", true, "unsupported protocol"},
 		{"grpc rejected", "grpc", true, "unsupported protocol"},
 		{"anthropic-vertex rejected", "anthropic-vertex", true, "unsupported protocol"},
@@ -65,17 +59,6 @@ func TestValidateProtocol(t *testing.T) {
 				t.Errorf("ValidateProtocol(%q) returned unexpected error: %v", tt.p, err)
 			}
 		})
-	}
-}
-
-// TestValidateProtocol_AcceptsNormalizedAlias is the explicit contract check
-// for the recommended call pattern ValidateProtocol(NormalizeProtocol(raw)).
-func TestValidateProtocol_AcceptsNormalizedAlias(t *testing.T) {
-	if err := ValidateProtocol(NormalizeProtocol("openai-chat-completions")); err != nil {
-		t.Errorf("ValidateProtocol(NormalizeProtocol(\"openai-chat-completions\")) = %v, want nil", err)
-	}
-	if err := ValidateProtocol(NormalizeProtocol("OpenAI-Chat-Completions")); err != nil {
-		t.Errorf("ValidateProtocol(NormalizeProtocol(\"OpenAI-Chat-Completions\")) = %v, want nil", err)
 	}
 }
 
