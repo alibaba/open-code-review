@@ -391,7 +391,7 @@ ocr review --audience agent
 ```bash
 mkdir -p .claude/commands
 curl -o .claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
 **ユーザーレベル**（全プロジェクトで個人用にグローバル利用）：
@@ -399,7 +399,7 @@ curl -o .claude/commands/open-code-review.md \
 ```bash
 mkdir -p ~/.claude/commands
 curl -o ~/.claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
 > **前提条件**: すべての統合方法において、`ocr` CLIのインストールとLLMの設定が必要です。上記の[インストール](#インストール)と[LLMの設定](#1-llmの設定)を参照してください。

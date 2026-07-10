@@ -391,7 +391,7 @@ package manager 없이 빠르게 설정하려면 command 파일을 복사해 Cla
 ```bash
 mkdir -p .claude/commands
 curl -o .claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
 **User-level**(여러 프로젝트에서 개인 전역 사용):
@@ -399,7 +399,7 @@ curl -o .claude/commands/open-code-review.md \
 ```bash
 mkdir -p ~/.claude/commands
 curl -o ~/.claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
 > **전제 조건**: 모든 통합 방식은 `ocr` CLI가 설치되어 있고 LLM이 설정되어 있어야 합니다. 위의 [설치](#설치)와 [LLM 설정](#1-llm-설정)을 참고하세요.

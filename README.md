@@ -391,7 +391,7 @@ For a quick setup without any package manager, simply copy the command file to u
 ```bash
 mkdir -p .claude/commands
 curl -o .claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
 **User-level** (personal global use across all projects):
@@ -399,7 +399,7 @@ curl -o .claude/commands/open-code-review.md \
 ```bash
 mkdir -p ~/.claude/commands
 curl -o ~/.claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
 > **Prerequisite**: All integration methods require the `ocr` CLI to be installed and an LLM configured. See [Install](#install) and [Configure LLM](#1-configure-llm) above.

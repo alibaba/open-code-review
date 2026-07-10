@@ -12,7 +12,7 @@ sidebar:
 リポジトリには
 [`plugins/open-code-review/`](https://github.com/alibaba/open-code-review/tree/main/plugins/open-code-review)
 配下に Claude Code plugin が用意されています。コマンドの prompt 本体は
-[`plugins/open-code-review/commands/review.md`](https://github.com/alibaba/open-code-review/blob/main/plugins/open-code-review/commands/review.md)
+[`plugins/open-code-review/claude-code/commands/review.md`](https://github.com/alibaba/open-code-review/blob/main/plugins/open-code-review/claude-code/commands/review.md)
 にあり、以下で述べるワークフローの正式な拠り所です。
 
 ## インストール
@@ -37,7 +37,7 @@ plugin marketplace をスキップしたい場合は、コマンドファイル�
 ```bash
 mkdir -p .claude/commands
 curl -o .claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
 **ユーザーレベル**（マシン上のすべてのプロジェクトで利用可能）：
@@ -45,7 +45,7 @@ curl -o .claude/commands/open-code-review.md \
 ```bash
 mkdir -p ~/.claude/commands
 curl -o ~/.claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
 ### コマンドをサポートするその他の agent
