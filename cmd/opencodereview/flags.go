@@ -101,6 +101,7 @@ type reviewOptions struct {
 	from           string
 	to             string
 	commit         string
+	diffFile       string // --diff-file: path to a unified patch selecting a subset of hunks
 	resume         string
 	excludes       string // --exclude: comma-separated gitignore-style patterns
 	outputFormat   string
@@ -127,6 +128,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.from, "from", "", "source ref to start diff from (e.g., 'main')")
 	a.StringVar(&opts.to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
 	a.StringVarP(&opts.commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
+	a.StringVar(&opts.diffFile, "diff-file", "", "path to a unified git patch selecting a subset of complete hunks from the --from/--to (or --commit) diff; review is narrowed to those hunks")
 	a.StringVar(&opts.resume, "resume", "", "resume from a previous review session id")
 	a.StringVar(&opts.excludes, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 	a.StringVarP(&opts.outputFormat, "format", "f", "text", "output format: text or json")
@@ -170,6 +172,19 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 		return opts, fmt.Errorf("--preview and --resume cannot be used together")
 	}
 
+	if opts.diffFile != "" {
+		// A stable ref is required so full file reads and line mapping anchor at
+		// the true HEAD/--to tree. Workspace mode has no such ref.
+		if opts.commit == "" && (opts.from == "" || opts.to == "") {
+			return opts, fmt.Errorf("--diff-file requires --from/--to or --commit (it selects a subset of that range's hunks)")
+		}
+		// Resume replays fingerprints computed from the full-range diff; a
+		// narrowed diff would silently mismatch, so reject the combination.
+		if opts.resume != "" {
+			return opts, fmt.Errorf("--diff-file and --resume cannot be used together")
+		}
+	}
+
 	switch opts.audience {
 	case "human", "agent":
 	default:
@@ -210,6 +225,9 @@ Examples:
   ocr review --commit abc123
   ocr review -c abc123
 
+  # Review only a subset of hunks selected externally (exact subset of the range)
+  ocr review --from master --to dev-ref --diff-file selected.patch
+
   # Resume a previous range review
   ocr review --from master --to dev-ref --resume <session-id>
 
@@ -234,6 +252,7 @@ Flags:
   -b, --background string       optional requirement/business context for the review
   -B, --background-file string  path to a Markdown file used as review background (combined with --background; inline value appears first when both are set)
   -c, --commit string           single commit hash or tag to review (vs its parent)
+  --diff-file string            path to a unified git patch selecting a subset of complete hunks from the --from/--to (or --commit) diff
   -f, --format string           output format: text or json (default "text")
   --concurrency int             max concurrent file reviews (default 8)
   --max-git-procs int           max concurrent git subprocesses (default 16)

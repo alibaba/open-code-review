@@ -117,6 +117,12 @@ type Args struct {
 
 	// Resume is an optional read-only checkpoint index from a previous review session.
 	Resume *session.ResumeState
+
+	// SelectedDiff, when non-empty, is a unified git diff containing a subset of
+	// complete hunks from the canonical From..To / Commit diff. When set, the
+	// review is narrowed to exactly those hunks while file/tool reads still come
+	// from the true --to/HEAD tree. It is only valid in range or commit mode.
+	SelectedDiff string
 }
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
@@ -315,6 +321,13 @@ func (a *Agent) loadDiffs(ctx context.Context) error {
 	parsed, err := provider.GetDiff(ctx)
 	if err != nil {
 		return fmt.Errorf("get diffs: %w", err)
+	}
+
+	if a.args.SelectedDiff != "" {
+		parsed, err = diff.ApplySelection(parsed, a.args.SelectedDiff)
+		if err != nil {
+			return fmt.Errorf("apply selected diff: %w", err)
+		}
 	}
 
 	a.diffs = parsed

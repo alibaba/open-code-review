@@ -58,8 +58,13 @@ func runReview(args []string) error {
 		opts.background = mergeBackground(opts.background, fileBackground)
 	}
 
+	selectedDiff, err := loadSelectedDiff(opts.diffFile)
+	if err != nil {
+		return err
+	}
+
 	if opts.preview {
-		return runPreview(cc, opts)
+		return runPreview(cc, opts, selectedDiff)
 	}
 
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
@@ -116,6 +121,7 @@ func runReview(args []string) error {
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
+		SelectedDiff:          selectedDiff,
 	})
 
 	// Silence progress output during execution; restored before the trace
@@ -238,14 +244,28 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 	return nil
 }
 
-func runPreview(cc *commonContext, opts reviewOptions) error {
+// loadSelectedDiff reads the --diff-file patch from disk. An empty path yields
+// an empty selection (default behaviour, whole-range review).
+func loadSelectedDiff(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read --diff-file %q: %w", path, err)
+	}
+	return string(data), nil
+}
+
+func runPreview(cc *commonContext, opts reviewOptions, selectedDiff string) error {
 	ag := agent.New(agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:      cc.RepoDir,
+		From:         opts.from,
+		To:           opts.to,
+		Commit:       opts.commit,
+		FileFilter:   cc.FileFilter,
+		GitRunner:    cc.GitRunner,
+		SelectedDiff: selectedDiff,
 	})
 
 	preview, err := ag.Preview(context.Background())
