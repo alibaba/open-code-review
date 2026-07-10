@@ -16,7 +16,9 @@ import (
 
 var (
 	diffHeaderRe = regexp.MustCompile(`^diff --git a/(.+?) b/(.+)$`)
-	binaryRe     = regexp.MustCompile(`Binary files `)
+	// Anchored: hunk body lines always carry a '+', '-', ' ' or '\' prefix, so
+	// content that merely mentions "Binary files " must not match.
+	binaryRe = regexp.MustCompile(`^Binary files `)
 )
 
 // ParseDiffText splits the unified diff text into per-file Diff structs.

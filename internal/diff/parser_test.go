@@ -129,3 +129,41 @@ index 0000000..1234567
 		t.Errorf("Insertions = %d, want 2", d.Insertions)
 	}
 }
+
+// TestParseDiffText_BinaryMentionInBody guards the binary marker detection:
+// a content line that merely contains "Binary files " (always prefixed with
+// '+', '-' or ' ' in a hunk body) must not mark the file as binary, while a
+// real line-anchored "Binary files ... differ" marker must.
+func TestParseDiffText_BinaryMentionInBody(t *testing.T) {
+	diffText := `diff --git a/doc.md b/doc.md
+index 1111111..2222222 100644
+--- a/doc.md
++++ b/doc.md
+@@ -1,2 +1,3 @@
+ docs
++Binary files are compared here
+ tail
+`
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	if diffs[0].IsBinary {
+		t.Errorf("IsBinary = true, want false: body mention must not trigger binary detection")
+	}
+	if diffs[0].Insertions != 1 {
+		t.Errorf("Insertions = %d, want 1", diffs[0].Insertions)
+	}
+
+	binText := "diff --git a/img.png b/img.png\nindex 111..222 100644\nBinary files a/img.png and b/img.png differ\n"
+	diffs, err = ParseDiffText(context.Background(), binText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 || !diffs[0].IsBinary {
+		t.Fatalf("real binary marker not detected: %+v", diffs)
+	}
+}

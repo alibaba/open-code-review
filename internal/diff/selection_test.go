@@ -333,6 +333,24 @@ func TestApplySelection_BinaryRejected(t *testing.T) {
 	}
 }
 
+func TestApplySelection_BinaryMentionInHunkBodyNotRejected(t *testing.T) {
+	// A hunk body line whose content merely mentions "Binary files " must not
+	// mark the file as binary: only a real (line-anchored) binary marker counts.
+	hunk := "@@ -1,2 +1,3 @@\n docs\n+Binary files are compared here\n tail"
+	canonical := []model.Diff{{
+		OldPath: "doc.md", NewPath: "doc.md",
+		Diff: "diff --git a/doc.md b/doc.md\n--- a/doc.md\n+++ b/doc.md\n" + hunk,
+	}}
+	patch := "diff --git a/doc.md b/doc.md\n--- a/doc.md\n+++ b/doc.md\n" + hunk
+	got, err := ApplySelection(canonical, patch)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got[0].Diff, "Binary files are compared here") {
+		t.Errorf("selected hunk content lost: %q", got[0].Diff)
+	}
+}
+
 func TestApplySelection_SubmoduleRejected(t *testing.T) {
 	canonical := []model.Diff{{
 		OldPath: "sub", NewPath: "sub",
