@@ -1155,6 +1155,41 @@ func TestResolveEndpoint_ProviderExtraHeaders(t *testing.T) {
 	}
 }
 
+func TestResolveEndpoint_EnvExtraHeadersMergedWithConfigFile(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_EXTRA_HEADERS", "EagleEye-TraceId=trace-from-env,X-New=from-env")
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {
+				APIKey:       "sk-ant-test",
+				Model:        "claude-sonnet-4-6",
+				ExtraHeaders: map[string]string{"X-Org-ID": "org-123"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v, ok := ep.ExtraHeaders["X-Org-ID"]; !ok || v != "org-123" {
+		t.Errorf("config file header preserved: ExtraHeaders[\"X-Org-ID\"] = %q, want %q", v, "org-123")
+	}
+	if v, ok := ep.ExtraHeaders["EagleEye-TraceId"]; !ok || v != "trace-from-env" {
+		t.Errorf("env header merged: ExtraHeaders[\"EagleEye-TraceId\"] = %q, want %q", v, "trace-from-env")
+	}
+	if v, ok := ep.ExtraHeaders["X-New"]; !ok || v != "from-env" {
+		t.Errorf("env header merged: ExtraHeaders[\"X-New\"] = %q, want %q", v, "from-env")
+	}
+}
+
 func TestResolveEndpoint_LegacyLlmExtraHeaders(t *testing.T) {
 	clearAllEnv(t)
 
