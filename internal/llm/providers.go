@@ -9,7 +9,7 @@ import (
 //
 // Protocol uses the canonical names defined in protocol.go:
 //   - ProtocolAnthropic ("anthropic")
-//   - ProtocolOpenAIChatCompletions ("openai-chat-completions")
+//   - ProtocolOpenAIChatCompletions ("openai")
 //   - ProtocolOpenAIResponses ("openai-responses")
 //
 // To add a built-in provider that speaks a different protocol, set Protocol

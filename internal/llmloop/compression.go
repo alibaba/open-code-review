@@ -210,7 +210,6 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 		Model:     r.deps.Model,
 		Messages:  compressionMsgs,
 		MaxTokens: r.deps.Template.MaxTokens,
-		CacheKey:  llm.ComputeCacheKey(compressionMsgs),
 	})
 	duration := time.Since(startTime)
 

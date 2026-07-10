@@ -37,7 +37,7 @@ const (
 	envOCRLLMAuthHeader   = "OCR_LLM_AUTH_HEADER"
 	envOCRLLMExtraHeaders = "OCR_LLM_EXTRA_HEADERS"
 	// envOCRLLMProtocol overrides the resolved protocol (anthropic |
-	// openai-chat-completions | openai-responses; alias openai). Takes priority
+	// openai | openai-responses). Takes priority
 	// over OCR_USE_ANTHROPIC when set.
 	envOCRLLMProtocol = "OCR_LLM_PROTOCOL"
 	// envOCRLLMTimeout is a global override applied in ResolveEndpointWithModelOverride
@@ -205,7 +205,7 @@ type llmFileConfig struct {
 	AuthToken    string            `json:"auth_token,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
 	Model        string            `json:"model,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`     // anthropic|openai-chat-completions|openai-responses (alias openai); takes priority over use_anthropic
+	Protocol     string            `json:"protocol,omitempty"`     // anthropic|openai|openai-responses; takes priority over use_anthropic
 	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false; legacy fallback when protocol is empty
 	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`

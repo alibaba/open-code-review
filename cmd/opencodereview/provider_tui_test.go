@@ -1365,7 +1365,7 @@ func TestNewProviderTUI_ManualProtocolFromConfig(t *testing.T) {
 		}
 		m := newProviderTUI(cfg, "")
 		if m.manualProtocolIdx != 1 {
-			t.Errorf("manualProtocolIdx = %d, want 1 (openai-chat-completions)", m.manualProtocolIdx)
+			t.Errorf("manualProtocolIdx = %d, want 1 (openai)", m.manualProtocolIdx)
 		}
 	})
 
@@ -1392,9 +1392,9 @@ func TestEnterEditCustomProvider_ProtocolIndex(t *testing.T) {
 		wantIdx  int
 	}{
 		{"anthropic", llm.ProtocolAnthropic, 0},
-		{"openai-chat-completions", llm.ProtocolOpenAIChatCompletions, 1},
+		{"openai", llm.ProtocolOpenAIChatCompletions, 1},
 		{"openai-responses", llm.ProtocolOpenAIResponses, 2},
-		{"legacy alias openai", "openai", 1},
+		{"legacy alias openai-chat-completions", "openai-chat-completions", 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

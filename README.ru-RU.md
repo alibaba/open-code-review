@@ -208,7 +208,7 @@ ocr config set custom_providers.my-gateway.api_key your-api-key-here
 ocr config set custom_providers.my-gateway.model gpt-4o
 ```
 
-> Для пользовательских провайдеров `url` и `protocol` обязательны. Поддерживаемые протоколы: `anthropic`, `openai-chat-completions`, `openai-responses` (псевдоним: `openai`).
+> Для пользовательских провайдеров `url` и `protocol` обязательны. Поддерживаемые протоколы: `anthropic`, `openai`, `openai-responses`.
 
 Дополнительные настройки:
 
@@ -251,7 +251,7 @@ export OCR_LLM_MODEL=gpt-5.4
 export OCR_LLM_PROTOCOL=openai-responses
 ```
 
-`OCR_LLM_PROTOCOL` принимает значения `anthropic`, `openai-chat-completions`, `openai-responses` (псевдоним `openai`) и имеет приоритет над `OCR_USE_ANTHROPIC`, если заданы обе переменные.
+`OCR_LLM_PROTOCOL` принимает значения `anthropic`, `openai`, `openai-responses` и имеет приоритет над `OCR_USE_ANTHROPIC`, если заданы обе переменные.
 
 Также совместим с переменными окружения Claude Code (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`) и разбирает `~/.zshrc` / `~/.bashrc` в поисках соответствующих export'ов.
 
@@ -675,7 +675,7 @@ OCR разрешает правила ревью по цепочке приор�
 | `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
 | `providers.<name>.api_key` | string | API-ключ провайдера |
 | `providers.<name>.url` | string | Переопределение base URL провайдера |
-| `providers.<name>.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses` (псевдоним: `openai`) |
+| `providers.<name>.protocol` | string | `anthropic` \| `openai` \| `openai-responses` |
 | `providers.<name>.model` | string | Имя модели провайдера |
 | `providers.<name>.models` | array | Необязательный список моделей для интерактивного выбора |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
@@ -690,7 +690,7 @@ OCR разрешает правила ревью по цепочке приор�
 | `llm.timeout_sec` | integer | Таймаут HTTP-запроса в секундах, по умолчанию `300` |
 | `llm.extra_headers` | string | HTTP-заголовки `key=value` через запятую |
 | `llm.model` | string | `claude-opus-4-6` |
-| `llm.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses` (псевдоним: `openai`); имеет приоритет над `llm.use_anthropic` |
+| `llm.protocol` | string | `anthropic` \| `openai` \| `openai-responses`; имеет приоритет над `llm.use_anthropic` |
 | `llm.use_anthropic` | boolean | `true` \| `false` (устаревшее; предпочтительнее `llm.protocol`) |
 | `mcp_servers.<name>.command` | string | Команда для запуска MCP-сервера |
 | `mcp_servers.<name>.args` | array | Аргументы командной строки для MCP-сервера |
@@ -751,7 +751,7 @@ ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
 | `OCR_LLM_AUTH_HEADER` | Заголовок авторизации Anthropic (`x-api-key` или `authorization`) |
 | `OCR_LLM_EXTRA_HEADERS` | HTTP-заголовки `key=value` через запятую |
 | `OCR_LLM_MODEL` | Имя модели |
-| `OCR_LLM_PROTOCOL` | Протокол: `anthropic` \| `openai-chat-completions` \| `openai-responses` (псевдоним: `openai`); имеет приоритет над `OCR_USE_ANTHROPIC` |
+| `OCR_LLM_PROTOCOL` | Протокол: `anthropic` \| `openai` \| `openai-responses`; имеет приоритет над `OCR_USE_ANTHROPIC` |
 | `OCR_LLM_TIMEOUT` | Таймаут HTTP-запроса в секундах (переопределяет `timeout_sec` из файла конфигурации) |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI Chat Completions (устаревшее; предпочтительнее `OCR_LLM_PROTOCOL`) |
 

@@ -18,8 +18,9 @@ const (
 	// api.anthropic.com (or a compatible gateway).
 	ProtocolAnthropic = "anthropic"
 	// ProtocolOpenAIChatCompletions is the OpenAI Chat Completions API
-	// (/v1/chat/completions). The legacy alias "openai" normalizes to this.
-	ProtocolOpenAIChatCompletions = "openai-chat-completions"
+	// (/v1/chat/completions). The value "openai" is kept for full backward
+	// compatibility with existing config files.
+	ProtocolOpenAIChatCompletions = "openai"
 	// ProtocolOpenAIResponses is the OpenAI Responses API (/v1/responses),
 	// used by GPT-5.x / o-series models.
 	ProtocolOpenAIResponses = "openai-responses"
@@ -31,14 +32,16 @@ const (
 // values are returned unchanged so that ValidateProtocol can surface a precise
 // error message rather than silently swallowing a typo.
 //
-// Currently the only alias is "openai" -> ProtocolOpenAIChatCompletions.
+// The alias "openai-chat-completions" -> ProtocolOpenAIChatCompletions ("openai")
+// exists for configs written during the short-lived naming experiment on this
+// branch; all existing production configs already use "openai".
 func NormalizeProtocol(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "":
 		return ""
 	case ProtocolAnthropic:
 		return ProtocolAnthropic
-	case "openai", ProtocolOpenAIChatCompletions:
+	case ProtocolOpenAIChatCompletions, "openai-chat-completions":
 		return ProtocolOpenAIChatCompletions
 	case ProtocolOpenAIResponses:
 		return ProtocolOpenAIResponses
@@ -48,18 +51,18 @@ func NormalizeProtocol(raw string) string {
 }
 
 // ValidateProtocol accepts the three canonical protocol names and rejects
-// everything else. It intentionally does NOT accept the "openai" alias —
-// callers must run the value through NormalizeProtocol first. This keeps
+// everything else. It intentionally does NOT accept the "openai-chat-completions"
+// alias — callers must run the value through NormalizeProtocol first. This keeps
 // alias mapping centralized in NormalizeProtocol and lets the error message
-// enumerate both canonical names and the accepted alias.
+// enumerate the canonical names.
 func ValidateProtocol(p string) error {
 	switch p {
 	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses:
 		return nil
 	case "anthropic-vertex":
-		return fmt.Errorf("protocol %q is not yet implemented; supported protocols are %q, %q, %q (alias %q)", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, "openai")
+		return fmt.Errorf("protocol %q is not yet implemented; supported protocols are %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses)
 	}
-	return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q (alias %q)", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, "openai")
+	return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses)
 }
 
 // IsAnthropicProtocol reports whether p is the canonical Anthropic protocol

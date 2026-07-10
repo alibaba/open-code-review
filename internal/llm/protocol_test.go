@@ -13,11 +13,11 @@ func TestNormalizeProtocol(t *testing.T) {
 	}{
 		{"empty stays empty", "", ""},
 		{"canonical anthropic is idempotent", ProtocolAnthropic, ProtocolAnthropic},
-		{"canonical openai-chat-completions is idempotent", ProtocolOpenAIChatCompletions, ProtocolOpenAIChatCompletions},
+		{"canonical openai is idempotent", ProtocolOpenAIChatCompletions, ProtocolOpenAIChatCompletions},
 		{"canonical openai-responses is idempotent", ProtocolOpenAIResponses, ProtocolOpenAIResponses},
-		{"alias openai normalizes", "openai", ProtocolOpenAIChatCompletions},
-		{"alias OPENAI is case-insensitive", "OPENAI", ProtocolOpenAIChatCompletions},
-		{"alias with whitespace is trimmed", "  openai  ", ProtocolOpenAIChatCompletions},
+		{"alias openai-chat-completions normalizes to openai", "openai-chat-completions", ProtocolOpenAIChatCompletions},
+		{"alias OPENAI-CHAT-COMPLETIONS is case-insensitive", "OPENAI-CHAT-COMPLETIONS", ProtocolOpenAIChatCompletions},
+		{"alias with whitespace is trimmed", "  openai-chat-completions  ", ProtocolOpenAIChatCompletions},
 		{"anthropic case-insensitive", "ANTHROPIC", ProtocolAnthropic},
 		{"openai-responses case-insensitive", "OpenAI-Responses", ProtocolOpenAIResponses},
 		{"unknown passthrough lowercased", "gRPC", "grpc"},
@@ -40,12 +40,11 @@ func TestValidateProtocol(t *testing.T) {
 		errSub  string
 	}{
 		{"anthropic ok", ProtocolAnthropic, false, ""},
-		{"openai-chat-completions ok", ProtocolOpenAIChatCompletions, false, ""},
+		{"openai ok", ProtocolOpenAIChatCompletions, false, ""},
 		{"openai-responses ok", ProtocolOpenAIResponses, false, ""},
-		// Per the plan (§1.4), ValidateProtocol does NOT accept the "openai"
-		// alias — callers must run it through NormalizeProtocol first. This
-		// keeps alias mapping in exactly one place.
-		{"bare alias openai rejected", "openai", true, "unsupported protocol"},
+		// ValidateProtocol does NOT accept the "openai-chat-completions" alias
+		// — callers must run it through NormalizeProtocol first.
+		{"alias openai-chat-completions rejected", "openai-chat-completions", true, "unsupported protocol"},
 		{"empty rejected", "", true, "unsupported protocol"},
 		{"grpc rejected", "grpc", true, "unsupported protocol"},
 		{"anthropic-vertex rejected with friendly message", "anthropic-vertex", true, "not yet implemented"},
@@ -72,23 +71,23 @@ func TestValidateProtocol(t *testing.T) {
 // TestValidateProtocol_AcceptsNormalizedAlias is the explicit contract check
 // for the recommended call pattern ValidateProtocol(NormalizeProtocol(raw)).
 func TestValidateProtocol_AcceptsNormalizedAlias(t *testing.T) {
-	if err := ValidateProtocol(NormalizeProtocol("openai")); err != nil {
-		t.Errorf("ValidateProtocol(NormalizeProtocol(\"openai\")) = %v, want nil", err)
+	if err := ValidateProtocol(NormalizeProtocol("openai-chat-completions")); err != nil {
+		t.Errorf("ValidateProtocol(NormalizeProtocol(\"openai-chat-completions\")) = %v, want nil", err)
 	}
-	if err := ValidateProtocol(NormalizeProtocol("OPENAI")); err != nil {
-		t.Errorf("ValidateProtocol(NormalizeProtocol(\"OPENAI\")) = %v, want nil", err)
+	if err := ValidateProtocol(NormalizeProtocol("OpenAI-Chat-Completions")); err != nil {
+		t.Errorf("ValidateProtocol(NormalizeProtocol(\"OpenAI-Chat-Completions\")) = %v, want nil", err)
 	}
 }
 
 // TestValidateProtocol_ErrorMessageListsAllProtocols makes sure the error
-// message enumerates every canonical name plus the alias, so users discover
-// openai-responses from any typo.
+// message enumerates every canonical name so users discover openai-responses
+// from any typo.
 func TestValidateProtocol_ErrorMessageListsAllProtocols(t *testing.T) {
 	err := ValidateProtocol("grpc")
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	for _, sub := range []string{ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, "openai"} {
+	for _, sub := range []string{ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses} {
 		if !strings.Contains(err.Error(), sub) {
 			t.Errorf("error %q should mention %q", err.Error(), sub)
 		}
@@ -103,7 +102,7 @@ func TestIsAnthropicProtocol(t *testing.T) {
 		{ProtocolAnthropic, true},
 		{ProtocolOpenAIChatCompletions, false},
 		{ProtocolOpenAIResponses, false},
-		{"openai", false}, // alias is not the canonical anthropic name
+		{"openai", false}, // not the canonical anthropic name
 		{"", false},
 		{"anthropic-vertex", false},
 	}

@@ -321,6 +321,6 @@ Examples:
 
 Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging
 Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers
-Protocol values: anthropic, openai-chat-completions, openai-responses (alias: openai)
+Protocol values: anthropic, openai, openai-responses
 MCP server fields: command, args, env, tools, setup`)
 }

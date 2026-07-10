@@ -589,7 +589,6 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 		Model:     a.args.Model,
 		Messages:  messages,
 		MaxTokens: a.args.Template.MaxTokens,
-		CacheKey:  llm.ComputeCacheKey(messages),
 	})
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))
@@ -643,7 +642,6 @@ func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.Llm
 		Model:     a.args.Model,
 		Messages:  messages,
 		MaxTokens: a.args.Template.MaxTokens,
-		CacheKey:  llm.ComputeCacheKey(messages),
 	})
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))
@@ -719,7 +717,6 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) {
 		Model:     a.args.Model,
 		Messages:  messages,
 		MaxTokens: a.args.Template.MaxTokens,
-		CacheKey:  llm.ComputeCacheKey(messages),
 	})
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))

@@ -208,7 +208,7 @@ ocr config set custom_providers.my-gateway.api_key your-api-key-here
 ocr config set custom_providers.my-gateway.model gpt-4o
 ```
 
-> 自定义供应商的 `url` 和 `protocol` 为必填项。`protocol` 支持 `anthropic`、`openai-chat-completions`、`openai-responses`（别名 `openai`）。
+> 自定义供应商的 `url` 和 `protocol` 为必填项。`protocol` 支持 `anthropic`、`openai`、`openai-responses`。
 
 可选配置项：
 
@@ -251,7 +251,7 @@ export OCR_LLM_MODEL=gpt-5.4
 export OCR_LLM_PROTOCOL=openai-responses
 ```
 
-`OCR_LLM_PROTOCOL` 接受 `anthropic`、`openai-chat-completions`、`openai-responses`（别名 `openai`），与 `OCR_USE_ANTHROPIC` 同时设置时优先使用前者。
+`OCR_LLM_PROTOCOL` 接受 `anthropic`、`openai`、`openai-responses`，与 `OCR_USE_ANTHROPIC` 同时设置时优先使用前者。
 
 同时兼容 Claude Code 环境变量（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`），并解析 `~/.zshrc` / `~/.bashrc` 中的相关导出。
 
@@ -663,7 +663,7 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
 | `providers.<name>.api_key` | string | 供应商 API 密钥 |
 | `providers.<name>.url` | string | 供应商 Base URL 覆盖 |
-| `providers.<name>.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses`（别名 `openai`） |
+| `providers.<name>.protocol` | string | `anthropic` \| `openai` \| `openai-responses` |
 | `providers.<name>.model` | string | 供应商模型名称 |
 | `providers.<name>.models` | array | 用于交互式选择的可选供应商模型列表 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
@@ -678,7 +678,7 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `llm.timeout_sec` | integer | 每次请求的 HTTP 超时时间（秒），默认 `300` |
 | `llm.extra_headers` | string | 逗号分隔的 `key=value` HTTP 头 |
 | `llm.model` | string | `claude-opus-4-6` |
-| `llm.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses`（别名 `openai`）；优先级高于 `llm.use_anthropic` |
+| `llm.protocol` | string | `anthropic` \| `openai` \| `openai-responses`；优先级高于 `llm.use_anthropic` |
 | `llm.use_anthropic` | boolean | `true` \| `false`（兼容字段，推荐改用 `llm.protocol`） |
 | `mcp_servers.<name>.command` | string | 启动 MCP 服务器的命令 |
 | `mcp_servers.<name>.args` | array | MCP 服务器的命令行参数 |
@@ -739,7 +739,7 @@ ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
 | `OCR_LLM_AUTH_HEADER` | Anthropic 认证头（`x-api-key` 或 `authorization`） |
 | `OCR_LLM_EXTRA_HEADERS` | 逗号分隔的 `key=value` HTTP 头 |
 | `OCR_LLM_MODEL` | 模型名称 |
-| `OCR_LLM_PROTOCOL` | 协议：`anthropic` \| `openai-chat-completions` \| `openai-responses`（别名 `openai`）；优先级高于 `OCR_USE_ANTHROPIC` |
+| `OCR_LLM_PROTOCOL` | 协议：`anthropic` \| `openai` \| `openai-responses`；优先级高于 `OCR_USE_ANTHROPIC` |
 | `OCR_LLM_TIMEOUT` | 每次请求的 HTTP 超时时间（秒），覆盖配置文件中的 `timeout_sec` |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic，`false` = OpenAI Chat Completions（兼容字段，推荐改用 `OCR_LLM_PROTOCOL`） |
 

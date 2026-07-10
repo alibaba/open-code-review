@@ -208,7 +208,7 @@ ocr config set custom_providers.my-gateway.api_key your-api-key-here
 ocr config set custom_providers.my-gateway.model gpt-4o
 ```
 
-> 커스텀 provider에서는 `url`과 `protocol`이 필수입니다. 지원 프로토콜: `anthropic`, `openai-chat-completions`, `openai-responses` (별칭: `openai`).
+> 커스텀 provider에서는 `url`과 `protocol`이 필수입니다. 지원 프로토콜: `anthropic`, `openai`, `openai-responses`
 
 선택 설정:
 
@@ -251,7 +251,7 @@ export OCR_LLM_MODEL=gpt-5.4
 export OCR_LLM_PROTOCOL=openai-responses
 ```
 
-`OCR_LLM_PROTOCOL`은 `anthropic`, `openai-chat-completions`, `openai-responses`(별칭 `openai`)를 허용하며, `OCR_USE_ANTHROPIC`과 함께 설정하면 우선 적용됩니다.
+`OCR_LLM_PROTOCOL`은 `anthropic`, `openai`, `openai-responses`를 허용하며, `OCR_USE_ANTHROPIC`과 함께 설정하면 우선 적용됩니다.
 
 Claude Code 환경 변수(`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`)와도 호환되며, `~/.zshrc` / `~/.bashrc`의 export도 파싱합니다.
 
@@ -631,7 +631,7 @@ Config file: `~/.opencodereview/config.json`
 | `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
 | `providers.<name>.api_key` | string | Provider별 API key |
 | `providers.<name>.url` | string | Provider base URL override |
-| `providers.<name>.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses` (별칭: `openai`) |
+| `providers.<name>.protocol` | string | `anthropic` \| `openai` \| `openai-responses` |
 | `providers.<name>.model` | string | Provider의 model 이름 |
 | `providers.<name>.models` | array | 대화형 선택에 사용할 optional provider model 목록 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
@@ -646,7 +646,7 @@ Config file: `~/.opencodereview/config.json`
 | `llm.timeout_sec` | integer | 요청당 HTTP timeout(초), 기본값 `300` |
 | `llm.extra_headers` | string | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `llm.model` | string | `claude-opus-4-6` |
-| `llm.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses` (별칭: `openai`); `llm.use_anthropic`보다 우선 |
+| `llm.protocol` | string | `anthropic` \| `openai` \| `openai-responses`; `llm.use_anthropic`보다 우선 |
 | `llm.use_anthropic` | boolean | `true` \| `false` (레거시; `llm.protocol` 권장) |
 | `mcp_servers.<name>.command` | string | MCP 서버를 시작하는 명령어 |
 | `mcp_servers.<name>.args` | array | MCP 서버의 커맨드라인 인수 |
@@ -707,7 +707,7 @@ ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
 | `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` 또는 `authorization`) |
 | `OCR_LLM_EXTRA_HEADERS` | 쉼표로 구분된 `key=value` HTTP 헤더 |
 | `OCR_LLM_MODEL` | Model name |
-| `OCR_LLM_PROTOCOL` | 프로토콜: `anthropic` \| `openai-chat-completions` \| `openai-responses` (별칭: `openai`); `OCR_USE_ANTHROPIC`보다 우선 |
+| `OCR_LLM_PROTOCOL` | 프로토콜: `anthropic` \| `openai` \| `openai-responses`; `OCR_USE_ANTHROPIC`보다 우선 |
 | `OCR_LLM_TIMEOUT` | 요청당 HTTP timeout(초), config file의 `timeout_sec`를 override |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI Chat Completions (레거시; `OCR_LLM_PROTOCOL` 권장) |
 

@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-code-review/open-code-review/internal/config/template"
 	"github.com/open-code-review/open-code-review/internal/diff"
 	"github.com/open-code-review/open-code-review/internal/llm"
@@ -149,7 +150,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
-	cacheKey := llm.ComputeCacheKey(messages)
+	sessionID := uuid.NewString()
 
 	for toolReqCount > 0 {
 		select {
@@ -169,7 +170,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			Messages:  messages,
 			Tools:     r.deps.MainToolDefs,
 			MaxTokens: r.deps.Template.MaxTokens,
-			CacheKey:  cacheKey,
+			SessionID: sessionID,
 		})
 		duration := time.Since(startTime)
 		if err != nil {

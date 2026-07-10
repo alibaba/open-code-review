@@ -138,7 +138,7 @@ type providerTUIModel struct {
 	deleteModelName       string
 }
 
-// cpProtocolIndex maps a protocol string (canonical name or "openai" alias) to
+// cpProtocolIndex maps a protocol string (canonical name or legacy alias) to
 // its index in cpProtocols. Unknown / empty values default to the OpenAI Chat
 // Completions entry (index 1) to preserve legacy behavior where any non-anthropic
 // protocol was treated as OpenAI.
@@ -319,7 +319,7 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 	} else if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic {
 		m.manualProtocolIdx = 0 // anthropic
 	} else {
-		m.manualProtocolIdx = 1 // openai-chat-completions
+		m.manualProtocolIdx = 1 // openai
 	}
 	}
 

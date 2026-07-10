@@ -538,7 +538,6 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 		Model:     a.args.Model,
 		Messages:  messages,
 		MaxTokens: a.args.Template.MaxTokens,
-		CacheKey:  llm.ComputeCacheKey(messages),
 	})
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))
@@ -745,7 +744,6 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 		Model:     a.args.Model,
 		Messages:  messages,
 		MaxTokens: a.args.Template.MaxTokens,
-		CacheKey:  llm.ComputeCacheKey(messages),
 	})
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))

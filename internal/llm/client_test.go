@@ -554,7 +554,7 @@ func TestNewLLMClient_Dispatch(t *testing.T) {
 		want     string
 	}{
 		{"anthropic -> AnthropicClient", ProtocolAnthropic, "*llm.AnthropicClient"},
-		{"openai-chat-completions -> OpenAIClient", ProtocolOpenAIChatCompletions, "*llm.OpenAIClient"},
+		{"openai -> OpenAIClient", ProtocolOpenAIChatCompletions, "*llm.OpenAIClient"},
 		{"openai-responses -> OpenAIResponsesClient", ProtocolOpenAIResponses, "*llm.OpenAIResponsesClient"},
 		// Defensive default: an unnormalized/unknown protocol falls through to
 		// OpenAIClient (preserves the pre-refactor behavior where any

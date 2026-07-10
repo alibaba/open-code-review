@@ -48,7 +48,6 @@ func ReLocateComment(
 		Model:     modelName,
 		Messages:  messages,
 		MaxTokens: maxTokens,
-		CacheKey:  llm.ComputeCacheKey(messages),
 	})
 	if err != nil {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Re-location LLM call failed for %s: %v\n", cm.Path, err)

@@ -107,8 +107,9 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 //   - role=tool messages (ToolCallID set) become function_call_output items.
 //   - store is forced to false (stateless, privacy-preserving; see
 //     DESIGN_STATE_CACHE_PHASE.md §4).
-//   - PromptCacheKey is read directly from req.CacheKey (precomputed once per
-//     session by the caller via llm.ComputeCacheKey). Only set when non-empty.
+//   - PromptCacheKey is set from req.SessionID when non-empty. The caller
+//     generates a random UUID per file session so that all turns within one
+//     file's agent loop share a cache bucket. Only set when non-empty.
 func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatRequest) responses.ResponseNewParams {
 	var systemParts []string
 	var input []responses.ResponseInputItemUnionParam
@@ -160,8 +161,8 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 	if instructions != "" {
 		params.Instructions = openai.String(instructions)
 	}
-	if req.CacheKey != "" {
-		params.PromptCacheKey = openai.String(req.CacheKey)
+	if req.SessionID != "" {
+		params.PromptCacheKey = openai.String(req.SessionID)
 	}
 	if len(tools) > 0 {
 		params.Tools = tools

@@ -208,7 +208,7 @@ ocr config set custom_providers.my-gateway.api_key your-api-key-here
 ocr config set custom_providers.my-gateway.model gpt-4o
 ```
 
-> カスタムプロバイダーでは`url`と`protocol`が必須です。サポートされるプロトコル：`anthropic`、`openai-chat-completions`、`openai-responses`（エイリアス：`openai`）。
+> カスタムプロバイダーでは`url`と`protocol`が必須です。サポートされるプロトコル：`anthropic`、`openai`、`openai-responses`。
 
 オプション設定：
 
@@ -251,7 +251,7 @@ export OCR_LLM_MODEL=gpt-5.4
 export OCR_LLM_PROTOCOL=openai-responses
 ```
 
-`OCR_LLM_PROTOCOL` は `anthropic`、`openai-chat-completions`、`openai-responses`（エイリアス `openai`）を受け付け、`OCR_USE_ANTHROPIC` と同時に設定した場合は優先されます。
+`OCR_LLM_PROTOCOL` は `anthropic`、`openai`、`openai-responses`を受け付け、`OCR_USE_ANTHROPIC` と同時に設定した場合は優先されます。
 
 Claude Codeの環境変数（`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_MODEL`）とも互換性があり、`~/.zshrc` / `~/.bashrc`からこれらのexportをパースします。
 
@@ -673,7 +673,7 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
 | `providers.<name>.api_key` | string | プロバイダー固有のAPIキー |
 | `providers.<name>.url` | string | プロバイダーのベースURLオーバーライド |
-| `providers.<name>.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses`（エイリアス: `openai`） |
+| `providers.<name>.protocol` | string | `anthropic` \| `openai` \| `openai-responses` |
 | `providers.<name>.model` | string | プロバイダーのモデル名 |
 | `providers.<name>.models` | array | 対話的選択に使う任意のプロバイダーモデル一覧 |
 | `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
@@ -688,7 +688,7 @@ OCRは4層の優先度チェーンを使ってレビュールールを解決し�
 | `llm.timeout_sec` | integer | リクエストごとのHTTPタイムアウト（秒）、デフォルト `300` |
 | `llm.extra_headers` | string | カンマ区切りの `key=value` HTTPヘッダー |
 | `llm.model` | string | `claude-opus-4-6` |
-| `llm.protocol` | string | `anthropic` \| `openai-chat-completions` \| `openai-responses`（エイリアス: `openai`）；`llm.use_anthropic` より優先 |
+| `llm.protocol` | string | `anthropic` \| `openai` \| `openai-responses`；`llm.use_anthropic` より優先 |
 | `llm.use_anthropic` | boolean | `true` \| `false`（レガシー；`llm.protocol` を推奨） |
 | `mcp_servers.<name>.command` | string | MCPサーバーを起動するコマンド |
 | `mcp_servers.<name>.args` | array | MCPサーバーのコマンドライン引数 |
@@ -749,7 +749,7 @@ ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
 | `OCR_LLM_AUTH_HEADER` | Anthropic認証ヘッダー（`x-api-key`または`authorization`） |
 | `OCR_LLM_EXTRA_HEADERS` | カンマ区切りの `key=value` HTTPヘッダー |
 | `OCR_LLM_MODEL` | モデル名 |
-| `OCR_LLM_PROTOCOL` | プロトコル：`anthropic` \| `openai-chat-completions` \| `openai-responses`（エイリアス: `openai`）；`OCR_USE_ANTHROPIC` より優先 |
+| `OCR_LLM_PROTOCOL` | プロトコル：`anthropic` \| `openai` \| `openai-responses`；`OCR_USE_ANTHROPIC` より優先 |
 | `OCR_LLM_TIMEOUT` | リクエストごとのHTTPタイムアウト（秒）、設定ファイルの `timeout_sec` を上書き |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic、`false` = OpenAI Chat Completions（レガシー；`OCR_LLM_PROTOCOL` を推奨） |
 

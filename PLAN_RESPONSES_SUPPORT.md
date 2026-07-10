@@ -1,7 +1,7 @@
 # 计划：为 OCR 增加 OpenAI Responses API 支持
 
 > 状态：**已确认（FINAL）** — 所有架构决策已拍板，单 PR 实施。
-> 目标：在现有 LLM Provider 系统中新增 `openai-responses` 协议，使 OCR 可经 OpenAI Responses API（`/v1/responses`）进行代码评审，支持 GPT-5.x / o-系列等模型。**同时**对现有 protocol 命名做一次规范化重构（`openai` → `openai-chat-completions`，别名兼容），并为未来 `anthropic-vertex` 等 provider 预留命名空间。
+> 目标：在现有 LLM Provider 系统中新增 `openai-responses` 协议，使 OCR 可经 OpenAI Responses API（`/v1/responses`）进行代码评审，支持 GPT-5.x / o-系列等模型。**同时**引入 protocol 常量规范化（`openai` 保持不变以实现完全向前兼容），并为未来 `anthropic-vertex` 等 provider 预留命名空间。
 
 ---
 
@@ -28,12 +28,12 @@
 | 规范值 | 含义 | 分发 client |
 |---|---|---|
 | `anthropic` | Anthropic Messages API（直连） | `AnthropicClient` |
-| `openai-chat-completions` | OpenAI Chat Completions（原 `openai` 的规范名） | `OpenAIClient` |
+| `openai` | OpenAI Chat Completions | `OpenAIClient` |
 | `openai-responses` | OpenAI Responses API（新增） | `OpenAIResponsesClient` |
 
 ### 1.2 别名（向后兼容）
 
-- `openai` → 归一化为 `openai-chat-completions`
+- `openai-chat-completions` → 归一化为 `openai`（仅供本分支测试期产出的配置；存量配置均为 `openai`，无需转换）
 - 存量配置 `"protocol": "openai"`、`use_anthropic=false`、`OCR_USE_ANTHROPIC=false` 行为不变。
 
 ### 1.3 预留命名空间（本期不实现）
@@ -48,16 +48,16 @@
 ```go
 const (
     ProtocolAnthropic            = "anthropic"
-    ProtocolOpenAIChatCompletions = "openai-chat-completions"
+    ProtocolOpenAIChatCompletions = "openai"
     ProtocolOpenAIResponses      = "openai-responses"
 )
 
-// NormalizeProtocol 归一化别名（openai → openai-chat-completions）。
+// NormalizeProtocol 归一化别名（openai-chat-completions → openai）。
 // 空串原样返回（由调用方决定默认）。未知名原样返回，交由 ValidateProtocol 报错。
 func NormalizeProtocol(raw string) string { ... }
 
 // ValidateProtocol 接受三个规范名；拒绝其它（含 anthropic-vertex，提示暂未实现）。
-// 注意：本函数**不**接受别名 "openai"——调用方必须先经 NormalizeProtocol 归一化。
+// 注意：本函数**不**接受别名 "openai-chat-completions"——调用方必须先经 NormalizeProtocol 归一化。
 func ValidateProtocol(p string) error { ... }
 
 // IsAnthropicProtocol 报告是否为 anthropic 协议（仅规范名）。
@@ -66,29 +66,29 @@ func IsAnthropicProtocol(p string) bool { return p == ProtocolAnthropic }
 
 **调用时机**：resolver 各 strategy 在产出 `ResolvedEndpoint` 前、`tryProviderConfig`/`tryCustomProvider` 读取 `entry.Protocol` 后调用 `NormalizeProtocol`；校验统一走 `ValidateProtocol`。底层 switch 只面对规范名。
 
-> **`openai` 别名在 `ValidateProtocol` 中的处理——方案比选：**
+> **`openai-chat-completions` 别名在 `ValidateProtocol` 中的处理——方案比选：**
 >
 > | 方案 | 做法 | 优点 | 缺点 |
 > |---|---|---|---|
-> | **A（采用）：严格分离** | `ValidateProtocol` 只认规范名；调用方必须 `ValidateProtocol(NormalizeProtocol(raw))` | 职责单一；别名映射只在 `NormalizeProtocol` 一处；错误信息精确 | 调用方忘记先 Normalize 会导致 `"openai"` 被拒（但 resolver 所有路径已统一 Normalize，不会遗漏） |
-> | B：内部宽容 | `ValidateProtocol` 内部先 `NormalizeProtocol(p)` 再 switch | 调用方不可能误用 | 隐式接受非规范输入；若调用方未同时 Normalize，下游 switch 拿到 `"openai"` 而非 `"openai-chat-completions"`，分发可能出错 |
+> | **A（采用）：严格分离** | `ValidateProtocol` 只认规范名；调用方必须 `ValidateProtocol(NormalizeProtocol(raw))` | 职责单一；别名映射只在 `NormalizeProtocol` 一处；错误信息精确 | 调用方忘记先 Normalize 会导致 `"openai-chat-completions"` 被拒（但 resolver 所有路径已统一 Normalize，不会遗漏） |
+> | B：内部宽容 | `ValidateProtocol` 内部先 `NormalizeProtocol(p)` 再 switch | 调用方不可能误用 | 隐式接受非规范输入；若调用方未同时 Normalize，下游 switch 可能拿到别名而非规范名 |
 > | C：合并为 `ValidateAndNormalize(p) (string, error)` | 一次调用产出已校验的规范名 | 无歧义；原子操作 | 改变函数签名（`error` → `(string, error)`）；两个职责合并 |
 >
-> **选定方案 A**：与 §1.4 的职责划分一致（`NormalizeProtocol` 管别名、`ValidateProtocol` 管白名单），resolver 调用链已保证 `Normalize → Validate → 用规范名` 的顺序。§6.1 测试用例须据此修正为 `ValidateProtocol(NormalizeProtocol("openai"))` 通过，而非 `ValidateProtocol("openai")` 通过。
+> **选定方案 A**：与 §1.4 的职责划分一致（`NormalizeProtocol` 管别名、`ValidateProtocol` 管白名单），resolver 调用链已保证 `Normalize → Validate → 用规范名` 的顺序。
 
 ### 1.5 默认行为（未显式指定 protocol，保持向前兼容）
 
 | 配置来源 | 默认规则 |
 |---|---|
-| legacy `llm` 块（无 `protocol` 字段） | `use_anthropic=true|nil` → `anthropic`；`false` → `openai-chat-completions` |
-| 内置 provider（providers.go registry） | registry 内 `Protocol` 字段改为规范名（`openai-chat-completions` / `anthropic`） |
-| custom provider | protocol 必填；接受规范名 + `openai` 别名 |
-| 环境变量（无 `OCR_LLM_PROTOCOL`） | `OCR_USE_ANTHROPIC=true|未设` → `anthropic`；`false` → `openai-chat-completions` |
+| legacy `llm` 块（无 `protocol` 字段） | `use_anthropic=true|nil` → `anthropic`；`false` → `openai` |
+| 内置 provider（providers.go registry） | registry 内 `Protocol` 字段改为规范名（`openai` / `anthropic`） |
+| custom provider | protocol 必填；接受规范名 + `openai-chat-completions` 别名 |
+| 环境变量（无 `OCR_LLM_PROTOCOL`） | `OCR_USE_ANTHROPIC=true|未设` → `anthropic`；`false` → `openai` |
 | `llm.protocol` / `OCR_LLM_PROTOCOL` 非空 | 优先级最高（归一化后采用） |
 
 ### 1.6 用户可见变化
 
-- `ocr llm providers` 输出的 PROTOCOL 列：`openai` → `openai-chat-completions`（信息更精确，release notes 说明）。
+- `ocr llm providers` 输出的 PROTOCOL 列：`openai`（值不变，仅从硬编码字符串改为常量引用）。
 - `ocr config provider` TUI：protocol 选项展示规范名三项（见 §3.6）。
 
 ---
@@ -179,17 +179,17 @@ default: // ProtocolOpenAIChatCompletions（防御兜底）
 - `tryProviderConfig`：
   - 内置 provider：`protocol = NormalizeProtocol(preset.Protocol)`（registry 已是规范名，幂等）。
   - 自定义 provider：读取 `entry.Protocol` → `NormalizeProtocol` → `ValidateProtocol`（错误信息列出三规范名 + 别名 `openai`）。
-  - `protocol == ProtocolAnthropic` 分支（authHeader、`ensureMessagesSuffix`）保持条件语义不变（仅常量替换）；`openai-chat-completions` 与 `openai-responses` 均不做 resolver 级 URL 处理。
+  - `protocol == ProtocolAnthropic` 分支（authHeader、`ensureMessagesSuffix`）保持条件语义不变（仅常量替换）；`openai` 与 `openai-responses` 均不做 resolver 级 URL 处理。
 - `tryOCREnv`：
   - 新增读取 `OCR_LLM_PROTOCOL`（新常量 `envOCRLLMProtocol`）；非空 → `NormalizeProtocol` 后采用。
-  - 否则按 `OCR_USE_ANTHROPIC`：`true|未设`→`anthropic`，`false`→`openai-chat-completions`（产出规范名，原逻辑产出 `"openai"` 的两处一并改）。
+  - 否则按 `OCR_USE_ANTHROPIC`：`true|未设`→`anthropic`，`false`→`openai`（产出规范名，原逻辑产出 `"openai"` 的两处一并改）。
   - `OCR_LLM_PROTOCOL` 与 `OCR_USE_ANTHROPIC` 同时设置时，前者优先（文档说明）。
 - `tryLegacyLlmConfig`：
   - 新增 `llm.protocol` 字段读取（见 §3.4）；非空 → 归一化优先。
   - 否则按 `use_anthropic`（同上产出规范名）。
 - `tryCCEnv` / `tryShellRC`：硬编码 `Protocol: "anthropic"` 不变（已是规范名）。
 - `ensureMessagesSuffix`：仅 anthropic 调用，逻辑不变。
-- **authHeader 行为**（`resolver.go:330-348` 现有逻辑）：仅 `protocol == "anthropic"` 时设置 `authHeader`（`x-api-key` / `authorization`）；`openai-chat-completions` 和 `openai-responses` 均走 else 分支 → `authHeader = ""`。Responses API 的认证与 Chat Completions 完全一致——**SDK 的 `WithAPIKey(cfg.APIKey)` 自动设置 `Authorization: Bearer <key>`**（`requestconfig.go:664-667`，`authPreference = authCredentialPreferenceBearer`），无需任何 auth header 配置。
+- **authHeader 行为**（`resolver.go:330-348` 现有逻辑）：仅 `protocol == "anthropic"` 时设置 `authHeader`（`x-api-key` / `authorization`）；`openai` 和 `openai-responses` 均走 else 分支 → `authHeader = ""`。Responses API 的认证与 Chat Completions 完全一致——**SDK 的 `WithAPIKey(cfg.APIKey)` 自动设置 `Authorization: Bearer <key>`**（`requestconfig.go:664-667`，`authPreference = authCredentialPreferenceBearer`），无需任何 auth header 配置。
 
 ### 3.4 配置结构（方案 A）
 
@@ -201,7 +201,7 @@ type llmFileConfig struct {
     AuthToken    string            `json:"auth_token,omitempty"`
     AuthHeader   string            `json:"auth_header,omitempty"`
     Model        string            `json:"model,omitempty"`
-    Protocol     string            `json:"protocol,omitempty"`     // ← 新增：anthropic|openai-chat-completions|openai-responses（别名 openai）
+    Protocol     string            `json:"protocol,omitempty"`     // ← 新增：anthropic|openai|openai-responses
     UseAnthropic *bool             `json:"use_anthropic,omitempty"` // 降级为兼容回退
     TimeoutSec   int               `json:"timeout_sec,omitempty"`
     ExtraBody    map[string]any    `json:"extra_body,omitempty"`
@@ -226,7 +226,7 @@ type llmFileConfig struct {
 
 **现状对齐对象：`NewOpenAIClient`（`client.go:286`）**——确保 cfg.URL 是完整端点，再剥后缀喂 SDK。
 
-**resolver 侧**：`openai-responses` **不做任何 URL 处理**（与 `openai-chat-completions` 一致；仅 `anthropic` 调 `ensureMessagesSuffix`）。
+**resolver 侧**：`openai-responses` **不做任何 URL 处理**（与 `openai` 一致；仅 `anthropic` 调 `ensureMessagesSuffix`）。
 
 **`NewOpenAIResponsesClient` 侧**（新 helper `ensureResponsesEndpoint`）：
 
@@ -268,14 +268,14 @@ var cpProtocols = []string{
 - **Manual tab 现可表达 responses**：选中 `openai-responses` 后写入 `cfg.Llm.Protocol`（方案 A，无需再限制 manual 仅二协议）。
 - `applyManualConfig`（`provider_cmd.go:92`）：
   - 优先用 `result.protocol`（规范名）写入 `cfg.Llm.Protocol`；
-  - 当 protocol 为 `anthropic`/`openai-chat-completions` 时，仍同步设置 `use_anthropic`（兼容旧读取路径，双写无害）；
+  - 当 protocol 为 `anthropic`/`openai` 时，仍同步设置 `use_anthropic`（兼容旧读取路径，双写无害）；
   - `result()`（:1481）中 protocol 取 `cpProtocols[idx]` 自动带规范名。
 
 ### 3.7 内置 provider registry
 
 **`internal/llm/providers.go`**
 
-- 12 处 `Protocol: "openai"` → `Protocol: llm.ProtocolOpenAIChatCompletions`（即 `"openai-chat-completions"`）。
+- 12 处 `Protocol: "openai"` → `Protocol: llm.ProtocolOpenAIChatCompletions`（值不变，仍为 `"openai"`，仅从硬编码字符串改为常量引用）。
 - 1 处 `Protocol: "anthropic"` → `Protocol: llm.ProtocolAnthropic`（值不变，用常量）。
 - 顶部注释补充「支持的 Protocol 规范值」清单，便于后续新增 provider（呼应决策 1：保证扩展能力）。
 
@@ -291,11 +291,11 @@ var cpProtocols = []string{
 
 ## 4. 环境变量（决策 6，与配置联合）
 
-**新增** `OCR_LLM_PROTOCOL`（常量 `envOCRLLMProtocol`）：`anthropic` | `openai-chat-completions` | `openai-responses`（别名 `openai`）。
+**新增** `OCR_LLM_PROTOCOL`（常量 `envOCRLLMProtocol`）：`anthropic` | `openai` | `openai-responses`。
 
 **resolver 优先级（env 路径）：**
 1. `OCR_LLM_PROTOCOL` 非空 → `NormalizeProtocol` 后采用；
-2. 否则 `OCR_USE_ANTHROPIC`：`true|未设`→`anthropic`，`false`→`openai-chat-completions`。
+2. 否则 `OCR_USE_ANTHROPIC`：`true|未设`→`anthropic`，`false`→`openai`。
 
 **文档更新**（README 环境变量表）：
 - 新增 `OCR_LLM_PROTOCOL` 行。
@@ -352,8 +352,8 @@ var cpProtocols = []string{
 ### 6.1 单元测试
 
 **`internal/llm/protocol_test.go`（新增）**
-- `NormalizeProtocol`：`openai`→`openai-chat-completions`；空串→空；规范名幂等；未知名原样。
-- `ValidateProtocol`：三规范名通过；`ValidateProtocol(NormalizeProtocol("openai"))` 通过（别名须先归一化）；`anthropic-vertex` 拒绝（错误含「暂未实现」）；`grpc` 拒绝。
+- `NormalizeProtocol`：`openai-chat-completions`→`openai`；空串→空；规范名幂等；未知名原样。
+- `ValidateProtocol`：三规范名通过；`ValidateProtocol(NormalizeProtocol("openai-chat-completions"))` 通过（别名须先归一化）；`anthropic-vertex` 拒绝（错误含「暂未实现」）；`grpc` 拒绝。
 
 **`internal/llm/responses_client_test.go`（新增）**
 - `TestNewOpenAIResponsesClient_URLNormalization`：对仗 §3.5 契约表。
@@ -366,21 +366,21 @@ var cpProtocols = []string{
 - 用 `httptest.Server` 录制/回放（参考 `client_test.go`）。
 
 **`internal/llm/client_test.go`（扩展）**
-- `TestNewLLMClient_Dispatch`：三规范名分别得到 `*AnthropicClient`/`*OpenAIClient`/`*OpenAIResponsesClient`；`openai` 别名经 resolver 归一化后落到 `*OpenAIClient`。
+- `TestNewLLMClient_Dispatch`：三规范名分别得到 `*AnthropicClient`/`*OpenAIClient`/`*OpenAIResponsesClient`；`openai-chat-completions` 别名经 resolver 归一化后落到 `*OpenAIClient`。
 
 **`internal/llm/resolver_test.go`（扩展）**
-- 自定义 provider `protocol: "openai-responses"` / `"openai-chat-completions"` / 别名 `"openai"` 各自解析正确。
+- 自定义 provider `protocol: "openai-responses"` / `"openai"` / 别名 `"openai-chat-completions"` 各自解析正确。
 - `anthropic-vertex` 被拒（错误信息校验）。
 - legacy `llm.protocol` 优先于 `use_anthropic`。
 - `OCR_LLM_PROTOCOL` 优先于 `OCR_USE_ANTHROPIC`。
 - `openai-responses` URL 未被附加 `/v1/messages` 或 `/chat/completions`。
 
 **`internal/llm/providers_test.go`（扩展）**
-- registry 内置项 Protocol 均为规范名（无裸 `"openai"`）。
+- registry 内置项 Protocol 均使用规范常量（`ProtocolOpenAIChatCompletions` / `ProtocolAnthropic`）。
 
 **`cmd/opencodereview/`（扩展）**
 - `provider_cmd_test.go` / `config_dispatch_test.go`：
-  - `config set providers.X.protocol openai-responses` / `openai-chat-completions` / `openai`（别名）成功。
+  - `config set providers.X.protocol openai-responses` / `openai` / `openai-chat-completions`（别名）成功。
   - `config set custom_providers.Y.protocol anthropic-vertex` 失败（暂未实现）。
   - `config set llm.protocol openai-responses` 成功写入 `cfg.Llm.Protocol`。
 - `provider_tui_test.go`：`cpProtocols` 含三项规范名；Manual/Custom 表单可选到 `openai-responses`，`result().protocol` 为规范名。
@@ -390,7 +390,7 @@ var cpProtocols = []string{
 - `ocr config set provider openai` + `ocr config set providers.openai.protocol openai-responses` + key + `ocr llm test` 通过。
 - 别名回归：`providers.openai.protocol openai` 仍走 Chat Completions（行为不变）。
 - `ocr review` 与 `ocr scan` 在 `openai-responses` 下端到端跑通（plan/主循环/summary/re-location 四阶段）；多轮工具调用 `call_id` 无失配。
-- 同仓库对比 `openai-chat-completions` vs `openai-responses` 的评论数 / token / `cached_tokens`（呼应 §5.1 验证）。
+- 同仓库对比 `openai` vs `openai-responses` 的评论数 / token / `cached_tokens`（呼应 §5.1 验证）。
 - 自定义网关 URL 透传正常。
 - `ocr viewer` 会话 JSONL 可读。
 

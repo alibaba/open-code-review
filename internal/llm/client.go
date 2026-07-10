@@ -1,14 +1,12 @@
 // Package llm provides LLM client interfaces supporting multiple protocols.
 // Supported protocols (canonical names, see protocol.go):
 //   - "anthropic" — Anthropic Messages API
-//   - "openai-chat-completions" — OpenAI Chat Completions API (legacy alias: "openai")
+//   - "openai" — OpenAI Chat Completions API
 //   - "openai-responses" — OpenAI Responses API
 package llm
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -113,38 +111,6 @@ func extractBlockText(block ContentBlock) string {
 	return sb.String()
 }
 
-// ComputeCacheKey derives a stable prompt cache key from the system prompt
-// (instructions) and the first user message in the conversation. Intended to
-// be called once per session by the caller, then passed via ChatRequest.CacheKey.
-// The key is sha256(instructions + "\x00" + firstUser)[:32] — the null-byte
-// delimiter avoids concatenation ambiguity. The hash carries no business
-// semantics.
-func ComputeCacheKey(messages []Message) string {
-	var systemParts []string
-	var firstUser string
-	firstUserSeen := false
-	for _, msg := range messages {
-		content := msg.ExtractText()
-		switch msg.Role {
-		case "system":
-			if content != "" {
-				systemParts = append(systemParts, content)
-			}
-		case "user":
-			if !firstUserSeen {
-				firstUser = content
-				firstUserSeen = true
-			}
-		}
-	}
-	instructions := strings.Join(systemParts, "\n\n")
-	h := sha256.New()
-	h.Write([]byte(instructions))
-	h.Write([]byte{0})
-	h.Write([]byte(firstUser))
-	return hex.EncodeToString(h.Sum(nil))[:32]
-}
-
 // Choice holds a single choice from the response.
 type Choice struct {
 	Message      ResponseMessage `json:"message"`
@@ -231,7 +197,7 @@ type ClientConfig struct {
 // protocol dispatch (canonical names from protocol.go):
 //   - ProtocolAnthropic ("anthropic") -> AnthropicClient
 //   - ProtocolOpenAIResponses ("openai-responses") -> OpenAIResponsesClient
-//   - ProtocolOpenAIChatCompletions ("openai-chat-completions") or anything else -> OpenAIClient
+//   - ProtocolOpenAIChatCompletions ("openai") or anything else -> OpenAIClient
 //
 // The defensive default keeps legacy callers that somehow bypass resolver
 // normalization working (they previously got OpenAIClient for any non-anthropic
@@ -366,7 +332,7 @@ type ChatRequest struct {
 	Tools       []ToolDef `json:"tools,omitempty"`
 	Temperature *float64  `json:"temperature,omitempty"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
-	CacheKey    string    `json:"-"` // precomputed prompt cache key (Responses API only)
+	SessionID   string    `json:"-"` // per-file agent loop session ID; used as prompt_cache_key by the Responses API client
 }
 
 // CompletionsWithCtx sends a chat completion request with context support for cancellation and timeout.
