@@ -283,4 +283,14 @@ export const zh: TranslationKeys = {
   'docs.search.hint.select': '选择',
   'docs.search.hint.open': '打开',
   'docs.search.hint.close': '关闭',
+
+  // Blog
+  'blog.title': '博客',
+  'blog.allTags': '全部',
+  'blog.backToList': '← 返回博客',
+  'blog.toc': '目录',
+  'blog.noPosts': '暂无文章。',
+  'blog.noPostsForTag': '该标签下暂无文章。',
+  'blog.search.placeholder': '搜索文章...',
+  'blog.search.noResults': '未找到结果',
 };

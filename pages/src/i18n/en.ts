@@ -281,4 +281,14 @@ export const en: TranslationKeys = {
   'docs.search.hint.select': 'Select',
   'docs.search.hint.open': 'Open',
   'docs.search.hint.close': 'Close',
+
+  // Blog
+  'blog.title': 'Blog',
+  'blog.allTags': 'All',
+  'blog.backToList': '← Back to Blog',
+  'blog.toc': 'CONTENTS',
+  'blog.noPosts': 'No posts yet.',
+  'blog.noPostsForTag': 'No posts found for this tag.',
+  'blog.search.placeholder': 'Search posts...',
+  'blog.search.noResults': 'No results found',
 };

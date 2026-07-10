@@ -283,4 +283,14 @@ export const ja: TranslationKeys = {
   'docs.search.hint.select': '選択',
   'docs.search.hint.open': '開く',
   'docs.search.hint.close': '閉じる',
+
+  // Blog
+  'blog.title': 'ブログ',
+  'blog.allTags': 'すべて',
+  'blog.backToList': '← ブログに戻る',
+  'blog.toc': '目次',
+  'blog.noPosts': 'まだ記事がありません。',
+  'blog.noPostsForTag': 'このタグの記事が見つかりません。',
+  'blog.search.placeholder': '記事を検索...',
+  'blog.search.noResults': '結果が見つかりません',
 };
