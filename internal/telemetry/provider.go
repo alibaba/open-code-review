@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -57,6 +58,10 @@ func Init(ctx context.Context) bool {
 
 	otel.SetTracerProvider(tracerProvider)
 	otel.SetMeterProvider(meterProvider)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
 
 	return len(shutdownFuncs) > 0
 }

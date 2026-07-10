@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -169,4 +171,74 @@ func TestRecordLLMResult_Error(t *testing.T) {
 func TestRecordLLMResult_NilSpan(t *testing.T) {
 	RecordLLMResult(nil, 100*time.Millisecond, 0, nil)
 	RecordLLMResult(nil, 100*time.Millisecond, 0, fmt.Errorf("err"))
+}
+
+// A well-formed W3C traceparent: version-traceID-spanID-flags.
+const validTraceParent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+const wantExtractedTraceID = "0af7651916cd43dd8448eb211c80319c"
+
+func TestContextWithTraceParentFromEnv_Extracts(t *testing.T) {
+	setupEnabledTelemetry(t)
+	// Init registers TraceContext+Baggage at the global propagator; mirror
+	// that here so Extract works without going through the full Init path.
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{}, propagation.Baggage{}))
+
+	t.Setenv("TRACEPARENT", validTraceParent)
+	ctx := ContextWithTraceParentFromEnv(context.Background())
+
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
+		t.Fatal("expected a valid SpanContext after extracting TRACEPARENT")
+	}
+	if got := sc.TraceID().String(); got != wantExtractedTraceID {
+		t.Errorf("extracted TraceID = %q, want %q", got, wantExtractedTraceID)
+	}
+
+	// A span started on this ctx must inherit the upstream trace (child, not root).
+	_, span := StartSpan(ctx, "test.child")
+	defer span.End()
+	if got := span.SpanContext().TraceID().String(); got != wantExtractedTraceID {
+		t.Errorf("child span TraceID = %q, want %q (must inherit upstream)", got, wantExtractedTraceID)
+	}
+}
+
+func TestContextWithTraceParentFromEnv_AbsentOrDisabled(t *testing.T) {
+	// Telemetry disabled: must short-circuit and leave ctx with no span context.
+	initialized = false
+	shutdownFuncs = nil
+	t.Setenv("TRACEPARENT", validTraceParent)
+	ctx := ContextWithTraceParentFromEnv(context.Background())
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		t.Error("expected no valid SpanContext when telemetry is disabled")
+	}
+
+	// Telemetry enabled but TRACEPARENT unset: ctx unchanged (no upstream parent).
+	setupEnabledTelemetry(t)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{}, propagation.Baggage{}))
+	t.Setenv("TRACEPARENT", "")
+	ctx = ContextWithTraceParentFromEnv(context.Background())
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		t.Error("expected no valid SpanContext when TRACEPARENT is unset")
+	}
+}
+
+func TestContextWithTraceParentFromEnv_Malformed(t *testing.T) {
+	setupEnabledTelemetry(t)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{}, propagation.Baggage{}))
+
+	for _, bad := range []string{
+		"not-a-traceparent",
+		"00-invalidtraceid-invalidspanid-01",
+	} {
+		t.Run(bad, func(t *testing.T) {
+			t.Setenv("TRACEPARENT", bad)
+			ctx := ContextWithTraceParentFromEnv(context.Background())
+			if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+				t.Errorf("expected no valid SpanContext for malformed TRACEPARENT %q", bad)
+			}
+		})
+	}
 }

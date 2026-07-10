@@ -115,7 +115,7 @@ func runReview(args []string) error {
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
-	ctx, span := telemetry.StartSpan(context.Background(), "review.run")
+	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(context.Background()), "review.run")
 	defer span.End()
 	telemetry.SetAttr(span, "review.repo", cc.RepoDir)
 	telemetry.SetAttr(span, "review.from", opts.from)

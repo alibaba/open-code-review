@@ -208,7 +208,7 @@ func runScan(args []string) error {
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
-	ctx, span := telemetry.StartSpan(context.Background(), "scan.run")
+	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(context.Background()), "scan.run")
 	defer span.End()
 	var traceID string
 	if telemetry.IsEnabled() {

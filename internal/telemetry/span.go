@@ -3,11 +3,13 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -22,6 +24,20 @@ func StartSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) 
 		return ctx, trace.SpanFromContext(ctx)
 	}
 	return getTracer().Start(ctx, name, opts...)
+}
+
+// ContextWithTraceParentFromEnv extracts W3C traceparent from the TRACEPARENT
+// environment variable and returns a context carrying the upstream span context.
+// Returns ctx unchanged when telemetry is disabled or the variable is unset.
+func ContextWithTraceParentFromEnv(ctx context.Context) context.Context {
+	if !IsEnabled() {
+		return ctx
+	}
+	tp := os.Getenv("TRACEPARENT")
+	if tp == "" {
+		return ctx
+	}
+	return otel.GetTextMapPropagator().Extract(ctx, propagation.MapCarrier{"traceparent": tp})
 }
 
 // TraceIDFromContext returns the hex-encoded trace ID of the span carried by
