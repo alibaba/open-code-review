@@ -188,7 +188,7 @@ const BlogPage: React.FC = () => {
         <Navbar />
         <div style={{ display: 'flex', justifyContent: 'center', maxWidth: 1440, margin: '0 auto', flex: 1, width: '100%' }}>
           {/* Main content */}
-          <div style={{ flex: 1, minWidth: 0, padding: isMobile ? '32px 20px 80px' : '40px 48px 80px', maxWidth: 820 }}>
+          <div style={{ flex: 1, minWidth: 0, padding: isMobile ? '32px 20px 80px' : '40px 48px 80px', maxWidth: isMobile ? undefined : '65%' }}>
             {/* Back link */}
             <button
               onClick={() => navigate('/blog')}
