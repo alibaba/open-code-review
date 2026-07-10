@@ -1242,18 +1242,6 @@ func (m *providerTUIModel) applyEditCustomProviderSave() error {
 	entry.URL = r.url
 	entry.Protocol = r.protocol
 	entry.AuthHeader = r.authHeader
-	if entry.ExtraBody != nil {
-		if err := llm.ValidateExtraBody(entry.ExtraBody); err != nil {
-			m.formError = err.Error()
-			return err
-		}
-	}
-	if len(entry.ExtraHeaders) > 0 {
-		if err := llm.ValidateExtraHeadersMap(entry.ExtraHeaders); err != nil {
-			m.formError = err.Error()
-			return err
-		}
-	}
 	if key, edited := m.customAPIKeyForSave(); edited {
 		entry.APIKey = key
 	}

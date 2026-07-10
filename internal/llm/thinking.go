@@ -267,8 +267,11 @@ func ApplyModelsThinking(extraBody map[string]any, modelsThinking map[string]str
 }
 
 func cloneExtraBodyMap(m map[string]any) map[string]any {
-	if m == nil || len(m) == 0 {
+	if m == nil {
 		return nil
+	}
+	if len(m) == 0 {
+		return map[string]any{}
 	}
 	out := make(map[string]any, len(m))
 	for k, v := range m {

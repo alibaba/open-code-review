@@ -376,9 +376,6 @@ func setConfigValue(cfg *Config, key, value string) error {
 		if err := json.Unmarshal([]byte(value), &m); err != nil {
 			return fmt.Errorf("invalid JSON for llm.extra_body: %w", err)
 		}
-		if err := llm.ValidateExtraBody(m); err != nil {
-			return fmt.Errorf("invalid llm.extra_body: %w", err)
-		}
 		cfg.Llm.ExtraBody = m
 	default:
 		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, models_thinking\nMCP server fields: command, args, env, tools, setup", key)
@@ -426,9 +423,6 @@ func applyProviderField(entry *ProviderEntry, isPreset bool, providerName, field
 		var m map[string]any
 		if err := json.Unmarshal([]byte(value), &m); err != nil {
 			return fmt.Errorf("invalid JSON for %s: %w", key, err)
-		}
-		if err := llm.ValidateExtraBody(m); err != nil {
-			return fmt.Errorf("invalid %s: %w", key, err)
 		}
 		entry.ExtraBody = m
 	case "models_thinking":

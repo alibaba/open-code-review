@@ -1155,25 +1155,7 @@ func TestResolveEndpoint_OCREnvExtraHeadersReservedRejected(t *testing.T) {
 	}
 }
 
-func TestValidateExtraHeadersMap(t *testing.T) {
-	if err := ValidateExtraHeadersMap(map[string]string{"X-Org-ID": "org-123"}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if err := ValidateExtraHeadersMap(map[string]string{"Authorization": "bad"}); err == nil {
-		t.Fatal("expected reserved header error")
-	}
-}
-
-func TestValidateExtraBody(t *testing.T) {
-	if err := ValidateExtraBody(map[string]any{"enable_thinking": false}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if err := ValidateExtraBody(map[string]any{"model": "x"}); err == nil {
-		t.Fatal("expected reserved key error")
-	}
-}
-
-func TestResolveEndpoint_ProviderExtraBodyReservedRejected(t *testing.T) {
+func TestResolveEndpoint_ProviderExtraBodyLoadsReservedKeys(t *testing.T) {
 	clearAllEnv(t)
 
 	cfg := configFile{
@@ -1190,16 +1172,16 @@ func TestResolveEndpoint_ProviderExtraBodyReservedRejected(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	os.WriteFile(cfgPath, data, 0644)
 
-	_, err := ResolveEndpoint(cfgPath)
-	if err == nil {
-		t.Fatal("expected error for reserved extra_body key in JSON config")
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
 	}
-	if !strings.Contains(err.Error(), "model") {
-		t.Errorf("error = %v", err)
+	if ep.ExtraBody["model"] != "override" {
+		t.Fatalf("ExtraBody = %#v", ep.ExtraBody)
 	}
 }
 
-func TestResolveEndpoint_ProviderExtraHeadersReservedRejected(t *testing.T) {
+func TestResolveEndpoint_ProviderExtraHeadersLoadsReservedKeys(t *testing.T) {
 	clearAllEnv(t)
 
 	cfg := configFile{
@@ -1216,12 +1198,12 @@ func TestResolveEndpoint_ProviderExtraHeadersReservedRejected(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	os.WriteFile(cfgPath, data, 0644)
 
-	_, err := ResolveEndpoint(cfgPath)
-	if err == nil {
-		t.Fatal("expected error for reserved extra header in JSON config")
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
 	}
-	if !strings.Contains(err.Error(), "Authorization") {
-		t.Errorf("error = %v", err)
+	if ep.ExtraHeaders["Authorization"] != "bad" {
+		t.Fatalf("ExtraHeaders = %#v", ep.ExtraHeaders)
 	}
 }
 

@@ -3019,26 +3019,6 @@ func TestModelTUI_TabTogglesThinking(t *testing.T) {
 	}
 }
 
-func TestValidateExtraBody(t *testing.T) {
-	if err := llm.ValidateExtraBody(map[string]any{"enable_thinking": false}); err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"model", "messages", "stream", "max_tokens", "max_completion_tokens", "system", "tools", "tool_choice", "stop"} {
-		if err := llm.ValidateExtraBody(map[string]any{key: "x"}); err == nil {
-			t.Fatalf("expected error for reserved key %q", key)
-		}
-	}
-	if err := llm.ValidateExtraBody(map[string]any{"Model": "x"}); err == nil {
-		t.Fatal("expected case-insensitive reserved key rejection")
-	}
-	if err := llm.ValidateExtraBody(map[string]any{"thinking": map[string]any{"type": "disabled"}}); err != nil {
-		t.Fatalf("nested maps should be allowed: %v", err)
-	}
-	if err := llm.ValidateExtraBody(map[string]any{"nested": map[string]any{"model": "override"}}); err != nil {
-		t.Fatalf("nested reserved keys should be allowed: %v", err)
-	}
-}
-
 func TestCloneProviderEntry_DeepClonesExtraBody(t *testing.T) {
 	orig := ProviderEntry{
 		ExtraBody: map[string]any{
@@ -3088,7 +3068,7 @@ func TestApplyEditCustomProviderSave_PreservesExtraBody(t *testing.T) {
 	}
 }
 
-func TestApplyEditCustomProviderSave_RejectsInvalidExistingExtraBody(t *testing.T) {
+func TestApplyEditCustomProviderSave_PreservesInvalidExistingExtraBody(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	cfg := &Config{
@@ -3110,11 +3090,11 @@ func TestApplyEditCustomProviderSave_RejectsInvalidExistingExtraBody(t *testing.
 	m.cpNameInput.SetValue("aaa")
 	m.cpURLInput.SetValue("https://example.com/v1")
 
-	if err := m.applyEditCustomProviderSave(); err == nil {
-		t.Fatal("expected error for manually edited invalid extra_body")
+	if err := m.applyEditCustomProviderSave(); err != nil {
+		t.Fatalf("applyEditCustomProviderSave: %v", err)
 	}
-	if !strings.Contains(m.formError, "model") {
-		t.Errorf("formError = %q, want reserved key error", m.formError)
+	if cfg.CustomProviders["aaa"].ExtraBody["model"] != "override" {
+		t.Fatalf("ExtraBody = %#v, want preserved", cfg.CustomProviders["aaa"].ExtraBody)
 	}
 }
 

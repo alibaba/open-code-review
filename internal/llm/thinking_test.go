@@ -105,8 +105,12 @@ func TestMergeExtraBody_EmptyMaps(t *testing.T) {
 }
 
 func TestCloneExtraBodyMap_EmptyMap(t *testing.T) {
-	if got := cloneExtraBodyMap(map[string]any{}); got != nil {
-		t.Fatalf("empty map should clone to nil, got %#v", got)
+	got := cloneExtraBodyMap(map[string]any{})
+	if got == nil {
+		t.Fatal("empty map should clone to non-nil empty map")
+	}
+	if len(got) != 0 {
+		t.Fatalf("empty map should clone to {}, got %#v", got)
 	}
 }
 
