@@ -7,6 +7,8 @@ package llm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -109,6 +111,38 @@ func extractBlockText(block ContentBlock) string {
 		sb.WriteString(extractBlockText(nested))
 	}
 	return sb.String()
+}
+
+// ComputeCacheKey derives a stable prompt cache key from the system prompt
+// (instructions) and the first user message in the conversation. Intended to
+// be called once per session by the caller, then passed via ChatRequest.CacheKey.
+// The key is sha256(instructions + "\x00" + firstUser)[:32] — the null-byte
+// delimiter avoids concatenation ambiguity. The hash carries no business
+// semantics.
+func ComputeCacheKey(messages []Message) string {
+	var systemParts []string
+	var firstUser string
+	firstUserSeen := false
+	for _, msg := range messages {
+		content := msg.ExtractText()
+		switch msg.Role {
+		case "system":
+			if content != "" {
+				systemParts = append(systemParts, content)
+			}
+		case "user":
+			if !firstUserSeen {
+				firstUser = content
+				firstUserSeen = true
+			}
+		}
+	}
+	instructions := strings.Join(systemParts, "\n\n")
+	h := sha256.New()
+	h.Write([]byte(instructions))
+	h.Write([]byte{0})
+	h.Write([]byte(firstUser))
+	return hex.EncodeToString(h.Sum(nil))[:32]
 }
 
 // Choice holds a single choice from the response.
@@ -332,6 +366,7 @@ type ChatRequest struct {
 	Tools       []ToolDef `json:"tools,omitempty"`
 	Temperature *float64  `json:"temperature,omitempty"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
+	CacheKey    string    `json:"-"` // precomputed prompt cache key (Responses API only)
 }
 
 // CompletionsWithCtx sends a chat completion request with context support for cancellation and timeout.

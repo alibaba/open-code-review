@@ -12,7 +12,7 @@
 | 1 | 新增内置 responses provider | **否**。本期只保证「新增使用 responses 格式的 provider 的能力」（扩展性），不新增内置项。 |
 | 2 | 多轮状态管理 | **无状态**。每轮发送完整 input，不使用 `previous_response_id`；不动 loop 状态机。 |
 | 3 | reasoning items 回传 | **先不回传**。`reasoning_content` 仅用于显示；记为观测项。 |
-| 4 | `store` 字段 | **强制 `store=false`**。用 **P1** 方案（`PromptCacheKey` 由 instructions hash 派生，零管线改动）。**风险与取舍见 §5**。 |
+| 4 | `store` 字段 | **强制 `store=false`**。`PromptCacheKey` 由调用方（loop / agent）在 session 开始时**计算一次** `sha256(instructions + firstUserMessage)[:32]`，经 `ChatRequest.CacheKey` 透传给 client；client 不重复计算。**风险与取舍见 §5**。 |
 | 5+6 | 配置块 + 环境变量 | **方案 A**：统一引入 `protocol` 字段 + `OCR_LLM_PROTOCOL`；`use_anthropic` / `OCR_USE_ANTHROPIC` 降级为兼容回退。**protocol 命名重构见 §1**。 |
 | 7 | URL 处理 | **resolver 不处理 `openai-responses` URL**（与 openai 一致），归一化全部放 `NewOpenAIResponsesClient`。详见 §3.5。 |
 | 8 | `finish_reason` 映射 | **粗粒度**：`completed`→`stop`、`incomplete`→`length`、有工具调用→`tool_calls`、兜底 `stop`。 |
@@ -136,7 +136,7 @@ func IsAnthropicProtocol(p string) bool { return p == ProtocolAnthropic }
 | `req.Temperature` (非 nil) | `Temperature`（`openai.Float(*req.Temperature)`） |
 | `req.Model` | `Model` |
 | —— | `Store: openai.Bool(false)`（强制，见 §5） |
-| —— | `PromptCacheKey: openai.String(sha256(instructions)[:32])`（P1，见 §5；instructions 为空时不设） |
+| `req.CacheKey`（非空时） | `PromptCacheKey: openai.String(req.CacheKey)`（调用方预计算一次，见 §5；为空时不设） |
 
 复用 `msg.ExtractText()`（`client.go:85`）提取文本。
 
@@ -303,7 +303,7 @@ var cpProtocols = []string{
 
 ---
 
-## 5. `store=false` 风险与 `PromptCacheKey`（P1）技术取舍
+## 5. `store=false` 风险与 `PromptCacheKey` 技术取舍
 
 > 本节作为文档单独成段，同时写入 README「Responses API 注意事项」。
 > **详细设计**（含 state/Phase/store/CacheKey 的耦合矩阵、修改面对比、决策树）见独立文档：`DESIGN_STATE_CACHE_PHASE.md`。
@@ -315,18 +315,35 @@ var cpProtocols = []string{
 - **验证步骤（PR 实现后、合并前必做）**：用真实 key，同一 prompt 分别 `store=true` / `store=false` 各跑一轮，对比 `usage.input_tokens_details.cached_tokens`。
   - 若 `store=false` 使缓存显著失效 → 回到决策点：要么接受（隐私优先）、要么改默认 `store=true`（缓存优先，附隐私告警）、要么改用 `previous_response_id` 状态模式（推翻决策 2，成本高）。
 
-### 5.2 P1（instructions hash）技术取舍
+### 5.2 PromptCacheKey：调用方预计算一次方案
 
-- **做法**：`PromptCacheKey = sha256(instructions)[:32]`，仅在 instructions 非空时设置。
+- **做法**：
+  1. `ChatRequest` 新增 `CacheKey string \`json:"-"\`` 字段（`json:"-"` 保证 Chat Completions / Anthropic client 不序列化、不读取）。
+  2. 新增包级 helper `llm.ComputeCacheKey(messages []Message) string`：从 messages 中提取 instructions（system 消息 `\n\n` 拼接）+ 第一条 user 消息文本，返回 `sha256(instructions + "\x00" + firstUser)[:32]`。
+  3. 各 LLM 调用点在 **session / 请求构建时计算一次**，存为局部变量，每轮仅做字符串赋值：
+     - **主循环**（`loop.go:RunPerFile`）：进入循环前调 `llm.ComputeCacheKey(initialMessages)`，存入局部变量 `cacheKey`；循环内构建 `ChatRequest` 时 `CacheKey: cacheKey`。
+     - **单轮调用**（plan `agent.go:executePlan`、summary `agent.go:executeReviewFilter`、re-location `relocation.go`、scan `scan/agent.go` ×3）：在唯一的请求构建处同样调用一次。
+  4. `buildResponsesParams` 直接读 `req.CacheKey`：非空 → 设 `PromptCacheKey`；空 → 不设。**client 不扫描 messages、不计算 hash。**
+
 - **选择理由**：
-  - OCR 单次评审中 system prompt + tool 定义对所有文件完全一致，是最长可缓存前缀；
-  - 以其 hash 做「桶 key」让 OpenAI 把同会话请求归桶，prefix 匹配自然命中；
-  - **零管线改动**：不碰 `ChatRequest`、loop、agent、re-location、testconnection 等调用方。
+  - 一个待评审文件对应一个 session，系统 prompt 跨文件完全一致；将第一条 user 消息（携带文件内容上下文）纳入 hash，使不同文件落入不同缓存桶。
+  - hash 仅在 session 开始时计算一次，避免每轮重复 sha256。
+  - `ChatRequest.CacheKey` 以 `json:"-"` 标记，对 Chat Completions / Anthropic client **零行为影响**（不序列化、不读取）。
+  - client 层逻辑极简（透传一个字符串），职责清晰。
+
 - **取舍 / 局限**：
-  - key 不含文件维度——但文件内容位于「前缀之后」，不影响 prefix 命中，仅影响桶分配粒度；
-  - 若 OpenAI 桶容量按 key 聚合，同会话所有文件共享一桶，可能增加桶内驱逐概率（小评审规模下可忽略）；
+  - 需修改 `ChatRequest`（全协议共享结构）增一个字段，并在 `loop.go` + 其他 5 个调用点在构建请求时计算并填入——侵入面比原 P1 方案（零管线改动）大，但改动机械、可控。
   - hash 不携带任何业务语义，无法人为区分会话。
-- **升级路径（不在本期）**：若需更精细 keying，方案 P2——`ChatRequest` 增 `CacheKey string`，loop 用 `sessionID+filePath` 填充；代价是侵入全协议共享结构与 5+ 调用点，待真实需求出现再评估。
+
+- **与原 P1 方案的对比**：
+
+  | 维度 | 原 P1（已弃用） | 本方案（采用） |
+  |---|---|---|
+  | key 来源 | `sha256(instructions)[:32]` | `sha256(instructions + firstUser)[:32]` |
+  | 计算位置 | client 内 `buildResponsesParams` | 调用方（loop / agent），session 开始时 |
+  | 计算频率 | 每轮重算 | 每 session 仅一次 |
+  | 文件区分 | 无法（所有文件共享同一 key） | 可以（first user message 因文件而异） |
+  | 管线改动 | 零 | `ChatRequest` +1 字段，5+ 调用点 +1 行 |
 
 ---
 
@@ -343,7 +360,8 @@ var cpProtocols = []string{
 - `TestBuildResponsesParams_SystemToInstructions`：多 system → `Instructions` 拼接。
 - `TestBuildResponsesParams_ToolCallItems`：assistant+tool_calls → function_call items；tool 结果 → function_call_output，`call_id` 正确。
 - `TestBuildResponsesParams_Tools`：`ToolDef` → `FunctionToolParam`（`Strict:false`）。
-- `TestBuildResponsesParams_StoreAndCacheKey`：`Store=false`；instructions 非空时 `PromptCacheKey==sha256(instructions)[:32]`；instructions 空时不设。
+- `TestBuildResponsesParams_StoreAndCacheKey`：`Store=false`；`req.CacheKey` 非空时透传为 `PromptCacheKey`；为空时不设。
+- `TestComputeCacheKey`：`llm.ComputeCacheKey` 对 system + first user 的 hash 正确；相同 instructions + first user → 相同 key；不同 first user → 不同 key。
 - `TestMapResponsesResponse_TextOnly` / `_FunctionCalls`（`ID==CallID`）/ `_Usage`（含 `CachedTokens`）/ `_Status`（粗粒度映射）。
 - 用 `httptest.Server` 录制/回放（参考 `client_test.go`）。
 
@@ -385,7 +403,7 @@ var cpProtocols = []string{
 1. **协议命名重构基底**：新增 `internal/llm/protocol.go` + 单测；引入 `NormalizeProtocol`/`ValidateProtocol`/常量。
 2. **registry 与分发改名**：`providers.go` 改规范名常量；`client.go` `NewLLMClient` switch；`resolver.go` 各 strategy 产出规范名 + 校验。
 3. **配置通路（方案 A）**：`resolver.go` `llmFileConfig` + `config_cmd.go` `LlmConfig` 增 `Protocol`；`applyProviderField` 放开；`llm.protocol` / `OCR_LLM_PROTOCOL` 优先级；TUI `cpProtocols` 三项 + manual 可表达 responses。
-4. **Responses client**：新增 `responses_client.go` + URL 归一化 + `buildResponsesParams`/`mapResponsesResponse` + `store=false`/P1 cache key；接入分发。
+4. **Responses client + CacheKey 通路**：新增 `responses_client.go` + URL 归一化 + `buildResponsesParams`/`mapResponsesResponse` + `store=false`；`ChatRequest` 增 `CacheKey` 字段 + `llm.ComputeCacheKey` helper；loop / agent 各调用点在 session 开始时计算一次 cache key 并填入；接入分发。
 5. **测试补全**：上述各测试文件。
 6. **文档**：README（含全部译本：`README.zh-CN.md`、`README.ko-KR.md`、`README.ja-JP.md`、`README.ru-RU.md`；VS Code 扩展 `extensions/vscode/README.zh-CN.md` 按需）protocol 说明、配置示例、环境变量表、§5 注意事项；release notes 要点。
 
@@ -400,7 +418,7 @@ var cpProtocols = []string{
 - [ ] `ocr config provider`（TUI）、`ocr config set`、legacy `llm.protocol`、`OCR_LLM_PROTOCOL` 均可配置 `openai-responses`。
 - [ ] 别名回归：存量 `openai` 配置行为不变。
 - [ ] URL 归一化符合 §3.5 契约表；resolver 不处理 `openai-responses` URL。
-- [ ] `store=false` + P1 cache key 生效；§5.1 实测记录在案（缓存命中或确认退化）。
+- [ ] `store=false` + 预计算 cache key 生效（`ChatRequest.CacheKey` 透传）；§5.1 实测记录在案（缓存命中或确认退化）。
 - [ ] `ocr llm test` / `ocr review` / `ocr scan` 在新协议下端到端通过；多轮 `call_id` 配对正确。
 - [ ] `go test ./...` / `go vet ./...` / `make build` 通过。
 - [ ] README（含译本）更新协议命名、配置示例、env 表、§5 注意事项。
@@ -414,12 +432,16 @@ var cpProtocols = []string{
 - `internal/llm/responses_client.go` / `responses_client_test.go`
 
 **修改：**
-- `internal/llm/client.go`（分发 switch）
+- `internal/llm/client.go`（分发 switch + `ChatRequest.CacheKey` 字段 + `ComputeCacheKey` helper）
 - `internal/llm/resolver.go`（归一化/校验、`llm.protocol`、`OCR_LLM_PROTOCOL`、URL 处理条件常量化）
 - `internal/llm/resolver_test.go`
 - `internal/llm/providers.go`（registry 改规范名常量 + 注释）
 - `internal/llm/providers_test.go`
 - `internal/llm/client_test.go`（dispatch 测试）
+- `internal/llmloop/loop.go`（`RunPerFile` 入口计算一次 cache key，每轮填入 `ChatRequest.CacheKey`）
+- `internal/agent/agent.go`（plan / summary 调用点计算 cache key）
+- `internal/diff/relocation.go`（re-location 调用点计算 cache key）
+- `internal/scan/agent.go`（scan 调用点 ×3 计算 cache key）
 - `cmd/opencodereview/config_cmd.go`（`LlmConfig.Protocol`、`applyProviderField`、`llm.protocol` case）
 - `cmd/opencodereview/provider_tui.go`（`cpProtocols` 三项规范名）
 - `cmd/opencodereview/provider_cmd.go`（`applyManualConfig` 双写）
@@ -427,6 +449,5 @@ var cpProtocols = []string{
 - `README.md` / `README.zh-CN.md` / `README.ko-KR.md` / `README.ja-JP.md` / `README.ru-RU.md`（及 `extensions/vscode/README.zh-CN.md` 按需）
 
 **不修改（本期）：**
-- `internal/llmloop/loop.go`（无状态方案不动）
-- `internal/agent/*`、`internal/scan/*`、`internal/config/testconnection/*`（均通过 `NewLLMClient(ep)` 按 `ep.Protocol` 自动分发，新增 `openai-responses` 天然兼容，无需改动）
+- `internal/agent/*`、`internal/scan/*`、`internal/config/testconnection/*`（均通过 `NewLLMClient(ep)` 按 `ep.Protocol` 自动分发，新增 `openai-responses` 天然兼容。注：`agent.go` / `scan/agent.go` / `relocation.go` 仅新增一行 `CacheKey: llm.ComputeCacheKey(...)` 填充，不涉及协议分发逻辑改动）
 - `client.go` 的 `encodingForModel`（决策 9）

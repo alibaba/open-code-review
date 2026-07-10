@@ -73,6 +73,7 @@ func runLLMTest() error {
 			Model:     ep.Model,
 			Messages:  messages,
 			MaxTokens: 2048,
+			CacheKey:  llm.ComputeCacheKey(messages),
 		})
 	}()
 	if err != nil {

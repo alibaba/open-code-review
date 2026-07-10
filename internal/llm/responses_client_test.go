@@ -111,7 +111,7 @@ func TestBuildResponsesParams_NoInstructionsWhenNoSystem(t *testing.T) {
 	}
 	if params.PromptCacheKey.Valid() {
 		got := params.PromptCacheKey.Value
-		t.Errorf("expected PromptCacheKey to be unset when no instructions, got %q", got)
+		t.Errorf("expected PromptCacheKey to be unset when req.CacheKey is empty, got %q", got)
 	}
 }
 
@@ -253,34 +253,61 @@ func TestBuildResponsesParams_StoreAndCacheKey(t *testing.T) {
 		}
 	})
 
-	t.Run("cache key is sha256(instructions)[:32] when instructions present", func(t *testing.T) {
+	t.Run("PromptCacheKey passes through req.CacheKey", func(t *testing.T) {
 		req := ChatRequest{
-			Messages: []Message{
-				{Role: "system", Content: "system prompt"},
-				{Role: "user", Content: "hi"},
-			},
+			Messages: []Message{{Role: "user", Content: "hi"}},
+			CacheKey: "abc123",
 		}
 		params := client.buildResponsesParams("gpt-5.4", req)
 		if !params.PromptCacheKey.Valid() {
-			t.Fatal("expected PromptCacheKey to be set when instructions are present")
+			t.Fatal("expected PromptCacheKey to be set when req.CacheKey is non-empty")
 		}
-		got := params.PromptCacheKey.Value
-		sum := sha256.Sum256([]byte("system prompt"))
-		want := hex.EncodeToString(sum[:])[:32]
-		if got != want {
-			t.Errorf("PromptCacheKey = %q, want %q", got, want)
+		if got := params.PromptCacheKey.Value; got != "abc123" {
+			t.Errorf("PromptCacheKey = %q, want %q", got, "abc123")
 		}
 	})
 
-	t.Run("cache key stable across requests with same instructions", func(t *testing.T) {
-		req1 := ChatRequest{Messages: []Message{{Role: "system", Content: "same"}, {Role: "user", Content: "msg1"}}}
-		req2 := ChatRequest{Messages: []Message{{Role: "system", Content: "same"}, {Role: "user", Content: "msg2"}}}
-		p1 := client.buildResponsesParams("gpt-5.4", req1)
-		p2 := client.buildResponsesParams("gpt-5.4", req2)
-		k1 := p1.PromptCacheKey.Value
-		k2 := p2.PromptCacheKey.Value
-		if k1 != k2 {
-			t.Errorf("PromptCacheKey changed across requests with identical instructions: %q vs %q", k1, k2)
+	t.Run("PromptCacheKey unset when req.CacheKey empty", func(t *testing.T) {
+		req := ChatRequest{
+			Messages: []Message{{Role: "system", Content: "system prompt"}},
+		}
+		params := client.buildResponsesParams("gpt-5.4", req)
+		if params.PromptCacheKey.Valid() {
+			t.Errorf("expected PromptCacheKey unset when req.CacheKey empty, got %q", params.PromptCacheKey.Value)
+		}
+	})
+}
+
+func TestComputeCacheKey(t *testing.T) {
+	t.Run("hash of instructions + first user message", func(t *testing.T) {
+		messages := []Message{
+			{Role: "system", Content: "system prompt"},
+			{Role: "user", Content: "hi"},
+		}
+		got := ComputeCacheKey(messages)
+		h := sha256.New()
+		h.Write([]byte("system prompt"))
+		h.Write([]byte{0})
+		h.Write([]byte("hi"))
+		want := hex.EncodeToString(h.Sum(nil))[:32]
+		if got != want {
+			t.Errorf("ComputeCacheKey = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("different first user message yields different key", func(t *testing.T) {
+		m1 := []Message{{Role: "system", Content: "same"}, {Role: "user", Content: "file A"}}
+		m2 := []Message{{Role: "system", Content: "same"}, {Role: "user", Content: "file B"}}
+		if ComputeCacheKey(m1) == ComputeCacheKey(m2) {
+			t.Error("expected different cache keys for different first user messages")
+		}
+	})
+
+	t.Run("stable across requests with same instructions and first user", func(t *testing.T) {
+		m1 := []Message{{Role: "system", Content: "same"}, {Role: "user", Content: "msg1"}, {Role: "user", Content: "extra"}}
+		m2 := []Message{{Role: "system", Content: "same"}, {Role: "user", Content: "msg1"}, {Role: "user", Content: "different"}}
+		if ComputeCacheKey(m1) != ComputeCacheKey(m2) {
+			t.Error("expected same cache key for identical instructions and first user message")
 		}
 	})
 }
@@ -522,11 +549,13 @@ func TestOpenAIResponsesClient_EndToEnd(t *testing.T) {
 		t.Fatalf("cfg.URL = %q", client.cfg.URL)
 	}
 
+	messages := []Message{
+		{Role: "system", Content: "be brief"},
+		{Role: "user", Content: "ping"},
+	}
 	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
-		Messages: []Message{
-			{Role: "system", Content: "be brief"},
-			{Role: "user", Content: "ping"},
-		},
+		Messages: messages,
+		CacheKey: ComputeCacheKey(messages),
 	})
 	if err != nil {
 		t.Fatalf("CompletionsWithCtx: %v", err)

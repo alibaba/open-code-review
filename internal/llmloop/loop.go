@@ -149,6 +149,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
+	cacheKey := llm.ComputeCacheKey(messages)
 
 	for toolReqCount > 0 {
 		select {
@@ -168,6 +169,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			Messages:  messages,
 			Tools:     r.deps.MainToolDefs,
 			MaxTokens: r.deps.Template.MaxTokens,
+			CacheKey:  cacheKey,
 		})
 		duration := time.Since(startTime)
 		if err != nil {

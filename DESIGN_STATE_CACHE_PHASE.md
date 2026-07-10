@@ -13,7 +13,7 @@ OpenAI Responses API（`/v1/responses`）相比 Chat Completions 引入了若干
 1. **对话状态**：每轮是重放全部历史，还是用 `previous_response_id` 引用服务端状态？
 2. **Phase 字段**：gpt-5.3-codex+ 模型在 assistant 消息上标注 `commentary` / `final_answer`，重放时需保留——但 OCR 的 `Message` 结构没有这个字段。
 3. **`store` 参数**：服务端是否留存响应？影响隐私和缓存。
-4. **`PromptCacheKey`**：显式缓存桶 key——在 `store=false` 下是否生效？
+4. **`PromptCacheKey`**：显式缓存桶 key——由调用方在 session 开始时计算一次（`sha256(instructions + firstUser)[:32]`），经 `ChatRequest.CacheKey` 透传。在 `store=false` 下是否生效？
 
 这四个问题**高度耦合**，不能单独决策。下文逐一展开，最后给出耦合矩阵与推荐方案。
 
@@ -270,22 +270,34 @@ buildResponsesParams → ResponseInputItemParamOfMessage(content, "assistant")
 
 ### 4.4 选项矩阵
 
-| | 方案 SC1：`store=false` + P1 cache key（当前计划） | 方案 SC2：`store=true` + 无 cache key | 方案 SC3：`store=true` + P1 cache key | 方案 SC4：`store=false` + 无 cache key |
+| | 方案 SC1：`store=false` + 预计算 cache key（当前计划） | 方案 SC2：`store=true` + 无 cache key | 方案 SC3：`store=true` + 预计算 cache key | 方案 SC4：`store=false` + 无 cache key |
 |---|---|---|---|---|
 | **隐私** | 最佳（不留存） | 差（留存） | 差（留存） | 最佳 |
 | **prefix caching** | 不确定 | **确定生效** | **确定生效** | 不确定 |
 | **PromptCacheKey** | 不确定是否生效 | 不需要（自动缓存） | 确定生效 | 不适用 |
 | **previous_response_id** | 不可用 | 可用（但不用） | 可用（但不用） | 不可用 |
-| **代码改动** | 当前计划 | 改一行（`store=true`） | 当前计划改一行 | 当前计划去掉 cache key |
+| **代码改动** | `ChatRequest`+1 字段 + 调用方计算 key | 改一行（`store=true`） | SC1 + 改一行 | 去掉 cache key 通路 |
 | **网关兼容** | 最佳 | 网关需支持留存 | 同 SC2 | 最佳 |
 
-### 4.5 `PromptCacheKey`（P1 方案）的技术取舍回顾
+### 4.5 `PromptCacheKey`（调用方预计算方案）的技术取舍
 
-**当前计划 P1**：`PromptCacheKey = sha256(instructions)[:32]`，仅 instructions 非空时设。
+**当前计划**：`PromptCacheKey = sha256(instructions + firstUserMessage)[:32]`，由调用方（loop / agent）在 session 开始时计算一次，经 `ChatRequest.CacheKey` 透传给 client。
 
-**前提依赖**：P1 仅在 `store=false` 且 prefix caching 仍生效的场景下有意义。如果 `store=false` 禁用了一切缓存，P1 就是死代码（无害但无用）。
+**为什么不用原 P1 方案（client 内每轮从 instructions 计算）**：
+- 原 P1 的 key 仅基于 instructions，所有文件共享同一 system prompt → 同一 cache key，无法区分文件维度。
+- 原 P1 每轮在 `buildResponsesParams` 内重新扫描 messages + 计算 sha256，虽然开销极低，但逻辑上不优雅。
 
-**升级路径（P2，不在本期）**：`ChatRequest` 增 `CacheKey string`，loop 用 `sessionID + filePath` 填充。代价是侵入全协议共享结构 + 5+ 调用点。
+**预计算方案的设计要点**：
+
+| 维度 | 说明 |
+|---|---|
+| **key 来源** | `sha256(instructions + "\x00" + firstUserMessage)[:32]`——null-byte 分隔避免拼接歧义 |
+| **计算位置** | 调用方（`loop.go:RunPerFile` 入口 / 各单轮调用点），通过 `llm.ComputeCacheKey(messages)` helper |
+| **计算频率** | 每 session 仅一次（主循环）/ 每请求一次（单轮调用，天然只有一次） |
+| **传递方式** | `ChatRequest.CacheKey string \`json:"-"\``——`json:"-"` 保证 Chat Completions / Anthropic client 忽略此字段 |
+| **client 行为** | `buildResponsesParams` 读 `req.CacheKey`：非空 → 设 `PromptCacheKey`；空 → 不设。不扫描 messages、不计算 hash |
+
+**前提依赖**：预计算 key 仅在 `store=false` 且 prefix caching 仍生效的场景下有意义。如果 `store=false` 禁用了一切缓存，cache key 就是死代码（无害但无用）。
 
 ### 4.6 验证计划（必须执行）
 
@@ -294,7 +306,7 @@ buildResponsesParams → ResponseInputItemParamOfMessage(content, "assistant")
 | 实验 | store | PromptCacheKey | 预期观察 |
 |---|---|---|---|
 | 基线 | `true` | 不设 | `cached_tokens` 应在第 2+ 轮显著 > 0 |
-| SC1 | `false` | 设（P1） | 观察 `cached_tokens`：若 > 0 且与基线接近 → P1 有效；若 = 0 → P1 无效 |
+| SC1 | `false` | 设（预计算） | 观察 `cached_tokens`：若 > 0 且与基线接近 → cache key 有效；若 = 0 → 无效 |
 | SC4 | `false` | 不设 | 观察 `cached_tokens`：若 > 0 → store=false 不影响 prefix caching；若 = 0 → 影响 |
 
 **决策树（基于实验结果）：**
@@ -303,8 +315,8 @@ buildResponsesParams → ResponseInputItemParamOfMessage(content, "assistant")
 SC4 的 cached_tokens > 0?
 ├── Yes → store=false 不影响 prefix caching
 │   └── SC1 的 cached_tokens > 0?
-│       ├── Yes → PromptCacheKey 在 store=false 下生效，保留 P1（当前计划 OK）
-│       └── No  → PromptCacheKey 在 store=false 下无效，改用 SC4（去掉 P1，简化）
+│       ├── Yes → PromptCacheKey 在 store=false 下生效，保留预计算 key（当前计划 OK）
+│       └── No  → PromptCacheKey 在 store=false 下无效，改用 SC4（去掉 cache key，简化）
 └── No  → store=false 禁用 prefix caching
     └── 回到决策点：
         ├── 接受（隐私优先，无缓存）→ SC4
@@ -315,9 +327,9 @@ SC4 的 cached_tokens > 0?
 ### 4.7 推荐
 
 **实施期采用 SC1（当前计划），但必须在合并前跑完 §4.6 验证。** 根据 `cached_tokens` 实测结果决定最终方案。理由：
-1. SC1 是隐私最优且代码侵入最低的方案；
+1. SC1 是隐私最优的方案；
 2. 如果验证显示 `store=false` 禁用了缓存，可一行切换到 SC2（`store=true`），代价仅是隐私降级；
-3. P1 cache key 的代码量很小（3 行），即使最终证明无效，移除也无成本；
+3. cache key 通路代码量小（`ChatRequest` +1 字段 + 各调用点 +1 行 `llm.ComputeCacheKey(...)` 调用），即使最终证明无效，移除也无成本；
 4. 不应在不确定的阶段提前复杂化（如直接选状态链）。
 
 ---
@@ -328,35 +340,38 @@ SC4 的 cached_tokens > 0?
 
 | 方案组 | 状态 | Phase | store | CacheKey | 代码侵入 | 缓存确定性 | 隐私 | codex 兼容 |
 |---|---|---|---|---|---|---|---|---|
-| **★推荐** | 无状态 | 丢弃(P1) | false | P1 | 低 | 待验证 | 最佳 | 降级(可接受) |
+| **★推荐** | 无状态 | 丢弃(P1) | false | 预计算 | 中低 | 待验证 | 最佳 | 降级(可接受) |
 | 缓存优先 | 无状态 | 丢弃(P1) | true | 无 | 低 | 确定 | 差 | 降级 |
-| 缓存+keying | 无状态 | 丢弃(P1) | true | P1 | 低 | 确定 | 差 | 降级 |
-| Phase 完整 | 无状态 | 穿透(P2) | false | P1 | 中 | 待验证 | 最佳 | 满分 |
+| 缓存+keying | 无状态 | 丢弃(P1) | true | 预计算 | 中低 | 确定 | 差 | 降级 |
+| Phase 完整 | 无状态 | 穿透(P2) | false | 预计算 | 中 | 待验证 | 最佳 | 满分 |
 | 全功能 | 状态链 | 服务端保留 | true | 自动 | 高 | 确定 | 最差 | 满分 |
 
-**★ 推荐方案（当前计划，微调后确认）**：
+**★ 推荐方案（当前计划）**：
 - 状态：无状态重放（§2 选项 A）
 - Phase：丢弃 + TODO 标注（§3 选项 P1）
 - store：`false`（§4 SC1），**合并前必须跑验证**
-- CacheKey：P1（instructions hash），**若 §4.6 验证证明无效则移除**
+- CacheKey：预计算（`sha256(instructions + firstUser)[:32]`，调用方计算一次经 `ChatRequest.CacheKey` 透传），**若 §4.6 验证证明无效则移除**
 
 ---
 
 ## 6. 最终修改面汇总（推荐方案）
 
-### 6.1 新增文件
+### 6.1 新增 / 修改文件
 
 | 文件 | 内容 | 与 Phase/store 相关的要点 |
 |---|---|---|
-| `internal/llm/responses_client.go` | Responses client 实现 | `buildResponsesParams`：设 `store=false` + `PromptCacheKey`（P1）；不设 Phase。`mapResponsesResponse`：用 `sdkResp.OutputText()` 取文本；**Phase 字段加 TODO 注释** |
+| `internal/llm/responses_client.go`（新增） | Responses client 实现 | `buildResponsesParams`：设 `store=false` + 读 `req.CacheKey` 透传为 `PromptCacheKey`（不扫描 messages、不计算 hash）；不设 Phase。`mapResponsesResponse`：用 `sdkResp.OutputText()` 取文本；**Phase 字段加 TODO 注释** |
+| `internal/llm/client.go`（修改） | `ChatRequest` 增字段 + helper | `ChatRequest` 增 `CacheKey string \`json:"-"\``；新增包级 helper `ComputeCacheKey(messages []Message) string` |
+| `internal/llmloop/loop.go`（修改） | 主循环调用点 | `RunPerFile` 入口调 `llm.ComputeCacheKey(initialMessages)` 计算一次，存局部变量；每轮构建 `ChatRequest` 时填入 `CacheKey` |
+| `internal/agent/agent.go`（修改） | plan / summary 调用点 | 各请求构建处调 `llm.ComputeCacheKey(messages)` 填入 `CacheKey` |
+| `internal/diff/relocation.go`（修改） | re-location 调用点 | 同上 |
+| `internal/scan/agent.go`（修改） | scan 调用点 ×3 | 同上 |
 
 ### 6.2 不修改的文件（及其理由）
 
 | 文件 | 不修改理由 |
 |---|---|
-| `internal/llmloop/loop.go` | 无状态方案不需要 loop 感知 response_id；Phase 丢弃方案不需要 loop 传递 Phase |
-| `internal/agent/agent.go` | 四阶段调用方式不变（均通过 `CompletionsWithCtx`） |
-| `internal/llm/client.go` 的 `Message` / `ChatRequest` 结构 | 不为 Responses-only 特性（Phase / previous_response_id）增字段 |
+| `internal/llm/client.go` 的 `Message` 结构 | Phase 丢弃方案不需要 Message 增字段（Phase 维度）；`ChatRequest` 仅增 `CacheKey`（`json:"-"`，对其它协议零影响） |
 | `internal/config/testconnection/*` | 通过 `NewLLMClient(ep)` 自动分发，无需感知协议 |
 
 ### 6.3 如果未来需要 Phase 支持（P2 路径）

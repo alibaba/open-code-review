@@ -2,8 +2,6 @@ package llm
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"strings"
 	"time"
 
@@ -109,9 +107,8 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 //   - role=tool messages (ToolCallID set) become function_call_output items.
 //   - store is forced to false (stateless, privacy-preserving; see
 //     DESIGN_STATE_CACHE_PHASE.md §4).
-//   - PromptCacheKey is derived from the instructions hash so OpenAI can bucket
-//     same-prompt requests for prefix caching. Only set when instructions are
-//     non-empty.
+//   - PromptCacheKey is read directly from req.CacheKey (precomputed once per
+//     session by the caller via llm.ComputeCacheKey). Only set when non-empty.
 func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatRequest) responses.ResponseNewParams {
 	var systemParts []string
 	var input []responses.ResponseInputItemUnionParam
@@ -162,7 +159,9 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 
 	if instructions != "" {
 		params.Instructions = openai.String(instructions)
-		params.PromptCacheKey = openai.String(promptCacheKeyFromInstructions(instructions))
+	}
+	if req.CacheKey != "" {
+		params.PromptCacheKey = openai.String(req.CacheKey)
 	}
 	if len(tools) > 0 {
 		params.Tools = tools
@@ -175,16 +174,6 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 	}
 
 	return params
-}
-
-// promptCacheKeyFromInstructions derives a stable, opaque cache bucket key
-// from the instructions text. The first 32 hex chars of sha256(instructions)
-// keep the key short (OpenAI caps prompt_cache_key at 64 chars) while still
-// uniquely bucketing distinct system prompts. The hash carries no business
-// semantics.
-func promptCacheKeyFromInstructions(instructions string) string {
-	sum := sha256.Sum256([]byte(instructions))
-	return hex.EncodeToString(sum[:])[:32]
 }
 
 // mapResponsesResponse converts the SDK Response into the shared ChatResponse.
