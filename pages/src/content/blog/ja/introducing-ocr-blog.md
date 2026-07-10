@@ -1,6 +1,6 @@
 ---
 title: Open Code Review ブログシステムの紹介
-date: 2026-07-01
+date: 2026-07-10
 tags: [アナウンス, ガイド]
 summary: Open Code Review ブログシステムの仕組みと、GitHub の Markdown ファイルを使って記事を書く方法を紹介します。
 author: lizhengfeng101

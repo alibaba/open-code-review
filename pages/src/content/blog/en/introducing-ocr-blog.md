@@ -1,6 +1,6 @@
 ---
 title: Introducing the Open Code Review Blog System
-date: 2026-07-01
+date: 2026-07-10
 tags: [announcement, guide]
 summary: Learn how the Open Code Review blog system works and how you can contribute articles using simple Markdown files managed in GitHub.
 author: lizhengfeng101
