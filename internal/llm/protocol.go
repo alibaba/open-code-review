@@ -59,15 +59,7 @@ func ValidateProtocol(p string) error {
 	switch p {
 	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses:
 		return nil
-	case "anthropic-vertex":
-		return fmt.Errorf("protocol %q is not yet implemented; supported protocols are %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses)
+	default:
+		return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses)
 	}
-	return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses)
-}
-
-// IsAnthropicProtocol reports whether p is the canonical Anthropic protocol
-// name. It returns false for any other value (including the empty string and
-// non-canonical aliases).
-func IsAnthropicProtocol(p string) bool {
-	return p == ProtocolAnthropic
 }

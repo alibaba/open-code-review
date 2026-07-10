@@ -1557,10 +1557,10 @@ func TestResolveEndpoint_CustomProviderAnthropicVertexRejected(t *testing.T) {
 
 	_, err := ResolveEndpoint(cfgPath)
 	if err == nil {
-		t.Fatal("expected error for anthropic-vertex (not yet implemented)")
+		t.Fatal("expected error for anthropic-vertex (unsupported)")
 	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("error %q should mention 'not yet implemented'", err.Error())
+	if !strings.Contains(err.Error(), "unsupported protocol") {
+		t.Errorf("error %q should mention 'unsupported protocol'", err.Error())
 	}
 }
 

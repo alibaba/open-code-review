@@ -622,4 +622,3 @@ func TestStripThinkTags(t *testing.T) {
 		})
 	}
 }
-

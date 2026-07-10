@@ -311,16 +311,16 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 			m.manualTokenMasked = true
 			m.manualTokenInput.SetValue(strings.Repeat("*", 20))
 		}
-	// Manual tab protocol: prefer cfg.Llm.Protocol (canonical, covers all three
-	// protocols including openai-responses); fall back to use_anthropic for
-	// configs written before llm.protocol existed.
-	if cfg.Llm.Protocol != "" {
-		m.manualProtocolIdx = cpProtocolIndex(cfg.Llm.Protocol)
-	} else if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic {
-		m.manualProtocolIdx = 0 // anthropic
-	} else {
-		m.manualProtocolIdx = 1 // openai
-	}
+		// Manual tab protocol: prefer cfg.Llm.Protocol (canonical, covers all three
+		// protocols including openai-responses); fall back to use_anthropic for
+		// configs written before llm.protocol existed.
+		if cfg.Llm.Protocol != "" {
+			m.manualProtocolIdx = cpProtocolIndex(cfg.Llm.Protocol)
+		} else if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic {
+			m.manualProtocolIdx = 0 // anthropic
+		} else {
+			m.manualProtocolIdx = 1 // openai
+		}
 	}
 
 	return m

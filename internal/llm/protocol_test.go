@@ -47,7 +47,7 @@ func TestValidateProtocol(t *testing.T) {
 		{"alias openai-chat-completions rejected", "openai-chat-completions", true, "unsupported protocol"},
 		{"empty rejected", "", true, "unsupported protocol"},
 		{"grpc rejected", "grpc", true, "unsupported protocol"},
-		{"anthropic-vertex rejected with friendly message", "anthropic-vertex", true, "not yet implemented"},
+		{"anthropic-vertex rejected", "anthropic-vertex", true, "unsupported protocol"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,25 +90,6 @@ func TestValidateProtocol_ErrorMessageListsAllProtocols(t *testing.T) {
 	for _, sub := range []string{ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses} {
 		if !strings.Contains(err.Error(), sub) {
 			t.Errorf("error %q should mention %q", err.Error(), sub)
-		}
-	}
-}
-
-func TestIsAnthropicProtocol(t *testing.T) {
-	tests := []struct {
-		p    string
-		want bool
-	}{
-		{ProtocolAnthropic, true},
-		{ProtocolOpenAIChatCompletions, false},
-		{ProtocolOpenAIResponses, false},
-		{"openai", false}, // not the canonical anthropic name
-		{"", false},
-		{"anthropic-vertex", false},
-	}
-	for _, tt := range tests {
-		if got := IsAnthropicProtocol(tt.p); got != tt.want {
-			t.Errorf("IsAnthropicProtocol(%q) = %v, want %v", tt.p, got, tt.want)
 		}
 	}
 }

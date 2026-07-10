@@ -124,8 +124,8 @@ func TestBuildResponsesParams_ToolCallItems(t *testing.T) {
 				Content: "",
 				ToolCalls: []ToolCall{
 					{
-						ID:   "call_abc",
-						Type: "function",
+						ID:       "call_abc",
+						Type:     "function",
 						Function: FunctionCall{Name: "list_files", Arguments: `{"path":"/tmp"}`},
 					},
 				},

@@ -175,7 +175,7 @@ func TestSetConfigValueProviderEntryProtocol(t *testing.T) {
 	}
 
 	if err := setConfigValue(cfg, "custom_providers.custom.protocol", "anthropic-vertex"); err == nil {
-		t.Fatal("expected error for not-yet-implemented protocol anthropic-vertex")
+		t.Fatal("expected error for unsupported protocol anthropic-vertex")
 	}
 
 	if err := setConfigValue(cfg, "custom_providers.custom.protocol", "openai-responses"); err != nil {

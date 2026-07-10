@@ -205,7 +205,7 @@ type llmFileConfig struct {
 	AuthToken    string            `json:"auth_token,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
 	Model        string            `json:"model,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`     // anthropic|openai|openai-responses; takes priority over use_anthropic
+	Protocol     string            `json:"protocol,omitempty"`      // anthropic|openai|openai-responses; takes priority over use_anthropic
 	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false; legacy fallback when protocol is empty
 	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
@@ -347,7 +347,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no model configured; run 'ocr config model' to select one or pass --model", cfg.Provider)
 	}
 
-	if IsAnthropicProtocol(protocol) {
+	if protocol == ProtocolAnthropic {
 		var err error
 		ah := "authorization"
 		if isPreset && authHeader != "" {
@@ -375,7 +375,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 	}
 
-	if IsAnthropicProtocol(protocol) {
+	if protocol == ProtocolAnthropic {
 		url = ensureMessagesSuffix(url)
 	}
 
@@ -423,7 +423,7 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	}
 
 	var authHeader string
-	if IsAnthropicProtocol(protocol) {
+	if protocol == ProtocolAnthropic {
 		var err error
 		authHeader, err = NormalizeAuthHeader(cfg.Llm.AuthHeader)
 		if err != nil {
@@ -548,7 +548,7 @@ func parseShellRC(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 
 func defaultAuthHeader(protocol string) string {
 	// auth_header is Anthropic-only; OpenAI-compatible clients keep API key auth.
-	if IsAnthropicProtocol(protocol) {
+	if protocol == ProtocolAnthropic {
 		return "authorization"
 	}
 	return ""

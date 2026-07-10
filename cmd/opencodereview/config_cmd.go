@@ -224,7 +224,7 @@ type LlmConfig struct {
 	AuthToken    string            `json:"auth_token,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
 	Model        string            `json:"model,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`     // canonical protocol name; takes priority over UseAnthropic
+	Protocol     string            `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
 	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
