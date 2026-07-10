@@ -10,7 +10,7 @@ sidebar:
 ## 仓库里有什么
 
 仓库在
-[`plugins/open-code-review/`](https://github.com/alibaba/open-code-review/tree/main/plugins/open-code-review)
+[`plugins/open-code-review/claude-code/`](https://github.com/alibaba/open-code-review/tree/main/plugins/open-code-review/claude-code)
 下提供 Claude Code plugin。命令 prompt 本体位于
 [`plugins/open-code-review/claude-code/commands/review.md`](https://github.com/alibaba/open-code-review/blob/main/plugins/open-code-review/claude-code/commands/review.md)，
 是下述工作流的权威依据。

@@ -10,7 +10,7 @@ sidebar:
 ## リポジトリに含まれるもの
 
 リポジトリには
-[`plugins/open-code-review/`](https://github.com/alibaba/open-code-review/tree/main/plugins/open-code-review)
+[`plugins/open-code-review/claude-code/`](https://github.com/alibaba/open-code-review/tree/main/plugins/open-code-review/claude-code)
 配下に Claude Code plugin が用意されています。コマンドの prompt 本体は
 [`plugins/open-code-review/claude-code/commands/review.md`](https://github.com/alibaba/open-code-review/blob/main/plugins/open-code-review/claude-code/commands/review.md)
 にあり、以下で述べるワークフローの正式な拠り所です。

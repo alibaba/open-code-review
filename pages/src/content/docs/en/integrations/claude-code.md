@@ -12,7 +12,7 @@ ones worth adopting.
 ## What ships in the repo
 
 The repo ships a Claude Code plugin under
-[`plugins/open-code-review/`](https://github.com/alibaba/open-code-review/tree/main/plugins/open-code-review).
+[`plugins/open-code-review/claude-code/`](https://github.com/alibaba/open-code-review/tree/main/plugins/open-code-review/claude-code).
 The command prompt itself lives at
 [`plugins/open-code-review/claude-code/commands/review.md`](https://github.com/alibaba/open-code-review/blob/main/plugins/open-code-review/claude-code/commands/review.md)
 and is the source of truth for the workflow described below.
