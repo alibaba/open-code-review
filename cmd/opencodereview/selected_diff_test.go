@@ -79,6 +79,42 @@ func TestLoadSelectedDiff(t *testing.T) {
 	}
 }
 
+// TestLoadSelectedDiff_EmptyFileRejected guards against a fail-open: an empty
+// --diff-file must be an error, not an empty selection that silently reviews
+// the full range (agent.loadDiffs only applies selection when non-empty).
+func TestLoadSelectedDiff_EmptyFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"empty.patch":      "",
+		"whitespace.patch": "  \n\t\n",
+	} {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := loadSelectedDiff(p)
+		if err == nil || !strings.Contains(err.Error(), "empty") {
+			t.Errorf("%s: got err %v, want empty-file rejection", name, err)
+		}
+	}
+}
+
+func TestLoadSelectedDiff_SizeAndDirGuards(t *testing.T) {
+	dir := t.TempDir()
+
+	if _, err := loadSelectedDiff(dir); err == nil || !strings.Contains(err.Error(), "directory") {
+		t.Errorf("directory path: got err %v, want directory rejection", err)
+	}
+
+	big := filepath.Join(dir, "big.patch")
+	if err := os.WriteFile(big, make([]byte, maxSelectedDiffBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadSelectedDiff(big); err == nil || !strings.Contains(err.Error(), "exceed") {
+		t.Errorf("oversized file: got err %v, want size rejection", err)
+	}
+}
+
 // --- Integration test: real git repo, subset selection ---
 
 func runGit(t *testing.T, dir string, args ...string) string {

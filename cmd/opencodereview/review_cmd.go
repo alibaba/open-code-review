@@ -244,15 +244,36 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 	return nil
 }
 
+// maxSelectedDiffBytes caps --diff-file reads. The selection is a subset of
+// the canonical range diff, so anything past this is a mistake, not a review.
+const maxSelectedDiffBytes = 8 << 20 // 8 MB
+
 // loadSelectedDiff reads the --diff-file patch from disk. An empty path yields
-// an empty selection (default behaviour, whole-range review).
+// an empty selection (default behaviour, whole-range review). A path that is
+// set but yields no content is an error: the agent only narrows the review
+// when the selection is non-empty, so silently returning "" would fail open
+// into a full-range review.
 func loadSelectedDiff(path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("read --diff-file %q: %w", path, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("--diff-file %q is a directory, not a file", path)
+	}
+	if info.Size() > maxSelectedDiffBytes {
+		return "", fmt.Errorf("--diff-file %q is %d bytes, exceeding the maximum of %d bytes",
+			path, info.Size(), maxSelectedDiffBytes)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read --diff-file %q: %w", path, err)
+	}
+	if strings.TrimSpace(string(data)) == "" {
+		return "", fmt.Errorf("--diff-file %q is empty; refusing to fall back to a full-range review", path)
 	}
 	return string(data), nil
 }
