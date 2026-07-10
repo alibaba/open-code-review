@@ -485,7 +485,7 @@ func TestWindowSizeMsg(t *testing.T) {
 
 func TestBlurManualStep_AllSteps(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
-	for _, step := range []manualStep{manualStepURL, manualStepProtocol, manualStepModel, manualStepAuthToken, manualStepAuthHeader, manualStepExtraBody, manualStepExtraHeaders} {
+	for _, step := range []manualStep{manualStepURL, manualStepProtocol, manualStepModel, manualStepAuthToken, manualStepAuthHeader} {
 		m.manualStep = step
 		m.blurManualStep()
 	}
@@ -494,12 +494,10 @@ func TestBlurManualStep_AllSteps(t *testing.T) {
 func TestFocusManualStep_AllSteps(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
 	textSteps := map[manualStep]func(providerTUIModel) bool{
-		manualStepURL:          func(m providerTUIModel) bool { return m.manualURLInput.Focused() },
-		manualStepModel:        func(m providerTUIModel) bool { return m.manualModelInput.Focused() },
-		manualStepAuthToken:    func(m providerTUIModel) bool { return m.manualTokenInput.Focused() },
-		manualStepAuthHeader:   func(m providerTUIModel) bool { return m.manualAuthHeaderInput.Focused() },
-		manualStepExtraBody:    func(m providerTUIModel) bool { return m.manualExtraBodyInput.Focused() },
-		manualStepExtraHeaders: func(m providerTUIModel) bool { return m.manualExtraHeadersInput.Focused() },
+		manualStepURL:        func(m providerTUIModel) bool { return m.manualURLInput.Focused() },
+		manualStepModel:      func(m providerTUIModel) bool { return m.manualModelInput.Focused() },
+		manualStepAuthToken:  func(m providerTUIModel) bool { return m.manualTokenInput.Focused() },
+		manualStepAuthHeader: func(m providerTUIModel) bool { return m.manualAuthHeaderInput.Focused() },
 	}
 	for step, focused := range textSteps {
 		m.manualStep = step
@@ -1906,7 +1904,7 @@ func TestProviderTUIView_CustomForm_AllSteps(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
 	m.activeTab = tabCustom
 	m.creatingCustom = true
-	for _, step := range []customProviderStep{cpStepName, cpStepBaseURL, cpStepAPIKey, cpStepAuthHeader, cpStepProtocol, cpStepExtraBody, cpStepExtraHeaders} {
+	for _, step := range []customProviderStep{cpStepName, cpStepBaseURL, cpStepAPIKey, cpStepAuthHeader, cpStepProtocol} {
 		m.cpStep = step
 		v := m.View()
 		if v.Content == "" {
@@ -1932,7 +1930,7 @@ func TestProviderTUIView_ManualForm_AllSteps(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
 	m.activeTab = tabManual
 	m.inManualForm = true
-	for _, step := range []manualStep{manualStepURL, manualStepProtocol, manualStepModel, manualStepAuthToken, manualStepAuthHeader, manualStepExtraBody, manualStepExtraHeaders} {
+	for _, step := range []manualStep{manualStepURL, manualStepProtocol, manualStepModel, manualStepAuthToken, manualStepAuthHeader} {
 		m.manualStep = step
 		v := m.View()
 		if v.Content == "" {

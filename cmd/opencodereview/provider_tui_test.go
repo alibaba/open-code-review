@@ -92,10 +92,6 @@ func assertManualInputFocused(t *testing.T, m providerTUIModel, step manualStep,
 		got = m.manualTokenInput.Focused()
 	case manualStepAuthHeader:
 		got = m.manualAuthHeaderInput.Focused()
-	case manualStepExtraBody:
-		got = m.manualExtraBodyInput.Focused()
-	case manualStepExtraHeaders:
-		got = m.manualExtraHeadersInput.Focused()
 	default:
 		return
 	}
@@ -390,14 +386,6 @@ func TestProviderTUI_ManualFormEscBackThroughAllTextSteps(t *testing.T) {
 			step: manualStepAuthHeader, name: "Auth Header", edit: "-h",
 			valueFn: func(m providerTUIModel) string { return m.manualAuthHeaderInput.Value() },
 		},
-		{
-			step: manualStepExtraBody, name: "Extra Body", edit: " ",
-			valueFn: func(m providerTUIModel) string { return m.manualExtraBodyInput.Value() },
-		},
-		{
-			step: manualStepExtraHeaders, name: "Extra Headers", edit: "x",
-			valueFn: func(m providerTUIModel) string { return m.manualExtraHeadersInput.Value() },
-		},
 	}
 
 	for _, spec := range specs {
@@ -415,9 +403,9 @@ func TestProviderTUI_ManualFormEscBackThroughAllTextSteps(t *testing.T) {
 			for m.manualStep != spec.step {
 				m = advanceManualForm(m, 1)
 			}
-			if spec.step == manualStepExtraHeaders {
+			if spec.step == manualStepAuthHeader {
 				m = escManualForm(m)
-				assertManualInputFocused(t, m, manualStepExtraBody, true, "Extra Body")
+				assertManualInputFocused(t, m, manualStepAuthToken, true, "Auth Token")
 				m = advanceManualForm(m, 1)
 			} else {
 				m = advanceManualForm(m, 1)
@@ -435,25 +423,12 @@ func TestProviderTUI_ManualFormEscBackThroughAllTextSteps(t *testing.T) {
 	}
 }
 
-func TestProviderTUI_ManualFormEscFromURLClearsExtraMaps(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabManual
-	m = enterManualForm(m)
-	m.manualExtraBody = map[string]any{"stale": true}
-	m.manualExtraHeaders = map[string]string{"X-Stale": "yes"}
-
-	m2 := escManualForm(m)
-	if m2.inManualForm {
-		t.Fatal("expected to exit manual form")
-	}
-	if m2.manualExtraBody != nil || m2.manualExtraHeaders != nil {
-		t.Fatalf("stale extra maps should be cleared: body=%#v headers=%#v", m2.manualExtraBody, m2.manualExtraHeaders)
-	}
-}
-
-func TestProviderTUI_ManualFormEscFromURLResetsExtraMapsFromConfig(t *testing.T) {
+func TestProviderTUI_ManualFormEscFromURLResetsFieldsFromConfig(t *testing.T) {
 	cfg := &Config{
 		Llm: LlmConfig{
+			URL:          "https://example.com/v1",
+			Model:        "test-model",
+			AuthToken:    "token",
 			ExtraBody:    map[string]any{"enable_thinking": false},
 			ExtraHeaders: map[string]string{"X-Org": "org"},
 		},
@@ -461,15 +436,11 @@ func TestProviderTUI_ManualFormEscFromURLResetsExtraMapsFromConfig(t *testing.T)
 	m := newProviderTUI(cfg, "")
 	m.activeTab = tabManual
 	m = enterManualForm(m)
-	m.manualExtraBody = map[string]any{"stale": true}
-	m.manualExtraHeaders = map[string]string{"X-Stale": "yes"}
+	m.manualURLInput.SetValue("https://stale.example.com")
 
 	m2 := escManualForm(m)
-	if m2.manualExtraBody["enable_thinking"] != false {
-		t.Fatalf("manualExtraBody = %#v, want config value", m2.manualExtraBody)
-	}
-	if m2.manualExtraHeaders["X-Org"] != "org" {
-		t.Fatalf("manualExtraHeaders = %#v, want config value", m2.manualExtraHeaders)
+	if m2.manualURLInput.Value() != cfg.Llm.URL {
+		t.Fatalf("manualURLInput = %q, want config URL", m2.manualURLInput.Value())
 	}
 }
 
@@ -1092,27 +1063,23 @@ func TestProviderTUI_EditCustomClearKey_NoMaskedOnStepAPIKey(t *testing.T) {
 
 	result, _ := m.Update(enterKey())
 	m2 := result.(providerTUIModel)
-	result, _ = m2.Update(enterKey()) // extra body (skip)
-	m3 := result.(providerTUIModel)
-	result, _ = m3.Update(enterKey()) // extra headers (skip)
-	m4 := result.(providerTUIModel)
-	if m4.step != stepModel {
-		t.Fatalf("step = %d, want stepModel", m4.step)
+	if m2.step != stepModel {
+		t.Fatalf("step = %d, want stepModel", m2.step)
 	}
-	if got := m4.customProviders[m4.customIdx].entry.APIKey; got != "" {
+	if got := m2.customProviders[m2.customIdx].entry.APIKey; got != "" {
 		t.Errorf("saved APIKey = %q, want empty", got)
 	}
 
-	m4.modelIdx = modelIdxForName(t, m4, "test")
-	result, _ = m4.Update(enterKey())
-	m5 := result.(providerTUIModel)
-	if m5.step != stepAPIKey {
-		t.Fatalf("step = %d, want stepAPIKey", m5.step)
+	m2.modelIdx = modelIdxForName(t, m2, "test")
+	result, _ = m2.Update(enterKey())
+	m3 := result.(providerTUIModel)
+	if m3.step != stepAPIKey {
+		t.Fatalf("step = %d, want stepAPIKey", m3.step)
 	}
-	if m5.apiKeyMasked {
+	if m3.apiKeyMasked {
 		t.Error("apiKeyMasked should be false after clearing key in edit")
 	}
-	got := stripANSI(m5.View().Content)
+	got := stripANSI(m3.View().Content)
 	if strings.Contains(got, "Type or paste to replace the saved key") {
 		t.Errorf("view should not show replace hint; got:\n%s", got)
 	}
@@ -1198,34 +1165,27 @@ func TestProviderTUI_CustomFormCreateReturnsToModelList(t *testing.T) {
 	m6.apiKeyInput.SetValue("key-123")
 	result, _ = m6.Update(enterKey()) // API key -> auth header
 	m7 := result.(providerTUIModel)
-	result, _ = m7.Update(enterKey()) // auth header -> extra body
+	result, _ = m7.Update(enterKey()) // auth header -> save
 	m8 := result.(providerTUIModel)
-	result, _ = m8.Update(enterKey()) // extra body -> extra headers
-	m9 := result.(providerTUIModel)
-	result, cmd := m9.Update(enterKey()) // extra headers -> save
-	m10 := result.(providerTUIModel)
 
-	if cmd != nil {
-		t.Error("create should not quit TUI")
-	}
-	if m10.creatingCustom {
+	if m8.creatingCustom {
 		t.Error("creatingCustom should be false after create")
 	}
 	// Create should drop the user into the model selection step for the new
 	// provider so they can pick/add a model right away.
-	if m10.step != stepModel {
-		t.Errorf("step = %d, want stepModel", m10.step)
+	if m8.step != stepModel {
+		t.Errorf("step = %d, want stepModel", m8.step)
 	}
-	if len(m10.customProviders) != 1 {
-		t.Fatalf("expected 1 custom provider, got %d", len(m10.customProviders))
+	if len(m8.customProviders) != 1 {
+		t.Fatalf("expected 1 custom provider, got %d", len(m8.customProviders))
 	}
-	if m10.customProviders[0].name != "my-new" {
-		t.Errorf("provider name = %q, want %q", m10.customProviders[0].name, "my-new")
+	if m8.customProviders[0].name != "my-new" {
+		t.Errorf("provider name = %q, want %q", m8.customProviders[0].name, "my-new")
 	}
 	if cfg.Provider != "" {
 		t.Error("active provider should not be set when only creating")
 	}
-	if !m10.savedInSession {
+	if !m8.savedInSession {
 		t.Error("savedInSession should be true after create")
 	}
 	if _, err := os.Stat(configPath); err != nil {
@@ -2925,189 +2885,31 @@ func TestApplyManualConfigNormalizesAuthHeader(t *testing.T) {
 	}
 }
 
-func TestProviderTUI_CustomFormExtraHeadersReparsesExtraBodyFromInput(t *testing.T) {
+func TestApplyManualConfig_PreservesExistingExtraFields(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	cfg := &Config{
-		CustomProviders: map[string]ProviderEntry{
-			"aaa": {
-				URL:       "https://example.com/v1",
-				Protocol:  "openai",
-				Model:     "test",
-				Models:    []string{"test"},
-				ExtraBody: map[string]any{"stale": true},
-			},
+		Llm: LlmConfig{
+			ExtraBody:    map[string]any{"enable_thinking": false},
+			ExtraHeaders: map[string]string{"X-Org-ID": "org-123"},
 		},
 	}
-	m := newProviderTUI(cfg, configPath)
-	m.activeTab = tabCustom
-	m.editingCustom = true
-	m.editTargetName = "aaa"
-	m.cpProtocolIdx = 1
-	m.cpNameInput.SetValue("aaa")
-	m.cpURLInput.SetValue("https://example.com/v1")
-	m.cpStep = cpStepExtraHeaders
-	m.cpExtraBody = map[string]any{"stale": true}
-	m.cpExtraBodyInput.SetValue(`{"enable_thinking":false}`)
-	m.cpExtraHeadersInput.SetValue(`{}`)
-	m.cpExtraHeadersInput.Focus()
 
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-	if m2.formError != "" {
-		t.Fatalf("unexpected formError: %q", m2.formError)
-	}
-	got := cfg.CustomProviders["aaa"].ExtraBody
-	if got["enable_thinking"] != false {
-		t.Fatalf("ExtraBody should come from input field, not stale cache: %#v", got)
-	}
-	if _, ok := got["stale"]; ok {
-		t.Fatal("stale cached extra body should not be persisted")
-	}
-}
-
-func TestProviderTUI_ManualFormExtraHeadersReparsesExtraBodyFromInput(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabManual
-	m = enterManualForm(m)
-	m.manualStep = manualStepExtraHeaders
-	m.manualExtraBody = map[string]any{"stale": true}
-	m.manualExtraBodyInput.SetValue(`{"enable_thinking":false}`)
-	m.manualExtraHeadersInput.SetValue(`{}`)
-	m.manualExtraHeadersInput.Focus()
-
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-	if m2.formError != "" {
-		t.Fatalf("unexpected formError: %q", m2.formError)
-	}
-	if !m2.confirmed {
-		t.Fatal("expected manual form confirmed")
-	}
-	got := m2.result().extraBody
-	if got["enable_thinking"] != false {
-		t.Fatalf("ExtraBody should come from input field, not stale cache: %#v", got)
-	}
-	if _, ok := got["stale"]; ok {
-		t.Fatal("stale cached extra body should not be persisted")
-	}
-}
-
-func TestProviderTUI_ManualFormExtraHeadersFallsBackToExtraBodyOnParseError(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabManual
-	m = enterManualForm(m)
-	m.manualStep = manualStepExtraHeaders
-	m.manualExtraBody = nil
-	m.manualExtraBodyInput.SetValue(`{"enable_thinking": tru}`)
-	m.manualExtraHeadersInput.SetValue(`{"X-Org-ID":"org-123"}`)
-	m.manualExtraHeadersInput.Focus()
-
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-	if m2.manualStep != manualStepExtraBody {
-		t.Fatalf("manualStep = %d, want extra body after invalid extra body input", m2.manualStep)
-	}
-	if m2.formError != "" {
-		t.Fatalf("formError = %q, want empty (inline draft error only)", m2.formError)
-	}
-	if hint := extraBodyErrorFromDraft(m2.manualExtraBodyInput.Value()); hint == "" {
-		t.Fatal("expected inline extra body error hint")
-	}
-}
-
-func TestProviderTUI_CustomFormExtraHeadersFallsBackToExtraBodyOnParseError(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
-	m.creatingCustom = true
-	m.cpStep = cpStepExtraHeaders
-	m.cpExtraBody = nil
-	m.cpExtraBodyInput.SetValue(`{"enable_thinking": tru}`)
-	m.cpExtraHeadersInput.SetValue(`{"X-Org-ID":"org-123"}`)
-	m.cpExtraHeadersInput.Focus()
-
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-	if m2.cpStep != cpStepExtraBody {
-		t.Fatalf("cpStep = %d, want extra body after invalid extra body input", m2.cpStep)
-	}
-	if m2.formError != "" {
-		t.Fatalf("formError = %q, want empty (inline draft error only)", m2.formError)
-	}
-	if hint := extraBodyErrorFromDraft(m2.cpExtraBodyInput.Value()); hint == "" {
-		t.Fatal("expected inline extra body error hint")
-	}
-}
-
-func TestApplyManualConfigExtraHeaders(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{}
-
-	withHeaders := providerTUIResult{
-		isManual:     true,
-		url:          "https://example.com/v1",
-		model:        "test-model",
-		apiKey:       "token",
-		protocol:     "openai",
-		extraHeaders: map[string]string{"X-Org-ID": "org-123"},
-	}
-	if err := applyManualConfig(configPath, cfg, withHeaders); err != nil {
-		t.Fatalf("applyManualConfig: %v", err)
-	}
-	if cfg.Llm.ExtraHeaders["X-Org-ID"] != "org-123" {
-		t.Fatalf("ExtraHeaders = %#v", cfg.Llm.ExtraHeaders)
-	}
-}
-
-func TestApplyManualConfigRejectsReservedExtraHeaders(t *testing.T) {
-	cfg := &Config{}
 	result := providerTUIResult{
-		isManual:     true,
-		url:          "https://example.com/v1",
-		model:        "test-model",
-		apiKey:       "token",
-		protocol:     "openai",
-		extraHeaders: map[string]string{"Authorization": "bad"},
-	}
-	if err := applyManualConfig("", cfg, result); err == nil {
-		t.Fatal("expected error for reserved extra header")
-	}
-}
-
-func TestApplyManualConfigExtraBody(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{}
-
-	withBody := providerTUIResult{
-		isManual:  true,
-		url:       "https://example.com/v1",
-		model:     "test-model",
-		apiKey:    "token",
-		protocol:  "openai",
-		extraBody: map[string]any{"enable_thinking": false},
-	}
-	if err := applyManualConfig(configPath, cfg, withBody); err != nil {
-		t.Fatalf("applyManualConfig: %v", err)
-	}
-	if cfg.Llm.ExtraBody["enable_thinking"] != false {
-		t.Fatalf("ExtraBody = %#v", cfg.Llm.ExtraBody)
-	}
-
-	cfg = &Config{}
-	cleared := providerTUIResult{
 		isManual: true,
 		url:      "https://example.com/v1",
 		model:    "test-model",
 		apiKey:   "token",
 		protocol: "openai",
 	}
-	if err := applyManualConfig(configPath, cfg, cleared); err != nil {
-		t.Fatalf("applyManualConfig cleared: %v", err)
+	if err := applyManualConfig(configPath, cfg, result); err != nil {
+		t.Fatalf("applyManualConfig: %v", err)
 	}
-	if cfg.Llm.ExtraBody != nil {
-		t.Fatalf("ExtraBody should be nil when unset, got %#v", cfg.Llm.ExtraBody)
+	if cfg.Llm.ExtraBody["enable_thinking"] != false {
+		t.Fatalf("ExtraBody = %#v, want preserved", cfg.Llm.ExtraBody)
+	}
+	if cfg.Llm.ExtraHeaders["X-Org-ID"] != "org-123" {
+		t.Fatalf("ExtraHeaders = %#v, want preserved", cfg.Llm.ExtraHeaders)
 	}
 }
 
@@ -3137,80 +2939,42 @@ func TestApplyCustomProviderConfigNormalizesAuthHeader(t *testing.T) {
 	}
 }
 
-func TestApplyCustomProviderConfigAppliesExtraBodyAndHeaders(t *testing.T) {
+func TestApplyCustomProviderConfigPreservesExistingExtraFields(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	cfg := &Config{
 		CustomProviders: map[string]ProviderEntry{
 			"test-provider": {
-				URL:      "https://example.com/v1",
-				Protocol: "openai",
-				Model:    "m",
-				Models:   []string{"m"},
-			},
-		},
-	}
-
-	result := providerTUIResult{
-		provider:     "test-provider",
-		model:        "m",
-		models:       []string{"m"},
-		isCustom:     true,
-		url:          "https://example.com/v1",
-		protocol:     "openai",
-		extraBody:    map[string]any{"enable_thinking": false},
-		extraHeaders: map[string]string{"X-Org-ID": "org-123"},
-	}
-	if err := applyCustomProviderConfig(configPath, cfg, result); err != nil {
-		t.Fatalf("applyCustomProviderConfig: %v", err)
-	}
-	entry := cfg.CustomProviders["test-provider"]
-	if entry.ExtraBody["enable_thinking"] != false {
-		t.Fatalf("ExtraBody = %#v", entry.ExtraBody)
-	}
-	if entry.ExtraHeaders["X-Org-ID"] != "org-123" {
-		t.Fatalf("ExtraHeaders = %#v", entry.ExtraHeaders)
-	}
-}
-
-func TestApplyCustomProviderConfigPreservesSessionSavedExtras(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-
-	// Simulate applyCreateCustomProvider saving extras while initial cfg was empty.
-	sessionCfg := &Config{
-		CustomProviders: map[string]ProviderEntry{
-			"new-provider": {
 				URL:          "https://example.com/v1",
 				Protocol:     "openai",
+				Model:        "m",
+				Models:       []string{"m"},
 				ExtraBody:    map[string]any{"enable_thinking": false},
 				ExtraHeaders: map[string]string{"X-Org-ID": "org-123"},
 			},
 		},
 	}
-	if err := saveConfig(configPath, sessionCfg); err != nil {
-		t.Fatalf("saveConfig: %v", err)
-	}
 
 	result := providerTUIResult{
-		provider:     "new-provider",
-		model:        "test-model",
-		models:       []string{"test-model"},
-		isCustom:     true,
-		url:          "https://example.com/v1",
-		protocol:     "openai",
-		extraBody:    map[string]any{"enable_thinking": false},
-		extraHeaders: map[string]string{"X-Org-ID": "org-123"},
+		provider: "test-provider",
+		model:    "m2",
+		models:   []string{"m", "m2"},
+		isCustom: true,
+		url:      "https://example.com/v1",
+		protocol: "openai",
 	}
-	if err := applyCustomProviderConfig(configPath, sessionCfg, result); err != nil {
+	if err := applyCustomProviderConfig(configPath, cfg, result); err != nil {
 		t.Fatalf("applyCustomProviderConfig: %v", err)
 	}
-	entry := sessionCfg.CustomProviders["new-provider"]
+	entry := cfg.CustomProviders["test-provider"]
+	if entry.Model != "m2" {
+		t.Fatalf("Model = %q, want m2", entry.Model)
+	}
 	if entry.ExtraBody["enable_thinking"] != false {
-		t.Fatalf("ExtraBody = %#v, want session-saved value preserved", entry.ExtraBody)
+		t.Fatalf("ExtraBody = %#v, want preserved", entry.ExtraBody)
 	}
 	if entry.ExtraHeaders["X-Org-ID"] != "org-123" {
-		t.Fatalf("ExtraHeaders = %#v, want session-saved value preserved", entry.ExtraHeaders)
+		t.Fatalf("ExtraHeaders = %#v, want preserved", entry.ExtraHeaders)
 	}
 }
 
@@ -3239,33 +3003,6 @@ func TestProviderTUI_TabTogglesThinkingOnOfficialModelStep(t *testing.T) {
 	}
 }
 
-func TestProviderTUI_CustomModelViewShowsExtraBodyHint(t *testing.T) {
-	cfg := &Config{
-		CustomProviders: map[string]ProviderEntry{
-			"my-proxy": {
-				URL:       "https://example.com/v1",
-				Protocol:  "openai",
-				Model:     "qwen3.7-max",
-				ExtraBody: map[string]any{"enable_thinking": false},
-			},
-		},
-	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
-	m.customIdx = 0
-	m.step = stepModel
-
-	got := stripANSI(m.View().Content)
-	if !strings.Contains(got, `Extra body: {"enable_thinking":false}`) {
-		t.Errorf("view should show extra body JSON, got:\n%s", got)
-	}
-	helpIdx := strings.Index(got, "↑/↓ Select")
-	hintIdx := strings.Index(got, "Extra body:")
-	if helpIdx < 0 || hintIdx < 0 || hintIdx >= helpIdx {
-		t.Errorf("extra body hint should appear above help line, got:\n%s", got)
-	}
-}
-
 func TestModelTUI_TabTogglesThinking(t *testing.T) {
 	m := officialConfigModelTUI(t, "", nil)
 	result, _ := m.Update(tabKeyMsg())
@@ -3279,44 +3016,6 @@ func TestModelTUI_TabTogglesThinking(t *testing.T) {
 	}
 	if !strings.Contains(got, "Tab Thinking") {
 		t.Errorf("help should mention Tab Thinking, got:\n%s", got)
-	}
-}
-
-func TestModelTUI_CustomShowsExtraBodyHint(t *testing.T) {
-	m := customConfigModelTUI(t, "", []string{"qwen3.7-max"})
-	if entry, ok := m.existingCfg.CustomProviders[m.providerName]; ok {
-		entry.ExtraBody = map[string]any{"enable_thinking": false}
-		m.existingCfg.CustomProviders[m.providerName] = entry
-	}
-	got := stripANSI(m.View().Content)
-	if !strings.Contains(got, `Extra body: {"enable_thinking":false}`) {
-		t.Errorf("view should show extra body JSON, got:\n%s", got)
-	}
-}
-
-func TestParseExtraBodyInput(t *testing.T) {
-	body, err := parseExtraBodyInput(`{"enable_thinking": false}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if body["enable_thinking"] != false {
-		t.Fatalf("body = %#v", body)
-	}
-	if _, err := parseExtraBodyInput("{bad"); err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
-	if body, err := parseExtraBodyInput(""); err != nil || body != nil {
-		t.Fatalf("empty input = %#v, %v", body, err)
-	}
-	if body, err := parseExtraBodyInput("{}"); err != nil || body != nil {
-		t.Fatalf("empty object should normalize to nil: %#v, %v", body, err)
-	}
-	large := strings.Repeat("a", maxExtraBodyBytes+1)
-	if _, err := parseExtraBodyInput(`{"x":"` + large + `"}`); err == nil {
-		t.Fatal("expected error for oversized extra body")
-	}
-	if _, err := parseExtraBodyInput(`{"model":"gpt-4"}`); err == nil {
-		t.Fatal("expected error for reserved extra_body key")
 	}
 }
 
@@ -3340,88 +3039,6 @@ func TestValidateExtraBody(t *testing.T) {
 	}
 }
 
-func TestExtraBodyHintFromDraft(t *testing.T) {
-	if hint := extraBodyHintFromDraft(`{"enable_thinking":false}`); !strings.Contains(hint, "enable_thinking") {
-		t.Fatalf("hint = %q", hint)
-	}
-	if hint := extraBodyHintFromDraft("{bad"); hint == "" {
-		t.Fatal("invalid JSON should show an error hint")
-	}
-	if hint := extraBodyHintFromDraft(""); hint != "" {
-		t.Fatalf("empty input should not produce hint, got %q", hint)
-	}
-}
-
-func TestExtraBodyErrorFromDraft(t *testing.T) {
-	if hint := extraBodyErrorFromDraft(`{"enable_thinking":false}`); hint != "" {
-		t.Fatalf("valid JSON should not produce error hint, got %q", hint)
-	}
-	if hint := extraBodyErrorFromDraft("{bad"); hint == "" {
-		t.Fatal("invalid JSON should show an error hint")
-	}
-	if hint := extraBodyErrorFromDraft(""); hint != "" {
-		t.Fatalf("empty input should not produce hint, got %q", hint)
-	}
-}
-
-func TestProviderTUIView_CustomForm_ExtraBodyNoDuplicateHint(t *testing.T) {
-	cfg := &Config{
-		CustomProviders: map[string]ProviderEntry{
-			"stepfun-openai": {
-				URL:       "https://api.stepfun.com/v1",
-				Protocol:  "openai",
-				ExtraBody: map[string]any{"enable_thinking": true},
-			},
-		},
-	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
-	m.editingCustom = true
-	m.editTargetName = "stepfun-openai"
-	m.cpStep = cpStepExtraBody
-	m.cpExtraBodyInput.SetValue(`{"enable_thinking":true}`)
-
-	got := stripANSI(m.View().Content)
-	if strings.Count(got, "Extra body:") != 0 {
-		t.Errorf("active extra body step should not show duplicate hint line, got:\n%s", got)
-	}
-	if !strings.Contains(got, "Extra Body:") {
-		t.Errorf("expected active Extra Body field label, got:\n%s", got)
-	}
-	if !strings.Contains(got, `{"enable_thinking":true}`) {
-		t.Errorf("expected extra body JSON in input, got:\n%s", got)
-	}
-}
-
-func TestProviderTUIView_CustomForm_ExtraBodyShowsParseError(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
-	m.creatingCustom = true
-	m.cpStep = cpStepExtraBody
-	m.cpExtraBodyInput.SetValue("{bad")
-
-	got := stripANSI(m.View().Content)
-	if strings.Count(got, "invalid JSON") != 1 {
-		t.Errorf("expected exactly one parse error while typing, got:\n%s", got)
-	}
-}
-
-func TestProviderTUIView_CustomForm_ExtraBodyConfirmParseErrorOnce(t *testing.T) {
-	m := newProviderTUI(&Config{}, "")
-	m.activeTab = tabCustom
-	m.creatingCustom = true
-	m.cpStep = cpStepExtraBody
-	m.cpExtraBodyInput.SetValue(`{"enable_thinking": tru}`)
-
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-
-	got := stripANSI(m2.View().Content)
-	if strings.Count(got, "invalid JSON") != 1 {
-		t.Errorf("expected exactly one parse error after confirm, got:\n%s", got)
-	}
-}
-
 func TestCloneProviderEntry_DeepClonesExtraBody(t *testing.T) {
 	orig := ProviderEntry{
 		ExtraBody: map[string]any{
@@ -3434,91 +3051,6 @@ func TestCloneProviderEntry_DeepClonesExtraBody(t *testing.T) {
 	origThinking := orig.ExtraBody["thinking"].(map[string]any)
 	if origThinking["budget_tokens"] != 100 {
 		t.Fatal("nested ExtraBody values should be deep-cloned")
-	}
-}
-
-func TestFormatParseExtraBodyRoundTrip(t *testing.T) {
-	orig := map[string]any{"enable_thinking": false, "temperature": 0.2}
-	formatted := formatExtraBodyJSON(orig)
-	parsed, err := parseExtraBodyInput(formatted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if parsed["enable_thinking"] != false || parsed["temperature"] != 0.2 {
-		t.Fatalf("round trip = %#v", parsed)
-	}
-	body, err := parseExtraBodyInput("  " + formatted + "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if body["enable_thinking"] != false {
-		t.Fatalf("whitespace trim failed: %#v", body)
-	}
-}
-
-func TestFormatExtraBodyJSON_Deterministic(t *testing.T) {
-	m := map[string]any{"b": 2, "a": 1}
-	got1 := formatExtraBodyJSON(m)
-	got2 := formatExtraBodyJSON(m)
-	if got1 != got2 || got1 != `{"a":1,"b":2}` {
-		t.Fatalf("deterministic JSON = %q", got1)
-	}
-}
-
-func TestParseExtraHeadersInput(t *testing.T) {
-	body, err := parseExtraHeadersInput(`{"X-Org-ID":"org-123","X-Forwarded-For":"1.2.3.4,5.6.7.8"}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if body["X-Org-ID"] != "org-123" {
-		t.Fatalf("body = %#v", body)
-	}
-	if _, err := parseExtraHeadersInput("{bad"); err == nil {
-		t.Fatal("expected error for invalid JSON")
-	}
-	if body, err := parseExtraHeadersInput(""); err != nil || body != nil {
-		t.Fatalf("empty input = %#v, %v", body, err)
-	}
-	if _, err := parseExtraHeadersInput(`{"Authorization":"bad"}`); err == nil {
-		t.Fatal("expected error for reserved header")
-	}
-}
-
-func TestProviderTUI_CustomFormCreatePersistsExtraHeaders(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{}
-	m := newProviderTUI(cfg, configPath)
-
-	result, _ := m.Update(rightKey())
-	m2 := result.(providerTUIModel)
-	result, _ = m2.Update(enterKey())
-	m3 := result.(providerTUIModel)
-	m3.cpNameInput.SetValue("hdr-provider")
-	result, _ = m3.Update(enterKey())
-	m4 := result.(providerTUIModel)
-	result, _ = m4.Update(enterKey())
-	m5 := result.(providerTUIModel)
-	m5.cpURLInput.SetValue("https://api.example.com")
-	result, _ = m5.Update(enterKey())
-	m6 := result.(providerTUIModel)
-	m6.apiKeyInput.SetValue("key-123")
-	result, _ = m6.Update(enterKey())
-	m7 := result.(providerTUIModel)
-	result, _ = m7.Update(enterKey())
-	m8 := result.(providerTUIModel)
-	m8.cpExtraBodyInput.SetValue(`{"enable_thinking":false}`)
-	result, _ = m8.Update(enterKey())
-	m9 := result.(providerTUIModel)
-	m9.cpExtraHeadersInput.SetValue(`{"X-Org-ID":"org-123"}`)
-	result, _ = m9.Update(enterKey())
-	m10 := result.(providerTUIModel)
-	if m10.step != stepModel {
-		t.Fatalf("step = %d, want stepModel", m10.step)
-	}
-	got := cfg.CustomProviders["hdr-provider"].ExtraHeaders
-	if got["X-Org-ID"] != "org-123" {
-		t.Fatalf("ExtraHeaders = %#v", got)
 	}
 }
 

@@ -116,14 +116,6 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	cfg.Llm.AuthHeader = authHeader
 	useAnthropic := result.protocol == "anthropic"
 	cfg.Llm.UseAnthropic = &useAnthropic
-	if err := llm.ValidateExtraBody(result.extraBody); err != nil {
-		return fmt.Errorf("invalid extra_body: %w", err)
-	}
-	if err := llm.ValidateExtraHeadersMap(result.extraHeaders); err != nil {
-		return fmt.Errorf("invalid extra_headers: %w", err)
-	}
-	cfg.Llm.ExtraBody = result.extraBody
-	cfg.Llm.ExtraHeaders = result.extraHeaders
 
 	if err := saveConfig(configPath, cfg); err != nil {
 		return err
@@ -181,14 +173,6 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	} else {
 		entry.APIKey = ""
 	}
-	if err := llm.ValidateExtraBody(result.extraBody); err != nil {
-		return fmt.Errorf("invalid extra_body: %w", err)
-	}
-	if err := llm.ValidateExtraHeadersMap(result.extraHeaders); err != nil {
-		return fmt.Errorf("invalid extra_headers: %w", err)
-	}
-	entry.ExtraBody = result.extraBody
-	entry.ExtraHeaders = result.extraHeaders
 	// modelThinkingModes is not merged here because the TUI disables
 	// thinking toggle for custom providers, so result.modelThinkingModes is always nil.
 	if err := llm.ValidateModelsThinking(entry.ModelsThinking); err != nil {

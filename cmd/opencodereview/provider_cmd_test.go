@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/open-code-review/open-code-review/internal/llm"
@@ -205,23 +204,6 @@ func TestApplyOfficialProviderConfig_MissingFields(t *testing.T) {
 	err := applyOfficialProviderConfig("", &Config{}, providerTUIResult{provider: "", model: ""})
 	if err == nil {
 		t.Fatal("expected error for missing provider/model")
-	}
-}
-
-func TestApplyManualConfig_RejectsReservedExtraBodyKey(t *testing.T) {
-	cfg := &Config{}
-	err := applyManualConfig("", cfg, providerTUIResult{
-		isManual:  true,
-		url:       "https://example.com/v1",
-		model:     "test-model",
-		protocol:  "openai",
-		extraBody: map[string]any{"model": "override"},
-	})
-	if err == nil {
-		t.Fatal("expected error for reserved extra_body key")
-	}
-	if !strings.Contains(err.Error(), "model") {
-		t.Fatalf("error = %q, want reserved key mention", err)
 	}
 }
 

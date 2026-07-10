@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -39,8 +38,6 @@ const (
 	cpStepBaseURL
 	cpStepAPIKey
 	cpStepAuthHeader
-	cpStepExtraBody
-	cpStepExtraHeaders
 )
 
 type manualStep int
@@ -51,19 +48,9 @@ const (
 	manualStepModel
 	manualStepAuthToken
 	manualStepAuthHeader
-	manualStepExtraBody
-	manualStepExtraHeaders
 )
 
 var cpProtocols = []string{"anthropic", "openai"}
-
-const (
-	// textinput.CharLimit counts runes, so for multi-byte input the UI layer may
-	// allow up to ~4x bytes before the byte check in parseExtraBodyInput fires.
-	// These constants are the authoritative byte budget validated on Enter.
-	maxExtraBodyBytes    = 8 * 1024
-	maxExtraHeadersBytes = 8 * 1024
-)
 
 type customProviderListItem struct {
 	name  string
@@ -82,8 +69,6 @@ type providerTUIResult struct {
 	url                string
 	protocol           string
 	authHeader         string
-	extraBody          map[string]any
-	extraHeaders       map[string]string
 	modelThinkingModes map[string]string
 	sessionModelPick   map[string]string
 }
@@ -132,34 +117,27 @@ type providerTUIModel struct {
 	officialIdx int
 
 	// --- tab: custom ---
-	customProviders     []customProviderListItem
-	customIdx           int
-	creatingCustom      bool
-	editingCustom       bool
-	editTargetName      string
-	cpStep              customProviderStep
-	cpProtocolIdx       int
-	cpNameInput         textinput.Model
-	cpURLInput          textinput.Model
-	cpAuthInput         textinput.Model
-	cpExtraBodyInput    textinput.Model
-	cpExtraHeadersInput textinput.Model
-	cpExtraBody         map[string]any
+	customProviders []customProviderListItem
+	customIdx       int
+	creatingCustom  bool
+	editingCustom   bool
+	editTargetName  string
+	cpStep          customProviderStep
+	cpProtocolIdx   int
+	cpNameInput     textinput.Model
+	cpURLInput      textinput.Model
+	cpAuthInput     textinput.Model
 
 	// --- tab: manual ---
-	inManualForm            bool
-	manualStep              manualStep
-	manualProtocolIdx       int
-	manualURLInput          textinput.Model
-	manualModelInput        textinput.Model
-	manualAuthHeaderInput   textinput.Model
-	manualTokenInput        textinput.Model
-	manualExtraBodyInput    textinput.Model
-	manualExtraHeadersInput textinput.Model
-	manualExtraBody         map[string]any
-	manualExtraHeaders      map[string]string
-	manualTokenMasked       bool
-	manualTokenOriginal     string
+	inManualForm          bool
+	manualStep            manualStep
+	manualProtocolIdx     int
+	manualURLInput        textinput.Model
+	manualModelInput      textinput.Model
+	manualAuthHeaderInput textinput.Model
+	manualTokenInput      textinput.Model
+	manualTokenMasked     bool
+	manualTokenOriginal   string
 
 	// --- shared model/api-key steps (official + existing custom) ---
 	modelIdx    int
@@ -262,16 +240,6 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 	cpAuth.Placeholder = "optional, leave empty for default (Authorization)"
 	cpAuth.SetWidth(55)
 
-	cpExtraBody := textinput.New()
-	cpExtraBody.Placeholder = `optional, e.g. {"enable_thinking": false}`
-	cpExtraBody.CharLimit = maxExtraBodyBytes
-	cpExtraBody.SetWidth(60)
-
-	cpExtraHeaders := textinput.New()
-	cpExtraHeaders.Placeholder = `optional, e.g. {"X-Org-ID": "org-123"}`
-	cpExtraHeaders.CharLimit = maxExtraHeadersBytes
-	cpExtraHeaders.SetWidth(60)
-
 	manualURL := textinput.New()
 	manualURL.Placeholder = "enter your API base URL"
 	manualURL.SetWidth(50)
@@ -290,37 +258,23 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 	manualToken.EchoMode = textinput.EchoPassword
 	manualToken.EchoCharacter = '*'
 
-	manualExtraBody := textinput.New()
-	manualExtraBody.Placeholder = `optional, e.g. {"enable_thinking": false}`
-	manualExtraBody.CharLimit = maxExtraBodyBytes
-	manualExtraBody.SetWidth(60)
-
-	manualExtraHeaders := textinput.New()
-	manualExtraHeaders.Placeholder = `optional, e.g. {"X-Org-ID": "org-123"}`
-	manualExtraHeaders.CharLimit = maxExtraHeadersBytes
-	manualExtraHeaders.SetWidth(60)
-
 	m := providerTUIModel{
-		providers:               providers,
-		existingCfg:             cfg,
-		modelInput:              mi,
-		apiKeyInput:             ai,
-		cpNameInput:             cpName,
-		cpURLInput:              cpURL,
-		cpAuthInput:             cpAuth,
-		cpExtraBodyInput:        cpExtraBody,
-		cpExtraHeadersInput:     cpExtraHeaders,
-		manualURLInput:          manualURL,
-		manualModelInput:        manualModel,
-		manualAuthHeaderInput:   manualAuthHeader,
-		manualTokenInput:        manualToken,
-		manualExtraBodyInput:    manualExtraBody,
-		manualExtraHeadersInput: manualExtraHeaders,
-		width:                   80,
-		height:                  24,
-		activeTab:               tabOfficial,
-		customProviders:         collectCustomProviders(cfg),
-		configPath:              configPath,
+		providers:             providers,
+		existingCfg:           cfg,
+		modelInput:            mi,
+		apiKeyInput:           ai,
+		cpNameInput:           cpName,
+		cpURLInput:            cpURL,
+		cpAuthInput:           cpAuth,
+		manualURLInput:        manualURL,
+		manualModelInput:      manualModel,
+		manualAuthHeaderInput: manualAuthHeader,
+		manualTokenInput:      manualToken,
+		width:                 80,
+		height:                24,
+		activeTab:             tabOfficial,
+		customProviders:       collectCustomProviders(cfg),
+		configPath:            configPath,
 	}
 
 	providerFound := false
@@ -395,8 +349,6 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 		} else {
 			m.manualProtocolIdx = 1 // openai
 		}
-		m.manualExtraBodyInput.SetValue(formatExtraBodyJSON(cfg.Llm.ExtraBody))
-		m.manualExtraHeadersInput.SetValue(formatExtraHeadersJSON(cfg.Llm.ExtraHeaders))
 	}
 
 	return m
@@ -1004,9 +956,6 @@ func (m providerTUIModel) updateCustomProviderForm(key string, msg tea.KeyPressM
 			m.cpNameInput.SetValue("")
 			m.cpURLInput.SetValue("")
 			m.cpAuthInput.SetValue("")
-			m.cpExtraBodyInput.SetValue("")
-			m.cpExtraHeadersInput.SetValue("")
-			m.cpExtraBody = nil
 			m.apiKeyInput.SetValue("")
 			m.apiKeyMasked = false
 			m.apiKeyOriginal = ""
@@ -1074,13 +1023,6 @@ func (m *providerTUIModel) enterEditCustomProvider() {
 		m.apiKeyMasked = false
 		m.apiKeyOriginal = ""
 	}
-	m.cpExtraBodyInput.SetValue(formatExtraBodyJSON(entry.ExtraBody))
-	m.cpExtraHeadersInput.SetValue(formatExtraHeadersJSON(entry.ExtraHeaders))
-	if entry.ExtraBody != nil {
-		m.cpExtraBody = deepCloneMap(entry.ExtraBody)
-	} else {
-		m.cpExtraBody = nil
-	}
 }
 
 func authHeaderFormError(raw string) string {
@@ -1136,44 +1078,12 @@ func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cpAuthInput.Blur()
-		m.cpStep = cpStepExtraBody
-		return m, m.cpExtraBodyInput.Focus()
-	case cpStepExtraBody:
-		extraBody, err := parseExtraBodyInput(m.cpExtraBodyInput.Value())
-		if err != nil {
-			m.formError = ""
-			return m, nil
-		}
-		m.cpExtraBody = extraBody
-		m.cpExtraBodyInput.Blur()
-		m.formError = ""
-		m.cpStep = cpStepExtraHeaders
-		return m, m.cpExtraHeadersInput.Focus()
-	case cpStepExtraHeaders:
-		// Re-parse from input so saved Extra Body matches what the user sees if they
-		// edited the field after advancing from cpStepExtraBody (inline draft hints
-		// surface parse errors; formError stays empty to avoid duplicate messages).
-		extraBody, err := parseExtraBodyInput(m.cpExtraBodyInput.Value())
-		if err != nil {
-			m.formError = ""
-			m.cpExtraHeadersInput.Blur()
-			m.cpStep = cpStepExtraBody
-			return m, m.cpExtraBodyInput.Focus()
-		}
-		m.cpExtraBody = extraBody
-		extraHeaders, err := parseExtraHeadersInput(m.cpExtraHeadersInput.Value())
-		if err != nil {
-			m.formError = ""
-			return m, nil
-		}
-		m.cpExtraHeadersInput.Blur()
 		m.formError = ""
 		if m.editingCustom {
-			r := m.result()
-			if err := m.applyEditCustomProviderSaveWithExtras(r, extraBody, extraHeaders, true); err != nil {
+			if err := m.applyEditCustomProviderSave(); err != nil {
 				return m, nil
 			}
-			// Edit succeeded — drop the user into the model list for this provider.
+			r := m.result()
 			m.editingCustom = false
 			m.editTargetName = ""
 			m.apiKeyInput.SetValue("")
@@ -1187,7 +1097,7 @@ func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.creatingCustom {
-			return m.applyCreateCustomProvider(extraBody, extraHeaders)
+			return m.applyCreateCustomProvider()
 		}
 		m.confirmed = true
 		return m, tea.Quit
@@ -1195,7 +1105,7 @@ func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m providerTUIModel) applyCreateCustomProvider(extraBody map[string]any, extraHeaders map[string]string) (tea.Model, tea.Cmd) {
+func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 	if m.existingCfg == nil {
 		m.formError = "failed to save: config not loaded"
 		return m, nil
@@ -1221,24 +1131,10 @@ func (m providerTUIModel) applyCreateCustomProvider(extraBody map[string]any, ex
 	}
 
 	entry := ProviderEntry{
-		URL:          r.url,
-		Protocol:     r.protocol,
-		AuthHeader:   r.authHeader,
-		APIKey:       strings.TrimSpace(m.apiKeyInput.Value()),
-		ExtraBody:    extraBody,
-		ExtraHeaders: extraHeaders,
-	}
-	if entry.ExtraBody != nil {
-		if err := llm.ValidateExtraBody(entry.ExtraBody); err != nil {
-			m.formError = err.Error()
-			return m, nil
-		}
-	}
-	if len(entry.ExtraHeaders) > 0 {
-		if err := llm.ValidateExtraHeadersMap(entry.ExtraHeaders); err != nil {
-			m.formError = err.Error()
-			return m, nil
-		}
+		URL:        r.url,
+		Protocol:   r.protocol,
+		AuthHeader: r.authHeader,
+		APIKey:     strings.TrimSpace(m.apiKeyInput.Value()),
 	}
 	m.existingCfg.CustomProviders[r.provider] = entry
 
@@ -1255,9 +1151,6 @@ func (m providerTUIModel) applyCreateCustomProvider(extraBody map[string]any, ex
 	m.cpNameInput.SetValue("")
 	m.cpURLInput.SetValue("")
 	m.cpAuthInput.SetValue("")
-	m.cpExtraBodyInput.SetValue("")
-	m.cpExtraHeadersInput.SetValue("")
-	m.cpExtraBody = nil
 	m.apiKeyInput.SetValue("")
 	m.apiKeyMasked = false
 	m.apiKeyOriginal = ""
@@ -1319,12 +1212,9 @@ func cloneCustomProviderList(src []customProviderListItem) []customProviderListI
 	return out
 }
 
-// applyEditCustomProviderSave persists edits without touching ExtraBody/ExtraHeaders.
+// applyEditCustomProviderSave persists provider form edits without touching ExtraBody/ExtraHeaders.
 func (m *providerTUIModel) applyEditCustomProviderSave() error {
-	return m.applyEditCustomProviderSaveWithExtras(m.result(), nil, nil, false)
-}
-
-func (m *providerTUIModel) applyEditCustomProviderSaveWithExtras(r providerTUIResult, extraBody map[string]any, extraHeaders map[string]string, updateExtras bool) error {
+	r := m.result()
 	if m.existingCfg == nil {
 		m.formError = "failed to save: config not loaded"
 		return fmt.Errorf("config not loaded")
@@ -1352,14 +1242,6 @@ func (m *providerTUIModel) applyEditCustomProviderSaveWithExtras(r providerTUIRe
 	entry.URL = r.url
 	entry.Protocol = r.protocol
 	entry.AuthHeader = r.authHeader
-	if updateExtras {
-		if extraBody != nil {
-			entry.ExtraBody = deepCloneMap(extraBody)
-		} else {
-			entry.ExtraBody = nil
-		}
-		entry.ExtraHeaders = cloneExtraHeadersMap(extraHeaders)
-	}
 	if entry.ExtraBody != nil {
 		if err := llm.ValidateExtraBody(entry.ExtraBody); err != nil {
 			m.formError = err.Error()
@@ -1429,10 +1311,6 @@ func (m *providerTUIModel) blurCPStep() {
 		m.apiKeyInput.Blur()
 	case cpStepAuthHeader:
 		m.cpAuthInput.Blur()
-	case cpStepExtraBody:
-		m.cpExtraBodyInput.Blur()
-	case cpStepExtraHeaders:
-		m.cpExtraHeadersInput.Blur()
 	}
 }
 
@@ -1446,10 +1324,6 @@ func (m *providerTUIModel) focusCPStep() tea.Cmd {
 		return m.apiKeyInput.Focus()
 	case cpStepAuthHeader:
 		return m.cpAuthInput.Focus()
-	case cpStepExtraBody:
-		return m.cpExtraBodyInput.Focus()
-	case cpStepExtraHeaders:
-		return m.cpExtraHeadersInput.Focus()
 	}
 	return nil
 }
@@ -1468,10 +1342,6 @@ func (m providerTUIModel) passThroughCPInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.apiKeyInput, cmd = m.apiKeyInput.Update(msg)
 	case cpStepAuthHeader:
 		m.cpAuthInput, cmd = m.cpAuthInput.Update(msg)
-	case cpStepExtraBody:
-		m.cpExtraBodyInput, cmd = m.cpExtraBodyInput.Update(msg)
-	case cpStepExtraHeaders:
-		m.cpExtraHeadersInput, cmd = m.cpExtraHeadersInput.Update(msg)
 	}
 	if _, ok := msg.(tea.KeyPressMsg); ok {
 		m.formError = ""
@@ -1492,14 +1362,6 @@ func (m providerTUIModel) updateManualForm(key string, msg tea.KeyPressMsg) (tea
 				m.manualURLInput.SetValue(m.existingCfg.Llm.URL)
 				m.manualModelInput.SetValue(m.existingCfg.Llm.Model)
 				m.manualAuthHeaderInput.SetValue(m.existingCfg.Llm.AuthHeader)
-				m.manualExtraBodyInput.SetValue(formatExtraBodyJSON(m.existingCfg.Llm.ExtraBody))
-				m.manualExtraHeadersInput.SetValue(formatExtraHeadersJSON(m.existingCfg.Llm.ExtraHeaders))
-				if m.existingCfg.Llm.ExtraBody != nil {
-					m.manualExtraBody = deepCloneMap(m.existingCfg.Llm.ExtraBody)
-				} else {
-					m.manualExtraBody = nil
-				}
-				m.manualExtraHeaders = cloneExtraHeadersMap(m.existingCfg.Llm.ExtraHeaders)
 				if m.existingCfg.Llm.AuthToken != "" {
 					m.manualTokenOriginal = m.existingCfg.Llm.AuthToken
 					m.manualTokenMasked = true
@@ -1513,13 +1375,9 @@ func (m providerTUIModel) updateManualForm(key string, msg tea.KeyPressMsg) (tea
 				m.manualURLInput.SetValue("")
 				m.manualModelInput.SetValue("")
 				m.manualAuthHeaderInput.SetValue("")
-				m.manualExtraBodyInput.SetValue("")
-				m.manualExtraHeadersInput.SetValue("")
 				m.manualTokenInput.SetValue("")
 				m.manualTokenMasked = false
 				m.manualTokenOriginal = ""
-				m.manualExtraBody = nil
-				m.manualExtraHeaders = nil
 			}
 			m.formError = ""
 			return m, nil
@@ -1769,39 +1627,7 @@ func (m providerTUIModel) handleManualFormEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.blurManualStep()
-		m.manualStep = manualStepExtraBody
-		return m, m.focusManualStep()
-	case manualStepExtraBody:
-		extraBody, err := parseExtraBodyInput(m.manualExtraBodyInput.Value())
-		if err != nil {
-			m.formError = ""
-			return m, nil
-		}
-		m.manualExtraBodyInput.Blur()
 		m.formError = ""
-		m.manualExtraBody = extraBody
-		m.manualStep = manualStepExtraHeaders
-		return m, m.focusManualStep()
-	case manualStepExtraHeaders:
-		// Re-parse from input so saved Extra Body matches what the user sees if they
-		// edited the field after advancing from manualStepExtraBody (inline draft hints
-		// surface parse errors; formError stays empty to avoid duplicate messages).
-		extraBody, err := parseExtraBodyInput(m.manualExtraBodyInput.Value())
-		if err != nil {
-			m.formError = ""
-			m.manualExtraHeadersInput.Blur()
-			m.manualStep = manualStepExtraBody
-			return m, m.focusManualStep()
-		}
-		m.manualExtraBody = extraBody
-		extraHeaders, err := parseExtraHeadersInput(m.manualExtraHeadersInput.Value())
-		if err != nil {
-			m.formError = ""
-			return m, nil
-		}
-		m.manualExtraHeadersInput.Blur()
-		m.formError = ""
-		m.manualExtraHeaders = extraHeaders
 		m.confirmed = true
 		return m, tea.Quit
 	}
@@ -1820,10 +1646,6 @@ func (m *providerTUIModel) blurManualStep() {
 		m.manualTokenInput.Blur()
 	case manualStepAuthHeader:
 		m.manualAuthHeaderInput.Blur()
-	case manualStepExtraBody:
-		m.manualExtraBodyInput.Blur()
-	case manualStepExtraHeaders:
-		m.manualExtraHeadersInput.Blur()
 	}
 }
 
@@ -1839,10 +1661,6 @@ func (m *providerTUIModel) focusManualStep() tea.Cmd {
 		return m.manualTokenInput.Focus()
 	case manualStepAuthHeader:
 		return m.manualAuthHeaderInput.Focus()
-	case manualStepExtraBody:
-		return m.manualExtraBodyInput.Focus()
-	case manualStepExtraHeaders:
-		return m.manualExtraHeadersInput.Focus()
 	}
 	return nil
 }
@@ -1863,10 +1681,6 @@ func (m providerTUIModel) passThroughManualInput(msg tea.Msg) (tea.Model, tea.Cm
 		m.manualTokenInput, cmd = m.manualTokenInput.Update(msg)
 	case manualStepAuthHeader:
 		m.manualAuthHeaderInput, cmd = m.manualAuthHeaderInput.Update(msg)
-	case manualStepExtraBody:
-		m.manualExtraBodyInput, cmd = m.manualExtraBodyInput.Update(msg)
-	case manualStepExtraHeaders:
-		m.manualExtraHeadersInput, cmd = m.manualExtraHeadersInput.Update(msg)
 	}
 	if _, ok := msg.(tea.KeyPressMsg); ok {
 		m.formError = ""
@@ -2096,8 +1910,6 @@ func (m providerTUIModel) result() providerTUIResult {
 				url:              cp.entry.URL,
 				protocol:         cp.entry.Protocol,
 				authHeader:       cp.entry.AuthHeader,
-				extraBody:        cp.entry.ExtraBody,
-				extraHeaders:     cp.entry.ExtraHeaders,
 				sessionModelPick: m.sessionModelPickSnapshot(),
 			}
 		}
@@ -2110,29 +1922,16 @@ func (m providerTUIModel) result() providerTUIResult {
 		}
 		authHeader, _ := llm.NormalizeAuthHeader(m.manualAuthHeaderInput.Value())
 		return providerTUIResult{
-			isManual:     true,
-			url:          strings.TrimSpace(m.manualURLInput.Value()),
-			model:        strings.TrimSpace(m.manualModelInput.Value()),
-			apiKey:       apiKey,
-			protocol:     cpProtocols[m.manualProtocolIdx],
-			authHeader:   authHeader,
-			extraBody:    m.manualExtraBody,
-			extraHeaders: m.manualExtraHeaders,
+			isManual:   true,
+			url:        strings.TrimSpace(m.manualURLInput.Value()),
+			model:      strings.TrimSpace(m.manualModelInput.Value()),
+			apiKey:     apiKey,
+			protocol:   cpProtocols[m.manualProtocolIdx],
+			authHeader: authHeader,
 		}
 	}
 
 	return providerTUIResult{}
-}
-
-func formatExtraBodyJSON(m map[string]any) string {
-	if len(m) == 0 {
-		return ""
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return ""
-	}
-	return string(b)
 }
 
 func deepCloneMap(m map[string]any) map[string]any {
@@ -2163,38 +1962,6 @@ func deepCloneAny(v any) any {
 	}
 }
 
-func parseExtraBodyInput(raw string) (map[string]any, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, nil
-	}
-	if len(raw) > maxExtraBodyBytes {
-		return nil, fmt.Errorf("extra body too large (max %d bytes)", maxExtraBodyBytes)
-	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	if err := llm.ValidateExtraBody(out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func formatExtraHeadersJSON(m map[string]string) string {
-	if len(m) == 0 {
-		return ""
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return ""
-	}
-	return string(b)
-}
-
 func cloneExtraHeadersMap(m map[string]string) map[string]string {
 	if len(m) == 0 {
 		return nil
@@ -2204,38 +1971,6 @@ func cloneExtraHeadersMap(m map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-func parseExtraHeadersInput(raw string) (map[string]string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, nil
-	}
-	if len(raw) > maxExtraHeadersBytes {
-		return nil, fmt.Errorf("extra headers too large (max %d bytes)", maxExtraHeadersBytes)
-	}
-	var out map[string]string
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	if err := llm.ValidateExtraHeadersMap(out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func extraHeadersErrorFromDraft(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "{}" {
-		return ""
-	}
-	if _, err := parseExtraHeadersInput(raw); err != nil {
-		return tuiErrorStyle.Render("  " + err.Error())
-	}
-	return ""
 }
 
 func (m providerTUIModel) currentModelName() string {
@@ -2499,64 +2234,6 @@ func (m modelTUIModel) modelsThinkingSnapshotForSave() map[string]string {
 	return modelsThinkingSnapshotForSave(m.modelThinkingModes, m.modelThinkingState(), m.currentModelName())
 }
 
-func (m providerTUIModel) customProviderExtraBodyConfigured() bool {
-	return len(m.customProviderExtraBody()) > 0
-}
-
-func (m providerTUIModel) customProviderExtraBody() map[string]any {
-	if m.activeTab != tabCustom {
-		return nil
-	}
-	cp, ok := m.selectedCustomProvider()
-	if !ok {
-		return nil
-	}
-	entry := m.customProviderEntry(cp.name, cp.entry)
-	return entry.ExtraBody
-}
-
-func (m providerTUIModel) customProviderExtraBodyHint() string {
-	if m.activeTab != tabCustom {
-		return ""
-	}
-	return extraBodyHintLine(m.customProviderExtraBody())
-}
-
-func extraBodyHintLine(extraBody map[string]any) string {
-	if len(extraBody) == 0 {
-		return ""
-	}
-	return tuiDimStyle.Render("  Extra body: " + formatExtraBodyJSON(extraBody))
-}
-
-func extraBodyHintFromDraft(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "{}" {
-		return ""
-	}
-	body, err := parseExtraBodyInput(raw)
-	if err != nil {
-		return tuiErrorStyle.Render("  " + err.Error())
-	}
-	if len(body) == 0 {
-		return ""
-	}
-	return extraBodyHintLine(body)
-}
-
-// extraBodyErrorFromDraft returns a validation error for invalid draft JSON only.
-// Valid JSON is omitted because the active form field already shows the input.
-func extraBodyErrorFromDraft(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "{}" {
-		return ""
-	}
-	if _, err := parseExtraBodyInput(raw); err != nil {
-		return tuiErrorStyle.Render("  " + err.Error())
-	}
-	return ""
-}
-
 func listCursorPrefix(isCursor bool) string {
 	if isCursor {
 		return "  " + tuiCursorStyle.Render(tuiCursor) + " "
@@ -2739,8 +2416,6 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 		{"Base URL", m.cpURLInput.Value(), m.cpStep == cpStepBaseURL},
 		{"API Key", strings.Repeat("*", len(m.apiKeyInput.Value())), m.cpStep == cpStepAPIKey},
 		{"Auth Header", m.cpAuthInput.Value(), m.cpStep == cpStepAuthHeader},
-		{"Extra Body", m.cpExtraBodyInput.Value(), m.cpStep == cpStepExtraBody},
-		{"Extra Headers", m.cpExtraHeadersInput.Value(), m.cpStep == cpStepExtraHeaders},
 	}
 
 	for _, f := range fields {
@@ -2768,16 +2443,6 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 				}
 			case cpStepAuthHeader:
 				s.WriteString("    " + m.cpAuthInput.View() + "\n")
-			case cpStepExtraBody:
-				s.WriteString("    " + m.cpExtraBodyInput.View() + "\n")
-				if errHint := extraBodyErrorFromDraft(m.cpExtraBodyInput.Value()); errHint != "" {
-					s.WriteString(errHint + "\n")
-				}
-			case cpStepExtraHeaders:
-				s.WriteString("    " + m.cpExtraHeadersInput.View() + "\n")
-				if errHint := extraHeadersErrorFromDraft(m.cpExtraHeadersInput.Value()); errHint != "" {
-					s.WriteString(errHint + "\n")
-				}
 			}
 		} else {
 			display := f.value
@@ -2831,8 +2496,6 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 		{"Model", m.manualModelInput.Value(), m.manualStep == manualStepModel},
 		{"Auth Token", strings.Repeat("*", len(m.manualTokenInput.Value())), m.manualStep == manualStepAuthToken},
 		{"Auth Header", m.manualAuthHeaderInput.Value(), m.manualStep == manualStepAuthHeader},
-		{"Extra Body", m.manualExtraBodyInput.Value(), m.manualStep == manualStepExtraBody},
-		{"Extra Headers", m.manualExtraHeadersInput.Value(), m.manualStep == manualStepExtraHeaders},
 	}
 
 	for _, f := range fields {
@@ -2860,16 +2523,6 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 				}
 			case manualStepAuthHeader:
 				s.WriteString("    " + m.manualAuthHeaderInput.View() + "\n")
-			case manualStepExtraBody:
-				s.WriteString("    " + m.manualExtraBodyInput.View() + "\n")
-				if errHint := extraBodyErrorFromDraft(m.manualExtraBodyInput.Value()); errHint != "" {
-					s.WriteString(errHint + "\n")
-				}
-			case manualStepExtraHeaders:
-				s.WriteString("    " + m.manualExtraHeadersInput.View() + "\n")
-				if errHint := extraHeadersErrorFromDraft(m.manualExtraHeadersInput.Value()); errHint != "" {
-					s.WriteString(errHint + "\n")
-				}
 			}
 		} else {
 			display := f.value
@@ -2940,12 +2593,6 @@ func (m providerTUIModel) viewModel(s *strings.Builder) {
 	}
 
 	s.WriteString("\n")
-
-	if hint := m.customProviderExtraBodyHint(); hint != "" && m.activeTab == tabCustom {
-		s.WriteString(hint)
-		s.WriteString("\n")
-		s.WriteString("\n")
-	}
 
 	if m.confirmingDeleteModel {
 		s.WriteString("  " + tuiSelectedItemStyle.Render(fmt.Sprintf("Delete %q? (y/n)", m.deleteModelName)))
@@ -3585,16 +3232,6 @@ func (m modelTUIModel) currentModelName() string {
 	return m.selectedModel()
 }
 
-func (m modelTUIModel) customProviderExtraBody() map[string]any {
-	if !m.isCustomProvider || m.existingCfg == nil {
-		return nil
-	}
-	if entry, ok := m.existingCfg.CustomProviders[m.providerName]; ok {
-		return entry.ExtraBody
-	}
-	return nil
-}
-
 func (m modelTUIModel) View() tea.View {
 	var s strings.Builder
 	s.WriteString("\n")
@@ -3647,12 +3284,6 @@ func (m modelTUIModel) View() tea.View {
 	}
 
 	s.WriteString("\n")
-
-	if hint := extraBodyHintLine(m.customProviderExtraBody()); hint != "" && m.isCustomProvider {
-		s.WriteString(hint)
-		s.WriteString("\n")
-		s.WriteString("\n")
-	}
 
 	if m.confirmingDeleteModel {
 		s.WriteString("  " + tuiSelectedItemStyle.Render(fmt.Sprintf("Delete %q? (y/n)", m.deleteModelName)))
