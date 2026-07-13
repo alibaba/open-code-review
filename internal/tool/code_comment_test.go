@@ -2,7 +2,11 @@ package tool
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/open-code-review/open-code-review/internal/model"
 )
 
 func TestParseComments(t *testing.T) {
@@ -131,6 +135,101 @@ func TestParseComments_Fields(t *testing.T) {
 	if c.Thinking != "strict equality is safer" {
 		t.Errorf("Thinking = %q", c.Thinking)
 	}
+}
+
+// TestParseComments_CategorySeverity verifies the structured category and severity
+// fields are read off each comment object when present, and left zero-valued when
+// absent (older/less-capable models that omit them still produce valid comments).
+func TestParseComments_CategorySeverity(t *testing.T) {
+	t.Run("parsed when present", func(t *testing.T) {
+		args := map[string]any{
+			"path": "main.go",
+			"comments": []any{
+				map[string]any{
+					"content":       "Potential nil pointer dereference.",
+					"existing_code": "x := *p",
+					"category":      "bug",
+					"severity":      "high",
+				},
+			},
+		}
+		comments, errMsg := ParseComments(args)
+		if errMsg != "" {
+			t.Fatalf("unexpected error message: %s", errMsg)
+		}
+		if len(comments) != 1 {
+			t.Fatalf("expected 1 comment, got %d", len(comments))
+		}
+		if got := comments[0].Category; got != "bug" {
+			t.Errorf("category = %q, want %q", got, "bug")
+		}
+		if got := comments[0].Severity; got != "high" {
+			t.Errorf("severity = %q, want %q", got, "high")
+		}
+	})
+
+	t.Run("zero-valued when absent", func(t *testing.T) {
+		args := map[string]any{
+			"path": "main.go",
+			"comments": []any{
+				map[string]any{
+					"content":       "Consider renaming for clarity.",
+					"existing_code": "a := 1",
+				},
+			},
+		}
+		comments, errMsg := ParseComments(args)
+		if errMsg != "" {
+			t.Fatalf("unexpected error message: %s", errMsg)
+		}
+		if len(comments) != 1 {
+			t.Fatalf("expected 1 comment, got %d", len(comments))
+		}
+		if comments[0].Category != "" {
+			t.Errorf("category = %q, want empty", comments[0].Category)
+		}
+		if comments[0].Severity != "" {
+			t.Errorf("severity = %q, want empty", comments[0].Severity)
+		}
+	})
+}
+
+// TestLlmComment_JSONCategorySeverity verifies category and severity serialize as
+// flat siblings alongside content when set, and are omitted entirely when empty so
+// existing JSON consumers are unaffected.
+func TestLlmComment_JSONCategorySeverity(t *testing.T) {
+	t.Run("omitted when empty", func(t *testing.T) {
+		b, err := json.Marshal(model.LlmComment{Path: "main.go", Content: "no metadata"})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		out := string(b)
+		if strings.Contains(out, "category") {
+			t.Errorf("expected no category key, got %s", out)
+		}
+		if strings.Contains(out, "severity") {
+			t.Errorf("expected no severity key, got %s", out)
+		}
+	})
+
+	t.Run("serialized when set", func(t *testing.T) {
+		b, err := json.Marshal(model.LlmComment{
+			Path:     "main.go",
+			Content:  "sql injection",
+			Category: "security",
+			Severity: "critical",
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		out := string(b)
+		if !strings.Contains(out, `"category":"security"`) {
+			t.Errorf("expected category in output, got %s", out)
+		}
+		if !strings.Contains(out, `"severity":"critical"`) {
+			t.Errorf("expected severity in output, got %s", out)
+		}
+	})
 }
 
 func TestCodeCommentProvider_Execute(t *testing.T) {

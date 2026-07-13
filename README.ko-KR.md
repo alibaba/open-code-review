@@ -13,7 +13,6 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
-  <a href="https://goreportcard.com/report/github.com/alibaba/open-code-review"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
@@ -107,6 +106,18 @@ npm install -g @alibaba-group/open-code-review
 ```
 
 설치 후 `ocr` 명령을 전역에서 사용할 수 있습니다.
+
+**업데이트**
+
+NPM으로 설치했다면 최신 버전으로 수동 업데이트할 수 있습니다:
+
+```bash
+npm install -g @alibaba-group/open-code-review@latest
+```
+
+NPM 설치의 `ocr`은 기본적으로 백그라운드에서 새 버전을 확인하고 자동으로 업데이트합니다. 자동 업데이트를 끄려면 `OCR_NO_UPDATE=1`을 설정하세요.
+
+설치 스크립트나 수동 다운로드한 binary로 설치했다면 같은 설치/다운로드 명령을 다시 실행해 로컬 binary를 최신 release로 교체할 수 있습니다. 특정 release tag로 고정해야 한다면 `OCR_VERSION`을 사용하세요.
 
 **GitHub Release 사용**
 
@@ -280,6 +291,10 @@ ocr review --from main --to feature-branch
 # 단일 commit
 ocr review --commit abc123
 
+# 중단된 range 또는 단일 commit review 재개
+ocr session list
+ocr review --from main --to feature-branch --resume <session-id>
+
 # 전체 파일 스캔 — diff 대신 파일 전체를 리뷰 (git 이력 불필요)
 ocr scan                          # 전체 repository 스캔
 ocr scan --path internal/agent    # 디렉터리 또는 특정 파일 스캔
@@ -415,11 +430,35 @@ ocr review \
 
 `--format json` flag는 CI script에서 파싱하기 좋은 machine-readable 결과를 출력합니다.
 
+각 finding에는 두 개의 구조화된 field가 포함되어, CI 통합에서 comment 텍스트를 다시 파싱하지 않고도 정렬·그룹화·필터링하거나 build를 gate할 수 있습니다:
+
+| Field | 허용 값 | 설명 |
+|-------|--------|------|
+| `category` | `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other` | 이슈가 속한 카테고리. |
+| `severity` | `critical`, `high`, `medium`, `low` | 이슈의 중요도. |
+
+JSON 출력에서 두 field는 `content`, `start_line` 등과 같은 수준의 sibling으로 나타납니다. 터미널에서는 comment 앞에 인라인 `[category · severity]` badge로 표시되며 severity에 따라 색상이 지정됩니다.
+
 통합 예시는 [`examples/`](./examples/) 디렉터리를 참고하세요.
 
 - [`github_actions/`](./examples/github_actions/): GitHub Actions 통합 예시
 - [`gitlab_ci/`](./examples/gitlab_ci/): GitLab CI 통합 예시
 - [`gitflic_ci/`](./examples/gitflic_ci/): GitFlic CI 통합 예시
+
+#### GitHub Action
+
+GitHub의 경우, 이 리포지터리는 루트에 바로 사용할 수 있는 composite Action([`action.yml`](./action.yml))을 제공합니다. 직접 `ocr review` 스크립트를 작성하는 대신 이를 참조하기만 하면 전체 파이프라인 — checkout, OCR 설치, review 실행, inline/summary comment 게시, artifact 업로드, 재시도 및 멱등성 — 을 모두 처리합니다:
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+```
+
+재현성을 위해 version tag나 commit SHA에 고정하세요. 전체 workflow 데모와 inputs/outputs, comment 게시 모드(sticky summary, incremental non-destructive posting)의 전체 목록은 [`examples/github_actions/`](./examples/github_actions/) 디렉터리를 참고하세요.
 
 ## Commands
 
@@ -434,6 +473,8 @@ ocr review \
 | `ocr config unset custom_providers.<name>` | - | custom provider 삭제 |
 | `ocr llm test` | - | LLM 연결 테스트 |
 | `ocr llm providers` | - | built-in LLM provider 목록 표시 |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | 저장된 review session 목록 표시 |
+| `ocr session show <id>` | `ocr sessions show <id>` | 단일 session과 파일별 checkpoint 확인 |
 | `ocr viewer` | `ocr v` | `localhost:5483`에서 WebUI session viewer 실행 |
 | `ocr version` | - | version 정보 표시 |
 
@@ -447,16 +488,53 @@ ocr review \
 | `--commit` | `-c` | - | 리뷰할 단일 commit |
 | `--exclude` | - | - | 건너뛸 파일의 쉼표 구분 gitignore 스타일 패턴; rule.json의 excludes와 병합 |
 | `--preview` | `-p` | `false` | LLM 실행 없이 리뷰 대상 파일 미리보기 |
+| `--resume` | - | - | 이전의 호환되는 range 또는 단일 commit review session에서 재개 |
 | `--format` | `-f` | `text` | Output format: `text` 또는 `json` |
 | `--concurrency` | - | `8` | 최대 동시 파일 리뷰 수 |
 | `--timeout` | - | `10` | 동시 task timeout(분) |
 | `--audience` | - | `human` | `human`(progress 표시) 또는 `agent`(summary only) |
 | `--background` | `-b` | - | 리뷰를 위한 선택적 요구사항/비즈니스 컨텍스트. `--commit` 사용 시 미지정이면 commit message에서 자동 추출 |
+| `--background-file` | `-B` | - | Markdown 파일에서 읽어오는 선택적 요구사항/비즈니스 컨텍스트. `--background`와 함께 사용하면 inline 값이 먼저 배치됩니다 |
 | `--model` | - | - | 이번 리뷰에서 LLM model 선택 또는 override |
 | `--rule` | - | - | custom JSON review rules 경로 |
 | `--max-tools` | - | built-in | 파일별 최대 tool call round. template default보다 클 때만 적용 |
 | `--max-git-procs` | - | built-in | 최대 동시 git subprocess 수 |
 | `--tools` | - | - | custom JSON tools config 경로 |
+
+#### Resumable Reviews and Sessions
+
+모든 `ocr review` 실행은 `~/.opencodereview/sessions/` 아래에 local session log를 저장합니다.
+정상 완료된 text output은 review 결과에 집중하며 session ID를 출력하지 않습니다.
+저장된 session은 `ocr session list/show`로 찾을 수 있고, `--format json`을 사용하면
+machine-readable output에 `session_id`가 포함됩니다. range 또는 단일 commit review가 중단된 경우,
+저장된 session을 나열한 뒤 동일한 review target과 일치하는 session에서 재개합니다.
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+Resume은 의도적으로 엄격합니다. branch range와 단일 commit review만 지원하고 workspace review는 지원하지 않습니다.
+현재 `--from/--to` 또는 `--commit`은 저장된 session과 일치해야 합니다. `--preview`와 `--resume`은 함께 사용할 수 없습니다.
+
+`--format json`을 사용하면 재개된 run에는 다음 field가 포함됩니다.
+
+- `session_id`: 현재 run의 session ID
+- `resume.resumed_from`: source session ID
+- `resume.reused_files`: 저장된 checkpoint에서 재사용한 파일 수
+- `resume.rerun_files`: 현재 run에서 다시 review한 파일 수
+
+### `ocr session` Flags
+
+| Command | Flag | Default | Description |
+|---------|------|---------|-------------|
+| `ocr session list` | `--repo` | current dir | session을 나열할 repository |
+| `ocr session list` | `--json` | `false` | session summary를 JSON으로 출력 |
+| `ocr session list` | `--limit` | `20` | 나열할 session 수 제한. `0`은 unlimited |
+| `ocr session show <id>` | `--repo` | current dir | 확인할 session의 repository |
+| `ocr session show <id>` | `--json` | `false` | session metadata와 파일별 item을 JSON으로 출력 |
 
 ### `ocr scan` Flags
 
@@ -503,12 +581,24 @@ ocr review --from main --to my-feature --concurrency 4
 # 특정 commit을 verbose JSON output으로 리뷰
 ocr review --commit abc123 --format json --audience agent
 
+# 중단된 range 또는 단일 commit review 재개
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to my-feature --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+
 # 이번 리뷰에서 model 선택 또는 override
 ocr review --model claude-opus-4-6
 ocr review --commit abc123 --model claude-sonnet-4-6
 
 # 요구사항 컨텍스트를 제공하여 더 정확한 리뷰 수행
 ocr review --background "로그인 API에 rate limiting 추가"
+
+# Markdown 파일에서 요구사항 컨텍스트 제공
+ocr review --background-file ./docs/my_business_context.md
+
+# inline 컨텍스트와 로컬 컨텍스트 파일을 함께 사용(둘 다 적용됨)
+ocr review --background "인증에 집중" --background-file ./docs/my_business_context.md
 
 # custom review rules 사용
 ocr review --rule /path/to/my-rules.json
@@ -733,13 +823,22 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 exported data에 LLM prompt와 response를 포함하려면 `telemetry.content_logging`을 설정합니다.
 
+**프로토콜 선택:** 환경 변수 `OTEL_EXPORTER_OTLP_PROTOCOL`로 export 프로토콜을 선택할 수 있습니다:
+
+| 값 | 전송 방식 | 설명 |
+|---|---|---|
+| `grpc` (기본값) | gRPC | 기본 포트 4317 |
+| `http/protobuf` | HTTP | 기본 포트 4318 |
+
+**Endpoint 형식:** `telemetry.otlp_endpoint`는 `host:port` 또는 `http://host:port` 형식의 base URL을 지정합니다. 경로를 포함할 필요가 없습니다. SDK가 [OTLP 사양](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request)에 따라 signal 경로(예: `/v1/traces`)를 자동으로 추가합니다.
+
 ## Contributing
 
-개발 환경 설정, coding guideline, pull request 제출 방법은 [CONTRIBUTING.ko-KR.md](CONTRIBUTING.ko-KR.md)를 참고하세요.
+이 프로젝트는 기여해 주신 모든 분들 덕분에 존재합니다. 개발 환경 설정, coding guideline, pull request 제출 방법은 [CONTRIBUTING.ko-KR.md](CONTRIBUTING.ko-KR.md)를 참고하세요.
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
+<a href="https://github.com/alibaba/open-code-review/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
+</a>
 
 ## License
 

@@ -54,7 +54,7 @@ func captureStderr(t *testing.T, fn func()) string {
 	defer func() { os.Stderr = oldStderr }()
 
 	fn()
-	w.Close()
+	_ = w.Close()
 
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, r)

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"runtime/debug"
@@ -22,6 +23,8 @@ import (
 	"github.com/open-code-review/open-code-review/internal/stdout"
 	"github.com/open-code-review/open-code-review/internal/telemetry"
 	"github.com/open-code-review/open-code-review/internal/tool"
+
+	"go.opentelemetry.io/otel/codes"
 )
 
 // AgentWarning is re-exported from llmloop for backwards compatibility with
@@ -111,6 +114,9 @@ type Args struct {
 	// Session is an optional session history instance for collecting conversation records.
 	// When nil, a default one is created automatically with git branch auto-detected from repoDir.
 	Session *session.SessionHistory
+
+	// Resume is an optional read-only checkpoint index from a previous review session.
+	Resume *session.ResumeState
 }
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
@@ -125,6 +131,16 @@ type Agent struct {
 	session         *session.SessionHistory
 	subtaskFailed   int64 // count of failed subtasks, accessed atomically
 	runner          *llmloop.Runner
+	resumeInfo      *ResumeInfo
+}
+
+// ResumeInfo summarizes file-level reuse for a resumed review.
+type ResumeInfo struct {
+	ResumedFrom   string `json:"resumed_from"`
+	ReusedFiles   int64  `json:"reused_files"`
+	RerunFiles    int64  `json:"rerun_files"`
+	PreviousModel string `json:"previous_model,omitempty"`
+	CurrentModel  string `json:"current_model,omitempty"`
 }
 
 // New creates a new Agent from the given arguments.
@@ -142,10 +158,11 @@ func New(args Args) *Agent {
 			mode = reviewModeString(args.From, args.To, args.Commit)
 		}
 		args.Session = session.New(args.RepoDir, gitBranch, args.Model, session.SessionOptions{
-			ReviewMode: mode,
-			DiffFrom:   args.From,
-			DiffTo:     args.To,
-			DiffCommit: args.Commit,
+			ReviewMode:  mode,
+			DiffFrom:    args.From,
+			DiffTo:      args.To,
+			DiffCommit:  args.Commit,
+			ResumedFrom: resumedFromSession(args.Resume),
 		})
 	}
 	a := &Agent{
@@ -221,6 +238,23 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 // Session returns the session history associated with this Agent.
 func (a *Agent) Session() *session.SessionHistory {
 	return a.session
+}
+
+// SessionID returns the current review's session id, or "" when no session has been created.
+func (a *Agent) SessionID() string {
+	if a == nil || a.session == nil {
+		return ""
+	}
+	return a.session.SessionID
+}
+
+// ResumeInfo returns resume metadata for output. Nil means this was not a resume run.
+func (a *Agent) ResumeInfo() *ResumeInfo {
+	if a.resumeInfo == nil {
+		return nil
+	}
+	info := *a.resumeInfo
+	return &info
 }
 
 // FilesReviewed returns the number of changed files included in this review.
@@ -325,6 +359,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	if len(a.diffs) == 0 {
 		return nil, fmt.Errorf("all diffs filtered out by token size")
 	}
+	toDispatch := a.applyResume(a.diffs)
 
 	var wg sync.WaitGroup
 
@@ -337,8 +372,8 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
 
 	var dispatched int64
-	for i := range a.diffs {
-		if a.diffs[i].IsDeleted {
+	for i := range toDispatch {
+		if toDispatch[i].IsDeleted {
 			continue
 		}
 		dispatched++
@@ -346,6 +381,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		sem <- struct{}{} // acquire semaphore
 
 		go func(d model.Diff) {
+			fingerprint := reviewItemFingerprint(a.reviewMode(), d)
 			defer wg.Done()
 			defer func() { <-sem }() // release
 			// A panic while reviewing one file must be isolated exactly like an
@@ -357,6 +393,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 			defer func() {
 				if r := recover(); r != nil {
 					atomic.AddInt64(&a.subtaskFailed, 1)
+					a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, fmt.Sprintf("panic: %v", r))
 					fmt.Fprintf(stdout.Writer(), "[ocr] Subtask panic for %s: %v\n%s\n", d.NewPath, r, debug.Stack())
 					telemetry.ErrorEvent(ctx, "subtask.panic", fmt.Errorf("panic: %v", r),
 						telemetry.AnyToAttr("file.path", d.NewPath))
@@ -373,20 +410,31 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 				fileCtx = ctx
 			}
 
-			if err := a.executeSubtask(fileCtx, d); err != nil {
+			completed, skipReason, err := a.executeSubtask(fileCtx, d)
+			if err != nil {
 				atomic.AddInt64(&a.subtaskFailed, 1)
+				a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, err.Error())
 				fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for %s: %v\n", d.NewPath, err)
 				telemetry.ErrorEvent(fileCtx, "subtask.error", err,
 					telemetry.AnyToAttr("file.path", d.NewPath))
 				a.recordWarning("subtask_error", d.NewPath, err.Error())
+				return
 			}
-		}(a.diffs[i])
+			if !completed {
+				if skipReason != "" {
+					a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, skipReason)
+				}
+				return
+			}
+			comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
+			a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+		}(toDispatch[i])
 	}
 
 	wg.Wait()
 
 	if dispatched == 0 {
-		return []model.LlmComment{}, nil
+		return a.args.CommentCollector.Comments(), nil
 	}
 
 	// All subtasks finished — collect comments from the global collector once.
@@ -402,8 +450,76 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	return a.args.CommentCollector.Comments(), nil
 }
 
+func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
+	resume := a.args.Resume
+	if resume == nil {
+		return diffs
+	}
+
+	mode := a.reviewMode()
+	toDispatch := make([]model.Diff, 0, len(diffs))
+	var reused int64
+	for _, d := range diffs {
+		if d.IsDeleted {
+			toDispatch = append(toDispatch, d)
+			continue
+		}
+		fingerprint := reviewItemFingerprint(mode, d)
+		item, ok := resume.Item(fingerprint)
+		if !ok {
+			toDispatch = append(toDispatch, d)
+			continue
+		}
+		for _, cm := range item.Comments {
+			a.args.CommentCollector.Add(cm)
+		}
+		a.session.RecordReviewItemReused(effectivePath(d), d.OldPath, d.NewPath, fingerprint, resume.SessionID, item.Comments)
+		reused++
+	}
+
+	rerun := countDispatchable(toDispatch)
+	a.resumeInfo = &ResumeInfo{
+		ResumedFrom:   resume.SessionID,
+		ReusedFiles:   reused,
+		RerunFiles:    rerun,
+		PreviousModel: resume.Model,
+		CurrentModel:  a.args.Model,
+	}
+	fmt.Fprintf(stdout.Writer(), "[ocr] Resume %s: reusing %d file(s), reviewing %d file(s)\n", resume.SessionID, reused, rerun)
+	return toDispatch
+}
+
+func countDispatchable(diffs []model.Diff) int64 {
+	var n int64
+	for _, d := range diffs {
+		if !d.IsDeleted {
+			n++
+		}
+	}
+	return n
+}
+
+func (a *Agent) reviewMode() string {
+	if a.args.ReviewMode != "" {
+		return a.args.ReviewMode
+	}
+	return reviewModeString(a.args.From, a.args.To, a.args.Commit)
+}
+
+func reviewItemFingerprint(mode string, d model.Diff) string {
+	sum := sha256.Sum256([]byte(mode + "\x00" + d.OldPath + "\x00" + d.NewPath + "\x00" + d.Diff))
+	return fmt.Sprintf("%x", sum)
+}
+
+func resumedFromSession(resume *session.ResumeState) string {
+	if resume == nil {
+		return ""
+	}
+	return resume.SessionID
+}
+
 // executeSubtask performs the Plan Phase + Main Loop for a single file.
-func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
+func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute."+d.NewPath)
 	defer span.End()
 	telemetry.SetAttr(span, "file.path", d.NewPath)
@@ -412,7 +528,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 	telemetry.SetAttr(span, "lines.deleted", d.Deletions)
 
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return false, "", ctx.Err()
 	}
 
 	newPath := d.NewPath
@@ -446,7 +562,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 
 	// Phase 2: Main task loop
 	if len(a.args.Template.MainTask.Messages) == 0 {
-		return fmt.Errorf("main_task.messages is empty in template")
+		return false, "", fmt.Errorf("main_task.messages is empty in template")
 	}
 
 	rawMsgs := a.args.Template.MainTask.Messages
@@ -484,10 +600,21 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 			telemetry.AnyToAttr("file.path", newPath),
 			telemetry.AnyToAttr("tokens", tokenCount),
 			telemetry.AnyToAttr("max_tokens", maxAllowed))
-		return nil
+		return false, msg, nil
 	}
 
-	err := a.runner.RunPerFile(ctx, messages, newPath)
+	mainCompleted, err := func() (bool, error) {
+		ctx, mainSpan := telemetry.StartSpan(ctx, "main.loop")
+		defer mainSpan.End()
+		telemetry.SetAttr(mainSpan, "file.path", newPath)
+		completed, err := a.runner.RunPerFile(ctx, messages, newPath)
+		if err != nil {
+			mainSpan.SetStatus(codes.Error, err.Error())
+			mainSpan.RecordError(err)
+			return false, err
+		}
+		return completed, nil
+	}()
 	if err == nil {
 		// REVIEW_FILTER_TASK runs after the main loop and decides which of the
 		// just-collected comments to drop. It needs to see comments produced by
@@ -497,12 +624,22 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) error {
 		}
 		a.executeReviewFilter(ctx, d, newPath)
 	}
-	return err
+	if err != nil {
+		return false, "", err
+	}
+	if !mainCompleted {
+		return false, "main_task did not complete before stopping", nil
+	}
+	return true, "", nil
 }
 
 // executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are
 // provably incorrect based solely on the diff. Errors are logged and silently ignored.
 func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath string) {
+	ctx, span := telemetry.StartSpan(ctx, "review_filter.execute")
+	defer span.End()
+	telemetry.SetAttr(span, "file.path", newPath)
+
 	ft := a.args.Template.ReviewFilterTask
 	if ft == nil || len(ft.Messages) == 0 {
 		return
@@ -512,6 +649,7 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	if len(comments) == 0 {
 		return
 	}
+	telemetry.SetAttr(span, "comments.before", len(comments))
 
 	commentsJSON := buildFilterCommentsJSON(comments)
 
@@ -534,20 +672,33 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
 	startTime := time.Now()
 
+	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
 		MaxTokens: a.args.Template.MaxTokens,
 	})
+	duration := time.Since(startTime)
 	if err != nil {
-		rec.SetError(err, time.Since(startTime))
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		rec.SetError(err, duration)
 		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter failed for %s: %v\n", newPath, err)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
 		return
 	}
-	rec.SetResponse(resp, time.Since(startTime))
+	var totalTokens int64
+	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
+	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
 
 	indices := parseFilterResponse(resp.Content(), len(comments))
+	telemetry.SetAttr(span, "comments.filtered", len(indices))
 	if len(indices) == 0 {
 		return
 	}
@@ -722,6 +873,10 @@ func (a *Agent) extFromPath(path string) string {
 // executePlanPhase runs the plan task for a single file, sending template messages
 // with resolved placeholders and collecting the LLM response as plan guidance.
 func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFiles, rule string) (string, error) {
+	ctx, span := telemetry.StartSpan(ctx, "plan.execute")
+	defer span.End()
+	telemetry.SetAttr(span, "file.path", newPath)
+
 	pt := a.args.Template.PlanTask
 	messages := make([]llm.Message, 0, len(pt.Messages))
 	for _, m := range pt.Messages {
@@ -740,16 +895,28 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
 	startTime := time.Now()
 
+	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
 		MaxTokens: a.args.Template.MaxTokens,
 	})
+	duration := time.Since(startTime)
 	if err != nil {
-		rec.SetError(err, time.Since(startTime))
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		rec.SetError(err, duration)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
 		return "", fmt.Errorf("plan request: %w", err)
 	}
-	rec.SetResponse(resp, time.Since(startTime))
+	var totalTokens int64
+	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
+	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
 	fmt.Fprintf(stdout.Writer(), "[ocr] Plan completed for %s\n", newPath)
 	return resp.Content(), nil

@@ -32,13 +32,9 @@ func runConfigProvider() error {
 	final := finalModel.(providerTUIModel)
 
 	if !final.confirmed {
-		// TUI persists changes (create/edit/model/add/delete) directly to disk
-		// during the session, so the on-disk file is already up to date for any
-		// savedInSession operation. No additional post-TUI apply step is needed.
-		if final.savedInSession {
-			return nil
-		}
-		fmt.Println("Cancelled.")
+		// TUI persists changes during the session; Esc only abandons the final
+		// provider/API-key confirmation step.
+		printWizardCancelled(final.savedInSession, "Configuration changes")
 		return nil
 	}
 
@@ -53,6 +49,16 @@ func runConfigProvider() error {
 	}
 
 	return applyOfficialProviderConfig(configPath, cfg, result)
+}
+
+// printWizardCancelled prints the standard Esc-cancel message for config wizards.
+// changesDescription is a short noun phrase, e.g. "Configuration changes".
+func printWizardCancelled(savedInSession bool, changesDescription string) {
+	if savedInSession {
+		fmt.Printf("Cancelled. (%s made during this session were kept.)\n", changesDescription)
+		return
+	}
+	fmt.Println("Cancelled.")
 }
 
 func applyProviderDeletions(configPath string, cfg *Config, names []string) (bool, error) {
@@ -146,7 +152,8 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	if result.provider == "" {
 		return fmt.Errorf("provider name is required")
 	}
-	if result.model == "" {
+	model := result.resolvedModel()
+	if model == "" {
 		return fmt.Errorf("model is required")
 	}
 
@@ -155,11 +162,11 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	}
 
 	entry := cfg.CustomProviders[result.provider]
-	entry.Model = result.model
+	entry.Model = model
 	if len(result.models) > 0 {
 		entry.Models = append([]string(nil), result.models...)
 	}
-	entry.Models = ensureModelInList(entry.Models, result.model)
+	entry.Models = ensureModelInList(entry.Models, model)
 	if result.url != "" {
 		entry.URL = result.url
 	}
@@ -175,14 +182,16 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	}
 	if result.apiKey != "" {
 		entry.APIKey = result.apiKey
+	} else {
+		entry.APIKey = ""
 	}
 	cfg.CustomProviders[result.provider] = entry
 
 	if !result.isEdit {
 		cfg.Provider = result.provider
-		cfg.Model = result.model
+		cfg.Model = model
 	} else if cfg.Provider == result.provider {
-		cfg.Model = result.model
+		cfg.Model = model
 	}
 
 	if err := saveConfig(configPath, cfg); err != nil {
@@ -195,13 +204,13 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 		} else {
 			fmt.Printf("\nCustom provider %q updated (not currently active).\n", result.provider)
 		}
-		fmt.Printf("Model: %s\n", result.model)
+		fmt.Printf("Model: %s\n", model)
 		fmt.Println("\nTip: run 'ocr config model' to switch model later.")
 		return nil
 	}
 
 	fmt.Printf("\nProvider set to: %s (custom)\n", result.provider)
-	fmt.Printf("Model: %s\n", result.model)
+	fmt.Printf("Model: %s\n", model)
 
 	fmt.Println("\nTesting connection...")
 	if err := runLLMTest(); err != nil {
@@ -215,7 +224,11 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 }
 
 func applyOfficialProviderConfig(configPath string, cfg *Config, result providerTUIResult) error {
-	if result.provider == "" || result.model == "" {
+	if result.provider == "" {
+		return fmt.Errorf("provider and model are required")
+	}
+	model := result.resolvedModel()
+	if model == "" {
 		return fmt.Errorf("provider and model are required")
 	}
 
@@ -236,12 +249,15 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	}
 
 	entry := cfg.Providers[result.provider]
-	entry.Model = result.model
+	entry.Model = model
 	if len(result.models) > 0 {
 		entry.Models = mergeModelLists(entry.Models, result.models)
 	}
 	if result.apiKey != "" {
 		entry.APIKey = result.apiKey
+	} else {
+		// Confirmed empty key: clear saved api_key so resolver falls back to $ENV_VAR.
+		entry.APIKey = ""
 	}
 	cfg.Providers[result.provider] = entry
 
@@ -249,14 +265,14 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 		cfg.Model = ""
 	}
 	cfg.Provider = result.provider
-	cfg.Model = result.model
+	cfg.Model = model
 
 	if err := saveConfig(configPath, cfg); err != nil {
 		return err
 	}
 
 	fmt.Printf("\nProvider set to: %s\n", result.provider)
-	fmt.Printf("Model: %s\n", result.model)
+	fmt.Printf("Model: %s\n", model)
 
 	fmt.Println("\nTesting connection...")
 	if err := runLLMTest(); err != nil {
@@ -287,8 +303,10 @@ func runConfigModel() error {
 	currentModel := ""
 	provider := llm.Provider{Name: cfg.Provider, DisplayName: cfg.Provider}
 	isCustom := false
+	registryModels := []string(nil)
 	if preset, isPreset := llm.LookupProvider(cfg.Provider); isPreset {
 		provider = preset
+		registryModels = append([]string(nil), preset.Models...)
 		if entry, ok := cfg.Providers[cfg.Provider]; ok {
 			currentModel = activeModelForProvider(cfg, cfg.Provider, entry)
 			provider.Models = mergeModelLists(provider.Models, entry.Models)
@@ -306,7 +324,15 @@ func runConfigModel() error {
 		provider.Models = mergeModelLists(entry.Models)
 	}
 
-	m := newModelTUI(provider, currentModel)
+	m := newModelTUIConfig(modelTUIConfig{
+		Provider:       provider,
+		CurrentModel:   currentModel,
+		RegistryModels: registryModels,
+		ExistingCfg:    cfg,
+		ConfigPath:     configPath,
+		ProviderName:   cfg.Provider,
+		IsCustom:       isCustom,
+	})
 	p := tea.NewProgram(m)
 	finalModel, err := p.Run()
 	if err != nil {
@@ -315,7 +341,7 @@ func runConfigModel() error {
 
 	final := finalModel.(modelTUIModel)
 	if final.cancelled {
-		fmt.Println("Cancelled.")
+		printWizardCancelled(final.savedInSession, "Model list changes")
 		return nil
 	}
 
@@ -338,7 +364,9 @@ func runConfigModel() error {
 		}
 		entry := cfg.Providers[cfg.Provider]
 		entry.Model = selectedModel
-		if !modelListContains(provider.Models, selectedModel) {
+		// Use registry-only list: provider.Models was captured before the TUI and
+		// may include stale entry.Models from add/delete during the session.
+		if !llm.ModelListContains(registryModels, selectedModel) {
 			entry.Models = ensureModelInList(entry.Models, selectedModel)
 		}
 		cfg.Providers[cfg.Provider] = entry

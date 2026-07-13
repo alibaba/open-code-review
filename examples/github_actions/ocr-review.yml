@@ -1,71 +1,64 @@
 # OpenCodeReview - GitHub Actions PR Auto-Review Demo
 #
-# This workflow automatically reviews pull requests using OpenCodeReview
-# and posts review comments directly on the PR.
+# Demonstrates invoking the reusable action for both automatic PR review
+# (pull_request_target: opened/synchronize/reopened) and on-demand re-review
+# via comments starting with '/open-code-review' or '@open-code-review'.
 #
-# Triggers:
-#   - PR opened (uses pull_request_target for fork secret access)
-#   - Comment on PR containing '/open-code-review' or '@open-code-review'
+# Required secrets/vars (Settings -> Secrets and variables -> Actions):
+#   secret    OCR_LLM_URL            LLM API endpoint
+#   secret    OCR_LLM_AUTH_TOKEN     LLM auth token (mapped to OCR_LLM_TOKEN)
+#   variable  OCR_LLM_MODEL          model name
+#   variable  OCR_LLM_USE_ANTHROPIC  'true' for Anthropic, 'false' for OpenAI-compatible
 #
-# Required secrets:
-#   OCR_LLM_URL        - LLM API endpoint (e.g., https://api.openai.com/v1/chat/completions)
-#   OCR_LLM_AUTH_TOKEN - Authentication token for the LLM API
-#
-# Optional secrets:
-#   OCR_LLM_MODEL      - Model name (default: gpt-4o)
-#   OCR_LLM_USE_ANTHROPIC - Set to 'true' if using Anthropic Claude models
-#
-# Optional variables (for retry/delay tuning):
-# The retry strategy follows GitHub's documented guidance for REST API rate limits:
-#   https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api
-#   - Primary rate limit exhausted (x-ratelimit-remaining=0): wait until x-ratelimit-reset.
-#   - Secondary rate limit with a retry-after header: wait exactly that long.
-#   - Secondary rate limit with NO header: wait at least one minute, then use
-#     exponential backoff on continued failures.
-#
-#   OCR_RETRY_BASE_DELAY     - Base delay (ms) for exponential backoff when no retry
-#                             header is present (default: 60000, per GitHub's
-#                             "at least one minute" recommendation for secondary limits).
-#   OCR_RETRY_MAX_DELAY     - Maximum delay (ms) cap applied to EVERY computed wait,
-#                             including retry-after and x-ratelimit-reset, so a far-future
-#                             reset cannot stall the job past its timeout (default: 300000 = 5 min).
-#   OCR_MAX_RETRIES         - Max retry attempts per comment when rate-limited (default: 3).
-#   OCR_SUCCESS_DELAY       - Delay (ms) between successful comment posts to pace requests (default: 2000).
-#   OCR_FAILURE_DELAY       - Delay (ms) after a non-retryable failure to pace subsequent requests (default: 1000).
-#   OCR_LOW_REMAINING_THRESHOLD - When x-ratelimit-remaining is at or below this value,
-#                             proactively increase request spacing to avoid hitting the limit
-#                             (default: 3; GitHub best practice is to watch the header and slow down).
-#   OCR_LOW_REMAINING_SPACING - Request spacing (ms) used when remaining quota is low
-#                             (default: 10000 = 10s).
-#   OCR_READ_SUCCESS_DELAY   - Delay (ms) after a successful read API call (listReviews /
-#                             listReviewComments / listIssueComments) used for the
-#                             idempotency check. Reads are cheaper than writes, so the
-#                             default is shorter (default: 500).
-#   OCR_READ_LOW_REMAINING_SPACING - Request spacing (ms) for read calls when remaining
-#                             quota is low (default: 5000 = 5s).
-#
-# Idempotency:
-#   When the batch createReview fails with a 5xx, the request may still have landed on
-#   the server. Before retrying per-comment, the workflow queries existing reviews and
-#   review comments (tagged with a per-run HTML comment) and only retries the comments
-#   that are actually missing. This prevents duplicate review posts.
-#
-# Note: GITHUB_TOKEN is automatically provided by GitHub Actions.
-# Note: The workflow also configures llm.extra_body to '{"thinking": {"type": "disabled"}}'
-#   to disable thinking mode for compatibility with various LLM providers.
+# For the full list of action inputs/outputs and the four comment-posting modes
+# (sticky / incremental), see action.yml at the repo root.
 
 name: OpenCodeReview PR Review
 
+# Conditional concurrency group.
+#
+# GitHub Actions evaluates concurrency BEFORE job-level if-conditions. With a
+# flat group (ocr-<pr_number>), every comment on the PR — even an unrelated
+# conversation reply that will be skipped — enters the same group and, because
+# cancel-in-progress is true, cancels any in-progress review. The result: a
+# single normal comment kills a running review, and you see "two runs, one
+# cancelled" in the Actions tab.
+#
+# Fix: matching events (PR events + /open-code-review comments) share a per-PR
+# group so a new review cancels any stale one for the same PR. Non-matching
+# comments land in a unique noop-<run_id> group that can never collide with a
+# real review, so they are skipped instantly without disrupting anything.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    ${{
+      (
+        github.event_name == 'pull_request_target'
+        || (
+          github.event_name == 'issue_comment'
+          && github.event.issue.pull_request
+          && github.event.comment.user.type != 'Bot'
+          && (
+            github.event.comment.author_association == 'MEMBER'
+            || github.event.comment.author_association == 'OWNER'
+            || github.event.comment.author_association == 'COLLABORATOR'
+          )
+          && (
+            startsWith(github.event.comment.body, '/open-code-review')
+            || startsWith(github.event.comment.body, '@open-code-review')
+          )
+        )
+      )
+      && format('ocr-{0}', github.event.pull_request.number || github.event.issue.number)
+      || format('noop-{0}', github.run_id)
+    }}
   cancel-in-progress: true
 
 on:
   # Use pull_request_target instead of pull_request so that secrets are
-  # available even for PRs from forks. This is safe because OCR only reads
-  # the diff and does not execute any code from the PR.
+  # available even for PRs from forks. This is safe because the reusable
+  # action only reads the diff and does not execute any code from the PR.
   pull_request_target:
-    types: [opened]
+    types: [opened, synchronize, reopened]
   issue_comment:
     types: [created]
 
@@ -76,19 +69,38 @@ permissions:
 jobs:
   code-review:
     runs-on: ubuntu-latest
-    # Run on PR events, or on comments starting with trigger keywords
+    timeout-minutes: 30
+    # Run on PR events, or on human-authored comments starting with trigger
+    # keywords. Bot comments are excluded as a safety net: GITHUB_TOKEN already
+    # suppresses events from bot-posted comments, but a PAT/App token would not.
+    # issue_comment triggers are further gated on author_association so only
+    # MEMBER/OWNER/COLLABORATOR users can spend LLM quota via re-review.
     if: |
-      github.event_name == 'pull_request_target' ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/open-code-review')) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '@open-code-review'))
+      github.event_name == 'pull_request_target'
+      || (
+        github.event_name == 'issue_comment'
+        && github.event.issue.pull_request
+        && github.event.comment.user.type != 'Bot'
+        && (
+          github.event.comment.author_association == 'MEMBER'
+          || github.event.comment.author_association == 'OWNER'
+          || github.event.comment.author_association == 'COLLABORATOR'
+        )
+        && (
+          startsWith(github.event.comment.body, '/open-code-review')
+          || startsWith(github.event.comment.body, '@open-code-review')
+        )
+      )
     steps:
       - name: Get PR context
         id: pr-context
-        if: github.event_name != 'pull_request_target'
+        if: github.event_name == 'issue_comment'
         uses: actions/github-script@v7
         with:
           script: |
-            // For issue_comment events, get PR info
+            // For issue_comment events, resolve PR base/head so the action
+            // can review the right diff (issue_comment has no top-level
+            // pull_request payload fields).
             const prNumber = context.issue.number;
             const { data: pullRequest } = await github.rest.pulls.get({
               owner: context.repo.owner,
@@ -96,829 +108,16 @@ jobs:
               pull_number: prNumber
             });
             core.setOutput('base_ref', pullRequest.base.ref);
-            core.setOutput('head_ref', pullRequest.head.ref);
             core.setOutput('head_sha', pullRequest.head.sha);
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Full history needed for merge-base diff
-          ref: ${{ github.event.pull_request.head.sha || steps.pr-context.outputs.head_sha }}
-
-      - name: Fetch PR head ref (ensures fork commits are available)
-        run: git fetch origin pull/${{ github.event.pull_request.number || github.event.issue.number }}/head
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      - name: Install OpenCodeReview
-        run: |
-          npm install -g @alibaba-group/open-code-review
-          echo "OpenCodeReview installed with version:"
-          ocr version || true
-
-      - name: Configure OCR
-        run: |
-          ocr config set llm.url ${{ secrets.OCR_LLM_URL }}
-          ocr config set llm.auth_token ${{ secrets.OCR_LLM_AUTH_TOKEN }}
-          ocr config set llm.model ${{ secrets.OCR_LLM_MODEL }}
-          ocr config set llm.use_anthropic ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
-          ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
-
       - name: Run OpenCodeReview
-        id: review
-        run: |
-          # Get base ref and head SHA from PR context (different for comment triggers)
-          # Note: We use HEAD_SHA instead of origin/${HEAD_REF} to support fork PRs,
-          # because fork branches don't exist on the origin remote.
-          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
-            BASE_REF="${{ github.event.pull_request.base.ref }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          else
-            BASE_REF="${{ steps.pr-context.outputs.base_ref }}"
-            HEAD_SHA="${{ steps.pr-context.outputs.head_sha }}"
-          fi
-
-          echo "Reviewing PR: ${HEAD_SHA} against origin/${BASE_REF}"
-
-          # Run OCR in range mode with JSON output
-          ocr review \
-            --from "origin/${BASE_REF}" \
-            --to "${HEAD_SHA}" \
-            --format json \
-            > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log || true
-
-          echo "OCR review completed. Output:"
-          cat /tmp/ocr-result.json
-          echo "OCR review completed. Error log:"
-          cat /tmp/ocr-stderr.log
-
-      - name: Post review comments to PR
-        uses: actions/github-script@v7
+        uses: alibaba/open-code-review@main
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const crypto = require('crypto');
-            const path = '/tmp/ocr-result.json';
-
-            // Unique tag for this workflow run + attempt. Embedded in review/comment
-            // bodies as an HTML comment so the idempotency check can detect whether
-            // a batch createReview actually landed on the server before retrying.
-            // context.runId / context.runAttempt are numbers from @actions/github's
-            // Context (parsed from GITHUB_RUN_ID / GITHUB_RUN_ATTEMPT). Use
-            // Number.isFinite to guard against NaN when the env vars are missing,
-            // falling back to safe defaults.
-            const runId = Number.isFinite(context.runId) ? context.runId : 0;
-            const runAttempt = Number.isFinite(context.runAttempt) ? context.runAttempt : 1;
-            const RUN_TAG = `${runId}-${runAttempt}`;
-            const REVIEW_TAG = `<!-- ocr-review-run:${RUN_TAG} -->`;
-            const SUMMARY_TAG = `<!-- ocr-summary-run:${RUN_TAG} -->`;
-
-            // Read OCR output
-            let result;
-            try {
-              const raw = fs.readFileSync(path, 'utf8');
-              result = JSON.parse(raw);
-            } catch (e) {
-              console.log('Failed to parse OCR output:', e.message);
-              // Post a simple comment if parsing fails
-              const stderr = fs.readFileSync('/tmp/ocr-stderr.log', 'utf8').trim();
-              if (stderr) {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  body: `⚠️ **OpenCodeReview** encountered an error:\n${fencedBlock(stderr)}`
-                });
-              }
-              return;
-            }
-
-            const comments = result.comments || [];
-            const warnings = result.warnings || [];
-
-            // If no comments, post a summary
-            if (comments.length === 0) {
-              const message = result.message || 'No comments generated. Looks good to me.';
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: `✅ **OpenCodeReview**: ${message}`
-              });
-              return;
-            }
-
-            // Prepare PR review with inline comments
-            const prNumber = context.issue.number;
-            let commitSha;
-            
-            // Get commit SHA from event context
-            if (context.eventName === 'pull_request_target') {
-              commitSha = context.payload.pull_request.head.sha;
-            } else {
-              // For comment events, we need to fetch the PR
-              const { data: pullRequest } = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber
-              });
-              commitSha = pullRequest.head.sha;
-            }
-
-            // Build review comments array for the PR review API
-            // Only inline comments with line info can be posted via createReview
-            const reviewComments = [];
-            const commentsWithoutLine = [];
-
-            for (const comment of comments) {
-              // Check if comment has valid line information for inline comment (line >= 1)
-              const hasValidLine = (comment.start_line >= 1) || (comment.end_line >= 1);
-              if (!hasValidLine) {
-                commentsWithoutLine.push({ comment });
-                continue;
-              }
-
-              // Each inline comment becomes an item carrying a random ID
-              // (assigned once) and its resolved line targeting. The body is
-              // built from item.id only at API-call time (see toReviewPayload),
-              // so retry/idempotency logic reads item.id directly instead of
-              // recomputing it, and distinct comments never share an ID.
-              reviewComments.push({
-                comment,
-                id: newCommentId(),
-                lines: resolveLines(comment)
-              });
-            }
-
-            // Submit as a single PR review with all comments
-            const totalCount = comments.length;
-            const inlineCount = reviewComments.length;
-            const summaryCount = commentsWithoutLine.length;
-            let summaryBody = buildSummaryBody(totalCount, inlineCount, summaryCount, warnings);
-
-            // Add comments without line info to summary body
-            summaryBody += formatSummaryComments(commentsWithoutLine);
-
-            // Prepend the run tag so the idempotency check can detect whether the
-            // batch review actually landed on the server before retrying.
-            summaryBody = REVIEW_TAG + '\n' + summaryBody;
-
-            // Statistics tracking
-            let successCount = 0;
-            let failedCount = 0;
-            const failedComments = [];
-
-            // Retry/pacing configuration (shared by write and read API calls).
-            // parseNonNegInt guards against nonsensical env values (negative,
-            // NaN, non-numeric) that `parseInt(...) || default` would let
-            // through for negative numbers, since a negative parseInt result
-            // is truthy and would bypass the `|| default` fallback.
-            function parseNonNegInt(val, defaultVal) {
-              const n = parseInt(val, 10);
-              return Number.isFinite(n) && n >= 0 ? n : defaultVal;
-            }
-            const MAX_RETRIES = parseNonNegInt(process.env.OCR_MAX_RETRIES, 3);
-            const SUCCESS_DELAY = parseNonNegInt(process.env.OCR_SUCCESS_DELAY, 2000); // delay after successful write
-            const FAILURE_DELAY = parseNonNegInt(process.env.OCR_FAILURE_DELAY, 1000); // delay after non-retryable failure
-            const LOW_REMAINING_THRESHOLD = parseNonNegInt(process.env.OCR_LOW_REMAINING_THRESHOLD, 3);
-            const LOW_REMAINING_SPACING = parseNonNegInt(process.env.OCR_LOW_REMAINING_SPACING, 10000);
-            // Read APIs are cheaper and have higher thresholds; use shorter pacing.
-            const READ_SUCCESS_DELAY = parseNonNegInt(process.env.OCR_READ_SUCCESS_DELAY, 500);
-            const READ_LOW_REMAINING_SPACING = parseNonNegInt(process.env.OCR_READ_LOW_REMAINING_SPACING, 5000);
-
-            try {
-              const batchRes = await github.rest.pulls.createReview({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                commit_id: commitSha,
-                body: summaryBody,
-                event: 'COMMENT',
-                comments: reviewComments.map(toReviewPayload)
-              });
-              successCount = reviewComments.length;
-              console.log(`Successfully posted review with ${successCount} inline comments (${commentsWithoutLine.length} in summary)`);
-              logRateLimitQuota(batchRes, 'after batch createReview');
-            } catch (e) {
-              console.log('Failed to post review with inline comments:', e.message);
-              console.log('Checking whether the batch review actually landed on the server before retrying...');
-
-              // Idempotency check: the batch createReview may have succeeded on the
-              // server even though we got a 5xx. Query existing reviews to find out,
-              // so we only retry the comments that are actually missing.
-              let existingReview = null;
-              try {
-                existingReview = await findExistingBatchReview({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  prNumber,
-                  tag: REVIEW_TAG
-                });
-              } catch (checkErr) {
-                console.log(`Idempotency check failed (${checkErr.message}). ` +
-                            `Degrading to original fallback (accepting duplicate risk).`);
-              }
-
-              // Compute the list of inline comments that still need to be posted.
-              // If the batch review landed, only retry the missing ones; otherwise
-              // retry all of them.
-              let toRetry = reviewComments;
-              if (existingReview && existingReview.found) {
-                const postedIds = await getPostedCommentIds({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  prNumber
-                });
-                toRetry = reviewComments.filter((item) =>
-                  !postedIds.has(item.id)
-                );
-                successCount = reviewComments.length - toRetry.length;
-                console.log(`Batch review already exists (review_id=${existingReview.review.id}). ` +
-                            `${successCount}/${reviewComments.length} inline comments already posted. ` +
-                            `${toRetry.length} missing, will retry only those.`);
-              } else {
-                console.log('Batch review not found on server. Falling back to per-comment posting...');
-              }
-
-              // If the batch itself was rate-limited, honor its rate-limit headers
-              // (retry-after / x-ratelimit-reset) before retrying per-comment,
-              // otherwise the first per-comment call re-hits the same wall immediately.
-              const batchRetry = computeRetryDelayMs(e, 0);
-              if (batchRetry != null) {
-                const secs = (batchRetry.delayMs / 1000).toFixed(1);
-                console.log(
-                  `Batch createReview was rate-limited (HTTP ${e.status}). ` +
-                  `Cooling down ${secs}s via '${batchRetry.source}' (${batchRetry.detail}) before per-comment retry.`
-                );
-                await sleep(batchRetry.delayMs);
-              }
-
-              for (const item of toRetry) {
-                const { comment, id } = item;
-                let posted = false;
-                for (let attempt = 0; attempt <= MAX_RETRIES && !posted; attempt++) {
-                  try {
-                    const res = await github.rest.pulls.createReview({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      pull_number: prNumber,
-                      commit_id: commitSha,
-                      body: '',
-                      event: 'COMMENT',
-                      comments: [toReviewPayload(item)]
-                    });
-                    successCount++;
-                    posted = true;
-                    console.log(`Successfully posted comment for ${comment.path}`);
-                    // Proactive throttle: if remaining quota is low, slow down to
-                    // avoid hitting the limit (GitHub best practice: watch the header).
-                    const remaining = logRateLimitQuota(res, `after ${comment.path}`);
-                    const lowQuota = remaining != null && remaining <= LOW_REMAINING_THRESHOLD;
-                    if (lowQuota) {
-                      console.log(`[rate-limit] quota low (remaining=${remaining} <= ${LOW_REMAINING_THRESHOLD}); increasing spacing to ${LOW_REMAINING_SPACING}ms.`);
-                      await sleep(LOW_REMAINING_SPACING);
-                    } else {
-                      await sleep(SUCCESS_DELAY);
-                    }
-                  } catch (innerE) {
-                    // Decide whether to retry and how long to wait, based on GitHub's
-                    // rate-limit documentation (retry-after / x-ratelimit-* headers).
-                    const retryInfo = computeRetryDelayMs(innerE, attempt);
-                    const willRetry = retryInfo != null && attempt < MAX_RETRIES;
-                    // Any error whose request may have reached GitHub (5xx server
-                    // errors, 408 timeout, or network-layer errors with no status)
-                    // can mean the comment was actually created but the response was
-                    // lost. Before retrying (which would post a duplicate) or before
-                    // giving up (which would wrongly list it as failed in the summary),
-                    // we must check whether it already landed.
-                    //
-                    // IMPORTANT: do the check AFTER cooling down, not immediately.
-                    // If the error is rate-limit-related (5xx under load, or a
-                    // network blip), firing read requests right away further
-                    // pressures the already-struggling API. Honor the computed
-                    // retry delay first, then query.
-                    const status = innerE.status;
-                    const maybeReachedServer =
-                      (typeof status === 'number' && (status >= 500 || status === 408)) ||
-                      status == null; // network errors (ECONNRESET, ETIMEDOUT, ...)
-                    if (maybeReachedServer) {
-                      // Cool down first: even read requests count against rate
-                      // limits, and querying during an ongoing 5xx/rate-limit
-                      // episode can worsen the situation. Use the retry delay when
-                      // available; for non-retryable errors (retryInfo == null)
-                      // there is no header-derived wait, so use a short fixed cool
-                      // down before the read.
-                      const coolDownMs = retryInfo != null ? retryInfo.delayMs : FAILURE_DELAY;
-                      if (coolDownMs > 0) {
-                        const secs = (coolDownMs / 1000).toFixed(1);
-                        console.log(
-                          `Cooling down ${secs}s before idempotency check for ${comment.path} ` +
-                          `(HTTP ${innerE.status || 'n/a'}, attempt ${attempt + 1}/${MAX_RETRIES + 1}).`
-                        );
-                        await sleep(coolDownMs);
-                      }
-                      const alreadyPosted = await isCommentAlreadyPosted({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        prNumber,
-                        id
-                      });
-                      if (alreadyPosted === true) {
-                        successCount++;
-                        posted = true;
-                        console.log(`Comment for ${comment.path} already posted (id=${id}); treating as success.`);
-                        await sleep(SUCCESS_DELAY);
-                        continue;
-                      }
-                      // Unknown (null): the read API is unavailable, so we
-                      // cannot tell whether the comment landed. To avoid a
-                      // duplicate, do NOT retry posting; record as failed so
-                      // the summary surfaces the uncertainty rather than
-                      // silently risking a duplicate.
-                      if (alreadyPosted === null) {
-                        failedCount++;
-                        const reason = 'idempotency check unavailable (read API failed)';
-                        failedComments.push({ comment, error: `${innerE.message} [${reason}]` });
-                        console.log(`Cannot verify whether comment for ${comment.path} was posted (${reason}, HTTP ${innerE.status || 'n/a'}); skipping retry to avoid duplicate.`);
-                        await sleep(SUCCESS_DELAY);
-                        break;
-                      }
-                      // Not found on server. If retries are exhausted or the
-                      // error is non-retryable, this is a real failure.
-                      if (!willRetry) {
-                        failedCount++;
-                        failedComments.push({ comment, error: innerE.message });
-                        const reason = retryInfo == null ? 'non-retryable error' : 'rate-limit retries exhausted';
-                        console.log(`Failed to post comment for ${comment.path} (${reason}, HTTP ${innerE.status || 'n/a'}): ${innerE.message}`);
-                        await sleep(SUCCESS_DELAY);
-                        break;
-                      }
-                      // willRetry: cool down already consumed above, loop back.
-                    } else if (willRetry) {
-                      // Pure 429/403 rate-limit: the request never reached the
-                      // server, so no duplicate is possible and the idempotency
-                      // check can be skipped. Just honor the retry delay.
-                      const secs = (retryInfo.delayMs / 1000).toFixed(1);
-                      console.log(
-                        `Rate-limited on ${comment.path} ` +
-                        `(HTTP ${innerE.status}, attempt ${attempt + 1}/${MAX_RETRIES}). ` +
-                        `Waiting ${secs}s via '${retryInfo.source}' (${retryInfo.detail}). ` +
-                        `Error: ${innerE.message}`
-                      );
-                      await sleep(retryInfo.delayMs);
-                    } else {
-                      // Non-retryable error that definitely did not reach the
-                      // server (e.g. 4xx validation error): record as failed.
-                      failedCount++;
-                      failedComments.push({ comment, error: innerE.message });
-                      console.log(`Failed to post comment for ${comment.path} (non-retryable error, HTTP ${innerE.status || 'n/a'}): ${innerE.message}`);
-                      await sleep(FAILURE_DELAY);
-                      break;
-                    }
-                  }
-                }
-              }
-              
-              // Post summary comment with statistics
-              let finalBody = buildSummaryBody(totalCount, successCount, commentsWithoutLine.length + failedComments.length, warnings);
-              finalBody += formatSummaryComments(commentsWithoutLine);
-              finalBody += `\n\n---\n\n📊 **Posting Statistics:**`;
-              finalBody += `\n- ✅ Successfully posted: ${successCount} comment(s)`;
-              if (failedCount > 0) {
-                finalBody += `\n- ❌ Failed to post: ${failedCount} comment(s)`;
-              }
-              
-              // Add failed comments as summary content so review feedback is not lost.
-              if (failedComments.length > 0) {
-                finalBody += '\n\n---\n\n### ⚠️ Inline comments shown in summary';
-                for (const { comment, error } of failedComments) {
-                  finalBody += '\n\n---\n\n';
-                  finalBody += formatCommentMarkdown(comment, error);
-                }
-              }
-
-              // Prepend the summary tag and post only if no summary with this tag
-              // already exists (idempotency: the batch review may have carried the
-              // same summary body, in which case we must not duplicate it).
-              finalBody = SUMMARY_TAG + '\n' + finalBody;
-              const summaryAlreadyPosted = await hasIssueCommentWithId({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issueNumber: prNumber,
-                id: SUMMARY_TAG
-              });
-              if (summaryAlreadyPosted === true) {
-                console.log('Summary comment with this run tag already exists; skipping.');
-              } else if (summaryAlreadyPosted === null) {
-                // Read API unavailable: cannot tell whether the summary already
-                // landed. Skip posting to avoid a duplicate; the review content
-                // is still available via inline comments / batch review.
-                console.log('Cannot verify whether summary comment already exists (read API failed); skipping to avoid duplicate.');
-              } else {
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: prNumber,
-                  body: finalBody
-                });
-              }
-            }
-
-            function sleep(ms) {
-              return new Promise(resolve => setTimeout(resolve, ms));
-            }
-
-            // Retry wrapper shared by write and read API calls. Reuses
-            // computeRetryDelayMs so rate-limit headers (retry-after /
-            // x-ratelimit-*) are honored uniformly. Throws on final failure
-            // so the caller can decide how to degrade.
-            async function withRetry(tag, fn) {
-              for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-                try {
-                  return await fn();
-                } catch (e) {
-                  const retryInfo = computeRetryDelayMs(e, attempt);
-                  const willRetry = retryInfo != null && attempt < MAX_RETRIES;
-                  if (willRetry) {
-                    const secs = (retryInfo.delayMs / 1000).toFixed(1);
-                    console.log(
-                      `[${tag}] transient/rate-limited (HTTP ${e.status}, attempt ${attempt + 1}/${MAX_RETRIES}). ` +
-                      `Waiting ${secs}s via '${retryInfo.source}' (${retryInfo.detail}). ${e.message}`
-                    );
-                    await sleep(retryInfo.delayMs);
-                  } else {
-                    console.log(`[${tag}] failed after ${attempt + 1} attempts: ${e.message}`);
-                    throw e;
-                  }
-                }
-              }
-            }
-
-            // Read API wrapper with retry + proactive pacing. Read requests are
-            // cheaper than writes but still consume the primary rate limit and can
-            // trigger the secondary limit when issued in a tight loop. Use shorter
-            // delays than writes (READ_SUCCESS_DELAY / READ_LOW_REMAINING_SPACING).
-            async function readWithPacing(tag, fn) {
-              const res = await withRetry(tag, fn);
-              const remaining = logRateLimitQuota(res, tag);
-              const lowQuota = remaining != null && remaining <= LOW_REMAINING_THRESHOLD;
-              if (lowQuota) {
-                console.log(`[rate-limit] quota low after read (${remaining} <= ${LOW_REMAINING_THRESHOLD}); spacing ${READ_LOW_REMAINING_SPACING}ms.`);
-                await sleep(READ_LOW_REMAINING_SPACING);
-              } else {
-                await sleep(READ_SUCCESS_DELAY);
-              }
-              return res;
-            }
-
-            // Paginated helper that walks all pages of a list endpoint with retry
-            // and pacing. Returns the concatenated array of items.
-            async function readAllPages(tag, pageFn, maxPages = 50) {
-              if (!Number.isFinite(maxPages) || maxPages < 1) {
-                throw new Error(`readAllPages: maxPages must be a positive integer, got ${maxPages}`);
-              }
-              const all = [];
-              let page = 1;
-              const PER_PAGE = 100;
-              while (page <= maxPages) {
-                const res = await readWithPacing(`${tag} (page ${page})`, () => pageFn(page, PER_PAGE));
-                const items = res.data || [];
-                all.push(...items);
-                if (items.length < PER_PAGE) break;
-                page++;
-              }
-              // NOTE: Truncation here is intentional and acts as a safety
-              // valve against unbounded loops (e.g. a bug or malicious
-              // activity), not as a normal operating mode. A PR accumulating
-              // >5000 review comments is far outside expected usage; in that
-              // rare case we log a warning and proceed with partial data
-              // rather than failing the whole review.
-              //
-              // Caveat: this is NOT the same as a read failure. When the read
-              // API throws (rate limit, 5xx), isCommentAlreadyPosted and
-              // hasIssueCommentWithId catch it and return null (unknown), so
-              // the caller skips retrying and creates no duplicate. A
-              // truncated walk does not throw; it returns a partial set
-              // silently, so isCommentAlreadyPosted returns false (definitively
-              // "not posted") for any comment beyond the cap, and the retry
-              // loop will repost it, producing a duplicate. This tradeoff is
-              // accepted because the trigger is far outside expected usage; if
-              // that ceiling ever needs to rise, make maxPages configurable.
-              if (page > maxPages) {
-                console.log(`[${tag}] reached max page limit (${maxPages}); results may be incomplete.`);
-              }
-              return all;
-            }
-
-            // Idempotency check: find whether a batch review with this run tag
-            // already exists on the PR. Returns { found, review } or throws on
-            // final failure (caller degrades to original fallback).
-            async function findExistingBatchReview({ owner, repo, prNumber, tag }) {
-              const reviews = await readAllPages('listReviews', (page, per_page) =>
-                github.rest.pulls.listReviews({ owner, repo, pull_number: prNumber, per_page, page })
-              );
-              for (const r of reviews) {
-                if ((r.body || '').includes(tag)) {
-                  return { found: true, review: r };
-                }
-              }
-              return { found: false };
-            }
-
-            // Collect the set of comment-level IDs already posted on the PR
-            // (across all reviews). Uses listReviewComments (PR-level, cross-review)
-            // so a single paginated walk covers everything, avoiding the O(missing)
-            // amplification of per-comment lookups.
-            async function getPostedCommentIds({ owner, repo, prNumber }) {
-              const comments = await readAllPages('listReviewComments', (page, per_page) =>
-                github.rest.pulls.listReviewComments({ owner, repo, pull_number: prNumber, per_page, page })
-              );
-              const ids = new Set();
-              // Anchor the regex to the HTML comment wrapper (<!-- ocr-... -->)
-              // so user-generated content or code suggestions cannot trigger
-              // false positives in the idempotency check. The ID format is
-              // `ocr-<RUN_TAG>-<random>` where RUN_TAG is `<runId>-<runAttempt>`
-              // and <random> is a per-comment random hex token. Capture group 1
-              // holds the bare ID (ocr-<RUN_TAG>-<random>), so we can add it
-              // directly without stripping comment markers.
-              const ID_RE = /<!--\s*(ocr-\d+-\d+-[a-f0-9]+)\s*-->/g;
-              for (const c of comments) {
-                const body = c.body || '';
-                let m;
-                while ((m = ID_RE.exec(body)) !== null) {
-                  ids.add(m[1]);
-                }
-              }
-              return ids;
-            }
-
-            // Check whether a specific comment-level ID has already landed on the
-            // server. Used by the per-comment retry loop: when a createReview call
-            // fails with a transient 5xx/408, the request may have reached GitHub
-            // and succeeded even though the response was lost. Querying before
-            // retrying prevents posting a duplicate inline comment.
-            // Returns true/false when the check succeeds, or null when the
-            // read API is unavailable (rate limit, 5xx, etc.). Returning null
-            // (rather than defaulting to false) prevents the caller from
-            // assuming the comment was not posted and risking a duplicate on
-            // retry.
-            //
-            // Each call walks listReviewComments fresh — no cached snapshot.
-            // A snapshot reused across retries would go stale as comments land
-            // during the loop, and a stale miss for a 5xx-landed comment would
-            // trigger a retry that posts a duplicate. Read calls are paced via
-            // readAllPages/readWithPacing and degrade to null (skip retry) if the
-            // read API itself fails, so the extra walks cannot produce duplicates.
-            async function isCommentAlreadyPosted({ owner, repo, prNumber, id }) {
-              try {
-                const posted = await getPostedCommentIds({ owner, repo, prNumber });
-                return posted.has(id);
-              } catch (e) {
-                console.log(`[isCommentAlreadyPosted] check failed for ${id} (${e.message}); treating as unknown to avoid duplicates.`);
-                return null;
-              }
-            }
-
-            // Check whether an issue comment with the given tag already exists.
-            // Used to avoid posting a duplicate summary comment when the batch
-            // review already carried the same summary body.
-            // Returns true/false when the check succeeds, or null when the
-            // read API is unavailable. Returning null (rather than defaulting
-            // to false) lets the caller decide whether to skip posting or
-            // degrade gracefully, instead of silently risking a duplicate
-            // summary comment.
-            async function hasIssueCommentWithId({ owner, repo, issueNumber, id }) {
-              try {
-                const comments = await readAllPages('listIssueComments', (page, per_page) =>
-                  github.rest.issues.listComments({ owner, repo, issue_number: issueNumber, per_page, page })
-                );
-                // Match the tag anchored to its HTML comment wrapper for
-                // consistency with getPostedCommentIds and to defend against
-                // user content that happens to contain the bare tag string.
-                // `id` is an opaque tag like `<!-- ocr-summary-run:... -->`,
-                // so escape any regex metacharacters before embedding it.
-                const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const tagRe = new RegExp('<!--\\s*' + escaped + '\\s*-->');
-                return comments.some(c => tagRe.test(c.body || ''));
-              } catch (e) {
-                console.log(`[listIssueComments] check failed (${e.message}); treating as unknown to avoid duplicates.`);
-                return null;
-              }
-            }
-
-            // Case-insensitive header lookup. Octokit normalizes response headers to
-            // lowercase, but this defensive check also handles original casing so that
-            // quota logging and retry delay computation never silently miss a header.
-            function getHeader(headers, name) {
-              const v = headers[name] != null ? headers[name] : headers[name.toLowerCase()];
-              return v != null ? String(v).trim() : undefined;
-            }
-
-            // Decide whether an error is worth retrying and, if so, how long to wait.
-            // Implements GitHub's documented rate-limit retry strategy using the
-            // response headers (retry-after, x-ratelimit-remaining, x-ratelimit-reset).
-            // Returns { delayMs, source, detail } when retryable, or null otherwise.
-            // See: https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api
-            function computeRetryDelayMs(error, attempt) {
-              if (!error) return null;
-              const status = error.status;
-              const message = String(error.message || '');
-              const isRateLimit = status === 429 || (status === 403 && /rate limit|abuse|secondary/i.test(message));
-              const isTransient = (status >= 500 && status < 600) || status === 408;
-              if (!isRateLimit && !isTransient) return null;
-
-              const headers = ((error.response || {}).headers) || {};
-              const header = (name) => getHeader(headers, name);
-              const nowSec = Math.floor(Date.now() / 1000);
-
-              // The absolute maximum wait for any single retry. Header-derived waits
-              // (retry-after / x-ratelimit-reset) are GitHub's recommended durations,
-              // but capping them prevents a far-future reset from stalling the CI job
-              // past its timeout. When we cap, the next retry may re-hit the limit.
-              const cap = parseInt(process.env.OCR_RETRY_MAX_DELAY, 10) || 300000;
-              const base = parseInt(process.env.OCR_RETRY_BASE_DELAY, 10) || 60000;
-
-              // { rawMs, source, detail } describing the recommended wait before cap.
-              let info = null;
-
-              if (isRateLimit) {
-                // (1) Honor "retry-after" when present (seconds, or an HTTP-date).
-                const retryAfter = header('retry-after');
-                if (retryAfter) {
-                  const secs = Number(retryAfter);
-                  if (!isNaN(secs) && secs >= 0) {
-                    info = { rawMs: secs * 1000, source: 'retry-after', detail: `${secs}s (from header)` };
-                  } else {
-                    const dateMs = Date.parse(retryAfter);
-                    if (!isNaN(dateMs)) {
-                      info = { rawMs: Math.max(0, dateMs - Date.now()), source: 'retry-after (HTTP-date)', detail: retryAfter };
-                    }
-                  }
-                }
-
-                // (2) Primary limit exhausted (x-ratelimit-remaining=0): wait until reset.
-                if (!info) {
-                  const remaining = header('x-ratelimit-remaining');
-                  const reset = header('x-ratelimit-reset');
-                  if (reset != null && Number(remaining) === 0) {
-                    const rawMs = Math.max(0, Number(reset) - nowSec) * 1000;
-                    info = { rawMs, source: 'x-ratelimit-reset', detail: `remaining=0, reset epoch=${reset} (in ${Math.ceil(rawMs / 1000)}s)` };
-                  }
-                }
-
-                // (3) Secondary limit with no retry hint: docs say wait at least one
-                //     minute, then increase exponentially between retries.
-                if (!info) {
-                  const backoff = Math.min(base * Math.pow(2, attempt), cap);
-                  const jitter = Math.floor(Math.random() * 1000);
-                  info = { rawMs: backoff + jitter, source: 'exponential-backoff', detail: `base=${base}ms*2^${attempt} (cap ${cap}ms) +${jitter}ms jitter` };
-                }
-              } else {
-                // Transient server error (5xx / 408): back off without the 60s floor.
-                // Use a shorter base than the rate-limit path: server hiccups are
-                // typically short-lived, so a 2s initial wait (doubling per retry)
-                // is sufficient and avoids stalling the CI job unnecessarily.
-                const transientBase = 2000;
-                const backoff = Math.min(transientBase * Math.pow(2, attempt), cap);
-                const jitter = Math.floor(Math.random() * 1000);
-                info = { rawMs: backoff + jitter, source: 'transient-backoff', detail: `base=${transientBase}ms*2^${attempt} (cap ${cap}ms) +${jitter}ms jitter (HTTP ${status})` };
-              }
-
-              // Apply the universal cap to header-derived waits too.
-              const delayMs = Math.min(info.rawMs, cap);
-              if (delayMs < info.rawMs) {
-                info.detail += ` [CAPPED to ${cap}ms; GitHub recommended ${Math.ceil(info.rawMs / 1000)}s]`;
-              }
-              return { delayMs, source: info.source, detail: info.detail };
-            }
-
-            // Best-effort logging of remaining rate-limit quota from a successful response.
-            // Returns the parsed x-ratelimit-remaining value (or null) for proactive throttling.
-            function logRateLimitQuota(response, tag) {
-              try {
-                const h = (response && response.headers) || {};
-                const header = (name) => getHeader(h, name);
-                const remaining = header('x-ratelimit-remaining');
-                const limit = header('x-ratelimit-limit');
-                const reset = header('x-ratelimit-reset');
-                if (remaining != null) {
-                  console.log(
-                    `[rate-limit] ${tag}: remaining=${remaining}/${limit != null ? limit : '?'}` +
-                    (reset != null ? `, reset epoch=${reset}` : '')
-                  );
-                }
-                return remaining != null ? Number(remaining) : null;
-              } catch (_) { return null; }
-            }
-
-            // Random per-comment ID, assigned once when the inline-comment item
-            // is built and carried on the item struct. Random (rather than
-            // content-derived) so two distinct comments that share the same
-            // path/line/content still get different IDs and the idempotency
-            // check never mistakes one for the other (which would silently drop
-            // the second). Embedded in the comment body as an HTML comment so
-            // getPostedCommentIds can match it back on retry.
-            function newCommentId() {
-              return `ocr-${RUN_TAG}-${crypto.randomBytes(8).toString('hex')}`;
-            }
-
-            // Resolve the line-targeting fields for a createReview comment
-            // payload (start_line/line/start_side/side) from the comment's line
-            // range. Returned object is spread into the payload in toReviewPayload.
-            function resolveLines(comment) {
-              const start = comment.start_line;
-              const end = comment.end_line;
-              if (start >= 1 && end >= 1 && start !== end) {
-                return { start_line: start, line: end, start_side: 'RIGHT', side: 'RIGHT' };
-              } else if (end >= 1) {
-                return { line: end, side: 'RIGHT' };
-              } else if (start >= 1) {
-                return { line: start, side: 'RIGHT' };
-              }
-              return {};
-            }
-
-            // Build the createReview payload for an inline-comment item. The
-            // body is assembled here (at call time) from the item's precomputed
-            // ID, so retry/idempotency logic works directly off item.id instead
-            // of recomputing an ID each time it needs to check posting status.
-            function toReviewPayload(item) {
-              return {
-                path: item.comment.path,
-                body: buildBody(item.comment, item.id),
-                ...item.lines
-              };
-            }
-
-            // Assemble the visible comment body: the per-comment ID tag (HTML
-            // comment, invisible when rendered) prepended for idempotency
-            // matching, plus the code suggestion block if present.
-            function buildBody(comment, id) {
-              let body = `<!-- ${id} -->\n`;
-              body += comment.content || '';
-              if (comment.suggestion_code && comment.existing_code) {
-                body += '\n\n**Suggestion:**\n';
-                body += fencedBlock(comment.suggestion_code, 'suggestion');
-              }
-              return body;
-            }
-
-            function formatCommentMarkdown(comment, error) {
-              let md = `### 📄 \`${comment.path}\``;
-              if (comment.start_line && comment.end_line) {
-                md += ` (L${comment.start_line}-L${comment.end_line})`;
-              }
-              md += '\n\n';
-              if (error) {
-                md += `⚠️ GitHub could not post this as an inline comment: ${error}\n\n`;
-              }
-              md += comment.content || '';
-
-              if (comment.suggestion_code && comment.existing_code) {
-                md += '\n\n<details><summary>💡 Suggested Change</summary>\n\n';
-                md += '**Before:**\n' + fencedBlock(comment.existing_code) + '\n\n';
-                md += '**After:**\n' + fencedBlock(comment.suggestion_code) + '\n\n';
-                md += '</details>';
-              }
-
-              return md;
-            }
-
-            function buildSummaryBody(totalCount, inlineCount, summaryCount, warnings) {
-              let body = `🔍 **OpenCodeReview** found **${totalCount}** issue(s) in this PR.`;
-              if (totalCount > 0) {
-                body += `\n- ✅ ${inlineCount} posted as inline comment(s)`;
-                body += `\n- 📝 ${summaryCount} posted as summary`;
-              }
-              if (warnings.length > 0) {
-                body += `\n\n⚠️ ${warnings.length} warning(s) occurred during review.`;
-              }
-              return body;
-            }
-
-            function formatSummaryComments(summaryComments) {
-              let body = '';
-              for (const { comment } of summaryComments) {
-                body += '\n\n---\n\n';
-                body += formatCommentMarkdown(comment);
-              }
-              return body;
-            }
-
-            function fencedBlock(content, language = '') {
-              const text = String(content || '');
-              const fence = safeFence(text);
-              let block = fence + language + '\n' + text;
-              if (!text.endsWith('\n')) block += '\n';
-              return block + fence;
-            }
-
-            function safeFence(content) {
-              const matches = String(content || '').match(/`+/g) || [];
-              const maxTicks = matches.reduce((max, ticks) => Math.max(max, ticks.length), 0);
-              return '`'.repeat(Math.max(3, maxTicks + 1));
-            }
+          llm_url: ${{ secrets.OCR_LLM_URL }}
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: ${{ vars.OCR_LLM_MODEL }}
+          llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+          # For issue_comment triggers, pass the resolved refs; for
+          # pull_request_target the action resolves them from the event.
+          base_ref: ${{ steps.pr-context.outputs.base_ref }}
+          head_sha: ${{ steps.pr-context.outputs.head_sha }}

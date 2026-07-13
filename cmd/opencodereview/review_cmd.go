@@ -11,8 +11,11 @@ import (
 
 	"github.com/open-code-review/open-code-review/internal/agent"
 	"github.com/open-code-review/open-code-review/internal/mcp"
+	"github.com/open-code-review/open-code-review/internal/session"
 	"github.com/open-code-review/open-code-review/internal/telemetry"
 	"github.com/open-code-review/open-code-review/internal/tool"
+
+	"go.opentelemetry.io/otel/codes"
 )
 
 func runReview(args []string) error {
@@ -44,8 +47,24 @@ func runReview(args []string) error {
 		}
 	}
 
+	// Only touch the background when --background-file is set, so the existing
+	// --background behaviour (raw, unsanitised) is preserved for users who do
+	// not opt into the file-based context.
+	if opts.backgroundFile != "" {
+		fileBackground, err := loadBackgroundFile(opts.backgroundFile)
+		if err != nil {
+			return err
+		}
+		opts.background = mergeBackground(opts.background, fileBackground)
+	}
+
 	if opts.preview {
 		return runPreview(cc, opts)
+	}
+
+	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
+	if err != nil {
+		return err
 	}
 
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
@@ -81,6 +100,7 @@ func runReview(args []string) error {
 		From:                  opts.from,
 		To:                    opts.to,
 		Commit:                opts.commit,
+		ReviewMode:            reviewModeFromOptions(opts),
 		Template:              *cc.Template,
 		SystemRule:            cc.Resolver,
 		FileFilter:            cc.FileFilter,
@@ -95,6 +115,7 @@ func runReview(args []string) error {
 		Model:                 rt.Model,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
+		Resume:                resumeState,
 	})
 
 	// Silence progress output during execution; restored before the trace
@@ -104,34 +125,75 @@ func runReview(args []string) error {
 
 	ctx, span := telemetry.StartSpan(context.Background(), "review.run")
 	defer span.End()
+	telemetry.SetAttr(span, "review.repo", cc.RepoDir)
+	telemetry.SetAttr(span, "review.from", opts.from)
+	telemetry.SetAttr(span, "review.to", opts.to)
+	telemetry.SetAttr(span, "review.model", rt.Model)
+	var traceID string
+	if telemetry.IsEnabled() {
+		traceID = telemetry.TraceIDFromContext(ctx)
+		if opts.outputFormat != "json" {
+			fmt.Fprintf(os.Stderr, "[ocr] TraceID: %s\n", traceID)
+		}
+	}
 	startTime := time.Now()
 
 	comments, err := ag.Run(ctx)
 	if err != nil {
-		telemetry.SetAttr(span, "error", err.Error())
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		if id := ag.SessionID(); id != "" {
+			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+		}
 		return fmt.Errorf("review failed: %w", err)
 	}
 
 	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q)
 }
 
-func resolveRepoDir(input string) (string, error) {
-	if input == "" {
-		var err error
-		input, err = os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("get working directory: %w", err)
-		}
+func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeState, error) {
+	if opts.resume == "" {
+		return nil, nil
 	}
-	absPath, err := filepath.Abs(input)
+	current := session.SessionOptions{
+		ReviewMode: reviewModeFromOptions(opts),
+		DiffFrom:   opts.from,
+		DiffTo:     opts.to,
+		DiffCommit: opts.commit,
+	}
+	if current.ReviewMode == session.ReviewModeWorkspace {
+		return nil, fmt.Errorf("resume requires --from/--to or --commit; workspace resume is not supported")
+	}
+	state, err := session.LoadResumeState(repoDir, opts.resume)
 	if err != nil {
-		return "", fmt.Errorf("resolve absolute path: %w", err)
+		return nil, fmt.Errorf("load resume session: %w (run 'ocr session list' to see available sessions)", err)
 	}
-	out, err := runGitCmd(absPath, "rev-parse", "--git-dir")
-	if err != nil || len(out) == 0 {
-		return "", fmt.Errorf("%s is not a git repository", absPath)
+	if err := state.ValidateOptions(current); err != nil {
+		return nil, fmt.Errorf("%w (run 'ocr session list' to see available sessions)", err)
 	}
-	return absPath, nil
+	if state.CompletedCount() == 0 {
+		return nil, fmt.Errorf("resume session %q has no completed review items (run 'ocr session list' to see available sessions)", opts.resume)
+	}
+	return state, nil
+}
+
+func reviewModeFromOptions(opts reviewOptions) string {
+	if opts.commit != "" {
+		return session.ReviewModeCommit
+	}
+	if opts.from != "" && opts.to != "" {
+		return session.ReviewModeRange
+	}
+	return session.ReviewModeWorkspace
+}
+
+// resolveRepoDir resolves the repo dir for `ocr rules check`. It delegates to
+// resolveWorkingDir(requireGit=true) so it anchors at the git top-level just
+// like the review path — keeping rule resolution consistent when run from a
+// monorepo subdirectory (#287).
+func resolveRepoDir(input string) (string, error) {
+	absPath, _, err := resolveWorkingDir(input, true)
+	return absPath, err
 }
 
 // requireGitRepo validates that the given directory is part of a git repository.

@@ -157,6 +157,9 @@ func TestCopyMessages(t *testing.T) {
 	}
 
 	cp = append(cp, llm.NewTextMessage("user", "c"))
+	if len(cp) != len(orig)+1 {
+		t.Errorf("appended copy length = %d, want %d", len(cp), len(orig)+1)
+	}
 	if len(orig) != 2 {
 		t.Error("copyMessages: appending to copy modified original slice")
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/open-code-review/open-code-review/internal/config/toolsconfig"
 	"github.com/open-code-review/open-code-review/internal/llm"
 	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/open-code-review/open-code-review/internal/session"
 	"github.com/open-code-review/open-code-review/internal/tool"
 )
 
@@ -407,6 +408,62 @@ func TestFilterLargeDiffs_ZeroMaxTokens(t *testing.T) {
 	}
 }
 
+func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
+	diffs := []model.Diff{
+		{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
+		{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
+	}
+	fp := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	resume := &session.ResumeState{
+		SessionID:  "old-session",
+		Model:      "anthropic-model",
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Items: map[string]session.ResumeItem{
+			fp: {
+				FilePath:    "a.go",
+				OldPath:     "a.go",
+				NewPath:     "a.go",
+				Fingerprint: fp,
+				Comments: []model.LlmComment{{
+					Path:    "a.go",
+					Content: "cached comment",
+				}},
+			},
+		},
+	}
+	collector := tool.NewCommentCollector()
+	sess := session.New(t.TempDir(), "feature", "openai-model", session.SessionOptions{
+		ReviewMode:  session.ReviewModeRange,
+		DiffFrom:    "main",
+		DiffTo:      "feature",
+		ResumedFrom: "old-session",
+	})
+	defer sess.Finalize()
+	a := New(Args{
+		From:             "main",
+		To:               "feature",
+		Model:            "openai-model",
+		CommentCollector: collector,
+		Resume:           resume,
+		Session:          sess,
+	})
+
+	toDispatch := a.applyResume(diffs)
+	if len(toDispatch) != 1 || toDispatch[0].NewPath != "b.go" {
+		t.Fatalf("toDispatch = %+v, want only b.go", toDispatch)
+	}
+	comments := collector.Comments()
+	if len(comments) != 1 || comments[0].Content != "cached comment" {
+		t.Fatalf("comments = %+v", comments)
+	}
+	info := a.ResumeInfo()
+	if info == nil || info.ReusedFiles != 1 || info.RerunFiles != 1 || info.PreviousModel != "anthropic-model" || info.CurrentModel != "openai-model" {
+		t.Fatalf("ResumeInfo = %+v", info)
+	}
+}
+
 func TestCountReviewable(t *testing.T) {
 	a := New(Args{})
 	diffs := []model.Diff{
@@ -497,6 +554,140 @@ func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {
 	}
 	if !strings.Contains(comments[0].Content, "null pointer") {
 		t.Errorf("Content = %q", comments[0].Content)
+	}
+}
+
+func TestDispatchSubtasks_TokenThresholdSkipIsNotReusableCheckpoint(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+	sess := session.New(repoDir, "feature", "fake", session.SessionOptions{
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+	})
+
+	client := &fakeAgentClient{responses: []*llm.ChatResponse{
+		agentTaskDoneResponse(),
+	}}
+	a := New(Args{
+		From:      "main",
+		To:        "feature",
+		LLMClient: client,
+		Model:     "fake",
+		Session:   sess,
+		Template: template.Template{
+			MaxTokens:           100,
+			MaxToolRequestTimes: 5,
+			MainTask: template.LlmConversation{
+				Messages: []template.ChatMessage{
+					{Role: "user", Content: strings.Repeat("context ", 200) + "{{diff}}"},
+				},
+			},
+		},
+	})
+	diff := model.Diff{NewPath: "large-prompt.go", OldPath: "large-prompt.go", Diff: "+x", Insertions: 1}
+	a.diffs = []model.Diff{diff}
+	a.currentDate = "2025-06-26 10:00"
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if len(comments) != 0 {
+		t.Fatalf("expected no comments, got %d", len(comments))
+	}
+	if client.calls != 0 {
+		t.Fatalf("threshold skip should not call LLM, got %d calls", client.calls)
+	}
+	sess.Finalize()
+
+	state, err := session.LoadResumeState(repoDir, sess.SessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if state.CompletedCount() != 0 {
+		t.Fatalf("CompletedCount = %d, want 0", state.CompletedCount())
+	}
+	fp := reviewItemFingerprint(session.ReviewModeRange, diff)
+	if _, ok := state.Item(fp); ok {
+		t.Fatal("token-threshold skip was recorded as a reusable checkpoint")
+	}
+	summary, items, err := session.LoadDetail(repoDir, sess.SessionID)
+	if err != nil {
+		t.Fatalf("LoadDetail: %v", err)
+	}
+	if summary.CompletedFiles != 0 || summary.FailedFiles != 1 {
+		t.Fatalf("summary counts = completed %d failed %d, want completed 0 failed 1", summary.CompletedFiles, summary.FailedFiles)
+	}
+	if len(items) != 1 || items[0].Type != "failed" || !strings.Contains(items[0].Error, "prompt tokens") {
+		t.Fatalf("items = %+v, want one token-threshold failed item", items)
+	}
+}
+
+func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+	sess := session.New(repoDir, "feature", "fake", session.SessionOptions{
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+	})
+
+	emptyContent := ""
+	client := &fakeAgentClient{responses: []*llm.ChatResponse{{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &emptyContent}}},
+		Model:   "fake",
+		Usage:   &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 1},
+	}}}
+	a := New(Args{
+		From:      "main",
+		To:        "feature",
+		LLMClient: client,
+		Model:     "fake",
+		Session:   sess,
+		Template: template.Template{
+			MaxTokens:           100000,
+			MaxToolRequestTimes: 1,
+			MainTask: template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diff}}"}},
+			},
+		},
+	})
+	diff := model.Diff{NewPath: "needs-review.go", OldPath: "needs-review.go", Diff: "+x", Insertions: 1}
+	a.diffs = []model.Diff{diff}
+	a.currentDate = "2025-06-26 10:00"
+
+	_, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1", client.calls)
+	}
+	sess.Finalize()
+
+	state, err := session.LoadResumeState(repoDir, sess.SessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if state.CompletedCount() != 0 {
+		t.Fatalf("CompletedCount = %d, want 0", state.CompletedCount())
+	}
+	fp := reviewItemFingerprint(session.ReviewModeRange, diff)
+	if _, ok := state.Item(fp); ok {
+		t.Fatal("incomplete main task was recorded as a reusable checkpoint")
+	}
+	summary, items, err := session.LoadDetail(repoDir, sess.SessionID)
+	if err != nil {
+		t.Fatalf("LoadDetail: %v", err)
+	}
+	if summary.CompletedFiles != 0 || summary.FailedFiles != 1 {
+		t.Fatalf("summary counts = completed %d failed %d, want completed 0 failed 1", summary.CompletedFiles, summary.FailedFiles)
+	}
+	if len(items) != 1 || items[0].Type != "failed" || !strings.Contains(items[0].Error, "main_task did not complete") {
+		t.Fatalf("items = %+v, want one incomplete-main failed item", items)
 	}
 }
 

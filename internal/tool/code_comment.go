@@ -68,6 +68,12 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 		if thinking, ok := obj["thinking"].(string); ok {
 			cm.Thinking = thinking
 		}
+		if category, ok := obj["category"].(string); ok {
+			cm.Category = category
+		}
+		if severity, ok := obj["severity"].(string); ok {
+			cm.Severity = severity
+		}
 		if path, ok := args["path"].(string); ok {
 			cm.Path = path
 		}

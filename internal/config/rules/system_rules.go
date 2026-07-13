@@ -344,6 +344,11 @@ func loadRuleFile(path string) (*ProjectRule, error) {
 	return &pr, nil
 }
 
+// loadProjectRule reads <repoDir>/.opencodereview/rule.json. Since #287 anchored
+// RepoDir at the git top-level, `ocr review` from a monorepo subdirectory loads
+// the repo-root rule file — which is consistent, since rule entries match against
+// root-relative diff paths. A subproject-local rule.json under the subdirectory is
+// intentionally not consulted; put shared rules at the repo root, or pass --rule.
 func loadProjectRule(repoDir string) (*ProjectRule, error) {
 	path := filepath.Join(repoDir, ".opencodereview", "rule.json")
 	data, err := os.ReadFile(path)

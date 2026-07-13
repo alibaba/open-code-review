@@ -1,5 +1,5 @@
 import { I18nContext, resolveLocale } from './I18nProvider';
-import { useEffect, useReducer } from 'preact/hooks';
+import { useCallback, useEffect, useReducer } from 'preact/hooks';
 import { bridge } from './bridge';
 import { ConfigView } from './views/ConfigView';
 import { configPanelInitialState, configPanelReducer } from './configStore';
@@ -12,6 +12,7 @@ function runEnvCheck(dispatch: (action: { type: 'checkingEnv' }) => void): void 
 
 export function ConfigPanelApp() {
   const [state, dispatch] = useReducer(configPanelReducer, configPanelInitialState);
+  const clearConnTest = useCallback(() => dispatch({ type: 'clearConnTest' }), []);
 
   useEffect(() => {
     const unsub = bridge.onMessage((msg) => dispatch(msg));
@@ -59,7 +60,7 @@ export function ConfigPanelApp() {
         onCopy={(text) => bridge.post({ type: 'copyToClipboard', text })}
         onTest={(entries) => { dispatch({ type: 'testingConn' }); bridge.post({ type: 'testConnection', entries }); }}
         onSave={(entries) => bridge.post({ type: 'setConfigBatch', entries })}
-        onClearConnTest={() => dispatch({ type: 'clearConnTest' })}
+        onClearConnTest={clearConnTest}
         onDeleteCustomProvider={(name) => bridge.post({ type: 'deleteCustomProvider', name })}
         onActivateCustomProvider={(name) => bridge.post({ type: 'activateCustomProvider', name })}
         onClose={() => bridge.post({ type: 'closeConfigPanel' })}

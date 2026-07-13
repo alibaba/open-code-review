@@ -154,6 +154,14 @@ func toLoopTemplate(s template.ScanTemplate) template.Template {
 // Session returns the session history associated with this Agent.
 func (a *Agent) Session() *session.SessionHistory { return a.session }
 
+// SessionID returns the current scan's session id, or "" when no session has been created.
+func (a *Agent) SessionID() string {
+	if a == nil || a.session == nil {
+		return ""
+	}
+	return a.session.SessionID
+}
+
 // FilesReviewed returns the number of items included in this scan.
 func (a *Agent) FilesReviewed() int64 { return int64(len(a.items)) }
 
@@ -553,7 +561,8 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) error {
 		return nil
 	}
 
-	return a.runner.RunPerFile(ctx, messages, it.Path)
+	_, err := a.runner.RunPerFile(ctx, messages, it.Path)
+	return err
 }
 
 // maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable

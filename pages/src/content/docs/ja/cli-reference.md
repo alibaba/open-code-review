@@ -20,6 +20,7 @@ Commands:
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
+  session, sessions  List and inspect saved review sessions
   version      Show version information
 
 Examples:
@@ -30,12 +31,14 @@ Examples:
   ocr config set llm.model opus-4-6        Set a config value
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
+  ocr session list                         List saved review sessions
   ocr version                              Show version info
 
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
+Use "ocr session -h" for more information about session inspection.
 
 GitHub: https://github.com/alibaba/open-code-review
 ```
@@ -52,6 +55,8 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr config model` | — | 対話的な model 選択 TUI。 |
 | `ocr llm test` | — | 短い chat リクエストを送信し、設定されたエンドポイントを検証します。 |
 | `ocr llm providers` | — | 組み込みの LLM プロバイダーをすべて一覧表示します。 |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | 保存されたレビューセッションを一覧表示します。 |
+| `ocr session show <id>` | `ocr sessions show <id>` | 1つのセッションとファイル単位のチェックポイントを表示します。 |
 | `ocr viewer` | — | 過去のレビューセッション用のローカル Web UI を起動します（`localhost:5483`）。 |
 | `ocr version` | — | バージョン、commit、プラットフォーム、ビルド日、GitHub URL を出力します。 |
 
@@ -79,6 +84,7 @@ ocr r      [flags]   (alias)
 | `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。 |
+| `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）または `json`（機械可読なコメント配列）。 |
 | `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します。`agent` は stdout を静音化し、最終サマリー / JSON のみを出力します。 |
 | `--background <text>` | `-b` | — | plan + main prompt に注入する、任意の要件 / 業務コンテキスト。 |
@@ -92,6 +98,7 @@ ocr r      [flags]   (alias)
 
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
+> `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
 
 ### モード
 
@@ -124,6 +131,28 @@ ocr review -c abc123
 ```
 
 `git show abc123` が生成する diff（すなわちその commit が導入した変更）をレビューします。
+
+### 中断したレビューの再開
+
+すべての `ocr review` 実行は、`~/.opencodereview/sessions/` 配下にローカル
+セッションログを保存します。正常終了したテキスト出力はレビュー結果に集中し、session ID
+は表示しません。保存済みセッションは `ocr session list/show` で確認でき、
+`--format json` では機械可読出力に `session_id` が含まれます。範囲または単一 commit
+レビューが中断された場合は、保存済みセッションを一覧表示し、同じレビュー対象に一致するセッションから再開します:
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+再開は意図的に厳密です:
+
+- ワークスペースレビューは再開できません
+- 範囲レビューは同じ `--from` と `--to` が必要です
+- 単一 commit レビューは同じ `--commit` が必要です
+- `--preview` と `--resume` は併用できません
 
 ### 出力
 
@@ -193,6 +222,8 @@ ocr review --format json --audience agent
 | `summary` | 任意。実行の集計: `files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` の実行時は省略されます。 |
 | `comments` | 常に存在しますが、空の場合があります。各コメントのフィールドは上記の例のとおりです。 |
 | `warnings` | 任意。1 つ以上のサブエージェントが失敗した場合に存在します。各項目は影響を受けたファイルとエラーを記述します。 |
+| `session_id` | 任意。永続化されたレビュー実行に含まれます。互換性のある範囲または単一 commit レビューを再試行する際に `ocr review --resume <session-id>` へ渡せます。 |
+| `resume` | 任意。再開した実行で存在し、`resumed_from`、`reused_files`、`rerun_files`、`previous_model`、`current_model` を含みます。 |
 
 レビュー対象のファイルがない場合、JSON モードは `skipped` の外殻を発行し、呼び出し側が「変更なし」と「発見なし」を区別できるようにします:
 
@@ -212,6 +243,48 @@ ocr review --format json --audience agent
 | `1` | 致命的エラー。引数の誤り、LLM エンドポイントを解決できない、すべてのファイルごとのサブエージェントが失敗した、などです。エラーテキストは stderr に出力されます。 |
 
 致命的でない警告（個々のサブエージェントの失敗、あるファイルが token しきい値を超過、など）はインラインで出力されます。JSON モードでは `warnings` 配列に追加されます。
+
+## `ocr session`
+
+`~/.opencodereview/sessions/` 配下に保存されたローカルレビューセッションログを一覧表示・確認します。
+session ID の確認、ファイル単位のチェックポイント状態の確認、中断した範囲または単一 commit
+レビューの再開に使用します。
+
+```text
+ocr session <sub-command>
+ocr sessions <sub-command>   (alias)
+
+Sub-commands:
+  list, ls    List recent review sessions for the current repo
+  show <id>   Show one session's metadata and per-file items
+```
+
+### `ocr session list`
+
+```bash
+ocr session list
+ocr session list --limit 50
+ocr session list --json
+```
+
+| 引数 | デフォルト | 説明 |
+|---|---|---|
+| `--repo <path>` | カレントディレクトリ | セッションを一覧表示するリポジトリ。 |
+| `--json` | `false` | セッションサマリーを JSON として出力します。 |
+| `--limit <n>` | `20` | 一覧表示するセッション数を制限します。`0` は無制限です。 |
+
+### `ocr session show`
+
+```bash
+ocr session show <session-id>
+ocr session show --json <session-id>
+ocr session show --repo /path/to/repo <session-id>
+```
+
+| 引数 | デフォルト | 説明 |
+|---|---|---|
+| `--repo <path>` | カレントディレクトリ | セッションを確認するリポジトリ。 |
+| `--json` | `false` | セッションのメタデータとファイル単位の項目を JSON として出力します。 |
 
 ## `ocr rules`
 

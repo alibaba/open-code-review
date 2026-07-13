@@ -13,7 +13,6 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
-  <a href="https://goreportcard.com/report/github.com/alibaba/open-code-review"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
@@ -107,6 +106,18 @@ npm install -g @alibaba-group/open-code-review
 ```
 
 После установки команда `ocr` доступна глобально.
+
+**Обновление**
+
+Если установка выполнена через NPM, обновите вручную до последней версии:
+
+```bash
+npm install -g @alibaba-group/open-code-review@latest
+```
+
+Установка через NPM также по умолчанию проверяет новые версии в фоне и обновляется автоматически. Чтобы отключить автообновления, задайте `OCR_NO_UPDATE=1`.
+
+Если вы устанавливали через install script или вручную скачанный бинарный файл, повторно запустите ту же команду установки/скачивания, чтобы заменить локальный бинарный файл последним релизом. Используйте `OCR_VERSION`, если нужно зафиксировать конкретный тег релиза.
 
 **Из GitHub Release**
 
@@ -280,6 +291,10 @@ ocr review --from main --to feature-branch
 # Один коммит
 ocr review --commit abc123
 
+# Возобновить прерванное ревью диапазона или одного коммита
+ocr session list
+ocr review --from main --to feature-branch --resume <session-id>
+
 # Полнофайловое сканирование — ревью целых файлов вместо диффа (история git не нужна)
 ocr scan                          # сканировать весь репозиторий
 ocr scan --path internal/agent    # сканировать каталог или конкретные файлы
@@ -417,11 +432,35 @@ ocr review \
 
 Флаг `--format json` выводит машиночитаемый результат, удобный для разбора в CI-скриптах.
 
+Каждое замечание содержит два структурированных поля, чтобы CI-интеграции могли сортировать, группировать, фильтровать замечания или блокировать сборку без повторного разбора текста комментария:
+
+| Поле | Допустимые значения | Примечание |
+|------|---------------------|------------|
+| `category` | `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other` | Категория, к которой относится замечание. |
+| `severity` | `critical`, `high`, `medium`, `low` | Важность замечания. |
+
+В JSON-выводе эти два поля располагаются рядом с `content`, `start_line` и др. В терминале они отображаются перед комментарием как встроенный бейдж `[category · severity]`, цвет которого определяется важностью.
+
 Примеры интеграции — в каталоге [`examples/`](./examples/):
 
 - [`github_actions/`](./examples/github_actions/) — пример интеграции с GitHub Actions
 - [`gitlab_ci/`](./examples/gitlab_ci/) — пример интеграции с GitLab CI
 - [`gitflic_ci/`](./examples/gitflic_ci/) — пример интеграции с GitFlic CI
+
+#### GitHub Action
+
+Для GitHub в корне репозитория также поставляется готовая к использованию composite Action ([`action.yml`](./action.yml)). Вместо того чтобы вручную скриптовать `ocr review`, просто подключите её — она берёт на себя весь конвейер: checkout, установку OCR, запуск ревью, публикацию инлайн- и сводных комментариев, загрузку артефактов, а также повтор и идемпотентность:
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+```
+
+Для воспроизводимости зафиксируйте тег версии или SHA коммита. Полный демо-воркфлоу, а также полный список входов, выходов и режимов публикации комментариев (закреплённая сводка, инкрементальная неразрушающая публикация) см. в каталоге [`examples/github_actions/`](./examples/github_actions/).
 
 ## Команды
 
@@ -436,6 +475,8 @@ ocr review \
 | `ocr config unset custom_providers.<name>` | — | Удалить пользовательского провайдера |
 | `ocr llm test` | — | Проверить подключение к LLM |
 | `ocr llm providers` | — | Показать список встроенных LLM-провайдеров |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | Показать сохранённые сессии ревью |
+| `ocr session show <id>` | `ocr sessions show <id>` | Показать одну сессию и её checkpoint'ы по файлам |
 | `ocr viewer` | `ocr v` | Запустить WebUI-просмотрщик сессий на `localhost:5483` |
 | `ocr version` | — | Показать информацию о версии |
 
@@ -449,16 +490,55 @@ ocr review \
 | `--commit` | `-c` | — | Один коммит для ревью |
 | `--exclude` | — | — | Паттерны в стиле gitignore через запятую для пропуска файлов; объединяются с excludes из rule.json |
 | `--preview` | `-p` | `false` | Показать, какие файлы попадут в ревью, без запуска LLM |
+| `--resume` | — | — | Возобновить предыдущую совместимую сессию ревью диапазона или одного коммита |
 | `--format` | `-f` | `text` | Формат вывода: `text` или `json` |
 | `--concurrency` | — | `8` | Максимум одновременных ревью файлов |
 | `--timeout` | — | `10` | Таймаут конкурентной задачи в минутах |
 | `--audience` | — | `human` | `human` (показывать прогресс) или `agent` (только сводка) |
 | `--background` | `-b` | — | Необязательный контекст требований/бизнес-логики для ревью; при `--commit` автоматически заполняется из сообщения коммита |
+| `--background-file` | `-B` | — | Необязательный контекст требований/бизнес-логики из Markdown-файла; при совместном использовании с `--background` встроенное значение идёт первым |
 | `--model` | — | — | Выбрать или переопределить LLM-модель для этого ревью |
 | `--rule` | — | — | Путь к пользовательским JSON-правилам ревью |
 | `--max-tools` | — | встроенное | Максимум раундов вызова инструментов на файл; действует, только если больше значения шаблона по умолчанию |
 | `--max-git-procs` | — | встроенное | Максимум одновременных git-подпроцессов |
 | `--tools` | — | — | Путь к пользовательскому JSON-конфигу инструментов |
+
+#### Возобновляемые ревью и сессии
+
+Каждый запуск `ocr review` сохраняет локальный журнал сессии в
+`~/.opencodereview/sessions/`. Успешный текстовый вывод остаётся сфокусированным
+на результате ревью и не печатает session ID. Сохранённые сессии можно найти через
+`ocr session list/show`, а `--format json` добавляет `session_id` в машиночитаемый
+вывод. Если ревью диапазона или одного коммита было прервано, выберите сохранённую
+сессию с тем же целевым ревью и возобновите её:
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+Возобновление намеренно строгое: поддерживаются только ревью диапазона веток и одного
+коммита, но не ревью рабочей копии. Текущие `--from/--to` или `--commit` должны
+совпадать с сохранённой сессией. `--preview` нельзя использовать вместе с `--resume`.
+
+При `--format json` возобновлённый запуск включает:
+
+- `session_id` — session ID текущего запуска
+- `resume.resumed_from` — исходный session ID
+- `resume.reused_files` — файлы, повторно использованные из сохранённых checkpoint'ов
+- `resume.rerun_files` — файлы, заново проверенные в текущем запуске
+
+### Флаги `ocr session`
+
+| Команда | Флаг | По умолчанию | Описание |
+|---------|------|--------------|----------|
+| `ocr session list` | `--repo` | текущий каталог | Репозиторий, для которого нужно показать сессии |
+| `ocr session list` | `--json` | `false` | Вывести сводки сессий в JSON |
+| `ocr session list` | `--limit` | `20` | Ограничить количество сессий; `0` означает без ограничения |
+| `ocr session show <id>` | `--repo` | текущий каталог | Репозиторий, сессию которого нужно посмотреть |
+| `ocr session show <id>` | `--json` | `false` | Вывести метаданные сессии и элементы по файлам в JSON |
 
 ### Флаги `ocr scan`
 
@@ -505,12 +585,24 @@ ocr review --from main --to my-feature --concurrency 4
 # Ревью конкретного коммита с подробным JSON-выводом
 ocr review --commit abc123 --format json --audience agent
 
+# Возобновить прерванное ревью диапазона или одного коммита
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to my-feature --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+
 # Выбрать или переопределить модель для этого ревью
 ocr review --model claude-opus-4-6
 ocr review --commit abc123 --model claude-sonnet-4-6
 
 # Передать контекст требований для более прицельного ревью
 ocr review --background "Добавляем rate limiting в API логина"
+
+# Передать контекст требований из Markdown-файла
+ocr review --background-file ./docs/my_business_context.md
+
+# Совместить встроенный контекст с локальным файлом контекста (используются оба)
+ocr review --background "Фокус на аутентификации" --background-file ./docs/my_business_context.md
 
 # Использовать собственные правила ревью
 ocr review --rule /path/to/my-rules.json
@@ -777,13 +869,22 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 Установите `telemetry.content_logging`, чтобы включать промпты и ответы LLM в экспортируемые данные.
 
+**Выбор протокола:** Переменная окружения `OTEL_EXPORTER_OTLP_PROTOCOL` определяет протокол экспорта:
+
+| Значение | Транспорт | Описание |
+|---|---|---|
+| `grpc` (по умолчанию) | gRPC | Порт по умолчанию 4317 |
+| `http/protobuf` | HTTP | Порт по умолчанию 4318 |
+
+**Формат endpoint:** `telemetry.otlp_endpoint` принимает базовый URL в формате `host:port` или `http://host:port` без компонента пути. SDK автоматически добавляет путь сигнала (например, `/v1/traces`) в соответствии со [спецификацией OTLP](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request).
+
 ## Участие в разработке
 
-В [CONTRIBUTING.ru-RU.md](CONTRIBUTING.ru-RU.md) описаны настройка окружения разработки, рекомендации по коду и порядок отправки pull request'ов.
+Этот проект существует благодаря всем, кто вносит свой вклад. В [CONTRIBUTING.ru-RU.md](CONTRIBUTING.ru-RU.md) описаны настройка окружения разработки, рекомендации по коду и порядок отправки pull request'ов.
 
-## История звёзд
-
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
+<a href="https://github.com/alibaba/open-code-review/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
+</a>
 
 ## Лицензия
 

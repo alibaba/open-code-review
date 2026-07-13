@@ -13,7 +13,6 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
-  <a href="https://goreportcard.com/report/github.com/alibaba/open-code-review"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
@@ -107,6 +106,18 @@ npm install -g @alibaba-group/open-code-review
 ```
 
 安装后，`ocr` 命令即可全局使用。
+
+**更新**
+
+如果通过 NPM 安装，可手动更新到最新版本：
+
+```bash
+npm install -g @alibaba-group/open-code-review@latest
+```
+
+通过 NPM 安装的 `ocr` 还会默认在后台检查新版本并自动升级；如需关闭自动更新，可设置 `OCR_NO_UPDATE=1`。
+
+如果通过安装脚本或手动下载二进制文件安装，重新运行对应的安装/下载命令即可替换为最新 release。需要固定版本时，可继续通过 `OCR_VERSION` 指定 release tag。
 
 **从 GitHub Release 下载**
 
@@ -280,6 +291,10 @@ ocr review --from main --to feature-branch
 # 单个提交
 ocr review --commit abc123
 
+# 恢复中断的区间或单 commit 评审
+ocr session list
+ocr review --from main --to feature-branch --resume <session-id>
+
 # 全量文件扫描 —— 审查整个文件而非 diff（无需 git 历史）
 ocr scan                          # 扫描整个仓库
 ocr scan --path internal/agent    # 扫描指定目录或文件
@@ -415,11 +430,35 @@ ocr review \
 
 `--format json` 参数输出适合 CI 脚本解析的机器可读结果。
 
+每条评审结果都带有两个结构化字段，便于 CI 集成在无需解析评论文本的情况下排序、分组、过滤或卡点构建：
+
+| 字段 | 允许的取值 | 说明 |
+|------|-----------|------|
+| `category` | `bug`、`security`、`performance`、`maintainability`、`test`、`style`、`documentation`、`other` | 问题所属的类别。 |
+| `severity` | `critical`、`high`、`medium`、`low` | 问题的严重程度。 |
+
+在 JSON 输出中，这两个字段与 `content`、`start_line` 等平级；在终端中，它们会以内联的 `[category · severity]` 徽章形式显示在评论前，并按严重程度着色。
+
 集成示例请参见 [`examples/`](./examples/) 目录：
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions 集成示例
 - [`gitlab_ci/`](./examples/gitlab_ci/) — GitLab CI 集成示例
 - [`gitflic_ci/`](./examples/gitflic_ci/) — GitFlic CI 集成示例
+
+#### GitHub Action
+
+对于 GitHub，本仓库还在仓库根目录提供了一个开箱即用的 composite Action（[`action.yml`](./action.yml)）。你无需自己编写 `ocr review` 脚本，直接引用它即可完成完整流程——checkout、安装 OCR、执行审查、发布行内评论与汇总评论、上传 artifacts，以及重试与幂等处理：
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+```
+
+为保障可复现性，请固定到某个版本标签或 commit SHA。完整的 workflow 示例以及 inputs、outputs 与评论发布模式（置顶汇总、增量非破坏式发布）的完整列表，请参见 [`examples/github_actions/`](./examples/github_actions/) 目录。
 
 ## 命令
 
@@ -434,6 +473,8 @@ ocr review \
 | `ocr config unset custom_providers.<name>` | — | 删除自定义供应商 |
 | `ocr llm test` | — | 测试 LLM 连通性 |
 | `ocr llm providers` | — | 列出内置 LLM 供应商 |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话 |
+| `ocr session show <id>` | `ocr sessions show <id>` | 查看单个会话及其逐文件检查点 |
 | `ocr viewer` | `ocr v` | 启动 WebUI 会话查看器，地址 `localhost:5483` |
 | `ocr version` | — | 显示版本信息 |
 
@@ -447,16 +488,52 @@ ocr review \
 | `--commit` | `-c` | — | 审查单个提交 |
 | `--exclude` | — | — | 以逗号分隔的 gitignore 风格模式，用于跳过匹配文件；与 rule.json 中的 excludes 合并 |
 | `--preview` | `-p` | `false` | 预览将被审查的文件列表，不调用 LLM |
+| `--resume` | — | — | 从之前兼容的区间或单 commit 评审会话恢复 |
 | `--format` | `-f` | `text` | 输出格式：`text` 或 `json` |
 | `--concurrency` | — | `8` | 最大并发文件审查数 |
 | `--timeout` | — | `10` | 并发任务超时时间（分钟） |
 | `--audience` | — | `human` | `human`（显示进度）或 `agent`（仅输出摘要） |
 | `--background` | `-b` | — | 可选的需求/业务背景信息；使用 `--commit` 时如未指定则自动从 commit message 中提取 |
+| `--background-file` | `-B` | — | 来自 Markdown 文件的可选需求/业务背景信息；与 `--background` 同时使用时，内联内容排在前面 |
 | `--model` | — | — | 为本次审查选择或覆盖 LLM 模型 |
 | `--rule` | — | — | 自定义 JSON 审查规则路径 |
 | `--max-tools` | — | 内置默认 | 每个文件的最大工具调用轮次；仅在大于模板默认值时生效 |
 | `--max-git-procs` | — | 内置默认 | 最大并发 git 子进程数 |
 | `--tools` | — | — | 自定义 JSON 工具配置路径 |
+
+#### 可恢复评审与会话
+
+每次 `ocr review` 都会在 `~/.opencodereview/sessions/` 下保存本地会话日志。
+正常完成的文本输出只展示评审结果，不打印 session ID；可使用
+`ocr session list/show` 查找已保存会话，或用 `--format json` 在机器可读输出中获取
+`session_id`。如果区间或单 commit 评审被中断，可列出保存的会话，并从匹配相同评审目标的会话恢复：
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+恢复逻辑是严格的：仅支持分支区间和单 commit 评审，不支持工作区评审；当前
+`--from/--to` 或 `--commit` 必须与保存的会话一致。`--preview` 不能与 `--resume` 同时使用。
+
+使用 `--format json` 时，恢复运行会包含：
+
+- `session_id` — 当前运行的 session ID
+- `resume.resumed_from` — 来源 session ID
+- `resume.reused_files` — 从已保存检查点复用的文件数
+- `resume.rerun_files` — 本次重新评审的文件数
+
+### `ocr session` 参数
+
+| 命令 | 参数 | 默认值 | 描述 |
+|------|------|--------|------|
+| `ocr session list` | `--repo` | 当前目录 | 要列出会话的仓库 |
+| `ocr session list` | `--json` | `false` | 以 JSON 输出会话摘要 |
+| `ocr session list` | `--limit` | `20` | 限制列出的会话数量；`0` 表示不限 |
+| `ocr session show <id>` | `--repo` | 当前目录 | 要查看会话的仓库 |
+| `ocr session show <id>` | `--json` | `false` | 以 JSON 输出会话元数据和逐文件条目 |
 
 ### `ocr scan` 参数
 
@@ -503,12 +580,24 @@ ocr review --from main --to my-feature --concurrency 4
 # 审查特定提交并以 JSON 格式输出详细信息
 ocr review --commit abc123 --format json --audience agent
 
+# 恢复中断的区间或单 commit 评审
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to my-feature --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+
 # 为本次审查选择或覆盖模型
 ocr review --model claude-opus-4-6
 ocr review --commit abc123 --model claude-sonnet-4-6
 
 # 提供需求背景以获得更有针对性的审查
 ocr review --background "为登录 API 添加限流"
+
+# 从 Markdown 文件提供需求背景
+ocr review --background-file ./docs/my_business_context.md
+
+# 将内联背景与本地背景文件结合使用（两者都会生效）
+ocr review --background "关注鉴权" --background-file ./docs/my_business_context.md
 
 # 使用自定义审查规则
 ocr review --rule /path/to/my-rules.json
@@ -765,13 +854,22 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 设置 `telemetry.content_logging` 可在导出数据中包含 LLM 提示词和响应。
 
+**协议选择：** 通过环境变量 `OTEL_EXPORTER_OTLP_PROTOCOL` 选择导出协议：
+
+| 值 | 传输方式 | 说明 |
+|---|---|---|
+| `grpc`（默认） | gRPC | 默认端口 4317 |
+| `http/protobuf` | HTTP | 默认端口 4318 |
+
+**Endpoint 格式：** `telemetry.otlp_endpoint` 的值为 `host:port` 或 `http://host:port`，无需包含路径。SDK 会根据 [OTLP 规范](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request)自动追加信号路径（如 `/v1/traces`）。
+
 ## 贡献
 
-参见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) 了解开发环境搭建、编码规范以及如何提交 Pull Request。
+感谢所有为本项目做出贡献的人。参见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) 了解开发环境搭建、编码规范以及如何提交 Pull Request。
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
+<a href="https://github.com/alibaba/open-code-review/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
+</a>
 
 ## 许可证
 

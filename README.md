@@ -13,7 +13,6 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
-  <a href="https://goreportcard.com/report/github.com/alibaba/open-code-review"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
@@ -107,6 +106,18 @@ npm install -g @alibaba-group/open-code-review
 ```
 
 After installation, the `ocr` command is available globally.
+
+**Update**
+
+If you installed via NPM, update manually to the latest version:
+
+```bash
+npm install -g @alibaba-group/open-code-review@latest
+```
+
+NPM installations also check for newer versions in the background by default and upgrade automatically. To disable auto-updates, set `OCR_NO_UPDATE=1`.
+
+If you installed with the install script or a manually downloaded binary, rerun the same install/download command to replace the local binary with the latest release. Use `OCR_VERSION` when you need to pin a specific release tag.
 
 **From GitHub Release**
 
@@ -280,6 +291,10 @@ ocr review --from main --to feature-branch
 # Single commit
 ocr review --commit abc123
 
+# Resume an interrupted range or commit review
+ocr session list
+ocr review --from main --to feature-branch --resume <session-id>
+
 # Full-file scan — review whole files instead of a diff (no git history needed)
 ocr scan                          # scan the entire repository
 ocr scan --path internal/agent    # scan a directory or specific files
@@ -417,11 +432,35 @@ The `--from` flag accepts a branch ref (e.g., `origin/main`) or commit SHA as th
 
 The `--format json` flag outputs machine-readable results suitable for parsing in CI scripts.
 
+Each finding carries two structured fields so CI integrations can sort, group, filter, or gate builds without re-parsing comment text:
+
+| Field | Allowed values | Notes |
+|-------|----------------|-------|
+| `category` | `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other` | The category the issue belongs to. |
+| `severity` | `critical`, `high`, `medium`, `low` | The importance of the issue. |
+
+In JSON output the two fields appear as siblings alongside `content`, `start_line`, etc. In the terminal, they render as an inline `[category · severity]` badge before the comment, colored by severity.
+
 See the [`examples/`](./examples/) directory for integration examples:
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions integration example
 - [`gitlab_ci/`](./examples/gitlab_ci/) — GitLab CI integration example
 - [`gitflic_ci/`](./examples/gitflic_ci/) — GitFlic CI integration example
+
+#### GitHub Action
+
+For GitHub, this repository also ships a ready-to-use composite Action at the repo root ([`action.yml`](./action.yml)). Instead of scripting `ocr review` yourself, reference it directly and it handles the full pipeline — checkout, OCR install, running the review, posting inline and summary comments, uploading artifacts, and retry/idempotency:
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+```
+
+Pin to a version tag or commit SHA for reproducibility. See the [`examples/github_actions/`](./examples/github_actions/) directory for a complete workflow demo and the full list of inputs, outputs, and comment-posting modes (sticky summary, incremental non-destructive posting).
 
 ## Commands
 
@@ -436,6 +475,8 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `ocr config unset custom_providers.<name>` | — | Delete a custom provider |
 | `ocr llm test` | — | Test LLM connectivity |
 | `ocr llm providers` | — | List built-in LLM providers |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions |
+| `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints |
 | `ocr viewer` | `ocr v` | Launch WebUI session viewer on `localhost:5483` |
 | `ocr version` | — | Show version info |
 
@@ -449,16 +490,55 @@ See the [`examples/`](./examples/) directory for integration examples:
 | `--commit` | `-c` | — | Single commit to review |
 | `--exclude` | — | — | Comma-separated gitignore-style patterns to skip; merged with rule.json excludes |
 | `--preview` | `-p` | `false` | Preview which files will be reviewed without running the LLM |
+| `--resume` | — | — | Resume from a previous compatible range or commit review session |
 | `--format` | `-f` | `text` | Output format: `text` or `json` |
 | `--concurrency` | — | `8` | Max concurrent file reviews |
 | `--timeout` | — | `10` | Concurrent task timeout in minutes |
 | `--audience` | — | `human` | `human` (show progress) or `agent` (summary only) |
 | `--background` | `-b` | — | Optional requirement/business context for the review; auto-filled from commit message when using `--commit` |
+| `--background-file` | `-B` | — | Optional requirement/business context from a Markdown file; Combined with `--background` the inline value is given first |
 | `--model` | — | — | Select or override the LLM model for this review |
 | `--rule` | — | — | Path to custom JSON review rules |
 | `--max-tools` | — | built-in | Max tool call rounds per file; only takes effect when greater than template default |
-| `--max-git-procs` | — | built-in | Max concurrent git subprocesses |
-| `--tools` | — | — | Path to custom JSON tools config |
+| `--max-git-procs` | — | `16` | Max concurrent git subprocesses |
+| `--tools` | — | built-in | Path to custom JSON tools config |
+
+#### Resumable Reviews and Sessions
+
+Every `ocr review` run persists a local session log under
+`~/.opencodereview/sessions/`. Successful text output stays focused on review
+results and does not print the session ID; use `ocr session list/show` to find
+saved sessions, or `--format json` to include `session_id` in machine-readable
+output. If a range or commit review is interrupted, list the saved sessions and
+resume from the one that matches the same review target:
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+Resume is intentionally strict: it only supports branch-range and single-commit
+reviews, not workspace reviews, and the current `--from/--to` or `--commit`
+must match the saved session. `--preview` cannot be combined with `--resume`.
+
+When `--format json` is used, resumed runs include:
+
+- `session_id` — the current run's session ID
+- `resume.resumed_from` — the source session ID
+- `resume.reused_files` — files reused from saved checkpoints
+- `resume.rerun_files` — files reviewed again in the current run
+
+### `ocr session` Flags
+
+| Command | Flag | Default | Description |
+|---------|------|---------|-------------|
+| `ocr session list` | `--repo` | current dir | Repository whose sessions should be listed |
+| `ocr session list` | `--json` | `false` | Emit session summaries as JSON |
+| `ocr session list` | `--limit` | `20` | Cap listed sessions; use `0` for unlimited |
+| `ocr session show <id>` | `--repo` | current dir | Repository whose session should be inspected |
+| `ocr session show <id>` | `--json` | `false` | Emit session metadata and per-file items as JSON |
 
 ### `ocr scan` Flags
 
@@ -508,12 +588,24 @@ ocr review --from main --to my-feature --concurrency 4
 # Review a specific commit with verbose JSON output
 ocr review --commit abc123 --format json --audience agent
 
+# Resume an interrupted range or commit review
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to my-feature --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+
 # Select or override model for this review
 ocr review --model claude-opus-4-6
 ocr review --commit abc123 --model claude-sonnet-4-6
 
 # Provide requirement context for more targeted review
 ocr review --background "Adding rate limiting to the login API"
+
+# Provide requirement context from a Markdown file
+ocr review --background-file ./docs/my_business_context.md
+
+# Combine inline context with a local context file (both are used)
+ocr review --background "Focus on auth" --background-file ./docs/my_business_context.md
 
 # Use custom review rules
 ocr review --rule /path/to/my-rules.json
@@ -780,13 +872,23 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 Set `telemetry.content_logging` to include LLM prompts and responses in exported data.
 
+**Protocol selection:** Set the environment variable `OTEL_EXPORTER_OTLP_PROTOCOL` to choose the export protocol:
+
+| Value | Transport | Notes |
+|---|---|---|
+| `grpc` (default) | gRPC | Default port 4317 |
+| `http/protobuf` | HTTP | Default port 4318 |
+
+**Endpoint format:** `telemetry.otlp_endpoint` expects a base URL in `host:port` or `http://host:port` format, without a path component. The SDK appends the signal path (e.g. `/v1/traces`) automatically per the [OTLP specification](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request).
+
+
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding guidelines, and how to submit pull requests.
+This project exists thanks to all the people who contribute. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding guidelines, and how to submit pull requests.
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
+<a href="https://github.com/alibaba/open-code-review/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
+</a>
 
 ## License
 

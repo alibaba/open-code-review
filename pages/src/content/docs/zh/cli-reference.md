@@ -20,6 +20,7 @@ Commands:
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
+  session, sessions  List and inspect saved review sessions
   version      Show version information
 
 Examples:
@@ -30,12 +31,14 @@ Examples:
   ocr config set llm.model opus-4-6        Set a config value
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
+  ocr session list                         List saved review sessions
   ocr version                              Show version info
 
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
+Use "ocr session -h" for more information about session inspection.
 
 GitHub: https://github.com/alibaba/open-code-review
 ```
@@ -52,6 +55,8 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr config model` | — | 交互式 model 选择 TUI。 |
 | `ocr llm test` | — | 发送一条简短 chat 请求以验证配置的端点。 |
 | `ocr llm providers` | — | 列出所有内置 LLM provider。 |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话。 |
+| `ocr session show <id>` | `ocr sessions show <id>` | 查看单个会话及其逐文件检查点。 |
 | `ocr viewer` | — | 启动用于历史评审会话的本地 Web UI（`localhost:5483`）。 |
 | `ocr version` | — | 打印版本、commit、平台、构建日期与 GitHub URL。 |
 
@@ -80,6 +85,7 @@ unstaged + untracked 变更。
 | `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
 | `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。 |
+| `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）或 `json`（机器可读的评论数组）。 |
 | `--audience <who>` | — | `human` | `human` 流式输出进度行；`agent` 静默 stdout，只打印最终摘要 / JSON。 |
 | `--background <text>` | `-b` | — | 注入 plan + main prompt 的可选需求 / 业务上下文。 |
@@ -93,6 +99,7 @@ unstaged + untracked 变更。
 
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
+> `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。
 
 ### 模式
 
@@ -128,6 +135,27 @@ ocr review -c abc123
 ```
 
 评审 `git show abc123` 产生的 diff（即该 commit 引入的变更）。
+
+### 恢复中断的评审
+
+每次 `ocr review` 都会在 `~/.opencodereview/sessions/` 下保存本地会话日志。
+正常完成的文本输出只展示评审结果，不打印 session ID；可使用
+`ocr session list/show` 查找已保存会话，或用 `--format json` 在机器可读输出中获取
+`session_id`。如果区间或单 commit 评审被中断，先列出已保存会话，再从与当前评审目标一致的会话恢复：
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+恢复逻辑是严格的：
+
+- 工作区评审不能恢复
+- 区间评审必须使用相同的 `--from` 和 `--to`
+- 单 commit 评审必须使用相同的 `--commit`
+- `--preview` 和 `--resume` 不能同时使用
 
 ### 输出
 
@@ -201,6 +229,8 @@ ocr review --format json --audience agent
 | `summary` | 可选。运行聚合：`files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` 运行时省略。 |
 | `comments` | 总是存在，可能为空。每条评论的字段如上例。 |
 | `warnings` | 可选。当一个或多个子 agent 失败时存在；每条描述受影响文件与错误。 |
+| `session_id` | 可选。持久化的评审运行会包含该字段；重试兼容的区间或单 commit 评审时可传给 `ocr review --resume <session-id>`。 |
+| `resume` | 可选。恢复运行时存在，包含 `resumed_from`、`reused_files`、`rerun_files`、`previous_model` 和 `current_model`。 |
 
 当没有文件可评审时，JSON 模式会发一个 `skipped` 外壳，以便调用方区分“无变更”
 与“无发现”：
@@ -222,6 +252,47 @@ ocr review --format json --audience agent
 
 非致命警告（单个子 agent 失败、某文件超过 token 阈值等）内联打印；JSON 模式下
 会加入 `warnings` 数组。
+
+## `ocr session`
+
+列出和查看保存在 `~/.opencodereview/sessions/` 下的本地评审会话日志。
+可用它查找 session ID、查看逐文件检查点状态，并恢复中断的区间或单 commit 评审。
+
+```text
+ocr session <sub-command>
+ocr sessions <sub-command>   (alias)
+
+Sub-commands:
+  list, ls    List recent review sessions for the current repo
+  show <id>   Show one session's metadata and per-file items
+```
+
+### `ocr session list`
+
+```bash
+ocr session list
+ocr session list --limit 50
+ocr session list --json
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--repo <path>` | 当前目录 | 要列出会话的仓库。 |
+| `--json` | `false` | 以 JSON 输出会话摘要。 |
+| `--limit <n>` | `20` | 限制列出的会话数量。使用 `0` 表示不限制。 |
+
+### `ocr session show`
+
+```bash
+ocr session show <session-id>
+ocr session show --json <session-id>
+ocr session show --repo /path/to/repo <session-id>
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--repo <path>` | 当前目录 | 要查看会话的仓库。 |
+| `--json` | `false` | 以 JSON 输出会话元数据和逐文件条目。 |
 
 ## `ocr rules`
 

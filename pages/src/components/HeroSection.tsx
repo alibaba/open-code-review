@@ -169,7 +169,7 @@ const HeroSection: React.FC = () => {
       style={{
         width: '100vw',
         marginLeft: 'calc(-50vw + 50%)',
-        height: isMobile ? 820 : isTablet ? 800 : 960,
+        height: isMobile ? 850 : isTablet ? 830 : 990,
         position: 'relative',
         overflow: 'hidden',
         display: 'flex',
@@ -362,7 +362,7 @@ const HeroSection: React.FC = () => {
           {/* Terminal body */}
           <div
             style={{
-              padding: '10px 0',
+              padding: '10px 0 8px 0',
               background: 'rgba(255,255,255,0.08)',
               backdropFilter: 'blur(20px)',
               borderBottomLeftRadius: 8,

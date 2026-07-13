@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -78,9 +79,18 @@ func TestQuietHandle_IdempotentRestore(t *testing.T) {
 
 func TestResolveWorkingDir_CurrentDir(t *testing.T) {
 	dir := t.TempDir()
-	origDir, _ := os.Getwd()
-	defer os.Chdir(origDir)
-	os.Chdir(dir)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(origDir); err != nil {
+			t.Errorf("restore chdir: %v", err)
+		}
+	}()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
 
 	absPath, isGit, err := resolveWorkingDir("", false)
 	if err != nil {
@@ -106,6 +116,89 @@ func TestResolveWorkingDir_NonExistent(t *testing.T) {
 	_, _, err := resolveWorkingDir(filepath.Join(t.TempDir(), "no-such-dir"), false)
 	if err == nil {
 		t.Fatal("expected error for non-existent path")
+	}
+}
+
+// TestResolveWorkingDir_MonorepoSubdir reproduces #287: running `ocr review`
+// from a subdirectory of a git repo must anchor RepoDir at the git top-level
+// (git reports diff / `git show HEAD:<path>` paths relative to the repo root),
+// while `ocr scan` (requireGit=false) must keep the subdirectory so its walk
+// stays scoped.
+func TestResolveWorkingDir_MonorepoSubdir(t *testing.T) {
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init")
+	git("config", "user.email", "t@t.co")
+	git("config", "user.name", "t")
+
+	sub := filepath.Join(root, "subproject1", "src")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// macOS /var -> /private/var symlink means t.TempDir() differs from the
+	// canonicalized toplevel git returns; compare via EvalSymlinks.
+	wantRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", root, err)
+	}
+
+	// review path: hoisted to the git top-level.
+	got, isGit, err := resolveWorkingDir(sub, true)
+	if err != nil {
+		t.Fatalf("resolveWorkingDir(sub, true) error: %v", err)
+	}
+	if !isGit {
+		t.Error("expected isGit=true for a git subdirectory")
+	}
+	gotResolved, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", got, err)
+	}
+	if gotResolved != wantRoot {
+		t.Errorf("review RepoDir = %q, want git top-level %q", gotResolved, wantRoot)
+	}
+
+	// scan path: keeps the subdirectory unchanged.
+	gotScan, _, err := resolveWorkingDir(sub, false)
+	if err != nil {
+		t.Fatalf("resolveWorkingDir(sub, false) error: %v", err)
+	}
+	gotScanResolved, err := filepath.EvalSymlinks(gotScan)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", gotScan, err)
+	}
+	wantSub, err := filepath.EvalSymlinks(sub)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", sub, err)
+	}
+	if gotScanResolved != wantSub {
+		t.Errorf("scan RepoDir = %q, want subdir %q (must stay scoped)", gotScanResolved, wantSub)
+	}
+}
+
+// TestResolveWorkingDir_BareRepoFailsLoudly guards the #287 fix: a bare repo has
+// no work tree, so `git rev-parse --git-dir` succeeds (isGit=true) but
+// `--show-toplevel` fails. The review path (requireGit=true) must return an
+// error rather than silently reusing the input dir, which would reproduce the
+// original root-relative-path bug.
+func TestResolveWorkingDir_BareRepoFailsLoudly(t *testing.T) {
+	bare := t.TempDir()
+	cmd := exec.Command("git", "init", "--bare", bare)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+
+	_, _, err := resolveWorkingDir(bare, true)
+	if err == nil {
+		t.Fatal("expected error for a bare repo (no work tree), got nil")
 	}
 }
 

@@ -63,7 +63,7 @@ func TestContentLogging_EnabledWithEnv(t *testing.T) {
 func TestContentLogging_EnabledWithoutEnv(t *testing.T) {
 	setupEnabledTelemetry(t)
 	t.Setenv("OCR_CONTENT_LOGGING", "")
-	os.Unsetenv("OCR_CONTENT_LOGGING")
+	_ = os.Unsetenv("OCR_CONTENT_LOGGING")
 	if ContentLogging() {
 		t.Error("expected ContentLogging()=false when enabled but env var not set")
 	}
@@ -112,7 +112,7 @@ func TestInit_DisabledByDefault(t *testing.T) {
 	}
 	for _, k := range envKeys {
 		t.Setenv(k, "")
-		os.Unsetenv(k)
+		_ = os.Unsetenv(k)
 	}
 
 	defer func() {
@@ -140,7 +140,7 @@ func TestInit_EnabledConsole(t *testing.T) {
 	}
 	for _, k := range envKeys {
 		t.Setenv(k, "")
-		os.Unsetenv(k)
+		_ = os.Unsetenv(k)
 	}
 
 	defer func() {

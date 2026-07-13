@@ -21,6 +21,7 @@ Commands:
   config       Manage configuration settings
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
+  session, sessions  List and inspect saved review sessions
   version      Show version information
 
 Examples:
@@ -31,12 +32,14 @@ Examples:
   ocr config set llm.model opus-4-6        Set a config value
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
+  ocr session list                         List saved review sessions
   ocr version                              Show version info
 
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
+Use "ocr session -h" for more information about session inspection.
 
 GitHub: https://github.com/alibaba/open-code-review
 ```
@@ -53,6 +56,8 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr config model` | — | Interactive model-selection TUI. |
 | `ocr llm test` | — | Send a small chat request to verify the configured endpoint. |
 | `ocr llm providers` | — | List all built-in LLM providers. |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions. |
+| `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints. |
 | `ocr viewer` | — | Launch the local web UI for past review sessions (`localhost:5483`). |
 | `ocr version` | — | Print version, commit, platform, build date, and GitHub URL. |
 
@@ -83,6 +88,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
 | `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. |
+| `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable) or `json` (machine-readable comment array). |
 | `--audience <who>` | — | `human` | `human` streams progress lines; `agent` quiets stdout and prints only the final summary / JSON. |
 | `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
@@ -96,6 +102,8 @@ staged + unstaged + untracked changes in the current directory's repo.
 
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
+> `--resume` supports only range or commit reviews and cannot be combined
+> with `--preview`.
 
 ### Modes
 
@@ -134,6 +142,29 @@ ocr review -c abc123
 
 Reviews the diff produced by `git show abc123` (i.e., the changes that
 single commit introduced).
+
+### Resuming interrupted reviews
+
+Every `ocr review` run persists a local session log under
+`~/.opencodereview/sessions/`. Successful text output stays focused on review
+results and does not print the session ID; use `ocr session list/show` to find
+saved sessions, or `--format json` to include `session_id` in machine-readable
+output. If a range or commit review is interrupted, list saved sessions and
+resume from one that matches the same review target:
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+Resume is strict by design:
+
+- workspace reviews cannot be resumed
+- range reviews must use the same `--from` and `--to`
+- commit reviews must use the same `--commit`
+- `--preview` and `--resume` cannot be used together
 
 ### Output
 
@@ -208,6 +239,8 @@ Top-level fields:
 | `summary` | Optional. Run aggregates: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (omitempty), `cache_write_tokens` (omitempty), `elapsed`. Omitted for `skipped` runs. |
 | `comments` | Always present, possibly empty. Per-comment fields are the ones in the example above. |
 | `warnings` | Optional. Present when one or more sub-agents failed; each entry describes the affected file and the error. |
+| `session_id` | Optional. Present on persisted review runs; pass this to `ocr review --resume <session-id>` when retrying compatible range or commit reviews. |
+| `resume` | Optional. Present on resumed runs with `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, and `current_model`. |
 
 When no files were eligible for review, JSON mode emits a `skipped`
 envelope instead so callers can distinguish "no changes" from "no findings":
@@ -230,6 +263,48 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 Non-fatal warnings (a single sub-agent failed, a file exceeded the token
 threshold, etc.) are printed inline; in JSON mode they're added to the
 `warnings` array.
+
+## `ocr session`
+
+Lists and inspects local review session logs saved under
+`~/.opencodereview/sessions/`. Use it to find a session ID, inspect
+per-file checkpoint status, and resume interrupted range or commit reviews.
+
+```text
+ocr session <sub-command>
+ocr sessions <sub-command>   (alias)
+
+Sub-commands:
+  list, ls    List recent review sessions for the current repo
+  show <id>   Show one session's metadata and per-file items
+```
+
+### `ocr session list`
+
+```bash
+ocr session list
+ocr session list --limit 50
+ocr session list --json
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--repo <path>` | current dir | Repository whose sessions should be listed. |
+| `--json` | `false` | Emit session summaries as JSON. |
+| `--limit <n>` | `20` | Cap the number of listed sessions. Use `0` for unlimited. |
+
+### `ocr session show`
+
+```bash
+ocr session show <session-id>
+ocr session show --json <session-id>
+ocr session show --repo /path/to/repo <session-id>
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--repo <path>` | current dir | Repository whose session should be inspected. |
+| `--json` | `false` | Emit session metadata and per-file items as JSON. |
 
 ## `ocr rules`
 

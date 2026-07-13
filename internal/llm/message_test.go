@@ -243,7 +243,9 @@ func TestParseShellRC_ModelOverride(t *testing.T) {
 export ANTHROPIC_AUTH_TOKEN="token"
 export ANTHROPIC_MODEL=claude-3-opus
 `
-	os.WriteFile(rcPath, []byte(content), 0644)
+	if err := os.WriteFile(rcPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write rc: %v", err)
+	}
 
 	ep, ok, err := parseShellRC(rcPath, "override-model")
 	if err != nil {
@@ -265,7 +267,9 @@ func TestParseShellRC_Incomplete(t *testing.T) {
 export ANTHROPIC_AUTH_TOKEN="token"
 # missing ANTHROPIC_MODEL
 `
-	os.WriteFile(rcPath, []byte(content), 0644)
+	if err := os.WriteFile(rcPath, []byte(content), 0644); err != nil {
+		t.Fatalf("write rc: %v", err)
+	}
 
 	_, ok, err := parseShellRC(rcPath, "")
 	if err != nil {
@@ -288,16 +292,16 @@ func TestParseShellRC_NonexistentFile(t *testing.T) {
 
 func TestModelListContains(t *testing.T) {
 	models := []string{"gpt-4", " claude-3-opus ", "gemini-pro"}
-	if !modelListContains(models, "claude-3-opus") {
+	if !ModelListContains(models, "claude-3-opus") {
 		t.Error("expected true for claude-3-opus")
 	}
-	if !modelListContains(models, "gpt-4") {
+	if !ModelListContains(models, "gpt-4") {
 		t.Error("expected true for gpt-4")
 	}
-	if modelListContains(models, "gpt-3.5") {
+	if ModelListContains(models, "gpt-3.5") {
 		t.Error("expected false for gpt-3.5")
 	}
-	if modelListContains(nil, "anything") {
+	if ModelListContains(nil, "anything") {
 		t.Error("expected false for nil list")
 	}
 }

@@ -23,11 +23,17 @@ func initTestGitRepo(t *testing.T) string {
 		}
 	}
 	f := filepath.Join(dir, "README.md")
-	os.WriteFile(f, []byte("hello"), 0o644)
+	if err := os.WriteFile(f, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
 	cmd := exec.Command("git", "-C", dir, "add", ".")
-	cmd.CombinedOutput()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, out)
+	}
 	cmd = exec.Command("git", "-C", dir, "commit", "-m", "initial commit")
-	cmd.CombinedOutput()
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, out)
+	}
 	return dir
 }
 
@@ -93,9 +99,18 @@ func TestResolveRepoDir_NotGitRepo(t *testing.T) {
 
 func TestResolveRepoDir_EmptyUsesWd(t *testing.T) {
 	dir := initTestGitRepo(t)
-	origDir, _ := os.Getwd()
-	defer os.Chdir(origDir)
-	os.Chdir(dir)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(origDir); err != nil {
+			t.Errorf("restore chdir: %v", err)
+		}
+	}()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
 
 	resolved, err := resolveRepoDir("")
 	if err != nil {

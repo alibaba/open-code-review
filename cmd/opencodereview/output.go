@@ -61,7 +61,19 @@ func renderComment(comment model.LlmComment) {
 	fmt.Printf("\n\033[2m─── %s:%d-%d ───\033[0m\n", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine)
 
 	if comment.Content != "" {
-		for _, ln := range wrapByRunes(sanitizeTerminal(comment.Content), 100) {
+		badge := buildBadge(comment)
+		content := sanitizeTerminal(comment.Content)
+		if badge != "" {
+			// Prepend the plain badge text to the content so it wraps inline with
+			// the first line, then colorize just the badge prefix after wrapping.
+			content = badge + " " + content
+		}
+		lines := wrapByRunes(content, 100)
+		for i, ln := range lines {
+			if i == 0 && badge != "" && strings.HasPrefix(ln, badge) {
+				color := severityColor(comment.Severity)
+				ln = color + badge + "\033[0m" + ln[len(badge):]
+			}
 			fmt.Printf("%s\n", ln)
 		}
 		fmt.Println()
@@ -81,6 +93,41 @@ func renderComment(comment model.LlmComment) {
 	}
 
 	fmt.Println()
+}
+
+// buildBadge renders a compact "[category · severity]" tag for a finding. It returns
+// an empty string when neither structured field is present, so text output for findings
+// without metadata is unchanged.
+func buildBadge(comment model.LlmComment) string {
+	category := sanitizeTerminal(comment.Category)
+	severity := sanitizeTerminal(comment.Severity)
+	switch {
+	case category != "" && severity != "":
+		return fmt.Sprintf("[%s · %s]", category, severity)
+	case category != "":
+		return fmt.Sprintf("[%s]", category)
+	case severity != "":
+		return fmt.Sprintf("[%s]", severity)
+	default:
+		return ""
+	}
+}
+
+// severityColor maps a finding severity to an ANSI color used for its badge.
+// Unknown or empty severities fall back to dim.
+func severityColor(severity string) string {
+	switch severity {
+	case "critical":
+		return "\033[1;91m" // bold bright red
+	case "high":
+		return "\033[91m" // bright red
+	case "medium":
+		return "\033[93m" // bright yellow
+	case "low":
+		return "\033[94m" // bright blue
+	default:
+		return "\033[2m" // dim
+	}
 }
 
 // printDiffLine renders a single diff line with colored prefix and background on content.
@@ -193,12 +240,15 @@ type jsonToolCalls struct {
 
 type jsonOutput struct {
 	Status         string               `json:"status"`
+	TraceID        string               `json:"trace_id,omitempty"`
 	Message        string               `json:"message,omitempty"`
 	Summary        *jsonSummary         `json:"summary,omitempty"`
 	ToolCalls      *jsonToolCalls       `json:"tool_calls"`
 	Comments       []model.LlmComment   `json:"comments"`
 	Warnings       []agent.AgentWarning `json:"warnings,omitempty"`
 	ProjectSummary string               `json:"project_summary,omitempty"`
+	Resume         *agent.ResumeInfo    `json:"resume,omitempty"`
+	SessionID      string               `json:"session_id,omitempty"`
 }
 
 func outputJSON(comments []model.LlmComment) error {
@@ -216,9 +266,10 @@ func outputJSON(comments []model.LlmComment) error {
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
-	duration time.Duration, projectSummary string, toolCalls map[string]int64) error {
+	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string) error {
 	out := jsonOutput{
 		Status:   "success",
+		TraceID:  traceID,
 		Comments: comments,
 		Summary: &jsonSummary{
 			FilesReviewed:    filesReviewed,
@@ -231,6 +282,8 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			Elapsed:          duration.Round(time.Second).String(),
 		},
 		ProjectSummary: projectSummary,
+		Resume:         resumeInfo,
+		SessionID:      sessionID,
 	}
 	var total int64
 	for _, v := range toolCalls {
@@ -264,9 +317,10 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	return enc.Encode(out)
 }
 
-func outputJSONNoFiles() error {
+func outputJSONNoFiles(traceID string) error {
 	out := jsonOutput{
 		Status:   "skipped",
+		TraceID:  traceID,
 		Message:  "No supported files changed.",
 		Comments: []model.LlmComment{},
 		ToolCalls: &jsonToolCalls{

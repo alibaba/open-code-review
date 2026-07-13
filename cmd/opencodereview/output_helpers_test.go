@@ -168,9 +168,8 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "fail"}}
-	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil)
-
-	w.Close()
+	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "")
+	_ = w.Close()
 	os.Stdout = old
 
 	if err != nil {
@@ -178,15 +177,20 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 
 	var out jsonOutput
-	json.Unmarshal(buf.Bytes(), &out)
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if out.Status != "completed_with_errors" {
 		t.Errorf("status = %q, want completed_with_errors", out.Status)
 	}
 	if !strings.Contains(out.Message, "errors") {
 		t.Errorf("message = %q, expected to mention errors", out.Message)
+	}
+	if out.TraceID != "abc123trace" {
+		t.Errorf("trace_id = %q, want abc123trace", out.TraceID)
 	}
 }
 
@@ -222,7 +226,7 @@ func TestOutputJSON(t *testing.T) {
 	}
 	err := outputJSON(comments)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 
 	if err != nil {
@@ -230,7 +234,7 @@ func TestOutputJSON(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 
 	var out jsonOutput
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
@@ -251,7 +255,7 @@ func TestOutputJSON_NoComments(t *testing.T) {
 
 	err := outputJSON(nil)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 
 	if err != nil {
@@ -259,10 +263,12 @@ func TestOutputJSON_NoComments(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 
 	var out jsonOutput
-	json.Unmarshal(buf.Bytes(), &out)
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if out.Message == "" {
 		t.Error("expected non-empty message when no comments")
 	}
@@ -275,9 +281,8 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	comments := []model.LlmComment{{Path: "b.go", Content: "test"}}
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "c.go", Message: "failed"}}
-	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3})
-
-	w.Close()
+	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "")
+	_ = w.Close()
 	os.Stdout = old
 
 	if err != nil {
@@ -285,10 +290,12 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 
 	var out jsonOutput
-	json.Unmarshal(buf.Bytes(), &out)
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if out.Status != "completed_with_errors" {
 		t.Errorf("status = %q, want completed_with_errors", out.Status)
 	}
@@ -301,6 +308,9 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 	if out.ToolCalls == nil || out.ToolCalls.Total != 3 {
 		t.Errorf("ToolCalls.Total = %v", out.ToolCalls)
 	}
+	if out.TraceID != "trace-xyz-789" {
+		t.Errorf("trace_id = %q, want trace-xyz-789", out.TraceID)
+	}
 }
 
 func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
@@ -309,9 +319,8 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "warning", Message: "something"}}
-	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil)
-
-	w.Close()
+	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "")
+	_ = w.Close()
 	os.Stdout = old
 
 	if err != nil {
@@ -319,10 +328,12 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 
 	var out jsonOutput
-	json.Unmarshal(buf.Bytes(), &out)
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if out.Status != "completed_with_warnings" {
 		t.Errorf("status = %q, want completed_with_warnings", out.Status)
 	}
@@ -336,9 +347,9 @@ func TestOutputJSONNoFiles(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := outputJSONNoFiles()
+	err := outputJSONNoFiles("test-trace-id-456")
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 
 	if err != nil {
@@ -346,12 +357,17 @@ func TestOutputJSONNoFiles(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 
 	var out jsonOutput
-	json.Unmarshal(buf.Bytes(), &out)
+	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if out.Status != "skipped" {
 		t.Errorf("status = %q, want skipped", out.Status)
+	}
+	if out.TraceID != "test-trace-id-456" {
+		t.Errorf("trace_id = %q, want test-trace-id-456", out.TraceID)
 	}
 }
 
@@ -364,10 +380,10 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	os.Stdout = w
 	fn()
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	return buf.String()
 }
 

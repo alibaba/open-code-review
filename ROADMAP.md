@@ -19,6 +19,9 @@ OpenCodeReview currently provides:
 - CI/CD integration (GitHub Actions, GitLab CI, etc.).
 - Multi-provider LLM support (OpenAI-compatible, Anthropic, Google Gemini,
   Amazon Bedrock, Azure OpenAI, etc.).
+- MCP server — expose OpenCodeReview over the
+  [Model Context Protocol](https://modelcontextprotocol.io/) so review
+  capabilities can be invoked from any MCP-compatible client.
 - Review rules engine with per-file pattern matching.
 - Multi-language documentation (English, Chinese, Japanese, Korean, Russian).
 
@@ -30,13 +33,15 @@ OpenCodeReview currently provides:
   PyCharm, and other JetBrains IDEs with the same capabilities as the
   existing VSCode extension.
 
-### MCP Integration
+### Delegate Mode
 
-- **Standard MCP server** — Expose OpenCodeReview as a
-  [Model Context Protocol](https://modelcontextprotocol.io/) server,
-  allowing users to integrate external context tools (documentation
-  retrieval, issue trackers, internal knowledge bases) into the review
-  process through the standard MCP interface.
+- **Subscription-friendly review** — An opt-in mode where `ocr` no longer
+  depends on a separately-configured LLM endpoint. Instead of calling an
+  LLM itself, `ocr` resolves the review scope, applies excludes, loads
+  review rules, injects background context, and collects the diffs, then
+  hands that off as a structured review task for the host coding agent
+  (e.g. Claude Code) to execute using its own agent loop and included
+  subscription usage — removing the need for a standalone API key.
 
 ### Ultra Mode
 

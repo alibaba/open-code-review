@@ -13,7 +13,6 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@alibaba-group/open-code-review"><img alt="npm" src="https://img.shields.io/npm/v/@alibaba-group/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
-  <a href="https://goreportcard.com/report/github.com/alibaba/open-code-review"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
   <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
@@ -107,6 +106,18 @@ npm install -g @alibaba-group/open-code-review
 ```
 
 インストール後、`ocr`コマンドがグローバルに利用可能になります。
+
+**更新**
+
+NPM でインストールした場合は、手動で最新バージョンへ更新できます：
+
+```bash
+npm install -g @alibaba-group/open-code-review@latest
+```
+
+NPM インストール版の `ocr` は、既定でバックグラウンドで新しいバージョンを確認し、自動的に更新します。自動更新を無効にするには、`OCR_NO_UPDATE=1` を設定してください。
+
+インストールスクリプトまたは手動ダウンロードしたバイナリでインストールした場合は、同じインストール/ダウンロードコマンドを再実行すると、ローカルのバイナリを最新リリースに置き換えられます。特定のリリースタグに固定する必要がある場合は `OCR_VERSION` を使います。
 
 **GitHub Releaseから**
 
@@ -280,6 +291,10 @@ ocr review --from main --to feature-branch
 # 単一コミット
 ocr review --commit abc123
 
+# 中断した範囲または単一 commit レビューを再開
+ocr session list
+ocr review --from main --to feature-branch --resume <session-id>
+
 # フルファイルスキャン — diffではなくファイル全体をレビュー（git履歴不要）
 ocr scan                          # リポジトリ全体をスキャン
 ocr scan --path internal/agent    # ディレクトリまたは特定のファイルをスキャン
@@ -415,11 +430,35 @@ ocr review \
 
 `--format json`フラグは、CIスクリプトでのパースに適した機械可読な結果を出力します。
 
+各指摘には2つの構造化フィールドが付与され、CI統合はコメント本文を再パースせずに並べ替え・グループ化・フィルタリング・ビルドのゲート判定を行えます：
+
+| フィールド | 許可される値 | 説明 |
+|-----------|-------------|------|
+| `category` | `bug`、`security`、`performance`、`maintainability`、`test`、`style`、`documentation`、`other` | 指摘が属するカテゴリ。 |
+| `severity` | `critical`、`high`、`medium`、`low` | 指摘の重要度。 |
+
+JSON出力ではこの2つのフィールドは`content`や`start_line`などと同じ階層に並びます。ターミナルでは、コメントの前にインラインの`[category · severity]`バッジとして表示され、重要度に応じて色分けされます。
+
 統合例は[`examples/`](./examples/)ディレクトリを参照してください：
 
 - [`github_actions/`](./examples/github_actions/) — GitHub Actions統合の例
 - [`gitlab_ci/`](./examples/gitlab_ci/) — GitLab CI統合の例
 - [`gitflic_ci/`](./examples/gitflic_ci/) — GitFlic CI統合の例
+
+#### GitHub Action
+
+GitHub 向けに、本リポジトリはリポジトリルートにすぐ使える composite Action（[`action.yml`](./action.yml)）を同梱しています。自分で `ocr review` をスクリプト化する代わりに、これを直接参照するだけで、checkout、OCR のインストール、レビューの実行、インラインコメントとサマリーコメントの投稿、アーティファクトのアップロード、再試行・冪等性までの全パイプラインを処理できます：
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+```
+
+再現性を高めるため、バージョンタグまたはコミット SHA に固定してください。完全なワークフローデモ、inputs/outputs の全一覧、コメント投稿モード（スティッキーサマリー、非破壊的なインクリメンタル投稿）については [`examples/github_actions/`](./examples/github_actions/) ディレクトリを参照してください。
 
 ## コマンド
 
@@ -434,6 +473,8 @@ ocr review \
 | `ocr config unset custom_providers.<name>` | — | カスタムプロバイダーを削除 |
 | `ocr llm test` | — | LLMの疎通テスト |
 | `ocr llm providers` | — | ビルトインLLMプロバイダーを一覧表示 |
+| `ocr session list` | `ocr sessions list`, `ocr session ls` | 保存済みレビューセッションを一覧表示 |
+| `ocr session show <id>` | `ocr sessions show <id>` | 1つのセッションとファイル単位のチェックポイントを表示 |
 | `ocr viewer` | `ocr v` | `localhost:5483`でWebUIセッションビューアーを起動 |
 | `ocr version` | — | バージョン情報を表示 |
 
@@ -447,16 +488,53 @@ ocr review \
 | `--commit` | `-c` | — | レビュー対象の単一コミット |
 | `--exclude` | — | — | カンマ区切りのgitignoreスタイルパターンでスキップ対象を指定；rule.jsonのexcludesとマージ |
 | `--preview` | `-p` | `false` | LLMを実行せずにレビュー対象ファイルをプレビュー |
+| `--resume` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開 |
 | `--format` | `-f` | `text` | 出力形式：`text`または`json` |
 | `--concurrency` | — | `8` | ファイルレビューの最大同時実行数 |
 | `--timeout` | — | `10` | 同時実行タスクのタイムアウト（分） |
 | `--audience` | — | `human` | `human`（進捗を表示）または`agent`（サマリーのみ） |
 | `--background` | `-b` | — | レビューのための任意の要件/ビジネスコンテキスト。`--commit`使用時に未指定の場合、コミットメッセージから自動取得 |
+| `--background-file` | `-B` | — | Markdownファイルから読み込む任意の要件/ビジネスコンテキスト。`--background`と併用した場合はインラインの値が先に配置されます |
 | `--model` | — | — | このレビューでLLMモデルを選択または上書き |
 | `--rule` | — | — | カスタムJSONレビュールールへのパス |
 | `--max-tools` | — | 組み込み値 | ファイルごとのツール呼び出しラウンドの上限。テンプレートのデフォルトより大きい場合のみ有効 |
 | `--max-git-procs` | — | 組み込み値 | gitサブプロセスの最大同時実行数 |
 | `--tools` | — | — | カスタムJSONツール設定へのパス |
+
+#### 再開可能なレビューとセッション
+
+すべての `ocr review` 実行は、`~/.opencodereview/sessions/` 配下にローカル
+セッションログを保存します。正常終了したテキスト出力はレビュー結果に集中し、session ID
+は表示しません。保存済みセッションは `ocr session list/show` で確認でき、
+`--format json` では機械可読出力に `session_id` が含まれます。範囲または単一 commit
+レビューが中断された場合は、保存済みセッションを一覧表示し、同じレビュー対象に一致するセッションから再開します:
+
+```bash
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to feature-branch --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+```
+
+再開は意図的に厳密です。範囲レビューと単一 commit レビューのみ対応し、ワークスペースレビューは再開できません。
+現在の `--from/--to` または `--commit` は保存済みセッションと一致する必要があります。`--preview` と `--resume` は併用できません。
+
+`--format json` を使用すると、再開した実行には次が含まれます:
+
+- `session_id` — 現在の実行の session ID
+- `resume.resumed_from` — 再開元の session ID
+- `resume.reused_files` — 保存済みチェックポイントから再利用したファイル数
+- `resume.rerun_files` — 現在の実行で再レビューしたファイル数
+
+### `ocr session`のフラグ
+
+| コマンド | フラグ | デフォルト | 説明 |
+|---------|------|---------|------|
+| `ocr session list` | `--repo` | カレントディレクトリ | 一覧表示するセッションのリポジトリ |
+| `ocr session list` | `--json` | `false` | セッション概要をJSONで出力 |
+| `ocr session list` | `--limit` | `20` | 一覧表示するセッション数の上限。`0` は無制限 |
+| `ocr session show <id>` | `--repo` | カレントディレクトリ | 確認するセッションのリポジトリ |
+| `ocr session show <id>` | `--json` | `false` | セッションメタデータとファイル単位の項目をJSONで出力 |
 
 ### `ocr scan`のフラグ
 
@@ -503,12 +581,24 @@ ocr review --from main --to my-feature --concurrency 4
 # 特定のコミットを詳細なJSON出力でレビュー
 ocr review --commit abc123 --format json --audience agent
 
+# 中断した範囲または単一 commit レビューを再開
+ocr session list
+ocr session show <session-id>
+ocr review --from main --to my-feature --resume <session-id>
+ocr review --commit abc123 --resume <session-id>
+
 # このレビューでモデルを選択またはオーバーライド
 ocr review --model claude-opus-4-6
 ocr review --commit abc123 --model claude-sonnet-4-6
 
 # 要件コンテキストを提供してより的確なレビューを実施
 ocr review --background "ログインAPIにレート制限を追加"
+
+# Markdownファイルから要件コンテキストを提供
+ocr review --background-file ./docs/my_business_context.md
+
+# インラインのコンテキストとローカルのコンテキストファイルを組み合わせる（両方が使用されます）
+ocr review --background "認証に注目" --background-file ./docs/my_business_context.md
 
 # カスタムレビュールールを使用
 ocr review --rule /path/to/my-rules.json
@@ -775,13 +865,22 @@ ocr config set telemetry.otlp_endpoint localhost:4317
 
 エクスポートデータにLLMのプロンプトとレスポンスを含めるには、`telemetry.content_logging`を設定してください。
 
+**プロトコル選択：** 環境変数 `OTEL_EXPORTER_OTLP_PROTOCOL` でエクスポートプロトコルを選択できます：
+
+| 値 | トランスポート | 説明 |
+|---|---|---|
+| `grpc`（デフォルト） | gRPC | デフォルトポート 4317 |
+| `http/protobuf` | HTTP | デフォルトポート 4318 |
+
+**Endpoint 形式：** `telemetry.otlp_endpoint` は `host:port` または `http://host:port` 形式のベースURLを指定します。パスを含める必要はありません。SDKが [OTLP仕様](https://opentelemetry.io/docs/specs/otlp/#otlphttp-request)に従いシグナルパス（例：`/v1/traces`）を自動的に付加します。
+
 ## コントリビューション
 
-開発環境のセットアップ、コーディングガイドライン、プルリクエストの提出方法については[CONTRIBUTING.md](CONTRIBUTING.md)を参照してください。
+このプロジェクトは、貢献してくださるすべての方々のおかげで成り立っています。開発環境のセットアップ、コーディングガイドライン、プルリクエストの提出方法については[CONTRIBUTING.md](CONTRIBUTING.md)を参照してください。
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/open-code-review&type=Date)](https://star-history.com/#alibaba/open-code-review&Date)
+<a href="https://github.com/alibaba/open-code-review/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=alibaba/open-code-review" />
+</a>
 
 ## ライセンス
 

@@ -68,17 +68,17 @@ export function ConfigView({
     setTab(next.tab);
     setCustomView(next.customView);
     setCustomSelection(next.customSelection);
-  }, [panelFocus, config, onClearConnTest]);
+  }, [panelFocus, config]);
 
   const wide = layout === 'panel';
   const t = useT();
   const stepper = (
     <div class="config-stepper">
-      <div class={`config-step-pill${step === 1 ? ' active' : ''}${cliStatus === 'installed' ? ' done' : ''}`}>
+      <div class={`config-step-pill${step === 1 ? ' done' : ''}`}>
         <span class="config-step-num">1</span>
         <span>{t('view.config.step1')}</span>
       </div>
-      <div class={`config-step-pill${step === 2 ? ' active' : ''}`}>
+      <div class={`config-step-pill${step === 2 ? ' done' : ''}`}>
         <span class="config-step-num">2</span>
         <span>{t('view.config.step2')}</span>
       </div>

@@ -10,6 +10,10 @@ import { generateHeadingId } from '../utils/headingId';
 // Initialize mermaid with dark theme
 mermaid.initialize({
   startOnLoad: false,
+  // 'strict' makes mermaid sanitize its own SVG output (DOMPurify internally):
+  // safe label HTML like <b>/<span> is kept, scripts/handlers are stripped.
+  // This is why we can inject the returned SVG directly below without re-sanitizing.
+  securityLevel: 'strict',
   theme: 'dark',
   themeVariables: {
     primaryColor: '#1a1a2e',
@@ -131,9 +135,16 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
         const id = `mermaid-diagram-${crypto.randomUUID()}`;
         const { svg } = await mermaid.render(id, code);
         if (cancelled) return;
-        // Replace the <pre> with rendered SVG
+        // Replace the <pre> with rendered SVG. The SVG is produced by mermaid with
+        // securityLevel:'strict' (see initialize above), which already sanitizes its
+        // output. Re-running DOMPurify over the whole SVG breaks it (namespaces,
+        // inline <style>, foreignObject labels), so we inject mermaid's trusted
+        // output directly.
         const wrapper = document.createElement('div');
         wrapper.className = 'mermaid-rendered';
+        // codeql[js/xss-through-dom] -- svg is derived from user-controlled mermaid code, but mermaid
+        // renders it with securityLevel:'strict' (see initialize above), which sanitizes the output via
+        // DOMPurify (scripts/handlers stripped). The trust boundary relies on that setting staying 'strict'.
         wrapper.innerHTML = svg;
         pre.replaceWith(wrapper);
       } catch (e) {
