@@ -28,7 +28,8 @@ const (
 
 // NormalizeProtocol canonicalizes protocol names. It is case-insensitive and
 // trims whitespace. Empty string is returned as-is (the caller decides the
-// default). Unknown values are returned unchanged so that ValidateProtocol can
+// default). Known protocol names are mapped to their canonical constants;
+// unknown values are lowercased and trimmed so that ValidateProtocol can
 // surface a precise error message rather than silently swallowing a typo.
 func NormalizeProtocol(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
