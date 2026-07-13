@@ -346,6 +346,16 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return err
 		}
 		cfg.Llm.Protocol = normalized
+		// Mirror use_anthropic so older binaries that predate llm.protocol
+		// still pick the right protocol family: anthropic -> true, the OpenAI
+		// family (including openai-responses) -> false.
+		if normalized == llm.ProtocolAnthropic {
+			t := true
+			cfg.Llm.UseAnthropic = &t
+		} else {
+			f := false
+			cfg.Llm.UseAnthropic = &f
+		}
 	case "llm.use_anthropic", "llm.UseAnthropic":
 		b, err := strconv.ParseBool(value)
 		if err != nil {

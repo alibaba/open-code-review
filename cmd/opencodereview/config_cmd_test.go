@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strconv"
 	"testing"
 
 	"github.com/open-code-review/open-code-review/internal/llm"
@@ -187,18 +188,55 @@ func TestSetConfigValueProviderEntryProtocol(t *testing.T) {
 }
 
 func TestSetConfigValueLlmProtocol(t *testing.T) {
-	cfg := &Config{}
+	// Each protocol mirrors use_anthropic so older binaries that predate
+	// llm.protocol still pick the right protocol family.
+	tests := []struct {
+		name          string
+		value         string
+		wantProtocol  string
+		wantUseAnthro bool
+	}{
+		{"anthropic mirrors true", "anthropic", llm.ProtocolAnthropic, true},
+		{"openai alias mirrors false", "openai", llm.ProtocolOpenAIChatCompletions, false},
+		{"openai-responses mirrors false", "openai-responses", llm.ProtocolOpenAIResponses, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			if err := setConfigValue(cfg, "llm.protocol", tt.value); err != nil {
+				t.Fatalf("setConfigValue llm.protocol: %v", err)
+			}
+			if cfg.Llm.Protocol != tt.wantProtocol {
+				t.Errorf("cfg.Llm.Protocol = %q, want %q", cfg.Llm.Protocol, tt.wantProtocol)
+			}
+			if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic != tt.wantUseAnthro {
+				got := "<nil>"
+				if cfg.Llm.UseAnthropic != nil {
+					got = strconv.FormatBool(*cfg.Llm.UseAnthropic)
+				}
+				t.Errorf("cfg.Llm.UseAnthropic = %s, want %v", got, tt.wantUseAnthro)
+			}
+		})
+	}
 
-	if err := setConfigValue(cfg, "llm.protocol", "openai-responses"); err != nil {
-		t.Fatalf("setConfigValue llm.protocol: %v", err)
-	}
-	if cfg.Llm.Protocol != llm.ProtocolOpenAIResponses {
-		t.Errorf("cfg.Llm.Protocol = %q, want %q", cfg.Llm.Protocol, llm.ProtocolOpenAIResponses)
-	}
+	t.Run("overwrites stale use_anthropic when switching protocol", func(t *testing.T) {
+		stale := true
+		cfg := &Config{}
+		cfg.Llm.UseAnthropic = &stale
+		if err := setConfigValue(cfg, "llm.protocol", "openai-responses"); err != nil {
+			t.Fatalf("setConfigValue llm.protocol: %v", err)
+		}
+		if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic {
+			t.Error("UseAnthropic should be false (overwriting stale true)")
+		}
+	})
 
-	if err := setConfigValue(cfg, "llm.protocol", "grpc"); err == nil {
-		t.Fatal("expected error for invalid llm.protocol")
-	}
+	t.Run("rejects invalid protocol", func(t *testing.T) {
+		cfg := &Config{}
+		if err := setConfigValue(cfg, "llm.protocol", "grpc"); err == nil {
+			t.Fatal("expected error for invalid llm.protocol")
+		}
+	})
 }
 
 func TestSetConfigValueProviderEntryInvalidKey(t *testing.T) {

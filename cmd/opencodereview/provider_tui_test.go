@@ -2819,7 +2819,7 @@ func TestApplyManualConfig_DoubleWritesProtocolAndUseAnthropic(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 
-	t.Run("responses writes Protocol only (no use_anthropic equivalent)", func(t *testing.T) {
+	t.Run("responses writes Protocol AND use_anthropic=false (openai-family fallback)", func(t *testing.T) {
 		cfg := &Config{}
 		result := providerTUIResult{
 			isManual: true,
@@ -2834,13 +2834,14 @@ func TestApplyManualConfig_DoubleWritesProtocolAndUseAnthropic(t *testing.T) {
 		if cfg.Llm.Protocol != llm.ProtocolOpenAIResponses {
 			t.Errorf("Protocol = %q, want %q", cfg.Llm.Protocol, llm.ProtocolOpenAIResponses)
 		}
-		// UseAnthropic should not be set for responses (no boolean equivalent).
-		if cfg.Llm.UseAnthropic != nil {
-			t.Errorf("UseAnthropic = %v, want nil for responses protocol", *cfg.Llm.UseAnthropic)
+		// UseAnthropic falls back to false so older binaries use the OpenAI
+		// family instead of wrongly defaulting to anthropic.
+		if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic {
+			t.Error("UseAnthropic should be false for responses protocol")
 		}
 	})
 
-	t.Run("responses clears stale use_anthropic from prior protocol", func(t *testing.T) {
+	t.Run("responses overwrites stale use_anthropic from prior protocol", func(t *testing.T) {
 		stale := true
 		cfg := &Config{}
 		cfg.Llm.UseAnthropic = &stale // simulate switching from anthropic
@@ -2854,8 +2855,8 @@ func TestApplyManualConfig_DoubleWritesProtocolAndUseAnthropic(t *testing.T) {
 		if err := applyManualConfig(configPath, cfg, result); err != nil {
 			t.Fatalf("applyManualConfig: %v", err)
 		}
-		if cfg.Llm.UseAnthropic != nil {
-			t.Errorf("UseAnthropic = %v, want nil (stale value should be cleared)", *cfg.Llm.UseAnthropic)
+		if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic {
+			t.Error("UseAnthropic should be false (overwriting stale true)")
 		}
 	})
 

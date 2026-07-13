@@ -114,21 +114,20 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	}
 	cfg.Llm.AuthHeader = authHeader
 	// Write the canonical protocol so resolver picks it up directly. Also
-	// mirror use_anthropic for the two protocols that have a boolean
-	// equivalent, so configs read correctly on older binaries that predate
-	// llm.protocol. openai-responses has no boolean equivalent; clear any
-	// stale use_anthropic so older binaries fall back to their default.
+	// mirror use_anthropic so configs read correctly on older binaries that
+	// predate llm.protocol: anthropic -> true, the OpenAI family (including
+	// openai-responses, which has no exact boolean equivalent) -> false, so
+	// older binaries pick the OpenAI auth header/endpoint instead of wrongly
+	// defaulting to anthropic.
 	protocol := llm.NormalizeProtocol(result.protocol)
 	cfg.Llm.Protocol = protocol
 	switch protocol {
 	case llm.ProtocolAnthropic:
 		t := true
 		cfg.Llm.UseAnthropic = &t
-	case llm.ProtocolOpenAIChatCompletions:
+	default:
 		f := false
 		cfg.Llm.UseAnthropic = &f
-	default:
-		cfg.Llm.UseAnthropic = nil
 	}
 
 	if err := saveConfig(configPath, cfg); err != nil {
