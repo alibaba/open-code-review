@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -199,13 +200,17 @@ type ProviderEntry struct {
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
 
-// MCPServerConfig holds configuration for a single MCP server (stdio transport).
+// MCPServerConfig holds configuration for a single MCP server.
+// Type "stdio" (default) uses a subprocess; type "remote" uses Streamable HTTP.
 type MCPServerConfig struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
-	Env     []string `json:"env,omitempty"`
-	Tools   []string `json:"tools,omitempty"`
-	Setup   string   `json:"setup,omitempty"`
+	Type    string            `json:"type,omitempty"` // "stdio" (default) or "remote"
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     []string          `json:"env,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Tools   []string          `json:"tools,omitempty"`
+	Setup   string            `json:"setup,omitempty"`
 }
 
 // Config represents the user-level configuration file (~/.opencodereview/config.json).
@@ -402,7 +407,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: command, args, env, tools, setup", key)
+		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key)
 	}
 	return nil
 }
@@ -568,6 +573,11 @@ func setMCPServerValue(cfg *Config, key, value string) error {
 	entry := cfg.MCPServers[name]
 
 	switch field {
+	case "type":
+		if value != "stdio" && value != "remote" {
+			return fmt.Errorf("invalid MCP server type %q: must be \"stdio\" or \"remote\"", value)
+		}
+		entry.Type = value
 	case "command":
 		if value == "" {
 			return fmt.Errorf("MCP server command cannot be empty")
@@ -591,6 +601,24 @@ func setMCPServerValue(cfg *Config, key, value string) error {
 			}
 		}
 		entry.Env = env
+	case "url":
+		if value == "" {
+			return fmt.Errorf("MCP server URL cannot be empty")
+		}
+		parsed, err := url.Parse(value)
+		if err != nil {
+			return fmt.Errorf("invalid MCP server URL %q: %w", value, err)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return fmt.Errorf("MCP server URL must use http or https scheme, got %q", parsed.Scheme)
+		}
+		entry.URL = value
+	case "headers":
+		parsed, err := parseMCPHeaders(value)
+		if err != nil {
+			return fmt.Errorf("invalid headers for %s: %w", key, err)
+		}
+		entry.Headers = parsed
 	case "tools":
 		var tools []string
 		if err := json.Unmarshal([]byte(value), &tools); err != nil {
@@ -612,11 +640,29 @@ func setMCPServerValue(cfg *Config, key, value string) error {
 	case "setup":
 		entry.Setup = value
 	default:
-		return fmt.Errorf("unknown MCP server field %q: supported fields are command, args, env, tools, setup", field)
+		return fmt.Errorf("unknown MCP server field %q: supported fields are type, command, args, env, url, headers, tools, setup", field)
 	}
 
 	cfg.MCPServers[name] = entry
 	return nil
+}
+
+// parseMCPHeaders parses a JSON object of header key-value pairs.
+// Example: {"Authorization": "Bearer $TOKEN", "X-Custom": "value"}
+func parseMCPHeaders(value string) (map[string]string, error) {
+	var m map[string]string
+	if err := json.Unmarshal([]byte(value), &m); err != nil {
+		return nil, fmt.Errorf("expected JSON object: %w", err)
+	}
+	for k, v := range m {
+		if k == "" {
+			return nil, fmt.Errorf("header name must not be empty")
+		}
+		if v == "" {
+			return nil, fmt.Errorf("header value for %q must not be empty", k)
+		}
+	}
+	return m, nil
 }
 
 func (c *Config) ensureTelemetry() {

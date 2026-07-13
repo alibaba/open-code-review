@@ -1211,3 +1211,72 @@ func TestConfigRoundTripPreservesTimeoutSec(t *testing.T) {
 		t.Errorf("llm.timeout_sec = %d, want 60 (lost in round-trip)", got)
 	}
 }
+
+func TestSetMCPServerValue_Type(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.type", "remote"); err != nil {
+		t.Fatalf("setMCPServerValue: %v", err)
+	}
+	if cfg.MCPServers["gh"].Type != "remote" {
+		t.Errorf("Type = %q, want %q", cfg.MCPServers["gh"].Type, "remote")
+	}
+}
+
+func TestSetMCPServerValue_TypeInvalid(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.type", "invalid"); err == nil {
+		t.Fatal("expected error for invalid type, got nil")
+	}
+}
+
+func TestSetMCPServerValue_URL(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.url", "https://api.example.com/mcp"); err != nil {
+		t.Fatalf("setMCPServerValue: %v", err)
+	}
+	if cfg.MCPServers["gh"].URL != "https://api.example.com/mcp" {
+		t.Errorf("URL = %q, want %q", cfg.MCPServers["gh"].URL, "https://api.example.com/mcp")
+	}
+}
+
+func TestSetMCPServerValue_URLEmpty(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.url", ""); err == nil {
+		t.Fatal("expected error for empty URL, got nil")
+	}
+}
+
+func TestSetMCPServerValue_URLInvalidScheme(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.url", "ftp://example.com/mcp"); err == nil {
+		t.Fatal("expected error for non-http scheme, got nil")
+	}
+}
+
+func TestSetMCPServerValue_Headers(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.headers", `{"Authorization":"Bearer $TOKEN","X-Custom":"val"}`); err != nil {
+		t.Fatalf("setMCPServerValue: %v", err)
+	}
+	h := cfg.MCPServers["gh"].Headers
+	if h["Authorization"] != "Bearer $TOKEN" {
+		t.Errorf("Authorization = %q, want %q", h["Authorization"], "Bearer $TOKEN")
+	}
+	if h["X-Custom"] != "val" {
+		t.Errorf("X-Custom = %q, want %q", h["X-Custom"], "val")
+	}
+}
+
+func TestSetMCPServerValue_HeadersInvalidJSON(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.headers", "not-json"); err == nil {
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
+}
+
+func TestSetMCPServerValue_HeadersEmptyValue(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.headers", `{"Authorization":""}`); err == nil {
+		t.Fatal("expected error for empty header value, got nil")
+	}
+}

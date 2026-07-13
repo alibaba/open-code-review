@@ -3,10 +3,44 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+func TestHeaderTransport(t *testing.T) {
+	headers := map[string]string{
+		"Authorization": "Bearer test-token",
+		"X-Custom":      "custom-value",
+	}
+	transport := &headerTransport{
+		base:    http.DefaultTransport,
+		headers: headers,
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want %q", got, "Bearer test-token")
+		}
+		if got := r.Header.Get("X-Custom"); got != "custom-value" {
+			t.Errorf("X-Custom = %q, want %q", got, "custom-value")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	client := &http.Client{Transport: transport}
+	resp, err := client.Get(ts.URL)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
 
 func TestContentToText_SingleText(t *testing.T) {
 	contents := []mcp.Content{
