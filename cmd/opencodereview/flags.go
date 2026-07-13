@@ -324,6 +324,11 @@ Examples:
   ocr config set mcp_servers.codegraph.args '["-y","@anthropic/codegraph-mcp"]'
   ocr config set mcp_servers.codegraph.env '["CODEGRAPH_TOKEN=xxx"]'
 
+  # Remote MCP server (Streamable HTTP transport)
+  ocr config set mcp_servers.remote-srv.type remote
+  ocr config set mcp_servers.remote-srv.url https://mcp.example.com/mcp
+  ocr config set mcp_servers.remote-srv.headers '{"Authorization":"Bearer $MCP_TOKEN"}'
+
   # Delete an MCP server
   ocr config unset mcp_servers.codegraph
 
@@ -339,5 +344,5 @@ Examples:
 Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging
 Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers
 Protocol values: anthropic, openai, openai-responses
-MCP server fields: command, args, env, tools, setup`)
+MCP server fields: type, command, args, env, url, headers, tools, setup`)
 }
