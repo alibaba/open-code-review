@@ -418,7 +418,6 @@ h3 { margin: 1.5rem 0 0.75rem; color: var(--text-strong); }
     padding: 0.15em 0.35em;
     border-radius: 4px;
     font-size: 0.88em;
-   
 }
 .response-text .md-h1 { font-size: 1.15em; font-weight: 700; margin: 0.6em 0 0.3em; color: var(--text-strong); }
 .response-text .md-h2 { font-size: 1.05em; font-weight: 600; margin: 0.5em 0 0.25em; color: var(--text-strong); }
