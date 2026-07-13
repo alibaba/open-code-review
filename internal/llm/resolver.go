@@ -290,6 +290,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	if isPreset {
 		url = preset.BaseURL
 		protocol = NormalizeProtocol(preset.Protocol)
+		if err := ValidateProtocol(protocol); err != nil {
+			return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+		}
 		authHeader = preset.AuthHeader
 		if entry.URL != "" {
 			url = entry.URL

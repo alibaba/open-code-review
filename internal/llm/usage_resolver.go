@@ -18,12 +18,18 @@ var promptTokensPaths = []string{
 	"usage.prompt_tokens",      // OpenAI standard
 	"prompt_tokens",            // flat at root
 	"data.usage.prompt_tokens", // wrapped in data layer
+	"usage.input_tokens",       // OpenAI Responses API
+	"input_tokens",             // Responses flat at root
+	"data.usage.input_tokens",  // wrapped Responses API
 }
 
 var completionTokensPaths = []string{
 	"usage.completion_tokens",      // OpenAI standard
 	"completion_tokens",            // flat at root
 	"data.usage.completion_tokens", // wrapped in data layer
+	"usage.output_tokens",          // OpenAI Responses API
+	"output_tokens",                // Responses flat at root
+	"data.usage.output_tokens",     // wrapped Responses API
 }
 
 var cacheReadTokensPaths = []string{
@@ -32,6 +38,8 @@ var cacheReadTokensPaths = []string{
 	"data.usage.cache_read_input_tokens",             // wrapped Anthropic-compatible proxy
 	"usage.prompt_tokens_details.cached_tokens",      // OpenAI-compatible providers
 	"data.usage.prompt_tokens_details.cached_tokens", // wrapped OpenAI-compatible providers
+	"usage.input_tokens_details.cached_tokens",       // OpenAI Responses API
+	"data.usage.input_tokens_details.cached_tokens",  // wrapped OpenAI Responses API
 }
 
 var cacheWriteTokensPaths = []string{

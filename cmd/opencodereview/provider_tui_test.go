@@ -2840,6 +2840,25 @@ func TestApplyManualConfig_DoubleWritesProtocolAndUseAnthropic(t *testing.T) {
 		}
 	})
 
+	t.Run("responses clears stale use_anthropic from prior protocol", func(t *testing.T) {
+		stale := true
+		cfg := &Config{}
+		cfg.Llm.UseAnthropic = &stale // simulate switching from anthropic
+		result := providerTUIResult{
+			isManual: true,
+			url:      "https://example.com/v1",
+			model:    "gpt-5.4",
+			apiKey:   "tok",
+			protocol: llm.ProtocolOpenAIResponses,
+		}
+		if err := applyManualConfig(configPath, cfg, result); err != nil {
+			t.Fatalf("applyManualConfig: %v", err)
+		}
+		if cfg.Llm.UseAnthropic != nil {
+			t.Errorf("UseAnthropic = %v, want nil (stale value should be cleared)", *cfg.Llm.UseAnthropic)
+		}
+	})
+
 	t.Run("anthropic writes Protocol AND use_anthropic=true (back-compat)", func(t *testing.T) {
 		cfg := &Config{}
 		result := providerTUIResult{

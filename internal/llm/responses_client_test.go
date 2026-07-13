@@ -417,6 +417,30 @@ func TestMapResponsesResponse_StatusIncomplete(t *testing.T) {
 	}
 }
 
+func TestMapResponsesResponse_StatusFailedAndCancelled(t *testing.T) {
+	for _, status := range []string{"failed", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
+			body := `{
+				"id":"resp_err",
+				"object":"response",
+				"model":"gpt-5.4",
+				"status":"` + status + `",
+				"output":[
+					{"type":"message","role":"assistant","content":[{"type":"output_text","text":""}]}
+				],
+				"usage":{"input_tokens":5,"output_tokens":0,"total_tokens":5}
+			}`
+			sdkResp := unmarshalResponsesBody(t, body)
+
+			resp := client.mapResponsesResponse(sdkResp)
+			if resp.Choices[0].FinishReason != "error" {
+				t.Errorf("FinishReason = %q, want %q for %s status", resp.Choices[0].FinishReason, "error", status)
+			}
+		})
+	}
+}
+
 func TestMapResponsesResponse_Usage(t *testing.T) {
 	client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
 	body := `{

@@ -121,3 +121,32 @@ func TestResolveUsageCacheCreationTokensPriority(t *testing.T) {
 		t.Errorf("CacheWriteTokens = %d, want 30 (Anthropic top-level path should win over prompt_tokens_details)", usage.CacheWriteTokens)
 	}
 }
+
+func TestResolveUsageResponsesAPIFieldNames(t *testing.T) {
+	usage := resolveUsage([]byte(`{
+		"usage": {
+			"input_tokens": 100,
+			"output_tokens": 50,
+			"total_tokens": 150,
+			"input_tokens_details": {
+				"cached_tokens": 80
+			}
+		}
+	}`))
+
+	if usage == nil {
+		t.Fatal("resolveUsage returned nil")
+	}
+	if usage.PromptTokens != 100 {
+		t.Errorf("PromptTokens = %d, want 100 (from input_tokens)", usage.PromptTokens)
+	}
+	if usage.CompletionTokens != 50 {
+		t.Errorf("CompletionTokens = %d, want 50 (from output_tokens)", usage.CompletionTokens)
+	}
+	if usage.TotalTokens != 150 {
+		t.Errorf("TotalTokens = %d, want 150", usage.TotalTokens)
+	}
+	if usage.CacheReadTokens != 80 {
+		t.Errorf("CacheReadTokens = %d, want 80 (from input_tokens_details.cached_tokens)", usage.CacheReadTokens)
+	}
+}

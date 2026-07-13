@@ -116,8 +116,8 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	// Write the canonical protocol so resolver picks it up directly. Also
 	// mirror use_anthropic for the two protocols that have a boolean
 	// equivalent, so configs read correctly on older binaries that predate
-	// llm.protocol. openai-responses has no boolean equivalent and is left
-	// out of use_anthropic (older binaries would fall back to their default).
+	// llm.protocol. openai-responses has no boolean equivalent; clear any
+	// stale use_anthropic so older binaries fall back to their default.
 	protocol := llm.NormalizeProtocol(result.protocol)
 	cfg.Llm.Protocol = protocol
 	switch protocol {
@@ -127,6 +127,8 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	case llm.ProtocolOpenAIChatCompletions:
 		f := false
 		cfg.Llm.UseAnthropic = &f
+	default:
+		cfg.Llm.UseAnthropic = nil
 	}
 
 	if err := saveConfig(configPath, cfg); err != nil {

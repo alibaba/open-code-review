@@ -227,16 +227,19 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 	finishReason := mapResponsesFinishReason(string(sdkResp.Status), toolCalls)
 
 	var usage *UsageInfo
-	u := sdkResp.Usage
-	if u.InputTokens > 0 || u.OutputTokens > 0 || u.TotalTokens > 0 {
-		usage = &UsageInfo{
-			PromptTokens:     u.InputTokens,
-			CompletionTokens: u.OutputTokens,
-			CacheReadTokens:  u.InputTokensDetails.CachedTokens,
-			TotalTokens:      u.TotalTokens,
-		}
+	rawUsage := resolveUsage([]byte(sdkResp.RawJSON()))
+	if rawUsage != nil {
+		usage = rawUsage
 	} else {
-		usage = resolveUsage([]byte(sdkResp.RawJSON()))
+		u := sdkResp.Usage
+		if u.InputTokens > 0 || u.OutputTokens > 0 || u.TotalTokens > 0 {
+			usage = &UsageInfo{
+				PromptTokens:     u.InputTokens,
+				CompletionTokens: u.OutputTokens,
+				CacheReadTokens:  u.InputTokensDetails.CachedTokens,
+				TotalTokens:      u.TotalTokens,
+			}
+		}
 	}
 
 	return &ChatResponse{
@@ -258,6 +261,7 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 // mapResponsesFinishReason applies the coarse-grained mapping from decision 8:
 //   - completed -> stop
 //   - incomplete -> length
+//   - failed/cancelled -> error
 //   - any tool calls present -> tool_calls (overrides status, since a model
 //     that emitted function calls is mid-tool-loop regardless of API status)
 //   - otherwise -> stop (defensive default; keeps the loop progressing)
@@ -268,6 +272,8 @@ func mapResponsesFinishReason(status string, toolCalls []ToolCall) string {
 	switch status {
 	case string(responses.ResponseStatusIncomplete):
 		return "length"
+	case string(responses.ResponseStatusFailed), string(responses.ResponseStatusCancelled):
+		return "error"
 	default:
 		return "stop"
 	}
