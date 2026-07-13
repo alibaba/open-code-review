@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -63,20 +64,24 @@ func NewClient(ctx context.Context, name, command string, args, env []string, di
 
 // NewRemoteClient connects to a remote MCP server via Streamable HTTP transport.
 // Header values may contain $ENV_VAR references which are expanded at runtime.
+// Returns an error if any header value expands to an empty string.
 func NewRemoteClient(ctx context.Context, name, url string, headers map[string]string, version string) (*Client, error) {
-	httpClient := &http.Client{}
+	var expanded map[string]string
 	if len(headers) > 0 {
-		expanded := make(map[string]string, len(headers))
+		expanded = make(map[string]string, len(headers))
 		for k, v := range headers {
 			expanded[k] = os.Expand(v, os.Getenv)
 			if expanded[k] == "" {
-				fmt.Fprintf(os.Stderr, "[ocr] WARNING: MCP server %q header %q expanded to empty value — check your environment variables\n", name, k)
+				return nil, fmt.Errorf("MCP server %q header %q expanded to empty value — check your environment variables", name, k)
 			}
 		}
-		httpClient.Transport = &headerTransport{
-			base:    http.DefaultTransport,
-			headers: expanded,
-		}
+	}
+	httpClient := &http.Client{
+		Transport: &headerTransport{
+			base:       http.DefaultTransport,
+			headers:    expanded,
+			serverName: name,
+		},
 	}
 
 	client := mcp.NewClient(
@@ -113,10 +118,12 @@ func NewRemoteClient(ctx context.Context, name, url string, headers map[string]s
 	}, nil
 }
 
-// headerTransport injects custom headers into every HTTP request.
+// headerTransport injects custom headers into every HTTP request and surfaces
+// clear authentication errors for 401/403 responses.
 type headerTransport struct {
-	base    http.RoundTripper
-	headers map[string]string
+	base       http.RoundTripper
+	headers    map[string]string
+	serverName string
 }
 
 func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -124,7 +131,21 @@ func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	for k, v := range t.headers {
 		cloned.Header.Set(k, v)
 	}
-	return t.base.RoundTrip(cloned)
+	resp, err := t.base.RoundTrip(cloned)
+	if err != nil {
+		return nil, err
+	}
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("remote MCP server %q returned HTTP 401 Unauthorized — check your token/header configuration", t.serverName)
+	case http.StatusForbidden:
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("remote MCP server %q returned HTTP 403 Forbidden — your credentials may lack required permissions", t.serverName)
+	}
+	return resp, nil
 }
 
 func (c *Client) Name() string       { return c.name }

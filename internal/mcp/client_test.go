@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -16,8 +17,9 @@ func TestHeaderTransport(t *testing.T) {
 		"X-Custom":      "custom-value",
 	}
 	transport := &headerTransport{
-		base:    http.DefaultTransport,
-		headers: headers,
+		base:       http.DefaultTransport,
+		headers:    headers,
+		serverName: "test-server",
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +41,48 @@ func TestHeaderTransport(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestHeaderTransport_401(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+
+	transport := &headerTransport{
+		base:       http.DefaultTransport,
+		headers:    map[string]string{"Authorization": "Bearer bad-token"},
+		serverName: "auth-server",
+	}
+	client := &http.Client{Transport: transport}
+	_, err := client.Get(ts.URL)
+	if err == nil {
+		t.Fatal("expected error for 401, got nil")
+	}
+	if got := err.Error(); !strings.Contains(got, "401 Unauthorized") || !strings.Contains(got, "auth-server") {
+		t.Errorf("error = %q, want mention of 401 and server name", got)
+	}
+}
+
+func TestHeaderTransport_403(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	transport := &headerTransport{
+		base:       http.DefaultTransport,
+		headers:    map[string]string{"Authorization": "Bearer limited-token"},
+		serverName: "perm-server",
+	}
+	client := &http.Client{Transport: transport}
+	_, err := client.Get(ts.URL)
+	if err == nil {
+		t.Fatal("expected error for 403, got nil")
+	}
+	if got := err.Error(); !strings.Contains(got, "403 Forbidden") || !strings.Contains(got, "perm-server") {
+		t.Errorf("error = %q, want mention of 403 and server name", got)
 	}
 }
 

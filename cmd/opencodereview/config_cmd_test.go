@@ -1267,6 +1267,13 @@ func TestSetMCPServerValue_Headers(t *testing.T) {
 	}
 }
 
+func TestSetMCPServerValue_URLNoHost(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.url", "http://"); err == nil {
+		t.Fatal("expected error for URL without host, got nil")
+	}
+}
+
 func TestSetMCPServerValue_HeadersInvalidJSON(t *testing.T) {
 	cfg := &Config{}
 	if err := setMCPServerValue(cfg, "mcp_servers.gh.headers", "not-json"); err == nil {

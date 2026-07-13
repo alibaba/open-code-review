@@ -612,6 +612,9 @@ func setMCPServerValue(cfg *Config, key, value string) error {
 		if parsed.Scheme != "http" && parsed.Scheme != "https" {
 			return fmt.Errorf("MCP server URL must use http or https scheme, got %q", parsed.Scheme)
 		}
+		if parsed.Host == "" {
+			return fmt.Errorf("MCP server URL %q must include a host", value)
+		}
 		entry.URL = value
 	case "headers":
 		parsed, err := parseMCPHeaders(value)
