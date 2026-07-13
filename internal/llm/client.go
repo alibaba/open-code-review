@@ -205,6 +205,14 @@ type ClientConfig struct {
 	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
 	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
 	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+	// SessionKey is the fallback prompt-cache affinity key
+	// for requests whose context carries none (see ContextWithSessionKey).
+	//
+	// Review and scan runs tag every request context with the real session's ID,
+	// so this fallback only serves session-less callers such as `ocr llm test`.
+	//
+	// Auto-generated when empty. The effective key replaces `SessionKeyTemplateVar` in Extra* values.
+	SessionKey string
 
 	// retryCollector receives one record per real HTTP attempt. It is
 	// unexported because it is not configuration: it is a handle on the current
@@ -354,9 +362,14 @@ type OpenAIClient struct {
 }
 
 // NewOpenAIClient creates a new OpenAI-compatible LLM client.
+// ExtraHeaders are applied per request (not baked into the SDK client) so
+// SessionKeyTemplateVar can expand to the session key each request carries.
 func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
 	}
 	baseURL := strings.TrimRight(cfg.URL, "/")
 	if !strings.HasSuffix(baseURL, "/chat/completions") {
@@ -371,9 +384,6 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithMaxRetries(5),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
-	}
-	for k, v := range cfg.ExtraHeaders {
-		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
@@ -423,8 +433,16 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 
 	params := c.buildOpenAIParams(model, req)
 
+	sessionKey := c.cfg.SessionKey
+	if k := SessionKeyFromContext(ctx); k != "" {
+		sessionKey = k
+	}
+
 	var opts []openaiopt.RequestOption
-	for k, v := range c.cfg.ExtraBody {
+	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
+		opts = append(opts, openaiopt.WithHeader(k, v))
+	}
+	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
 		// Skip the "stream" key here. The streaming decision below uses a
 		// dedicated boolean check, and when streaming is enabled the SDK's
 		// NewStreaming method sets stream=true on the wire itself. When
@@ -709,9 +727,16 @@ type AnthropicClient struct {
 }
 
 // NewAnthropicClient creates a new Anthropic Messages API client.
+// The Anthropic API manages prompt-cache affinity server-side, so unlike the
+// OpenAI client no session key body field is injected; the key is still
+// available to ExtraHeaders/ExtraBody via SessionKeyTemplateVar, applied per
+// request so it can expand to the session key each request carries.
 func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
 	}
 	if !strings.HasSuffix(cfg.URL, "/v1/messages") && !strings.HasSuffix(cfg.URL, "/v1/messages/") {
 		baseURL := strings.TrimRight(cfg.URL, "/")
@@ -747,9 +772,6 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		)
 	}
 
-	for k, v := range cfg.ExtraHeaders {
-		opts = append(opts, option.WithHeader(k, v))
-	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
 	}
@@ -788,8 +810,16 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		return nil, err
 	}
 
+	sessionKey := c.cfg.SessionKey
+	if k := SessionKeyFromContext(ctx); k != "" {
+		sessionKey = k
+	}
+
 	var opts []option.RequestOption
-	for k, v := range c.cfg.ExtraBody {
+	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
+		opts = append(opts, option.WithHeader(k, v))
+	}
+	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
 		// This client is non-streaming: it calls Messages.New, which expects a
 		// single JSON body. If a provider config sets extra_body.stream=true,
 		// forwarding it here makes the API answer with SSE and every call fails

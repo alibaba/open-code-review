@@ -1591,6 +1591,38 @@ func TestResolveEndpoint_EnvExtraHeadersMergedWithConfigFile(t *testing.T) {
 	}
 }
 
+func TestResolveEndpoint_SessionKeyPlaceholderPreserved(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:       "sk-test",
+				URL:          "https://gateway.example.com/v1",
+				Protocol:     "openai",
+				Model:        "some-model",
+				ExtraHeaders: map[string]string{"x-session-affinity": "{ocr_session_key}"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The template placeholder must survive resolution untouched.
+	// Expansion happens in the client, per request.
+	if v := ep.ExtraHeaders["x-session-affinity"]; v != "{ocr_session_key}" {
+		t.Errorf("ExtraHeaders[\"x-session-affinity\"] = %q, want raw placeholder", v)
+	}
+}
+
 func TestResolveEndpoint_LegacyLlmExtraHeaders(t *testing.T) {
 	clearAllEnv(t)
 

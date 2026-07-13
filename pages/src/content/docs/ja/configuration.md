@@ -214,6 +214,27 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
 ```
 
+### プロンプトキャッシュのセッションアフィニティ
+
+OCR はすべての LLM 会話ごとに、レビューセッションとその中のタスクにスコープされた
+プロンプトキャッシュ・アフィニティキー（`<セッションID>-<タスク種別>-<スコープハッシュ>`）を
+導出します。プロンプトキャッシュはプレフィックス単位でマッチするため、会話ごとのキーは、
+実行全体を 1 つのホットキーに集中させず、成長していく各会話（例：ファイルごとの
+レビューツールループ）を一貫したキャッシュノードに保ちます。キーのセッション ID
+プレフィックスにより、プロバイダー側のキャッシュログを `ocr session` の記録と照合できます。
+
+利用するには、プロバイダーがキーを期待する場所の `extra_headers` または `extra_body` の
+値に `{ocr_session_key}` テンプレート変数を埋め込みます。OCR がリクエストごとにその会話の
+キーに置換し、設定がなければ何も送信しません。
+
+```bash
+# OpenAI: prompt_cache_key リクエストボディフィールド
+ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_key}"}'
+
+# ヘッダーでルーティングするゲートウェイ（Cloudflare、Fireworks、Mistral は通常 x-session-affinity を使用）
+ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
+```
+
 ## レビュー言語を設定する
 
 `language` はレビューコメントをどの言語で出力するかを決めます。未設定の場合は

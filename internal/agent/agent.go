@@ -264,6 +264,11 @@ func (a *Agent) newRequestMeta(filePath string, taskType session.TaskType, reque
 
 // Run executes the full review pipeline: parse diffs -> plan per file -> LLM tool-loop -> collect comments.
 func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
+	// Base prompt-cache affinity key for any LLM request in this run that a task doesn't re-scope.
+	// Each task conversation (plan, per-file main loop, compression, ...) refines it with llm.SessionTaskKey where it starts,
+	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
+	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
+
 	// Step 1: Parse diffs
 	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
 	if err := a.loadDiffs(ctx); err != nil {
@@ -1301,6 +1306,8 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 
 	fs := a.session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.ReviewFilterTask), newPath))
 	startTime := time.Now()
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.ReviewFilterTask, rec.RequestNo))
 
@@ -1525,6 +1532,8 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 
 	fs := a.session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.PlanTask), newPath))
 	startTime := time.Now()
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.PlanTask, rec.RequestNo))
 
