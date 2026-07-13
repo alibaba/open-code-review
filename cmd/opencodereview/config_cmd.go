@@ -362,6 +362,13 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid boolean for llm.use_anthropic: %w", err)
 		}
 		cfg.Llm.UseAnthropic = &b
+		// Mirror protocol so the two never disagree: true -> anthropic, the
+		// OpenAI family -> openai (chat-completions, the legacy default).
+		if b {
+			cfg.Llm.Protocol = llm.ProtocolAnthropic
+		} else {
+			cfg.Llm.Protocol = llm.ProtocolOpenAIChatCompletions
+		}
 	case "language", "Language":
 		cfg.Language = value
 	case "telemetry.enabled", "telemetry.Enabled":

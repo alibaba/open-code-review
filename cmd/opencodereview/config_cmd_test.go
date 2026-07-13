@@ -787,13 +787,46 @@ func TestSetConfigValueLlmModel(t *testing.T) {
 }
 
 func TestSetConfigValueLlmUseAnthropic(t *testing.T) {
-	cfg := &Config{}
-	if err := setConfigValue(cfg, "llm.use_anthropic", "false"); err != nil {
-		t.Fatalf("setConfigValue: %v", err)
+	// use_anthropic mirrors protocol so the two never disagree.
+	tests := []struct {
+		name          string
+		value         string
+		wantUseAnthro bool
+		wantProtocol  string
+	}{
+		{"true mirrors anthropic", "true", true, llm.ProtocolAnthropic},
+		{"false mirrors openai", "false", false, llm.ProtocolOpenAIChatCompletions},
 	}
-	if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic != false {
-		t.Errorf("UseAnthropic = %v", cfg.Llm.UseAnthropic)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			if err := setConfigValue(cfg, "llm.use_anthropic", tt.value); err != nil {
+				t.Fatalf("setConfigValue: %v", err)
+			}
+			if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic != tt.wantUseAnthro {
+				got := "<nil>"
+				if cfg.Llm.UseAnthropic != nil {
+					got = strconv.FormatBool(*cfg.Llm.UseAnthropic)
+				}
+				t.Errorf("UseAnthropic = %s, want %v", got, tt.wantUseAnthro)
+			}
+			if cfg.Llm.Protocol != tt.wantProtocol {
+				t.Errorf("Protocol = %q, want %q", cfg.Llm.Protocol, tt.wantProtocol)
+			}
+		})
 	}
+
+	t.Run("overwrites stale protocol when switching use_anthropic", func(t *testing.T) {
+		// Simulate a prior openai-responses config; setting use_anthropic=true
+		// must repoint protocol to anthropic so they never disagree.
+		cfg := &Config{Llm: LlmConfig{Protocol: llm.ProtocolOpenAIResponses}}
+		if err := setConfigValue(cfg, "llm.use_anthropic", "true"); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+		if cfg.Llm.Protocol != llm.ProtocolAnthropic {
+			t.Errorf("Protocol = %q, want %q", cfg.Llm.Protocol, llm.ProtocolAnthropic)
+		}
+	})
 }
 
 func TestSetConfigValueLlmUseAnthropicInvalid(t *testing.T) {
