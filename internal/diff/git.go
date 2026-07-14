@@ -310,7 +310,7 @@ func (p *Provider) untrackedFileDiffs(ctx context.Context) ([]string, error) {
 }
 
 func (p *Provider) untrackedFilesList(ctx context.Context) ([]string, error) {
-	out, err := p.runGit(ctx, "ls-files", "--others", "--exclude-standard")
+	out, err := p.runGit(ctx, "-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard")
 	if err != nil || out == "" {
 		return nil, nil
 	}

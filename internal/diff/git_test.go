@@ -146,6 +146,31 @@ func TestDiffModesPreserveNonASCIIPaths(t *testing.T) {
 	}
 }
 
+func TestWorkspaceDiffPreservesNonASCIIUntrackedPath(t *testing.T) {
+	repo, trackedPath := initRepoWithNonASCIIChange(t)
+	runGitTest(t, repo, "checkout", "--", trackedPath)
+
+	untrackedPath := "src/café/(authenticated)/新增.ts"
+	if err := os.WriteFile(filepath.Join(repo, filepath.FromSlash(untrackedPath)), []byte("untracked\n"), 0o644); err != nil {
+		t.Fatalf("write non-ASCII untracked file: %v", err)
+	}
+
+	provider := NewWorkspaceProvider(repo, gitcmd.New(0))
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff returned error: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("got %d diffs, want 1: %+v", len(diffs), diffs)
+	}
+	if diffs[0].NewPath != untrackedPath {
+		t.Errorf("NewPath = %q, want %q", diffs[0].NewPath, untrackedPath)
+	}
+	if diffs[0].NewFileContent != "untracked\n" {
+		t.Errorf("NewFileContent = %q, want %q", diffs[0].NewFileContent, "untracked\n")
+	}
+}
+
 // TestWorkspaceDiffSurvivesExternalDiffTool guards against issue #82: when a
 // user has configured an external diff tool (GIT_EXTERNAL_DIFF or
 // diff.external), git diff/show emit the tool's output instead of unified diff
