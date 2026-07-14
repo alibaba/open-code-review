@@ -832,16 +832,6 @@ ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
 | `OCR_LLM_TIMEOUT` | 每次请求的 HTTP 超时时间（秒），覆盖配置文件中的 `timeout_sec` |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic，`false` = OpenAI Chat Completions（兼容字段，推荐改用 `OCR_LLM_PROTOCOL`） |
 
-### OpenAI Responses API 注意事项
-
-使用 `protocol: openai-responses` 时，OCR 会把每一轮请求作为完全自包含的输入发送（无状态重放，不使用 `previous_response_id`），因此 Agent 主循环无需任何协议专属改动。有两个实现细节值得了解：
-
-- **`store=false`**：请求显式不保留服务端响应以保护隐私。在 `store=false` 下 OpenAI 的自动 prefix caching 是否仍然生效，官方文档表述不明确——如果你关心缓存命中率，可在 `ocr viewer` 会话 JSONL 中查看 `usage.input_tokens_details.cached_tokens` 自行验证。
-- **`prompt_cache_key`**：由 `sha256(instructions)[:32]` 派生，在每条带 system 指令的请求中发送，便于 OpenAI 把相同 prompt 的请求归桶做 prefix 匹配。该 key 不携带任何业务语义，也不含文件维度（文件内容位于可缓存前缀之后，不影响命中）。
-
-Phase 字段（assistant 消息上的 `commentary` / `final_answer`，`gpt-5.3-codex` 及以后模型使用）目前在响应映射阶段被丢弃。当前 GPT-5.x / o-系列模型不产生 Phase，短期无影响；待这些模型进入支持范围时会补充支持。
-
-
 ## 遥测
 
 OpenTelemetry 集成，用于可观测性（spans、metrics）。默认关闭。

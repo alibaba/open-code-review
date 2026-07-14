@@ -850,16 +850,6 @@ ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
 | `OCR_LLM_TIMEOUT` | Per-request HTTP timeout in seconds (overrides config file `timeout_sec`) |
 | `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI Chat Completions (legacy; prefer `OCR_LLM_PROTOCOL`) |
 
-### OpenAI Responses API Notes
-
-When using `protocol: openai-responses`, OCR sends each turn as a fully self-contained request (stateless replay — no `previous_response_id`) so the agent loop needs no protocol-specific changes. Two implementation details worth knowing:
-
-- **`store=false`**: requests explicitly opt out of server-side response retention for privacy. Whether OpenAI's automatic prefix caching still applies under `store=false` is not fully documented — verify by inspecting `usage.input_tokens_details.cached_tokens` in `ocr viewer` session JSONL if cache hit rate matters to you.
-- **`prompt_cache_key`**: derived from `sha256(instructions)[:32]` and sent on every request that has system instructions, so OpenAI can bucket same-prompt requests for prefix matching. The key carries no business semantics and excludes per-file content (which sits after the cacheable prefix anyway).
-
-Phase fields (`commentary` / `final_answer` on assistant messages, used by `gpt-5.3-codex` and later) are currently dropped during response mapping. Current GPT-5.x / o-series models do not produce Phase, so there's no short-term impact; support will be added when those models enter the supported list.
-
-
 ## Telemetry
 
 OpenTelemetry integration for observability (spans, metrics). Disabled by default.
