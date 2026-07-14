@@ -779,7 +779,8 @@ Config file: `~/.opencodereview/config.json`
 | `mcp_servers.<name>.args` | array | Command-line arguments for the MCP server |
 | `mcp_servers.<name>.env` | array | Environment variables in `KEY=VALUE` format |
 | `mcp_servers.<name>.tools` | array | Allowed tool names (empty = all tools) |
-| `mcp_servers.<name>.setup` | string | Setup command to run before starting the server |
+| `mcp_servers.<name>.setup` | string | Setup command to run before starting the server (e.g. build an index) |
+| `mcp_servers.<name>.setup_timeout` | integer | Setup command timeout in minutes (e.g. `30`; default: `30`) |
 | `language` | string | Any language name, e.g. `English`, `Chinese` (default: `English`) |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -801,6 +802,7 @@ ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
 ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
 ocr config set mcp_servers.<name>.tools '["tool_name"]'
 ocr config set mcp_servers.<name>.setup '<setup command>'
+ocr config set mcp_servers.<name>.setup_timeout 30
 
 # Delete an MCP server
 ocr config unset mcp_servers.<name>
@@ -813,8 +815,9 @@ ocr config unset mcp_servers.<name>
 | `env` | No | Environment variables in `KEY=VALUE` format |
 | `tools` | No | Allowed tool names; if empty, all tools from the server are available |
 | `setup` | No | A shell command to run before starting the server (e.g. build an index) |
+| `setup_timeout` | No | Setup command timeout in minutes (e.g. `30`). Default: `30` |
 
-> **Note:** If an MCP tool's name conflicts with a built-in tool, it will be skipped with a warning. The `setup` command has a 5-minute timeout.
+> **Note:** If an MCP tool's name conflicts with a built-in tool, it will be skipped with a warning.
 
 **Example: Add [CodeGraph](https://github.com/nicholasgasior/codegraph) for code structure analysis**
 
@@ -823,6 +826,7 @@ ocr config set mcp_servers.codegraph.command codegraph
 ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
 ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
 ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+ocr config set mcp_servers.codegraph.setup_timeout 30
 ```
 
 ### Environment Variables

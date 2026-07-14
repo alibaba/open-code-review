@@ -752,6 +752,7 @@ ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
 ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
 ocr config set mcp_servers.<name>.tools '["tool_name"]'
 ocr config set mcp_servers.<name>.setup '<setup command>'
+ocr config set mcp_servers.<name>.setup_timeout 30
 
 # MCP 서버 삭제
 ocr config unset mcp_servers.<name>
@@ -764,8 +765,9 @@ ocr config unset mcp_servers.<name>
 | `env` | 아니오 | 환경 변수 (`KEY=VALUE` 형식) |
 | `tools` | 아니오 | 허용할 도구 이름. 비어 있으면 서버의 모든 도구 사용 가능 |
 | `setup` | 아니오 | 서버 시작 전에 실행할 셸 명령어 (예: 인덱스 빌드) |
+| `setup_timeout` | 아니오 | setup 명령어의 타임아웃(분), 예: `30`. 기본값: `30` |
 
-> **참고:** MCP 도구의 이름이 내장 도구와 충돌하면 경고와 함께 건너뜁니다. `setup` 명령어의 타임아웃은 5분입니다.
+> **참고:** MCP 도구의 이름이 내장 도구와 충돌하면 경고와 함께 건너뜁니다.
 
 **예시: [CodeGraph](https://github.com/nicholasgasior/codegraph)를 추가하여 코드 구조 분석 강화**
 
@@ -774,6 +776,7 @@ ocr config set mcp_servers.codegraph.command codegraph
 ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
 ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
 ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+ocr config set mcp_servers.codegraph.setup_timeout 30
 ```
 
 ### Environment Variables

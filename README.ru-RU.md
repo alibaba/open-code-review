@@ -798,6 +798,7 @@ ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
 ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
 ocr config set mcp_servers.<name>.tools '["tool_name"]'
 ocr config set mcp_servers.<name>.setup '<setup command>'
+ocr config set mcp_servers.<name>.setup_timeout 30
 
 # Удалить MCP-сервер
 ocr config unset mcp_servers.<name>
@@ -810,8 +811,9 @@ ocr config unset mcp_servers.<name>
 | `env` | Нет | Переменные окружения в формате `KEY=VALUE` |
 | `tools` | Нет | Разрешённые имена инструментов; если пусто — доступны все инструменты сервера |
 | `setup` | Нет | Shell-команда для выполнения перед запуском сервера (например, построение индекса) |
+| `setup_timeout` | Нет | Таймаут setup-команды в минутах, например `30`. По умолчанию: `30` |
 
-> **Примечание:** Если имя MCP-инструмента конфликтует со встроенным инструментом, он будет пропущен с предупреждением. Таймаут команды `setup` составляет 5 минут.
+> **Примечание:** Если имя MCP-инструмента конфликтует со встроенным инструментом, он будет пропущен с предупреждением.
 
 **Пример: добавление [CodeGraph](https://github.com/nicholasgasior/codegraph) для усиления анализа структуры кода**
 
@@ -820,6 +822,7 @@ ocr config set mcp_servers.codegraph.command codegraph
 ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
 ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
 ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+ocr config set mcp_servers.codegraph.setup_timeout 30
 ```
 
 ### Переменные окружения

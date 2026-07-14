@@ -761,7 +761,8 @@ OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则�
 | `mcp_servers.<name>.args` | array | MCP 服务器的命令行参数 |
 | `mcp_servers.<name>.env` | array | 环境变量，`KEY=VALUE` 格式 |
 | `mcp_servers.<name>.tools` | array | 允许使用的工具名称（为空则允许所有工具） |
-| `mcp_servers.<name>.setup` | string | 启动服务器前运行的初始化命令 |
+| `mcp_servers.<name>.setup` | string | 启动服务器前运行的初始化命令（例如构建索引） |
+| `mcp_servers.<name>.setup_timeout` | integer | setup 命令的超时时间（分钟），例如 `30`；默认：`30` |
 | `language` | string | 任意语言名称，例如 `English`、`Chinese`（默认：`English`） |
 | `telemetry.enabled` | boolean | `true` \| `false` |
 | `telemetry.exporter` | string | `console` \| `otlp` |
@@ -783,6 +784,7 @@ ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
 ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
 ocr config set mcp_servers.<name>.tools '["tool_name"]'
 ocr config set mcp_servers.<name>.setup '<setup command>'
+ocr config set mcp_servers.<name>.setup_timeout 30
 
 # 删除 MCP 服务器
 ocr config unset mcp_servers.<name>
@@ -795,8 +797,9 @@ ocr config unset mcp_servers.<name>
 | `env` | 否 | 环境变量，`KEY=VALUE` 格式 |
 | `tools` | 否 | 允许使用的工具名称；为空则服务器的所有工具均可用 |
 | `setup` | 否 | 启动服务器前运行的 shell 命令（例如构建索引） |
+| `setup_timeout` | 否 | setup 命令的超时时间（分钟），例如 `30`。默认：`30` |
 
-> **注意：** 如果 MCP 工具的名称与内置工具冲突，该工具将被跳过并输出警告。`setup` 命令的超时时间为 5 分钟。
+> **注意：** 如果 MCP 工具的名称与内置工具冲突，该工具将被跳过并输出警告。
 
 **示例：添加 [CodeGraph](https://github.com/nicholasgasior/codegraph) 增强代码结构分析能力**
 
@@ -805,6 +808,7 @@ ocr config set mcp_servers.codegraph.command codegraph
 ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
 ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
 ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+ocr config set mcp_servers.codegraph.setup_timeout 30
 ```
 
 ### 环境变量

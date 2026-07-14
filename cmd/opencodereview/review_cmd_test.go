@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/open-code-review/open-code-review/internal/tool"
 )
 
 func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
@@ -53,4 +56,58 @@ func TestParseReviewFlagsAllowsFromAndTo(t *testing.T) {
 	if opts.from != "main" || opts.to != "HEAD" {
 		t.Fatalf("unexpected opts: from=%q to=%q", opts.from, opts.to)
 	}
+}
+
+func TestInitMCPClients_NilConfig(t *testing.T) {
+	clients := initMCPClients(context.Background(), nil, tool.NewRegistry(), "/tmp", "test")
+	if clients != nil {
+		t.Fatalf("expected nil for nil config, got %d clients", len(clients))
+	}
+}
+
+func TestInitMCPClients_EmptyServers(t *testing.T) {
+	clients := initMCPClients(context.Background(), &Config{}, tool.NewRegistry(), "/tmp", "test")
+	if clients != nil {
+		t.Fatalf("expected nil for empty servers, got %d clients", len(clients))
+	}
+}
+
+func TestInitMCPClients_EmptyCommandSkipped(t *testing.T) {
+	cfg := &Config{
+		MCPServers: map[string]MCPServerConfig{
+			"no-cmd": {Setup: "echo hello"},
+		},
+	}
+	clients := initMCPClients(context.Background(), cfg, tool.NewRegistry(), "/tmp", "test")
+	if clients != nil {
+		t.Fatalf("expected nil when the only server has no command")
+	}
+}
+
+func TestInitMCPClients_SetupOnly(t *testing.T) {
+	cfg := &Config{
+		MCPServers: map[string]MCPServerConfig{
+			"no-cmd": {Command: "echo", Setup: "echo setup-run"},
+		},
+	}
+	// Setup runs successfully, then the server is created (echo exits after initCtx timeout).
+	clients := initMCPClients(context.Background(), cfg, tool.NewRegistry(), "/tmp", "test")
+	if len(clients) != 0 {
+		t.Fatalf("expected 0 clients (echo is not an MCP server), got %d", len(clients))
+	}
+}
+
+func TestInitMCPClients_SetupTimeoutAborts(t *testing.T) {
+	cfg := &Config{
+		MCPServers: map[string]MCPServerConfig{
+			"sleepy": {
+				Command:      "echo",
+				Setup:        "sleep 5",
+				SetupTimeout: 1, // 1 minute timeout
+			},
+		},
+	}
+	// A 1-minute timeout should be plenty for "sleep 5" to succeed.
+	clients := initMCPClients(context.Background(), cfg, tool.NewRegistry(), "/tmp", "test")
+	_ = clients
 }

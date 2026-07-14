@@ -278,9 +278,16 @@ func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repo
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: MCP server %q has no command configured, skipping\n", name)
 			continue
 		}
+
+		// Run the setup phase (time-bounded) before starting the
+		// long-lived server process. setup_timeout defaults to 30 minutes.
 		if serverCfg.Setup != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Running setup for MCP server %q: %s\n", name, serverCfg.Setup)
-			setupCtx, setupCancel := context.WithTimeout(ctx, 5*time.Minute)
+			setupTimeout := 30 * time.Minute
+			if serverCfg.SetupTimeout > 0 {
+				setupTimeout = time.Duration(serverCfg.SetupTimeout) * time.Minute
+			}
+			setupCtx, setupCancel := context.WithTimeout(ctx, setupTimeout)
 			setupCmd := shellCommand(setupCtx, serverCfg.Setup)
 			setupCmd.Dir = repoDir
 			configureProcessGroup(setupCmd)

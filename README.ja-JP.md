@@ -794,6 +794,7 @@ ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
 ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
 ocr config set mcp_servers.<name>.tools '["tool_name"]'
 ocr config set mcp_servers.<name>.setup '<setup command>'
+ocr config set mcp_servers.<name>.setup_timeout 30
 
 # MCPサーバーを削除
 ocr config unset mcp_servers.<name>
@@ -806,8 +807,9 @@ ocr config unset mcp_servers.<name>
 | `env` | いいえ | 環境変数（`KEY=VALUE`形式） |
 | `tools` | いいえ | 許可するツール名。空の場合、サーバーのすべてのツールが利用可能 |
 | `setup` | いいえ | サーバー起動前に実行するシェルコマンド（例：インデックスの構築） |
+| `setup_timeout` | いいえ | setup コマンドのタイムアウト（分）、例：`30`。デフォルト：`30` |
 
-> **注意：** MCPツールの名前が組み込みツールと競合する場合、そのツールは警告付きでスキップされます。`setup`コマンドのタイムアウトは5分です。
+> **注意：** MCPツールの名前が組み込みツールと競合する場合、そのツールは警告付きでスキップされます。
 
 **例：[CodeGraph](https://github.com/nicholasgasior/codegraph)を追加してコード構造分析を強化**
 
@@ -816,6 +818,7 @@ ocr config set mcp_servers.codegraph.command codegraph
 ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
 ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
 ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
+ocr config set mcp_servers.codegraph.setup_timeout 30
 ```
 
 ### 環境変数

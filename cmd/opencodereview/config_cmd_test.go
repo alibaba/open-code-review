@@ -540,6 +540,33 @@ func TestSetMCPServerValue_Setup(t *testing.T) {
 	}
 }
 
+func TestSetMCPServerValue_SetupTimeout(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.setup_timeout", "30"); err != nil {
+		t.Fatalf("setMCPServerValue: %v", err)
+	}
+	if cfg.MCPServers["my-server"].SetupTimeout != 30 {
+		t.Errorf("SetupTimeout = %d, want %d", cfg.MCPServers["my-server"].SetupTimeout, 30)
+	}
+}
+
+func TestSetMCPServerValue_SetupTimeoutInvalid(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.setup_timeout", "not-a-number"); err == nil {
+		t.Fatal("expected error for invalid timeout")
+	}
+}
+
+func TestSetMCPServerValue_SetupTimeoutNonPositive(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.setup_timeout", "0"); err == nil {
+		t.Fatal("expected error for non-positive timeout")
+	}
+	if err := setMCPServerValue(cfg, "mcp_servers.my-server.setup_timeout", "-5"); err == nil {
+		t.Fatal("expected error for negative timeout")
+	}
+}
+
 func TestSetMCPServerValue_UnknownField(t *testing.T) {
 	cfg := &Config{}
 	if err := setMCPServerValue(cfg, "mcp_servers.my-server.unknown", "val"); err == nil {

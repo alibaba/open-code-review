@@ -200,11 +200,12 @@ type ProviderEntry struct {
 
 // MCPServerConfig holds configuration for a single MCP server (stdio transport).
 type MCPServerConfig struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
-	Env     []string `json:"env,omitempty"`
-	Tools   []string `json:"tools,omitempty"`
-	Setup   string   `json:"setup,omitempty"`
+	Command      string   `json:"command"`
+	Args         []string `json:"args,omitempty"`
+	Env          []string `json:"env,omitempty"`
+	Tools        []string `json:"tools,omitempty"`
+	Setup        string   `json:"setup,omitempty"`
+	SetupTimeout int      `json:"setup_timeout,omitempty"`
 }
 
 // Config represents the user-level configuration file (~/.opencodereview/config.json).
@@ -374,7 +375,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nMCP server fields: command, args, env, tools, setup", key)
+		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nMCP server fields: command, args, env, tools, setup, setup_timeout", key)
 	}
 	return nil
 }
@@ -582,8 +583,14 @@ func setMCPServerValue(cfg *Config, key, value string) error {
 		entry.Tools = filtered
 	case "setup":
 		entry.Setup = value
+	case "setup_timeout":
+		n, err := strconv.Atoi(value)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("invalid value for %s: must be a positive integer (minutes)", key)
+		}
+		entry.SetupTimeout = n
 	default:
-		return fmt.Errorf("unknown MCP server field %q: supported fields are command, args, env, tools, setup", field)
+		return fmt.Errorf("unknown MCP server field %q: supported fields are command, args, env, tools, setup, setup_timeout", field)
 	}
 
 	cfg.MCPServers[name] = entry
