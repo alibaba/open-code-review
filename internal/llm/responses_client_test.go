@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3/responses"
@@ -55,12 +54,6 @@ func TestNewOpenAIResponsesClient_URLNormalization(t *testing.T) {
 			client := NewOpenAIResponsesClient(ClientConfig{URL: tt.inputURL})
 			if client.cfg.URL != tt.wantURL {
 				t.Errorf("got URL %q, want %q", client.cfg.URL, tt.wantURL)
-			}
-			// SDK base URL should be the part before /responses so the SDK
-			// can re-append it.
-			wantSDKBase := strings.TrimSuffix(tt.wantURL, "/responses")
-			if got := client.sdkBaseURL(); got != wantSDKBase {
-				t.Errorf("sdkBaseURL() = %q, want %q", got, wantSDKBase)
 			}
 		})
 	}

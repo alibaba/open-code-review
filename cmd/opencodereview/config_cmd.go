@@ -362,11 +362,13 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid boolean for llm.use_anthropic: %w", err)
 		}
 		cfg.Llm.UseAnthropic = &b
-		// Mirror protocol so the two never disagree: true -> anthropic, the
-		// OpenAI family -> openai (chat-completions, the legacy default).
+		// Mirror protocol for backward compatibility. true always selects
+		// anthropic. false only mirrors to the legacy openai default when
+		// protocol is unset or already a legacy value (anthropic/openai);
+		// openai-responses is preserved to avoid a silent downgrade.
 		if b {
 			cfg.Llm.Protocol = llm.ProtocolAnthropic
-		} else {
+		} else if cfg.Llm.Protocol == "" || cfg.Llm.Protocol == llm.ProtocolAnthropic || cfg.Llm.Protocol == llm.ProtocolOpenAIChatCompletions {
 			cfg.Llm.Protocol = llm.ProtocolOpenAIChatCompletions
 		}
 	case "language", "Language":
@@ -398,7 +400,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nMCP server fields: command, args, env, tools, setup", key)
+		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: command, args, env, tools, setup", key)
 	}
 	return nil
 }

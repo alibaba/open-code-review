@@ -827,6 +827,18 @@ func TestSetConfigValueLlmUseAnthropic(t *testing.T) {
 			t.Errorf("Protocol = %q, want %q", cfg.Llm.Protocol, llm.ProtocolAnthropic)
 		}
 	})
+
+	t.Run("preserves openai-responses when setting use_anthropic false", func(t *testing.T) {
+		// A prior openai-responses config must not be silently downgraded to
+		// openai when the legacy use_anthropic=false is set.
+		cfg := &Config{Llm: LlmConfig{Protocol: llm.ProtocolOpenAIResponses}}
+		if err := setConfigValue(cfg, "llm.use_anthropic", "false"); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+		if cfg.Llm.Protocol != llm.ProtocolOpenAIResponses {
+			t.Errorf("Protocol = %q, want %q (openai-responses must be preserved)", cfg.Llm.Protocol, llm.ProtocolOpenAIResponses)
+		}
+	})
 }
 
 func TestSetConfigValueLlmUseAnthropicInvalid(t *testing.T) {

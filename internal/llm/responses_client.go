@@ -30,7 +30,7 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 		cfg.Timeout = 5 * time.Minute
 	}
 	ensureResponsesEndpoint(&cfg)
-	sdkBaseURL := strings.TrimSuffix(cfg.URL, "/responses")
+	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/responses")
 
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
@@ -66,11 +66,6 @@ func ensureResponsesEndpoint(cfg *ClientConfig) {
 		baseURL = baseURL + "/responses"
 	}
 	cfg.URL = baseURL
-}
-
-// sdkBaseURL strips the /responses suffix so the SDK can re-append it.
-func (c *OpenAIResponsesClient) sdkBaseURL() string {
-	return strings.TrimSuffix(strings.TrimRight(c.cfg.URL, "/"), "/responses")
 }
 
 // CompletionsWithCtx sends a Responses API request and maps the result back to

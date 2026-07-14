@@ -32,7 +32,8 @@ const (
 // unknown values are lowercased and trimmed so that ValidateProtocol can
 // surface a precise error message rather than silently swallowing a typo.
 func NormalizeProtocol(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	switch normalized {
 	case "":
 		return ""
 	case ProtocolAnthropic:
@@ -42,7 +43,7 @@ func NormalizeProtocol(raw string) string {
 	case ProtocolOpenAIResponses:
 		return ProtocolOpenAIResponses
 	default:
-		return strings.ToLower(strings.TrimSpace(raw))
+		return normalized
 	}
 }
 
