@@ -65,6 +65,87 @@ func initRepoWithChange(t *testing.T) string {
 	return repo
 }
 
+// initRepoWithNonASCIIChange creates a repository whose changed file path
+// contains both non-ASCII characters and Next.js-style route groups. It forces
+// Git's default path quoting so tests do not depend on the user's global config.
+func initRepoWithNonASCIIChange(t *testing.T) (string, string) {
+	t.Helper()
+	repo := t.TempDir()
+
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+	runGitTest(t, repo, "config", "core.quotepath", "true")
+
+	relPath := "src/café/(authenticated)/文件.ts"
+	file := filepath.Join(repo, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatalf("create non-ASCII path: %v", err)
+	}
+	if err := os.WriteFile(file, []byte("before\n"), 0o644); err != nil {
+		t.Fatalf("write non-ASCII file: %v", err)
+	}
+	runGitTest(t, repo, "add", "--", relPath)
+	runGitTest(t, repo, "commit", "-q", "-m", "initial commit")
+
+	if err := os.WriteFile(file, []byte("after\n"), 0o644); err != nil {
+		t.Fatalf("modify non-ASCII file: %v", err)
+	}
+	return repo, relPath
+}
+
+func TestDiffModesPreserveNonASCIIPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider func(t *testing.T, repo string, runner *gitcmd.Runner) *Provider
+	}{
+		{
+			name: "workspace",
+			provider: func(_ *testing.T, repo string, runner *gitcmd.Runner) *Provider {
+				return NewWorkspaceProvider(repo, runner)
+			},
+		},
+		{
+			name: "commit",
+			provider: func(t *testing.T, repo string, runner *gitcmd.Runner) *Provider {
+				runGitTest(t, repo, "add", "-A")
+				runGitTest(t, repo, "commit", "-q", "-m", "update non-ASCII file")
+				return NewCommitProvider(repo, "HEAD", runner)
+			},
+		},
+		{
+			name: "range",
+			provider: func(t *testing.T, repo string, runner *gitcmd.Runner) *Provider {
+				runGitTest(t, repo, "add", "-A")
+				runGitTest(t, repo, "commit", "-q", "-m", "update non-ASCII file")
+				return NewProvider(repo, "HEAD~1", "HEAD", runner)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo, relPath := initRepoWithNonASCIIChange(t)
+			provider := tt.provider(t, repo, gitcmd.New(0))
+
+			diffs, err := provider.GetDiff(context.Background())
+			if err != nil {
+				t.Fatalf("GetDiff returned error: %v", err)
+			}
+			if len(diffs) != 1 {
+				t.Fatalf("got %d diffs, want 1: %+v", len(diffs), diffs)
+			}
+			if diffs[0].NewPath != relPath {
+				t.Errorf("NewPath = %q, want %q", diffs[0].NewPath, relPath)
+			}
+			if diffs[0].NewFileContent != "after\n" {
+				t.Errorf("NewFileContent = %q, want %q", diffs[0].NewFileContent, "after\n")
+			}
+		})
+	}
+}
+
 // TestWorkspaceDiffSurvivesExternalDiffTool guards against issue #82: when a
 // user has configured an external diff tool (GIT_EXTERNAL_DIFF or
 // diff.external), git diff/show emit the tool's output instead of unified diff
