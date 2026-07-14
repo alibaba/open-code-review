@@ -136,7 +136,7 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 
 	fmt.Println("\nManual configuration saved.")
 	fmt.Printf("URL: %s\n", result.url)
-	fmt.Printf("Protocol: %s\n", result.protocol)
+	fmt.Printf("Protocol: %s\n", protocol)
 	fmt.Printf("Model: %s\n", result.model)
 
 	fmt.Println("\nTesting connection...")

@@ -54,7 +54,7 @@ var registry = []Provider{
 	{
 		Name:        "edenai",
 		DisplayName: "Eden AI",
-		Protocol:    "openai",
+		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.edenai.run/v3",
 		EnvVar:      "EDENAI_API_KEY",
 		Models: []string{
