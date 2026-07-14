@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode"
@@ -17,6 +18,13 @@ const (
 )
 
 var multiNewline = regexp.MustCompile(`\n{3,}`)
+
+func resolveBackgroundFilePath(repoDir, path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(repoDir, path)
+}
 
 // mergeBackground combines the inline --background value (or an auto-populated
 // commit message) with the content read from --background-file, separated by a

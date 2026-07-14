@@ -13,3 +13,4 @@ jest.config.js
 .superpowers/**
 prototype.html
 resources/icon-old.svg
+__mocks__/**

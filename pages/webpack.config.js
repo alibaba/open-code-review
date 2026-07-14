@@ -1,5 +1,6 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const CopyPlugin = require('copy-webpack-plugin');
 
 module.exports = {
   mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
@@ -50,7 +51,10 @@ module.exports = {
     port: 3030,
     host: '0.0.0.0',
     allowedHosts: 'all',
-    static: { directory: __dirname },
+    static: [
+      { directory: path.resolve(__dirname, 'public') },
+      { directory: __dirname }
+    ],
     historyApiFallback: {
       index: '/index.html',
       rewrites: [{ from: /^\/\_p\/\d+\//, to: '/index.html' }]
@@ -60,6 +64,11 @@ module.exports = {
     new HtmlWebpackPlugin({
       template: './index.html',
       inject: 'body'
+    }),
+    new CopyPlugin({
+      patterns: [
+        { from: 'public', to: '.', noErrorOnMissing: true }
+      ]
     })
   ]
 };

@@ -16,6 +16,9 @@ Get your first code review running in a few minutes.
 
 ```bash
 npm install -g @alibaba-group/open-code-review
+```
+
+```bash
 ocr version
 ```
 

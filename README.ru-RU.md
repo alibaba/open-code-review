@@ -402,7 +402,7 @@ ocr review --audience agent
 ```bash
 mkdir -p .claude/commands
 curl -o .claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
 **На уровне пользователя** (личное глобальное использование во всех проектах):
@@ -410,7 +410,7 @@ curl -o .claude/commands/open-code-review.md \
 ```bash
 mkdir -p ~/.claude/commands
 curl -o ~/.claude/commands/open-code-review.md \
-  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/commands/review.md
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
 > **Требование**: для всех способов интеграции необходим установленный CLI `ocr` и настроенная LLM. См. разделы [Установка](#установка) и [Настройте LLM](#быстрый-старт) выше.

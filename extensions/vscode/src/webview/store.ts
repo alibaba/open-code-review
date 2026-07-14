@@ -13,6 +13,7 @@ export interface AppState {
   logs: LogLine[];
   session: { state: ReviewState; result: CliResult | null; error?: string };
   commentStatus: Record<number, CommentStatus>;
+  commentJumpable: Record<number, boolean>;
   reviewMode: ReviewMode;
   locale: SupportedLocale;
 }
@@ -26,7 +27,8 @@ export const initialState: AppState = {
   logs: [],
   session: { state: 'idle', result: null },
   commentStatus: {},
-  reviewMode: 'workspace',
+  commentJumpable: {},
+  reviewMode: ReviewMode.Workspace,
   locale: 'en',
 };
 
@@ -66,18 +68,30 @@ export function reducer(state: AppState, msg: HostToWebview | LocalAction): AppS
         ...state,
         logs: starting ? [] : state.logs,
         commentStatus: starting ? {} : state.commentStatus,
+        commentJumpable: starting ? {} : state.commentJumpable,
         session: { state: msg.state, result: starting ? null : state.session.result, error: msg.error },
         view: STATE_TO_VIEW[msg.state],
       };
     }
     case 'logLine':
       return { ...state, logs: [...state.logs, msg.line] };
-    case 'reviewDone':
-      return { ...state, session: { ...state.session, result: msg.result } };
+    case 'reviewDone': {
+      const commentJumpable: Record<number, boolean> = {};
+      msg.result.comments.forEach((_, i) => { commentJumpable[i] = true; });
+      return {
+        ...state,
+        session: { ...state.session, result: msg.result },
+        commentJumpable,
+      };
+    }
     case 'commentSync': {
       const commentStatus = { ...state.commentStatus };
-      for (const c of msg.comments) commentStatus[c.index] = c.status;
-      return { ...state, commentStatus };
+      const commentJumpable = { ...state.commentJumpable };
+      for (const c of msg.comments) {
+        commentStatus[c.index] = c.status;
+        if (c.jumpable !== undefined) commentJumpable[c.index] = c.jumpable;
+      }
+      return { ...state, commentStatus, commentJumpable };
     }
     default:
       return state;

@@ -25,6 +25,65 @@ func TestLoadBackgroundFileNotFound(t *testing.T) {
 	}
 }
 
+func TestResolveBackgroundFilePath(t *testing.T) {
+	repo := filepath.FromSlash("/path/to/repo")
+
+	t.Run("relative anchored at repo", func(t *testing.T) {
+		got := resolveBackgroundFilePath(repo, filepath.FromSlash("./docs/context.md"))
+		want := filepath.Join(repo, "docs", "context.md")
+		if got != want {
+			t.Errorf("resolveBackgroundFilePath = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("absolute unchanged", func(t *testing.T) {
+		abs := filepath.FromSlash("/etc/context.md")
+		if got := resolveBackgroundFilePath(repo, abs); got != abs {
+			t.Errorf("resolveBackgroundFilePath = %q, want %q (absolute must be untouched)", got, abs)
+		}
+	})
+
+	t.Run("empty unchanged", func(t *testing.T) {
+		if got := resolveBackgroundFilePath(repo, ""); got != "" {
+			t.Errorf("resolveBackgroundFilePath = %q, want empty", got)
+		}
+	})
+
+	t.Run("empty repoDir falls back to the relative path", func(t *testing.T) {
+		// When --repo is omitted and repo detection fails, repoDir is empty.
+		// Ensure it falls back to the CWD.
+		rel := filepath.FromSlash("./docs/context.md")
+		got := resolveBackgroundFilePath("", rel)
+		want := filepath.FromSlash("docs/context.md")
+		if got != want {
+			t.Errorf("resolveBackgroundFilePath = %q, want %q", got, want)
+		}
+	})
+}
+
+// TestLoadBackgroundFileRelativeToRepo verifies the end-to-end path: a relative
+// --background-file argument resolves against the repo directory, not the
+// process CWD, and is read successfully from there.
+func TestLoadBackgroundFileRelativeToRepo(t *testing.T) {
+	repo := t.TempDir()
+	docs := filepath.Join(repo, "docs")
+	if err := os.MkdirAll(docs, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(docs, "context.md"), []byte("Repo-relative context."), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	resolved := resolveBackgroundFilePath(repo, filepath.FromSlash("./docs/context.md"))
+	got, err := loadBackgroundFile(resolved)
+	if err != nil {
+		t.Fatalf("loadBackgroundFile: %v", err)
+	}
+	if !strings.Contains(got, "Repo-relative context.") {
+		t.Errorf("expected repo-relative file to be read, got %q", got)
+	}
+}
+
 func TestLoadBackgroundFileEmpty(t *testing.T) {
 	cases := map[string]string{
 		"zero bytes":      "",

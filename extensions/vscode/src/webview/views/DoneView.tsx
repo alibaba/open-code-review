@@ -7,13 +7,13 @@ import { useT } from '../I18nProvider';
 interface Props {
   result: CliResult;
   commentStatus: Record<number, CommentStatus>;
+  commentJumpable: Record<number, boolean>;
   logs: LogLine[];
-  canJump: boolean;
   onOpen: (index: number) => void;
   onAction: (index: number, action: 'apply' | 'discard' | 'falsePositive') => void;
 }
 
-export function DoneView({ result, commentStatus, logs, canJump, onOpen, onAction }: Props) {
+export function DoneView({ result, commentStatus, commentJumpable, logs, onOpen, onAction }: Props) {
   const [showLogs, setShowLogs] = useState(false);
   const t = useT();
   const s = result.summary;
@@ -35,7 +35,8 @@ export function DoneView({ result, commentStatus, logs, canJump, onOpen, onActio
       )}
 
       {result.comments.map((c, i) => (
-        <CommentCard key={i} comment={c} index={i} canJump={canJump}
+        <CommentCard key={i} comment={c} index={i}
+          canJump={commentJumpable[i] !== false}
           status={commentStatus[i] ?? 'pending'} onOpen={onOpen} onAction={onAction} />
       ))}
     </div>

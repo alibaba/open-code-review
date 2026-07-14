@@ -824,6 +824,8 @@ body {
   margin-bottom: 10px;
   transition: opacity 0.3s, max-height 0.3s, padding 0.3s, margin 0.3s;
   max-height: 400px;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
@@ -840,6 +842,18 @@ body {
   gap: 8px;
   margin-bottom: 8px;
   flex-wrap: wrap;
+}
+
+.comment-header.jumpable {
+  cursor: pointer;
+  border-radius: 6px;
+  margin: -4px -6px 4px;
+  padding: 4px 6px;
+  transition: background 0.15s;
+}
+
+.comment-header.jumpable:hover {
+  background: var(--card-quiet);
 }
 
 .comment-file {
@@ -886,11 +900,15 @@ body {
   line-height: 1.6;
   color: var(--ink);
   margin-bottom: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .comment-actions {
   display: flex;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .comment-actions button {

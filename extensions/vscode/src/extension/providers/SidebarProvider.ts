@@ -2,7 +2,7 @@ import { resolveLocale, toHtmlLang } from '../../shared/i18n';
 import * as vscode from 'vscode';
 import { ConfigPanelFocus } from '../../shared/configUtils';
 import { HostToWebview, WebviewToHost } from '../../shared/messages';
-import { FileChange } from '../../shared/types';
+import { FileChange, ReviewMode } from '../../shared/types';
 import { CliService } from '../services/CliService';
 import { ConfigService } from '../services/ConfigService';
 import { GitService } from '../services/GitService';
@@ -13,6 +13,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private session?: ReviewSession;
   private openConfigPanel?: (focus?: ConfigPanelFocus) => void;
+  private gitWatchDisposable?: vscode.Disposable;
 
   constructor(
     private extensionUri: vscode.Uri,
@@ -37,6 +38,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     view.webview.options = { enableScripts: true, localResourceRoots: [this.extensionUri] };
     view.webview.html = this.html(view.webview);
     view.webview.onDidReceiveMessage((msg: WebviewToHost) => this.handle(msg));
+
+    this.gitWatchDisposable?.dispose();
+    this.gitWatchDisposable = this.git.watchWorkspaceChanges((gitState) => {
+      this.post({ type: 'gitState', gitState });
+    });
+    view.onDidDispose(() => {
+      this.gitWatchDisposable?.dispose();
+      this.gitWatchDisposable = undefined;
+      this.view = undefined;
+    });
   }
 
   private post(msg: HostToWebview): void {
@@ -48,7 +59,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     switch (msg.type) {
       case 'ready': {
         const config = this.config.read();
-        const gitState = await this.git.getState('workspace');
+        const gitState = await this.git.getState(ReviewMode.Workspace);
         const locale = resolveLocale(vscode.env.language);
         this.post({ type: 'init', config, gitState, locale });
         break;
@@ -59,9 +70,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
       case 'getModeFiles': {
         let files: FileChange[] = [];
-        if (msg.mode === 'branch' && msg.from && msg.to) {
+        if (msg.mode === ReviewMode.Branch && msg.from && msg.to) {
           files = await this.git.getBranchDiff(msg.from, msg.to);
-        } else if (msg.mode === 'commit' && msg.commit) {
+        } else if (msg.mode === ReviewMode.Commit && msg.commit) {
           files = await this.git.getCommitFiles(msg.commit);
         }
         this.post({ type: 'modeFiles', mode: msg.mode, files });
@@ -75,14 +86,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         break;
       case 'startReview': {
         this.session = new ReviewSession(this.cli, cwd);
-        // 仅工作区模式在编辑器内放置评论 thread；分支/提交模式代码不在工作区，会错位。
-        const inEditor = msg.options.mode === 'workspace';
         await this.session.run(msg.options, {
           onState: (state, error) => this.post({ type: 'stateChange', state, error }),
           onLog: (line) => this.post({ type: 'logLine', line }),
           onDone: (result) => {
-            this.post({ type: 'reviewDone', result });
-            if (result.comments.length) this.comments.show(result.comments, inEditor);
+            void (async () => {
+              if (result.comments.length) {
+                await this.comments.show(result.comments, {
+                  mode: msg.options.mode,
+                  from: msg.options.from,
+                  to: msg.options.to,
+                  commit: msg.options.commit,
+                });
+              }
+              this.post({ type: 'reviewDone', result });
+            })();
           },
         });
         break;

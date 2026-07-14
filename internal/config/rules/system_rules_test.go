@@ -80,6 +80,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/lib.rs", "Ownership and Lifetime Correctness"},
 		{"crates/service/src/main.rs", "Unsafe Code Boundaries"},
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
+		{"scripts/deploy.py", "Mutable Default Arguments"},
+		{"src/app/main.py", "Mutable Default Arguments"},
 	}
 
 	for _, tt := range tests {
@@ -104,7 +106,6 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 		"docs/architecture.txt",
 		"Makefile",
 		"internal/agent/agent.go",
-		"scripts/deploy.py",
 		"ios/ViewController.m",
 	}
 

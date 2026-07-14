@@ -2,12 +2,12 @@
   "name": "open-code-review-vscode",
   "displayName": "Open Code Review",
   "description": "%ocr.description%",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "open-code-review",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nigulasikk/open-code-review.git",
+    "url": "git+https://github.com/alibaba/open-code-review.git",
     "directory": "extensions/vscode"
   },
   "engines": {
@@ -16,6 +16,7 @@
   "categories": [
     "Other"
   ],
+  "icon": "resources/icon.png",
   "main": "./out/extension.js",
   "activationEvents": [
     "onStartupFinished"

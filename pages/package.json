@@ -31,6 +31,7 @@
     "@types/three": "^0.185.0",
     "autoprefixer": "^10.4.16",
     "babel-loader": "^9.1.3",
+    "copy-webpack-plugin": "^14.0.0",
     "css-loader": "^6.8.1",
     "html-webpack-plugin": "^5.5.3",
     "postcss": "^8.5.15",

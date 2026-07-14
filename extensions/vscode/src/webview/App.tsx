@@ -55,14 +55,14 @@ export function App() {
             <div class="result-region">
               {state.view === 'running' && <RunningView logs={state.logs} onCancel={() => bridge.post({ type: 'cancelReview' })} />}
               {state.view === 'done' && state.session.result && (
-                <DoneView result={state.session.result} commentStatus={state.commentStatus} logs={state.logs}
-                  canJump={state.reviewMode === 'workspace'}
+                <DoneView result={state.session.result} commentStatus={state.commentStatus}
+                  commentJumpable={state.commentJumpable} logs={state.logs}
                   onOpen={(i) => bridge.post({ type: 'jumpToComment', index: i })}
                   onAction={(i, action) => bridge.post({ type: 'commentAction', index: i, action })} />
               )}
               {state.view === 'empty' && <EmptyView logs={state.logs} />}
               {state.view === 'cancelled' && <CancelledView />}
-              {state.view === 'failed' && <FailedView error={state.session.error} onRetry={() => start({ mode: 'workspace' })} />}
+              {state.view === 'failed' && <FailedView error={state.session.error} onRetry={() => start({ mode: ReviewMode.Workspace })} />}
             </div>
           )}
         </div>

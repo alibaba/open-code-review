@@ -51,7 +51,10 @@ func runReview(args []string) error {
 	// --background behaviour (raw, unsanitised) is preserved for users who do
 	// not opt into the file-based context.
 	if opts.backgroundFile != "" {
-		fileBackground, err := loadBackgroundFile(opts.backgroundFile)
+		// Resolve relative paths against the git top-level (cc.RepoDir), matching
+		// file_read semantics, so `-B ./docs/context.md` works from any directory.
+		bgPath := resolveBackgroundFilePath(cc.RepoDir, opts.backgroundFile)
+		fileBackground, err := loadBackgroundFile(bgPath)
 		if err != nil {
 			return err
 		}
