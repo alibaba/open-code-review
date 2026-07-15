@@ -40,7 +40,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "kimi", "mimo", "minimax", "openai", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "kimi", "mimo", "minimax", "ollama-cloud", "openai", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -124,6 +124,34 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 	}
 	if p.AuthHeader != "" {
 		t.Errorf("AuthHeader = %q, want empty", p.AuthHeader)
+	}
+}
+
+func TestLookupProvider_OllamaCloudDetails(t *testing.T) {
+	p, ok := LookupProvider("ollama-cloud")
+	if !ok {
+		t.Fatal("ollama-cloud not found")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://ollama.com/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://ollama.com/v1")
+	}
+	if p.EnvVar != "OLLAMA_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "OLLAMA_API_KEY")
+	}
+	if p.AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
+	}
+	expectedModels := []string{"gpt-oss:120b", "gpt-oss:20b"}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
 	}
 }
 
