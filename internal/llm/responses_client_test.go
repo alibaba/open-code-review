@@ -569,6 +569,98 @@ func TestOpenAIResponsesClient_EndToEnd(t *testing.T) {
 	}
 }
 
+// TestOpenAIResponsesClient_ExtraBodyStreamDropped verifies that an
+// extra_body.stream=true (valid for the Chat Completions client) is NOT
+// forwarded to the Responses API. Forwarding it makes the API answer with SSE
+// while Responses.New expects a JSON body, breaking every call. Other
+// extra_body keys must still be forwarded.
+func TestOpenAIResponsesClient_ExtraBodyStreamDropped(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"resp_stream",
+			"object":"response",
+			"model":"gpt-5.4",
+			"status":"completed",
+			"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-5.4",
+		ExtraBody: map[string]any{
+			"stream":               true,
+			"keep_me":              "yes",
+			"temperature_override": 0.1,
+		},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if _, present := gotBody["stream"]; present {
+		t.Errorf("request body should NOT contain a stream field, got %v", gotBody["stream"])
+	}
+	if gotBody["keep_me"] != "yes" {
+		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
+	}
+	if resp.Content() != "ok" {
+		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
+	}
+}
+
+// TestOpenAIResponsesClient_NonSuccessStatusReturnsError verifies that a
+// response with HTTP 200 but a non-completed status is surfaced as an error
+// rather than a normal ChatResponse. The Responses API returns 200 for
+// failed/cancelled (terminal) and queued/in_progress (background) states, so
+// the SDK reports a nil Go error; callers that branch on err must still fail.
+func TestOpenAIResponsesClient_NonSuccessStatusReturnsError(t *testing.T) {
+	for _, status := range []string{"failed", "cancelled", "queued", "in_progress"} {
+		t.Run(status, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{
+					"id":"resp_` + status + `",
+					"object":"response",
+					"model":"gpt-5.4",
+					"status":"` + status + `",
+					"output":[],
+					"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}
+				}`))
+			}))
+			defer server.Close()
+
+			client := NewOpenAIResponsesClient(ClientConfig{
+				URL:    server.URL + "/v1",
+				APIKey: "test-key",
+				Model:  "gpt-5.4",
+			})
+
+			resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages: []Message{{Role: "user", Content: "hi"}},
+			})
+			if err == nil {
+				t.Fatalf("expected error for status=%s, got nil (resp=%v)", status, resp)
+			}
+			if resp != nil {
+				t.Errorf("expected nil ChatResponse for status=%s, got %v", status, resp)
+			}
+		})
+	}
+}
+
 // --- helpers ---
 
 func unmarshalResponsesBody(t *testing.T, body string) *responses.Response {

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -80,12 +81,33 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 
 	var opts []openaiopt.RequestOption
 	for k, v := range c.cfg.ExtraBody {
+		// This client is non-streaming: it calls Responses.New, which expects a
+		// single JSON body. If a provider config sets extra_body.stream=true
+		// (valid for the Chat Completions client, which switches to a streaming
+		// path), forwarding it here makes the API answer with SSE and every
+		// call fails to decode. Drop the key rather than forward it.
+		if k == "stream" {
+			continue
+		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 
 	sdkResp, err := c.sdk.Responses.New(ctx, params, opts...)
 	if err != nil {
 		return nil, err
+	}
+
+	// The Responses API returns HTTP 200 even when the response object is in a
+	// terminal failure state (failed/cancelled) or a non-terminal background
+	// state (queued/in_progress). The SDK therefore returns a nil Go error in
+	// those cases. Surface them as real errors so callers (ocr llm test, the
+	// review loop) that branch on err != nil actually fail instead of treating
+	// a dead response as success.
+	switch sdkResp.Status {
+	case responses.ResponseStatusFailed, responses.ResponseStatusCancelled:
+		return nil, fmt.Errorf("openai-responses request did not complete: status=%s", sdkResp.Status)
+	case responses.ResponseStatusQueued, responses.ResponseStatusInProgress:
+		return nil, fmt.Errorf("openai-responses returned non-terminal status=%s (background/async mode is not supported)", sdkResp.Status)
 	}
 
 	return c.mapResponsesResponse(sdkResp), nil
