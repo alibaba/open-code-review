@@ -144,7 +144,28 @@ func TestLookupProvider_OllamaCloudDetails(t *testing.T) {
 	if p.AuthHeader != "" {
 		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
 	}
-	expectedModels := []string{"gpt-oss:120b", "gpt-oss:20b"}
+	// Models list mirrors the live /v1/models endpoint (as of Jul 2026).
+	// Every entry was runtime-verified to support tool calling via /v1/chat/completions.
+	expectedModels := []string{
+		"deepseek-v4-flash",
+		"deepseek-v4-pro",
+		"gemma4:31b",
+		"glm-5.1",
+		"glm-5.2",
+		"gpt-oss:120b",
+		"gpt-oss:20b",
+		"kimi-k2.5",
+		"kimi-k2.6",
+		"kimi-k2.7-code",
+		"minimax-m2.5",
+		"minimax-m2.7",
+		"minimax-m3",
+		"mistral-large-3:675b",
+		"nemotron-3-nano:30b",
+		"nemotron-3-super",
+		"nemotron-3-ultra",
+		"qwen3.5:397b",
+	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
 	}
