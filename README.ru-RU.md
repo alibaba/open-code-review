@@ -298,6 +298,11 @@ ocr review --from main --to feature-branch --resume <session-id>
 # Полнофайловое сканирование — ревью целых файлов вместо диффа (история git не нужна)
 ocr scan                          # сканировать весь репозиторий
 ocr scan --path internal/agent    # сканировать каталог или конкретные файлы
+
+# Режим делегирования — AI-агент сам выполняет ревью
+# OCR отвечает за выбор файлов и разрешение правил; настройка LLM не требуется
+ocr delegate preview
+ocr delegate rule src/main.go src/handler.go
 ```
 
 ### Интеграция с кодинг-агентами
@@ -314,6 +319,14 @@ npx skills add alibaba/open-code-review --skill open-code-review
 
 Это установит скилл `open-code-review` из [реестра скиллов](skills/open-code-review/SKILL.md), который объясняет вашему кодинг-агенту, как вызывать `ocr` для код-ревью, классифицировать найденные проблемы по приоритету и при необходимости применять исправления.
 
+**Режим делегирования** — если вы хотите, чтобы AI-агент сам выполнял ревью (OCR отвечает только за выбор файлов и разрешение правил, настройка LLM на стороне OCR не требуется):
+
+```bash
+npx skills add alibaba/open-code-review --skill open-code-review-delegate
+```
+
+Подробнее см. [skills/open-code-review-delegate/SKILL.md](skills/open-code-review-delegate/SKILL.md).
+
 #### Вариант 2: установка как плагин Claude Code
 
 Для [Claude Code](https://docs.anthropic.com/en/docs/claude-code) установите плагин с командой, выполнив в Claude Code:
@@ -323,7 +336,7 @@ npx skills add alibaba/open-code-review --skill open-code-review
 /plugin install open-code-review@open-code-review
 ```
 
-Это зарегистрирует slash-команду `/open-code-review:review`, которая запускает OCR и автоматически фильтрует и исправляет найденные проблемы.
+Это зарегистрирует slash-команду `/open-code-review:review`, которая запускает OCR и автоматически фильтрует и исправляет найденные проблемы. Также предоставляется команда `/open-code-review:delegate-review` для режима делегирования (агент выполняет ревью своими силами, OCR отвечает за выбор файлов и разрешение правил).
 
 #### Вариант 3: установка как плагин Codex
 
@@ -413,7 +426,21 @@ curl -o ~/.claude/commands/open-code-review.md \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
-> **Требование**: для всех способов интеграции необходим установленный CLI `ocr` и настроенная LLM. См. разделы [Установка](#установка) и [Настройте LLM](#быстрый-старт) выше.
+Режим делегирования (настройка LLM на стороне OCR не требуется):
+
+```bash
+# Уровень проекта
+mkdir -p .claude/commands
+curl -o .claude/commands/open-code-review-delegate.md \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/delegate-review.md
+
+# Уровень пользователя
+mkdir -p ~/.claude/commands
+curl -o ~/.claude/commands/open-code-review-delegate.md \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/delegate-review.md
+```
+
+> **Требования**: Все способы интеграции требуют установки CLI `ocr`. Стандартный режим дополнительно требует настройки LLM — см. [Установка](#установка) и [Настройка LLM](#1-настройка-llm) выше. Режим делегирования **не требует** настройки LLM на стороне OCR.
 
 ### Интеграция с CI/CD
 
@@ -468,6 +495,8 @@ ocr review \
 |---------|-------|----------|
 | `ocr review` | `ocr r` | Запустить код-ревью на основе диффа |
 | `ocr scan` | `ocr s` | Ревью целых файлов (дифф не нужен) |
+| `ocr delegate preview` | `ocr d preview` | Предварительный просмотр файлов для ревью с метаданными режима/ссылок (LLM не требуется) |
+| `ocr delegate rule <path...>` | `ocr d rule` | Вывод правил ревью, сгруппированных по содержимому (LLM не требуется) |
 | `ocr rules check <file>` | — | Показать, какое правило ревью применяется к пути файла |
 | `ocr config provider` | — | Интерактивная настройка провайдера (встроенный, пользовательский или ручной) |
 | `ocr config model` | — | Интерактивный выбор модели для активного провайдера |
@@ -561,6 +590,31 @@ ocr review --commit abc123 --resume <session-id>
 
 Перед каждым запуском `ocr scan` выводит приблизительную оценку стоимости в токенах. Используйте `--preview`, чтобы сначала посмотреть список файлов, и `--max-tokens-budget`, чтобы ограничить расход на больших репозиториях.
 
+### Флаги `ocr delegate`
+
+`ocr delegate` — режим делегирования для AI-агентов. Он обеспечивает детерминированный
+выбор файлов и разрешение правил без вызова LLM — фактическое ревью выполняет
+хост-агент своими силами.
+
+| Подкоманда | Описание |
+|------------|----------|
+| `ocr delegate preview` | Вывод списка файлов для ревью с метаданными режима/ссылок |
+| `ocr delegate rule <path...>` | Вывод правил ревью, сгруппированных по содержимому |
+
+Обе подкоманды используют общие флаги:
+
+| Флаг | Сокращение | По умолчанию | Описание |
+|------|-----------|--------------|----------|
+| `--repo` | — | текущий каталог | Корень Git-репозитория |
+| `--from` | — | — | Исходная ссылка (например, `main`) |
+| `--to` | — | — | Целевая ссылка (например, `feature-branch`) |
+| `--commit` | `-c` | — | Один коммит |
+| `--exclude` | — | — | Паттерны исключения в стиле gitignore через запятую |
+| `--rule` | — | — | Путь к файлу с пользовательскими JSON-правилами |
+| `--background` | `-b` | — | Необязательный контекст требований/бизнеса |
+| `--background-file` | `-B` | — | Бизнес-контекст из Markdown-файла |
+| `--max-git-procs` | — | `16` | Макс. параллельных подпроцессов git |
+
 ## Примеры
 
 ```bash
@@ -625,6 +679,12 @@ ocr scan --repo /path/to/plain/dir --format json
 
 # Самое быстрое сканирование: пропустить планирование, дедупликацию и сводку проекта
 ocr scan --no-plan --no-dedup --no-summary
+
+# Режим делегирования — AI-агент выполняет ревью (настройка LLM не требуется)
+ocr delegate preview
+ocr delegate preview --from main --to feature-branch
+ocr delegate preview --commit abc123
+ocr delegate rule internal/handler.go internal/service.go cmd/main.go
 
 # Открыть историю сессий ревью в браузере
 ocr viewer

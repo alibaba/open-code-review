@@ -298,6 +298,11 @@ ocr review --from main --to feature-branch --resume <session-id>
 # 全量文件扫描 —— 审查整个文件而非 diff（无需 git 历史）
 ocr scan                          # 扫描整个仓库
 ocr scan --path internal/agent    # 扫描指定目录或文件
+
+# 委托模式 — 让你的 AI 编程 agent 自己执行评审
+# OCR 负责文件选择和规则解析；无需配置 LLM
+ocr delegate preview
+ocr delegate rule src/main.go src/handler.go
 ```
 
 ### 集成到编程 Agent
@@ -314,6 +319,14 @@ npx skills add alibaba/open-code-review --skill open-code-review
 
 此命令从 [skills 注册表](skills/open-code-review/SKILL.md)安装 `open-code-review` skill，教会你的编程 Agent 如何调用 `ocr` 进行代码审查、按优先级分类问题，并可选择性地应用修复。
 
+**委托模式** — 如果你希望编程 agent 自身执行评审（OCR 仅负责文件选择和规则解析，OCR 侧无需配置 LLM）：
+
+```bash
+npx skills add alibaba/open-code-review --skill open-code-review-delegate
+```
+
+详见 [skills/open-code-review-delegate/SKILL.md](skills/open-code-review-delegate/SKILL.md)。
+
 #### 方式二：作为 Claude Code Plugin 安装
 
 对于 [Claude Code](https://docs.anthropic.com/en/docs/claude-code)，在 Claude Code 中通过以下命令安装命令插件：
@@ -323,7 +336,7 @@ npx skills add alibaba/open-code-review --skill open-code-review
 /plugin install open-code-review@open-code-review
 ```
 
-此命令注册 `/open-code-review:review` 斜杠命令，运行 OCR 并自动过滤和修复问题。
+此命令注册 `/open-code-review:review` 斜杠命令，运行 OCR 并自动过滤和修复问题。同时提供 `/open-code-review:delegate-review` 委托模式命令（agent 使用自身能力进行评审，OCR 负责文件选择和规则解析）。
 
 #### 方式三：作为 Codex Plugin 安装
 
@@ -413,7 +426,21 @@ curl -o ~/.claude/commands/open-code-review.md \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/review.md
 ```
 
-> **前置条件**：所有集成方式都需要安装 `ocr` CLI 并配置 LLM。参见上方[安装](#安装)和[配置 LLM](#1-配置-llm)。
+委托模式（OCR 侧无需配置 LLM）：
+
+```bash
+# 项目级
+mkdir -p .claude/commands
+curl -o .claude/commands/open-code-review-delegate.md \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/delegate-review.md
+
+# 用户级
+mkdir -p ~/.claude/commands
+curl -o ~/.claude/commands/open-code-review-delegate.md \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/delegate-review.md
+```
+
+> **前提条件**：所有集成方式都需要安装 `ocr` CLI。标准模式还需要配置 LLM — 参见上文[安装](#安装)和[配置 LLM](#1-配置-llm)。委托模式 OCR 侧**不需要** LLM 配置。
 
 ### CI/CD 集成
 
@@ -466,6 +493,8 @@ ocr review \
 |------|------|------|
 | `ocr review` | `ocr r` | 开始基于 diff 的代码审查 |
 | `ocr scan` | `ocr s` | 审查整个文件（无需 diff） |
+| `ocr delegate preview` | `ocr d preview` | 预览可评审文件列表及模式/引用元数据（无需 LLM） |
+| `ocr delegate rule <path...>` | `ocr d rule` | 输出按内容分组的评审规则（无需 LLM） |
 | `ocr rules check <file>` | — | 预览某个文件路径生效的审查规则 |
 | `ocr config provider` | — | 交互式供应商设置（内置、自定义或手动） |
 | `ocr config model` | — | 为当前供应商交互式选择模型 |
@@ -556,6 +585,29 @@ ocr review --commit abc123 --resume <session-id>
 
 每次运行前，`ocr scan` 会打印粗略的 token 费用估算。使用 `--preview` 先查看文件列表，使用 `--max-tokens-budget` 限制大型仓库的开销。
 
+### `ocr delegate` 参数
+
+`ocr delegate` 是面向 AI 编程 agent 的委托模式。它提供确定性的文件选择和规则解析，不调用任何 LLM — 由宿主 agent 使用自身能力执行实际评审。
+
+| 子命令 | 说明 |
+|--------|------|
+| `ocr delegate preview` | 输出可评审文件列表及模式/引用元数据 |
+| `ocr delegate rule <path...>` | 输出按内容分组的评审规则 |
+
+两个子命令共享以下参数：
+
+| 参数 | 缩写 | 默认值 | 说明 |
+|------|------|--------|------|
+| `--repo` | — | 当前目录 | Git 仓库根目录 |
+| `--from` | — | — | 源引用（如 `main`） |
+| `--to` | — | — | 目标引用（如 `feature-branch`） |
+| `--commit` | `-c` | — | 单次提交 |
+| `--exclude` | — | — | 逗号分隔的 gitignore 风格排除模式 |
+| `--rule` | — | — | 自定义 JSON 评审规则路径 |
+| `--background` | `-b` | — | 可选的需求/业务上下文 |
+| `--background-file` | `-B` | — | 从 Markdown 文件读取业务上下文 |
+| `--max-git-procs` | — | `16` | 最大并发 git 子进程数 |
+
 ## 示例
 
 ```bash
@@ -620,6 +672,12 @@ ocr scan --repo /path/to/plain/dir --format json
 
 # 最快扫描：跳过规划、去重和项目总结
 ocr scan --no-plan --no-dedup --no-summary
+
+# 委托模式 — 让 AI agent 驱动评审（无需 LLM 配置）
+ocr delegate preview
+ocr delegate preview --from main --to feature-branch
+ocr delegate preview --commit abc123
+ocr delegate rule internal/handler.go internal/service.go cmd/main.go
 
 # 在浏览器中查看审查会话历史
 ocr viewer

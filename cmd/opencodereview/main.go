@@ -56,6 +56,8 @@ func dispatch() error {
 		return runRules(args[1:])
 	case "viewer":
 		return runViewer(args[1:])
+	case "delegate", "d":
+		return runDelegate(args[1:])
 	case "session", "sessions":
 		return runSession(args[1:])
 	case "-h", "--help":
@@ -75,6 +77,7 @@ Usage:
 Commands:
   review, r    Start a diff-based code review
   scan, s      Scan entire files (no diff required)
+  delegate, d  Output review spec for host-agent delegation (no LLM required)
   rules        Inspect and debug review rules
   config       Manage configuration settings
   llm          LLM utility commands
