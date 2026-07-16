@@ -74,7 +74,7 @@ func TestGroupRules(t *testing.T) {
 			},
 		},
 		{
-			name: "different sources same text still grouped",
+			name: "same text different sources stay separate",
 			resolver: &stubDetailResolver{
 				mapping: map[string]rules.RuleDetail{
 					"a.go": {Rule: "same text", Source: "project", Pattern: "*.go"},
@@ -83,7 +83,22 @@ func TestGroupRules(t *testing.T) {
 			},
 			paths: []string{"a.go", "b.go"},
 			want: []RuleGroup{
-				{ID: 1, Source: "project", Pattern: "*.go", Text: "same text", Files: []string{"a.go", "b.go"}},
+				{ID: 1, Source: "project", Pattern: "*.go", Text: "same text", Files: []string{"a.go"}},
+				{ID: 2, Source: "custom", Pattern: "b.*", Text: "same text", Files: []string{"b.go"}},
+			},
+		},
+		{
+			name: "same text same source different patterns stay separate",
+			resolver: &stubDetailResolver{
+				mapping: map[string]rules.RuleDetail{
+					"src/main.go": {Rule: "go rule", Source: "custom", Pattern: "src/**/*.go"},
+					"cmd/main.go": {Rule: "go rule", Source: "custom", Pattern: "cmd/**/*.go"},
+				},
+			},
+			paths: []string{"src/main.go", "cmd/main.go"},
+			want: []RuleGroup{
+				{ID: 1, Source: "custom", Pattern: "src/**/*.go", Text: "go rule", Files: []string{"src/main.go"}},
+				{ID: 2, Source: "custom", Pattern: "cmd/**/*.go", Text: "go rule", Files: []string{"cmd/main.go"}},
 			},
 		},
 	}
