@@ -40,7 +40,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "kimi", "mimo", "minimax", "ollama-cloud", "openai", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "kimi", "litellm", "mimo", "minimax", "ollama-cloud", "openai", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -165,6 +165,51 @@ func TestLookupProvider_OllamaCloudDetails(t *testing.T) {
 		"nemotron-3-super",
 		"nemotron-3-ultra",
 		"qwen3.5:397b",
+	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
+}
+
+func TestLookupProvider_LiteLLMDetails(t *testing.T) {
+	p, ok := LookupProvider("litellm")
+	if !ok {
+		t.Fatal("litellm not found")
+	}
+	if p.DisplayName != "LiteLLM AI Gateway" {
+		t.Errorf("DisplayName = %q, want %q", p.DisplayName, "LiteLLM AI Gateway")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "http://localhost:4000/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "http://localhost:4000/v1")
+	}
+	if p.EnvVar != "LITELLM_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "LITELLM_API_KEY")
+	}
+	if p.AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
+	}
+	// LiteLLM uses provider/model format for routing to backing providers.
+	expectedModels := []string{
+		"anthropic/claude-sonnet-4-6",
+		"anthropic/claude-opus-4-6",
+		"anthropic/claude-haiku-4-5",
+		"openai/gpt-4o",
+		"openai/gpt-5.4",
+		"openai/o3",
+		"vertex_ai/gemini-2.5-flash",
+		"vertex_ai/gemini-2.5-pro",
+		"bedrock/anthropic.claude-sonnet-4-6-v1",
+		"groq/llama-4-scout-17b-16e-instruct",
+		"mistral/mistral-large-latest",
+		"deepseek/deepseek-chat",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))

@@ -279,6 +279,27 @@ var registry = []Provider{
 			"qwen3.5:397b",
 		},
 	},
+	{
+		Name:        "litellm",
+		DisplayName: "LiteLLM AI Gateway",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "http://localhost:4000/v1",
+		EnvVar:      "LITELLM_API_KEY",
+		Models: []string{
+			"anthropic/claude-sonnet-4-6",
+			"anthropic/claude-opus-4-6",
+			"anthropic/claude-haiku-4-5",
+			"openai/gpt-4o",
+			"openai/gpt-5.4",
+			"openai/o3",
+			"vertex_ai/gemini-2.5-flash",
+			"vertex_ai/gemini-2.5-pro",
+			"bedrock/anthropic.claude-sonnet-4-6-v1",
+			"groq/llama-4-scout-17b-16e-instruct",
+			"mistral/mistral-large-latest",
+			"deepseek/deepseek-chat",
+		},
+	},
 }
 
 var registryMap map[string]Provider
