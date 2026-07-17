@@ -6,6 +6,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -201,6 +202,7 @@ func TestRenderListName_Inactive(t *testing.T) {
 func TestCloneProviderEntry_WithExtraBody(t *testing.T) {
 	orig := ProviderEntry{
 		APIKey:     "key",
+		APIKeyCmd:  "op read op://dev/anthropic/api-key",
 		URL:        "http://localhost",
 		Protocol:   "openai",
 		Model:      "gpt-4",
@@ -212,6 +214,9 @@ func TestCloneProviderEntry_WithExtraBody(t *testing.T) {
 
 	if clone.APIKey != orig.APIKey || clone.URL != orig.URL || clone.Protocol != orig.Protocol {
 		t.Error("basic fields not copied")
+	}
+	if clone.APIKeyCmd != orig.APIKeyCmd {
+		t.Errorf("APIKeyCmd not copied: got %q, want %q", clone.APIKeyCmd, orig.APIKeyCmd)
 	}
 	if len(clone.Models) != 2 || clone.Models[0] != "gpt-4" {
 		t.Errorf("Models not cloned: %v", clone.Models)
@@ -242,6 +247,38 @@ func TestCloneProviderEntry_NilExtraBody(t *testing.T) {
 	clone := cloneProviderEntry(orig)
 	if clone.ExtraBody != nil {
 		t.Error("ExtraBody should remain nil")
+	}
+}
+
+// TestCloneProviderEntry_CopiesEveryField fails when a field is added to
+// ProviderEntry but not to cloneProviderEntry -- the way TimeoutSec and
+// ExtraHeaders were once silently dropped. DeepEqual catches a dropped field;
+// the reflect sweep is what stops a zero-valued fixture from hiding one.
+func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
+	orig := ProviderEntry{
+		APIKey:       "key",
+		APIKeyCmd:    "op read op://dev/x/api-key",
+		URL:          "http://localhost",
+		Protocol:     "openai",
+		Model:        "gpt-4",
+		Models:       []string{"gpt-4"},
+		AuthHeader:   "Authorization",
+		TimeoutSec:   45,
+		RetryCodes:   []int{403},
+		ExtraBody:    map[string]any{"temperature": 0.7},
+		ExtraHeaders: map[string]string{"X-Trace": "on"},
+	}
+
+	rv := reflect.ValueOf(orig)
+	for i := range rv.NumField() {
+		if rv.Field(i).IsZero() {
+			t.Fatalf("fixture leaves %s zero-valued; set it so the clone is actually checked",
+				rv.Type().Field(i).Name)
+		}
+	}
+
+	if clone := cloneProviderEntry(orig); !reflect.DeepEqual(clone, orig) {
+		t.Errorf("clone dropped a field:\n got %+v\nwant %+v", clone, orig)
 	}
 }
 

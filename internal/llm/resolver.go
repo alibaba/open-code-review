@@ -240,9 +240,10 @@ type llmFileConfig struct {
 	AuthToken    string            `json:"auth_token,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
 	Model        string            `json:"model,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`      // anthropic|openai|openai-responses; takes priority over use_anthropic
-	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false; legacy fallback when protocol is empty
-	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
+	AuthTokenCmd string            `json:"auth_token_cmd,omitempty"` // shell command whose stdout is the auth token; used when auth_token is empty
+	Protocol     string            `json:"protocol,omitempty"`       // anthropic|openai|openai-responses; takes priority over use_anthropic
+	UseAnthropic *bool             `json:"use_anthropic,omitempty"`  // pointer to distinguish unset from false; legacy fallback when protocol is empty
+	TimeoutSec   int               `json:"timeout_sec,omitempty"`    // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
@@ -251,6 +252,7 @@ type llmFileConfig struct {
 // providerEntryConfig represents a single provider entry in config.json.
 type providerEntryConfig struct {
 	APIKey       string            `json:"api_key,omitempty"`
+	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
 	URL          string            `json:"url,omitempty"`
 	Protocol     string            `json:"protocol,omitempty"`
 	Model        string            `json:"model,omitempty"`
@@ -318,13 +320,24 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 
 	apiKey := entry.APIKey
-	if apiKey == "" {
-		if isPreset && preset.EnvVar != "" {
-			apiKey = os.Getenv(preset.EnvVar)
+	switch {
+	case apiKey != "":
+		// Static api_key always wins. Warn (don't error) if a command is also set,
+		// so a config that keeps api_key_cmd as a deliberate fallback still works.
+		if entry.APIKeyCmd != "" {
+			fmt.Fprintf(os.Stderr, "warning: provider %q has both api_key and api_key_cmd set; using the static api_key\n", cfg.Provider)
 		}
+	case entry.APIKeyCmd != "":
+		resolved, err := resolveKeyCmd(entry.APIKeyCmd, fmt.Sprintf("api_key_cmd for provider %q", cfg.Provider))
+		if err != nil {
+			return ResolvedEndpoint{}, false, err
+		}
+		apiKey = resolved
+	case isPreset && preset.EnvVar != "":
+		apiKey = os.Getenv(preset.EnvVar)
 	}
 	if apiKey == "" {
-		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key configured and no environment variable fallback found", cfg.Provider)
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key or api_key_cmd configured and no environment variable fallback found", cfg.Provider)
 	}
 
 	var url, protocol, authHeader, model string
@@ -451,8 +464,26 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	if modelOverride != "" {
 		model = modelOverride
 	}
-	if cfg.Llm.URL == "" || cfg.Llm.AuthToken == "" || model == "" {
+	// Fall through to later strategies when the legacy block is incomplete. This
+	// includes the case where neither auth_token nor auth_token_cmd is set — and,
+	// critically, an incomplete block (e.g. missing url) never runs auth_token_cmd.
+	token := cfg.Llm.AuthToken
+	if cfg.Llm.URL == "" || model == "" || (token == "" && cfg.Llm.AuthTokenCmd == "") {
 		return ResolvedEndpoint{}, false, nil
+	}
+	switch {
+	case token != "":
+		// Static auth_token always wins; warn if a command is also set.
+		if cfg.Llm.AuthTokenCmd != "" {
+			fmt.Fprintf(os.Stderr, "warning: llm config has both auth_token and auth_token_cmd set; using the static auth_token\n")
+		}
+	case cfg.Llm.AuthTokenCmd != "":
+		// Otherwise-complete legacy block with a set-but-failing command is a hard error.
+		resolved, err := resolveKeyCmd(cfg.Llm.AuthTokenCmd, "auth_token_cmd for llm config")
+		if err != nil {
+			return ResolvedEndpoint{}, false, err
+		}
+		token = resolved
 	}
 
 	// llm.protocol (normalized) wins over use_anthropic when set.
@@ -499,7 +530,7 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 
 	return ResolvedEndpoint{
 		URL:          cfg.Llm.URL,
-		Token:        cfg.Llm.AuthToken,
+		Token:        token,
 		Model:        model,
 		Protocol:     protocol,
 		AuthHeader:   authHeader,

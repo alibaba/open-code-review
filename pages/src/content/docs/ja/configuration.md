@@ -146,6 +146,39 @@ Ollama は API key を無視しますが、カスタム provider は空でない
   }
 }
 ```
+### API key をコマンドで取得する
+
+key を設定ファイルに保存する代わりに、`api_key_cmd` で実行時にシークレット
+マネージャー（1Password、`pass`、`gopass` など）から取得できます。前後の空白を
+除いた 1 行の stdout が key になります。レガシーの `llm` ブロックにも同等の
+`auth_token_cmd` があります。
+
+```bash
+ocr config set providers.anthropic.api_key_cmd "op read op://dev/anthropic/api-key"
+```
+
+OS 標準のキーリングも同じ方法で使えます。OS に付属するコマンドをそのまま指定
+すれば、key は `config.json` ではなく Keychain や Secret Service に保存されます。
+
+```bash
+# macOS Keychain
+ocr config set providers.anthropic.api_key_cmd \
+  "security find-generic-password -s ocr-anthropic -w"
+
+# Linux（Secret Service: GNOME Keyring、KWallet など）
+ocr config set providers.anthropic.api_key_cmd \
+  "secret-tool lookup service ocr-anthropic"
+```
+
+優先順位：静的な `api_key` が常に優先されます（両方設定されている場合はコマンドを
+無視し、警告を表示します）。それ以外の場合は `api_key_cmd` を実行します。どちらも
+設定されていない場合のみ、OCR は provider の環境変数にフォールバックします。
+
+コマンドは `ocr` 実行ごとに 1 回実行され、成功する必要があります。非ゼロ終了、
+空の出力、複数行の出力はいずれもハードエラーです（OCR が黙ってフォールバックする
+ことはありません）。コマンドは 60 秒以内に完了する必要があります。コマンドの
+stderr は端末へそのまま渡されるため、対話的なプロンプト（pinentry、Touch ID）も
+引き続き動作します。
 
 ### 追加のリトライ対象ステータスコード
 

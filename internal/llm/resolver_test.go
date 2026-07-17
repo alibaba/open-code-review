@@ -834,7 +834,7 @@ func TestResolveEndpoint_MiniMaxProviderRejectsOtherRegionEnv(t *testing.T) {
 			})
 
 			_, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: tt.provider})
-			if err == nil || !strings.Contains(err.Error(), "has no api_key configured and no environment variable fallback found") {
+			if err == nil || !strings.Contains(err.Error(), "has no api_key or api_key_cmd configured and no environment variable fallback found") {
 				t.Fatalf("error = %v", err)
 			}
 		})

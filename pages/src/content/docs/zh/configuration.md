@@ -138,6 +138,35 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
   }
 }
 ```
+### 通过命令获取 API key
+
+除了把 key 直接写进配置文件，还可以用 `api_key_cmd` 在运行时从密钥管理器
+（1Password、`pass`、`gopass` 等）获取。命令去除首尾空白后的单行 stdout 即为
+key。旧版 `llm` 配置块也有对应的 `auth_token_cmd`。
+
+```bash
+ocr config set providers.anthropic.api_key_cmd "op read op://dev/anthropic/api-key"
+```
+
+操作系统自带的密钥环同理，直接用系统已有的命令即可，key 保存在 Keychain 或
+Secret Service 中，而不是 `config.json` 里：
+
+```bash
+# macOS Keychain
+ocr config set providers.anthropic.api_key_cmd \
+  "security find-generic-password -s ocr-anthropic -w"
+
+# Linux（Secret Service：GNOME Keyring、KWallet 等）
+ocr config set providers.anthropic.api_key_cmd \
+  "secret-tool lookup service ocr-anthropic"
+```
+
+优先级：静态 `api_key` 始终优先（两者都设置时忽略命令并打印警告）；否则运行
+`api_key_cmd`；只有两者都未设置时，OCR 才回退到 provider 对应的环境变量。
+
+命令在每次 `ocr` 调用时运行一次，且必须成功：非零退出、空输出或多行输出都会
+被视为硬错误（OCR 绝不会静默回退）。命令须在 60 秒内完成。命令的 stderr 会透传
+到你的终端，因此交互式提示（pinentry、Touch ID）仍可正常工作。
 
 ### 额外的重试状态码
 

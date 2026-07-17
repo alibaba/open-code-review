@@ -148,6 +148,39 @@ The `timeout_sec` keys are not supported by `ocr config set` — edit
   }
 }
 ```
+### API key from a command
+
+Instead of storing a key in the config file, `api_key_cmd` fetches it at
+runtime from a secret manager (1Password, `pass`, `gopass`, …). Its trimmed,
+single-line stdout becomes the key. The same option is available for the
+legacy `llm` block as `auth_token_cmd`.
+
+```bash
+ocr config set providers.anthropic.api_key_cmd "op read op://dev/anthropic/api-key"
+```
+
+Your OS keyring works the same way, through the tool it already ships with, so
+the key lives in the Keychain or Secret Service rather than in `config.json`:
+
+```bash
+# macOS Keychain
+ocr config set providers.anthropic.api_key_cmd \
+  "security find-generic-password -s ocr-anthropic -w"
+
+# Linux (Secret Service: GNOME Keyring, KWallet, …)
+ocr config set providers.anthropic.api_key_cmd \
+  "secret-tool lookup service ocr-anthropic"
+```
+
+Precedence: a static `api_key` always wins (if both are set, the command is
+ignored and a warning is printed); otherwise `api_key_cmd` runs; only if
+neither is set does OCR fall back to the provider's environment variable.
+
+The command runs once per `ocr` invocation and must succeed: a non-zero exit,
+empty output, or multi-line output is a hard error (OCR never silently falls
+back). It must complete within 60 seconds. The command's stderr is passed
+through to your terminal, so interactive prompts (pinentry, Touch ID) still
+work.
 
 ### Additional retry status codes
 
