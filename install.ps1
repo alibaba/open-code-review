@@ -15,11 +15,8 @@ function Err([string]$Message) {
 
 function Get-OcrArch {
     $arch = $env:PROCESSOR_ARCHITECTURE
-    if ([string]::IsNullOrEmpty($arch) -and [System.Environment]::Is64BitOperatingSystem) {
-        $arch = 'AMD64'
-    }
     if ([string]::IsNullOrEmpty($arch)) {
-        Err 'could not determine processor architecture'
+        Err 'unable to detect architecture (PROCESSOR_ARCHITECTURE is empty); please set it manually'
     }
     switch -Regex ($arch) {
         '^(AMD64|X64|x86_64)$' { return 'amd64' }
