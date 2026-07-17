@@ -10,7 +10,7 @@ Get your first code review running in a few minutes.
 
 - **Git ≥ 2.41**
 - **Node.js ≥ 18**
-- **LLM API key**
+- **LLM API key** (not needed if using [Delegation Mode](../integrations/delegate/))
 
 ## Step 1 — Install the CLI
 
@@ -25,6 +25,8 @@ ocr version
 > See [Installation](../installation/) for more methods.
 
 ## Step 2 — Configure an LLM
+
+> If you're using [Delegation Mode](../integrations/delegate/) (e.g. running inside Claude Code), the host agent supplies the model — skip to Step 4.
 
 ```bash
 ocr config provider
