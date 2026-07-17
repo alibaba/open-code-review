@@ -148,6 +148,18 @@ $env:OCR_VERSION = "v1.3.13"
 irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
 ```
 
+Передача удалённого скрипта напрямую в shell выполняет код из интернета. Лучше сначала скачать и просмотреть скрипт:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh -o install.sh
+less install.sh && sh install.sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 -OutFile install.ps1
+notepad install.ps1   # просмотрите, затем: .\install.ps1
+```
+
 <details>
 <summary>Ручная загрузка (все платформы, включая Windows)</summary>
 

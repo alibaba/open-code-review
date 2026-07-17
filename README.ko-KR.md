@@ -148,6 +148,18 @@ $env:OCR_VERSION = "v1.3.13"
 irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
 ```
 
+원격 스크립트를 셸로 바로 파이프하면 인터넷의 코드가 실행됩니다. 먼저 다운로드해 내용을 확인한 뒤 실행하는 방식을 권장합니다:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh -o install.sh
+less install.sh && sh install.sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 -OutFile install.ps1
+notepad install.ps1   # 확인 후: .\install.ps1
+```
+
 <details>
 <summary>수동 다운로드 (Windows 포함 모든 플랫폼)</summary>
 

@@ -148,6 +148,18 @@ $env:OCR_VERSION = "v1.3.13"
 irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
 ```
 
+Piping a remote script into a shell executes code from the internet. Prefer downloading and inspecting first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh -o install.sh
+less install.sh && sh install.sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 -OutFile install.ps1
+notepad install.ps1   # review, then: .\install.ps1
+```
+
 <details>
 <summary>Manual download (all platforms, including Windows)</summary>
 

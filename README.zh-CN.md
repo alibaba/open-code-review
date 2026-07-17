@@ -148,6 +148,18 @@ $env:OCR_VERSION = "v1.3.13"
 irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
 ```
 
+将远程脚本直接管道到 shell 会执行来自互联网的代码。建议先下载并检查后再运行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh -o install.sh
+less install.sh && sh install.sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 -OutFile install.ps1
+notepad install.ps1   # 检查后执行: .\install.ps1
+```
+
 <details>
 <summary>手动下载（所有平台，包括 Windows）</summary>
 

@@ -1,5 +1,8 @@
 # Install the ocr (Open Code Review) CLI from GitHub releases on Windows.
 #   irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+# Prefer to inspect first:
+#   irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 -OutFile install.ps1
+#   notepad install.ps1   # review, then: .\install.ps1
 # Env: OCR_INSTALL_DIR (default $env:LOCALAPPDATA\Programs\ocr), OCR_VERSION (default latest).
 # Requires PowerShell 5.1+ or PowerShell 7+.
 
@@ -15,10 +18,13 @@ function Get-OcrArch {
     if ([string]::IsNullOrEmpty($arch) -and [System.Environment]::Is64BitOperatingSystem) {
         $arch = 'AMD64'
     }
+    if ([string]::IsNullOrEmpty($arch)) {
+        Err 'could not determine processor architecture'
+    }
     switch -Regex ($arch) {
         '^(AMD64|X64|x86_64)$' { return 'amd64' }
         '^(ARM64|aarch64)$' { return 'arm64' }
-        default { Err "unsupported architecture: $arch" }
+        default { Err "unsupported architecture: $arch (only amd64 and arm64 are supported)" }
     }
 }
 

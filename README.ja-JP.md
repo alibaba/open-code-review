@@ -148,6 +148,18 @@ $env:OCR_VERSION = "v1.3.13"
 irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
 ```
 
+リモートスクリプトをシェルに直接パイプすると、インターネット上のコードが実行されます。先にダウンロードして内容を確認してから実行することを推奨します：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh -o install.sh
+less install.sh && sh install.sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 -OutFile install.ps1
+notepad install.ps1   # 確認後: .\install.ps1
+```
+
 <details>
 <summary>手動ダウンロード（Windows を含む全プラットフォーム）</summary>
 

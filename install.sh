@@ -1,6 +1,9 @@
 #!/bin/sh
 # Install the ocr (Open Code Review) CLI from GitHub releases.
 #   curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+# Prefer to inspect first:
+#   curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh -o install.sh
+#   less install.sh && sh install.sh
 # Env: OCR_INSTALL_DIR (default /usr/local/bin), OCR_VERSION (default latest).
 set -eu
 
