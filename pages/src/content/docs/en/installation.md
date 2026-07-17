@@ -58,9 +58,17 @@ It honours two environment variables:
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | Where to place the `ocr` binary. |
 | `OCR_VERSION` | latest release | Pin a specific release tag (e.g. `v1.2.3`). |
 
-The script supports `darwin` and `linux` on `amd64` / `arm64`; for
-Windows, use the [GitHub Release binary](#github-release-binary) or
-[NPM](#npm-recommended) path instead.
+The script supports `darwin` and `linux` on `amd64` / `arm64`.
+
+On Windows (PowerShell 5.1+), use the PowerShell installer instead:
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+```
+
+It honours the same `OCR_INSTALL_DIR` and `OCR_VERSION` variables (set via
+`$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION`). The default install location is
+`%LOCALAPPDATA%\Programs\ocr`.
 
 ## GitHub Release binary
 

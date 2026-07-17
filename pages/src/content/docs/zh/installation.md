@@ -54,9 +54,16 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/insta
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | 放置 `ocr` 二进制的位置。 |
 | `OCR_VERSION` | 最新 release | 固定到某个 release tag（如 `v1.2.3`）。 |
 
-该脚本支持 `darwin` 与 `linux` 的 `amd64` / `arm64`；Windows 请改用
-[GitHub Release 二进制](#github-release-binary)或 [NPM](#npm-recommended)
-方式。
+该脚本支持 `darwin` 与 `linux` 的 `amd64` / `arm64`。
+
+在 Windows（PowerShell 5.1+）上，请改用 PowerShell 安装脚本：
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+```
+
+它同样识别 `OCR_INSTALL_DIR` 与 `OCR_VERSION`（通过 `$env:OCR_INSTALL_DIR` /
+`$env:OCR_VERSION` 设置）。默认安装位置为 `%LOCALAPPDATA%\Programs\ocr`。
 
 ## GitHub Release 二进制
 

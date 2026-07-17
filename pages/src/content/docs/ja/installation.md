@@ -56,9 +56,17 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/insta
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | `ocr` バイナリを配置する場所。 |
 | `OCR_VERSION` | 最新 release | 特定の release tag に固定します（例：`v1.2.3`）。 |
 
-このスクリプトは `darwin` と `linux` の `amd64` / `arm64` をサポートします。Windows では
-[GitHub Release バイナリ](#github-release-binary) または [NPM](#npm-recommended)
-の方法を使用してください。
+このスクリプトは `darwin` と `linux` の `amd64` / `arm64` をサポートします。
+
+Windows（PowerShell 5.1+）では、代わりに PowerShell インストーラーを使用してください：
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+```
+
+同じ `OCR_INSTALL_DIR` と `OCR_VERSION` を認識します（`$env:OCR_INSTALL_DIR` /
+`$env:OCR_VERSION` で設定）。デフォルトのインストール先は
+`%LOCALAPPDATA%\Programs\ocr` です。
 
 ## GitHub Release バイナリ
 
