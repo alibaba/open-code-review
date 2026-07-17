@@ -420,4 +420,4 @@ ocr -V
 - [クイックスタート](../quickstart/): インストールして最初のレビューを完了します。
 - [設定](../configuration/): 引数の背後にある環境変数と config key。
 - [レビュールール](../review-rules/): `--rule` 引数とルールの解決。
-- [連携](../integrations/): agent と CI から `ocr review` を呼び出します。
+- [連携](../integrations/agent-skill/): agent と CI から `ocr review` を呼び出します。

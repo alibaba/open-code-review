@@ -94,5 +94,5 @@ ocr review --format json --audience agent > review.json
 - [配置](../configuration/) —— 每个环境变量、config key 与内置 provider。
 - [CLI 参考](../cli-reference/) —— 每个子命令、参数与输出模式。
 - [评审规则](../review-rules/) —— 自定义评审内容。
-- [集成](../integrations/) —— 把 OCR 嵌入 Claude Code、Agent skill 或 CI。
+- [集成](../integrations/agent-skill/) —— 把 OCR 嵌入 Claude Code、Agent skill 或 CI。
 - [FAQ](../faq/) —— 已知错误与对策。

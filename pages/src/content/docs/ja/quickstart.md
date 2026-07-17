@@ -94,5 +94,5 @@ ocr review --format json --audience agent > review.json
 - [設定](../configuration/) —— 各環境変数、config key、組み込み provider。
 - [CLI リファレンス](../cli-reference/) —— 各サブコマンド、引数、出力モード。
 - [レビュールール](../review-rules/) —— レビュー内容をカスタマイズします。
-- [インテグレーション](../integrations/) —— OCR を Claude Code、Agent skill、CI に組み込みます。
+- [インテグレーション](../integrations/agent-skill/) —— OCR を Claude Code、Agent skill、CI に組み込みます。
 - [FAQ](../faq/) —— 既知のエラーと対策。

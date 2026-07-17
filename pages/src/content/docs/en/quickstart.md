@@ -94,5 +94,5 @@ ocr review --format json --audience agent > review.json
 - [Configuration](../configuration/) — every env var, config key, and built-in provider.
 - [CLI Reference](../cli-reference/) — every sub-command, flag, and output mode.
 - [Review Rules](../review-rules/) — customize what gets reviewed.
-- [Integrations](../integrations/) — embed OCR in Claude Code, an Agent skill, or CI.
+- [Integrations](../integrations/agent-skill/) — embed OCR in Claude Code, an Agent skill, or CI.
 - [FAQ](../faq/) — known errors and remedies.

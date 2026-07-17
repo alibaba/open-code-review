@@ -444,4 +444,4 @@ ocr -V
 - [快速开始](../quickstart/)——安装并完成首次评审。
 - [配置](../configuration/)——参数背后的环境变量与 config key。
 - [评审规则](../review-rules/)——`--rule` 参数与规则解析。
-- [集成](../integrations/)——从 agent 与 CI 调用 `ocr review`。
+- [集成](../integrations/agent-skill/)——从 agent 与 CI 调用 `ocr review`。

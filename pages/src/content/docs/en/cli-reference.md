@@ -468,4 +468,4 @@ and the GitHub URL (`https://github.com/alibaba/open-code-review`).
 - [QuickStart](../quickstart/) — install and run your first review.
 - [Configuration](../configuration/) — env vars and config keys behind the flags.
 - [Review Rules](../review-rules/) — the `--rule` flag and rule resolution.
-- [Integrations](../integrations/) — calling `ocr review` from agents and CI.
+- [Integrations](../integrations/agent-skill/) — calling `ocr review` from agents and CI.
