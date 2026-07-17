@@ -115,5 +115,3 @@ re-reads commands on every invocation, so no restart is needed.
 
 - [Agent Skill](../agent-skill/) — the SDK-level equivalent; same
   underlying CLI, different defaults (asks before fixing).
-- [Direct Subprocess](../subprocess/) — bypass the slash command and
-  call the CLI yourself.

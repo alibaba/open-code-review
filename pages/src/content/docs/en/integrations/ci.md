@@ -7,7 +7,7 @@ sidebar:
 Run OCR on every Pull Request or Merge Request. The upstream repo
 ships two ready-made pipelines you copy and configure — one for
 GitHub Actions, one for GitLab CI. Both are thin wrappers around the
-core command from [Direct Subprocess](../subprocess/).
+core command documented in the [CLI Reference](../cli-reference/#json).
 
 ## How CI/CD integration works
 
@@ -37,7 +37,7 @@ implementations of it:
 
    `--format json` gives a parseable payload; `--audience agent`
    suppresses progress lines. See the
-   [JSON shape](../subprocess/#json-shape) for the envelope every
+   [JSON output](../cli-reference/#json) for the envelope every
    recipe consumes.
 5. **Parse the JSON** and walk `comments[]`.
 6. **Post comments back** to the PR / MR via the provider's review
@@ -453,7 +453,7 @@ script:
 
 ## See Also
 
-- [Direct Subprocess](../subprocess/) — the JSON shape both pipelines
+- [CLI Reference](../cli-reference/#json) — the JSON output shape both pipelines
   consume, useful when writing your own CI script from scratch.
 - [Configuration](../../configuration/) — every env var and config
   key OCR honors.

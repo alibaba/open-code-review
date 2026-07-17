@@ -6,7 +6,7 @@ sidebar:
 
 在每个 Pull Request 或 Merge Request 上运行 OCR。上游仓库提供两条现成流水线，
 你复制并配置即可——一条 GitHub Actions，一条 GitLab CI。两者都是
-[Direct Subprocess](../subprocess/)中核心命令的薄包装。
+[CLI 参考](../cli-reference/#json)中记录的核心命令的薄包装。
 
 ## CI/CD 集成如何工作
 
@@ -31,7 +31,7 @@ sidebar:
    ```
 
    `--format json` 给出可解析载荷；`--audience agent` 屏蔽进度行。每条配方消费的
-   外壳见 [JSON 结构](../subprocess/#json-shape)。
+   外壳见 [JSON 输出](../cli-reference/#json)。
 5. **解析 JSON** 并遍历 `comments[]`。
 6. **通过 provider 的 review API 把评论回贴到 PR / MR。** 无有效行信息的条目
    （文件级发现）合并到摘要备注而非内联张贴；若内联批量 API 拒绝请求，张贴步骤也
@@ -401,6 +401,6 @@ script:
 
 ## 另见
 
-- [Direct Subprocess](../subprocess/)——两条流水线消费的 JSON 结构，从头写
+- [CLI 参考](../cli-reference/#json)——两条流水线消费的 JSON 结构，从头写
   CI 脚本时有用。
 - [配置](../../configuration/)——OCR 接受的每个环境变量与 config key。

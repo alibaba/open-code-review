@@ -156,10 +156,8 @@ Classify each finding by severity:
 | [Agent Skill](../agent-skill/) | OCR | Agent invokes `ocr review`; OCR drives the full review |
 | [Command (Claude Code)](../claude-code/) | OCR | Slash command in Claude Code; OCR drives the review |
 | **Delegation Mode** | Host agent | OCR provides scaffolding; agent drives the review |
-| [Direct Subprocess](../subprocess/) | OCR | Manual CLI invocation |
 
 ## See Also
 
 - [Agent Skill](../agent-skill/) — OCR drives the full review on behalf of the agent.
 - [Command (Claude Code)](../claude-code/) — slash-command flavor with auto-fix.
-- [Direct Subprocess](../subprocess/) — bypass skills/commands, call CLI directly.

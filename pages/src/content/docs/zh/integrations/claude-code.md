@@ -99,4 +99,3 @@ Code 每次调用都重新读取命令，因此无需重启。
 
 - [Agent Skill](../agent-skill/)——SDK 级等价物；同一个底层 CLI，不同默认值
   （修复前先询问）。
-- [Direct Subprocess](../subprocess/)——绕过 slash 命令，自行调用 CLI。

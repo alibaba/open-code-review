@@ -82,4 +82,3 @@ SDK は SKILL.md prompt をロードし、agent が[skill が行うこと](#what
 ## 関連項目
 
 - [Command（Claude Code Plugin）](../claude-code/)——同じ skill の slash-command 版。
-- [Direct Subprocess](../subprocess/)——マニフェストを介さず、自分で CLI を呼び出す方法。

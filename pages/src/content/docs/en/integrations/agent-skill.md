@@ -115,5 +115,3 @@ prompt template.
 
 - [Command（Claude Code Plugin）](../claude-code/) — the
   slash-command flavor of the same skill.
-- [Direct Subprocess](../subprocess/) — bypass the manifest and call
-  the CLI yourself.

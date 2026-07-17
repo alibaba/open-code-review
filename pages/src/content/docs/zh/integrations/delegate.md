@@ -142,10 +142,8 @@ cat <path>                     # 新的未跟踪文件
 | [Agent Skill](../agent-skill/) | OCR | Agent 调用 `ocr review`，OCR 驱动完整审查 |
 | [Command（Claude Code）](../claude-code/) | OCR | Claude Code 中的斜杠命令，OCR 驱动审查 |
 | **委托模式** | 宿主 Agent | OCR 提供脚手架，Agent 驱动审查 |
-| [Direct Subprocess](../subprocess/) | OCR | 手动 CLI 调用 |
 
 ## 另请参阅
 
 - [Agent Skill](../agent-skill/) — OCR 代表 Agent 驱动完整审查。
 - [Command（Claude Code）](../claude-code/) — 斜杠命令风格，含自动修复。
-- [Direct Subprocess](../subprocess/) — 跳过 skill/command，直接调用 CLI。

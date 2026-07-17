@@ -142,10 +142,8 @@ cat <path>                     # 新規未追跡ファイル
 | [Agent Skill](../agent-skill/) | OCR | Agent が `ocr review` を呼び出し、OCR が完全なレビューを駆動 |
 | [Command（Claude Code）](../claude-code/) | OCR | Claude Code のスラッシュコマンド、OCR がレビューを駆動 |
 | **デリゲーションモード** | ホストエージェント | OCR がスキャフォールディングを提供、Agent がレビューを駆動 |
-| [Direct Subprocess](../subprocess/) | OCR | 手動 CLI 呼び出し |
 
 ## 関連項目
 
 - [Agent Skill](../agent-skill/) — OCR がエージェントに代わって完全なレビューを駆動。
 - [Command（Claude Code）](../claude-code/) — スラッシュコマンド形式、自動修正付き。
-- [Direct Subprocess](../subprocess/) — skill/command をバイパスし、CLI を直接呼び出し。

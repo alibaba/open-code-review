@@ -99,4 +99,3 @@ markdown。若你的框架期望不同 schema，markdown 正文仍可用作 prom
 
 - [Command（Claude Code Plugin）](../claude-code/)——同一 skill 的
   slash-command 版本。
-- [Direct Subprocess](../subprocess/)——绕过 manifest，自行调用 CLI。

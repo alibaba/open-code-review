@@ -5,7 +5,7 @@ sidebar:
 ---
 
 すべての Pull Request または Merge Request で OCR を実行します。上流リポジトリは、コピーして設定するだけのすぐ使える 2 つのパイプラインを提供しています——1 つは GitHub Actions、もう 1 つは GitLab CI です。どちらも
-[Direct Subprocess](../subprocess/)にある中核コマンドの薄いラッパーです。
+[CLI リファレンス](../cli-reference/#json)に記載されている中核コマンドの薄いラッパーです。
 
 ## CI/CD 統合の仕組み
 
@@ -26,7 +26,7 @@ sidebar:
      --audience agent
    ```
 
-   `--format json` は解析可能なペイロードを提供し、`--audience agent` は進捗行を抑制します。各レシピが消費する外殻は [JSON の構造](../subprocess/#json-shape)を参照してください。
+   `--format json` は解析可能なペイロードを提供し、`--audience agent` は進捗行を抑制します。各レシピが消費する外殻は [JSON 出力](../cli-reference/#json)を参照してください。
 5. **JSON を解析**し、`comments[]` を反復処理します。
 6. **プロバイダーの review API を通じてコメントを PR / MR に貼り戻します。** 有効な行情報を持たない項目（ファイルレベルの発見）はインラインで貼り付けるのではなくサマリーの注記にまとめられます。インラインの一括 API がリクエストを拒否した場合、貼り付け手順も通常のサマリーコメントにフォールバックします。
 
@@ -362,5 +362,5 @@ script:
 
 ## 関連項目
 
-- [Direct Subprocess](../subprocess/)——2 つのパイプラインが消費する JSON の構造。ゼロから CI スクリプトを書くときに役立ちます。
+- [CLI リファレンス](../cli-reference/#json)——2 つのパイプラインが消費する JSON の構造。ゼロから CI スクリプトを書くときに役立ちます。
 - [設定](../../configuration/)——OCR が受け付けるすべての環境変数と config key。
