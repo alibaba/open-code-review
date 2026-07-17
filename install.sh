@@ -16,7 +16,7 @@ main() {
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   case "$os" in
     darwin|linux) ;;
-    *) err "unsupported OS: $os (download the Windows binary from GitHub releases)" ;;
+    *) err "unsupported OS: $os (on Windows use: irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex)" ;;
   esac
 
   arch="$(uname -m)"

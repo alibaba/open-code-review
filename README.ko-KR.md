@@ -134,6 +134,20 @@ OCR_INSTALL_DIR="$HOME/.local/bin" OCR_VERSION=v1.3.13 \
   sh -c "$(curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh)"
 ```
 
+Windows (PowerShell 5.1+)에서는:
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+```
+
+이 스크립트는 알맞은 Windows 릴리스 binary를 선택하고 SHA-256 체크섬을 검증한 뒤 `ocr.exe`로 `%LOCALAPPDATA%\Programs\ocr`에 설치합니다. 설치 위치는 `OCR_INSTALL_DIR`로, 릴리스 버전은 `OCR_VERSION`으로 재정의할 수 있습니다:
+
+```powershell
+$env:OCR_INSTALL_DIR = "$env:USERPROFILE\bin"
+$env:OCR_VERSION = "v1.3.13"
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+```
+
 <details>
 <summary>수동 다운로드 (Windows 포함 모든 플랫폼)</summary>
 

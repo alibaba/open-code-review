@@ -134,6 +134,20 @@ OCR_INSTALL_DIR="$HOME/.local/bin" OCR_VERSION=v1.3.13 \
   sh -c "$(curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh)"
 ```
 
+On Windows (PowerShell 5.1+):
+
+```powershell
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+```
+
+The script picks the right Windows release binary, verifies its SHA-256 checksum, and installs it as `ocr.exe` in `%LOCALAPPDATA%\Programs\ocr`. Override the target with `OCR_INSTALL_DIR` or pin a release with `OCR_VERSION`:
+
+```powershell
+$env:OCR_INSTALL_DIR = "$env:USERPROFILE\bin"
+$env:OCR_VERSION = "v1.3.13"
+irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+```
+
 <details>
 <summary>Manual download (all platforms, including Windows)</summary>
 
