@@ -272,6 +272,7 @@ export const en: TranslationKeys = {
   'docs.sidebar.integrations': 'Integrations',
   'docs.sidebar.agentSkill': 'Agent Skill',
   'docs.sidebar.claudeCode': 'Command (Claude Code)',
+  'docs.sidebar.delegate': 'Delegation Mode',
   'docs.sidebar.subprocess': 'Direct Subprocess',
   'docs.sidebar.cicd': 'CI/CD',
   'docs.sidebar.contributing': 'Contributing',

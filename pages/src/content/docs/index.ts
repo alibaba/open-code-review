@@ -16,6 +16,7 @@ import enAgentSkill from './en/integrations/agent-skill.md';
 import enClaudeCode from './en/integrations/claude-code.md';
 import enSubprocess from './en/integrations/subprocess.md';
 import enCicd from './en/integrations/ci.md';
+import enDelegate from './en/integrations/delegate.md';
 import enContributing from './en/contributing.md';
 import enFaq from './en/faq.md';
 
@@ -35,6 +36,7 @@ import zhAgentSkill from './zh/integrations/agent-skill.md';
 import zhClaudeCode from './zh/integrations/claude-code.md';
 import zhSubprocess from './zh/integrations/subprocess.md';
 import zhCicd from './zh/integrations/ci.md';
+import zhDelegate from './zh/integrations/delegate.md';
 import zhContributing from './zh/contributing.md';
 import zhFaq from './zh/faq.md';
 
@@ -54,6 +56,7 @@ import jaAgentSkill from './ja/integrations/agent-skill.md';
 import jaClaudeCode from './ja/integrations/claude-code.md';
 import jaSubprocess from './ja/integrations/subprocess.md';
 import jaCicd from './ja/integrations/ci.md';
+import jaDelegate from './ja/integrations/delegate.md';
 import jaContributing from './ja/contributing.md';
 import jaFaq from './ja/faq.md';
 
@@ -73,6 +76,7 @@ export type DocSlug =
   | 'claude-code'
   | 'subprocess'
   | 'cicd'
+  | 'delegate'
   | 'contributing'
   | 'faq';
 
@@ -92,6 +96,7 @@ const enDocs: Record<DocSlug, string> = {
   'claude-code': enClaudeCode,
   'subprocess': enSubprocess,
   'cicd': enCicd,
+  'delegate': enDelegate,
   'contributing': enContributing,
   'faq': enFaq,
 };
@@ -112,6 +117,7 @@ const zhDocs: Record<DocSlug, string> = {
   'claude-code': zhClaudeCode,
   'subprocess': zhSubprocess,
   'cicd': zhCicd,
+  'delegate': zhDelegate,
   'contributing': zhContributing,
   'faq': zhFaq,
 };
@@ -132,6 +138,7 @@ const jaDocs: Record<DocSlug, string> = {
   'claude-code': jaClaudeCode,
   'subprocess': jaSubprocess,
   'cicd': jaCicd,
+  'delegate': jaDelegate,
   'contributing': jaContributing,
   'faq': jaFaq,
 };

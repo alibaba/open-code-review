@@ -100,6 +100,14 @@
   padding-left: 24px;
 }
 
+.docs-markdown ul {
+  list-style-type: disc;
+}
+
+.docs-markdown ol {
+  list-style-type: decimal;
+}
+
 .docs-markdown li {
   margin-bottom: 6px;
   color: rgba(255, 255, 255, 0.6);
