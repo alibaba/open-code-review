@@ -57,10 +57,8 @@ markdown prompt），上面的文件复制方法就是安装路径：把 `open-c
 放进你的 agent 读取命令的目录，按你的 agent 调用命令的方式调用它。prompt 正文
 与 agent 无关——它只告诉模型选哪些 `ocr` 参数以及如何分级输出。
 
-> **前置条件：** 首次运行时命令会自行安装 `ocr` CLI
-> （通过 `npm install -g @alibaba-group/open-code-review`），前提是二进制不在
-> `PATH` 上。你**确实**需要预先配置好 LLM——若 `ocr llm test` 连不上，命令会
-> 失败。见[配置](../../configuration/)。
+> **提示：** 如果不想自行配置 LLM，可以试试[委托模式](../delegate/)——它让宿主
+> agent（Claude Code）提供模型，无需额外的 LLM 配置。
 
 ## 使用
 
@@ -83,9 +81,7 @@ prompt 解析你的请求并选择正确的 `ocr review` 参数：无参数 → 
 命令 prompt 很短——三步：
 
 1. **运行评审。** 用从你请求推断的参数调用 `ocr review --audience agent`
-   （描述了需求上下文时加可选 `--background`）。若 `ocr` 二进制不在 `PATH`，
-   命令通过 `npm i -g @alibaba-group/open-code-review` 自动安装并继续。输出在 5
-   分钟超时内捕获。
+   （描述了需求上下文时加可选 `--background`）。输出在 5 分钟超时内捕获。
 2. **过滤与评估。** 把每条评论分为 **High** / **Medium** / **Low**。低置信
    （疑似误报、吹毛求疵、缺上下文）评论被静默丢弃；其余展示。
 3. **修复。** 对值得采纳的 High/Medium 项自动应用修复。与
