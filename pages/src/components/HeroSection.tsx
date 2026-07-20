@@ -6,8 +6,11 @@ import ReactDOM from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
-import ErrorBoundary from './ErrorBoundary';
-import docDownloadIcon from '../assets/icons/doc-download-green.svg';
+import ColorBends from './ColorBends';
+import npmIcon from '../assets/icons/npm.svg';
+import appleIcon from '../assets/icons/apple.svg';
+import linuxIcon from '../assets/icons/linux.svg';
+import windowsIcon from '../assets/icons/windows.svg';
 import copyIcon from '../assets/icons/icon-copy.svg';
 
 const ColorBends = React.lazy(() => import(/* webpackChunkName: "color-bends" */ './ColorBends'));
@@ -121,11 +124,16 @@ const terminalLines = [
   { num: 12, content: <span className="terminal-cursor" style={{ color: TC.text }}>｜</span> },
 ];
 
-const INSTALL_CMD = 'npm i -g @alibaba-group/open-code-review';
+const INSTALL_CHANNELS = [
+  { key: 'npm', labelKey: 'hero.installNpm', cmd: 'npm i -g @alibaba-group/open-code-review', icons: [npmIcon] },
+  { key: 'unix', labelKey: 'hero.installUnix', cmd: 'curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh', icons: [appleIcon, linuxIcon] },
+  { key: 'windows', labelKey: 'hero.installWindows', cmd: 'irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex', icons: [windowsIcon] },
+];
 
 const HeroSection: React.FC = () => {
   const { t } = useTranslation();
-  const { isMobile, isTablet } = useResponsive();
+  const { isMobile, isTablet, isDesktop } = useResponsive();
+  const twoCol = isDesktop;
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [showShaderBackground, setShowShaderBackground] = useState(false);
@@ -200,7 +208,7 @@ const HeroSection: React.FC = () => {
       style={{
         width: '100vw',
         marginLeft: 'calc(-50vw + 50%)',
-        height: isMobile ? 850 : isTablet ? 830 : 990,
+        height: isMobile ? 1000 : isTablet ? 900 : 860,
         position: 'relative',
         overflow: 'hidden',
         display: 'flex',
@@ -259,123 +267,194 @@ const HeroSection: React.FC = () => {
           position: 'relative',
           zIndex: 2,
           display: 'flex',
-          flexDirection: 'column',
+          flexDirection: twoCol ? 'row' : 'column',
           alignItems: 'center',
-          paddingTop: isMobile ? 100 : 180,
-          paddingLeft: isMobile ? 20 : 0,
-          paddingRight: isMobile ? 20 : 0,
-          gap: isMobile ? 24 : 32,
-          maxWidth: isMobile ? '100%' : 742,
+          justifyContent: 'center',
+          paddingTop: isMobile ? 80 : 170,
+          paddingLeft: isMobile ? 20 : 40,
+          paddingRight: isMobile ? 20 : 40,
+          gap: twoCol ? 56 : isMobile ? 24 : 32,
+          maxWidth: twoCol ? 1200 : isMobile ? '100%' : 742,
+          width: '100%',
         }}
       >
-        {/* Install Badge */}
+        {/* Left column */}
         <div
           style={{
-            width: 'auto',
-            height: 32,
-            background: 'rgba(0,0,0,0.8)',
-            borderRadius: 500,
-            border: '1px solid rgba(255,255,255,0.16)',
             display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '0 12px',
-            marginBottom: isMobile ? 8 : 0,
+            flexDirection: 'column',
+            alignItems: twoCol ? 'flex-start' : 'center',
+            gap: isMobile ? 20 : 24,
+            flex: twoCol ? '1 1 0' : undefined,
+            minWidth: 0,
+            maxWidth: twoCol ? 520 : '100%',
+            width: '100%',
           }}
         >
-          <img src={docDownloadIcon} alt="" style={{ width: 16, height: 16, flexShrink: 0 }} />
-          <p className="install-text-shimmer" style={{ fontSize: 12, fontWeight: 400, margin: 0, letterSpacing: '0.2px', whiteSpace: 'nowrap' }}>
-            {INSTALL_CMD}
-          </p>
-          <img
-            src={copyIcon}
-            alt="Copy"
-            style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
-            onClick={() => handleCopy(INSTALL_CMD)}
-          />
-        </div>
+          {/* Title */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: twoCol ? 'flex-start' : 'center', width: '100%' }}>
+            <h1
+              style={{
+                color: '#FFFFFF',
+                fontSize: isMobile ? 28 : isTablet ? 36 : 48,
+                fontWeight: 500,
+                textAlign: twoCol ? 'left' : 'center',
+                lineHeight: isMobile ? '34px' : isTablet ? '42px' : '52px',
+                letterSpacing: '0.96px',
+                margin: 0,
+              }}
+            >
+              {t('hero.title').split('\n').map((line, i, arr) => (
+                <React.Fragment key={i}>
+                  {line}
+                  {i < arr.length - 1 && <br />}
+                </React.Fragment>
+              ))}
+            </h1>
+            <p
+              style={{
+                color: 'rgba(255,255,255,0.6)',
+                fontSize: isMobile ? 14 : 16,
+                textAlign: twoCol ? 'left' : 'center',
+                lineHeight: '24px',
+                marginTop: 16,
+                maxWidth: isMobile ? '100%' : 520,
+              }}
+            >
+              {t('hero.description')}
+            </p>
+          </div>
 
-        {/* Title */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <h1
+          {/* Install channels */}
+          <div
             style={{
-              color: '#FFFFFF',
-              fontSize: isMobile ? 28 : isTablet ? 36 : 48,
-              fontWeight: 500,
-              textAlign: 'center',
-              lineHeight: isMobile ? '34px' : isTablet ? '42px' : '52px',
-              letterSpacing: '0.96px',
-              margin: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+              width: '100%',
+              maxWidth: 460,
             }}
           >
-            {t('hero.title').split('\n').map((line, i, arr) => (
-              <React.Fragment key={i}>
-                {line}
-                {i < arr.length - 1 && <br />}
-              </React.Fragment>
+            {INSTALL_CHANNELS.map((ch) => (
+              <div key={ch.key} style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {ch.key === 'unix' ? (() => {
+                    const parts = t(ch.labelKey).split('/');
+                    const macLabel = (parts[0] ?? '').trim();
+                    const linuxLabel = (parts[1] ?? '').trim();
+                    return (
+                      <>
+                        <img src={ch.icons[0]} alt="" style={{ width: 14, height: 14, flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>
+                          {macLabel}{linuxLabel ? ' /' : ''}
+                        </span>
+                        {linuxLabel && (
+                          <>
+                            <img src={ch.icons[1]} alt="" style={{ width: 14, height: 14, flexShrink: 0 }} />
+                            <span style={{ fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>
+                              {linuxLabel}
+                            </span>
+                          </>
+                        )}
+                      </>
+                    );
+                  })() : (
+                    <>
+                      {ch.icons.map((icon, idx) => (
+                        <img key={idx} src={icon} alt="" style={{ width: 14, height: 14, flexShrink: 0 }} />
+                      ))}
+                      <span style={{ fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>
+                        {t(ch.labelKey)}
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    height: 32,
+                    padding: '0 12px',
+                    background: 'rgba(0,0,0,0.8)',
+                    border: '1px solid rgba(255,255,255,0.16)',
+                    borderRadius: 6,
+                    width: '100%',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontFamily: 'Menlo, monospace',
+                      color: 'rgba(255,255,255,0.85)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {ch.cmd}
+                  </span>
+                  <img
+                    src={copyIcon}
+                    alt="Copy"
+                    style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
+                    onClick={() => handleCopy(ch.cmd)}
+                  />
+                </div>
+              </div>
             ))}
-          </h1>
-          <p
-            style={{
-              color: 'rgba(255,255,255,0.6)',
-              fontSize: isMobile ? 14 : 16,
-              textAlign: 'center',
-              lineHeight: '24px',
-              marginTop: 16,
-              maxWidth: isMobile ? '100%' : 742,
-            }}
-          >
-            {t('hero.description')}
-          </p>
-        </div>
+          </div>
 
-        {/* Buttons */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <a
-            href="#quickstart"
-            style={{
-              height: 32,
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 12px',
-              background: '#ffffff',
-              border: '1px solid #EBEBEB',
-              borderRadius: 6,
-              color: 'rgba(0,0,0,0.77)',
-              fontSize: 14,
-              fontWeight: 500,
-              textDecoration: 'none',
-            }}
-          >
-            {t('hero.quickStart')}
-          </a>
-          <Link
-            to="/docs"
-            style={{
-              height: 32,
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              padding: '4px 12px',
-              background: 'rgba(0,0,0,0.9)',
-              borderRadius: 6,
-              color: '#fff',
-              fontSize: 14,
-              border: '1px solid rgba(255,255,255,0.16)',
-              textDecoration: 'none',
-            }}
-          >
-            {t('hero.learnMore')}
-          </Link>
+          {/* Buttons */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a
+              href="#quickstart"
+              style={{
+                height: 32,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 12px',
+                background: '#ffffff',
+                border: '1px solid #EBEBEB',
+                borderRadius: 6,
+                color: 'rgba(0,0,0,0.77)',
+                fontSize: 14,
+                fontWeight: 500,
+                textDecoration: 'none',
+              }}
+            >
+              {t('hero.quickStart')}
+            </a>
+            <Link
+              to="/docs"
+              style={{
+                height: 32,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                padding: '4px 12px',
+                background: 'rgba(0,0,0,0.9)',
+                borderRadius: 6,
+                color: '#fff',
+                fontSize: 14,
+                border: '1px solid rgba(255,255,255,0.16)',
+                textDecoration: 'none',
+              }}
+            >
+              {t('hero.learnMore')}
+            </Link>
+          </div>
         </div>
 
         {/* Terminal */}
         <div
           style={{
             width: '100%',
-            maxWidth: isMobile ? '100%' : isTablet ? 560 : 692,
+            maxWidth: isMobile ? '100%' : twoCol ? 600 : isTablet ? 560 : 692,
+            flexShrink: twoCol ? 0 : undefined,
             borderRadius: 8,
             overflow: 'hidden',
             border: '1px solid rgba(255,255,255,0.08)',
