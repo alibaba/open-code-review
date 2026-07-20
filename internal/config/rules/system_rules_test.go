@@ -88,6 +88,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/app/main.py", "Mutable Default Arguments"},
 		{"locale/zh_CN/LC_MESSAGES/messages.po", "Placeholder Mismatch"},
 		{"i18n/app.po", "Plural Forms"},
+		{"locale/messages.pot", "Placeholder Consistency"},
+		{"i18n/app.pot", "Header Integrity"},
 	}
 
 	for _, tt := range tests {

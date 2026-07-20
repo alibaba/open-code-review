@@ -21,6 +21,7 @@
     "**/*.{cpp,cc,hpp}": "cpp.md",
     "**/*.c": "c.md",
     "**/*.py": "python.md",
-    "**/*.po": "po.md"
+    "**/*.po": "po.md",
+    "**/*.pot": "pot.md"
   }
 }
