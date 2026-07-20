@@ -1,5 +1,5 @@
 <div align="center">
-  <a href="https://alibaba.github.io/open-code-review/">
+  <a href="https://open-codereview.ai">
     <img src="imgs/logo-core.svg" alt="OpenCodeReview logo" width="180" />
   </a>
   <h1>OpenCodeReview</h1>
@@ -37,7 +37,7 @@ Open Code Review 是一款 AI 驱动的代码审查 CLI 工具。它的前身是
 
 它读取 Git diff，通过具备工具调用能力的 Agent 将变更文件发送至可配置的 LLM，生成具有行级精度的结构化审查意见。Agent 可以读取完整文件内容、搜索代码库、检查其他变更文件以获取上下文，从而进行深度审查——而非仅停留在表面的 diff 反馈。除了 diff 审查，`ocr scan` 可以审查整个文件，适用于审计不熟悉的代码库或没有有意义 diff 的目录。
 
-访问[官方网站](https://alibaba.github.io/open-code-review/)了解更多信息。
+访问[官方网站](https://open-codereview.ai)了解更多信息。
 
 ![Highlights](imgs/highlights-zh.png)
 

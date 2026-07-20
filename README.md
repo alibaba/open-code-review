@@ -1,5 +1,5 @@
 <div align="center">
-  <a href="https://alibaba.github.io/open-code-review/">
+  <a href="https://open-codereview.ai">
     <img src="imgs/logo-core.svg" alt="OpenCodeReview logo" width="180" />
   </a>
   <h1>OpenCodeReview</h1>
@@ -37,7 +37,7 @@ Open Code Review is an AI-powered code review CLI tool. It originated as Alibaba
 
 It reads Git diffs, sends changed files to a configurable LLM via an agent with tool-use capabilities, and generates structured review comments with line-level precision. The agent can read full file contents, search the codebase, inspect other changed files for context, and produce deep reviews — not just surface-level diff feedback. Beyond diff review, `ocr scan` reviews entire files for auditing unfamiliar codebases or directories that have no meaningful diff.
 
-Visit the [official website](https://alibaba.github.io/open-code-review/) for more details.
+Visit the [official website](https://open-codereview.ai) for more details.
 
 ![Highlights](imgs/highlights-en.png)
 
