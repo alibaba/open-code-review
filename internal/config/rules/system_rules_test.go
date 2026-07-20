@@ -86,6 +86,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
 		{"scripts/deploy.py", "Mutable Default Arguments"},
 		{"src/app/main.py", "Mutable Default Arguments"},
+		{"locale/zh_CN/LC_MESSAGES/messages.po", "Placeholder Mismatch"},
+		{"i18n/app.po", "Plural Forms"},
 	}
 
 	for _, tt := range tests {
