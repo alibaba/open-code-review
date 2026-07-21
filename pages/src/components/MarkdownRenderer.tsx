@@ -78,14 +78,12 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
   }, [toastVisible]);
 
   const html = useMemo(() => {
-    const publicPath = (window.location.pathname.replace(/\/[^/]*$/, '') || '').replace(/\/$/, '');
     // Custom renderer to generate heading IDs matching the TOC extraction logic
     const renderer = new Renderer();
     renderer.image = function ({ href, title, text }: { href: string; title?: string | null; text: string }) {
       const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const src = href.startsWith('/') ? `${publicPath}${href}` : href;
       const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
-      return `<img src="${escapeAttr(src)}" alt="${escapeAttr(text)}"${titleAttr} />`;
+      return `<img src="${escapeAttr(href)}" alt="${escapeAttr(text)}"${titleAttr} />`;
     };
     renderer.heading = function ({ text, depth }: { text: string; depth: number }) {
       const id = generateHeadingId(text);
