@@ -125,6 +125,24 @@ If you already have Claude Code's `ANTHROPIC_*` or OCR's own `OCR_LLM_*`
 environment variables configured, OCR picks them up automatically — no
 config file needed.
 
+### Using CC-Switch
+
+If you use [CC-Switch](https://github.com/farion1231/cc-switch) with its
+[routing service](https://www.ccswitch.io/en/docs?section=proxy&item=service)
+enabled, point the provider `url` at the local proxy — no other setup is
+required:
+
+```bash
+# Claude (Anthropic-compatible)
+ocr config set providers.anthropic.url http://127.0.0.1:15721
+
+# Codex / OpenAI-compatible — set that provider's url key instead
+ocr config set providers.<name>.url http://127.0.0.1:15721/v1
+```
+
+`api_key` can be any value. `extra_body` (and other per-provider fields)
+still apply as usual.
+
 ### Send vendor-specific fields
 
 Some providers require non-standard request fields (such as Bedrock-style

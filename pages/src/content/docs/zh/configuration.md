@@ -115,6 +115,22 @@ ocr llm test
 
 如果你已经配好了 Claude Code 的 `ANTHROPIC_*`，或 OCR 自己的 `OCR_LLM_*`环境变量，OCR 会自动识别，无需再写配置文件。
 
+### 使用 CC-Switch
+
+如果你使用 [CC-Switch](https://github.com/farion1231/cc-switch) 并开启了
+[路由服务](https://www.ccswitch.io/zh/docs?section=proxy&item=service)，
+可以将供应商的 `url` 配置成 CC-Switch 启动的代理地址，无需额外配置：
+
+```bash
+# Claude（Anthropic 兼容）
+ocr config set providers.anthropic.url http://127.0.0.1:15721
+
+# Codex / OpenAI 兼容 — 将该供应商的 url 键设为代理地址
+ocr config set providers.<name>.url http://127.0.0.1:15721/v1
+```
+
+`api_key` 可设置为任意值。`extra_body`（及其他按供应商字段）依然生效。
+
 ### 发送厂商专属字段
 
 某些 provider 需要非标准的请求字段（如 Bedrock 风格的 `thinking`）。用`extra_body`（合并进每次请求）即可发送，无需改源码：
