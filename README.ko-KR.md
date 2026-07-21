@@ -514,129 +514,23 @@ GitHub의 경우, 이 리포지터리는 루트에 바로 사용할 수 있는 c
 
 재현성을 위해 version tag나 commit SHA에 고정하세요. 전체 workflow 데모와 inputs/outputs, comment 게시 모드(sticky summary, incremental non-destructive posting)의 전체 목록은 [`examples/github_actions/`](./examples/github_actions/) 디렉터리를 참고하세요.
 
+## Documentation
+
+전체 문서는 **[open-codereview.ai/docs](https://open-codereview.ai/docs)** 에서 확인할 수 있습니다:
+
+- [빠른 시작](https://open-codereview.ai/docs/quickstart) — 설치하고 첫 리뷰 실행하기
+- [설치](https://open-codereview.ai/docs/installation) — 모든 플랫폼 및 패키지 매니저
+- [CLI 레퍼런스](https://open-codereview.ai/docs/cli-reference) — 모든 명령어와 플래그
+- [리뷰 규칙](https://open-codereview.ai/docs/review-rules) — 규칙 우선순위 체인, 파일 형식, 경로 필터링
+- [설정](https://open-codereview.ai/docs/configuration) — 설정 키와 환경 변수
+- [MCP 서버](https://open-codereview.ai/docs/mcp) — 외부 도구로 리뷰 에이전트 확장
+- [코딩 에이전트 연동](https://open-codereview.ai/docs/claude-code) — Claude Code, Agent Skill, 위임 모드
+- [CI/CD 연동](https://open-codereview.ai/docs/cicd) — 파이프라인에서 리뷰 실행
+- [아키텍처](https://open-codereview.ai/docs/architecture) · [도구](https://open-codereview.ai/docs/tools) · [세션 뷰어](https://open-codereview.ai/docs/viewer) · [텔레메트리](https://open-codereview.ai/docs/telemetry) · [FAQ](https://open-codereview.ai/docs/faq)
+
 ## Commands
 
-| Command | Alias | Description |
-|---------|-------|-------------|
-| `ocr review` | `ocr r` | diff 기반 코드 리뷰 시작 |
-| `ocr scan` | `ocr s` | 전체 파일 리뷰 (diff 불필요) |
-| `ocr delegate preview` | `ocr d preview` | 리뷰 대상 파일 목록을 모드/참조 메타데이터와 함께 출력 (LLM 불필요) |
-| `ocr delegate rule <path...>` | `ocr d rule` | 내용별로 그룹화된 리뷰 규칙 출력 (LLM 불필요) |
-| `ocr rules check <file>` | - | 파일 경로에 적용될 리뷰 rule 미리보기 |
-| `ocr config provider` | - | 대화형 provider 설정 (built-in, custom, 수동) |
-| `ocr config model` | - | 활성 provider의 대화형 model 선택 |
-| `ocr config set <key> <value>` | - | config 값 설정 |
-| `ocr config unset custom_providers.<name>` | - | custom provider 삭제 |
-| `ocr llm test` | - | LLM 연결 테스트 |
-| `ocr llm providers` | - | built-in LLM provider 목록 표시 |
-| `ocr session list` | `ocr sessions list`, `ocr session ls` | 저장된 review session 목록 표시 |
-| `ocr session show <id>` | `ocr sessions show <id>` | 단일 session과 파일별 checkpoint 확인 |
-| `ocr viewer` | `ocr v` | `localhost:5483`에서 WebUI session viewer 실행 |
-| `ocr version` | - | version 정보 표시 |
-
-### `ocr review` Flags
-
-| Flag | Shorthand | Default | Description |
-|------|-----------|---------|-------------|
-| `--repo` | - | current dir | Git repository root |
-| `--from` | - | - | Source ref 예: `main` |
-| `--to` | - | - | Target ref 예: `feature-branch` |
-| `--commit` | `-c` | - | 리뷰할 단일 commit |
-| `--exclude` | - | - | 건너뛸 파일의 쉼표 구분 gitignore 스타일 패턴; rule.json의 excludes와 병합 |
-| `--preview` | `-p` | `false` | LLM 실행 없이 리뷰 대상 파일 미리보기 |
-| `--resume` | - | - | 이전의 호환되는 range 또는 단일 commit review session에서 재개 |
-| `--format` | `-f` | `text` | Output format: `text` 또는 `json` |
-| `--concurrency` | - | `8` | 최대 동시 파일 리뷰 수 |
-| `--timeout` | - | `10` | 동시 task timeout(분) |
-| `--audience` | - | `human` | `human`(progress 표시) 또는 `agent`(summary only) |
-| `--background` | `-b` | - | 리뷰를 위한 선택적 요구사항/비즈니스 컨텍스트. `--commit` 사용 시 미지정이면 commit message에서 자동 추출 |
-| `--background-file` | `-B` | - | Markdown 파일에서 읽어오는 선택적 요구사항/비즈니스 컨텍스트. `--background`와 함께 사용하면 inline 값이 먼저 배치됩니다 |
-| `--model` | - | - | 이번 리뷰에서 LLM model 선택 또는 override |
-| `--rule` | - | - | custom JSON review rules 경로 |
-| `--max-tools` | - | built-in | 파일별 최대 tool call round. template default보다 클 때만 적용 |
-| `--max-git-procs` | - | built-in | 최대 동시 git subprocess 수 |
-| `--tools` | - | - | custom JSON tools config 경로 |
-
-#### Resumable Reviews and Sessions
-
-모든 `ocr review` 실행은 `~/.opencodereview/sessions/` 아래에 local session log를 저장합니다.
-정상 완료된 text output은 review 결과에 집중하며 session ID를 출력하지 않습니다.
-저장된 session은 `ocr session list/show`로 찾을 수 있고, `--format json`을 사용하면
-machine-readable output에 `session_id`가 포함됩니다. range 또는 단일 commit review가 중단된 경우,
-저장된 session을 나열한 뒤 동일한 review target과 일치하는 session에서 재개합니다.
-
-```bash
-ocr session list
-ocr session show <session-id>
-ocr review --from main --to feature-branch --resume <session-id>
-ocr review --commit abc123 --resume <session-id>
-```
-
-Resume은 의도적으로 엄격합니다. branch range와 단일 commit review만 지원하고 workspace review는 지원하지 않습니다.
-현재 `--from/--to` 또는 `--commit`은 저장된 session과 일치해야 합니다. `--preview`와 `--resume`은 함께 사용할 수 없습니다.
-
-`--format json`을 사용하면 재개된 run에는 다음 field가 포함됩니다.
-
-- `session_id`: 현재 run의 session ID
-- `resume.resumed_from`: source session ID
-- `resume.reused_files`: 저장된 checkpoint에서 재사용한 파일 수
-- `resume.rerun_files`: 현재 run에서 다시 review한 파일 수
-
-### `ocr session` Flags
-
-| Command | Flag | Default | Description |
-|---------|------|---------|-------------|
-| `ocr session list` | `--repo` | current dir | session을 나열할 repository |
-| `ocr session list` | `--json` | `false` | session summary를 JSON으로 출력 |
-| `ocr session list` | `--limit` | `20` | 나열할 session 수 제한. `0`은 unlimited |
-| `ocr session show <id>` | `--repo` | current dir | 확인할 session의 repository |
-| `ocr session show <id>` | `--json` | `false` | session metadata와 파일별 item을 JSON으로 출력 |
-
-### `ocr scan` Flags
-
-`ocr scan`은 diff가 아닌 전체 파일을 리뷰합니다 — 익숙하지 않은 코드베이스 감사, 마이그레이션 전 스캔, 의미 있는 diff가 없는 디렉터리 등에 유용합니다. 비-git 디렉터리에서도 작동합니다 (`.gitignore`를 따르는 파일 시스템 탐색으로 폴백).
-
-| Flag | Shorthand | Default | Description |
-|------|-----------|---------|-------------|
-| `--path` | - | 전체 repo | 스캔할 쉼표 구분 디렉터리/파일 |
-| `--exclude` | - | - | 건너뛸 파일의 쉼표 구분 gitignore 스타일 패턴; rule.json의 excludes와 병합 |
-| `--preview` | `-p` | `false` | LLM 실행 없이 스캔 대상 파일 목록 표시 |
-| `--max-tokens-budget` | - | `0` (무제한) | 총 토큰 사용량 제한; 초과 시 dispatch 중단 |
-| `--no-plan` | - | `false` | 파일별 planning 사전 처리 건너뛰기 |
-| `--no-dedup` | - | `false` | 배치별 유사 comment 중복 제거 건너뛰기 |
-| `--no-summary` | - | `false` | 프로젝트 수준 요약 건너뛰기 |
-| `--batch` | - | `by-language` | 배치 전략: `none`, `by-language`, 또는 `by-directory` |
-| `--format` | `-f` | `text` | Output format: `text` 또는 `json` (JSON에 `project_summary` 필드 포함) |
-| `--concurrency` | - | `8` | 최대 동시 파일 스캔 수 |
-| `--rule` | - | - | custom JSON review rules 경로 |
-| `--repo` | - | current dir | 스캔할 repository 또는 디렉터리 루트 |
-
-각 실행 전에 `ocr scan`은 대략적인 토큰 비용 추정치를 출력합니다. `--preview`로 먼저 파일 목록을 확인하고, `--max-tokens-budget`으로 대규모 repository의 비용을 제한할 수 있습니다.
-
-### `ocr delegate` 플래그
-
-`ocr delegate`는 AI 코딩 에이전트를 위한 위임 모드입니다. LLM을 호출하지 않고
-결정론적인 파일 선택과 규칙 해석을 제공합니다 — 실제 리뷰는 호스트 에이전트가
-자체 능력으로 수행합니다.
-
-| 하위 명령 | 설명 |
-|-----------|------|
-| `ocr delegate preview` | 리뷰 대상 파일 목록을 모드/참조 메타데이터와 함께 출력 |
-| `ocr delegate rule <path...>` | 내용별로 그룹화된 리뷰 규칙 출력 |
-
-두 하위 명령은 다음 플래그를 공유합니다:
-
-| 플래그 | 축약형 | 기본값 | 설명 |
-|--------|--------|--------|------|
-| `--repo` | — | 현재 디렉터리 | Git 저장소 루트 |
-| `--from` | — | — | 소스 참조 (예: `main`) |
-| `--to` | — | — | 대상 참조 (예: `feature-branch`) |
-| `--commit` | `-c` | — | 단일 커밋 |
-| `--exclude` | — | — | 쉼표로 구분된 gitignore 스타일 제외 패턴 |
-| `--rule` | — | — | 커스텀 JSON 리뷰 규칙 경로 |
-| `--background` | `-b` | — | 선택적 요구사항/비즈니스 컨텍스트 |
-| `--background-file` | `-B` | — | Markdown 파일에서 비즈니스 컨텍스트 로드 |
-| `--max-git-procs` | — | `16` | 최대 동시 git 하위 프로세스 수 |
+OCR는 `review`, `scan`, `delegate`, `config`, `llm`, `session`, `viewer` 등의 명령어를 제공합니다. 전체 명령어 목록과 모든 플래그(재개 가능한 리뷰 및 `ocr scan` / `ocr delegate`의 전체 옵션 포함)는 **[CLI 레퍼런스](https://open-codereview.ai/docs/cli-reference)** 를 참조하세요.
 
 ## Examples
 
@@ -726,167 +620,11 @@ OCR_VIEWER_ALLOWED_HOSTS=review.internal,ocr.lan ocr viewer --addr :3000
 
 ## Review Rules
 
-OCR은 네 계층의 priority chain으로 review rule을 해석합니다. 각 계층은 first-match-wins 방식입니다. 파일 경로가 pattern에 match되면 해당 rule을 사용하고, 아니면 다음 계층으로 넘어갑니다.
-
-| Priority | Source | Path | Description |
-|----------|--------|------|-------------|
-| 1 (highest) | `--rule` flag | User-specified path | CLI explicit override |
-| 2 | Project config | `<repoDir>/.opencodereview/rule.json` | project별 rule, git commit 가능 |
-| 3 | Global config | `~/.opencodereview/rule.json` | user-wide 개인 선호 |
-| 4 (lowest) | System default | Embedded `system_rules.json` | 일반 language와 file type을 다루는 built-in rule |
-
-### Rule File Format
-
-모든 계층은 같은 JSON format을 공유합니다.
-
-```json
-{
-  "rules": [
-    {
-      "path": "force-api/**/*.java",
-      "rule": "All new methods must validate required parameters for null values",
-      "merge_system_rule": true
-    },
-    {
-      "path": "**/*mapper*.xml",
-      "rule": "Check SQL for injection risks, parameter errors, and missing closing tags"
-    }
-  ]
-}
-```
-
-- `path`는 `**` recursive matching과 `{java,kt}` brace expansion을 지원합니다.
-- `merge_system_rule`은 optional입니다. `true`이면 매칭된 built-in system rule을 이 user rule과 병합합니다.
-- 각 계층 안에서는 rule이 선언 순서대로 평가되며 첫 번째 match가 선택됩니다.
-- rule file이 없으면 조용히 건너뜁니다.
-
-**`rule` 필드는 인라인 콘텐츠와 파일 경로를 모두 지원합니다.** 시스템이 다음 순서로 자동 판별합니다:
-
-1. 값에 줄바꿈이 포함된 경우 → **인라인 콘텐츠** (여러 줄 규칙은 파일 경로로 간주되지 않습니다).
-2. 값이 한 줄이고 공백이 없으며 `.md` / `.txt` / `.markdown`으로 끝나는 경우 → **파일 경로**.
-   - 절대 경로(`/`로 시작)는 그대로 사용됩니다.
-   - 상대 경로는 프로젝트 루트에서 확인합니다. 경로 탐색(예: `../../etc/passwd.md`)은 차단됩니다. 없으면 `[WARN]`을 출력하고 규칙이 지워집니다 (인라인으로 폴백 없음).
-   - 파일은 유효성 검사를 통과해야 합니다: 허용된 확장자, ≤ 512 KB, 심볼릭 링크 해석 후 대상도 허용된 확장자여야 합니다. 검증 실패 시 규칙이 지워집니다.
-3. 그 외의 경우 → **인라인 콘텐츠**.
-
-```json
-{
-  "rules": [
-    {
-      "path": "**/*mapper*.xml",
-      "rule": "docs/sql-rules.md"
-    },
-    {
-      "path": "**/*.java",
-      "rule": "Always check for null safety and resource leaks"
-    },
-    {
-      "path": "**/*.go",
-      "rule": "shared/go-concurrency.md"
-    },
-    {
-      "path": "**/*.py",
-      "rule": "/Users/me/team-rules/python.md"
-    }
-  ]
-}
-```
-
-- `docs/sql-rules.md` — 상대 경로, `<project>/docs/sql-rules.md`에서 로드.
-- `Always check for null safety…` — 인라인 문자열, 그대로 사용.
-- `shared/go-concurrency.md` — 상대 경로, 동일하게 해결.
-- `/Users/me/team-rules/python.md` — 절대 경로, 그대로 사용.
-
-> 절대 경로는 프로젝트 외부 파일에 접근할 수 있으며, 이는 의도된 설계입니다. `rule.json`은 프로젝트 메인테이너가 작성하는 신뢰된 입력입니다. 팀은 공유 규칙을 공통 경로(예: `/opt/company-rules/`)에 두어 각 프로젝트에 복사할 필요가 없습니다.
+OCR는 4단계 우선순위 체인(`--rule` 플래그 > 프로젝트 설정 > 전역 설정 > 내장 기본값)으로 리뷰 규칙을 해석하며, 인라인 또는 파일 기반 규칙, `**` glob 매칭, `include` / `exclude` 경로 필터링을 지원합니다. 전체 규칙 파일 형식과 필터링 동작은 **[리뷰 규칙](https://open-codereview.ai/docs/review-rules)** 을 참조하세요.
 
 ## Configuration Reference
 
-Config file: `~/.opencodereview/config.json`
-
-| Key | Type | Example |
-|-----|------|---------|
-| `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
-| `providers.<name>.api_key` | string | Provider별 API key |
-| `providers.<name>.url` | string | Provider base URL override |
-| `providers.<name>.protocol` | string | `anthropic` \| `openai` \| `openai-responses` |
-| `providers.<name>.model` | string | Provider의 model 이름 |
-| `providers.<name>.models` | array | 대화형 선택에 사용할 optional provider model 목록 |
-| `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
-| `providers.<name>.extra_body` | object | 모든 요청 본문에 병합되는 JSON 객체 |
-| `providers.<name>.timeout_sec` | integer | 요청당 HTTP timeout(초), 기본값 `300` |
-| `providers.<name>.extra_headers` | string | 쉼표로 구분된 `key=value` HTTP 헤더 |
-| `custom_providers.<name>.*` | — | optional `models`를 포함한 `providers.<name>.*`과 동일한 필드 |
-| `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
-| `llm.auth_token` | string | `sk-xxxxxxx` |
-| `llm.auth_header` | string | Anthropic only: `x-api-key` \| `authorization` |
-| `llm.extra_body` | object | 모든 요청 본문에 병합되는 JSON 객체 |
-| `llm.timeout_sec` | integer | 요청당 HTTP timeout(초), 기본값 `300` |
-| `llm.extra_headers` | string | 쉼표로 구분된 `key=value` HTTP 헤더 |
-| `llm.model` | string | `claude-opus-4-6` |
-| `llm.protocol` | string | `anthropic` \| `openai` \| `openai-responses`; `llm.use_anthropic`보다 우선 |
-| `llm.use_anthropic` | boolean | `true` \| `false` (레거시; `llm.protocol` 권장) |
-| `mcp_servers.<name>.command` | string | MCP 서버를 시작하는 명령어 |
-| `mcp_servers.<name>.args` | array | MCP 서버의 커맨드라인 인수 |
-| `mcp_servers.<name>.env` | array | 환경 변수 (`KEY=VALUE` 형식) |
-| `mcp_servers.<name>.tools` | array | 허용할 도구 이름 (비어 있으면 모든 도구 허용) |
-| `mcp_servers.<name>.setup` | string | 서버 시작 전에 실행할 설정 명령어 |
-| `language` | string | 임의의 언어 이름, 예: `English`, `Chinese` (기본값: `English`) |
-| `telemetry.enabled` | boolean | `true` \| `false` |
-| `telemetry.exporter` | string | `console` \| `otlp` |
-| `telemetry.otlp_endpoint` | string | OTLP collector address |
-| `telemetry.content_logging` | boolean | telemetry에 prompt 포함 여부 |
-
-환경 변수는 config file보다 우선합니다.
-
-### MCP Server
-
-Open Code Review는 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 서버를 지원하여 리뷰 에이전트가 stdio 전송을 통해 코드 리뷰 중에 외부 도구를 사용할 수 있습니다.
-
-CLI로 MCP 서버를 설정합니다:
-
-```bash
-# MCP 서버 추가
-ocr config set mcp_servers.<name>.command <command>
-ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
-ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
-ocr config set mcp_servers.<name>.tools '["tool_name"]'
-ocr config set mcp_servers.<name>.setup '<setup command>'
-
-# MCP 서버 삭제
-ocr config unset mcp_servers.<name>
-```
-
-| 필드 | 필수 | 설명 |
-|------|------|------|
-| `command` | 예 | MCP 서버를 시작하는 실행 명령어 |
-| `args` | 아니오 | 서버에 전달할 커맨드라인 인수 |
-| `env` | 아니오 | 환경 변수 (`KEY=VALUE` 형식) |
-| `tools` | 아니오 | 허용할 도구 이름. 비어 있으면 서버의 모든 도구 사용 가능 |
-| `setup` | 아니오 | 서버 시작 전에 실행할 셸 명령어 (예: 인덱스 빌드) |
-
-> **참고:** MCP 도구의 이름이 내장 도구와 충돌하면 경고와 함께 건너뜁니다. `setup` 명령어의 타임아웃은 5분입니다.
-
-**예시: [CodeGraph](https://github.com/nicholasgasior/codegraph)를 추가하여 코드 구조 분석 강화**
-
-```bash
-ocr config set mcp_servers.codegraph.command codegraph
-ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
-ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
-ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
-```
-
-### Environment Variables
-
-| Variable | Purpose |
-|----------|---------|
-| `OCR_LLM_URL` | LLM API endpoint URL |
-| `OCR_LLM_TOKEN` | API key / auth token |
-| `OCR_LLM_AUTH_HEADER` | Anthropic auth header (`x-api-key` 또는 `authorization`) |
-| `OCR_LLM_EXTRA_HEADERS` | 쉼표로 구분된 `key=value` HTTP 헤더 |
-| `OCR_LLM_MODEL` | Model name |
-| `OCR_LLM_PROTOCOL` | 프로토콜: `anthropic` \| `openai` \| `openai-responses`; `OCR_USE_ANTHROPIC`보다 우선 |
-| `OCR_LLM_TIMEOUT` | 요청당 HTTP timeout(초), config file의 `timeout_sec`를 override |
-| `OCR_USE_ANTHROPIC` | `true` = Anthropic, `false` = OpenAI Chat Completions (레거시; `OCR_LLM_PROTOCOL` 권장) |
+설정은 `~/.opencodereview/config.json`에 저장되며 환경 변수로 재정의할 수 있습니다. 프로바이더, 모델, MCP 서버, 언어, 텔레메트리를 다룹니다. 전체 설정 키 레퍼런스, 환경 변수, MCP 서버 설정은 **[설정](https://open-codereview.ai/docs/configuration)** 및 **[MCP 서버](https://open-codereview.ai/docs/mcp)** 를 참조하세요.
 
 ## Telemetry
 

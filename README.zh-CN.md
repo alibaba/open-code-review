@@ -514,126 +514,23 @@ ocr review \
 
 为保障可复现性，请固定到某个版本标签或 commit SHA。完整的 workflow 示例以及 inputs、outputs 与评论发布模式（置顶汇总、增量非破坏式发布）的完整列表，请参见 [`examples/github_actions/`](./examples/github_actions/) 目录。
 
+## 文档
+
+完整文档见 **[open-codereview.ai/docs](https://open-codereview.ai/docs)**：
+
+- [快速开始](https://open-codereview.ai/docs/quickstart) —— 安装并运行你的第一次评审
+- [安装](https://open-codereview.ai/docs/installation) —— 覆盖各平台与包管理器
+- [CLI 参考](https://open-codereview.ai/docs/cli-reference) —— 所有命令与参数
+- [评审规则](https://open-codereview.ai/docs/review-rules) —— 规则优先级链、文件格式与路径过滤
+- [配置](https://open-codereview.ai/docs/configuration) —— 配置项与环境变量
+- [MCP 服务器](https://open-codereview.ai/docs/mcp) —— 用外部工具扩展评审 agent
+- [编程 Agent 集成](https://open-codereview.ai/docs/claude-code) —— Claude Code、Agent Skill 与委托模式
+- [CI/CD 集成](https://open-codereview.ai/docs/cicd) —— 在流水线中运行评审
+- [架构](https://open-codereview.ai/docs/architecture) · [工具](https://open-codereview.ai/docs/tools) · [会话查看器](https://open-codereview.ai/docs/viewer) · [遥测](https://open-codereview.ai/docs/telemetry) · [FAQ](https://open-codereview.ai/docs/faq)
+
 ## 命令
 
-| 命令 | 别名 | 描述 |
-|------|------|------|
-| `ocr review` | `ocr r` | 开始基于 diff 的代码审查 |
-| `ocr scan` | `ocr s` | 审查整个文件（无需 diff） |
-| `ocr delegate preview` | `ocr d preview` | 预览可评审文件列表及模式/引用元数据（无需 LLM） |
-| `ocr delegate rule <path...>` | `ocr d rule` | 输出按内容分组的评审规则（无需 LLM） |
-| `ocr rules check <file>` | — | 预览某个文件路径生效的审查规则 |
-| `ocr config provider` | — | 交互式供应商设置（内置、自定义或手动） |
-| `ocr config model` | — | 为当前供应商交互式选择模型 |
-| `ocr config set <key> <value>` | — | 设置配置项 |
-| `ocr config unset custom_providers.<name>` | — | 删除自定义供应商 |
-| `ocr llm test` | — | 测试 LLM 连通性 |
-| `ocr llm providers` | — | 列出内置 LLM 供应商 |
-| `ocr session list` | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话 |
-| `ocr session show <id>` | `ocr sessions show <id>` | 查看单个会话及其逐文件检查点 |
-| `ocr viewer` | `ocr v` | 启动 WebUI 会话查看器，地址 `localhost:5483` |
-| `ocr version` | — | 显示版本信息 |
-
-### `ocr review` 参数
-
-| 参数 | 缩写 | 默认值 | 描述 |
-|------|------|--------|------|
-| `--repo` | — | 当前目录 | Git 仓库根目录 |
-| `--from` | — | — | 源引用（如 `main`） |
-| `--to` | — | — | 目标引用（如 `feature-branch`） |
-| `--commit` | `-c` | — | 审查单个提交 |
-| `--exclude` | — | — | 以逗号分隔的 gitignore 风格模式，用于跳过匹配文件；与 rule.json 中的 excludes 合并 |
-| `--preview` | `-p` | `false` | 预览将被审查的文件列表，不调用 LLM |
-| `--resume` | — | — | 从之前兼容的区间或单 commit 评审会话恢复 |
-| `--format` | `-f` | `text` | 输出格式：`text` 或 `json` |
-| `--concurrency` | — | `8` | 最大并发文件审查数 |
-| `--timeout` | — | `10` | 并发任务超时时间（分钟） |
-| `--audience` | — | `human` | `human`（显示进度）或 `agent`（仅输出摘要） |
-| `--background` | `-b` | — | 可选的需求/业务背景信息；使用 `--commit` 时如未指定则自动从 commit message 中提取 |
-| `--background-file` | `-B` | — | 来自 Markdown 文件的可选需求/业务背景信息；与 `--background` 同时使用时，内联内容排在前面 |
-| `--model` | — | — | 为本次审查选择或覆盖 LLM 模型 |
-| `--rule` | — | — | 自定义 JSON 审查规则路径 |
-| `--max-tools` | — | 内置默认 | 每个文件的最大工具调用轮次；仅在大于模板默认值时生效 |
-| `--max-git-procs` | — | 内置默认 | 最大并发 git 子进程数 |
-| `--tools` | — | — | 自定义 JSON 工具配置路径 |
-
-#### 可恢复评审与会话
-
-每次 `ocr review` 都会在 `~/.opencodereview/sessions/` 下保存本地会话日志。
-正常完成的文本输出只展示评审结果，不打印 session ID；可使用
-`ocr session list/show` 查找已保存会话，或用 `--format json` 在机器可读输出中获取
-`session_id`。如果区间或单 commit 评审被中断，可列出保存的会话，并从匹配相同评审目标的会话恢复：
-
-```bash
-ocr session list
-ocr session show <session-id>
-ocr review --from main --to feature-branch --resume <session-id>
-ocr review --commit abc123 --resume <session-id>
-```
-
-恢复逻辑是严格的：仅支持分支区间和单 commit 评审，不支持工作区评审；当前
-`--from/--to` 或 `--commit` 必须与保存的会话一致。`--preview` 不能与 `--resume` 同时使用。
-
-使用 `--format json` 时，恢复运行会包含：
-
-- `session_id` — 当前运行的 session ID
-- `resume.resumed_from` — 来源 session ID
-- `resume.reused_files` — 从已保存检查点复用的文件数
-- `resume.rerun_files` — 本次重新评审的文件数
-
-### `ocr session` 参数
-
-| 命令 | 参数 | 默认值 | 描述 |
-|------|------|--------|------|
-| `ocr session list` | `--repo` | 当前目录 | 要列出会话的仓库 |
-| `ocr session list` | `--json` | `false` | 以 JSON 输出会话摘要 |
-| `ocr session list` | `--limit` | `20` | 限制列出的会话数量；`0` 表示不限 |
-| `ocr session show <id>` | `--repo` | 当前目录 | 要查看会话的仓库 |
-| `ocr session show <id>` | `--json` | `false` | 以 JSON 输出会话元数据和逐文件条目 |
-
-### `ocr scan` 参数
-
-`ocr scan` 审查整个文件而非 diff —— 适用于审计不熟悉的代码库、迁移前扫描，或任何没有有意义 diff 的目录。它也可以在非 git 目录中工作（会回退到遵循 `.gitignore` 的文件系统遍历）。
-
-| 参数 | 缩写 | 默认值 | 描述 |
-|------|------|--------|------|
-| `--path` | — | 整个仓库 | 以逗号分隔的待扫描目录/文件 |
-| `--exclude` | — | — | 以逗号分隔的 gitignore 风格模式，用于跳过匹配文件；与 rule.json 中的 excludes 合并 |
-| `--preview` | `-p` | `false` | 列出将被扫描的文件，不运行 LLM |
-| `--max-tokens-budget` | — | `0`（无限制） | 限制总 token 使用量；超出后停止分发 |
-| `--no-plan` | — | `false` | 跳过按文件的规划预处理 |
-| `--no-dedup` | — | `false` | 跳过按批次的相似评论去重 |
-| `--no-summary` | — | `false` | 跳过项目级别的总结 |
-| `--batch` | — | `by-language` | 批处理策略：`none`、`by-language` 或 `by-directory` |
-| `--format` | `-f` | `text` | 输出格式：`text` 或 `json`（JSON 包含 `project_summary` 字段） |
-| `--concurrency` | — | `8` | 最大并发文件扫描数 |
-| `--rule` | — | — | 自定义 JSON 审查规则路径 |
-| `--repo` | — | 当前目录 | 要扫描的仓库或目录根路径 |
-
-每次运行前，`ocr scan` 会打印粗略的 token 费用估算。使用 `--preview` 先查看文件列表，使用 `--max-tokens-budget` 限制大型仓库的开销。
-
-### `ocr delegate` 参数
-
-`ocr delegate` 是面向 AI 编程 agent 的委托模式。它提供确定性的文件选择和规则解析，不调用任何 LLM — 由宿主 agent 使用自身能力执行实际评审。
-
-| 子命令 | 说明 |
-|--------|------|
-| `ocr delegate preview` | 输出可评审文件列表及模式/引用元数据 |
-| `ocr delegate rule <path...>` | 输出按内容分组的评审规则 |
-
-两个子命令共享以下参数：
-
-| 参数 | 缩写 | 默认值 | 说明 |
-|------|------|--------|------|
-| `--repo` | — | 当前目录 | Git 仓库根目录 |
-| `--from` | — | — | 源引用（如 `main`） |
-| `--to` | — | — | 目标引用（如 `feature-branch`） |
-| `--commit` | `-c` | — | 单次提交 |
-| `--exclude` | — | — | 逗号分隔的 gitignore 风格排除模式 |
-| `--rule` | — | — | 自定义 JSON 评审规则路径 |
-| `--background` | `-b` | — | 可选的需求/业务上下文 |
-| `--background-file` | `-B` | — | 从 Markdown 文件读取业务上下文 |
-| `--max-git-procs` | — | `16` | 最大并发 git 子进程数 |
+OCR 提供 `review`、`scan`、`delegate`、`config`、`llm`、`session`、`viewer` 等命令。完整的命令列表与所有参数（包括可恢复评审以及 `ocr scan` / `ocr delegate` 的全部选项），详见 **[CLI 参考](https://open-codereview.ai/docs/cli-reference)**。
 
 ## 示例
 
@@ -713,209 +610,11 @@ ocr viewer --addr :3000
 
 ## 评审规则
 
-OCR 通过四层优先级链解析评审规则。每层采用首次匹配原则：如果文件路径匹配到某个模式，则使用该规则；否则穿透到下一层。
-
-| 优先级 | 来源 | 路径 | 描述 |
-|--------|------|------|------|
-| 1（最高） | `--rule` 参数 | 用户指定路径 | CLI 显式覆盖 |
-| 2 | 项目配置 | `<repoDir>/.opencodereview/rule.json` | 项目级规则，可提交到 git |
-| 3 | 全局配置 | `~/.opencodereview/rule.json` | 用户级个人偏好 |
-| 4（最低） | 系统默认 | 内嵌 `system_rules.json` | 覆盖常见语言和文件类型的内置规则 |
-
-### 规则文件格式
-
-第 1–3 层使用相同的 JSON 格式：
-
-```json
-{
-  "rules": [
-    {
-      "path": "force-api/**/*.java",
-      "rule": "所有新方法必须对必填参数进行空值校验",
-      "merge_system_rule": true
-    },
-    {
-      "path": "**/*mapper*.xml",
-      "rule": "检查 SQL 注入风险、参数错误和缺少闭合标签"
-    }
-  ]
-}
-```
-
-- `path` 支持 `**` 递归匹配和 `{java,kt}` 大括号展开。
-- `merge_system_rule` 为可选字段。设为 `true` 时，命中的内置系统规则会与该用户规则合并；否则用户规则会替换系统规则。
-- 在每一层内，规则按声明顺序评估 —— 首次匹配生效。
-- 如果规则文件不存在，将被静默跳过。
-
-**`rule` 字段同时支持内联内容和文件路径。**系统按以下顺序自动判断：
-
-1. 如果值包含换行 → **内联内容**（多行规则永远不会被当作文件路径）。
-2. 如果值是单行、不含空格、且以 `.md` / `.txt` / `.markdown` 结尾 → **文件路径**。
-   - 绝对路径（以 `/` 开头）直接使用。
-   - 相对路径在项目根目录下查找，路径穿越（如 `../../etc/passwd.md`）会被拦截。找不到则 `[WARN]` 并清空该规则（不会回退为内联）。
-   - 文件需通过安全校验：白名单扩展名、≤ 512 KB、symlink 解析后目标也必须是白名单扩展名。校验失败则清空该规则。
-3. 否则 → **内联内容**。
-
-```json
-{
-  "rules": [
-    {
-      "path": "**/*mapper*.xml",
-      "rule": "docs/sql-rules.md"
-    },
-    {
-      "path": "**/*.java",
-      "rule": "始终检查空值安全和资源泄漏"
-    },
-    {
-      "path": "**/*.go",
-      "rule": "shared/go-concurrency.md"
-    },
-    {
-      "path": "**/*.py",
-      "rule": "/Users/me/team-rules/python.md"
-    }
-  ]
-}
-```
-
-- `docs/sql-rules.md` — 相对路径，从 `<project>/docs/sql-rules.md` 加载。
-- `始终检查空值安全…` — 内联字符串，直接使用。
-- `shared/go-concurrency.md` — 相对路径，同上。
-- `/Users/me/team-rules/python.md` — 绝对路径，直接使用。
-
-> 绝对路径可以访问项目目录之外的文件，这是有意为之的设计——`rule.json` 由项目维护者编写，属于受信输入。团队可将共享规则放在统一路径下（如 `/opt/company-rules/`），无需在各项目中复制。
-
-### 路径过滤
-
-规则文件同时支持 `include` 和 `exclude` 字段，用于控制哪些文件进入审查范围：
-
-```json
-{
-  "rules": [
-    {"path": "**/*.java", "rule": "检查空值安全"}
-  ],
-  "include": ["src/main/**/*.java", "lib/**/*.kt"],
-  "exclude": ["**/generated/**", "vendor/**"]
-}
-```
-
-**过滤决策优先级（从高到低）：**
-
-| 步骤 | 条件 | 结果 |
-|------|------|------|
-| 1 | 文件为二进制文件 | 排除 |
-| 2 | 路径匹配用户 `exclude` 模式 | 排除 |
-| 3 | 文件扩展名不在支持列表中 | 排除 |
-| 4 | 配置了 `include` 且路径匹配 | **纳入审查**（跳过步骤 5） |
-| 5 | 路径匹配内置默认排除模式（测试文件等） | 排除 |
-| 6 | 以上均不满足 | 纳入审查 |
-
-**生效逻辑：**
-
-- `include` 和 `exclude` 遵循与评审规则相同的优先级链（`--rule` > 项目配置 > 全局配置），取**最高优先级中配置了 include/exclude 的那一层**整体生效，不会跨层合并。
-- `exclude` 始终优先于 `include` —— 同时匹配两者的文件会被排除。
-- `include` 的作用是**绕过内置默认排除模式**（如测试文件），而非限制审查范围 —— 未匹配 `include` 的文件仍会正常进入后续的默认过滤判断。
-- 模式语法：支持 `**` 递归匹配、`*` 单级匹配和 `{a,b}` 大括号展开，匹配时不区分大小写。
-
-**内置默认排除模式**（用于过滤测试文件等，可通过 `include` 覆盖）：
-
-```
-**/*_test.go, **/*Test.java, **/*Tests.java, **/*_test.rs,
-**/*.test.{js,jsx,ts,tsx}, **/*.spec.{js,jsx,ts,tsx}, **/__tests__/**,
-**/src/test/java/**/*.java, **/src/test/**/*.kt,
-**/test/**/*_test.py, **/tests/**/*_test.py, **/*_test.py,
-**/*_spec.rb, **/spec/**/*_spec.rb, **/oh_modules/**
-```
+OCR 通过四层优先级链解析评审规则（`--rule` 参数 > 项目配置 > 全局配置 > 内置默认），支持内联或文件形式的规则、`**` 通配匹配，以及 `include` / `exclude` 路径过滤。完整的规则文件格式与过滤语义，详见 **[评审规则](https://open-codereview.ai/docs/review-rules)**。
 
 ## 配置参考
 
-配置文件：`~/.opencodereview/config.json`
-
-| 键 | 类型 | 示例 |
-|----|------|------|
-| `provider` | string | `anthropic` \| `openai` \| `dashscope` \| `deepseek` \| `z-ai` |
-| `providers.<name>.api_key` | string | 供应商 API 密钥 |
-| `providers.<name>.url` | string | 供应商 Base URL 覆盖 |
-| `providers.<name>.protocol` | string | `anthropic` \| `openai` \| `openai-responses` |
-| `providers.<name>.model` | string | 供应商模型名称 |
-| `providers.<name>.models` | array | 用于交互式选择的可选供应商模型列表 |
-| `providers.<name>.auth_header` | string | `x-api-key` \| `authorization` |
-| `providers.<name>.extra_body` | object | 合并到每个请求体的 JSON 对象 |
-| `providers.<name>.timeout_sec` | integer | 每次请求的 HTTP 超时时间（秒），默认 `300` |
-| `providers.<name>.extra_headers` | string | 逗号分隔的 `key=value` HTTP 头 |
-| `custom_providers.<name>.*` | — | 与 `providers.<name>.*` 相同的字段，包括可选的 `models` |
-| `llm.url` | string | `https://api.openai.com/v1/chat/completions` |
-| `llm.auth_token` | string | `sk-xxxxxxx` |
-| `llm.auth_header` | string | 仅 Anthropic：`x-api-key` \| `authorization` |
-| `llm.extra_body` | object | 合并到每个请求体的 JSON 对象 |
-| `llm.timeout_sec` | integer | 每次请求的 HTTP 超时时间（秒），默认 `300` |
-| `llm.extra_headers` | string | 逗号分隔的 `key=value` HTTP 头 |
-| `llm.model` | string | `claude-opus-4-6` |
-| `llm.protocol` | string | `anthropic` \| `openai` \| `openai-responses`；优先级高于 `llm.use_anthropic` |
-| `llm.use_anthropic` | boolean | `true` \| `false`（兼容字段，推荐改用 `llm.protocol`） |
-| `mcp_servers.<name>.command` | string | 启动 MCP 服务器的命令 |
-| `mcp_servers.<name>.args` | array | MCP 服务器的命令行参数 |
-| `mcp_servers.<name>.env` | array | 环境变量，`KEY=VALUE` 格式 |
-| `mcp_servers.<name>.tools` | array | 允许使用的工具名称（为空则允许所有工具） |
-| `mcp_servers.<name>.setup` | string | 启动服务器前运行的初始化命令 |
-| `language` | string | 任意语言名称，例如 `English`、`Chinese`（默认：`English`） |
-| `telemetry.enabled` | boolean | `true` \| `false` |
-| `telemetry.exporter` | string | `console` \| `otlp` |
-| `telemetry.otlp_endpoint` | string | OTLP 采集器地址 |
-| `telemetry.content_logging` | boolean | 在遥测数据中包含提示词 |
-
-环境变量优先级高于配置文件。
-
-### MCP Server
-
-Open Code Review 支持 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 服务器，允许评审 Agent 在代码评审过程中通过 stdio 传输协议调用外部工具。
-
-通过 CLI 配置 MCP 服务器：
-
-```bash
-# 添加 MCP 服务器
-ocr config set mcp_servers.<name>.command <command>
-ocr config set mcp_servers.<name>.args '["arg1","arg2"]'
-ocr config set mcp_servers.<name>.env '["KEY=VALUE"]'
-ocr config set mcp_servers.<name>.tools '["tool_name"]'
-ocr config set mcp_servers.<name>.setup '<setup command>'
-
-# 删除 MCP 服务器
-ocr config unset mcp_servers.<name>
-```
-
-| 字段 | 必填 | 说明 |
-|------|------|------|
-| `command` | 是 | 启动 MCP 服务器的可执行命令 |
-| `args` | 否 | 传递给服务器的命令行参数 |
-| `env` | 否 | 环境变量，`KEY=VALUE` 格式 |
-| `tools` | 否 | 允许使用的工具名称；为空则服务器的所有工具均可用 |
-| `setup` | 否 | 启动服务器前运行的 shell 命令（例如构建索引） |
-
-> **注意：** 如果 MCP 工具的名称与内置工具冲突，该工具将被跳过并输出警告。`setup` 命令的超时时间为 5 分钟。
-
-**示例：添加 [CodeGraph](https://github.com/nicholasgasior/codegraph) 增强代码结构分析能力**
-
-```bash
-ocr config set mcp_servers.codegraph.command codegraph
-ocr config set mcp_servers.codegraph.args '["serve","--mcp"]'
-ocr config set mcp_servers.codegraph.tools '["codegraph_explore"]'
-ocr config set mcp_servers.codegraph.setup 'codegraph init && codegraph index'
-```
-
-### 环境变量
-
-| 变量 | 用途 |
-|------|------|
-| `OCR_LLM_URL` | LLM API 端点 URL |
-| `OCR_LLM_TOKEN` | API 密钥 / 认证令牌 |
-| `OCR_LLM_AUTH_HEADER` | Anthropic 认证头（`x-api-key` 或 `authorization`） |
-| `OCR_LLM_EXTRA_HEADERS` | 逗号分隔的 `key=value` HTTP 头 |
-| `OCR_LLM_MODEL` | 模型名称 |
-| `OCR_LLM_PROTOCOL` | 协议：`anthropic` \| `openai` \| `openai-responses`；优先级高于 `OCR_USE_ANTHROPIC` |
-| `OCR_LLM_TIMEOUT` | 每次请求的 HTTP 超时时间（秒），覆盖配置文件中的 `timeout_sec` |
-| `OCR_USE_ANTHROPIC` | `true` = Anthropic，`false` = OpenAI Chat Completions（兼容字段，推荐改用 `OCR_LLM_PROTOCOL`） |
+配置位于 `~/.opencodereview/config.json`，可被环境变量覆盖，涵盖供应商、模型、MCP 服务器、语言与遥测。完整的配置项参考、环境变量与 MCP 服务器配置，详见 **[配置](https://open-codereview.ai/docs/configuration)** 与 **[MCP 服务器](https://open-codereview.ai/docs/mcp)**。
 
 ## 遥测
 
