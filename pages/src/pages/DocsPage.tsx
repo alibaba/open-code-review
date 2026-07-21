@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
@@ -19,6 +19,28 @@ function decodeFragment(fragment: string): string {
   } catch {
     return fragment;
   }
+}
+
+// Markdown renders a frame or more after navigation, so a fragment's heading
+// may not exist yet. Retry across a few frames; the returned canceller stops a
+// stale chain when navigation moves on.
+function scrollToFragmentWhenReady(id: string): () => void {
+  let frame = 0;
+  let cancelled = false;
+  const tryScroll = (attempts: number) => {
+    if (cancelled) return;
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (attempts < 10) {
+      frame = requestAnimationFrame(() => tryScroll(attempts + 1));
+    }
+  };
+  frame = requestAnimationFrame(() => tryScroll(0));
+  return () => {
+    cancelled = true;
+    cancelAnimationFrame(frame);
+  };
 }
 
 /* ─── Sidebar tree data ─── */
@@ -138,6 +160,7 @@ if (process.env.NODE_ENV !== 'production' && validSlugs.size !== flatDocList.len
 const DocsPage: React.FC = () => {
   const { slug: slugParam } = useParams<{ slug?: string }>();
   const navigate = useNavigate();
+  const { hash } = useLocation();
   /* Active doc slug is derived from the URL param, falling back to quickstart */
   const activeSlug: DocSlug =
     slugParam && validSlugs.has(slugParam as DocSlug) ? (slugParam as DocSlug) : 'quickstart';
@@ -148,6 +171,8 @@ const DocsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchSelectedIdx, setSearchSelectedIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  /* Cancels an in-flight click-triggered scroll when a newer one starts */
+  const cancelPendingScroll = useRef<(() => void) | null>(null);
   const { t, language } = useTranslation();
   const { isMobile } = useResponsive();
   const contentRef = React.useRef<HTMLDivElement>(null);
@@ -158,6 +183,13 @@ const DocsPage: React.FC = () => {
   const docContent = useMemo(() => getDocContent(activeSlug, language), [activeSlug, language]);
   const docTitle = useMemo(() => getDocTitle(activeSlug, language), [activeSlug, language]);
   const headings = useMemo(() => extractHeadings(docContent), [docContent]);
+
+  /* Scroll direct links after their markdown heading has rendered */
+  useEffect(() => {
+    const fragment = hash.startsWith('#') ? hash.slice(1) : hash;
+    if (!fragment) return;
+    return scrollToFragmentWhenReady(decodeFragment(fragment));
+  }, [hash, docContent]);
 
   /* Track active heading via IntersectionObserver */
   useEffect(() => {
@@ -230,15 +262,8 @@ const DocsPage: React.FC = () => {
       const anchor2raw = href.split('#')[1];
       const anchor2 = anchor2raw ? decodeFragment(anchor2raw) : undefined;
       if (anchor2) {
-        const tryScroll = (attempts: number) => {
-          const el = document.getElementById(anchor2);
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          } else if (attempts < 10) {
-            requestAnimationFrame(() => tryScroll(attempts + 1));
-          }
-        };
-        requestAnimationFrame(() => tryScroll(0));
+        cancelPendingScroll.current?.();
+        cancelPendingScroll.current = scrollToFragmentWhenReady(anchor2);
       }
     }
   }, [navigateToDoc]);
