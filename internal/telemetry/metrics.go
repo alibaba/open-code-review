@@ -67,6 +67,9 @@ func ensureMetrics() {
 	checkMetricErr(err)
 }
 
+// checkMetricErr intentionally ignores metric registration errors.
+// Telemetry is best-effort, and a failed metric registration 
+// should not break or interrupt the main application flow.
 func checkMetricErr(err error) {}
 
 func RecordReviewDuration(ctx context.Context, dur time.Duration) {
