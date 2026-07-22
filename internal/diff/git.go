@@ -123,7 +123,11 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 		combined.WriteString(out)
 
 	case ModeCommit:
-		out, err := p.runGit(ctx, "-c", "core.quotepath=false", "show", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", p.commit)
+		// --diff-merges=first-parent: for merge commits, plain `git show`
+		// emits a combined diff ("diff --cc"), which ParseDiffText cannot
+		// parse — the commit would silently yield zero reviewable diffs.
+		// Diffs against the first parent instead, in regular unified format.
+		out, err := p.runGit(ctx, "-c", "core.quotepath=false", "show", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "--diff-merges=first-parent", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", p.commit)
 		if err != nil {
 			return nil, fmt.Errorf("git show failed: %w", err)
 		}
