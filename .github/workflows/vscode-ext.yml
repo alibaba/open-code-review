@@ -1,10 +1,6 @@
 name: VS Code Extension
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'extensions/vscode/**'
   pull_request:
     branches: [main]
     paths:
