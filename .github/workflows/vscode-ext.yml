@@ -20,7 +20,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 10
     container:
-      image: node:24.0.0
+      image: node:24
     defaults:
       run:
         working-directory: extensions/vscode
