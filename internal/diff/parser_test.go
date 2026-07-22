@@ -129,3 +129,101 @@ index 0000000..1234567
 		t.Errorf("Insertions = %d, want 2", d.Insertions)
 	}
 }
+
+// TestParseDiffText_BinaryMarkerAnchored guards two binary-detection cases:
+// a text file whose CONTENT mentions "Binary files " must not be classified
+// as binary (the unanchored regex used to match any line in the section and
+// the file was silently excluded from review), while a real binary diff must
+// still be detected.
+func TestParseDiffText_BinaryMarkerAnchored(t *testing.T) {
+	diffText := `diff --git a/docs.md b/docs.md
+index 1234567..89abcde 100644
+--- a/docs.md
++++ b/docs.md
+@@ -1,2 +1,3 @@
+ line1
++Note: Binary files are handled specially by git.
+ line2
+diff --git a/blob.bin b/blob.bin
+index 1234567..89abcde 100644
+Binary files a/blob.bin and b/blob.bin differ
+`
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 2 {
+		t.Fatalf("expected 2 diffs, got %d", len(diffs))
+	}
+	if diffs[0].IsBinary {
+		t.Errorf("docs.md IsBinary = true, want false (content line mentioning "+
+			"'Binary files ' must not mark the file binary); diff:\n%s", diffText)
+	}
+	if diffs[0].Insertions != 1 {
+		t.Errorf("docs.md Insertions = %d, want 1", diffs[0].Insertions)
+	}
+	if !diffs[1].IsBinary {
+		t.Errorf("blob.bin IsBinary = false, want true")
+	}
+}
+
+// TestParseDiffText_CountsContentLinesWithPlusMinusPrefix covers content
+// lines that themselves begin with "++"/"--": an added line "++i" renders in
+// the diff as "+++i", and the old "exclude +++/--- header" guard used to drop
+// it from the insertion count (same for deletions), skewing per-file stats
+// and the changeLines threshold that gates the plan phase.
+func TestParseDiffText_CountsContentLinesWithPlusMinusPrefix(t *testing.T) {
+	diffText := `diff --git a/counter.go b/counter.go
+index 1234567..89abcde 100644
+--- a/counter.go
++++ b/counter.go
+@@ -1,3 +1,3 @@
+ func inc() {
+---oldFlag
++++newFlag
+ }
+`
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	d := diffs[0]
+	if d.Insertions != 1 {
+		t.Errorf("Insertions = %d, want 1 (added content line \"+++newFlag\")", d.Insertions)
+	}
+	if d.Deletions != 1 {
+		t.Errorf("Deletions = %d, want 1 (deleted content line \"---oldFlag\")", d.Deletions)
+	}
+}
+
+// TestParseDiffText_DevNullStringInsideHunk ensures an added content line
+// whose rendered form is exactly "+++ /dev/null" (i.e. the file gained a line
+// reading "++ /dev/null") is treated as hunk content, not as the deleted-file
+// header marker.
+func TestParseDiffText_DevNullStringInsideHunk(t *testing.T) {
+	diffText := `diff --git a/paths.txt b/paths.txt
+index 1234567..89abcde 100644
+--- a/paths.txt
++++ b/paths.txt
+@@ -1,1 +1,2 @@
+ first
++++ /dev/null
+`
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	d := diffs[0]
+	if d.IsDeleted {
+		t.Errorf("IsDeleted = true, want false (\"+++ /dev/null\" inside a hunk is content)")
+	}
+	if d.Insertions != 1 {
+		t.Errorf("Insertions = %d, want 1", d.Insertions)
+	}
+}

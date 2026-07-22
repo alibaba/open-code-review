@@ -16,7 +16,10 @@ import (
 
 var (
 	diffHeaderRe = regexp.MustCompile(`^diff --git a/(.+?) b/(.+)$`)
-	binaryRe     = regexp.MustCompile(`Binary files `)
+	// Anchored: git emits the marker at column 0 ("Binary files a/x and b/y
+	// differ"). Content lines inside hunks always carry a leading "+", "-"
+	// or " " prefix, so an anchored match can never misfire on file content.
+	binaryRe = regexp.MustCompile(`^Binary files `)
 )
 
 // ParseDiffText splits the unified diff text into per-file Diff structs.
@@ -29,6 +32,13 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	var diffs []model.Diff
 	var current *model.Diff
 	var buf strings.Builder
+	// inHunk tracks whether the current line sits inside a "@@" hunk of the
+	// current file's section. Only hunk content lines carry a leading
+	// "+"/"-"/" " marker, so insertion/deletion counting and the binary
+	// marker must look at hunk state: outside a hunk, "+++ b/file" and
+	// "--- a/file" are headers, not content; inside a hunk, an added line
+	// like "++i" renders as "+++i" and still counts as an insertion.
+	inHunk := false
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -46,13 +56,16 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 				OldPath: m[1],
 				NewPath: m[2],
 			}
+			inHunk = false
 		}
 		if current == nil {
 			continue
 		}
 
 		switch {
-		case binaryRe.MatchString(line):
+		case strings.HasPrefix(line, "@@"):
+			inHunk = true
+		case !inHunk && binaryRe.MatchString(line):
 			current.IsBinary = true
 		// Extended header lines (unambiguous: content lines always carry a
 		// leading "+", "-" or " " prefix, so a bare prefix match is safe).
@@ -69,13 +82,15 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 			current.NewPath = strings.TrimPrefix(line, "rename to ")
 			current.IsRenamed = true
 		// git emits "--- /dev/null" / "+++ /dev/null" without a/ b/ prefixes.
-		case line == "--- /dev/null":
+		// Guarded by inHunk: inside a hunk the same strings can be content
+		// (e.g. an added line "++ /dev/null").
+		case !inHunk && line == "--- /dev/null":
 			current.IsNew = true
-		case line == "+++ /dev/null":
+		case !inHunk && line == "+++ /dev/null":
 			current.IsDeleted = true
-		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+		case inHunk && strings.HasPrefix(line, "+"):
 			current.Insertions++
-		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+		case inHunk && strings.HasPrefix(line, "-"):
 			current.Deletions++
 		}
 		buf.WriteString(line)
