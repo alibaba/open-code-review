@@ -22,7 +22,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 10
     container:
-      image: node:24
+      image: node:24.4.1
     defaults:
       run:
         working-directory: extensions/vscode
@@ -32,6 +32,14 @@ jobs:
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
         working-directory: .
+
+      - name: Cache Yarn packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/yarn
+          key: ${{ runner.os }}-yarn-${{ hashFiles('extensions/vscode/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
