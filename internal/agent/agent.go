@@ -618,9 +618,12 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, string,
 	if err == nil {
 		// REVIEW_FILTER_TASK runs after the main loop and decides which of the
 		// just-collected comments to drop. It needs to see comments produced by
-		// the async CommentWorkerPool, so wait for that to drain first.
+		// this file's async CommentWorkerPool units, so wait for those to drain
+		// first. This must be keyed to newPath: a pool-wide Await here would run
+		// concurrently with other files' Submit calls and misuses sync.WaitGroup
+		// ("Add called concurrently with Wait").
 		if a.args.CommentWorkerPool != nil {
-			a.args.CommentWorkerPool.Await()
+			a.args.CommentWorkerPool.AwaitKey(newPath)
 		}
 		a.executeReviewFilter(ctx, d, newPath)
 	}

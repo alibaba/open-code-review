@@ -382,7 +382,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 			pool := r.deps.CommentWorkerPool
 			asyncCtx := context.WithoutCancel(ctx)
 			toolName := t.Name()
-			pool.Submit(func() ([]model.LlmComment, error) {
+			pool.SubmitFor(newPath, func() ([]model.LlmComment, error) {
 				defer func() {
 					dur := time.Since(startTime)
 					telemetry.RecordToolResult(toolSpan, toolName, dur.Milliseconds(), nil)

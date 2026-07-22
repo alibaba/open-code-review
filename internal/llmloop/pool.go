@@ -37,6 +37,12 @@ type CommentWorkerPool struct {
 	wg        sync.WaitGroup
 	resultsMu sync.Mutex
 	results   []model.LlmComment
+
+	// keys tracks per-key WaitGroups so callers can drain only the units
+	// submitted under one key (e.g. one reviewed file) without waiting for
+	// — or racing — submissions made under other keys.
+	keysMu sync.Mutex
+	keys   map[string]*sync.WaitGroup
 }
 
 // NewCommentWorkerPool creates a pool with the given concurrency limit.
@@ -53,7 +59,36 @@ func NewCommentWorkerPool(workerCount int) *CommentWorkerPool {
 // Submit runs f in a background goroutine bounded by the semaphore.
 // When f completes its return value is collected internally.
 func (p *CommentWorkerPool) Submit(f func() ([]model.LlmComment, error)) {
+	p.submit(f, nil)
+}
+
+// SubmitFor is Submit plus registration under key, so AwaitKey can wait for
+// exactly the units submitted under that key instead of the whole pool.
+//
+// Callers must guarantee that all SubmitFor calls for a given key
+// happen-before the matching AwaitKey call for that key — the same contract
+// as Await, but scoped to one key. Per-file review satisfies this because a
+// file's tool-use loop finishes submitting before its AwaitKey runs.
+func (p *CommentWorkerPool) SubmitFor(key string, f func() ([]model.LlmComment, error)) {
+	p.keysMu.Lock()
+	if p.keys == nil {
+		p.keys = make(map[string]*sync.WaitGroup)
+	}
+	kwg := p.keys[key]
+	if kwg == nil {
+		kwg = &sync.WaitGroup{}
+		p.keys[key] = kwg
+	}
+	kwg.Add(1)
+	p.keysMu.Unlock()
+	p.submit(f, kwg)
+}
+
+func (p *CommentWorkerPool) submit(f func() ([]model.LlmComment, error), kwg *sync.WaitGroup) {
 	p.wg.Go(func() {
+		if kwg != nil {
+			defer kwg.Done()
+		}
 		p.semaphore <- struct{}{}
 		defer func() { <-p.semaphore }()
 		// Contain a panic in the submitted work so one bad unit of work cannot
@@ -87,7 +122,26 @@ func (p *CommentWorkerPool) Submit(f func() ([]model.LlmComment, error)) {
 // calls wg.Go (which does wg.Add(1) synchronously), so a Submit racing Await
 // would risk sync.WaitGroup's "Add called concurrently with Wait" panic.
 // Callers must ensure every Submit has returned before calling Await.
+// Callers that need to drain while other submissions are still in flight
+// must use SubmitFor/AwaitKey instead.
 func (p *CommentWorkerPool) Await() []model.LlmComment {
 	p.wg.Wait()
 	return p.results
+}
+
+// AwaitKey blocks until every unit submitted under key so far has completed.
+// It never touches the pool-wide WaitGroup, so it is safe to call while other
+// keys still have SubmitFor calls in flight — unlike Await.
+//
+// The caller must ensure no SubmitFor with the same key runs concurrently
+// with AwaitKey (see SubmitFor's contract). Waiting on an unknown key
+// returns immediately.
+func (p *CommentWorkerPool) AwaitKey(key string) {
+	p.keysMu.Lock()
+	kwg := p.keys[key]
+	p.keysMu.Unlock()
+	if kwg == nil {
+		return
+	}
+	kwg.Wait()
 }
