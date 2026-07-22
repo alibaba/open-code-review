@@ -20,7 +20,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 10
     container:
-      image: node:24
+      image: node:24.0.0
     defaults:
       run:
         working-directory: extensions/vscode
@@ -30,6 +30,13 @@ jobs:
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
         working-directory: .
+
+      - name: Setup Node.js with Yarn cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'yarn'
+          cache-dependency-path: extensions/vscode/yarn.lock
 
       - name: Install dependencies
         run: yarn install --frozen-lockfile
