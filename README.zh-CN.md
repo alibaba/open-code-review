@@ -111,7 +111,7 @@ npm install -g @alibaba-group/open-code-review
 
 **1. 配置 LLM**
 
-在审查代码之前，必须先配置 LLM。除非你使用[委托模式](https://open-codereview.ai/docs/integrations/delegate)。
+在审查代码之前，必须先配置 LLM。除非你使用[委托模式](https://open-codereview.ai/docs/delegate)。
 
 ```bash
 ocr config provider          # 选择内置供应商或添加自定义供应商
@@ -163,9 +163,9 @@ ocr delegate rule src/main.go src/handler.go
 - [配置](https://open-codereview.ai/docs/configuration) —— 配置项与环境变量
 - [MCP 服务器](https://open-codereview.ai/docs/mcp) —— 用外部工具扩展评审 agent
 - 编程 Agent 集成 —— 将 OCR 集成到 Claude Code、Codex、Cursor 等
-  - [Skill](https://open-codereview.ai/docs/integrations/agent-skill) —— 作为可复用的 Agent Skill 安装
-  - [Plugin](https://open-codereview.ai/docs/integrations/claude-code) —— 作为 Claude Code / Codex / Cursor 插件安装
-  - [委托模式](https://open-codereview.ai/docs/integrations/delegate) —— 让 Agent 使用自身的 LLM 进行评审
+  - [Skill](https://open-codereview.ai/docs/agent-skill) —— 作为可复用的 Agent Skill 安装
+  - [Plugin](https://open-codereview.ai/docs/claude-code) —— 作为 Claude Code / Codex / Cursor 插件安装
+  - [委托模式](https://open-codereview.ai/docs/delegate) —— 让 Agent 使用自身的 LLM 进行评审
 - [CI/CD 集成](https://open-codereview.ai/docs/cicd) —— 支持 GitHub Actions、GitLab CI、GitFlic CI、Gerrit 集成
 - [会话查看器](https://open-codereview.ai/docs/viewer) —— 在浏览器中浏览和回放评审会话
 - [遥测](https://open-codereview.ai/docs/telemetry) —— OpenTelemetry 集成，用于可观测性

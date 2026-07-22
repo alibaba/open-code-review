@@ -111,7 +111,7 @@ npm install -g @alibaba-group/open-code-review
 
 **1. LLMの設定**
 
-コードレビューの前にLLMの設定が必要です。[デリゲートモード](https://open-codereview.ai/docs/integrations/delegate)を使用する場合は不要です。
+コードレビューの前にLLMの設定が必要です。[デリゲートモード](https://open-codereview.ai/docs/delegate)を使用する場合は不要です。
 
 ```bash
 ocr config provider          # ビルトインプロバイダーを選択またはカスタムプロバイダーを追加
@@ -163,9 +163,9 @@ ocr delegate rule src/main.go src/handler.go
 - [設定](https://open-codereview.ai/docs/configuration) — 設定キーと環境変数
 - [MCP サーバー](https://open-codereview.ai/docs/mcp) — 外部ツールでレビューエージェントを拡張
 - コーディングエージェント連携 — OCR を Claude Code、Codex、Cursor などに統合
-  - [Skill](https://open-codereview.ai/docs/integrations/agent-skill) — 再利用可能なエージェントスキルとしてインストール
-  - [Plugin](https://open-codereview.ai/docs/integrations/claude-code) — Claude Code / Codex / Cursor プラグインとしてインストール
-  - [デリゲートモード](https://open-codereview.ai/docs/integrations/delegate) — エージェント自身の LLM でレビューを実行
+  - [Skill](https://open-codereview.ai/docs/agent-skill) — 再利用可能なエージェントスキルとしてインストール
+  - [Plugin](https://open-codereview.ai/docs/claude-code) — Claude Code / Codex / Cursor プラグインとしてインストール
+  - [デリゲートモード](https://open-codereview.ai/docs/delegate) — エージェント自身の LLM でレビューを実行
 - [CI/CD 連携](https://open-codereview.ai/docs/cicd) — GitHub Actions、GitLab CI、GitFlic CI、Gerrit との統合
 - [セッションビューアー](https://open-codereview.ai/docs/viewer) — ブラウザでレビューセッションを閲覧・再生
 - [テレメトリー](https://open-codereview.ai/docs/telemetry) — 可観測性のためのOpenTelemetry統合

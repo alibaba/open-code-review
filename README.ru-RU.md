@@ -111,7 +111,7 @@ npm install -g @alibaba-group/open-code-review
 
 **1. Настройте LLM**
 
-Перед запуском ревью необходимо настроить LLM, если только вы не используете [режим делегирования](https://open-codereview.ai/docs/integrations/delegate).
+Перед запуском ревью необходимо настроить LLM, если только вы не используете [режим делегирования](https://open-codereview.ai/docs/delegate).
 
 ```bash
 ocr config provider          # Выбрать встроенного провайдера или добавить пользовательский
@@ -163,9 +163,9 @@ ocr delegate rule src/main.go src/handler.go
 - [Конфигурация](https://open-codereview.ai/docs/configuration) — ключи конфигурации и переменные окружения
 - [MCP-сервер](https://open-codereview.ai/docs/mcp) — расширение агента ревью внешними инструментами
 - Интеграция с кодинг-агентами — встраивание OCR в Claude Code, Codex, Cursor и др.
-  - [Skill](https://open-codereview.ai/docs/integrations/agent-skill) — установка как переиспользуемый навык агента
-  - [Plugin](https://open-codereview.ai/docs/integrations/claude-code) — установка как плагин Claude Code / Codex / Cursor
-  - [Режим делегирования](https://open-codereview.ai/docs/integrations/delegate) — агент ревьюит своей собственной LLM
+  - [Skill](https://open-codereview.ai/docs/agent-skill) — установка как переиспользуемый навык агента
+  - [Plugin](https://open-codereview.ai/docs/claude-code) — установка как плагин Claude Code / Codex / Cursor
+  - [Режим делегирования](https://open-codereview.ai/docs/delegate) — агент ревьюит своей собственной LLM
 - [Интеграция с CI/CD](https://open-codereview.ai/docs/cicd) — GitHub Actions, GitLab CI, GitFlic CI и Gerrit
 - [Просмотр сессий](https://open-codereview.ai/docs/viewer) — просмотр и воспроизведение сессий ревью в браузере
 - [Телеметрия](https://open-codereview.ai/docs/telemetry) — интеграция с OpenTelemetry для наблюдаемости

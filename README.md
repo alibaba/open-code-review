@@ -111,7 +111,7 @@ For other installation methods (install script, GitHub Release binary, from sour
 
 **1. Configure LLM**
 
-You must configure an LLM before reviewing code, unless you use [Delegation Mode](https://open-codereview.ai/docs/integrations/delegate).
+You must configure an LLM before reviewing code, unless you use [Delegation Mode](https://open-codereview.ai/docs/delegate).
 
 ```bash
 ocr config provider          # Select a built-in provider or add a custom one
@@ -163,9 +163,9 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
 - [Configuration](https://open-codereview.ai/docs/configuration) — config keys and environment variables
 - [MCP Server](https://open-codereview.ai/docs/mcp) — extend the review agent with external tools
 - Coding Agent Integrations — integrate OCR into Claude Code, Codex, Cursor, etc.
-  - [Skill](https://open-codereview.ai/docs/integrations/agent-skill) — install as a reusable agent skill
-  - [Plugin](https://open-codereview.ai/docs/integrations/claude-code) — install as a Claude Code / Codex / Cursor plugin
-  - [Delegation Mode](https://open-codereview.ai/docs/integrations/delegate) — let your agent review using its own LLM
+  - [Skill](https://open-codereview.ai/docs/agent-skill) — install as a reusable agent skill
+  - [Plugin](https://open-codereview.ai/docs/claude-code) — install as a Claude Code / Codex / Cursor plugin
+  - [Delegation Mode](https://open-codereview.ai/docs/delegate) — let your agent review using its own LLM
 - [CI/CD Integration](https://open-codereview.ai/docs/cicd) — GitHub Actions, GitLab CI, GitFlic CI, and Gerrit integration
 - [Session Viewer](https://open-codereview.ai/docs/viewer) — browse and replay review sessions in browser
 - [Telemetry](https://open-codereview.ai/docs/telemetry) — OpenTelemetry integration for observability

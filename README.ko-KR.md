@@ -111,7 +111,7 @@ npm install -g @alibaba-group/open-code-review
 
 **1. LLM 설정**
 
-코드 리뷰 전에 LLM 설정이 필요합니다. [위임 모드](https://open-codereview.ai/docs/integrations/delegate)를 사용하는 경우에는 불필요합니다.
+코드 리뷰 전에 LLM 설정이 필요합니다. [위임 모드](https://open-codereview.ai/docs/delegate)를 사용하는 경우에는 불필요합니다.
 
 ```bash
 ocr config provider          # built-in provider 선택 또는 custom provider 추가
@@ -163,9 +163,9 @@ ocr delegate rule src/main.go src/handler.go
 - [설정](https://open-codereview.ai/docs/configuration) — 설정 키와 환경 변수
 - [MCP 서버](https://open-codereview.ai/docs/mcp) — 외부 도구로 리뷰 에이전트 확장
 - 코딩 에이전트 연동 — OCR을 Claude Code, Codex, Cursor 등에 통합
-  - [Skill](https://open-codereview.ai/docs/integrations/agent-skill) — 재사용 가능한 에이전트 스킬로 설치
-  - [Plugin](https://open-codereview.ai/docs/integrations/claude-code) — Claude Code / Codex / Cursor 플러그인으로 설치
-  - [위임 모드](https://open-codereview.ai/docs/integrations/delegate) — 에이전트 자체 LLM으로 리뷰 수행
+  - [Skill](https://open-codereview.ai/docs/agent-skill) — 재사용 가능한 에이전트 스킬로 설치
+  - [Plugin](https://open-codereview.ai/docs/claude-code) — Claude Code / Codex / Cursor 플러그인으로 설치
+  - [위임 모드](https://open-codereview.ai/docs/delegate) — 에이전트 자체 LLM으로 리뷰 수행
 - [CI/CD 연동](https://open-codereview.ai/docs/cicd) — GitHub Actions, GitLab CI, GitFlic CI, Gerrit 통합
 - [세션 뷰어](https://open-codereview.ai/docs/viewer) — 브라우저에서 리뷰 세션 탐색 및 재생
 - [텔레메트리](https://open-codereview.ai/docs/telemetry) — 관측성을 위한 OpenTelemetry 통합
