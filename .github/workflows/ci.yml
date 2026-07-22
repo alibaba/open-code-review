@@ -71,7 +71,7 @@ jobs:
 
   cross-compile:
     runs-on: self-hosted
-    timeout-minutes: 20
+    timeout-minutes: 10
     container:
       image: golang:1.26.5
     strategy:
