@@ -194,6 +194,7 @@ type ProviderEntry struct {
 	Model        string            `json:"model,omitempty"`
 	Models       []string          `json:"models,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
+	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
@@ -226,6 +227,7 @@ type LlmConfig struct {
 	Model        string            `json:"model,omitempty"`
 	Protocol     string            `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
 	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
+	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
