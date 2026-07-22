@@ -20,7 +20,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 10
     container:
-      image: node:24
+      image: node:24.4.1
     defaults:
       run:
         working-directory: extensions/vscode
@@ -34,7 +34,7 @@ jobs:
       - name: Setup Node.js with Yarn cache
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '24.4.1'
           cache: 'yarn'
           cache-dependency-path: extensions/vscode/yarn.lock
 
