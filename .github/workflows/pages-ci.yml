@@ -1,0 +1,38 @@
+name: Pages CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'pages/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: self-hosted
+    timeout-minutes: 15
+    container:
+      image: node:24
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
+      - name: Install dependencies
+        working-directory: pages
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: pages
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: pages
+        run: npm run build
