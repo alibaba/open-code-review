@@ -105,7 +105,7 @@
     "ts-loader": "^9.5.0",
     "typescript": "^5.3.0",
     "webpack": "^5.108.4",
-    "webpack-cli": "^5.1.0"
+    "webpack-cli": "^7.2.1"
   },
   "resolutions": {
     "undici": ">=7.28.0",
