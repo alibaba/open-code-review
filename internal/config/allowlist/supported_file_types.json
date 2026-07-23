@@ -77,5 +77,6 @@
   ".jl",
   ".hcl",
   ".tfvars",
-  ".bicep"
+  ".bicep",
+  ".proto"
 ]

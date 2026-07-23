@@ -102,6 +102,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"modules/network/vpc.hcl", "Overly Permissive Access"},
 		{"envs/prod.tfvars", "Hardcoded Secrets"},
 		{"infra/main.bicep", "Hardcoded Secrets"},
+		{"api/v1/user.proto", "Wire Compatibility"},
+		{"service.proto", "Wire Compatibility"},
 	}
 
 	for _, tt := range tests {
