@@ -1,0 +1,253 @@
+# OpenCodeReview - Bitbucket Pipelines PR auto-review
+#
+# Runs when a pull request is created or its source branch is updated, reviews
+# the PR diff with OpenCodeReview, and posts the findings back to the PR.
+#
+# Required repository variables:
+#   OCR_LLM_URL              LLM API endpoint
+#   OCR_LLM_AUTH_TOKEN       LLM authentication token (secured)
+#   OCR_LLM_MODEL            Model name
+#
+# Choose one Bitbucket authentication method:
+#   BITBUCKET_ACCESS_TOKEN   Repository access token (secured, recommended)
+# or:
+#   BITBUCKET_API_TOKEN      Scoped user API token (secured)
+#   BITBUCKET_API_TOKEN_EMAIL
+#
+# Optional repository variables:
+#   OCR_LLM_USE_ANTHROPIC    "true" for Anthropic, "false" otherwise
+
+image: node:20
+
+# OCR compares the destination branch with the source commit through their
+# merge base. A full clone avoids failures on long-lived branches.
+clone:
+  depth: full
+
+definitions:
+  steps:
+    - step: &ocr-pr-review
+        name: OpenCodeReview
+        max-time: 30
+        script:
+          - |
+            : "${OCR_LLM_URL:?Set OCR_LLM_URL in Repository settings -> Pipelines -> Repository variables}"
+            : "${OCR_LLM_AUTH_TOKEN:?Set OCR_LLM_AUTH_TOKEN as a secured repository variable}"
+            : "${OCR_LLM_MODEL:?Set OCR_LLM_MODEL in Repository settings -> Pipelines -> Repository variables}"
+            : "${BITBUCKET_PR_ID:?This pipeline must run for a pull request}"
+            : "${BITBUCKET_PR_DESTINATION_BRANCH:?Missing pull request destination branch}"
+            : "${BITBUCKET_COMMIT:?Missing pull request source commit}"
+
+            if [ -z "${BITBUCKET_ACCESS_TOKEN:-}" ]; then
+              : "${BITBUCKET_API_TOKEN:?Set BITBUCKET_ACCESS_TOKEN, or the API token variables}"
+              : "${BITBUCKET_API_TOKEN_EMAIL:?BITBUCKET_API_TOKEN_EMAIL is required with BITBUCKET_API_TOKEN}"
+            fi
+
+          - npm install -g @alibaba-group/open-code-review
+
+          - |
+            ocr config set llm.url "$OCR_LLM_URL"
+            ocr config set llm.auth_token "$OCR_LLM_AUTH_TOKEN"
+            ocr config set llm.model "$OCR_LLM_MODEL"
+            ocr config set llm.use_anthropic "${OCR_LLM_USE_ANTHROPIC:-false}"
+
+          # Materialize the destination tracking ref explicitly. This works
+          # even when the clone's configured fetch refspec is narrow.
+          - |
+            git fetch origin \
+              "+refs/heads/${BITBUCKET_PR_DESTINATION_BRANCH}:refs/remotes/origin/${BITBUCKET_PR_DESTINATION_BRANCH}"
+
+          - |
+            ocr review \
+              --from "origin/${BITBUCKET_PR_DESTINATION_BRANCH}" \
+              --to "${BITBUCKET_COMMIT}" \
+              --format json \
+              --audience agent \
+              > /tmp/ocr-result.json || true
+
+            if [ ! -s /tmp/ocr-result.json ]; then
+              echo "OCR review produced no output."
+              exit 1
+            fi
+
+          # Node 20 provides fetch, so the posting step needs no extra packages.
+          # Findings are posted inline where Bitbucket accepts the line
+          # position; invalid positions fall back to regular PR comments.
+          - |
+            node <<'NODE'
+            const fs = require("node:fs");
+
+            const resultPath = "/tmp/ocr-result.json";
+            let result;
+            try {
+              result = JSON.parse(fs.readFileSync(resultPath, "utf8"));
+            } catch (error) {
+              throw new Error(`Could not parse ${resultPath}: ${error.message}`);
+            }
+            if (!Array.isArray(result.comments)) {
+              throw new Error(`Invalid OCR JSON in ${resultPath}: "comments" must be an array`);
+            }
+
+            const required = (name) => {
+              const value = process.env[name];
+              if (!value) throw new Error(`Missing required environment variable: ${name}`);
+              return value;
+            };
+
+            const workspace = required("BITBUCKET_WORKSPACE");
+            const repoSlug = required("BITBUCKET_REPO_SLUG");
+            const prId = required("BITBUCKET_PR_ID");
+            const accessToken = process.env.BITBUCKET_ACCESS_TOKEN;
+            const apiToken = process.env.BITBUCKET_API_TOKEN;
+            const apiTokenEmail = process.env.BITBUCKET_API_TOKEN_EMAIL;
+
+            let authorization;
+            if (accessToken) {
+              authorization = `Bearer ${accessToken}`;
+            } else {
+              if (!apiToken || !apiTokenEmail) {
+                throw new Error(
+                  "Set BITBUCKET_ACCESS_TOKEN, or set both BITBUCKET_API_TOKEN and BITBUCKET_API_TOKEN_EMAIL."
+                );
+              }
+              authorization = `Basic ${Buffer.from(`${apiTokenEmail}:${apiToken}`).toString("base64")}`;
+            }
+
+            const encode = encodeURIComponent;
+            const commentsUrl =
+              `https://api.bitbucket.org/2.0/repositories/${encode(workspace)}` +
+              `/${encode(repoSlug)}/pullrequests/${encode(prId)}/comments`;
+
+            class ApiError extends Error {
+              constructor(status, body) {
+                super(`Bitbucket API returned HTTP ${status}: ${body.slice(0, 500)}`);
+                this.status = status;
+              }
+            }
+
+            async function postComment(payload) {
+              const response = await fetch(commentsUrl, {
+                method: "POST",
+                headers: {
+                  Accept: "application/json",
+                  Authorization: authorization,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+              });
+              if (!response.ok) {
+                throw new ApiError(response.status, await response.text());
+              }
+              return response.json();
+            }
+
+            function positiveLine(value) {
+              return Number.isInteger(value) && value > 0 ? value : undefined;
+            }
+
+            function codeFence(value, language = "") {
+              const text = String(value);
+              const fence = text.includes("```") ? "````" : "```";
+              return `${fence}${language}\n${text}\n${fence}`;
+            }
+
+            function findingBody(comment, includeLocation) {
+              const labels = [comment.severity, comment.category].filter(Boolean);
+              const prefix = labels.length ? `**${labels.join(" · ")}**\n\n` : "";
+              let body = `${prefix}${comment.content || "OpenCodeReview finding."}`;
+
+              if (comment.suggestion_code && comment.existing_code) {
+                body += `\n\n**Suggestion:**\n${codeFence(comment.suggestion_code)}`;
+              }
+
+              if (includeLocation) {
+                const start = positiveLine(comment.start_line);
+                const end = positiveLine(comment.end_line);
+                const range = start && end && start !== end
+                  ? `L${start}-L${end}`
+                  : `L${end || start || "?"}`;
+                body = `### \`${comment.path || "unknown file"}\` (${range})\n\n${body}`;
+              }
+              return body;
+            }
+
+            function inlinePosition(comment) {
+              const path = comment.path;
+              const start = positiveLine(comment.start_line);
+              const end = positiveLine(comment.end_line) || start;
+              if (!path || !end) return undefined;
+
+              const inline = { path, to: end };
+              if (start && start < end) inline.start_to = start;
+              return inline;
+            }
+
+            async function main() {
+              const comments = result.comments;
+              let inlineCount = 0;
+              let fallbackCount = 0;
+
+              for (const comment of comments) {
+                const inline = inlinePosition(comment);
+                if (!inline) {
+                  await postComment({ content: { raw: findingBody(comment, true) } });
+                  fallbackCount += 1;
+                  continue;
+                }
+
+                try {
+                  await postComment({
+                    content: { raw: findingBody(comment, false) },
+                    inline,
+                  });
+                  inlineCount += 1;
+                } catch (error) {
+                  // Bitbucket returns 400 when a line cannot be anchored in the
+                  // current PR diff. Retry only that placement error as a
+                  // general comment; other errors may have landed server-side.
+                  if (!(error instanceof ApiError) || error.status !== 400) throw error;
+                  await postComment({ content: { raw: findingBody(comment, true) } });
+                  fallbackCount += 1;
+                }
+              }
+
+              const summary = result.summary || {};
+              const status = result.status || "unknown";
+              const message = result.message ? `\n\n${result.message}` : "";
+              const warningCount = Array.isArray(result.warnings) ? result.warnings.length : 0;
+              const summaryBody = [
+                "<!-- open-code-review-summary -->",
+                "## OpenCodeReview summary",
+                "",
+                `- Status: **${status}**`,
+                `- Files reviewed: **${summary.files_reviewed ?? "n/a"}**`,
+                `- Findings: **${comments.length}**`,
+                `- Inline comments: **${inlineCount}**`,
+                `- General comments: **${fallbackCount}**`,
+                `- Warnings: **${warningCount}**`,
+              ].join("\n") + message;
+
+              await postComment({ content: { raw: summaryBody } });
+              console.log(
+                `Posted ${inlineCount} inline finding(s), ${fallbackCount} general finding(s), and one summary.`
+              );
+            }
+
+            main().catch((error) => {
+              console.error(error.message);
+              process.exitCode = 1;
+            });
+            NODE
+
+pipelines:
+  custom:
+    ocr-pr-review:
+      - step: *ocr-pr-review
+
+# pullrequest-push is evaluated when a PR is created or its source branch is
+# updated. The condition matches every source branch.
+triggers:
+  pullrequest-push:
+    - condition: glob(BITBUCKET_BRANCH, "**")
+      pipelines:
+        - ocr-pr-review
