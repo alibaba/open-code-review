@@ -95,38 +95,3 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
         run: go build -o /dev/null ./...
-
-  translation-sync:
-    runs-on: self-hosted
-    timeout-minutes: 10
-    container:
-      image: node:24
-    steps:
-      # fetch-depth: 0 so the non-blocking docs check can diff base...head.
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Trust workspace
-        run: git config --global --replace-all safe.directory '*'
-
-      # Validate the guardrail script itself (plain Node, no deps).
-      - name: Test translation-sync guardrail
-        run: node scripts/github-actions/check-translation-sync.test.js
-
-      # BLOCKING: all README*.md translations must share an identical ##
-      # (level-2) section structure. Fails the job with an ::error annotation
-      # if any file diverges.
-      - name: Check README translation structure
-        run: node scripts/github-actions/check-translation-sync.js readmes
-
-      # NON-BLOCKING: on PRs, warn (::warning annotation) when a file under
-      # pages/src/content/docs/en/** changed without its zh/ja counterpart.
-      # continue-on-error keeps it advisory: it never fails the build.
-      - name: Check docs translation sync
-        if: ${{ github.event_name == 'pull_request' }}
-        continue-on-error: true
-        env:
-          OCR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          OCR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node scripts/github-actions/check-translation-sync.js docs

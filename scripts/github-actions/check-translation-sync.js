@@ -63,6 +63,10 @@ function extractHeadings(markdown) {
     if (fence) {
       const ch = fence[1][0];
       if (fenceChar === null) fenceChar = ch; // opening fence
+      // TODO(commonmark): a closing fence must be at least as long as the
+      // opening run of the same char; we close on the fence char alone and
+      // ignore length. Harmless for our READMEs (no nested/ragged fences), but
+      // a `~~~~`-opened block closed by a shorter `~~~` would end early here.
       else if (fenceChar === ch) fenceChar = null; // matching closing fence
       continue;
     }
@@ -267,10 +271,23 @@ function runReadmeCheck({ repoRoot = process.cwd(), files = README_FILES } = {})
     }
   }
 
+  // Short-circuit when any expected file is absent: comparing only the files
+  // that DID load can mask a real divergence (e.g. a missing reference would
+  // silently promote the next file to reference). A missing translation is
+  // itself a failure, so fail fast before the structure comparison.
+  if (missing > 0) {
+    emitError(
+      null,
+      "README translation structure check failed: one or more expected " +
+        "README*.md files are missing (see the file annotations above)."
+    );
+    return 1;
+  }
+
   const { ok, errors } = compareReadmeStructures(loaded);
   for (const err of errors) emitError(err.file, err.message);
 
-  if (missing === 0 && ok) {
+  if (ok) {
     console.log(
       `README translation structure check passed: all ${loaded.length} ` +
         `README files share the same ## section structure.`

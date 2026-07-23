@@ -108,15 +108,10 @@ function testDroppedHeadingFails() {
 function testReorderedHeadingFails() {
   // Two `##` sections with different sub-structure; swapping them keeps the
   // level-2 COUNT identical but changes the outline order -> must fail.
-  const en = readme(["## Alpha", "### A1", "## Beta", "### B1"]);
-  // reference outline: [1,2,3,2,3]
-  const zh = readme(["## Beta", "### B1", "## Alpha", "### A1"]);
-  // still [1,2,3,2,3]? No: Beta(2) B1(3) Alpha(2) A1(3) -> [1,2,3,2,3]. Same!
-  // Use differing sub-structure so a reorder is detectable structurally.
+  // The sub-structure must differ so the reorder is detectable structurally:
+  // same level-2 count, different heading-level outline.
   const en2 = readme(["## Alpha", "### A1", "## Beta"]); // [1,2,3,2]
   const zh2 = readme(["## Beta", "## Alpha", "### A1"]); // [1,2,2,3]
-  void en;
-  void zh;
   const { ok, errors } = compareReadmeStructures([
     { name: "README.md", content: en2 },
     { name: "README.zh-CN.md", content: zh2 },
