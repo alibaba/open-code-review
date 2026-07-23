@@ -7,11 +7,6 @@ name: translation-sync
 # and a slow container pull here never delays core CI feedback.
 
 on:
-  push:
-    paths:
-      - "README*.md"
-      - "pages/src/content/docs/**"
-      - "scripts/github-actions/check-translation-sync.*"
   pull_request:
     paths:
       - "README*.md"
