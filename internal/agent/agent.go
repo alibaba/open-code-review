@@ -662,12 +662,6 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
-	if ft.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(ft.Timeout)*time.Second)
-		defer cancel()
-	}
-
 	fs := a.session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
 	startTime := time.Now()
