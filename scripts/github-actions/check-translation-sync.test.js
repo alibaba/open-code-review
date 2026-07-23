@@ -62,6 +62,25 @@ function testExtractHeadingsTildeFenceAndTrailingHashes() {
   );
 }
 
+function testExtractHeadingsInnerShorterFenceDoesNotClose() {
+  // CommonMark: a closing fence must be at least as long as the opening one.
+  // A block opened with ```` (4 backticks) must NOT be closed by an inner ```
+  // (3 backticks); everything up to the matching 4-backtick line stays code.
+  const md = [
+    "# Title",
+    "````", // open, length 4
+    "## not a heading (inside code)",
+    "```", // shorter than opening -> does NOT close
+    "## also inside code",
+    "````", // length >= 4 -> real close
+    "## Real Heading",
+  ].join("\n");
+  assert.deepStrictEqual(
+    extractHeadings(md).map((h) => `${h.level}:${h.text}`),
+    ["1:Title", "2:Real Heading"]
+  );
+}
+
 // --- README structure comparison -------------------------------------------
 
 function testIdenticalStructurePasses() {
@@ -240,6 +259,7 @@ function testSplitList() {
 function main() {
   testExtractHeadingsSkipsCodeFences();
   testExtractHeadingsTildeFenceAndTrailingHashes();
+  testExtractHeadingsInnerShorterFenceDoesNotClose();
   testIdenticalStructurePasses();
   testAddedHeadingFails();
   testDroppedHeadingFails();

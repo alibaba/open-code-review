@@ -57,17 +57,23 @@ function extractHeadings(markdown) {
   const lines = String(markdown).split(/\r?\n/);
   const headings = [];
   let fenceChar = null; // '`' or '~' while inside a fence, else null
+  let fenceLen = 0; // length of the opening fence run (CommonMark: the close
+  // must use the same char and be at least this long)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const fence = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
     if (fence) {
       const ch = fence[1][0];
-      if (fenceChar === null) fenceChar = ch; // opening fence
-      // TODO(commonmark): a closing fence must be at least as long as the
-      // opening run of the same char; we close on the fence char alone and
-      // ignore length. Harmless for our READMEs (no nested/ragged fences), but
-      // a `~~~~`-opened block closed by a shorter `~~~` would end early here.
-      else if (fenceChar === ch) fenceChar = null; // matching closing fence
+      const len = fence[1].length;
+      if (fenceChar === null) {
+        fenceChar = ch; // opening fence
+        fenceLen = len;
+      } else if (fenceChar === ch && len >= fenceLen) {
+        fenceChar = null; // matching closing fence (same char, long enough)
+        fenceLen = 0;
+      }
+      // A shorter run of the same char inside the block (len < fenceLen) is
+      // just code content, so fall through and skip it below.
       continue;
     }
     if (fenceChar !== null) continue; // inside a code fence

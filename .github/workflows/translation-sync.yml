@@ -23,7 +23,9 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 10
     container:
-      image: node:24
+      # Pinned to an exact 24.x for reproducible builds, matching the
+      # golang:1.26.5 pin used by the other jobs (avoids the mutable node:24 tag).
+      image: node:24.18.0
     steps:
       # fetch-depth: 0 so the non-blocking docs check can diff base...head.
       - uses: actions/checkout@v4
