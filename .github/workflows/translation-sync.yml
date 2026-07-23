@@ -42,6 +42,8 @@ jobs:
       # NON-BLOCKING: on PRs, warn (::warning) when a file under
       # pages/src/content/docs/en/** changed without its zh/ja counterpart.
       # continue-on-error keeps it advisory: it never fails the build.
+      # The event_name guard is intentional even though on: is PR-only today:
+      # if a push: trigger is reintroduced, base/head.sha would be empty.
       - name: Check docs translation sync
         if: ${{ github.event_name == 'pull_request' }}
         continue-on-error: true
