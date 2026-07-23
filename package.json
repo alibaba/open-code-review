@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "postinstall": "node scripts/install.js",
-    "test:github-actions": "node scripts/github-actions/post-review-comments.test.js"
+    "test:github-actions": "node scripts/github-actions/post-review-comments.test.js && node scripts/github-actions/check-translation-sync.test.js"
   },
   "repository": {
     "type": "git",
