@@ -101,10 +101,10 @@
     "eslint": "^8.56.0",
     "jest": "^29.7.0",
     "style-loader": "^3.3.0",
-    "ts-jest": "^29.1.0",
+    "ts-jest": "^29.4.12",
     "ts-loader": "^9.5.0",
     "typescript": "^5.3.0",
-    "webpack": "^5.89.0",
+    "webpack": "^5.108.4",
     "webpack-cli": "^5.1.0"
   },
   "resolutions": {
@@ -118,6 +118,6 @@
     "linkify-it": ">=5.0.2"
   },
   "dependencies": {
-    "preact": "^10.19.0"
+    "preact": "^10.29.7"
   }
 }
