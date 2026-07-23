@@ -113,7 +113,7 @@
     "js-yaml": ">=4.3.0",
     "minimatch": "^9.0.7",
     "@typescript-eslint/typescript-estree/minimatch": "^9.0.7",
-    "brace-expansion": ">=2.1.2",
+    "brace-expansion": ">=2.1.2 <3",
     "fast-uri": ">=3.1.4",
     "linkify-it": ">=5.0.2"
   },
