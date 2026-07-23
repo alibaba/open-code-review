@@ -257,9 +257,9 @@ func (a *Agent) ResumeInfo() *ResumeInfo {
 	return &info
 }
 
-// FilesReviewed returns the number of changed files included in this review.
+// FilesReviewed returns the number of dispatchable files included in this review.
 func (a *Agent) FilesReviewed() int64 {
-	return int64(len(a.diffs))
+	return countDispatchable(a.diffs)
 }
 
 // Diffs returns the parsed diffs loaded by the agent.
