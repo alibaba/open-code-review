@@ -58,12 +58,23 @@ definitions:
               "+refs/heads/${BITBUCKET_PR_DESTINATION_BRANCH}:refs/remotes/origin/${BITBUCKET_PR_DESTINATION_BRANCH}"
 
           - |
+            OCR_EXIT_CODE=0
             ocr review \
               --from "origin/${BITBUCKET_PR_DESTINATION_BRANCH}" \
               --to "${BITBUCKET_COMMIT}" \
               --format json \
               --audience agent \
-              > /tmp/ocr-result.json || true
+              > /tmp/ocr-result.json 2> /tmp/ocr-stderr.log || OCR_EXIT_CODE=$?
+
+            if [ -s /tmp/ocr-stderr.log ]; then
+              echo "=== OCR stderr ==="
+              cat /tmp/ocr-stderr.log
+            fi
+
+            if [ "$OCR_EXIT_CODE" -ne 0 ]; then
+              echo "OCR review failed with exit code ${OCR_EXIT_CODE}."
+              exit "$OCR_EXIT_CODE"
+            fi
 
             if [ ! -s /tmp/ocr-result.json ]; then
               echo "OCR review produced no output."

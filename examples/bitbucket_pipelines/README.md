@@ -239,9 +239,10 @@ access the current repository and comment on its pull requests.
 
 ### OCR review produced no output
 
-Verify `OCR_LLM_URL`, `OCR_LLM_AUTH_TOKEN`, and `OCR_LLM_MODEL`. Also confirm
-that the destination branch was fetched and that the PR changes contain file
-types supported by OCR.
+The pipeline prints OCR stderr before failing. Use those diagnostics to verify
+`OCR_LLM_URL`, `OCR_LLM_AUTH_TOKEN`, and `OCR_LLM_MODEL`. Also confirm that the
+destination branch was fetched and that the PR changes contain file types
+supported by OCR.
 
 ### Cannot find a merge base
 
