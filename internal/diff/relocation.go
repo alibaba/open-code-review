@@ -30,12 +30,6 @@ func ReLocateComment(
 		return false, nil, nil
 	}
 
-	if task.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(task.Timeout)*time.Second)
-		defer cancel()
-	}
-
 	messages := make([]llm.Message, 0, len(task.Messages))
 	for _, m := range task.Messages {
 		content := m.Content
