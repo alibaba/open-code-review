@@ -32,7 +32,12 @@ export class CliService {
 
   private probeCommand(bin: string, args: string[]): Promise<{ ok: boolean; version?: string }> {
     return new Promise((resolve) => {
-      const proc = spawn(resolveBin(bin), args, { env: getShellEnv() });
+      // Windows 下 npm/ocr 等是 .cmd 包装脚本，spawn 必须走 shell 才能执行（node.exe 可直接跑，
+      // 但 npm.cmd 不行），否则环境检测会误报"未检测到 npm"。参见 install() 的同款处理。
+      const proc = spawn(resolveBin(bin), args, {
+        env: getShellEnv(),
+        shell: process.platform === 'win32',
+      });
       let stdout = '';
       let errored = false;
       proc.stdout?.on('data', (d) => { stdout += d.toString(); });
@@ -108,9 +113,11 @@ export class CliService {
     envExtra?: Record<string, string>,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
+      // 同 probeCommand：Windows 下 ocr 是 npm 装的 .cmd 包装脚本，需走 shell 才能执行。
       const proc = spawn(resolveBin(this.cliPath), args, {
         cwd,
         env: envExtra ? { ...getShellEnv(), ...envExtra } : getShellEnv(),
+        shell: process.platform === 'win32',
       });
       this.current = proc;
       let stdout = '';
