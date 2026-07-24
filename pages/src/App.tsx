@@ -21,6 +21,7 @@ const App: React.FC = () => {
       <ScrollToTop />
       <Routes>
         <Route path="/" element={<LandingPage><FeaturesPage /></LandingPage>} />
+        <Route path="/features" element={<LandingPage><FeaturesPage /></LandingPage>} />
         <Route path="/benchmark" element={<LandingPage><BenchmarkPage /></LandingPage>} />
         <Route path="/quickstart" element={<LandingPage><QuickStartPage /></LandingPage>} />
         <Route path="/docs" element={<DocsPage />} />
