@@ -107,6 +107,7 @@ type reviewOptions struct {
 	audience       string // --audience: "human" (default) or "agent"
 	background     string // --background: optional requirement context
 	backgroundFile string // --background-file: path to a Markdown file used as background
+	provider       string // --provider: override resolved LLM provider for this review
 	model          string // --model: override resolved LLM model for this review
 	concurrency    int
 	perFileTimeout int
@@ -135,6 +136,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.audience, "audience", "human", "output audience: human (show progress) or agent (summary only)")
 	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the review")
 	a.StringVarP(&opts.backgroundFile, "background-file", "B", "", "optional requirement/business context from a Markdown file (combined with --background; inline value appears first when both are set)")
+	a.StringVar(&opts.provider, "provider", "", "override LLM provider for this review (e.g., openai)")
 	a.StringVar(&opts.model, "model", "", "override LLM model for this review (e.g., claude-opus-4-6)")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
@@ -239,6 +241,7 @@ Flags:
   --max-git-procs int           max concurrent git subprocesses (default 16)
   --from string                 source ref to start diff from (e.g., 'main')
   --max-tools int               max tool call rounds per file (0 = template default; min 10)
+  --provider string             override LLM provider for this review (e.g., openai)
   --model string                override LLM model for this review (e.g., claude-opus-4-6)
   -p, --preview                 preview which files will be reviewed without running the LLM
   --repo string                 root directory of the git repository (default: current dir)

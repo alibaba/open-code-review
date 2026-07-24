@@ -70,7 +70,7 @@ func runReview(args []string) error {
 		return err
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.provider, opts.model)
 	if err != nil {
 		return err
 	}
