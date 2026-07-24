@@ -92,6 +92,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"i18n/app.pot", "Header Integrity"},
 		{"api/schema.graphql", "Breaking Changes"},
 		{"queries/user.gql", "Breaking Changes"},
+		{"src/model.jl", "Type Stability"},
+		{"MyPkg/src/solver.jl", "Type Stability"},
 	}
 
 	for _, tt := range tests {
