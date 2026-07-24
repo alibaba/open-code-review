@@ -1,11 +1,12 @@
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { Suspense, useCallback, useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
-import ColorBends from './ColorBends';
 import docDownloadIcon from '../assets/icons/doc-download-green.svg';
 import copyIcon from '../assets/icons/icon-copy.svg';
+
+const ColorBends = React.lazy(() => import(/* webpackChunkName: "color-bends" */ './ColorBends'));
 
 
 const TC = {
@@ -123,6 +124,7 @@ const HeroSection: React.FC = () => {
   const { isMobile, isTablet } = useResponsive();
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [showShaderBackground, setShowShaderBackground] = useState(false);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -164,6 +166,30 @@ const HeroSection: React.FC = () => {
     return () => clearTimeout(timer);
   }, [toastVisible]);
 
+  useEffect(() => {
+    // Wait until after the first paint before loading the heavy shader chunk.
+    let secondFrame: number | undefined;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => setShowShaderBackground(true));
+    });
+
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      if (secondFrame !== undefined) cancelAnimationFrame(secondFrame);
+    };
+  }, []);
+
+  const shaderFallback = (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 0,
+        background: 'radial-gradient(circle at 50% 20%, #0d750d 0%, #042e04 38%, #000000 78%)',
+      }}
+    />
+  );
+
   return (
     <>
     <section
@@ -179,29 +205,34 @@ const HeroSection: React.FC = () => {
       }}
     >
       {/* Shader Background */}
-      <ColorBends
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          width: '100%',
-          height: '100%',
-          zIndex: 0,
-        }}
-        colors={['#0d750d', '#042e04', '#066020']}
-        rotation={90}
-        speed={0.23}
-        scale={1.2}
-        frequency={1}
-        warpStrength={1}
-        mouseInfluence={1}
-        noise={0.33}
-        parallax={0.45}
-        iterations={1}
-        intensity={0.8}
-        bandWidth={6}
-        transparent
-      />
+      {!showShaderBackground && shaderFallback}
+      {showShaderBackground && (
+        <Suspense fallback={shaderFallback}>
+          <ColorBends
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: '100%',
+              height: '100%',
+              zIndex: 0,
+            }}
+            colors={['#0d750d', '#042e04', '#066020']}
+            rotation={90}
+            speed={0.23}
+            scale={1.2}
+            frequency={1}
+            warpStrength={1}
+            mouseInfluence={1}
+            noise={0.33}
+            parallax={0.45}
+            iterations={1}
+            intensity={0.8}
+            bandWidth={6}
+            transparent
+          />
+        </Suspense>
+      )}
 
       {/* Gradient overlay */}
       <div
