@@ -71,5 +71,16 @@
   ".dart",
   ".tf",
   ".graphql",
-  ".gql"
+  ".gql",
+  ".proto",
+  ".hcl",
+  ".tfvars",
+  ".nix",
+  ".prisma",
+  ".bicep",
+  ".dhall",
+  ".jsonnet",
+  ".libsonnet",
+  ".thrift",
+  ".capnp"
 ]
