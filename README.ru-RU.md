@@ -165,9 +165,10 @@ ocr delegate rule src/main.go src/handler.go
 - [Правила ревью](https://open-codereview.ai/docs/review-rules) — кастомизация правил ревью, фильтрация и таргетинг по путям
 - [Конфигурация](https://open-codereview.ai/docs/configuration) — ключи конфигурации и переменные окружения
 - [MCP-сервер](https://open-codereview.ai/docs/mcp) — расширение агента ревью внешними инструментами
-- Интеграция с кодинг-агентами — встраивание OCR в Claude Code, Codex, Cursor и др.
+- Интеграция с кодинг-агентами — встраивание OCR в Claude Code, Codex, Cursor, OpenCode и др.
   - [Skill](https://open-codereview.ai/docs/agent-skill) — установка как переиспользуемый навык агента
   - [Plugin](https://open-codereview.ai/docs/claude-code) — установка как плагин Claude Code / Codex / Cursor
+  - [OpenCode](plugins/open-code-review/opencode/README.md) — установка нативных инструментов ревью и slash-команд
   - [Режим делегирования](https://open-codereview.ai/docs/delegate) — агент ревьюит своей собственной LLM
 - [Интеграция с CI/CD](https://open-codereview.ai/docs/cicd) — GitHub Actions, GitLab CI, GitFlic CI и Gerrit
 - [Просмотр сессий](https://open-codereview.ai/docs/viewer) — просмотр и воспроизведение сессий ревью в браузере

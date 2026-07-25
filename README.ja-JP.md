@@ -165,9 +165,10 @@ ocr delegate rule src/main.go src/handler.go
 - [レビュールール](https://open-codereview.ai/docs/review-rules) — レビュールールのカスタマイズ、パスフィルタリングとターゲティング
 - [設定](https://open-codereview.ai/docs/configuration) — 設定キーと環境変数
 - [MCP サーバー](https://open-codereview.ai/docs/mcp) — 外部ツールでレビューエージェントを拡張
-- コーディングエージェント連携 — OCR を Claude Code、Codex、Cursor などに統合
+- コーディングエージェント連携 — OCR を Claude Code、Codex、Cursor、OpenCode などに統合
   - [Skill](https://open-codereview.ai/docs/agent-skill) — 再利用可能なエージェントスキルとしてインストール
   - [Plugin](https://open-codereview.ai/docs/claude-code) — Claude Code / Codex / Cursor プラグインとしてインストール
+  - [OpenCode](plugins/open-code-review/opencode/README.md) — ネイティブレビュー・ツールとスラッシュコマンドをインストール
   - [デリゲートモード](https://open-codereview.ai/docs/delegate) — エージェント自身の LLM でレビューを実行
 - [CI/CD 連携](https://open-codereview.ai/docs/cicd) — GitHub Actions、GitLab CI、GitFlic CI、Gerrit との統合
 - [セッションビューアー](https://open-codereview.ai/docs/viewer) — ブラウザでレビューセッションを閲覧・再生

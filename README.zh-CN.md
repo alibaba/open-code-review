@@ -165,9 +165,10 @@ ocr delegate rule src/main.go src/handler.go
 - [评审规则](https://open-codereview.ai/docs/review-rules) —— 深度定制规则进行评审，过滤路径、指定路径等
 - [配置](https://open-codereview.ai/docs/configuration) —— 配置项与环境变量
 - [MCP 服务器](https://open-codereview.ai/docs/mcp) —— 用外部工具扩展评审 agent
-- 编程 Agent 集成 —— 将 OCR 集成到 Claude Code、Codex、Cursor 等
+- 编程 Agent 集成 —— 将 OCR 集成到 Claude Code、Codex、Cursor、OpenCode 等
   - [Skill](https://open-codereview.ai/docs/agent-skill) —— 作为可复用的 Agent Skill 安装
   - [Plugin](https://open-codereview.ai/docs/claude-code) —— 作为 Claude Code / Codex / Cursor 插件安装
+  - [OpenCode](plugins/open-code-review/opencode/README.md) —— 安装原生审查工具和斜杠命令
   - [委托模式](https://open-codereview.ai/docs/delegate) —— 让 Agent 使用自身的 LLM 进行评审
 - [CI/CD 集成](https://open-codereview.ai/docs/cicd) —— 支持 GitHub Actions、GitLab CI、GitFlic CI、Gerrit 集成
 - [会话查看器](https://open-codereview.ai/docs/viewer) —— 在浏览器中浏览和回放评审会话
