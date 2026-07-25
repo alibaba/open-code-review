@@ -9,8 +9,8 @@
         "role": "user",
         "content": "<current_file_path>{{current_file_path}}</current_file_path>\n\n<current_file_content>\n{{file_content}}\n</current_file_content>\n\nCurrent time in the real world: {{current_system_date_time}}\n\n<user_task>\n### Requirement Background (Optional)\n{{requirement_background}}\n\n### Review Checklist\n{{system_rule}}\n\n### Pre-scan Focus Areas\n{{plan_guidance}}\n\nReview the entire source file in <current_file_content> and report all findings via code_comment, then call task_done.\n</user_task>"
       }
-    ],
-    "timeout": 180
+    ]
+  
   },
   "PLAN_TASK": {
     "messages": [
@@ -22,8 +22,8 @@
         "role": "user",
         "content": "<current_file_path>{{current_file_path}}</current_file_path>\n\n<current_file_content>\n{{file_content}}\n</current_file_content>\n\nCurrent time: {{current_system_date_time}}\n\n### Review Checklist (project rules)\n{{system_rule}}\n\nProduce the JSON focus checklist now."
       }
-    ],
-    "timeout": 90
+    ]
+    
   },
   "DEDUP_TASK": {
     "messages": [
@@ -35,8 +35,8 @@
         "role": "user",
         "content": "<batch_comments>\n{{batch_comments}}\n</batch_comments>\n\nProduce the dedup groups JSON now."
       }
-    ],
-    "timeout": 90
+    ]
+    
   },
   "PROJECT_SUMMARY_TASK": {
     "messages": [
@@ -48,8 +48,8 @@
         "role": "user",
         "content": "Total comments: {{comment_count}} across {{file_count}} files.\n\n<all_comments>\n{{all_comments}}\n</all_comments>\n\nProduce the project summary markdown now."
       }
-    ],
-    "timeout": 120
+    ]
+   
   },
   "MEMORY_COMPRESSION_TASK": {
     "messages": [
@@ -61,8 +61,7 @@
         "role": "user",
         "content": "{{context}}"
       }
-    ],
-    "timeout": 120
+    ]
   },
   "RE_LOCATION_TASK": {
     "messages": [
@@ -74,8 +73,8 @@
         "role": "user",
         "content": "Below is a unified diff and a review comment. Identify the minimal contiguous code range in the diff that the comment targets.\n\nRules:\n1. Copy the relevant lines VERBATIM from the diff — do not rewrite, reformat, or add anything.\n2. Strip leading diff markers (`+`, `-`, ` `) from each line before outputting.\n3. Include only the lines directly related to the issue — no surrounding context.\n4. If multiple disjoint locations apply, pick the single most relevant one.\n5. Output ONLY a fenced code block. No explanation, no commentary.\n\n**Diff:**\n```diff\n{diff}```\n\n**Original code snippet (failed to match):**\n```\n{existing_code}\n```\n\n**Review comment:**\n{suggestion_content}"
       }
-    ],
-    "timeout": 180
+    ]
+    
   },
   "MAX_TOKENS": 58888,
   "MAX_TOOL_REQUEST_TIMES": 60,
