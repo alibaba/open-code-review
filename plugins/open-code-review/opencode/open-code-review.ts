@@ -132,7 +132,9 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
     let stdoutBytes = 0
     let stderrBytes = 0
     let settled = false
+    let closed = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined
     let abort: (() => void) | undefined
 
     const finish = (callback: () => void): void => {
@@ -145,8 +147,18 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
       callback()
     }
 
-    const failForOutputLimit = (error: Error): void => {
+    const terminateChild = (): void => {
+      if (closed) return
       child.kill("SIGTERM")
+      forceKillTimer ??= setTimeout(() => {
+        if (!closed) {
+          child.kill("SIGKILL")
+        }
+      }, 3_000)
+    }
+
+    const failForOutputLimit = (error: Error): void => {
+      terminateChild()
       finish(() => reject(error))
     }
 
@@ -173,6 +185,8 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
     })
 
     child.on("close", (exitCode) => {
+      closed = true
+      clearTimeout(forceKillTimer)
       finish(() => {
         const result = {
           stdout: Buffer.concat(stdoutChunks).toString("utf8").trim(),
@@ -191,7 +205,7 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
     })
 
     abort = (): void => {
-      child.kill("SIGTERM")
+      terminateChild()
       finish(() => reject(new OcrExecutionError(
         "OpenCodeReview was cancelled by OpenCode.",
         {
@@ -204,7 +218,7 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
     options.signal?.addEventListener("abort", abort, { once: true })
 
     timer = setTimeout(() => {
-      child.kill("SIGTERM")
+      terminateChild()
       finish(() => reject(new OcrExecutionError(
         `OpenCodeReview timed out after ${Math.round(timeoutMs / 1000)} seconds.`,
         {
@@ -303,7 +317,7 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
         args: {},
         async execute(_args, context) {
           const cwd = context.worktree || context.directory || worktree
-          const [version, llm] = await Promise.all([
+          const [version, llm] = await Promise.allSettled([
             runOcr(["version"], {
               cwd,
               timeoutMs: 30_000,
@@ -315,11 +329,25 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
               signal: context.abort,
             }),
           ])
-          return [
-            version.stdout,
-            llm.stdout,
-            llm.stderr,
-          ].filter(Boolean).join("\n")
+          const rejected = [version, llm].find(
+            (result): result is PromiseRejectedResult => result.status === "rejected",
+          )
+          if (context.abort.aborted && rejected) {
+            throw rejected.reason
+          }
+
+          const parts: string[] = []
+          if (version.status === "fulfilled") {
+            parts.push(version.value.stdout)
+          } else {
+            parts.push(`Version check failed: ${version.reason?.message ?? "unknown error"}`)
+          }
+          if (llm.status === "fulfilled") {
+            parts.push(llm.value.stdout, llm.value.stderr)
+          } else {
+            parts.push(`LLM connection check failed: ${llm.reason?.message ?? "unknown error"}`)
+          }
+          return parts.filter(Boolean).join("\n")
         },
       }),
     },
