@@ -83,6 +83,17 @@ async function waitForProcessExit(pid, timeoutMs = 5_000) {
   throw new Error(`Process ${pid} did not exit within ${timeoutMs}ms`)
 }
 
+async function withShortOverallTimeout(timeoutMs, callback) {
+  const originalSetTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (handler, delay, ...args) =>
+    originalSetTimeout(handler, delay === 15 * 60 * 1000 ? timeoutMs : delay, ...args)
+  try {
+    return await callback()
+  } finally {
+    globalThis.setTimeout = originalSetTimeout
+  }
+}
+
 test("module exposes only one OpenCode plugin entry point", async () => {
   const module = await import("../dist/open-code-review.js")
   assert.deepEqual(Object.keys(module), ["OpenCodeReviewPlugin"])
@@ -299,6 +310,37 @@ test("ocr_review force-kills a child that ignores cancellation", async () => {
   )
 })
 
+test("ocr_review terminates after its overall timeout", async () => {
+  await withFakeOcr(
+    "setInterval(() => {}, 1000)",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      await withShortOverallTimeout(20, async () => {
+        await assert.rejects(
+          hooks.tool.ocr_review.execute({}, toolContext(worktree)),
+          /timed out after 900 seconds/,
+        )
+      })
+    },
+  )
+})
+
+test("ocr_review enforces one output limit across stdout and stderr", async () => {
+  await withFakeOcr(
+    [
+      "process.stdout.write('a'.repeat(6 * 1024 * 1024))",
+      "process.stderr.write('b'.repeat(6 * 1024 * 1024))",
+    ].join("\n"),
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      await assert.rejects(
+        hooks.tool.ocr_review.execute({}, toolContext(worktree)),
+        /output exceeded the 10485760-byte safety limit/,
+      )
+    },
+  )
+})
+
 test("ocr_review rejects invalid JSON output", async () => {
   await withFakeOcr(
     "console.log('not json')",
@@ -308,6 +350,20 @@ test("ocr_review rejects invalid JSON output", async () => {
         hooks.tool.ocr_review.execute({}, toolContext(worktree)),
         /invalid JSON/,
       )
+    },
+  )
+})
+
+test("ocr_review preserves valid JSON after validation", async () => {
+  await withFakeOcr(
+    "console.log('{\"status\":\"success\",\"findings\":[]}')",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_review.execute(
+        {},
+        toolContext(worktree),
+      )
+      assert.equal(output, "{\"status\":\"success\",\"findings\":[]}")
     },
   )
 })

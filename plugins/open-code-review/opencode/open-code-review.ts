@@ -129,8 +129,7 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
 
     const stdoutChunks: Uint8Array[] = []
     const stderrChunks: Uint8Array[] = []
-    let stdoutBytes = 0
-    let stderrBytes = 0
+    let outputBytes = 0
     let settled = false
     let closed = false
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -164,14 +163,14 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
 
     child.stdout.on("data", (chunk: Buffer) => {
       try {
-        stdoutBytes = appendChunk(stdoutChunks, stdoutBytes, chunk, maxOutputBytes)
+        outputBytes = appendChunk(stdoutChunks, outputBytes, chunk, maxOutputBytes)
       } catch (error) {
         failForOutputLimit(error as Error)
       }
     })
     child.stderr.on("data", (chunk: Buffer) => {
       try {
-        stderrBytes = appendChunk(stderrChunks, stderrBytes, chunk, maxOutputBytes)
+        outputBytes = appendChunk(stderrChunks, outputBytes, chunk, maxOutputBytes)
       } catch (error) {
         failForOutputLimit(error as Error)
       }
@@ -240,7 +239,8 @@ function formatReviewResult(result: RunResult, preview: boolean): string {
     return result.stdout || "No files changed."
   }
   try {
-    return JSON.stringify(JSON.parse(result.stdout), null, 2)
+    JSON.parse(result.stdout)
+    return result.stdout
   } catch {
     throw new OcrExecutionError("OpenCodeReview returned invalid JSON.", result)
   }
