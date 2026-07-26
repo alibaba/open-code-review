@@ -149,7 +149,8 @@ export class GitService {
 
     try {
       const [diffHeadOut, untrackedOut] = await Promise.all([
-        runGit(root, ['diff', '--name-status', 'HEAD']),
+        // HEAD does not exist before the first commit; fall back to the index below.
+        runGit(root, ['diff', '--name-status', 'HEAD']).catch(() => ''),
         runGit(root, ['ls-files', '--others', '--exclude-standard']),
       ]);
       let diffCachedOut = '';
