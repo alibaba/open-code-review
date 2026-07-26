@@ -160,6 +160,12 @@ type Args struct {
 	// LLM endpoint and app config; a zero value simply omits those fields from
 	// the hash input.
 	RuntimeConfig RuntimeConfig
+
+	// Dismissals is an optional read-side filter of dismissed findings.
+	// When non-nil, findings whose dismissal fingerprint is in the store are
+	// suppressed from the returned comments; nil = stateless (today's behavior),
+	// so a review with no dismissal store on disk is byte-identical to before.
+	Dismissals *session.DismissalFilter
 }
 
 // RuntimeConfig captures the allowlisted, non-secret runtime settings that
@@ -173,6 +179,7 @@ type RuntimeConfig struct {
 	EndpointHost string        // endpoint host[:port] only, credential- and path-free
 	Language     string        // configured review output language
 	Timeout      time.Duration // per-request timeout (0 means client default)
+
 }
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
@@ -408,6 +415,13 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 
 	// Step 2: Dispatch per-group subtasks concurrently
 	comments, err := a.dispatchSubtasks(ctx)
+	// Suppress dismissed findings on the success path only: when err != nil,
+	// dispatchSubtasks returns a partial/nil slice and masking it would hide a
+	// failure. Suppress returns a new slice (D3: input untouched) and is a no-op
+	// when Dismissals is nil (D2: byte-identical to the stateless default).
+	if err == nil && a.args.Dismissals != nil {
+		comments = a.args.Dismissals.Suppress(comments)
+	}
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
 	}
