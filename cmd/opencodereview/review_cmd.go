@@ -70,6 +70,11 @@ func runReview(args []string) error {
 		return err
 	}
 
+	// Dismissal filter: loaded only when the per-repo dismissal store exists.
+	// Absence → nil (D2: byte-identical to the stateless default; one stat, no read).
+	// Corrupt/unreadable → nil + warning (D6: fail safe, file left untouched).
+	dismissalFilter := loadDismissalFilter(cc.RepoDir)
+
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
 	if err != nil {
 		return err
@@ -119,6 +124,7 @@ func runReview(args []string) error {
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
+		Dismissals:            dismissalFilter,
 	})
 
 	// Silence progress output during execution; restored before the trace
@@ -188,6 +194,32 @@ func reviewModeFromOptions(opts reviewOptions) string {
 		return session.ReviewModeRange
 	}
 	return session.ReviewModeWorkspace
+}
+
+// loadDismissalFilter loads the per-repo dismissal filter for review suppression.
+//
+// It performs a single stat of the dismissal store path and returns nil when the
+// store does not exist (D2: byte-identical to the stateless default — no read,
+// no allocation). When the store exists but is corrupt or unreadable, it prints
+// a warning to stderr and returns nil so the review proceeds stateless (D6/AS5:
+// fail safe; the corrupt file is left untouched). On a successful load it returns
+// a DismissalFilter built from the store's fingerprints.
+func loadDismissalFilter(repoDir string) *session.DismissalFilter {
+	path, err := session.DismissalFilePath(repoDir)
+	if err != nil {
+		// Could not resolve home dir; there is no store to consult. Stay stateless.
+		return nil
+	}
+	if _, err := os.Stat(path); err != nil {
+		// Missing (or otherwise unreadable): no opt-in. One stat, no read.
+		return nil
+	}
+	store, err := session.LoadDismissals(repoDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: dismissal store %q is corrupt or unreadable (%v); proceeding without suppression. The file was left untouched.\n", path, err)
+		return nil
+	}
+	return session.NewDismissalFilter(store)
 }
 
 // resolveRepoDir resolves the repo dir for `ocr rules check`. It delegates to

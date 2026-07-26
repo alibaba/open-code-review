@@ -60,6 +60,8 @@ func dispatch() error {
 		return runDelegate(args[1:])
 	case "session", "sessions":
 		return runSession(args[1:])
+	case "dismiss":
+		return runDismiss(args[1:])
 	case "-h", "--help":
 		printTopLevelUsage()
 		return nil
@@ -83,6 +85,7 @@ Commands:
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
+  dismiss      Record and manage dismissed findings (suppress from review)
   version      Show version information
 
 Examples:
@@ -96,6 +99,7 @@ Examples:
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
   ocr session list                         List saved review sessions
+  ocr dismiss add <session> <ref>          Dismiss a finding from a session
   ocr version                              Show version info
 
 Use "ocr review -h" for more information about review.
@@ -104,6 +108,7 @@ Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
 Use "ocr session -h" for more information about session inspection.
+Use "ocr dismiss -h" for more information about managing dismissed findings.
 
 GitHub: https://github.com/alibaba/open-code-review`)
 }
