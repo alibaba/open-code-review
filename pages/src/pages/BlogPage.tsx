@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { useResponsive } from '../hooks/useResponsive';
+import { useCommandSearch, useSearchKeyboardNav } from '../hooks/useCommandSearch';
 import {
   getBlogContent,
   getBlogMeta,
@@ -13,7 +14,7 @@ import {
   searchBlog,
   BlogSlug,
 } from '../content/blog';
-import { generateHeadingId } from '../utils/headingId';
+import { extractHeadings } from '../utils/extractHeadings';
 import docContentsIcon from '../assets/icons/doc-contents.svg';
 import searchIcon from '../assets/icons/icon-search.svg';
 import '../styles/docs-markdown.css';
@@ -21,30 +22,6 @@ import '../styles/blog.css';
 
 const fontFamily = 'PingFang SC, -apple-system, BlinkMacSystemFont, sans-serif';
 
-/* ─── Extract headings from markdown for right TOC ─── */
-function extractHeadings(markdown: string): { id: string; text: string; level: number }[] {
-  const headings: { id: string; text: string; level: number }[] = [];
-  const lines = markdown.split('\n');
-  let inCodeBlock = false;
-  for (const line of lines) {
-    if (line.trim().startsWith('```')) {
-      inCodeBlock = !inCodeBlock;
-      continue;
-    }
-    if (inCodeBlock) continue;
-    const match = line.match(/^(#{2,3})\s+(.+)$/);
-    if (match) {
-      const level = match[1].length;
-      const text = match[2]
-        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-        .replace(/[`*_\[\]()]/g, '')
-        .trim();
-      const id = generateHeadingId(text);
-      headings.push({ id, text, level });
-    }
-  }
-  return headings;
-}
 
 /* ─── Build valid slug set from blog posts ─── */
 function getValidSlugs(language: string): Set<BlogSlug> {
@@ -59,10 +36,13 @@ const BlogPage: React.FC = () => {
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [hoveredHeadingId, setHoveredHeadingId] = useState<string>('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchSelectedIdx, setSearchSelectedIdx] = useState(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const {
+    searchOpen, setSearchOpen,
+    searchQuery, setSearchQuery,
+    searchSelectedIdx, setSearchSelectedIdx,
+    searchInputRef,
+    searchResults,
+  } = useCommandSearch(searchBlog, language);
 
   const validSlugs = useMemo(() => getValidSlugs(language), [language]);
   const isDetailView = !!(slugParam && validSlugs.has(slugParam as BlogSlug));
@@ -117,56 +97,15 @@ const BlogPage: React.FC = () => {
     return () => observer.disconnect();
   }, [headings, isDetailView]);
 
-  /* Search results */
-  const searchResults = useMemo(() => searchBlog(searchQuery, language), [searchQuery, language]);
-
-  useEffect(() => {
-    setSearchSelectedIdx(0);
-  }, [searchResults]);
-
-  /* Cmd+K keyboard shortcut */
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        const activeEl = document.activeElement;
-        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') && !searchOpen) return;
-        e.preventDefault();
-        setSearchOpen(prev => !prev);
-      }
-      if (e.key === 'Escape') {
-        setSearchOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [searchOpen]);
-
-  useEffect(() => {
-    if (searchOpen) {
-      setTimeout(() => searchInputRef.current?.focus(), 50);
-    } else {
-      setSearchQuery('');
-    }
-  }, [searchOpen]);
-
   const handleSearchSelect = useCallback((slug: BlogSlug) => {
     navigate(`/blog/${slug}`);
     setSearchOpen(false);
     window.scrollTo(0, 0);
-  }, [navigate]);
+  }, [navigate, setSearchOpen]);
 
-  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSearchSelectedIdx(prev => Math.min(prev + 1, searchResults.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSearchSelectedIdx(prev => Math.max(prev - 1, 0));
-    } else if (e.key === 'Enter' && searchResults.length > 0) {
-      e.preventDefault();
-      handleSearchSelect(searchResults[searchSelectedIdx].slug);
-    }
-  }, [searchResults, searchSelectedIdx, handleSearchSelect]);
+  const handleSearchKeyDown = useSearchKeyboardNav(
+    searchResults, searchSelectedIdx, setSearchSelectedIdx, handleSearchSelect,
+  );
 
   const scrollToHeading = useCallback((id: string) => {
     const el = document.getElementById(id);

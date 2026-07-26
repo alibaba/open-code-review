@@ -5,8 +5,9 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { useResponsive } from '../hooks/useResponsive';
+import { useCommandSearch, useSearchKeyboardNav } from '../hooks/useCommandSearch';
 import { getDocContent, getDocTitle, DocSlug, searchDocs } from '../content/docs';
-import { generateHeadingId } from '../utils/headingId';
+import { extractHeadings } from '../utils/extractHeadings';
 import docContentsIcon from '../assets/icons/doc-contents.svg';
 import searchIcon from '../assets/icons/icon-search.svg';
 import '../styles/docs-markdown.css';
@@ -98,32 +99,6 @@ const ChevronIcon: React.FC<{ expanded: boolean }> = ({ expanded }) => (
   </svg>
 );
 
-/* ─── Extract headings from markdown for right TOC ─── */
-function extractHeadings(markdown: string): { id: string; text: string; level: number }[] {
-  const headings: { id: string; text: string; level: number }[] = [];
-  const lines = markdown.split('\n');
-  let inCodeBlock = false;
-  for (const line of lines) {
-    if (line.trim().startsWith('```')) {
-      inCodeBlock = !inCodeBlock;
-      continue;
-    }
-    if (inCodeBlock) continue;
-    const match = line.match(/^(#{2,3})\s+(.+)$/);
-    if (match) {
-      const level = match[1].length;
-      // Strip markdown link syntax [text](url) → text, then strip other formatting
-      const text = match[2]
-        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-        .replace(/[`*_\[\]()]/g, '')
-        .trim();
-      const id = generateHeadingId(text);
-      headings.push({ id, text, level });
-    }
-  }
-  return headings;
-}
-
 /* ─── Flat ordered list of all doc slugs for prev/next navigation ─── */
 function buildFlatDocList(): { slug: DocSlug; labelKey: string }[] {
   const list: { slug: DocSlug; labelKey: string }[] = [];
@@ -167,14 +142,17 @@ const DocsPage: React.FC = () => {
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({ 'sb-integrations': true });
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [hoveredHeadingId, setHoveredHeadingId] = useState<string>('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchSelectedIdx, setSearchSelectedIdx] = useState(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   /* Cancels an in-flight click-triggered scroll when a newer one starts */
   const cancelPendingScroll = useRef<(() => void) | null>(null);
   const { t, language } = useTranslation();
   const { isMobile } = useResponsive();
+  const {
+    searchOpen, setSearchOpen,
+    searchQuery, setSearchQuery,
+    searchSelectedIdx, setSearchSelectedIdx,
+    searchInputRef,
+    searchResults,
+  } = useCommandSearch(searchDocs, language);
   const contentRef = React.useRef<HTMLDivElement>(null);
 
   const fontFamily = 'PingFang SC, -apple-system, BlinkMacSystemFont, sans-serif';
@@ -276,15 +254,6 @@ const DocsPage: React.FC = () => {
     }
   }, []);
 
-  /* Check if a sidebar item or its children is active */
-  const isItemActive = useCallback((item: SidebarItem): boolean => {
-    if (item.slug === activeSlug) return true;
-    if (item.children) {
-      return item.children.some(child => child.slug === activeSlug);
-    }
-    return false;
-  }, [activeSlug]);
-
   /* Auto-expand parent when a child is active */
   useEffect(() => {
     for (const group of sidebarTree) {
@@ -296,60 +265,16 @@ const DocsPage: React.FC = () => {
     }
   }, [activeSlug]);
 
-  /* Search results */
-  const searchResults = useMemo(() => searchDocs(searchQuery, language), [searchQuery, language]);
-
-  /* Reset selection when results change */
-  useEffect(() => {
-    setSearchSelectedIdx(0);
-  }, [searchResults]);
-
-  /* ⌘K / Ctrl+K keyboard shortcut */
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        // Don't intercept when focused in other input/textarea (unless search is already open)
-        const activeEl = document.activeElement;
-        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') && !searchOpen) return;
-        e.preventDefault();
-        setSearchOpen(prev => !prev);
-      }
-      if (e.key === 'Escape') {
-        setSearchOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [searchOpen]);
-
-  /* Focus input when search opens */
-  useEffect(() => {
-    if (searchOpen) {
-      setTimeout(() => searchInputRef.current?.focus(), 50);
-    } else {
-      setSearchQuery('');
-    }
-  }, [searchOpen]);
-
   /* Handle search result selection */
   const handleSearchSelect = useCallback((slug: DocSlug) => {
     navigateToDoc(slug);
     setSearchOpen(false);
-  }, [navigateToDoc]);
+  }, [navigateToDoc, setSearchOpen]);
 
   /* Keyboard navigation in search modal */
-  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSearchSelectedIdx(prev => Math.min(prev + 1, searchResults.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSearchSelectedIdx(prev => Math.max(prev - 1, 0));
-    } else if (e.key === 'Enter' && searchResults.length > 0) {
-      e.preventDefault();
-      handleSearchSelect(searchResults[searchSelectedIdx].slug);
-    }
-  }, [searchResults, searchSelectedIdx, handleSearchSelect]);
+  const handleSearchKeyDown = useSearchKeyboardNav(
+    searchResults, searchSelectedIdx, setSearchSelectedIdx, handleSearchSelect,
+  );
 
   return (
     <div style={{ minHeight: '100vh', background: '#000000', paddingTop: 72, fontFamily }}>
