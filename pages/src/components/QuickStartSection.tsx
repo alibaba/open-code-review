@@ -1,8 +1,9 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React from 'react';
 import ReactDOM from 'react-dom';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
 import { useSectionTitleStyle } from '../hooks/useResponsiveStyle';
+import { useCopyToast } from '../hooks/useCopyToast';
 import copyIcon from '../assets/icons/icon-copy.svg';
 import chevronDown from '../assets/icons/icon-chevron-down.svg';
 import chevronRight from '../assets/icons/icon-chevron-right.svg';
@@ -67,37 +68,7 @@ const QuickStartSection: React.FC = () => {
   const { t } = useTranslation();
   const { isMobile, isTablet } = useResponsive();
   const titleStyle = useSectionTitleStyle();
-  const [toastVisible, setToastVisible] = useState(false);
-
-  const handleCopy = useCallback((text: string) => {
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(() => {
-        setToastVisible(true);
-      }).catch(() => {
-        fallbackCopy(text);
-      });
-    } else {
-      fallbackCopy(text);
-    }
-  }, []);
-
-  const fallbackCopy = (text: string) => {
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    const success = document.execCommand('copy');
-    document.body.removeChild(textarea);
-    if (success) setToastVisible(true);
-  };
-
-  useEffect(() => {
-    if (!toastVisible) return;
-    const timer = setTimeout(() => setToastVisible(false), 1200);
-    return () => clearTimeout(timer);
-  }, [toastVisible]);
+  const { toastVisible, handleCopy } = useCopyToast();
 
   return (
     <section
