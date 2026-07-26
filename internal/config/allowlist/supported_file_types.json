@@ -71,5 +71,6 @@
   ".dart",
   ".tf",
   ".graphql",
-  ".gql"
+  ".gql",
+  ".jl"
 ]

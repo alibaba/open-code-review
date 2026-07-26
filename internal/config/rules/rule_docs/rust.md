@@ -46,6 +46,14 @@
 - Public structs, enums, traits, and errors should have useful names, visibility, trait derives, and documentation appropriate to the crate boundary
 - Avoid exposing concrete collection or synchronization types in public APIs when a slice, iterator, trait, or narrower abstraction would preserve flexibility
 
+#### Macros and Metaprogramming
+Only flag when the diff actually defines a `macro_rules!` or procedural macro; do not report on ordinary macro invocations.
+- An `$x:expr` fragment interpolated more than once in the expansion, so the caller's expression — and any side effects — runs multiple times; bind it to a `let` once inside the expansion
+- Exported or publicly used macros that reference items without `$crate::`, so name resolution breaks or binds the wrong item when the macro is invoked from another crate
+- Token-tree (`$t:tt`) fragments re-emitted without parentheses, where operator precedence can silently change the intended meaning; this applies only to token-level (`tt`) interpolation, since an `:expr` fragment and a whole expansion are each parsed as one complete expression
+- Procedural macros that `unwrap()`, `expect()`, or `panic!` on malformed input instead of emitting a `syn::Error` / `compile_error!` with a useful span
+- Macro-hygiene assumptions that break: generated identifiers relying on names from the call-site scope, or items that collide when the macro is invoked more than once in the same module
+
 #### Security-Sensitive Code
 - Validate path, URL, command, SQL, and serialized input before use; do not build shell commands or SQL with unchecked string concatenation
 - Do not log secrets, tokens, credentials, private keys, or personally identifiable information

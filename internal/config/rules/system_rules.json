@@ -23,6 +23,7 @@
     "**/*.py": "python.md",
     "**/*.po": "po.md",
     "**/*.pot": "pot.md",
-    "**/*.{graphql,gql}": "graphql.md"
+    "**/*.{graphql,gql}": "graphql.md",
+    "**/*.jl": "julia.md"
   }
 }
