@@ -28,6 +28,14 @@ const NO_LINE_REASON = "No line information provided";
 // incrementalOverlapThreshold option / incremental_overlap_threshold input.
 const DEFAULT_OVERLAP_THRESHOLD = 0.6;
 
+// Default maximum number of inline comments packed into a single createReview
+// call. Production once failed at 71 comments in one request (GitHub Server
+// Error after partial success); 50 stays at GitHub's documented soft guidance
+// for inline comments per review while keeping typical (sub-50) runs on a
+// single batch. Tunable via the reviewCommentBatchSize option /
+// review_comment_batch_size input.
+const DEFAULT_BATCH_SIZE = 50;
+
 async function runPostReviewComments({
   github,
   context,
@@ -38,6 +46,7 @@ async function runPostReviewComments({
   stickySummary = true,
   incremental = false,
   incrementalOverlapThreshold = DEFAULT_OVERLAP_THRESHOLD,
+  reviewCommentBatchSize = DEFAULT_BATCH_SIZE,
 }) {
   const log = (msg) => {
     if (core && typeof core.info === "function") core.info(msg);
@@ -58,11 +67,7 @@ async function runPostReviewComments({
   // HTML comments so the idempotency check can detect whether a batch
   // createReview actually landed on the server before retrying, which prevents
   // duplicate review posts on retry.
-  const runId = Number.isFinite(context.runId) ? context.runId : 0;
-  const runAttempt = Number.isFinite(context.runAttempt) ? context.runAttempt : 1;
-  const RUN_TAG = `${runId}-${runAttempt}`;
-  const REVIEW_TAG = `<!-- ocr-review-run:${RUN_TAG} -->`;
-  const SUMMARY_TAG = `<!-- ocr-summary-run:${RUN_TAG} -->`;
+  const { RUN_TAG, REVIEW_TAG, SUMMARY_TAG } = buildRunTags(context.runId, context.runAttempt);
 
   const stats = {
     total: 0,
@@ -186,10 +191,18 @@ async function runPostReviewComments({
     log,
   });
 
-  // Submit inline comments (the to-send set) as a single PR review.
+  // Submit inline comments (the to-send set) as one or more PR reviews.
   let successCount = 0;
   let failedCount = 0;
   const failedComments = [];
+
+  // Sort before partitioning so identical reruns produce identical batches
+  // (B2/AS4): a partial-success retry reproduces the same partition, which is
+  // what makes per-batch reconciliation against already-posted fence IDs work.
+  const batchSize = resolveBatchSize(reviewCommentBatchSize);
+  const sorted = sortToSendDeterministically(toSend);
+  const batches = chunkArray(sorted, batchSize);
+  const batchCounters = { total: batches.length, attempted: 0, succeeded: 0, reconciled: 0 };
 
   if (toSend.length > 0) {
     // The summary lives in its own issue comment (anchored above), so the
@@ -198,211 +211,24 @@ async function runPostReviewComments({
     // may have landed on the server even though we received a 5xx response).
     const reviewBody = REVIEW_TAG;
 
-    try {
-      const batchRes = await github.rest.pulls.createReview({
+    for (const chunk of batches) {
+      const r = await publishBatch({
+        chunk,
+        github,
         owner,
         repo,
-        pull_number: prNumber,
-        commit_id: commitSha,
-        body: reviewBody,
-        event: "COMMENT",
-        comments: toSend.map(({ reviewComment }) => reviewComment),
+        prNumber,
+        commitSha,
+        reviewBody,
+        REVIEW_TAG,
+        log,
       });
-      successCount = toSend.length;
-      log(`Successfully posted review with ${successCount} inline comment(s) (${commentsWithoutLine.length} in summary).`);
-      logRateLimitQuota(batchRes, "after batch createReview", log);
-    } catch (e) {
-      log(`Failed to post review with inline comments: ${e.message}`);
-
-      // Retry/pacing configuration (shared by write and read API calls).
-      // parseNonNegInt guards against nonsensical env values (negative, NaN,
-      // non-numeric) that `parseInt(...) || default` would let through for
-      // negative numbers, since a negative parseInt result is truthy and would
-      // bypass the `|| default` fallback.
-      const MAX_RETRIES = parseNonNegInt(process.env.OCR_MAX_RETRIES, 3);
-      const SUCCESS_DELAY = parseNonNegInt(process.env.OCR_SUCCESS_DELAY, 2000);
-      const FAILURE_DELAY = parseNonNegInt(process.env.OCR_FAILURE_DELAY, 1000);
-      const LOW_REMAINING_THRESHOLD = parseNonNegInt(process.env.OCR_LOW_REMAINING_THRESHOLD, 3);
-      const LOW_REMAINING_SPACING = parseNonNegInt(process.env.OCR_LOW_REMAINING_SPACING, 10000);
-      // Read APIs are cheaper and have higher thresholds; use shorter pacing.
-      const READ_SUCCESS_DELAY = parseNonNegInt(process.env.OCR_READ_SUCCESS_DELAY, 500);
-      const READ_LOW_REMAINING_SPACING = parseNonNegInt(process.env.OCR_READ_LOW_REMAINING_SPACING, 5000);
-
-      // Rate-limit cooldown: honor the batch error's retry/rate-limit headers
-      // BEFORE any further API call — including the idempotency reads below.
-      // Firing reads immediately after a rate-limit/5xx would further pressure
-      // the already-struggling API; this is the same cool-down-before-read
-      // discipline the per-comment loop applies before isCommentAlreadyPosted.
-      const batchRetry = computeRetryDelayMs(e, 0);
-      if (batchRetry != null) {
-        const secs = (batchRetry.delayMs / 1000).toFixed(1);
-        log(
-          `Batch createReview failed (HTTP ${e.status}). ` +
-            `Cooling down ${secs}s via '${batchRetry.source}' (${batchRetry.detail}) before any retry or read.`
-        );
-        await sleep(batchRetry.delayMs);
-      }
-
-      // The idempotency read ("did the batch land?") is only meaningful when the
-      // request MAY have reached the server: 5xx, 408 timeout, or a network
-      // error with no status. For a pure rate-limit (429 / 403 abuse) or a
-      // validation error (422), the request was rejected before the review was
-      // created, so the batch definitely did not land — querying would be both
-      // pointless AND an extra read fired during a rate-limit episode. Skip it
-      // and retry all comments. This mirrors the per-comment maybeReachedServer
-      // predicate so the two layers stay consistent.
-      const batchStatus = e.status;
-      const batchMaybeReachedServer =
-        (typeof batchStatus === "number" && (batchStatus >= 500 || batchStatus === 408)) ||
-        batchStatus == null; // network errors (ECONNRESET, ETIMEDOUT, ...)
-
-      let existingReview = null;
-      if (batchMaybeReachedServer) {
-        log("Checking whether the batch review actually landed on the server before retrying...");
-        try {
-          existingReview = await findExistingBatchReview({ github, owner, repo, prNumber, tag: REVIEW_TAG, log });
-        } catch (checkErr) {
-          log(`Idempotency check failed (${checkErr.message}). Degrading to original fallback (accepting duplicate risk).`);
-        }
-      } else {
-        log(`Batch did not reach the server (HTTP ${batchStatus || "n/a"}); skipping idempotency check and retrying all comments.`);
-      }
-
-      // Compute the list of inline comments that still need to be posted. If
-      // the batch review landed, only retry the missing ones; otherwise retry
-      // all of them.
-      let toRetry = toSend;
-      if (existingReview && existingReview.found) {
-        const postedIds = await getPostedCommentIds({ github, owner, repo, prNumber, log });
-        toRetry = toSend.filter((item) => !postedIds.has(item.id));
-        successCount = toSend.length - toRetry.length;
-        log(
-          `Batch review already exists (review_id=${existingReview.review.id}). ` +
-            `${successCount}/${toSend.length} inline comments already posted. ` +
-            `${toRetry.length} missing, will retry only those.`
-        );
-      } else {
-        log("Batch review not found on server. Falling back to per-comment posting...");
-      }
-
-      for (const { comment, reviewComment, id } of toRetry) {
-        let posted = false;
-        for (let attempt = 0; attempt <= MAX_RETRIES && !posted; attempt++) {
-          try {
-            const res = await github.rest.pulls.createReview({
-              owner,
-              repo,
-              pull_number: prNumber,
-              commit_id: commitSha,
-              body: "",
-              event: "COMMENT",
-              comments: [reviewComment],
-            });
-            successCount++;
-            posted = true;
-            log(`Successfully posted comment for ${reviewComment.path}`);
-            // Proactive throttle: if remaining quota is low, slow down to
-            // avoid hitting the limit (GitHub best practice: watch the header).
-            const remaining = logRateLimitQuota(res, `after ${reviewComment.path}`, log);
-            const lowQuota = remaining != null && remaining <= LOW_REMAINING_THRESHOLD;
-            if (lowQuota) {
-              log(`[rate-limit] quota low (remaining=${remaining} <= ${LOW_REMAINING_THRESHOLD}); increasing spacing to ${LOW_REMAINING_SPACING}ms.`);
-              await sleep(LOW_REMAINING_SPACING);
-            } else {
-              await sleep(SUCCESS_DELAY);
-            }
-          } catch (innerE) {
-            // Decide whether to retry and how long to wait, based on GitHub's
-            // rate-limit documentation (retry-after / x-ratelimit-* headers).
-            const retryInfo = computeRetryDelayMs(innerE, attempt);
-            const willRetry = retryInfo != null && attempt < MAX_RETRIES;
-            // Any error whose request may have reached GitHub (5xx server
-            // errors, 408 timeout, or network-layer errors with no status) can
-            // mean the comment was actually created but the response was lost.
-            // Before retrying (which would post a duplicate) or before giving
-            // up (which would wrongly list it as failed in the summary), check
-            // whether it already landed.
-            //
-            // IMPORTANT: do the check AFTER cooling down, not immediately. If
-            // the error is rate-limit-related (5xx under load, or a network
-            // blip), firing read requests right away further pressures the
-            // already-struggling API. Honor the computed retry delay first,
-            // then query.
-            const status = innerE.status;
-            const maybeReachedServer =
-              (typeof status === "number" && (status >= 500 || status === 408)) ||
-              status == null; // network errors (ECONNRESET, ETIMEDOUT, ...)
-            if (maybeReachedServer) {
-              // Cool down first: even read requests count against rate limits,
-              // and querying during an ongoing 5xx/rate-limit episode can
-              // worsen the situation. Use the retry delay when available; for
-              // non-retryable errors (retryInfo == null) there is no
-              // header-derived wait, so use a short fixed cool down before the
-              // read.
-              const coolDownMs = retryInfo != null ? retryInfo.delayMs : FAILURE_DELAY;
-              if (coolDownMs > 0) {
-                const secs = (coolDownMs / 1000).toFixed(1);
-                log(
-                  `Cooling down ${secs}s before idempotency check for ${reviewComment.path} ` +
-                    `(HTTP ${innerE.status || "n/a"}, attempt ${attempt + 1}/${MAX_RETRIES + 1}).`
-                );
-                await sleep(coolDownMs);
-              }
-              const alreadyPosted = await isCommentAlreadyPosted({ github, owner, repo, prNumber, id, log });
-              if (alreadyPosted === true) {
-                successCount++;
-                posted = true;
-                log(`Comment for ${reviewComment.path} already posted (id=${id}); treating as success.`);
-                await sleep(SUCCESS_DELAY);
-                continue;
-              }
-              // Unknown (null): the read API is unavailable, so we cannot tell
-              // whether the comment landed. To avoid a duplicate, do NOT retry
-              // posting; record as failed so the summary surfaces the
-              // uncertainty rather than silently risking a duplicate.
-              if (alreadyPosted === null) {
-                failedCount++;
-                const reason = "idempotency check unavailable (read API failed)";
-                failedComments.push({ comment, error: `${innerE.message} [${reason}]` });
-                log(`Cannot verify whether comment for ${reviewComment.path} was posted (${reason}, HTTP ${innerE.status || "n/a"}); skipping retry to avoid duplicate.`);
-                await sleep(SUCCESS_DELAY);
-                break;
-              }
-              // Not found on server. If retries are exhausted or the error is
-              // non-retryable, this is a real failure.
-              if (!willRetry) {
-                failedCount++;
-                failedComments.push({ comment, error: innerE.message });
-                const reason = retryInfo == null ? "non-retryable error" : "rate-limit retries exhausted";
-                log(`Failed to post comment for ${reviewComment.path} (${reason}, HTTP ${innerE.status || "n/a"}): ${innerE.message}`);
-                await sleep(SUCCESS_DELAY);
-                break;
-              }
-              // willRetry: cool down already consumed above, loop back.
-            } else if (willRetry) {
-              // Pure 429/403 rate-limit: the request never reached the server,
-              // so no duplicate is possible and the idempotency check can be
-              // skipped. Just honor the retry delay.
-              const secs = (retryInfo.delayMs / 1000).toFixed(1);
-              log(
-                `Rate-limited on ${reviewComment.path} ` +
-                  `(HTTP ${innerE.status}, attempt ${attempt + 1}/${MAX_RETRIES}). ` +
-                  `Waiting ${secs}s via '${retryInfo.source}' (${retryInfo.detail}). ` +
-                  `Error: ${innerE.message}`
-              );
-              await sleep(retryInfo.delayMs);
-            } else {
-              // Non-retryable error that definitely did not reach the server
-              // (e.g. 4xx validation error): record as failed.
-              failedCount++;
-              failedComments.push({ comment, error: innerE.message });
-              log(`Failed to post comment for ${reviewComment.path} (non-retryable error, HTTP ${innerE.status || "n/a"}): ${innerE.message}`);
-              await sleep(FAILURE_DELAY);
-              break;
-            }
-          }
-        }
-      }
+      successCount += r.succeeded;
+      failedCount += r.failed;
+      for (const fc of r.failedComments) failedComments.push(fc);
+      batchCounters.attempted++;
+      if (r.reconciled) batchCounters.reconciled++;
+      if (r.succeeded > 0) batchCounters.succeeded++;
     }
   } else {
     log("No inline comments to post after filtering (all overlapping or none had line info).");
@@ -455,15 +281,351 @@ async function runPostReviewComments({
   });
   if (finalized) stats.summaryUrl = finalized.url;
 
-  setStatsOutputs(out, stats);
+  setStatsOutputs(out, stats, batchCounters, batchSize);
 }
 
-function setStatsOutputs(out, stats) {
+// Publish a single bounded batch of inline comments via one createReview call,
+// then reconcile + per-comment-retry on failure. This is the per-batch body of
+// the previous all-in-one publish block, factored out so it can run once per
+// chunk. The reconciliation/idempotency logic is unchanged: the only behavioral
+// difference is that it operates on `chunk` (a slice of the sorted toSend) and
+// returns its counts/failed-list so the caller can accumulate them across
+// batches (B3/B4/B5/B6).
+//
+// Returns { succeeded, failed, failedComments, reconciled }.
+//   - succeeded: comments in this batch that ended up on the server (posted by
+//     the batch call, or reconciled-already-posted, or per-comment retry).
+//   - failed: comments that could not be posted AND could not be reconciled.
+//   - reconciled: true if the batch call failed and at least one of this
+//     batch's comments was proven already-posted (idempotency read succeeded).
+async function publishBatch({
+  chunk,
+  github,
+  owner,
+  repo,
+  prNumber,
+  commitSha,
+  reviewBody,
+  REVIEW_TAG,
+  log,
+}) {
+  let succeeded = 0;
+  let failed = 0;
+  const failedComments = [];
+  let reconciled = false;
+
+  try {
+    const batchRes = await github.rest.pulls.createReview({
+      owner,
+      repo,
+      pull_number: prNumber,
+      commit_id: commitSha,
+      body: reviewBody,
+      event: "COMMENT",
+      comments: chunk.map(({ reviewComment }) => reviewComment),
+    });
+    succeeded = chunk.length;
+    log(`Successfully posted review batch with ${succeeded} inline comment(s).`);
+    logRateLimitQuota(batchRes, "after batch createReview", log);
+  } catch (e) {
+    log(`Failed to post review batch with ${chunk.length} inline comment(s): ${e.message}`);
+
+    // Retry/pacing configuration (shared by write and read API calls).
+    // parseNonNegInt guards against nonsensical env values (negative, NaN,
+    // non-numeric) that `parseInt(...) || default` would let through for
+    // negative numbers, since a negative parseInt result is truthy and would
+    // bypass the `|| default` fallback. These are re-read here (not threaded
+    // through a config bag) to keep this helper a behavior-preserving move of
+    // the existing catch block — scoping config to only the batch size would
+    // silently drop per-comment pacing.
+    const MAX_RETRIES = parseNonNegInt(process.env.OCR_MAX_RETRIES, 3);
+    const SUCCESS_DELAY = parseNonNegInt(process.env.OCR_SUCCESS_DELAY, 2000);
+    const FAILURE_DELAY = parseNonNegInt(process.env.OCR_FAILURE_DELAY, 1000);
+    const LOW_REMAINING_THRESHOLD = parseNonNegInt(process.env.OCR_LOW_REMAINING_THRESHOLD, 3);
+    const LOW_REMAINING_SPACING = parseNonNegInt(process.env.OCR_LOW_REMAINING_SPACING, 10000);
+    // Read APIs are cheaper and have higher thresholds; use shorter pacing.
+    const READ_SUCCESS_DELAY = parseNonNegInt(process.env.OCR_READ_SUCCESS_DELAY, 500);
+    const READ_LOW_REMAINING_SPACING = parseNonNegInt(process.env.OCR_READ_LOW_REMAINING_SPACING, 5000);
+
+    // Rate-limit cooldown: honor the batch error's retry/rate-limit headers
+    // BEFORE any further API call — including the idempotency reads below.
+    // Firing reads immediately after a rate-limit/5xx would further pressure
+    // the already-struggling API; this is the same cool-down-before-read
+    // discipline the per-comment loop applies before isCommentAlreadyPosted.
+    const batchRetry = computeRetryDelayMs(e, 0);
+    if (batchRetry != null) {
+      const secs = (batchRetry.delayMs / 1000).toFixed(1);
+      log(
+        `Batch createReview failed (HTTP ${e.status}). ` +
+          `Cooling down ${secs}s via '${batchRetry.source}' (${batchRetry.detail}) before any retry or read.`
+      );
+      await sleep(batchRetry.delayMs);
+    }
+
+    // The idempotency read ("did the batch land?") is only meaningful when the
+    // request MAY have reached the server: 5xx, 408 timeout, or a network
+    // error with no status. For a pure rate-limit (429 / 403 abuse) or a
+    // validation error (422), the request was rejected before the review was
+    // created, so the batch definitely did not land — querying would be both
+    // pointless AND an extra read fired during a rate-limit episode. Skip it
+    // and retry all comments. This mirrors the per-comment maybeReachedServer
+    // predicate so the two layers stay consistent.
+    const batchStatus = e.status;
+    const batchMaybeReachedServer =
+      (typeof batchStatus === "number" && (batchStatus >= 500 || batchStatus === 408)) ||
+      batchStatus == null; // network errors (ECONNRESET, ETIMEDOUT, ...)
+
+    let existingReview = null;
+    if (batchMaybeReachedServer) {
+      log("Checking whether the batch review actually landed on the server before retrying...");
+      try {
+        existingReview = await findExistingBatchReview({ github, owner, repo, prNumber, tag: REVIEW_TAG, log });
+      } catch (checkErr) {
+        log(`Idempotency check failed (${checkErr.message}). Degrading to original fallback (accepting duplicate risk).`);
+      }
+    } else {
+      log(`Batch did not reach the server (HTTP ${batchStatus || "n/a"}); skipping idempotency check and retrying all comments.`);
+    }
+
+    // Compute the list of inline comments that still need to be posted. If the
+    // batch review landed, only retry the missing ones; otherwise retry all of
+    // them. NOTE: REVIEW_TAG is shared across all batches, so
+    // findExistingBatchReview may match an EARLIER batch's review — harmless
+    // for correctness because getPostedCommentIds returns a server-global set
+    // of every fence ID across ALL reviews, and we filter this chunk's items
+    // against that global set (never the set against the chunk). The counts
+    // below therefore reflect only THIS chunk's members.
+    let toRetry = chunk;
+    if (existingReview && existingReview.found) {
+      const postedIds = await getPostedCommentIds({ github, owner, repo, prNumber, log });
+      toRetry = chunk.filter((item) => !postedIds.has(item.id));
+      succeeded = chunk.length - toRetry.length;
+      reconciled = succeeded > 0;
+      log(
+        `A batch review already exists on the server (review_id=${existingReview.review.id}). ` +
+          `${succeeded}/${chunk.length} of this batch's inline comments already posted. ` +
+          `${toRetry.length} missing, will retry only those.`
+      );
+    } else {
+      log("Batch review not found on server. Falling back to per-comment posting...");
+    }
+
+    for (const { comment, reviewComment, id } of toRetry) {
+      let posted = false;
+      for (let attempt = 0; attempt <= MAX_RETRIES && !posted; attempt++) {
+        try {
+          const res = await github.rest.pulls.createReview({
+            owner,
+            repo,
+            pull_number: prNumber,
+            commit_id: commitSha,
+            body: "",
+            event: "COMMENT",
+            comments: [reviewComment],
+          });
+          succeeded++;
+          posted = true;
+          log(`Successfully posted comment for ${reviewComment.path}`);
+          // Proactive throttle: if remaining quota is low, slow down to
+          // avoid hitting the limit (GitHub best practice: watch the header).
+          const remaining = logRateLimitQuota(res, `after ${reviewComment.path}`, log);
+          const lowQuota = remaining != null && remaining <= LOW_REMAINING_THRESHOLD;
+          if (lowQuota) {
+            log(`[rate-limit] quota low (remaining=${remaining} <= ${LOW_REMAINING_THRESHOLD}); increasing spacing to ${LOW_REMAINING_SPACING}ms.`);
+            await sleep(LOW_REMAINING_SPACING);
+          } else {
+            await sleep(SUCCESS_DELAY);
+          }
+        } catch (innerE) {
+          // Decide whether to retry and how long to wait, based on GitHub's
+          // rate-limit documentation (retry-after / x-ratelimit-* headers).
+          const retryInfo = computeRetryDelayMs(innerE, attempt);
+          const willRetry = retryInfo != null && attempt < MAX_RETRIES;
+          // Any error whose request may have reached GitHub (5xx server
+          // errors, 408 timeout, or network-layer errors with no status) can
+          // mean the comment was actually created but the response was lost.
+          // Before retrying (which would post a duplicate) or before giving
+          // up (which would wrongly list it as failed in the summary), check
+          // whether it already landed.
+          //
+          // IMPORTANT: do the check AFTER cooling down, not immediately. If
+          // the error is rate-limit-related (5xx under load, or a network
+          // blip), firing read requests right away further pressures the
+          // already-struggling API. Honor the computed retry delay first,
+          // then query.
+          const status = innerE.status;
+          const maybeReachedServer =
+            (typeof status === "number" && (status >= 500 || status === 408)) ||
+            status == null; // network errors (ECONNRESET, ETIMEDOUT, ...)
+          if (maybeReachedServer) {
+            // Cool down first: even read requests count against rate limits,
+            // and querying during an ongoing 5xx/rate-limit episode can
+            // worsen the situation. Use the retry delay when available; for
+            // non-retryable errors (retryInfo == null) there is no
+            // header-derived wait, so use a short fixed cool down before the
+            // read.
+            const coolDownMs = retryInfo != null ? retryInfo.delayMs : FAILURE_DELAY;
+            if (coolDownMs > 0) {
+              const secs = (coolDownMs / 1000).toFixed(1);
+              log(
+                `Cooling down ${secs}s before idempotency check for ${reviewComment.path} ` +
+                  `(HTTP ${innerE.status || "n/a"}, attempt ${attempt + 1}/${MAX_RETRIES + 1}).`
+              );
+              await sleep(coolDownMs);
+            }
+            const alreadyPosted = await isCommentAlreadyPosted({ github, owner, repo, prNumber, id, log });
+            if (alreadyPosted === true) {
+              succeeded++;
+              posted = true;
+              log(`Comment for ${reviewComment.path} already posted (id=${id}); treating as success.`);
+              await sleep(SUCCESS_DELAY);
+              continue;
+            }
+            // Unknown (null): the read API is unavailable, so we cannot tell
+            // whether the comment landed. To avoid a duplicate, do NOT retry
+            // posting; record as failed so the summary surfaces the
+            // uncertainty rather than silently risking a duplicate.
+            if (alreadyPosted === null) {
+              failed++;
+              const reason = "idempotency check unavailable (read API failed)";
+              failedComments.push({ comment, error: `${innerE.message} [${reason}]` });
+              log(`Cannot verify whether comment for ${reviewComment.path} was posted (${reason}, HTTP ${innerE.status || "n/a"}); skipping retry to avoid duplicate.`);
+              await sleep(SUCCESS_DELAY);
+              break;
+            }
+            // Not found on server. If retries are exhausted or the error is
+            // non-retryable, this is a real failure.
+            if (!willRetry) {
+              failed++;
+              failedComments.push({ comment, error: innerE.message });
+              const reason = retryInfo == null ? "non-retryable error" : "rate-limit retries exhausted";
+              log(`Failed to post comment for ${reviewComment.path} (${reason}, HTTP ${innerE.status || "n/a"}): ${innerE.message}`);
+              await sleep(SUCCESS_DELAY);
+              break;
+            }
+            // willRetry: cool down already consumed above, loop back.
+          } else if (willRetry) {
+            // Pure 429/403 rate-limit: the request never reached the server,
+            // so no duplicate is possible and the idempotency check can be
+            // skipped. Just honor the retry delay.
+            const secs = (retryInfo.delayMs / 1000).toFixed(1);
+            log(
+              `Rate-limited on ${reviewComment.path} ` +
+                `(HTTP ${innerE.status}, attempt ${attempt + 1}/${MAX_RETRIES}). ` +
+                `Waiting ${secs}s via '${retryInfo.source}' (${retryInfo.detail}). ` +
+                `Error: ${innerE.message}`
+            );
+            await sleep(retryInfo.delayMs);
+          } else {
+            // Non-retryable error that definitely did not reach the server
+            // (e.g. 4xx validation error): record as failed.
+            failed++;
+            failedComments.push({ comment, error: innerE.message });
+            log(`Failed to post comment for ${reviewComment.path} (non-retryable error, HTTP ${innerE.status || "n/a"}): ${innerE.message}`);
+            await sleep(FAILURE_DELAY);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return { succeeded, failed, failedComments, reconciled };
+}
+
+// Build the per-run idempotency tags from the GitHub Actions run identity.
+// runId / runAttempt come from @actions/github's Context (GITHUB_RUN_ID /
+// GITHUB_RUN_ATTEMPT); Number.isFinite guards against NaN when the env vars are
+// missing, falling back to safe defaults. REVIEW_TAG is the body marker the
+// batch createReview carries so findExistingBatchReview can locate a batch that
+// landed despite a 5xx; SUMMARY_TAG is the analogous marker for the summary
+// issue comment. Pure so it can be tested and reused.
+function buildRunTags(runId, runAttempt) {
+  const id = Number.isFinite(runId) ? runId : 0;
+  const attempt = Number.isFinite(runAttempt) ? runAttempt : 1;
+  const RUN_TAG = `${id}-${attempt}`;
+  return {
+    RUN_TAG,
+    REVIEW_TAG: `<!-- ocr-review-run:${RUN_TAG} -->`,
+    SUMMARY_TAG: `<!-- ocr-summary-run:${RUN_TAG} -->`,
+  };
+}
+
+// Resolve the configured batch size. A batch size is a positive integer (N>=1):
+// 0, negatives, NaN, and non-numeric strings all fall back to the default.
+// Mirrors the parseNonNegInt discipline but with a lower bound of 1, since a
+// zero-size batch would be nonsensical (B1).
+function resolveBatchSize(raw) {
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 1 ? n : DEFAULT_BATCH_SIZE;
+}
+
+// Deterministically order the toSend set before partitioning so identical
+// inputs produce identical batches across reruns (B2/AS4). Returns a NEW array
+// (does not mutate the caller's array). Sort key: path → start_line → end_line
+// → original array index. The explicit original-index tiebreak guarantees
+// stable ordering even for same-file same-line findings, on engines where
+// Array.prototype.sort stability would otherwise be incidental. Severity/
+// category ordering is intentionally absent — comment objects carry no such
+// fields (verified at the call site), and adding them is a cross-cutting schema
+// change explicitly out of scope (sibling issue #478).
+function sortToSendDeterministically(items) {
+  return items
+    .map((item, origIndex) => ({ item, origIndex }))
+    .sort((a, b) => {
+      const ca = a.item.comment;
+      const cb = b.item.comment;
+      const byPath = String(ca.path).localeCompare(String(cb.path));
+      if (byPath !== 0) return byPath;
+      const byStart = (ca.start_line || 0) - (cb.start_line || 0);
+      if (byStart !== 0) return byStart;
+      const byEnd = (ca.end_line || 0) - (cb.end_line || 0);
+      if (byEnd !== 0) return byEnd;
+      return a.origIndex - b.origIndex;
+    })
+    .map(({ item }) => item);
+}
+
+// Partition a sorted array into contiguous slices of at most `size` items
+// (B1/AS2/AS3). Contiguity + sorted input ⇒ deterministic partition: the last
+// slice is the remainder (length === size when items.length is a multiple of
+// size, otherwise items.length mod size).
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function setStatsOutputs(out, stats, batchCounters, batchSize) {
   out("comments_total", String(stats.total));
   out("comments_inline", String(stats.inline));
   out("comments_skipped", String(stats.skipped));
   out("comments_failed", String(stats.failed));
   out("summary_comment_url", stats.summaryUrl || "");
+  // Per-batch telemetry (B7). These are additional outputs; the five above are
+  // unchanged so existing consumers of comments_* / summary_comment_url are
+  // unaffected. batch_summary is a single JSON string so a fleet dashboard can
+  // read one value instead of correlating multiple scalars.
+  if (batchCounters) {
+    out("batches_total", String(batchCounters.total));
+    out("batches_attempted", String(batchCounters.attempted));
+    out("batches_succeeded", String(batchCounters.succeeded));
+    out("batches_reconciled", String(batchCounters.reconciled));
+    out(
+      "batch_summary",
+      JSON.stringify({
+        total: batchCounters.total,
+        attempted: batchCounters.attempted,
+        succeeded: batchCounters.succeeded,
+        reconciled: batchCounters.reconciled,
+        batch_size: batchSize != null ? batchSize : DEFAULT_BATCH_SIZE,
+        inline: stats.inline,
+        failed: stats.failed,
+      })
+    );
+  }
 }
 
 // ---- Summary posting (sticky vs new) ----
@@ -1200,4 +1362,10 @@ module.exports = {
   safeFence,
   SUMMARY_MARKER,
   NO_LINE_REASON,
+  resolveBatchSize,
+  sortToSendDeterministically,
+  chunkArray,
+  setStatsOutputs,
+  DEFAULT_BATCH_SIZE,
+  buildRunTags,
 };

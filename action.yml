@@ -87,6 +87,15 @@ inputs:
       Value in (0, 1]; ignored unless incremental is true.
     required: false
     default: '0.6'
+  review_comment_batch_size:
+    description: >-
+      Maximum number of inline comments packed into a single createReview call.
+      Large reviews are split into sequential batches of at most this size so a
+      single request never exceeds GitHub's practical limits (a prior run failed
+      after posting 71 inline comments in one request). Integer >= 1; values
+      below 1 or non-numeric fall back to the default (50).
+    required: false
+    default: '50'
   base_ref:
     description: >-
       Override the base ref. Provide this (and head_sha) when invoking from a
@@ -275,6 +284,7 @@ runs:
       uses: actions/github-script@v7
       env:
         OCR_INCREMENTAL_OVERLAP_THRESHOLD: ${{ inputs.incremental_overlap_threshold }}
+        OCR_REVIEW_COMMENT_BATCH_SIZE: ${{ inputs.review_comment_batch_size }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |
@@ -302,4 +312,5 @@ runs:
             stickySummary: ${{ inputs.sticky_summary == 'true' }},
             incremental: ${{ inputs.incremental == 'true' }},
             incrementalOverlapThreshold: parseFloat(process.env.OCR_INCREMENTAL_OVERLAP_THRESHOLD),
+            reviewCommentBatchSize: parseInt(process.env.OCR_REVIEW_COMMENT_BATCH_SIZE, 10),
           });

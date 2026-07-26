@@ -12,7 +12,16 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE } = require(path.join(__dirname, "post-review-comments.js"));
+
+// REVIEW_TAG as the production code builds it for this test's hardcoded run
+// identity (context.runId=undefined -> 0, runAttempt=undefined -> 1). Used as
+// the primary discriminator between batch createReview calls (body ===
+// REVIEW_TAG) and per-comment fallback calls (body === ""). Reconstructed via
+// the exported buildRunTags rather than hardcoded so it tracks any future tag
+// format change. `length > 1` is NOT a safe discriminator once N=1 batches
+// exist (a single-comment batch collides with the per-comment shape).
+const REVIEW_TAG = buildRunTags(undefined, undefined).REVIEW_TAG;
 
 // Make all retry/pacing delays effectively zero so tests run fast.
 // computeRetryDelayMs reads OCR_RETRY_MAX_DELAY / OCR_RETRY_BASE_DELAY via
@@ -100,15 +109,17 @@ function makeGithub(opts = {}) {
     return opts.successRemaining != null ? String(opts.successRemaining) : "5000";
   }
 
-  // Inline comment objects recorded in the BATCH createReview call (index 0)
-  // only, so tests can simulate "this comment already landed on the server"
-  // without predicting the random IDs from newCommentId(). Scoped to the batch
-  // call so batch-level landing (echoPosted) stays disjoint from per-comment
-  // landing (landedKeys, which reads per-comment calls at index >= 1).
+  // Inline comment objects recorded in BATCH createReview calls only, so tests
+  // can simulate "this comment already landed on the server" without predicting
+  // the random IDs from newCommentId(). Under multi-batch (N < toSend.length)
+  // there are several batch calls (body === REVIEW_TAG), so this scans ALL batch
+  // calls — not just createReviewCalls[0]. Scoped to batch calls so batch-level
+  // landing (echoPosted) stays disjoint from per-comment landing (landedKeys,
+  // which reads per-comment calls with body === "").
   function batchPostedComments() {
     const out = [];
-    const call = createReviewCalls[0];
-    if (call) {
+    for (const call of createReviewCalls) {
+      if ((call.body || "") !== REVIEW_TAG) continue;
       for (const c of call.comments || []) {
         const m = /<!--\s*(ocr-\d+-\d+-[a-f0-9]+)\s*-->/.exec(c.body || "");
         if (m) {
@@ -123,6 +134,16 @@ function makeGithub(opts = {}) {
       }
     }
     return out;
+  }
+
+  // Count of batch createReview calls issued so far (body === REVIEW_TAG), so a
+  // per-batch-index error spec can target e.g. "fail batch #2 but not #1".
+  function batchCallCount() {
+    let n = 0;
+    for (const call of createReviewCalls) {
+      if ((call.body || "") === REVIEW_TAG) n++;
+    }
+    return n;
   }
 
   return {
@@ -144,9 +165,25 @@ function makeGithub(opts = {}) {
           ops.push({ type: "createReview", params });
           const callIdx = createReviewCalls.length - 1;
           const successRes = () => ({ data: {}, headers: { "x-ratelimit-remaining": successRemaining() } });
-          if (callIdx === 0) {
-            // Batch call. bulkErrorSpec (rich: with headers) takes precedence
-            // over the legacy bulkError/bulkErrorStatus pair.
+          // Discriminate batch vs per-comment by body, NOT callIdx. Under
+          // multi-batch (N < toSend.length) several batch calls precede the
+          // per-comment fallbacks, so callIdx === 0 is unsound. Batch calls
+          // carry body === REVIEW_TAG; per-comment fallback calls use body === "".
+          // (comments.length > 1 is NOT a safe discriminator once N=1 batches
+          // exist — a single-comment batch collides with per-comment shape.)
+          const isBatch = (params.body || "") === REVIEW_TAG;
+          if (isBatch) {
+            const batchIdx = batchCallCount() - 1;
+            // Per-batch error spec takes precedence (lets a test fail batch #2
+            // but not #1); then the legacy bulkError/bulkErrorSpec apply to all
+            // batches uniformly.
+            if (typeof opts.batchErrorSpec === "function") {
+              const spec = opts.batchErrorSpec(batchIdx);
+              if (spec) throw makeErr(spec.message, spec.status, spec.headers);
+            } else if (Array.isArray(opts.batchErrorSpec)) {
+              const spec = opts.batchErrorSpec[batchIdx];
+              if (spec) throw makeErr(spec.message, spec.status, spec.headers);
+            }
             if (opts.bulkErrorSpec) {
               throw makeErr(opts.bulkErrorSpec.message, opts.bulkErrorSpec.status, opts.bulkErrorSpec.headers);
             }
@@ -155,10 +192,10 @@ function makeGithub(opts = {}) {
             }
             return successRes();
           }
-          // Per-comment call (index >= 1). perCommentError(rc, attempt) lets a
-          // test fail some comments and not others (partial failure), and be
-          // attempt-aware (retry-then-succeed). Falls back to the legacy
-          // individualError (applies to all per-comment calls) for older tests.
+          // Per-comment call. perCommentError(rc, attempt) lets a test fail some
+          // comments and not others (partial failure), and be attempt-aware
+          // (retry-then-succeed). Falls back to the legacy individualError
+          // (applies to all per-comment calls) for older tests.
           if (typeof opts.perCommentError === "function") {
             const rc = params.comments && params.comments[0];
             const key = commentKey(rc);
@@ -1288,6 +1325,282 @@ function testOverlapsHistory() {
   assert.strictEqual(overlapsHistory({ path: "a.js", line: 11, start_line: 9, side: "RIGHT" }, ml, "garbage"), false);
 }
 
+// ---- Batching tests (issue #479) ----
+
+// Build N synthetic inline-commentable comments with deterministic, distinct
+// (path, line) identities so partitioning/sorting is observable. Line numbers
+// increase with the index so the deterministic sort (path → start_line →
+// end_line → origIndex) reproduces the input order for same-path entries.
+function makeComments(n) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push({ path: `src/file${i}.js`, content: `comment ${i}`, start_line: i + 1, end_line: i + 1 });
+  }
+  return out;
+}
+
+// Pure-helper: resolveBatchSize clamps invalid/missing values to the default
+// and passes valid positives through (B1/A2).
+function testResolveBatchSize() {
+  assert.strictEqual(resolveBatchSize(1), 1, "minimum valid size");
+  assert.strictEqual(resolveBatchSize(50), 50);
+  assert.strictEqual(resolveBatchSize(1000), 1000);
+  // Invalid: 0, negative, NaN, non-numeric, missing -> default.
+  assert.strictEqual(resolveBatchSize(0), DEFAULT_BATCH_SIZE);
+  assert.strictEqual(resolveBatchSize(-5), DEFAULT_BATCH_SIZE);
+  assert.strictEqual(resolveBatchSize(NaN), DEFAULT_BATCH_SIZE);
+  assert.strictEqual(resolveBatchSize("garbage"), DEFAULT_BATCH_SIZE);
+  assert.strictEqual(resolveBatchSize(""), DEFAULT_BATCH_SIZE);
+  assert.strictEqual(resolveBatchSize(undefined), DEFAULT_BATCH_SIZE);
+  assert.strictEqual(resolveBatchSize(null), DEFAULT_BATCH_SIZE);
+  // Numeric strings parse (mirrors parseInt of the action input).
+  assert.strictEqual(resolveBatchSize("20"), 20);
+}
+
+// Pure-helper: chunkArray partitions into contiguous slices; the last slice is
+// the remainder (B1/AS2/AS3).
+function testChunkArray() {
+  assert.deepStrictEqual(chunkArray([], 5), []);
+  assert.deepStrictEqual(chunkArray([1], 5), [[1]]);
+  // Exact multiple: last slice is full-sized.
+  assert.deepStrictEqual(chunkArray([1, 2, 3, 4], 2), [[1, 2], [3, 4]]);
+  // Remainder: last slice is the leftover.
+  assert.deepStrictEqual(chunkArray([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
+  // 71 @ 20 -> [20,20,20,11] (the canonical acceptance scenario AS3).
+  const chunks = chunkArray(makeComments(71).map((_, i) => i), 20);
+  assert.deepStrictEqual(chunks.map((c) => c.length), [20, 20, 20, 11]);
+}
+
+// Pure-helper: sortToSendDeterministically is stable and does not mutate the
+// input (B2/AS4).
+function testSortToSendDeterministically() {
+  const items = [
+    { comment: { path: "b.js", start_line: 5, end_line: 5 } },
+    { comment: { path: "a.js", start_line: 10, end_line: 10 } },
+    { comment: { path: "a.js", start_line: 3, end_line: 3 } },
+    { comment: { path: "a.js", start_line: 3, end_line: 7 } },
+  ];
+  const snapshot = items.map((i) => i.comment);
+  const sorted = sortToSendDeterministically(items);
+  // Input not mutated.
+  assert.deepStrictEqual(items.map((i) => i.comment), snapshot, "input array not mutated");
+  // Order: a.js:3-3, a.js:3-7, a.js:10-10, b.js:5-5.
+  assert.strictEqual(sorted[0].comment.path, "a.js");
+  assert.strictEqual(sorted[0].comment.start_line, 3);
+  assert.strictEqual(sorted[0].comment.end_line, 3);
+  assert.strictEqual(sorted[1].comment.start_line, 3);
+  assert.strictEqual(sorted[1].comment.end_line, 7);
+  assert.strictEqual(sorted[2].comment.start_line, 10);
+  assert.strictEqual(sorted[3].comment.path, "b.js");
+  // Determinism: identical input -> identical output across runs.
+  const sorted2 = sortToSendDeterministically(items);
+  assert.strictEqual(JSON.stringify(sorted2), JSON.stringify(sorted), "deterministic across runs");
+}
+
+// AS1/AS2/AS3/AS4: 71 comments @ N=20 -> exactly 4 batch createReview calls
+// with comment counts [20,20,20,11]; all comment bodies present; deterministic
+// across two runs.
+async function testBatchPartitioningDeterministic() {
+  const result = { comments: makeComments(71), warnings: [] };
+  const run1 = await run({ result, opts: { reviewCommentBatchSize: 20 } });
+  const batchCalls = run1.github.createReviewCalls.filter((c) => (c.body || "") === REVIEW_TAG);
+  assert.strictEqual(batchCalls.length, 4, "ceil(71/20) = 4 batches");
+  assert.deepStrictEqual(
+    batchCalls.map((c) => c.comments.length),
+    [20, 20, 20, 11],
+    "partition sizes [20,20,20,11]"
+  );
+  // Every comment body (with its fence) appears exactly once across batches.
+  const allBodies = batchCalls.flatMap((c) => c.comments.map((rc) => rc.body));
+  assert.strictEqual(allBodies.length, 71, "all 71 comments present");
+  // AS4: a second run produces byte-identical batch composition (the random
+  // fence IDs differ, but the partition — which path/line ends up in which
+  // batch — is identical).
+  const run2 = await run({ result, opts: { reviewCommentBatchSize: 20 } });
+  const batchCalls2 = run2.github.createReviewCalls.filter((c) => (c.body || "") === REVIEW_TAG);
+  const paths1 = batchCalls.flatMap((c) => c.comments.map((rc) => rc.path));
+  const paths2 = batchCalls2.flatMap((c) => c.comments.map((rc) => rc.path));
+  assert.deepStrictEqual(paths2, paths1, "deterministic partition across runs");
+  // Telemetry reflects the partition.
+  assert.strictEqual(run1.outputs.batches_total, "4");
+  assert.strictEqual(run1.outputs.batches_attempted, "4");
+  assert.strictEqual(run1.outputs.batches_succeeded, "4");
+  assert.strictEqual(run1.outputs.comments_inline, "71");
+}
+
+// AS2 edge: N=1 -> one createReview call per comment, each carrying exactly 1.
+async function testBatchSizeOnePerComment() {
+  const result = { comments: makeComments(3), warnings: [] };
+  const { github, outputs } = await run({ result, opts: { reviewCommentBatchSize: 1 } });
+  const batchCalls = github.createReviewCalls.filter((c) => (c.body || "") === REVIEW_TAG);
+  assert.strictEqual(batchCalls.length, 3, "N=1 -> 3 single-comment batches");
+  for (const c of batchCalls) {
+    assert.strictEqual(c.comments.length, 1, "each batch carries exactly one comment");
+  }
+  assert.strictEqual(outputs.batches_total, "3");
+  assert.strictEqual(outputs.comments_inline, "3");
+}
+
+// AS2 edge: N >= toSend.length -> a single batch (no regression vs the previous
+// all-in-one behavior).
+async function testBatchSizeLargerThanToSend() {
+  const result = { comments: makeComments(3), warnings: [] };
+  const { github, outputs } = await run({ result, opts: { reviewCommentBatchSize: 100 } });
+  const batchCalls = github.createReviewCalls.filter((c) => (c.body || "") === REVIEW_TAG);
+  assert.strictEqual(batchCalls.length, 1, "single batch when N >= toSend.length");
+  assert.strictEqual(batchCalls[0].comments.length, 3);
+  assert.strictEqual(outputs.batches_total, "1");
+  assert.strictEqual(outputs.comments_inline, "3");
+}
+
+// AS5: 2 batches; batch #2 throws 5xx but landed on the server. Only batch #2's
+// missing comments are retried; batch #1's comments are untouched (no
+// double-post). Requires the per-batch error spec.
+async function testBatchPartialSuccessReconcilesPerBatch() {
+  const result = { comments: makeComments(4), warnings: [] };
+  const { github, outputs } = await run({
+    result,
+    githubOpts: {
+      // Fail ONLY batch #2 (index 1) with a 5xx; batch #1 (index 0) succeeds.
+      batchErrorSpec: (batchIdx) =>
+        batchIdx === 1 ? { status: 502, message: "Bad Gateway" } : null,
+      // Batch #2's review landed despite the 5xx.
+      batchLanded: true,
+      // getPostedCommentIds returns a GLOBAL set across all reviews. Batch #1
+      // succeeded, so its 2 comments (c0,c1) are genuinely on the server; 1 of
+      // batch #2's (c2) also landed. batchPostedComments() scans ALL batch calls
+      // in order [c0,c1,c2,c3], so postedCount=3 echoes [c0,c1,c2] -> batch #2's
+      // chunk [c2,c3] filters to toRetry=[c3] (only the missing one).
+      echoPosted: true,
+      postedCount: 3,
+    },
+    opts: { reviewCommentBatchSize: 2 },
+  });
+  const batchCalls = github.createReviewCalls.filter((c) => (c.body || "") === REVIEW_TAG);
+  assert.strictEqual(batchCalls.length, 2, "two batches issued");
+  // Batch #1 (call 0) succeeded wholesale; batch #2 (call 1) failed.
+  // Per-comment fallback calls carry body === "".
+  const perCommentCalls = github.createReviewCalls.filter((c) => (c.body || "") !== REVIEW_TAG);
+  // Only batch #2's missing comment (c3) is retried (not batch #1's, not c2).
+  assert.strictEqual(perCommentCalls.length, 1, "only batch #2's missing comment retried");
+  assert.strictEqual(perCommentCalls[0].comments.length, 1);
+  // The retried comment belongs to batch #2 (c3), never batch #1 (c0/c1).
+  const batch1Paths = new Set(batchCalls[0].comments.map((rc) => rc.path));
+  assert.strictEqual(
+    batch1Paths.has(perCommentCalls[0].comments[0].path),
+    false,
+    "retried comment is not from batch #1"
+  );
+  // All 4 end up posted (3 batch-landed + 1 retried), none failed.
+  assert.strictEqual(outputs.comments_inline, "4");
+  assert.strictEqual(outputs.comments_failed, "0");
+  assert.strictEqual(outputs.batches_total, "2");
+  assert.strictEqual(outputs.batches_reconciled, "1", "batch #2 reconciled");
+}
+
+// B4: 71 comments, one batch partially fails irrecoverably ->
+// comments_inline + comments_failed == 71 (exhaustive, mutually exclusive);
+// batches_total == 4.
+async function testBatchCountsExhaustive() {
+  const result = { comments: makeComments(71), warnings: [] };
+  const { outputs } = await run({
+    result,
+    githubOpts: {
+      // Fail batch #4 (index 3, the 11-comment remainder) with a 5xx.
+      batchErrorSpec: (batchIdx) =>
+        batchIdx === 3 ? { status: 502, message: "Bad Gateway" } : null,
+      // Batch #4 did NOT land, and its per-comment retries all fail with a
+      // non-retryable 422 (line unresolvable) -> recorded as failed.
+      batchLanded: false,
+      perCommentError: () => ({ status: 422, message: "Line could not be resolved" }),
+    },
+    opts: { reviewCommentBatchSize: 20 },
+  });
+  const inline = parseInt(outputs.comments_inline, 10);
+  const failed = parseInt(outputs.comments_failed, 10);
+  assert.strictEqual(inline + failed, 71, "inline + failed == 71 (exhaustive)");
+  assert.strictEqual(outputs.batches_total, "4");
+  // Batches 1-3 (60 comments) all succeed; batch 4 (11) all fail.
+  assert.strictEqual(inline, 60);
+  assert.strictEqual(failed, 11);
+}
+
+// B6 (multi-batch): the idempotency read API is unavailable mid-sequence. The
+// affected batch's comments are recorded as failed (NOT reposted, avoiding
+// duplicates) and earlier/later batches are undisturbed. This is required
+// because the existing single-batch testPerComment5xxIdempotencyUnavailableSkipsRetry
+// does not exercise B6 across batch boundaries.
+async function testBatchReconcileUnavailableStopsVisibly() {
+  const result = { comments: makeComments(4), warnings: [] };
+  const { github, outputs } = await run({
+    result,
+    githubOpts: {
+      // Fail batch #2 (index 1) with a 5xx (may have reached the server).
+      batchErrorSpec: (batchIdx) =>
+        batchIdx === 1 ? { status: 502, message: "Bad Gateway" } : null,
+      // The read API (listReviewComments) is unavailable -> the per-comment
+      // idempotency check returns null (unknown) -> skip retry, record failed.
+      listReviewCommentsThrow: true,
+      // Per-comment fallback also 5xx's so the unavailable path is exercised.
+      perCommentError: () => ({ status: 502, message: "Bad Gateway" }),
+    },
+    opts: { reviewCommentBatchSize: 2 },
+  });
+  const batchCalls = github.createReviewCalls.filter((c) => (c.body || "") === REVIEW_TAG);
+  assert.strictEqual(batchCalls.length, 2, "two batches issued");
+  // Batch #1 (indices 0,1) succeeded; batch #2 (indices 2,3) failed and could
+  // not be reconciled -> its comments are recorded as failed, not retried.
+  const perCommentCalls = github.createReviewCalls.filter((c) => (c.body || "") !== REVIEW_TAG);
+  // Each of batch #2's 2 comments is attempted once via the per-comment
+  // fallback, but the unavailable idempotency read returns null -> the retry
+  // is skipped (break) and the comment recorded as failed. Exactly 2 attempts,
+  // no blind retries that would duplicate.
+  assert.strictEqual(
+    perCommentCalls.length,
+    2,
+    "exactly one fallback attempt per batch #2 comment, no blind retry"
+  );
+  assert.strictEqual(outputs.comments_inline, "2", "batch #1's 2 comments posted");
+  assert.strictEqual(outputs.comments_failed, "2", "batch #2's 2 comments recorded as failed");
+  assert.strictEqual(outputs.batches_total, "2");
+}
+
+// A2: invalid batch sizes fall back to the default (50), producing a single
+// batch for test-sized input.
+async function testBatchSizeInvalidFallsBackToDefault() {
+  for (const bad of [0, -5, "garbage"]) {
+    const result = { comments: makeComments(3), warnings: [] };
+    const { github, outputs } = await run({ result, opts: { reviewCommentBatchSize: bad } });
+    const batchCalls = github.createReviewCalls.filter((c) => (c.body || "") === REVIEW_TAG);
+    assert.strictEqual(batchCalls.length, 1, `invalid size ${JSON.stringify(bad)} -> single batch (default 50)`);
+    assert.strictEqual(outputs.batches_total, "1");
+  }
+}
+
+// B7: per-batch telemetry outputs are present and correct.
+async function testBatchTelemetryOutputs() {
+  const result = { comments: makeComments(5), warnings: [] };
+  const { outputs } = await run({ result, opts: { reviewCommentBatchSize: 2 } });
+  // ceil(5/2) = 3 batches.
+  assert.strictEqual(outputs.batches_total, "3");
+  assert.strictEqual(outputs.batches_attempted, "3");
+  assert.strictEqual(outputs.batches_succeeded, "3");
+  assert.strictEqual(outputs.batches_reconciled, "0");
+  // Existing outputs unchanged.
+  assert.strictEqual(outputs.comments_total, "5");
+  assert.strictEqual(outputs.comments_inline, "5");
+  assert.strictEqual(outputs.comments_failed, "0");
+  // batch_summary is valid JSON with the documented shape.
+  const summary = JSON.parse(outputs.batch_summary);
+  assert.strictEqual(summary.total, 3);
+  assert.strictEqual(summary.attempted, 3);
+  assert.strictEqual(summary.succeeded, 3);
+  assert.strictEqual(summary.reconciled, 0);
+  assert.strictEqual(summary.batch_size, 2);
+  assert.strictEqual(summary.inline, 5);
+  assert.strictEqual(summary.failed, 0);
+}
+
 async function main() {
   await testFailedInlineCommentsAreSummarized();
   await testWarningsListedAfterSummaryComments();
@@ -1328,6 +1641,19 @@ async function main() {
   testResolveThreshold();
   testOverlapsHistory();
   testNewCommentIdFormat();
+  // Batching (issue #479) — pure helpers
+  testResolveBatchSize();
+  testChunkArray();
+  testSortToSendDeterministically();
+  // Batching (issue #479) — integration via mock
+  await testBatchPartitioningDeterministic();
+  await testBatchSizeOnePerComment();
+  await testBatchSizeLargerThanToSend();
+  await testBatchPartialSuccessReconcilesPerBatch();
+  await testBatchCountsExhaustive();
+  await testBatchReconcileUnavailableStopsVisibly();
+  await testBatchSizeInvalidFallsBackToDefault();
+  await testBatchTelemetryOutputs();
   console.log("All post-review-comments tests passed.");
 }
 
