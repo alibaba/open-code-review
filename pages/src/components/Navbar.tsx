@@ -14,7 +14,7 @@ const LANG_OPTIONS: { value: Language; label: string }[] = [
 ];
 
 const navTabs = [
-  { path: '/', labelKey: 'navbar.features' },
+  { path: '/features', labelKey: 'navbar.features' },
   { path: '/benchmark', labelKey: 'navbar.benchmark' },
   { path: '/quickstart', labelKey: 'navbar.quickstart' },
   { path: '/docs', labelKey: 'navbar.docs' },
