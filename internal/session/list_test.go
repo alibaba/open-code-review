@@ -136,6 +136,89 @@ func TestLoadSummary_FallsBackToSessionEndFilesReviewed(t *testing.T) {
 	if len(items) != 0 {
 		t.Fatalf("legacy session should not synthesize item details, got %d", len(items))
 	}
+	if !summary.Legacy || summary.RunManifest != nil {
+		t.Fatalf("legacy summary flags = legacy:%v manifest:%v", summary.Legacy, summary.RunManifest)
+	}
+}
+
+func TestLoadSummaryPrefersV1RunManifest(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+
+	sh := New(repoDir, "main", "test-model", SessionOptions{
+		ReviewMode: ReviewModeWorkspace,
+		Operation:  OperationReview,
+	})
+	b := sh.Manifest()
+	b.SetInput(ManifestInput{Mode: InputModeWorkspace})
+	items := []CoverageItem{
+		{ItemID: "a", Path: "a.go"},
+		{ItemID: "b", Path: "b.go"},
+		{ItemID: "c", Path: "c.go"},
+		{ItemID: "d", Path: "d.go"},
+	}
+	for _, item := range items {
+		if err := b.RegisterSelected(item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.SealSelected(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.MarkCompleted("a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.MarkReused("b"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.MarkFailed("c", FailureProvider, "provider request failed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.MarkWaived("d", "accepted by user"); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := b.Finalize(time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh.SetFinalManifest(&manifest)
+	if err := sh.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+
+	summary, err := LoadSummary(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Legacy || summary.Aborted || summary.RunManifest == nil {
+		t.Fatalf("summary flags = legacy:%v aborted:%v manifest:%v", summary.Legacy, summary.Aborted, summary.RunManifest)
+	}
+	if summary.RunManifest.TerminalState != StatePartial {
+		t.Fatalf("terminal_state = %q", summary.RunManifest.TerminalState)
+	}
+	if summary.SelectedFiles != 4 || summary.CompletedFiles != 1 || summary.ReusedFiles != 1 || summary.FailedFiles != 1 || summary.WaivedFiles != 1 {
+		t.Fatalf("coverage counts = %+v", summary)
+	}
+}
+
+func TestLoadSummaryIgnoresUnknownManifestVersion(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	sh.SetFinalManifest(&RunManifest{SchemaVersion: "ocr.run-manifest/v999", TerminalState: StateComplete})
+	if err := sh.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := LoadSummary(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !summary.Legacy || summary.RunManifest != nil {
+		t.Fatalf("unknown schema must be treated as legacy: %+v", summary)
+	}
 }
 
 func TestLoadSummary_MissingFile(t *testing.T) {

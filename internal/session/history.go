@@ -189,7 +189,11 @@ func (sh *SessionHistory) FinalManifest() *RunManifest {
 	}
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
-	return sh.finalManifest
+	if sh.finalManifest == nil {
+		return nil
+	}
+	m := sh.finalManifest.cloned()
+	return &m
 }
 
 // GetOrCreateFileSession returns the FileSession for the given file path,

@@ -12,7 +12,7 @@
 <h2>Sessions: {{.RepoName}}</h2>
 {{if .Sessions}}
 <table class="table">
-    <thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th><th>Files</th><th>Duration</th><th>Started At</th></tr></thead>
+    <thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th><th>Files</th><th>Status</th><th>Duration</th><th>Started At</th></tr></thead>
     <tbody>
     {{range .Sessions}}
         <tr>
@@ -21,6 +21,7 @@
             <td>{{if .ReviewMode}}{{.ReviewMode}}{{else}}-{{end}}</td>
             <td><code>{{.Model}}</code></td>
             <td>{{.FileCount}}</td>
+            <td>{{if .Aborted}}aborted{{else if .Legacy}}legacy{{else}}{{.TerminalState}}{{end}}</td>
             <td>{{formatDuration .DurationSec}}</td>
             <td>{{formatTime .Timestamp}}</td>
         </tr>

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -166,5 +167,40 @@ func TestRunSession_UnknownSubcommand(t *testing.T) {
 	err := runSession([]string{"bogus"})
 	if err == nil {
 		t.Fatal("expected error for unknown sub-command")
+	}
+}
+
+func TestSessionDisplayUsesManifestStatusAndCoverage(t *testing.T) {
+	summary := session.Summary{
+		SessionID:      "run-1",
+		SelectedFiles:  4,
+		CompletedFiles: 1,
+		ReusedFiles:    1,
+		FailedFiles:    1,
+		WaivedFiles:    1,
+		RunManifest: &session.RunManifest{
+			TerminalState: session.StatePartial,
+		},
+	}
+	if got := describeStatus(summary); got != "partial" {
+		t.Fatalf("status = %q", got)
+	}
+	if got := describeFiles(summary); !strings.Contains(got, "4") || !strings.Contains(got, "failed 1") || !strings.Contains(got, "waived 1") {
+		t.Fatalf("files = %q", got)
+	}
+	got := captureStdout(t, func() { printSessionDetail(os.Stdout, &summary, nil) })
+	if !strings.Contains(got, "4 selected = 1 completed + 1 reused + 1 failed + 1 waived") {
+		t.Fatalf("detail = %q", got)
+	}
+}
+
+func TestSessionDisplayDoesNotInferLegacyComplete(t *testing.T) {
+	summary := session.Summary{CompletedFiles: 2, Legacy: true}
+	if got := describeStatus(summary); got != "legacy" {
+		t.Fatalf("status = %q", got)
+	}
+	summary.Aborted = true
+	if got := describeStatus(summary); got != "aborted" {
+		t.Fatalf("status = %q", got)
 	}
 }

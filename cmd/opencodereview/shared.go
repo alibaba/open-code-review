@@ -17,6 +17,7 @@ import (
 	"github.com/open-code-review/open-code-review/internal/gitcmd"
 	"github.com/open-code-review/open-code-review/internal/llm"
 	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/open-code-review/open-code-review/internal/session"
 	"github.com/open-code-review/open-code-review/internal/stdout"
 	"github.com/open-code-review/open-code-review/internal/telemetry"
 	"github.com/open-code-review/open-code-review/internal/tool"
@@ -286,6 +287,9 @@ type ResultProvider interface {
 	// in JSON output or failure diagnostics. Returns "" when no session was
 	// created.
 	SessionID() string
+	// RunManifest returns the frozen v1 coverage result for review runs. Scan
+	// remains legacy and returns nil.
+	RunManifest() *session.RunManifest
 }
 
 type resumeInfoProvider interface {
@@ -316,8 +320,9 @@ func emitRunResult(
 	}
 
 	traceID := telemetry.TraceIDFromContext(ctx)
+	manifest := ag.RunManifest()
 
-	if outputFormat == "json" && len(comments) == 0 && ag.FilesReviewed() == 0 {
+	if outputFormat == "json" && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
 		return outputJSONNoFiles(traceID)
 	}
 
@@ -341,9 +346,9 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID())
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest)
 	}
-	outputTextWithWarnings(comments, ag.Warnings())
+	outputTextWithWarnings(comments, ag.Warnings(), manifest)
 	if summary := ag.ProjectSummary(); summary != "" {
 		fmt.Printf("\n\n──────── Project Summary ────────\n\n%s\n", summary)
 	}

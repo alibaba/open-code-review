@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/open-code-review/open-code-review/internal/agent"
 	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/open-code-review/open-code-review/internal/session"
 )
 
 type mockResultProvider struct {
@@ -27,20 +29,57 @@ type mockResultProvider struct {
 	toolCalls        map[string]int64
 	resumeInfo       *agent.ResumeInfo
 	sessionID        string
+	manifest         *session.RunManifest
 }
 
-func (m *mockResultProvider) Diffs() []model.Diff            { return m.diffs }
-func (m *mockResultProvider) FilesReviewed() int64           { return m.filesReviewed }
-func (m *mockResultProvider) TotalInputTokens() int64        { return m.inputTokens }
-func (m *mockResultProvider) TotalOutputTokens() int64       { return m.outputTokens }
-func (m *mockResultProvider) TotalTokensUsed() int64         { return m.totalTokens }
-func (m *mockResultProvider) TotalCacheReadTokens() int64    { return m.cacheReadTokens }
-func (m *mockResultProvider) TotalCacheWriteTokens() int64   { return m.cacheWriteTokens }
-func (m *mockResultProvider) Warnings() []agent.AgentWarning { return m.warnings }
-func (m *mockResultProvider) ProjectSummary() string         { return m.projectSummary }
-func (m *mockResultProvider) ToolCalls() map[string]int64    { return m.toolCalls }
-func (m *mockResultProvider) ResumeInfo() *agent.ResumeInfo  { return m.resumeInfo }
-func (m *mockResultProvider) SessionID() string              { return m.sessionID }
+func (m *mockResultProvider) Diffs() []model.Diff               { return m.diffs }
+func (m *mockResultProvider) FilesReviewed() int64              { return m.filesReviewed }
+func (m *mockResultProvider) TotalInputTokens() int64           { return m.inputTokens }
+func (m *mockResultProvider) TotalOutputTokens() int64          { return m.outputTokens }
+func (m *mockResultProvider) TotalTokensUsed() int64            { return m.totalTokens }
+func (m *mockResultProvider) TotalCacheReadTokens() int64       { return m.cacheReadTokens }
+func (m *mockResultProvider) TotalCacheWriteTokens() int64      { return m.cacheWriteTokens }
+func (m *mockResultProvider) Warnings() []agent.AgentWarning    { return m.warnings }
+func (m *mockResultProvider) ProjectSummary() string            { return m.projectSummary }
+func (m *mockResultProvider) ToolCalls() map[string]int64       { return m.toolCalls }
+func (m *mockResultProvider) ResumeInfo() *agent.ResumeInfo     { return m.resumeInfo }
+func (m *mockResultProvider) SessionID() string                 { return m.sessionID }
+func (m *mockResultProvider) RunManifest() *session.RunManifest { return m.manifest }
+
+func mockManifest(state session.TerminalState) *session.RunManifest {
+	a := session.CoverageItem{ItemID: "a", Path: "a.go", Fingerprint: "fp-a"}
+	b := session.CoverageItem{ItemID: "b", Path: "b.go", Fingerprint: "fp-b"}
+	m := &session.RunManifest{
+		SchemaVersion: session.ManifestSchemaVersion,
+		RunID:         "run-1",
+		Operation:     session.OperationReview,
+		TerminalState: state,
+		Input:         session.ManifestInput{Mode: session.InputModeWorkspace},
+		Coverage: session.Coverage{
+			Selected:  []session.CoverageItem{},
+			Completed: []session.CoverageItem{},
+			Reused:    []session.CoverageItem{},
+			Failed:    []session.CoverageItem{},
+			Waived:    []session.CoverageItem{},
+		},
+	}
+	switch state {
+	case session.StateComplete:
+		m.Coverage.Selected = []session.CoverageItem{a, b}
+		m.Coverage.Completed = []session.CoverageItem{a, b}
+	case session.StatePartial:
+		b.Classification = session.FailureProvider
+		m.Coverage.Selected = []session.CoverageItem{a, b}
+		m.Coverage.Completed = []session.CoverageItem{a}
+		m.Coverage.Failed = []session.CoverageItem{b}
+	case session.StateFailed:
+		a.Classification = session.FailureProvider
+		b.Classification = session.FailureTimeout
+		m.Coverage.Selected = []session.CoverageItem{a, b}
+		m.Coverage.Failed = []session.CoverageItem{a, b}
+	}
+	return m
+}
 
 func TestEmitRunResult_JSONNoFiles(t *testing.T) {
 	ag := &mockResultProvider{filesReviewed: 0}
@@ -56,6 +95,134 @@ func TestEmitRunResult_JSONNoFiles(t *testing.T) {
 	}
 	if out.Status != "skipped" {
 		t.Errorf("status = %q, want skipped", out.Status)
+	}
+}
+
+func TestEmitRunResult_JSONUsesManifestTerminalState(t *testing.T) {
+	manifest := mockManifest(session.StatePartial)
+	ag := &mockResultProvider{
+		filesReviewed: 2,
+		manifest:      manifest,
+		warnings: []agent.AgentWarning{{
+			Type: "subtask_error", File: "b.go", Message: "provider failed",
+		}},
+	}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.Status != string(session.StatePartial) {
+		t.Fatalf("status = %q, want partial", out.Status)
+	}
+	if out.Manifest == nil || out.Manifest.RunID != manifest.RunID {
+		t.Fatalf("manifest = %+v", out.Manifest)
+	}
+	if strings.Contains(out.Message, "Looks good") {
+		t.Fatalf("partial message must not claim success: %q", out.Message)
+	}
+}
+
+func TestEmitRunResult_JSONSkippedIncludesManifest(t *testing.T) {
+	ag := &mockResultProvider{manifest: mockManifest(session.StateSkipped)}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.Status != string(session.StateSkipped) || out.Manifest == nil {
+		t.Fatalf("output = %+v", out)
+	}
+	if !strings.Contains(out.Message, "no items were selected") {
+		t.Fatalf("message = %q", out.Message)
+	}
+}
+
+func TestEmitRunResult_JSONManifestMatchesPersistedSessionEnd(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Operation:  session.OperationReview,
+	})
+	builder := sh.Manifest()
+	builder.SetInput(session.ManifestInput{Mode: session.InputModeRange, RequestedFrom: "main", RequestedHead: "feature"})
+	a := session.CoverageItem{ItemID: "a", Path: "a.go", Fingerprint: "fp-a"}
+	b := session.CoverageItem{ItemID: "b", Path: "b.go", Fingerprint: "fp-b"}
+	if err := builder.RegisterSelected(a); err != nil {
+		t.Fatalf("register a: %v", err)
+	}
+	if err := builder.RegisterSelected(b); err != nil {
+		t.Fatalf("register b: %v", err)
+	}
+	if err := builder.SealSelected(); err != nil {
+		t.Fatalf("seal selected: %v", err)
+	}
+	if err := builder.MarkCompleted(a.ItemID); err != nil {
+		t.Fatalf("complete a: %v", err)
+	}
+	if err := builder.MarkFailed(b.ItemID, session.FailureProvider, "provider or subtask request failed"); err != nil {
+		t.Fatalf("fail b: %v", err)
+	}
+	manifest, err := builder.Finalize(0)
+	if err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	sh.SetFinalManifest(&manifest)
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+
+	ag := &mockResultProvider{filesReviewed: 2, sessionID: sh.SessionID, manifest: sh.FinalManifest()}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+
+	path, err := session.SessionFilePath(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("session path: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read session: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var persisted struct {
+		Type        string               `json:"type"`
+		RunManifest *session.RunManifest `json:"run_manifest"`
+	}
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &persisted); err != nil {
+		t.Fatalf("unmarshal session_end: %v", err)
+	}
+	if persisted.Type != "session_end" || persisted.RunManifest == nil {
+		t.Fatalf("last record = %+v", persisted)
+	}
+	outputJSON, err := json.Marshal(out.Manifest)
+	if err != nil {
+		t.Fatalf("marshal output manifest: %v", err)
+	}
+	persistedJSON, err := json.Marshal(persisted.RunManifest)
+	if err != nil {
+		t.Fatalf("marshal persisted manifest: %v", err)
+	}
+	if string(outputJSON) != string(persistedJSON) {
+		t.Fatalf("manifest mismatch\noutput:    %s\npersisted: %s", outputJSON, persistedJSON)
 	}
 }
 
@@ -123,6 +290,38 @@ func TestEmitRunResult_TextNoComments(t *testing.T) {
 	})
 	if !strings.Contains(got, "Looks good to me") {
 		t.Errorf("expected 'Looks good to me', got %q", got)
+	}
+}
+
+func TestEmitRunResult_TextPartialNeverLooksGood(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 2, manifest: mockManifest(session.StatePartial)}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	if !strings.Contains(got, "partially complete") || strings.Contains(got, "Looks good") {
+		t.Fatalf("partial output = %q", got)
+	}
+}
+
+func TestEmitRunResult_TextCompleteReportsFindingsAndWaived(t *testing.T) {
+	manifest := mockManifest(session.StateComplete)
+	b := manifest.Coverage.Completed[1]
+	manifest.Coverage.Completed = manifest.Coverage.Completed[:1]
+	b.Reason = "accepted"
+	manifest.Coverage.Waived = []session.CoverageItem{b}
+	ag := &mockResultProvider{filesReviewed: 2, manifest: manifest}
+	comments := []model.LlmComment{{Path: "a.go", Content: "fix", StartLine: 1, EndLine: 1}}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, comments, time.Now(), "text", "developer", nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	for _, want := range []string{"Review complete: 1 finding(s)", "including 1 waived", "a.go"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("complete output missing %q: %q", want, got)
+		}
 	}
 }
 

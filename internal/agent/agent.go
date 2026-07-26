@@ -239,13 +239,16 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		if b := a.session.Manifest(); b != nil {
 			_ = b.SetRunFailure(session.RunFailureInput, "failed to resolve review input")
 		}
-		a.finalizeManifest()
+		manifestErr := a.finalizeManifest()
 		// Keep the load failure as the primary cause, but never drop a persistence
 		// failure: a run that could not even write its failed session_end must
 		// report both rather than silently prefer one.
 		loadErr := fmt.Errorf("load diffs: %w", err)
 		if ferr := a.session.Finalize(); ferr != nil {
-			return nil, errors.Join(loadErr, fmt.Errorf("finalize session: %w", ferr))
+			manifestErr = errors.Join(manifestErr, fmt.Errorf("finalize session: %w", ferr))
+		}
+		if manifestErr != nil {
+			return nil, errors.Join(loadErr, manifestErr)
 		}
 		return nil, loadErr
 	}
@@ -272,9 +275,12 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		// run_failure), which is the correct terminal state for "nothing to do".
 		// A persistence failure here is still a delivery error — a clean skip
 		// cannot be claimed if its session_end never reached disk.
-		a.finalizeManifest()
+		manifestErr := a.finalizeManifest()
 		if ferr := a.session.Finalize(); ferr != nil {
-			return []model.LlmComment{}, fmt.Errorf("finalize session: %w", ferr)
+			manifestErr = errors.Join(manifestErr, fmt.Errorf("finalize session: %w", ferr))
+		}
+		if manifestErr != nil {
+			return []model.LlmComment{}, manifestErr
 		}
 		return []model.LlmComment{}, nil
 	}
@@ -298,7 +304,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// persistence failure is a delivery error in its own right: when the review
 	// also failed, both facts are reported (errors.Join) rather than letting the
 	// review error hide the fact that session_end never reached disk.
-	a.finalizeManifest()
+	if manifestErr := a.finalizeManifest(); manifestErr != nil {
+		err = errors.Join(err, manifestErr)
+	}
 	if ferr := a.session.Finalize(); ferr != nil {
 		finalizeErr := fmt.Errorf("finalize session: %w", ferr)
 		if err != nil {
@@ -321,6 +329,16 @@ func (a *Agent) SessionID() string {
 		return ""
 	}
 	return a.session.SessionID
+}
+
+// RunManifest returns the immutable coverage snapshot produced for this review,
+// or nil when manifest construction failed. The scan path deliberately returns
+// nil because scan is outside the v1 manifest scope.
+func (a *Agent) RunManifest() *session.RunManifest {
+	if a == nil || a.session == nil {
+		return nil
+	}
+	return a.session.FinalManifest()
 }
 
 // ResumeInfo returns resume metadata for output. Nil means this was not a resume run.
@@ -929,13 +947,13 @@ func (a *Agent) registerCoverage(diffs []model.Diff) error {
 // finalizeManifest freezes the run's coverage builder and stores the immutable
 // manifest on the session for persistence and CLI consumption. Nil-safe. A
 // construction (validation) failure leaves the stored manifest nil — session_end
-// then persists in legacy form — and is surfaced as a warning rather than
-// aborting delivery of whatever else the run produced. Elapsed is measured from
-// the session start so both outlets report the same duration.
-func (a *Agent) finalizeManifest() {
+// then persists in legacy form — and is returned as a delivery error so the CLI
+// cannot report a manifest-enabled review as successful without a valid snapshot.
+// Elapsed is measured from the session start so both outlets report the same duration.
+func (a *Agent) finalizeManifest() error {
 	b := a.session.Manifest()
 	if b == nil {
-		return
+		return nil
 	}
 	// Freeze the input/repository identity from this run's captured resolution and
 	// current selected set before the manifest closes. Done here (not in New) so
@@ -945,9 +963,10 @@ func (a *Agent) finalizeManifest() {
 	m, err := b.Finalize(time.Since(a.session.StartTime))
 	if err != nil {
 		a.recordWarning("manifest_error", "", err.Error())
-		return
+		return fmt.Errorf("finalize run manifest: %w", err)
 	}
 	a.session.SetFinalManifest(&m)
+	return nil
 }
 
 func resumedFromSession(resume *session.ResumeState) string {

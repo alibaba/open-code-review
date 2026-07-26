@@ -168,7 +168,7 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "fail"}}
-	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "")
+	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -281,7 +281,7 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	comments := []model.LlmComment{{Path: "b.go", Content: "test"}}
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "c.go", Message: "failed"}}
-	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "")
+	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -319,7 +319,7 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "warning", Message: "something"}}
-	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "")
+	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -414,7 +414,7 @@ func TestOutputText_WithComments(t *testing.T) {
 func TestOutputTextWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	warnings := []agent.AgentWarning{{Type: "warning", File: "x.go", Message: "slow"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(nil, warnings)
+		outputTextWithWarnings(nil, warnings, nil)
 	})
 	if !strings.Contains(got, "Looks good to me") {
 		t.Errorf("expected 'Looks good to me', got %q", got)
@@ -424,7 +424,7 @@ func TestOutputTextWithWarnings_NoCommentsNoErrors(t *testing.T) {
 func TestOutputTextWithWarnings_NoCommentsWithSubtaskError(t *testing.T) {
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "y.go", Message: "failed"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(nil, warnings)
+		outputTextWithWarnings(nil, warnings, nil)
 	})
 	if !strings.Contains(got, "could not be reviewed") {
 		t.Errorf("expected subtask error message, got %q", got)
@@ -437,7 +437,7 @@ func TestOutputTextWithWarnings_WithComments(t *testing.T) {
 	}
 	warnings := []agent.AgentWarning{{Type: "info", File: "b.go", Message: "note"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(comments, warnings)
+		outputTextWithWarnings(comments, warnings, nil)
 	})
 	if !strings.Contains(got, "a.go") {
 		t.Errorf("expected comment path, got %q", got)

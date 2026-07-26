@@ -1,0 +1,258 @@
+package agent
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/open-code-review/open-code-review/internal/config/template"
+	"github.com/open-code-review/open-code-review/internal/gitcmd"
+	"github.com/open-code-review/open-code-review/internal/llm"
+	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/open-code-review/open-code-review/internal/session"
+)
+
+type manifestFlowClient struct{}
+
+func (manifestFlowClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	var prompt string
+	for _, message := range req.Messages {
+		if text, ok := message.Content.(string); ok {
+			prompt += text
+		}
+	}
+	switch {
+	case strings.Contains(prompt, "panic.go"):
+		panic("manifest integration panic")
+	case strings.Contains(prompt, "bad.go"):
+		return nil, errors.New("provider rejected api_key=LEAKED at /Users/example/private")
+	default:
+		return agentTaskDoneResponse(), nil
+	}
+}
+
+func newManifestFlowAgent(t *testing.T, diffs []model.Diff, resume *session.ResumeState) *Agent {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
+		ReviewMode:  session.ReviewModeRange,
+		DiffFrom:    "main",
+		DiffTo:      "feature",
+		ResumedFrom: resumedFromSession(resume),
+		Operation:   session.OperationReview,
+	})
+	a := New(Args{
+		RepoDir:    repoDir,
+		From:       "main",
+		To:         "feature",
+		ReviewMode: session.ReviewModeRange,
+		LLMClient:  manifestFlowClient{},
+		Model:      "fake",
+		Session:    sh,
+		Resume:     resume,
+		Template: template.Template{
+			MaxTokens:           100000,
+			MaxToolRequestTimes: 5,
+			MainTask: template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{current_file_path}} {{diff}}"}},
+			},
+		},
+		MainToolDefs: []llm.ToolDef{{
+			Type: "function",
+			Function: llm.FunctionDef{
+				Name:        "task_done",
+				Description: "finish the review",
+			},
+		}},
+	})
+	a.diffs = diffs
+	a.currentDate = "2026-07-26 12:00"
+	return a
+}
+
+func finishManifestFlow(t *testing.T, a *Agent) *session.RunManifest {
+	t.Helper()
+	if err := a.finalizeManifest(); err != nil {
+		t.Fatalf("finalize manifest: %v", err)
+	}
+	if err := a.session.Finalize(); err != nil {
+		t.Fatalf("finalize session: %v", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil {
+		t.Fatal("expected frozen manifest")
+	}
+	return manifest
+}
+
+func TestManifestFlowCompleteAndPartial(t *testing.T) {
+	t.Run("complete with zero findings", func(t *testing.T) {
+		a := newManifestFlowAgent(t, []model.Diff{{OldPath: "good.go", NewPath: "good.go", Diff: "+ok", Insertions: 1}}, nil)
+		comments, err := a.dispatchSubtasks(context.Background())
+		if err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		if len(comments) != 0 {
+			t.Fatalf("comments = %d, want 0", len(comments))
+		}
+		manifest := finishManifestFlow(t, a)
+		if manifest.TerminalState != session.StateComplete || len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 0 {
+			t.Fatalf("manifest = %+v", manifest)
+		}
+	})
+
+	t.Run("mixed provider result is partial", func(t *testing.T) {
+		a := newManifestFlowAgent(t, []model.Diff{
+			{OldPath: "good.go", NewPath: "good.go", Diff: "+ok", Insertions: 1},
+			{OldPath: "bad.go", NewPath: "bad.go", Diff: "+bad", Insertions: 1},
+		}, nil)
+		if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+			t.Fatalf("mixed dispatch must continue: %v", err)
+		}
+		manifest := finishManifestFlow(t, a)
+		if manifest.TerminalState != session.StatePartial || len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 1 {
+			t.Fatalf("manifest = %+v", manifest)
+		}
+		if manifest.Coverage.Failed[0].Classification != session.FailureProvider {
+			t.Fatalf("failure = %+v", manifest.Coverage.Failed[0])
+		}
+		if strings.Contains(manifest.Coverage.Failed[0].Reason, "LEAKED") || strings.Contains(manifest.Coverage.Failed[0].Reason, "/Users/") {
+			t.Fatalf("manifest exposed raw provider error: %+v", manifest.Coverage.Failed[0])
+		}
+	})
+}
+
+func TestManifestFlowRunInputFailureIsPersisted(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "missing-base",
+		DiffTo:     "missing-head",
+		Operation:  session.OperationReview,
+	})
+	a := New(Args{
+		RepoDir:    repoDir,
+		From:       "missing-base",
+		To:         "missing-head",
+		ReviewMode: session.ReviewModeRange,
+		GitRunner:  gitcmd.New(1),
+		LLMClient:  manifestFlowClient{},
+		Model:      "fake",
+		Session:    sh,
+	})
+
+	if _, err := a.Run(context.Background()); err == nil {
+		t.Fatal("invalid review input must fail")
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || manifest.TerminalState != session.StateFailed || manifest.RunFailure == nil {
+		t.Fatalf("manifest = %+v", manifest)
+	}
+	if manifest.RunFailure.Classification != session.RunFailureInput || len(manifest.Coverage.Selected) != 0 {
+		t.Fatalf("run failure = %+v, coverage = %+v", manifest.RunFailure, manifest.Coverage)
+	}
+
+	summary, err := session.LoadSummary(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("load persisted summary: %v", err)
+	}
+	if summary.RunManifest == nil || summary.RunManifest.TerminalState != session.StateFailed || summary.Aborted {
+		t.Fatalf("persisted summary = %+v", summary)
+	}
+}
+
+func TestManifestFlowAllFailedTimeoutAndPanic(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		ctx       func() context.Context
+		wantClass session.FailureClass
+	}{
+		{name: "provider", path: "bad.go", ctx: context.Background, wantClass: session.FailureProvider},
+		{name: "timeout", path: "timeout.go", ctx: func() context.Context {
+			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			t.Cleanup(cancel)
+			return ctx
+		}, wantClass: session.FailureTimeout},
+		{name: "panic", path: "panic.go", ctx: context.Background, wantClass: session.FailurePanic},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newManifestFlowAgent(t, []model.Diff{{OldPath: tc.path, NewPath: tc.path, Diff: "+x", Insertions: 1}}, nil)
+			if _, err := a.dispatchSubtasks(tc.ctx()); err == nil {
+				t.Fatal("all-failed dispatch must return an error")
+			}
+			manifest := finishManifestFlow(t, a)
+			if manifest.TerminalState != session.StateFailed || manifest.RunFailure != nil || len(manifest.Coverage.Failed) != 1 {
+				t.Fatalf("manifest = %+v", manifest)
+			}
+			if got := manifest.Coverage.Failed[0].Classification; got != tc.wantClass {
+				t.Fatalf("classification = %q, want %q", got, tc.wantClass)
+			}
+		})
+	}
+}
+
+func TestManifestFlowBudgetAndSkipped(t *testing.T) {
+	t.Run("single-item budget stop", func(t *testing.T) {
+		a := newManifestFlowAgent(t, []model.Diff{{OldPath: "budget.go", NewPath: "budget.go", Diff: "+x", Insertions: 1}}, nil)
+		a.args.Template.MaxTokens = 100
+		a.args.Template.MainTask.Messages[0].Content = strings.Repeat("context ", 200) + "{{diff}}"
+		if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+			t.Fatalf("business stop is represented by coverage, not a dispatch error: %v", err)
+		}
+		manifest := finishManifestFlow(t, a)
+		if manifest.TerminalState != session.StateFailed || len(manifest.Coverage.Failed) != 1 || manifest.Coverage.Failed[0].Classification != session.FailureBudget {
+			t.Fatalf("manifest = %+v", manifest)
+		}
+	})
+
+	t.Run("all oversized is skipped", func(t *testing.T) {
+		a := newManifestFlowAgent(t, []model.Diff{{OldPath: "large.go", NewPath: "large.go", Diff: strings.Repeat("word ", 500), Insertions: 1}}, nil)
+		a.args.Template.MaxTokens = 10
+		if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		manifest := finishManifestFlow(t, a)
+		if manifest.TerminalState != session.StateSkipped || len(manifest.Coverage.Selected) != 0 {
+			t.Fatalf("manifest = %+v", manifest)
+		}
+	})
+}
+
+func TestManifestFlowResumeRecordsParentAndReusedItem(t *testing.T) {
+	diffs := []model.Diff{
+		{OldPath: "cached.go", NewPath: "cached.go", Diff: "+cached", Insertions: 1},
+		{OldPath: "fresh.go", NewPath: "fresh.go", Diff: "+fresh", Insertions: 1},
+	}
+	fingerprint := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	resume := &session.ResumeState{
+		SessionID:  "parent-run",
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Items: map[string]session.ResumeItem{
+			fingerprint: {
+				FilePath:    "cached.go",
+				OldPath:     "cached.go",
+				NewPath:     "cached.go",
+				Fingerprint: fingerprint,
+			},
+		},
+	}
+	a := newManifestFlowAgent(t, diffs, resume)
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	manifest := finishManifestFlow(t, a)
+	if manifest.ParentRunID != "parent-run" || len(manifest.Coverage.Reused) != 1 || len(manifest.Coverage.Completed) != 1 {
+		t.Fatalf("manifest = %+v", manifest)
+	}
+	if manifest.Input.RequestedFrom != "main" || manifest.Input.RequestedHead != "feature" || manifest.Input.SourceArtifactSHA256 == "" {
+		t.Fatalf("child input identity = %+v", manifest.Input)
+	}
+}

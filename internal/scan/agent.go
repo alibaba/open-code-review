@@ -163,6 +163,11 @@ func (a *Agent) SessionID() string {
 	return a.session.SessionID
 }
 
+// RunManifest returns nil because scan is intentionally outside the v1 run
+// manifest scope. It exists so review and scan can share the output pipeline
+// without synthesizing a manifest for scan.
+func (a *Agent) RunManifest() *session.RunManifest { return nil }
+
 // FilesReviewed returns the number of items included in this scan.
 func (a *Agent) FilesReviewed() int64 { return int64(len(a.items)) }
 

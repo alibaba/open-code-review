@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-code-review/open-code-review/internal/agent"
 	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/open-code-review/open-code-review/internal/session"
 	"github.com/open-code-review/open-code-review/internal/suggestdiff"
 )
 
@@ -32,8 +33,13 @@ func hasSubtaskErrors(warnings []agent.AgentWarning) bool {
 	return false
 }
 
-func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning) {
-	if len(comments) == 0 {
+func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning, manifest *session.RunManifest) {
+	if manifest != nil {
+		fmt.Println(manifestMessage(manifest, len(comments)))
+		for _, c := range comments {
+			renderComment(c)
+		}
+	} else if len(comments) == 0 {
 		if hasSubtaskErrors(warnings) {
 			fmt.Println("Some files could not be reviewed due to errors (see warnings below).")
 		} else {
@@ -249,6 +255,7 @@ type jsonOutput struct {
 	ProjectSummary string               `json:"project_summary,omitempty"`
 	Resume         *agent.ResumeInfo    `json:"resume,omitempty"`
 	SessionID      string               `json:"session_id,omitempty"`
+	Manifest       *session.RunManifest `json:"manifest,omitempty"`
 }
 
 func outputJSON(comments []model.LlmComment) error {
@@ -266,7 +273,8 @@ func outputJSON(comments []model.LlmComment) error {
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
-	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string) error {
+	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
+	manifest *session.RunManifest) error {
 	out := jsonOutput{
 		Status:   "success",
 		TraceID:  traceID,
@@ -284,6 +292,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		ProjectSummary: projectSummary,
 		Resume:         resumeInfo,
 		SessionID:      sessionID,
+		Manifest:       manifest,
 	}
 	var total int64
 	for _, v := range toolCalls {
@@ -297,7 +306,10 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		Total:  total,
 		ByTool: byTool,
 	}
-	if len(comments) == 0 {
+	if manifest != nil {
+		out.Status = string(manifest.TerminalState)
+		out.Message = manifestMessage(manifest, len(comments))
+	} else if len(comments) == 0 {
 		if hasSubtaskErrors(warnings) {
 			out.Message = "Some files could not be reviewed due to errors."
 		} else {
@@ -306,15 +318,42 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	}
 	if len(warnings) > 0 {
 		out.Warnings = warnings
-		if hasSubtaskErrors(warnings) {
+		if manifest == nil && hasSubtaskErrors(warnings) {
 			out.Status = "completed_with_errors"
-		} else {
+		} else if manifest == nil {
 			out.Status = "completed_with_warnings"
 		}
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
+}
+
+func manifestMessage(manifest *session.RunManifest, findings int) string {
+	if manifest == nil {
+		return ""
+	}
+	selected := len(manifest.Coverage.Selected)
+	failed := len(manifest.Coverage.Failed)
+	waived := len(manifest.Coverage.Waived)
+	switch manifest.TerminalState {
+	case session.StateComplete:
+		if waived > 0 {
+			return fmt.Sprintf("Review complete: %d finding(s) across %d selected item(s), including %d waived.", findings, selected, waived)
+		}
+		return fmt.Sprintf("Review complete: %d finding(s) across %d selected item(s).", findings, selected)
+	case session.StatePartial:
+		return fmt.Sprintf("Review partially complete: %d finding(s); %d of %d selected item(s) failed.", findings, failed, selected)
+	case session.StateFailed:
+		if manifest.RunFailure != nil {
+			return fmt.Sprintf("Review failed (%s): %d finding(s); %d of %d selected item(s) failed.", manifest.RunFailure.Classification, findings, failed, selected)
+		}
+		return fmt.Sprintf("Review failed: %d finding(s); %d of %d selected item(s) failed.", findings, failed, selected)
+	case session.StateSkipped:
+		return "Review skipped: no items were selected."
+	default:
+		return fmt.Sprintf("Review finished with unknown manifest state %q.", manifest.TerminalState)
+	}
 }
 
 func outputJSONNoFiles(traceID string) error {

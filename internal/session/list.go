@@ -28,12 +28,16 @@ type Summary struct {
 	StartTime      time.Time     `json:"start_time"`
 	EndTime        time.Time     `json:"end_time,omitempty"`
 	Duration       time.Duration `json:"duration_ns,omitempty"`
+	SelectedFiles  int           `json:"selected_files"`
 	CompletedFiles int           `json:"completed_files"`
 	FailedFiles    int           `json:"failed_files"`
 	ReusedFiles    int           `json:"reused_files"`
+	WaivedFiles    int           `json:"waived_files"`
 	TotalComments  int           `json:"total_comments"`
 	LLMFailures    int64         `json:"llm_failures"`
 	Aborted        bool          `json:"aborted"`
+	Legacy         bool          `json:"legacy"`
+	RunManifest    *RunManifest  `json:"run_manifest,omitempty"`
 }
 
 // ItemDetail describes one file-level record within a session, used by `ocr session show`.
@@ -72,6 +76,7 @@ type summaryRecord struct {
 	FilesReviewed   []string        `json:"files_reviewed"`
 	DurationSeconds float64         `json:"duration_seconds"`
 	LLMFailures     int64           `json:"llm_failures"`
+	RunManifest     *RunManifest    `json:"run_manifest"`
 }
 
 // SessionsDir returns the on-disk directory that holds JSONL session files
@@ -229,8 +234,22 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 		s.FailedFiles++
 	case "session_end":
 		s.Aborted = false
-		if s.CompletedFiles == 0 && s.ReusedFiles == 0 && s.FailedFiles == 0 && len(rec.FilesReviewed) > 0 {
-			s.CompletedFiles = len(rec.FilesReviewed)
+		if rec.RunManifest != nil && rec.RunManifest.SchemaVersion == ManifestSchemaVersion {
+			m := rec.RunManifest.cloned()
+			s.RunManifest = &m
+			s.SelectedFiles = len(m.Coverage.Selected)
+			s.CompletedFiles = len(m.Coverage.Completed)
+			s.ReusedFiles = len(m.Coverage.Reused)
+			s.FailedFiles = len(m.Coverage.Failed)
+			s.WaivedFiles = len(m.Coverage.Waived)
+		} else {
+			// A completed session without a known v1 manifest is legacy. Keep the
+			// checkpoint-derived counts, but never infer a v1 complete state.
+			s.Legacy = true
+			if s.CompletedFiles == 0 && s.ReusedFiles == 0 && s.FailedFiles == 0 && len(rec.FilesReviewed) > 0 {
+				s.CompletedFiles = len(rec.FilesReviewed)
+			}
+			s.SelectedFiles = s.CompletedFiles + s.ReusedFiles + s.FailedFiles
 		}
 		if !ts.IsZero() {
 			s.EndTime = ts

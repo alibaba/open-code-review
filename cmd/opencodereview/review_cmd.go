@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -143,17 +144,41 @@ func runReview(args []string) error {
 	}
 	startTime := time.Now()
 
-	comments, err := ag.Run(ctx)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
+	comments, runErr := ag.Run(ctx)
+	manifest := ag.RunManifest()
+	resultErr := reviewResultError(runErr, manifest)
+	if resultErr != nil {
+		span.SetStatus(codes.Error, resultErr.Error())
+		span.RecordError(resultErr)
+	}
+
+	// A successfully constructed manifest is publishable even when execution or
+	// session delivery failed. Emit it first, then return the independent process
+	// error so JSON consumers retain the complete coverage diagnosis.
+	var emitErr error
+	if manifest != nil || runErr == nil {
+		emitErr = emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q)
+		if emitErr != nil {
+			emitErr = fmt.Errorf("emit review result: %w", emitErr)
+		}
+	}
+	if resultErr != nil {
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
-		return fmt.Errorf("review failed: %w", err)
+		return errors.Join(resultErr, emitErr)
 	}
+	return emitErr
+}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q)
+func reviewResultError(runErr error, manifest *session.RunManifest) error {
+	if runErr != nil {
+		return fmt.Errorf("review failed: %w", runErr)
+	}
+	if manifest != nil && manifest.TerminalState == session.StateFailed {
+		return errors.New("review failed: run manifest terminal state is failed")
+	}
+	return nil
 }
 
 func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeState, error) {

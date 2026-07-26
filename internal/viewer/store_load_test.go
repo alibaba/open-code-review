@@ -175,6 +175,28 @@ func TestLoadSession_MissingFile(t *testing.T) {
 	}
 }
 
+func TestLoadSessionReadsV1Manifest(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(repoDir, "manifest.jsonl"),
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
+		`{"type":"session_end","duration_seconds":1,"run_manifest":{"schema_version":"ocr.run-manifest/v1","run_id":"run-1","operation":"review","terminal_state":"complete","repository":{},"input":{"mode":"workspace"},"execution":{},"coverage":{"selected":[{"item_id":"a","path":"a.go"},{"item_id":"b","path":"b.go"}],"completed":[{"item_id":"a","path":"a.go"}],"reused":[{"item_id":"b","path":"b.go"}],"failed":[],"waived":[]},"elapsed_ms":1000}}`)
+
+	vs, err := LoadSession(root, "repo", "manifest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vs.Summary.RunManifest == nil || vs.Summary.TerminalState != "complete" || vs.Summary.FileCount != 2 {
+		t.Fatalf("summary = %+v", vs.Summary)
+	}
+	if vs.Summary.CompletedCount != 1 || vs.Summary.ReusedCount != 1 || vs.Summary.FailedCount != 0 || vs.Summary.WaivedCount != 0 {
+		t.Fatalf("coverage counts = %+v", vs.Summary)
+	}
+}
+
 func TestLoadSession_MalformedLines(t *testing.T) {
 	root := t.TempDir()
 	repoDir := filepath.Join(root, "repo")

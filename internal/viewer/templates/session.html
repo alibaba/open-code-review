@@ -25,8 +25,22 @@
         <span><strong>Model:</strong> <code>{{.Session.Summary.Model}}</code></span>
         <span><strong>Duration:</strong> {{formatDuration .Session.Summary.DurationSec}}</span>
         <span><strong>Files:</strong> {{.Session.Summary.FileCount}}</span>
+        <span><strong>Status:</strong> {{if .Session.Summary.Aborted}}aborted{{else if .Session.Summary.Legacy}}legacy{{else}}{{.Session.Summary.TerminalState}}{{end}}</span>
     </div>
 </div>
+
+{{if .Session.Summary.RunManifest}}
+<div class="token-summary">
+    <h3>Coverage</h3>
+    <div class="token-stats">
+        <div class="token-item"><div class="token-value">{{.Session.Summary.SelectedCount}}</div><div class="token-label">Selected</div></div>
+        <div class="token-item"><div class="token-value">{{.Session.Summary.CompletedCount}}</div><div class="token-label">Completed</div></div>
+        <div class="token-item"><div class="token-value">{{.Session.Summary.ReusedCount}}</div><div class="token-label">Reused</div></div>
+        <div class="token-item"><div class="token-value{{if .Session.Summary.FailedCount}} badge-error{{end}}">{{.Session.Summary.FailedCount}}</div><div class="token-label">Failed</div></div>
+        <div class="token-item"><div class="token-value">{{.Session.Summary.WaivedCount}}</div><div class="token-label">Waived</div></div>
+    </div>
+</div>
+{{end}}
 
 <div class="token-summary">
     <h3>Token Usage</h3>

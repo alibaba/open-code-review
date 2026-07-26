@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/open-code-review/open-code-review/internal/session"
 )
 
 // SessionsRoot returns the root directory where session JSONL files are stored.
@@ -75,19 +77,28 @@ func DiscoverRepos(root string) ([]RepoInfo, error) {
 
 // SessionSummary is built from session_start and session_end records.
 type SessionSummary struct {
-	SessionID     string
-	Timestamp     time.Time
-	CWD           string
-	GitBranch     string
-	Model         string
-	ReviewMode    string
-	DiffFrom      string
-	DiffTo        string
-	DiffCommit    string
-	FilesReviewed []string
-	DurationSec   float64
-	FileCount     int
-	LLMFailures   int
+	SessionID      string
+	Timestamp      time.Time
+	CWD            string
+	GitBranch      string
+	Model          string
+	ReviewMode     string
+	DiffFrom       string
+	DiffTo         string
+	DiffCommit     string
+	FilesReviewed  []string
+	DurationSec    float64
+	FileCount      int
+	LLMFailures    int
+	Aborted        bool
+	Legacy         bool
+	TerminalState  string
+	SelectedCount  int
+	CompletedCount int
+	ReusedCount    int
+	FailedCount    int
+	WaivedCount    int
+	RunManifest    *session.RunManifest
 }
 
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
@@ -126,7 +137,7 @@ func peekSession(path string) (SessionSummary, error) {
 	}
 	defer f.Close()
 
-	var summary SessionSummary
+	summary := SessionSummary{Aborted: true}
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
@@ -172,24 +183,13 @@ func peekSession(path string) (SessionSummary, error) {
 		var rec map[string]any
 		if err := json.Unmarshal(lastLine, &rec); err == nil {
 			if typ, _ := rec["type"].(string); typ == "session_end" {
-				if dur, ok := rec["duration_seconds"].(float64); ok {
-					summary.DurationSec = dur
-				}
-				if files, ok := rec["files_reviewed"].([]any); ok {
-					summary.FilesReviewed = make([]string, 0, len(files))
-					for _, fv := range files {
-						if s, ok := fv.(string); ok {
-							summary.FilesReviewed = append(summary.FilesReviewed, s)
-						}
-					}
-				}
-				if f, ok := rec["llm_failures"].(float64); ok {
-					summary.LLMFailures = int(f)
-				}
+				applySessionEnd(&summary, rec)
 			}
 		}
 	}
-	summary.FileCount = len(summary.FilesReviewed)
+	if summary.RunManifest == nil {
+		summary.FileCount = len(summary.FilesReviewed)
+	}
 	return summary, scanner.Err()
 }
 
@@ -269,6 +269,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	defer f.Close()
 
 	vs := &ViewSession{Files: make([]*FileGroup, 0)}
+	vs.Summary.Aborted = true
 	fileIndex := make(map[string]*FileGroup)
 
 	scanner := bufio.NewScanner(f)
@@ -443,21 +444,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 
 		case "session_end":
-			if dur, ok := rec["duration_seconds"].(float64); ok {
-				vs.Summary.DurationSec = dur
-			}
-			if files, ok := rec["files_reviewed"].([]any); ok {
-				vs.Summary.FilesReviewed = make([]string, 0, len(files))
-				for _, fv := range files {
-					if s, ok2 := fv.(string); ok2 {
-						vs.Summary.FilesReviewed = append(vs.Summary.FilesReviewed, s)
-					}
-				}
-			}
-			vs.Summary.FileCount = len(vs.Summary.FilesReviewed)
-			if f, ok := rec["llm_failures"].(float64); ok {
-				vs.Summary.LLMFailures = int(f)
-			}
+			applySessionEnd(&vs.Summary, rec)
 		}
 	}
 
@@ -493,4 +480,43 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs.Summary.SessionID = sessionID
 	return vs, scanner.Err()
+}
+
+func applySessionEnd(summary *SessionSummary, rec map[string]any) {
+	summary.Aborted = false
+	if dur, ok := rec["duration_seconds"].(float64); ok {
+		summary.DurationSec = dur
+	}
+	if files, ok := rec["files_reviewed"].([]any); ok {
+		summary.FilesReviewed = make([]string, 0, len(files))
+		for _, fv := range files {
+			if s, ok := fv.(string); ok {
+				summary.FilesReviewed = append(summary.FilesReviewed, s)
+			}
+		}
+	}
+	if f, ok := rec["llm_failures"].(float64); ok {
+		summary.LLMFailures = int(f)
+	}
+
+	if raw, ok := rec["run_manifest"]; ok {
+		data, err := json.Marshal(raw)
+		if err == nil {
+			var manifest session.RunManifest
+			if err := json.Unmarshal(data, &manifest); err == nil && manifest.SchemaVersion == session.ManifestSchemaVersion {
+				summary.RunManifest = &manifest
+				summary.TerminalState = string(manifest.TerminalState)
+				summary.SelectedCount = len(manifest.Coverage.Selected)
+				summary.CompletedCount = len(manifest.Coverage.Completed)
+				summary.ReusedCount = len(manifest.Coverage.Reused)
+				summary.FailedCount = len(manifest.Coverage.Failed)
+				summary.WaivedCount = len(manifest.Coverage.Waived)
+				summary.FileCount = summary.SelectedCount
+			}
+		}
+	}
+	if summary.RunManifest == nil {
+		summary.Legacy = true
+		summary.FileCount = len(summary.FilesReviewed)
+	}
 }
