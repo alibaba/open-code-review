@@ -212,6 +212,57 @@ func TestDismissListCorruptStoreWarnsAndShowsEmpty(t *testing.T) {
 	}
 }
 
+func TestDismissListNoPanicWhenStorePathUnresolvable(t *testing.T) {
+	// Regression: LoadDismissals returns (nil, err) when HOME is unresolvable;
+	// runDismissList must return an error, not panic on a nil store deref.
+	t.Setenv("HOME", "")
+	repoDir := t.TempDir()
+	err := runDismiss([]string{"list", "--repo", repoDir})
+	if err == nil {
+		t.Fatal("expected error when store path cannot be resolved (HOME unset), got nil")
+	}
+}
+
+func TestDismissRemoveAmbiguousPrefixReports(t *testing.T) {
+	// Regression: a short-fingerprint prefix matching multiple entries must
+	// report the ambiguity explicitly, not fall through to a generic "no match".
+	// Use resolveRemoveRef directly with crafted entries sharing a known prefix
+	// (real SHA-256 fingerprints rarely collide on a prefix, so the store is
+	// constructed with explicit fingerprint strings).
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	store, err := session.LoadDismissals(repoDir)
+	if err != nil {
+		t.Fatalf("LoadDismissals: %v", err)
+	}
+	store.Record(session.DismissalEntry{Fingerprint: "abc1230000000000000000000000000000000000000000000000000000000000", Path: "a.go"})
+	store.Record(session.DismissalEntry{Fingerprint: "abc1239999999999999999999999999999999999999999999999999999999999", Path: "b.go"})
+	if err := store.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	store, err = session.LoadDismissals(repoDir)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	_, err = resolveRemoveRef(store, "abc1")
+	if err == nil {
+		t.Fatal("expected ambiguity error for shared prefix, got nil")
+	}
+	if !strings.Contains(err.Error(), "matches") || !strings.Contains(err.Error(), "disambiguate") {
+		t.Errorf("expected ambiguity-reporting error, got: %v", err)
+	}
+
+	// Sanity: a unique prefix still resolves.
+	fp, err := resolveRemoveRef(store, "abc1230")
+	if err != nil {
+		t.Fatalf("unique prefix should resolve: %v", err)
+	}
+	if !strings.HasPrefix(fp, "abc1230") {
+		t.Errorf("resolved fingerprint %q does not extend the prefix", fp)
+	}
+}
+
 func TestRunDismissUsage(t *testing.T) {
 	out := captureStdout(t, func() {
 		if err := runDismiss(nil); err != nil {

@@ -130,6 +130,13 @@ func runDismissList(args []string) error {
 	}
 	store, err := session.LoadDismissals(resolvedRepo)
 	if err != nil {
+		// LoadDismissals returns (nil, err) only when the store path cannot be
+		// resolved (e.g. HOME unresolvable); otherwise it returns (emptyStore, err)
+		// for a corrupt/unreadable file so we can still list nothing safely. Guard
+		// both: on a nil store we cannot proceed (no path to consult).
+		if store == nil {
+			return fmt.Errorf("load dismissal store: %w", err)
+		}
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: dismissal store corrupt (%v); showing no dismissals. The file was left untouched.\n", err)
 	}
 	entries := store.List()
@@ -236,15 +243,20 @@ func resolveRemoveRef(store *session.DismissalStore, ref string) (string, error)
 	// Short fingerprint prefix (first 12 chars, as printed by `dismiss list`).
 	if len(ref) >= 4 {
 		var match string
-		count := 0
+		var matches []string
 		for _, e := range entries {
 			if strings.HasPrefix(e.Fingerprint, ref) {
 				match = e.Fingerprint
-				count++
+				matches = append(matches, e.Fingerprint)
 			}
 		}
-		if count == 1 {
+		if len(matches) == 1 {
 			return match, nil
+		}
+		if len(matches) > 1 {
+			// Report the ambiguity explicitly rather than falling through to a
+			// generic "no match" error (consistent with resolveFindingRef).
+			return "", fmt.Errorf("prefix %q matches %d dismissals; provide more characters or use 'ocr dismiss list' to disambiguate (matches: %s)", ref, len(matches), shortFingerprint(matches[0]))
 		}
 	}
 	// List index form (checked last so a decimal-looking fingerprint prefix is
@@ -285,7 +297,8 @@ func printDismissTable(w io.Writer, entries []session.DismissalEntry) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "INDEX\tFINGERPRINT\tPATH\tPREVIEW\tDISMISSED AT")
 	for i, e := range entries {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", i, shortFingerprint(e.Fingerprint), e.Path, truncateForPreview(e.ContentPreview), e.DismissedAt)
+		// ContentPreview is already truncated at store time; use it directly.
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", i, shortFingerprint(e.Fingerprint), e.Path, e.ContentPreview, e.DismissedAt)
 	}
 	tw.Flush()
 }
