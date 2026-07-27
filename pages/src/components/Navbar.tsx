@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
@@ -9,12 +9,12 @@ import type { Language } from '../i18n/types';
 
 const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
-  { value: 'zh', label: '中文' },
-  { value: 'ja', label: '日本語' },
+  { value: 'zh', label: 'ä¸­æ–‡' },
+  { value: 'ja', label: 'æ—¥æœ¬èªž' },
 ];
 
 const navTabs = [
-  { path: '/', labelKey: 'navbar.features' },
+  { path: '/#features', labelKey: 'navbar.features' },
   { path: '/benchmark', labelKey: 'navbar.benchmark' },
   { path: '/quickstart', labelKey: 'navbar.quickstart' },
   { path: '/docs', labelKey: 'navbar.docs' },
@@ -38,6 +38,42 @@ const Navbar: React.FC = () => {
   }, []);
 
   const currentPath = location.pathname;
+  const currentHash = location.hash;
+
+  const handleNavClick = useCallback((path: string) => {
+    if (path.includes('#')) {
+      const [route, hash] = path.split('#');
+      const targetRoute = route || '/';
+      if (currentPath === targetRoute) {
+        // Already on the correct page â€” just scroll to the anchor.
+        const el = document.getElementById(hash);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+        }
+      } else {
+        // Navigate to the page first; ScrollToTop + useEffect will handle
+        // scrolling after the route change.
+        navigate(path);
+      }
+    } else {
+      navigate(path);
+    }
+  }, [currentPath, navigate]);
+
+  // After navigation to a hash route, scroll to the target element.
+  useEffect(() => {
+    if (currentHash) {
+      const id = currentHash.replace('#', '');
+      // Small delay to let the page render before scrolling.
+      const timer = setTimeout(() => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [currentPath, currentHash]);
 
   return (
     <nav
@@ -80,11 +116,13 @@ const Navbar: React.FC = () => {
         {!isMobile && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {navTabs.map((tab) => {
-              const isActive = tab.path === '/' ? currentPath === '/' : currentPath.startsWith(tab.path);
+              const isActive = tab.path === '/#features'
+                ? currentPath === '/' && currentHash === '#features'
+                : currentPath.startsWith(tab.path);
               return (
                 <button
                   key={tab.path}
-                  onClick={() => navigate(tab.path)}
+                  onClick={() => handleNavClick(tab.path)}
                   style={{
                     padding: '8px 16px',
                     borderRadius: 8,
@@ -141,7 +179,7 @@ const Navbar: React.FC = () => {
                 width: '100%',
                 fontFamily: language === 'ja' ? "'Hiragino Sans', sans-serif" : "'PingFang SC', -apple-system, sans-serif",
               }}>
-                {language === 'en' ? 'En' : language === 'zh' ? '中' : 'あ'}
+                {language === 'en' ? 'En' : language === 'zh' ? 'ä¸­' : 'ã‚'}
               </span>
             </button>
             {langOpen && (
