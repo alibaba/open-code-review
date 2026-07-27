@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/open-code-review/open-code-review/internal/model"
 	"github.com/open-code-review/open-code-review/internal/session"
 )
 
@@ -22,6 +23,8 @@ func runSession(args []string) error {
 		return runSessionList(args[1:])
 	case "show":
 		return runSessionShow(args[1:])
+	case "comments":
+		return runSessionComments(args[1:])
 	case "-h", "--help":
 		printSessionUsage()
 		return nil
@@ -113,6 +116,82 @@ func runSessionShow(args []string) error {
 	}
 
 	printSessionDetail(os.Stdout, summary, items)
+	return nil
+}
+
+func runSessionComments(args []string) error {
+	a := newOcrFlagSet("ocr session comments")
+	var repoDir string
+	var asJSON bool
+	var severity string
+	var category string
+	a.StringVar(&repoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	a.BoolVar(&asJSON, "json", false, "emit JSON instead of text")
+	a.StringVar(&severity, "severity", "", "show only comments with this exact severity (e.g. high)")
+	a.StringVar(&category, "category", "", "show only comments with this exact category (e.g. bug)")
+	if err := a.Parse(args); err != nil {
+		return err
+	}
+	if a.showHelp {
+		printSessionCommentsUsage()
+		return nil
+	}
+
+	rest := a.fs.Args()
+	if len(rest) == 0 {
+		printSessionCommentsUsage()
+		return fmt.Errorf("session comments requires a session ID")
+	}
+	sessionID := rest[0]
+
+	resolvedRepo, err := resolveWorkingDirForSession(repoDir)
+	if err != nil {
+		return err
+	}
+	summary, entries, err := session.LoadComments(resolvedRepo, sessionID)
+	if err != nil {
+		return fmt.Errorf("load session %q: %w", sessionID, err)
+	}
+
+	// Flatten surviving comments in on-disk record order; filters are exact
+	// match and select but never reorder, so two runs over the same session
+	// diff cleanly.
+	var comments []model.LlmComment
+	for _, e := range entries {
+		for _, c := range e.Comments {
+			if severity != "" && c.Severity != severity {
+				continue
+			}
+			if category != "" && c.Category != category {
+				continue
+			}
+			comments = append(comments, c)
+		}
+	}
+
+	if asJSON {
+		payload := struct {
+			SessionID string             `json:"session_id"`
+			Comments  []model.LlmComment `json:"comments"`
+		}{
+			SessionID: summary.SessionID,
+			Comments:  comments, // nil → marshals as null; normalize to []
+		}
+		if payload.Comments == nil {
+			payload.Comments = []model.LlmComment{}
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(payload)
+	}
+
+	if len(comments) == 0 {
+		fmt.Println("No comments found for this session.")
+		return nil
+	}
+	for _, c := range comments {
+		renderComment(c)
+	}
 	return nil
 }
 
@@ -267,10 +346,11 @@ func printSessionUsage() {
   ocr session <sub-command>
 
 Sub-commands:
-  list, ls    List recent review sessions for the current repo
-  show <id>   Show one session's metadata and per-file items
+  list, ls        List recent review sessions for the current repo
+  show <id>       Show one session's metadata and per-file items
+  comments <id>   Show the materialized comments of one session
 
-Use "ocr session list -h" or "ocr session show -h" for details.`)
+Use "ocr session list -h", "ocr session show -h", or "ocr session comments -h" for details.`)
 }
 
 func printSessionListUsage() {
@@ -296,4 +376,19 @@ Show metadata and per-file items for a single session.
 Flags:
   --repo string   Root directory of the git repository (default: current dir)
   --json          Emit JSON instead of a table`)
+}
+
+func printSessionCommentsUsage() {
+	fmt.Println(`Usage:
+  ocr session comments [flags] <session-id>
+
+Show the materialized review comments of a single session, in the same style as
+'ocr review'. Comments are sourced from review_item_done and review_item_reused
+records, in on-disk order.
+
+Flags:
+  --repo string       Root directory of the git repository (default: current dir)
+  --json              Emit {"session_id","comments":[...]} JSON instead of text
+  --severity string   Show only comments with this exact severity (e.g. high)
+  --category string   Show only comments with this exact category (e.g. bug)`)
 }

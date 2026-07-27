@@ -146,6 +146,128 @@ func TestLoadSummary_MissingFile(t *testing.T) {
 	}
 }
 
+func TestLoadComments_ReturnsContent(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+
+	sh := New(repoDir, "main", "test-model", SessionOptions{
+		ReviewMode: ReviewModeCommit,
+		DiffCommit: "abc123",
+	})
+	sh.RecordReviewItemDone("a.go", "a.go", "a.go", "fp-a", []model.LlmComment{
+		{Path: "a.go", Content: "note", Category: "bug", Severity: "high"},
+	})
+	sh.RecordReviewItemReused("b.go", "b.go", "b.go", "fp-b", "prior-session", []model.LlmComment{
+		{Path: "b.go", Content: "cached", Category: "style", Severity: "low"},
+	})
+	// Failed records carry no comments and must contribute nothing.
+	sh.RecordReviewItemFailed("c.go", "c.go", "c.go", "fp-c", "boom")
+	sh.Finalize()
+
+	summary, entries, err := LoadComments(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadComments: %v", err)
+	}
+
+	// done + reused only; failed naturally excluded.
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 comment entries (done+reused), got %d: %+v", len(entries), entries)
+	}
+	if entries[0].Type != "done" || entries[0].FilePath != "a.go" {
+		t.Errorf("entry[0] = %+v", entries[0])
+	}
+	if len(entries[0].Comments) != 1 || entries[0].Comments[0].Content != "note" {
+		t.Errorf("done comments = %+v", entries[0].Comments)
+	}
+	if entries[1].Type != "reused" || entries[1].FilePath != "b.go" {
+		t.Errorf("entry[1] = %+v", entries[1])
+	}
+	if len(entries[1].Comments) != 1 || entries[1].Comments[0].Content != "cached" {
+		t.Errorf("reused comments = %+v", entries[1].Comments)
+	}
+
+	// Parity: LoadComments' summary TotalComments must equal LoadDetail's
+	// because both walk the same records via applyRecordToSummary.
+	detailSummary, _, err := LoadDetail(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadDetail: %v", err)
+	}
+	if summary.TotalComments != detailSummary.TotalComments {
+		t.Errorf("TotalComments parity broken: LoadComments=%d, LoadDetail=%d",
+			summary.TotalComments, detailSummary.TotalComments)
+	}
+}
+
+func TestLoadComments_EmptySession(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+
+	sh := New(repoDir, "main", "test-model", SessionOptions{
+		ReviewMode: ReviewModeCommit,
+		DiffCommit: "abc123",
+	})
+	// Only a failed record (no comments) and no done/reused records.
+	sh.RecordReviewItemFailed("c.go", "c.go", "c.go", "fp-c", "boom")
+	sh.Finalize()
+
+	summary, entries, err := LoadComments(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadComments: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected 0 entries for comment-less session, got %d", len(entries))
+	}
+	if summary.TotalComments != 0 {
+		t.Errorf("TotalComments = %d, want 0", summary.TotalComments)
+	}
+}
+
+func TestLoadComments_PreservesRecordOrder(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+
+	sh := New(repoDir, "main", "test-model", SessionOptions{
+		ReviewMode: ReviewModeCommit,
+		DiffCommit: "abc123",
+	})
+	// Two done records + one reused in deliberate order; on-disk order must be preserved.
+	sh.RecordReviewItemDone("first.go", "first.go", "first.go", "fp-1", []model.LlmComment{
+		{Path: "first.go", Content: "one"},
+	})
+	sh.RecordReviewItemReused("second.go", "second.go", "second.go", "fp-2", "src", []model.LlmComment{
+		{Path: "second.go", Content: "two"},
+	})
+	sh.RecordReviewItemDone("third.go", "third.go", "third.go", "fp-3", []model.LlmComment{
+		{Path: "third.go", Content: "three"},
+	})
+	sh.Finalize()
+
+	_, entries, err := LoadComments(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadComments: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+	wantPaths := []string{"first.go", "second.go", "third.go"}
+	for i, want := range wantPaths {
+		if entries[i].FilePath != want {
+			t.Errorf("entry[%d] FilePath = %q, want %q (on-disk order not preserved)", i, entries[i].FilePath, want)
+		}
+	}
+}
+
+func TestLoadComments_MissingFile(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	if _, _, err := LoadComments(t.TempDir(), "nonexistent"); err == nil {
+		t.Fatal("expected error for missing session")
+	}
+}
+
 // writeTestSession creates a real JSONL session using the persistence layer
 // so tests exercise the same on-disk format that ListSessions consumes.
 // It returns the session id.

@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/open-code-review/open-code-review/internal/model"
 )
 
 // Summary is a compact digest of one persisted session, suitable for
@@ -47,6 +49,16 @@ type ItemDetail struct {
 	Comments        int       `json:"comments"`
 	SourceSessionID string    `json:"source_session_id,omitempty"`
 	Error           string    `json:"error,omitempty"`
+}
+
+// CommentEntry is one file-level record carrying its materialized comments,
+// returned by LoadComments for the `ocr session comments` viewer. It is
+// intentionally a standalone type (not a field on ItemDetail) so that
+// ItemDetail.Comments remains an int count for `ocr session show`.
+type CommentEntry struct {
+	Type     string             `json:"type"` // "done" | "reused"
+	FilePath string             `json:"file_path"`
+	Comments []model.LlmComment `json:"comments"`
 }
 
 // summaryRecord is a superset of resumeRecord that also carries session_end fields.
@@ -154,6 +166,83 @@ func LoadDetail(repoDir, sessionID string) (*Summary, []ItemDetail, error) {
 		summary.SessionID = sessionID
 	}
 	return summary, items, nil
+}
+
+// LoadComments returns the summary plus per-record comment groups for one
+// session, sourcing materialized comments from review_item_done and
+// review_item_reused records (the same records TotalComments counts). It is
+// read-only and does not mutate the session store. Records that carry no
+// comments (e.g. review_item_failed, which persists nil) are skipped.
+func LoadComments(repoDir, sessionID string) (*Summary, []CommentEntry, error) {
+	path, err := SessionFilePath(repoDir, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	summary := &Summary{
+		SessionID: sessionID,
+		FilePath:  path,
+		RepoDir:   repoDir,
+		Aborted:   true,
+	}
+	var entries []CommentEntry
+	err = walkSessionFile(path, func(rec summaryRecord) {
+		applyRecordToSummary(summary, rec)
+		if comments, ok := commentsFromRecord(rec); ok {
+			entries = append(entries, comments)
+		}
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if summary.SessionID == "" {
+		summary.SessionID = sessionID
+	}
+	return summary, entries, nil
+}
+
+// commentsFromRecord extracts a CommentEntry for review_item_done and
+// review_item_reused records. It returns ok=false when the record carries no
+// comment array (failed records, non-item records, or empty arrays), so such
+// records are naturally excluded from the viewer output.
+func commentsFromRecord(rec summaryRecord) (CommentEntry, bool) {
+	kind := ""
+	switch rec.Type {
+	case "review_item_done":
+		kind = "done"
+	case "review_item_reused":
+		kind = "reused"
+	default:
+		return CommentEntry{}, false
+	}
+	comments := decodeCommentsRaw(rec.Comments)
+	if len(comments) == 0 {
+		return CommentEntry{}, false
+	}
+	filePath := rec.FilePath
+	if filePath == "" {
+		filePath = rec.NewPath
+	}
+	return CommentEntry{
+		Type:     kind,
+		FilePath: filePath,
+		Comments: comments,
+	}, true
+}
+
+// decodeCommentsRaw unmarshals a record's comments field (json.RawMessage)
+// into []model.LlmComment. The on-disk shape is identical to the one the
+// writer persists (WriteReviewItemDone/WriteReviewItemReused) and that
+// resumeRecord.Comments already decodes directly. A nil/empty or malformed
+// field yields nil.
+func decodeCommentsRaw(raw json.RawMessage) []model.LlmComment {
+	if len(raw) == 0 {
+		return nil
+	}
+	var comments []model.LlmComment
+	if err := json.Unmarshal(raw, &comments); err != nil {
+		return nil
+	}
+	return comments
 }
 
 func loadSummaryFromFile(path, sessionID, repoDir string) (*Summary, error) {

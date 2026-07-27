@@ -145,6 +145,12 @@ ocr review --commit abc123
 ocr session list
 ocr review --from main --to feature-branch --resume <session-id>
 
+# 저장된 세션 확인: 메타데이터, 파일별 항목, 구체화된 코멘트
+ocr session show <session-id>
+ocr session comments <session-id>                  # ocr review 스타일로 코멘트 보기
+ocr session comments <session-id> --severity high  # 심각도로 필터링
+ocr session comments <session-id> --json           # 스크립트용 JSON 출력
+
 # 전체 파일 스캔 — diff 대신 파일 전체를 리뷰 (git 이력 불필요)
 ocr scan                          # 전체 repository 스캔
 ocr scan --path internal/agent    # 디렉터리 또는 특정 파일 스캔

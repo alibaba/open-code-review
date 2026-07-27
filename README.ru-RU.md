@@ -145,6 +145,12 @@ ocr review --commit abc123
 ocr session list
 ocr review --from main --to feature-branch --resume <session-id>
 
+# Просмотр сохранённой сессии: метаданные, записи по файлам и сами комментарии
+ocr session show <session-id>
+ocr session comments <session-id>                  # комментарии в стиле ocr review
+ocr session comments <session-id> --severity high  # фильтр по критичности
+ocr session comments <session-id> --json           # вывод JSON для скриптов
+
 # Полнофайловое сканирование — ревью целых файлов вместо диффа (история git не нужна)
 ocr scan                          # сканировать весь репозиторий
 ocr scan --path internal/agent    # сканировать каталог или конкретные файлы
