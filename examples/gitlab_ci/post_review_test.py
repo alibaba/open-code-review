@@ -20,6 +20,7 @@ import io
 import json
 import os
 import random
+import socket
 import sys
 import tempfile
 import unittest
@@ -626,6 +627,40 @@ class MakePosterTest(unittest.TestCase):
         headers = {k.lower(): v for k, v in captured["headers"].items()}
         self.assertEqual(headers.get("job-token"), self.TOKEN)
         self.assertNotIn("private-token", headers)
+
+    # ---- URLError (network-level errors) ----
+
+    def test_retry_urlerror_then_success(self):
+        discussion = {"body": "hello"}
+        conn_err = urllib.error.URLError(ConnectionRefusedError("refused"))
+        n, result, raised = self.post_seq(
+            discussion,
+            [conn_err, b'{"id": 1}'],
+        )
+        self.assertIsNone(raised)
+        self.assertTrue(result["success"])
+        self.assertEqual(n, 2)
+
+    def test_urlerror_exhausts_retries(self):
+        discussion = {"body": "hello"}
+        conn_err = urllib.error.URLError(ConnectionRefusedError("refused"))
+        n, result, raised = self.post_seq(
+            discussion,
+            [conn_err] * 4,  # max_retries=3 → 4 attempts
+        )
+        self.assertFalse(result["success"])
+        self.assertFalse(result["is_rate_limit_exhausted"])
+        self.assertEqual(n, 4)
+
+    def test_urlerror_timeout_not_retried(self):
+        discussion = {"body": "hello"}
+        timeout_err = urllib.error.URLError(socket.timeout("timed out"))
+        n, result, raised = self.post_seq(
+            discussion,
+            [timeout_err, b'{"id": 1}'],
+        )
+        self.assertFalse(result["success"])
+        self.assertEqual(n, 1)  # no retry on timeout
 
 
 # --------------------------------------------------------------------------- #

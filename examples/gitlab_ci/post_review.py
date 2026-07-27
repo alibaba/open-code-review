@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import random
+import socket
 import sys
 import time
 import urllib.error
@@ -294,6 +295,34 @@ def _api_request_with_retry(api_base, token, auth_header, config, endpoint,
                     "data": None,
                     "is_rate_limit_exhausted": is_rate_limit,
                     "rate_limit_remaining": rl_remaining,
+                }
+        except urllib.error.URLError as e:
+            # Retry connection-level errors (DNS, refused, reset), but NOT
+            # connection-phase timeouts (ambiguous — server may have
+            # processed the request, so retrying risks a duplicate post).
+            if isinstance(e.reason, (socket.timeout, TimeoutError)):
+                log("Connection timeout for %s, not retrying" % endpoint)
+                return {
+                    "success": False,
+                    "data": None,
+                    "is_rate_limit_exhausted": False,
+                    "rate_limit_remaining": None,
+                }
+            if attempt < max_retries:
+                delay = transient_base_delay * (2 ** attempt)
+                delay = min(delay, max_retry_delay)
+                delay = delay * (0.75 + random.random() * 0.5)  # ±25% jitter
+                log("Network error for %s, retrying in %.1fs (attempt %d/%d)"
+                    % (endpoint, delay, attempt + 1, max_retries))
+                _sleep(delay)
+            else:
+                log("Network error for %s after %d retries, giving up"
+                    % (endpoint, max_retries))
+                return {
+                    "success": False,
+                    "data": None,
+                    "is_rate_limit_exhausted": False,
+                    "rate_limit_remaining": None,
                 }
 
     return {
