@@ -17,6 +17,34 @@ func TestApplyCLIExcludes_Empty(t *testing.T) {
 	}
 }
 
+func TestLoadCommonContext_MaxToolsOverride(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+
+	tests := []struct {
+		name     string
+		maxTools int
+		want     int
+	}{
+		{name: "template default", maxTools: 0, want: 30},
+		{name: "lower bound", maxTools: 10, want: 10},
+		{name: "lower than default", maxTools: 15, want: 15},
+		{name: "higher than default", maxTools: 40, want: 40},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cc, err := loadCommonContext(repoDir, "", tt.maxTools, 0, false)
+			if err != nil {
+				t.Fatalf("loadCommonContext() error: %v", err)
+			}
+			if got := cc.Template.MaxToolRequestTimes; got != tt.want {
+				t.Errorf("MaxToolRequestTimes = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestApplyCLIExcludes_AppendsPatterns(t *testing.T) {
 	cc := &commonContext{FileFilter: &rules.FileFilter{Exclude: []string{"a"}}}
 	applyCLIExcludes(cc, []string{"b", "c"})
