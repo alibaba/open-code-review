@@ -15,7 +15,9 @@ const FeaturesPage: React.FC = () => {
         <HeroSection />
       </FadeInSection>
       <FadeInSection delay={100}>
-        <HighlightsSection />
+        <div id="features">
+          <HighlightsSection />
+        </div>
       </FadeInSection>
       <FadeInSection delay={100}>
         <UseCasesSection />
