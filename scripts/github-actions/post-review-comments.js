@@ -343,9 +343,10 @@ async function publishBatch({
     const FAILURE_DELAY = parseNonNegInt(process.env.OCR_FAILURE_DELAY, 1000);
     const LOW_REMAINING_THRESHOLD = parseNonNegInt(process.env.OCR_LOW_REMAINING_THRESHOLD, 3);
     const LOW_REMAINING_SPACING = parseNonNegInt(process.env.OCR_LOW_REMAINING_SPACING, 10000);
-    // Read APIs are cheaper and have higher thresholds; use shorter pacing.
-    const READ_SUCCESS_DELAY = parseNonNegInt(process.env.OCR_READ_SUCCESS_DELAY, 500);
-    const READ_LOW_REMAINING_SPACING = parseNonNegInt(process.env.OCR_READ_LOW_REMAINING_SPACING, 5000);
+    // Note: read-API pacing (OCR_READ_SUCCESS_DELAY / OCR_READ_LOW_REMAINING_SPACING)
+    // is handled internally by readWithPacing() for the read calls below
+    // (findExistingBatchReview / getPostedCommentIds / isCommentAlreadyPosted),
+    // so it is not read here — only the write-path pacing knobs are.
 
     // Rate-limit cooldown: honor the batch error's retry/rate-limit headers
     // BEFORE any further API call — including the idempotency reads below.
