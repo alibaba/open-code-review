@@ -339,7 +339,7 @@ func (a *Agent) filterScanItems(items []model.ScanItem) []model.ScanItem {
 
 // filterLargeScans drops items whose content exceeds 80% of MaxTokens.
 func (a *Agent) filterLargeScans(items []model.ScanItem) []model.ScanItem {
-	limit := a.args.Template.MaxTokens * 4 / 5
+	limit := llmloop.PromptTokenLimit(a.args.Template.MaxTokens)
 	if limit <= 0 {
 		return items
 	}
@@ -573,7 +573,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) error {
 
 	tokenCount := llmloop.CountMessagesTokens(messages)
 	maxAllowed := a.args.Template.MaxTokens
-	tokenLimit := maxAllowed * 4 / 5
+	tokenLimit := llmloop.PromptTokenLimit(maxAllowed)
 	if tokenCount > tokenLimit {
 		msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d)", tokenCount, 80, maxAllowed)
 		fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: %s for %s\n", msg, it.Path)

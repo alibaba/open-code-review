@@ -1,15 +1,49 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import { SearchTrigger } from '../components/SearchTrigger';
 import { useResponsive } from '../hooks/useResponsive';
+import { useCommandSearch, useSearchKeyboardNav } from '../hooks/useCommandSearch';
 import { getDocContent, getDocTitle, DocSlug, searchDocs } from '../content/docs';
-import { generateHeadingId } from '../utils/headingId';
+import { extractHeadings } from '../utils/extractHeadings';
 import docContentsIcon from '../assets/icons/doc-contents.svg';
 import searchIcon from '../assets/icons/icon-search.svg';
 import '../styles/docs-markdown.css';
+
+// marked percent-encodes non-ASCII hrefs; heading ids are raw text from
+// generateHeadingId, so fragments must be decoded before lookup.
+function decodeFragment(fragment: string): string {
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
+// Markdown renders a frame or more after navigation, so a fragment's heading
+// may not exist yet. Retry across a few frames; the returned canceller stops a
+// stale chain when navigation moves on.
+function scrollToFragmentWhenReady(id: string): () => void {
+  let frame = 0;
+  let cancelled = false;
+  const tryScroll = (attempts: number) => {
+    if (cancelled) return;
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (attempts < 10) {
+      frame = requestAnimationFrame(() => tryScroll(attempts + 1));
+    }
+  };
+  frame = requestAnimationFrame(() => tryScroll(0));
+  return () => {
+    cancelled = true;
+    cancelAnimationFrame(frame);
+  };
+}
 
 /* ─── Sidebar tree data ─── */
 interface SidebarItem {
@@ -66,32 +100,6 @@ const ChevronIcon: React.FC<{ expanded: boolean }> = ({ expanded }) => (
   </svg>
 );
 
-/* ─── Extract headings from markdown for right TOC ─── */
-function extractHeadings(markdown: string): { id: string; text: string; level: number }[] {
-  const headings: { id: string; text: string; level: number }[] = [];
-  const lines = markdown.split('\n');
-  let inCodeBlock = false;
-  for (const line of lines) {
-    if (line.trim().startsWith('```')) {
-      inCodeBlock = !inCodeBlock;
-      continue;
-    }
-    if (inCodeBlock) continue;
-    const match = line.match(/^(#{2,3})\s+(.+)$/);
-    if (match) {
-      const level = match[1].length;
-      // Strip markdown link syntax [text](url) → text, then strip other formatting
-      const text = match[2]
-        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-        .replace(/[`*_\[\]()]/g, '')
-        .trim();
-      const id = generateHeadingId(text);
-      headings.push({ id, text, level });
-    }
-  }
-  return headings;
-}
-
 /* ─── Flat ordered list of all doc slugs for prev/next navigation ─── */
 function buildFlatDocList(): { slug: DocSlug; labelKey: string }[] {
   const list: { slug: DocSlug; labelKey: string }[] = [];
@@ -128,18 +136,24 @@ if (process.env.NODE_ENV !== 'production' && validSlugs.size !== flatDocList.len
 const DocsPage: React.FC = () => {
   const { slug: slugParam } = useParams<{ slug?: string }>();
   const navigate = useNavigate();
+  const { hash } = useLocation();
   /* Active doc slug is derived from the URL param, falling back to quickstart */
   const activeSlug: DocSlug =
     slugParam && validSlugs.has(slugParam as DocSlug) ? (slugParam as DocSlug) : 'quickstart';
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({ 'sb-integrations': true });
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [hoveredHeadingId, setHoveredHeadingId] = useState<string>('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchSelectedIdx, setSearchSelectedIdx] = useState(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  /* Cancels an in-flight click-triggered scroll when a newer one starts */
+  const cancelPendingScroll = useRef<(() => void) | null>(null);
   const { t, language } = useTranslation();
   const { isMobile } = useResponsive();
+  const {
+    searchOpen, setSearchOpen,
+    searchQuery, setSearchQuery,
+    searchSelectedIdx, setSearchSelectedIdx,
+    searchInputRef,
+    searchResults,
+  } = useCommandSearch(searchDocs, language);
   const contentRef = React.useRef<HTMLDivElement>(null);
 
   const fontFamily = 'PingFang SC, -apple-system, BlinkMacSystemFont, sans-serif';
@@ -148,6 +162,13 @@ const DocsPage: React.FC = () => {
   const docContent = useMemo(() => getDocContent(activeSlug, language), [activeSlug, language]);
   const docTitle = useMemo(() => getDocTitle(activeSlug, language), [activeSlug, language]);
   const headings = useMemo(() => extractHeadings(docContent), [docContent]);
+
+  /* Scroll direct links after their markdown heading has rendered */
+  useEffect(() => {
+    const fragment = hash.startsWith('#') ? hash.slice(1) : hash;
+    if (!fragment) return;
+    return scrollToFragmentWhenReady(decodeFragment(fragment));
+  }, [hash, docContent]);
 
   /* Track active heading via IntersectionObserver */
   useEffect(() => {
@@ -198,7 +219,7 @@ const DocsPage: React.FC = () => {
     // Skip pure anchors (same-page scroll)
     if (href.startsWith('#')) {
       e.preventDefault();
-      const id = href.slice(1);
+      const id = decodeFragment(href.slice(1));
       const el = document.getElementById(id);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
@@ -217,17 +238,11 @@ const DocsPage: React.FC = () => {
       e.preventDefault();
       navigateToDoc(slug);
       // Handle anchor scroll after navigation with reliable retry
-      const anchor2 = href.split('#')[1];
+      const anchor2raw = href.split('#')[1];
+      const anchor2 = anchor2raw ? decodeFragment(anchor2raw) : undefined;
       if (anchor2) {
-        const tryScroll = (attempts: number) => {
-          const el = document.getElementById(anchor2);
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          } else if (attempts < 10) {
-            requestAnimationFrame(() => tryScroll(attempts + 1));
-          }
-        };
-        requestAnimationFrame(() => tryScroll(0));
+        cancelPendingScroll.current?.();
+        cancelPendingScroll.current = scrollToFragmentWhenReady(anchor2);
       }
     }
   }, [navigateToDoc]);
@@ -240,15 +255,6 @@ const DocsPage: React.FC = () => {
     }
   }, []);
 
-  /* Check if a sidebar item or its children is active */
-  const isItemActive = useCallback((item: SidebarItem): boolean => {
-    if (item.slug === activeSlug) return true;
-    if (item.children) {
-      return item.children.some(child => child.slug === activeSlug);
-    }
-    return false;
-  }, [activeSlug]);
-
   /* Auto-expand parent when a child is active */
   useEffect(() => {
     for (const group of sidebarTree) {
@@ -260,60 +266,16 @@ const DocsPage: React.FC = () => {
     }
   }, [activeSlug]);
 
-  /* Search results */
-  const searchResults = useMemo(() => searchDocs(searchQuery, language), [searchQuery, language]);
-
-  /* Reset selection when results change */
-  useEffect(() => {
-    setSearchSelectedIdx(0);
-  }, [searchResults]);
-
-  /* ⌘K / Ctrl+K keyboard shortcut */
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        // Don't intercept when focused in other input/textarea (unless search is already open)
-        const activeEl = document.activeElement;
-        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') && !searchOpen) return;
-        e.preventDefault();
-        setSearchOpen(prev => !prev);
-      }
-      if (e.key === 'Escape') {
-        setSearchOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [searchOpen]);
-
-  /* Focus input when search opens */
-  useEffect(() => {
-    if (searchOpen) {
-      setTimeout(() => searchInputRef.current?.focus(), 50);
-    } else {
-      setSearchQuery('');
-    }
-  }, [searchOpen]);
-
   /* Handle search result selection */
   const handleSearchSelect = useCallback((slug: DocSlug) => {
     navigateToDoc(slug);
     setSearchOpen(false);
-  }, [navigateToDoc]);
+  }, [navigateToDoc, setSearchOpen]);
 
   /* Keyboard navigation in search modal */
-  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSearchSelectedIdx(prev => Math.min(prev + 1, searchResults.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSearchSelectedIdx(prev => Math.max(prev - 1, 0));
-    } else if (e.key === 'Enter' && searchResults.length > 0) {
-      e.preventDefault();
-      handleSearchSelect(searchResults[searchSelectedIdx].slug);
-    }
-  }, [searchResults, searchSelectedIdx, handleSearchSelect]);
+  const handleSearchKeyDown = useSearchKeyboardNav(
+    searchResults, searchSelectedIdx, setSearchSelectedIdx, handleSearchSelect,
+  );
 
   return (
     <div style={{ minHeight: '100vh', background: '#000000', paddingTop: 72, fontFamily }}>
@@ -337,34 +299,11 @@ const DocsPage: React.FC = () => {
             borderRight: 'none',
           }}>
             {/* Search trigger button */}
-            <button
+            <SearchTrigger
+              placeholder={t('docs.search.placeholder')}
               onClick={() => setSearchOpen(true)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                width: '100%',
-                padding: '8px 12px',
-                marginBottom: 20,
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                borderRadius: 8,
-                cursor: 'pointer',
-                color: 'rgba(255,255,255,0.4)',
-                fontSize: 14,
-                fontFamily,
-                outline: 'none',
-                transition: 'border-color 0.15s',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)')}
-              onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)')}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <img src={searchIcon} alt="" style={{ width: 16, height: 16, opacity: 0.6 }} />
-                {t('docs.search.placeholder')}
-              </span>
-              <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', lineHeight: 1 }}>⌘K</span>
-            </button>
+              style={{ width: '100%', justifyContent: 'space-between', marginBottom: 20 }}
+            />
 
             {sidebarTree.map((group, gi) => (
               <div key={gi} style={{ display: 'flex', flexDirection: 'column', marginBottom: 16 }}>

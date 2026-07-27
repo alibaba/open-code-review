@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: "\U0001F512 Report a Security Vulnerability"
+    url: https://github.com/alibaba/open-code-review/security/advisories/new
+    about: Please report vulnerabilities privately, not as public issues. See SECURITY.md.
   - name: "\U0001F4AC Questions & Help"
     url: https://github.com/alibaba/open-code-review/discussions/categories/q-a
     about: Ask questions or get help with configuration in Discussions.

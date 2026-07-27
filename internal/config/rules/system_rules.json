@@ -20,6 +20,10 @@
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,hpp}": "cpp.md",
     "**/*.c": "c.md",
-    "**/*.py": "python.md"
+    "**/*.py": "python.md",
+    "**/*.po": "po.md",
+    "**/*.pot": "pot.md",
+    "**/*.{graphql,gql}": "graphql.md",
+    "**/*.jl": "julia.md"
   }
 }

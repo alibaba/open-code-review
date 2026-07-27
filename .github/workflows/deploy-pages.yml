@@ -19,6 +19,7 @@ concurrency:
 jobs:
   build:
     runs-on: self-hosted
+    timeout-minutes: 10
     container:
       image: node:24
     steps:
@@ -50,6 +51,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: self-hosted
+    timeout-minutes: 15
     container:
       image: node:24
     needs: build

@@ -58,14 +58,14 @@ help: build
 	$(DIST_DIR)/$(BINARY_NAME) -h
 
 fmt:
-	$(GO) fmt $(PACKAGES)
+	gofmt -s -w .
 
 vet:
 	LC_ALL=C $(GO) vet $(PACKAGES)
 
 check:
 	$(GO) mod tidy
-	$(GO) fmt $(PACKAGES)
+	gofmt -s -w .
 	LC_ALL=C $(GO) vet $(PACKAGES)
 	@echo "check passed"
 

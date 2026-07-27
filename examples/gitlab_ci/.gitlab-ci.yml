@@ -7,9 +7,10 @@
 # Required CI/CD Variables (Settings → CI/CD → Variables):
 #   OCR_LLM_URL        - LLM API endpoint (e.g., https://api.openai.com/v1/chat/completions)
 #   OCR_LLM_AUTH_TOKEN - Authentication token for the LLM API (mark as "Masked")
+#   OCR_LLM_MODEL      - Model name (e.g., gpt-4o). OCR has no built-in default model; the
+#                        pipeline fails fast if this is unset.
 #
 # Optional CI/CD Variables:
-#   OCR_LLM_MODEL      - Model name (default: gpt-4o)
 #   GITLAB_API_TOKEN   - GitLab Personal/Project Access Token with "api" scope
 #                        (falls back to CI_JOB_TOKEN if not set)
 #
@@ -48,12 +49,14 @@ code-review:
     - echo "OpenCodeReview installed with version:" && ocr version || true
 
     # Configure OCR
-    - mkdir -p ~/.open-code-review
     # Gitlab CI/CD does not support configuring variables with value length less than 8, so you can't set use_anthropic as a CI variable
     - |
-      ocr config set llm.url $OCR_LLM_URL
-      ocr config set llm.auth_token $OCR_LLM_AUTH_TOKEN
-      ocr config set llm.model $OCR_LLM_MODEL
+      : "${OCR_LLM_URL:?set OCR_LLM_URL in Settings -> CI/CD -> Variables}"
+      : "${OCR_LLM_AUTH_TOKEN:?set OCR_LLM_AUTH_TOKEN in Settings -> CI/CD -> Variables}"
+      : "${OCR_LLM_MODEL:?set OCR_LLM_MODEL in Settings -> CI/CD -> Variables}"
+      ocr config set llm.url "$OCR_LLM_URL"
+      ocr config set llm.auth_token "$OCR_LLM_AUTH_TOKEN"
+      ocr config set llm.model "$OCR_LLM_MODEL"
       ocr config set llm.use_anthropic false
       ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
 

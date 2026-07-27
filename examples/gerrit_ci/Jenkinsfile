@@ -1,0 +1,107 @@
+// OpenCodeReview - Gerrit patchset auto-review (Jenkins + Gerrit Trigger)
+//
+// Reviews every new patchset with OpenCodeReview and posts the findings back
+// onto the change via post_review.py (see README.md in this directory).
+//
+// Trigger: configure the Gerrit Trigger plugin ON THE JOB (Configure ->
+// Gerrit Trigger -> trigger on "Patchset Created"). A declarative
+// `triggers { gerrit(...) }` block exists, but its map syntax varies across
+// plugin versions, so real jobs configure the trigger in the UI. The plugin
+// injects GERRIT_BRANCH, GERRIT_REFSPEC, GERRIT_CHANGE_NUMBER,
+// GERRIT_CHANGE_URL and GERRIT_PATCHSET_REVISION, used below.
+//
+// Jenkins credentials: ocr-llm-auth-token (Secret text, LLM API token) and
+// gerrit-http (Username/password: bot account + its Gerrit HTTP password --
+// Settings > HTTP Credentials, NOT the account password).
+// The agent needs git, node/npm 20+ and python3 on PATH.
+
+pipeline {
+    agent any
+
+    environment {
+        // ocr resolves OCR_LLM_URL / OCR_LLM_TOKEN / OCR_LLM_MODEL directly
+        // from the environment (no `ocr config set`), so the token stays
+        // env-only and is never written to disk on a shared agent.
+        OCR_LLM_URL = 'https://api.openai.com/v1/chat/completions'
+        OCR_LLM_MODEL = 'gpt-4o'
+        OCR_LLM_TOKEN = credentials('ocr-llm-auth-token')
+        // The env resolver defaults to the Anthropic protocol; this is an
+        // OpenAI chat-completions endpoint.
+        OCR_USE_ANTHROPIC = 'false'
+        // GERRIT_URL: set here or in Jenkins global env; if unset,
+        // post_review.py derives it from the injected GERRIT_CHANGE_URL.
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                // Fresh workspaces lack the target ref, so fetch the branch
+                // with an explicit refspec that materializes the tracking ref
+                // (ocr diffs against origin/$GERRIT_BRANCH; a bare fetch only
+                // updates FETCH_HEAD when the clone refspec is narrow), then
+                // fetch the patchset ref and check out its revision.
+                sh '''
+                    git fetch origin "+refs/heads/$GERRIT_BRANCH:refs/remotes/origin/$GERRIT_BRANCH"
+                    git fetch origin "$GERRIT_REFSPEC"
+                    git checkout "$GERRIT_PATCHSET_REVISION"
+                '''
+            }
+        }
+
+        stage('Install OCR') {
+            steps {
+                // Pin the version you have validated; bump deliberately.
+                sh 'npm install -g @alibaba-group/open-code-review@1.7.12'
+                // extra_body has no env-var equivalent. Providers that accept
+                // a top-level "thinking" field (e.g. DashScope/GLM; OpenAI
+                // rejects unknown fields) must fall back to the config file,
+                // which then needs the full triple (the config-file strategy
+                // resolves url/token/model together, ignoring the env vars):
+                //   ocr config set llm.url/auth_token/model/use_anthropic ...
+                //   ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
+                // That writes the token to ~/.opencodereview/config.json, so on
+                // a shared agent clean it up with:
+                //   post { always { sh 'rm -f ~/.opencodereview/config.json' } }
+            }
+        }
+
+        stage('Review') {
+            steps {
+                // `|| true` is REQUIRED: `ocr review` exits non-zero only
+                // when EVERY sub-agent fails; partial failures still exit 0.
+                // The guard in the next stage handles the empty-output case.
+                sh '''
+                    ocr review \
+                      --from "origin/$GERRIT_BRANCH" \
+                      --to "$GERRIT_PATCHSET_REVISION" \
+                      --format json \
+                      --audience agent \
+                      > result.json || true
+                '''
+            }
+        }
+
+        stage('Post to Gerrit') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'gerrit-http', usernameVariable: 'GERRIT_HTTP_USER', passwordVariable: 'GERRIT_HTTP_PASSWORD')]) {
+                    // post_review.py sits in the reviewed repo only in this
+                    // demo; real jobs vendor it or fetch it:
+                    //   curl -fsSLO https://raw.githubusercontent.com/alibaba/open-code-review/main/examples/gerrit_ci/post_review.py
+                    // --revision pins the reviewed SHA explicitly: the
+                    // `current` default would retarget comments if a new
+                    // patchset landed mid-pipeline. GERRIT_CHANGE_NUMBER and
+                    // GERRIT_URL/GERRIT_CHANGE_URL come from the environment.
+                    sh '''
+                        if [ ! -s result.json ]; then
+                          echo "OCR review produced no output, skipping post."
+                          exit 0
+                        fi
+                        python3 examples/gerrit_ci/post_review.py \
+                          --input result.json \
+                          --revision "$GERRIT_PATCHSET_REVISION"
+                    '''
+                }
+            }
+        }
+    }
+}

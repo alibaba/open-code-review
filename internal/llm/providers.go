@@ -169,6 +169,21 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "iflytek",
+		DisplayName: "iFlytek Spark API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://spark-api-open.xf-yun.com/v1",
+		EnvVar:      "SPARK_API_KEY",
+		Models: []string{
+			"4.0Ultra",
+			"generalv3.5",
+			"max-32k",
+			"generalv3",
+			"pro-128k",
+			"lite",
+		},
+	},
+	{
 		Name:        "kimi",
 		DisplayName: "Kimi Moonshot API",
 		Protocol:    ProtocolOpenAIChatCompletions,

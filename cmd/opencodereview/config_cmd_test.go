@@ -1151,3 +1151,63 @@ func TestEnsureModelInList(t *testing.T) {
 		t.Errorf("new model should append: got %v, want %v", got, want)
 	}
 }
+
+// TestConfigRoundTripPreservesTimeoutSec guards against silent config loss:
+// the resolver reads providers.<name>.timeout_sec / llm.timeout_sec (the docs
+// tell users to hand-edit them), but the cmd-side Config struct used to lack
+// the field, so any loadOrCreateConfig + saveConfig cycle (every
+// `ocr config set`, `ocr config model`, interactive provider setup, ...)
+// silently dropped the key and reverted requests to the default timeout.
+func TestConfigRoundTripPreservesTimeoutSec(t *testing.T) {
+	configPath := t.TempDir() + "/config.json"
+	original := `{
+    "provider": "ollama",
+    "providers": {
+        "ollama": {
+            "url": "http://127.0.0.1:11434/v1",
+            "protocol": "openai",
+            "model": "qwen3",
+            "timeout_sec": 900
+        }
+    },
+    "custom_providers": {
+        "my-gateway": {
+            "url": "https://gw.example.com/v1",
+            "protocol": "openai",
+            "timeout_sec": 120
+        }
+    },
+    "llm": {
+        "timeout_sec": 60
+    }
+}`
+	if err := os.WriteFile(configPath, []byte(original), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// Emulate an unrelated `ocr config set` round-trip.
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("loadOrCreateConfig: %v", err)
+	}
+	if err := setConfigValue(cfg, "language", "Chinese"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	reloaded, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := reloaded.Providers["ollama"].TimeoutSec; got != 900 {
+		t.Errorf("providers.ollama.timeout_sec = %d, want 900 (lost in round-trip)", got)
+	}
+	if got := reloaded.CustomProviders["my-gateway"].TimeoutSec; got != 120 {
+		t.Errorf("custom_providers.my-gateway.timeout_sec = %d, want 120 (lost in round-trip)", got)
+	}
+	if got := reloaded.Llm.TimeoutSec; got != 60 {
+		t.Errorf("llm.timeout_sec = %d, want 60 (lost in round-trip)", got)
+	}
+}

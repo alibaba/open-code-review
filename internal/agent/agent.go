@@ -350,9 +350,9 @@ func (a *Agent) ResumeInfo() *ResumeInfo {
 	return &info
 }
 
-// FilesReviewed returns the number of changed files included in this review.
+// FilesReviewed returns the number of dispatchable files included in this review.
 func (a *Agent) FilesReviewed() int64 {
-	return int64(len(a.diffs))
+	return countDispatchable(a.diffs)
 }
 
 // Diffs returns the parsed diffs loaded by the agent.
@@ -1072,7 +1072,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 
 	tokenCount := llmloop.CountMessagesTokens(messages)
 	maxAllowed := a.args.Template.MaxTokens
-	tokenLimit := maxAllowed * 4 / 5 // 80% of MaxTokens
+	tokenLimit := llmloop.PromptTokenLimit(maxAllowed)
 	if tokenCount > tokenLimit {
 		msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d)", tokenCount, 80, maxAllowed)
 		fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: %s for %s\n", msg, newPath)
@@ -1106,9 +1106,12 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 	if err == nil {
 		// REVIEW_FILTER_TASK runs after the main loop and decides which of the
 		// just-collected comments to drop. It needs to see comments produced by
-		// the async CommentWorkerPool, so wait for that to drain first.
+		// this file's async CommentWorkerPool units, so wait for those to drain
+		// first. This must be keyed to newPath: a pool-wide Await here would run
+		// concurrently with other files' Submit calls and misuses sync.WaitGroup
+		// ("Add called concurrently with Wait").
 		if a.args.CommentWorkerPool != nil {
-			a.args.CommentWorkerPool.Await()
+			a.args.CommentWorkerPool.AwaitKey(newPath)
 		}
 		a.executeReviewFilter(ctx, d, newPath)
 	}
@@ -1155,12 +1158,6 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 		content = strings.ReplaceAll(content, "{{diff}}", d.Diff)
 		content = strings.ReplaceAll(content, "{{comments}}", commentsJSON)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
-	}
-
-	if ft.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(ft.Timeout)*time.Second)
-		defer cancel()
 	}
 
 	fs := a.session.GetOrCreateFileSession(newPath)
@@ -1282,7 +1279,7 @@ func (a *Agent) resolveSystemRule(path string) string {
 
 // filterLargeDiffs drops diffs whose diff content alone consumes more than 80% of MaxTokens.
 func (a *Agent) filterLargeDiffs(diffs []model.Diff) []model.Diff {
-	limit := a.args.Template.MaxTokens * 4 / 5
+	limit := llmloop.PromptTokenLimit(a.args.Template.MaxTokens)
 	if limit <= 0 {
 		return diffs
 	}

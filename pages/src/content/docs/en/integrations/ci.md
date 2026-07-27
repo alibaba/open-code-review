@@ -120,13 +120,23 @@ semantic convention like `feat(auth): add OAuth2 support`):
 
 ```yaml
 - name: Run OCR review
+  env:
+    PR_TITLE: ${{ github.event.pull_request.title }}
+    BASE_REF: ${{ github.base_ref }}
+    HEAD_REF: ${{ github.head_ref }}
   run: |
     ocr review \
-      --background "${{ github.event.pull_request.title }}" \
-      --from "origin/${{ github.base_ref }}" \
-      --to "origin/${{ github.head_ref }}" \
+      --background "$PR_TITLE" \
+      --from "origin/$BASE_REF" \
+      --to "origin/$HEAD_REF" \
       --format json --audience agent
 ```
+
+Pass PR-controlled values through `env:` rather than
+interpolating `${{ }}` directly into `run:`. GitHub substitutes
+`${{ }}` textually *before* the shell parses the line, so a PR
+title or branch name containing shell metacharacters would
+execute on your runner.
 
 #### Custom rules
 
@@ -134,10 +144,13 @@ Pass a project-specific rule file with `--rule`:
 
 ```yaml
 - name: Run OCR review
+  env:
+    BASE_REF: ${{ github.base_ref }}
+    HEAD_REF: ${{ github.head_ref }}
   run: |
     ocr review --rule ./my-rules.json \
-      --from "origin/${{ github.base_ref }}" \
-      --to "origin/${{ github.head_ref }}"
+      --from "origin/$BASE_REF" \
+      --to "origin/$HEAD_REF"
 ```
 
 See [Review Rules](../../review-rules/) for the schema.
@@ -149,10 +162,13 @@ to stay under your LLM provider's rate limits:
 
 ```yaml
 - name: Run OCR review
+  env:
+    BASE_REF: ${{ github.base_ref }}
+    HEAD_REF: ${{ github.head_ref }}
   run: |
     ocr review --concurrency 5 \
-      --from "origin/${{ github.base_ref }}" \
-      --to "origin/${{ github.head_ref }}"
+      --from "origin/$BASE_REF" \
+      --to "origin/$HEAD_REF"
 ```
 
 #### Trigger pattern

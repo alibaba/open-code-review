@@ -53,6 +53,42 @@ OpenAI use different auth headers and different URL shapes — make sure
 against the current directory. If you're not inside a Git working tree,
 it exits early. Either `cd` into a repo, or pass `--repo /path/to/repo`.
 
+### "No tool calls parsed" (local models / Ollama)
+
+```
+[ocr] No tool calls parsed for src/foo.go, retrying...
+[ocr] Max tool requests reached for src/foo.go.
+```
+
+If every review loops through `No tool calls parsed` retries and ends
+with "Max tool requests reached" and zero comments, the model — not the
+config — is the problem. OCR drives the review entirely through tool
+calls, so **the model must support native tool calling (function
+calling)**. A model that merely *narrates* tool calls in its text
+output (or inside `<think>` blocks) can never work with OCR, no matter
+how the prompt is tuned — `deepseek-r1` is a common example. Models
+with native tool support, such as `qwen3`, work fine. For Ollama, pick
+from the models tagged with tools support:
+<https://ollama.com/search?c=tools>.
+
+Verify a local model directly, without OCR in the loop:
+
+```bash
+curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/json" -d '{
+  "model": "qwen3:32b",
+  "messages": [{"role": "user", "content": "The code below has a bug, use the report_bug tool to report it.\n\nfunc add(a, b int) int {\n  return a - b\n}"}],
+  "tools": [{"type": "function", "function": {"name": "report_bug", "description": "Report a bug in the code",
+    "parameters": {"type": "object", "properties": {"line": {"type": "integer"}, "description": {"type": "string"}}, "required": ["description"]}}}]
+}'
+```
+
+Pass: the response contains a structured `tool_calls` array naming
+`report_bug`. Fail: the "call" appears as text inside `content`.
+
+If the model *does* support tools but responses are slow on local
+hardware, raise the LLM timeout instead — see
+[Timeouts](../configuration/#timeouts).
+
 ## Filtering & rules
 
 ### My file isn't being reviewed
@@ -173,6 +209,9 @@ usually one of:
   `--max-tools 40` for more, `--max-tools 15` for fewer). Values 1–9
   are clamped up to 10; `0` (the default) uses the template default of
   30.
+- The model does not support native tool calling at all (common with
+  local models) — see
+  ["No tool calls parsed" (local models / Ollama)](#no-tool-calls-parsed-local-models-ollama).
 
 ### Some sub-agents fail; the run still exits 0
 

@@ -686,6 +686,11 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 					if err := json.Unmarshal([]byte(tc.Function.Arguments), &argsMap); err != nil {
 						return anthropic.MessageNewParams{}, fmt.Errorf("invalid tool call arguments for %s: %w", tc.Function.Name, err)
 					}
+					if argsMap == nil {
+						// null arguments → empty map; Anthropic API rejects
+						// null input (#382). Same guard as llmloop.parseToolArgs.
+						argsMap = map[string]any{}
+					}
 				}
 				blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, argsMap, tc.Function.Name))
 			}

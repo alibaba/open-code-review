@@ -39,7 +39,7 @@ Go to **Settings → CI/CD → Variables** and add:
 | `OCR_LLM_URL` | Yes | LLM API endpoint URL |
 | `OCR_LLM_AUTH_TOKEN` | Yes | LLM API authentication token |
 | `GITFLIC_TOKEN` | Yes | GitFlic access token used to post discussions |
-| `OCR_LLM_MODEL` | No | Model name (e.g., `gpt-4o`) |
+| `OCR_LLM_MODEL` | Yes | Model name (e.g., `gpt-4o`) — OCR has no built-in default model and fails when this is unset |
 | `GITFLIC_API_URL` | No | REST API base URL for self-hosted GitFlic (default: `https://api.gitflic.ru`) |
 
 > **Note:** GitFlic CI/CD does not accept variables with values shorter than 8 characters, so `use_anthropic` cannot be set as a CI variable. The pipeline sets it to `false`; to use Anthropic Claude models, edit `gitflic-ci.yaml` directly.

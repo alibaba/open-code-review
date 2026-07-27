@@ -49,6 +49,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
 | `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
+| `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
@@ -68,6 +69,43 @@ ocr config set custom_providers.my-gateway.model    llama-3-70b
 ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
 ```
 
+用 Ollama 跑本地模型，就是一个指向本地 OpenAI 兼容端点的自定义 provider：
+
+```bash
+ocr config set provider                          ollama
+ocr config set custom_providers.ollama.url       http://127.0.0.1:11434/v1
+ocr config set custom_providers.ollama.protocol  openai
+ocr config set custom_providers.ollama.model     qwen3:32b
+ocr config set custom_providers.ollama.api_key   ollama
+```
+
+Ollama 会忽略 API key，但自定义 provider 要求非空的 `api_key`（自定义
+provider 没有环境变量回退），所以设任意占位值即可。模型本身必须支持原生
+工具调用——选型前请先看 FAQ 中的
+["No tool calls parsed"（本地模型 / Ollama）](../faq/#no-tool-calls-parsed-本地模型-ollama)。
+
+### 超时
+
+每个 LLM 请求都有 HTTP 超时，默认 **300 秒**。慢的本地模型（或大文件）可能
+需要更长的时间。三个配置项，作用域递增：
+
+- `providers.<name>.timeout_sec` / `custom_providers.<name>.timeout_sec`
+  ——per-provider，单位秒。
+- `llm.timeout_sec`——用于旧版 `llm` 配置段，单位秒。
+- `OCR_LLM_TIMEOUT` 环境变量——整数秒；对每条解析路径都覆盖配置文件里
+  的值。
+
+`ocr config set` 不支持 `timeout_sec` key——直接编辑
+`~/.opencodereview/config.json`：
+
+```json
+{
+  "custom_providers": {
+    "ollama": { "url": "http://127.0.0.1:11434/v1", "protocol": "openai", "timeout_sec": 900 }
+  }
+}
+```
+
 ### 验证连通性
 
 ```bash
@@ -77,6 +115,22 @@ ocr llm test
 ### 复用已有的环境变量
 
 如果你已经配好了 Claude Code 的 `ANTHROPIC_*`，或 OCR 自己的 `OCR_LLM_*`环境变量，OCR 会自动识别，无需再写配置文件。
+
+### 使用 CC-Switch
+
+如果你使用 [CC-Switch](https://github.com/farion1231/cc-switch) 并开启了
+[路由服务](https://www.ccswitch.io/zh/docs?section=proxy&item=service)，
+可以将供应商的 `url` 配置成 CC-Switch 启动的代理地址，无需额外配置：
+
+```bash
+# Claude（Anthropic 兼容）
+ocr config set providers.anthropic.url http://127.0.0.1:15721
+
+# Codex / OpenAI 兼容 — 将该供应商的 url 键设为代理地址
+ocr config set providers.<name>.url http://127.0.0.1:15721/v1
+```
+
+`api_key` 可设置为任意值。`extra_body`（及其他按供应商字段）依然生效。
 
 ### 发送厂商专属字段
 

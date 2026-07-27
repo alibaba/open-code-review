@@ -1,0 +1,53 @@
+name: translation-sync
+
+# Content-validation guardrails, kept out of ci.yml (which is build/test/lint):
+#   - blocking: all README*.md translations share the same ## section structure.
+#   - non-blocking: warn when a docs/en page changes without its zh/ja counterpart.
+# Scoped with paths: so it only runs when a translation or the checker changes,
+# and a slow container pull here never delays core CI feedback.
+
+on:
+  pull_request:
+    paths:
+      - "README*.md"
+      - "pages/src/content/docs/**"
+      - "scripts/github-actions/check-translation-sync.*"
+
+jobs:
+  translation-sync:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    container:
+      # Pinned to an exact 24.x for reproducible builds, matching the
+      # golang:1.26.5 pin used by the other jobs (avoids the mutable node:24 tag).
+      image: node:24.18.0
+    steps:
+      # fetch-depth: 0 so the non-blocking docs check can diff base...head.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
+      # Validate the guardrail script itself (plain Node, no deps).
+      - name: Test translation-sync guardrail
+        run: node scripts/github-actions/check-translation-sync.test.js
+
+      # BLOCKING: all README*.md translations must share an identical ##
+      # (level-2) section structure. Fails with an ::error annotation on divergence.
+      - name: Check README translation structure
+        run: node scripts/github-actions/check-translation-sync.js readmes
+
+      # NON-BLOCKING: on PRs, warn (::warning) when a file under
+      # pages/src/content/docs/en/** changed without its zh/ja counterpart.
+      # continue-on-error keeps it advisory: it never fails the build.
+      # The event_name guard is intentional even though on: is PR-only today:
+      # if a push: trigger is reintroduced, base/head.sha would be empty.
+      - name: Check docs translation sync
+        if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true
+        env:
+          OCR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          OCR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/github-actions/check-translation-sync.js docs

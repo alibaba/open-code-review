@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import ReactDOM from 'react-dom';
+import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
 import ColorBends from './ColorBends';
@@ -313,8 +314,8 @@ const HeroSection: React.FC = () => {
           >
             {t('hero.quickStart')}
           </a>
-          <a
-            href="#/docs"
+          <Link
+            to="/docs"
             style={{
               height: 32,
               display: 'flex',
@@ -330,7 +331,7 @@ const HeroSection: React.FC = () => {
             }}
           >
             {t('hero.learnMore')}
-          </a>
+          </Link>
         </div>
 
         {/* Terminal */}

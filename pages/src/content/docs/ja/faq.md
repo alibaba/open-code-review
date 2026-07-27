@@ -53,6 +53,39 @@ OpenAI は異なる auth header と URL フォーマットを使います——`
 `git ls-files`）を実行します。Git ワークツリー内にいない場合は、早期に終了します。リポジトリに
 `cd` するか、`--repo /path/to/repo` を渡してください。
 
+### "No tool calls parsed"（ローカルモデル / Ollama）
+
+```
+[ocr] No tool calls parsed for src/foo.go, retrying...
+[ocr] Max tool requests reached for src/foo.go.
+```
+
+すべてのレビューが `No tool calls parsed` のリトライをループし、"Max tool requests
+reached" とコメント 0 件で終わる場合、問題は設定ではなくモデルにあります。OCR はレビュー全体を
+ツール呼び出しで駆動するため、**モデルはネイティブなツール呼び出し（function calling）を
+サポートしている必要があります**。ツール呼び出しをテキスト出力（あるいは `<think>` ブロック内）で
+*語るだけ*のモデルは、prompt をどう調整しても OCR では決して動作しません——`deepseek-r1` は
+よくある例です。`qwen3` のようなネイティブなツールサポートを持つモデルは問題なく動作します。
+Ollama の場合は、tools サポートのタグが付いたモデルから選んでください:
+<https://ollama.com/search?c=tools>。
+
+OCR を介さずに、ローカルモデルを直接検証するには:
+
+```bash
+curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/json" -d '{
+  "model": "qwen3:32b",
+  "messages": [{"role": "user", "content": "The code below has a bug, use the report_bug tool to report it.\n\nfunc add(a, b int) int {\n  return a - b\n}"}],
+  "tools": [{"type": "function", "function": {"name": "report_bug", "description": "Report a bug in the code",
+    "parameters": {"type": "object", "properties": {"line": {"type": "integer"}, "description": {"type": "string"}}, "required": ["description"]}}}]
+}'
+```
+
+合格: 応答に `report_bug` を指す構造化された `tool_calls` 配列が含まれる。不合格: 「呼び出し」が
+`content` 内のテキストとして現れる。
+
+モデルがツールを*サポートしている*のに、ローカルハードウェアで応答が遅い場合は、代わりに
+LLM タイムアウトを引き上げてください——[タイムアウト](../configuration/#timeouts)を参照。
+
 ## フィルタリングとルール
 
 ### ファイルがレビューされない
@@ -163,6 +196,9 @@ JSON モードでは `warnings` にも表示されます。
 - ファイルが本当に大きい、あるいはコンテキストが重く、30 回では足りない。`--max-tools <n>` で
   上げるか下げるか調整してください（例: `--max-tools 40` でより多く、`--max-tools 15` でより少なく）。
   1〜9 は 10 に引き上げられます。`0`（デフォルト）はテンプレートのデフォルト 30 を使います。
+- モデルがネイティブなツール呼び出しを全くサポートしていない（ローカルモデルでよくある）——
+  ["No tool calls parsed"（ローカルモデル / Ollama）](#no-tool-calls-parsed-ollama)を
+  参照してください。
 
 ### 一部のサブエージェントが失敗しても、実行は 0 で終了する
 

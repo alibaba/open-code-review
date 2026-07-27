@@ -154,7 +154,7 @@ func renderTemplate(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, data); err != nil {
 		// Partially written — just log
-		fmt.Printf("[viewer] template execution error: %v\n", err)
+		fmt.Printf("[ocr] template execution error: %v\n", err)
 	}
 }
 

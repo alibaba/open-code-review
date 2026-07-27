@@ -8,7 +8,7 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'bundle.js',
-    publicPath: process.env.NODE_ENV === 'production' ? '/open-code-review/' : '/'
+    publicPath: '/'
   },
   module: {
     rules: [
@@ -64,6 +64,13 @@ module.exports = {
     new HtmlWebpackPlugin({
       template: './index.html',
       inject: 'body'
+    }),
+    // SPA fallback: serve the app shell for deep links / refreshes on client-side
+    // routes (BrowserRouter). GitHub Pages returns this for unknown paths.
+    new HtmlWebpackPlugin({
+      template: './index.html',
+      inject: 'body',
+      filename: '404.html'
     }),
     new CopyPlugin({
       patterns: [

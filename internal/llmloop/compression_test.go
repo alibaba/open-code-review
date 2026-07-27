@@ -175,3 +175,40 @@ func TestCopyMessages(t *testing.T) {
 		t.Error("copyMessages should return independent slice")
 	}
 }
+
+func TestPromptTokenLimit(t *testing.T) {
+	tests := []struct {
+		name      string
+		maxTokens int
+		want      int
+	}{
+		{name: "zero", maxTokens: 0, want: 0},
+		{name: "one truncates to zero", maxTokens: 1, want: 0},
+		{name: "four truncates to three", maxTokens: 4, want: 3},
+		{name: "five rounds to exact 4.0 via float half-ULP", maxTokens: 5, want: 4},
+		{name: "typical 4k context", maxTokens: 4096, want: 3276},
+		{name: "default max tokens", maxTokens: 58888, want: 47110},
+		{name: "typical 128k context", maxTokens: 128000, want: 102400},
+		{name: "typical 200k context", maxTokens: 200000, want: 160000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := PromptTokenLimit(tt.maxTokens); got != tt.want {
+				t.Errorf("PromptTokenLimit(%d) = %d, want %d", tt.maxTokens, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPromptTokenLimitMatchesReplacedExpression pins the one-time migration:
+// PromptTokenLimit replaced a literal `maxTokens*4/5` at four call sites, so the
+// float form must agree with the integer form it replaced across the realistic
+// max_tokens range. This is specific to tokenWarningThreshold being 0.80 — if the
+// threshold ever changes, delete this test rather than "fixing" it.
+func TestPromptTokenLimitMatchesReplacedExpression(t *testing.T) {
+	for _, maxTokens := range []int{0, 1, 2, 3, 4, 5, 7, 40, 100, 1000, 4096, 8192, 32768, 58888, 128000, 200000, 1_000_000} {
+		if got, want := PromptTokenLimit(maxTokens), maxTokens*4/5; got != want {
+			t.Errorf("PromptTokenLimit(%d) = %d, want %d (maxTokens*4/5)", maxTokens, got, want)
+		}
+	}
+}

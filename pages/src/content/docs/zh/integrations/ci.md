@@ -101,13 +101,21 @@ curl -o .github/workflows/ocr-review.yml \
 
 ```yaml
 - name: Run OCR review
+  env:
+    PR_TITLE: ${{ github.event.pull_request.title }}
+    BASE_REF: ${{ github.base_ref }}
+    HEAD_REF: ${{ github.head_ref }}
   run: |
     ocr review \
-      --background "${{ github.event.pull_request.title }}" \
-      --from "origin/${{ github.base_ref }}" \
-      --to "origin/${{ github.head_ref }}" \
+      --background "$PR_TITLE" \
+      --from "origin/$BASE_REF" \
+      --to "origin/$HEAD_REF" \
       --format json --audience agent
 ```
+
+把 PR 可控的值通过 `env:` 传入，不要把 `${{ }}` 直接插值进 `run:`。GitHub 在
+shell 解析该行 *之前* 就已把 `${{ }}` 做了文本替换，因此包含 shell 元字符的 PR
+标题或分支名会在你的 runner 上被执行。
 
 #### 自定义规则
 
@@ -115,10 +123,13 @@ curl -o .github/workflows/ocr-review.yml \
 
 ```yaml
 - name: Run OCR review
+  env:
+    BASE_REF: ${{ github.base_ref }}
+    HEAD_REF: ${{ github.head_ref }}
   run: |
     ocr review --rule ./my-rules.json \
-      --from "origin/${{ github.base_ref }}" \
-      --to "origin/${{ github.head_ref }}"
+      --from "origin/$BASE_REF" \
+      --to "origin/$HEAD_REF"
 ```
 
 schema 见[评审规则](../../review-rules/)。
@@ -129,10 +140,13 @@ schema 见[评审规则](../../review-rules/)。
 
 ```yaml
 - name: Run OCR review
+  env:
+    BASE_REF: ${{ github.base_ref }}
+    HEAD_REF: ${{ github.head_ref }}
   run: |
     ocr review --concurrency 5 \
-      --from "origin/${{ github.base_ref }}" \
-      --to "origin/${{ github.head_ref }}"
+      --from "origin/$BASE_REF" \
+      --to "origin/$HEAD_REF"
 ```
 
 #### 触发模式

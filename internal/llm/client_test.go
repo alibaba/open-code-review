@@ -222,6 +222,68 @@ func TestBuildAnthropicParams_CacheControl_NoSystem(t *testing.T) {
 	}
 }
 
+func TestBuildAnthropicParams_NullToolCallArguments(t *testing.T) {
+	// "arguments": null (as emitted by some OpenAI-compatible gateways)
+	// unmarshals a pre-initialized map back to nil; the Anthropic API
+	// requires tool_use input to be an object, not null (#382).
+	client := NewAnthropicClient(ClientConfig{URL: "https://api.anthropic.com"})
+
+	tests := []struct {
+		name      string
+		arguments string
+	}{
+		{name: "null arguments", arguments: `null`},
+		{name: "empty arguments", arguments: ``},
+		{name: "empty object", arguments: `{}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := ChatRequest{
+				Messages: []Message{
+					{Role: "user", Content: "Hello"},
+					{
+						Role: "assistant",
+						ToolCalls: []ToolCall{{
+							ID:   "call_1",
+							Type: "function",
+							Function: FunctionCall{
+								Name:      "code_comment",
+								Arguments: tt.arguments,
+							},
+						}},
+					},
+				},
+			}
+
+			params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+			if err != nil {
+				t.Fatalf("buildAnthropicParams: %v", err)
+			}
+
+			var found bool
+			for _, m := range params.Messages {
+				for _, b := range m.Content {
+					if b.OfToolUse == nil {
+						continue
+					}
+					found = true
+					input, ok := b.OfToolUse.Input.(map[string]any)
+					if !ok {
+						t.Fatalf("tool_use input type = %T, want map[string]any", b.OfToolUse.Input)
+					}
+					if input == nil {
+						t.Error("tool_use input is a nil map; API requires an object")
+					}
+				}
+			}
+			if !found {
+				t.Fatal("no tool_use block found in built params")
+			}
+		})
+	}
+}
+
 func TestAnthropicClient_UsesConfiguredXAPIKeyHeader(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "env-oauth-token")

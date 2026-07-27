@@ -50,6 +50,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
 | `tencent-tokenhub` | openai | `https://tokenhub.tencentmaas.com/v1` | `TENCENT_TOKENHUB_API_KEY` |
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
+| `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
@@ -70,6 +71,47 @@ ocr config set custom_providers.my-gateway.model    llama-3-70b
 ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
 ```
 
+Ollama で動かすローカルモデルは、ローカルの OpenAI 互換エンドポイントを
+指すカスタム provider にすぎません。
+
+```bash
+ocr config set provider                          ollama
+ocr config set custom_providers.ollama.url       http://127.0.0.1:11434/v1
+ocr config set custom_providers.ollama.protocol  openai
+ocr config set custom_providers.ollama.model     qwen3:32b
+ocr config set custom_providers.ollama.api_key   ollama
+```
+
+Ollama は API key を無視しますが、カスタム provider は空でない `api_key` を
+必要とします（カスタム provider には環境変数のフォールバックがありません）。
+そのため任意のプレースホルダー値を設定してください。モデル自体はネイティブな
+ツール呼び出しをサポートしている必要があります——選ぶ前に FAQ の
+["No tool calls parsed"（ローカルモデル / Ollama）](../faq/#no-tool-calls-parsed-ollama)を
+参照してください。
+
+### タイムアウト（Timeouts）
+
+各 LLM リクエストには HTTP タイムアウトがあり、デフォルトは **300 秒**です。
+遅いローカルモデル（あるいは大きなファイル）では、それ以上の時間が必要になることがあります。
+スコープの狭い順に、3 つの設定があります。
+
+- `providers.<name>.timeout_sec` / `custom_providers.<name>.timeout_sec`
+  ——provider ごと、秒単位。
+- `llm.timeout_sec`——レガシーな `llm` セクション用、秒単位。
+- `OCR_LLM_TIMEOUT` 環境変数——整数（秒単位）。すべての解決パスで設定ファイルの
+  値を上書きします。
+
+`timeout_sec` key は `ocr config set` ではサポートされていません——
+`~/.opencodereview/config.json` を直接編集してください。
+
+```json
+{
+  "custom_providers": {
+    "ollama": { "url": "http://127.0.0.1:11434/v1", "protocol": "openai", "timeout_sec": 900 }
+  }
+}
+```
+
 ### 接続性を検証する
 
 ```bash
@@ -81,6 +123,24 @@ ocr llm test
 Claude Code の `ANTHROPIC_*` や OCR 独自の `OCR_LLM_*` 環境変数をすでに
 設定している場合、OCR はそれらを自動的に認識するため、設定ファイルを書く
 必要はありません。
+
+### CC-Switch を使う
+
+[CC-Switch](https://github.com/farion1231/cc-switch) を
+[ルーティングサービス](https://www.ccswitch.io/en/docs?section=proxy&item=service)
+有効で使用している場合、プロバイダーの `url` をローカルプロキシに向けるだけで、
+追加設定なしで利用できます：
+
+```bash
+# Claude（Anthropic 互換）
+ocr config set providers.anthropic.url http://127.0.0.1:15721
+
+# Codex / OpenAI 互換 — そのプロバイダーの url キーを設定
+ocr config set providers.<name>.url http://127.0.0.1:15721/v1
+```
+
+`api_key` は任意の値で構いません。`extra_body`（およびその他のプロバイダー固有フィールド）は
+引き続き有効です。
 
 ### ベンダー固有のフィールドを送信する
 

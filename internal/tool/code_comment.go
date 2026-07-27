@@ -4,9 +4,44 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/open-code-review/open-code-review/internal/model"
 )
+
+const (
+	codeCommentCategoryBug             = "bug"
+	codeCommentCategorySecurity        = "security"
+	codeCommentCategoryPerformance     = "performance"
+	codeCommentCategoryMaintainability = "maintainability"
+	codeCommentCategoryTest            = "test"
+	codeCommentCategoryStyle           = "style"
+	codeCommentCategoryDocumentation   = "documentation"
+	codeCommentCategoryOther           = "other"
+
+	codeCommentSeverityCritical = "critical"
+	codeCommentSeverityHigh     = "high"
+	codeCommentSeverityMedium   = "medium"
+	codeCommentSeverityLow      = "low"
+)
+
+var validCodeCommentCategories = map[string]struct{}{
+	codeCommentCategoryBug:             {},
+	codeCommentCategorySecurity:        {},
+	codeCommentCategoryPerformance:     {},
+	codeCommentCategoryMaintainability: {},
+	codeCommentCategoryTest:            {},
+	codeCommentCategoryStyle:           {},
+	codeCommentCategoryDocumentation:   {},
+	codeCommentCategoryOther:           {},
+}
+
+var validCodeCommentSeverities = map[string]struct{}{
+	codeCommentSeverityCritical: {},
+	codeCommentSeverityHigh:     {},
+	codeCommentSeverityMedium:   {},
+	codeCommentSeverityLow:      {},
+}
 
 // CodeCommentProvider submits review comments to the per-Agent CommentCollector.
 type CodeCommentProvider struct {
@@ -69,10 +104,10 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 			cm.Thinking = thinking
 		}
 		if category, ok := obj["category"].(string); ok {
-			cm.Category = category
+			cm.Category = normalizeCodeCommentCategory(category)
 		}
 		if severity, ok := obj["severity"].(string); ok {
-			cm.Severity = severity
+			cm.Severity = normalizeCodeCommentSeverity(severity)
 		}
 		if path, ok := args["path"].(string); ok {
 			cm.Path = path
@@ -85,4 +120,20 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 		comments = append(comments, cm)
 	}
 	return comments, ""
+}
+
+func normalizeCodeCommentCategory(category string) string {
+	normalized := strings.ToLower(category)
+	if _, ok := validCodeCommentCategories[normalized]; ok {
+		return normalized
+	}
+	return codeCommentCategoryOther
+}
+
+func normalizeCodeCommentSeverity(severity string) string {
+	normalized := strings.ToLower(severity)
+	if _, ok := validCodeCommentSeverities[normalized]; ok {
+		return normalized
+	}
+	return codeCommentSeverityLow
 }

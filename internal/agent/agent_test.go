@@ -396,6 +396,41 @@ func TestFilterLargeDiffs(t *testing.T) {
 	}
 }
 
+// exactNTokens builds a string that llm.CountTokens reports as exactly n
+// tokens, failing loudly if the tokenizer disagrees so fixture drift cannot
+// silently weaken the boundary assertions below.
+func exactNTokens(t *testing.T, n int) string {
+	t.Helper()
+	s := strings.TrimSpace(strings.Repeat("a ", n))
+	if got := llm.CountTokens(s); got != n {
+		t.Fatalf("fixture drift: llm.CountTokens(<%d-token string>) = %d, want %d", n, got, n)
+	}
+	return s
+}
+
+// TestFilterLargeDiffs_Boundary pins the 80% threshold exactly: with
+// MaxTokens=100 the limit is 80, so an 80-token diff is kept and an 81-token
+// one is dropped. TestFilterLargeDiffs above uses margins wide enough to pass
+// at any threshold, so it does not pin the value.
+func TestFilterLargeDiffs_Boundary(t *testing.T) {
+	a := New(Args{
+		Template: template.Template{MaxTokens: 100},
+	})
+
+	diffs := []model.Diff{
+		{NewPath: "at-limit.go", Diff: exactNTokens(t, 80)},
+		{NewPath: "over-limit.go", Diff: exactNTokens(t, 81)},
+	}
+
+	kept := a.filterLargeDiffs(diffs)
+	if len(kept) != 1 {
+		t.Fatalf("expected 1 kept diff, got %d", len(kept))
+	}
+	if kept[0].NewPath != "at-limit.go" {
+		t.Errorf("kept wrong file: got %s, want at-limit.go", kept[0].NewPath)
+	}
+}
+
 func TestFilterLargeDiffs_ZeroMaxTokens(t *testing.T) {
 	a := New(Args{
 		Template: template.Template{MaxTokens: 0},

@@ -14,5 +14,6 @@
   "**/*Tests.java",
   "**/*_test.rs",
   "**/oh_modules/**",
-  "**/*.test.ets"
+  "**/*.test.ets",
+  "**/test/**/*.jl"
 ]

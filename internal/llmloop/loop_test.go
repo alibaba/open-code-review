@@ -3,6 +3,7 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/open-code-review/open-code-review/internal/config/template"
@@ -269,6 +270,117 @@ func TestRunner_RecordUsage(t *testing.T) {
 	}
 	if runner.TotalTokensUsed() != 150 {
 		t.Errorf("total = %d", runner.TotalTokensUsed())
+	}
+}
+
+// argsCapturingProvider records the args map Execute receives, so tests can
+// assert the runner never hands tools a nil map.
+type argsCapturingProvider struct {
+	tool     tool.Tool
+	gotArgs  map[string]any
+	captured bool
+}
+
+func (p *argsCapturingProvider) Tool() tool.Tool { return p.tool }
+func (p *argsCapturingProvider) Execute(_ context.Context, args map[string]any) (string, error) {
+	p.gotArgs = args
+	p.captured = true
+	return "ok", nil
+}
+
+func TestExecuteToolCall_ArgumentsEdgeCases(t *testing.T) {
+	// Regression for #382: some OpenAI-compatible gateways emit
+	// "arguments": null; json.Unmarshal("null", &m) leaves m nil, and the
+	// code_comment path override then panicked with "assignment to entry
+	// in nil map".
+	tests := []struct {
+		name           string
+		toolName       string
+		arguments      string
+		wantContains   string // substring expected in cp.Data ("" = skip)
+		wantComment    string // if non-empty, expect one collected comment with this path
+		wantNonNilArgs bool   // dynamic tool: Execute must receive a non-nil args map
+	}{
+		{
+			name:         "null args on code_comment (issue #382)",
+			toolName:     "code_comment",
+			arguments:    `null`,
+			wantContains: "'comments' array is required",
+		},
+		{
+			name:         "empty object on code_comment",
+			toolName:     "code_comment",
+			arguments:    `{}`,
+			wantContains: "'comments' array is required",
+		},
+		{
+			name:        "valid args keeps path override",
+			toolName:    "code_comment",
+			arguments:   `{"path":"hallucinated.go","comments":[{"content":"issue","existing_code":"foo"}]}`,
+			wantComment: "file.go",
+		},
+		{
+			name:         "empty string args",
+			toolName:     "code_comment",
+			arguments:    ``,
+			wantContains: "Error parsing tool arguments",
+		},
+		{
+			name:         "malformed json args",
+			toolName:     "code_comment",
+			arguments:    `{"comments":`,
+			wantContains: "Error parsing tool arguments",
+		},
+		{
+			name:           "null args on dynamic tool",
+			toolName:       "dyn_echo",
+			arguments:      `null`,
+			wantNonNilArgs: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			collector := tool.NewCommentCollector()
+			dyn := &argsCapturingProvider{tool: tool.Dynamic("dyn_echo")}
+			reg := tool.NewRegistry()
+			reg.Register(&tool.CodeCommentProvider{Collector: collector})
+			reg.Register(dyn)
+			reg.Freeze()
+
+			r := NewRunner(Deps{
+				Tools:            reg,
+				CommentCollector: collector,
+			})
+
+			cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
+				Function: llm.FunctionCall{
+					Name:      tt.toolName,
+					Arguments: tt.arguments,
+				},
+			}, nil)
+
+			if tt.wantContains != "" && !strings.Contains(cp.Data, tt.wantContains) {
+				t.Errorf("cp.Data = %q, want substring %q", cp.Data, tt.wantContains)
+			}
+			if tt.wantComment != "" {
+				comments := collector.Comments()
+				if len(comments) != 1 {
+					t.Fatalf("expected 1 comment, got %d", len(comments))
+				}
+				if comments[0].Path != tt.wantComment {
+					t.Errorf("comment path = %q, want %q", comments[0].Path, tt.wantComment)
+				}
+			}
+			if tt.wantNonNilArgs {
+				if !dyn.captured {
+					t.Fatal("dynamic tool Execute was not called")
+				}
+				if dyn.gotArgs == nil {
+					t.Error("dynamic tool Execute received nil args map, want non-nil empty map")
+				}
+			}
+		})
 	}
 }
 

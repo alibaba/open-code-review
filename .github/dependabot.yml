@@ -17,3 +17,21 @@ updates:
       actions:
         patterns:
           - "*"
+
+  - package-ecosystem: npm
+    directory: /extensions/vscode
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      # yarn.lock already resolves @types/vscode far above the declared
+      # engines.vscode floor (^1.74.0). Realign the two deliberately rather
+      # than let a bot churn a version no CI job builds or type-checks.
+      - dependency-name: "@types/vscode"
+    groups:
+      vscode-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

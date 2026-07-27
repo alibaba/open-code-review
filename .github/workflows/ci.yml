@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: self-hosted
@@ -20,6 +24,24 @@ jobs:
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -s -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::Not gofmt-clean. Run 'gofmt -s -w .' and commit:"
+            echo "$unformatted"
+            gofmt -s -d .
+            exit 1
+          fi
+
+      - name: Check go.mod is tidy
+        run: |
+          go mod tidy
+          if ! git diff --exit-code -- go.mod go.sum; then
+            echo "::error::go.mod/go.sum are not tidy. Run 'go mod tidy' and commit the diff above."
+            exit 1
+          fi
 
       - name: Vet
         run: go vet ./...
@@ -46,3 +68,30 @@ jobs:
 
       - name: Build
         run: go build -o /dev/null ./cmd/opencodereview
+
+  cross-compile:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    container:
+      image: golang:1.26.5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {goos: linux,   goarch: arm64}
+          - {goos: darwin,  goarch: amd64}
+          - {goos: darwin,  goarch: arm64}
+          - {goos: windows, goarch: amd64}
+          - {goos: windows, goarch: arm64}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: go build -o /dev/null ./...

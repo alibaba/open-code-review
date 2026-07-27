@@ -1,9 +1,10 @@
-import React, { useMemo, useEffect, useRef, useState, useCallback, useId } from 'react';
+import React, { useMemo, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { Marked, Renderer } from 'marked';
 import DOMPurify from 'dompurify';
 import mermaid from 'mermaid';
 import { useTranslation } from '../i18n';
+import { useCopyToast } from '../hooks/useCopyToast';
 import copyIcon from '../assets/icons/icon-copy.svg';
 import { generateHeadingId } from '../utils/headingId';
 
@@ -47,45 +48,15 @@ interface MarkdownRendererProps {
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
-  const [toastVisible, setToastVisible] = useState(false);
-
-  const handleCopy = useCallback((text: string) => {
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text).then(() => {
-        setToastVisible(true);
-      }).catch(() => fallbackCopy(text));
-    } else {
-      fallbackCopy(text);
-    }
-  }, []);
-
-  const fallbackCopy = (text: string) => {
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    const success = document.execCommand('copy');
-    document.body.removeChild(textarea);
-    if (success) setToastVisible(true);
-  };
-
-  useEffect(() => {
-    if (!toastVisible) return;
-    const timer = setTimeout(() => setToastVisible(false), 1200);
-    return () => clearTimeout(timer);
-  }, [toastVisible]);
+  const { toastVisible, handleCopy } = useCopyToast();
 
   const html = useMemo(() => {
-    const publicPath = (window.location.pathname.replace(/\/[^/]*$/, '') || '').replace(/\/$/, '');
     // Custom renderer to generate heading IDs matching the TOC extraction logic
     const renderer = new Renderer();
     renderer.image = function ({ href, title, text }: { href: string; title?: string | null; text: string }) {
       const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const src = href.startsWith('/') ? `${publicPath}${href}` : href;
       const titleAttr = title ? ` title="${escapeAttr(title)}"` : '';
-      return `<img src="${escapeAttr(src)}" alt="${escapeAttr(text)}"${titleAttr} />`;
+      return `<img src="${escapeAttr(href)}" alt="${escapeAttr(text)}"${titleAttr} />`;
     };
     renderer.heading = function ({ text, depth }: { text: string; depth: number }) {
       const id = generateHeadingId(text);

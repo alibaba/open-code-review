@@ -1,0 +1,436 @@
+#!/usr/bin/env python3
+"""Post an OpenCodeReview result onto a Gerrit change.
+
+This is the CI-layer "glue" for Gerrit, mirroring examples/gitflic_ci: it keeps
+platform-specific publishing out of the `ocr` binary and lives entirely in the
+pipeline. It reads the JSON emitted by `ocr review --format json` and posts it
+as ONE batched ReviewInput via
+
+    POST {GERRIT_URL}/a/changes/{change}/revisions/{revision}/review
+
+so a review lands atomically: inline comments grouped per file plus a summary
+message, in a single request (Gerrit's set-review endpoint).
+
+Gerrit specifics handled here:
+
+  - preemptive HTTP basic auth: Gerrit's /a/ endpoints reply 401 without a
+    challenge round-trip in some setups, so the Authorization header is always
+    sent up front (urllib's HTTPBasicAuthHandler does not do this);
+  - the ")]}'" XSSI prefix on every JSON response is stripped before parsing;
+  - a 200 response that is not Gerrit JSON (e.g. an HTML login page after a
+    redirect) is treated as a configuration error, not success;
+  - HTTP 400 on the batch is retried once with all inline comments folded into
+    the summary message, so findings still reach the change.
+
+Comments are placed on a single line (`line` = end_line); Gerrit's range form
+is deliberately not used in v1. Credentials are the Gerrit *HTTP password*
+(Settings > HTTP Credentials), not the account password, and are never echoed
+into logs or error output.
+
+Standard library only (json, urllib) so it runs on any stock python3 image.
+"""
+
+import argparse
+import base64
+import json
+import os
+import re
+import socket
+import sys
+import time
+import urllib.error
+import urllib.request
+
+XSSI_PREFIX = ")]}'"
+MAX_MESSAGE_LEN = 16000
+TRUNCATION_MARKER = "\n\n[truncated]"
+DEFAULT_REVISION = "current"
+# Total attempts (so 2 retries) for the safe-to-retry transport failures in
+# make_poster; see post() for exactly which failures qualify.
+MAX_ATTEMPTS = 3
+INLINE_CLAUSE_RE = re.compile(r"; \d+ posted as inline comment\(s\)\.")
+
+# Injectable so tests can run without real delays; production uses time.sleep.
+_sleep = time.sleep
+
+
+def log(msg):
+    print(msg, file=sys.stderr)
+
+
+# --------------------------------------------------------------------------- #
+# Pure layer: OCR result JSON -> Gerrit ReviewInput
+# --------------------------------------------------------------------------- #
+
+
+def format_comment(c):
+    """Render one inline comment body (same shape as gitflic's format_comment).
+
+    The Severity/Category header line exists because Gerrit's CommentInput has
+    no structural severity/category slot, so the metadata must live in the
+    message text itself.
+    """
+    header = []
+    if c.get("severity"):
+        header.append("**Severity:** " + c["severity"])
+    if c.get("category"):
+        header.append("**Category:** " + c["category"])
+    body = c.get("content", "")
+    if header:
+        body = " · ".join(header) + "\n\n" + body
+    suggestion = c.get("suggestion_code", "")
+    existing = c.get("existing_code", "")
+    if suggestion and existing:
+        body += "\n\n**Suggestion:**\n```\n" + suggestion + "\n```"
+    return body
+
+
+def truncate_message(msg):
+    if len(msg) <= MAX_MESSAGE_LEN:
+        return msg
+    return msg[: MAX_MESSAGE_LEN - len(TRUNCATION_MARKER)] + TRUNCATION_MARKER
+
+
+def build_review_input(result):
+    """Map `ocr review --format json` output to one Gerrit ReviewInput dict."""
+    comments = result.get("comments") or []
+    warnings = result.get("warnings") or []
+
+    grouped = {}  # path -> [CommentInput, ...]
+    folded = []  # comment bodies without a usable path; go into the summary
+    for c in comments:
+        text = truncate_message(format_comment(c))
+        path = c.get("path") or ""
+        if not path:
+            folded.append(text)
+            continue
+        entry = {
+            "message": text,
+            "unresolved": c.get("severity") in ("critical", "high"),
+        }
+        # ponytail: single-line placement only (line = end_line); the range
+        # form is E2E-gated and deliberately left out of v1.
+        line = c.get("end_line") or 0
+        if line > 0:
+            entry["line"] = line
+        grouped.setdefault(path, []).append(entry)
+
+    if comments:
+        inline = sum(len(v) for v in grouped.values())
+        summary = "OpenCodeReview found %d issue(s)" % len(comments)
+        files_reviewed = (result.get("summary") or {}).get("files_reviewed") or 0
+        if files_reviewed:
+            summary += " in %d file(s) reviewed" % files_reviewed
+        summary += "; %d posted as inline comment(s)." % inline
+    else:
+        summary = "OpenCodeReview: " + (
+            result.get("message") or "No comments generated. Looks good to me."
+        )
+    if warnings:
+        summary += "\n\n%d warning(s) occurred during review." % len(warnings)
+    for text in folded:
+        summary += "\n\n---\n\n" + text
+
+    review = {
+        "message": truncate_message(summary),
+        "tag": "autogenerated:opencodereview",
+        "notify": "OWNER",
+        "omit_duplicate_comments": True,
+        # Old Gerrit servers defaulted to deleting the caller's draft comments
+        # on set-review; KEEP is a valid enum everywhere and protects humans
+        # running this with personal credentials.
+        "drafts": "KEEP",
+    }
+    if grouped:
+        # Plain `comments` (CommentInput), not `robot_comments`/RobotCommentInput:
+        # robot comments are deprecated since Gerrit 3.6, disabled-by-default in
+        # 3.12, and slated for removal; the `tag: autogenerated:...` above already
+        # marks these as bot-generated.
+        review["comments"] = grouped
+    return review
+
+
+def fold_comments(review_input):
+    """Rebuild a ReviewInput with all inline comments folded into the summary.
+
+    Used when Gerrit rejects the batch (HTTP 400, e.g. a line outside the
+    file): the findings still reach the change as one message.
+    """
+    folded = {k: v for k, v in review_input.items() if k != "comments"}
+    # The reused summary still claims "N posted as inline comment(s)." from
+    # build_review_input; drop that clause so the message doesn't say the
+    # comments were posted inline and then explain they couldn't be placed.
+    summary = INLINE_CLAUSE_RE.sub(".", review_input.get("message", ""))
+    parts = [
+        summary,
+        "\nInline comments could not be placed; findings follow:",
+    ]
+    for path, entries in (review_input.get("comments") or {}).items():
+        for e in entries:
+            loc = "`%s:%d`" % (path, e["line"]) if "line" in e else "`%s`" % path
+            parts.append("\n---\n\n%s\n\n%s" % (loc, e["message"]))
+    full = "\n".join(parts)
+    if len(full) > MAX_MESSAGE_LEN:
+        log("warning: folded summary truncated (%d of %d chars dropped)"
+            % (len(full) - MAX_MESSAGE_LEN + len(TRUNCATION_MARKER), len(full)))
+    folded["message"] = truncate_message(full)
+    return folded
+
+
+def strip_xssi(text):
+    """Strip Gerrit's ")]}'" anti-XSSI prefix (possibly stacked) from a response."""
+    text = text.lstrip("\n")
+    while text.startswith(XSSI_PREFIX):
+        text = text[len(XSSI_PREFIX):].lstrip("\n")
+    return text
+
+
+def build_endpoint(base, change, revision):
+    """Join base URL (context path kept, trailing slash tolerated) and route."""
+    return "%s/a/changes/%s/revisions/%s/review" % (
+        str(base).rstrip("/"),
+        change,
+        revision or DEFAULT_REVISION,
+    )
+
+
+def derive_base_url(change_url):
+    """Derive the Gerrit base URL from a change URL.
+
+    Modern URLs ({base}/c/{project}/+/{number}) split at "/c/", which keeps
+    any context path; legacy URLs ({base}/{number}) drop the trailing number.
+    """
+    url = change_url.rstrip("/")
+    if "/c/" in url:
+        return url.split("/c/")[0]
+    return re.sub(r"/\d+$", "", url)
+
+
+# --------------------------------------------------------------------------- #
+# Transport (urllib only)
+# --------------------------------------------------------------------------- #
+
+
+def make_poster(url, user, password, timeout):
+    """Return post(review_input) that POSTs to the Gerrit set-review endpoint.
+
+    Auth is preemptive basic auth; the parsed (XSSI-stripped) response JSON is
+    returned. A response that does not parse as JSON raises ValueError -- a
+    2xx with an HTML body means the request never reached the REST API.
+    """
+    credentials = base64.b64encode(
+        ("%s:%s" % (user, password)).encode("utf-8")
+    ).decode("ascii")
+
+    def post(review_input):
+        body = json.dumps(review_input, ensure_ascii=False).encode("utf-8")
+        # Bounded retry, scoped to the provably-safe failures only. A read
+        # timeout is deliberately NOT retried: it is ambiguous (the server may
+        # have applied the review), and omit_duplicate_comments dedupes only
+        # byte-identical *inline* comments, not the summary `message`, so
+        # retrying an ambiguous request risks posting a duplicate change
+        # message. depot_tools' gerrit_util.py retries hard (TRY_LIMIT=6); we
+        # retry only server errors and pre-response connection failures.
+        for attempt in range(MAX_ATTEMPTS):
+            req = urllib.request.Request(url, data=body, method="POST")
+            # unredirected: credentials must not follow redirects to other hosts
+            # (urllib forwards ordinary headers cross-host on redirect).
+            req.add_unredirected_header("Authorization", "Basic " + credentials)
+            req.add_header("Content-Type", "application/json; charset=UTF-8")
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    raw = resp.read().decode("utf-8", "replace")
+                return json.loads(strip_xssi(raw))
+            except urllib.error.HTTPError as e:
+                # Retry only 5xx (the review was not applied). 4xx
+                # (400/401/404/409) are classified by main() and must propagate
+                # unchanged.
+                if e.code < 500 or attempt == MAX_ATTEMPTS - 1:
+                    raise
+            except urllib.error.URLError as e:
+                # Retry pre-response connection errors (refused/reset/DNS), but
+                # NOT a connection-phase timeout wrapped as URLError -- see the
+                # ambiguity note above. (A read timeout raises a bare
+                # socket.timeout/TimeoutError, which is not caught here and so
+                # already propagates without retry.)
+                if isinstance(e.reason, (socket.timeout, TimeoutError)):
+                    raise
+                if attempt == MAX_ATTEMPTS - 1:
+                    raise
+            _sleep(0.5 * (2 ** attempt))
+
+    return post
+
+
+def make_dry_run_poster():
+    """Return post(review_input) that prints instead of calling Gerrit."""
+
+    def post(review_input):
+        print(json.dumps(review_input, ensure_ascii=False, indent=2))
+        return {}
+
+    return post
+
+
+# --------------------------------------------------------------------------- #
+# CLI
+# --------------------------------------------------------------------------- #
+
+
+def load_review_result(path):
+    """Read the JSON produced by `ocr review --format json` (path '-' = stdin)."""
+    if path == "-":
+        data = sys.stdin.read()
+    else:
+        with open(path, encoding="utf-8") as f:
+            data = f.read()
+    result = json.loads(data)
+    if not isinstance(result, dict):
+        raise ValueError("expected a JSON object")
+    return result
+
+
+def scrub(text, password, user=""):
+    """Never let the HTTP credentials reach CI logs, even via echoed error bodies."""
+    if password:
+        # Servers/proxies that echo the Authorization header would leak the
+        # base64(user:password) form, which decodes trivially; scrub it too.
+        b64 = base64.b64encode(
+            ("%s:%s" % (user, password)).encode("utf-8")
+        ).decode("ascii")
+        text = text.replace(b64, "***")
+    # A very short "password" (misconfiguration) would mangle unrelated
+    # diagnostics, e.g. "Operation" -> "O***eration"; skip it.
+    if not password or len(password) < 4:
+        return text
+    return text.replace(password, "***")
+
+
+def read_error_body(e):
+    try:
+        return e.read(512).decode("utf-8", "replace").strip()
+    except Exception:  # noqa: BLE001 - body is best-effort diagnostics only
+        return ""
+
+
+def positive_float(value):
+    f = float(value)
+    if f <= 0:
+        raise argparse.ArgumentTypeError("timeout must be > 0")
+    return f
+
+
+def parse_args(argv):
+    p = argparse.ArgumentParser(
+        description="Post `ocr review --format json` output onto a Gerrit change."
+    )
+    p.add_argument("input", nargs="?", default=None,
+                   help="review result JSON path (same as --input; wins if both given)")
+    p.add_argument("--gerrit-url", default="",
+                   help="Gerrit base URL (default: $GERRIT_URL, or derived from $GERRIT_CHANGE_URL)")
+    p.add_argument("--change", default="",
+                   help="change number (default: $GERRIT_CHANGE_NUMBER)")
+    p.add_argument("--revision", default="",
+                   help="revision/patchset (default: $GERRIT_PATCHSET_REVISION or 'current')")
+    p.add_argument("--user", default="",
+                   help="HTTP credentials username (default: $GERRIT_HTTP_USER)")
+    p.add_argument("--password", default="",
+                   help="Gerrit HTTP password, NOT the account password (default: $GERRIT_HTTP_PASSWORD)")
+    p.add_argument("--input", dest="input_flag", default="-",
+                   help="review result JSON ('-' = stdin, default)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print the ReviewInput instead of posting it")
+    p.add_argument("--timeout", type=positive_float, default=30.0,
+                   help="HTTP timeout in seconds (default: 30)")
+    return p.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    env = os.environ.get
+
+    base_url = args.gerrit_url or env("GERRIT_URL", "")
+    if not base_url and env("GERRIT_CHANGE_URL", ""):
+        base_url = derive_base_url(env("GERRIT_CHANGE_URL", ""))
+    change = args.change or env("GERRIT_CHANGE_NUMBER", "")
+    revision = args.revision or env("GERRIT_PATCHSET_REVISION", "") or DEFAULT_REVISION
+    user = args.user or env("GERRIT_HTTP_USER", "")
+    password = args.password or env("GERRIT_HTTP_PASSWORD", "")
+    # Positional path wins over --input (gitflic parity: its script is positional).
+    input_path = args.input if args.input is not None else args.input_flag
+
+    if not args.dry_run:
+        missing = [name for name, value in (
+            ("GERRIT_URL", base_url),
+            ("GERRIT_CHANGE_NUMBER", change),
+            ("GERRIT_HTTP_USER", user),
+            ("GERRIT_HTTP_PASSWORD", password),
+        ) if not value]
+        if missing:
+            log("error: missing required %s (set via flag or environment)"
+                % ", ".join(missing))
+            return 2
+
+    try:
+        result = load_review_result(input_path)
+    except (OSError, ValueError) as e:
+        log("error: cannot read review result %s: %s" % (input_path, e))
+        return 1
+
+    review_input = build_review_input(result)
+
+    if args.dry_run:
+        make_dry_run_poster()(review_input)
+        return 0
+
+    endpoint = build_endpoint(base_url, change, revision)
+    post = make_poster(endpoint, user, password, args.timeout)
+    try:
+        post(review_input)
+    except urllib.error.HTTPError as e:
+        body = scrub(read_error_body(e), password, user)
+        if e.code in (401, 403):
+            log("error: Gerrit rejected the credentials (HTTP %d). Use the "
+                "HTTP password from Settings > HTTP Credentials, not the "
+                "account password: %s" % (e.code, body))
+            return 2
+        if e.code == 404:
+            log("error: change %s not found at %s (HTTP 404). Check the change "
+                "number and GERRIT_URL (a proxy stripping the /a/ prefix also "
+                "causes this): %s" % (change, endpoint, body))
+            return 2
+        if e.code == 409:
+            log("warning: change %s is closed/abandoned (HTTP 409); nothing "
+                "posted: %s" % (change, body))
+            return 0
+        if e.code == 400 and "comments" in review_input:
+            log("warning: Gerrit rejected the batched comments (HTTP 400); "
+                "retrying with findings folded into the summary: %s" % body)
+            try:
+                post(fold_comments(review_input))
+            except (urllib.error.HTTPError, urllib.error.URLError, ValueError) as e2:
+                log("error: fallback post failed: %s" % scrub(str(e2), password, user))
+                return 2
+            print("Posted review to change %s (inline comments folded into "
+                  "summary)." % change)
+            return 0
+        else:
+            log("error: Gerrit API HTTP %d: %s" % (e.code, body))
+            return 2
+    except urllib.error.URLError as e:
+        log("error: cannot reach Gerrit at %s (check GERRIT_URL): %s"
+            % (endpoint, scrub(str(e.reason), password, user)))
+        return 2
+    except ValueError as e:
+        log("error: response from %s was not Gerrit JSON; check the GERRIT_URL "
+            "scheme (http vs https) and any redirects: %s"
+            % (endpoint, scrub(str(e), password, user)))
+        return 2
+
+    total = len(result.get("comments") or [])
+    print("Posted review with %d comment(s) to change %s." % (total, change))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

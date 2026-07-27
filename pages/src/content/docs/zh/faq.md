@@ -48,6 +48,38 @@ URL 格式——确保 `llm.use_anthropic` 与你指向的 URL 相匹配：
 `ocr review` 对当前目录运行 `git diff`（以及对 untracked 文件的 `git ls-files`）。
 若你不在 Git 工作树内，它会提前退出。要么 `cd` 进仓库，要么传 `--repo /path/to/repo`。
 
+### "No tool calls parsed"（本地模型 / Ollama）
+
+```
+[ocr] No tool calls parsed for src/foo.go, retrying...
+[ocr] Max tool requests reached for src/foo.go.
+```
+
+若每次评审都在 `No tool calls parsed` 重试中循环，最终以 "Max tool requests
+reached" 结束且没有任何评论，问题出在模型——而非配置。OCR 完全通过工具调用驱动评审，
+因此**模型必须支持原生工具调用（function calling）**。只在文本输出（或
+`<think>` 块内）*叙述*工具调用的模型，无论怎么调 prompt 都永远无法与 OCR
+配合使用——`deepseek-r1` 是常见例子。具备原生工具支持的模型（如 `qwen3`）则工作
+正常。对 Ollama，请从带 tools 标签的模型中挑选：
+<https://ollama.com/search?c=tools>。
+
+绕开 OCR、直接验证本地模型：
+
+```bash
+curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/json" -d '{
+  "model": "qwen3:32b",
+  "messages": [{"role": "user", "content": "The code below has a bug, use the report_bug tool to report it.\n\nfunc add(a, b int) int {\n  return a - b\n}"}],
+  "tools": [{"type": "function", "function": {"name": "report_bug", "description": "Report a bug in the code",
+    "parameters": {"type": "object", "properties": {"line": {"type": "integer"}, "description": {"type": "string"}}, "required": ["description"]}}}]
+}'
+```
+
+通过：响应包含指向 `report_bug` 的结构化 `tool_calls` 数组。失败：“调用”以
+文本形式出现在 `content` 里。
+
+若模型*确实*支持工具，只是在本地硬件上响应缓慢，请改为调高 LLM 超时——见
+[超时](../configuration/#超时)。
+
 ## 过滤与规则
 
 ### 我的文件没被评审
@@ -150,6 +182,8 @@ diff 能从 plan 中受益。要为单次评审跳过它，用更小 diff 运行
 - 文件确实大或上下文重，30 轮不够。用 `--max-tools <n>` 调高或调低
   （如 `--max-tools 40` 更多，`--max-tools 15` 更少）。1–9 会被上调到 10；
   `0`（默认）用模板默认 30。
+- 模型完全不支持原生工具调用（本地模型常见）——见
+  ["No tool calls parsed"（本地模型 / Ollama）](#no-tool-calls-parsed-本地模型-ollama)。
 
 ### 一些子 agent 失败；运行仍以 0 退出
 

@@ -28,6 +28,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".FTLH", true},
 		{".ftlx", true},
 		{".FTLX", true},
+		{".graphql", true},
+		{".GRAPHQL", true},
+		{".gql", true},
+		{".GQL", true},
+		{".jl", true},
+		{".JL", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -101,6 +107,11 @@ func TestIsExcludedPath(t *testing.T) {
 		{"oh_modules nested", "entry/oh_modules/lib/index.ets", true},
 		{"ets test file", "entry/src/test/Component.test.ets", true},
 		{"ets non-test", "entry/src/main/Component.ets", false},
+
+		// Julia test files
+		{"julia test file", "test/runtests.jl", true},
+		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
+		{"julia non-test", "src/model.jl", false},
 
 		// Case insensitive
 		{"case insensitive go", "Foo/Bar_Test.go", true},
