@@ -1377,7 +1377,7 @@ func TestNewLLMClient_DefaultTimeout(t *testing.T) {
 		URL:   "https://api.example.com/v1",
 		Token: "test-token",
 		Model: "test-model",
-		// Timeout not set â€” should default to 5 minutes
+		// Timeout not set — should default to 5 minutes
 	}
 
 	client := NewLLMClient(ep)
@@ -1748,7 +1748,7 @@ func TestResolveEndpoint_OCREnvProtocolInvalid(t *testing.T) {
 }
 
 // TestResolveEndpoint_ResponsesURLNotMutated makes sure the resolver leaves
-// openai-responses URLs alone â€” only anthropic gets /v1/messages appended.
+// openai-responses URLs alone — only anthropic gets /v1/messages appended.
 func TestResolveEndpoint_ResponsesURLNotMutated(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("OCR_LLM_URL", "https://api.openai.com/v1")
