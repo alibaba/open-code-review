@@ -54,6 +54,8 @@ func dispatch() error {
 		return runLLM(args[1:])
 	case "rules":
 		return runRules(args[1:])
+	case "update":
+		return runUpdate(args[1:])
 	case "viewer":
 		return runViewer(args[1:])
 	case "delegate", "d":
@@ -83,6 +85,7 @@ Commands:
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
+  update       Update ocr to the latest version
   version      Show version information
 
 Examples:
@@ -97,6 +100,7 @@ Examples:
   ocr llm providers                        List built-in providers
   ocr session list                         List saved review sessions
   ocr version                              Show version info
+  ocr update                               Update ocr to the latest release
 
 Use "ocr review -h" for more information about review.
 Use "ocr scan -h" for more information about scan.
