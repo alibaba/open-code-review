@@ -29,7 +29,8 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
     return { error };
   }
 
-  componentDidCatch(error: Error): void {
+  componentDidCatch(error: Error, info: React.ErrorInfo): void {
+    console.error('ErrorBoundary caught an error:', error, info);
     if (this.props.reloadOnChunkError && isChunkLoadError(error) && this.markChunkReloadAttempt()) {
       window.location.reload();
     }
