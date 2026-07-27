@@ -24,6 +24,6 @@
     "**/*.po": "po.md",
     "**/*.pot": "pot.md",
     "**/*.{graphql,gql}": "graphql.md",
-    "**/*.jl": "julia.md"
+    "**/*.{tf,hcl,tfvars}": "terraform.md"
   }
 }
