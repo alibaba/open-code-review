@@ -680,5 +680,9 @@ func ensureMessagesSuffix(rawURL string) string {
 	if strings.HasSuffix(u, "/v1") {
 		return u + "/messages"
 	}
+	// URL has /v1/ in the middle (e.g. /v1/anthropic) — already versioned, leave it alone.
+	if strings.Contains(u, "/v1/") {
+		return rawURL
+	}
 	return u + "/v1/messages"
 }
