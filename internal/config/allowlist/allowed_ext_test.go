@@ -114,6 +114,11 @@ func TestIsExcludedPath(t *testing.T) {
 		{"ets test file", "entry/src/test/Component.test.ets", true},
 		{"ets non-test", "entry/src/main/Component.ets", false},
 
+		// Julia test files
+		{"julia test file", "test/runtests.jl", true},
+		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
+		{"julia non-test", "src/model.jl", false},
+
 		// Case insensitive
 		{"case insensitive go", "Foo/Bar_Test.go", true},
 		{"case insensitive java", "com/FooTEST.java", true}, // lowercase → "com/footest.java" matches "**/*test.java"

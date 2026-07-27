@@ -10,7 +10,7 @@
 
 #### Overly Permissive Access
 - A `Microsoft.Authorization/roleAssignments` resource granting a broad built-in role (`Owner`, `Contributor`) at subscription or resource-group scope where a narrower, resource-scoped or custom role would suffice, especially when sibling assignments in the same file use narrower scopes
-- A network security group rule (`Microsoft.Network/networkSecurityGroups/securityRules`) with `sourceAddressPrefix` set to `*`/`Internet`/`0.0.0.0/0` on a sensitive port (SSH/22, RDP/3389, database ports) or on all ports (`destinationPortRange: '*'`)
+- A network security group rule (`Microsoft.Network/networkSecurityGroups/securityRules`) with `sourceAddressPrefix` set to `*`/`Internet`/`0.0.0.0/0` on a sensitive port (SSH/22, RDP/3389, or a database port such as MySQL/3306, PostgreSQL/5432, SQL Server/1433, MongoDB/27017) or on all ports (`destinationPortRange: '*'`)
 - A storage account, key vault, or SQL server resource with `publicNetworkAccess` explicitly set to `'Enabled'` (or left at a default that resolves to public) alongside no compensating `networkAcls`/private-endpoint configuration elsewhere in the same file
 
 #### Insecure Resource Defaults
