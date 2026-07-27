@@ -102,6 +102,40 @@ curl -LO https://github.com/alibaba/open-code-review/releases/latest/download/sh
 shasum -a 256 -c sha256sum.txt --ignore-missing
 ```
 
+## 更新已有安装
+
+### 静态二进制（安装脚本或 GitHub Release）
+
+如果你通过安装脚本或直接下载二进制安装了 `ocr`，可以使用内置的
+`ocr update` 命令原地更新：
+
+```bash
+ocr update
+```
+
+该命令会从 GitHub 下载最新 release，校验 sha256 校验和，并原地替换
+当前运行的二进制。其他选项：
+
+```bash
+ocr update --check              # 检查是否有可用更新
+ocr update --version v1.7.17    # 安装指定版本
+ocr update --force              # 即使已是最新也重新安装
+```
+
+或者重新运行安装脚本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+```
+
+### NPM
+
+NPM 安装默认自动更新（见上文）。手动更新：
+
+```bash
+npm install -g @alibaba-group/open-code-review
+```
+
 ## 从源码构建
 
 仅当你要修改 OCR 本身，或在某个没有预编译二进制的平台上运行时才需要此方式。

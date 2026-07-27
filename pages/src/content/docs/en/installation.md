@@ -107,6 +107,40 @@ curl -LO https://github.com/alibaba/open-code-review/releases/latest/download/sh
 shasum -a 256 -c sha256sum.txt --ignore-missing
 ```
 
+## Updating an existing installation
+
+### Static binary (install script or GitHub Release)
+
+If you installed `ocr` via the install script or downloaded a binary
+directly, you can update in place with the built-in `ocr update` command:
+
+```bash
+ocr update
+```
+
+This downloads the latest release from GitHub, verifies the sha256 checksum,
+and atomically replaces the running binary. Other options:
+
+```bash
+ocr update --check              # Check if an update is available
+ocr update --version v1.7.17    # Install a specific version
+ocr update --force              # Reinstall even if already latest
+```
+
+Alternatively, re-run the install script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+```
+
+### NPM
+
+NPM installs auto-update by default (see above). To update manually:
+
+```bash
+npm install -g @alibaba-group/open-code-review
+```
+
 ## Build from source
 
 You only need this path if you're hacking on OCR or running on a platform
