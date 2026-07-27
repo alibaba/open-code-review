@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/agent"
-	"github.com/open-code-review/open-code-review/internal/mcp"
-	"github.com/open-code-review/open-code-review/internal/session"
-	"github.com/open-code-review/open-code-review/internal/telemetry"
-	"github.com/open-code-review/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/mcp"
+	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/telemetry"
+	"github.com/alibaba/open-code-review/internal/tool"
 
 	"go.opentelemetry.io/otel/codes"
 )

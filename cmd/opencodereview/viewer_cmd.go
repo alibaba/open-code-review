@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/open-code-review/open-code-review/internal/viewer"
+	"github.com/alibaba/open-code-review/internal/viewer"
 )
 
 type viewerOptions struct {

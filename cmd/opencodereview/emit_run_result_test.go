@@ -10,8 +10,8 @@ import (
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
-	"github.com/open-code-review/open-code-review/internal/agent"
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 type mockResultProvider struct {

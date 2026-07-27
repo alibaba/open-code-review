@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-code-review/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
 
 func TestFileReader_Read_Workspace(t *testing.T) {

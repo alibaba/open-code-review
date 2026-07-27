@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 func TestListSessions_EmptyRepoReturnsNil(t *testing.T) {

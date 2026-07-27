@@ -3,7 +3,7 @@ package diff
 import (
 	"testing"
 
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 const testDiff = `diff --git a/pkg/example/handler.go b/pkg/example/handler.go

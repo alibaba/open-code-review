@@ -9,7 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func runSession(args []string) error {

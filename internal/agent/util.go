@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/llm"
-	"github.com/open-code-review/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 // planBlockPattern matches the optional "Review Plan" section in a MAIN_TASK

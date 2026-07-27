@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/open-code-review/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 func TestCustomProviderActiveModel_NilCfg(t *testing.T) {

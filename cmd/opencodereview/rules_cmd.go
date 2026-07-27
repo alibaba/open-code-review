@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-code-review/open-code-review/internal/config/rules"
+	"github.com/alibaba/open-code-review/internal/config/rules"
 )
 
 func runRules(args []string) error {

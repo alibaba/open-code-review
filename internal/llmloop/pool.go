@@ -12,8 +12,8 @@ import (
 	"runtime/debug"
 	"sync"
 
-	"github.com/open-code-review/open-code-review/internal/model"
-	"github.com/open-code-review/open-code-review/internal/stdout"
+	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/stdout"
 )
 
 // AgentWarning describes a non-fatal warning recorded during a per-file

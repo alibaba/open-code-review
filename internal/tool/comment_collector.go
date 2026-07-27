@@ -3,7 +3,7 @@ package tool
 import (
 	"sync"
 
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // CommentCollector is a thread-safe, per-Agent comment store.

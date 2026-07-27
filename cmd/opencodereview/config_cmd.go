@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/open-code-review/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 // Default config file location: ~/.opencodereview/config.json

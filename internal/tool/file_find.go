@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/diff"
 )
 
 const (

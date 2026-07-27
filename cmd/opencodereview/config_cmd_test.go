@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/open-code-review/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 func TestSetConfigValueAuthHeaderNormalizesKnownValues(t *testing.T) {

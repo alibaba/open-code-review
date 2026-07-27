@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // Preview enumerates files and applies the standard reviewability filter

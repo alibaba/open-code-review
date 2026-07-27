@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/agent"
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 func TestHasSubtaskErrors(t *testing.T) {

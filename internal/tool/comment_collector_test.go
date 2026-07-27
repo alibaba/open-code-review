@@ -3,7 +3,7 @@ package tool
 import (
 	"testing"
 
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 func cm(path, content string) model.LlmComment {

@@ -3,8 +3,8 @@ package scan
 import (
 	"fmt"
 
-	"github.com/open-code-review/open-code-review/internal/llm"
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // Cost-estimation heuristics. These are deliberately rough — their job is

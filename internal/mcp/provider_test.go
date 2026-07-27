@@ -3,9 +3,9 @@ package mcp
 import (
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/tool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/open-code-review/open-code-review/internal/llm"
-	"github.com/open-code-review/open-code-review/internal/tool"
 )
 
 func newTestClient(name string, tools []*mcp.Tool) *Client {

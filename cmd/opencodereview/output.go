@@ -8,9 +8,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/open-code-review/open-code-review/internal/agent"
-	"github.com/open-code-review/open-code-review/internal/model"
-	"github.com/open-code-review/open-code-review/internal/suggestdiff"
+	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/suggestdiff"
 )
 
 func outputText(comments []model.LlmComment) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-code-review/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 func TestExcludeToolDef(t *testing.T) {

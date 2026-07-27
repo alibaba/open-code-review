@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/config/template"
-	"github.com/open-code-review/open-code-review/internal/llm"
-	"github.com/open-code-review/open-code-review/internal/model"
-	"github.com/open-code-review/open-code-review/internal/stdout"
-	"github.com/open-code-review/open-code-review/internal/telemetry"
+	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/stdout"
+	"github.com/alibaba/open-code-review/internal/telemetry"
 )
 
 // ReLocateComment calls the LLM to regenerate a precise existing_code snippet

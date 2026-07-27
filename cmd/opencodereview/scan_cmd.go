@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/config/template"
-	"github.com/open-code-review/open-code-review/internal/llmloop"
-	"github.com/open-code-review/open-code-review/internal/scan"
-	"github.com/open-code-review/open-code-review/internal/telemetry"
-	"github.com/open-code-review/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/llmloop"
+	"github.com/alibaba/open-code-review/internal/scan"
+	"github.com/alibaba/open-code-review/internal/telemetry"
+	"github.com/alibaba/open-code-review/internal/tool"
 
 	"go.opentelemetry.io/otel/codes"
 )

@@ -16,9 +16,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/open-code-review/open-code-review/internal/diff"
-	"github.com/open-code-review/open-code-review/internal/gitcmd"
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // binarySniffWindow is the number of leading bytes inspected to decide

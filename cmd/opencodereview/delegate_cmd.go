@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-code-review/open-code-review/internal/agent"
-	"github.com/open-code-review/open-code-review/internal/config/rules"
-	"github.com/open-code-review/open-code-review/internal/delegate"
-	"github.com/open-code-review/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/config/rules"
+	"github.com/alibaba/open-code-review/internal/delegate"
+	"github.com/alibaba/open-code-review/internal/diff"
 )
 
 type delegateOptions struct {
