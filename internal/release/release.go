@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -24,6 +26,16 @@ const GitHubRepo = "alibaba/open-code-review"
 
 // Default HTTP request timeout for version checks and downloads.
 const defaultTimeout = 30 * time.Second
+
+// Max download sizes to prevent unbounded reads from a compromised server.
+const (
+	maxBinarySize   = 500 * 1024 * 1024 // 500 MB for binary downloads
+	maxAPIBodySize  = 1 * 1024 * 1024   // 1 MB for API JSON responses
+	maxChecksumSize = 64 * 1024         // 64 KB for sha256sum.txt
+)
+
+// NPMPackageName is the NPM package name for ocr, used in update hints.
+const NPMPackageName = "@alibaba-group/open-code-review"
 
 // urlPattern is the release download URL template. It mirrors the
 // ocrConfig.urlPattern in package.json; TestURLPatternConsistency validates
@@ -115,7 +127,7 @@ func FetchLatestRelease(client *http.Client) (*LatestRelease, error) {
 	}
 
 	var body githubReleaseResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIBodySize)).Decode(&body); err != nil {
 		return nil, fmt.Errorf("decode release response: %w", err)
 	}
 	if body.TagName == "" {
@@ -247,8 +259,13 @@ func downloadFile(client *http.Client, url, dest string) error {
 	}
 	defer out.Close()
 
-	if _, err := io.Copy(out, resp.Body); err != nil {
+	limited := io.LimitReader(resp.Body, maxBinarySize)
+	n, err := io.Copy(out, limited)
+	if err != nil {
 		return fmt.Errorf("write %s: %w", dest, err)
+	}
+	if n >= maxBinarySize {
+		return fmt.Errorf("download %s: file exceeds maximum allowed size (%d bytes)", url, maxBinarySize)
 	}
 	return nil
 }
@@ -271,7 +288,7 @@ func verifyChecksum(client *http.Client, version, assetName, assetPath string) e
 		return fmt.Errorf("download checksums: status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxChecksumSize))
 	if err != nil {
 		return fmt.Errorf("read checksums: %w", err)
 	}
@@ -289,13 +306,17 @@ func verifyChecksum(client *http.Client, version, assetName, assetPath string) e
 		return fmt.Errorf("no checksum entry for %s in sha256sum.txt", assetName)
 	}
 
-	data, err := os.ReadFile(assetPath)
+	f, err := os.Open(assetPath)
 	if err != nil {
 		return fmt.Errorf("read downloaded binary: %w", err)
 	}
+	defer f.Close()
 
-	sum := sha256.Sum256(data)
-	got := hex.EncodeToString(sum[:])
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("hash downloaded binary: %w", err)
+	}
+	got := hex.EncodeToString(h.Sum(nil))
 	if got != want {
 		return fmt.Errorf("checksum mismatch for %s (got %s, want %s)", assetName, got, want)
 	}
@@ -356,18 +377,35 @@ func replaceBinary(newBinaryPath string) error {
 	return nil
 }
 
-// moveFile moves a file, falling back to copy+delete when the source and
-// destination are on different filesystems (where os.Rename fails with
-// EXDEV / cross-device link).
+// moveFile moves a file, falling back to copy+delete only for cross-device
+// errors (EXDEV). Other rename errors are returned immediately to avoid
+// masking real problems like permission denied or file busy.
 func moveFile(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
+	err := os.Rename(src, dst)
+	if err == nil {
 		return nil
+	}
+	if !isCrossDeviceError(err) {
+		return err
 	}
 	// Fall back to copy + delete for cross-device moves.
 	if err := copyFile(src, dst); err != nil {
 		return err
 	}
 	return os.Remove(src)
+}
+
+// isCrossDeviceError reports whether err is a cross-device link error
+// (EXDEV on Unix).
+func isCrossDeviceError(err error) bool {
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) {
+		var sysErr syscall.Errno
+		if errors.As(linkErr.Err, &sysErr) {
+			return sysErr == syscall.EXDEV
+		}
+	}
+	return false
 }
 
 // copyFile copies a regular file, preserving permissions.
@@ -421,7 +459,10 @@ func DownloadAndReplace(client *http.Client, version string) (*DownloadResult, e
 		return nil, err
 	}
 
-	exe, _ := os.Executable()
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("determine executable path: %w", err)
+	}
 	fmt.Printf("Installing to %s...\n", exe)
 
 	if err := replaceBinary(tmpBinary); err != nil {

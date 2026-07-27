@@ -35,7 +35,11 @@ func runUpdate(args []string) error {
 		return nil
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	// Use a short-timeout client for API calls and a long-timeout client
+	// for binary downloads, since http.Client.Timeout covers the entire
+	// request lifecycle including reading the response body.
+	apiClient := &http.Client{Timeout: 30 * time.Second}
+	downloadClient := &http.Client{Timeout: 10 * time.Minute}
 
 	method := release.DetectInstallMethod()
 
@@ -48,7 +52,7 @@ func runUpdate(args []string) error {
 		}
 	} else {
 		fmt.Print("Checking for the latest release...\n")
-		latest, err := release.FetchLatestRelease(client)
+		latest, err := release.FetchLatestRelease(apiClient)
 		if err != nil {
 			return fmt.Errorf("failed to check latest release: %w", err)
 		}
@@ -64,6 +68,8 @@ func runUpdate(args []string) error {
 		if release.IsNewerVersion(latestVersion, currentVersion) {
 			fmt.Printf("A new version is available: %s (current: %s)\n", version, displayVersion())
 			fmt.Printf("Run 'ocr update' to install it.\n")
+		} else if targetVersion != "" {
+			fmt.Printf("Version %s is not newer than current (%s)\n", version, displayVersion())
 		} else {
 			fmt.Printf("ocr is up to date (%s)\n", displayVersion())
 		}
@@ -95,7 +101,7 @@ func runUpdate(args []string) error {
 			release.GitHubRepo)
 		return nil
 	default: // InstallStatic
-		result, err := release.DownloadAndReplace(client, version)
+		result, err := release.DownloadAndReplace(downloadClient, version)
 		if err != nil {
 			return fmt.Errorf("update failed: %w", err)
 		}
@@ -108,10 +114,9 @@ func runUpdate(args []string) error {
 
 // npmUpdateHint prints instructions for updating an NPM-installed ocr.
 func npmUpdateHint(version string) error {
-	pkgName := "@alibaba-group/open-code-review"
 	fmt.Println("Detected NPM installation. Self-update is handled by the NPM wrapper.")
 	fmt.Println("To update manually, run:")
-	fmt.Printf("  npm install -g %s@%s\n", pkgName, release.BareVersion(version))
+	fmt.Printf("  npm install -g %s@%s\n", release.NPMPackageName, release.BareVersion(version))
 	fmt.Printf("\nOr let the wrapper auto-update on the next run (set OCR_NO_UPDATE=1 to disable).\n")
 	return nil
 }
