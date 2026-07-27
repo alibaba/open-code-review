@@ -662,6 +662,21 @@ class MakePosterTest(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(n, 1)  # no retry on timeout
 
+    # ---- non-UTF-8 error body ----
+
+    def test_non_utf8_error_body_does_not_crash(self):
+        """HTTPError with non-UTF-8 body must not raise UnicodeDecodeError."""
+        discussion = {"body": "hello"}
+        # latin-1 bytes that are invalid UTF-8
+        bad_body = b"\xff\xfe<html>Server Error</html>"
+        n, result, raised = self.post_seq(
+            discussion,
+            [http_error(404, bad_body)],
+        )
+        self.assertFalse(result["success"])
+        self.assertEqual(n, 1)
+        self.assertIsNone(raised)
+
 
 # --------------------------------------------------------------------------- #
 # fetch_diff_refs() with mocked urlopen (Seam 2 extension)

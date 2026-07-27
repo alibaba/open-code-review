@@ -245,7 +245,7 @@ def _api_request_with_retry(api_base, token, auth_header, config, endpoint,
         req = urllib.request.Request(url, data=body, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req) as resp:
-                resp_data = json.loads(resp.read().decode("utf-8"))
+                resp_data = json.loads(resp.read().decode("utf-8", "replace"))
                 remaining = _parse_rate_limit_header(resp.headers, "RateLimit-Remaining")
                 limit = _parse_rate_limit_header(resp.headers, "RateLimit-Limit")
                 if remaining is not None and limit is not None:
@@ -257,7 +257,7 @@ def _api_request_with_retry(api_base, token, auth_header, config, endpoint,
                     "rate_limit_remaining": remaining,
                 }
         except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8")
+            error_body = e.read().decode("utf-8", "replace")
             is_rate_limit = e.code == 429 or (
                 e.code == 403
                 and any(kw in error_body.lower() for kw in
