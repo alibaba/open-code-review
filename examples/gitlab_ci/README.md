@@ -13,14 +13,23 @@ MR Created/Updated → GitLab Pipeline Triggered → OCR Reviews Diff → Discus
 3. Runs `ocr review --from origin/<target> --to <commit_sha> --format json --audience agent` to analyze the diff (uses commit SHA to support fork MRs)
 4. Parses the JSON output and posts inline discussions on the MR using GitLab's Discussions API
 
+The example keeps the review-posting logic in `post_review.py` rather than an
+inline CI heredoc. The publishing flow is independent from the GitLab HTTP
+transport, so its inline, fallback, summary, authentication, and retry behavior
+is covered by the standard-library tests in `post_review_test.py`.
+
 ## Setup
 
-### 1. Copy the pipeline file
+### 1. Copy the pipeline and posting script
 
-Copy `.gitlab-ci.yml` to your repository root (or include it via `include:`):
+Keep `post_review.py` at `examples/gitlab_ci/post_review.py`, as referenced by
+the pipeline, and copy `.gitlab-ci.yml` to your repository root (or include it
+via `include:`):
 
 ```bash
 cp .gitlab-ci.yml /path/to/your/repo/.gitlab-ci.yml
+mkdir -p /path/to/your/repo/examples/gitlab_ci
+cp post_review.py /path/to/your/repo/examples/gitlab_ci/post_review.py
 ```
 
 Or use GitLab's `include` feature in your existing `.gitlab-ci.yml`:
@@ -28,6 +37,25 @@ Or use GitLab's `include` feature in your existing `.gitlab-ci.yml`:
 ```yaml
 include:
   - local: 'ci_demo/gitlab_ci/.gitlab-ci.yml'
+```
+
+When including the pipeline from a different path, update its final
+`python3 examples/gitlab_ci/post_review.py` command to match the location of
+the copied helper.
+
+### Run the posting tests locally
+
+The tests use only the Python standard library and make no network requests.
+Run them from this directory:
+
+```bash
+python3 post_review_test.py
+```
+
+Or run them from the repository root:
+
+```bash
+python3 -m unittest discover -s examples/gitlab_ci -p '*_test.py'
 ```
 
 ### 2. Configure CI/CD Variables
@@ -204,10 +232,7 @@ script:
     WRAPPER_SCRIPT
 
   # Post review comments to MR
-  - |
-    python3 << 'PYTHON_SCRIPT'
-    ...existing post script...
-    PYTHON_SCRIPT
+  - python3 examples/gitlab_ci/post_review.py /tmp/ocr-result.json
 ```
 
 The key logic: the Python wrapper checks for existing OCR comments before running `ocr review`. If found, it exits early with `sys.exit(0)` before consuming any LLM tokens. To re-trigger a review, users can manually delete the previous OCR comments.
