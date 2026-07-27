@@ -86,6 +86,51 @@ func TestHeaderTransport_403(t *testing.T) {
 	}
 }
 
+func TestNewRemoteClient_HeaderExpandsToEmpty(t *testing.T) {
+	t.Setenv("OCR_TEST_EMPTY_VAR", "")
+
+	_, err := NewRemoteClient(
+		context.Background(),
+		"test-srv",
+		"http://localhost:9999/mcp",
+		map[string]string{"Authorization": "$OCR_TEST_EMPTY_VAR"},
+		"v0.0.1-test",
+	)
+	if err == nil {
+		t.Fatal("expected error when header expands to empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "expanded to empty") {
+		t.Errorf("error = %q, want mention of 'expanded to empty'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Authorization") {
+		t.Errorf("error = %q, want mention of header name 'Authorization'", err.Error())
+	}
+}
+
+func TestNewRemoteClient_HeaderExpandsUnsetVar(t *testing.T) {
+	t.Setenv("OCR_TEST_UNSET_MARKER", "")
+	// Ensure the variable is truly unset (Setenv("", "") sets it to empty;
+	// os.Expand with os.Getenv returns "" for both unset and empty).
+	// The point: $OCR_TEST_NONEXISTENT_VAR_XYZ is never set.
+
+	_, err := NewRemoteClient(
+		context.Background(),
+		"test-srv",
+		"http://localhost:9999/mcp",
+		map[string]string{"X-Token": "$OCR_TEST_NONEXISTENT_VAR_XYZ"},
+		"v0.0.1-test",
+	)
+	if err == nil {
+		t.Fatal("expected error when header references unset env var, got nil")
+	}
+	if !strings.Contains(err.Error(), "expanded to empty") {
+		t.Errorf("error = %q, want mention of 'expanded to empty'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "X-Token") {
+		t.Errorf("error = %q, want mention of header name 'X-Token'", err.Error())
+	}
+}
+
 func TestContentToText_SingleText(t *testing.T) {
 	contents := []mcp.Content{
 		&mcp.TextContent{Text: "hello"},
