@@ -393,7 +393,7 @@ def build_config(env):
         "retry_base_delay": int(env.get("OCR_RETRY_BASE_DELAY", "2000")) / 1000,
         "max_retries": int(env.get("OCR_MAX_RETRIES", "3")),
         "max_retry_delay": int(env.get("OCR_MAX_RETRY_DELAY", "60000")) / 1000,
-        "transient_base_delay": 2,  # hardcoded, matches heredoc
+        "transient_base_delay": 2.0,  # hardcoded, matches heredoc
     }
 
 
@@ -431,9 +431,18 @@ def main(argv=None):
     mr_iid = env.get("CI_MERGE_REQUEST_IID", "")
     api_token = env.get("GITLAB_API_TOKEN") or env.get("CI_JOB_TOKEN", "")
 
-    if not api_token and not args.dry_run:
-        log("ERROR: No API token available (GITLAB_API_TOKEN or CI_JOB_TOKEN). Cannot post comments.")
-        return 1
+    if not args.dry_run:
+        missing = [name for name, value in (
+            ("CI_PROJECT_ID", project_id),
+            ("CI_MERGE_REQUEST_IID", mr_iid),
+        ) if not value]
+        if missing:
+            log("error: missing required %s (set via CI environment)"
+                % ", ".join(missing))
+            return 1
+        if not api_token:
+            log("ERROR: No API token available (GITLAB_API_TOKEN or CI_JOB_TOKEN). Cannot post comments.")
+            return 1
 
     api_base = "%s/api/v4/projects/%s/merge_requests/%s" % (gitlab_url, project_id, mr_iid)
 

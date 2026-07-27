@@ -766,5 +766,83 @@ class DryRunPosterTest(unittest.TestCase):
             poster({"body": "test2", "position": {"new_path": "x.py", "new_line": 1}})
 
 
+# --------------------------------------------------------------------------- #
+# main() auth-header resolution (end-to-end)
+# --------------------------------------------------------------------------- #
+
+
+class MainAuthHeaderTest(unittest.TestCase):
+    """Verify main() resolves PRIVATE-TOKEN vs JOB-TOKEN from env vars."""
+
+    BASE_ENV = {
+        "CI_SERVER_URL": "https://gitlab.example",
+        "CI_PROJECT_ID": "1",
+        "CI_MERGE_REQUEST_IID": "2",
+    }
+
+    def run_main_with_captured_poster(self, env_overrides):
+        """Run main() with make_poster mocked; return (rc, captured_auth_header)."""
+        env = dict(self.BASE_ENV)
+        env.update(env_overrides)
+        captured = {}
+
+        def fake_make_poster(api_base, token, auth_header, config):
+            captured["auth_header"] = auth_header
+            captured["token"] = token
+            def post(discussion):
+                return {"success": True, "rate_limit_remaining": None, "is_rate_limit_exhausted": False}
+            return post
+
+        import tempfile as tf
+        f = tf.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump({"comments": [comment()]}, f)
+        f.close()
+        self.addCleanup(os.unlink, f.name)
+
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(pr, "make_poster", fake_make_poster), \
+                mock.patch.object(pr, "fetch_diff_refs", lambda *a, **kw: DIFF_REFS), \
+                mock.patch.object(pr, "_sleep", lambda _s: None):
+            rc = pr.main([f.name])
+        return rc, captured
+
+    def test_private_token_when_gitlab_api_token_set(self):
+        rc, captured = self.run_main_with_captured_poster({
+            "GITLAB_API_TOKEN": "glpat-xxxx",
+        })
+        self.assertEqual(rc, 0)
+        self.assertEqual(captured["auth_header"], "PRIVATE-TOKEN")
+        self.assertEqual(captured["token"], "glpat-xxxx")
+
+    def test_job_token_when_only_ci_job_token_set(self):
+        rc, captured = self.run_main_with_captured_poster({
+            "CI_JOB_TOKEN": "ci-job-xxxx",
+        })
+        self.assertEqual(rc, 0)
+        self.assertEqual(captured["auth_header"], "JOB-TOKEN")
+        self.assertEqual(captured["token"], "ci-job-xxxx")
+
+    def test_private_token_wins_when_both_set(self):
+        rc, captured = self.run_main_with_captured_poster({
+            "GITLAB_API_TOKEN": "glpat-xxxx",
+            "CI_JOB_TOKEN": "ci-job-xxxx",
+        })
+        self.assertEqual(rc, 0)
+        self.assertEqual(captured["auth_header"], "PRIVATE-TOKEN")
+        self.assertEqual(captured["token"], "glpat-xxxx")
+
+    def test_missing_ci_vars_fails_fast(self):
+        env = {"GITLAB_API_TOKEN": "glpat-xxxx"}  # missing CI_PROJECT_ID, CI_MERGE_REQUEST_IID
+        with mock.patch.dict(os.environ, env, clear=True):
+            rc = pr.main(["/tmp/nonexistent.json"])
+        self.assertEqual(rc, 1)
+
+    def test_missing_token_fails_fast(self):
+        env = dict(self.BASE_ENV)  # has CI_PROJECT_ID and CI_MERGE_REQUEST_IID but no token
+        with mock.patch.dict(os.environ, env, clear=True):
+            rc = pr.main(["/tmp/nonexistent.json"])
+        self.assertEqual(rc, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
