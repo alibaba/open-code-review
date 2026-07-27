@@ -403,7 +403,8 @@ async function publishBatch({
       succeeded = chunk.length - toRetry.length;
       reconciled = succeeded > 0;
       log(
-        `A batch review already exists on the server (review_id=${existingReview.review.id}). ` +
+        `A batch review with this run's tag exists on the server ` +
+          `(review_id=${existingReview.review.id}, may belong to an earlier batch). ` +
           `${succeeded}/${chunk.length} of this batch's inline comments already posted. ` +
           `${toRetry.length} missing, will retry only those.`
       );

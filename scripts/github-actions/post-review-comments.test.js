@@ -289,10 +289,12 @@ function makeGithub(opts = {}) {
 
 function mockCore() {
   const outputs = {};
+  const logs = [];
   return {
     outputs,
+    logs,
     setOutput(name, value) { outputs[name] = value; },
-    info() {},
+    info(message) { logs.push(message); },
   };
 }
 
@@ -1458,7 +1460,7 @@ async function testBatchSizeLargerThanToSend() {
 // double-post). Requires the per-batch error spec.
 async function testBatchPartialSuccessReconcilesPerBatch() {
   const result = { comments: makeComments(4), warnings: [] };
-  const { github, outputs } = await run({
+  const { github, core, outputs } = await run({
     result,
     githubOpts: {
       // Fail ONLY batch #2 (index 1) with a 5xx; batch #1 (index 0) succeeds.
@@ -1496,6 +1498,10 @@ async function testBatchPartialSuccessReconcilesPerBatch() {
   assert.strictEqual(outputs.comments_failed, "0");
   assert.strictEqual(outputs.batches_total, "2");
   assert.strictEqual(outputs.batches_reconciled, "1", "batch #2 reconciled");
+  assert.ok(
+    core.logs.some((message) => message.includes("may belong to an earlier batch")),
+    "reconciliation log clarifies that the matched review may belong to an earlier batch"
+  );
 }
 
 // B4: 71 comments, one batch partially fails irrecoverably ->
