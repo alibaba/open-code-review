@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,10 @@ func (manifestFlowClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequ
 		panic("manifest integration panic")
 	case strings.Contains(prompt, "bad.go"):
 		return nil, errors.New("provider rejected api_key=LEAKED at /Users/example/private")
+	case strings.Contains(prompt, "slow.go"):
+		// A per-item deadline (wrapped, not a cancelled dispatch ctx) so the
+		// timeout stays isolated to this file while its sibling succeeds.
+		return nil, fmt.Errorf("provider call timed out: %w", context.DeadlineExceeded)
 	default:
 		return agentTaskDoneResponse(), nil
 	}
@@ -197,6 +202,65 @@ func TestManifestFlowAllFailedTimeoutAndPanic(t *testing.T) {
 	}
 }
 
+// A single item failing by timeout, panic, or budget must stay isolated: the run
+// is partial (not failed), the sibling still completes, and run_failure is nil —
+// per-item outcomes never escalate to a run-level failure.
+func TestManifestFlowMixedFailureIsIsolatedToPartial(t *testing.T) {
+	// The budget item's diff stays under the diff-size pre-filter (80% of
+	// MaxTokens), while its long path inflates the rendered prompt past the same
+	// threshold — so only this file trips the budget stop, without touching the
+	// shared template that its sibling also renders.
+	longPath := strings.Repeat("nested/", 20) + "budget.go"
+	for _, tc := range []struct {
+		name      string
+		failDiff  model.Diff
+		setup     func(*Agent)
+		wantClass session.FailureClass
+	}{
+		{
+			name:      "timeout",
+			failDiff:  model.Diff{OldPath: "slow.go", NewPath: "slow.go", Diff: "+slow", Insertions: 1},
+			wantClass: session.FailureTimeout,
+		},
+		{
+			name:      "panic",
+			failDiff:  model.Diff{OldPath: "panic.go", NewPath: "panic.go", Diff: "+boom", Insertions: 1},
+			wantClass: session.FailurePanic,
+		},
+		{
+			name:      "budget",
+			failDiff:  model.Diff{OldPath: longPath, NewPath: longPath, Diff: strings.Repeat("token ", 50), Insertions: 1},
+			setup:     func(a *Agent) { a.args.Template.MaxTokens = 100 },
+			wantClass: session.FailureBudget,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			good := model.Diff{OldPath: "good.go", NewPath: "good.go", Diff: "+ok", Insertions: 1}
+			a := newManifestFlowAgent(t, []model.Diff{good, tc.failDiff}, nil)
+			if tc.setup != nil {
+				tc.setup(a)
+			}
+			// One item's failure must not fail the whole run: dispatch continues.
+			if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+				t.Fatalf("mixed dispatch must continue past a single-item failure: %v", err)
+			}
+			manifest := finishManifestFlow(t, a)
+			if manifest.TerminalState != session.StatePartial {
+				t.Fatalf("terminal = %q, want partial; manifest = %+v", manifest.TerminalState, manifest)
+			}
+			if manifest.RunFailure != nil {
+				t.Fatalf("item-level failure must not set run_failure: %+v", manifest.RunFailure)
+			}
+			if len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 1 {
+				t.Fatalf("coverage = %+v", manifest.Coverage)
+			}
+			if got := manifest.Coverage.Failed[0].Classification; got != tc.wantClass {
+				t.Fatalf("classification = %q, want %q", got, tc.wantClass)
+			}
+		})
+	}
+}
+
 func TestManifestFlowBudgetAndSkipped(t *testing.T) {
 	t.Run("single-item budget stop", func(t *testing.T) {
 		a := newManifestFlowAgent(t, []model.Diff{{OldPath: "budget.go", NewPath: "budget.go", Diff: "+x", Insertions: 1}}, nil)
@@ -254,5 +318,36 @@ func TestManifestFlowResumeRecordsParentAndReusedItem(t *testing.T) {
 	}
 	if manifest.Input.RequestedFrom != "main" || manifest.Input.RequestedHead != "feature" || manifest.Input.SourceArtifactSHA256 == "" {
 		t.Fatalf("child input identity = %+v", manifest.Input)
+	}
+}
+
+func TestManifestFlowResumeWithReusedAndAllRerunsFailedIsPartial(t *testing.T) {
+	diffs := []model.Diff{
+		{OldPath: "cached.go", NewPath: "cached.go", Diff: "+cached", Insertions: 1},
+		{OldPath: "bad.go", NewPath: "bad.go", Diff: "+bad", Insertions: 1},
+	}
+	fingerprint := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	resume := &session.ResumeState{
+		SessionID:  "parent-run",
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Items: map[string]session.ResumeItem{
+			fingerprint: {
+				FilePath:    "cached.go",
+				OldPath:     "cached.go",
+				NewPath:     "cached.go",
+				Fingerprint: fingerprint,
+			},
+		},
+	}
+
+	a := newManifestFlowAgent(t, diffs, resume)
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("partial resumed dispatch must not return an error: %v", err)
+	}
+	manifest := finishManifestFlow(t, a)
+	if manifest.TerminalState != session.StatePartial || len(manifest.Coverage.Reused) != 1 || len(manifest.Coverage.Failed) != 1 {
+		t.Fatalf("manifest = %+v", manifest)
 	}
 }

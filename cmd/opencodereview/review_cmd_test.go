@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -60,6 +62,23 @@ func TestParseReviewFlagsRejectsFromWithoutTo(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--to is required when --from is specified") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// A review that fails flag validation must exit before any session is created,
+// so nothing is persisted under $HOME/.opencodereview (scenario 5: no artifacts).
+func TestRunReviewFlagValidationWritesNoArtifacts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// --to without --from is rejected in parseReviewFlags, before loadCommonContext,
+	// git resolution, session.New, or any manifest work.
+	if err := runReview([]string{"--to", "HEAD"}); err == nil {
+		t.Fatal("expected --to without --from to fail")
+	}
+
+	if _, err := os.Stat(filepath.Join(home, ".opencodereview")); !os.IsNotExist(err) {
+		t.Fatalf("validation failure left artifacts under $HOME/.opencodereview (stat err = %v)", err)
 	}
 }
 

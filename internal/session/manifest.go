@@ -522,6 +522,16 @@ func (b *ManifestBuilder) transition(itemID string, to itemState, class FailureC
 	}
 	if bi.state != stateSelected {
 		if bi.state == to {
+			// Re-applying the same terminal state is idempotent, except that a
+			// failed item re-marked with a different classification is a
+			// conflicting transition: reason is free text and does not
+			// participate, but the machine-readable classification must match so
+			// a mis-keyed double-mark surfaces instead of silently keeping the
+			// first class.
+			if to == stateFailed && bi.item.Classification != class {
+				return fmt.Errorf("manifest: item %s already failed as %s, cannot re-mark as %s",
+					itemID, bi.item.Classification, class)
+			}
 			return nil // idempotent: same outcome re-applied
 		}
 		return fmt.Errorf("manifest: item %s already %s, cannot transition to %s",
@@ -589,13 +599,24 @@ func sanitizeReason(s string) string {
 	if s == "" {
 		return ""
 	}
-	// Order matters: strip "Bearer <tok>" before the assignment rule, so a token
-	// following "Authorization:" is removed rather than left behind.
+	// Order matters. Coerce to valid UTF-8 and strip control characters BEFORE
+	// the redaction regexes: an embedded control byte inside a token would
+	// otherwise truncate a regex match (e.g. "Bearer AAA\x00BBB" matches only
+	// "Bearer AAA"), and the later strip would then drop the byte and splice the
+	// surviving "BBB" back in, leaking part of the secret. Removing the byte
+	// first lets the regex see and redact the whole token.
+	//
+	// Residual (OI-1, best-effort floor): an invalid UTF-8 byte is replaced with
+	// the replacement rune "�" rather than removed, so it can still truncate a
+	// token match. This change only closes the control-byte bypass; the "�" case
+	// remains an accepted floor limitation.
+	s = strings.ToValidUTF8(s, "�")
+	s = stripUnsafeChars(s)
+	// Within the redaction pass, strip "Bearer <tok>" before the assignment rule,
+	// so a token following "Authorization:" is removed rather than left behind.
 	s = urlUserinfoRe.ReplaceAllString(s, "${1}[REDACTED]@")
 	s = bearerRe.ReplaceAllString(s, "[REDACTED]")
 	s = secretAssignmentRe.ReplaceAllString(s, "${1}${2}[REDACTED]")
-	s = strings.ToValidUTF8(s, "�")
-	s = stripUnsafeChars(s)
 	if utf8.RuneCountInString(s) > maxReasonLen {
 		s = string([]rune(s)[:maxReasonLen]) + "…"
 	}
@@ -848,7 +869,10 @@ func computeTerminal(cov Coverage, rf *RunFailure) TerminalState {
 }
 
 func sortItems(items []CoverageItem) {
-	sort.Slice(items, func(i, j int) bool {
+	// SliceStable to match the design's "sorted stably by item_id": item_ids are
+	// unique per set today so the result is identical to sort.Slice, but stable
+	// sort keeps the wording and behavior aligned if a set ever carries dupes.
+	sort.SliceStable(items, func(i, j int) bool {
 		return items[i].ItemID < items[j].ItemID
 	})
 }

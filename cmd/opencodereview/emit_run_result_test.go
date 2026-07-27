@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -103,9 +104,10 @@ func TestEmitRunResult_JSONUsesManifestTerminalState(t *testing.T) {
 	ag := &mockResultProvider{
 		filesReviewed: 2,
 		manifest:      manifest,
-		warnings: []agent.AgentWarning{{
-			Type: "subtask_error", File: "b.go", Message: "provider failed",
-		}},
+		warnings: []agent.AgentWarning{
+			{Type: "subtask_error", File: "b.go", Message: "provider rejected api_key=LEAKED at /Users/example/private"},
+			{Type: "info", File: "a.go", Message: "retry used"},
+		},
 	}
 	got := captureStdout(t, func() {
 		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil); err != nil {
@@ -124,6 +126,12 @@ func TestEmitRunResult_JSONUsesManifestTerminalState(t *testing.T) {
 	}
 	if strings.Contains(out.Message, "Looks good") {
 		t.Fatalf("partial message must not claim success: %q", out.Message)
+	}
+	if len(out.Warnings) != 1 || out.Warnings[0].Type != "info" {
+		t.Fatalf("published warnings = %+v, want only non-coverage warning", out.Warnings)
+	}
+	if strings.Contains(got, "LEAKED") || strings.Contains(got, "/Users/example/private") {
+		t.Fatalf("manifest JSON exposed raw subtask warning: %q", got)
 	}
 }
 
@@ -189,9 +197,19 @@ func TestEmitRunResult_JSONManifestMatchesPersistedSessionEnd(t *testing.T) {
 			t.Fatalf("emitRunResult: %v", err)
 		}
 	})
-	var out jsonOutput
-	if err := json.Unmarshal([]byte(got), &out); err != nil {
-		t.Fatalf("unmarshal output: %v", err)
+	// Capture each exit's manifest as the raw bytes it actually emitted, not a
+	// struct round-trip: re-marshaling both sides through session.RunManifest would
+	// normalize away any real serialization divergence between the two exits. The
+	// contract (OI-3) is "same source, canonicalized equal" — compact only the
+	// insignificant whitespace, then compare bytes.
+	var cliOut struct {
+		Manifest json.RawMessage `json:"manifest"`
+	}
+	if err := json.Unmarshal([]byte(got), &cliOut); err != nil {
+		t.Fatalf("unmarshal CLI output: %v", err)
+	}
+	if len(cliOut.Manifest) == 0 {
+		t.Fatal("CLI output carried no manifest")
 	}
 
 	path, err := session.SessionFilePath(repoDir, sh.SessionID)
@@ -204,25 +222,26 @@ func TestEmitRunResult_JSONManifestMatchesPersistedSessionEnd(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	var persisted struct {
-		Type        string               `json:"type"`
-		RunManifest *session.RunManifest `json:"run_manifest"`
+		Type        string          `json:"type"`
+		RunManifest json.RawMessage `json:"run_manifest"`
 	}
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &persisted); err != nil {
 		t.Fatalf("unmarshal session_end: %v", err)
 	}
-	if persisted.Type != "session_end" || persisted.RunManifest == nil {
-		t.Fatalf("last record = %+v", persisted)
+	if persisted.Type != "session_end" || len(persisted.RunManifest) == 0 {
+		t.Fatalf("last record has no run_manifest: type=%q", persisted.Type)
 	}
-	outputJSON, err := json.Marshal(out.Manifest)
-	if err != nil {
-		t.Fatalf("marshal output manifest: %v", err)
+
+	var cliCompact, persistedCompact bytes.Buffer
+	if err := json.Compact(&cliCompact, cliOut.Manifest); err != nil {
+		t.Fatalf("compact CLI manifest: %v", err)
 	}
-	persistedJSON, err := json.Marshal(persisted.RunManifest)
-	if err != nil {
-		t.Fatalf("marshal persisted manifest: %v", err)
+	if err := json.Compact(&persistedCompact, persisted.RunManifest); err != nil {
+		t.Fatalf("compact persisted manifest: %v", err)
 	}
-	if string(outputJSON) != string(persistedJSON) {
-		t.Fatalf("manifest mismatch\noutput:    %s\npersisted: %s", outputJSON, persistedJSON)
+	if !bytes.Equal(cliCompact.Bytes(), persistedCompact.Bytes()) {
+		t.Fatalf("manifest bytes differ after canonicalization\nCLI:       %s\npersisted: %s",
+			cliCompact.Bytes(), persistedCompact.Bytes())
 	}
 }
 

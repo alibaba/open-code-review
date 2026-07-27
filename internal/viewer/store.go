@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -138,19 +139,14 @@ func peekSession(path string) (SessionSummary, error) {
 	defer f.Close()
 
 	summary := SessionSummary{Aborted: true}
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-
 	var lastLine []byte
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	readErr := readJSONLLines(f, func(line []byte) {
 		lastLine = append([]byte(nil), line...)
 
 		if summary.Timestamp.IsZero() {
 			var rec map[string]any
 			if err := json.Unmarshal(line, &rec); err != nil {
-				continue
+				return
 			}
 			if ts, ok := rec["timestamp"].(string); ok {
 				summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
@@ -177,7 +173,7 @@ func peekSession(path string) (SessionSummary, error) {
 				summary.DiffCommit = v
 			}
 		}
-	}
+	})
 
 	if len(lastLine) > 0 {
 		var rec map[string]any
@@ -187,10 +183,28 @@ func peekSession(path string) (SessionSummary, error) {
 			}
 		}
 	}
-	if summary.RunManifest == nil {
-		summary.FileCount = len(summary.FilesReviewed)
+	return summary, readErr
+}
+
+// readJSONLLines visits each physical JSONL record without bufio.Scanner's
+// fixed token ceiling. session_end embeds the complete run manifest and can
+// legitimately exceed the former 10 MiB scanner limit on very large reviews.
+func readJSONLLines(r io.Reader, visit func([]byte)) error {
+	reader := bufio.NewReader(r)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			visit(line)
+		}
+		switch err {
+		case nil:
+			continue
+		case io.EOF:
+			return nil
+		default:
+			return err
+		}
 	}
-	return summary, scanner.Err()
 }
 
 // ViewSession holds fully parsed records for one session.
@@ -272,14 +286,10 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	vs.Summary.Aborted = true
 	fileIndex := make(map[string]*FileGroup)
 
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-
-	for scanner.Scan() {
+	readErr := readJSONLLines(f, func(line []byte) {
 		var rec map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
-			continue // skip malformed lines
+		if err := json.Unmarshal(line, &rec); err != nil {
+			return // skip malformed lines
 		}
 		typ, _ := rec["type"].(string)
 
@@ -446,7 +456,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 		case "session_end":
 			applySessionEnd(&vs.Summary, rec)
 		}
-	}
+	})
 
 	// Aggregate token usage across all task cards
 	fileBreakdown := make([]FileTokenUsage, 0, len(vs.Files))
@@ -479,7 +489,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	})
 
 	vs.Summary.SessionID = sessionID
-	return vs, scanner.Err()
+	return vs, readErr
 }
 
 func applySessionEnd(summary *SessionSummary, rec map[string]any) {

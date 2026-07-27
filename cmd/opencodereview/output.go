@@ -33,6 +33,27 @@ func hasSubtaskErrors(warnings []agent.AgentWarning) bool {
 	return false
 }
 
+// warningsForOutput removes coverage-level subtask diagnostics once a manifest
+// is present. Their classification and safe summary already live in the frozen
+// coverage.failed set; retaining the original warning would duplicate that fact
+// and could expose the provider's raw error text in JSON. Non-coverage warnings
+// remain visible, and legacy output keeps its existing warning behavior.
+func warningsForOutput(warnings []agent.AgentWarning, manifest *session.RunManifest) []agent.AgentWarning {
+	if manifest == nil || len(warnings) == 0 {
+		return warnings
+	}
+	filtered := make([]agent.AgentWarning, 0, len(warnings))
+	for _, warning := range warnings {
+		if warning.Type != "subtask_error" {
+			filtered = append(filtered, warning)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
 func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning, manifest *session.RunManifest) {
 	if manifest != nil {
 		fmt.Println(manifestMessage(manifest, len(comments)))
@@ -275,6 +296,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest) error {
+	publishedWarnings := warningsForOutput(warnings, manifest)
 	out := jsonOutput{
 		Status:   "success",
 		TraceID:  traceID,
@@ -316,9 +338,9 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			out.Message = "No comments generated. Looks good to me."
 		}
 	}
-	if len(warnings) > 0 {
-		out.Warnings = warnings
-		if manifest == nil && hasSubtaskErrors(warnings) {
+	if len(publishedWarnings) > 0 {
+		out.Warnings = publishedWarnings
+		if manifest == nil && hasSubtaskErrors(publishedWarnings) {
 			out.Status = "completed_with_errors"
 		} else if manifest == nil {
 			out.Status = "completed_with_warnings"

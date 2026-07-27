@@ -139,6 +139,7 @@ func TestRunFailureSweepsPendingToMatchingClass(t *testing.T) {
 		{"cancelled", RunFailureCancelled, FailureCancelled},
 		{"budget", RunFailureBudget, FailureBudget},
 		{"timeout", RunFailureTimeout, FailureTimeout},
+		{"configuration", RunFailureConfiguration, FailureConfiguration},
 		{"internal", RunFailureInternal, FailureUnknown}, // no item-level internal
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -232,6 +233,48 @@ func TestIdempotentSameOutcome(t *testing.T) {
 	m := mustFinalize(t, b)
 	if len(m.Coverage.Completed) != 1 {
 		t.Fatalf("completed = %d, want 1", len(m.Coverage.Completed))
+	}
+}
+
+// Re-marking a failed item with the same classification is idempotent; reason is
+// free text and does not participate, so the first reason is kept.
+func TestFailedSameClassIsIdempotent(t *testing.T) {
+	b := newBuilderWith("a")
+	if err := b.MarkFailed("a", FailureProvider, "first reason"); err != nil {
+		t.Fatalf("first MarkFailed: %v", err)
+	}
+	if err := b.MarkFailed("a", FailureProvider, "second reason"); err != nil {
+		t.Fatalf("idempotent MarkFailed with same class should not error: %v", err)
+	}
+	m := mustFinalize(t, b)
+	if len(m.Coverage.Failed) != 1 {
+		t.Fatalf("failed = %d, want 1", len(m.Coverage.Failed))
+	}
+	if got := m.Coverage.Failed[0].Classification; got != FailureProvider {
+		t.Fatalf("classification = %s, want provider", got)
+	}
+	if got := m.Coverage.Failed[0].Reason; got != "first reason" {
+		t.Fatalf("reason = %q, want first reason kept", got)
+	}
+}
+
+// Re-marking a failed item with a different classification is a conflicting
+// transition: it errors and the first classification is kept (never silently
+// overwritten or dropped).
+func TestFailedDifferentClassErrorsAndKeepsFirst(t *testing.T) {
+	b := newBuilderWith("a")
+	if err := b.MarkFailed("a", FailureTimeout, "timed out"); err != nil {
+		t.Fatalf("first MarkFailed: %v", err)
+	}
+	if err := b.MarkFailed("a", FailureProvider, "provider error"); err == nil {
+		t.Fatal("expected error re-marking failed item with a different class")
+	}
+	m := mustFinalize(t, b)
+	if len(m.Coverage.Failed) != 1 {
+		t.Fatalf("failed = %d, want 1", len(m.Coverage.Failed))
+	}
+	if got := m.Coverage.Failed[0].Classification; got != FailureTimeout {
+		t.Fatalf("classification = %s, want timeout kept", got)
 	}
 }
 
@@ -587,6 +630,19 @@ func TestSanitizeReasonStripsControlChars(t *testing.T) {
 	// invalid UTF-8 bytes are replaced, not preserved
 	if got2 := sanitizeReason("bad\xff\xfebytes"); strings.ContainsRune(got2, 0xff) {
 		t.Fatalf("invalid UTF-8 survived: %q", got2)
+	}
+}
+
+// A control byte embedded inside a secret must not let the tail of the token
+// survive: UTF-8 coercion + control-char stripping run before the redaction
+// regexes, so the whole token is seen and redacted rather than split.
+func TestSanitizeReasonControlByteInTokenDoesNotLeakTail(t *testing.T) {
+	got := sanitizeReason("Authorization: Bearer AAA\x00BBB rejected")
+	if strings.Contains(got, "BBB") {
+		t.Fatalf("secret tail leaked past control byte: %q", got)
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("expected redaction marker: %q", got)
 	}
 }
 

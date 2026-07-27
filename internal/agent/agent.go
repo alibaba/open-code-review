@@ -577,7 +577,14 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	failed := atomic.LoadInt64(&a.subtaskFailed)
-	if failed > 0 && failed == dispatched {
+	reused := int64(0)
+	if a.resumeInfo != nil {
+		reused = a.resumeInfo.ReusedFiles
+	}
+	// A resumed run can still have usable coverage when every newly dispatched
+	// subtask hard-fails. Preserve the legacy all-failed error only when there is
+	// no reused result; otherwise the manifest is partial and must exit 0.
+	if failed > 0 && failed == dispatched && reused == 0 {
 		return nil, fmt.Errorf("all %d file review(s) failed — check your LLM configuration and API key", dispatched)
 	}
 
@@ -723,16 +730,28 @@ func (a *Agent) applyInputIdentity(b *session.ManifestBuilder) {
 // empty selected set yields the canonical empty-input digest. It uses the raw
 // fingerprint (not item_id) so a content change to the same logical file changes
 // the artifact — exactly what a resume needs to detect a moved ref's new input.
+//
+// Items are deduplicated by item_id (first wins) so the hash denominator matches
+// the sealed selected set — RegisterSelected ignores a duplicate item_id, so two
+// diffs that normalize to the same (mode, old, new) contribute one selected item
+// and must contribute one artifact entry too, keeping the two in lockstep and the
+// digest deterministic regardless of diff iteration order.
 func (a *Agent) sourceArtifactSHA256() string {
 	type pair struct{ id, fingerprint string }
 	pairs := make([]pair, 0, len(a.diffs))
+	seen := make(map[string]struct{}, len(a.diffs))
 	for _, d := range a.diffs {
 		if d.IsDeleted {
 			continue
 		}
-		pairs = append(pairs, pair{a.manifestItemID(d), reviewItemFingerprint(a.reviewMode(), d)})
+		id := a.manifestItemID(d)
+		if _, dup := seen[id]; dup {
+			continue // first wins, matching RegisterSelected's dedup
+		}
+		seen[id] = struct{}{}
+		pairs = append(pairs, pair{id, reviewItemFingerprint(a.reviewMode(), d)})
 	}
-	sort.Slice(pairs, func(i, j int) bool { return pairs[i].id < pairs[j].id })
+	sort.SliceStable(pairs, func(i, j int) bool { return pairs[i].id < pairs[j].id })
 
 	fields := make([]string, 0, len(pairs)*2)
 	for _, p := range pairs {

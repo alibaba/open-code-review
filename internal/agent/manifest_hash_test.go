@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/open-code-review/open-code-review/internal/config/rules"
+	"github.com/open-code-review/open-code-review/internal/model"
 )
 
 // emptySHA256 is the canonical digest of an empty input, which hashFields must
@@ -77,6 +78,34 @@ func TestRuleConfigSHA256_NilResolverAndFilter(t *testing.T) {
 	a := New(Args{SystemRule: nil, FileFilter: nil})
 	if got := a.ruleConfigSHA256(); got != emptySHA256() {
 		t.Errorf("empty rule config = %q, want empty-input digest %q", got, emptySHA256())
+	}
+}
+
+func TestSourceArtifactSHA256_DedupsByItemID(t *testing.T) {
+	// Two diffs that normalize to the same (mode, old, new) share one item_id, so
+	// RegisterSelected seals a single selected item. The artifact digest must use
+	// the same denominator: the pair is deduplicated (first wins) so the run with
+	// the duplicate hashes identically to the run carrying only the first diff.
+	d1 := model.Diff{OldPath: "a.go", NewPath: "a.go", Diff: "@@ first content @@"}
+	d2 := model.Diff{OldPath: "a.go", NewPath: "a.go", Diff: "@@ second content @@"}
+
+	dup := New(Args{})
+	dup.diffs = []model.Diff{d1, d2}
+
+	single := New(Args{})
+	single.diffs = []model.Diff{d1}
+
+	got := dup.sourceArtifactSHA256()
+	if got != dup.sourceArtifactSHA256() {
+		t.Fatal("sourceArtifactSHA256 is not deterministic")
+	}
+	if got != single.sourceArtifactSHA256() {
+		t.Errorf("duplicate item_id was not deduplicated: digest %q != single-item digest %q",
+			got, single.sourceArtifactSHA256())
+	}
+	// Sanity: it is a real digest, not the empty-input sentinel.
+	if got == emptySHA256() {
+		t.Error("non-empty selected set produced the empty-input digest")
 	}
 }
 
