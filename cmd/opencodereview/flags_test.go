@@ -84,6 +84,34 @@ func TestParseReviewFlags_NegativeMaxGitProcs(t *testing.T) {
 	}
 }
 
+func TestParseReviewFlags_NegativeMaxTokensBudget(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--max-tokens-budget", "-1"})
+	if err == nil {
+		t.Fatal("expected error for negative max-tokens-budget")
+	}
+}
+
+func TestParseReviewFlags_BudgetFlagsDefaultZero(t *testing.T) {
+	// Unset budget flag defaults to 0 (unlimited) so existing behavior is unchanged.
+	opts, err := parseReviewFlags([]string{"--from", "main", "--to", "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.maxTokensBudget != 0 {
+		t.Errorf("maxTokensBudget = %d, want 0 (default unlimited)", opts.maxTokensBudget)
+	}
+}
+
+func TestParseReviewFlags_BudgetFlagsParsed(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--max-tokens-budget", "120000"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.maxTokensBudget != 120000 {
+		t.Errorf("maxTokensBudget = %d, want 120000", opts.maxTokensBudget)
+	}
+}
+
 func TestParseReviewFlags_ConflictingModes(t *testing.T) {
 	_, err := parseReviewFlags([]string{"--from", "main", "--to", "dev", "--commit", "abc"})
 	if err == nil {

@@ -191,6 +191,14 @@ func (a *Agent) Warnings() []llmloop.AgentWarning { return a.runner.Warnings() }
 // ToolCalls returns per-tool call counts accumulated during scan.
 func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 
+// BudgetExceeded always returns false for scan. Scan self-limits via its own
+// token budget gate and MaxToolRequestTimes; the typed budget_exceeded status
+// and tool-call-budget plumbing are diff-review-path features (see
+// internal/agent). This method exists only so *scan.Agent satisfies the
+// cmd/opencodereview.ResultProvider interface, keeping scan's JSON output
+// unchanged (status stays success / completed_with_*).
+func (a *Agent) BudgetExceeded() bool { return false }
+
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
 }

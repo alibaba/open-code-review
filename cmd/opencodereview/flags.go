@@ -95,25 +95,26 @@ func expandShortFlags(args []string, shortMap map[string]string) []string {
 // --- review subcommand options ---
 
 type reviewOptions struct {
-	toolConfigPath string
-	rulePath       string
-	repoDir        string
-	from           string
-	to             string
-	commit         string
-	resume         string
-	excludes       string // --exclude: comma-separated gitignore-style patterns
-	outputFormat   string
-	audience       string // --audience: "human" (default) or "agent"
-	background     string // --background: optional requirement context
-	backgroundFile string // --background-file: path to a Markdown file used as background
-	model          string // --model: override resolved LLM model for this review
-	concurrency    int
-	perFileTimeout int
-	maxTools       int
-	maxGitProcs    int
-	preview        bool
-	showHelp       bool
+	toolConfigPath  string
+	rulePath        string
+	repoDir         string
+	from            string
+	to              string
+	commit          string
+	resume          string
+	excludes        string // --exclude: comma-separated gitignore-style patterns
+	outputFormat    string
+	audience        string // --audience: "human" (default) or "agent"
+	background      string // --background: optional requirement context
+	backgroundFile  string // --background-file: path to a Markdown file used as background
+	model           string // --model: override resolved LLM model for this review
+	concurrency     int
+	perFileTimeout  int
+	maxTools        int
+	maxGitProcs     int
+	maxTokensBudget int // --max-tokens-budget: cap total token usage; 0 = unlimited
+	preview         bool
+	showHelp        bool
 }
 
 func parseReviewFlags(args []string) (reviewOptions, error) {
@@ -138,6 +139,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.model, "model", "", "override LLM model for this review (e.g., claude-opus-4-6)")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
+	a.IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output); dispatch stops once exceeded (0 = unlimited)")
 	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be reviewed without running the LLM")
 
 	if err := a.Parse(args); err != nil {
@@ -187,6 +189,9 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 
 	if opts.maxGitProcs < 0 {
 		return opts, fmt.Errorf("--max-git-procs must be a non-negative integer (0 means use default 16)")
+	}
+	if opts.maxTokensBudget < 0 {
+		return opts, fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
 	}
 
 	return opts, nil
@@ -241,6 +246,7 @@ Flags:
   --concurrency int             max concurrent file reviews (default 8)
   --exclude string              comma-separated gitignore-style patterns to exclude (merged with rule.json)
   --max-git-procs int           max concurrent git subprocesses (default 16)
+  --max-tokens-budget int       cap total token usage; dispatch stops once exceeded (0 = unlimited)
   --from string                 source ref to start diff from (e.g., 'main')
   --max-tools int               max tool call rounds per file (0 = template default; min 10)
   --model string                override LLM model for this review (e.g., claude-opus-4-6)
