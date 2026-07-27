@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package agent
 
 import (
@@ -6,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -56,11 +60,24 @@ func initGitWorkspaceRepo(t *testing.T) string {
 	run("git", "init")
 	run("git", "config", "user.email", "test@test.com")
 	run("git", "config", "user.name", "Test")
+	// Pin the commit timestamp: TestAgentRunSessionJSONLUnchangedWithDismissalStore
+	// compares two fixture repos byte-for-byte, and an unpinned date makes their
+	// commit hashes (and so resolved_base in the run manifest) drift whenever the
+	// two inits straddle a clock tick.
+	run("git", "config", "commit.gpgsign", "false")
+	cmd := exec.Command("git", "commit", "-m", "initial")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_DATE=2026-01-01T00:00:00Z",
+		"GIT_COMMITTER_DATE=2026-01-01T00:00:00Z",
+	)
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("write main.go: %v", err)
 	}
 	run("git", "add", ".")
-	run("git", "commit", "-m", "initial")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %s", out)
+	}
 	// Uncommitted change -> workspace diff.
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
 		t.Fatalf("modify main.go: %v", err)
@@ -262,6 +279,10 @@ func TestAgentRunSessionJSONLUnchangedWithDismissalStore(t *testing.T) {
 
 	// The comments recorded in the JSONL must be identical: the dismissal
 	// filter suppresses only the returned slice, not what the collector wrote.
+	// run_id and elapsed_ms in the session_end manifest are run-nondeterministic
+	// and are normalized away before the byte comparison.
+	noFilterJSONL = normalizeRunNondeterminism(noFilterJSONL)
+	withFilterJSONL = normalizeRunNondeterminism(withFilterJSONL)
 	if noFilterJSONL != withFilterJSONL {
 		t.Errorf("session JSONL differs with dismissal store present (D3/AS4 violation):\n--- no filter ---\n%s\n--- with filter ---\n%s", noFilterJSONL, withFilterJSONL)
 	}
@@ -270,4 +291,16 @@ func TestAgentRunSessionJSONLUnchangedWithDismissalStore(t *testing.T) {
 	if !strings.Contains(withFilterJSONL, "dismiss me") {
 		t.Errorf("dismissed finding absent from session JSONL (D3: suppression must not remove recorded findings): %s", withFilterJSONL)
 	}
+}
+
+// normalizeRunNondeterminism masks the per-run values embedded in the
+// session_end run manifest (run_id UUID, elapsed_ms timings) so two runs of
+// the same review can be compared byte-for-byte.
+func normalizeRunNondeterminism(jsonl string) string {
+	id := regexp.MustCompile(`"run_id":"[0-9a-f-]+"`)
+	elapsed := regexp.MustCompile(`"elapsed_ms":\d+`)
+	base := regexp.MustCompile(`"resolved_base":"[0-9a-f]+"`)
+	out := id.ReplaceAllString(jsonl, `"run_id":"X"`)
+	out = elapsed.ReplaceAllString(out, `"elapsed_ms":0`)
+	return base.ReplaceAllString(out, `"resolved_base":"X"`)
 }
