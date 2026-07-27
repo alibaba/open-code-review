@@ -351,3 +351,63 @@ func TestManifestFlowResumeWithReusedAndAllRerunsFailedIsPartial(t *testing.T) {
 		t.Fatalf("manifest = %+v", manifest)
 	}
 }
+
+// TestManifestFlowResumeWithProviderTransition verifies that a resumed run
+// records the *current* provider/model in execution (not the parent's) while
+// still linking to the parent via parent_run_id. Covers the issue #367
+// acceptance criterion "provider transition": a consumer must be able to
+// audit that a provider/model change happened across a resume chain.
+func TestManifestFlowResumeWithProviderTransition(t *testing.T) {
+	diffs := []model.Diff{
+		{OldPath: "cached.go", NewPath: "cached.go", Diff: "+cached", Insertions: 1},
+	}
+	fingerprint := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	// The parent run used a different provider/model; ResumeState only carries
+	// the session id and fingerprint, never the parent's execution metadata.
+	resume := &session.ResumeState{
+		SessionID:  "parent-run",
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Items: map[string]session.ResumeItem{
+			fingerprint: {
+				FilePath:    "cached.go",
+				OldPath:     "cached.go",
+				NewPath:     "cached.go",
+				Fingerprint: fingerprint,
+			},
+		},
+	}
+
+	a := newManifestFlowAgent(t, diffs, resume)
+	// Simulate a provider/model transition on the child run. New() already
+	// called initManifest with the default "fake" model; re-seed execution so
+	// the frozen manifest reflects the child's actual provider/model.
+	a.args.Provider = "beta"
+	a.args.Model = "model-b"
+	a.initManifest()
+
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	manifest := finishManifestFlow(t, a)
+
+	// The child manifest records the *current* provider/model, so a consumer
+	// can audit that a transition occurred across the resume chain.
+	if manifest.Execution.Provider != "beta" || manifest.Execution.Model != "model-b" {
+		t.Fatalf("execution = %+v, want provider=beta model=model-b", manifest.Execution)
+	}
+	// parent_run_id links to the parent, making the transition traceable.
+	if manifest.ParentRunID != "parent-run" {
+		t.Fatalf("parent_run_id = %q, want parent-run", manifest.ParentRunID)
+	}
+	// The fingerprint hit is recorded as reused; the child recomputes its
+	// own input identity (source_artifact_sha256).
+	if len(manifest.Coverage.Reused) != 1 || len(manifest.Coverage.Completed) != 0 {
+		t.Fatalf("coverage reused=%d completed=%d, want 1/0",
+			len(manifest.Coverage.Reused), len(manifest.Coverage.Completed))
+	}
+	if manifest.Input.SourceArtifactSHA256 == "" {
+		t.Fatal("child source_artifact_sha256 must be populated")
+	}
+}
