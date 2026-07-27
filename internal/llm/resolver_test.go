@@ -1806,6 +1806,11 @@ func TestEnsureMessagesSuffix(t *testing.T) {
 			input: "https://proxy.example.com/anthropic",
 			want:  "https://proxy.example.com/anthropic/v1/messages",
 		},
+		{
+			name:  "proxy URL with /v1/ mid-path",
+			input: "https://proxy.example.com/v1/anthropic",
+			want:  "https://proxy.example.com/v1/anthropic",
+		},
 	}
 
 	for _, tt := range tests {
