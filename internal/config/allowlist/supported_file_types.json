@@ -74,5 +74,6 @@
   ".gql",
   ".jl",
   ".hcl",
-  ".tfvars"
+  ".tfvars",
+  ".bicep"
 ]
