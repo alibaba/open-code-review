@@ -96,6 +96,29 @@ inputs:
       below 1 or non-numeric fall back to the default (50).
     required: false
     default: '50'
+  route_severity_below:
+    description: >-
+      Optional severity threshold that routes findings at-or-below it from
+      inline comments to the PR summary (fail-open: never drops a finding).
+      One of: critical, high, medium, low. For example, 'low' routes only
+      low-severity findings, while 'medium' routes medium AND low. An empty or
+      unknown value disables severity routing (findings stay inline). Findings
+      with an empty or unknown severity are never routed by this policy and
+      keep their normal placement.
+    required: false
+    default: ''
+  route_categories:
+    description: >-
+      Optional comma-separated list of categories routed from inline comments
+      to the PR summary (fail-open: never drops a finding). Categories are
+      case-insensitive and drawn from: bug, security, performance,
+      maintainability, test, style, documentation, other. For example,
+      'style,documentation' routes those categories to the summary. Unknown
+      category tokens are ignored. Findings with an empty or unknown category
+      are never routed by this policy and keep their normal placement. Combine
+      with route_severity_below to route on either condition.
+    required: false
+    default: ''
   base_ref:
     description: >-
       Override the base ref. Provide this (and head_sha) when invoking from a
@@ -119,6 +142,12 @@ outputs:
   comments_skipped:
     description: Number of inline comments skipped by incremental mode (overlap with history).
     value: ${{ steps.post.outputs.comments_skipped }}
+  comments_routed:
+    description: >-
+      Number of inline-eligible comments routed to the PR summary by the
+      route_severity_below / route_categories policy. Mutually exclusive with
+      comments_inline, comments_skipped, and comments_failed.
+    value: ${{ steps.post.outputs.comments_routed }}
   comments_failed:
     description: Number of inline comments that failed to post.
     value: ${{ steps.post.outputs.comments_failed }}
@@ -285,6 +314,8 @@ runs:
       env:
         OCR_INCREMENTAL_OVERLAP_THRESHOLD: ${{ inputs.incremental_overlap_threshold }}
         OCR_REVIEW_COMMENT_BATCH_SIZE: ${{ inputs.review_comment_batch_size }}
+        OCR_ROUTE_SEVERITY_BELOW: ${{ inputs.route_severity_below }}
+        OCR_ROUTE_CATEGORIES: ${{ inputs.route_categories }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |
@@ -313,4 +344,6 @@ runs:
             incremental: ${{ inputs.incremental == 'true' }},
             incrementalOverlapThreshold: parseFloat(process.env.OCR_INCREMENTAL_OVERLAP_THRESHOLD),
             reviewCommentBatchSize: parseInt(process.env.OCR_REVIEW_COMMENT_BATCH_SIZE, 10),
+            routeSeverityBelow: process.env.OCR_ROUTE_SEVERITY_BELOW,
+            routeCategories: process.env.OCR_ROUTE_CATEGORIES,
           });
