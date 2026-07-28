@@ -198,7 +198,7 @@ export function searchDocs(query: string, language: string): { slug: DocSlug; ti
       // Extract snippet around match
       const start = Math.max(0, idx - 30);
       const end = Math.min(content.length, idx + query.length + 60);
-      let snippet = content.slice(start, end).replace(/[#*_`\[\]()]/g, '').replace(/\n/g, ' ').trim();
+      let snippet = content.slice(start, end).replace(/[#*_`[\]()]/g, '').replace(/\n/g, ' ').trim();
       if (start > 0) snippet = '...' + snippet;
       if (end < content.length) snippet = snippet + '...';
       const title = getDocTitle(slug, language);
