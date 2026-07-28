@@ -215,6 +215,11 @@ describe('pickRepoRoot', () => {
     const roots = ['C:\\repo', 'C:\\repository'];
     expect(pickRepoRoot(roots, 'C:\\repository\\src')).toBe('C:\\repository');
   });
+
+  it('handles mixed separators between a UNC root and workspace path', () => {
+    const roots = ['//server/share/other', '//server/share/repo'];
+    expect(pickRepoRoot(roots, '\\\\server\\share\\repo\\src')).toBe('//server/share/repo');
+  });
 });
 
 describe('getCommitFiles: git show revision placement', () => {

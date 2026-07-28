@@ -89,7 +89,8 @@ export function pickRepoRoot(roots: string[], workspacePath?: string): string | 
   if (!workspacePath) return roots[0];
 
   const candidates = roots.map((root) => {
-    const pathApi = /^[a-z]:[\\/]/i.test(root) || root.includes('\\') ? path.win32 : path.posix;
+    const isWindowsPath = [root, workspacePath].some((p) => /^[a-z]:[\\/]/i.test(p) || p.includes('\\'));
+    const pathApi = isWindowsPath ? path.win32 : path.posix;
     return { root, relative: pathApi.relative(root, workspacePath), pathApi };
   });
 
