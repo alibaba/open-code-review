@@ -71,19 +71,19 @@
   background: #000000;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 6px;
-  padding: 4px 16px;
+  padding: 4px 0;
   margin: 0 0 16px 0;
-  overflow-x: auto;
   display: flex;
   align-self: stretch;
   justify-content: space-between;
   align-items: center;
+  position: relative;
 }
 
 .docs-markdown pre code {
   background: none;
   border: none;
-  padding: 0;
+  padding: 0 16px;
   font-size: 13px;
   line-height: 22px;
   color: rgba(255, 255, 255, 0.8);
@@ -91,6 +91,7 @@
   display: block;
   flex: 1;
   min-width: 0;
+  overflow-x: auto;
 }
 
 /* Lists */
@@ -236,15 +237,15 @@
 }
 
 /* Scrollbar styling for code blocks */
-.docs-markdown pre::-webkit-scrollbar {
+.docs-markdown pre code::-webkit-scrollbar {
   height: 6px;
 }
 
-.docs-markdown pre::-webkit-scrollbar-track {
+.docs-markdown pre code::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.docs-markdown pre::-webkit-scrollbar-thumb {
+.docs-markdown pre code::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.15);
   border-radius: 3px;
 }

@@ -108,7 +108,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
       // Create copy button matching reference HTML
       const btn = document.createElement('div');
       btn.className = 'code-copy-btn';
-      btn.style.cssText = 'display:flex;flex-shrink:0;justify-content:flex-start;align-items:flex-start;flex-direction:column;padding-top:4px;padding-bottom:4px;cursor:pointer;';
+      btn.style.cssText = 'position:absolute;top:4px;right:12px;display:flex;padding:4px;cursor:pointer;';
       btn.innerHTML = `<img src="${copyIcon}" alt="copy" style="width:16px;height:16px;" />`;
       btn.addEventListener('click', () => {
         const text = codeEl.textContent || '';
