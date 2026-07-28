@@ -2,7 +2,7 @@ import React from 'react';
 
 const CHUNK_RELOAD_STORAGE_KEY = 'ocr-chunk-reload-attempted';
 
-type FallbackRender = (error: Error, reset: () => void) => React.ReactNode;
+type FallbackRender = (error: Error, reload: () => void) => React.ReactNode;
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -46,7 +46,7 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
     }
   }
 
-  private reset = (): void => {
+  private reload = (): void => {
     try {
       window.sessionStorage.removeItem(CHUNK_RELOAD_STORAGE_KEY);
     } catch {}
@@ -58,6 +58,6 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
     if (!error) return this.props.children;
 
     const { fallback } = this.props;
-    return typeof fallback === 'function' ? fallback(error, this.reset) : fallback;
+    return typeof fallback === 'function' ? fallback(error, this.reload) : fallback;
   }
 }

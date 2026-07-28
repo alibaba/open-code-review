@@ -72,21 +72,21 @@ describe('ErrorBoundary', () => {
     expect(reload).not.toHaveBeenCalled();
   });
 
-  it('clears the guard and reloads directly when reset', () => {
+  it('clears the guard and reloads directly from the fallback', () => {
     storage.set(STORAGE_KEY, 'true');
-    let reset: (() => void) | undefined;
+    let reloadBoundary: (() => void) | undefined;
     const boundary = new ErrorBoundary({
       children: null,
-      fallback: (_error, retry) => {
-        reset = retry;
+      fallback: (_error, reload) => {
+        reloadBoundary = reload;
         return null;
       },
     });
     boundary.state = ErrorBoundary.getDerivedStateFromError(new Error('render failed'));
     boundary.render();
 
-    expect(reset).toBeDefined();
-    reset?.();
+    expect(reloadBoundary).toBeDefined();
+    reloadBoundary?.();
 
     expect(storage.has(STORAGE_KEY)).toBe(false);
     expect(reload).toHaveBeenCalledOnce();

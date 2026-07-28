@@ -18,7 +18,7 @@ const ScrollToTop: React.FC = () => {
   return null;
 };
 
-const RouteErrorFallback: React.FC<{ reset: () => void }> = ({ reset }) => {
+const RouteErrorFallback: React.FC<{ reload: () => void }> = ({ reload }) => {
   const { t } = useTranslation();
 
   return (
@@ -47,7 +47,7 @@ const RouteErrorFallback: React.FC<{ reset: () => void }> = ({ reset }) => {
         <p style={{ margin: '0 0 16px', fontSize: 16 }}>{t('error.pageLoadFailed')}</p>
         <button
           type="button"
-          onClick={reset}
+          onClick={reload}
           style={{
             border: 0,
             borderRadius: 6,
@@ -70,7 +70,7 @@ const App: React.FC = () => {
   return (
     <>
       <ScrollToTop />
-      <ErrorBoundary reloadOnChunkError fallback={(_error, reset) => <RouteErrorFallback reset={reset} />}>
+      <ErrorBoundary reloadOnChunkError fallback={(_error, reload) => <RouteErrorFallback reload={reload} />}>
         <Suspense fallback={<div style={{ minHeight: '100vh', background: '#000000' }} />}>
           <Routes>
             <Route path="/" element={<LandingPage><FeaturesPage /></LandingPage>} />
