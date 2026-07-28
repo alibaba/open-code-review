@@ -205,6 +205,16 @@ describe('pickRepoRoot', () => {
     const roots = ['/a/repo', '/b/repo'];
     expect(pickRepoRoot(roots, undefined)).toBe('/a/repo');
   });
+
+  it('selects a Windows repository containing the workspace subdirectory', () => {
+    const roots = ['C:\\other', 'C:\\repo'];
+    expect(pickRepoRoot(roots, 'C:\\repo\\packages\\app')).toBe('C:\\repo');
+  });
+
+  it('does not treat a Windows path with the same prefix as an ancestor', () => {
+    const roots = ['C:\\repo', 'C:\\repository'];
+    expect(pickRepoRoot(roots, 'C:\\repository\\src')).toBe('C:\\repository');
+  });
 });
 
 describe('getCommitFiles: git show revision placement', () => {
