@@ -9,9 +9,11 @@ import type { Language } from '../i18n/types';
 
 const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
-  { value: 'zh', label: 'ä¸­æ–‡' },
-  { value: 'ja', label: 'æ—¥æœ¬èªž' },
+  { value: 'zh', label: '中文' },
+  { value: 'ja', label: '日本語' },
 ];
+
+const LANG_ABBREVIATIONS: Record<Language, string> = { en: 'En', zh: '\u4e2d', ja: '\u3042' };
 
 const navTabs = [
   { path: '/#features', labelKey: 'navbar.features' },
@@ -45,14 +47,11 @@ const Navbar: React.FC = () => {
       const [route, hash] = path.split('#');
       const targetRoute = route || '/';
       if (currentPath === targetRoute) {
-        // Already on the correct page â€” just scroll to the anchor.
         const el = document.getElementById(hash);
         if (el) {
           el.scrollIntoView({ behavior: 'smooth' });
         }
       } else {
-        // Navigate to the page first; ScrollToTop + useEffect will handle
-        // scrolling after the route change.
         navigate(path);
       }
     } else {
@@ -64,16 +63,18 @@ const Navbar: React.FC = () => {
   useEffect(() => {
     if (currentHash) {
       const id = currentHash.replace('#', '');
-      // Small delay to let the page render before scrolling.
-      const timer = setTimeout(() => {
-        const el = document.getElementById(id);
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth' });
-        }
-      }, 100);
-      return () => clearTimeout(timer);
+      // Double-rAF ensures the browser has painted the target element
+      // before we attempt to scroll, avoiding fragile fixed timeouts.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const el = document.getElementById(id);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth' });
+          }
+        });
+      });
     }
-  }, [currentPath, currentHash]);
+  }, [currentHash]);
 
   return (
     <nav
@@ -117,7 +118,7 @@ const Navbar: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {navTabs.map((tab) => {
               const isActive = tab.path === '/#features'
-                ? currentPath === '/' && currentHash === '#features'
+                ? currentPath === '/' && (currentHash === '#features' || currentHash === '')
                 : currentPath.startsWith(tab.path);
               return (
                 <button
@@ -179,7 +180,7 @@ const Navbar: React.FC = () => {
                 width: '100%',
                 fontFamily: language === 'ja' ? "'Hiragino Sans', sans-serif" : "'PingFang SC', -apple-system, sans-serif",
               }}>
-                {language === 'en' ? 'En' : language === 'zh' ? 'ä¸­' : 'ã‚'}
+                {language === 'en' ? 'En' : language === 'zh' ? '中' : 'あ'}
               </span>
             </button>
             {langOpen && (
