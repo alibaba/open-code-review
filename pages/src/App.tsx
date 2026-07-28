@@ -74,6 +74,7 @@ const App: React.FC = () => {
         <Suspense fallback={<div style={{ minHeight: '100vh', background: '#000000' }} />}>
           <Routes>
             <Route path="/" element={<LandingPage><FeaturesPage /></LandingPage>} />
+            <Route path="/features" element={<LandingPage><FeaturesPage /></LandingPage>} />
             <Route path="/benchmark" element={<LandingPage><BenchmarkPage /></LandingPage>} />
             <Route path="/quickstart" element={<LandingPage><QuickStartPage /></LandingPage>} />
             <Route path="/docs" element={<DocsPage />} />
