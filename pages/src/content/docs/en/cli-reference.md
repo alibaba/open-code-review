@@ -96,6 +96,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--timeout <minutes>` | — | `10` | Per-file deadline. `0` disables the timeout. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per file. `0` uses the template default (`30`); values 1–9 are clamped up to `10`; any value `≥ 10` overrides the template default (even if smaller than `30`). |
+| `--provider <name>` | — | — | Override the resolved LLM provider for this review (e.g., `openai`). |
 | `--model <name>` | — | — | Override the resolved LLM model for this review (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
 | `--tools <path>` | — | embedded | Path to a custom JSON tool-config file. Overrides the embedded tool definitions. |

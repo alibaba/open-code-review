@@ -31,6 +31,14 @@ type ResolvedEndpoint struct {
 
 // Environment variable names for OCR-specific configuration.
 const (
+	configStrategyName         = "OCR config file"
+	environmentStrategyName    = "OCR environment"
+	claudeCodeStrategyName     = "Claude Code environment"
+	shellRCStrategyName        = "Shell rc file"
+	providerSourcePrefix       = "provider:"
+	providersSectionName       = "providers"
+	customProvidersSectionName = "custom_providers"
+
 	envOCRLLMURL          = "OCR_LLM_URL"
 	envOCRLLMToken        = "OCR_LLM_TOKEN"
 	envOCRLLMModel        = "OCR_LLM_MODEL"
@@ -66,16 +74,35 @@ func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
 // but uses modelOverride as the request model when it is non-empty. The override
 // can also supply the otherwise required model for a configured endpoint.
 func ResolveEndpointWithModelOverride(configPath, modelOverride string) (ResolvedEndpoint, error) {
+	return ResolveEndpointWithOverrides(configPath, "", modelOverride)
+}
+
+// ResolveEndpointWithOverrides resolves an endpoint like ResolveEndpoint, but
+// applies non-empty provider and model overrides for the current command.
+func ResolveEndpointWithOverrides(configPath, providerOverride, modelOverride string) (ResolvedEndpoint, error) {
+	providerOverride = strings.TrimSpace(providerOverride)
 	modelOverride = strings.TrimSpace(modelOverride)
+
+	if providerOverride != "" {
+		ep, _, err := tryOCRConfig(configPath, providerOverride, modelOverride)
+		if err != nil {
+			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", configStrategyName, err)
+		}
+		ep, err = finalizeResolvedEndpoint(ep, configStrategyName)
+		if err != nil {
+			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", configStrategyName, err)
+		}
+		return ep, nil
+	}
 
 	strategies := []struct {
 		name string
 		fn   func() (ResolvedEndpoint, bool, error)
 	}{
-		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath, modelOverride) }},
-		{"OCR environment", func() (ResolvedEndpoint, bool, error) { return tryOCREnv(modelOverride) }},
-		{"Claude Code environment", func() (ResolvedEndpoint, bool, error) { return tryCCEnv(modelOverride) }},
-		{"Shell rc file", func() (ResolvedEndpoint, bool, error) { return tryShellRC(modelOverride) }},
+		{configStrategyName, func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath, "", modelOverride) }},
+		{environmentStrategyName, func() (ResolvedEndpoint, bool, error) { return tryOCREnv(modelOverride) }},
+		{claudeCodeStrategyName, func() (ResolvedEndpoint, bool, error) { return tryCCEnv(modelOverride) }},
+		{shellRCStrategyName, func() (ResolvedEndpoint, bool, error) { return tryShellRC(modelOverride) }},
 	}
 
 	for _, s := range strategies {
@@ -84,41 +111,49 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
 		}
 		if ok && ep.URL != "" && ep.Token != "" && ep.Model != "" {
-			if ep.Source == "" {
-				ep.Source = s.name
-			}
-			ep.Model = stripModelSuffix(ep.Model)
-			// OCR_LLM_TIMEOUT is a global override: applies regardless of
-			// which strategy resolved the endpoint, and takes precedence
-			// over config-file values when set.
-			envTimeout, ok, err := parseTimeoutEnv()
+			ep, err = finalizeResolvedEndpoint(ep, s.name)
 			if err != nil {
 				return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
-			}
-			if ok {
-				ep.Timeout = envTimeout
-			}
-			// OCR_LLM_EXTRA_HEADERS is a global override: merges into
-			// extra headers regardless of which strategy resolved the
-			// endpoint. Env values take precedence over config-file values.
-			if raw := os.Getenv(envOCRLLMExtraHeaders); raw != "" {
-				envHeaders, err := ParseExtraHeaders(raw)
-				if err != nil {
-					return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
-				}
-				if ep.ExtraHeaders == nil {
-					ep.ExtraHeaders = envHeaders
-				} else {
-					for k, v := range envHeaders {
-						ep.ExtraHeaders[k] = v
-					}
-				}
 			}
 			return ep, nil
 		}
 	}
 
 	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
+}
+
+func finalizeResolvedEndpoint(ep ResolvedEndpoint, strategyName string) (ResolvedEndpoint, error) {
+	if ep.Source == "" {
+		ep.Source = strategyName
+	}
+	ep.Model = stripModelSuffix(ep.Model)
+	// OCR_LLM_TIMEOUT is a global override: applies regardless of
+	// which strategy resolved the endpoint, and takes precedence
+	// over config-file values when set.
+	envTimeout, ok, err := parseTimeoutEnv()
+	if err != nil {
+		return ResolvedEndpoint{}, err
+	}
+	if ok {
+		ep.Timeout = envTimeout
+	}
+	// OCR_LLM_EXTRA_HEADERS is a global override: merges into extra headers
+	// regardless of which strategy resolved the endpoint. Env values take
+	// precedence over config-file values.
+	if raw := os.Getenv(envOCRLLMExtraHeaders); raw != "" {
+		envHeaders, err := ParseExtraHeaders(raw)
+		if err != nil {
+			return ResolvedEndpoint{}, err
+		}
+		if ep.ExtraHeaders == nil {
+			ep.ExtraHeaders = envHeaders
+		} else {
+			for k, v := range envHeaders {
+				ep.ExtraHeaders[k] = v
+			}
+		}
+	}
+	return ep, nil
 }
 
 // parseTimeoutEnv reads and validates the OCR_LLM_TIMEOUT environment variable.
@@ -241,10 +276,13 @@ type configFile struct {
 }
 
 // tryOCRConfig reads the OCR config file.
-func tryOCRConfig(path, modelOverride string) (ResolvedEndpoint, bool, error) {
+func tryOCRConfig(path, providerOverride, modelOverride string) (ResolvedEndpoint, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if providerOverride != "" {
+				return ResolvedEndpoint{}, false, fmt.Errorf("provider %q requires a config file", providerOverride)
+			}
 			return ResolvedEndpoint{}, false, nil
 		}
 		return ResolvedEndpoint{}, false, err
@@ -255,30 +293,33 @@ func tryOCRConfig(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 		return ResolvedEndpoint{}, false, fmt.Errorf("parse config: %w", err)
 	}
 
+	if providerOverride != "" {
+		return tryProviderConfig(cfg, providerOverride, true, modelOverride)
+	}
 	if cfg.Provider != "" {
-		return tryProviderConfig(cfg, modelOverride)
+		return tryProviderConfig(cfg, cfg.Provider, false, modelOverride)
 	}
 
 	return tryLegacyLlmConfig(cfg, modelOverride)
 }
 
 // tryProviderConfig resolves an endpoint from the provider-based configuration.
-func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, bool, error) {
-	preset, isPreset := LookupProvider(cfg.Provider)
+func tryProviderConfig(cfg configFile, providerName string, isProviderOverride bool, modelOverride string) (ResolvedEndpoint, bool, error) {
+	preset, isPreset := LookupProvider(providerName)
 
 	var entry providerEntryConfig
 	var ok bool
 	if isPreset {
-		entry, ok = cfg.Providers[cfg.Provider]
+		entry, ok = cfg.Providers[providerName]
 	} else {
-		entry, ok = cfg.CustomProviders[cfg.Provider]
+		entry, ok = cfg.CustomProviders[providerName]
 	}
 	if !ok {
-		section := "providers"
+		section := providersSectionName
 		if !isPreset {
-			section = "custom_providers"
+			section = customProvidersSectionName
 		}
-		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q is set but not configured in %s section", cfg.Provider, section)
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q is set but not configured in %s section", providerName, section)
 	}
 
 	apiKey := entry.APIKey
@@ -288,7 +329,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		}
 	}
 	if apiKey == "" {
-		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key configured and no environment variable fallback found", cfg.Provider)
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key configured and no environment variable fallback found", providerName)
 	}
 
 	var url, protocol, authHeader, model string
@@ -298,7 +339,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		url = preset.BaseURL
 		protocol = NormalizeProtocol(preset.Protocol)
 		if err := ValidateProtocol(protocol); err != nil {
-			return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+			return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", providerName, err)
 		}
 		authHeader = preset.AuthHeader
 		if entry.URL != "" {
@@ -307,24 +348,24 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		if entry.Protocol != "" {
 			normalized := NormalizeProtocol(entry.Protocol)
 			if err := ValidateProtocol(normalized); err != nil {
-				return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+				return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", providerName, err)
 			}
 			protocol = normalized
 		}
 	} else {
-		// Custom provider: url and protocol are required; model can come from cfg.Model.
+		// Custom provider: url and protocol are required.
 		if entry.URL == "" || entry.Protocol == "" {
-			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires url and protocol fields", cfg.Provider)
+			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires url and protocol fields", providerName)
 		}
 		normalized := NormalizeProtocol(entry.Protocol)
 		if err := ValidateProtocol(normalized); err != nil {
-			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q: %w", cfg.Provider, err)
+			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q: %w", providerName, err)
 		}
 		url = entry.URL
 		protocol = normalized
 	}
 
-	if cfg.Model != "" {
+	if cfg.Model != "" && !isProviderOverride {
 		model = cfg.Model
 	}
 	if entry.Model != "" {
@@ -345,7 +386,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 				return ResolvedEndpoint{}, false, fmt.Errorf(
 					"model %q is not available for provider %q; available models: %s",
 					modelOverride,
-					cfg.Provider,
+					providerName,
 					strings.Join(availableModels, ", "),
 				)
 			}
@@ -354,7 +395,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 
 	if model == "" {
-		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no model configured; run 'ocr config model' to select one or pass --model", cfg.Provider)
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no model configured; run 'ocr config model' to select one or pass --model", providerName)
 	}
 
 	if protocol == ProtocolAnthropic {
@@ -368,7 +409,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		}
 		authHeader, err = NormalizeAuthHeader(ah)
 		if err != nil {
-			return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+			return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", providerName, err)
 		}
 		if authHeader == "" {
 			authHeader = defaultAuthHeader(protocol)
@@ -382,7 +423,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 
 	timeout, err := validateTimeoutSec(entry.TimeoutSec)
 	if err != nil {
-		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", providerName, err)
 	}
 
 	if protocol == ProtocolAnthropic {
@@ -395,7 +436,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		Model:        model,
 		Protocol:     protocol,
 		AuthHeader:   authHeader,
-		Source:       "provider:" + cfg.Provider,
+		Source:       providerSourcePrefix + providerName,
 		ExtraBody:    extraBody,
 		ExtraHeaders: extraHeaders,
 		Timeout:      timeout,

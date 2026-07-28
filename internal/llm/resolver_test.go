@@ -415,6 +415,111 @@ func TestResolveEndpointWithModelOverride_CustomProviderWithoutConfiguredModel(t
 	}
 }
 
+func TestResolveEndpointWithProviderOverride_UsesConfiguredPresetProvider(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-sonnet-4-6"},
+			"openai":    {APIKey: "sk-openai-test", Model: "gpt-4o"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpointWithOverrides(cfgPath, "openai", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Source != "provider:openai" {
+		t.Errorf("Source = %q, want %q", ep.Source, "provider:openai")
+	}
+	if ep.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if ep.Token != "sk-openai-test" {
+		t.Errorf("Token = %q, want %q", ep.Token, "sk-openai-test")
+	}
+	if ep.Model != "gpt-4o" {
+		t.Errorf("Model = %q, want %q", ep.Model, "gpt-4o")
+	}
+}
+
+func TestResolveEndpointWithProviderOverride_RequiresConfiguredProvider(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://api.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	t.Setenv("OCR_LLM_MODEL", "env-model")
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-sonnet-4-6"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := ResolveEndpointWithOverrides(cfgPath, "openai", "")
+	if err == nil {
+		t.Fatal("expected error for unconfigured provider override")
+	}
+	if !strings.Contains(err.Error(), "provider \"openai\"") {
+		t.Errorf("error should mention requested provider, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "OCR environment") {
+		t.Errorf("provider override should not fall back to OCR environment, got: %v", err)
+	}
+}
+
+func TestResolveEndpointWithProviderOverride_DoesNotUseDefaultModelForSelectedProvider(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Model:    "claude-sonnet-4-6",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test"},
+		},
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:   "token",
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "openai",
+				Models:   []string{"llama-3-70b", "llama-3-8b"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := ResolveEndpointWithOverrides(cfgPath, "my-gateway", "")
+	if err == nil {
+		t.Fatal("expected error when provider override has no configured model")
+	}
+	if !strings.Contains(err.Error(), "provider \"my-gateway\" has no model configured") {
+		t.Errorf("error should mention missing selected-provider model, got: %v", err)
+	}
+
+	ep, err := ResolveEndpointWithOverrides(cfgPath, "my-gateway", "llama-3-8b")
+	if err != nil {
+		t.Fatalf("unexpected error with explicit model override: %v", err)
+	}
+	if ep.Model != "llama-3-8b" {
+		t.Errorf("Model = %q, want %q", ep.Model, "llama-3-8b")
+	}
+}
+
 func TestResolveEndpoint_ProviderAPIKeyEnvFallback(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "env-api-key")

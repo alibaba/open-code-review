@@ -36,6 +36,17 @@ func TestParseReviewFlagsModelOverride(t *testing.T) {
 	}
 }
 
+func TestParseReviewFlagsProviderOverride(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--provider", "openai"})
+	if err != nil {
+		t.Fatalf("parseReviewFlags: %v", err)
+	}
+
+	if opts.provider != "openai" {
+		t.Errorf("provider = %q, want %q", opts.provider, "openai")
+	}
+}
+
 func TestParseReviewFlagsResume(t *testing.T) {
 	opts, err := parseReviewFlags([]string{"--from", "main", "--to", "feature", "--resume", "session-123"})
 	if err != nil {
