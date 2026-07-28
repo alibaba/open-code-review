@@ -67,7 +67,14 @@ jobs:
           echo "PASS: Coverage ${COVERAGE}% meets 80% threshold"
 
       - name: Build
-        run: go build -o /dev/null ./cmd/opencodereview
+        run: go build -o ./opencodereview ./cmd/opencodereview
+
+      - name: Smoke test
+        run: |
+          ./opencodereview --version
+          ./opencodereview --version | grep -q "open-code-review"
+          ./opencodereview --help
+          ./opencodereview --help | grep -q "Commands:"
 
   cross-compile:
     runs-on: self-hosted
