@@ -85,9 +85,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
       const trimmed = text.replace(/^\n+|\n+$/g, '');
       const content = escaped ? trimmed : trimmed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       const langClass = lang ? ` class="language-${lang}"` : '';
-      const isMultiline = trimmed.includes('\n');
-      const alignItems = isMultiline ? 'flex-start' : 'center';
-      return `<pre style="align-items:${alignItems};"><code${langClass}>${content}</code></pre>\n`;
+      return `<pre><code${langClass}>${content}</code></pre>\n`;
     };
     const instance = new Marked({ gfm: true, breaks: false, renderer });
     return DOMPurify.sanitize(instance.parse(content) as string);
@@ -105,10 +103,9 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
       if (!codeEl || codeEl.classList.contains('language-mermaid')) return;
       if (pre.querySelector('.code-copy-btn')) return; // already added
 
-      // Create copy button matching reference HTML
+      // Create copy button; visual styles live in docs-markdown.css
       const btn = document.createElement('div');
       btn.className = 'code-copy-btn';
-      btn.style.cssText = 'position:absolute;top:4px;right:12px;display:flex;padding:4px;cursor:pointer;';
       btn.innerHTML = `<img src="${copyIcon}" alt="copy" style="width:16px;height:16px;" />`;
       btn.addEventListener('click', () => {
         const text = codeEl.textContent || '';

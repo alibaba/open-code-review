@@ -73,10 +73,6 @@
   border-radius: 6px;
   padding: 4px 0;
   margin: 0 0 16px 0;
-  display: flex;
-  align-self: stretch;
-  justify-content: space-between;
-  align-items: center;
   position: relative;
 }
 
@@ -89,9 +85,41 @@
   color: rgba(255, 255, 255, 0.8);
   white-space: pre;
   display: block;
-  flex: 1;
-  min-width: 0;
   overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+/* Copy button: revealed on hover so it never obscures code while reading;
+   the translucent background keeps it legible over long lines. */
+.docs-markdown pre .code-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  display: flex;
+  padding: 4px;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.docs-markdown pre:hover .code-copy-btn {
+  opacity: 1;
+}
+
+/* The generic content-image rule below must not inflate the icon. */
+.docs-markdown pre .code-copy-btn img {
+  margin: 0;
+  border-radius: 0;
+}
+
+/* Touch devices have no hover: keep the button always visible. */
+@media (hover: none) {
+  .docs-markdown pre .code-copy-btn {
+    opacity: 1;
+  }
 }
 
 /* Lists */
