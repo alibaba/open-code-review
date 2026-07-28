@@ -17,7 +17,7 @@ export function extractHeadings(markdown: string): { id: string; text: string; l
       // Strip markdown link syntax [text](url) → text, then strip other formatting
       const text = match[2]
         .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
-        .replace(/[`*_\[\]()]/g, '')
+        .replace(/[`*_[\]()]/g, '')
         .trim();
       const id = generateHeadingId(text);
       headings.push({ id, text, level });

@@ -18,6 +18,10 @@ export const en: TranslationKeys = {
   'hero.copied': 'Copied!',
   'hero.copyFailed': 'Copy failed',
 
+  // Error boundary
+  'error.pageLoadFailed': 'Failed to load this page.',
+  'error.reload': 'Reload',
+
   // Highlights
   'highlights.stat1Value': '20K+',
   'highlights.stat1Label': 'ACTIVE USERS',

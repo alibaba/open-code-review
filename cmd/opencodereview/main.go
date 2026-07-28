@@ -54,7 +54,7 @@ func dispatch() error {
 		return runLLM(args[1:])
 	case "rules":
 		return runRules(args[1:])
-	case "viewer":
+	case "viewer", "v":
 		return runViewer(args[1:])
 	case "delegate", "d":
 		return runDelegate(args[1:])
@@ -81,7 +81,7 @@ Commands:
   rules        Inspect and debug review rules
   config       Manage configuration settings
   llm          LLM utility commands
-  viewer       Start the WebUI session viewer
+  viewer, v    Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
   version      Show version information
 
@@ -100,9 +100,11 @@ Examples:
 
 Use "ocr review -h" for more information about review.
 Use "ocr scan -h" for more information about scan.
+Use "ocr delegate -h" for more information about delegation mode.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.
 Use "ocr llm" for more information about LLM utilities.
+Use "ocr viewer -h" for more information about the session viewer.
 Use "ocr session -h" for more information about session inspection.
 
 GitHub: https://github.com/alibaba/open-code-review`)
