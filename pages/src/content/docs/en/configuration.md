@@ -62,8 +62,8 @@ environment variable.
 ### Custom providers
 
 Any provider name not in the table above is treated as custom and must
-supply at least `url` and `protocol` (`protocol` is either `anthropic` or
-`openai`):
+supply at least `url` and `protocol` (`protocol` is `anthropic`, `openai`,
+or `openai-responses`):
 
 ```bash
 ocr config set provider                             my-gateway
@@ -71,6 +71,16 @@ ocr config set custom_providers.my-gateway.url      https://gateway.internal.com
 ocr config set custom_providers.my-gateway.protocol openai
 ocr config set custom_providers.my-gateway.model    llama-3-70b
 ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
+```
+For a provider that uses the OpenAI Responses API (`/v1/responses`), set
+`protocol` to `openai-responses`. OCR accepts either the API base URL or
+the full `/responses` endpoint:
+```bash
+ocr config set provider                                   my-responses-gateway
+ocr config set custom_providers.my-responses-gateway.url  https://api.example.com/v1
+ocr config set custom_providers.my-responses-gateway.protocol openai-responses
+ocr config set custom_providers.my-responses-gateway.model    my-model
+ocr config set custom_providers.my-responses-gateway.api_key  "$MY_API_KEY"
 ```
 
 A local model served by Ollama is just a custom provider pointing at the

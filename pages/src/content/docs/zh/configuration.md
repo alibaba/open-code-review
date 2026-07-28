@@ -59,7 +59,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ### 自定义 provider
 
 任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`
-（`protocol` 取 `anthropic` 或 `openai`）：
+（`protocol` 取 `anthropic`、`openai` 或 `openai-responses`）：
 
 ```bash
 ocr config set provider                             my-gateway
@@ -67,6 +67,16 @@ ocr config set custom_providers.my-gateway.url      https://gateway.internal.com
 ocr config set custom_providers.my-gateway.protocol openai
 ocr config set custom_providers.my-gateway.model    llama-3-70b
 ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
+```
+如果 provider 使用 OpenAI Responses API（`/v1/responses`），请将 `protocol`
+设为 `openai-responses`。`url` 可以填写 API Base URL，也可以填写完整的
+`/responses` 端点：
+```bash
+ocr config set provider                                   my-responses-gateway
+ocr config set custom_providers.my-responses-gateway.url  https://api.example.com/v1
+ocr config set custom_providers.my-responses-gateway.protocol openai-responses
+ocr config set custom_providers.my-responses-gateway.model    my-model
+ocr config set custom_providers.my-responses-gateway.api_key  "$MY_API_KEY"
 ```
 
 用 Ollama 跑本地模型，就是一个指向本地 OpenAI 兼容端点的自定义 provider：
