@@ -50,7 +50,7 @@ export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, E
     try {
       window.sessionStorage.removeItem(CHUNK_RELOAD_STORAGE_KEY);
     } catch {}
-    this.setState({ error: null });
+    window.location.reload();
   };
 
   render(): React.ReactNode {

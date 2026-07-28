@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "webpack serve",
     "build": "NODE_ENV=production webpack --mode production",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -39,6 +40,7 @@
     "style-loader": "^3.3.3",
     "tailwindcss": "^3.3.5",
     "typescript": "^5.3.2",
+    "vitest": "^4.1.10",
     "webpack": "^5.89.0",
     "webpack-cli": "^5.1.4",
     "webpack-dev-server": "^5.2.4"
