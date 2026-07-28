@@ -4,6 +4,7 @@ import LandingPage from './components/LandingPage';
 import ErrorBoundary from './components/ErrorBoundary';
 import { useTranslation } from './i18n';
 import FeaturesPage from './pages/FeaturesPage';
+import FeaturesRoutePage from './pages/FeaturesRoutePage';
 
 const BenchmarkPage = React.lazy(() => import(/* webpackChunkName: "benchmark-page" */ './pages/BenchmarkPage'));
 const QuickStartPage = React.lazy(() => import(/* webpackChunkName: "quickstart-page" */ './pages/QuickStartPage'));
@@ -74,7 +75,7 @@ const App: React.FC = () => {
         <Suspense fallback={<div style={{ minHeight: '100vh', background: '#000000' }} />}>
           <Routes>
             <Route path="/" element={<LandingPage><FeaturesPage /></LandingPage>} />
-            <Route path="/features" element={<LandingPage><FeaturesPage /></LandingPage>} />
+            <Route path="/features" element={<LandingPage><FeaturesRoutePage /></LandingPage>} />
             <Route path="/benchmark" element={<LandingPage><BenchmarkPage /></LandingPage>} />
             <Route path="/quickstart" element={<LandingPage><QuickStartPage /></LandingPage>} />
             <Route path="/docs" element={<DocsPage />} />
