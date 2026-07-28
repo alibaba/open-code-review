@@ -224,6 +224,9 @@ Examples:
   ocr review --preview
   ocr review -c abc123 -p
 
+  # Exclude generated files / fixtures
+  ocr review --exclude '**/generated/*,**/testdata/*'
+
   # Provide requirement/business context inline, from a Markdown file, or both
   ocr review --background "Adding rate limiting to the login API"
   ocr review --background-file ./docs/requirements.md
@@ -236,6 +239,7 @@ Flags:
   -c, --commit string           single commit hash or tag to review (vs its parent)
   -f, --format string           output format: text or json (default "text")
   --concurrency int             max concurrent file reviews (default 8)
+  --exclude string              comma-separated gitignore-style patterns to exclude (merged with rule.json)
   --max-git-procs int           max concurrent git subprocesses (default 16)
   --from string                 source ref to start diff from (e.g., 'main')
   --max-tools int               max tool call rounds per file (0 = template default; min 10)
@@ -275,7 +279,7 @@ func parseConfigArgs(args []string) (configAction, error) {
 		}, nil
 	case "unset":
 		if len(args) < 2 {
-			return configAction{}, fmt.Errorf("usage: ocr config unset custom_providers.<name>\ne.g., ocr config unset custom_providers.my-gateway")
+			return configAction{}, fmt.Errorf("usage: ocr config unset custom_providers.<name> | mcp_servers.<name>\ne.g., ocr config unset custom_providers.my-gateway\ne.g., ocr config unset mcp_servers.codegraph")
 		}
 		return configAction{
 			subCmd: "unset",
