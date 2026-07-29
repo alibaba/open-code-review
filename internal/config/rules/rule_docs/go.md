@@ -67,7 +67,3 @@ Confirm attacker control or a trust boundary before reporting. Prefer a concrete
 - Review production Go changes by default. `*_test.go` files remain excluded by OCR's default path filter and are reviewed only when user configuration explicitly includes them.
 - Suggest tests only for concrete changed correctness, concurrency, error, or boundary failure modes. Favor deterministic tests; do not demand flaky timing-based race tests.
 - Do not make formatting, import ordering, naming preferences, simplification, or advice already enforced by `gofmt`, `go vet`, Staticcheck, linters, or the compiler into blocking findings.
-
-#### References
-- [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments) and [Effective Go](https://go.dev/doc/effective_go) inform this guidance. Use them to understand semantics, not to turn formatting/style preferences into findings.
-- Check current standard-library documentation for version-sensitive APIs, especially [`context`](https://pkg.go.dev/context), [`sync`](https://pkg.go.dev/sync), and [`time`](https://pkg.go.dev/time), before reporting lifecycle or concurrency defects.

@@ -838,7 +838,7 @@ func TestResolveDetail_SystemGoPatternMatch(t *testing.T) {
 				t.Errorf("expected pattern '**/*.go', got %q", detail.Pattern)
 			}
 			for _, required := range []string{
-				"Go Review Principles", "Go 1.23+", "defer` inside a loop", "crypto/rand", "Go Code Review Comments",
+				"Go Review Principles", "Go 1.23+", "defer` inside a loop", "crypto/rand",
 			} {
 				if !strings.Contains(detail.Rule, required) {
 					t.Errorf("expected Go rule to contain %q", required)
