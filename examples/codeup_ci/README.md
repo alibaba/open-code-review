@@ -68,6 +68,5 @@ Set `OCR_REVIEW_EXTRA_ARGS` as a pipeline variable to pass extra flags to
 ## Local testing
 
 ```bash
-pip install -r requirements-dev.txt  # if you add test dependencies
 python3 -m unittest post_review_test -v
 ```
