@@ -72,5 +72,6 @@
   ".tf",
   ".graphql",
   ".gql",
+  ".prisma",
   ".jl"
 ]
