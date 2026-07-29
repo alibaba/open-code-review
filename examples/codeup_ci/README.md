@@ -1,93 +1,73 @@
-# CodeUp (云效) Integration
+# CodeUp CI Integration
 
-This integrates `open-code-review` into a **Yunxiao Flow (云效流水线)**
-pipeline so that AI review comments are posted automatically on
-**CodeUp merge requests**, alongside the existing GitHub Actions, GitLab CI,
-GitFlic CI, and Gerrit integrations.
+Run `open-code-review` (`ocr`) automatically on every merge request in
+[Alibaba Cloud Yunxiao CodeUp](https://codeup.aliyun.com), posting results
+as a merge request comment via Flow.
 
 ## How it works
 
-1. Configure your Flow pipeline's trigger to run on
-   **合并请求 新建/更新** (merge request created/updated) code-source events.
-2. Add a custom step (Shell or Flow-CLI step) that runs
-   [`scripts/codeup-review.sh`](../../scripts/codeup-review.sh).
-3. The script:
-   - Installs the `ocr` CLI (`npm install -g @alibaba-group/open-code-review`)
-   - Runs `ocr review --format json` against the merge request diff
-   - Formats findings into Markdown
-   - Posts them as a single comment via CodeUp's
-     [`CreateChangeRequestComment`](https://help.aliyun.com/zh/yunxiao/developer-reference/createchangerequestcomment)
-     OpenAPI
+1. A Yunxiao Flow pipeline is triggered on merge request open/update.
+2. The pipeline installs Node.js and the `ocr` CLI.
+3. `post_review.py` runs `ocr review --format json` against the diff
+   between the merge request's target and source branches.
+4. Findings are formatted into a single Markdown summary and posted to the
+   merge request via the
+   [CreateChangeRequestComment](https://help.aliyun.com/zh/yunxiao/developer-reference/createchangerequestcomment)
+   API.
+
+This posts one summary comment per review run rather than true inline
+per-line comments. Inline comments require resolving the merge request's
+current patchset ID first — a reasonable follow-up, tracked as a known
+limitation below.
 
 ## Setup
 
-### 1. Create a CodeUp personal access token
+1. Copy `codeup-flow.yml` into your repository (or paste its contents into
+   a new pipeline in the Flow console) and adjust `endpoint`,
+   `serviceConnection`, and `runsOn` for your organization.
+2. Copy `post_review.py` alongside it (or reference it directly if you
+   keep it in a shared location).
+3. Configure the following pipeline variables in Flow, marking secrets as
+   protected:
 
-Generate a personal access token (个人访问令牌) with repository read/comment
-scope. See: `Codeup 个人访问令牌` in the Yunxiao docs.
+   | Variable | Required | Description |
+   |---|---|---|
+   | `CODEUP_TOKEN` | Yes (secret) | Personal access token used for the `x-yunxiao-token` header. |
+   | `CODEUP_ORG_ID` | Yes | Your Yunxiao organization ID. |
+   | `CODEUP_REPO_ID` | Yes | Numeric ID of the CodeUp repository. |
+   | `OCR_LLM_URL` | Yes | Your LLM endpoint, e.g. `https://api.anthropic.com/v1/messages`. |
+   | `OCR_LLM_TOKEN` | Yes (secret) | API key for the LLM endpoint. |
+   | `OCR_LLM_MODEL` | Yes | Model name, e.g. `<provider-model-name>`. |
+   | `OCR_USE_ANTHROPIC` | If using Anthropic | Set to `true` when `OCR_LLM_URL` is an Anthropic-compatible endpoint. |
 
-### 2. Configure pipeline variables
+   `CODEUP_MR_LOCAL_ID`, `CODEUP_TARGET_BRANCH`, and `CODEUP_SOURCE_BRANCH`
+   are populated automatically from the merge request trigger context —
+   see `codeup-flow.yml` for how they're wired into the step's environment.
 
-In your Flow pipeline → **变量和缓存 (Variables & Cache)**, add the
-following as (ideally *private/secret*) string variables:
+4. Enable the merge-request trigger on the pipeline's code source
+   (**Edit pipeline → Edit code source → Enable code source trigger**,
+   with trigger event set to "Merge request created/updated").
 
-| Variable            | Description                                              |
-| -------------------- | --------------------------------------------------------- |
-| `CODEUP_DOMAIN`       | Your CodeUp domain, e.g. `codeup.aliyun.com`               |
-| `CODEUP_TOKEN`        | The personal access token from step 1 (mark as **私密**)   |
-| `CODEUP_ORG_ID`        | Your Yunxiao organization ID                               |
-| `CODEUP_REPO_ID`        | Numeric repository ID (or `namespace/repo` form)           |
-| `CODEUP_MR_LOCAL_ID`     | The merge request's local ID for this run                  |
+## Optional flags
 
-`CODEUP_MR_LOCAL_ID`, `CODEUP_REPO_ID`, and `CODEUP_ORG_ID` should generally
-be populated from Flow's **built-in merge-request trigger variables**, not
-hardcoded — the exact built-in variable names can differ by Flow template
-version, so map them explicitly in your pipeline step, e.g.:
+Set `OCR_REVIEW_EXTRA_ARGS` as a pipeline variable to pass extra flags to
+`ocr review`, e.g. `--concurrency 4`.
 
-```yaml
-# Illustrative — adapt variable names to whatever your Flow template
-# exposes for merge-request-triggered runs.
-env:
-  CODEUP_DOMAIN: codeup.aliyun.com
-  CODEUP_TOKEN: ${CODEUP_TOKEN}
-  CODEUP_ORG_ID: ${CODEUP_ORG_ID}
-  CODEUP_REPO_ID: ${REPO_ID}
-  CODEUP_MR_LOCAL_ID: ${CHANGE_REQUEST_LOCAL_ID}
-```
+## Known limitations
 
-### 3. Configure the LLM (same as other integrations)
+- **Summary comment only.** Findings are posted as one combined Markdown
+  comment rather than individual inline comments anchored to specific
+  lines. True inline comments would require calling
+  CreateChangeRequestComment once per finding with `file_path` and
+  `line_number` set against the merge request's current patchset — planned
+  as a follow-up.
+- Requires a full (non-shallow) clone, or at minimum a fetch of the target
+  branch, since `post_review.py` diffs `origin/<target>` against
+  `origin/<source>`.
 
-```bash
-ocr config set llm.url https://api.anthropic.com/v1/messages
-ocr config set llm.auth_token "$OCR_LLM_TOKEN"
-ocr config set llm.model claude-opus-4-6
-ocr config set llm.use_anthropic true
-```
-
-or via env vars (`OCR_LLM_URL`, `OCR_LLM_TOKEN`, `OCR_LLM_MODEL`,
-`OCR_USE_ANTHROPIC`) as documented in the main README.
-
-### 4. Add the pipeline step
-
-In the Flow UI, add a **自定义步骤 (Custom Step)** / Shell step with:
+## Local testing
 
 ```bash
-chmod +x scripts/codeup-review.sh scripts/format_ocr_report.py
-./scripts/codeup-review.sh
+pip install -r requirements-dev.txt  # if you add test dependencies
+python3 -m unittest post_review_test -v
 ```
-
-(Ensure `jq`, `python3`, and `curl` are available in the build image —
-these are present in most default Flow shell images; install them
-explicitly in the step if using a minimal custom image.)
-
-## Notes / Known limitations
-
-- This first version posts one **global comment** per review run rather
-  than true per-line inline comments. CodeUp's API supports inline
-  comments (`comment_type: INLINE_COMMENT` with `file_path`/`line_number`/
-  `patchset_biz_id`), which is a natural follow-up — it requires fetching
-  the merge request's current patchset ID first via `ListMergeRequestPatchSets`
-  (or equivalent) so comments anchor to the correct diff version.
-- No native "云效" GitHub-Actions-style marketplace action exists yet, so
-  this is wired as a plain shell step, matching the current GitLab CI
-  approach used elsewhere in this repo.
