@@ -71,26 +71,55 @@
   background: #000000;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 6px;
-  padding: 4px 16px;
+  padding: 4px 0;
   margin: 0 0 16px 0;
-  overflow-x: auto;
-  display: flex;
-  align-self: stretch;
-  justify-content: space-between;
-  align-items: center;
+  position: relative;
 }
 
 .docs-markdown pre code {
   background: none;
   border: none;
-  padding: 0;
+  padding: 0 16px;
   font-size: 13px;
   line-height: 22px;
   color: rgba(255, 255, 255, 0.8);
   white-space: pre;
   display: block;
-  flex: 1;
-  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+/* Copy button: revealed on hover so it never obscures code while reading;
+   the translucent background keeps it legible over long lines. */
+.docs-markdown pre .code-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  display: flex;
+  padding: 4px;
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.docs-markdown pre:hover .code-copy-btn {
+  opacity: 1;
+}
+
+/* The generic content-image rule below must not inflate the icon. */
+.docs-markdown pre .code-copy-btn img {
+  margin: 0;
+  border-radius: 0;
+}
+
+/* Touch devices have no hover: keep the button always visible. */
+@media (hover: none) {
+  .docs-markdown pre .code-copy-btn {
+    opacity: 1;
+  }
 }
 
 /* Lists */
@@ -236,15 +265,15 @@
 }
 
 /* Scrollbar styling for code blocks */
-.docs-markdown pre::-webkit-scrollbar {
+.docs-markdown pre code::-webkit-scrollbar {
   height: 6px;
 }
 
-.docs-markdown pre::-webkit-scrollbar-track {
+.docs-markdown pre code::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.docs-markdown pre::-webkit-scrollbar-thumb {
+.docs-markdown pre code::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.15);
   border-radius: 3px;
 }

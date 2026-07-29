@@ -73,5 +73,8 @@
   ".graphql",
   ".gql",
   ".prisma",
-  ".jl"
+  ".jl",
+  ".hcl",
+  ".tfvars",
+  ".bicep"
 ]

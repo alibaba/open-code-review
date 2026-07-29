@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
+import ErrorBoundary from './ErrorBoundary';
 import docDownloadIcon from '../assets/icons/doc-download-green.svg';
 import copyIcon from '../assets/icons/icon-copy.svg';
 
@@ -207,31 +208,33 @@ const HeroSection: React.FC = () => {
       {/* Shader Background */}
       {!showShaderBackground && shaderFallback}
       {showShaderBackground && (
-        <Suspense fallback={shaderFallback}>
-          <ColorBends
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              width: '100%',
-              height: '100%',
-              zIndex: 0,
-            }}
-            colors={['#0d750d', '#042e04', '#066020']}
-            rotation={90}
-            speed={0.23}
-            scale={1.2}
-            frequency={1}
-            warpStrength={1}
-            mouseInfluence={1}
-            noise={0.33}
-            parallax={0.45}
-            iterations={1}
-            intensity={0.8}
-            bandWidth={6}
-            transparent
-          />
-        </Suspense>
+        <ErrorBoundary fallback={shaderFallback}>
+          <Suspense fallback={shaderFallback}>
+            <ColorBends
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                width: '100%',
+                height: '100%',
+                zIndex: 0,
+              }}
+              colors={['#0d750d', '#042e04', '#066020']}
+              rotation={90}
+              speed={0.23}
+              scale={1.2}
+              frequency={1}
+              warpStrength={1}
+              mouseInfluence={1}
+              noise={0.33}
+              parallax={0.45}
+              iterations={1}
+              intensity={0.8}
+              bandWidth={6}
+              transparent
+            />
+          </Suspense>
+        </ErrorBoundary>
       )}
 
       {/* Gradient overlay */}

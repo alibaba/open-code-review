@@ -94,6 +94,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"queries/user.gql", "Breaking Changes"},
 		{"src/model.jl", "Type Stability"},
 		{"MyPkg/src/solver.jl", "Type Stability"},
+		{"main.tf", "Hardcoded Secrets"},
+		{"modules/network/vpc.hcl", "Overly Permissive Access"},
+		{"envs/prod.tfvars", "Hardcoded Secrets"},
+		{"infra/main.bicep", "Hardcoded Secrets"},
 	}
 
 	for _, tt := range tests {

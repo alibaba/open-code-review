@@ -10,7 +10,7 @@ export function generateHeadingId(text: string): string {
   // bypassed by nested tags). Keeps text content, decodes HTML entities so the
   // TOC side (raw markdown) and renderer side (marked HTML output) agree.
   const plain = DOMPurify.sanitize(text, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] })
-    .replace(/[`*_\[\]()]/g, '')
+    .replace(/[`*_[\]()]/g, '')
     .trim();
   return plain.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-|-$/g, '');
 }

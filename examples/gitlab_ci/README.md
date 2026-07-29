@@ -15,15 +15,15 @@ MR Created/Updated → GitLab Pipeline Triggered → OCR Reviews Diff → Discus
 
 ## Setup
 
-### 1. Copy the pipeline file
+### 1. Copy the pipeline and script files
 
-Copy `.gitlab-ci.yml` to your repository root (or include it via `include:`):
+Copy **both** `.gitlab-ci.yml` and `post_review.py` to your repository root (or a subdirectory — adjust the `python3 post_review.py` path in the YAML if you place the script elsewhere):
 
 ```bash
-cp .gitlab-ci.yml /path/to/your/repo/.gitlab-ci.yml
+cp .gitlab-ci.yml post_review.py /path/to/your/repo/
 ```
 
-Or use GitLab's `include` feature in your existing `.gitlab-ci.yml`:
+Or use GitLab's `include` feature in your existing `.gitlab-ci.yml` (the script path is relative to the pipeline file's location):
 
 ```yaml
 include:
@@ -204,10 +204,7 @@ script:
     WRAPPER_SCRIPT
 
   # Post review comments to MR
-  - |
-    python3 << 'PYTHON_SCRIPT'
-    ...existing post script...
-    PYTHON_SCRIPT
+  - python3 post_review.py /tmp/ocr-result.json
 ```
 
 The key logic: the Python wrapper checks for existing OCR comments before running `ocr review`. If found, it exits early with `sys.exit(0)` before consuming any LLM tokens. To re-trigger a review, users can manually delete the previous OCR comments.
@@ -281,6 +278,19 @@ Add verbose output to the review step:
 script:
   - cat /tmp/ocr-result.json
   - cat /tmp/ocr-stderr.log
+```
+
+## Testing
+
+The posting logic (retry, backoff, rate-limit throttling, inline→fallback→summary flow) is unit-tested with no network access and no wall-clock sleep cost. Tests use only the standard-library `unittest`.
+
+```bash
+# From the example directory
+cd examples/gitlab_ci
+python3 post_review_test.py
+
+# From the repo root
+python3 -m unittest discover -s examples/gitlab_ci -p '*_test.py'
 ```
 
 

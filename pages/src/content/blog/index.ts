@@ -113,7 +113,7 @@ export function searchBlog(query: string, language: string): { slug: BlogSlug; t
     const lowerTitle = meta.title.toLowerCase();
     const lowerSummary = (meta.summary || '').toLowerCase();
 
-    let snippet = '';
+    let snippet: string;
     const contentIdx = lowerContent.indexOf(lowerQuery);
     if (lowerTitle.includes(lowerQuery)) {
       snippet = meta.title;
@@ -122,7 +122,7 @@ export function searchBlog(query: string, language: string): { slug: BlogSlug; t
     } else if (contentIdx !== -1) {
       const start = Math.max(0, contentIdx - 30);
       const end = Math.min(content.length, contentIdx + query.length + 60);
-      snippet = content.slice(start, end).replace(/[#*_`\[\]()]/g, '').replace(/\n/g, ' ').trim();
+      snippet = content.slice(start, end).replace(/[#*_`[\]()]/g, '').replace(/\n/g, ' ').trim();
       if (start > 0) snippet = '...' + snippet;
       if (end < content.length) snippet = snippet + '...';
     } else {

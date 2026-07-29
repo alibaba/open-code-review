@@ -3,10 +3,133 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+func TestHeaderTransport(t *testing.T) {
+	headers := map[string]string{
+		"Authorization": "Bearer test-token",
+		"X-Custom":      "custom-value",
+	}
+	transport := &headerTransport{
+		base:       http.DefaultTransport,
+		headers:    headers,
+		serverName: "test-server",
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want %q", got, "Bearer test-token")
+		}
+		if got := r.Header.Get("X-Custom"); got != "custom-value" {
+			t.Errorf("X-Custom = %q, want %q", got, "custom-value")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	client := &http.Client{Transport: transport}
+	resp, err := client.Get(ts.URL)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+func TestHeaderTransport_401(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+
+	transport := &headerTransport{
+		base:       http.DefaultTransport,
+		headers:    map[string]string{"Authorization": "Bearer bad-token"},
+		serverName: "auth-server",
+	}
+	client := &http.Client{Transport: transport}
+	_, err := client.Get(ts.URL)
+	if err == nil {
+		t.Fatal("expected error for 401, got nil")
+	}
+	if got := err.Error(); !strings.Contains(got, "401 Unauthorized") || !strings.Contains(got, "auth-server") {
+		t.Errorf("error = %q, want mention of 401 and server name", got)
+	}
+}
+
+func TestHeaderTransport_403(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	transport := &headerTransport{
+		base:       http.DefaultTransport,
+		headers:    map[string]string{"Authorization": "Bearer limited-token"},
+		serverName: "perm-server",
+	}
+	client := &http.Client{Transport: transport}
+	_, err := client.Get(ts.URL)
+	if err == nil {
+		t.Fatal("expected error for 403, got nil")
+	}
+	if got := err.Error(); !strings.Contains(got, "403 Forbidden") || !strings.Contains(got, "perm-server") {
+		t.Errorf("error = %q, want mention of 403 and server name", got)
+	}
+}
+
+func TestNewRemoteClient_HeaderExpandsToEmpty(t *testing.T) {
+	t.Setenv("OCR_TEST_EMPTY_VAR", "")
+
+	_, err := NewRemoteClient(
+		context.Background(),
+		"test-srv",
+		"http://localhost:9999/mcp",
+		map[string]string{"Authorization": "$OCR_TEST_EMPTY_VAR"},
+		"v0.0.1-test",
+	)
+	if err == nil {
+		t.Fatal("expected error when header expands to empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "expanded to empty") {
+		t.Errorf("error = %q, want mention of 'expanded to empty'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "Authorization") {
+		t.Errorf("error = %q, want mention of header name 'Authorization'", err.Error())
+	}
+}
+
+func TestNewRemoteClient_HeaderExpandsUnsetVar(t *testing.T) {
+	t.Setenv("OCR_TEST_UNSET_MARKER", "")
+	// Ensure the variable is truly unset (Setenv("", "") sets it to empty;
+	// os.Expand with os.Getenv returns "" for both unset and empty).
+	// The point: $OCR_TEST_NONEXISTENT_VAR_XYZ is never set.
+
+	_, err := NewRemoteClient(
+		context.Background(),
+		"test-srv",
+		"http://localhost:9999/mcp",
+		map[string]string{"X-Token": "$OCR_TEST_NONEXISTENT_VAR_XYZ"},
+		"v0.0.1-test",
+	)
+	if err == nil {
+		t.Fatal("expected error when header references unset env var, got nil")
+	}
+	if !strings.Contains(err.Error(), "expanded to empty") {
+		t.Errorf("error = %q, want mention of 'expanded to empty'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "X-Token") {
+		t.Errorf("error = %q, want mention of header name 'X-Token'", err.Error())
+	}
+}
 
 func TestContentToText_SingleText(t *testing.T) {
 	contents := []mcp.Content{
