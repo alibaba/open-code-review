@@ -117,6 +117,12 @@ type Args struct {
 
 	// Resume is an optional read-only checkpoint index from a previous review session.
 	Resume *session.ResumeState
+
+	// Dismissals is an optional read-side filter of dismissed findings.
+	// When non-nil, findings whose dismissal fingerprint is in the store are
+	// suppressed from the returned comments; nil = stateless (today's behavior),
+	// so a review with no dismissal store on disk is byte-identical to before.
+	Dismissals *session.DismissalFilter
 }
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
@@ -228,6 +234,13 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 
 	// Step 2: Dispatch per-file subtasks concurrently
 	comments, err := a.dispatchSubtasks(ctx)
+	// Suppress dismissed findings on the success path only: when err != nil,
+	// dispatchSubtasks returns a partial/nil slice and masking it would hide a
+	// failure. Suppress returns a new slice (D3: input untouched) and is a no-op
+	// when Dismissals is nil (D2: byte-identical to the stateless default).
+	if err == nil && a.args.Dismissals != nil {
+		comments = a.args.Dismissals.Suppress(comments)
+	}
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
 	}

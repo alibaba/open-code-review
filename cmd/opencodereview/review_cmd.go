@@ -70,6 +70,11 @@ func runReview(args []string) error {
 		return err
 	}
 
+	// Dismissal filter: loaded only when the per-repo dismissal store exists.
+	// Absence → nil (D2: byte-identical to the stateless default; one stat, no read).
+	// Corrupt/unreadable → nil + warning (D6: fail safe, file left untouched).
+	dismissalFilter := loadDismissalFilter(cc.RepoDir)
+
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
 	if err != nil {
 		return err
@@ -119,6 +124,7 @@ func runReview(args []string) error {
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
+		Dismissals:            dismissalFilter,
 	})
 
 	// Silence progress output during execution; restored before the trace
@@ -188,6 +194,37 @@ func reviewModeFromOptions(opts reviewOptions) string {
 		return session.ReviewModeRange
 	}
 	return session.ReviewModeWorkspace
+}
+
+// loadDismissalFilter loads the per-repo dismissal filter for review suppression.
+//
+// It returns nil when there is no dismissal store or the store is empty, so a
+// review with no dismissals on disk is byte-identical to the stateless default
+// (D2: nil filter ⇒ Agent.Run passes comments through untouched). LoadDismissals
+// already performs the existence check internally via os.ReadFile's IsNotExist
+// handling, so no separate stat is needed (which also removes any stat→read
+// TOCTOU window). When the store exists but is corrupt or unreadable, it prints
+// a warning to stderr and returns nil so the review proceeds stateless (D6/AS5:
+// fail safe; the corrupt file is left untouched). On a successful load with at
+// least one entry it returns a DismissalFilter built from the store's fingerprints.
+func loadDismissalFilter(repoDir string) *session.DismissalFilter {
+	store, err := session.LoadDismissals(repoDir)
+	if err != nil {
+		if store == nil {
+			// Store path could not be resolved (e.g. HOME unresolvable): stay stateless.
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: dismissal store %q is corrupt or unreadable (%v); proceeding without suppression. The file was left untouched.\n", store.Path(), err)
+		return nil
+	}
+	// Empty store (missing file or an explicit empty store) ⇒ nil filter so the
+	// review is byte-identical to having no store (D2). An empty filter would also
+	// be a no-op via Suppress's fast path, but nil keeps the "nil = stateless"
+	// invariant clean and skips allocating the filter.
+	if len(store.List()) == 0 {
+		return nil
+	}
+	return session.NewDismissalFilter(store)
 }
 
 // resolveRepoDir resolves the repo dir for `ocr rules check`. It delegates to
