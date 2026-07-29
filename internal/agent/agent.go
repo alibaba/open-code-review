@@ -90,7 +90,7 @@ type Args struct {
 	// executeToolCall instead of via a separate worker pool.
 	CommentWorkerPool *CommentWorkerPool
 
-	// Concurrency limit for per-file subtasks. Defaults to number of CPUs.
+	// Concurrency limit for per-file subtasks. MaxConcurrency <= 0 defaults to 8.
 	MaxConcurrency int
 
 	// Concurrent task timeout in minutes. 0 means no timeout.

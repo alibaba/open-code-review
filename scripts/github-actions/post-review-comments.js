@@ -36,6 +36,33 @@ const DEFAULT_OVERLAP_THRESHOLD = 0.6;
 // review_comment_batch_size input.
 const DEFAULT_BATCH_SIZE = 50;
 
+// Enumerations for category/severity routing, sourced from the LLM output
+// schema (internal/config/toolsconfig/tools.json:55-84). Used both to validate
+// the routing policy and to normalize the metadata before comparison. Kept as
+// plain arrays (not Sets) so tests can inspect ordering for severity ranking.
+const CATEGORIES = [
+  "bug",
+  "security",
+  "performance",
+  "maintainability",
+  "test",
+  "style",
+  "documentation",
+  "other",
+];
+// Severity rank: higher = more severe. An unknown/empty severity has no rank
+// (never matched by the routing policy). Order matches the enum (critical is
+// the most severe, low the least).
+const SEVERITIES = ["critical", "high", "medium", "low"];
+const SEVERITY_RANK = new Map(
+  SEVERITIES.map((s, i) => [s, SEVERITIES.length - i])
+); // critical=4, high=3, medium=2, low=1
+
+// Sentinel policy object: "do not route anything". Returned by buildPolicy on
+// any parse problem so the partition loop falls open to today's behavior (I1).
+// Equivalently produced by an empty policy (no threshold, no categories).
+const NO_ROUTING = Object.freeze({ routeBySeverity: false, routeByCategory: false });
+
 async function runPostReviewComments({
   github,
   context,
@@ -47,6 +74,13 @@ async function runPostReviewComments({
   incremental = false,
   incrementalOverlapThreshold = DEFAULT_OVERLAP_THRESHOLD,
   reviewCommentBatchSize = DEFAULT_BATCH_SIZE,
+  // Fail-open finding-publication controls (#478). Both optional and empty by
+  // default: with neither set, behavior is byte-identical to today (modulo the
+  // additive badge prefix on rendered comments). buildPolicy parses them once
+  // before the partition loop and degrades to NO_ROUTING on any malformed value
+  // (fail-open for the policy itself, upholding I1).
+  routeSeverityBelow = "",
+  routeCategories = "",
 }) {
   const log = (msg) => {
     if (core && typeof core.info === "function") core.info(msg);
@@ -74,6 +108,7 @@ async function runPostReviewComments({
     inline: 0,
     skipped: 0,
     failed: 0,
+    routed: 0,
     summaryUrl: "",
   };
 
@@ -121,18 +156,35 @@ async function runPostReviewComments({
     commitSha = pullRequest.head.sha;
   }
 
-  // Partition: inline (with valid line info) vs summary (without).
+  // Partition: inline (with valid line info) vs summary (without) vs routed
+  // (valid line but the publication policy moves it to the summary).
   // Each inline comment gets a random per-comment ID (assigned once) embedded
   // in its body as an HTML comment, so the retry/idempotency logic can detect
   // whether a comment already landed on the server and avoid posting a
   // duplicate. Random (not content-derived) so two distinct comments that
   // share path/line/content still get different IDs.
+  //
+  // Routing is a placement decision in this loop, not a post-hoc filter: a
+  // finding the policy routes to summary is pushed to commentsRouted (mirroring
+  // commentsWithoutLine) instead of reviewComments. Routed findings therefore
+  // never enter reviewComments -> never enter toSend/toRetry -> never reach a
+  // createReview call (I4: no double-post surface on retry).
+  const policy = buildPolicy({ severityThreshold: routeSeverityBelow, categories: routeCategories });
   const reviewComments = [];
   const commentsWithoutLine = [];
+  const commentsRouted = [];
   for (const comment of comments) {
     const hasValidLine = comment.start_line >= 1 || comment.end_line >= 1;
     if (!hasValidLine) {
       commentsWithoutLine.push({ comment, body: formatComment(comment), reason: NO_LINE_REASON });
+      continue;
+    }
+    // Routing applies only to findings that COULD be posted inline (valid
+    // line). No-line findings already go to the summary via commentsWithoutLine,
+    // so they are never re-routed (avoids double-counting in the summary).
+    const route = routeComment(comment, policy);
+    if (route.routed) {
+      commentsRouted.push({ comment, body: formatComment(comment), reason: route.reason });
       continue;
     }
     const id = newCommentId(RUN_TAG);
@@ -187,7 +239,9 @@ async function runPostReviewComments({
     prNumber,
     sticky: stickySummary,
     tag: SUMMARY_TAG,
-    body: wrapSummary(buildPreReviewSummaryBody(stats.total, commentsWithoutLine, warnings)),
+    body: wrapSummary(
+      buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings)
+    ),
     log,
   });
 
@@ -236,24 +290,29 @@ async function runPostReviewComments({
 
   stats.inline = successCount;
   stats.failed = failedCount;
+  stats.routed = commentsRouted.length;
 
   // ---- Finalize the summary with the complete body ----
   // Now that the review has landed (or failed per-comment), write the final
   // summary body. Posting statistics are merged into the leading summary
   // header (see buildSummaryBody), so here we only append the per-comment
   // renderings: every comment that did not go out as inline — whether because
-  // it had no line info or because posting failed — is rendered as one
-  // continuous block, each carrying the reason it ended up in the summary (so
-  // the reader always knows why it is here).
+  // it had no line info, was routed by the publication policy, or because
+  // posting failed — is rendered as one continuous block, each carrying the
+  // reason it ended up in the summary (so the reader always knows why it is
+  // here). Routed findings render BEFORE the failed block so the order is:
+  // counts → no-line summary → routed summary → failed.
   let summaryBody = buildSummaryBody({
     total: stats.total,
     inline: successCount,
     summary: commentsWithoutLine.length,
     skipped: stats.skipped,
+    routed: commentsRouted.length,
     failed: failedCount,
     warnings,
   });
   summaryBody += formatSummaryComments(commentsWithoutLine);
+  summaryBody += formatSummaryComments(commentsRouted);
   for (const { comment, error } of failedComments) {
     summaryBody += "\n\n---\n\n";
     summaryBody += formatCommentMarkdown(comment, error);
@@ -604,6 +663,7 @@ function setStatsOutputs(out, stats, batchCounters, batchSize) {
   out("comments_total", String(stats.total));
   out("comments_inline", String(stats.inline));
   out("comments_skipped", String(stats.skipped));
+  out("comments_routed", String(stats.routed));
   out("comments_failed", String(stats.failed));
   out("summary_comment_url", stats.summaryUrl || "");
   // Per-batch telemetry (B7). These are additional outputs; the five above are
@@ -1172,14 +1232,136 @@ function newCommentId(runTag) {
   return `ocr-${runTag}-${crypto.randomBytes(8).toString("hex")}`;
 }
 
+// ---- Badge + publication policy helpers (#478) ----
+//
+// These are pure functions (no I/O, no side effects) so they can be unit-tested
+// directly. buildBadge byte-matches the CLI's cmd/opencodereview/output.go
+// buildBadge degeneration so review output is consistent across surfaces (I6).
+// buildPolicy/routeComment implement fail-open finding-publication routing
+// (I1, I4): a finding never matches the policy on unknown/malformed metadata,
+// and routing is a placement decision (findings route OUT of the inline write
+// path), so a routed finding can never be double-posted on retry.
+
+// Strip C0/C1 control characters from a metadata value. The CLI's
+// sanitizeTerminal (cmd/opencodereview/output.go:197-206) strips control chars
+// but PRESERVES \t and \n (harmless in a terminal). This Action sanitizer is
+// intentionally STRICTER: it strips ALL control chars including \t and \n,
+// because a newline/tab in a category or severity would break the comment
+// body's layout (the badge renders in Markdown in a browser). This is a
+// deliberate, documented divergence from strict OC1 byte-parity: clean enum
+// values (the overwhelmingly common case) render identically across surfaces,
+// and the divergence only manifests for malformed model output, in a SAFER
+// direction (the Action cannot have its layout broken by a control char).
+function sanitizeMetadata(value) {
+  return String(value == null ? "" : value).replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+}
+
+// Build the category/severity badge for a comment, byte-matching the CLI's
+// buildBadge degeneration (cmd/opencodereview/output.go:98-114):
+//   both non-empty -> "[category · severity]" (with a middot, U+00B7)
+//   only category  -> "[category]"
+//   only severity  -> "[severity]"
+//   neither        -> "" (no badge line)
+// Returns the empty string (not a newline) when nothing renders, so callers
+// can prepend conditionally without leaving a blank line.
+function buildBadge(comment) {
+  const category = sanitizeMetadata(comment && comment.category);
+  const severity = sanitizeMetadata(comment && comment.severity);
+  if (category && severity) return `[${category} · ${severity}]`;
+  if (category) return `[${category}]`;
+  if (severity) return `[${severity}]`;
+  return "";
+}
+
+// Parse the publication policy from the raw opt-in inputs. Returns a normalized
+// policy object, or the NO_ROUTING sentinel when no routing is requested or any
+// value is malformed (fail-open for the policy itself, upholding I1).
+//
+//   severityThreshold: a severity name (case-insensitive) at-or-below which
+//     findings route. An unknown/empty value disables severity routing.
+//   categories: a comma-separated category list (case-insensitive). Unknown
+//     category tokens are dropped; an empty list (or all-unknown) disables
+//     category routing.
+//
+// The returned object has two booleans so routeComment can short-circuit
+// without re-parsing, plus the normalized values it needs to decide:
+//   {
+//     routeBySeverity: bool,
+//     severityRank: number,           // rank of the threshold; -1 when disabled
+//     routeByCategory: bool,
+//     categories: Set<string>,        // lowercase enum members; empty when disabled
+//   }
+function buildPolicy({ severityThreshold, categories } = {}) {
+  let routeBySeverity = false;
+  let severityRank = -1;
+  if (severityThreshold != null) {
+    const norm = String(severityThreshold).trim().toLowerCase();
+    if (SEVERITY_RANK.has(norm)) {
+      routeBySeverity = true;
+      severityRank = SEVERITY_RANK.get(norm);
+    }
+    // Any other value (empty, unknown, garbage) leaves routeBySeverity=false
+    // (fail-open for the policy: unknown threshold -> no routing).
+  }
+
+  let routeByCategory = false;
+  const categorySet = new Set();
+  if (categories != null) {
+    const tokens = String(categories)
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter((t) => t.length > 0);
+    for (const t of tokens) {
+      if (CATEGORIES.includes(t)) categorySet.add(t);
+      // Unknown category tokens are silently dropped (fail-open: an unknown
+      // category in the policy never matches a finding's category, so including
+      // it would be a no-op anyway; dropping keeps the set clean).
+    }
+    if (categorySet.size > 0) routeByCategory = true;
+  }
+
+  if (!routeBySeverity && !routeByCategory) return NO_ROUTING;
+  return { routeBySeverity, severityRank, routeByCategory, categories: categorySet };
+}
+
+// Decide whether a comment routes to the summary per the policy. Returns
+// { routed: true, reason } or { routed: false }. A finding matches when its
+// severity is at-or-below the threshold (when severity routing is on) OR its
+// category is in the category list (when category routing is on). Unknown or
+// malformed metadata on the finding NEVER matches (I1): an empty/unknown
+// category or severity has no rank and no enum membership, so it falls through
+// to the normal inline path (visible), never dropped.
+function routeComment(comment, policy) {
+  if (!policy || (!policy.routeBySeverity && !policy.routeByCategory)) {
+    return { routed: false };
+  }
+  const catRaw = comment && comment.category != null ? String(comment.category).trim().toLowerCase() : "";
+  const sevRaw = comment && comment.severity != null ? String(comment.severity).trim().toLowerCase() : "";
+  const catKnown = catRaw !== "" && CATEGORIES.includes(catRaw);
+  const sevKnown = sevRaw !== "" && SEVERITY_RANK.has(sevRaw);
+
+  if (policy.routeBySeverity && sevKnown && SEVERITY_RANK.get(sevRaw) <= policy.severityRank) {
+    return { routed: true, reason: `Routed to summary (severity ${sevRaw}${catKnown ? ` · category ${catRaw}` : ""})` };
+  }
+  if (policy.routeByCategory && catKnown && policy.categories.has(catRaw)) {
+    return { routed: true, reason: `Routed to summary (category ${catRaw}${sevKnown ? ` · severity ${sevRaw}` : ""})` };
+  }
+  return { routed: false };
+}
+
 // ---- Formatting helpers (ported verbatim) ----
 
 // Assemble the visible comment body. When `id` is provided (inline comments),
 // the per-comment ID tag is prepended as an HTML comment (invisible when
 // rendered) so getPostedCommentIds can match it back on retry for the
-// idempotency check. The code suggestion block is then appended if present.
+// idempotency check. The category/severity badge is then prepended (when
+// present) on its own leading line AFTER the id comment, so the idempotency
+// regex (unanchored, scans the whole body) still matches and the badge renders
+// as the first visible line. The code suggestion block is appended if present.
 function formatComment(comment, id) {
   let body = id ? `<!-- ${id} -->\n` : "";
+  const badge = buildBadge(comment);
+  if (badge) body += `${badge}\n`;
   body += comment.content || "";
   if (comment.suggestion_code && comment.existing_code) {
     body += "\n\n**Suggestion:**\n";
@@ -1189,7 +1371,14 @@ function formatComment(comment, id) {
 }
 
 function formatCommentMarkdown(comment, error) {
-  let md = `### 📄 \`${comment.path}\``;
+  let md = "";
+  // The badge renders as a leading line before the path heading (consistent
+  // with formatComment), so the heading/reason lines still anchor the comment
+  // and existing substring assertions on them are unaffected. The badge is ""
+  // for any finding without category/severity metadata.
+  const badge = buildBadge(comment);
+  if (badge) md += `${badge}\n`;
+  md += `### 📄 \`${comment.path}\``;
   if (comment.start_line && comment.end_line) {
     md += ` (L${comment.start_line}-L${comment.end_line})`;
   }
@@ -1214,19 +1403,24 @@ function formatCommentMarkdown(comment, error) {
 // inline / posted as summary" header vs. the trailing "Posting Statistics"
 // block, whose overlapping definitions made the summary hard to interpret).
 //
-// The four counts are mutually exclusive and, together with `inline`, sum to
+// The five counts are mutually exclusive and, together with `inline`, sum to
 // `total`:
 //   inline  — comments that landed as review inline comments
 //   summary — comments without line info, rendered in the summary body below
+//   routed  — comments the publication policy moved from inline to summary
+//             (also rendered in the body below, each tagged with its reason)
 //   skipped — comments suppressed by incremental overlap filtering
 //   failed  — comments that had line info but could not be posted (also
 //             rendered in the body below, each tagged with its failure reason)
-function buildSummaryBody({ total, inline, summary, skipped, failed, warnings }) {
+function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed, warnings }) {
   let body = `🔍 **OpenCodeReview** found **${total}** issue(s) in this PR.`;
   if (total > 0) {
     body += `\n- ✅ Successfully posted inline: ${inline} comment(s)`;
     if (summary > 0) {
       body += `\n- 📝 In summary (no line info): ${summary} comment(s)`;
+    }
+    if (routed > 0) {
+      body += `\n- 📋 Routed to summary by policy: ${routed} comment(s)`;
     }
     if (skipped > 0) {
       body += `\n- ⏭️ Skipped (overlap with history): ${skipped} comment(s)`;
@@ -1243,18 +1437,25 @@ function buildSummaryBody({ total, inline, summary, skipped, failed, warnings })
 
 // Pre-review summary body: shown in the anchor comment while inline comments
 // are being posted. Includes only what is known before the review lands (issue
-// count, warnings, comments without line info) — final posting statistics are
-// added by the finalize phase. Kept informative (not an empty placeholder) so
-// the summary is useful even if the run is interrupted before finalize.
-function buildPreReviewSummaryBody(totalCount, summaryComments, warnings) {
+// count, warnings, comments without line info, routed comments) — final posting
+// statistics are added by the finalize phase. Kept informative (not an empty
+// placeholder) so the summary is useful even if the run is interrupted before
+// finalize. Routed findings are known before the review (the policy decision is
+// made in the partition loop) so they are rendered here too, keeping the
+// pre-review anchor accurate.
+function buildPreReviewSummaryBody(totalCount, summaryComments, routedComments, warnings) {
   let body = `🔍 **OpenCodeReview** found **${totalCount}** issue(s) in this PR.`;
   if (totalCount > 0) {
     body += `\n- ⏳ _Posting review comments…_`;
+    if (routedComments && routedComments.length > 0) {
+      body += `\n- 📋 Routed to summary by policy: ${routedComments.length} comment(s)`;
+    }
   }
   if (warnings.length > 0) {
     body += `\n\n⚠️ ${warnings.length} warning(s) occurred during review.`;
   }
   body += formatSummaryComments(summaryComments);
+  body += formatSummaryComments(routedComments);
   body += formatWarnings(warnings);
   return body;
 }
@@ -1354,6 +1555,10 @@ module.exports = {
   getPostedCommentIds,
   isCommentAlreadyPosted,
   newCommentId,
+  sanitizeMetadata,
+  buildBadge,
+  buildPolicy,
+  routeComment,
   formatComment,
   formatCommentMarkdown,
   buildSummaryBody,
@@ -1370,4 +1575,8 @@ module.exports = {
   setStatsOutputs,
   DEFAULT_BATCH_SIZE,
   buildRunTags,
+  NO_ROUTING,
+  CATEGORIES,
+  SEVERITIES,
+  SEVERITY_RANK,
 };

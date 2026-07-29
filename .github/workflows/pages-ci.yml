@@ -29,6 +29,10 @@ jobs:
         working-directory: pages
         run: npm install
 
+      - name: Lint
+        working-directory: pages
+        run: npm run lint
+
       - name: Typecheck
         working-directory: pages
         run: npm run typecheck
@@ -36,3 +40,7 @@ jobs:
       - name: Build
         working-directory: pages
         run: npm run build
+
+      - name: Check bundle size
+        working-directory: pages
+        run: npm run size

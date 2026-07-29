@@ -2,7 +2,7 @@
   "name": "open-code-review-vscode",
   "displayName": "Open Code Review",
   "description": "%ocr.description%",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "open-code-review",
   "license": "Apache-2.0",
   "repository": {
@@ -111,11 +111,11 @@
     "undici": ">=7.28.0",
     "form-data": ">=4.0.6",
     "js-yaml": ">=5.2.2",
-    "minimatch": "^9.0.7",
-    "@typescript-eslint/typescript-estree/minimatch": "^9.0.7",
-    "brace-expansion": ">=2.1.2 <3",
+    "minimatch": "^10.2.6",
+    "@typescript-eslint/typescript-estree/minimatch": "^10.2.6",
+    "brace-expansion": ">=5.0.8 <6",
     "fast-uri": ">=3.1.4",
-    "linkify-it": ">=5.0.2"
+    "linkify-it": ">=5.0.2 <6"
   },
   "dependencies": {
     "preact": "^10.29.7"

@@ -1764,3 +1764,61 @@ func TestResolveEndpoint_ResponsesURLNotMutated(t *testing.T) {
 		t.Errorf("URL = %q, want %q (resolver must not mutate openai-responses URLs)", ep.URL, "https://api.openai.com/v1")
 	}
 }
+
+func TestEnsureMessagesSuffix(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "bare base URL",
+			input: "https://api.anthropic.com",
+			want:  "https://api.anthropic.com/v1/messages",
+		},
+		{
+			name:  "base URL with trailing slash",
+			input: "https://api.anthropic.com/",
+			want:  "https://api.anthropic.com/v1/messages",
+		},
+		{
+			name:  "URL ending with /v1",
+			input: "https://api.anthropic.com/v1",
+			want:  "https://api.anthropic.com/v1/messages",
+		},
+		{
+			name:  "URL ending with /v1/",
+			input: "https://api.anthropic.com/v1/",
+			want:  "https://api.anthropic.com/v1/messages",
+		},
+		{
+			name:  "URL already has /v1/messages",
+			input: "https://api.anthropic.com/v1/messages",
+			want:  "https://api.anthropic.com/v1/messages",
+		},
+		{
+			name:  "URL already has /v1/messages with trailing slash",
+			input: "https://api.anthropic.com/v1/messages/",
+			want:  "https://api.anthropic.com/v1/messages/",
+		},
+		{
+			name:  "proxy URL without versioned path",
+			input: "https://proxy.example.com/anthropic",
+			want:  "https://proxy.example.com/anthropic/v1/messages",
+		},
+		{
+			name:  "proxy URL with /v1/ mid-path",
+			input: "https://proxy.example.com/v1/anthropic",
+			want:  "https://proxy.example.com/v1/anthropic",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ensureMessagesSuffix(tt.input)
+			if got != tt.want {
+				t.Errorf("ensureMessagesSuffix(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

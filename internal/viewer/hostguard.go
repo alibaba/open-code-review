@@ -113,6 +113,21 @@ func splitBindHost(addr string) string {
 	return addr
 }
 
+// DisplayAddr rewrites a wildcard listen address (empty host, 0.0.0.0, or ::)
+// to a localhost form so printed URLs are always openable in a browser.
+// Non-wildcard addresses are returned unchanged.
+func DisplayAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	switch host {
+	case "", "0.0.0.0", "::":
+		return net.JoinHostPort("localhost", port)
+	}
+	return addr
+}
+
 // resolveAllowedHostsFromEnv reads the OCR_VIEWER_ALLOWED_HOSTS environment
 // variable and combines it with the bind host to produce the active allowlist.
 func resolveAllowedHostsFromEnv(bindAddr string) map[string]struct{} {

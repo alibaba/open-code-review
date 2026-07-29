@@ -32,8 +32,16 @@ func TestIsAllowedExt(t *testing.T) {
 		{".GRAPHQL", true},
 		{".gql", true},
 		{".GQL", true},
+		{".prisma", true},
+		{".PRISMA", true},
 		{".jl", true},
 		{".JL", true},
+		{".hcl", true},
+		{".HCL", true},
+		{".tfvars", true},
+		{".TFVARS", true},
+		{".bicep", true},
+		{".BICEP", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -101,6 +109,9 @@ func TestIsExcludedPath(t *testing.T) {
 		// Rust test files
 		{"rust test file", "src/parser_test.rs", true},
 		{"rust non-test", "src/parser.rs", false},
+
+		// Prisma schemas have no conventional default test-file exclusion.
+		{"prisma schema", "prisma/schema.prisma", false},
 
 		// HarmonyOS oh_modules and test files
 		{"oh_modules root", "oh_modules/some_lib/index.ets", true},

@@ -12,6 +12,7 @@
     ".github/**/*.{yaml,yml}": "github_config.md",
     "**/*.{yaml,yml}": "yaml.md",
     "**/*.java": "java.md",
+    "**/*.go": "go.md",
     "**/*.{ftl,ftlh,ftlx}": "freemarker.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
@@ -24,6 +25,9 @@
     "**/*.po": "po.md",
     "**/*.pot": "pot.md",
     "**/*.{graphql,gql}": "graphql.md",
-    "**/*.jl": "julia.md"
+    "**/*.prisma": "prisma.md",
+    "**/*.jl": "julia.md",
+    "**/*.{tf,hcl,tfvars}": "terraform.md",
+    "**/*.bicep": "bicep.md"
   }
 }

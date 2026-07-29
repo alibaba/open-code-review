@@ -18,6 +18,10 @@ export const zh: TranslationKeys = {
   'hero.copied': '已复制',
   'hero.copyFailed': '复制失败',
 
+  // Error boundary
+  'error.pageLoadFailed': '页面加载失败。',
+  'error.reload': '重新加载',
+
   // Highlights
   'highlights.stat1Value': '20K+',
   'highlights.stat1Label': '活跃用户',

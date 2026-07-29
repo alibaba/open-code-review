@@ -39,3 +39,6 @@ bin/opencodereview
 
 *.run.xml
 **/spoon.classpath.tmp
+# Python
+__pycache__/
+*.py[cod]

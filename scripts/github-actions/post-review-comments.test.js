@@ -12,7 +12,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK } = require(path.join(__dirname, "post-review-comments.js"));
 
 // REVIEW_TAG as the production code builds it for this test's hardcoded run
 // identity (context.runId=undefined -> 0, runAttempt=undefined -> 1). Used as
@@ -1607,6 +1607,450 @@ async function testBatchTelemetryOutputs() {
   assert.strictEqual(summary.failed, 0);
 }
 
+// ---- Badge + publication policy tests (#478) ----
+//
+// I6: buildBadge byte-matches the CLI's buildBadge degeneration
+// (cmd/opencodereview/output.go:98-114). Each degeneration branch is pinned,
+// plus control-char sanitization so a model-emitted newline cannot break the
+// comment body layout.
+function testBuildBadgeMatchesCliDegeneration() {
+  // both present -> "[category · severity]" with a middot (U+00B7)
+  assert.strictEqual(buildBadge({ category: "bug", severity: "high" }), "[bug · high]");
+  // only category -> "[category]"
+  assert.strictEqual(buildBadge({ category: "style", severity: "" }), "[style]");
+  assert.strictEqual(buildBadge({ category: "style", severity: null }), "[style]");
+  assert.strictEqual(buildBadge({ category: "style" }), "[style]");
+  // only severity -> "[severity]"
+  assert.strictEqual(buildBadge({ category: "", severity: "low" }), "[low]");
+  assert.strictEqual(buildBadge({ category: null, severity: "low" }), "[low]");
+  assert.strictEqual(buildBadge({ severity: "low" }), "[low]");
+  // neither -> "" (no badge rendered)
+  assert.strictEqual(buildBadge({}), "");
+  assert.strictEqual(buildBadge({ category: "", severity: "" }), "");
+  assert.strictEqual(buildBadge({ category: null, severity: null }), "");
+  // missing comment object entirely
+  assert.strictEqual(buildBadge(null), "");
+  assert.strictEqual(buildBadge(undefined), "");
+  // The separator is the U+00B7 middot (·), exactly matching the CLI's
+  // fmt.Sprintf("[%s · %s]", ...). Pin the exact byte (not "." or "-" or "·"'s
+  // decomposition) so a future edit that swaps the separator fails loudly.
+  const both = buildBadge({ category: "bug", severity: "low" });
+  assert.ok(both.includes("·"), "badge contains the U+00B7 middot");
+  assert.strictEqual(both, "[bug · low]", "exact badge string for the common case");
+  // control-char sanitization: the Action strips ALL control chars (including
+  // \t and \n) from metadata — intentionally STRICTER than the CLI's
+  // sanitizeTerminal (which keeps \t/\n), because a newline/tab would break
+  // the Markdown comment body layout. Documented divergence from strict OC1
+  // byte-parity; clean enum values match exactly across surfaces.
+  assert.strictEqual(buildBadge({ category: "bu\ng", severity: "high" }), "[bug · high]");
+  assert.strictEqual(buildBadge({ category: "bug", severity: "hi\tgh" }), "[bug · high]");
+  assert.strictEqual(buildBadge({ category: "bug\r\n", severity: "high" }), "[bug · high]");
+  // a value that is ALL control chars degenerates to "" (badge not rendered),
+  // not a label of empty brackets.
+  assert.strictEqual(buildBadge({ category: "\n\r\t", severity: "\n" }), "");
+}
+
+function testSanitizeMetadataStripsControlChars() {
+  assert.strictEqual(sanitizeMetadata("clean"), "clean");
+  assert.strictEqual(sanitizeMetadata("a\nb"), "ab");
+  assert.strictEqual(sanitizeMetadata("a\tb"), "ab");
+  assert.strictEqual(sanitizeMetadata("a\rb"), "ab");
+  assert.strictEqual(sanitizeMetadata("a\x00b"), "ab");
+  assert.strictEqual(sanitizeMetadata("a\x7fb"), "ab");
+  assert.strictEqual(sanitizeMetadata("\n\r\t"), "");
+  // null/undefined/numbers degrade safely to their string form.
+  assert.strictEqual(sanitizeMetadata(null), "");
+  assert.strictEqual(sanitizeMetadata(undefined), "");
+  assert.strictEqual(sanitizeMetadata(42), "42");
+}
+
+// I1: buildPolicy fails open on any malformed input — a bad policy never routes
+// a finding, so no finding is ever silently dropped because the policy itself
+// was broken. The NO_ROUTING sentinel is returned for every non-routing case.
+function testBuildPolicyFailsOpenOnMalformed() {
+  // empty / null inputs -> no routing
+  assert.strictEqual(buildPolicy({}), NO_ROUTING);
+  assert.strictEqual(buildPolicy({ severityThreshold: "", categories: "" }), NO_ROUTING);
+  assert.strictEqual(buildPolicy({ severityThreshold: null, categories: null }), NO_ROUTING);
+  assert.strictEqual(buildPolicy(undefined), NO_ROUTING);
+  // unknown severity -> severity routing disabled (fail-open)
+  assert.strictEqual(buildPolicy({ severityThreshold: "trivial" }), NO_ROUTING);
+  assert.strictEqual(buildPolicy({ severityThreshold: "Criticals" }), NO_ROUTING);
+  // garbage threshold -> no routing
+  assert.strictEqual(buildPolicy({ severityThreshold: "garbage" }), NO_ROUTING);
+  // all-unknown categories -> category routing disabled (fail-open)
+  assert.strictEqual(buildPolicy({ categories: "unknown,also-unknown" }), NO_ROUTING);
+  // a known threshold enables severity routing; the returned rank is correct.
+  const lowP = buildPolicy({ severityThreshold: "low" });
+  assert.strictEqual(lowP.routeBySeverity, true);
+  assert.strictEqual(lowP.routeByCategory, false);
+  assert.strictEqual(lowP.severityRank, SEVERITY_RANK.get("low"));
+  // case-insensitivity
+  const medP = buildPolicy({ severityThreshold: "MeDiUm" });
+  assert.strictEqual(medP.routeBySeverity, true);
+  assert.strictEqual(medP.severityRank, SEVERITY_RANK.get("medium"));
+  // known categories enable category routing; unknown tokens dropped.
+  const catP = buildPolicy({ categories: "Style, UNKNOWN, documentation" });
+  assert.strictEqual(catP.routeByCategory, true);
+  assert.strictEqual(catP.routeBySeverity, false);
+  assert.ok(catP.categories.has("style"));
+  assert.ok(catP.categories.has("documentation"));
+  assert.ok(!catP.categories.has("unknown"));
+  // whitespace-only threshold -> no routing
+  assert.strictEqual(buildPolicy({ severityThreshold: "   " }), NO_ROUTING);
+}
+
+// I1: routeComment never routes a finding with unknown/malformed metadata — it
+// falls through to the normal inline path (visible), never dropped. Boundary
+// inclusivity ("at-or-below") is pinned so the threshold value itself routes.
+function testRouteCommentUnknownMetadataNeverRouted() {
+  const policy = buildPolicy({ severityThreshold: "medium", categories: "style,documentation" });
+  // severity routing: medium threshold routes medium AND low (inclusive-at-or-below)
+  assert.strictEqual(routeComment({ severity: "medium" }, policy).routed, true);
+  assert.strictEqual(routeComment({ severity: "low" }, policy).routed, true);
+  // severity strictly above the threshold stays inline
+  assert.strictEqual(routeComment({ severity: "high" }, policy).routed, false);
+  assert.strictEqual(routeComment({ severity: "critical" }, policy).routed, false);
+  // unknown/empty severity is NEVER routed by severity (fail-open: I1)
+  assert.strictEqual(routeComment({ severity: "" }, policy).routed, false);
+  assert.strictEqual(routeComment({ severity: "trivial" }, policy).routed, false);
+  assert.strictEqual(routeComment({ severity: null }, policy).routed, false);
+  assert.strictEqual(routeComment({}, policy).routed, false);
+  // category routing: a listed category routes regardless of severity
+  assert.strictEqual(routeComment({ category: "style" }, policy).routed, true);
+  assert.strictEqual(routeComment({ category: "documentation" }, policy).routed, true);
+  // unlisted/unknown category is NEVER routed by category (fail-open: I1)
+  assert.strictEqual(routeComment({ category: "bug" }, policy).routed, false);
+  assert.strictEqual(routeComment({ category: "unknown" }, policy).routed, false);
+  assert.strictEqual(routeComment({ category: "" }, policy).routed, false);
+  assert.strictEqual(routeComment({ category: null }, policy).routed, false);
+  // case-insensitive category matching
+  assert.strictEqual(routeComment({ category: "STYLE" }, policy).routed, true);
+  assert.strictEqual(routeComment({ category: "Documentation" }, policy).routed, true);
+  // NO_ROUTING sentinel never routes anything
+  assert.strictEqual(routeComment({ severity: "low", category: "style" }, NO_ROUTING).routed, false);
+  assert.strictEqual(routeComment({ severity: "low", category: "style" }, null).routed, false);
+  // routed result carries a reason string
+  const r = routeComment({ severity: "low", category: "style" }, policy);
+  assert.ok(r.routed);
+  assert.ok(typeof r.reason === "string" && r.reason.length > 0);
+  assert.match(r.reason, /severity low/);
+  assert.match(r.reason, /category style/);
+}
+
+// Pins the "at-or-below" boundary explicitly (PLAN_VALIDATION Risk C): the
+// threshold value itself routes, and the floor (low) routes low.
+function testRouteSeverityBelowBoundaryInclusive() {
+  const lowP = buildPolicy({ severityThreshold: "low" });
+  // threshold = low routes ONLY low (the floor). critical/high/medium stay.
+  assert.strictEqual(routeComment({ severity: "low" }, lowP).routed, true);
+  assert.strictEqual(routeComment({ severity: "medium" }, lowP).routed, false);
+  assert.strictEqual(routeComment({ severity: "high" }, lowP).routed, false);
+  assert.strictEqual(routeComment({ severity: "critical" }, lowP).routed, false);
+  const critP = buildPolicy({ severityThreshold: "critical" });
+  // threshold = critical routes everything (all severities are at-or-below it).
+  for (const sev of SEVERITIES) {
+    assert.strictEqual(routeComment({ severity: sev }, critP).routed, true);
+  }
+}
+
+// A finding that matches BOTH the severity and category conditions routes
+// EXACTLY ONCE (no double-count): the severity branch short-circuits, the
+// category branch is never reached, and the partition loop counts the finding
+// in the routed bucket a single time.
+async function testFindingMatchingBothConditionsRoutesOnce() {
+  const result = {
+    comments: [
+      // matches BOTH severity (low <= low) AND category (style in list)
+      { path: "src/both.js", content: "matches both", category: "style", severity: "low", start_line: 1, end_line: 1 },
+      // matches only severity
+      { path: "src/sev.js", content: "sev only", category: "bug", severity: "low", start_line: 2, end_line: 2 },
+      // matches only category
+      { path: "src/cat.js", content: "cat only", category: "documentation", severity: "critical", start_line: 3, end_line: 3 },
+    ],
+    warnings: [],
+  };
+
+  const { github, outputs } = await run({
+    result,
+    opts: { routeSeverityBelow: "low", routeCategories: "style,documentation" },
+  });
+
+  // All three route (none posted inline); routed count is exactly 3 (no
+  // double-count from the "both" finding matching two conditions).
+  assert.strictEqual(github.createReviewCalls.length, 0, "no inline posting — all routed");
+  assert.strictEqual(outputs.comments_routed, "3", "each finding counted once even when matching both conditions");
+  assert.strictEqual(outputs.comments_total, "3");
+  assert.strictEqual(outputs.comments_inline, "0");
+}
+
+// I6 / additive behavior: formatComment prepends the badge AFTER the id HTML
+// comment, so the idempotency regex (unanchored) still matches and the badge
+// is the first VISIBLE line. No badge when category/severity are absent.
+function testFormatCommentBadgePlacement() {
+  // with id and badge: id HTML comment stays first, badge on the next line
+  const withBadge = formatComment({ content: "body", category: "bug", severity: "high" }, "ocr-1-1-abcd");
+  assert.ok(withBadge.startsWith("<!-- ocr-1-1-abcd -->\n"), "id HTML comment is the first bytes");
+  assert.ok(withBadge.startsWith("<!-- ocr-1-1-abcd -->\n[bug · high]\n"), "badge follows id line");
+  assert.ok(withBadge.endsWith("body"), "content preserved at the end");
+  // without id: badge is the first line
+  const noId = formatComment({ content: "body", category: "style", severity: "low" });
+  assert.ok(noId.startsWith("[style · low]\n"));
+  // no metadata -> no badge line at all (byte-identical to pre-change output)
+  const noBadge = formatComment({ content: "body" }, "ocr-1-1-abcd");
+  assert.strictEqual(noBadge, "<!-- ocr-1-1-abcd -->\nbody");
+  // suggestion block still appends after the badge
+  const withSuggestion = formatComment(
+    { content: "c", category: "bug", severity: "high", existing_code: "old", suggestion_code: "new" },
+    "ocr-1-1-abcd"
+  );
+  assert.match(withSuggestion, /\[bug · high\]/);
+  assert.match(withSuggestion, /\*\*Suggestion:\*\*/);
+  assert.match(withSuggestion, /```suggestion/);
+}
+
+// I6: formatCommentMarkdown prepends the badge as a leading line before the
+// path heading (PLAN_VALIDATION Risk A confirmed placement).
+function testFormatCommentMarkdownBadgePlacement() {
+  const md = formatCommentMarkdown({ path: "a.js", content: "body", category: "bug", severity: "high" });
+  // badge is the first line, before the heading
+  assert.ok(md.startsWith("[bug · high]\n"), "badge is the leading line");
+  assert.match(md, /### 📄 `a.js`/);
+  assert.match(md, /body/);
+  // no metadata -> no badge line, heading is first (byte-identical to pre-change)
+  const noBadge = formatCommentMarkdown({ path: "a.js", content: "body" });
+  assert.ok(noBadge.startsWith("### 📄 `a.js`"));
+  assert.ok(!noBadge.includes("·"));
+}
+
+// I3: with no routing input set, placement is identical to today (modulo the
+// additive badge prefix, which is "" for findings without metadata). Exercises
+// the full runPostReviewComments path with default empty policy.
+async function testNoRoutingInputPreservesBehavior() {
+  const result = {
+    comments: [
+      { path: "src/a.js", content: "inline content", start_line: 10, end_line: 10 },
+      { path: "docs/no-line.md", content: "no-line content", start_line: 0, end_line: 0 },
+    ],
+    warnings: [],
+  };
+
+  const { github, outputs } = await run({ result });
+
+  // The inline comment is posted via the batch review (not routed).
+  assert.strictEqual(github.createReviewCalls.length, 1, "one batch review");
+  const sent = github.createReviewCalls[0].comments;
+  assert.strictEqual(sent.length, 1);
+  assert.strictEqual(sent[0].path, "src/a.js");
+  // no routed bucket (output defaults to 0)
+  assert.strictEqual(outputs.comments_routed, "0");
+  assert.strictEqual(outputs.comments_inline, "1");
+  assert.strictEqual(outputs.comments_total, "2");
+}
+
+// I2 + OC4: severity routing moves at-or-below findings to the summary and
+// counts reconcile to the total.
+async function testRouteSeverityBelowRoutesToSummary() {
+  const result = {
+    comments: [
+      { path: "src/critical.js", content: "critical finding", category: "bug", severity: "critical", start_line: 1, end_line: 1 },
+      { path: "src/low.js", content: "low finding", category: "style", severity: "low", start_line: 2, end_line: 2 },
+      { path: "docs/no-line.md", content: "no-line finding", category: "documentation", severity: "low", start_line: 0, end_line: 0 },
+    ],
+    warnings: [],
+  };
+
+  const { github, outputs } = await run({
+    result,
+    opts: { routeSeverityBelow: "low" },
+  });
+
+  // only the critical inline finding is posted (low is routed, no-line stays in summary)
+  assert.strictEqual(github.createReviewCalls.length, 1, "one batch review");
+  const sent = github.createReviewCalls[0].comments;
+  assert.strictEqual(sent.length, 1, "only critical inline finding posted");
+  assert.strictEqual(sent[0].path, "src/critical.js");
+  // counts reconcile (I2): inline + routed + summary == total (skipped=failed=0)
+  assert.strictEqual(outputs.comments_total, "3");
+  assert.strictEqual(outputs.comments_inline, "1");
+  assert.strictEqual(outputs.comments_routed, "1");
+  assert.strictEqual(outputs.comments_failed, "0");
+  assert.strictEqual(outputs.comments_skipped, "0");
+  // routed finding rendered in the summary with its reason
+  const body = github.updatedComments[0].body;
+  assert.match(body, /📋 Routed to summary by policy: 1 comment\(s\)/);
+  assert.match(body, /low finding/);
+  assert.match(body, /Routed to summary \(severity low/);
+  // no-line finding still rendered in summary too
+  assert.match(body, /no-line finding/);
+}
+
+// OC4: comma-list category routing moves listed categories to the summary.
+async function testRouteCategoriesRoutesToSummary() {
+  const result = {
+    comments: [
+      { path: "src/bug.js", content: "bug finding", category: "bug", severity: "high", start_line: 1, end_line: 1 },
+      { path: "src/style.js", content: "style finding", category: "style", severity: "low", start_line: 2, end_line: 2 },
+      { path: "docs/doc.md", content: "doc finding", category: "documentation", severity: "low", start_line: 3, end_line: 3 },
+    ],
+    warnings: [],
+  };
+
+  const { github, outputs } = await run({
+    result,
+    opts: { routeCategories: "style,documentation" },
+  });
+
+  // only the bug finding is posted inline; style + documentation routed
+  assert.strictEqual(github.createReviewCalls.length, 1);
+  const sent = github.createReviewCalls[0].comments;
+  assert.strictEqual(sent.length, 1);
+  assert.strictEqual(sent[0].path, "src/bug.js");
+  assert.strictEqual(outputs.comments_inline, "1");
+  assert.strictEqual(outputs.comments_routed, "2");
+  assert.strictEqual(outputs.comments_total, "3");
+  const body = github.updatedComments[0].body;
+  assert.match(body, /📋 Routed to summary by policy: 2 comment\(s\)/);
+  assert.match(body, /style finding/);
+  assert.match(body, /doc finding/);
+}
+
+// I4: routed findings never enter the createReview write path, so they cannot
+// be double-posted on retry. Verified by inspecting createReviewCalls bodies.
+async function testRoutedFindingsNeverCallCreateReview() {
+  const result = {
+    comments: [
+      { path: "src/keep.js", content: "keep inline", category: "bug", severity: "critical", start_line: 1, end_line: 1 },
+      { path: "src/route.js", content: "route me", category: "style", severity: "low", start_line: 2, end_line: 2 },
+    ],
+    warnings: [],
+  };
+
+  const { github, outputs } = await run({
+    result,
+    // Inject a batch error so the per-comment retry path runs; routed findings
+    // must STILL not appear in any createReview call (batch or per-comment).
+    githubOpts: {
+      bulkErrorSpec: { message: "Bad Gateway", status: 502 },
+      // No batchLanded / echoPosted -> full retry of toSend (the non-routed set).
+    },
+    opts: { routeCategories: "style" },
+  });
+
+  // Every createReview call must contain ONLY the kept finding's path, never
+  // the routed one. This is the faithful proxy for "cannot be double-posted":
+  // a finding absent from every write call cannot land twice.
+  for (const call of github.createReviewCalls) {
+    const paths = (call.comments || []).map((c) => c.path);
+    assert.ok(!paths.includes("src/route.js"), `routed finding appeared in createReview call: ${JSON.stringify(paths)}`);
+    assert.ok(paths.includes("src/keep.js"), `kept finding missing from createReview call: ${JSON.stringify(paths)}`);
+  }
+  assert.strictEqual(outputs.comments_routed, "1");
+  // at least the batch + one per-comment retry happened
+  assert.ok(github.createReviewCalls.length >= 2, "batch then per-comment retry ran");
+}
+
+// I2: accounting reconciles across mixed inputs —
+// inline + summary + skipped + failed + routed == total.
+async function testAccountingReconcilesToTotal() {
+  const history = [{ path: "src/overlap.js", line: 5, start_line: 5, side: "RIGHT", user: { login: "github-actions[bot]" } }];
+  const result = {
+    comments: [
+      // routed by severity (low)
+      { path: "src/routed.js", content: "routed", category: "style", severity: "low", start_line: 1, end_line: 1 },
+      // inline (posted successfully via per-comment retry)
+      { path: "src/inline.js", content: "inline", category: "bug", severity: "high", start_line: 2, end_line: 2 },
+      // skipped by incremental overlap
+      { path: "src/overlap.js", content: "overlap", category: "bug", severity: "high", start_line: 5, end_line: 5 },
+      // failed to post (422 non-retryable during per-comment retry)
+      { path: "src/fail.js", content: "fail", category: "bug", severity: "high", start_line: 3, end_line: 3 },
+      // no-line (summary)
+      { path: "docs/noline.md", content: "no-line", category: "documentation", severity: "low", start_line: 0, end_line: 0 },
+    ],
+    warnings: [],
+  };
+
+  const { outputs } = await run({
+    result,
+    githubOpts: {
+      history,
+      // A 502 on the BATCH call forces the per-comment retry path, where
+      // perCommentError actually fires (it only runs on per-comment calls).
+      bulkErrorSpec: { message: "Bad Gateway", status: 502 },
+      perCommentError: (rc) => {
+        if (rc && rc.path === "src/fail.js") {
+          return { message: "Line could not be resolved", status: 422 };
+        }
+        return null;
+      },
+    },
+    opts: { incremental: true, routeSeverityBelow: "low" },
+  });
+
+  const total = Number(outputs.comments_total);
+  const inline = Number(outputs.comments_inline);
+  const summary = 1; // the no-line finding (always summary)
+  const skipped = Number(outputs.comments_skipped);
+  const routed = Number(outputs.comments_routed);
+  const failed = Number(outputs.comments_failed);
+  assert.strictEqual(inline + summary + skipped + routed + failed, total, "counts sum to total (I2)");
+  assert.strictEqual(total, 5);
+  assert.strictEqual(routed, 1, "low-severity valid-line finding routed");
+  assert.strictEqual(inline, 1, "high-severity finding posted inline");
+  assert.strictEqual(skipped, 1, "overlap skipped by incremental");
+  assert.strictEqual(failed, 1, "fail.js failed to post");
+}
+
+// I1 / fail-open for the policy itself: malformed routing inputs degrade to
+// no-routing, so the Action behaves exactly like today (no finding dropped
+// because the policy string was garbage).
+async function testMalformedRoutingPolicyFailsOpen() {
+  const result = {
+    comments: [
+      { path: "src/a.js", content: "a", category: "bug", severity: "low", start_line: 1, end_line: 1 },
+      { path: "src/b.js", content: "b", category: "style", severity: "high", start_line: 2, end_line: 2 },
+    ],
+    warnings: [],
+  };
+
+  // unknown severity threshold -> no routing; both stay inline
+  const { outputs } = await run({
+    result,
+    opts: { routeSeverityBelow: "trivial" },
+  });
+  assert.strictEqual(outputs.comments_routed, "0");
+  assert.strictEqual(outputs.comments_inline, "2");
+  // all-unknown categories -> no routing
+  const { outputs: o2 } = await run({
+    result,
+    opts: { routeCategories: "nonsense,garbage" },
+  });
+  assert.strictEqual(o2.comments_routed, "0");
+  assert.strictEqual(o2.comments_inline, "2");
+}
+
+// I4: routed findings carry no id (formatComment called without an id arg),
+// so even a hypothetical leak into a write path could not match the
+// idempotency regex. Defense-in-depth check on the routed item shape.
+async function testRoutedFindingsCarryNoIdempotencyId() {
+  const result = {
+    comments: [
+      { path: "src/route.js", content: "route me", category: "style", severity: "low", start_line: 2, end_line: 2 },
+    ],
+    warnings: [],
+  };
+
+  const { github } = await run({
+    result,
+    opts: { routeCategories: "style" },
+  });
+  // No createReview call at all (the only finding was routed).
+  assert.strictEqual(github.createReviewCalls.length, 0);
+  // The routed body in the summary must NOT contain an ocr-... id comment.
+  const body = github.updatedComments[0].body;
+  assert.doesNotMatch(body, /ocr-\d+-\d+-[a-f0-9]+/, "routed summary body carries no idempotency id");
+}
+
 async function main() {
   await testFailedInlineCommentsAreSummarized();
   await testWarningsListedAfterSummaryComments();
@@ -1660,6 +2104,22 @@ async function main() {
   await testBatchReconcileUnavailableStopsVisibly();
   await testBatchSizeInvalidFallsBackToDefault();
   await testBatchTelemetryOutputs();
+  // Badge + publication policy (#478)
+  testBuildBadgeMatchesCliDegeneration();
+  testSanitizeMetadataStripsControlChars();
+  testBuildPolicyFailsOpenOnMalformed();
+  testRouteCommentUnknownMetadataNeverRouted();
+  testRouteSeverityBelowBoundaryInclusive();
+  await testFindingMatchingBothConditionsRoutesOnce();
+  testFormatCommentBadgePlacement();
+  testFormatCommentMarkdownBadgePlacement();
+  await testNoRoutingInputPreservesBehavior();
+  await testRouteSeverityBelowRoutesToSummary();
+  await testRouteCategoriesRoutesToSummary();
+  await testRoutedFindingsNeverCallCreateReview();
+  await testAccountingReconcilesToTotal();
+  await testMalformedRoutingPolicyFailsOpen();
+  await testRoutedFindingsCarryNoIdempotencyId();
   console.log("All post-review-comments tests passed.");
 }
 
