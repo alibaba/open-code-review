@@ -20,7 +20,7 @@ jobs:
     container:
       image: node:24.18.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'

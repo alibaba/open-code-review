@@ -198,7 +198,7 @@ runs:
 
     - name: Setup Node.js
       if: steps.check_deps.outputs.node_installed != 'true'
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: ${{ inputs.node_version }}
 
@@ -218,7 +218,7 @@ runs:
         echo "PR head sha: $HEAD_SHA"
 
     - name: Checkout base
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         # Checkout the trusted base, not the PR head. OCR reviews the
         # base-to-head diff from git objects; the head commit's blobs are
@@ -292,7 +292,7 @@ runs:
 
     - name: Upload review artifacts
       if: ${{ always() && inputs.upload_artifacts == 'true' }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ocr-review-result-${{ github.run_id }}-${{ github.run_attempt }}
         path: |
@@ -310,7 +310,7 @@ runs:
     - name: Post review comments
       if: env.OCR_EXIT_CODE == '0'
       id: post
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       env:
         OCR_INCREMENTAL_OVERLAP_THRESHOLD: ${{ inputs.incremental_overlap_threshold }}
         OCR_REVIEW_COMMENT_BATCH_SIZE: ${{ inputs.review_comment_batch_size }}
