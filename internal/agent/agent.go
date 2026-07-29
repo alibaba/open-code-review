@@ -631,7 +631,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, string,
 		return false, "", err
 	}
 	if !mainCompleted {
-		return false, "main_task did not complete before stopping", nil
+		return false, "", fmt.Errorf("main_task did not complete before stopping")
 	}
 	return true, "", nil
 }

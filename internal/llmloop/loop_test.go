@@ -30,7 +30,7 @@ func (f *fakeClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*
 	return resp, nil
 }
 
-func taskDoneResponse() *llm.ChatResponse {
+func taskDoneResponseWithArguments(arguments string) *llm.ChatResponse {
 	content := ""
 	return &llm.ChatResponse{
 		Choices: []llm.Choice{{
@@ -41,7 +41,7 @@ func taskDoneResponse() *llm.ChatResponse {
 					Type: "function",
 					Function: llm.FunctionCall{
 						Name:      "task_done",
-						Arguments: `{}`,
+						Arguments: arguments,
 					},
 				}},
 			},
@@ -49,6 +49,10 @@ func taskDoneResponse() *llm.ChatResponse {
 		Model: "fake",
 		Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
 	}
+}
+
+func taskDoneResponse() *llm.ChatResponse {
+	return taskDoneResponseWithArguments(`{}`)
 }
 
 func fileReadToolCallResponse(callID, args string) *llm.ChatResponse {
@@ -115,6 +119,84 @@ func TestRunPerFile_TaskDoneImmediately(t *testing.T) {
 	}
 	if runner.TotalOutputTokens() != 5 {
 		t.Errorf("TotalOutputTokens = %d, want 5", runner.TotalOutputTokens())
+	}
+}
+
+func TestRunPerFile_TaskDoneExplicitDone(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		taskDoneResponseWithArguments(`{"state":"DONE"}`),
+	}}
+	runner := NewRunner(newTestDeps(client))
+
+	completed, err := runner.RunPerFile(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review this file")},
+		"main.go",
+	)
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if !completed {
+		t.Fatal("expected task_done DONE to complete RunPerFile")
+	}
+}
+
+func TestRunPerFile_TaskDoneFailed(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		taskDoneResponseWithArguments(`{"state":"FAILED"}`),
+	}}
+	runner := NewRunner(newTestDeps(client))
+
+	completed, err := runner.RunPerFile(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review this file")},
+		"main.go",
+	)
+	if err == nil || !strings.Contains(err.Error(), "task_done reported FAILED") {
+		t.Fatalf("expected task_done FAILED error, got %v", err)
+	}
+	if completed {
+		t.Fatal("task_done FAILED must not complete RunPerFile")
+	}
+	if client.calls != 1 {
+		t.Fatalf("expected terminal failure after 1 LLM call, got %d", client.calls)
+	}
+}
+
+func TestRunPerFile_InvalidTaskDoneStateRetries(t *testing.T) {
+	tests := []struct {
+		name      string
+		arguments string
+	}{
+		{name: "unknown state", arguments: `{"state":"UNKNOWN"}`},
+		{name: "empty state", arguments: `{"state":""}`},
+		{name: "non-string state", arguments: `{"state":1}`},
+		{name: "malformed arguments", arguments: `{"state":`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &fakeClient{responses: []*llm.ChatResponse{
+				taskDoneResponseWithArguments(tt.arguments),
+				taskDoneResponseWithArguments(`{"state":"DONE"}`),
+			}}
+			runner := NewRunner(newTestDeps(client))
+
+			completed, err := runner.RunPerFile(
+				context.Background(),
+				[]llm.Message{llm.NewTextMessage("user", "review this file")},
+				"main.go",
+			)
+			if err != nil {
+				t.Fatalf("RunPerFile: %v", err)
+			}
+			if !completed {
+				t.Fatal("expected retry to complete with task_done DONE")
+			}
+			if client.calls != 2 {
+				t.Fatalf("expected invalid state to be retried, got %d LLM calls", client.calls)
+			}
+		})
 	}
 }
 
