@@ -275,7 +275,7 @@ func parseConfigArgs(args []string) (configAction, error) {
 		}, nil
 	case "unset":
 		if len(args) < 2 {
-			return configAction{}, fmt.Errorf("usage: ocr config unset custom_providers.<name>\ne.g., ocr config unset custom_providers.my-gateway")
+			return configAction{}, fmt.Errorf("usage: ocr config unset <provider|custom_providers.<name>|mcp_servers.<name>>\ne.g., ocr config unset provider")
 		}
 		return configAction{
 			subCmd: "unset",
@@ -291,6 +291,7 @@ func printConfigUsage() {
 
 Usage:
   ocr config set <key> <value>
+  ocr config unset provider                    Disable provider-based configuration
   ocr config unset custom_providers.<name>  Delete a custom provider
   ocr config unset mcp_servers.<name>       Delete an MCP server
   ocr config provider                       Interactive provider setup
@@ -318,6 +319,9 @@ Examples:
 
   # Delete a custom provider
   ocr config unset custom_providers.my-gateway
+
+  # Disable provider-based configuration and use legacy llm.* settings
+  ocr config unset provider
 
   # MCP server configuration (stdio transport)
   ocr config set mcp_servers.codegraph.command npx

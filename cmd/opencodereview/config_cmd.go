@@ -89,18 +89,25 @@ func runConfigSet(key, value string) error {
 		displayValue = maskKey(value)
 	}
 	fmt.Printf("Set %s = %s\n", key, displayValue)
+	if warning := legacyLLMShadowWarning(cfg.Provider, key); warning != "" {
+		fmt.Fprint(os.Stderr, warning)
+	}
 	return nil
 }
 
 func runConfigUnset(key string) error {
-	parts := strings.SplitN(key, ".", 2)
-	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports custom_providers.<name> and mcp_servers.<name>")
-	}
-
 	configPath, err := defaultConfigPath()
 	if err != nil {
 		return err
+	}
+
+	if key == "provider" {
+		return unsetActiveProvider(configPath)
+	}
+
+	parts := strings.SplitN(key, ".", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return fmt.Errorf("unset supports provider, custom_providers.<name>, and mcp_servers.<name>")
 	}
 
 	switch parts[0] {
@@ -109,8 +116,33 @@ func runConfigUnset(key string) error {
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports custom_providers.<name> and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, custom_providers.<name>, and mcp_servers.<name>")
 	}
+}
+
+func unsetActiveProvider(configPath string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	cfg.Provider = ""
+	cfg.Model = ""
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Println("Cleared active provider and model.")
+	return nil
+}
+
+func legacyLLMShadowWarning(provider, key string) string {
+	if provider == "" || !strings.HasPrefix(strings.ToLower(key), "llm.") {
+		return ""
+	}
+	return fmt.Sprintf("[ocr] WARNING: provider %q is active and takes precedence over llm.* settings.\n"+
+		"[ocr] Use 'ocr config set providers.%s.<field> <value>' to configure the active provider,\n"+
+		"[ocr] or run 'ocr config unset provider' to disable provider-based config.\n", provider, provider)
 }
 
 func unsetCustomProvider(configPath, name string) error {
