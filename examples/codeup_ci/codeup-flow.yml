@@ -1,0 +1,56 @@
+name: open-code-review
+
+# Triggered whenever a merge request is opened or updated against any branch.
+sources:
+  repo:
+    type: codeup
+    name: repo-source
+    endpoint: <your-codeup-repository-url>
+    branch: master
+    triggerEvents:
+      - mergeRequestOpen
+      - mergeRequestUpdate
+    certificate:
+      type: serviceConnection
+      serviceConnection: <your-service-connection-id>
+
+stages:
+  code_review_stage:
+    name: Code Review
+    jobs:
+      code_review_job:
+        name: open-code-review
+        runsOn: public/cn-hangzhou
+        steps:
+          install_node_step:
+            step: NodeInstall
+            name: Install Node.js
+            with:
+              version: "20"
+
+          install_ocr_step:
+            step: Shell
+            name: Install open-code-review CLI
+            with:
+              run: npm install -g @alibaba-group/open-code-review
+
+          run_review_step:
+            step: Shell
+            name: Run review and post comment
+            with:
+              # These CODEUP_* variables are populated by Flow from the
+              # merge-request trigger context. CODEUP_TOKEN should be stored
+              # as a protected/secret pipeline variable, not committed here.
+              env:
+                CODEUP_DOMAIN: codeup.aliyun.com
+                CODEUP_TOKEN: ${CODEUP_TOKEN}
+                CODEUP_ORG_ID: ${CODEUP_ORG_ID}
+                CODEUP_REPO_ID: ${CODEUP_REPO_ID}
+                CODEUP_MR_LOCAL_ID: ${CODEUP_MERGE_REQUEST_LOCAL_ID}
+                CODEUP_TARGET_BRANCH: ${CODEUP_MERGE_REQUEST_TARGET_BRANCH}
+                CODEUP_SOURCE_BRANCH: ${CODEUP_MERGE_REQUEST_SOURCE_BRANCH}
+                OCR_LLM_URL: ${OCR_LLM_URL}
+                OCR_LLM_TOKEN: ${OCR_LLM_TOKEN}
+                OCR_LLM_MODEL: ${OCR_LLM_MODEL}
+                OCR_USE_ANTHROPIC: ${OCR_USE_ANTHROPIC}
+              run: python3 post_review.py
