@@ -121,7 +121,7 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 		"readme.md",
 		"docs/architecture.txt",
 		"Makefile",
-		"internal/agent/agent.go",
+		"ios/ViewController.swift",
 		"ios/ViewController.m",
 	}
 
@@ -325,8 +325,8 @@ func TestNewResolver_ProjectRuleFallsBackToSystem(t *testing.T) {
 	}
 
 	got := resolver.Resolve("other/main.go")
-	if !strings.Contains(got, "Correctness") {
-		t.Errorf("expected system default rule, got %q", truncate(got, 80))
+	if !strings.Contains(got, "Go Review Principles") {
+		t.Errorf("expected system Go rule, got %q", truncate(got, 80))
 	}
 }
 
@@ -848,6 +848,37 @@ func TestResolveDetail_SystemPrismaPatternMatch(t *testing.T) {
 	}
 }
 
+func TestResolveDetail_SystemGoPatternMatch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"main.go", "internal/service/user.go", "CMD/MAIN.GO"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.go" {
+				t.Errorf("expected pattern '**/*.go', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Go Review Principles",
+				"Go 1.23+",
+				"defer` inside a loop",
+				"crypto/rand",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected Go rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveDetail_ProjectOverridesSystem(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
@@ -987,7 +1018,7 @@ func TestNewResolver_BraceExpansionInProjectRule(t *testing.T) {
 	}{
 		{"src/main/foo.java", "jvm-rule"},
 		{"src/main/bar.kt", "jvm-rule"},
-		{"src/main/baz.go", "Correctness"},
+		{"src/main/baz.swift", "Correctness"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
