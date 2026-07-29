@@ -995,8 +995,11 @@ func TestLegacyLLMShadowWarning(t *testing.T) {
 	if got := legacyLLMShadowWarning("dashscope", "providers.dashscope.url"); got != "" {
 		t.Errorf("warning for provider setting = %q", got)
 	}
-	if got := legacyLLMShadowWarning("dashscope", "llm.model"); !strings.Contains(got, "dashscope") {
-		t.Errorf("warning = %q", got)
+	if got := legacyLLMShadowWarning("dashscope", "llm.model"); !strings.Contains(got, "providers.dashscope.<field>") {
+		t.Errorf("preset-provider warning = %q", got)
+	}
+	if got := legacyLLMShadowWarning("my-gateway", "llm.model"); !strings.Contains(got, "custom_providers.my-gateway.<field>") {
+		t.Errorf("custom-provider warning = %q", got)
 	}
 }
 

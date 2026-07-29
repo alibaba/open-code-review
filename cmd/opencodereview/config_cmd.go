@@ -141,9 +141,13 @@ func legacyLLMShadowWarning(provider, key string) string {
 	if provider == "" || !strings.HasPrefix(strings.ToLower(key), "llm.") {
 		return ""
 	}
+	section := "custom_providers"
+	if _, isPreset := llm.LookupProvider(provider); isPreset {
+		section = "providers"
+	}
 	return fmt.Sprintf("[ocr] WARNING: provider %q is active and takes precedence over llm.* settings.\n"+
-		"[ocr] Use 'ocr config set providers.%s.<field> <value>' to configure the active provider,\n"+
-		"[ocr] or run 'ocr config unset provider' to disable provider-based config.\n", provider, provider)
+		"[ocr] Use 'ocr config set %s.%s.<field> <value>' to configure the active provider,\n"+
+		"[ocr] or run 'ocr config unset provider' to disable provider-based config.\n", provider, section, provider)
 }
 
 func unsetCustomProvider(configPath, name string) error {
