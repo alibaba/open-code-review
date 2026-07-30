@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -89,7 +90,9 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 }
 
 func hasTraversalPathComponent(pathspec string) bool {
-	for _, part := range strings.Split(pathspec, "/") {
+	// Normalize backslash separators (Windows) so "..\..\.." is caught too.
+	normalized := filepath.ToSlash(filepath.Clean(pathspec))
+	for _, part := range strings.Split(normalized, "/") {
 		if part == ".." {
 			return true
 		}

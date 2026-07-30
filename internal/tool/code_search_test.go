@@ -462,6 +462,34 @@ func TestCodeSearchProvider_Execute_RejectsTraversalPattern(t *testing.T) {
 	}
 }
 
+func TestCodeSearchProvider_Execute_RejectsBackslashTraversal(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+	tests := []struct {
+		name    string
+		pattern string
+	}{
+		{name: "backslash leading parent", pattern: `..\..\etc`},
+		{name: "backslash middle parent", pattern: `pkg\..\internal`},
+		{name: "mixed separators", pattern: `pkg\../..\secret`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := p.Execute(context.Background(), map[string]any{
+				"search_text":   "Hello",
+				"file_patterns": []any{test.pattern},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != "Error: file_patterns must not contain .." {
+				t.Errorf("Execute() = %q, want traversal rejection", got)
+			}
+		})
+	}
+}
+
 func TestCodeSearchProvider_Execute_AllowsDoubleDotInFilename(t *testing.T) {
 	dir := setupTestRepo(t)
 	if err := os.WriteFile(filepath.Join(dir, "foo..bar.go"), []byte("package main\n\nfunc DoubleDotName() {}\n"), 0644); err != nil {
