@@ -135,7 +135,7 @@ cd your-project
 # Workspace mode — review all staged, unstaged, and untracked changes
 ocr review
 
-# Branch range — compare two refs
+# Branch range — reviews feature-branch's changes since it diverged from main (merge-base mode)
 ocr review --from main --to feature-branch
 
 # Single commit
