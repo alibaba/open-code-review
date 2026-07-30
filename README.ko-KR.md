@@ -135,7 +135,7 @@ cd your-project
 # Workspace mode: staged, unstaged, untracked 변경을 모두 리뷰
 ocr review
 
-# Branch range: 두 ref 비교
+# Branch range: merge-base(main, feature-branch)..feature-branch 리뷰
 ocr review --from main --to feature-branch
 
 # 단일 commit

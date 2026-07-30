@@ -66,7 +66,7 @@ cd path/to/your-repo
 # Все локальные изменения, включая новые файлы
 ocr review
 
-# Изменения в feature-branch относительно main
+# Изменения в feature-branch относительно merge-base(main, feature-branch)
 ocr review --from main --to feature-branch
 
 # Изменения, внесённые коммитом abc123

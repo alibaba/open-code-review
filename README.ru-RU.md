@@ -135,7 +135,7 @@ cd your-project
 # Режим рабочей копии — ревью всех staged, unstaged и untracked изменений
 ocr review
 
-# Диапазон веток — сравнение двух ref'ов
+# Диапазон веток — ревью merge-base(main, feature-branch)..feature-branch
 ocr review --from main --to feature-branch
 
 # Один коммит

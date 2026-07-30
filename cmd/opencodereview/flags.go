@@ -208,7 +208,7 @@ Examples:
   # Review staged + unstaged + untracked changes in current workspace
   ocr review
 
-  # Review a branch against its base (merge-base mode)
+  # Review a branch range: merge-base(master, dev-ref)..dev-ref
   ocr review --from master --to dev-ref
 
   # Review a specific commit

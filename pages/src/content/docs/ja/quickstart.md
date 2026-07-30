@@ -66,7 +66,7 @@ cd path/to/your-repo
 # ワークスペースモード —— staged + unstaged + untracked の変更をレビュー（デフォルト）
 ocr review
 
-# ブランチ区間 —— `main..feature-branch` をレビュー
+# ブランチ区間 —— `merge-base(main, feature-branch)..feature-branch` をレビュー
 ocr review --from main --to feature-branch
 
 # 単一 commit —— その commit が導入した diff をレビュー

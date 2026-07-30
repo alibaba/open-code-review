@@ -135,7 +135,7 @@ cd your-project
 # 工作区模式 —— 审查所有暂存、未暂存和未跟踪的变更
 ocr review
 
-# 分支范围 —— 比较两个引用
+# 分支范围 —— 审查 merge-base(main, feature-branch)..feature-branch
 ocr review --from main --to feature-branch
 
 # 单个提交

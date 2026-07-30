@@ -66,7 +66,7 @@ cd path/to/your-repo
 # Workspace mode — reviews staged + unstaged + untracked changes (default)
 ocr review
 
-# Branch range — reviews `main..feature-branch`
+# Branch range — reviews `merge-base(main, feature-branch)..feature-branch`
 ocr review --from main --to feature-branch
 
 # Single commit — reviews the diff that commit introduced
