@@ -11,7 +11,15 @@ const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
   { value: 'zh', label: '中文' },
   { value: 'ja', label: '日本語' },
+  { value: 'ru', label: 'Русский' },
 ];
+
+const LANG_BADGE: Record<Language, string> = {
+  en: 'En',
+  zh: '中',
+  ja: 'あ',
+  ru: 'Ru',
+};
 
 const navTabs = [
   { path: '/features', labelKey: 'navbar.features' },
@@ -143,7 +151,7 @@ const Navbar: React.FC = () => {
                 width: '100%',
                 fontFamily: language === 'ja' ? "'Hiragino Sans', sans-serif" : "'PingFang SC', -apple-system, sans-serif",
               }}>
-                {language === 'en' ? 'En' : language === 'zh' ? '中' : 'あ'}
+                {LANG_BADGE[language]}
               </span>
             </button>
             {langOpen && (

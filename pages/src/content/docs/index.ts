@@ -1,5 +1,7 @@
 /* Docs content index — imports all markdown files and provides a lookup by slug + language */
 
+import type { Language } from '../../i18n/types';
+
 // English docs
 import enQuickstart from './en/quickstart.md';
 import enInstallation from './en/installation.md';
@@ -54,6 +56,10 @@ import jaDelegate from './ja/integrations/delegate.md';
 import jaContributing from './ja/contributing.md';
 import jaFaq from './ja/faq.md';
 
+// Russian docs (incremental — partial LocalizedDocs)
+import ruQuickstart from './ru/quickstart.md';
+import ruInstallation from './ru/installation.md';
+
 export type DocSlug =
   | 'quickstart'
   | 'installation'
@@ -71,6 +77,8 @@ export type DocSlug =
   | 'delegate'
   | 'contributing'
   | 'faq';
+
+type LocalizedDocs = Partial<Record<DocSlug, string>>;
 
 const enDocs: Record<DocSlug, string> = {
   'quickstart': enQuickstart,
@@ -129,10 +137,16 @@ const jaDocs: Record<DocSlug, string> = {
   'faq': jaFaq,
 };
 
-const docsMap: Record<string, Record<DocSlug, string>> = {
+const ruDocs: LocalizedDocs = {
+  'quickstart': ruQuickstart,
+  'installation': ruInstallation,
+};
+
+const docsMap: Record<Language, LocalizedDocs> = {
   en: enDocs,
   zh: zhDocs,
   ja: jaDocs,
+  ru: ruDocs,
 };
 
 /**
@@ -152,8 +166,8 @@ function stripFrontmatter(md: string): string {
  * Get raw content for a slug in the given language, with English fallback.
  */
 function getRawContent(slug: DocSlug, language: string): string {
-  const langDocs = docsMap[language] || docsMap.en;
-  return langDocs[slug] || enDocs[slug] || '';
+  const langDocs = docsMap[language as Language] || docsMap.en;
+  return langDocs[slug] ?? enDocs[slug] ?? '';
 }
 
 /**
@@ -182,15 +196,16 @@ export function getDocTitle(slug: DocSlug, language: string): string {
 
 /**
  * Search across all docs for a query string. Returns matching slugs with context.
+ * Iterates every English slug so partial locales still search English fallbacks.
  */
 export function searchDocs(query: string, language: string): { slug: DocSlug; title: string; snippet: string }[] {
   if (!query.trim()) return [];
-  const langDocs = docsMap[language] || docsMap.en;
+  const langDocs = docsMap[language as Language] || docsMap.en;
   const results: { slug: DocSlug; title: string; snippet: string }[] = [];
   const lowerQuery = query.toLowerCase();
-  const slugs = Object.keys(langDocs) as DocSlug[];
+  const slugs = Object.keys(enDocs) as DocSlug[];
   for (const slug of slugs) {
-    const raw = langDocs[slug] || enDocs[slug] || '';
+    const raw = langDocs[slug] ?? enDocs[slug] ?? '';
     const content = stripFrontmatter(raw);
     const lowerContent = content.toLowerCase();
     const idx = lowerContent.indexOf(lowerQuery);
