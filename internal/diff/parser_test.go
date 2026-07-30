@@ -2,8 +2,50 @@ package diff
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
+
+func TestParseDiffText_StripsIndexHeadersFromPromptDiff(t *testing.T) {
+	diffText := `diff --git a/first.go b/first.go
+index 1234567..89abcde 100644
+--- a/first.go
++++ b/first.go
+@@ -1,1 +1,2 @@
+ first
++index added-content
+diff --git a/second.go b/second.go
+new file mode 100644
+index 0000000..7654321
+--- /dev/null
++++ b/second.go
+@@ -0,0 +1 @@
++package second
+`
+
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 2 {
+		t.Fatalf("expected 2 diffs, got %d", len(diffs))
+	}
+
+	for _, d := range diffs {
+		if strings.Contains(d.Diff, "\nindex ") {
+			t.Errorf("prompt diff contains index header:\n%s", d.Diff)
+		}
+	}
+	if !strings.Contains(diffs[0].Diff, "diff --git a/first.go b/first.go") {
+		t.Errorf("prompt diff lost git header:\n%s", diffs[0].Diff)
+	}
+	if !strings.Contains(diffs[0].Diff, "+index added-content") {
+		t.Errorf("prompt diff lost index-prefixed hunk content:\n%s", diffs[0].Diff)
+	}
+	if !diffs[1].IsNew {
+		t.Error("new-file metadata was not preserved")
+	}
+}
 
 // TestParseDiffText_Rename guards against issue #99: a renamed file must be
 // recognized via the "rename from"/"rename to" extended header lines so that
