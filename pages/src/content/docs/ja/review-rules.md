@@ -120,14 +120,25 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `.github/**/*.{yaml,yml}` | `github_config.md`: その他の `.github` 設定 YAML。 |
 | `**/*.{yaml,yml}` | `yaml.md` |
 | `**/*.java` | `java.md` |
+| `**/*.go` | `go.md`: Go ソースコード。 |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。 |
 | `**/*.ets` | `arkts.md`: ArkTS / HarmonyOS。 |
+| `**/*.astro` | `astro.md`: Astro コンポーネントと islands。 |
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |
 | `**/*.c` | `c.md` |
+| `**/*.py` | `python.md`: Python ソースコード。 |
 | `**/*.{php,phtml}` | `php.md`: PHP ソースと PHP テンプレート。 |
+| `**/*.proto` | `protobuf.md`: Protocol Buffers のワイヤ互換性。 |
+| `**/*.po` | `po.md`: gettext コンパイル済みカタログ。 |
+| `**/*.pot` | `pot.md`: gettext テンプレートファイル。 |
+| `**/*.{graphql,gql}` | `graphql.md`: GraphQL スキーマと操作。 |
+| `**/*.prisma` | `prisma.md`: Prisma スキーマ。 |
+| `**/*.jl` | `julia.md`: Julia ソースコード。 |
+| `**/*.{tf,hcl,tfvars}` | `terraform.md`: Terraform / HCL。 |
+| `**/*.bicep` | `bicep.md`: Bicep（Azure）テンプレート。 |
 | *(fallback)* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。
