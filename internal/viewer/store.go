@@ -386,7 +386,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 							args, _ := tm["arguments"].(string)
 							info := ToolCallInfo{Name: name, Arguments: args}
 							if name == "task_done" {
-								info.Ok = true
+								info.Ok = taskDoneSucceeded(args)
 							}
 							card.ToolCalls = append(card.ToolCalls, info)
 						}
@@ -414,6 +414,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 
 		case "tool_call":
+			toolName, _ := rec["tool_name"].(string)
 			result, _ := rec["result"].(string)
 			okVal := true
 			if b, hasOk := rec["ok"].(bool); hasOk {
@@ -432,7 +433,10 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				if len(cards) > 0 {
 					card := cards[len(cards)-1]
 					for ti := range card.ToolCalls {
-						if card.ToolCalls[ti].Result == "" && !card.ToolCalls[ti].Ok {
+						// Older session records omitted tool_name, so retain
+						// positional matching only for those records.
+						if (toolName == "" || card.ToolCalls[ti].Name == toolName) &&
+							card.ToolCalls[ti].Result == "" && !card.ToolCalls[ti].Ok {
 							card.ToolCalls[ti].Result = result
 							card.ToolCalls[ti].Ok = okVal
 							card.ToolCalls[ti].DurationMs = durationMs
@@ -493,4 +497,17 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs.Summary.SessionID = sessionID
 	return vs, scanner.Err()
+}
+
+func taskDoneSucceeded(arguments string) bool {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return false
+	}
+	state, hasState := args["state"]
+	if !hasState {
+		return true
+	}
+	stateString, ok := state.(string)
+	return ok && stateString == "DONE"
 }
