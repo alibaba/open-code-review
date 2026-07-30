@@ -138,7 +138,7 @@ func unsetActiveProvider(configPath string) error {
 }
 
 func legacyLLMShadowWarning(provider, key string) string {
-	if provider == "" || !strings.HasPrefix(strings.ToLower(key), "llm.") {
+	if provider == "" || !strings.HasPrefix(key, "llm.") {
 		return ""
 	}
 	section := "custom_providers"

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -169,6 +170,11 @@ func TestParseConfigArgs_UnsetMissingKey(t *testing.T) {
 	_, err := parseConfigArgs([]string{"unset"})
 	if err == nil {
 		t.Fatal("expected error for missing key")
+	}
+	for _, example := range []string{"ocr config unset provider", "ocr config unset custom_providers.my-provider", "ocr config unset mcp_servers.github"} {
+		if !strings.Contains(err.Error(), example) {
+			t.Errorf("error missing example %q: %v", example, err)
+		}
 	}
 }
 

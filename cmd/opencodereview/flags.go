@@ -279,7 +279,7 @@ func parseConfigArgs(args []string) (configAction, error) {
 		}, nil
 	case "unset":
 		if len(args) < 2 {
-			return configAction{}, fmt.Errorf("usage: ocr config unset <provider|custom_providers.<name>|mcp_servers.<name>>\ne.g., ocr config unset provider")
+			return configAction{}, fmt.Errorf("usage: ocr config unset <provider|custom_providers.<name>|mcp_servers.<name>>\nexamples:\n  ocr config unset provider\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github")
 		}
 		return configAction{
 			subCmd: "unset",
