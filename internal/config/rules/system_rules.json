@@ -7,11 +7,13 @@
     "**/build.gradle": "build_gradle.md",
     "**/package.json": "package_json.md",
     "**/Cargo.toml": "cargo_toml.md",
+    "**/composer.json": "composer_json.md",
     "**/*.{json,json5}": "json.md",
     ".github/workflows/**/*.{yaml,yml}": "github_workflows.md",
     ".github/**/*.{yaml,yml}": "github_config.md",
     "**/*.{yaml,yml}": "yaml.md",
     "**/*.java": "java.md",
+    "**/*.go": "go.md",
     "**/*.{ftl,ftlh,ftlx}": "freemarker.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
@@ -21,9 +23,13 @@
     "**/*.{cpp,cc,hpp}": "cpp.md",
     "**/*.c": "c.md",
     "**/*.py": "python.md",
+    "**/*.{php,phtml}": "php.md",
     "**/*.po": "po.md",
     "**/*.pot": "pot.md",
     "**/*.{graphql,gql}": "graphql.md",
-    "**/*.jl": "julia.md"
+    "**/*.prisma": "prisma.md",
+    "**/*.jl": "julia.md",
+    "**/*.{tf,hcl,tfvars}": "terraform.md",
+    "**/*.bicep": "bicep.md"
   }
 }

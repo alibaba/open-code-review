@@ -9,6 +9,7 @@ const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
   { value: 'zh', label: '中文' },
   { value: 'ja', label: '日本語' },
+  { value: 'ru', label: 'Русский' },
 ];
 
 const Footer: React.FC = () => {

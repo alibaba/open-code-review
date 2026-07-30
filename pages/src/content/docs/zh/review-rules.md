@@ -125,7 +125,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 3. 按声明顺序试 `~/.opencodereview/rule.json`。
 4. 回退到内嵌系统规则层。
 
-内嵌 `system_rules.json` 自带这些模式（按序）：
+以下是内嵌 `system_rules.json` 的部分模式，按相对匹配顺序排列：
 
 | 模式 | 规则文档 |
 |---|---|
@@ -135,6 +135,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/build.gradle` | `build_gradle.md`——Gradle 依赖。 |
 | `**/package.json` | `package_json.md`——NPM 依赖 / 脚本。 |
 | `**/Cargo.toml` | `cargo_toml.md`——Rust manifest。 |
+| `**/composer.json` | `composer_json.md`——Composer 依赖、自动加载、脚本、插件和包配置。 |
 | `**/*.{json,json5}` | `json.md`——通用 JSON（也匹配 `.json5`）。 |
 | `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md`——GitHub Actions 工作流 YAML。 |
 | `.github/**/*.{yaml,yml}` | `github_config.md`——其他 `.github` 配置 YAML。 |
@@ -147,6 +148,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.rs` | `rust.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |
 | `**/*.c` | `c.md` |
+| `**/*.{php,phtml}` | `php.md`——PHP 源代码和 PHP 模板。 |
 | *(fallback)* | `default.md` |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。

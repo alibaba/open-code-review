@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 var sessionSubDir = "sessions"

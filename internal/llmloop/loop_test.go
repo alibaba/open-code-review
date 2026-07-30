@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-code-review/open-code-review/internal/config/template"
-	"github.com/open-code-review/open-code-review/internal/llm"
-	"github.com/open-code-review/open-code-review/internal/session"
-	"github.com/open-code-review/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/tool"
 )
 
 type fakeClient struct {
@@ -222,6 +222,66 @@ func TestRunPerFile_MaxToolRequestsWithoutTaskDoneDoesNotComplete(t *testing.T) 
 	}
 	if stop != StopMaxRounds {
 		t.Fatalf("expected StopMaxRounds, got %v", stop)
+	}
+}
+
+func TestRunPerFile_EmptyToolResultsStopWithEmptyRounds(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		fileReadToolCallResponse("call_2", `{"path":"main.go"}`),
+		fileReadToolCallResponse("call_3", `{"path":"main.go"}`),
+	}}
+	deps := newTestDeps(client)
+	reg := tool.NewRegistry()
+	reg.Register(&fakeFileReadProvider{result: ""})
+	deps.Tools = reg
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if completed {
+		t.Fatal("RunPerFile completed without task_done")
+	}
+	if stop != StopEmptyRounds {
+		t.Fatalf("stop = %v, want StopEmptyRounds", stop)
+	}
+	if client.calls != 3 {
+		t.Fatalf("LLM calls = %d, want 3 empty rounds", client.calls)
+	}
+}
+
+func TestRunPerFile_UncompressibleContextStopsWithCompression(t *testing.T) {
+	emptySummary := ""
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		{
+			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &emptySummary}}},
+			Model:   "fake",
+		},
+	}}
+	deps := newTestDeps(client)
+	deps.Template.MaxTokens = 20
+	deps.Template.MemoryCompressionTask = template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "Summarize: {{context}}"}},
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", strings.Repeat("word ", 100))}
+	completed, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if completed {
+		t.Fatal("RunPerFile completed without task_done")
+	}
+	if stop != StopCompression {
+		t.Fatalf("stop = %v, want StopCompression", stop)
+	}
+	if client.calls != 2 {
+		t.Fatalf("LLM calls = %d, want one main call and one compression call", client.calls)
 	}
 }
 

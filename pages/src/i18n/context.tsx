@@ -1,10 +1,11 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { Language, TranslationKeys } from './types';
 import { en } from './en';
 import { zh } from './zh';
 import { ja } from './ja';
+import { ru } from './ru';
 
-const translations: Record<Language, TranslationKeys> = { en, zh, ja };
+const translations: Record<Language, TranslationKeys> = { en, zh, ja, ru };
 
 interface LanguageContextValue {
   language: Language;
@@ -16,7 +17,7 @@ const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 const STORAGE_KEY = 'ocr-lang';
 
-const SUPPORTED_LANGUAGES: Language[] = ['en', 'zh', 'ja'];
+const SUPPORTED_LANGUAGES: Language[] = ['en', 'zh', 'ja', 'ru'];
 
 function detectBrowserLanguage(): Language | null {
   try {
@@ -39,13 +40,17 @@ function getInitialLanguage(): Language {
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [language, setLanguageState] = useState<Language>(getInitialLanguage);
 
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
+
   const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
     try { localStorage.setItem(STORAGE_KEY, lang); } catch {}
   }, []);
 
   const t = useCallback((key: string): string => {
-    return translations[language][key] ?? key;
+    return translations[language][key as keyof TranslationKeys] ?? key;
   }, [language]);
 
   return (

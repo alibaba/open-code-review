@@ -496,6 +496,35 @@ func TestFinalizeRejectsMissingMode(t *testing.T) {
 	}
 }
 
+func TestFinalizeValidationFailureDoesNotMutateSelectedItems(t *testing.T) {
+	b := NewManifestBuilder("run-1", "review")
+	if err := b.RegisterSelected(sel("a")); err != nil {
+		t.Fatalf("register selected: %v", err)
+	}
+	if err := b.SealSelected(); err != nil {
+		t.Fatalf("seal selected: %v", err)
+	}
+
+	if _, err := b.Finalize(0); err == nil {
+		t.Fatal("expected missing input.mode to fail validation")
+	}
+	if b.Frozen() {
+		t.Fatal("validation failure must not freeze the builder")
+	}
+
+	b.SetInput(ManifestInput{Mode: InputModeWorkspace})
+	if err := b.MarkCompleted("a"); err != nil {
+		t.Fatalf("mark completed after failed Finalize: %v", err)
+	}
+	m, err := b.Finalize(0)
+	if err != nil {
+		t.Fatalf("retry Finalize: %v", err)
+	}
+	if m.TerminalState != StateComplete || len(m.Coverage.Completed) != 1 || len(m.Coverage.Failed) != 0 {
+		t.Fatalf("retried manifest = %+v, want one completed item", m)
+	}
+}
+
 // Finalize rejects an empty run_id.
 func TestFinalizeRejectsEmptyRunID(t *testing.T) {
 	b := NewManifestBuilder("", "review")

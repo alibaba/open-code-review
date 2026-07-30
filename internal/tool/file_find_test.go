@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-code-review/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
 
 // TestFileFind_NonGitDirectoryFallback verifies file_find works in a plain

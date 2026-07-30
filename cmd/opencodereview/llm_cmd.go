@@ -7,8 +7,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/config/testconnection"
-	"github.com/open-code-review/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/config/testconnection"
+	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 func runLLM(args []string) error {

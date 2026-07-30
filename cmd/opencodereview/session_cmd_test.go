@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-code-review/open-code-review/internal/model"
-	"github.com/open-code-review/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func TestRunSessionList_TextIncludesSessionID(t *testing.T) {
@@ -191,6 +191,17 @@ func TestSessionDisplayUsesManifestStatusAndCoverage(t *testing.T) {
 	got := captureStdout(t, func() { printSessionDetail(os.Stdout, &summary, nil) })
 	if !strings.Contains(got, "4 selected = 1 completed + 1 reused + 1 failed + 1 waived") {
 		t.Fatalf("detail = %q", got)
+	}
+}
+
+func TestSessionDisplayUsesUnknownForInvalidManifestStatus(t *testing.T) {
+	for _, state := range []session.TerminalState{"", "bogus"} {
+		summary := session.Summary{
+			RunManifest: &session.RunManifest{TerminalState: state},
+		}
+		if got := describeStatus(summary); got != "unknown" {
+			t.Errorf("terminal state %q displayed as %q, want unknown", state, got)
+		}
 	}
 }
 

@@ -141,7 +141,8 @@ text the agent should follow:
 3. Try `~/.opencodereview/rule.json` in declaration order.
 4. Fall back to the embedded system rule layer.
 
-The embedded `system_rules.json` ships with these patterns (in order):
+Selected embedded `system_rules.json` patterns are shown below in relative
+matching order:
 
 | Pattern | Rule doc |
 |---|---|
@@ -151,6 +152,7 @@ The embedded `system_rules.json` ships with these patterns (in order):
 | `**/build.gradle` | `build_gradle.md` — Gradle dependencies. |
 | `**/package.json` | `package_json.md` — NPM dependencies / scripts. |
 | `**/Cargo.toml` | `cargo_toml.md` — Rust manifest. |
+| `**/composer.json` | `composer_json.md` — Composer dependencies, autoloading, scripts, plugins, and package configuration. |
 | `**/*.{json,json5}` | `json.md` — generic JSON (also matches `.json5`). |
 | `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — GitHub Actions workflow YAML. |
 | `.github/**/*.{yaml,yml}` | `github_config.md` — other `.github` config YAML. |
@@ -163,6 +165,7 @@ The embedded `system_rules.json` ships with these patterns (in order):
 | `**/*.rs` | `rust.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |
 | `**/*.c` | `c.md` |
+| `**/*.{php,phtml}` | `php.md` — PHP source and PHP templates. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

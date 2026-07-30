@@ -11,8 +11,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/open-code-review/open-code-review/internal/gitcmd"
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // DiffContextLines defines the number of context lines around each changed hunk.

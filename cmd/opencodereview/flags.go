@@ -95,25 +95,26 @@ func expandShortFlags(args []string, shortMap map[string]string) []string {
 // --- review subcommand options ---
 
 type reviewOptions struct {
-	toolConfigPath string
-	rulePath       string
-	repoDir        string
-	from           string
-	to             string
-	commit         string
-	resume         string
-	excludes       string // --exclude: comma-separated gitignore-style patterns
-	outputFormat   string
-	audience       string // --audience: "human" (default) or "agent"
-	background     string // --background: optional requirement context
-	backgroundFile string // --background-file: path to a Markdown file used as background
-	model          string // --model: override resolved LLM model for this review
-	concurrency    int
-	perFileTimeout int
-	maxTools       int
-	maxGitProcs    int
-	preview        bool
-	showHelp       bool
+	toolConfigPath  string
+	rulePath        string
+	repoDir         string
+	from            string
+	to              string
+	commit          string
+	resume          string
+	excludes        string // --exclude: comma-separated gitignore-style patterns
+	outputFormat    string
+	audience        string // --audience: "human" (default) or "agent"
+	background      string // --background: optional requirement context
+	backgroundFile  string // --background-file: path to a Markdown file used as background
+	model           string // --model: override resolved LLM model for this review
+	concurrency     int
+	perFileTimeout  int
+	maxTools        int
+	maxGitProcs     int
+	maxTokensBudget int // --max-tokens-budget: cap total token usage; 0 = unlimited
+	preview         bool
+	showHelp        bool
 }
 
 func parseReviewFlags(args []string) (reviewOptions, error) {
@@ -138,6 +139,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.model, "model", "", "override LLM model for this review (e.g., claude-opus-4-6)")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
+	a.IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output); dispatch stops once exceeded (0 = unlimited)")
 	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be reviewed without running the LLM")
 
 	if err := a.Parse(args); err != nil {
@@ -188,6 +190,9 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	if opts.maxGitProcs < 0 {
 		return opts, fmt.Errorf("--max-git-procs must be a non-negative integer (0 means use default 16)")
 	}
+	if opts.maxTokensBudget < 0 {
+		return opts, fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
+	}
 
 	return opts, nil
 }
@@ -224,6 +229,9 @@ Examples:
   ocr review --preview
   ocr review -c abc123 -p
 
+  # Exclude generated files / fixtures
+  ocr review --exclude '**/generated/*,**/testdata/*'
+
   # Provide requirement/business context inline, from a Markdown file, or both
   ocr review --background "Adding rate limiting to the login API"
   ocr review --background-file ./docs/requirements.md
@@ -236,7 +244,9 @@ Flags:
   -c, --commit string           single commit hash or tag to review (vs its parent)
   -f, --format string           output format: text or json (default "text")
   --concurrency int             max concurrent file reviews (default 8)
+  --exclude string              comma-separated gitignore-style patterns to exclude (merged with rule.json)
   --max-git-procs int           max concurrent git subprocesses (default 16)
+  --max-tokens-budget int       cap total token usage; dispatch stops once exceeded (0 = unlimited)
   --from string                 source ref to start diff from (e.g., 'main')
   --max-tools int               max tool call rounds per file (0 = template default; min 10)
   --model string                override LLM model for this review (e.g., claude-opus-4-6)
@@ -275,7 +285,7 @@ func parseConfigArgs(args []string) (configAction, error) {
 		}, nil
 	case "unset":
 		if len(args) < 2 {
-			return configAction{}, fmt.Errorf("usage: ocr config unset custom_providers.<name>\ne.g., ocr config unset custom_providers.my-gateway")
+			return configAction{}, fmt.Errorf("usage: ocr config unset custom_providers.<name> | mcp_servers.<name>\ne.g., ocr config unset custom_providers.my-gateway\ne.g., ocr config unset mcp_servers.codegraph")
 		}
 		return configAction{
 			subCmd: "unset",
@@ -324,6 +334,11 @@ Examples:
   ocr config set mcp_servers.codegraph.args '["-y","@anthropic/codegraph-mcp"]'
   ocr config set mcp_servers.codegraph.env '["CODEGRAPH_TOKEN=xxx"]'
 
+  # Remote MCP server (Streamable HTTP transport)
+  ocr config set mcp_servers.remote-srv.type remote
+  ocr config set mcp_servers.remote-srv.url https://mcp.example.com/mcp
+  ocr config set mcp_servers.remote-srv.headers '{"Authorization":"Bearer $MCP_TOKEN"}'
+
   # Delete an MCP server
   ocr config unset mcp_servers.codegraph
 
@@ -339,5 +354,5 @@ Examples:
 Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging
 Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers
 Protocol values: anthropic, openai, openai-responses
-MCP server fields: command, args, env, tools, setup`)
+MCP server fields: type, command, args, env, url, headers, tools, setup`)
 }

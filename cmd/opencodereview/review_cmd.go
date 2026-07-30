@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/agent"
-	"github.com/open-code-review/open-code-review/internal/mcp"
-	"github.com/open-code-review/open-code-review/internal/session"
-	"github.com/open-code-review/open-code-review/internal/telemetry"
-	"github.com/open-code-review/open-code-review/internal/tool"
+	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/mcp"
+	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/telemetry"
+	"github.com/alibaba/open-code-review/internal/tool"
 
 	"go.opentelemetry.io/otel/codes"
 )
@@ -121,6 +121,7 @@ func runReview(args []string) error {
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
+		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
 
@@ -163,6 +164,8 @@ func runReview(args []string) error {
 		}
 	}
 	if resultErr != nil {
+		q.Restore()
+		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat)
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
@@ -176,7 +179,23 @@ func reviewResultError(runErr error, manifest *session.RunManifest) error {
 		return fmt.Errorf("review failed: %w", runErr)
 	}
 	if manifest != nil && manifest.TerminalState == session.StateFailed {
-		return errors.New("review failed: run manifest terminal state is failed")
+		// Aggregate budget exhaustion is a controlled run stop in #508: partial
+		// results are publishable and the process exits successfully. The manifest
+		// still records terminal_state=failed plus run_failure=budget so coverage
+		// remains explicit and every undispatched selected item is failed/budget.
+		if manifest.RunFailure != nil && manifest.RunFailure.Classification == session.RunFailureBudget {
+			return nil
+		}
+		// Reasons stored in the manifest already went through sanitizeReason, so
+		// they are safe to echo on stderr.
+		if rf := manifest.RunFailure; rf != nil {
+			if rf.Reason != "" {
+				return fmt.Errorf("review failed (%s): %s", rf.Classification, rf.Reason)
+			}
+			return fmt.Errorf("review failed (%s)", rf.Classification)
+		}
+		return fmt.Errorf("review failed: %d of %d selected item(s) failed",
+			len(manifest.Coverage.Failed), len(manifest.Coverage.Selected))
 	}
 	return nil
 }
@@ -301,6 +320,26 @@ func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repo
 	var clients []*mcp.Client
 	for _, name := range mcpNames {
 		serverCfg := cfg.MCPServers[name]
+
+		isRemote := serverCfg.Type == "remote"
+
+		if isRemote {
+			if serverCfg.URL == "" {
+				fmt.Fprintf(os.Stderr, "[ocr] WARNING: remote MCP server %q has no URL configured, skipping\n", name)
+				continue
+			}
+			initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
+			mc, err := mcp.NewRemoteClient(initCtx, name, serverCfg.URL, serverCfg.Headers, version)
+			initCancel()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to connect to remote MCP server %q: %v\n", name, err)
+				continue
+			}
+			clients = append(clients, mc)
+			mcp.RegisterAll(tools, mc, serverCfg.Tools)
+			continue
+		}
+
 		if serverCfg.Command == "" {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: MCP server %q has no command configured, skipping\n", name)
 			continue

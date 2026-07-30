@@ -9,7 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func runSession(args []string) error {
@@ -252,7 +252,12 @@ func describeStatus(s session.Summary) string {
 		return "aborted"
 	}
 	if s.RunManifest != nil {
-		return string(s.RunManifest.TerminalState)
+		switch s.RunManifest.TerminalState {
+		case session.StateComplete, session.StatePartial, session.StateFailed, session.StateSkipped:
+			return string(s.RunManifest.TerminalState)
+		default:
+			return "unknown"
+		}
 	}
 	if s.FailedFiles > 0 {
 		return fmt.Sprintf("legacy (%d fail)", s.FailedFiles)

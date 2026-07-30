@@ -12,9 +12,9 @@ import (
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
-	"github.com/open-code-review/open-code-review/internal/agent"
-	"github.com/open-code-review/open-code-review/internal/model"
-	"github.com/open-code-review/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 type mockResultProvider struct {
@@ -30,6 +30,7 @@ type mockResultProvider struct {
 	toolCalls        map[string]int64
 	resumeInfo       *agent.ResumeInfo
 	sessionID        string
+	budgetExceeded   bool
 	manifest         *session.RunManifest
 }
 
@@ -45,6 +46,7 @@ func (m *mockResultProvider) ProjectSummary() string            { return m.proje
 func (m *mockResultProvider) ToolCalls() map[string]int64       { return m.toolCalls }
 func (m *mockResultProvider) ResumeInfo() *agent.ResumeInfo     { return m.resumeInfo }
 func (m *mockResultProvider) SessionID() string                 { return m.sessionID }
+func (m *mockResultProvider) BudgetExceeded() bool              { return m.budgetExceeded }
 func (m *mockResultProvider) RunManifest() *session.RunManifest { return m.manifest }
 
 func mockManifest(state session.TerminalState) *session.RunManifest {
@@ -81,7 +83,6 @@ func mockManifest(state session.TerminalState) *session.RunManifest {
 	}
 	return m
 }
-
 func TestEmitRunResult_JSONNoFiles(t *testing.T) {
 	ag := &mockResultProvider{filesReviewed: 0}
 	got := captureStdout(t, func() {

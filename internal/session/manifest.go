@@ -699,8 +699,14 @@ func (b *ManifestBuilder) Finalize(elapsed time.Duration) (RunManifest, error) {
 			sweepReason = r
 		}
 	}
+	type sweptItem struct {
+		item   *builderItem
+		before builderItem
+	}
+	swept := make([]sweptItem, 0)
 	for _, bi := range b.items {
 		if bi.state == stateSelected {
+			swept = append(swept, sweptItem{item: bi, before: *bi})
 			bi.state = stateFailed
 			bi.item.Classification = sweepClass
 			if bi.item.Reason == "" {
@@ -711,6 +717,12 @@ func (b *ManifestBuilder) Finalize(elapsed time.Duration) (RunManifest, error) {
 
 	cov := b.buildCoverageLocked()
 	if err := b.validateLocked(cov); err != nil {
+		// A failed Finalize must leave the unfrozen builder exactly as it was
+		// before the backstop sweep. Callers may repair a validation problem and
+		// still record the real outcome for an item before retrying Finalize.
+		for _, entry := range swept {
+			*entry.item = entry.before
+		}
 		return RunManifest{}, err
 	}
 	m := RunManifest{

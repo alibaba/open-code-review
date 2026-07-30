@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-code-review/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 // SessionsRoot returns the root directory where session JSONL files are stored.
@@ -190,18 +190,22 @@ func peekSession(path string) (SessionSummary, error) {
 // fixed token ceiling. session_end embeds the complete run manifest and can
 // legitimately exceed the former 10 MiB scanner limit on very large reviews.
 func readJSONLLines(r io.Reader, visit func([]byte)) error {
-	reader := bufio.NewReader(r)
+	reader := bufio.NewReaderSize(r, 64*1024)
 	for {
 		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			visit(line)
-		}
 		switch err {
 		case nil:
+			visit(line)
 			continue
 		case io.EOF:
+			if len(line) > 0 {
+				visit(line)
+			}
 			return nil
 		default:
+			// ReadBytes may return partial data together with a non-EOF error.
+			// Discard it rather than presenting a corrupt fragment as a JSONL
+			// record to callers.
 			return err
 		}
 	}

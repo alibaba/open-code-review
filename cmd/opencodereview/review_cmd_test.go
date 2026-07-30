@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-code-review/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
@@ -29,8 +29,32 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	if err := reviewResultError(nil, &session.RunManifest{TerminalState: session.StateFailed}); err == nil {
 		t.Fatal("failed manifest must produce a process error")
 	}
+	err := reviewResultError(nil, &session.RunManifest{
+		TerminalState: session.StateFailed,
+		RunFailure:    &session.RunFailure{Classification: session.RunFailureInput, Reason: "diff resolution failed"},
+	})
+	if err == nil || !strings.Contains(err.Error(), string(session.RunFailureInput)) || !strings.Contains(err.Error(), "diff resolution failed") {
+		t.Fatalf("run failure detail missing from error: %v", err)
+	}
+	err = reviewResultError(nil, &session.RunManifest{
+		TerminalState: session.StateFailed,
+		Coverage: session.Coverage{
+			Selected: []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}},
+			Failed:   []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "2 of 2 selected item(s) failed") {
+		t.Fatalf("failed item counts missing from error: %v", err)
+	}
+	budgetManifest := &session.RunManifest{
+		TerminalState: session.StateFailed,
+		RunFailure:    &session.RunFailure{Classification: session.RunFailureBudget, Reason: "aggregate token budget reached"},
+	}
+	if err := reviewResultError(nil, budgetManifest); err != nil {
+		t.Fatalf("controlled budget stop must not produce a process error: %v", err)
+	}
 	want := errors.New("dispatch failed")
-	if err := reviewResultError(want, &session.RunManifest{TerminalState: session.StateComplete}); !errors.Is(err, want) {
+	if err := reviewResultError(want, budgetManifest); !errors.Is(err, want) {
 		t.Fatalf("run error not preserved: %v", err)
 	}
 }

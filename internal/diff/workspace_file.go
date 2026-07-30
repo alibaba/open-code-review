@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/open-code-review/open-code-review/internal/pathutil"
+	"github.com/alibaba/open-code-review/internal/pathutil"
 )
 
 func readWorkspaceFileForDiff(repoDir, relPath string) ([]byte, error) {

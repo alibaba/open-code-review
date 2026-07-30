@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	allowedext "github.com/open-code-review/open-code-review/internal/config/allowlist"
-	"github.com/open-code-review/open-code-review/internal/model"
+	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // ExcludeReason / DiffPreview / DiffPreviewEntry are now type aliases of

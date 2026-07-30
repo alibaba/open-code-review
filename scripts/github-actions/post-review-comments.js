@@ -28,6 +28,41 @@ const NO_LINE_REASON = "No line information provided";
 // incrementalOverlapThreshold option / incremental_overlap_threshold input.
 const DEFAULT_OVERLAP_THRESHOLD = 0.6;
 
+// Default maximum number of inline comments packed into a single createReview
+// call. Production once failed at 71 comments in one request (GitHub Server
+// Error after partial success); 50 stays at GitHub's documented soft guidance
+// for inline comments per review while keeping typical (sub-50) runs on a
+// single batch. Tunable via the reviewCommentBatchSize option /
+// review_comment_batch_size input.
+const DEFAULT_BATCH_SIZE = 50;
+
+// Enumerations for category/severity routing, sourced from the LLM output
+// schema (internal/config/toolsconfig/tools.json:55-84). Used both to validate
+// the routing policy and to normalize the metadata before comparison. Kept as
+// plain arrays (not Sets) so tests can inspect ordering for severity ranking.
+const CATEGORIES = [
+  "bug",
+  "security",
+  "performance",
+  "maintainability",
+  "test",
+  "style",
+  "documentation",
+  "other",
+];
+// Severity rank: higher = more severe. An unknown/empty severity has no rank
+// (never matched by the routing policy). Order matches the enum (critical is
+// the most severe, low the least).
+const SEVERITIES = ["critical", "high", "medium", "low"];
+const SEVERITY_RANK = new Map(
+  SEVERITIES.map((s, i) => [s, SEVERITIES.length - i])
+); // critical=4, high=3, medium=2, low=1
+
+// Sentinel policy object: "do not route anything". Returned by buildPolicy on
+// any parse problem so the partition loop falls open to today's behavior (I1).
+// Equivalently produced by an empty policy (no threshold, no categories).
+const NO_ROUTING = Object.freeze({ routeBySeverity: false, routeByCategory: false });
+
 async function runPostReviewComments({
   github,
   context,
@@ -38,6 +73,14 @@ async function runPostReviewComments({
   stickySummary = true,
   incremental = false,
   incrementalOverlapThreshold = DEFAULT_OVERLAP_THRESHOLD,
+  reviewCommentBatchSize = DEFAULT_BATCH_SIZE,
+  // Fail-open finding-publication controls (#478). Both optional and empty by
+  // default: with neither set, behavior is byte-identical to today (modulo the
+  // additive badge prefix on rendered comments). buildPolicy parses them once
+  // before the partition loop and degrades to NO_ROUTING on any malformed value
+  // (fail-open for the policy itself, upholding I1).
+  routeSeverityBelow = "",
+  routeCategories = "",
 }) {
   const log = (msg) => {
     if (core && typeof core.info === "function") core.info(msg);
@@ -58,17 +101,14 @@ async function runPostReviewComments({
   // HTML comments so the idempotency check can detect whether a batch
   // createReview actually landed on the server before retrying, which prevents
   // duplicate review posts on retry.
-  const runId = Number.isFinite(context.runId) ? context.runId : 0;
-  const runAttempt = Number.isFinite(context.runAttempt) ? context.runAttempt : 1;
-  const RUN_TAG = `${runId}-${runAttempt}`;
-  const REVIEW_TAG = `<!-- ocr-review-run:${RUN_TAG} -->`;
-  const SUMMARY_TAG = `<!-- ocr-summary-run:${RUN_TAG} -->`;
+  const { RUN_TAG, REVIEW_TAG, SUMMARY_TAG } = buildRunTags(context.runId, context.runAttempt);
 
   const stats = {
     total: 0,
     inline: 0,
     skipped: 0,
     failed: 0,
+    routed: 0,
     summaryUrl: "",
   };
 
@@ -116,18 +156,35 @@ async function runPostReviewComments({
     commitSha = pullRequest.head.sha;
   }
 
-  // Partition: inline (with valid line info) vs summary (without).
+  // Partition: inline (with valid line info) vs summary (without) vs routed
+  // (valid line but the publication policy moves it to the summary).
   // Each inline comment gets a random per-comment ID (assigned once) embedded
   // in its body as an HTML comment, so the retry/idempotency logic can detect
   // whether a comment already landed on the server and avoid posting a
   // duplicate. Random (not content-derived) so two distinct comments that
   // share path/line/content still get different IDs.
+  //
+  // Routing is a placement decision in this loop, not a post-hoc filter: a
+  // finding the policy routes to summary is pushed to commentsRouted (mirroring
+  // commentsWithoutLine) instead of reviewComments. Routed findings therefore
+  // never enter reviewComments -> never enter toSend/toRetry -> never reach a
+  // createReview call (I4: no double-post surface on retry).
+  const policy = buildPolicy({ severityThreshold: routeSeverityBelow, categories: routeCategories });
   const reviewComments = [];
   const commentsWithoutLine = [];
+  const commentsRouted = [];
   for (const comment of comments) {
     const hasValidLine = comment.start_line >= 1 || comment.end_line >= 1;
     if (!hasValidLine) {
       commentsWithoutLine.push({ comment, body: formatComment(comment), reason: NO_LINE_REASON });
+      continue;
+    }
+    // Routing applies only to findings that COULD be posted inline (valid
+    // line). No-line findings already go to the summary via commentsWithoutLine,
+    // so they are never re-routed (avoids double-counting in the summary).
+    const route = routeComment(comment, policy);
+    if (route.routed) {
+      commentsRouted.push({ comment, body: formatComment(comment), reason: route.reason });
       continue;
     }
     const id = newCommentId(RUN_TAG);
@@ -182,14 +239,24 @@ async function runPostReviewComments({
     prNumber,
     sticky: stickySummary,
     tag: SUMMARY_TAG,
-    body: wrapSummary(buildPreReviewSummaryBody(stats.total, commentsWithoutLine, warnings)),
+    body: wrapSummary(
+      buildPreReviewSummaryBody(stats.total, commentsWithoutLine, commentsRouted, warnings)
+    ),
     log,
   });
 
-  // Submit inline comments (the to-send set) as a single PR review.
+  // Submit inline comments (the to-send set) as one or more PR reviews.
   let successCount = 0;
   let failedCount = 0;
   const failedComments = [];
+
+  // Sort before partitioning so identical reruns produce identical batches
+  // (B2/AS4): a partial-success retry reproduces the same partition, which is
+  // what makes per-batch reconciliation against already-posted fence IDs work.
+  const batchSize = resolveBatchSize(reviewCommentBatchSize);
+  const sorted = sortToSendDeterministically(toSend);
+  const batches = chunkArray(sorted, batchSize);
+  const batchCounters = { total: batches.length, attempted: 0, succeeded: 0, reconciled: 0 };
 
   if (toSend.length > 0) {
     // The summary lives in its own issue comment (anchored above), so the
@@ -198,211 +265,24 @@ async function runPostReviewComments({
     // may have landed on the server even though we received a 5xx response).
     const reviewBody = REVIEW_TAG;
 
-    try {
-      const batchRes = await github.rest.pulls.createReview({
+    for (const chunk of batches) {
+      const r = await publishBatch({
+        chunk,
+        github,
         owner,
         repo,
-        pull_number: prNumber,
-        commit_id: commitSha,
-        body: reviewBody,
-        event: "COMMENT",
-        comments: toSend.map(({ reviewComment }) => reviewComment),
+        prNumber,
+        commitSha,
+        reviewBody,
+        REVIEW_TAG,
+        log,
       });
-      successCount = toSend.length;
-      log(`Successfully posted review with ${successCount} inline comment(s) (${commentsWithoutLine.length} in summary).`);
-      logRateLimitQuota(batchRes, "after batch createReview", log);
-    } catch (e) {
-      log(`Failed to post review with inline comments: ${e.message}`);
-
-      // Retry/pacing configuration (shared by write and read API calls).
-      // parseNonNegInt guards against nonsensical env values (negative, NaN,
-      // non-numeric) that `parseInt(...) || default` would let through for
-      // negative numbers, since a negative parseInt result is truthy and would
-      // bypass the `|| default` fallback.
-      const MAX_RETRIES = parseNonNegInt(process.env.OCR_MAX_RETRIES, 3);
-      const SUCCESS_DELAY = parseNonNegInt(process.env.OCR_SUCCESS_DELAY, 2000);
-      const FAILURE_DELAY = parseNonNegInt(process.env.OCR_FAILURE_DELAY, 1000);
-      const LOW_REMAINING_THRESHOLD = parseNonNegInt(process.env.OCR_LOW_REMAINING_THRESHOLD, 3);
-      const LOW_REMAINING_SPACING = parseNonNegInt(process.env.OCR_LOW_REMAINING_SPACING, 10000);
-      // Read APIs are cheaper and have higher thresholds; use shorter pacing.
-      const READ_SUCCESS_DELAY = parseNonNegInt(process.env.OCR_READ_SUCCESS_DELAY, 500);
-      const READ_LOW_REMAINING_SPACING = parseNonNegInt(process.env.OCR_READ_LOW_REMAINING_SPACING, 5000);
-
-      // Rate-limit cooldown: honor the batch error's retry/rate-limit headers
-      // BEFORE any further API call — including the idempotency reads below.
-      // Firing reads immediately after a rate-limit/5xx would further pressure
-      // the already-struggling API; this is the same cool-down-before-read
-      // discipline the per-comment loop applies before isCommentAlreadyPosted.
-      const batchRetry = computeRetryDelayMs(e, 0);
-      if (batchRetry != null) {
-        const secs = (batchRetry.delayMs / 1000).toFixed(1);
-        log(
-          `Batch createReview failed (HTTP ${e.status}). ` +
-            `Cooling down ${secs}s via '${batchRetry.source}' (${batchRetry.detail}) before any retry or read.`
-        );
-        await sleep(batchRetry.delayMs);
-      }
-
-      // The idempotency read ("did the batch land?") is only meaningful when the
-      // request MAY have reached the server: 5xx, 408 timeout, or a network
-      // error with no status. For a pure rate-limit (429 / 403 abuse) or a
-      // validation error (422), the request was rejected before the review was
-      // created, so the batch definitely did not land — querying would be both
-      // pointless AND an extra read fired during a rate-limit episode. Skip it
-      // and retry all comments. This mirrors the per-comment maybeReachedServer
-      // predicate so the two layers stay consistent.
-      const batchStatus = e.status;
-      const batchMaybeReachedServer =
-        (typeof batchStatus === "number" && (batchStatus >= 500 || batchStatus === 408)) ||
-        batchStatus == null; // network errors (ECONNRESET, ETIMEDOUT, ...)
-
-      let existingReview = null;
-      if (batchMaybeReachedServer) {
-        log("Checking whether the batch review actually landed on the server before retrying...");
-        try {
-          existingReview = await findExistingBatchReview({ github, owner, repo, prNumber, tag: REVIEW_TAG, log });
-        } catch (checkErr) {
-          log(`Idempotency check failed (${checkErr.message}). Degrading to original fallback (accepting duplicate risk).`);
-        }
-      } else {
-        log(`Batch did not reach the server (HTTP ${batchStatus || "n/a"}); skipping idempotency check and retrying all comments.`);
-      }
-
-      // Compute the list of inline comments that still need to be posted. If
-      // the batch review landed, only retry the missing ones; otherwise retry
-      // all of them.
-      let toRetry = toSend;
-      if (existingReview && existingReview.found) {
-        const postedIds = await getPostedCommentIds({ github, owner, repo, prNumber, log });
-        toRetry = toSend.filter((item) => !postedIds.has(item.id));
-        successCount = toSend.length - toRetry.length;
-        log(
-          `Batch review already exists (review_id=${existingReview.review.id}). ` +
-            `${successCount}/${toSend.length} inline comments already posted. ` +
-            `${toRetry.length} missing, will retry only those.`
-        );
-      } else {
-        log("Batch review not found on server. Falling back to per-comment posting...");
-      }
-
-      for (const { comment, reviewComment, id } of toRetry) {
-        let posted = false;
-        for (let attempt = 0; attempt <= MAX_RETRIES && !posted; attempt++) {
-          try {
-            const res = await github.rest.pulls.createReview({
-              owner,
-              repo,
-              pull_number: prNumber,
-              commit_id: commitSha,
-              body: "",
-              event: "COMMENT",
-              comments: [reviewComment],
-            });
-            successCount++;
-            posted = true;
-            log(`Successfully posted comment for ${reviewComment.path}`);
-            // Proactive throttle: if remaining quota is low, slow down to
-            // avoid hitting the limit (GitHub best practice: watch the header).
-            const remaining = logRateLimitQuota(res, `after ${reviewComment.path}`, log);
-            const lowQuota = remaining != null && remaining <= LOW_REMAINING_THRESHOLD;
-            if (lowQuota) {
-              log(`[rate-limit] quota low (remaining=${remaining} <= ${LOW_REMAINING_THRESHOLD}); increasing spacing to ${LOW_REMAINING_SPACING}ms.`);
-              await sleep(LOW_REMAINING_SPACING);
-            } else {
-              await sleep(SUCCESS_DELAY);
-            }
-          } catch (innerE) {
-            // Decide whether to retry and how long to wait, based on GitHub's
-            // rate-limit documentation (retry-after / x-ratelimit-* headers).
-            const retryInfo = computeRetryDelayMs(innerE, attempt);
-            const willRetry = retryInfo != null && attempt < MAX_RETRIES;
-            // Any error whose request may have reached GitHub (5xx server
-            // errors, 408 timeout, or network-layer errors with no status) can
-            // mean the comment was actually created but the response was lost.
-            // Before retrying (which would post a duplicate) or before giving
-            // up (which would wrongly list it as failed in the summary), check
-            // whether it already landed.
-            //
-            // IMPORTANT: do the check AFTER cooling down, not immediately. If
-            // the error is rate-limit-related (5xx under load, or a network
-            // blip), firing read requests right away further pressures the
-            // already-struggling API. Honor the computed retry delay first,
-            // then query.
-            const status = innerE.status;
-            const maybeReachedServer =
-              (typeof status === "number" && (status >= 500 || status === 408)) ||
-              status == null; // network errors (ECONNRESET, ETIMEDOUT, ...)
-            if (maybeReachedServer) {
-              // Cool down first: even read requests count against rate limits,
-              // and querying during an ongoing 5xx/rate-limit episode can
-              // worsen the situation. Use the retry delay when available; for
-              // non-retryable errors (retryInfo == null) there is no
-              // header-derived wait, so use a short fixed cool down before the
-              // read.
-              const coolDownMs = retryInfo != null ? retryInfo.delayMs : FAILURE_DELAY;
-              if (coolDownMs > 0) {
-                const secs = (coolDownMs / 1000).toFixed(1);
-                log(
-                  `Cooling down ${secs}s before idempotency check for ${reviewComment.path} ` +
-                    `(HTTP ${innerE.status || "n/a"}, attempt ${attempt + 1}/${MAX_RETRIES + 1}).`
-                );
-                await sleep(coolDownMs);
-              }
-              const alreadyPosted = await isCommentAlreadyPosted({ github, owner, repo, prNumber, id, log });
-              if (alreadyPosted === true) {
-                successCount++;
-                posted = true;
-                log(`Comment for ${reviewComment.path} already posted (id=${id}); treating as success.`);
-                await sleep(SUCCESS_DELAY);
-                continue;
-              }
-              // Unknown (null): the read API is unavailable, so we cannot tell
-              // whether the comment landed. To avoid a duplicate, do NOT retry
-              // posting; record as failed so the summary surfaces the
-              // uncertainty rather than silently risking a duplicate.
-              if (alreadyPosted === null) {
-                failedCount++;
-                const reason = "idempotency check unavailable (read API failed)";
-                failedComments.push({ comment, error: `${innerE.message} [${reason}]` });
-                log(`Cannot verify whether comment for ${reviewComment.path} was posted (${reason}, HTTP ${innerE.status || "n/a"}); skipping retry to avoid duplicate.`);
-                await sleep(SUCCESS_DELAY);
-                break;
-              }
-              // Not found on server. If retries are exhausted or the error is
-              // non-retryable, this is a real failure.
-              if (!willRetry) {
-                failedCount++;
-                failedComments.push({ comment, error: innerE.message });
-                const reason = retryInfo == null ? "non-retryable error" : "rate-limit retries exhausted";
-                log(`Failed to post comment for ${reviewComment.path} (${reason}, HTTP ${innerE.status || "n/a"}): ${innerE.message}`);
-                await sleep(SUCCESS_DELAY);
-                break;
-              }
-              // willRetry: cool down already consumed above, loop back.
-            } else if (willRetry) {
-              // Pure 429/403 rate-limit: the request never reached the server,
-              // so no duplicate is possible and the idempotency check can be
-              // skipped. Just honor the retry delay.
-              const secs = (retryInfo.delayMs / 1000).toFixed(1);
-              log(
-                `Rate-limited on ${reviewComment.path} ` +
-                  `(HTTP ${innerE.status}, attempt ${attempt + 1}/${MAX_RETRIES}). ` +
-                  `Waiting ${secs}s via '${retryInfo.source}' (${retryInfo.detail}). ` +
-                  `Error: ${innerE.message}`
-              );
-              await sleep(retryInfo.delayMs);
-            } else {
-              // Non-retryable error that definitely did not reach the server
-              // (e.g. 4xx validation error): record as failed.
-              failedCount++;
-              failedComments.push({ comment, error: innerE.message });
-              log(`Failed to post comment for ${reviewComment.path} (non-retryable error, HTTP ${innerE.status || "n/a"}): ${innerE.message}`);
-              await sleep(FAILURE_DELAY);
-              break;
-            }
-          }
-        }
-      }
+      successCount += r.succeeded;
+      failedCount += r.failed;
+      for (const fc of r.failedComments) failedComments.push(fc);
+      batchCounters.attempted++;
+      if (r.reconciled) batchCounters.reconciled++;
+      if (r.succeeded > 0) batchCounters.succeeded++;
     }
   } else {
     log("No inline comments to post after filtering (all overlapping or none had line info).");
@@ -410,24 +290,29 @@ async function runPostReviewComments({
 
   stats.inline = successCount;
   stats.failed = failedCount;
+  stats.routed = commentsRouted.length;
 
   // ---- Finalize the summary with the complete body ----
   // Now that the review has landed (or failed per-comment), write the final
   // summary body. Posting statistics are merged into the leading summary
   // header (see buildSummaryBody), so here we only append the per-comment
   // renderings: every comment that did not go out as inline — whether because
-  // it had no line info or because posting failed — is rendered as one
-  // continuous block, each carrying the reason it ended up in the summary (so
-  // the reader always knows why it is here).
+  // it had no line info, was routed by the publication policy, or because
+  // posting failed — is rendered as one continuous block, each carrying the
+  // reason it ended up in the summary (so the reader always knows why it is
+  // here). Routed findings render BEFORE the failed block so the order is:
+  // counts → no-line summary → routed summary → failed.
   let summaryBody = buildSummaryBody({
     total: stats.total,
     inline: successCount,
     summary: commentsWithoutLine.length,
     skipped: stats.skipped,
+    routed: commentsRouted.length,
     failed: failedCount,
     warnings,
   });
   summaryBody += formatSummaryComments(commentsWithoutLine);
+  summaryBody += formatSummaryComments(commentsRouted);
   for (const { comment, error } of failedComments) {
     summaryBody += "\n\n---\n\n";
     summaryBody += formatCommentMarkdown(comment, error);
@@ -455,15 +340,354 @@ async function runPostReviewComments({
   });
   if (finalized) stats.summaryUrl = finalized.url;
 
-  setStatsOutputs(out, stats);
+  setStatsOutputs(out, stats, batchCounters, batchSize);
 }
 
-function setStatsOutputs(out, stats) {
+// Publish a single bounded batch of inline comments via one createReview call,
+// then reconcile + per-comment-retry on failure. This is the per-batch body of
+// the previous all-in-one publish block, factored out so it can run once per
+// chunk. The reconciliation/idempotency logic is unchanged: the only behavioral
+// difference is that it operates on `chunk` (a slice of the sorted toSend) and
+// returns its counts/failed-list so the caller can accumulate them across
+// batches (B3/B4/B5/B6).
+//
+// Returns { succeeded, failed, failedComments, reconciled }.
+//   - succeeded: comments in this batch that ended up on the server (posted by
+//     the batch call, or reconciled-already-posted, or per-comment retry).
+//   - failed: comments that could not be posted AND could not be reconciled.
+//   - reconciled: true if the batch call failed and at least one of this
+//     batch's comments was proven already-posted (idempotency read succeeded).
+async function publishBatch({
+  chunk,
+  github,
+  owner,
+  repo,
+  prNumber,
+  commitSha,
+  reviewBody,
+  REVIEW_TAG,
+  log,
+}) {
+  let succeeded = 0;
+  let failed = 0;
+  const failedComments = [];
+  let reconciled = false;
+
+  try {
+    const batchRes = await github.rest.pulls.createReview({
+      owner,
+      repo,
+      pull_number: prNumber,
+      commit_id: commitSha,
+      body: reviewBody,
+      event: "COMMENT",
+      comments: chunk.map(({ reviewComment }) => reviewComment),
+    });
+    succeeded = chunk.length;
+    log(`Successfully posted review batch with ${succeeded} inline comment(s).`);
+    logRateLimitQuota(batchRes, "after batch createReview", log);
+  } catch (e) {
+    log(`Failed to post review batch with ${chunk.length} inline comment(s): ${e.message}`);
+
+    // Retry/pacing configuration (shared by write and read API calls).
+    // parseNonNegInt guards against nonsensical env values (negative, NaN,
+    // non-numeric) that `parseInt(...) || default` would let through for
+    // negative numbers, since a negative parseInt result is truthy and would
+    // bypass the `|| default` fallback. These are re-read here (not threaded
+    // through a config bag) to keep this helper a behavior-preserving move of
+    // the existing catch block — scoping config to only the batch size would
+    // silently drop per-comment pacing.
+    const MAX_RETRIES = parseNonNegInt(process.env.OCR_MAX_RETRIES, 3);
+    const SUCCESS_DELAY = parseNonNegInt(process.env.OCR_SUCCESS_DELAY, 2000);
+    const FAILURE_DELAY = parseNonNegInt(process.env.OCR_FAILURE_DELAY, 1000);
+    const LOW_REMAINING_THRESHOLD = parseNonNegInt(process.env.OCR_LOW_REMAINING_THRESHOLD, 3);
+    const LOW_REMAINING_SPACING = parseNonNegInt(process.env.OCR_LOW_REMAINING_SPACING, 10000);
+    // Note: read-API pacing (OCR_READ_SUCCESS_DELAY / OCR_READ_LOW_REMAINING_SPACING)
+    // is handled internally by readWithPacing() for the read calls below
+    // (findExistingBatchReview / getPostedCommentIds / isCommentAlreadyPosted),
+    // so it is not read here — only the write-path pacing knobs are.
+
+    // Rate-limit cooldown: honor the batch error's retry/rate-limit headers
+    // BEFORE any further API call — including the idempotency reads below.
+    // Firing reads immediately after a rate-limit/5xx would further pressure
+    // the already-struggling API; this is the same cool-down-before-read
+    // discipline the per-comment loop applies before isCommentAlreadyPosted.
+    const batchRetry = computeRetryDelayMs(e, 0);
+    if (batchRetry != null) {
+      const secs = (batchRetry.delayMs / 1000).toFixed(1);
+      log(
+        `Batch createReview failed (HTTP ${e.status}). ` +
+          `Cooling down ${secs}s via '${batchRetry.source}' (${batchRetry.detail}) before any retry or read.`
+      );
+      await sleep(batchRetry.delayMs);
+    }
+
+    // The idempotency read ("did the batch land?") is only meaningful when the
+    // request MAY have reached the server: 5xx, 408 timeout, or a network
+    // error with no status. For a pure rate-limit (429 / 403 abuse) or a
+    // validation error (422), the request was rejected before the review was
+    // created, so the batch definitely did not land — querying would be both
+    // pointless AND an extra read fired during a rate-limit episode. Skip it
+    // and retry all comments. This mirrors the per-comment maybeReachedServer
+    // predicate so the two layers stay consistent.
+    const batchStatus = e.status;
+    const batchMaybeReachedServer =
+      (typeof batchStatus === "number" && (batchStatus >= 500 || batchStatus === 408)) ||
+      batchStatus == null; // network errors (ECONNRESET, ETIMEDOUT, ...)
+
+    let existingReview = null;
+    if (batchMaybeReachedServer) {
+      log("Checking whether the batch review actually landed on the server before retrying...");
+      try {
+        existingReview = await findExistingBatchReview({ github, owner, repo, prNumber, tag: REVIEW_TAG, log });
+      } catch (checkErr) {
+        log(`Idempotency check failed (${checkErr.message}). Degrading to original fallback (accepting duplicate risk).`);
+      }
+    } else {
+      log(`Batch did not reach the server (HTTP ${batchStatus || "n/a"}); skipping idempotency check and retrying all comments.`);
+    }
+
+    // Compute the list of inline comments that still need to be posted. If the
+    // batch review landed, only retry the missing ones; otherwise retry all of
+    // them. NOTE: REVIEW_TAG is shared across all batches, so
+    // findExistingBatchReview may match an EARLIER batch's review — harmless
+    // for correctness because getPostedCommentIds returns a server-global set
+    // of every fence ID across ALL reviews, and we filter this chunk's items
+    // against that global set (never the set against the chunk). The counts
+    // below therefore reflect only THIS chunk's members.
+    let toRetry = chunk;
+    if (existingReview && existingReview.found) {
+      const postedIds = await getPostedCommentIds({ github, owner, repo, prNumber, log });
+      toRetry = chunk.filter((item) => !postedIds.has(item.id));
+      succeeded = chunk.length - toRetry.length;
+      reconciled = succeeded > 0;
+      log(
+        `A batch review with this run's tag exists on the server ` +
+          `(review_id=${existingReview.review.id}, may belong to an earlier batch). ` +
+          `${succeeded}/${chunk.length} of this batch's inline comments already posted. ` +
+          `${toRetry.length} missing, will retry only those.`
+      );
+    } else {
+      log("Batch review not found on server. Falling back to per-comment posting...");
+    }
+
+    for (const { comment, reviewComment, id } of toRetry) {
+      let posted = false;
+      for (let attempt = 0; attempt <= MAX_RETRIES && !posted; attempt++) {
+        try {
+          const res = await github.rest.pulls.createReview({
+            owner,
+            repo,
+            pull_number: prNumber,
+            commit_id: commitSha,
+            body: "",
+            event: "COMMENT",
+            comments: [reviewComment],
+          });
+          succeeded++;
+          posted = true;
+          log(`Successfully posted comment for ${reviewComment.path}`);
+          // Proactive throttle: if remaining quota is low, slow down to
+          // avoid hitting the limit (GitHub best practice: watch the header).
+          const remaining = logRateLimitQuota(res, `after ${reviewComment.path}`, log);
+          const lowQuota = remaining != null && remaining <= LOW_REMAINING_THRESHOLD;
+          if (lowQuota) {
+            log(`[rate-limit] quota low (remaining=${remaining} <= ${LOW_REMAINING_THRESHOLD}); increasing spacing to ${LOW_REMAINING_SPACING}ms.`);
+            await sleep(LOW_REMAINING_SPACING);
+          } else {
+            await sleep(SUCCESS_DELAY);
+          }
+        } catch (innerE) {
+          // Decide whether to retry and how long to wait, based on GitHub's
+          // rate-limit documentation (retry-after / x-ratelimit-* headers).
+          const retryInfo = computeRetryDelayMs(innerE, attempt);
+          const willRetry = retryInfo != null && attempt < MAX_RETRIES;
+          // Any error whose request may have reached GitHub (5xx server
+          // errors, 408 timeout, or network-layer errors with no status) can
+          // mean the comment was actually created but the response was lost.
+          // Before retrying (which would post a duplicate) or before giving
+          // up (which would wrongly list it as failed in the summary), check
+          // whether it already landed.
+          //
+          // IMPORTANT: do the check AFTER cooling down, not immediately. If
+          // the error is rate-limit-related (5xx under load, or a network
+          // blip), firing read requests right away further pressures the
+          // already-struggling API. Honor the computed retry delay first,
+          // then query.
+          const status = innerE.status;
+          const maybeReachedServer =
+            (typeof status === "number" && (status >= 500 || status === 408)) ||
+            status == null; // network errors (ECONNRESET, ETIMEDOUT, ...)
+          if (maybeReachedServer) {
+            // Cool down first: even read requests count against rate limits,
+            // and querying during an ongoing 5xx/rate-limit episode can
+            // worsen the situation. Use the retry delay when available; for
+            // non-retryable errors (retryInfo == null) there is no
+            // header-derived wait, so use a short fixed cool down before the
+            // read.
+            const coolDownMs = retryInfo != null ? retryInfo.delayMs : FAILURE_DELAY;
+            if (coolDownMs > 0) {
+              const secs = (coolDownMs / 1000).toFixed(1);
+              log(
+                `Cooling down ${secs}s before idempotency check for ${reviewComment.path} ` +
+                  `(HTTP ${innerE.status || "n/a"}, attempt ${attempt + 1}/${MAX_RETRIES + 1}).`
+              );
+              await sleep(coolDownMs);
+            }
+            const alreadyPosted = await isCommentAlreadyPosted({ github, owner, repo, prNumber, id, log });
+            if (alreadyPosted === true) {
+              succeeded++;
+              posted = true;
+              log(`Comment for ${reviewComment.path} already posted (id=${id}); treating as success.`);
+              await sleep(SUCCESS_DELAY);
+              continue;
+            }
+            // Unknown (null): the read API is unavailable, so we cannot tell
+            // whether the comment landed. To avoid a duplicate, do NOT retry
+            // posting; record as failed so the summary surfaces the
+            // uncertainty rather than silently risking a duplicate.
+            if (alreadyPosted === null) {
+              failed++;
+              const reason = "idempotency check unavailable (read API failed)";
+              failedComments.push({ comment, error: `${innerE.message} [${reason}]` });
+              log(`Cannot verify whether comment for ${reviewComment.path} was posted (${reason}, HTTP ${innerE.status || "n/a"}); skipping retry to avoid duplicate.`);
+              await sleep(SUCCESS_DELAY);
+              break;
+            }
+            // Not found on server. If retries are exhausted or the error is
+            // non-retryable, this is a real failure.
+            if (!willRetry) {
+              failed++;
+              failedComments.push({ comment, error: innerE.message });
+              const reason = retryInfo == null ? "non-retryable error" : "rate-limit retries exhausted";
+              log(`Failed to post comment for ${reviewComment.path} (${reason}, HTTP ${innerE.status || "n/a"}): ${innerE.message}`);
+              await sleep(SUCCESS_DELAY);
+              break;
+            }
+            // willRetry: cool down already consumed above, loop back.
+          } else if (willRetry) {
+            // Pure 429/403 rate-limit: the request never reached the server,
+            // so no duplicate is possible and the idempotency check can be
+            // skipped. Just honor the retry delay.
+            const secs = (retryInfo.delayMs / 1000).toFixed(1);
+            log(
+              `Rate-limited on ${reviewComment.path} ` +
+                `(HTTP ${innerE.status}, attempt ${attempt + 1}/${MAX_RETRIES}). ` +
+                `Waiting ${secs}s via '${retryInfo.source}' (${retryInfo.detail}). ` +
+                `Error: ${innerE.message}`
+            );
+            await sleep(retryInfo.delayMs);
+          } else {
+            // Non-retryable error that definitely did not reach the server
+            // (e.g. 4xx validation error): record as failed.
+            failed++;
+            failedComments.push({ comment, error: innerE.message });
+            log(`Failed to post comment for ${reviewComment.path} (non-retryable error, HTTP ${innerE.status || "n/a"}): ${innerE.message}`);
+            await sleep(FAILURE_DELAY);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return { succeeded, failed, failedComments, reconciled };
+}
+
+// Build the per-run idempotency tags from the GitHub Actions run identity.
+// runId / runAttempt come from @actions/github's Context (GITHUB_RUN_ID /
+// GITHUB_RUN_ATTEMPT); Number.isFinite guards against NaN when the env vars are
+// missing, falling back to safe defaults. REVIEW_TAG is the body marker the
+// batch createReview carries so findExistingBatchReview can locate a batch that
+// landed despite a 5xx; SUMMARY_TAG is the analogous marker for the summary
+// issue comment. Pure so it can be tested and reused.
+function buildRunTags(runId, runAttempt) {
+  const id = Number.isFinite(runId) ? runId : 0;
+  const attempt = Number.isFinite(runAttempt) ? runAttempt : 1;
+  const RUN_TAG = `${id}-${attempt}`;
+  return {
+    RUN_TAG,
+    REVIEW_TAG: `<!-- ocr-review-run:${RUN_TAG} -->`,
+    SUMMARY_TAG: `<!-- ocr-summary-run:${RUN_TAG} -->`,
+  };
+}
+
+// Resolve the configured batch size. A batch size is a positive integer (N>=1):
+// 0, negatives, NaN, and non-numeric strings all fall back to the default.
+// Mirrors the parseNonNegInt discipline but with a lower bound of 1, since a
+// zero-size batch would be nonsensical (B1).
+function resolveBatchSize(raw) {
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 1 ? n : DEFAULT_BATCH_SIZE;
+}
+
+// Deterministically order the toSend set before partitioning so identical
+// inputs produce identical batches across reruns (B2/AS4). Returns a NEW array
+// (does not mutate the caller's array). Sort key: path → start_line → end_line
+// → original array index. The explicit original-index tiebreak guarantees
+// stable ordering even for same-file same-line findings, on engines where
+// Array.prototype.sort stability would otherwise be incidental. Severity/
+// category ordering is intentionally absent — comment objects carry no such
+// fields (verified at the call site), and adding them is a cross-cutting schema
+// change explicitly out of scope (sibling issue #478).
+function sortToSendDeterministically(items) {
+  return items
+    .map((item, origIndex) => ({ item, origIndex }))
+    .sort((a, b) => {
+      const ca = a.item.comment;
+      const cb = b.item.comment;
+      const byPath = String(ca.path).localeCompare(String(cb.path));
+      if (byPath !== 0) return byPath;
+      const byStart = (ca.start_line || 0) - (cb.start_line || 0);
+      if (byStart !== 0) return byStart;
+      const byEnd = (ca.end_line || 0) - (cb.end_line || 0);
+      if (byEnd !== 0) return byEnd;
+      return a.origIndex - b.origIndex;
+    })
+    .map(({ item }) => item);
+}
+
+// Partition a sorted array into contiguous slices of at most `size` items
+// (B1/AS2/AS3). Contiguity + sorted input ⇒ deterministic partition: the last
+// slice is the remainder (length === size when items.length is a multiple of
+// size, otherwise items.length mod size).
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function setStatsOutputs(out, stats, batchCounters, batchSize) {
   out("comments_total", String(stats.total));
   out("comments_inline", String(stats.inline));
   out("comments_skipped", String(stats.skipped));
+  out("comments_routed", String(stats.routed));
   out("comments_failed", String(stats.failed));
   out("summary_comment_url", stats.summaryUrl || "");
+  // Per-batch telemetry (B7). These are additional outputs; the five above are
+  // unchanged so existing consumers of comments_* / summary_comment_url are
+  // unaffected. batch_summary is a single JSON string so a fleet dashboard can
+  // read one value instead of correlating multiple scalars.
+  if (batchCounters) {
+    out("batches_total", String(batchCounters.total));
+    out("batches_attempted", String(batchCounters.attempted));
+    out("batches_succeeded", String(batchCounters.succeeded));
+    out("batches_reconciled", String(batchCounters.reconciled));
+    out(
+      "batch_summary",
+      JSON.stringify({
+        total: batchCounters.total,
+        attempted: batchCounters.attempted,
+        succeeded: batchCounters.succeeded,
+        reconciled: batchCounters.reconciled,
+        batch_size: batchSize != null ? batchSize : DEFAULT_BATCH_SIZE,
+        inline: stats.inline,
+        failed: stats.failed,
+      })
+    );
+  }
 }
 
 // ---- Summary posting (sticky vs new) ----
@@ -1008,14 +1232,136 @@ function newCommentId(runTag) {
   return `ocr-${runTag}-${crypto.randomBytes(8).toString("hex")}`;
 }
 
+// ---- Badge + publication policy helpers (#478) ----
+//
+// These are pure functions (no I/O, no side effects) so they can be unit-tested
+// directly. buildBadge byte-matches the CLI's cmd/opencodereview/output.go
+// buildBadge degeneration so review output is consistent across surfaces (I6).
+// buildPolicy/routeComment implement fail-open finding-publication routing
+// (I1, I4): a finding never matches the policy on unknown/malformed metadata,
+// and routing is a placement decision (findings route OUT of the inline write
+// path), so a routed finding can never be double-posted on retry.
+
+// Strip C0/C1 control characters from a metadata value. The CLI's
+// sanitizeTerminal (cmd/opencodereview/output.go:197-206) strips control chars
+// but PRESERVES \t and \n (harmless in a terminal). This Action sanitizer is
+// intentionally STRICTER: it strips ALL control chars including \t and \n,
+// because a newline/tab in a category or severity would break the comment
+// body's layout (the badge renders in Markdown in a browser). This is a
+// deliberate, documented divergence from strict OC1 byte-parity: clean enum
+// values (the overwhelmingly common case) render identically across surfaces,
+// and the divergence only manifests for malformed model output, in a SAFER
+// direction (the Action cannot have its layout broken by a control char).
+function sanitizeMetadata(value) {
+  return String(value == null ? "" : value).replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+}
+
+// Build the category/severity badge for a comment, byte-matching the CLI's
+// buildBadge degeneration (cmd/opencodereview/output.go:98-114):
+//   both non-empty -> "[category · severity]" (with a middot, U+00B7)
+//   only category  -> "[category]"
+//   only severity  -> "[severity]"
+//   neither        -> "" (no badge line)
+// Returns the empty string (not a newline) when nothing renders, so callers
+// can prepend conditionally without leaving a blank line.
+function buildBadge(comment) {
+  const category = sanitizeMetadata(comment && comment.category);
+  const severity = sanitizeMetadata(comment && comment.severity);
+  if (category && severity) return `[${category} · ${severity}]`;
+  if (category) return `[${category}]`;
+  if (severity) return `[${severity}]`;
+  return "";
+}
+
+// Parse the publication policy from the raw opt-in inputs. Returns a normalized
+// policy object, or the NO_ROUTING sentinel when no routing is requested or any
+// value is malformed (fail-open for the policy itself, upholding I1).
+//
+//   severityThreshold: a severity name (case-insensitive) at-or-below which
+//     findings route. An unknown/empty value disables severity routing.
+//   categories: a comma-separated category list (case-insensitive). Unknown
+//     category tokens are dropped; an empty list (or all-unknown) disables
+//     category routing.
+//
+// The returned object has two booleans so routeComment can short-circuit
+// without re-parsing, plus the normalized values it needs to decide:
+//   {
+//     routeBySeverity: bool,
+//     severityRank: number,           // rank of the threshold; -1 when disabled
+//     routeByCategory: bool,
+//     categories: Set<string>,        // lowercase enum members; empty when disabled
+//   }
+function buildPolicy({ severityThreshold, categories } = {}) {
+  let routeBySeverity = false;
+  let severityRank = -1;
+  if (severityThreshold != null) {
+    const norm = String(severityThreshold).trim().toLowerCase();
+    if (SEVERITY_RANK.has(norm)) {
+      routeBySeverity = true;
+      severityRank = SEVERITY_RANK.get(norm);
+    }
+    // Any other value (empty, unknown, garbage) leaves routeBySeverity=false
+    // (fail-open for the policy: unknown threshold -> no routing).
+  }
+
+  let routeByCategory = false;
+  const categorySet = new Set();
+  if (categories != null) {
+    const tokens = String(categories)
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter((t) => t.length > 0);
+    for (const t of tokens) {
+      if (CATEGORIES.includes(t)) categorySet.add(t);
+      // Unknown category tokens are silently dropped (fail-open: an unknown
+      // category in the policy never matches a finding's category, so including
+      // it would be a no-op anyway; dropping keeps the set clean).
+    }
+    if (categorySet.size > 0) routeByCategory = true;
+  }
+
+  if (!routeBySeverity && !routeByCategory) return NO_ROUTING;
+  return { routeBySeverity, severityRank, routeByCategory, categories: categorySet };
+}
+
+// Decide whether a comment routes to the summary per the policy. Returns
+// { routed: true, reason } or { routed: false }. A finding matches when its
+// severity is at-or-below the threshold (when severity routing is on) OR its
+// category is in the category list (when category routing is on). Unknown or
+// malformed metadata on the finding NEVER matches (I1): an empty/unknown
+// category or severity has no rank and no enum membership, so it falls through
+// to the normal inline path (visible), never dropped.
+function routeComment(comment, policy) {
+  if (!policy || (!policy.routeBySeverity && !policy.routeByCategory)) {
+    return { routed: false };
+  }
+  const catRaw = comment && comment.category != null ? String(comment.category).trim().toLowerCase() : "";
+  const sevRaw = comment && comment.severity != null ? String(comment.severity).trim().toLowerCase() : "";
+  const catKnown = catRaw !== "" && CATEGORIES.includes(catRaw);
+  const sevKnown = sevRaw !== "" && SEVERITY_RANK.has(sevRaw);
+
+  if (policy.routeBySeverity && sevKnown && SEVERITY_RANK.get(sevRaw) <= policy.severityRank) {
+    return { routed: true, reason: `Routed to summary (severity ${sevRaw}${catKnown ? ` · category ${catRaw}` : ""})` };
+  }
+  if (policy.routeByCategory && catKnown && policy.categories.has(catRaw)) {
+    return { routed: true, reason: `Routed to summary (category ${catRaw}${sevKnown ? ` · severity ${sevRaw}` : ""})` };
+  }
+  return { routed: false };
+}
+
 // ---- Formatting helpers (ported verbatim) ----
 
 // Assemble the visible comment body. When `id` is provided (inline comments),
 // the per-comment ID tag is prepended as an HTML comment (invisible when
 // rendered) so getPostedCommentIds can match it back on retry for the
-// idempotency check. The code suggestion block is then appended if present.
+// idempotency check. The category/severity badge is then prepended (when
+// present) on its own leading line AFTER the id comment, so the idempotency
+// regex (unanchored, scans the whole body) still matches and the badge renders
+// as the first visible line. The code suggestion block is appended if present.
 function formatComment(comment, id) {
   let body = id ? `<!-- ${id} -->\n` : "";
+  const badge = buildBadge(comment);
+  if (badge) body += `${badge}\n`;
   body += comment.content || "";
   if (comment.suggestion_code && comment.existing_code) {
     body += "\n\n**Suggestion:**\n";
@@ -1025,7 +1371,14 @@ function formatComment(comment, id) {
 }
 
 function formatCommentMarkdown(comment, error) {
-  let md = `### 📄 \`${comment.path}\``;
+  let md = "";
+  // The badge renders as a leading line before the path heading (consistent
+  // with formatComment), so the heading/reason lines still anchor the comment
+  // and existing substring assertions on them are unaffected. The badge is ""
+  // for any finding without category/severity metadata.
+  const badge = buildBadge(comment);
+  if (badge) md += `${badge}\n`;
+  md += `### 📄 \`${comment.path}\``;
   if (comment.start_line && comment.end_line) {
     md += ` (L${comment.start_line}-L${comment.end_line})`;
   }
@@ -1050,19 +1403,24 @@ function formatCommentMarkdown(comment, error) {
 // inline / posted as summary" header vs. the trailing "Posting Statistics"
 // block, whose overlapping definitions made the summary hard to interpret).
 //
-// The four counts are mutually exclusive and, together with `inline`, sum to
+// The five counts are mutually exclusive and, together with `inline`, sum to
 // `total`:
 //   inline  — comments that landed as review inline comments
 //   summary — comments without line info, rendered in the summary body below
+//   routed  — comments the publication policy moved from inline to summary
+//             (also rendered in the body below, each tagged with its reason)
 //   skipped — comments suppressed by incremental overlap filtering
 //   failed  — comments that had line info but could not be posted (also
 //             rendered in the body below, each tagged with its failure reason)
-function buildSummaryBody({ total, inline, summary, skipped, failed, warnings }) {
+function buildSummaryBody({ total, inline, summary, skipped, routed = 0, failed, warnings }) {
   let body = `🔍 **OpenCodeReview** found **${total}** issue(s) in this PR.`;
   if (total > 0) {
     body += `\n- ✅ Successfully posted inline: ${inline} comment(s)`;
     if (summary > 0) {
       body += `\n- 📝 In summary (no line info): ${summary} comment(s)`;
+    }
+    if (routed > 0) {
+      body += `\n- 📋 Routed to summary by policy: ${routed} comment(s)`;
     }
     if (skipped > 0) {
       body += `\n- ⏭️ Skipped (overlap with history): ${skipped} comment(s)`;
@@ -1079,18 +1437,25 @@ function buildSummaryBody({ total, inline, summary, skipped, failed, warnings })
 
 // Pre-review summary body: shown in the anchor comment while inline comments
 // are being posted. Includes only what is known before the review lands (issue
-// count, warnings, comments without line info) — final posting statistics are
-// added by the finalize phase. Kept informative (not an empty placeholder) so
-// the summary is useful even if the run is interrupted before finalize.
-function buildPreReviewSummaryBody(totalCount, summaryComments, warnings) {
+// count, warnings, comments without line info, routed comments) — final posting
+// statistics are added by the finalize phase. Kept informative (not an empty
+// placeholder) so the summary is useful even if the run is interrupted before
+// finalize. Routed findings are known before the review (the policy decision is
+// made in the partition loop) so they are rendered here too, keeping the
+// pre-review anchor accurate.
+function buildPreReviewSummaryBody(totalCount, summaryComments, routedComments, warnings) {
   let body = `🔍 **OpenCodeReview** found **${totalCount}** issue(s) in this PR.`;
   if (totalCount > 0) {
     body += `\n- ⏳ _Posting review comments…_`;
+    if (routedComments && routedComments.length > 0) {
+      body += `\n- 📋 Routed to summary by policy: ${routedComments.length} comment(s)`;
+    }
   }
   if (warnings.length > 0) {
     body += `\n\n⚠️ ${warnings.length} warning(s) occurred during review.`;
   }
   body += formatSummaryComments(summaryComments);
+  body += formatSummaryComments(routedComments);
   body += formatWarnings(warnings);
   return body;
 }
@@ -1190,6 +1555,10 @@ module.exports = {
   getPostedCommentIds,
   isCommentAlreadyPosted,
   newCommentId,
+  sanitizeMetadata,
+  buildBadge,
+  buildPolicy,
+  routeComment,
   formatComment,
   formatCommentMarkdown,
   buildSummaryBody,
@@ -1200,4 +1569,14 @@ module.exports = {
   safeFence,
   SUMMARY_MARKER,
   NO_LINE_REASON,
+  resolveBatchSize,
+  sortToSendDeterministically,
+  chunkArray,
+  setStatsOutputs,
+  DEFAULT_BATCH_SIZE,
+  buildRunTags,
+  NO_ROUTING,
+  CATEGORIES,
+  SEVERITIES,
+  SEVERITY_RANK,
 };

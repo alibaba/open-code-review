@@ -149,7 +149,7 @@ function testMissingReferenceOnlyIsFine() {
   assert.strictEqual(ok, true);
 }
 
-// --- docs en -> zh/ja counterpart sync -------------------------------------
+// --- docs en -> zh/ja/ru counterpart sync -------------------------------------
 
 function testCounterpartPaths() {
   assert.deepStrictEqual(
@@ -157,6 +157,7 @@ function testCounterpartPaths() {
     [
       { locale: "zh", path: "pages/src/content/docs/zh/integrations/ci.md" },
       { locale: "ja", path: "pages/src/content/docs/ja/integrations/ci.md" },
+      { locale: "ru", path: "pages/src/content/docs/ru/integrations/ci.md" },
     ]
   );
 }
@@ -167,12 +168,13 @@ function testEnOnlyChangeWarns() {
     "internal/agent/agent.go",
   ];
   const warnings = findMissingTranslations(changed);
-  // Both zh and ja counterparts missing -> two warnings.
-  assert.strictEqual(warnings.length, 2);
+  // zh, ja, and ru counterparts missing -> three warnings.
+  assert.strictEqual(warnings.length, 3);
   assert.deepStrictEqual(
     warnings.map((w) => w.counterpart).sort(),
     [
       "pages/src/content/docs/ja/faq.md",
+      "pages/src/content/docs/ru/faq.md",
       "pages/src/content/docs/zh/faq.md",
     ]
   );
@@ -183,6 +185,7 @@ function testEnWithBothCounterpartsNoWarn() {
     "pages/src/content/docs/en/faq.md",
     "pages/src/content/docs/zh/faq.md",
     "pages/src/content/docs/ja/faq.md",
+    "pages/src/content/docs/ru/faq.md",
   ];
   assert.deepStrictEqual(findMissingTranslations(changed), []);
 }
@@ -190,12 +193,21 @@ function testEnWithBothCounterpartsNoWarn() {
 function testEnWithOnlyOneCounterpartWarnsForTheOther() {
   const changed = [
     "pages/src/content/docs/en/mcp.md",
-    "pages/src/content/docs/zh/mcp.md", // ja still missing
+    "pages/src/content/docs/zh/mcp.md", // ja and ru still missing
   ];
   const warnings = findMissingTranslations(changed);
-  assert.strictEqual(warnings.length, 1);
-  assert.strictEqual(warnings[0].locale, "ja");
-  assert.strictEqual(warnings[0].counterpart, "pages/src/content/docs/ja/mcp.md");
+  assert.strictEqual(warnings.length, 2);
+  assert.deepStrictEqual(
+    warnings.map((w) => w.locale).sort(),
+    ["ja", "ru"]
+  );
+  assert.deepStrictEqual(
+    warnings.map((w) => w.counterpart).sort(),
+    [
+      "pages/src/content/docs/ja/mcp.md",
+      "pages/src/content/docs/ru/mcp.md",
+    ]
+  );
 }
 
 function testNonDocsAndNonEnChangesIgnored() {

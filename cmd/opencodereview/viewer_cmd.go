@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/open-code-review/open-code-review/internal/viewer"
+	"github.com/alibaba/open-code-review/internal/viewer"
 )
 
 type viewerOptions struct {
@@ -35,7 +35,7 @@ func runViewer(args []string) error {
 		return nil
 	}
 
-	fmt.Printf("Open Code Review Viewer starting on http://%s\n", opts.addr)
+	fmt.Printf("Open Code Review Viewer starting on http://%s\n", viewer.DisplayAddr(opts.addr))
 	return viewer.StartServer(opts.addr)
 }
 

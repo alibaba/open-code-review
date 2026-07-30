@@ -10,17 +10,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	allowedext "github.com/open-code-review/open-code-review/internal/config/allowlist"
-	"github.com/open-code-review/open-code-review/internal/config/rules"
-	"github.com/open-code-review/open-code-review/internal/config/template"
-	"github.com/open-code-review/open-code-review/internal/gitcmd"
-	"github.com/open-code-review/open-code-review/internal/llm"
-	"github.com/open-code-review/open-code-review/internal/llmloop"
-	"github.com/open-code-review/open-code-review/internal/model"
-	"github.com/open-code-review/open-code-review/internal/session"
-	"github.com/open-code-review/open-code-review/internal/stdout"
-	"github.com/open-code-review/open-code-review/internal/telemetry"
-	"github.com/open-code-review/open-code-review/internal/tool"
+	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
+	"github.com/alibaba/open-code-review/internal/config/rules"
+	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
+	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/stdout"
+	"github.com/alibaba/open-code-review/internal/telemetry"
+	"github.com/alibaba/open-code-review/internal/tool"
 )
 
 // changeFilesScanLiteral substitutes for the {{change_files}} placeholder.
@@ -196,6 +196,14 @@ func (a *Agent) Warnings() []llmloop.AgentWarning { return a.runner.Warnings() }
 
 // ToolCalls returns per-tool call counts accumulated during scan.
 func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
+
+// BudgetExceeded always returns false for scan. Scan self-limits via its own
+// token budget gate and MaxToolRequestTimes; the typed budget_exceeded status
+// and tool-call-budget plumbing are diff-review-path features (see
+// internal/agent). This method exists only so *scan.Agent satisfies the
+// cmd/opencodereview.ResultProvider interface, keeping scan's JSON output
+// unchanged (status stays success / completed_with_*).
+func (a *Agent) BudgetExceeded() bool { return false }
 
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)

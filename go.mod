@@ -1,4 +1,4 @@
-module github.com/open-code-review/open-code-review
+module github.com/alibaba/open-code-review
 
 go 1.25.5
 

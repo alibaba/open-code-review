@@ -3,8 +3,8 @@ package agent
 import (
 	"testing"
 
-	"github.com/open-code-review/open-code-review/internal/config/rules"
-	"github.com/open-code-review/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/config/rules"
+	"github.com/alibaba/open-code-review/internal/model"
 )
 
 func TestWhyExcluded_BinaryFile(t *testing.T) {

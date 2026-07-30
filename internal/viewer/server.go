@@ -59,7 +59,7 @@ func StartServer(addr string) error {
 		Handler: guarded,
 	}
 
-	fmt.Printf("\nOpen browser: http://%s\n", addr)
+	fmt.Printf("\nOpen browser: http://%s\n", DisplayAddr(addr))
 	return srv.ListenAndServe()
 }
 

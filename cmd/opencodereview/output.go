@@ -8,10 +8,10 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/open-code-review/open-code-review/internal/agent"
-	"github.com/open-code-review/open-code-review/internal/model"
-	"github.com/open-code-review/open-code-review/internal/session"
-	"github.com/open-code-review/open-code-review/internal/suggestdiff"
+	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/suggestdiff"
 )
 
 func outputText(comments []model.LlmComment) {
@@ -258,6 +258,7 @@ type jsonSummary struct {
 	CacheReadTokens  int64  `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int64  `json:"cache_write_tokens,omitempty"`
 	Elapsed          string `json:"elapsed"`
+	BudgetExceeded   bool   `json:"budget_exceeded,omitempty"`
 }
 
 type jsonToolCalls struct {
@@ -295,7 +296,7 @@ func outputJSON(comments []model.LlmComment) error {
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
-	manifest *session.RunManifest) error {
+	manifest *session.RunManifest, budgetExceeded bool) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	out := jsonOutput{
 		Status:   "success",
@@ -310,6 +311,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			CacheReadTokens:  cacheReadTokens,
 			CacheWriteTokens: cacheWriteTokens,
 			Elapsed:          duration.Round(time.Second).String(),
+			BudgetExceeded:   budgetExceeded,
 		},
 		ProjectSummary: projectSummary,
 		Resume:         resumeInfo,
@@ -345,6 +347,13 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		} else if manifest == nil {
 			out.Status = "completed_with_warnings"
 		}
+	}
+	// A tripped budget is a distinct typed terminal state (INV-3): it must
+	// read "budget_exceeded" regardless of any concurrent subtask warnings /
+	// errors, since the run stopped for the budget reason and partial results
+	// were still emitted. Takes precedence over the warning statuses above.
+	if budgetExceeded {
+		out.Status = "budget_exceeded"
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
@@ -391,6 +400,62 @@ func outputJSONNoFiles(traceID string) error {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
+}
+
+// emitFailureUsage writes a best-effort structured usage record to stderr when
+// a review fails (INV-4): the outer caller must still see the cost of the
+// failed attempt instead of losing it. It carries only token/tool-call tallies
+// and elapsed — never credentials or prompts (INV-4 no-secrets).
+//
+// The common failure path is a non-budget error (budget exhaustion returns
+// partial comments with a nil error and reaches emitRunResult instead). But
+// there is a residual edge: a budget gate can trip after dispatching N files,
+// and if every dispatched file then fails, dispatchSubtasks returns
+// (nil, error) — reaching here with ag.BudgetExceeded()==true. We therefore
+// report the agent's actual BudgetExceeded() value rather than hardcoding
+// false, so the record never contradicts the agent's state.
+//
+// In json format it emits a jsonOutput-shaped object to stderr (kept separate
+// from stdout so it does not pollute the machine-readable result stream);
+// otherwise a single human-readable [ocr] line. It must never return an error
+// that masks the original failure — all writes are best-effort.
+func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string) {
+	var toolTotal int64
+	for _, v := range ag.ToolCalls() {
+		toolTotal += v
+	}
+	budgetExceeded := ag.BudgetExceeded()
+	if outputFormat == "json" {
+		out := jsonOutput{
+			Status: "failed",
+			Summary: &jsonSummary{
+				FilesReviewed:    ag.FilesReviewed(),
+				TotalTokens:      ag.TotalTokensUsed(),
+				InputTokens:      ag.TotalInputTokens(),
+				OutputTokens:     ag.TotalOutputTokens(),
+				CacheReadTokens:  ag.TotalCacheReadTokens(),
+				CacheWriteTokens: ag.TotalCacheWriteTokens(),
+				Elapsed:          duration.Round(time.Second).String(),
+				BudgetExceeded:   budgetExceeded,
+			},
+			ToolCalls: &jsonToolCalls{
+				Total:  toolTotal,
+				ByTool: ag.ToolCalls(),
+			},
+			SessionID: ag.SessionID(),
+		}
+		enc := json.NewEncoder(os.Stderr)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(out)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[ocr] usage on failure: %d file(s), %d input + %d output = %d total tokens, %d tool calls, elapsed %s, budget_exceeded=%v",
+		ag.FilesReviewed(), ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
+		toolTotal, duration.Round(time.Second).String(), budgetExceeded)
+	if id := ag.SessionID(); id != "" {
+		fmt.Fprintf(os.Stderr, ", session %s", id)
+	}
+	fmt.Fprintln(os.Stderr)
 }
 
 func outputPreviewText(p *agent.DiffPreview) {
