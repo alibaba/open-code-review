@@ -101,9 +101,11 @@ func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
 
 	resolvedPath, err := filepath.EvalSymlinks(fullPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fullPath, nil
-		}
+		// Do NOT return fullPath for non-existent paths. Returning the
+		// unresolved path opens a TOCTOU window: between this check and
+		// the subsequent os.ReadFile/os.Open, a symlink could be placed
+		// at fullPath pointing outside the repo, and it would be
+		// followed without any WithinBase verification.
 		return "", fmt.Errorf("resolve file %q: %w", path, err)
 	}
 	if !pathutil.WithinBase(repoRoot, resolvedPath) {
