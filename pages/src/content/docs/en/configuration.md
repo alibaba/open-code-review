@@ -148,6 +148,7 @@ The `timeout_sec` keys are not supported by `ocr config set` — edit
   }
 }
 ```
+
 ### API key from a command
 
 Instead of storing a key in the config file, `api_key_cmd` fetches it at
@@ -177,10 +178,24 @@ ignored and a warning is printed); otherwise `api_key_cmd` runs; only if
 neither is set does OCR fall back to the provider's environment variable.
 
 The command runs once per `ocr` invocation and must succeed: a non-zero exit,
-empty output, or multi-line output is a hard error (OCR never silently falls
-back). It must complete within 60 seconds. The command's stderr is passed
-through to your terminal, so interactive prompts (pinentry, Touch ID) still
-work.
+empty output, multi-line output, or more than 64KiB of output is a hard error
+(OCR never silently falls back). It must complete within 60 seconds, which
+includes any time you spend answering a prompt. The command inherits your
+terminal's stdin and stderr, so interactive prompts (pinentry, Touch ID) both
+appear and can be answered. If the command leaves a background daemon holding
+its stdout pipe (`gpg-agent`, a first-use `op` daemon), the credential still
+arrives but every `ocr` run pauses an extra 5 seconds waiting for that pipe to
+close — redirect the daemon's output (`>/dev/null 2>&1`) to get rid of the wait.
+
+On Windows the command runs through `cmd.exe`, not `sh`, so a command written
+for one is generally not portable to the other: `%VAR%` and `^` are `cmd.exe`
+metacharacters, while `$VAR` expansion and `\` escaping do not apply there.
+Quoted arguments are passed through verbatim, so
+`op read "op://Private/My Vault/api-key"` works as written.
+
+Since the value is executed as a shell command, `config.json` is trusted
+input — keep it owned by you and not writable by anyone else (OCR writes it
+with `0600` permissions).
 
 ### Additional retry status codes
 

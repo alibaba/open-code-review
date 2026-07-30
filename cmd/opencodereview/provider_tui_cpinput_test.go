@@ -24,14 +24,42 @@ func TestIsUserEditMsg(t *testing.T) {
 	}
 }
 
-// TestOfficialAPIKeyRequiredError covers the with-EnvVar and without branches.
+// TestOfficialAPIKeyRequiredError covers every combination of the two hints the
+// message can offer. Both are independently gated, so a provider carrying only
+// one of Name/EnvVar must still be told about that one.
 func TestOfficialAPIKeyRequiredError(t *testing.T) {
-	got := officialAPIKeyRequiredError(llm.Provider{EnvVar: "MY_KEY"})
-	if got != "API key is required (or set $MY_KEY)" {
-		t.Errorf("got %q, want mention of $MY_KEY", got)
+	tests := []struct {
+		name     string
+		provider llm.Provider
+		want     string
+	}{
+		{
+			name:     "env var only",
+			provider: llm.Provider{EnvVar: "MY_KEY"},
+			want:     "API key is required (configure it, set $MY_KEY)",
+		},
+		{
+			name:     "name only",
+			provider: llm.Provider{Name: "acme"},
+			want:     "API key is required (configure it, set providers.acme.api_key_cmd)",
+		},
+		{
+			name:     "name and env var",
+			provider: llm.Provider{Name: "acme", EnvVar: "MY_KEY"},
+			want:     "API key is required (configure it, set providers.acme.api_key_cmd, or set $MY_KEY)",
+		},
+		{
+			name:     "neither",
+			provider: llm.Provider{},
+			want:     "API key is required",
+		},
 	}
-	if got := officialAPIKeyRequiredError(llm.Provider{}); got != "API key is required" {
-		t.Errorf("got %q, want generic message", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := officialAPIKeyRequiredError(tt.provider); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

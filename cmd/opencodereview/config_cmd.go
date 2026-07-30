@@ -126,8 +126,7 @@ func runConfigSet(key, value string) error {
 	}
 
 	displayValue := value
-	normalizedKey := strings.ToLower(strings.ReplaceAll(key, "_", ""))
-	if strings.HasSuffix(normalizedKey, "apikey") || strings.HasSuffix(normalizedKey, "authtoken") {
+	if shouldMaskConfigValue(key) {
 		displayValue = maskKey(value)
 	}
 	fmt.Printf("Set %s = %s\n", key, displayValue)
@@ -135,6 +134,15 @@ func runConfigSet(key, value string) error {
 		fmt.Fprint(os.Stderr, warning)
 	}
 	return nil
+}
+
+// shouldMaskConfigValue reports whether the echoed value of a config key holds a
+// secret and must be masked. Matching on the normalized suffix covers both
+// snake_case and Go field spellings of api_key/auth_token at any path depth,
+// while the *_cmd variants stay unmasked: a command line is not a secret.
+func shouldMaskConfigValue(key string) bool {
+	normalizedKey := strings.ToLower(strings.ReplaceAll(key, "_", ""))
+	return strings.HasSuffix(normalizedKey, "apikey") || strings.HasSuffix(normalizedKey, "authtoken")
 }
 
 func runConfigUnset(key string) error {

@@ -45,10 +45,11 @@ const (
 	// openai | openai-responses). Takes priority
 	// over OCR_USE_ANTHROPIC when set.
 	envOCRLLMProtocol = "OCR_LLM_PROTOCOL"
-	// envOCRLLMTimeout is a global override applied by finalizeResolvedEndpoint after
-	// ResolveEndpointWithOptions selects a strategy, rather than inside tryOCREnv like other OCR_LLM_* vars.
-	// This lets it override timeout for all resolution paths (OCR env, config file,
-	// provider config, Claude Code env, shell RC).
+	// envOCRLLMTimeout is a global override parsed at the top of
+	// ResolveEndpointWithOptions and applied by finalizeResolvedEndpoint to
+	// whichever strategy resolves, rather than inside tryOCREnv like other
+	// OCR_LLM_* vars. This lets it override timeout for all resolution paths
+	// (OCR env, config file, provider config, Claude Code env, shell RC).
 	envOCRLLMTimeout   = "OCR_LLM_TIMEOUT"
 	envOCRUseAnthropic = "OCR_USE_ANTHROPIC"
 )
@@ -83,6 +84,18 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (ResolvedEndpoint, error) {
 	opts.Provider = strings.TrimSpace(opts.Provider)
 	opts.Model = strings.TrimSpace(opts.Model)
+
+	// The global env overrides are parsed before any strategy runs, even though
+	// they are applied to the endpoint afterwards. Parsing them inside
+	// finalizeResolvedEndpoint would let a typo'd OCR_LLM_TIMEOUT ("30s") or an
+	// unparseable OCR_LLM_EXTRA_HEADERS abort resolution *after* api_key_cmd
+	// already prompted 1Password/pinentry/Touch ID for a credential that then
+	// gets discarded.
+	env, err := parseEnvOverrides()
+	if err != nil {
+		return ResolvedEndpoint{}, err
+	}
+
 	if opts.Provider != "" {
 		ep, ok, err := tryOCRConfig(configPath, opts)
 		if err != nil {
@@ -95,7 +108,7 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 			}
 			return ResolvedEndpoint{}, fmt.Errorf("resolve OCR config file: provider %q is not configured in %s section because the config file does not exist", opts.Provider, section)
 		}
-		return finalizeResolvedEndpoint("OCR config file", ep)
+		return finalizeResolvedEndpoint("OCR config file", ep, env), nil
 	}
 
 	strategies := []struct {
@@ -114,39 +127,58 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", strategy.name, err)
 		}
 		if ok && ep.URL != "" && ep.Token != "" && ep.Model != "" {
-			return finalizeResolvedEndpoint(strategy.name, ep)
+			return finalizeResolvedEndpoint(strategy.name, ep, env), nil
 		}
 	}
 
 	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
 }
 
-func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint) (ResolvedEndpoint, error) {
+// envOverrides holds the global OCR_LLM_* overrides that apply to whichever
+// strategy resolves the endpoint. Parsed once, up front — see the call site in
+// ResolveEndpointWithOptions for why the timing matters.
+type envOverrides struct {
+	timeout    time.Duration
+	hasTimeout bool
+	headers    map[string]string
+}
+
+func parseEnvOverrides() (envOverrides, error) {
+	var env envOverrides
+	var err error
+	env.timeout, env.hasTimeout, err = parseTimeoutEnv()
+	if err != nil {
+		return envOverrides{}, err
+	}
+	if raw := os.Getenv(envOCRLLMExtraHeaders); raw != "" {
+		env.headers, err = ParseExtraHeaders(raw)
+		if err != nil {
+			return envOverrides{}, fmt.Errorf("%s: %w", envOCRLLMExtraHeaders, err)
+		}
+	}
+	return env, nil
+}
+
+// finalizeResolvedEndpoint stamps the source label, strips the model suffix and
+// applies the global env overrides, which win over config-file values.
+func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint, env envOverrides) ResolvedEndpoint {
 	if ep.Source == "" {
 		ep.Source = source
 	}
 	ep.Model = stripModelSuffix(ep.Model)
-	envTimeout, ok, err := parseTimeoutEnv()
-	if err != nil {
-		return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", source, err)
+	if env.hasTimeout {
+		ep.Timeout = env.timeout
 	}
-	if ok {
-		ep.Timeout = envTimeout
-	}
-	if raw := os.Getenv(envOCRLLMExtraHeaders); raw != "" {
-		envHeaders, err := ParseExtraHeaders(raw)
-		if err != nil {
-			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", source, err)
-		}
+	if env.headers != nil {
 		if ep.ExtraHeaders == nil {
-			ep.ExtraHeaders = envHeaders
+			ep.ExtraHeaders = env.headers
 		} else {
-			for key, value := range envHeaders {
+			for key, value := range env.headers {
 				ep.ExtraHeaders[key] = value
 			}
 		}
 	}
-	return ep, nil
+	return ep
 }
 
 // parseTimeoutEnv reads and validates the OCR_LLM_TIMEOUT environment variable.
@@ -319,24 +351,46 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q is set but not configured in %s section", cfg.Provider, section)
 	}
 
+	// Pick the credential source here, but run api_key_cmd only just before
+	// returning (see below): a config typo must not trigger a secret-manager
+	// prompt before the cheap validation below has had a chance to fail.
+	// A whitespace-only api_key is a typo, not a credential: treat it as unset so
+	// it cannot silently shadow a working api_key_cmd (which otherwise resolves to
+	// a 401 with the command never running). A key with real content is used
+	// verbatim -- unlike command stdout, which has a mechanical trailing newline
+	// to strip, a static value has no artifact that trimming must undo.
 	apiKey := entry.APIKey
+	if strings.TrimSpace(apiKey) == "" {
+		apiKey = ""
+	}
+	// Same rule for the command: `sh -c "   "` exits 0 with no output, so a
+	// whitespace-only api_key_cmd would suppress the env fallback and then fail
+	// with "produced empty output". Treating it as unset keeps the typo from
+	// being more disruptive than the equivalent typo in api_key.
+	apiKeyCmd := entry.APIKeyCmd
+	if strings.TrimSpace(apiKeyCmd) == "" {
+		apiKeyCmd = ""
+	}
 	switch {
 	case apiKey != "":
 		// Static api_key always wins. Warn (don't error) if a command is also set,
 		// so a config that keeps api_key_cmd as a deliberate fallback still works.
-		if entry.APIKeyCmd != "" {
-			fmt.Fprintf(os.Stderr, "warning: provider %q has both api_key and api_key_cmd set; using the static api_key\n", cfg.Provider)
+		if apiKeyCmd != "" {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: provider %q has both api_key and api_key_cmd set; using the static api_key\n", cfg.Provider)
 		}
-	case entry.APIKeyCmd != "":
-		resolved, err := resolveKeyCmd(entry.APIKeyCmd, fmt.Sprintf("api_key_cmd for provider %q", cfg.Provider))
-		if err != nil {
-			return ResolvedEndpoint{}, false, err
+	case apiKeyCmd == "" && isPreset && preset.EnvVar != "":
+		// Env var is the last resort: only when neither api_key nor api_key_cmd
+		// is set, and only for preset providers (custom ones have no fallback).
+		// Same whitespace rule as the static key above, so `export
+		// ANTHROPIC_API_KEY="  "` reports "no api_key configured" instead of
+		// sending `Authorization: Bearer  ` and getting an opaque 401.
+		if v := os.Getenv(preset.EnvVar); strings.TrimSpace(v) != "" {
+			apiKey = v
 		}
-		apiKey = resolved
-	case isPreset && preset.EnvVar != "":
-		apiKey = os.Getenv(preset.EnvVar)
 	}
-	if apiKey == "" {
+	// No credential at all is still an error here, before any other validation:
+	// only the command's *execution* is deferred, not the emptiness check.
+	if apiKey == "" && apiKeyCmd == "" {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key or api_key_cmd configured and no environment variable fallback found", cfg.Provider)
 	}
 
@@ -443,6 +497,18 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		url = ensureMessagesSuffix(url)
 	}
 
+	// Single api_key_cmd resolution site for both preset and custom providers,
+	// as late as possible: everything above can fail without running the
+	// command. apiKey is empty here only when api_key_cmd is set (guaranteed by
+	// the emptiness check above), and a failing command is a hard error.
+	if apiKey == "" {
+		resolved, err := resolveKeyCmd(apiKeyCmd, fmt.Sprintf("api_key_cmd for provider %q", cfg.Provider))
+		if err != nil {
+			return ResolvedEndpoint{}, false, err
+		}
+		apiKey = resolved
+	}
+
 	return ResolvedEndpoint{
 		URL:          url,
 		Token:        apiKey,
@@ -467,23 +533,26 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	// Fall through to later strategies when the legacy block is incomplete. This
 	// includes the case where neither auth_token nor auth_token_cmd is set — and,
 	// critically, an incomplete block (e.g. missing url) never runs auth_token_cmd.
+	// "Incomplete" is judged after modelOverride is applied above, so a block
+	// missing only `model` is complete under --model and does run the command;
+	// that is the documented contract of ResolveEndpointWithModelOverride.
+	// Whitespace-only auth_token is treated as unset, same as api_key above, so it
+	// cannot shadow a working auth_token_cmd; same rule for the command itself.
 	token := cfg.Llm.AuthToken
-	if cfg.Llm.URL == "" || model == "" || (token == "" && cfg.Llm.AuthTokenCmd == "") {
+	if strings.TrimSpace(token) == "" {
+		token = ""
+	}
+	tokenCmd := cfg.Llm.AuthTokenCmd
+	if strings.TrimSpace(tokenCmd) == "" {
+		tokenCmd = ""
+	}
+	if cfg.Llm.URL == "" || model == "" || (token == "" && tokenCmd == "") {
 		return ResolvedEndpoint{}, false, nil
 	}
-	switch {
-	case token != "":
-		// Static auth_token always wins; warn if a command is also set.
-		if cfg.Llm.AuthTokenCmd != "" {
-			fmt.Fprintf(os.Stderr, "warning: llm config has both auth_token and auth_token_cmd set; using the static auth_token\n")
-		}
-	case cfg.Llm.AuthTokenCmd != "":
-		// Otherwise-complete legacy block with a set-but-failing command is a hard error.
-		resolved, err := resolveKeyCmd(cfg.Llm.AuthTokenCmd, "auth_token_cmd for llm config")
-		if err != nil {
-			return ResolvedEndpoint{}, false, err
-		}
-		token = resolved
+	// Static auth_token always wins; warn if a command is also set. The command
+	// itself runs only just before returning, after the validation below.
+	if token != "" && tokenCmd != "" {
+		fmt.Fprintln(os.Stderr, "[ocr] WARNING: llm config has both auth_token and auth_token_cmd set; using the static auth_token")
 	}
 
 	// llm.protocol (normalized) wins over use_anthropic when set.
@@ -526,6 +595,18 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	retryCodes, _, err := sanitizeRetryCodes(cfg.Llm.RetryCodes)
 	if err != nil {
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
+	}
+
+	// Runs last, after every cheap validation above: token is empty here only for
+	// an otherwise-complete block whose auth_token_cmd is set (guaranteed by the
+	// incompleteness check above), so a failing command is a hard error and an
+	// incomplete or invalid block never prompts for a credential.
+	if token == "" {
+		resolved, err := resolveKeyCmd(tokenCmd, "auth_token_cmd for llm config")
+		if err != nil {
+			return ResolvedEndpoint{}, false, err
+		}
+		token = resolved
 	}
 
 	return ResolvedEndpoint{

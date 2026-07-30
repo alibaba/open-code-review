@@ -243,7 +243,12 @@ func TestSessionFilePermissions(t *testing.T) {
 
 func TestFinalizeSurfacesWriterCreationErrorWithoutStdout(t *testing.T) {
 	tmpHome := t.TempDir()
+	// The writer resolves the home dir with os.UserHomeDir, which reads
+	// USERPROFILE on Windows and never falls back to HOME. With HOME alone the
+	// blocking file below landed in the temp dir while the writer kept using the
+	// real profile, so creation succeeded and there was no failure to surface.
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
 
 	// A regular file at this path makes creation of the sessions directory fail
 	// deterministically on every platform.

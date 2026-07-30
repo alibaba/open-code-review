@@ -1259,7 +1259,10 @@ func TestResolveRuleEntries_SymlinkSafety(t *testing.T) {
 	// The extension check on the resolved path should reject .json.
 	symlinkPath := filepath.Join(dir, "evil.md")
 	if err := os.Symlink(sensitiveFile, symlinkPath); err != nil {
-		t.Fatal(err)
+		// Creating a symlink on Windows needs SeCreateSymbolicLinkPrivilege, which
+		// an unelevated CI account does not have. Same skip the other symlink tests
+		// in this repo already use.
+		t.Skipf("cannot create symlink: %v", err)
 	}
 
 	entries := []ProjectRuleEntry{
@@ -1647,9 +1650,18 @@ func TestLoadGlobalRule(t *testing.T) {
 	globalRulePath := func(home string) string {
 		return filepath.Join(home, ".opencodereview", "rule.json")
 	}
+	// loadGlobalRule resolves the home dir with os.UserHomeDir, which reads
+	// USERPROFILE on Windows and never falls back to HOME. Setting HOME alone
+	// left the subtests reading the real profile, where the rule file they just
+	// wrote does not exist. Set both; the one that does not apply is harmless.
+	setHome := func(t *testing.T, home string) {
+		t.Helper()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+	}
 
 	t.Run("missing file is not an error", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setHome(t, t.TempDir())
 		pr, err := loadGlobalRule()
 		if err != nil || pr != nil {
 			t.Fatalf("expected nil,nil for missing global rule: pr=%v err=%v", pr, err)
@@ -1658,7 +1670,7 @@ func TestLoadGlobalRule(t *testing.T) {
 
 	t.Run("read error when path is a directory", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setHome(t, home)
 		// Create the rule.json path as a directory so ReadFile fails with a
 		// non-NotExist error (EISDIR), exercising the wrapped-error branch.
 		if err := os.MkdirAll(globalRulePath(home), 0o755); err != nil {
@@ -1671,7 +1683,7 @@ func TestLoadGlobalRule(t *testing.T) {
 
 	t.Run("unmarshal error on invalid JSON", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setHome(t, home)
 		path := globalRulePath(home)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("mkdir parent: %v", err)
@@ -1686,7 +1698,7 @@ func TestLoadGlobalRule(t *testing.T) {
 
 	t.Run("valid file returns rule", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setHome(t, home)
 		path := globalRulePath(home)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("mkdir parent: %v", err)
