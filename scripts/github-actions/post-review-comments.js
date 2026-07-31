@@ -265,6 +265,10 @@ async function runPostReviewComments({
     // may have landed on the server even though we received a 5xx response).
     const reviewBody = REVIEW_TAG;
 
+    // Shared across batches so the PR's diff inventory is fetched at most once
+    // per run even if several batches trip the 422 line-resolution fallback.
+    const diffCache = {};
+
     for (const chunk of batches) {
       const r = await publishBatch({
         chunk,
@@ -276,6 +280,7 @@ async function runPostReviewComments({
         reviewBody,
         REVIEW_TAG,
         log,
+        diffCache,
       });
       successCount += r.succeeded;
       failedCount += r.failed;
@@ -367,6 +372,7 @@ async function publishBatch({
   reviewBody,
   REVIEW_TAG,
   log,
+  diffCache,
 }) {
   let succeeded = 0;
   let failed = 0;
@@ -407,68 +413,129 @@ async function publishBatch({
     // (findExistingBatchReview / getPostedCommentIds / isCommentAlreadyPosted),
     // so it is not read here — only the write-path pacing knobs are.
 
-    // Rate-limit cooldown: honor the batch error's retry/rate-limit headers
-    // BEFORE any further API call — including the idempotency reads below.
-    // Firing reads immediately after a rate-limit/5xx would further pressure
-    // the already-struggling API; this is the same cool-down-before-read
-    // discipline the per-comment loop applies before isCommentAlreadyPosted.
-    const batchRetry = computeRetryDelayMs(e, 0);
-    if (batchRetry != null) {
-      const secs = (batchRetry.delayMs / 1000).toFixed(1);
-      log(
-        `Batch createReview failed (HTTP ${e.status}). ` +
-          `Cooling down ${secs}s via '${batchRetry.source}' (${batchRetry.detail}) before any retry or read.`
-      );
-      await sleep(batchRetry.delayMs);
-    }
+    // Rate-limit cooldown + idempotency reconciliation, both handled by
+    // cooldownAndReconcile(). The SAME helper runs for the secondary filtered
+    // batch below, so the two write paths cannot drift apart: every batch-level
+    // failure honors the error's retry/rate-limit headers before any further API
+    // call, and every failure that MAY have reached the server is reconciled
+    // against what actually landed before we retry anything.
+    const primary = await cooldownAndReconcile({
+      github,
+      owner,
+      repo,
+      prNumber,
+      log,
+      error: e,
+      items: chunk,
+      tag: REVIEW_TAG,
+      label: "Batch",
+      labelLower: "batch",
+    });
+    let toRetry = primary.toRetry;
+    succeeded += primary.alreadyPosted;
+    reconciled = primary.reconciled;
+    const batchStatus = primary.status;
 
-    // The idempotency read ("did the batch land?") is only meaningful when the
-    // request MAY have reached the server: 5xx, 408 timeout, or a network
-    // error with no status. For a pure rate-limit (429 / 403 abuse) or a
-    // validation error (422), the request was rejected before the review was
-    // created, so the batch definitely did not land — querying would be both
-    // pointless AND an extra read fired during a rate-limit episode. Skip it
-    // and retry all comments. This mirrors the per-comment maybeReachedServer
-    // predicate so the two layers stay consistent.
-    const batchStatus = e.status;
-    const batchMaybeReachedServer =
-      (typeof batchStatus === "number" && (batchStatus >= 500 || batchStatus === 408)) ||
-      batchStatus == null; // network errors (ECONNRESET, ETIMEDOUT, ...)
-
-    let existingReview = null;
-    if (batchMaybeReachedServer) {
-      log("Checking whether the batch review actually landed on the server before retrying...");
+    // ---- HTTP 422 line-resolution fallback -------------------------------
+    // GitHub rejects a whole createReview batch when ANY inline comment points
+    // at a line outside the PR diff. Rather than degrading straight to N
+    // separate per-comment reviews (N timeline entries — the churn issue #624
+    // is about), drop the comments we can PROVE are unresolvable and re-send
+    // the survivors as one review.
+    //
+    // Two guards keep this from making things worse:
+    //   * isLineResolutionFailure() — a 422 from this endpoint means
+    //     "Validation failed, OR the endpoint has been spammed". Only a
+    //     confirmed line/diff validation error activates the fallback; an
+    //     unrecognized 422 (including spam/abuse detection) falls straight
+    //     through to the per-comment loop, which has its own retry discipline.
+    //     Re-sending a batch into a spam-throttled endpoint would deepen the
+    //     incident rather than fix it.
+    //   * classifyCommentAgainstDiff() is TRI-state. A comment is only dropped
+    //     when the diff inventory is complete AND proves the line is outside
+    //     it. "unknown" (incomplete file list, file present but patch omitted
+    //     for a binary/oversized diff, LEFT-side comment, no line info) keeps
+    //     the pre-existing per-comment behavior instead of silently voiding a
+    //     comment that might well post.
+    if (batchStatus === 422 && toRetry.length > 0 && isLineResolutionFailure(e)) {
+      log(`[422-fallback] Batch createReview rejected by line/diff validation (HTTP 422). Filtering unresolvable comments against PR diff hunks...`);
+      let diff = null;
       try {
-        existingReview = await findExistingBatchReview({ github, owner, repo, prNumber, tag: REVIEW_TAG, log });
-      } catch (checkErr) {
-        log(`Idempotency check failed (${checkErr.message}). Degrading to original fallback (accepting duplicate risk).`);
+        diff = await getPrDiffHunks({ github, owner, repo, prNumber, log, cache: diffCache });
+      } catch (hunkErr) {
+        log(`[422-fallback] Failed to fetch PR diff hunks (${hunkErr.message}); proceeding without diff hunk filter.`);
       }
-    } else {
-      log(`Batch did not reach the server (HTTP ${batchStatus || "n/a"}); skipping idempotency check and retrying all comments.`);
-    }
 
-    // Compute the list of inline comments that still need to be posted. If the
-    // batch review landed, only retry the missing ones; otherwise retry all of
-    // them. NOTE: REVIEW_TAG is shared across all batches, so
-    // findExistingBatchReview may match an EARLIER batch's review — harmless
-    // for correctness because getPostedCommentIds returns a server-global set
-    // of every fence ID across ALL reviews, and we filter this chunk's items
-    // against that global set (never the set against the chunk). The counts
-    // below therefore reflect only THIS chunk's members.
-    let toRetry = chunk;
-    if (existingReview && existingReview.found) {
-      const postedIds = await getPostedCommentIds({ github, owner, repo, prNumber, log });
-      toRetry = chunk.filter((item) => !postedIds.has(item.id));
-      succeeded = chunk.length - toRetry.length;
-      reconciled = succeeded > 0;
-      log(
-        `A batch review with this run's tag exists on the server ` +
-          `(review_id=${existingReview.review.id}, may belong to an earlier batch). ` +
-          `${succeeded}/${chunk.length} of this batch's inline comments already posted. ` +
-          `${toRetry.length} missing, will retry only those.`
-      );
-    } else {
-      log("Batch review not found on server. Falling back to per-comment posting...");
+      // valid   -> provably inside the diff, safe to re-batch
+      // unknown -> cannot prove either way, fall through to the per-comment loop
+      // invalid -> provably outside the diff, route to the summary
+      const validItems = [];
+      const unknownItems = [];
+      for (const item of toRetry) {
+        const verdict = classifyCommentAgainstDiff(item, diff);
+        if (verdict === "valid") {
+          validItems.push(item);
+        } else if (verdict === "unknown") {
+          unknownItems.push(item);
+        } else {
+          failed++;
+          failedComments.push({
+            comment: item.comment,
+            error: `${describeCommentLocation(item.reviewComment)} could not be resolved (outside PR diff hunks)`,
+          });
+          log(`[422-fallback] Comment for ${item.reviewComment.path}:${describeCommentLocation(item.reviewComment)} is outside PR diff hunks; routing to summary failure.`);
+        }
+      }
+      if (unknownItems.length > 0) {
+        log(`[422-fallback] ${unknownItems.length} comment(s) could not be checked against the diff (incomplete or unavailable patch data); posting them individually rather than discarding them.`);
+      }
+
+      if (validItems.length > 0) {
+        log(`[422-fallback] Attempting secondary filtered batch createReview with ${validItems.length} valid comment(s)...`);
+        try {
+          const secondaryRes = await github.rest.pulls.createReview({
+            owner,
+            repo,
+            pull_number: prNumber,
+            commit_id: commitSha,
+            body: reviewBody,
+            event: "COMMENT",
+            comments: validItems.map(({ reviewComment }) => reviewComment),
+          });
+          succeeded += validItems.length;
+          log(`Successfully posted secondary filtered review batch with ${validItems.length} inline comment(s).`);
+          logRateLimitQuota(secondaryRes, "after secondary batch createReview", log);
+          toRetry = unknownItems;
+        } catch (secondaryE) {
+          log(`Secondary filtered batch createReview failed (HTTP ${secondaryE.status || "n/a"}): ${secondaryE.message}. Falling back to per-comment loop.`);
+          // Same cooldown + idempotency discipline as the primary batch: a 5xx
+          // or network error can mean the secondary review LANDED and only the
+          // response was lost, in which case dropping straight into the
+          // per-comment loop would repost every surviving comment.
+          const secondary = await cooldownAndReconcile({
+            github,
+            owner,
+            repo,
+            prNumber,
+            log,
+            error: secondaryE,
+            items: validItems,
+            tag: REVIEW_TAG,
+            label: "Secondary filtered batch",
+            labelLower: "secondary filtered batch",
+          });
+          succeeded += secondary.alreadyPosted;
+          if (secondary.reconciled) reconciled = true;
+          toRetry = secondary.toRetry.concat(unknownItems);
+        }
+      } else {
+        toRetry = unknownItems;
+      }
+
+      if (toRetry.length === 0) {
+        log(`[422-fallback] No comments remain for the per-comment fallback.`);
+        return { succeeded, failed, failedComments, reconciled };
+      }
     }
 
     for (const { comment, reviewComment, id } of toRetry) {
@@ -1529,6 +1596,268 @@ function safeRead(fs, p) {
   }
 }
 
+// Rate-limit cooldown + idempotency reconciliation for a FAILED batch
+// createReview. Shared by the primary batch and the 422 secondary filtered
+// batch so the two can never drift apart.
+//
+// Order matters: cool down FIRST (honoring the error's retry/rate-limit
+// headers) before any further API call, including the idempotency reads.
+// Firing reads immediately after a rate-limit/5xx would further pressure an
+// already-struggling API; this is the same cool-down-before-read discipline
+// the per-comment loop applies before isCommentAlreadyPosted.
+//
+// The idempotency read ("did the review land?") is only meaningful when the
+// request MAY have reached the server: 5xx, 408 timeout, or a network error
+// with no status. For a pure rate-limit (429 / 403 abuse) or a validation
+// error (422), the request was rejected before the review was created, so it
+// definitely did not land — querying would be both pointless AND an extra read
+// fired during a rate-limit episode. This mirrors the per-comment
+// maybeReachedServer predicate so all layers stay consistent.
+//
+// Returns { toRetry, alreadyPosted, reconciled, status, maybeReachedServer }.
+async function cooldownAndReconcile({ github, owner, repo, prNumber, log, error, items, tag, label, labelLower }) {
+  const retry = computeRetryDelayMs(error, 0);
+  if (retry != null) {
+    const secs = (retry.delayMs / 1000).toFixed(1);
+    log(
+      `${label} createReview failed (HTTP ${error.status}). ` +
+        `Cooling down ${secs}s via '${retry.source}' (${retry.detail}) before any retry or read.`
+    );
+    await sleep(retry.delayMs);
+  }
+
+  const status = error.status;
+  const maybeReachedServer =
+    (typeof status === "number" && (status >= 500 || status === 408)) ||
+    status == null; // network errors (ECONNRESET, ETIMEDOUT, ...)
+
+  let existingReview = null;
+  if (maybeReachedServer) {
+    log(`Checking whether the ${labelLower} review actually landed on the server before retrying...`);
+    try {
+      existingReview = await findExistingBatchReview({ github, owner, repo, prNumber, tag, log });
+    } catch (checkErr) {
+      log(`Idempotency check failed (${checkErr.message}). Degrading to original fallback (accepting duplicate risk).`);
+    }
+  } else {
+    log(`${label} did not reach the server (HTTP ${status || "n/a"}); skipping idempotency check and retrying all comments.`);
+  }
+
+  // If the review landed, only retry the missing comments; otherwise retry all
+  // of them. NOTE: the run tag is shared across all batches, so
+  // findExistingBatchReview may match an EARLIER batch's review — harmless for
+  // correctness because getPostedCommentIds returns a server-global set of
+  // every fence ID across ALL reviews, and we filter these items against that
+  // global set (never the set against the items). The counts below therefore
+  // reflect only the items passed in.
+  if (existingReview && existingReview.found) {
+    const postedIds = await getPostedCommentIds({ github, owner, repo, prNumber, log });
+    const toRetry = items.filter((item) => !postedIds.has(item.id));
+    const alreadyPosted = items.length - toRetry.length;
+    log(
+      `A ${labelLower} review with this run's tag exists on the server ` +
+        `(review_id=${existingReview.review.id}, may belong to an earlier batch). ` +
+        `${alreadyPosted}/${items.length} of this batch's inline comments already posted. ` +
+        `${toRetry.length} missing, will retry only those.`
+    );
+    return { toRetry, alreadyPosted, reconciled: alreadyPosted > 0, status, maybeReachedServer };
+  }
+
+  log(`${label} review not found on server. Falling back to per-comment posting...`);
+  return { toRetry: items, alreadyPosted: 0, reconciled: false, status, maybeReachedServer };
+}
+
+// GitHub documents 422 on this endpoint as "Validation failed, OR the endpoint
+// has been spammed" — so a bare status code is NOT evidence that a comment
+// pointed at a line outside the diff. Only re-send a filtered batch when the
+// error body actually names a line/diff validation problem; anything else
+// (spam/abuse detection, an unrelated validation failure) falls through to the
+// per-comment loop, which paces and retries on its own.
+const LINE_RESOLUTION_PATTERNS = [
+  /must be part of the diff/i,
+  /not part of the diff/i,
+  /could not be resolved/i,
+  /outside the diff/i,
+  /diff hunk/i,
+];
+const LINE_RESOLUTION_FIELDS = new Set(["line", "start_line", "position", "original_line", "original_start_line"]);
+
+function isLineResolutionFailure(error) {
+  if (!error) return false;
+  const texts = [];
+  if (error.message) texts.push(String(error.message));
+
+  const errors =
+    (error.response && error.response.data && error.response.data.errors) ||
+    (error.data && error.data.errors) ||
+    error.errors;
+  if (Array.isArray(errors)) {
+    for (const entry of errors) {
+      if (!entry) continue;
+      if (typeof entry === "string") {
+        texts.push(entry);
+        continue;
+      }
+      // A structured validation error naming a line field is conclusive on its
+      // own, regardless of how the message happens to be worded.
+      if (entry.field && LINE_RESOLUTION_FIELDS.has(String(entry.field))) return true;
+      if (entry.message) texts.push(String(entry.message));
+    }
+  }
+
+  const text = texts.join(" | ");
+  if (!text) return false;
+  return LINE_RESOLUTION_PATTERNS.some((re) => re.test(text));
+}
+
+// Parse a unified-diff patch into the RIGHT-side (new file) line ranges it
+// covers, ONE RANGE PER HUNK. Ranges — not a flat set of line numbers — because
+// GitHub requires a multi-line comment's start_line and line to sit inside the
+// SAME hunk; a flat set cannot tell a legal span from one that straddles two
+// hunks, and the straddling span would 422 all over again.
+//
+// Within a hunk the new-file line numbers are contiguous from the hunk header's
+// start: additions and context lines advance the counter, deletions do not (they
+// exist only in the old file). So each hunk collapses to {start, end}.
+function parseDiffHunkRanges(patch) {
+  if (!patch) return [];
+  const ranges = [];
+  const hunkHeaderRegex = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
+  const lines = String(patch).split("\n");
+  let current = null;
+
+  const flush = () => {
+    // A hunk with no RIGHT-side lines at all (a pure deletion, "+N,0") never
+    // advanced the counter, so end < start and there is nothing to comment on.
+    if (current && current.end >= current.start) ranges.push({ start: current.start, end: current.end });
+  };
+
+  for (const line of lines) {
+    const match = hunkHeaderRegex.exec(line);
+    if (match) {
+      flush();
+      const start = parseInt(match[1], 10);
+      current = { start, end: start - 1, next: start };
+      continue;
+    }
+    if (!current) continue;
+
+    if (line.startsWith("\\")) continue; // "\ No newline at end of file"
+    if (line.startsWith("-")) continue; // deletion: old file only, does not advance
+    if (line.startsWith("+") || line.startsWith(" ")) {
+      current.end = current.next;
+      current.next++;
+    }
+    // Anything else (notably a bare "" produced by a trailing newline in the
+    // patch string) is not a diff body line and must not advance the counter.
+  }
+  flush();
+  return ranges;
+}
+
+// TRI-STATE classification: "valid" | "invalid" | "unknown".
+//
+// "invalid" is a claim we must be able to PROVE, because it permanently routes
+// a finding to the summary without ever attempting to post it. Missing or
+// partial diff metadata is "unknown", not "invalid" — it means we could not
+// check, and the caller keeps the pre-existing per-comment behavior.
+function classifyCommentAgainstDiff(item, diff) {
+  // No inventory at all, or one we know is truncated: we cannot prove anything.
+  if (!diff || !diff.complete) return "unknown";
+
+  const { reviewComment } = item;
+  const path = reviewComment.path;
+
+  // File is not among the PR's changed files at all — provably outside the diff.
+  if (!diff.known.has(path)) return "invalid";
+
+  // File IS in the PR but GitHub omitted its `patch` (binary, or a diff over
+  // the size limit). We know nothing about its lines.
+  const ranges = diff.files.get(path);
+  if (!ranges) return "unknown";
+
+  // We only model RIGHT-side (new file) lines. The producer builds RIGHT-side
+  // comments today; if that ever changes, decline to judge rather than drop.
+  if (reviewComment.side && reviewComment.side !== "RIGHT") return "unknown";
+
+  const endLine = reviewComment.line;
+  if (endLine == null) return "unknown";
+  const startLine = reviewComment.start_line != null ? reviewComment.start_line : endLine;
+
+  // A reversed span is malformed and GitHub will reject it.
+  if (startLine > endLine) return "invalid";
+
+  // Both endpoints must fall inside ONE hunk.
+  const withinOneHunk = ranges.some((r) => startLine >= r.start && endLine <= r.end);
+  return withinOneHunk ? "valid" : "invalid";
+}
+
+// Human-readable location for the failure summary. A multi-line comment reports
+// its full span, so a range that failed on start_line is not described by the
+// (perfectly valid) end line alone.
+function describeCommentLocation(reviewComment) {
+  const endLine = reviewComment.line;
+  const startLine = reviewComment.start_line;
+  if (endLine == null && startLine == null) return "Line n/a";
+  if (startLine != null && endLine != null && startLine !== endLine) {
+    return `Lines ${startLine}-${endLine}`;
+  }
+  return `Line ${endLine != null ? endLine : startLine}`;
+}
+
+// Build the PR's RIGHT-side diff inventory.
+//
+// Returns { files, known, complete }:
+//   files    Map<path, Array<{start,end}>> — paths whose patch we could parse
+//   known    Set<path>                     — every path in the PR's file list
+//   complete boolean                       — the file list was fully enumerated
+//
+// `complete` is the guard that makes "invalid" provable: a truncated walk means
+// an absent path proves nothing. Pagination goes through readWithPacing so this
+// read honors the same retry/pacing/quota discipline as every other read in
+// this file. GitHub caps listFiles at 3000 files, hence MAX_PAGES = 30.
+//
+// `cache` (optional) memoizes the result for the run: with several batches each
+// failing 422, the inventory would otherwise be refetched per batch.
+async function getPrDiffHunks({ github, owner, repo, prNumber, log, cache }) {
+  const logFn = typeof log === "function" ? log : () => {};
+  if (cache && cache.diff !== undefined) return cache.diff;
+
+  const files = new Map();
+  const known = new Set();
+  let complete = true;
+
+  const PER_PAGE = 100;
+  const MAX_PAGES = 30;
+  let page = 1;
+  while (page <= MAX_PAGES) {
+    const res = await readWithPacing(
+      `listFiles (page ${page})`,
+      () => github.rest.pulls.listFiles({ owner, repo, pull_number: prNumber, per_page: PER_PAGE, page }),
+      logFn
+    );
+    const batch = (res && res.data) || [];
+    for (const file of batch) {
+      if (!file || !file.filename) continue;
+      known.add(file.filename);
+      if (file.patch) files.set(file.filename, parseDiffHunkRanges(file.patch));
+    }
+    if (batch.length < PER_PAGE) break;
+    page++;
+  }
+  if (page > MAX_PAGES) {
+    complete = false;
+    logFn(
+      `[422-fallback] PR changed-file list exceeded ${MAX_PAGES * PER_PAGE} files; ` +
+        `diff inventory is incomplete, so no comment will be discarded as out-of-diff.`
+    );
+  }
+
+  const diff = { files, known, complete };
+  if (cache) cache.diff = diff;
+  return diff;
+}
+
 module.exports = {
   runPostReviewComments,
   postSummary,
@@ -1579,4 +1908,10 @@ module.exports = {
   CATEGORIES,
   SEVERITIES,
   SEVERITY_RANK,
+  parseDiffHunkRanges,
+  classifyCommentAgainstDiff,
+  describeCommentLocation,
+  isLineResolutionFailure,
+  cooldownAndReconcile,
+  getPrDiffHunks,
 };
