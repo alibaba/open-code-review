@@ -117,6 +117,7 @@ func TestResolveInput_MergeCommit(t *testing.T) {
 
 	runGitTest(t, repo, "checkout", "-q", mainBranch)
 	writeCommit(t, repo, "c.txt", "mainline\n", "main change")
+	firstParent := gitOut(t, repo, "rev-parse", "HEAD")
 	runGitTest(t, repo, "merge", "-q", "--no-ff", "-m", "merge side", "side")
 	merge := gitOut(t, repo, "rev-parse", "HEAD")
 
@@ -129,11 +130,11 @@ func TestResolveInput_MergeCommit(t *testing.T) {
 	if got.ResolvedHead != merge {
 		t.Errorf("ResolvedHead = %q, want %q", got.ResolvedHead, merge)
 	}
-	if got.ResolvedBase != "" {
-		t.Errorf("ResolvedBase = %q, want empty for a merge commit", got.ResolvedBase)
+	if got.ResolvedBase != firstParent {
+		t.Errorf("ResolvedBase = %q, want first parent %q", got.ResolvedBase, firstParent)
 	}
-	if got.ExactRange != "" {
-		t.Errorf("ExactRange = %q, want empty for a merge commit", got.ExactRange)
+	if want := firstParent + ".." + merge; got.ExactRange != want {
+		t.Errorf("ExactRange = %q, want %q", got.ExactRange, want)
 	}
 }
 

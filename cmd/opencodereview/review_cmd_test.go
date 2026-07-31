@@ -46,15 +46,39 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "2 of 2 selected item(s) failed") {
 		t.Fatalf("failed item counts missing from error: %v", err)
 	}
-	budgetManifest := &session.RunManifest{
-		TerminalState: session.StateFailed,
-		RunFailure:    &session.RunFailure{Classification: session.RunFailureBudget, Reason: "aggregate token budget reached"},
+	// A controlled budget stop records no run_failure, so coverage alone decides.
+	// With anything covered the manifest is partial and must exit 0.
+	budgetPartial := &session.RunManifest{
+		TerminalState: session.StatePartial,
+		Coverage: session.Coverage{
+			Selected:  []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}},
+			Completed: []session.CoverageItem{{ItemID: "a"}},
+			Failed:    []session.CoverageItem{{ItemID: "b", Classification: session.FailureBudget}},
+		},
 	}
-	if err := reviewResultError(nil, budgetManifest); err != nil {
-		t.Fatalf("controlled budget stop must not produce a process error: %v", err)
+	if err := reviewResultError(nil, budgetPartial); err != nil {
+		t.Fatalf("budget stop with usable coverage must not produce a process error: %v", err)
+	}
+	// When the cap stopped the run before any file completed, every selected item
+	// is failed(budget): no usable coverage, so it must exit non-zero even though
+	// no run_failure was recorded. This boundary is deliberate, not incidental —
+	// one covered item is the difference between exit 0 and exit non-zero.
+	budgetAllFailed := &session.RunManifest{
+		TerminalState: session.StateFailed,
+		Coverage: session.Coverage{
+			Selected: []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}},
+			Failed: []session.CoverageItem{
+				{ItemID: "a", Classification: session.FailureBudget},
+				{ItemID: "b", Classification: session.FailureBudget},
+			},
+		},
+	}
+	if err := reviewResultError(nil, budgetAllFailed); err == nil ||
+		!strings.Contains(err.Error(), "2 of 2 selected item(s) failed") {
+		t.Fatalf("budget stop that covered nothing must produce a process error: %v", err)
 	}
 	want := errors.New("dispatch failed")
-	if err := reviewResultError(want, budgetManifest); !errors.Is(err, want) {
+	if err := reviewResultError(want, budgetPartial); !errors.Is(err, want) {
 		t.Fatalf("run error not preserved: %v", err)
 	}
 }

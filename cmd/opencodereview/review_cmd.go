@@ -179,13 +179,15 @@ func reviewResultError(runErr error, manifest *session.RunManifest) error {
 		return fmt.Errorf("review failed: %w", runErr)
 	}
 	if manifest != nil && manifest.TerminalState == session.StateFailed {
-		// Aggregate budget exhaustion is a controlled run stop in #508: partial
-		// results are publishable and the process exits successfully. The manifest
-		// still records terminal_state=failed plus run_failure=budget so coverage
-		// remains explicit and every undispatched selected item is failed/budget.
-		if manifest.RunFailure != nil && manifest.RunFailure.Classification == session.RunFailureBudget {
-			return nil
-		}
+		// The exit contract is: non-zero only for a run-level failure, or when
+		// every selected item failed. Any usable coverage — even incomplete — exits
+		// 0, so complete/partial/skipped all succeed and only failed lands here.
+		// That makes a budget stop exit 0 whenever anything was covered (it is a
+		// controlled truncation recording no run_failure) and non-zero only when
+		// the cap left nothing covered at all. Partial results are published
+		// regardless: runReview emits the frozen manifest before this error decides
+		// the exit status.
+		//
 		// Reasons stored in the manifest already went through sanitizeReason, so
 		// they are safe to echo on stderr.
 		if rf := manifest.RunFailure; rf != nil {

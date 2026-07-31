@@ -348,13 +348,14 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			out.Status = "completed_with_warnings"
 		}
 	}
-	// A tripped budget is a distinct typed terminal state (INV-3): it must
-	// read "budget_exceeded" regardless of any concurrent subtask warnings /
-	// errors, since the run stopped for the budget reason and partial results
-	// were still emitted. Takes precedence over the warning statuses above.
-	if budgetExceeded {
-		out.Status = "budget_exceeded"
-	}
+	// budgetExceeded deliberately does NOT touch out.Status. Reaching the
+	// aggregate token budget is a controlled coverage truncation, so it is already
+	// expressed in the manifest as failed(budget) on the items that never got
+	// dispatched — which makes terminal_state read "partial" whenever anything was
+	// covered. The status set above is therefore the single source of truth,
+	// and the budget reason stays observable through three deterministic outlets:
+	// summary.budget_exceeded, the token_budget_reached warning, and
+	// coverage.failed[].classification == "budget".
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
@@ -403,22 +404,24 @@ func outputJSONNoFiles(traceID string) error {
 }
 
 // emitFailureUsage writes a best-effort structured usage record to stderr when
-// a review fails (INV-4): the outer caller must still see the cost of the
-// failed attempt instead of losing it. It carries only token/tool-call tallies
-// and elapsed — never credentials or prompts (INV-4 no-secrets).
+// a review fails, so the outer caller still sees the cost of the failed attempt.
+// It carries only token/tool-call tallies and elapsed, never credentials or
+// prompts.
 //
-// The common failure path is a non-budget error (budget exhaustion returns
-// partial comments with a nil error and reaches emitRunResult instead). But
-// there is a residual edge: a budget gate can trip after dispatching N files,
-// and if every dispatched file then fails, dispatchSubtasks returns
-// (nil, error) — reaching here with ag.BudgetExceeded()==true. We therefore
-// report the agent's actual BudgetExceeded() value rather than hardcoding
-// false, so the record never contradicts the agent's state.
+// A plain aggregate budget stop does NOT reach here: it is a controlled coverage
+// truncation, so it yields terminal_state=partial and a nil error. It only
+// arrives when the truncation left nothing covered at all (every selected item
+// failed(budget) ⇒ terminal_state=failed), or alongside an unrelated failure.
+// Whenever the manifest was constructed, stdout has already published the
+// complete frozen result before this runs — so this record supplements it, never
+// replaces it. We report the agent's actual BudgetExceeded() value rather than
+// hardcoding false, so the record can never contradict the agent's state.
 //
 // In json format it emits a jsonOutput-shaped object to stderr (kept separate
-// from stdout so it does not pollute the machine-readable result stream);
-// otherwise a single human-readable [ocr] line. It must never return an error
-// that masks the original failure — all writes are best-effort.
+// from stdout so it does not pollute the machine-readable result stream, which
+// therefore always carries exactly one JSON document); otherwise a single
+// human-readable [ocr] line. It must never return an error that masks the
+// original failure — all writes are best-effort.
 func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string) {
 	var toolTotal int64
 	for _, v := range ag.ToolCalls() {

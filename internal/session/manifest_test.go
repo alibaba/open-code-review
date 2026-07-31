@@ -163,6 +163,105 @@ func TestRunFailureSweepsPendingToMatchingClass(t *testing.T) {
 	}
 }
 
+// A pending failure cause attributes the undecided items without escalating the
+// run: it is a controlled coverage truncation, so anything already covered keeps
+// the terminal state at partial rather than forcing failed the way run_failure
+// would. This is what makes `--max-tokens-budget` exit 0 while still reporting
+// exactly which files went unreviewed and why.
+func TestPendingFailureCauseSweepsWithoutForcingFailed(t *testing.T) {
+	b := newBuilderWith("a", "b")
+	b.MarkCompleted("a")
+	if err := b.SetPendingFailureCause(FailureBudget, "aggregate token budget reached"); err != nil {
+		t.Fatalf("SetPendingFailureCause: %v", err)
+	}
+	m := mustFinalize(t, b)
+	if m.TerminalState != StatePartial {
+		t.Fatalf("terminal = %q, want partial", m.TerminalState)
+	}
+	if m.RunFailure != nil {
+		t.Fatalf("run_failure = %+v, want nil", m.RunFailure)
+	}
+	if len(m.Coverage.Completed) != 1 {
+		t.Fatalf("completed dropped: %+v", m.Coverage)
+	}
+	if len(m.Coverage.Failed) != 1 {
+		t.Fatalf("failed = %d, want 1", len(m.Coverage.Failed))
+	}
+	if got := m.Coverage.Failed[0]; got.Classification != FailureBudget || got.Reason == "" {
+		t.Fatalf("swept item = %+v, want budget with the truncation reason", got)
+	}
+}
+
+// When the truncation leaves nothing covered, the same coverage rule that
+// produced partial above produces failed here — no run_failure needed. This is
+// the exit-code boundary: one covered item flips the process exit status.
+func TestPendingFailureCauseWithNoCoverageIsFailed(t *testing.T) {
+	b := newBuilderWith("a", "b")
+	if err := b.SetPendingFailureCause(FailureBudget, "aggregate token budget reached"); err != nil {
+		t.Fatalf("SetPendingFailureCause: %v", err)
+	}
+	m := mustFinalize(t, b)
+	if m.TerminalState != StateFailed {
+		t.Fatalf("terminal = %q, want failed", m.TerminalState)
+	}
+	if m.RunFailure != nil {
+		t.Fatalf("run_failure = %+v, want nil", m.RunFailure)
+	}
+	if len(m.Coverage.Failed) != 2 {
+		t.Fatalf("failed = %d, want 2", len(m.Coverage.Failed))
+	}
+	for _, it := range m.Coverage.Failed {
+		if it.Classification != FailureBudget {
+			t.Fatalf("item %s class = %q, want budget", it.ItemID, it.Classification)
+		}
+	}
+}
+
+// A real run-level failure outranks a pending cause in the sweep: the run did
+// fail, so its class colors the undecided items and forces terminal failed even
+// though a truncation cause was also recorded.
+func TestRunFailureOutranksPendingFailureCause(t *testing.T) {
+	b := newBuilderWith("a", "b")
+	b.MarkCompleted("a")
+	if err := b.SetPendingFailureCause(FailureBudget, "aggregate token budget reached"); err != nil {
+		t.Fatalf("SetPendingFailureCause: %v", err)
+	}
+	if err := b.SetRunFailure(RunFailureInternal, "scheduler invariant violated"); err != nil {
+		t.Fatalf("SetRunFailure: %v", err)
+	}
+	m := mustFinalize(t, b)
+	if m.TerminalState != StateFailed {
+		t.Fatalf("terminal = %q, want failed", m.TerminalState)
+	}
+	// internal has no item-level equivalent, so the swept item degrades to unknown
+	// rather than silently reporting the (now irrelevant) budget cause.
+	if len(m.Coverage.Failed) != 1 || m.Coverage.Failed[0].Classification != FailureUnknown {
+		t.Fatalf("swept item = %+v, want unknown from the run_failure mapping", m.Coverage.Failed)
+	}
+}
+
+func TestSetPendingFailureCauseValidation(t *testing.T) {
+	b := newBuilderWith("a")
+	if err := b.SetPendingFailureCause("not-a-class", "x"); err == nil {
+		t.Fatal("expected an invalid pending failure class to be rejected")
+	}
+	if err := b.SetPendingFailureCause(FailureBudget, "first"); err != nil {
+		t.Fatalf("first set: %v", err)
+	}
+	// Re-recording the same class is idempotent; changing it is an error, so a
+	// second, conflicting producer surfaces instead of silently winning or losing.
+	if err := b.SetPendingFailureCause(FailureBudget, "again"); err != nil {
+		t.Fatalf("same class must be idempotent: %v", err)
+	}
+	if err := b.SetPendingFailureCause(FailureTimeout, "different"); err == nil {
+		t.Fatal("expected a class change to be rejected")
+	}
+	mustFinalize(t, b)
+	if err := b.SetPendingFailureCause(FailureBudget, "after freeze"); err == nil {
+		t.Fatal("expected a post-freeze set to be rejected")
+	}
+}
+
 // Waived items count as resolved (non-failed): a run with completed + waived
 // and no failed is complete.
 func TestWaivedResolvesToComplete(t *testing.T) {

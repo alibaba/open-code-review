@@ -201,7 +201,7 @@ func TestEmitRunResult_JSONManifestMatchesPersistedSessionEnd(t *testing.T) {
 	// Capture each exit's manifest as the raw bytes it actually emitted, not a
 	// struct round-trip: re-marshaling both sides through session.RunManifest would
 	// normalize away any real serialization divergence between the two exits. The
-	// contract (OI-3) is "same source, canonicalized equal" — compact only the
+	// contract is "same source, canonicalized equal" — compact only the
 	// insignificant whitespace, then compare bytes.
 	var cliOut struct {
 		Manifest json.RawMessage `json:"manifest"`

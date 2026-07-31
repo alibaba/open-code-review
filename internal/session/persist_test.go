@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -236,8 +238,52 @@ func TestSessionFilePermissions(t *testing.T) {
 	}
 }
 
-// TestFinalizeSurfacesWriteError locks the contract A1/A2/A3 build on: when the
-// session_end write fails, Finalize returns that error instead of swallowing it,
+func TestFinalizeSurfacesWriterCreationErrorWithoutStdout(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// A regular file at this path makes creation of the sessions directory fail
+	// deterministically on every platform.
+	if err := os.WriteFile(filepath.Join(tmpHome, ".opencodereview"), []byte("blocked"), 0o600); err != nil {
+		t.Fatalf("create blocking file: %v", err)
+	}
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	os.Stdout = w
+	sh := New(t.TempDir(), "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	os.Stdout = oldStdout
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	stdout, readErr := io.ReadAll(r)
+	if closeErr := r.Close(); readErr == nil {
+		readErr = closeErr
+	}
+	if readErr != nil {
+		t.Fatalf("read captured stdout: %v", readErr)
+	}
+	if len(stdout) != 0 {
+		t.Fatalf("session creation failure wrote to stdout: %q", stdout)
+	}
+	if sh.HasPersistence() {
+		t.Fatal("session must not report persistence when writer creation failed")
+	}
+
+	err1 := sh.Finalize()
+	err2 := sh.Finalize()
+	for i, finalizeErr := range []error{err1, err2} {
+		if finalizeErr == nil || !strings.Contains(finalizeErr.Error(), "create session writer") {
+			t.Fatalf("Finalize call %d error = %v, want cached writer creation error", i+1, finalizeErr)
+		}
+	}
+}
+
+// TestFinalizeSurfacesWriteError verifies that when the session_end write fails,
+// Finalize returns that error instead of swallowing it,
 // so callers can surface a delivery failure rather than claim a clean run. We
 // force the failure by closing the underlying file out from under the buffered
 // writer; the Flush inside WriteSessionEnd then errors on the closed fd.
@@ -257,10 +303,8 @@ func TestFinalizeSurfacesWriteError(t *testing.T) {
 	}
 }
 
-// TestFinalizeReplaysWriteErrorOnEveryCall locks A3: with the finalized flag set
-// before the write, a first call returned the error but a second call saw
-// finalized==true and returned nil — masking the failure. Every call must now
-// replay the cached write error.
+// TestFinalizeReplaysWriteErrorOnEveryCall verifies that every call observes the
+// cached write error instead of a later call falsely reporting success.
 func TestFinalizeReplaysWriteErrorOnEveryCall(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	repoDir := t.TempDir()
@@ -279,8 +323,8 @@ func TestFinalizeReplaysWriteErrorOnEveryCall(t *testing.T) {
 	}
 }
 
-// TestFinalizeWritesSessionEndExactlyOnce locks the other half of A3: repeated
-// Finalize calls must not append a second session_end record.
+// TestFinalizeWritesSessionEndExactlyOnce verifies that repeated Finalize calls
+// do not append a second session_end record.
 func TestFinalizeWritesSessionEndExactlyOnce(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	repoDir := t.TempDir()

@@ -354,9 +354,8 @@ func TestManifestFlowResumeWithReusedAndAllRerunsFailedIsPartial(t *testing.T) {
 
 // TestManifestFlowResumeWithProviderTransition verifies that a resumed run
 // records the *current* provider/model in execution (not the parent's) while
-// still linking to the parent via parent_run_id. Covers the issue #367
-// acceptance criterion "provider transition": a consumer must be able to
-// audit that a provider/model change happened across a resume chain.
+// still linking to the parent via parent_run_id, so a consumer can audit that
+// the provider or model changed across a resume chain.
 func TestManifestFlowResumeWithProviderTransition(t *testing.T) {
 	diffs := []model.Diff{
 		{OldPath: "cached.go", NewPath: "cached.go", Diff: "+cached", Insertions: 1},

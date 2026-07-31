@@ -59,6 +59,10 @@ type SessionHistory struct {
 	// Finalize, embedded into session_end and exposed to the CLI. Nil for
 	// legacy/scan runs.
 	finalManifest *RunManifest
+	// persistInitErr records a failure to create the JSONL writer. The run may
+	// still produce a manifest for CLI output, but Finalize must report that the
+	// persisted-session outlet was never available.
+	persistInitErr error
 	// finalizeOnce ensures session_end is written exactly once even if several
 	// run paths (error, skip, normal) — possibly concurrently — reach Finalize.
 	finalizeOnce sync.Once
@@ -147,7 +151,10 @@ func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory 
 
 	p, err := newJSONLWriter(sessionID, repoDir, gitBranch, model, opts)
 	if err != nil {
-		fmt.Printf("[ocr session] warning: failed to create session writer: %v\n", err)
+		// Do not print here: New runs before JSON output is silenced, so writing a
+		// warning to stdout would corrupt the command's machine-readable output.
+		// Finalize returns this cached delivery error to the command layer.
+		sh.persistInitErr = fmt.Errorf("create session writer: %w", err)
 	} else {
 		sh.persist = p
 		p.WriteSessionStart(sh.StartTime)
@@ -194,6 +201,18 @@ func (sh *SessionHistory) FinalManifest() *RunManifest {
 	}
 	m := sh.finalManifest.cloned()
 	return &m
+}
+
+// HasPersistence reports whether this session has a JSONL writer. A false value
+// means no resumable session file exists, even though the run still has its own
+// in-memory ID and may produce a CLI manifest.
+func (sh *SessionHistory) HasPersistence() bool {
+	if sh == nil {
+		return false
+	}
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	return sh.persist != nil
 }
 
 // GetOrCreateFileSession returns the FileSession for the given file path,
@@ -276,6 +295,7 @@ func (sh *SessionHistory) Finalize() error {
 		sh.mu.Lock()
 		sh.EndTime = time.Now()
 		p := sh.persist
+		persistInitErr := sh.persistInitErr
 		manifest := sh.finalManifest
 		duration := sh.EndTime.Sub(sh.StartTime)
 		filesReviewed := make([]string, 0, len(sh.FileSessions))
@@ -284,6 +304,11 @@ func (sh *SessionHistory) Finalize() error {
 		}
 		failures := atomic.LoadInt64(&sh.llmFailures)
 		sh.mu.Unlock()
+
+		if persistInitErr != nil {
+			sh.finalizeErr = persistInitErr
+			return
+		}
 
 		// The single write attempt happens outside the lock (disk I/O); its
 		// result is cached in finalizeErr. sync.Once guarantees every other

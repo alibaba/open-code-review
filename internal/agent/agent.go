@@ -300,10 +300,10 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// Record file count metric.
 	telemetry.RecordFilesReviewed(ctx, int64(reviewCount))
 
-	// Pre-run cost projection so users aren't surprised by a large review
-	// (INV-5). Non-blocking warn-only: the estimate is order-of-magnitude and
-	// cannot account for agent tool-use inflation (≈300× in the #409 report),
-	// so it is a floor; real usage is reported from the API after the run.
+	// Pre-run cost projection so users aren't surprised by a large review.
+	// Non-blocking warn-only: the estimate is order-of-magnitude and cannot
+	// account for agent tool-use inflation, so it is a floor; real usage is
+	// reported from the API after the run.
 	//
 	// Gated behind MaxTokensBudget so users who never opt into a budget see no
 	// new output line (the estimate is only useful to budget-setters comparing
@@ -348,9 +348,11 @@ func (a *Agent) Session() *session.SessionHistory {
 	return a.session
 }
 
-// SessionID returns the current review's session id, or "" when no session has been created.
+// SessionID returns the current review's resumable session ID. It returns an
+// empty string when the session file could not be created, so callers do not
+// advertise a retry target that does not exist.
 func (a *Agent) SessionID() string {
-	if a == nil || a.session == nil {
+	if a == nil || a.session == nil || !a.session.HasPersistence() {
 		return ""
 	}
 	return a.session.SessionID
@@ -412,11 +414,17 @@ func (a *Agent) Warnings() []AgentWarning { return a.runner.Warnings() }
 // ToolCalls returns per-tool call counts accumulated during review.
 func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 
-// BudgetExceeded reports whether a token or tool-call budget gate stopped
+// BudgetExceeded reports whether the aggregate token budget gate stopped
 // dispatch before all files were reviewed. The run still returns the partial
-// comments collected up to that point (and a nil error) so the caller can
-// emit a typed budget_exceeded status with the partial results instead of a
-// bare failure.
+// comments collected up to that point (and a nil error), so those results are
+// published before the exit status is decided.
+//
+// This is a diagnostic signal, not a terminal state. The stop records a pending
+// failure cause (not a run_failure), so the manifest attributes the undispatched
+// items to failed(budget) and its coverage alone determines the terminal state
+// and exit code: partial/0 whenever anything was covered, failed/non-zero only
+// when the cap left nothing covered. Per-file token/tool-round exhaustion
+// does NOT set this flag — it is an item-level failed(budget) outcome instead.
 func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded }
 
 // recordWarning adds a non-fatal warning to the agent's warning list.
@@ -545,12 +553,25 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 				a.recordWarning("token_budget_reached", toDispatch[i].NewPath,
 					fmt.Sprintf("stopped dispatch: used %d tokens + next-file estimate %d = projected %d exceeds budget %d", used, nextEst, projected, a.args.MaxTokensBudget))
 				a.budgetExceeded = true
-				// This is a run-level controlled stop, not a failure isolated to the
-				// next file. Record the trigger once so Finalize can classify every
-				// still-selected, undispatched item as failed/budget while preserving
-				// completed and reused outcomes.
+				// Reaching a user-configured budget is a *controlled coverage
+				// truncation*, not a run-level failure: the run did exactly what it
+				// was told to do, and everything it finished before the cap is a
+				// valid result. So record a pending failure cause rather than a
+				// run_failure — Finalize then attributes every item that never got
+				// dispatched to failed(budget) while the terminal state stays
+				// coverage-derived (partial with any completed/reused item, failed
+				// only when the cap left nothing covered).
+				//
+				// Deliberately NOT SetRunFailure: that would force terminal_state to
+				// failed regardless of how much was covered, and it would claim the
+				// single first-wins run_failure slot, blocking a genuine run-level
+				// cause raised later, such as a global deadline or user cancellation,
+				// from being recorded at all.
+				// RunFailureBudget stays reserved for a real run-level budget
+				// anomaly, e.g. a corrupted budget counter that makes per-item
+				// coverage undeterminable.
 				if b := a.session.Manifest(); b != nil {
-					if err := b.SetRunFailure(session.RunFailureBudget, "aggregate token budget reached before dispatch completed"); err != nil {
+					if err := b.SetPendingFailureCause(session.FailureBudget, "aggregate token budget reached before dispatch completed"); err != nil {
 						a.recordWarning("manifest_error", "", err.Error())
 					}
 				}
@@ -850,10 +871,14 @@ func (a *Agent) ruleConfigSHA256() string {
 
 // runtimeConfigSHA256 is the deterministic identity of the allowlisted, non-secret
 // runtime settings: protocol, model, sanitized endpoint host, language, per-request
-// timeout and configured concurrency. Every field is tagged so structurally
-// different configs cannot collide once length-prefixed. No secret ever reaches
-// this hash — RuntimeConfig carries only the credential-free host, never the token
-// or full URL.
+// timeout, configured concurrency and the aggregate token budget. Every field is
+// tagged so structurally different configs cannot collide once length-prefixed. No
+// secret ever reaches this hash — RuntimeConfig carries only the credential-free
+// host, never the token or full URL.
+//
+// max_tokens_budget participates because it changes what coverage a run can even
+// attempt: two otherwise-identical runs with different budgets are not
+// interchangeable when auditing why one stopped short.
 func (a *Agent) runtimeConfigSHA256() string {
 	r := a.args.RuntimeConfig
 	return hashFields(
@@ -863,6 +888,7 @@ func (a *Agent) runtimeConfigSHA256() string {
 		"language", r.Language,
 		"timeout", r.Timeout.String(),
 		"concurrency", strconv.Itoa(a.args.MaxConcurrency),
+		"max_tokens_budget", strconv.FormatInt(a.args.MaxTokensBudget, 10),
 	)
 }
 
@@ -981,8 +1007,8 @@ func classifyItemError(err error) (session.FailureClass, string) {
 // classifyMainLoopStop maps a non-error, non-completed main-loop stop to an item
 // failure class and a safe reason. Only the configured max-tool-request budget is
 // a declared budget stop; the empty-round and compression exits are genuine but
-// unclassifiable, so they map to the honest unknown catch-all rather than being
-// mislabeled budget (per the plan: only an explicit budget reason may be budget).
+// unclassifiable, so they map to the honest unknown catch-all. Only an explicit
+// budget trigger may use the budget classification.
 func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, string) {
 	switch stop {
 	case llmloop.StopMaxRounds:

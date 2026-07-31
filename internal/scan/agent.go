@@ -155,9 +155,10 @@ func toLoopTemplate(s template.ScanTemplate) template.Template {
 // Session returns the session history associated with this Agent.
 func (a *Agent) Session() *session.SessionHistory { return a.session }
 
-// SessionID returns the current scan's session id, or "" when no session has been created.
+// SessionID returns the current scan's persisted session ID. It returns an empty
+// string when no session file exists.
 func (a *Agent) SessionID() string {
-	if a == nil || a.session == nil {
+	if a == nil || a.session == nil || !a.session.HasPersistence() {
 		return ""
 	}
 	return a.session.SessionID
@@ -242,8 +243,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		fmt.Fprintln(stdout.Writer(), "[ocr] No reviewable files. Skipping scan.")
 		telemetry.Event(ctx, "scan.no.files")
 		// A clean skip still has to reach disk: if session_end never persisted,
-		// the skip cannot be claimed. scan is a #367 Non-Goal (no manifest
-		// builder), but the session_end delivery contract still applies.
+		// the skip cannot be claimed. Scan has no manifest builder, but the
+		// session_end delivery contract still applies.
 		if ferr := a.session.Finalize(); ferr != nil {
 			return []model.LlmComment{}, fmt.Errorf("finalize session: %w", ferr)
 		}

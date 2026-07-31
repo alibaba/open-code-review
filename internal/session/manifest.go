@@ -138,6 +138,21 @@ type RunFailure struct {
 	Reason         string          `json:"reason,omitempty"`
 }
 
+// pendingFailureCause is the builder-internal classification Finalize applies to
+// items that are still undecided when the run closes, used when the run stopped
+// covering them deliberately rather than because the run itself failed.
+//
+// It is the contract for a *controlled coverage truncation*: the remaining items
+// genuinely did not get reviewed, so they are failed(<class>) and count against
+// coverage, but the run did not fail and its terminal state stays coverage-derived
+// (partial while anything completed, failed only when nothing did). It is
+// deliberately NOT part of RunManifest: schema v1 is frozen, and the fact is
+// already observable through coverage.failed[].classification.
+type pendingFailureCause struct {
+	Classification FailureClass
+	Reason         string
+}
+
 // TerminalState is the single, coverage-derived outcome of a run. It is the
 // authoritative replacement for the warning-derived "completed_with_errors"
 // status: it is computed only from the coverage sets plus run_failure, never
@@ -320,7 +335,8 @@ type ManifestBuilder struct {
 	input       ManifestInput
 	execution   ManifestExecution
 
-	runFailure *RunFailure
+	runFailure     *RunFailure
+	pendingFailure *pendingFailureCause
 
 	sealed bool
 	frozen bool
@@ -413,6 +429,51 @@ func (b *ManifestBuilder) SetRunFailure(class RunFailureClass, reason string) er
 			b.runFailure.Classification, class)
 	}
 	b.runFailure = &RunFailure{Classification: class, Reason: sanitizeReason(reason)}
+	return nil
+}
+
+// SetPendingFailureCause records the classification Finalize must use when it
+// sweeps items that never received a Mark*. It records no run_failure and
+// transitions no item now, so it does not escalate the run's terminal state.
+//
+// This is the entry point for a controlled coverage truncation — the caller
+// stopped covering the remaining selected items on purpose (the aggregate token
+// budget is the only wired producer today). Those items must be attributed to
+// that specific cause instead of degrading to "unknown", while the terminal state
+// stays coverage-derived: partial while anything completed or was reused, failed
+// only when the truncation left nothing covered.
+//
+// Setting a cause instead of walking the undispatched slice avoids three hazards
+// a hand-written loop has: it cannot race a subtask still in flight (Finalize runs
+// after the wait group drains), it cannot overwrite an already-recorded
+// completed/reused/failed outcome (the sweep only touches still-selected items),
+// and it cannot mis-mark an item that was never registered in the first place
+// (deleted/filtered files are not in the selected set).
+//
+// A run_failure, if also set, wins in the sweep and forces the run to failed;
+// this cause is then an unused fallback. It rejects an invalid class and a change
+// of an already-set class (first cause wins); re-recording the same class is
+// idempotent. reason is passed through sanitizeReason as a redaction floor.
+func (b *ManifestBuilder) SetPendingFailureCause(class FailureClass, reason string) error {
+	if b == nil {
+		return errNilBuilder
+	}
+	if !class.valid() {
+		return fmt.Errorf("manifest: invalid pending failure class %q", class)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.frozen {
+		return errFrozen
+	}
+	if b.pendingFailure != nil {
+		if b.pendingFailure.Classification == class {
+			return nil
+		}
+		return fmt.Errorf("manifest: pending failure cause already set to %q, cannot change to %q",
+			b.pendingFailure.Classification, class)
+	}
+	b.pendingFailure = &pendingFailureCause{Classification: class, Reason: sanitizeReason(reason)}
 	return nil
 }
 
@@ -592,9 +653,9 @@ func stripUnsafeChars(s string) string {
 // tokens and credential-like key=value pairs, removes control/escape characters,
 // collapses to a single line, coerces to valid UTF-8, and caps length.
 //
-// NOTE: absolute local paths, cookies and raw request/response bodies are NOT
-// stripped here — that ownership is an open issue pending sign-off (see
-// docs/367-open-issues.md, OI-1). Until resolved, callers must redact those.
+// Absolute local paths, cookies and raw request/response bodies are not stripped
+// here. Callers must replace those values with a safe summary before storing a
+// reason.
 func sanitizeReason(s string) string {
 	if s == "" {
 		return ""
@@ -606,10 +667,9 @@ func sanitizeReason(s string) string {
 	// surviving "BBB" back in, leaking part of the secret. Removing the byte
 	// first lets the regex see and redact the whole token.
 	//
-	// Residual (OI-1, best-effort floor): an invalid UTF-8 byte is replaced with
-	// the replacement rune "�" rather than removed, so it can still truncate a
-	// token match. This change only closes the control-byte bypass; the "�" case
-	// remains an accepted floor limitation.
+	// An invalid UTF-8 byte is replaced with the replacement rune "�" rather than
+	// removed, so it can still truncate a token match. This sanitizer is therefore
+	// only a defensive floor; callers still own context-aware redaction.
 	s = strings.ToValidUTF8(s, "�")
 	s = stripUnsafeChars(s)
 	// Within the redaction pass, strip "Bearer <tok>" before the assignment rule,
@@ -663,7 +723,8 @@ func (b *ManifestBuilder) Frozen() bool {
 
 // Finalize performs the hard-validated close of the run and returns the
 // immutable manifest. In order it: sweeps any item still selected into failed
-// (colored by the recorded run_failure class, else unknown); builds the five
+// (colored by the run_failure class, else the pending failure cause, else
+// unknown — see the sweep comment for the precedence); builds the five
 // coverage sets; validates the contract invariants (non-empty run_id/operation,
 // a valid input.mode, the set partition, a valid class on every failed item, a
 // non-empty reason on every waived item, and a valid run_failure class if set);
@@ -686,16 +747,29 @@ func (b *ManifestBuilder) Finalize(elapsed time.Duration) (RunManifest, error) {
 	}
 
 	// Backstop: no selected item may be left without an outcome. This covers
-	// goroutines that exited early, cancellation before dispatch, or any path
-	// the caller forgot. When a run_failure is set, undecided items take its
-	// matching item class; otherwise they fall back to unknown. It only runs
-	// when the process can still execute Finalize; a hard kill falls back to the
-	// per-item checkpoints.
+	// goroutines that exited early, cancellation before dispatch, a controlled
+	// coverage truncation, or any path the caller forgot. Highest priority first:
+	//
+	//  1. run_failure set — undecided items take its matching item class, and
+	//     computeTerminal forces the whole run to failed.
+	//  2. no run_failure but a pending failure cause set — undecided items take
+	//     that class and the terminal state stays coverage-derived, so a
+	//     deliberate truncation reports partial rather than a run failure.
+	//  3. neither — fall back to unknown.
+	//
+	// It only runs when the process can still execute Finalize; a hard kill falls
+	// back to the per-item checkpoints.
 	sweepClass := FailureUnknown
 	sweepReason := "no terminal outcome recorded"
-	if b.runFailure != nil {
+	switch {
+	case b.runFailure != nil:
 		sweepClass = itemFailureForRunClass(b.runFailure.Classification)
 		if r := b.runFailure.Reason; r != "" {
+			sweepReason = r
+		}
+	case b.pendingFailure != nil:
+		sweepClass = b.pendingFailure.Classification
+		if r := b.pendingFailure.Reason; r != "" {
 			sweepReason = r
 		}
 	}

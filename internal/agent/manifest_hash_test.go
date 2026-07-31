@@ -136,6 +136,9 @@ func TestRuntimeConfigSHA256(t *testing.T) {
 		{"language", func(x *Args) { x.RuntimeConfig.Language = "zh" }},
 		{"timeout", func(x *Args) { x.RuntimeConfig.Timeout = 60 * time.Second }},
 		{"concurrency", func(x *Args) { x.MaxConcurrency = 8 }},
+		// The aggregate budget changes what coverage a run can even attempt, so two
+		// otherwise-identical runs with different caps must not share an identity.
+		{"max_tokens_budget", func(x *Args) { x.MaxTokensBudget = 100_000 }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

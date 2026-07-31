@@ -12,11 +12,14 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
-// TestEmitRunResult_JSONBudgetExceededStatus verifies that a provider signaling
-// BudgetExceeded()==true produces JSON with status=="budget_exceeded" AND
-// summary.budget_exceeded==true (INV-3 typed status), and that it takes
-// precedence over completed_with_warnings.
-func TestEmitRunResult_JSONBudgetExceededStatus(t *testing.T) {
+// TestEmitRunResult_JSONBudgetStopIsPartial pins the unified terminal-state
+// contract for a controlled budget stop that still covered something: the
+// top-level status comes solely from the manifest's coverage-derived
+// terminal_state ("partial"), and budgetExceeded never overrides it. The budget
+// reason stays observable through three independent outlets — summary.
+// budget_exceeded, the token_budget_reached warning, and the failed items'
+// classification — so nothing is lost by dropping the typed status.
+func TestEmitRunResult_JSONBudgetStopIsPartial(t *testing.T) {
 	ag := &mockResultProvider{
 		filesReviewed:  3,
 		inputTokens:    100,
@@ -26,8 +29,16 @@ func TestEmitRunResult_JSONBudgetExceededStatus(t *testing.T) {
 		toolCalls:      map[string]int64{"file_read": 2},
 		budgetExceeded: true,
 		manifest: &session.RunManifest{
-			TerminalState: session.StateFailed,
-			RunFailure:    &session.RunFailure{Classification: session.RunFailureBudget, Reason: "aggregate token budget reached"},
+			TerminalState: session.StatePartial,
+			Coverage: session.Coverage{
+				Selected:  []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}},
+				Completed: []session.CoverageItem{{ItemID: "a"}},
+				Failed: []session.CoverageItem{{
+					ItemID:         "b",
+					Classification: session.FailureBudget,
+					Reason:         "aggregate token budget reached before dispatch completed",
+				}},
+			},
 		},
 	}
 	got := captureStdout(t, func() {
@@ -40,17 +51,24 @@ func TestEmitRunResult_JSONBudgetExceededStatus(t *testing.T) {
 	if err := json.Unmarshal([]byte(got), &out); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if out.Status != "budget_exceeded" {
-		t.Errorf("status = %q, want budget_exceeded (must take precedence over completed_with_warnings)", out.Status)
+	if out.Status != string(session.StatePartial) {
+		t.Errorf("status = %q, want %q (must mirror manifest.terminal_state, not a typed budget status)",
+			out.Status, session.StatePartial)
 	}
 	if out.Summary == nil || !out.Summary.BudgetExceeded {
 		t.Errorf("summary.budget_exceeded = %v, want true", out.Summary)
 	}
-	if out.Manifest == nil || out.Manifest.TerminalState != session.StateFailed || out.Manifest.RunFailure == nil || out.Manifest.RunFailure.Classification != session.RunFailureBudget {
-		t.Errorf("manifest = %+v, want failed run_failure=budget", out.Manifest)
+	if out.Manifest == nil {
+		t.Fatal("manifest must be published")
+	}
+	if out.Manifest.RunFailure != nil {
+		t.Errorf("a controlled budget stop must record no run_failure, got %+v", out.Manifest.RunFailure)
+	}
+	if len(out.Manifest.Coverage.Failed) != 1 || out.Manifest.Coverage.Failed[0].Classification != session.FailureBudget {
+		t.Errorf("coverage.failed = %+v, want one item classified budget", out.Manifest.Coverage.Failed)
 	}
 	// The token_budget_reached warning must still be present in the output so
-	// the reason is observable alongside the typed status.
+	// the reason is observable alongside the coverage-derived status.
 	var foundBudgetWarn bool
 	for _, w := range out.Warnings {
 		if w.Type == "token_budget_reached" {
@@ -63,11 +81,12 @@ func TestEmitRunResult_JSONBudgetExceededStatus(t *testing.T) {
 	}
 }
 
-// TestEmitRunResult_JSONBudgetExceededPrecedenceOverErrors verifies that
-// budget_exceeded takes precedence over completed_with_errors too — a budget
-// trip is a distinct typed terminal state (INV-3 lists completed_with_errors
-// as a status it must be distinct from).
-func TestEmitRunResult_JSONBudgetExceededPrecedenceOverErrors(t *testing.T) {
+// TestEmitRunResult_JSONBudgetDoesNotOverrideLegacyStatus guards the legacy
+// (manifest-less) path: budgetExceeded must not rewrite the warning-derived
+// status there either. Before the unified contract a budget trip forced
+// status=="budget_exceeded" and masked the fact that a subtask had errored;
+// now the error status survives and the budget shows up only in the summary.
+func TestEmitRunResult_JSONBudgetDoesNotOverrideLegacyStatus(t *testing.T) {
 	ag := &mockResultProvider{
 		filesReviewed:  1,
 		warnings:       []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "boom"}},
@@ -83,8 +102,11 @@ func TestEmitRunResult_JSONBudgetExceededPrecedenceOverErrors(t *testing.T) {
 	if err := json.Unmarshal([]byte(got), &out); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if out.Status != "budget_exceeded" {
-		t.Errorf("status = %q, want budget_exceeded (must take precedence over completed_with_errors)", out.Status)
+	if out.Status != "completed_with_errors" {
+		t.Errorf("status = %q, want completed_with_errors (budgetExceeded must not override it)", out.Status)
+	}
+	if out.Summary == nil || !out.Summary.BudgetExceeded {
+		t.Errorf("summary.budget_exceeded = %v, want true", out.Summary)
 	}
 }
 
@@ -118,7 +140,7 @@ func TestEmitRunResult_JSONNoBudgetIsSuccess(t *testing.T) {
 
 // TestEmitFailureUsage_TextEmitsStructuredRecord verifies the non-budget
 // failure path emits a structured usage record to stderr with the token totals
-// and budget_exceeded=false (INV-4). Text format.
+// and budget_exceeded=false in text format.
 func TestEmitFailureUsage_TextEmitsStructuredRecord(t *testing.T) {
 	ag := &mockResultProvider{
 		filesReviewed: 4,
@@ -139,7 +161,7 @@ func TestEmitFailureUsage_TextEmitsStructuredRecord(t *testing.T) {
 }
 
 // TestEmitFailureUsage_JSONEmitsStructuredRecord verifies the JSON form emits a
-// parseable record to stderr with budget_exceeded=false (INV-4).
+// parseable record to stderr with budget_exceeded=false.
 func TestEmitFailureUsage_JSONEmitsStructuredRecord(t *testing.T) {
 	ag := &mockResultProvider{
 		filesReviewed: 2,

@@ -105,12 +105,15 @@ type InputResolution struct {
 //
 //   - range:     base = merge-base(from,to); head = the commit `to` resolves to;
 //     exact_range = base..head only when both resolve.
-//   - commit:    head = the commit resolved from `commit`; a single-parent commit
-//     additionally fills base = parent and exact_range = parent..head. A root
-//     commit (no parent) or a merge commit (2+ parents) leaves base/range empty.
+//   - commit:    head = the commit resolved from `commit`; base is the first
+//     parent used by the diff, and exact_range = first-parent..head. A root
+//     commit has no base or exact range.
 //   - workspace: base = current HEAD when the repository has one (empty on an
 //     unborn repository); head and range stay empty (a workspace has no immutable
 //     head).
+//
+// Commit mode follows the same first-parent comparison used by GetDiff. Root
+// commits have no parent, so only their resolved head is available.
 //
 // It runs read-only git queries and never returns an error: an unresolvable
 // endpoint is reported as an empty field, never a fabricated SHA.
@@ -127,7 +130,9 @@ func (p *Provider) ResolveInput(ctx context.Context) InputResolution {
 	case ModeCommit:
 		head := p.resolveCommit(ctx, p.commit)
 		r := InputResolution{ResolvedHead: head}
-		if parents := p.commitParents(ctx, p.commit); len(parents) == 1 && head != "" {
+		if parents := p.commitParents(ctx, p.commit); len(parents) > 0 && head != "" {
+			// GetDiff renders merge commits against their first parent, so the
+			// manifest must record that same concrete comparison base.
 			r.ResolvedBase = parents[0]
 			r.ExactRange = parents[0] + ".." + head
 		}
@@ -344,10 +349,8 @@ func (p *Provider) RemoteIdentity(ctx context.Context) string {
 //
 // Local remotes (file://, absolute/relative filesystem paths, Windows drive
 // paths, UNC shares) have no stable network identity and no credentials to
-// strip; they canonicalize to "" so the caller omits repository identity — the
-// same behavior as a missing origin. Whether local remotes should instead carry
-// a path-based identity is a deferred product decision (docs/367-open-issues.md
-// OI-11 / B3); isolating them in one branch keeps that switch cheap.
+// strip; they canonicalize to "" so the caller omits repository identity, the
+// same behavior as a missing origin.
 //
 // An empty or unrecognizable input yields "".
 func canonicalRemote(raw string) string {

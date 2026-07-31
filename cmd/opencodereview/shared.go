@@ -287,10 +287,13 @@ type ResultProvider interface {
 	// in JSON output or failure diagnostics. Returns "" when no session was
 	// created.
 	SessionID() string
-	// BudgetExceeded reports whether a token/tool-call budget gate stopped the
-	// run before all files were reviewed. The run still returns partial
-	// comments; this lets the output layer set a typed "budget_exceeded"
-	// status distinct from success / warnings / errors.
+	// BudgetExceeded reports whether the aggregate token budget gate stopped the
+	// run before all files were reviewed. It is a diagnostic signal only — it
+	// feeds summary.budget_exceeded and the failure usage record, and never
+	// decides the run's terminal state. The terminal state comes solely from the
+	// manifest's coverage: the stop marks the undispatched items
+	// failed(budget) without recording a run_failure, so it reads as partial
+	// whenever anything was covered.
 	BudgetExceeded() bool
 	// RunManifest returns the frozen v1 coverage result for review runs. Scan
 	// remains legacy and returns nil.

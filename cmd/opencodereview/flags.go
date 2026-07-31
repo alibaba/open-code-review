@@ -139,7 +139,7 @@ func parseReviewFlags(args []string) (reviewOptions, error) {
 	a.StringVar(&opts.model, "model", "", "override LLM model for this review (e.g., claude-opus-4-6)")
 	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
-	a.IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output); dispatch stops once exceeded (0 = unlimited)")
+	a.IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; dispatch stops once exceeded and skipped files are reported as failed(budget). Partial results are published and review exits 0; it exits non-zero only if the cap stopped it before any file completed (0 = unlimited)")
 	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be reviewed without running the LLM")
 
 	if err := a.Parse(args); err != nil {
@@ -246,7 +246,10 @@ Flags:
   --concurrency int             max concurrent file reviews (default 8)
   --exclude string              comma-separated gitignore-style patterns to exclude (merged with rule.json)
   --max-git-procs int           max concurrent git subprocesses (default 16)
-  --max-tokens-budget int       cap total token usage; dispatch stops once exceeded (0 = unlimited)
+  --max-tokens-budget int       cap total token usage; dispatch stops once exceeded and skipped
+                                files are reported as failed(budget). Partial results are
+                                published and review exits 0; non-zero only if the cap stopped
+                                it before any file completed (0 = unlimited)
   --from string                 source ref to start diff from (e.g., 'main')
   --max-tools int               max tool call rounds per file (0 = template default; min 10)
   --model string                override LLM model for this review (e.g., claude-opus-4-6)
