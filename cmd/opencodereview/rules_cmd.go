@@ -5,50 +5,43 @@ import (
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
+	"github.com/spf13/cobra"
 )
 
-func runRules(args []string) error {
-	if len(args) == 0 {
-		printRulesUsage()
-		return nil
-	}
-	switch args[0] {
-	case "check":
-		return runRulesCheck(args[1:])
-	case "-h", "--help":
-		printRulesUsage()
-		return nil
-	default:
-		return fmt.Errorf("unknown rules sub-command: %s\nRun 'ocr rules -h' for usage", args[0])
-	}
+var rulesCmd = &cobra.Command{
+	Use:   "rules",
+	Short: "Inspect and debug review rules",
+	Long:  "Inspect and debug review rules.",
 }
 
-func runRulesCheck(args []string) error {
-	a := newOcrFlagSet("ocr rules check")
-	var repoDir, rulePath string
-	a.StringVar(&repoDir, "repo", "", "root directory of the git repository (default: current dir)")
-	a.StringVar(&rulePath, "rule", "", "path to JSON file with custom review rules")
-	if err := a.Parse(args); err != nil {
-		return err
-	}
-	if a.showHelp {
-		printRulesCheckUsage()
-		return nil
-	}
+var rulesCheckRepoDir string
+var rulesCheckRulePath string
 
-	rest := a.fs.Args()
-	if len(rest) == 0 {
-		printRulesCheckUsage()
-		return nil
-	}
-	filePath := rest[0]
+var rulesCheckCmd = &cobra.Command{
+	Use:   "check [flags] <file-path>",
+	Short: "Show which review rule applies to a given file path",
+	Long:  "Show which review rule applies to the given file path, including its source layer and matched pattern.",
+	Example: `  ocr rules check src/main/java/com/example/Foo.java
+  ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runRulesCheck(args[0])
+	},
+}
 
-	resolvedRepo, err := resolveRepoDir(repoDir)
+func init() {
+	addRepoFlag(rulesCheckCmd, &rulesCheckRepoDir)
+	rulesCheckCmd.Flags().StringVar(&rulesCheckRulePath, "rule", "", "path to a custom rule JSON file")
+	rulesCmd.AddCommand(rulesCheckCmd)
+}
+
+func runRulesCheck(filePath string) error {
+	resolvedRepo, err := resolveRepoDir(rulesCheckRepoDir)
 	if err != nil {
 		return err
 	}
 
-	resolver, _, err := rules.NewResolver(resolvedRepo, rulePath)
+	resolver, _, err := rules.NewResolver(resolvedRepo, rulesCheckRulePath)
 	if err != nil {
 		return fmt.Errorf("load rules: %w", err)
 	}
@@ -76,29 +69,4 @@ func runRulesCheck(args []string) error {
 	fmt.Println(strings.Repeat("─", 40))
 
 	return nil
-}
-
-func printRulesUsage() {
-	fmt.Println(`Usage:
-  ocr rules <sub-command>
-
-Sub-commands:
-  check <file>   Show which review rule applies to a given file path
-
-Use "ocr rules check -h" for more information.`)
-}
-
-func printRulesCheckUsage() {
-	fmt.Println(`Usage:
-  ocr rules check [flags] <file-path>
-
-Show which review rule applies to the given file path, including its source layer and matched pattern.
-
-Flags:
-  --repo    Root directory of the git repository (default: current dir)
-  --rule    Path to a custom rule JSON file
-
-Examples:
-  ocr rules check src/main/java/com/example/Foo.java
-  ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml`)
 }

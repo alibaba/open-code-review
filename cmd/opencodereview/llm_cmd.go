@@ -9,23 +9,36 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/testconnection"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/spf13/cobra"
 )
 
-func runLLM(args []string) error {
-	if len(args) == 0 {
-		printLLMUsage()
-		return nil
-	}
+var llmCmd = &cobra.Command{
+	Use:   "llm",
+	Short: "LLM utility commands",
+	Long:  "LLM utility commands.",
+	Example: `  ocr llm test                   Verify LLM connectivity and configuration
+  ocr llm providers              List available built-in providers`,
+}
 
-	switch args[0] {
-	case "test":
+var llmTestCmd = &cobra.Command{
+	Use:   "test",
+	Short: "Send a test conversation to the configured LLM model",
+	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLLMTest()
-	case "providers":
+	},
+}
+
+var llmProvidersCmd = &cobra.Command{
+	Use:   "providers",
+	Short: "List all built-in LLM providers",
+	Run: func(cmd *cobra.Command, args []string) {
 		runLLMProviders()
-		return nil
-	default:
-		return fmt.Errorf("unknown llm sub-command: %s\nRun 'ocr llm' for usage", args[0])
-	}
+	},
+}
+
+func init() {
+	llmCmd.AddCommand(llmTestCmd)
+	llmCmd.AddCommand(llmProvidersCmd)
 }
 
 func runLLMTest() error {
@@ -110,19 +123,4 @@ func runLLMProviders() {
 	}
 	fmt.Println("\nUse 'ocr config provider' to configure a provider interactively.")
 	fmt.Println("Use 'ocr config set provider <name>' to switch providers non-interactively.")
-}
-
-func printLLMUsage() {
-	fmt.Println(`LLM utility commands.
-
-Usage:
-  ocr llm <sub-command>
-
-Sub-commands:
-  test         Send a test conversation to the configured LLM model
-  providers    List all built-in LLM providers
-
-Examples:
-  ocr llm test                   Verify LLM connectivity and configuration
-  ocr llm providers              List available built-in providers`)
 }

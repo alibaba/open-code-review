@@ -15,22 +15,85 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/spf13/cobra"
 
 	"go.opentelemetry.io/otel/codes"
 )
 
-func runReview(args []string) error {
-	opts, err := parseReviewFlags(args)
-	if err != nil {
-		// parseReviewFlags already wraps with "parse flags: %w" — return as-is.
-		return err
-	}
-	if opts.showHelp {
-		printReviewUsage()
-		return nil
-	}
+type reviewOptions struct {
+	toolConfigPath  string
+	rulePath        string
+	repoDir         string
+	from            string
+	to              string
+	commit          string
+	resume          string
+	excludes        string
+	outputFormat    string
+	audience        string
+	background      string
+	backgroundFile  string
+	model           string
+	concurrency     int
+	perFileTimeout  int
+	maxTools        int
+	maxGitProcs     int
+	maxTokensBudget int
+	preview         bool
+}
 
-	// review path: git repo is required (diff concepts depend on it).
+var reviewOpts reviewOptions
+
+var reviewCmd = &cobra.Command{
+	Use:     "review [flags]",
+	Aliases: []string{"r"},
+	Short:   "Start a diff-based code review",
+	Long:    "OpenCodeReview - AI-Powered Code Review CLI\n\nStart a diff-based code review using a configurable LLM.",
+	Args:    cobra.NoArgs,
+	Example: `  # Review staged + unstaged + untracked changes in current workspace
+  ocr review
+
+  # Review a branch against its base (merge-base mode)
+  ocr review --from master --to dev-ref
+
+  # Review a specific commit
+  ocr review --commit abc123
+  ocr review -c abc123
+
+  # Resume a previous range review
+  ocr review --from master --to dev-ref --resume <session-id>
+
+  # Output JSON format
+  ocr review --format json
+  ocr review -f json
+
+  # Agent mode (summary only, no progress lines)
+  ocr review --audience agent
+
+  # Preview which files will be reviewed
+  ocr review --preview
+  ocr review -c abc123 -p
+
+  # Exclude generated files / fixtures
+  ocr review --exclude '**/generated/*,**/testdata/*'
+
+  # Provide requirement/business context inline, from a Markdown file, or both
+  ocr review --background "Adding rate limiting to the login API"
+  ocr review --background-file ./docs/requirements.md
+  ocr review --background "Focus on auth" --background-file ./docs/requirements.md`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateReviewOptions(&reviewOpts); err != nil {
+			return err
+		}
+		return executeReview(reviewOpts)
+	},
+}
+
+func init() {
+	registerReviewFlags(reviewCmd, &reviewOpts)
+}
+
+func executeReview(opts reviewOptions) error {
 	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err

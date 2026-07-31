@@ -10,43 +10,55 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/spf13/cobra"
 )
 
-func runSession(args []string) error {
-	if len(args) == 0 {
-		printSessionUsage()
-		return nil
-	}
-	switch args[0] {
-	case "list", "ls":
-		return runSessionList(args[1:])
-	case "show":
-		return runSessionShow(args[1:])
-	case "-h", "--help":
-		printSessionUsage()
-		return nil
-	default:
-		return fmt.Errorf("unknown session sub-command: %s\nRun 'ocr session -h' for usage", args[0])
-	}
+var sessionCmd = &cobra.Command{
+	Use:     "session",
+	Aliases: []string{"sessions"},
+	Short:   "List and inspect saved review sessions",
 }
 
-func runSessionList(args []string) error {
-	a := newOcrFlagSet("ocr session list")
-	var repoDir string
-	var asJSON bool
-	var limit int
-	a.StringVar(&repoDir, "repo", "", "root directory of the git repository (default: current dir)")
-	a.BoolVar(&asJSON, "json", false, "emit JSON instead of a table")
-	a.IntVar(&limit, "limit", 20, "cap the number of listed sessions (0 = unlimited)")
-	if err := a.Parse(args); err != nil {
-		return err
-	}
-	if a.showHelp {
-		printSessionListUsage()
-		return nil
-	}
+var sessionListRepoDir string
+var sessionListJSON bool
+var sessionListLimit int
 
-	resolvedRepo, err := resolveWorkingDirForSession(repoDir)
+var sessionListCmd = &cobra.Command{
+	Use:     "list [flags]",
+	Aliases: []string{"ls"},
+	Short:   "List recent review sessions for the current repo",
+	Long:    "List review sessions previously persisted to ~/.opencodereview/sessions/.\nThe session id printed here can be passed to 'ocr review --resume <id>'.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSessionList()
+	},
+}
+
+var sessionShowRepoDir string
+var sessionShowJSON bool
+
+var sessionShowCmd = &cobra.Command{
+	Use:   "show [flags] <session-id>",
+	Short: "Show one session's metadata and per-file items",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSessionShow(args[0])
+	},
+}
+
+func init() {
+	sessionListCmd.Flags().StringVar(&sessionListRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "emit JSON instead of a table")
+	sessionListCmd.Flags().IntVar(&sessionListLimit, "limit", 20, "cap the number of listed sessions (0 = unlimited)")
+
+	sessionShowCmd.Flags().StringVar(&sessionShowRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "emit JSON instead of a table")
+
+	sessionCmd.AddCommand(sessionListCmd)
+	sessionCmd.AddCommand(sessionShowCmd)
+}
+
+func runSessionList() error {
+	resolvedRepo, err := resolveWorkingDirForSession(sessionListRepoDir)
 	if err != nil {
 		return err
 	}
@@ -54,11 +66,11 @@ func runSessionList(args []string) error {
 	if err != nil {
 		return fmt.Errorf("list sessions: %w", err)
 	}
-	if limit > 0 && len(summaries) > limit {
-		summaries = summaries[:limit]
+	if sessionListLimit > 0 && len(summaries) > sessionListLimit {
+		summaries = summaries[:sessionListLimit]
 	}
 
-	if asJSON {
+	if sessionListJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(summaries)
@@ -72,28 +84,8 @@ func runSessionList(args []string) error {
 	return nil
 }
 
-func runSessionShow(args []string) error {
-	a := newOcrFlagSet("ocr session show")
-	var repoDir string
-	var asJSON bool
-	a.StringVar(&repoDir, "repo", "", "root directory of the git repository (default: current dir)")
-	a.BoolVar(&asJSON, "json", false, "emit JSON instead of a table")
-	if err := a.Parse(args); err != nil {
-		return err
-	}
-	if a.showHelp {
-		printSessionShowUsage()
-		return nil
-	}
-
-	rest := a.fs.Args()
-	if len(rest) == 0 {
-		printSessionShowUsage()
-		return fmt.Errorf("session show requires a session ID")
-	}
-	sessionID := rest[0]
-
-	resolvedRepo, err := resolveWorkingDirForSession(repoDir)
+func runSessionShow(sessionID string) error {
+	resolvedRepo, err := resolveWorkingDirForSession(sessionShowRepoDir)
 	if err != nil {
 		return err
 	}
@@ -102,7 +94,7 @@ func runSessionShow(args []string) error {
 		return fmt.Errorf("load session %q: %w", sessionID, err)
 	}
 
-	if asJSON {
+	if sessionShowJSON {
 		payload := struct {
 			Summary *session.Summary     `json:"summary"`
 			Items   []session.ItemDetail `json:"items"`
@@ -289,40 +281,4 @@ func truncate(s string, n int) string {
 		return "…"
 	}
 	return string(runes[:n-1]) + "…"
-}
-
-func printSessionUsage() {
-	fmt.Println(`Usage:
-  ocr session <sub-command>
-
-Sub-commands:
-  list, ls    List recent review sessions for the current repo
-  show <id>   Show one session's metadata and per-file items
-
-Use "ocr session list -h" or "ocr session show -h" for details.`)
-}
-
-func printSessionListUsage() {
-	fmt.Println(`Usage:
-  ocr session list [flags]
-  ocr session ls [flags]
-
-List review sessions previously persisted to ~/.opencodereview/sessions/. The
-session id printed here can be passed to 'ocr review --resume <id>'.
-
-Flags:
-  --repo string   Root directory of the git repository (default: current dir)
-  --json          Emit JSON instead of a table
-  --limit int     Cap the number of listed sessions (default 20; 0 = unlimited)`)
-}
-
-func printSessionShowUsage() {
-	fmt.Println(`Usage:
-  ocr session show [flags] <session-id>
-
-Show metadata and per-file items for a single session.
-
-Flags:
-  --repo string   Root directory of the git repository (default: current dir)
-  --json          Emit JSON instead of a table`)
 }

@@ -12,21 +12,17 @@ import (
 	"github.com/alibaba/open-code-review/internal/scan"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/spf13/cobra"
 
 	"go.opentelemetry.io/otel/codes"
 )
 
-// scanOptions mirrors reviewOptions for the full-scan subcommand. The two
-// types are kept separate so the scan flag set can evolve independently of
-// the diff-based review flags (e.g. --from/--to/--commit make no sense here).
-//
-// Bare `ocr scan` (no --path) scans the entire repository; --path narrows.
 type scanOptions struct {
 	toolConfigPath  string
 	rulePath        string
 	repoDir         string
-	paths           string // comma-separated relative paths; empty = whole repo
-	excludes        string // comma-separated gitignore-style exclude patterns
+	paths           string
+	excludes        string
 	outputFormat    string
 	audience        string
 	background      string
@@ -35,64 +31,49 @@ type scanOptions struct {
 	maxTools        int
 	maxGitProcs     int
 	preview         bool
-	noPlan          bool   // --no-plan: skip the PLAN_TASK pre-pass per file
-	noDedup         bool   // --no-dedup: skip the per-batch DEDUP_TASK
-	noSummary       bool   // --no-summary: skip the post-run PROJECT_SUMMARY_TASK
-	batch           string // --batch: override scan template's BATCH_STRATEGY
-	maxTokensBudget int    // --max-tokens-budget: cap total token usage; 0 = unlimited
-	model           string // --model: override resolved LLM model for this scan
-	showHelp        bool
+	noPlan          bool
+	noDedup         bool
+	noSummary       bool
+	batch           string
+	maxTokensBudget int
+	model           string
 }
 
-func parseScanFlags(args []string) (scanOptions, error) {
-	a := newOcrFlagSet("ocr scan")
-	opts := scanOptions{}
+var scanOpts scanOptions
 
-	a.StringVar(&opts.toolConfigPath, "tools", "", "path to JSON tools config file (default: embedded)")
-	a.StringVar(&opts.rulePath, "rule", "", "path to JSON file with system review rules")
-	a.StringVar(&opts.repoDir, "repo", "", "root directory of the git repository (default: current dir)")
-	a.StringVar(&opts.paths, "path", "", "comma-separated repo-relative directories or files to scan (default: whole repo)")
-	a.StringVar(&opts.excludes, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
-	a.StringVarP(&opts.outputFormat, "format", "f", "text", "output format: text or json")
-	a.IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file scans")
-	a.IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
-	a.StringVar(&opts.audience, "audience", "human", "output audience: human (show progress) or agent (summary only)")
-	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the scan")
-	a.IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
-	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
-	a.BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be scanned without running the LLM")
-	a.BoolVar(&opts.noPlan, "no-plan", false, "skip the per-file PLAN_TASK pre-pass (one fewer LLM call per file; may reduce review focus)")
-	a.BoolVar(&opts.noDedup, "no-dedup", false, "skip the per-batch DEDUP_TASK (keeps raw comments; one fewer LLM call per batch)")
-	a.BoolVar(&opts.noSummary, "no-summary", false, "skip the post-run PROJECT_SUMMARY_TASK (no project-level markdown summary)")
-	a.StringVar(&opts.batch, "batch", "", "override BATCH_STRATEGY from scan template: none | by-language | by-directory")
-	a.IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output); dispatch stops once exceeded (0 = unlimited)")
-	a.StringVar(&opts.model, "model", "", "override LLM model for this scan (e.g., claude-opus-4-6)")
+var scanCmd = &cobra.Command{
+	Use:     "scan [flags]",
+	Aliases: []string{"s"},
+	Short:   "Scan entire files (no diff required)",
+	Long:    "OpenCodeReview - Full-File Scan\n\nScan entire files for code review without requiring a diff.",
+	Args:    cobra.NoArgs,
+	Example: `  # Scan the entire repository
+  ocr scan
 
-	if err := a.Parse(args); err != nil {
-		return opts, fmt.Errorf("parse flags: %w", err)
-	}
+  # Scan a single directory
+  ocr scan --path internal/agent
 
-	opts.showHelp = a.showHelp
-	if opts.showHelp {
-		return opts, nil
-	}
+  # Scan multiple files
+  ocr scan --path internal/agent/agent.go,internal/diff/scan.go
 
-	switch opts.audience {
-	case "human", "agent":
-	default:
-		return opts, fmt.Errorf("invalid --audience value %q: must be 'human' or 'agent'", opts.audience)
-	}
+  # Exclude generated files / fixtures
+  ocr scan --exclude '**/generated/*,**/testdata/*'
 
-	if opts.maxTools < 0 {
-		return opts, fmt.Errorf("--max-tools must be a non-negative integer (0 means use template default)")
-	}
-	if opts.maxGitProcs < 0 {
-		return opts, fmt.Errorf("--max-git-procs must be a non-negative integer (0 means use default 16)")
-	}
-	if opts.maxTokensBudget < 0 {
-		return opts, fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
-	}
-	return opts, nil
+  # Preview which files would be scanned without calling the LLM
+  ocr scan --preview
+
+  # Skip the per-file PLAN_TASK pre-pass
+  ocr scan --no-plan`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateScanOptions(&scanOpts); err != nil {
+			return err
+		}
+		return executeScan(scanOpts)
+	},
+}
+
+func init() {
+	registerScanFlags(scanCmd, &scanOpts)
 }
 
 func splitPaths(raw string) []string {
@@ -110,19 +91,7 @@ func splitPaths(raw string) []string {
 	return out
 }
 
-func runScan(args []string) error {
-	opts, err := parseScanFlags(args)
-	if err != nil {
-		// parseScanFlags already wraps with "parse flags: %w" — return as-is.
-		return err
-	}
-	if opts.showHelp {
-		printScanUsage()
-		return nil
-	}
-
-	// scan path: git is preferred (more accurate .gitignore handling) but not required;
-	// provider falls back to filepath.Walk when the dir is not a git repo.
+func executeScan(opts scanOptions) error {
 	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, false)
 	if err != nil {
 		return err
@@ -250,53 +219,4 @@ func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths
 	}
 	outputPreviewText(preview)
 	return nil
-}
-
-func printScanUsage() {
-	fmt.Println(`OpenCodeReview - Full-File Scan
-
-Usage:
-  ocr scan [flags]
-  ocr s    [flags]                (alias)
-
-Examples:
-  # Scan the entire repository (default when no --path is given)
-  ocr scan
-
-  # Scan a single directory
-  ocr scan --path internal/agent
-
-  # Scan multiple files
-  ocr scan --path internal/agent/agent.go,internal/diff/scan.go
-
-  # Exclude generated files / fixtures
-  ocr scan --exclude '**/generated/*,**/testdata/*'
-
-  # Preview which files would be scanned without calling the LLM
-  ocr scan --preview
-
-  # Skip the per-file PLAN_TASK pre-pass (saves ~1 LLM call per file, may
-  # reduce review focus)
-  ocr scan --no-plan
-
-Flags:
-  --path string           comma-separated repo-relative dirs/files to scan (default: whole repo)
-  --exclude string        comma-separated gitignore-style patterns to exclude (merged with rule.json)
-  --no-plan               skip the per-file PLAN_TASK pre-pass (faster, less focused)
-  --no-dedup              skip the per-batch DEDUP_TASK (keeps raw comments)
-  --no-summary            skip the post-run PROJECT_SUMMARY_TASK
-  --batch string          override BATCH_STRATEGY: none | by-language | by-directory
-  --max-tokens-budget int cap total token usage; dispatch stops once exceeded (0 = unlimited)
-  --model string          override LLM model for this scan (e.g., claude-opus-4-6)
-  --audience string       output audience: human (show progress) or agent (summary only) (default "human")
-  -b, --background string optional requirement/business context for the scan
-  -f, --format string     output format: text or json (default "text")
-  --concurrency int       max concurrent file scans (default 8)
-  --max-git-procs int     max concurrent git subprocesses (default 16)
-  --max-tools int         max tool call rounds per file; only takes effect when greater than template default
-  -p, --preview           preview which files will be scanned without running the LLM
-  --repo string           root directory of the git repository (default: current dir)
-  --rule string           path to JSON file with system review rules
-  --timeout int           concurrent task timeout in minutes (default 10)
-  --tools string          path to JSON tools config file (default: embedded)`)
 }
