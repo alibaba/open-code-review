@@ -147,50 +147,5 @@ func TestParseReviewFlags_ShortFlags(t *testing.T) {
 	}
 }
 
-func TestParseConfigArgs_Empty(t *testing.T) {
-	_, err := parseConfigArgs(nil)
-	if err == nil {
-		t.Fatal("expected error for empty args")
-	}
-}
-
-func TestParseConfigArgs_Set(t *testing.T) {
-	act, err := parseConfigArgs([]string{"set", "llm.model", "gpt-4"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if act.subCmd != "set" || act.key != "llm.model" || act.value != "gpt-4" {
-		t.Errorf("got %+v", act)
-	}
-}
-
-func TestParseConfigArgs_SetMissingValue(t *testing.T) {
-	_, err := parseConfigArgs([]string{"set", "llm.model"})
-	if err == nil {
-		t.Fatal("expected error for missing value")
-	}
-}
-
-func TestParseConfigArgs_Unset(t *testing.T) {
-	act, err := parseConfigArgs([]string{"unset", "custom_providers.foo"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if act.subCmd != "unset" || act.key != "custom_providers.foo" {
-		t.Errorf("got %+v", act)
-	}
-}
-
-func TestParseConfigArgs_UnsetMissingKey(t *testing.T) {
-	_, err := parseConfigArgs([]string{"unset"})
-	if err == nil {
-		t.Fatal("expected error for missing key")
-	}
-}
-
-func TestParseConfigArgs_UnknownSubCmd(t *testing.T) {
-	_, err := parseConfigArgs([]string{"delete", "foo"})
-	if err == nil {
-		t.Fatal("expected error for unknown subcommand")
-	}
-}
+// Config argument parsing is exercised through runConfig (see
+// config_dispatch_test.go), which now routes via the production cobra tree.

@@ -369,25 +369,9 @@ func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 
 // --- unset tests ---
 
-func TestParseConfigArgsUnset(t *testing.T) {
-	action, err := parseConfigArgs([]string{"unset", "custom_providers.my-gateway"})
-	if err != nil {
-		t.Fatalf("parseConfigArgs: %v", err)
-	}
-	if action.subCmd != "unset" {
-		t.Errorf("subCmd = %q, want %q", action.subCmd, "unset")
-	}
-	if action.key != "custom_providers.my-gateway" {
-		t.Errorf("key = %q, want %q", action.key, "custom_providers.my-gateway")
-	}
-}
-
-func TestParseConfigArgsUnsetMissingKey(t *testing.T) {
-	_, err := parseConfigArgs([]string{"unset"})
-	if err == nil {
-		t.Fatal("expected error for missing key")
-	}
-}
+// parseConfigArgs unset tests were removed with the helper; unset dispatch is
+// covered by the TestRunConfigUnset_* tests and config_dispatch_test.go, and the
+// deeper unset behavior by the TestDeleteCustomProvider / provider tests below.
 
 func TestUnsetCustomProvider(t *testing.T) {
 	dir := t.TempDir()
