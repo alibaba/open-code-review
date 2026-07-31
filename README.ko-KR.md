@@ -135,7 +135,7 @@ cd your-project
 # Workspace mode: staged, unstaged, untracked 변경을 모두 리뷰
 ocr review
 
-# Branch range: 두 ref 비교
+# 브랜치 범위 — main에서 분기된 이후 feature-branch의 변경 사항을 리뷰합니다 (머지베이스 모드)
 ocr review --from main --to feature-branch
 
 # 단일 commit
