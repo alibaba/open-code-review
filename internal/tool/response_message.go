@@ -7,7 +7,7 @@ type ToolCallResult struct {
 	Result     string // output from the tool
 }
 
-// TaskCheckpoint mirrors the Java TaskCheckPoint — signals completion or carries data back to the LLM.
+// TaskCheckpoint signals completion or carries data back to the LLM.
 type TaskCheckpoint struct {
 	Data      string
 	Completed bool
