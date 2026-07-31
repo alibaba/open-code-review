@@ -20,12 +20,7 @@ func main() {
 	}
 
 	if err := rootCmd.Execute(); err != nil {
-		msg := err.Error()
-		fmt.Fprintf(os.Stderr, "Error: %v", err)
-		if suggestion := suggestFlagFromError(msg); suggestion != "" {
-			fmt.Fprint(os.Stderr, suggestion)
-		}
-		fmt.Fprintln(os.Stderr)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }

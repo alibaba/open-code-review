@@ -27,6 +27,7 @@ configurable LLM service, and generates review comments.`,
 }
 
 func init() {
+	rootCmd.SetFlagErrorFunc(flagErrorWithSuggestion)
 	rootCmd.Flags().BoolP("version", "V", false, "version for ocr")
 
 	rootCmd.AddCommand(versionCmd)

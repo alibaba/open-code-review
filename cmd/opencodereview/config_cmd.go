@@ -35,35 +35,21 @@ Examples:
 }
 
 var configSetCmd = &cobra.Command{
-	Use:   "set <key> <value>",
-	Short: "Set a configuration value",
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 2 {
-			return fmt.Errorf("usage: ocr config set <key> <value>\ne.g., ocr config set llm.model claude-opus-4-6")
-		}
-		if len(args) > 2 {
-			return fmt.Errorf("usage: ocr config set <key> <value>\ne.g., ocr config set llm.model claude-opus-4-6")
-		}
-		return nil
-	},
+	Use:     "set <key> <value>",
+	Short:   "Set a configuration value",
+	Example: "  ocr config set llm.model claude-opus-4-6\n  ocr config set provider anthropic",
+	Args:    cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runConfigSet(args[0], args[1])
 	},
 }
 
 var configUnsetCmd = &cobra.Command{
-	Use:   "unset <key>",
-	Short: "Remove a configuration value",
-	Long:  "Remove a provider, custom_providers.<name>, or mcp_servers.<name>.",
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 {
-			return fmt.Errorf("usage: ocr config unset <provider|custom_providers.<name>|mcp_servers.<name>>\nexamples:\n  ocr config unset provider\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github")
-		}
-		if len(args) > 1 {
-			return fmt.Errorf("usage: ocr config unset <key>")
-		}
-		return nil
-	},
+	Use:     "unset <key>",
+	Short:   "Remove a configuration value",
+	Long:    "Remove a provider, custom_providers.<name>, or mcp_servers.<name>.",
+	Example: "  ocr config unset provider\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github",
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runConfigUnset(args[0])
 	},

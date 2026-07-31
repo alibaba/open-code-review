@@ -2,36 +2,30 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
 
-// suggestFlagFromError parses cobra's "unknown flag" error and suggests the
-// closest matching flag. Returns empty string if no suggestion is applicable.
-func suggestFlagFromError(errMsg string) string {
-	// Cobra formats: "unknown flag: --xxx" or "unknown shorthand flag: 'x' in -x"
+// flagErrorWithSuggestion is a SetFlagErrorFunc handler that appends a
+// "Did you mean?" suggestion when the user misspells a flag.
+func flagErrorWithSuggestion(cmd *cobra.Command, err error) error {
+	msg := err.Error()
+
 	var unknown string
-	if strings.HasPrefix(errMsg, "unknown flag: ") {
-		unknown = strings.TrimPrefix(errMsg, "unknown flag: ")
+	if strings.HasPrefix(msg, "unknown flag: ") {
+		unknown = strings.TrimPrefix(msg, "unknown flag: ")
 		unknown = strings.TrimLeft(unknown, "-")
-	} else if strings.Contains(errMsg, "unknown shorthand flag") {
-		return ""
-	} else {
-		return ""
 	}
 	if unknown == "" {
-		return ""
+		return err
 	}
 
-	// Find the command that was being executed to access its flags.
-	cmd, _, _ := rootCmd.Find(os.Args[1:])
-	if cmd == nil {
-		cmd = rootCmd
+	if suggestion := suggestFlag(cmd, unknown); suggestion != "" {
+		return fmt.Errorf("%w%s", err, suggestion)
 	}
-	return suggestFlag(cmd, unknown)
+	return err
 }
 
 func suggestFlag(cmd *cobra.Command, unknown string) string {
