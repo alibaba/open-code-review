@@ -59,6 +59,7 @@ import jaFaq from './ja/faq.md';
 // Russian docs (incremental — partial LocalizedDocs)
 import ruQuickstart from './ru/quickstart.md';
 import ruInstallation from './ru/installation.md';
+import ruReviewRules from './ru/review-rules.md';
 
 export type DocSlug =
   | 'quickstart'
@@ -140,6 +141,7 @@ const jaDocs: Record<DocSlug, string> = {
 const ruDocs: LocalizedDocs = {
   'quickstart': ruQuickstart,
   'installation': ruInstallation,
+  'review-rules': ruReviewRules,
 };
 
 const docsMap: Record<Language, LocalizedDocs> = {

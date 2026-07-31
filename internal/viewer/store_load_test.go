@@ -200,6 +200,58 @@ func TestLoadSession_FullParse(t *testing.T) {
 	}
 }
 
+func TestLoadSession_TaskDoneStates(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeJSONL(t, filepath.Join(repoDir, "terminal-states.jsonl"),
+		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":1,"messages":[]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","tool_calls":[{"name":"task_done","arguments":"{}"}]}`,
+		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":2,"messages":[]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","tool_calls":[{"name":"task_done","arguments":"{\"state\":\"DONE\"}"}]}`,
+		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":3,"messages":[]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","tool_calls":[{"name":"task_done","arguments":"{\"state\":\"FAILED\"}"}]}`,
+		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":4,"messages":[]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","tool_calls":[{"name":"task_done","arguments":"{\"state\":\"\"}"}]}`,
+		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":5,"messages":[]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","tool_calls":[{"name":"task_done","arguments":"{\"state\":\"\"}"},{"name":"file_read","arguments":"{\"path\":\"main.go\"}"}]}`,
+		`{"type":"tool_call","filePath":"main.go","taskType":"main_task","tool_name":"file_read","result":"package main","ok":true,"duration_ms":20}`,
+	)
+
+	vs, err := LoadSession(root, "repo", "terminal-states")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vs.Files) != 1 {
+		t.Fatalf("files = %d, want 1", len(vs.Files))
+	}
+	cards := vs.Files[0].Tasks[MainTask]
+	if len(cards) != 5 {
+		t.Fatalf("main_task cards = %d, want 5", len(cards))
+	}
+	wantOK := []bool{true, true, false, false}
+	for i, want := range wantOK {
+		if len(cards[i].ToolCalls) != 1 {
+			t.Fatalf("card %d tool calls = %d, want 1", i, len(cards[i].ToolCalls))
+		}
+		if got := cards[i].ToolCalls[0].Ok; got != want {
+			t.Errorf("card %d task_done Ok = %v, want %v", i, got, want)
+		}
+	}
+	if len(cards[4].ToolCalls) != 2 {
+		t.Fatalf("card 4 tool calls = %d, want 2", len(cards[4].ToolCalls))
+	}
+	if cards[4].ToolCalls[0].Ok || cards[4].ToolCalls[0].Result != "" {
+		t.Errorf("invalid task_done received another tool's result: %+v", cards[4].ToolCalls[0])
+	}
+	if !cards[4].ToolCalls[1].Ok || cards[4].ToolCalls[1].Result != "package main" {
+		t.Errorf("file_read result was not matched by name: %+v", cards[4].ToolCalls[1])
+	}
+}
+
 func TestLoadSession_MissingFile(t *testing.T) {
 	root := t.TempDir()
 	repoDir := filepath.Join(root, "repo")

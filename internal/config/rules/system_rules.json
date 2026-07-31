@@ -24,6 +24,7 @@
     "**/*.c": "c.md",
     "**/*.py": "python.md",
     "**/*.{php,phtml}": "php.md",
+    "**/*.proto": "protobuf.md",
     "**/*.po": "po.md",
     "**/*.pot": "pot.md",
     "**/*.{graphql,gql}": "graphql.md",

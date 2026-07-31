@@ -22,6 +22,7 @@ func TestHasSubtaskErrors(t *testing.T) {
 		{"empty", []agent.AgentWarning{}, false},
 		{"no subtask errors", []agent.AgentWarning{{Type: "other", Message: "msg"}}, false},
 		{"has subtask error", []agent.AgentWarning{{Type: "subtask_error", Message: "fail"}}, true},
+		{"has scan subtask error", []agent.AgentWarning{{Type: "scan_subtask_error", Message: "fail"}}, true},
 		{"mixed", []agent.AgentWarning{{Type: "warn"}, {Type: "subtask_error"}}, true},
 	}
 	for _, tc := range tests {

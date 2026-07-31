@@ -1,8 +1,10 @@
 package main
 
 import (
+	"io"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -950,12 +952,113 @@ func TestSetConfigValueProviderClearsModel(t *testing.T) {
 }
 
 func TestRunConfigUnset_InvalidKey(t *testing.T) {
-	if err := runConfigUnset("provider"); err == nil {
-		t.Fatal("expected error for non custom_providers key")
-	}
 	if err := runConfigUnset("custom_providers."); err == nil {
 		t.Fatal("expected error for empty provider name")
 	}
+}
+
+func TestRunConfigSetWarnsWhenActiveProviderShadowsLegacyLLMConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	configPath, err := defaultConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveConfig(configPath, &Config{Provider: "dashscope"}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	stderr := captureConfigStderr(t, func() {
+		if err := runConfigSet("llm.url", "https://gateway.example/v1"); err != nil {
+			t.Fatalf("runConfigSet: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, `provider "dashscope" is active`) {
+		t.Errorf("warning = %q", stderr)
+	}
+	if !strings.Contains(stderr, "providers.dashscope.<field>") || !strings.Contains(stderr, "config unset provider") {
+		t.Errorf("warning does not explain how to resolve precedence: %q", stderr)
+	}
+
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if cfg.Llm.URL != "https://gateway.example/v1" {
+		t.Errorf("llm.url = %q", cfg.Llm.URL)
+	}
+}
+
+func TestLegacyLLMShadowWarning(t *testing.T) {
+	if got := legacyLLMShadowWarning("", "llm.model"); got != "" {
+		t.Errorf("warning without active provider = %q", got)
+	}
+	if got := legacyLLMShadowWarning("dashscope", "providers.dashscope.url"); got != "" {
+		t.Errorf("warning for provider setting = %q", got)
+	}
+	if got := legacyLLMShadowWarning("dashscope", "Llm.model"); got != "" {
+		t.Errorf("warning for invalid mixed-case legacy key = %q", got)
+	}
+	if got := legacyLLMShadowWarning("dashscope", "llm.model"); !strings.Contains(got, "providers.dashscope.<field>") {
+		t.Errorf("preset-provider warning = %q", got)
+	}
+	if got := legacyLLMShadowWarning("my-gateway", "llm.model"); !strings.Contains(got, "custom_providers.my-gateway.<field>") {
+		t.Errorf("custom-provider warning = %q", got)
+	}
+}
+
+func TestRunConfigUnsetProviderClearsSelectionAndKeepsProviderEntries(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	configPath, err := defaultConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveConfig(configPath, &Config{
+		Provider: "dashscope",
+		Model:    "legacy-model",
+		Providers: map[string]ProviderEntry{
+			"dashscope": {APIKey: "secret", Model: "provider-model"},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	if err := runConfigUnset("provider"); err != nil {
+		t.Fatalf("runConfigUnset(provider): %v", err)
+	}
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if cfg.Provider != "" || cfg.Model != "" {
+		t.Errorf("provider/model = %q/%q, want both empty", cfg.Provider, cfg.Model)
+	}
+	if got := cfg.Providers["dashscope"].APIKey; got != "secret" {
+		t.Errorf("provider entry was removed or changed: api_key = %q", got)
+	}
+}
+
+func captureConfigStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func TestRunConfig_EmptyArgs(t *testing.T) {

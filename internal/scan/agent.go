@@ -594,8 +594,14 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) error {
 		return nil
 	}
 
-	_, _, err := a.runner.RunPerFile(ctx, messages, it.Path)
-	return err
+	completed, _, err := a.runner.RunPerFile(ctx, messages, it.Path)
+	if err != nil {
+		return err
+	}
+	if !completed {
+		return fmt.Errorf("main_task did not complete before stopping")
+	}
+	return nil
 }
 
 // maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable

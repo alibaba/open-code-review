@@ -78,7 +78,7 @@ type Args struct {
 	Tools *tool.Registry
 
 	// PlanToolDefs holds llm.ToolDef entries enabled in plan_task, built once at startup.
-	// When nil, plan phase sends no tool definitions (same as Java behavior when plan_task is false).
+	// When nil, plan phase sends no tool definitions.
 	PlanToolDefs []llm.ToolDef
 
 	// MainToolDefs holds llm.ToolDef entries enabled in main_task, built once at startup.
@@ -86,10 +86,9 @@ type Args struct {
 
 	// CommentWorkerPool — separate goroutine pool for running asynchronous
 	// comment post-processing tasks (tracking, re-tracking, reflection,
-	// suggestion validation). This mirrors the Java side's subtaskExecutor
-	// which executes the CODE_COMMENT tool off the critical path so that the
-	// main LLM tool-use loop can continue issuing requests while comments are
-	// being processed in the background.
+	// suggestion validation). It executes the CODE_COMMENT tool off the
+	// critical path so that the main LLM tool-use loop can continue issuing
+	// requests while comments are being processed in the background.
 	//
 	// When nil (the default), comment processing happens synchronously inside
 	// executeToolCall instead of via a separate worker pool.
@@ -632,14 +631,18 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 				return
 			}
 			if !completed {
-				// A stop is a real item failure with a trigger-point class (budget
-				// on max-rounds, unknown otherwise). It is not counted in
-				// subtaskFailed, preserving the legacy all-failed rollup which only
-				// tracks hard errors and panics.
 				if stop != nil {
 					a.markFailed(d, stop.class, stop.reason)
 					if stop.checkpoint != "" {
 						a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, stop.checkpoint)
+					}
+					if stop.reportAsError {
+						atomic.AddInt64(&a.subtaskFailed, 1)
+						stopErr := errors.New(stop.checkpoint)
+						fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for %s: %v\n", d.NewPath, stopErr)
+						telemetry.ErrorEvent(fileCtx, "subtask.error", stopErr,
+							telemetry.AnyToAttr("file.path", d.NewPath))
+						a.recordWarning("subtask_error", d.NewPath, stopErr.Error())
 					}
 				}
 				return
@@ -1025,9 +1028,10 @@ func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, stri
 // detailed human-facing text preserved for the legacy RecordReviewItemFailed
 // resume record (unchanged behavior).
 type subtaskStop struct {
-	class      session.FailureClass
-	reason     string
-	checkpoint string
+	class         session.FailureClass
+	reason        string
+	checkpoint    string
+	reportAsError bool
 }
 
 // registerCoverage freezes the coverage denominator before any reuse or
@@ -1213,9 +1217,10 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 		// empty-round / compression are the honest unknown catch-all.
 		class, reason := classifyMainLoopStop(mainStop)
 		return false, &subtaskStop{
-			class:      class,
-			reason:     reason,
-			checkpoint: "main_task did not complete before stopping",
+			class:         class,
+			reason:        reason,
+			checkpoint:    "main_task did not complete before stopping",
+			reportAsError: true,
 		}, nil
 	}
 	return true, nil, nil

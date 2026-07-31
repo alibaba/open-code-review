@@ -648,6 +648,47 @@ func TestDispatchSubtasks_AllFailed(t *testing.T) {
 	}
 }
 
+func TestDispatchSubtasks_WithoutTaskDoneIsAllFailed(t *testing.T) {
+	empty := ""
+	client := &fakeScanClient{responses: []*llm.ChatResponse{{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &empty}}},
+		Model:   "test",
+		Usage:   &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 1},
+	}}}
+
+	tpl := makeTemplateWithFullScan()
+	tpl.MaxTokens = 100000
+	tpl.MaxToolRequestTimes = 1
+
+	a := NewAgent(Args{
+		Template:         tpl,
+		LLMClient:        client,
+		Model:            "test",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1,
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
+		Session: session.New(t.TempDir(), "main", "test", session.SessionOptions{
+			ReviewMode: session.ReviewModeFullScan,
+		}),
+	})
+	a.items = []model.ScanItem{{Path: "a.go", Content: "x", LineCount: 1}}
+	a.currentDate = "2026-06-26"
+	a.args.Tools.Freeze()
+
+	_, err := a.dispatchSubtasks(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "all 1 file scan(s) failed") {
+		t.Fatalf("expected all-failed error, got %v", err)
+	}
+	warnings := a.Warnings()
+	if len(warnings) != 1 || warnings[0].Type != "scan_subtask_error" ||
+		!strings.Contains(warnings[0].Message, "main_task did not complete") {
+		t.Fatalf("warnings = %+v, want one incomplete scan subtask error", warnings)
+	}
+}
+
 func TestPhaseEnabled(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	a := newAgentForTest(t, tpl)

@@ -80,6 +80,8 @@ ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
 ```
 
+`url` 既可以填 API 的 Base URL，也可以填完整的 `/responses` 端点，OCR 会自动归一化处理。
+
 用 Ollama 跑本地模型，就是一个指向本地 OpenAI 兼容端点的自定义 provider：
 
 ```bash

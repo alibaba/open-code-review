@@ -212,7 +212,7 @@ func (t *ScanTemplate) Validate() error {
 	return nil
 }
 
-// LlmConversation mirrors LlmConversation from the Java side — a preset prompt with settings.
+// LlmConversation is a preset prompt with settings.
 type LlmConversation struct {
 	Timeout  int           `json:"timeout"`
 	Messages []ChatMessage `json:"messages"`

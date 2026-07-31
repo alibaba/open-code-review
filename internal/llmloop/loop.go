@@ -168,9 +168,9 @@ const (
 // tool calls returned by the model, and collects review comments until
 // task_done is called or limits are reached. Token usage and warnings
 // are aggregated on the Runner across all files. The returned bool is true
-// only when the model explicitly calls task_done. The MainLoopStop return
-// classifies a non-completed, non-error stop at its trigger point so the caller
-// never has to infer the cause from text or ctx state.
+// only when the model explicitly calls task_done with a successful state. The
+// MainLoopStop return classifies a non-completed, non-error stop at its trigger
+// point so the caller never has to infer the cause from text or context state.
 func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath string) (bool, MainLoopStop, error) {
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
@@ -246,7 +246,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 		for _, call := range calls {
 			cp := r.executeToolCall(ctx, newPath, call, rec)
-			if cp.Completed {
+			if cp.Failed {
+				return false, StopNone, fmt.Errorf("task failed: %s", cp.Data)
+			} else if cp.Completed {
 				results = append(results, tool.ToolCallResult{
 					ToolCallID: call.ID,
 					Name:       call.Function.Name,
@@ -338,7 +340,26 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 	}
 
 	if t == tool.TaskDone {
-		return tool.Complete()
+		args, err := parseToolArgs(call.Function.Arguments)
+		if err != nil {
+			return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
+		}
+		rawState, hasState := args["state"]
+		if !hasState {
+			return tool.Complete()
+		}
+		state, ok := rawState.(string)
+		if !ok {
+			return tool.Of("Error: task_done state must be DONE or FAILED.")
+		}
+		switch state {
+		case "DONE":
+			return tool.Complete()
+		case "FAILED":
+			return tool.Fail("task_done reported FAILED")
+		default:
+			return tool.Of(fmt.Sprintf("Error: invalid task_done state %q; expected DONE or FAILED.", state))
+		}
 	}
 
 	p := lookupTool(r.deps.Tools, t)

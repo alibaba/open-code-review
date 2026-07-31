@@ -46,6 +46,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".TFVARS", true},
 		{".bicep", true},
 		{".BICEP", true},
+		{".proto", true},
+		{".PROTO", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},

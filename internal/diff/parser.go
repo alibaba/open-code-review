@@ -65,6 +65,11 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 		switch {
 		case strings.HasPrefix(line, "@@"):
 			inHunk = true
+		// The object IDs and mode in Git's extended "index" header are not
+		// useful review context. Keep index text in hunks, where it is file
+		// content and therefore carries a diff prefix.
+		case !inHunk && strings.HasPrefix(line, "index "):
+			continue
 		case !inHunk && binaryRe.MatchString(line):
 			current.IsBinary = true
 		// Extended header lines (unambiguous: content lines always carry a

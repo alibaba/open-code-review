@@ -26,7 +26,7 @@ func outputText(comments []model.LlmComment) {
 
 func hasSubtaskErrors(warnings []agent.AgentWarning) bool {
 	for _, w := range warnings {
-		if w.Type == "subtask_error" {
+		if isSubtaskErrorType(w.Type) {
 			return true
 		}
 	}
@@ -44,7 +44,7 @@ func warningsForOutput(warnings []agent.AgentWarning, manifest *session.RunManif
 	}
 	filtered := make([]agent.AgentWarning, 0, len(warnings))
 	for _, warning := range warnings {
-		if warning.Type != "subtask_error" {
+		if !isSubtaskErrorType(warning.Type) {
 			filtered = append(filtered, warning)
 		}
 	}
@@ -52,6 +52,10 @@ func warningsForOutput(warnings []agent.AgentWarning, manifest *session.RunManif
 		return nil
 	}
 	return filtered
+}
+
+func isSubtaskErrorType(warningType string) bool {
+	return warningType == "subtask_error" || warningType == "scan_subtask_error"
 }
 
 func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning, manifest *session.RunManifest) {
@@ -72,7 +76,7 @@ func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		}
 	}
 	for _, w := range warnings {
-		if w.Type == "subtask_error" {
+		if isSubtaskErrorType(w.Type) {
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING [%s] %s: %s\n", w.Type, sanitizeTerminal(w.File), sanitizeTerminal(w.Message))
