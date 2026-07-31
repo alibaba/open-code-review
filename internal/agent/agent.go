@@ -73,7 +73,7 @@ type Args struct {
 	Tools *tool.Registry
 
 	// PlanToolDefs holds llm.ToolDef entries enabled in plan_task, built once at startup.
-	// When nil, plan phase sends no tool definitions (same as Java behavior when plan_task is false).
+	// When nil, plan phase sends no tool definitions.
 	PlanToolDefs []llm.ToolDef
 
 	// MainToolDefs holds llm.ToolDef entries enabled in main_task, built once at startup.
@@ -81,10 +81,9 @@ type Args struct {
 
 	// CommentWorkerPool — separate goroutine pool for running asynchronous
 	// comment post-processing tasks (tracking, re-tracking, reflection,
-	// suggestion validation). This mirrors the Java side's subtaskExecutor
-	// which executes the CODE_COMMENT tool off the critical path so that the
-	// main LLM tool-use loop can continue issuing requests while comments are
-	// being processed in the background.
+	// suggestion validation). It executes the CODE_COMMENT tool off the
+	// critical path so that the main LLM tool-use loop can continue issuing
+	// requests while comments are being processed in the background.
 	//
 	// When nil (the default), comment processing happens synchronously inside
 	// executeToolCall instead of via a separate worker pool.

@@ -84,6 +84,8 @@ ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
 ```
 
+The `url` can be either the API base URL or the full `/responses` endpoint — OCR normalizes it either way.
+
 A local model served by Ollama is just a custom provider pointing at the
 local OpenAI-compatible endpoint:
 

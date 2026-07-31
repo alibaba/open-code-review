@@ -7,6 +7,8 @@
 dist/
 npm/*/bin/
 .claude/plans
+.claude/commands/comment.md
+.claude/commands/read-issue.md
 .claude/settings.local.json
 
 CLAUDE.md
