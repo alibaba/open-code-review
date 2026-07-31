@@ -170,7 +170,7 @@ matching order:
 | `**/*.py` | `python.md` — Python source. |
 | `**/*.{php,phtml}` | `php.md` — PHP source and PHP templates. |
 | `**/*.proto` | `protobuf.md` — Protocol Buffers wire compatibility. |
-| `**/*.po` | `po.md` — gettext compiled catalogs. |
+| `**/*.po` | `po.md` — gettext translation source catalogs. |
 | `**/*.pot` | `pot.md` — gettext template files. |
 | `**/*.{graphql,gql}` | `graphql.md` — GraphQL schema and operations. |
 | `**/*.prisma` | `prisma.md` — Prisma schema. |

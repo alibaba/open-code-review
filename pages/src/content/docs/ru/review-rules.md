@@ -172,7 +172,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.py` | `python.md` — исходный код Python. |
 | `**/*.{php,phtml}` | `php.md` — исходный код PHP и шаблоны PHP. |
 | `**/*.proto` | `protobuf.md` — совместимость Protocol Buffers на уровне wire. |
-| `**/*.po` | `po.md` — скомпилированные каталоги gettext. |
+| `**/*.po` | `po.md` — исходные каталоги переводов gettext. |
 | `**/*.pot` | `pot.md` — файлы шаблонов gettext. |
 | `**/*.{graphql,gql}` | `graphql.md` — схема и операции GraphQL. |
 | `**/*.prisma` | `prisma.md` — схема Prisma. |
