@@ -48,6 +48,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".BICEP", true},
 		{".proto", true},
 		{".PROTO", true},
+		{".nix", true},
+		{".NIX", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
