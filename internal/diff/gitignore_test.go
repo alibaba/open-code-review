@@ -180,6 +180,11 @@ func TestMatchGitignorePattern(t *testing.T) {
 		{"full path no match", "src/api.md", "docs/*.md", false},
 		{"negation pattern", "important.log", "!important.log", false},
 		{"path suffix match", "src/generated/api.go", "generated/api.go", true},
+		// The suffix has to begin on a path component. "othersrc" ends in
+		// "src", which would complete the pattern on a plain string suffix
+		// check and exclude a directory git never matched.
+		{"path suffix respects component boundary", "othersrc/main.go", "src/main.go", false},
+		{"path suffix at root is not a suffix match", "src/main.go", "rc/main.go", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

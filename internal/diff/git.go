@@ -281,7 +281,11 @@ func matchGitignoreBody(relPath, body string) bool {
 	}
 	// Also try matching against suffix of path, but not for anchored patterns:
 	// "/docs/api.md" names one file, not any path ending that way.
-	if !anchored && strings.HasSuffix(relPath, body) {
+	//
+	// The leading "/" makes the suffix start on a path component: without it
+	// "src/main.go" also matches "othersrc/main.go", because the tail of
+	// "othersrc" completes the pattern.
+	if !anchored && strings.HasSuffix(relPath, "/"+body) {
 		return true
 	}
 
