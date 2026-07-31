@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
+
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/model"
 )
@@ -184,8 +186,16 @@ func (p *Provider) loadGitignorePatterns() []string {
 
 // isPathExcluded returns true when the given relative file path should be skipped
 // based on hardcoded dir rules or .gitignore patterns.
+//
+// Patterns are resolved the way git resolves them: in file order, with the LAST
+// matching pattern deciding, and a leading "!" inverting that pattern's verdict.
+// Order matters because the "allow list" idiom (ignore everything with `*`, then
+// re-include with `!` lines — github/gitignore ships one per language) is only
+// correct under last-match-wins. Treating negations as unmatchable made every
+// file in such a repository look excluded, so a review silently covered nothing.
 func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bool {
-	// Hardcoded directory prefix checks
+	// Hardcoded directory prefix checks. These are an unconditional blocklist:
+	// a .gitignore negation cannot re-admit .git/ or node_modules/.
 	for _, prefix := range providerDirIgnoreDirs {
 		dirPart := strings.TrimSuffix(prefix, "/")
 		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
@@ -193,45 +203,85 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 		}
 	}
 
-	// .gitignore pattern matching
+	excluded := false
 	for _, pat := range gitignorePatterns {
-		if matchGitignorePattern(relPath, pat) {
-			return true
+		body, negated := strings.CutPrefix(pat, "!")
+		if body == "" {
+			continue
+		}
+
+		// Directory-only patterns (trailing "/") apply to directories, never to
+		// files. Git uses a negated one such as `!*/` to keep descending into
+		// subdirectories, not to re-admit the files inside them — honouring it
+		// here would readmit everything below the root.
+		if negated && strings.HasSuffix(body, "/") {
+			continue
+		}
+
+		if matchGitignoreBody(relPath, body) {
+			excluded = !negated
 		}
 	}
-	return false
+	return excluded
 }
 
 // matchGitignorePattern checks if relPath matches a single .gitignore pattern.
+//
+// Polarity is not this function's concern: a negated pattern reports false, so
+// callers testing one pattern in isolation still read it as "does this exclude
+// the path". Ordered resolution across a whole pattern list, where negations do
+// carry meaning, lives in isPathExcluded.
 func matchGitignorePattern(relPath, pat string) bool {
-	// Directory-only patterns (trailing /)
-	if before, ok := strings.CutSuffix(pat, "/"); ok {
-		dirName := before
-		// Match if any path segment equals the dir name
-		segments := strings.Split(relPath, "/")
-		return slices.Contains(segments, dirName)
-	}
-
-	// Negation patterns are not needed for exclusion purposes
 	if strings.HasPrefix(pat, "!") {
 		return false
 	}
+	return matchGitignoreBody(relPath, pat)
+}
 
-	// Patterns without / match basename
-	if !strings.Contains(pat, "/") {
-		base := filepath.Base(relPath)
-		if matched, _ := filepath.Match(pat, base); matched {
-			return true
+// matchGitignoreBody reports whether relPath matches a single pattern body —
+// the pattern with any leading "!" already stripped.
+func matchGitignoreBody(relPath, body string) bool {
+	// Directory-only patterns (trailing /)
+	if before, ok := strings.CutSuffix(body, "/"); ok {
+		// Only a real directory component can match, so the final segment (the
+		// file's own name) is excluded from consideration: `vendor/` must not
+		// match a *file* named "vendor", and `*/` must not match every path.
+		segments := strings.Split(relPath, "/")
+		return slices.Contains(segments[:max(len(segments)-1, 0)], before)
+	}
+
+	// A leading "/" anchors the pattern to the repository root rather than
+	// making it a path pattern; "/.golangci.yml" addresses the root file.
+	anchored := false
+	if trimmed, ok := strings.CutPrefix(body, "/"); ok {
+		body, anchored = trimmed, true
+	}
+
+	// "**" is not expressible with filepath.Match, so patterns containing it go
+	// through doublestar, which implements gitignore's globstar semantics.
+	if strings.Contains(body, "**") {
+		matched, err := doublestar.Match(body, relPath)
+		return err == nil && matched
+	}
+
+	// Patterns without / match basename — unless anchored, where the pattern
+	// addresses that name at the root only.
+	if !strings.Contains(body, "/") {
+		target := filepath.Base(relPath)
+		if anchored {
+			target = relPath
 		}
-		return false
+		matched, _ := filepath.Match(body, target)
+		return matched
 	}
 
 	// Patterns with / match against the full relative path
-	if matched, _ := filepath.Match(pat, relPath); matched {
+	if matched, _ := filepath.Match(body, relPath); matched {
 		return true
 	}
-	// Also try matching against suffix of path
-	if strings.HasSuffix(relPath, pat) {
+	// Also try matching against suffix of path, but not for anchored patterns:
+	// "/docs/api.md" names one file, not any path ending that way.
+	if !anchored && strings.HasSuffix(relPath, body) {
 		return true
 	}
 
