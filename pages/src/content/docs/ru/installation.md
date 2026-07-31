@@ -165,6 +165,22 @@ which ocr
 echo $PATH
 ```
 
+## Включение автодополнения оболочки (опционально)
+
+`ocr` поддерживает автодополнение по Tab для bash, zsh, fish и PowerShell.
+
+```bash
+# bash
+source <(ocr completion bash)
+
+# zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+Подробности по fish, PowerShell и постоянной настройке см. в
+[CLI Reference](./cli-reference.md#ocr-completion).
+
+
 ## Где OCR хранит состояние
 
 | Путь | Содержимое |

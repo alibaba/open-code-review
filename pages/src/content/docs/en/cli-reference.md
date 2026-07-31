@@ -449,6 +449,80 @@ Prints the version stamped at build time, the short Git commit (when
 present), the platform (`<GOOS>/<GOARCH>`), the build date (when present),
 and the GitHub URL (`https://github.com/alibaba/open-code-review`).
 
+
+## ocr completion
+
+Generate shell completion scripts for `ocr`, so command names, flags,
+and arguments can be tab-completed in your shell.
+
+### Bash
+
+One-shot, current session only:
+
+```bash
+source <(ocr completion bash)
+```
+
+Persistent (Linux):
+
+```bash
+ocr completion bash > /etc/bash_completion.d/ocr
+```
+
+Persistent (macOS):
+
+```bash
+ocr completion bash > $(brew --prefix)/etc/bash_completion.d/ocr
+```
+
+### Zsh
+
+If shell completion isn't already enabled in your environment, enable
+it once:
+
+```bash
+echo "autoload -U compinit; compinit" >> ~/.zshrc
+```
+
+Then load completions persistently:
+
+```bash
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+Start a new shell for this to take effect.
+
+### Fish
+
+One-shot, current session only:
+
+```bash
+ocr completion fish | source
+```
+
+Persistent:
+
+```bash
+ocr completion fish > ~/.config/fish/completions/ocr.fish
+```
+
+### PowerShell
+
+One-shot, current session only:
+
+```powershell
+ocr completion powershell | Out-String | Invoke-Expression
+```
+
+Persistent — generate the script once, then source it from your profile:
+
+```powershell
+ocr completion powershell > ocr.ps1
+```
+
+Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
+
+
 ## Tips & gotchas
 
 - `--audience agent` does **not** imply `--format json`. They control

@@ -163,6 +163,21 @@ which ocr
 echo $PATH
 ```
 
+## シェル補完を有効にする（任意）
+
+`ocr` は bash、zsh、fish、PowerShell の Tab 補完に対応しています。
+
+```bash
+# bash
+source <(ocr completion bash)
+
+# zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+fish、PowerShell、および永続化の詳しい設定方法は [CLI リファレンス](./cli-reference.md#ocr-completion) を参照してください。
+
+
 ## OCR が状態を保存する場所
 
 | パス | 保存内容 |

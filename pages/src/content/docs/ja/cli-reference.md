@@ -408,6 +408,76 @@ ocr -V
 
 ビルド時に書き込まれたバージョン情報、短い Git commit（存在する場合）、プラットフォーム（`<GOOS>/<GOARCH>`）、ビルド日（存在する場合）、そして GitHub URL（`https://github.com/alibaba/open-code-review`）を出力します。
 
+## ocr completion
+
+`ocr` のシェル補完スクリプトを生成し、シェル内でコマンド名・フラグ・引数を Tab 補完できるようにします。
+
+### Bash
+
+現在のセッションのみ：
+
+```bash
+source <(ocr completion bash)
+```
+
+永続化（Linux）：
+
+```bash
+ocr completion bash > /etc/bash_completion.d/ocr
+```
+
+永続化（macOS）：
+
+```bash
+ocr completion bash > $(brew --prefix)/etc/bash_completion.d/ocr
+```
+
+### Zsh
+
+シェル補完がまだ有効になっていない場合は、一度だけ実行してください：
+
+```bash
+echo "autoload -U compinit; compinit" >> ~/.zshrc
+```
+
+その後、補完を永続的に読み込みます：
+
+```bash
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+反映させるには新しいシェルを開始する必要があります。
+
+### Fish
+
+現在のセッションのみ：
+
+```bash
+ocr completion fish | source
+```
+
+永続化：
+
+```bash
+ocr completion fish > ~/.config/fish/completions/ocr.fish
+```
+
+### PowerShell
+
+現在のセッションのみ：
+
+```powershell
+ocr completion powershell | Out-String | Invoke-Expression
+```
+
+永続化 —— スクリプトを生成し、PowerShell プロファイルから読み込みます：
+
+```powershell
+ocr completion powershell > ocr.ps1
+```
+
+その後、`ocr.ps1` を読み込む行を PowerShell プロファイルに追加してください。
+
 ## ヒントと注意点
 
 - `--audience agent` は `--format json` を**含意しません**。両者は異なることを制御します。UI の抑制 vs 構造化されたペイロードです。両方が必要な場合は組み合わせて使用してください。

@@ -168,6 +168,22 @@ which ocr
 echo $PATH
 ```
 
+## Enable Shell Completion (optional)
+
+`ocr` supports tab-completion for bash, zsh, fish, and PowerShell.
+
+```bash
+# bash
+source <(ocr completion bash)
+
+# zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+See the [CLI Reference](./cli-reference.md#ocr-completion) for fish,
+PowerShell, and persistent setup instructions.
+
+
 ## Where OCR stores state
 
 | Path | What it holds |

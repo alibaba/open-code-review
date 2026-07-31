@@ -160,6 +160,22 @@ which ocr
 echo $PATH
 ```
 
+
+## 启用 Shell 补全（可选）
+
+`ocr` 支持 bash、zsh、fish 和 PowerShell 的 Tab 补全。
+
+```bash
+# bash
+source <(ocr completion bash)
+
+# zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+完整的 fish、PowerShell 及持久化配置说明，请参见 [CLI 参考](./cli-reference.md#ocr-completion)。
+
+
 ## OCR 在哪里存放状态
 
 | 路径 | 存放内容 |

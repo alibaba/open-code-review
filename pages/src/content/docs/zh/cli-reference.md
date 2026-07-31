@@ -428,6 +428,78 @@ ocr -V
 （`<GOOS>/<GOARCH>`）、构建日期（存在时），以及 GitHub URL
 （`https://github.com/alibaba/open-code-review`）。
 
+
+## ocr completion
+
+为 `ocr` 生成 shell 补全脚本，以便在 shell 中对命令名、参数和标志进行 Tab 补全。
+
+### Bash
+
+仅当前会话生效：
+
+```bash
+source <(ocr completion bash)
+```
+
+持久生效（Linux）：
+
+```bash
+ocr completion bash > /etc/bash_completion.d/ocr
+```
+
+持久生效（macOS）：
+
+```bash
+ocr completion bash > $(brew --prefix)/etc/bash_completion.d/ocr
+```
+
+### Zsh
+
+如果 shell 补全尚未启用，请先执行一次：
+
+```bash
+echo "autoload -U compinit; compinit" >> ~/.zshrc
+```
+
+然后持久加载补全：
+
+```bash
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+需要打开一个新的 shell 才能生效。
+
+### Fish
+
+仅当前会话生效：
+
+```bash
+ocr completion fish | source
+```
+
+持久生效：
+
+```bash
+ocr completion fish > ~/.config/fish/completions/ocr.fish
+```
+
+### PowerShell
+
+仅当前会话生效：
+
+```powershell
+ocr completion powershell | Out-String | Invoke-Expression
+```
+
+持久生效 —— 先生成脚本，再从 PowerShell 配置文件中加载：
+
+```powershell
+ocr completion powershell > ocr.ps1
+```
+
+然后在 PowerShell 配置文件中添加一行以加载 `ocr.ps1`。
+
+
 ## 提示与注意
 
 - `--audience agent` **并不**隐含 `--format json`。两者控制不同的事——屏蔽 UI
