@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -603,15 +604,22 @@ func TestOpenAIClient_StreamOnlyGateway(t *testing.T) {
 	}
 }
 
-func TestOpenAIClient_StreamingRequiresBooleanTrue(t *testing.T) {
+// TestOpenAIClient_NonStreamingRequestDropsStreamField verifies that the
+// "stream" key in extra_body is NOT forwarded to the non-streaming Chat
+// Completions request. Forwarding it makes the API answer with
+// text/event-stream (SSE) while Chat.Completions.New expects a JSON body,
+// breaking every call (see issue #647). Only extra_body.stream=true as a
+// boolean triggers the streaming path; other types (string "true", bool
+// false) must be dropped from the wire body entirely so the server returns
+// JSON. Other extra_body keys are still forwarded.
+func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 	tests := []struct {
-		name       string
-		configured bool
-		value      any
+		name  string
+		value any
 	}{
 		{name: "missing"},
-		{name: "boolean false", configured: true, value: false},
-		{name: "string true", configured: true, value: "true"},
+		{name: "boolean false", value: false},
+		{name: "string true", value: "true"},
 	}
 
 	for _, tt := range tests {
@@ -624,23 +632,8 @@ func TestOpenAIClient_StreamingRequiresBooleanTrue(t *testing.T) {
 					return
 				}
 
-				got, exists := body["stream"]
-				if exists != tt.configured {
-					t.Errorf("stream presence = %t, want %t", exists, tt.configured)
-				}
-				if tt.configured {
-					switch want := tt.value.(type) {
-					case bool:
-						gotBool, ok := got.(bool)
-						if !ok || gotBool != want {
-							t.Errorf("stream = %#v, want boolean %t", got, want)
-						}
-					case string:
-						gotString, ok := got.(string)
-						if !ok || gotString != want {
-							t.Errorf("stream = %#v, want string %q", got, want)
-						}
-					}
+				if _, exists := body["stream"]; exists {
+					t.Errorf("stream field should NOT be present in non-streaming request body, got %v", body["stream"])
 				}
 
 				w.Header().Set("Content-Type", "application/json")
@@ -654,7 +647,7 @@ func TestOpenAIClient_StreamingRequiresBooleanTrue(t *testing.T) {
 			defer server.Close()
 
 			var extraBody map[string]any
-			if tt.configured {
+			if tt.value != nil {
 				extraBody = map[string]any{"stream": tt.value}
 			}
 			client := NewOpenAIClient(ClientConfig{
@@ -1038,6 +1031,60 @@ func TestAnthropicClient_NoExtraHeadersWhenEmpty(t *testing.T) {
 		if k == "X-Custom-Header" || k == "X-Org-Id" {
 			t.Errorf("unexpected custom header %q sent", k)
 		}
+	}
+}
+
+// TestAnthropicClient_ExtraBodyStreamDropped verifies that an
+// extra_body.stream=true is NOT forwarded to the Messages API. Forwarding it
+// makes the API answer with text/event-stream (SSE) while Messages.New expects
+// a JSON body, breaking every call (see issue #647). Other extra_body keys
+// must still be forwarded.
+func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_stream_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "test-key",
+		Model:  "claude-test",
+		ExtraBody: map[string]any{
+			"stream":               true,
+			"keep_me":              "yes",
+			"temperature_override": 0.1,
+		},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "hi"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if _, present := gotBody["stream"]; present {
+		t.Errorf("request body should NOT contain a stream field, got %v", gotBody["stream"])
+	}
+	if gotBody["keep_me"] != "yes" {
+		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
+	}
+	if resp.Content() != "ok" {
+		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
 	}
 }
 

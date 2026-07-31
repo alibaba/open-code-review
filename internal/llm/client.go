@@ -346,6 +346,15 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 
 	var opts []openaiopt.RequestOption
 	for k, v := range c.cfg.ExtraBody {
+		// Skip the "stream" key here. The streaming decision below uses a
+		// dedicated boolean check, and when streaming is enabled the SDK's
+		// NewStreaming method sets stream=true on the wire itself. When
+		// streaming is NOT enabled, leaving the key in the body would make
+		// the API answer with text/event-stream and the non-streaming path
+		// fails to decode (see issue #647).
+		if k == "stream" {
+			continue
+		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 	if stream, ok := c.cfg.ExtraBody["stream"].(bool); ok && stream {
@@ -632,6 +641,13 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 
 	var opts []option.RequestOption
 	for k, v := range c.cfg.ExtraBody {
+		// This client is non-streaming: it calls Messages.New, which expects a
+		// single JSON body. If a provider config sets extra_body.stream=true,
+		// forwarding it here makes the API answer with SSE and every call fails
+		// to decode. Drop the key rather than forward it.
+		if k == "stream" {
+			continue
+		}
 		opts = append(opts, option.WithJSONSet(k, v))
 	}
 
