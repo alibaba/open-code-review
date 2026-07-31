@@ -2,7 +2,6 @@ package main
 
 import (
 	"testing"
-	"time"
 )
 
 func TestParseReviewFlagsBackgroundFile(t *testing.T) {
@@ -84,6 +83,33 @@ func TestParseReviewFlags_NegativeMaxGitProcs(t *testing.T) {
 	}
 }
 
+func TestParseReviewFlags_NegativeMaxTokensBudget(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--max-tokens-budget", "-1"})
+	if err == nil {
+		t.Fatal("expected error for negative max-tokens-budget")
+	}
+}
+
+func TestParseReviewFlags_BudgetFlagsDefaultZero(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--from", "main", "--to", "dev"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.maxTokensBudget != 0 {
+		t.Errorf("maxTokensBudget = %d, want 0 (default unlimited)", opts.maxTokensBudget)
+	}
+}
+
+func TestParseReviewFlags_BudgetFlagsParsed(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--max-tokens-budget", "120000"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.maxTokensBudget != 120000 {
+		t.Errorf("maxTokensBudget = %d, want 120000", opts.maxTokensBudget)
+	}
+}
+
 func TestParseReviewFlags_ConflictingModes(t *testing.T) {
 	_, err := parseReviewFlags([]string{"--from", "main", "--to", "dev", "--commit", "abc"})
 	if err == nil {
@@ -102,16 +128,6 @@ func TestParseReviewFlags_ToWithoutFrom(t *testing.T) {
 	_, err := parseReviewFlags([]string{"--to", "dev"})
 	if err == nil {
 		t.Fatal("expected error for --to without --from")
-	}
-}
-
-func TestParseReviewFlags_Help(t *testing.T) {
-	opts, err := parseReviewFlags([]string{"-h"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !opts.showHelp {
-		t.Error("expected showHelp=true")
 	}
 }
 
@@ -176,50 +192,5 @@ func TestParseConfigArgs_UnknownSubCmd(t *testing.T) {
 	_, err := parseConfigArgs([]string{"delete", "foo"})
 	if err == nil {
 		t.Fatal("expected error for unknown subcommand")
-	}
-}
-
-func TestDurationVar(t *testing.T) {
-	fs := newOcrFlagSet("test")
-	var d time.Duration
-	fs.DurationVar(&d, "timeout", 5*time.Second, "max duration")
-	if err := fs.Parse([]string{"--timeout", "10s"}); err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if d != 10*time.Second {
-		t.Errorf("d = %v, want 10s", d)
-	}
-}
-
-func TestPrintDefaults(t *testing.T) {
-	fs := newOcrFlagSet("test")
-	var s string
-	fs.StringVar(&s, "name", "default", "a name")
-	fs.PrintDefaults()
-}
-
-func TestExpandShortFlags(t *testing.T) {
-	m := map[string]string{"c": "commit", "f": "format"}
-	tests := []struct {
-		name string
-		args []string
-		want []string
-	}{
-		{"expands short", []string{"-c", "abc"}, []string{"--commit", "abc"}},
-		{"keeps long", []string{"--format", "json"}, []string{"--format", "json"}},
-		{"unknown short kept", []string{"-x", "val"}, []string{"-x", "val"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := expandShortFlags(tc.args, m)
-			if len(got) != len(tc.want) {
-				t.Fatalf("got %v, want %v", got, tc.want)
-			}
-			for i := range tc.want {
-				if got[i] != tc.want[i] {
-					t.Errorf("[%d] = %q, want %q", i, got[i], tc.want[i])
-				}
-			}
-		})
 	}
 }

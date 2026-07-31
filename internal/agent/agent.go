@@ -73,7 +73,7 @@ type Args struct {
 	Tools *tool.Registry
 
 	// PlanToolDefs holds llm.ToolDef entries enabled in plan_task, built once at startup.
-	// When nil, plan phase sends no tool definitions (same as Java behavior when plan_task is false).
+	// When nil, plan phase sends no tool definitions.
 	PlanToolDefs []llm.ToolDef
 
 	// MainToolDefs holds llm.ToolDef entries enabled in main_task, built once at startup.
@@ -81,16 +81,15 @@ type Args struct {
 
 	// CommentWorkerPool — separate goroutine pool for running asynchronous
 	// comment post-processing tasks (tracking, re-tracking, reflection,
-	// suggestion validation). This mirrors the Java side's subtaskExecutor
-	// which executes the CODE_COMMENT tool off the critical path so that the
-	// main LLM tool-use loop can continue issuing requests while comments are
-	// being processed in the background.
+	// suggestion validation). It executes the CODE_COMMENT tool off the
+	// critical path so that the main LLM tool-use loop can continue issuing
+	// requests while comments are being processed in the background.
 	//
 	// When nil (the default), comment processing happens synchronously inside
 	// executeToolCall instead of via a separate worker pool.
 	CommentWorkerPool *CommentWorkerPool
 
-	// Concurrency limit for per-file subtasks. Defaults to number of CPUs.
+	// Concurrency limit for per-file subtasks. MaxConcurrency <= 0 defaults to 8.
 	MaxConcurrency int
 
 	// Concurrent task timeout in minutes. 0 means no timeout.
@@ -117,6 +116,11 @@ type Args struct {
 
 	// Resume is an optional read-only checkpoint index from a previous review session.
 	Resume *session.ResumeState
+
+	// MaxTokensBudget caps the aggregate token usage (input+output) across the
+	// whole run; dispatch stops once the running total + a per-file look-ahead
+	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
+	MaxTokensBudget int64
 }
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
@@ -132,6 +136,7 @@ type Agent struct {
 	subtaskFailed   int64 // count of failed subtasks, accessed atomically
 	runner          *llmloop.Runner
 	resumeInfo      *ResumeInfo
+	budgetExceeded  bool // set when a token/tool-call budget gate stopped dispatch
 }
 
 // ResumeInfo summarizes file-level reuse for a resumed review.
@@ -226,6 +231,25 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// Record file count metric.
 	telemetry.RecordFilesReviewed(ctx, int64(reviewCount))
 
+	// Pre-run cost projection so users aren't surprised by a large review
+	// (INV-5). Non-blocking warn-only: the estimate is order-of-magnitude and
+	// cannot account for agent tool-use inflation (≈300× in the #409 report),
+	// so it is a floor; real usage is reported from the API after the run.
+	//
+	// Gated behind MaxTokensBudget so users who never opt into a budget see no
+	// new output line (the estimate is only useful to budget-setters comparing
+	// projected cost against their cap). Keeps the prior text-mode output
+	// unchanged for the common unlimited path.
+	if a.args.MaxTokensBudget > 0 {
+		est := estimateDiffCost(a.diffs)
+		fmt.Fprintf(stdout.Writer(), "[ocr] estimated cost: %s\n", est)
+		fmt.Fprintf(stdout.Writer(), "[ocr] token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
+		if est.TotalTokens > a.args.MaxTokensBudget {
+			fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: estimate (%s) exceeds token budget (%s); review will stop partway\n",
+				humanTokens(est.TotalTokens), humanTokens(a.args.MaxTokensBudget))
+		}
+	}
+
 	// Step 2: Dispatch per-file subtasks concurrently
 	comments, err := a.dispatchSubtasks(ctx)
 	if len(comments) > 0 {
@@ -293,6 +317,13 @@ func (a *Agent) Warnings() []AgentWarning { return a.runner.Warnings() }
 
 // ToolCalls returns per-tool call counts accumulated during review.
 func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
+
+// BudgetExceeded reports whether a token or tool-call budget gate stopped
+// dispatch before all files were reviewed. The run still returns the partial
+// comments collected up to that point (and a nil error) so the caller can
+// emit a typed budget_exceeded status with the partial results instead of a
+// bare failure.
+func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded }
 
 // recordWarning adds a non-fatal warning to the agent's warning list.
 func (a *Agent) recordWarning(warningType, file, message string) {
@@ -376,6 +407,29 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		if toDispatch[i].IsDeleted {
 			continue
 		}
+
+		// Per-file budget look-ahead, checked BEFORE acquiring the semaphore
+		// (mirrors scan/agent.go:472-486): if the tokens already spent PLUS a
+		// look-ahead estimate of this file's cost would exceed the budget,
+		// stop scheduling further files. Any worker already in flight is
+		// allowed to finish — its tokens flow into the atomic counter; we do
+		// NOT cancel it (matches scan, avoids half-written session records).
+		// Overrun is therefore bounded by the in-flight worker count
+		// (≤ concurrency, default 8), never a whole batch.
+		if a.args.MaxTokensBudget > 0 {
+			used := a.runner.TotalTokensUsed()
+			nextEst := estimateDiffFileTokens(toDispatch[i])
+			projected := used + nextEst
+			if projected > a.args.MaxTokensBudget {
+				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + next-file est %s = projected %s > budget %s) — skipping %s and remaining files\n",
+					humanTokens(used), humanTokens(nextEst), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), toDispatch[i].NewPath)
+				a.recordWarning("token_budget_reached", toDispatch[i].NewPath,
+					fmt.Sprintf("stopped dispatch: used %d tokens + next-file estimate %d = projected %d exceeds budget %d", used, nextEst, projected, a.args.MaxTokensBudget))
+				a.budgetExceeded = true
+				break
+			}
+		}
+
 		dispatched++
 		wg.Add(1)
 		sem <- struct{}{} // acquire semaphore
@@ -631,7 +685,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, string,
 		return false, "", err
 	}
 	if !mainCompleted {
-		return false, "main_task did not complete before stopping", nil
+		return false, "", fmt.Errorf("main_task did not complete before stopping")
 	}
 	return true, "", nil
 }

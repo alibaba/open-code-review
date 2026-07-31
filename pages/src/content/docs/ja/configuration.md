@@ -60,8 +60,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ### カスタム provider
 
 上記の表にない provider 名はすべてカスタムとみなされ、少なくとも `url` と
-`protocol` を指定する必要があります（`protocol` は `anthropic` または
-`openai`）。
+`protocol` を指定する必要があります（`protocol` は `anthropic`、`openai`、
+または `openai-responses`）。
 
 ```bash
 ocr config set provider                             my-gateway
@@ -70,6 +70,19 @@ ocr config set custom_providers.my-gateway.protocol openai
 ocr config set custom_providers.my-gateway.model    llama-3-70b
 ocr config set custom_providers.my-gateway.api_key  "$MY_API_KEY"
 ```
+
+provider またはモデルが OpenAI Responses API（`/v1/responses`）を必要とする場合は、
+`openai-responses` プロトコルを使用します。
+
+```bash
+ocr config set provider                                               openai-responses-gateway
+ocr config set custom_providers.openai-responses-gateway.url          https://api.openai.com/v1
+ocr config set custom_providers.openai-responses-gateway.protocol     openai-responses
+ocr config set custom_providers.openai-responses-gateway.model        gpt-5
+ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
+```
+
+`url` には API の Base URL または完全な `/responses` エンドポイントのどちらを指定してもよく、OCR がどちらの形式も正規化します。
 
 Ollama で動かすローカルモデルは、ローカルの OpenAI 互換エンドポイントを
 指すカスタム provider にすぎません。

@@ -28,6 +28,7 @@
   ".rake",
   ".gemspec",
   ".php",
+  ".phtml",
   ".swift",
   ".m",
   ".mm",
@@ -72,5 +73,10 @@
   ".tf",
   ".graphql",
   ".gql",
-  ".jl"
+  ".prisma",
+  ".jl",
+  ".hcl",
+  ".tfvars",
+  ".bicep",
+  ".proto"
 ]

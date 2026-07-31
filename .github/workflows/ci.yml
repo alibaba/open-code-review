@@ -20,7 +20,7 @@ jobs:
     container:
       image: golang:1.26.5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
@@ -67,7 +67,23 @@ jobs:
           echo "PASS: Coverage ${COVERAGE}% meets 80% threshold"
 
       - name: Build
-        run: go build -o /dev/null ./cmd/opencodereview
+        run: go build -o ./opencodereview ./cmd/opencodereview
+
+      - name: Smoke test
+        run: |
+          ./opencodereview --version
+          ./opencodereview --version | grep -q "open-code-review"
+          HELP=$(./opencodereview --help)
+          echo "$HELP" | grep -q "Commands:"
+          echo "$HELP" | grep -q "review"
+          echo "$HELP" | grep -q "scan"
+          echo "$HELP" | grep -q "delegate"
+          echo "$HELP" | grep -q "config"
+          echo "$HELP" | grep -q "llm"
+          echo "$HELP" | grep -q "viewer"
+          echo "$HELP" | grep -q "session"
+          echo "$HELP" | grep -q "rules"
+          rm -f ./opencodereview
 
   cross-compile:
     runs-on: self-hosted
@@ -84,7 +100,7 @@ jobs:
           - {goos: windows, goarch: amd64}
           - {goos: windows, goarch: arm64}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'

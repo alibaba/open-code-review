@@ -159,3 +159,27 @@ func TestHostGuard(t *testing.T) {
 		})
 	}
 }
+
+func TestDisplayAddr(t *testing.T) {
+	cases := []struct {
+		name string
+		addr string
+		want string
+	}{
+		{"empty-host", ":3000", "localhost:3000"},
+		{"ipv4-wildcard", "0.0.0.0:3000", "localhost:3000"},
+		{"ipv6-wildcard", "[::]:8080", "localhost:8080"},
+		{"loopback-default", "127.0.0.1:5483", "127.0.0.1:5483"},
+		{"lan-host", "192.168.1.10:5483", "192.168.1.10:5483"},
+		{"hostname", "localhost:5483", "localhost:5483"},
+		{"no-port", "localhost", "localhost"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := DisplayAddr(c.addr); got != c.want {
+				t.Errorf("DisplayAddr(%q) = %q, want %q", c.addr, got, c.want)
+			}
+		})
+	}
+}

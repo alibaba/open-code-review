@@ -2,7 +2,7 @@ name: translation-sync
 
 # Content-validation guardrails, kept out of ci.yml (which is build/test/lint):
 #   - blocking: all README*.md translations share the same ## section structure.
-#   - non-blocking: warn when a docs/en page changes without its zh/ja counterpart.
+#   - non-blocking: warn when a docs/en page changes without its zh/ja/ru counterpart.
 # Scoped with paths: so it only runs when a translation or the checker changes,
 # and a slow container pull here never delays core CI feedback.
 
@@ -40,7 +40,7 @@ jobs:
         run: node scripts/github-actions/check-translation-sync.js readmes
 
       # NON-BLOCKING: on PRs, warn (::warning) when a file under
-      # pages/src/content/docs/en/** changed without its zh/ja counterpart.
+      # pages/src/content/docs/en/** changed without its zh/ja/ru counterpart.
       # continue-on-error keeps it advisory: it never fails the build.
       # The event_name guard is intentional even though on: is PR-only today:
       # if a push: trigger is reintroduced, base/head.sha would be empty.

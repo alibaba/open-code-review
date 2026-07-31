@@ -16,7 +16,7 @@
 //
 //   2. Docs translation-sync annotation (NON-BLOCKING). When a PR changes a
 //      file under pages/src/content/docs/en/** without also changing the
-//      matching zh/ja counterpart path, emit a `::warning` PR annotation. This
+//      matching zh/ja/ru counterpart path, emit a `::warning` PR annotation. This
 //      never fails the build; it only nudges the author/reviewer.
 //
 // Invoked from .github/workflows/ci.yml:
@@ -41,9 +41,9 @@ const README_FILES = [
 ];
 
 // Docs live under pages/src/content/docs/<locale>/**. English is authored under
-// en/; zh/ and ja/ mirror the exact same relative sub-paths.
+// en/; zh/, ja/, and ru/ mirror the exact same relative sub-paths.
 const DOCS_EN_PREFIX = "pages/src/content/docs/en/";
-const DOCS_LOCALES = ["zh", "ja"];
+const DOCS_LOCALES = ["zh", "ja", "ru"];
 
 // ---------------------------------------------------------------------------
 // Markdown heading parsing
@@ -163,7 +163,7 @@ function compareReadmeStructures(files) {
 }
 
 // ---------------------------------------------------------------------------
-// Check 2: docs en -> zh/ja counterpart sync (non-blocking)
+// Check 2: docs en -> zh/ja/ru counterpart sync (non-blocking)
 // ---------------------------------------------------------------------------
 
 // Given an English docs path, return its expected translation counterparts.
@@ -176,7 +176,7 @@ function counterpartPaths(enPath) {
 }
 
 // From a changed-files list, find English docs that changed without their
-// zh/ja counterpart also changing. Returns [{ enPath, locale, counterpart }].
+// zh/ja/ru counterpart also changing. Returns [{ enPath, locale, counterpart }].
 function findMissingTranslations(changedFiles) {
   const set = new Set(changedFiles.map((p) => p.replace(/\\/g, "/")));
   const warnings = [];

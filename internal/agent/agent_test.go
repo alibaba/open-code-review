@@ -695,11 +695,15 @@ func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *test
 	a.currentDate = "2025-06-26 10:00"
 
 	_, err := a.dispatchSubtasks(context.Background())
-	if err != nil {
-		t.Fatalf("dispatchSubtasks: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "all 1 file review(s) failed") {
+		t.Fatalf("expected all-failed error, got %v", err)
 	}
 	if client.calls != 1 {
 		t.Fatalf("LLM calls = %d, want 1", client.calls)
+	}
+	warnings := a.Warnings()
+	if len(warnings) != 1 || warnings[0].Type != "subtask_error" || warnings[0].File != diff.NewPath {
+		t.Fatalf("warnings = %+v, want one subtask_error for %s", warnings, diff.NewPath)
 	}
 	sess.Finalize()
 
@@ -723,6 +727,46 @@ func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *test
 	}
 	if len(items) != 1 || items[0].Type != "failed" || !strings.Contains(items[0].Error, "main_task did not complete") {
 		t.Fatalf("items = %+v, want one incomplete-main failed item", items)
+	}
+}
+
+func TestDispatchSubtasks_IncompleteMainTaskMarksPartialFailure(t *testing.T) {
+	emptyContent := ""
+	client := &fakeAgentClient{responses: []*llm.ChatResponse{
+		agentTaskDoneResponse(),
+		{
+			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &emptyContent}}},
+			Model:   "fake",
+			Usage:   &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 1},
+		},
+	}}
+	a := New(Args{
+		From:           "main",
+		To:             "feature",
+		LLMClient:      client,
+		Model:          "fake",
+		MaxConcurrency: 1,
+		Template: template.Template{
+			MaxTokens:           100000,
+			MaxToolRequestTimes: 1,
+			MainTask: template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diff}}"}},
+			},
+		},
+	})
+	a.diffs = []model.Diff{
+		{NewPath: "complete.go", OldPath: "complete.go", Diff: "+x", Insertions: 1},
+		{NewPath: "incomplete.go", OldPath: "incomplete.go", Diff: "+y", Insertions: 1},
+	}
+	a.currentDate = "2025-06-26 10:00"
+
+	_, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("one completed file should keep the review partial, got %v", err)
+	}
+	warnings := a.Warnings()
+	if len(warnings) != 1 || warnings[0].Type != "subtask_error" || warnings[0].File != "incomplete.go" {
+		t.Fatalf("warnings = %+v, want one subtask_error for incomplete.go", warnings)
 	}
 }
 

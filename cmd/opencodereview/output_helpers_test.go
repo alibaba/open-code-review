@@ -22,6 +22,7 @@ func TestHasSubtaskErrors(t *testing.T) {
 		{"empty", []agent.AgentWarning{}, false},
 		{"no subtask errors", []agent.AgentWarning{{Type: "other", Message: "msg"}}, false},
 		{"has subtask error", []agent.AgentWarning{{Type: "subtask_error", Message: "fail"}}, true},
+		{"has scan subtask error", []agent.AgentWarning{{Type: "scan_subtask_error", Message: "fail"}}, true},
 		{"mixed", []agent.AgentWarning{{Type: "warn"}, {Type: "subtask_error"}}, true},
 	}
 	for _, tc := range tests {
@@ -168,7 +169,7 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "fail"}}
-	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "")
+	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", false)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -281,7 +282,7 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	comments := []model.LlmComment{{Path: "b.go", Content: "test"}}
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "c.go", Message: "failed"}}
-	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "")
+	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", false)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -319,7 +320,7 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "warning", Message: "something"}}
-	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "")
+	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", false)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -382,6 +383,24 @@ func captureStdout(t *testing.T, fn func()) string {
 	fn()
 	_ = w.Close()
 	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	return buf.String()
+}
+
+// captureStderr captures everything written to os.Stderr during fn. Mirrors
+// captureStdout; used to assert structured usage emitted on the failure path.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = w
+	fn()
+	_ = w.Close()
+	os.Stderr = old
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(r)
 	return buf.String()
