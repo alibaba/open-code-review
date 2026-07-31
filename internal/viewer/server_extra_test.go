@@ -67,14 +67,28 @@ func TestRenderTemplate_WithRepos(t *testing.T) {
 	renderTemplate(rr, "repos.html", map[string]any{
 		"Repos": []RepoInfo{
 			{EncodedPath: "my-project", SessionCount: 3},
+			{EncodedPath: "other-project", SessionCount: 1},
 		},
 	})
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "my-project") {
-		t.Errorf("expected repo name in rendered output")
+	body := rr.Body.String()
+	for _, required := range []string{
+		"my-project",
+		"other-project",
+		`id="repository-search-input"`,
+		`id="repositories-table"`,
+		"data-repository-name",
+		`addEventListener("input"`,
+		"toLowerCase()",
+		"name.includes(query)",
+		"row.hidden",
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("rendered repository page missing %q", required)
+		}
 	}
 }
 
