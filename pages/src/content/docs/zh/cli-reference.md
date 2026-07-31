@@ -428,6 +428,45 @@ ocr -V
 （`<GOOS>/<GOARCH>`）、构建日期（存在时），以及 GitHub URL
 （`https://github.com/alibaba/open-code-review`）。
 
+## `ocr completion`
+
+```text
+ocr completion [bash|zsh|fish|powershell]
+```
+
+生成 shell 补全脚本，让 `ocr` 子命令和参数在你的 shell 中自动补全。将目标 shell 作为参数传入；其他值会报错。
+
+各 shell 的一次性与持久化配置：
+
+```bash
+# Bash（当前会话）
+source <(ocr completion bash)
+# Bash（持久化）—— Linux：
+ocr completion bash > /etc/bash_completion.d/ocr
+# Bash（持久化）—— macOS：
+ocr completion bash > $(brew --prefix)/etc/bash_completion.d/ocr
+
+# Zsh —— 如需一次性启用补全：
+echo "autoload -U compinit; compinit" >> ~/.zshrc
+# Zsh（持久化）：
+ocr completion zsh > "${fpath[1]}/_ocr"
+# 然后重新打开一个 shell。
+
+# Fish：
+ocr completion fish | source
+# Fish（持久化）：
+ocr completion fish > ~/.config/fish/completions/ocr.fish
+```
+
+PowerShell：
+
+```powershell
+PS> ocr completion powershell | Out-String | Invoke-Expression
+# 每次新会话都加载：
+PS> ocr completion powershell > ocr.ps1
+# 并在你的 PowerShell 配置文件中 source 此文件。
+```
+
 ## 提示与注意
 
 - `--audience agent` **并不**隐含 `--format json`。两者控制不同的事——屏蔽 UI

@@ -163,6 +163,23 @@ which ocr
 echo $PATH
 ```
 
+## シェル補完を有効にする
+
+任意：`ocr` サブコマンドとフラグをシェル上で自動補完できるようにする補完スクリプトを生成します。
+
+```bash
+# Bash
+source <(ocr completion bash)
+
+# Zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+
+# Fish
+ocr completion fish | source
+```
+
+永続化の設定と PowerShell での使い方は、CLI リファレンスの [`ocr completion`](../cli-reference/) を参照してください。
+
 ## OCR が状態を保存する場所
 
 | パス | 保存内容 |

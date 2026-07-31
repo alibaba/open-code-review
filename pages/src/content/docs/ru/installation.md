@@ -165,6 +165,23 @@ which ocr
 echo $PATH
 ```
 
+## Включение автодополнения в оболочке
+
+Необязательно: сгенерируйте скрипт автодополнения, чтобы подкоманды и флаги `ocr` дополнялись автоматически в вашей оболочке.
+
+```bash
+# Bash
+source <(ocr completion bash)
+
+# Zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+
+# Fish
+ocr completion fish | source
+```
+
+Постоянная настройка и инструкции для PowerShell — в разделе [`ocr completion`](../cli-reference/) справки по CLI.
+
 ## Где OCR хранит состояние
 
 | Путь | Содержимое |

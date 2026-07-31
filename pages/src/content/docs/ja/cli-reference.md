@@ -408,6 +408,45 @@ ocr -V
 
 ビルド時に書き込まれたバージョン情報、短い Git commit（存在する場合）、プラットフォーム（`<GOOS>/<GOARCH>`）、ビルド日（存在する場合）、そして GitHub URL（`https://github.com/alibaba/open-code-review`）を出力します。
 
+## `ocr completion`
+
+```text
+ocr completion [bash|zsh|fish|powershell]
+```
+
+`ocr` サブコマンドとフラグをシェル上で自動補完できるようにする補完スクリプトを生成します。対象のシェルを引数で指定します。それ以外の値はエラーになります。
+
+シェルごとの 1 回限り / 永続化のセットアップ：
+
+```bash
+# Bash（現在のセッション）
+source <(ocr completion bash)
+# Bash（永続化）—— Linux：
+ocr completion bash > /etc/bash_completion.d/ocr
+# Bash（永続化）—— macOS：
+ocr completion bash > $(brew --prefix)/etc/bash_completion.d/ocr
+
+# Zsh —— 補完を一度だけ有効にする場合：
+echo "autoload -U compinit; compinit" >> ~/.zshrc
+# Zsh（永続化）：
+ocr completion zsh > "${fpath[1]}/_ocr"
+# その後、新しいシェルを起動してください。
+
+# Fish：
+ocr completion fish | source
+# Fish（永続化）：
+ocr completion fish > ~/.config/fish/completions/ocr.fish
+```
+
+PowerShell：
+
+```powershell
+PS> ocr completion powershell | Out-String | Invoke-Expression
+# 新しいセッションごとに読み込む場合：
+PS> ocr completion powershell > ocr.ps1
+# このファイルを PowerShell プロファイルから source してください。
+```
+
 ## ヒントと注意点
 
 - `--audience agent` は `--format json` を**含意しません**。両者は異なることを制御します。UI の抑制 vs 構造化されたペイロードです。両方が必要な場合は組み合わせて使用してください。

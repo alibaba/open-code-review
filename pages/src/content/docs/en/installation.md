@@ -168,6 +168,25 @@ which ocr
 echo $PATH
 ```
 
+## Enable shell completion
+
+Optional: generate a shell completion script so that `ocr` subcommands and
+flags auto-complete in your shell.
+
+```bash
+# Bash
+source <(ocr completion bash)
+
+# Zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+
+# Fish
+ocr completion fish | source
+```
+
+See the [`ocr completion`](../cli-reference/) section of the CLI reference
+for persistent setup and PowerShell instructions.
+
 ## Where OCR stores state
 
 | Path | What it holds |

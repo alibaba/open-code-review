@@ -449,6 +449,47 @@ Prints the version stamped at build time, the short Git commit (when
 present), the platform (`<GOOS>/<GOARCH>`), the build date (when present),
 and the GitHub URL (`https://github.com/alibaba/open-code-review`).
 
+## `ocr completion`
+
+```text
+ocr completion [bash|zsh|fish|powershell]
+```
+
+Generates a shell completion script so that `ocr` subcommands and flags
+auto-complete in your shell. Pass the target shell as an argument; any other
+value errors out.
+
+Per-shell one-shot and persistent setup:
+
+```bash
+# Bash (current session)
+source <(ocr completion bash)
+# Bash (persistent) — Linux:
+ocr completion bash > /etc/bash_completion.d/ocr
+# Bash (persistent) — macOS:
+ocr completion bash > $(brew --prefix)/etc/bash_completion.d/ocr
+
+# Zsh — enable completion once if needed:
+echo "autoload -U compinit; compinit" >> ~/.zshrc
+# Zsh (persistent):
+ocr completion zsh > "${fpath[1]}/_ocr"
+# Then start a new shell.
+
+# Fish:
+ocr completion fish | source
+# Fish (persistent):
+ocr completion fish > ~/.config/fish/completions/ocr.fish
+```
+
+PowerShell:
+
+```powershell
+PS> ocr completion powershell | Out-String | Invoke-Expression
+# For every new session:
+PS> ocr completion powershell > ocr.ps1
+# and source this file from your PowerShell profile.
+```
+
 ## Tips & gotchas
 
 - `--audience agent` does **not** imply `--format json`. They control

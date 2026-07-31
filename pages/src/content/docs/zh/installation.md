@@ -160,6 +160,23 @@ which ocr
 echo $PATH
 ```
 
+## 启用 shell 补全
+
+可选：生成 shell 补全脚本，让 `ocr` 子命令和参数在你的 shell 中自动补全。
+
+```bash
+# Bash
+source <(ocr completion bash)
+
+# Zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+
+# Fish
+ocr completion fish | source
+```
+
+持久化配置和 PowerShell 用法，见 CLI 参考中的 [`ocr completion`](../cli-reference/) 一节。
+
 ## OCR 在哪里存放状态
 
 | 路径 | 存放内容 |
