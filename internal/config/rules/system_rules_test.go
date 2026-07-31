@@ -1,10 +1,13 @@
 package rules
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 func TestExpandBraces_NoBraces(t *testing.T) {
@@ -1498,4 +1501,89 @@ func TestResolveRuleEntries_GlobalRuleFileResolution(t *testing.T) {
 	if entries[0].Rule != "global reusable rule" {
 		t.Errorf("global rule file should be resolved, got %q", entries[0].Rule)
 	}
+}
+
+// referencedRuleFiles reads the embedded system_rules.json and returns the set of
+// rule_docs filenames it references (default_rule + every path_rule_map value).
+// A plain map decode is enough here: we only need the value set, not key order.
+func referencedRuleFiles(t *testing.T) map[string]bool {
+	t.Helper()
+	data, err := rulesFS.ReadFile("system_rules.json")
+	if err != nil {
+		t.Fatalf("read embedded system_rules.json: %v", err)
+	}
+	var raw struct {
+		DefaultRule string            `json:"default_rule"`
+		PathRuleMap map[string]string `json:"path_rule_map"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal system_rules.json: %v", err)
+	}
+	refs := make(map[string]bool, len(raw.PathRuleMap)+1)
+	if raw.DefaultRule != "" {
+		refs[raw.DefaultRule] = true
+	}
+	for _, name := range raw.PathRuleMap {
+		refs[name] = true
+	}
+	return refs
+}
+
+func TestSystemRulesIntegrity(t *testing.T) {
+	rule, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+
+	t.Run("file_existence", func(t *testing.T) {
+		refs := referencedRuleFiles(t)
+		for name := range refs {
+			if _, err := rulesFS.ReadFile("rule_docs/" + name); err != nil {
+				t.Errorf("rule_docs/%s referenced by system_rules.json but not embedded: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("pattern_validity", func(t *testing.T) {
+		// Resolve expands braces before matching, so validate each expanded arm
+		// rather than the raw pattern (which may contain "{go,py}").
+		for _, pr := range rule.PathRules {
+			for _, p := range expandBraces(pr.Pattern) {
+				if !doublestar.ValidatePattern(p) {
+					t.Errorf("pattern %q (expanded from %q) is not a valid glob", p, pr.Pattern)
+				}
+			}
+		}
+	})
+
+	t.Run("no_orphan_files", func(t *testing.T) {
+		refs := referencedRuleFiles(t)
+		entries, err := rulesFS.ReadDir("rule_docs")
+		if err != nil {
+			t.Fatalf("read embedded rule_docs: %v", err)
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			if !refs[e.Name()] {
+				t.Errorf("rule_docs/%s is not referenced by system_rules.json (orphan file)", e.Name())
+			}
+		}
+	})
+
+	t.Run("no_duplicate_patterns", func(t *testing.T) {
+		// SystemRule.UnmarshalJSON preserves declaration order via a streaming
+		// decoder, so duplicate keys survive in PathRules rather than being
+		// silently collapsed by a map decode.
+		seen := make(map[string]int)
+		for _, pr := range rule.PathRules {
+			seen[pr.Pattern]++
+		}
+		for pattern, count := range seen {
+			if count > 1 {
+				t.Errorf("pattern %q appears %d times in path_rule_map", pattern, count)
+			}
+		}
+	})
 }
