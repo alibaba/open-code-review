@@ -18,6 +18,10 @@ export const ja: TranslationKeys = {
   'hero.copied': 'コピーしました',
   'hero.copyFailed': 'コピー失敗',
 
+  // Error boundary
+  'error.pageLoadFailed': 'ページの読み込みに失敗しました。',
+  'error.reload': '再読み込み',
+
   // Highlights
   'highlights.stat1Value': '20K+',
   'highlights.stat1Label': 'アクティブユーザー',

@@ -59,7 +59,7 @@ func StartServer(addr string) error {
 		Handler: guarded,
 	}
 
-	fmt.Printf("\nOpen browser: http://%s\n", addr)
+	fmt.Printf("\nOpen browser: http://%s\n", DisplayAddr(addr))
 	return srv.ListenAndServe()
 }
 
@@ -73,6 +73,20 @@ var cstZone = func() *time.Location {
 
 func formatTime(t time.Time) string {
 	return t.In(cstZone).Format("2006-01-02 15:04")
+}
+
+// CommentFileGroup groups review comments by file path for template rendering.
+type CommentFileGroup struct {
+	FilePath string
+	Comments []*ReviewComment
+}
+
+// SeverityCount holds counts for each severity level.
+type SeverityCount struct {
+	Critical int
+	High     int
+	Medium   int
+	Low      int
 }
 
 func parseTemplate(name string) (*template.Template, error) {
@@ -129,6 +143,62 @@ func parseTemplate(name string) (*template.Template, error) {
 				}
 			}
 			return result
+		},
+		"groupCommentsByFile": func(comments []*ReviewComment) []CommentFileGroup {
+			index := make(map[string]int)
+			var groups []CommentFileGroup
+			for _, c := range comments {
+				idx, ok := index[c.FilePath]
+				if !ok {
+					idx = len(groups)
+					index[c.FilePath] = idx
+					groups = append(groups, CommentFileGroup{FilePath: c.FilePath})
+				}
+				groups[idx].Comments = append(groups[idx].Comments, c)
+			}
+			return groups
+		},
+		"severityCounts": func(comments []*ReviewComment) SeverityCount {
+			var sc SeverityCount
+			for _, c := range comments {
+				switch c.Severity {
+				case "critical":
+					sc.Critical++
+				case "high":
+					sc.High++
+				case "medium":
+					sc.Medium++
+				case "low":
+					sc.Low++
+				}
+			}
+			return sc
+		},
+		"severityClass": func(s string) string {
+			switch s {
+			case "critical":
+				return "severity-critical"
+			case "high":
+				return "severity-high"
+			case "medium":
+				return "severity-medium"
+			case "low":
+				return "severity-low"
+			default:
+				return "severity-default"
+			}
+		},
+		"categoryClass": func(s string) string {
+			switch s {
+			case "bug":
+				return "cat-bug"
+			case "security":
+				return "cat-security"
+			case "performance":
+				return "cat-performance"
+			default:
+				return "cat-default"
+			}
 		},
 	}
 	content, err := assets.ReadFile("templates/" + name)

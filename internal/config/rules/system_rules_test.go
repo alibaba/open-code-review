@@ -1,10 +1,13 @@
 package rules
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 func TestExpandBraces_NoBraces(t *testing.T) {
@@ -69,6 +72,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"submodule/pom.xml", "snapshot"},
 		{"src/main/resources/application.properties", "Configuration Error Detection"},
 		{"frontend/package.json", "latest"},
+		{"composer.json", "Composer Manifest Review Principles"},
+		{"packages/library/composer.json", "Dependency Constraints and Resolution"},
 		{"config/app.yaml", "yaml-key"},
 		{"deploy/values.yml", "yaml-key"},
 		{"src/pages/index.astro", "client:*"},
@@ -86,6 +91,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
 		{"scripts/deploy.py", "Mutable Default Arguments"},
 		{"src/app/main.py", "Mutable Default Arguments"},
+		{"public/index.php", "PHP Review Principles"},
+		{"templates/account/profile.phtml", "Web and Template Security Boundaries"},
 		{"locale/zh_CN/LC_MESSAGES/messages.po", "Placeholder Mismatch"},
 		{"i18n/app.po", "Plural Forms"},
 		{"locale/messages.pot", "Placeholder Consistency"},
@@ -94,6 +101,12 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"queries/user.gql", "Breaking Changes"},
 		{"src/model.jl", "Type Stability"},
 		{"MyPkg/src/solver.jl", "Type Stability"},
+		{"main.tf", "Hardcoded Secrets"},
+		{"modules/network/vpc.hcl", "Overly Permissive Access"},
+		{"envs/prod.tfvars", "Hardcoded Secrets"},
+		{"infra/main.bicep", "Hardcoded Secrets"},
+		{"api/v1/user.proto", "Wire Compatibility"},
+		{"service.proto", "Wire Compatibility"},
 	}
 
 	for _, tt := range tests {
@@ -117,7 +130,7 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 		"readme.md",
 		"docs/architecture.txt",
 		"Makefile",
-		"internal/agent/agent.go",
+		"ios/ViewController.swift",
 		"ios/ViewController.m",
 	}
 
@@ -321,8 +334,8 @@ func TestNewResolver_ProjectRuleFallsBackToSystem(t *testing.T) {
 	}
 
 	got := resolver.Resolve("other/main.go")
-	if !strings.Contains(got, "Correctness") {
-		t.Errorf("expected system default rule, got %q", truncate(got, 80))
+	if !strings.Contains(got, "Go Review Principles") {
+		t.Errorf("expected system Go rule, got %q", truncate(got, 80))
 	}
 }
 
@@ -820,6 +833,122 @@ func TestResolveDetail_SystemPatternMatch(t *testing.T) {
 	}
 }
 
+func TestResolveDetail_SystemPrismaPatternMatch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"schema.prisma", "prisma/schema.prisma", "PRISMA/SCHEMA.PRISMA"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.prisma" {
+				t.Errorf("expected pattern '**/*.prisma', got %q", detail.Pattern)
+			}
+			if !strings.Contains(detail.Rule, "Prisma Schema Review Principles") {
+				t.Errorf("expected Prisma rule, got %q", truncate(detail.Rule, 80))
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemGoPatternMatch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"main.go", "internal/service/user.go", "CMD/MAIN.GO"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.go" {
+				t.Errorf("expected pattern '**/*.go', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Go Review Principles",
+				"Go 1.23+",
+				"defer` inside a loop",
+				"crypto/rand",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected Go rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemPHPPatternMatch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"index.php", "src/Controller/UserController.php", "TEMPLATES/INDEX.PHTML"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.{php,phtml}" {
+				t.Errorf("expected pattern '**/*.{php,phtml}', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"PHP Review Principles",
+				"foreach` value variable iterated by reference",
+				"unserialize()",
+				"PHPStan",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected PHP rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemComposerPatternPrecedesJSON(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"composer.json", "packages/library/composer.json", "PACKAGES/APP/COMPOSER.JSON"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/composer.json" {
+				t.Errorf("expected pattern '**/composer.json', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Composer Manifest Review Principles",
+				"config.allow-plugins",
+				"PSR-4",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected Composer rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveDetail_ProjectOverridesSystem(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
@@ -959,7 +1088,7 @@ func TestNewResolver_BraceExpansionInProjectRule(t *testing.T) {
 	}{
 		{"src/main/foo.java", "jvm-rule"},
 		{"src/main/bar.kt", "jvm-rule"},
-		{"src/main/baz.go", "Correctness"},
+		{"src/main/baz.swift", "Correctness"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
@@ -1372,4 +1501,89 @@ func TestResolveRuleEntries_GlobalRuleFileResolution(t *testing.T) {
 	if entries[0].Rule != "global reusable rule" {
 		t.Errorf("global rule file should be resolved, got %q", entries[0].Rule)
 	}
+}
+
+// referencedRuleFiles reads the embedded system_rules.json and returns the set of
+// rule_docs filenames it references (default_rule + every path_rule_map value).
+// A plain map decode is enough here: we only need the value set, not key order.
+func referencedRuleFiles(t *testing.T) map[string]bool {
+	t.Helper()
+	data, err := rulesFS.ReadFile("system_rules.json")
+	if err != nil {
+		t.Fatalf("read embedded system_rules.json: %v", err)
+	}
+	var raw struct {
+		DefaultRule string            `json:"default_rule"`
+		PathRuleMap map[string]string `json:"path_rule_map"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal system_rules.json: %v", err)
+	}
+	refs := make(map[string]bool, len(raw.PathRuleMap)+1)
+	if raw.DefaultRule != "" {
+		refs[raw.DefaultRule] = true
+	}
+	for _, name := range raw.PathRuleMap {
+		refs[name] = true
+	}
+	return refs
+}
+
+func TestSystemRulesIntegrity(t *testing.T) {
+	rule, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+
+	t.Run("file_existence", func(t *testing.T) {
+		refs := referencedRuleFiles(t)
+		for name := range refs {
+			if _, err := rulesFS.ReadFile("rule_docs/" + name); err != nil {
+				t.Errorf("rule_docs/%s referenced by system_rules.json but not embedded: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("pattern_validity", func(t *testing.T) {
+		// Resolve expands braces before matching, so validate each expanded arm
+		// rather than the raw pattern (which may contain "{go,py}").
+		for _, pr := range rule.PathRules {
+			for _, p := range expandBraces(pr.Pattern) {
+				if !doublestar.ValidatePattern(p) {
+					t.Errorf("pattern %q (expanded from %q) is not a valid glob", p, pr.Pattern)
+				}
+			}
+		}
+	})
+
+	t.Run("no_orphan_files", func(t *testing.T) {
+		refs := referencedRuleFiles(t)
+		entries, err := rulesFS.ReadDir("rule_docs")
+		if err != nil {
+			t.Fatalf("read embedded rule_docs: %v", err)
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			if !refs[e.Name()] {
+				t.Errorf("rule_docs/%s is not referenced by system_rules.json (orphan file)", e.Name())
+			}
+		}
+	})
+
+	t.Run("no_duplicate_patterns", func(t *testing.T) {
+		// SystemRule.UnmarshalJSON preserves declaration order via a streaming
+		// decoder, so duplicate keys survive in PathRules rather than being
+		// silently collapsed by a map decode.
+		seen := make(map[string]int)
+		for _, pr := range rule.PathRules {
+			seen[pr.Pattern]++
+		}
+		for pattern, count := range seen {
+			if count > 1 {
+				t.Errorf("pattern %q appears %d times in path_rule_map", pattern, count)
+			}
+		}
+	})
 }

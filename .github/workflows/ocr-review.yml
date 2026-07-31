@@ -45,7 +45,7 @@ jobs:
       # pull_request_target this checks out the trusted base branch; the
       # composite action performs its own full checkout (fetch-depth: 0) later.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'

@@ -255,6 +255,11 @@ type ResultProvider interface {
 	// in JSON output or failure diagnostics. Returns "" when no session was
 	// created.
 	SessionID() string
+	// BudgetExceeded reports whether a token/tool-call budget gate stopped the
+	// run before all files were reviewed. The run still returns partial
+	// comments; this lets the output layer set a typed "budget_exceeded"
+	// status distinct from success / warnings / errors.
+	BudgetExceeded() bool
 }
 
 type resumeInfoProvider interface {
@@ -310,7 +315,7 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID())
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), ag.BudgetExceeded())
 	}
 	outputTextWithWarnings(comments, ag.Warnings())
 	if summary := ag.ProjectSummary(); summary != "" {

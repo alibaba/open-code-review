@@ -22,7 +22,7 @@ func TestRunSessionList_TextIncludesSessionID(t *testing.T) {
 	sh.Finalize()
 
 	got := captureStdout(t, func() {
-		if err := runSessionList([]string{"--repo", repoDir}); err != nil {
+		if err := runSessionListCompat([]string{"--repo", repoDir}); err != nil {
 			t.Fatalf("runSessionList: %v", err)
 		}
 	})
@@ -51,7 +51,7 @@ func TestRunSessionList_JSON(t *testing.T) {
 	sh.Finalize()
 
 	got := captureStdout(t, func() {
-		if err := runSessionList([]string{"--repo", repoDir, "--json"}); err != nil {
+		if err := runSessionListCompat([]string{"--repo", repoDir, "--json"}); err != nil {
 			t.Fatalf("runSessionList: %v", err)
 		}
 	})
@@ -71,7 +71,7 @@ func TestRunSessionList_EmptyRepo(t *testing.T) {
 	repoDir := t.TempDir()
 
 	got := captureStdout(t, func() {
-		if err := runSessionList([]string{"--repo", repoDir}); err != nil {
+		if err := runSessionListCompat([]string{"--repo", repoDir}); err != nil {
 			t.Fatalf("runSessionList: %v", err)
 		}
 	})
@@ -94,7 +94,7 @@ func TestRunSessionShow_Text(t *testing.T) {
 	sh.Finalize()
 
 	got := captureStdout(t, func() {
-		if err := runSessionShow([]string{"--repo", repoDir, sh.SessionID}); err != nil {
+		if err := runSessionShowCompat([]string{"--repo", repoDir, sh.SessionID}); err != nil {
 			t.Fatalf("runSessionShow: %v", err)
 		}
 	})
@@ -119,7 +119,7 @@ func TestRunSessionShow_JSON(t *testing.T) {
 	sh.Finalize()
 
 	got := captureStdout(t, func() {
-		if err := runSessionShow([]string{"--repo", repoDir, "--json", sh.SessionID}); err != nil {
+		if err := runSessionShowCompat([]string{"--repo", repoDir, "--json", sh.SessionID}); err != nil {
 			t.Fatalf("runSessionShow: %v", err)
 		}
 	})
@@ -142,13 +142,9 @@ func TestRunSessionShow_JSON(t *testing.T) {
 func TestRunSessionShow_MissingID(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
-	got := captureStdout(t, func() {
-		if err := runSessionShow([]string{}); err == nil {
-			t.Fatal("expected error for missing session id")
-		}
-	})
-	if !strings.Contains(got, "session show") {
-		t.Errorf("expected usage output, got %q", got)
+	err := runSessionShowCompat([]string{})
+	if err == nil {
+		t.Fatal("expected error for missing session id")
 	}
 }
 

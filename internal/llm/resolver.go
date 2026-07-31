@@ -672,8 +672,16 @@ func splitHeaderPairs(raw string) ([]string, error) {
 // ensureMessagesSuffix appends /v1/messages to base URLs that lack a versioned path.
 func ensureMessagesSuffix(rawURL string) string {
 	u := strings.TrimRight(rawURL, "/")
+	// Already ends with the full messages path — don't modify.
+	if strings.HasSuffix(u, "/v1/messages") {
+		return rawURL
+	}
+	// Ends with /v1 (e.g. "https://api.anthropic.com/v1") — only append /messages.
+	if strings.HasSuffix(u, "/v1") {
+		return u + "/messages"
+	}
+	// URL has /v1/ in the middle (e.g. /v1/anthropic) — already versioned, leave it alone.
 	if strings.Contains(u, "/v1/") {
-		// Already has versioned path — don't modify.
 		return rawURL
 	}
 	return u + "/v1/messages"

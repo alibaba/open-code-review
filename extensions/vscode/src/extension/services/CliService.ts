@@ -158,7 +158,10 @@ export class CliService {
     if (this.current && this.current.pid) {
       this.current.kill('SIGTERM');
       const proc = this.current;
-      setTimeout(() => { if (!proc.killed) proc.kill('SIGKILL'); }, 3000);
+      const forceKillTimer = setTimeout(() => {
+        if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+      }, 3000);
+      proc.once('close', () => clearTimeout(forceKillTimer));
     }
   }
 }

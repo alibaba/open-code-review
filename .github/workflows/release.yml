@@ -29,7 +29,7 @@ jobs:
           - goos: windows
             goarch: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
@@ -70,7 +70,7 @@ jobs:
       - name: Install git
         run: apt-get update && apt-get install -y git
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -144,7 +144,7 @@ jobs:
         run: sha256sum opencodereview-* | sort > sha256sum.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body: ${{ steps.notes.outputs.body }}
           files: |
@@ -152,7 +152,7 @@ jobs:
             sha256sum.txt
 
       - name: Attest release artifacts
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             opencodereview-*
@@ -167,7 +167,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'

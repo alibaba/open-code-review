@@ -1,4 +1,5 @@
 import { FileChange } from '../../shared/types';
+import path from 'path';
 
 export function mapStatusCode(code: string): FileChange['status'] {
   switch (code) {
@@ -87,12 +88,20 @@ export function pickRepoRoot(roots: string[], workspacePath?: string): string | 
   if (roots.length === 0) return null;
   if (!workspacePath) return roots[0];
 
-  const exact = roots.find((r) => r === workspacePath);
-  if (exact) return exact;
+  const candidates = roots.map((root) => {
+    const isWindowsPath = [root, workspacePath].some((p) => /^[a-z]:[\\/]/i.test(p) || p.includes('\\'));
+    const pathApi = isWindowsPath ? path.win32 : path.posix;
+    return { root, relative: pathApi.relative(root, workspacePath), pathApi };
+  });
 
-  const ancestors = roots.filter((r) => workspacePath.startsWith(r.endsWith('/') ? r : r + '/'));
+  const exact = candidates.find(({ relative }) => relative === '');
+  if (exact) return exact.root;
+
+  const ancestors = candidates.filter(({ relative, pathApi }) =>
+    relative !== '..' && !relative.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(relative));
   if (ancestors.length > 0) {
-    return ancestors.reduce((deepest, r) => (r.length > deepest.length ? r : deepest));
+    return ancestors.reduce((deepest, candidate) =>
+      candidate.relative.length < deepest.relative.length ? candidate : deepest).root;
   }
 
   return roots[0];

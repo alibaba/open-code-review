@@ -30,8 +30,7 @@ type AgentWarning struct {
 // re-tracking, reflection, suggestion validation) asynchronously.
 //
 // Offloading them to a worker pool keeps the main LLM tool-use loop
-// unblocked, reducing overall latency — mirroring the Java side's dedicated
-// subtaskExecutor for the CODE_COMMENT tool.
+// unblocked, reducing overall latency.
 type CommentWorkerPool struct {
 	semaphore chan struct{}
 	wg        sync.WaitGroup

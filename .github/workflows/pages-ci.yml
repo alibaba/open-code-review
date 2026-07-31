@@ -20,7 +20,7 @@ jobs:
     container:
       image: node:24.18.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
@@ -29,6 +29,10 @@ jobs:
         working-directory: pages
         run: npm install
 
+      - name: Lint
+        working-directory: pages
+        run: npm run lint
+
       - name: Typecheck
         working-directory: pages
         run: npm run typecheck
@@ -36,3 +40,7 @@ jobs:
       - name: Build
         working-directory: pages
         run: npm run build
+
+      - name: Check bundle size
+        working-directory: pages
+        run: npm run size
