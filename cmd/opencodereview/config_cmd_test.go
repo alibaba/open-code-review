@@ -944,7 +944,7 @@ func TestSetConfigValueUnknownKey(t *testing.T) {
 		"Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
 		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\n" +
 		"Protocol values: anthropic, openai, openai-responses\n" +
-		"MCP server fields: command, args, env, tools, setup"
+		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}

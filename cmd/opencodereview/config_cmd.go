@@ -32,11 +32,13 @@ var supportedConfigKeys = []string{
 	"telemetry.exporter",
 	"telemetry.otlp_endpoint",
 	"telemetry.content_logging",
+}
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage configuration settings",
 	Long: `Configuration management.
-2
+
 Examples:
   # Provider setup (interactive)
   ocr config provider
@@ -496,7 +498,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: command, args, env, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
