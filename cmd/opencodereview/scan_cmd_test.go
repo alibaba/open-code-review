@@ -132,12 +132,10 @@ func TestParseScanFlags_PathNarrowsScope(t *testing.T) {
 }
 
 func TestParseScanFlags_HelpFlag(t *testing.T) {
-	opts, err := parseScanFlags([]string{"-h"})
+	// Cobra handles -h automatically; just ensure it does not error.
+	_, err := parseScanFlags([]string{"-h"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if !opts.showHelp {
-		t.Error("opts.showHelp should be true when -h is supplied")
 	}
 }
 

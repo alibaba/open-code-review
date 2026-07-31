@@ -10,7 +10,89 @@ import (
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/spf13/cobra"
 )
+
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Manage configuration settings",
+	Long: `Configuration management.
+
+Examples:
+  # Provider setup (interactive)
+  ocr config provider
+  ocr config model
+
+  # Provider setup (non-interactive)
+  ocr config set provider anthropic
+  ocr config set model claude-opus-4-6
+  ocr config set providers.anthropic.api_key "$ANTHROPIC_API_KEY"
+
+  # Custom provider
+  ocr config set provider my-gateway
+  ocr config set custom_providers.my-gateway.url https://gateway.internal.com/v1
+  ocr config set custom_providers.my-gateway.protocol openai`,
+}
+
+var configSetCmd = &cobra.Command{
+	Use:   "set <key> <value>",
+	Short: "Set a configuration value",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) < 2 {
+			return fmt.Errorf("usage: ocr config set <key> <value>\ne.g., ocr config set llm.model claude-opus-4-6")
+		}
+		if len(args) > 2 {
+			return fmt.Errorf("usage: ocr config set <key> <value>\ne.g., ocr config set llm.model claude-opus-4-6")
+		}
+		return nil
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runConfigSet(args[0], args[1])
+	},
+}
+
+var configUnsetCmd = &cobra.Command{
+	Use:   "unset <key>",
+	Short: "Remove a configuration value",
+	Long:  "Remove a provider, custom_providers.<name>, or mcp_servers.<name>.",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) < 1 {
+			return fmt.Errorf("usage: ocr config unset <provider|custom_providers.<name>|mcp_servers.<name>>\nexamples:\n  ocr config unset provider\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github")
+		}
+		if len(args) > 1 {
+			return fmt.Errorf("usage: ocr config unset <key>")
+		}
+		return nil
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runConfigUnset(args[0])
+	},
+}
+
+var configProviderCmd = &cobra.Command{
+	Use:   "provider",
+	Short: "Interactive provider setup",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runConfigProvider()
+	},
+}
+
+var configModelCmd = &cobra.Command{
+	Use:   "model",
+	Short: "Interactive model selection",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runConfigModel()
+	},
+}
+
+func init() {
+	configCmd.AddCommand(configSetCmd)
+	configCmd.AddCommand(configUnsetCmd)
+	configCmd.AddCommand(configProviderCmd)
+	configCmd.AddCommand(configModelCmd)
+}
 
 // Default config file location: ~/.opencodereview/config.json
 func defaultConfigPath() (string, error) {
@@ -29,40 +111,6 @@ func resolveConfigPath() (string, error) {
 		return p, nil
 	}
 	return defaultConfigPath()
-}
-
-func runConfig(args []string) error {
-	if len(args) == 0 {
-		printConfigUsage()
-		return nil
-	}
-
-	switch args[0] {
-	case "provider":
-		if len(args) != 1 {
-			return fmt.Errorf("config provider does not accept arguments; use 'ocr config set provider <name>' for non-interactive setup")
-		}
-		return runConfigProvider()
-	case "model":
-		if len(args) != 1 {
-			return fmt.Errorf("config model does not accept arguments; use 'ocr config set model <name>' for non-interactive setup")
-		}
-		return runConfigModel()
-	}
-
-	action, err := parseConfigArgs(args)
-	if err != nil {
-		return err
-	}
-
-	switch action.subCmd {
-	case "set":
-		return runConfigSet(action.key, action.value)
-	case "unset":
-		return runConfigUnset(action.key)
-	default:
-		return fmt.Errorf("unknown config sub-command: %s", action.subCmd)
-	}
 }
 
 func runConfigSet(key, value string) error {
