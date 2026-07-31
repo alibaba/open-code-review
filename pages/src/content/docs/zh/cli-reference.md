@@ -57,6 +57,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr llm providers` | — | 列出所有内置 LLM provider。 |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话。 |
 | `ocr session show <id>` | `ocr sessions show <id>` | 查看单个会话及其逐文件检查点。 |
+| `ocr session comments <id>` | `ocr sessions comments <id>` | 输出单个会话中记录的评审评论。 |
 | `ocr viewer` | — | 启动用于历史评审会话的本地 Web UI（`localhost:5483`）。 |
 | `ocr version` | — | 打印版本、commit、平台、构建日期与 GitHub URL。 |
 
@@ -146,6 +147,7 @@ ocr review -c abc123
 ```bash
 ocr session list
 ocr session show <session-id>
+ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
@@ -263,8 +265,9 @@ ocr session <sub-command>
 ocr sessions <sub-command>   (alias)
 
 Sub-commands:
-  list, ls    List recent review sessions for the current repo
-  show <id>   Show one session's metadata and per-file items
+  list, ls        List recent review sessions for the current repo
+  show <id>       Show one session's metadata and per-file items
+  comments <id>   Show the review comments recorded in one session
 ```
 
 ### `ocr session list`
@@ -293,6 +296,25 @@ ocr session show --repo /path/to/repo <session-id>
 |---|---|---|
 | `--repo <path>` | 当前目录 | 要查看会话的仓库。 |
 | `--json` | `false` | 以 JSON 输出会话元数据和逐文件条目。 |
+
+### `ocr session comments`
+
+输出会话中保存的所有评审评论，渲染风格与 `ocr review` 的终端输出一致
+（路径、行范围、严重程度标签、建议 diff）。
+
+```bash
+ocr session comments <session-id>
+ocr session comments --json <session-id>
+ocr session comments --severity high <session-id>
+ocr session comments --severity critical,high --category bug,security <session-id>
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--repo <path>` | 当前目录 | 要查看会话的仓库。 |
+| `--json` | `false` | 以 JSON 数组输出评论。 |
+| `--severity <list>` | 全部 | 逗号分隔的要包含的严重程度（`critical`、`high`、`medium`、`low`）。 |
+| `--category <list>` | 全部 | 逗号分隔的要包含的类别（如 `bug`、`security`）。 |
 
 ## `ocr rules`
 
