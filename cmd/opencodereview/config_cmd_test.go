@@ -941,6 +941,26 @@ func TestSetConfigValueUnknownKey(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
+	// The unknown-key error message must stay byte-identical after extracting
+	// supportedConfigKeys, and must be generated from that list.
+	err := setConfigValue(&Config{}, "bogus.key", "val")
+	if err == nil {
+		t.Fatal("expected error for unknown key")
+	}
+	want := "unknown config key: bogus.key\n" +
+		"Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\n" +
+		"Protocol values: anthropic, openai, openai-responses\n" +
+		"MCP server fields: type, command, args, env, url, headers, tools, setup"
+	if err.Error() != want {
+		t.Errorf("unknown-key message drifted:\n got: %q\nwant: %q", err.Error(), want)
+	}
+	if !strings.Contains(err.Error(), strings.Join(supportedConfigKeys, ", ")) {
+		t.Error("message should be generated from supportedConfigKeys")
+	}
+}
+
 func TestSetConfigValueProviderClearsModel(t *testing.T) {
 	cfg := &Config{Provider: "old-provider", Model: "old-model"}
 	if err := setConfigValue(cfg, "provider", "new-provider"); err != nil {
