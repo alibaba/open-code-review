@@ -1,11 +1,90 @@
 package rules
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
+
+func TestSystemRulesIntegrity(t *testing.T) {
+	data, err := rulesFS.ReadFile("system_rules.json")
+	if err != nil {
+		t.Fatalf("read embedded system_rules.json: %v", err)
+	}
+
+	var config struct {
+		DefaultRule string          `json:"default_rule"`
+		PathRuleMap json.RawMessage `json:"path_rule_map"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("unmarshal embedded system_rules.json: %v", err)
+	}
+
+	referenced := map[string]bool{config.DefaultRule: true}
+	decoder := json.NewDecoder(bytes.NewReader(config.PathRuleMap))
+	token, err := decoder.Token()
+	if err != nil {
+		t.Fatalf("read path_rule_map object: %v", err)
+	}
+	if token != json.Delim('{') {
+		t.Fatalf("path_rule_map should be an object, got %v", token)
+	}
+
+	seenPatterns := make(map[string]bool)
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			t.Fatalf("read path_rule_map key: %v", err)
+		}
+		pattern, ok := keyToken.(string)
+		if !ok {
+			t.Fatalf("path_rule_map key should be a string, got %T", keyToken)
+		}
+		if seenPatterns[pattern] {
+			t.Errorf("duplicate path_rule_map pattern %q", pattern)
+		}
+		seenPatterns[pattern] = true
+
+		var ruleFile string
+		if err := decoder.Decode(&ruleFile); err != nil {
+			t.Fatalf("read rule file for pattern %q: %v", pattern, err)
+		}
+		referenced[ruleFile] = true
+		for _, expanded := range expandBraces(pattern) {
+			if _, err := doublestar.Match(expanded, ""); err != nil {
+				t.Errorf("invalid glob pattern %q: %v", pattern, err)
+			}
+		}
+	}
+
+	for ruleFile := range referenced {
+		if ruleFile == "" {
+			t.Error("system rules contains an empty rule file reference")
+			continue
+		}
+		if _, err := rulesFS.ReadFile("rule_docs/" + ruleFile); err != nil {
+			t.Errorf("rule file %q is not embedded: %v", ruleFile, err)
+		}
+	}
+
+	entries, err := rulesFS.ReadDir("rule_docs")
+	if err != nil {
+		t.Fatalf("read embedded rule_docs: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
+			continue
+		}
+		if !referenced[entry.Name()] {
+			t.Errorf("embedded rule file %q is not referenced by system_rules.json", entry.Name())
+		}
+	}
+}
 
 func TestExpandBraces_NoBraces(t *testing.T) {
 	got := expandBraces("*.java")
