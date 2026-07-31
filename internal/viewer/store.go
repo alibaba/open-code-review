@@ -5,6 +5,7 @@ package viewer
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -88,6 +89,7 @@ type SessionSummary struct {
 	DurationSec   float64
 	FileCount     int
 	LLMFailures   int
+	CommentCount  int
 }
 
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
@@ -118,7 +120,8 @@ func ListSessions(root, encodedRepo string) ([]SessionSummary, error) {
 	return summaries, nil
 }
 
-// peekSession reads only the first and last record of a JSONL file.
+// peekSession reads the first record, all review_item records (for comment
+// count), and the last record of a JSONL file.
 func peekSession(path string) (SessionSummary, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -165,6 +168,17 @@ func peekSession(path string) (SessionSummary, error) {
 			if v, ok := rec["diffCommit"].(string); ok {
 				summary.DiffCommit = v
 			}
+			continue
+		}
+
+		// Count comments from review_item_done/reused records
+		if len(line) > 0 && (bytes.Contains(line, []byte(`"review_item_done"`)) || bytes.Contains(line, []byte(`"review_item_reused"`))) {
+			var rec map[string]any
+			if err := json.Unmarshal(line, &rec); err == nil {
+				if comments, ok := rec["comments"].([]any); ok {
+					summary.CommentCount += len(comments)
+				}
+			}
 		}
 	}
 
@@ -193,11 +207,24 @@ func peekSession(path string) (SessionSummary, error) {
 	return summary, scanner.Err()
 }
 
+// ReviewComment represents a single code review finding from a session.
+type ReviewComment struct {
+	FilePath       string
+	Content        string
+	SuggestionCode string
+	ExistingCode   string
+	StartLine      int
+	EndLine        int
+	Category       string // bug, security, performance, maintainability, test, style, documentation, other
+	Severity       string // critical, high, medium, low
+}
+
 // ViewSession holds fully parsed records for one session.
 type ViewSession struct {
 	Summary    SessionSummary
 	TokenUsage TokenUsageSummary
-	Files      []*FileGroup // ordered by file path
+	Files      []*FileGroup     // ordered by file path
+	Comments   []*ReviewComment // review findings from review_item_done/reused records
 }
 
 // TokenUsageSummary aggregates token counts across the session.
@@ -442,6 +469,43 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				}
 			}
 
+		case "review_item_done", "review_item_reused":
+			fp, _ := rec["filePath"].(string)
+			if comments, ok := rec["comments"].([]any); ok {
+				for _, c := range comments {
+					cm, ok := c.(map[string]any)
+					if !ok {
+						continue
+					}
+					rc := &ReviewComment{FilePath: fp}
+					if v, ok := cm["path"].(string); ok && v != "" {
+						rc.FilePath = v
+					}
+					if v, ok := cm["content"].(string); ok {
+						rc.Content = v
+					}
+					if v, ok := cm["suggestion_code"].(string); ok {
+						rc.SuggestionCode = v
+					}
+					if v, ok := cm["existing_code"].(string); ok {
+						rc.ExistingCode = v
+					}
+					if v, ok := cm["start_line"].(float64); ok {
+						rc.StartLine = int(v)
+					}
+					if v, ok := cm["end_line"].(float64); ok {
+						rc.EndLine = int(v)
+					}
+					if v, ok := cm["category"].(string); ok {
+						rc.Category = v
+					}
+					if v, ok := cm["severity"].(string); ok {
+						rc.Severity = v
+					}
+					vs.Comments = append(vs.Comments, rc)
+				}
+			}
+
 		case "session_end":
 			if dur, ok := rec["duration_seconds"].(float64); ok {
 				vs.Summary.DurationSec = dur
@@ -492,5 +556,6 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	})
 
 	vs.Summary.SessionID = sessionID
+	vs.Summary.CommentCount = len(vs.Comments)
 	return vs, scanner.Err()
 }

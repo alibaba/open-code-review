@@ -83,6 +83,59 @@
     {{end}}
 </div>
 
+{{if .Session.Comments}}
+<div class="comments-section">
+    <h3>Review Comments ({{len .Session.Comments}} findings)</h3>
+    {{with severityCounts .Session.Comments}}
+    <div class="severity-bar">
+        {{if .Critical}}<span class="severity-badge severity-critical">Critical: {{.Critical}}</span>{{end}}
+        {{if .High}}<span class="severity-badge severity-high">High: {{.High}}</span>{{end}}
+        {{if .Medium}}<span class="severity-badge severity-medium">Medium: {{.Medium}}</span>{{end}}
+        {{if .Low}}<span class="severity-badge severity-low">Low: {{.Low}}</span>{{end}}
+    </div>
+    {{end}}
+    <div class="comment-groups">
+    {{range groupCommentsByFile .Session.Comments}}
+    <details class="comment-file-group" open>
+        <summary class="comment-file-header">
+            <span class="chevron"></span>
+            <span class="file-path">{{.FilePath}}</span>
+            <span class="file-count-badge">{{len .Comments}} comments</span>
+        </summary>
+        <div class="comment-file-body">
+        {{range .Comments}}
+            <div class="comment-card">
+                <div class="comment-meta">
+                    {{if .Category}}<span class="comment-badge {{categoryClass .Category}}">{{.Category}}</span>{{end}}
+                    {{if .Severity}}<span class="comment-badge {{severityClass .Severity}}">{{.Severity}}</span>{{end}}
+                    {{if .StartLine}}<span class="comment-lines">L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}</span>{{end}}
+                </div>
+                <div class="comment-content">{{.Content}}</div>
+                {{if or .ExistingCode .SuggestionCode}}
+                <div class="comment-code-diff">
+                    {{if .ExistingCode}}
+                    <div class="code-panel code-existing">
+                        <div class="code-panel-label">Existing Code</div>
+                        <pre><code>{{.ExistingCode}}</code></pre>
+                    </div>
+                    {{end}}
+                    {{if .SuggestionCode}}
+                    <div class="code-panel code-suggestion">
+                        <div class="code-panel-label">Suggested Change</div>
+                        <pre><code>{{.SuggestionCode}}</code></pre>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+            </div>
+        {{end}}
+        </div>
+    </details>
+    {{end}}
+    </div>
+</div>
+{{end}}
+
 {{if .Session.Summary.FilesReviewed}}
 <h3>Files Reviewed</h3>
 <ul class="file-list">
