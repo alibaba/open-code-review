@@ -13,6 +13,63 @@ describe('CliService.isAvailable', () => {
   });
 });
 
+describe('CliService probe shell option', () => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  let spawnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    spawnSpy = jest.spyOn(require('child_process'), 'spawn');
+  });
+
+  afterEach(() => {
+    spawnSpy.mockRestore();
+    if (originalPlatform) {
+      Object.defineProperty(process, 'platform', originalPlatform);
+    }
+  });
+
+  it('Windows 上 probeCommand 应传入 shell: true', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    const mockProc = {
+      stdout: { on: jest.fn() },
+      on: jest.fn((event: string, cb: (code: number) => void) => {
+        if (event === 'close') cb(0);
+      }),
+    };
+    spawnSpy.mockReturnValue(mockProc as any);
+
+    const svc = new CliService('node');
+    await (svc as any).probeCommand('npm');
+
+    expect(spawnSpy).toHaveBeenCalledWith(
+      'npm',
+      ['--version'],
+      expect.objectContaining({ shell: true }),
+    );
+  });
+
+  it('非 Windows 上 probeCommand 不应传入 shell', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    const mockProc = {
+      stdout: { on: jest.fn() },
+      on: jest.fn((event: string, cb: (code: number) => void) => {
+        if (event === 'close') cb(0);
+      }),
+    };
+    spawnSpy.mockReturnValue(mockProc as any);
+
+    const svc = new CliService('node');
+    await (svc as any).probeCommand('npm');
+
+    expect(spawnSpy).toHaveBeenCalledWith(
+      'npm',
+      ['--version'],
+      expect.objectContaining({ shell: false }),
+    );
+  });
+});
+
 describe('CliService.runRaw', () => {
   it('收集 stdout 并在结束时 resolve', async () => {
     // 用 node 打印一段 JSON 模拟 ocr

@@ -30,35 +30,6 @@ func runReview(args []string) error {
 	return executeReview(opts)
 }
 
-// parseConfigArgs provides test compatibility for config argument parsing.
-type configAction struct {
-	subCmd string
-	key    string
-	value  string
-}
-
-func parseConfigArgs(args []string) (configAction, error) {
-	if len(args) == 0 {
-		return configAction{}, &configParseError{"usage: ocr config set <key> <value>\ne.g., ocr config set llm.model claude-opus-4-6"}
-	}
-
-	subCmd := args[0]
-	switch subCmd {
-	case "set":
-		if len(args) < 3 {
-			return configAction{}, &configParseError{"usage: ocr config set <key> <value>\ne.g., ocr config set llm.model claude-opus-4-6"}
-		}
-		return configAction{subCmd: "set", key: args[1], value: args[2]}, nil
-	case "unset":
-		if len(args) < 2 {
-			return configAction{}, &configParseError{"usage: ocr config unset <provider|custom_providers.<name>|mcp_servers.<name>>\nexamples:\n  ocr config unset provider\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github"}
-		}
-		return configAction{subCmd: "unset", key: args[1]}, nil
-	default:
-		return configAction{}, &configParseError{"unknown config sub-command: " + subCmd + "\nAvailable: set, unset, provider, model"}
-	}
-}
-
 // parseScanFlags provides test compatibility: parses args through a fresh
 // cobra command instance and returns the resulting scanOptions.
 func parseScanFlags(args []string) (scanOptions, error) {
@@ -77,10 +48,6 @@ func parseScanFlags(args []string) (scanOptions, error) {
 	err := cmd.Execute()
 	return opts, err
 }
-
-type configParseError struct{ msg string }
-
-func (e *configParseError) Error() string { return e.msg }
 
 // runSessionListCompat provides test compatibility for old-style runSessionList([]string{...}) calls.
 func runSessionListCompat(args []string) error {
@@ -139,38 +106,37 @@ func runSession(args []string) error {
 	return cmd.Execute()
 }
 
-// Ensure configParseError implements the error interface.
-var _ error = (*configParseError)(nil)
-
-// runConfig provides test compatibility: dispatches config subcommands.
+// runConfig provides test compatibility: dispatches config subcommands through a
+// fresh cobra command tree that mirrors the production config command, so the
+// test compat layer cannot drift from production routing.
 func runConfig(args []string) error {
-	if len(args) == 0 {
-		return nil
+	cmd := &cobra.Command{Use: "config", SilenceUsage: true, SilenceErrors: true}
+	setCmd := &cobra.Command{
+		Use: "set", Args: cobra.ExactArgs(2),
+		SilenceUsage: true, SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, a []string) error { return runConfigSet(a[0], a[1]) },
 	}
-	switch args[0] {
-	case "provider":
-		if len(args) != 1 {
-			return &configParseError{"config provider does not accept arguments; use 'ocr config set provider <name>' for non-interactive setup"}
-		}
-		return runConfigProvider()
-	case "model":
-		if len(args) != 1 {
-			return &configParseError{"config model does not accept arguments; use 'ocr config set model <name>' for non-interactive setup"}
-		}
-		return runConfigModel()
+	unsetCmd := &cobra.Command{
+		Use: "unset", Args: cobra.ExactArgs(1),
+		SilenceUsage: true, SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, a []string) error { return runConfigUnset(a[0]) },
 	}
-
-	action, err := parseConfigArgs(args)
-	if err != nil {
-		return err
+	providerCmd := &cobra.Command{
+		Use: "provider", Args: cobra.NoArgs,
+		SilenceUsage: true, SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, a []string) error { return runConfigProvider() },
 	}
-
-	switch action.subCmd {
-	case "set":
-		return runConfigSet(action.key, action.value)
-	case "unset":
-		return runConfigUnset(action.key)
-	default:
-		return &configParseError{"unknown config sub-command: " + action.subCmd}
+	modelCmd := &cobra.Command{
+		Use: "model", Args: cobra.NoArgs,
+		SilenceUsage: true, SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, a []string) error { return runConfigModel() },
 	}
+	cmd.AddCommand(setCmd, unsetCmd, providerCmd, modelCmd)
+	// A nil args slice makes cobra fall back to os.Args; pass an explicit empty
+	// slice so `runConfig(nil)` shows usage instead of reading the test binary's args.
+	if args == nil {
+		args = []string{}
+	}
+	cmd.SetArgs(args)
+	return cmd.Execute()
 }

@@ -369,25 +369,9 @@ func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 
 // --- unset tests ---
 
-func TestParseConfigArgsUnset(t *testing.T) {
-	action, err := parseConfigArgs([]string{"unset", "custom_providers.my-gateway"})
-	if err != nil {
-		t.Fatalf("parseConfigArgs: %v", err)
-	}
-	if action.subCmd != "unset" {
-		t.Errorf("subCmd = %q, want %q", action.subCmd, "unset")
-	}
-	if action.key != "custom_providers.my-gateway" {
-		t.Errorf("key = %q, want %q", action.key, "custom_providers.my-gateway")
-	}
-}
-
-func TestParseConfigArgsUnsetMissingKey(t *testing.T) {
-	_, err := parseConfigArgs([]string{"unset"})
-	if err == nil {
-		t.Fatal("expected error for missing key")
-	}
-}
+// parseConfigArgs unset tests were removed with the helper; unset dispatch is
+// covered by the TestRunConfigUnset_* tests and config_dispatch_test.go, and the
+// deeper unset behavior by the TestDeleteCustomProvider / provider tests below.
 
 func TestUnsetCustomProvider(t *testing.T) {
 	dir := t.TempDir()
@@ -938,6 +922,26 @@ func TestSetConfigValueUnknownKey(t *testing.T) {
 	cfg := &Config{}
 	if err := setConfigValue(cfg, "unknown.key", "val"); err == nil {
 		t.Fatal("expected error for unknown key")
+	}
+}
+
+func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
+	// The unknown-key error message must stay byte-identical after extracting
+	// supportedConfigKeys, and must be generated from that list.
+	err := setConfigValue(&Config{}, "bogus.key", "val")
+	if err == nil {
+		t.Fatal("expected error for unknown key")
+	}
+	want := "unknown config key: bogus.key\n" +
+		"Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\n" +
+		"Protocol values: anthropic, openai, openai-responses\n" +
+		"MCP server fields: type, command, args, env, url, headers, tools, setup"
+	if err.Error() != want {
+		t.Errorf("unknown-key message drifted:\n got: %q\nwant: %q", err.Error(), want)
+	}
+	if !strings.Contains(err.Error(), strings.Join(supportedConfigKeys, ", ")) {
+		t.Error("message should be generated from supportedConfigKeys")
 	}
 }
 

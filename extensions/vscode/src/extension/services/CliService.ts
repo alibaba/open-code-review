@@ -30,9 +30,10 @@ export class CliService {
     return env.ocr.ok;
   }
 
-  private probeCommand(bin: string, args: string[]): Promise<{ ok: boolean; version?: string }> {
+  private probeCommand(bin: string): Promise<{ ok: boolean; version?: string }> {
     return new Promise((resolve) => {
-      const proc = spawn(resolveBin(bin), args, { env: getShellEnv() });
+      // shell: true is safe here because args are hardcoded ['--version'] — no user input.
+      const proc = spawn(resolveBin(bin), ['--version'], { env: getShellEnv(), shell: process.platform === 'win32' });
       let stdout = '';
       let errored = false;
       proc.stdout?.on('data', (d) => { stdout += d.toString(); });
@@ -53,10 +54,10 @@ export class CliService {
       const cached = this.getCachedEnvironment();
       if (cached) return cached;
     }
-    const node = await this.probeCommand('node', ['--version']);
-    const npm = node.ok ? await this.probeCommand('npm', ['--version']) : { ok: false };
+    const node = await this.probeCommand('node');
+    const npm = node.ok ? await this.probeCommand('npm') : { ok: false };
     const ocr = node.ok && npm.ok
-      ? await this.probeCommand(this.cliPath, ['--version'])
+      ? await this.probeCommand(this.cliPath)
       : { ok: false };
     const env = { node, npm, ocr };
     this.envCache = { env, at: Date.now() };
