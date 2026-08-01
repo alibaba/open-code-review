@@ -369,10 +369,6 @@ func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 
 // --- unset tests ---
 
-// parseConfigArgs unset tests were removed with the helper; unset dispatch is
-// covered by the TestRunConfigUnset_* tests and config_dispatch_test.go, and the
-// deeper unset behavior by the TestDeleteCustomProvider / provider tests below.
-
 func TestUnsetCustomProvider(t *testing.T) {
 	dir := t.TempDir()
 	configPath := dir + "/config.json"

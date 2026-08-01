@@ -146,6 +146,3 @@ func TestParseReviewFlags_ShortFlags(t *testing.T) {
 		t.Error("expected preview=true")
 	}
 }
-
-// Config argument parsing is exercised through runConfig (see
-// config_dispatch_test.go), which now routes via the production cobra tree.
