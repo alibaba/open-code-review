@@ -125,6 +125,22 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 	if p.AuthHeader != "" {
 		t.Errorf("AuthHeader = %q, want empty", p.AuthHeader)
 	}
+	expectedModels := []string{
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
+		"gpt-5.5",
+		"gpt-5.4",
+		"gpt-5.4-mini",
+	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
 }
 
 func TestLookupProvider_OllamaCloudDetails(t *testing.T) {

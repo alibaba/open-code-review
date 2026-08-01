@@ -46,6 +46,9 @@ var registry = []Provider{
 		BaseURL:     "https://api.openai.com/v1",
 		EnvVar:      "OPENAI_API_KEY",
 		Models: []string{
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+			"gpt-5.6-luna",
 			"gpt-5.5",
 			"gpt-5.4",
 			"gpt-5.4-mini",
