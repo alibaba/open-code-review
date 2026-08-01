@@ -56,7 +56,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
 | `minimax` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
-| `novita` | openai | `https://api.novita.ai/v3/openai` | `NOVITA_API_KEY` |
+| `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
 ### カスタム provider
 
