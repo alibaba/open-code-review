@@ -15,5 +15,7 @@
   "**/*_test.rs",
   "**/oh_modules/**",
   "**/*.test.ets",
-  "**/test/**/*.jl"
+  "**/test/**/*.jl",
+  "**/test/**/*.hs",
+  "**/*Spec.hs"
 ]

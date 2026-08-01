@@ -48,6 +48,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".BICEP", true},
 		{".proto", true},
 		{".PROTO", true},
+		{".hs", true},
+		{".HS", true},
+		{".lhs", true},
+		{".LHS", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -129,6 +133,13 @@ func TestIsExcludedPath(t *testing.T) {
 		{"julia test file", "test/runtests.jl", true},
 		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
 		{"julia non-test", "src/model.jl", false},
+
+		// Haskell test files
+		{"haskell test directory", "test/Parser.hs", true},
+		{"haskell nested test directory", "packages/core/test/unit/Parser.hs", true},
+		{"haskell spec file", "src/ParserSpec.hs", true},
+		{"haskell root spec file", "ParserSpec.hs", true},
+		{"haskell non-test", "src/Parser.hs", false},
 
 		// Case insensitive
 		{"case insensitive go", "Foo/Bar_Test.go", true},

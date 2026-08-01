@@ -107,6 +107,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"infra/main.bicep", "Hardcoded Secrets"},
 		{"api/v1/user.proto", "Wire Compatibility"},
 		{"service.proto", "Wire Compatibility"},
+		{"src/Main.hs", "Partial Functions"},
+		{"examples/Tutorial.lhs", "Partial Functions"},
 	}
 
 	for _, tt := range tests {
