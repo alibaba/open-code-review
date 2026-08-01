@@ -298,7 +298,7 @@ var registry = []Provider{
 		Name:        "novita",
 		DisplayName: "Novita AI",
 		Protocol:    ProtocolOpenAIChatCompletions,
-		BaseURL:     "https://api.novita.ai/v3/openai",
+		BaseURL:     "https://api.novita.ai/openai",
 		EnvVar:      "NOVITA_API_KEY",
 		Models: []string{
 			"deepseek/deepseek-v4-pro",
