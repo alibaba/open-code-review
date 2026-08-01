@@ -1,0 +1,6 @@
+{
+    "name": "open-code-review",
+    "commands": "./commands",
+    "description": "Perform AI code review on Git diffs — supports workspace changes, branch ranges, and single commits with concurrent per-file analysis, codebase search, and deep context-aware review.",
+    "version": "1.0.0"
+}

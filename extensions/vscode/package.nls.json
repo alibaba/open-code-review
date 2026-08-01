@@ -1,0 +1,11 @@
+{
+  "ocr.activitybar.title": "Open Code Review",
+  "ocr.sidebar.name": "Code Review",
+  "ocr.review.start": "OCR: Start Code Review",
+  "ocr.review.cancel": "OCR: Cancel Review",
+  "ocr.config.open": "OCR: Open Configuration",
+  "ocr.comment.apply": "Apply",
+  "ocr.comment.discard": "Discard",
+  "ocr.comment.falsePositive": "False Positive",
+  "ocr.description": "AI Code Review — powered by open-code-review CLI"
+}

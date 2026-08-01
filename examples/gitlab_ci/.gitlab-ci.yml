@@ -1,0 +1,78 @@
+# OpenCodeReview - GitLab CI Merge Request Auto-Review Demo
+#
+# This pipeline automatically reviews Merge Requests using OpenCodeReview
+# and posts review comments (discussions) directly on the MR diff.
+# Supports both same-repo and forked MR scenarios.
+#
+# Required CI/CD Variables (Settings → CI/CD → Variables):
+#   OCR_LLM_URL        - LLM API endpoint (e.g., https://api.openai.com/v1/chat/completions)
+#   OCR_LLM_AUTH_TOKEN - Authentication token for the LLM API (mark as "Masked")
+#   OCR_LLM_MODEL      - Model name (e.g., gpt-4o). OCR has no built-in default model; the
+#                        pipeline fails fast if this is unset.
+#
+# Optional CI/CD Variables:
+#   GITLAB_API_TOKEN   - GitLab Personal/Project Access Token with "api" scope
+#                        (falls back to CI_JOB_TOKEN if not set)
+#
+# Optional CI/CD Variables (for retry/delay tuning):
+#   OCR_RETRY_BASE_DELAY    - Base delay (ms) for exponential backoff on rate-limit retries (default: 2000)
+#   OCR_MAX_RETRIES         - Max retry attempts per comment when rate-limited or transient error (default: 3)
+#   OCR_MAX_RETRY_DELAY     - Maximum delay (ms) per single retry, caps Retry-After/backoff (default: 60000)
+#   OCR_SUCCESS_DELAY       - Delay (ms) after a successful comment post to pace requests (default: 2000)
+#   OCR_FAILURE_DELAY       - Delay (ms) after a non-rate-limit failure to pace subsequent requests (default: 1000)
+#   OCR_RATE_LIMIT_THRESHOLD - Proactively slow down when GitLab RateLimit-Remaining is at/below this value (default: 10, set 0 to disable)
+#
+# Note: The pipeline also configures llm.extra_body to '{"thinking": {"type": "disabled"}}'
+#   to disable thinking mode for compatibility with various LLM providers.
+#
+# Fork MR Support:
+#   The script uses CI_COMMIT_SHA as the diff target to correctly resolve the
+#   source commit from forked repos. For some GitLab versions, you may need to enable:
+#   Project Settings → CI/CD → General pipelines →
+#     "Run pipelines in the parent project for merge requests from forked projects"
+
+stages:
+  - review
+
+code-review:
+  stage: review
+  interruptible: true
+  resource_group: mr-review-$CI_MERGE_REQUEST_IID
+  image: node:20
+  only:
+    - merge_requests
+  variables:
+    GIT_DEPTH: 0  # Full history needed for merge-base diff
+  script:
+    # Install OpenCodeReview
+    - npm install -g @alibaba-group/open-code-review
+    - echo "OpenCodeReview installed with version:" && ocr version || true
+
+    # Configure OCR
+    # Gitlab CI/CD does not support configuring variables with value length less than 8, so you can't set use_anthropic as a CI variable
+    - |
+      : "${OCR_LLM_URL:?set OCR_LLM_URL in Settings -> CI/CD -> Variables}"
+      : "${OCR_LLM_AUTH_TOKEN:?set OCR_LLM_AUTH_TOKEN in Settings -> CI/CD -> Variables}"
+      : "${OCR_LLM_MODEL:?set OCR_LLM_MODEL in Settings -> CI/CD -> Variables}"
+      ocr config set llm.url "$OCR_LLM_URL"
+      ocr config set llm.auth_token "$OCR_LLM_AUTH_TOKEN"
+      ocr config set llm.model "$OCR_LLM_MODEL"
+      ocr config set llm.use_anthropic false
+      ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
+
+    # Run OCR review (use CI_COMMIT_SHA for --to to support both same-repo and forked MRs)
+    - |
+      echo "Reviewing MR: ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME} against ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      ocr review \
+        --from "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" \
+        --to "${CI_COMMIT_SHA}" \
+        --format json \
+        --audience agent \
+        > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log || true
+      echo "OCR review completed."
+      cat /tmp/ocr-result.json
+
+    # Post review comments to MR
+    # post_review.py lives alongside this file; copy both into your repo.
+    # See examples/gitlab_ci/README.md for setup instructions.
+    - python3 post_review.py /tmp/ocr-result.json

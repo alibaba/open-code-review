@@ -1,0 +1,209 @@
+[
+  {
+    "name": "task_done",
+    "plan_task": false,
+    "main_task": true,
+    "definition": {
+      "name": "task_done",
+      "description": "Call this tool to terminate task execution when you have completed the user's task, such as when no obvious code issues are found during code review.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "DONE",
+              "FAILED"
+            ],
+            "description": "Defaults to DONE. Return FAILED if the task cannot be completed using available tools."
+          }
+        },
+        "required": [
+          "state"
+        ]
+      }
+    }
+  },
+  {
+    "name": "code_comment",
+    "plan_task": false,
+    "main_task": true,
+    "definition": {
+      "name": "code_comment",
+      "description": "When you discover that a code change could introduce code issue, please use this tool to report the issue. The tool will pinpoint your feedback to the precise code line (or block) in the current file by inserting a code comment.\n\n**Core Mechanism:**\nThis tool uses a dynamic sliding window algorithm to match corresponding consecutive lines in diff text based on your provided 'existing_code' parameter. Therefore, you must ensure the provided 'existing_code' actually exists in the diff text with exactly matching format. It should contain one or several consecutive lines of code most relevant to your comment.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "comments": {
+            "type": "array",
+            "description": "A list of comments. Each item should contain 'content' and 'existing_code'.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "Comment content, typically a brief description of code issues and corresponding suggestions."
+                },
+                "existing_code": {
+                  "type": "string",
+                  "description": "Code snippet used to locate comment position. Only return newly added code lines, should not include deleted code or unchanged code lines. Maintain consistent style with diff code for IDE recognition and mounting in current file."
+                },
+                "suggestion_code": {
+                  "type": "string",
+                  "description": "Corresponding suggested code snippet, maintaining consistent code style."
+                },
+                "category": {
+                  "type": "string",
+                  "enum": [
+                    "bug",
+                    "security",
+                    "performance",
+                    "maintainability",
+                    "test",
+                    "style",
+                    "documentation",
+                    "other"
+                  ],
+                  "description": "The category the issue belongs to."
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "critical",
+                    "high",
+                    "medium",
+                    "low"
+                  ],
+                  "description": "The severity of the issue."
+                }
+              },
+              "required": [
+                "content",
+                "existing_code",
+                "category",
+                "severity"
+              ]
+            }
+          }
+        },
+        "required": [
+          "comments"
+        ]
+      }
+    }
+  },
+  {
+    "name": "file_read",
+    "plan_task": false,
+    "main_task": true,
+    "definition": {
+      "name": "file_read",
+      "description": "Use this tool to read file content when you need to get context for git diff. You can specify start_line and end_line to view specific parts of the file.\n\n**Line Range Strategy:**\n- Git diff hunk header provides guidance on how to get more relevant context.\n- Git diff hunk header \"@@-x,y +m,n@@\" indicates that the old file has y lines starting from line x, and the new file has n lines starting from line m.\n- For example, when you need to read 50 lines above and below the current changed code block in the new file, set start_line = m - 50, end_line = m + n + 50.\n\n**Example output:**\nFile：path/to/example.go (Total lines: 50)\nIS_TRUNCATED: false\nLINE_RANGE: 10-12\n// The following is the original content of the file\nfunc main() {\n  fmt.Println(\"Hello, World!\")\n}\n\n**Limitations:**\n- If the specified range exceeds 500 lines, only 500 lines will be returned with a truncation notice.\n- This tool can only read file content from the modified version (after changes) in git diff.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "The relative path of the file to open."
+          },
+          "start_line": {
+            "type": "integer",
+            "description": "The start line number to view. Defaults to 1."
+          },
+          "end_line": {
+            "type": "integer",
+            "description": "The end line number to view. Defaults to end line of file."
+          }
+        },
+        "required": [
+          "file_path"
+        ]
+      }
+    }
+  },
+  {
+    "name": "code_search",
+    "plan_task": true,
+    "main_task": true,
+    "definition": {
+      "name": "code_search",
+      "description": "Use this tool to search for specific text within files. Supports searching in specific files, directories, or across the entire codebase with flexible file pattern filtering. Can use either exact string matching or regular expressions.\n\n**Example output:**\nSearch results for 'toolRequest' (case-insensitive):\nFile: path/to/example.java\n433|      String name = toolRequest.get().getName();\n438|      logToolRequest(newPath, tool, toolRequest.get());\n\n**Regular expression examples (requires use_perl_regexp: true):**\n- Find classes that extend BaseModel: 'class.*extends.*BaseModel'\n- Find function: 'functionName(.*)'\n- Find the function call sites: '\\.functionName(.*)'\n- Match any of multiple strings: 'error|exception|fail'\n\n**File patterns examples:**\n- Single file: ['src/main.go']\n- Multiple files: ['src/main.go', 'lib/utils.js']\n- All Go files: ['*.go']\n- Exclude test files: [':(exclude)*_test.go']\n- Only in src directory: ['src/']\n- Multiple patterns: ['*.go', ':(exclude)vendor/']\n\n**Limitations:**\n- If more than 100 matches are found, only the first 100 results will be returned.\n- Empty search terms will return no results.\n- This tool searches in the current version of files.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "search_text": {
+            "type": "string",
+            "description": "The text string or regular expression pattern to search for."
+          },
+          "file_patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of patterns to include/exclude files in the search. Supports Git pathspec syntax for including and excluding files. If omitted, searches the entire codebase."
+          },
+          "case_sensitive": {
+            "type": "boolean",
+            "description": "Whether the search should be case-sensitive. Defaults to false (case-insensitive)."
+          },
+          "use_perl_regexp": {
+            "type": "boolean",
+            "description": "If true, treats search_text as a Perl-compatible regular expression pattern instead of literal text. Defaults to false."
+          }
+        },
+        "required": [
+          "search_text"
+        ]
+      }
+    }
+  },
+  {
+    "name": "file_read_diff",
+    "plan_task": true,
+    "main_task": true,
+    "definition": {
+      "name": "file_read_diff",
+      "description": "The tool is used to view the changes made to other files in the list of modifications. Call this tool when you discover suspected code issues but need to check changes in other files to confirm whether the problem actually exists. This tool will respond in git diff format.\n\nOutput example:\n==== FILE: path/to/file1.txt ====\n--- a/path/to/file1.txt\n+++ b/path/to/file1.txt\n@@ -10,1 +10,1 @@\n- old content\n+ new content\n\n==== FILE: path/to/file2.txt ====\n@@ -5,1 +5,2 @@\n  - old content\n  + new content1\n  + new content2",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path_array": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of file paths to view diff content."
+          }
+        },
+        "required": [
+          "path_array"
+        ]
+      }
+    }
+  },
+  {
+    "name": "file_find",
+    "plan_task": true,
+    "main_task": true,
+    "definition": {
+      "name": "file_find",
+      "description": "Search for matching files in the current project based on filename keywords. Use this tool when you cannot find the files you need to view in the current change file list.\n\nThis tool searches for filenames containing specified keywords in the project directory and returns a list of matching file paths. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\nsrc/main/java/UserService.java\nsrc/test/java/UserServiceTest.java",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query_name": {
+            "type": "string",
+            "description": "Filename keyword to search for, supports partial matching."
+          },
+          "case_sensitive": {
+            "type": "boolean",
+            "description": "Whether to perform case-sensitive search. Defaults to false."
+          }
+        },
+        "required": [
+          "query_name"
+        ]
+      }
+    }
+  }
+]

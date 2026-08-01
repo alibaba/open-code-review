@@ -1,0 +1,123 @@
+# OpenCodeReview - GitHub Actions PR Auto-Review Demo
+#
+# Demonstrates invoking the reusable action for both automatic PR review
+# (pull_request_target: opened/synchronize/reopened) and on-demand re-review
+# via comments starting with '/open-code-review' or '@open-code-review'.
+#
+# Required secrets/vars (Settings -> Secrets and variables -> Actions):
+#   secret    OCR_LLM_URL            LLM API endpoint
+#   secret    OCR_LLM_AUTH_TOKEN     LLM auth token (mapped to OCR_LLM_TOKEN)
+#   variable  OCR_LLM_MODEL          model name
+#   variable  OCR_LLM_USE_ANTHROPIC  'true' for Anthropic, 'false' for OpenAI-compatible
+#
+# For the full list of action inputs/outputs and the four comment-posting modes
+# (sticky / incremental), see action.yml at the repo root.
+
+name: OpenCodeReview PR Review
+
+# Conditional concurrency group.
+#
+# GitHub Actions evaluates concurrency BEFORE job-level if-conditions. With a
+# flat group (ocr-<pr_number>), every comment on the PR — even an unrelated
+# conversation reply that will be skipped — enters the same group and, because
+# cancel-in-progress is true, cancels any in-progress review. The result: a
+# single normal comment kills a running review, and you see "two runs, one
+# cancelled" in the Actions tab.
+#
+# Fix: matching events (PR events + /open-code-review comments) share a per-PR
+# group so a new review cancels any stale one for the same PR. Non-matching
+# comments land in a unique noop-<run_id> group that can never collide with a
+# real review, so they are skipped instantly without disrupting anything.
+concurrency:
+  group: >-
+    ${{
+      (
+        github.event_name == 'pull_request_target'
+        || (
+          github.event_name == 'issue_comment'
+          && github.event.issue.pull_request
+          && github.event.comment.user.type != 'Bot'
+          && (
+            github.event.comment.author_association == 'MEMBER'
+            || github.event.comment.author_association == 'OWNER'
+            || github.event.comment.author_association == 'COLLABORATOR'
+          )
+          && (
+            startsWith(github.event.comment.body, '/open-code-review')
+            || startsWith(github.event.comment.body, '@open-code-review')
+          )
+        )
+      )
+      && format('ocr-{0}', github.event.pull_request.number || github.event.issue.number)
+      || format('noop-{0}', github.run_id)
+    }}
+  cancel-in-progress: true
+
+on:
+  # Use pull_request_target instead of pull_request so that secrets are
+  # available even for PRs from forks. This is safe because the reusable
+  # action only reads the diff and does not execute any code from the PR.
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Run on PR events, or on human-authored comments starting with trigger
+    # keywords. Bot comments are excluded as a safety net: GITHUB_TOKEN already
+    # suppresses events from bot-posted comments, but a PAT/App token would not.
+    # issue_comment triggers are further gated on author_association so only
+    # MEMBER/OWNER/COLLABORATOR users can spend LLM quota via re-review.
+    if: |
+      github.event_name == 'pull_request_target'
+      || (
+        github.event_name == 'issue_comment'
+        && github.event.issue.pull_request
+        && github.event.comment.user.type != 'Bot'
+        && (
+          github.event.comment.author_association == 'MEMBER'
+          || github.event.comment.author_association == 'OWNER'
+          || github.event.comment.author_association == 'COLLABORATOR'
+        )
+        && (
+          startsWith(github.event.comment.body, '/open-code-review')
+          || startsWith(github.event.comment.body, '@open-code-review')
+        )
+      )
+    steps:
+      - name: Get PR context
+        id: pr-context
+        if: github.event_name == 'issue_comment'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // For issue_comment events, resolve PR base/head so the action
+            // can review the right diff (issue_comment has no top-level
+            // pull_request payload fields).
+            const prNumber = context.issue.number;
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            core.setOutput('base_ref', pullRequest.base.ref);
+            core.setOutput('head_sha', pullRequest.head.sha);
+
+      - name: Run OpenCodeReview
+        uses: alibaba/open-code-review@main
+        with:
+          llm_url: ${{ secrets.OCR_LLM_URL }}
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: ${{ vars.OCR_LLM_MODEL }}
+          llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+          # For issue_comment triggers, pass the resolved refs; for
+          # pull_request_target the action resolves them from the event.
+          base_ref: ${{ steps.pr-context.outputs.base_ref }}
+          head_sha: ${{ steps.pr-context.outputs.head_sha }}

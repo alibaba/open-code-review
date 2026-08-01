@@ -1,0 +1,466 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+	"unicode"
+
+	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/suggestdiff"
+)
+
+func outputText(comments []model.LlmComment) {
+	if len(comments) == 0 {
+		fmt.Println("No comments generated. Looks good to me.")
+		return
+	}
+	for _, c := range comments {
+		renderComment(c)
+	}
+}
+
+func hasSubtaskErrors(warnings []agent.AgentWarning) bool {
+	for _, w := range warnings {
+		if isSubtaskErrorType(w.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+func isSubtaskErrorType(warningType string) bool {
+	return warningType == "subtask_error" || warningType == "scan_subtask_error"
+}
+
+func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning) {
+	if len(comments) == 0 {
+		if hasSubtaskErrors(warnings) {
+			fmt.Println("Some files could not be reviewed due to errors (see warnings below).")
+		} else {
+			fmt.Println("No comments generated. Looks good to me.")
+		}
+	} else {
+		for _, c := range comments {
+			renderComment(c)
+		}
+	}
+	for _, w := range warnings {
+		if isSubtaskErrorType(w.Type) {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING [%s] %s: %s\n", w.Type, sanitizeTerminal(w.File), sanitizeTerminal(w.Message))
+	}
+}
+
+func renderComment(comment model.LlmComment) {
+	lines := buildDiffLines(comment)
+	if len(lines) == 0 && comment.Content == "" {
+		return
+	}
+
+	fmt.Printf("\n\033[2m─── %s:%d-%d ───\033[0m\n", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine)
+
+	if comment.Content != "" {
+		badge := buildBadge(comment)
+		content := sanitizeTerminal(comment.Content)
+		if badge != "" {
+			// Prepend the plain badge text to the content so it wraps inline with
+			// the first line, then colorize just the badge prefix after wrapping.
+			content = badge + " " + content
+		}
+		lines := wrapByRunes(content, 100)
+		for i, ln := range lines {
+			if i == 0 && badge != "" && strings.HasPrefix(ln, badge) {
+				color := severityColor(comment.Severity)
+				ln = color + badge + "\033[0m" + ln[len(badge):]
+			}
+			fmt.Printf("%s\n", ln)
+		}
+		fmt.Println()
+	}
+
+	if len(lines) > 0 {
+		for _, dl := range lines {
+			switch dl.Type {
+			case suggestdiff.DiffAdded:
+				printDiffLine("+", sanitizeTerminal(dl.Content), "\033[92m", "\033[48;2;0;60;0m")
+			case suggestdiff.DiffDeleted:
+				printDiffLine("-", sanitizeTerminal(dl.Content), "\033[91m", "\033[48;2;70;0;0m")
+			case suggestdiff.DiffContext:
+				printDiffLine(" ", sanitizeTerminal(dl.Content), "\033[2m", "\033[48;2;38;38;38m")
+			}
+		}
+	}
+
+	fmt.Println()
+}
+
+// buildBadge renders a compact "[category · severity]" tag for a finding. It returns
+// an empty string when neither structured field is present, so text output for findings
+// without metadata is unchanged.
+func buildBadge(comment model.LlmComment) string {
+	category := sanitizeTerminal(comment.Category)
+	severity := sanitizeTerminal(comment.Severity)
+	switch {
+	case category != "" && severity != "":
+		return fmt.Sprintf("[%s · %s]", category, severity)
+	case category != "":
+		return fmt.Sprintf("[%s]", category)
+	case severity != "":
+		return fmt.Sprintf("[%s]", severity)
+	default:
+		return ""
+	}
+}
+
+// severityColor maps a finding severity to an ANSI color used for its badge.
+// Unknown or empty severities fall back to dim.
+func severityColor(severity string) string {
+	switch severity {
+	case "critical":
+		return "\033[1;91m" // bold bright red
+	case "high":
+		return "\033[91m" // bright red
+	case "medium":
+		return "\033[93m" // bright yellow
+	case "low":
+		return "\033[94m" // bright blue
+	default:
+		return "\033[2m" // dim
+	}
+}
+
+// printDiffLine renders a single diff line with colored prefix and background on content.
+func printDiffLine(prefix, content, fgColor, bgColor string) {
+	fmt.Printf("%s%s%s %s%s\033[0m\n", fgColor+bgColor, prefix, "\033[0m"+bgColor, content, "\033[0m")
+}
+
+// wrapByRunes splits text into lines that fit within maxWidth **rune** columns.
+// Respects existing newlines and wraps at word boundaries.
+func wrapByRunes(text string, maxW int) []string {
+	if text == "" {
+		return nil
+	}
+	var result []string
+	for _, para := range strings.Split(text, "\n") {
+		result = append(result, wrapSingleRuneLine(para, maxW)...)
+	}
+	return result
+}
+
+// wrapSingleRuneLine breaks one paragraph (no newlines) into rune-width-constrained lines.
+func wrapSingleRuneLine(line string, maxW int) []string {
+	runes := []rune(line)
+	if visibleRunesLen(runes) <= maxW {
+		return []string{line}
+	}
+	var result []string
+	for len(runes) > 0 {
+		cut := runeWrapCut(runes, maxW)
+		result = append(result, string(runes[:cut]))
+		runes = runes[cut:]
+		// trim leading spaces of next segment
+		for len(runes) > 0 && runes[0] == ' ' {
+			runes = runes[1:]
+		}
+	}
+	return result
+}
+
+// runeWrapCut returns a rune index suitable for breaking the line at ~maxW display width.
+func runeWrapCut(runes []rune, maxW int) int {
+	if visibleRunesLen(runes) <= maxW {
+		return len(runes)
+	}
+	best := maxW
+	if best >= len(runes) {
+		return len(runes)
+	}
+	for i := best; i > 0; i-- {
+		if runes[i] == ' ' || runes[i] == '\t' {
+			return i
+		}
+	}
+	return best
+}
+
+func visibleRunesLen(runes []rune) int {
+	n := 0
+	for _, r := range runes {
+		if r >= 32 && r != 127 {
+			n++
+		}
+	}
+	return n
+}
+
+func sanitizeTerminal(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '\t' || r == '\n' || !unicode.IsControl(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func splitToLines(s string) []string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func buildDiffLines(comment model.LlmComment) []suggestdiff.DiffLine {
+	if comment.SuggestionCode == "" || comment.ExistingCode == "" {
+		return nil
+	}
+	oldLines := splitToLines(comment.ExistingCode)
+	newLines := splitToLines(comment.SuggestionCode)
+	return suggestdiff.ComputeLineDiff(oldLines, newLines)
+}
+
+type jsonSummary struct {
+	FilesReviewed    int64  `json:"files_reviewed"`
+	Comments         int64  `json:"comments"`
+	TotalTokens      int64  `json:"total_tokens"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64  `json:"cache_write_tokens,omitempty"`
+	Elapsed          string `json:"elapsed"`
+	BudgetExceeded   bool   `json:"budget_exceeded,omitempty"`
+}
+
+type jsonToolCalls struct {
+	Total  int64            `json:"total"`
+	ByTool map[string]int64 `json:"by_tool"`
+}
+
+type jsonOutput struct {
+	Status         string               `json:"status"`
+	TraceID        string               `json:"trace_id,omitempty"`
+	Message        string               `json:"message,omitempty"`
+	Summary        *jsonSummary         `json:"summary,omitempty"`
+	ToolCalls      *jsonToolCalls       `json:"tool_calls"`
+	Comments       []model.LlmComment   `json:"comments"`
+	Warnings       []agent.AgentWarning `json:"warnings,omitempty"`
+	ProjectSummary string               `json:"project_summary,omitempty"`
+	Resume         *agent.ResumeInfo    `json:"resume,omitempty"`
+	SessionID      string               `json:"session_id,omitempty"`
+}
+
+func outputJSON(comments []model.LlmComment) error {
+	out := jsonOutput{
+		Status:   "success",
+		Comments: comments,
+	}
+	if len(comments) == 0 {
+		out.Message = "No comments generated. Looks good to me."
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
+	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
+	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string, budgetExceeded bool) error {
+	out := jsonOutput{
+		Status:   "success",
+		TraceID:  traceID,
+		Comments: comments,
+		Summary: &jsonSummary{
+			FilesReviewed:    filesReviewed,
+			Comments:         int64(len(comments)),
+			TotalTokens:      totalTokens,
+			InputTokens:      inputTokens,
+			OutputTokens:     outputTokens,
+			CacheReadTokens:  cacheReadTokens,
+			CacheWriteTokens: cacheWriteTokens,
+			Elapsed:          duration.Round(time.Second).String(),
+			BudgetExceeded:   budgetExceeded,
+		},
+		ProjectSummary: projectSummary,
+		Resume:         resumeInfo,
+		SessionID:      sessionID,
+	}
+	var total int64
+	for _, v := range toolCalls {
+		total += v
+	}
+	byTool := toolCalls
+	if byTool == nil {
+		byTool = make(map[string]int64)
+	}
+	out.ToolCalls = &jsonToolCalls{
+		Total:  total,
+		ByTool: byTool,
+	}
+	if len(comments) == 0 {
+		if hasSubtaskErrors(warnings) {
+			out.Message = "Some files could not be reviewed due to errors."
+		} else {
+			out.Message = "No comments generated. Looks good to me."
+		}
+	}
+	if len(warnings) > 0 {
+		out.Warnings = warnings
+		if hasSubtaskErrors(warnings) {
+			out.Status = "completed_with_errors"
+		} else {
+			out.Status = "completed_with_warnings"
+		}
+	}
+	// A tripped budget is a distinct typed terminal state (INV-3): it must
+	// read "budget_exceeded" regardless of any concurrent subtask warnings /
+	// errors, since the run stopped for the budget reason and partial results
+	// were still emitted. Takes precedence over the warning statuses above.
+	if budgetExceeded {
+		out.Status = "budget_exceeded"
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+func outputJSONNoFiles(traceID string) error {
+	out := jsonOutput{
+		Status:   "skipped",
+		TraceID:  traceID,
+		Message:  "No supported files changed.",
+		Comments: []model.LlmComment{},
+		ToolCalls: &jsonToolCalls{
+			ByTool: map[string]int64{},
+		},
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+// emitFailureUsage writes a best-effort structured usage record to stderr when
+// a review fails (INV-4): the outer caller must still see the cost of the
+// failed attempt instead of losing it. It carries only token/tool-call tallies
+// and elapsed — never credentials or prompts (INV-4 no-secrets).
+//
+// The common failure path is a non-budget error (budget exhaustion returns
+// partial comments with a nil error and reaches emitRunResult instead). But
+// there is a residual edge: a budget gate can trip after dispatching N files,
+// and if every dispatched file then fails, dispatchSubtasks returns
+// (nil, error) — reaching here with ag.BudgetExceeded()==true. We therefore
+// report the agent's actual BudgetExceeded() value rather than hardcoding
+// false, so the record never contradicts the agent's state.
+//
+// In json format it emits a jsonOutput-shaped object to stderr (kept separate
+// from stdout so it does not pollute the machine-readable result stream);
+// otherwise a single human-readable [ocr] line. It must never return an error
+// that masks the original failure — all writes are best-effort.
+func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string) {
+	var toolTotal int64
+	for _, v := range ag.ToolCalls() {
+		toolTotal += v
+	}
+	budgetExceeded := ag.BudgetExceeded()
+	if outputFormat == "json" {
+		out := jsonOutput{
+			Status: "failed",
+			Summary: &jsonSummary{
+				FilesReviewed:    ag.FilesReviewed(),
+				TotalTokens:      ag.TotalTokensUsed(),
+				InputTokens:      ag.TotalInputTokens(),
+				OutputTokens:     ag.TotalOutputTokens(),
+				CacheReadTokens:  ag.TotalCacheReadTokens(),
+				CacheWriteTokens: ag.TotalCacheWriteTokens(),
+				Elapsed:          duration.Round(time.Second).String(),
+				BudgetExceeded:   budgetExceeded,
+			},
+			ToolCalls: &jsonToolCalls{
+				Total:  toolTotal,
+				ByTool: ag.ToolCalls(),
+			},
+			SessionID: ag.SessionID(),
+		}
+		enc := json.NewEncoder(os.Stderr)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(out)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[ocr] usage on failure: %d file(s), %d input + %d output = %d total tokens, %d tool calls, elapsed %s, budget_exceeded=%v",
+		ag.FilesReviewed(), ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
+		toolTotal, duration.Round(time.Second).String(), budgetExceeded)
+	if id := ag.SessionID(); id != "" {
+		fmt.Fprintf(os.Stderr, ", session %s", id)
+	}
+	fmt.Fprintln(os.Stderr)
+}
+
+func outputPreviewText(p *agent.DiffPreview) {
+	if p.TotalFiles == 0 {
+		fmt.Println("No files changed.")
+		return
+	}
+
+	maxPathLen := 0
+	for _, e := range p.Entries {
+		if n := len(sanitizeTerminal(e.Path)); n > maxPathLen {
+			maxPathLen = n
+		}
+	}
+	if maxPathLen < 20 {
+		maxPathLen = 20
+	}
+	pathFmt := fmt.Sprintf("%%-%ds", maxPathLen)
+
+	fmt.Printf("\nPreview: %d file(s) changed  |  \033[32m+%d\033[0m  \033[31m-%d\033[0m\n",
+		p.TotalFiles, p.TotalInsertions, p.TotalDeletions)
+
+	if p.ReviewableCount > 0 {
+		fmt.Printf("\n\033[1mWill review (%d):\033[0m\n", p.ReviewableCount)
+		for _, e := range p.Entries {
+			if !e.WillReview {
+				continue
+			}
+			fmt.Printf("  %s  "+pathFmt+" \033[32m+%-4d\033[0m \033[31m-%-4d\033[0m\n",
+				statusBadge(e.Status), sanitizeTerminal(e.Path), e.Insertions, e.Deletions)
+		}
+	}
+
+	if p.ExcludedCount > 0 {
+		fmt.Printf("\n\033[1mExcluded from review (%d):\033[0m\n", p.ExcludedCount)
+		for _, e := range p.Entries {
+			if e.WillReview {
+				continue
+			}
+			fmt.Printf("  %s  "+pathFmt+" \033[2m(%s)\033[0m\n",
+				statusBadge(e.Status), sanitizeTerminal(e.Path), sanitizeTerminal(string(e.ExcludeReason)))
+		}
+	}
+
+	fmt.Println()
+}
+
+func statusBadge(status string) string {
+	switch status {
+	case "added":
+		return "\033[32m[A]\033[0m"
+	case "modified":
+		return "\033[33m[M]\033[0m"
+	case "deleted":
+		return "\033[31m[D]\033[0m"
+	case "renamed":
+		return "\033[36m[R]\033[0m"
+	case "binary":
+		return "\033[35m[B]\033[0m"
+	case "scan":
+		return "\033[34m[S]\033[0m"
+	default:
+		return "[?]"
+	}
+}

@@ -1,0 +1,100 @@
+name: Bug Report
+description: Report a bug encountered while using OpenCodeReview
+labels: ["bug"]
+type: Bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug! Please fill out the form below so we can investigate effectively.
+
+        Before opening a new issue, please [search existing issues](https://github.com/alibaba/open-code-review/issues) to avoid duplicates.
+
+  - type: input
+    id: version
+    attributes:
+      label: OpenCodeReview Version
+      description: Run `ocr version` and paste the output here.
+      placeholder: "v0.1.0 (commit: abc1234, built: 2026-05-01T00:00:00Z)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux (x86_64)
+        - Linux (ARM64)
+        - Windows
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Installation Method
+      options:
+        - npm (global)
+        - GitHub Release binary
+        - Built from source
+    validations:
+      required: true
+
+  - type: dropdown
+    id: llm-provider
+    attributes:
+      label: LLM Provider
+      description: Which LLM API are you using?
+      options:
+        - Anthropic (Claude)
+        - OpenAI
+        - Azure OpenAI
+        - Other OpenAI-compatible endpoint
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: "When I run `ocr review`, the CLI crashes with..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the issue.
+      placeholder: |
+        1. Configure LLM with `ocr config set ...`
+        2. Run `ocr review --from main --to feature`
+        3. Observe error message...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Error Output
+      description: Paste any relevant error messages or logs. Please redact any API keys or sensitive information.
+      render: shell
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other information that might help us investigate (e.g., custom review rules, specific file types, network environment).

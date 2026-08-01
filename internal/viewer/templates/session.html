@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Session Detail - Open Code Review Viewer</title>
+
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a><span class="sep">/</span><a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a><span class="sep">/</span><span class="current">{{.Session.Summary.SessionID | truncate 12}}</span></nav>
+<main>
+<div class="session-header">
+    <h2>Session: {{.Session.Summary.SessionID}}</h2>
+    <div class="meta">
+        <span><strong>CWD:</strong> {{.Session.Summary.CWD}}</span>
+        <span><strong>Branch:</strong> {{.Session.Summary.GitBranch}}</span>
+        <span><strong>Mode:</strong> {{if .Session.Summary.ReviewMode}}{{.Session.Summary.ReviewMode}}{{else}}-{{end}}</span>
+        {{if eq .Session.Summary.ReviewMode "range"}}
+        <span><strong>From:</strong> <code>{{.Session.Summary.DiffFrom}}</code></span>
+        <span><strong>To:</strong> <code>{{.Session.Summary.DiffTo}}</code></span>
+        {{end}}
+        {{if eq .Session.Summary.ReviewMode "commit"}}
+        <span><strong>Commit:</strong> <code>{{.Session.Summary.DiffCommit}}</code></span>
+        {{end}}
+        <span><strong>Model:</strong> <code>{{.Session.Summary.Model}}</code></span>
+        <span><strong>Duration:</strong> {{formatDuration .Session.Summary.DurationSec}}</span>
+        <span><strong>Files:</strong> {{.Session.Summary.FileCount}}</span>
+    </div>
+</div>
+
+<div class="token-summary">
+    <h3>Token Usage</h3>
+    <div class="token-stats">
+        <div class="token-item">
+            <div class="token-value" title="{{.Session.TokenUsage.TotalPromptTokens}}">{{formatNumber .Session.TokenUsage.TotalPromptTokens}}</div>
+            <div class="token-label">Prompt Tokens</div>
+        </div>
+        <div class="token-item">
+            <div class="token-value" title="{{.Session.TokenUsage.TotalCompletionTokens}}">{{formatNumber .Session.TokenUsage.TotalCompletionTokens}}</div>
+            <div class="token-label">Completion Tokens</div>
+        </div>
+        <div class="token-item">
+            <div class="token-value" title="{{add .Session.TokenUsage.TotalPromptTokens .Session.TokenUsage.TotalCompletionTokens}}">{{formatNumber (add .Session.TokenUsage.TotalPromptTokens .Session.TokenUsage.TotalCompletionTokens)}}</div>
+            <div class="token-label">Total Tokens</div>
+        </div>
+        <div class="token-item">
+            <div class="token-value" title="{{.Session.TokenUsage.RequestCount}}">{{formatNumber .Session.TokenUsage.RequestCount}}</div>
+            <div class="token-label">LLM Requests</div>
+        </div>
+        {{if or .Session.TokenUsage.TotalCacheReadTokens .Session.TokenUsage.TotalCacheWriteTokens}}
+        <div class="token-item">
+            <div class="token-value" title="{{.Session.TokenUsage.TotalCacheReadTokens}}">{{formatNumber .Session.TokenUsage.TotalCacheReadTokens}}</div>
+            <div class="token-label">Cache Read</div>
+        </div>
+        <div class="token-item">
+            <div class="token-value" title="{{.Session.TokenUsage.TotalCacheWriteTokens}}">{{formatNumber .Session.TokenUsage.TotalCacheWriteTokens}}</div>
+            <div class="token-label">Cache Write</div>
+        </div>
+        {{end}}
+        {{if .Session.Summary.LLMFailures}}
+        <div class="token-item">
+            <div class="token-value badge-error">{{.Session.Summary.LLMFailures}}</div>
+            <div class="token-label">LLM Failures</div>
+        </div>
+        {{end}}
+    </div>
+    {{with .Session.TokenUsage.FileTokenBreakdown}}
+    <table class="token-table">
+        <thead><tr><th>File</th><th>Prompt</th><th>Completion</th>{{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<th>Cache Read</th><th>Cache Write</th>{{end}}<th>Total</th></tr></thead>
+        <tbody>
+        {{range .}}
+            <tr>
+                <td title="{{.FilePath}}">{{.FilePath | truncate 60}}</td>
+                <td title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</td>
+                <td title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</td>
+                {{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<td title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</td><td title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</td>{{end}}
+                <td title="{{add .PromptTokens .CompletionTokens}}"><strong>{{formatNumber (add .PromptTokens .CompletionTokens)}}</strong></td>
+            </tr>
+        {{end}}
+        </tbody>
+    </table>
+    {{end}}
+</div>
+
+{{if .Session.Comments}}
+<div class="comments-section">
+    <h3>Review Comments ({{len .Session.Comments}} findings)</h3>
+    {{with severityCounts .Session.Comments}}
+    <div class="severity-bar">
+        {{if .Critical}}<span class="severity-badge severity-critical">Critical: {{.Critical}}</span>{{end}}
+        {{if .High}}<span class="severity-badge severity-high">High: {{.High}}</span>{{end}}
+        {{if .Medium}}<span class="severity-badge severity-medium">Medium: {{.Medium}}</span>{{end}}
+        {{if .Low}}<span class="severity-badge severity-low">Low: {{.Low}}</span>{{end}}
+    </div>
+    {{end}}
+    <div class="comment-groups">
+    {{range groupCommentsByFile .Session.Comments}}
+    <details class="comment-file-group" open>
+        <summary class="comment-file-header">
+            <span class="chevron"></span>
+            <span class="file-path">{{.FilePath}}</span>
+            <span class="file-count-badge">{{len .Comments}} comments</span>
+        </summary>
+        <div class="comment-file-body">
+        {{range .Comments}}
+            <div class="comment-card">
+                <div class="comment-meta">
+                    {{if .Category}}<span class="comment-badge {{categoryClass .Category}}">{{.Category}}</span>{{end}}
+                    {{if .Severity}}<span class="comment-badge {{severityClass .Severity}}">{{.Severity}}</span>{{end}}
+                    {{if .StartLine}}<span class="comment-lines">L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}</span>{{end}}
+                </div>
+                <div class="comment-content">{{.Content}}</div>
+                {{if or .ExistingCode .SuggestionCode}}
+                <div class="comment-code-diff">
+                    {{if .ExistingCode}}
+                    <div class="code-panel code-existing">
+                        <div class="code-panel-label">Existing Code</div>
+                        <pre><code>{{.ExistingCode}}</code></pre>
+                    </div>
+                    {{end}}
+                    {{if .SuggestionCode}}
+                    <div class="code-panel code-suggestion">
+                        <div class="code-panel-label">Suggested Change</div>
+                        <pre><code>{{.SuggestionCode}}</code></pre>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+            </div>
+        {{end}}
+        </div>
+    </details>
+    {{end}}
+    </div>
+</div>
+{{end}}
+
+{{if .Session.Summary.FilesReviewed}}
+<h3>Files Reviewed</h3>
+<ul class="file-list">
+{{range .Session.Summary.FilesReviewed}}
+    <li>{{.}}</li>
+{{end}}
+</ul>
+{{end}}
+
+<h3>Conversations ({{len .Session.Files}} files)</h3>
+<div class="conversations">
+{{range .Session.Files}}
+<details class="file-accordion">
+    <summary class="file-accordion-header">
+        <span class="chevron"></span>
+        <span class="file-path">{{.FilePath}}</span>
+        <span class="file-count-badge">{{cardCount .Tasks}} requests</span>
+    </summary>
+    <div class="file-accordion-body">
+        {{range $tg := orderedTasks .Tasks}}
+        <div class="task-group {{taskTypeClass $tg.Type}}">
+            <h4 class="task-type-label">
+                <span class="task-type-dot"></span>
+                {{$tg.Type}}
+            </h4>
+            {{range $tg.Cards}}
+            <div class="card">
+                <div class="card-header">
+                    <span class="request-label">Request #{{.RequestNo}}</span>
+                    {{if .Model}}<span class="badge badge-model">{{.Model}}</span>{{end}}
+                    {{if or .PromptTokens .CompletionTokens}}<span class="badge badge-tokens">P:<span title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</span> C:<span title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</span>{{if or .CacheReadTokens .CacheWriteTokens}} CR:<span title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</span> CW:<span title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</span>{{end}}</span>{{end}}
+                    {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
+                    {{if .Error}}<span class="badge badge-error">{{.Error}}</span>{{end}}
+                </div>
+                {{with .ResponseContent}}
+                <div class="card-body response-content">
+                    <div class="response-text">{{.}}</div>
+                </div>
+                {{end}}
+                {{if .ToolCalls}}
+                <div class="tool-calls-section">
+                    <div class="tool-calls-label">Tool Calls ({{len .ToolCalls}})</div>
+                    {{range .ToolCalls}}
+                    <div class="tool-call-item {{if not .Ok}}tool-call-error{{end}}">
+                        <div class="tool-call-header">
+                            <span class="tool-icon">&#9881;</span>
+                            <strong class="tool-name">{{.Name}}</strong>
+                            {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
+                            {{if not .Ok}}<span class="badge badge-error">Failed</span>{{end}}
+                        </div>
+                        <details class="tool-detail">
+                            <summary class="tool-detail-toggle">
+                                <span class="chevron-sm"></span>
+                                <span>Show Details</span>
+                            </summary>
+                            <div class="tool-detail-body">
+                                <div class="tool-section">
+                                    <div class="tool-section-label">Arguments</div>
+                                    <pre>{{.Arguments}}</pre>
+                                </div>
+                                {{if .Result}}
+                                <div class="tool-section">
+                                    <div class="tool-section-label">Result</div>
+                                    <pre>{{.Result}}</pre>
+                                </div>
+                                {{end}}
+                            </div>
+                        </details>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+            </div>
+            {{end}}
+        </div>
+        {{end}}
+    </div>
+</details>
+{{end}}
+</div>
+
+<script>
+document.querySelectorAll('.response-text').forEach(function(el) {
+    var text = el.textContent;
+    var esc = function(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    };
+    var codeBlocks = [];
+    var html = esc(text);
+    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+        codeBlocks.push(code.replace(/^\n|\n$/g, ''));
+        return '%%CODEBLOCK_' + (codeBlocks.length - 1) + '%%';
+    });
+    html = html
+        .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/^### (.+)$/gm, '<div class="md-h3">$1</div>')
+        .replace(/^## (.+)$/gm, '<div class="md-h2">$1</div>')
+        .replace(/^# (.+)$/gm, '<div class="md-h1">$1</div>')
+        .replace(/^[-*] (.+)$/gm, '<div class="md-li">&bull; $1</div>')
+        .replace(/\n{2,}/g, '<br><br>')
+        .replace(/\n/g, '<br>');
+    codeBlocks.forEach(function(code, i) {
+        html = html.replace('%%CODEBLOCK_' + i + '%%',
+            '<pre class="code-block"><code>' + code + '</code></pre>');
+    });
+    el.innerHTML = html;
+});
+</script>
+</main>
+</body>
+</html>

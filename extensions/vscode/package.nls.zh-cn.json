@@ -1,0 +1,11 @@
+{
+  "ocr.activitybar.title": "Open Code Review",
+  "ocr.sidebar.name": "Code Review",
+  "ocr.review.start": "OCR: 开始代码审查",
+  "ocr.review.cancel": "OCR: 取消审查",
+  "ocr.config.open": "OCR: 打开配置",
+  "ocr.comment.apply": "应用",
+  "ocr.comment.discard": "忽略",
+  "ocr.comment.falsePositive": "误报",
+  "ocr.description": "AI 代码审查 —— 基于 open-code-review CLI"
+}

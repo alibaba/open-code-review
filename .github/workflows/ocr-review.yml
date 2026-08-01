@@ -1,0 +1,64 @@
+# OpenCodeReview - GitHub Actions PR Auto-Review Pipeline
+#
+# Reviews pull requests using the reusable composite action defined in
+# action.yml at the repo root. See that file for the full list of inputs,
+# outputs, and implementation details (retry, idempotency, artifact upload, etc.).
+#
+# Triggers:
+#   - PR opened (uses pull_request_target for fork secret access)
+#
+# Required secrets (mapped to action inputs):
+#   OCR_LLM_URL           - LLM API endpoint (e.g., https://api.openai.com/v1/chat/completions)
+#   OCR_LLM_AUTH_TOKEN    - Authentication token for the LLM API
+#   OCR_LLM_MODEL         - Model name
+#   OCR_LLM_USE_ANTHROPIC - 'true' for Anthropic Claude, 'false' for OpenAI-compatible
+#
+# Note: GITHUB_TOKEN is automatically provided by GitHub Actions.
+
+name: OpenCodeReview PR Review
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  # Use pull_request_target instead of pull_request so that secrets are
+  # available even for PRs from forks. This is safe because OCR only reads
+  # the diff and does not execute any code from the PR.
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  code-review:
+    runs-on: self-hosted
+    timeout-minutes: 30
+    container:
+      image: node:24
+    if: github.event_name == 'pull_request_target'
+    steps:
+      # Materialize action.yml + scripts/ into the workspace so the local
+      # `uses: ./` action below can be resolved and loaded. For
+      # pull_request_target this checks out the trusted base branch; the
+      # composite action performs its own full checkout (fetch-depth: 0) later.
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
+      - name: Run OpenCodeReview
+        uses: ./
+        with:
+          llm_url: ${{ secrets.OCR_LLM_URL }}
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: ${{ secrets.OCR_LLM_MODEL }}
+          llm_use_anthropic: ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
+          llm_extra_body: '{"enable_thinking": false}'
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          sticky_summary: 'true'
+          incremental: 'false'
+          upload_artifacts: 'true'

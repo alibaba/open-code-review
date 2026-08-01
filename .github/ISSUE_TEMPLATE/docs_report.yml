@@ -1,0 +1,48 @@
+name: Documentation Issue
+description: Report an issue with documentation or suggest improvements
+labels: ["documentation"]
+type: Docs
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping us improve our documentation! Please describe the issue or suggestion below.
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Issue Type
+      options:
+        - Incorrect information
+        - Missing documentation
+        - Unclear / confusing explanation
+        - Typo or grammar error
+        - Outdated content
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Document Location
+      description: Which file or section is affected? Provide a URL or file path if possible.
+      placeholder: "e.g., README.md > Configuration Reference, or https://github.com/alibaba/open-code-review#review-rules"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe what's wrong or what could be improved.
+      placeholder: "The configuration example for Anthropic is missing the `llm.use_anthropic` field..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Change
+      description: If you have a specific suggestion for how to fix or improve it, please describe it here.
+      placeholder: "It would be helpful to add an example showing..."
