@@ -130,6 +130,33 @@ func TestIsExcludedPath(t *testing.T) {
 		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
 		{"julia non-test", "src/model.jl", false},
 
+		// Snapshot files
+		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},
+		{"snap file", "src/components/Button.snap", true},
+		{"snap deeply nested", "packages/ui/src/__snapshots__/util.snap", true},
+
+		// Test data directories
+		{"testdata go", "internal/parser/testdata/input.json", true},
+		{"testdata nested", "pkg/a/b/testdata/golden.txt", true},
+		{"fixtures dir", "test/fixtures/sample.json", true},
+		{"fixtures nested", "spec/fixtures/users.yml", true},
+
+		// Generated code
+		{"generated go", "api/types.generated.go", true},
+		{"generated ts", "src/graphql/schema.generated.ts", true},
+		{"gen go", "proto/message.gen.go", true},
+		{"pb go", "api/v1/service.pb.go", true},
+		{"pb cc", "proto/message.pb.cc", true},
+		{"pb h", "proto/message.pb.h", true},
+
+		// Non-matches for new patterns
+		{"snapshots in name", "src/snapshots/util.ts", false},
+		{"testdata in filename", "src/testdata.go", false},
+		{"fixtures in filename", "src/fixtures.ts", false},
+		{"generated not dotted", "src/generated/code.go", false},
+		{"gen not suffix", "src/gen/util.go", false},
+		{"pb not suffix", "src/pb/client.go", false},
+
 		// Case insensitive
 		{"case insensitive go", "Foo/Bar_Test.go", true},
 		{"case insensitive java", "com/FooTEST.java", true}, // lowercase → "com/footest.java" matches "**/*test.java"
