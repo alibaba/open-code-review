@@ -14,6 +14,31 @@ describe('applyConfigEntries', () => {
     });
   });
 
+  it('按当前模型合并 reasoning effort', () => {
+    const draft = applyConfigEntries({
+      provider: 'anthropic',
+      providers: {
+        anthropic: {
+          model: 'claude-opus-4-8',
+          model_settings: { 'claude-opus-4-7': { reasoning_effort: 'low' } },
+        },
+      },
+    }, [
+      { key: 'reasoning_effort', value: 'high' },
+    ]);
+    expect(draft.providers?.anthropic.model_settings).toEqual({
+      'claude-opus-4-7': { reasoning_effort: 'low' },
+      'claude-opus-4-8': { reasoning_effort: 'high' },
+    });
+
+    const cleared = applyConfigEntries(draft, [
+      { key: 'reasoning_effort', value: 'default' },
+    ]);
+    expect(cleared.providers?.anthropic.model_settings).toEqual({
+      'claude-opus-4-7': { reasoning_effort: 'low' },
+    });
+  });
+
   it('合并自定义 provider 条目', () => {
     const draft = applyConfigEntries({}, [
       { key: 'custom_providers.my-llm.protocol', value: 'openai' },

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { ConfigEntry, ConfigPanelFocus, ProviderTab, buildCustomCreateSaveEntries, buildCustomUpdateSaveEntries, buildOfficialSaveEntries, describeActiveProvider, detectInitialTab, isConfigReady, listCustomProviderNames } from '../../shared/configUtils';
+import { ConfigEntry, ConfigPanelFocus, ProviderTab, buildCustomCreateSaveEntries, buildCustomUpdateSaveEntries, buildOfficialSaveEntries, describeActiveProvider, detectInitialTab, isConfigReady, listCustomProviderNames, modelReasoningEffort, reasoningEffortOptions, savedModelReasoningEffort } from '../../shared/configUtils';
 import { mergeModelLists, PROVIDER_PRESETS } from '../../shared/providers';
 import { EnvCheckResult, LogLine, OcrConfig } from '../../shared/types';
 import { CliStatus, ConnTest } from '../configStore';
@@ -34,6 +34,13 @@ interface Props {
 
 const CUSTOM_NEW = '__new__';
 const MODEL_CUSTOM = '__custom__';
+
+function effortSelectOptions(protocol: string, providerDefaultLabel: string) {
+  return reasoningEffortOptions(protocol).map((value) => ({
+    value,
+    label: value || providerDefaultLabel,
+  }));
+}
 
 function resolvePanelState(config: OcrConfig | null, panelFocus?: ConfigPanelFocus | null) {
   const tab = panelFocus?.tab ?? detectInitialTab(config);
@@ -344,6 +351,7 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
   const [apiKey, setApiKey] = useState('');
   const [apiKeyTouched, setApiKeyTouched] = useState(false);
   const hasStoredKey = Boolean(savedEntry?.apiKey);
+  const [reasoningEffort, setReasoningEffort] = useState(modelReasoningEffort(savedEntry, initialModel));
 
   const resolvedModel = modelChoice === MODEL_CUSTOM ? customModel.trim() : modelChoice;
   const canSave = resolvedModel !== '';
@@ -353,6 +361,7 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
     resolvedModel,
     apiKey,
     apiKeyTouched || !hasStoredKey,
+    reasoningEffort,
   );
 
   const save = () => {
@@ -378,6 +387,7 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
             const m = entry?.model || models[0] || '';
             setModelChoice(models.includes(m) ? m : MODEL_CUSTOM);
             setCustomModel(models.includes(m) ? '' : m);
+            setReasoningEffort(modelReasoningEffort(entry, m));
             setApiKey('');
             setApiKeyTouched(false);
           }}
@@ -388,7 +398,11 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
       <FormItem label={t('view.config.model')}>
         <Select
           value={modelChoice}
-          onChange={setModelChoice}
+          onChange={(value) => {
+            setModelChoice(value);
+            const nextModel = value === MODEL_CUSTOM ? customModel.trim() : value;
+            setReasoningEffort(modelReasoningEffort(savedEntry, nextModel));
+          }}
           options={[
             ...modelOptions.map((m) => ({ value: m, label: m })),
             { value: MODEL_CUSTOM, label: t('view.config.customModel') },
@@ -398,10 +412,23 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
           <input
             class="form-input form-input-mt"
             value={customModel}
-            onInput={(e) => setCustomModel((e.target as HTMLInputElement).value)}
+            onInput={(e) => {
+              const nextModel = (e.target as HTMLInputElement).value;
+              setCustomModel(nextModel);
+              const savedEffort = savedModelReasoningEffort(savedEntry, nextModel.trim());
+              if (savedEffort !== undefined) setReasoningEffort(savedEffort);
+            }}
             placeholder="model name"
           />
         )}
+      </FormItem>
+
+      <FormItem label={t('view.config.reasoningEffort')} hint={t('view.config.reasoningEffortHint')}>
+        <Select
+          value={reasoningEffort}
+          onChange={setReasoningEffort}
+          options={effortSelectOptions(preset.protocol, t('view.config.providerDefault'))}
+        />
       </FormItem>
 
       <FormItem
@@ -440,6 +467,7 @@ function CustomForm({
   const [apiKey, setApiKey] = useState('');
   const [apiKeyTouched, setApiKeyTouched] = useState(false);
   const [authHeader, setAuthHeader] = useState(entry?.authHeader ?? '');
+  const [reasoningEffort, setReasoningEffort] = useState(modelReasoningEffort(entry, entry?.model ?? ''));
 
   const canSaveCreate = name.trim() !== '' && url.trim() !== '' && model.trim() !== '' && apiKey.trim() !== '';
   const canSaveEdit = !isCreate && name.trim() !== '' && url.trim() !== '' && model.trim() !== ''
@@ -454,6 +482,7 @@ function CustomForm({
     models,
     apiKey,
     authHeader,
+    reasoningEffort,
   });
 
   const buildEditEntries = () => buildCustomUpdateSaveEntries({
@@ -465,6 +494,7 @@ function CustomForm({
     apiKey,
     apiKeyChanged: apiKeyTouched || !entry?.apiKey,
     authHeader,
+    reasoningEffort,
   });
 
   const buildEntries = () => (isCreate ? buildCreateEntries() : buildEditEntries());
@@ -499,7 +529,11 @@ function CustomForm({
       <FormItem label={t('view.config.protocol')}>
         <Select
           value={protocol}
-          onChange={(v) => setProtocol(v as 'anthropic' | 'openai')}
+          onChange={(v) => {
+            const next = v as 'anthropic' | 'openai';
+            setProtocol(next);
+            if (!reasoningEffortOptions(next).includes(reasoningEffort)) setReasoningEffort('');
+          }}
           options={[
             { value: 'anthropic', label: 'anthropic' },
             { value: 'openai', label: 'openai' },
@@ -510,10 +544,22 @@ function CustomForm({
         <input class="form-input" value={url} onInput={(e) => setUrl((e.target as HTMLInputElement).value)} placeholder="https://api.example.com/v1" />
       </FormItem>
       <FormItem label={t('view.config.model')}>
-        <input class="form-input" value={model} onInput={(e) => setModel((e.target as HTMLInputElement).value)} placeholder="model name" />
+        <input class="form-input" value={model} onInput={(e) => {
+          const nextModel = (e.target as HTMLInputElement).value;
+          setModel(nextModel);
+          const savedEffort = savedModelReasoningEffort(entry, nextModel.trim());
+          if (savedEffort !== undefined) setReasoningEffort(savedEffort);
+        }} placeholder="model name" />
       </FormItem>
       <FormItem label={t('view.config.modelList')} optional>
         <input class="form-input" value={models} onInput={(e) => setModels((e.target as HTMLInputElement).value)} placeholder={t('view.config.modelListPlaceholder')} />
+      </FormItem>
+      <FormItem label={t('view.config.reasoningEffort')} hint={t('view.config.reasoningEffortHint')}>
+        <Select
+          value={reasoningEffort}
+          onChange={setReasoningEffort}
+          options={effortSelectOptions(protocol, t('view.config.providerDefault'))}
+        />
       </FormItem>
       <FormItem label={t('view.config.apiKey')} span={2}>
         <PasswordInput

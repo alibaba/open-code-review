@@ -182,13 +182,14 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	URL          string            // Full API endpoint URL
-	APIKey       string            // Bearer token / API key
-	Model        string            // Default model override
-	AuthHeader   string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
-	Timeout      time.Duration     // Request timeout
-	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
-	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
+	URL             string            // Full API endpoint URL
+	APIKey          string            // Bearer token / API key
+	Model           string            // Default model override
+	AuthHeader      string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
+	Timeout         time.Duration     // Request timeout
+	ExtraBody       map[string]any    // Vendor-specific fields merged into every request body
+	ExtraHeaders    map[string]string // Extra HTTP headers sent with every request
+	ReasoningEffort string            // Optional reasoning effort for the selected model
 }
 
 // --- Factory ---
@@ -204,13 +205,14 @@ type ClientConfig struct {
 // protocol).
 func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 	cfg := ClientConfig{
-		URL:          ep.URL,
-		APIKey:       ep.Token,
-		Model:        ep.Model,
-		AuthHeader:   ep.AuthHeader,
-		Timeout:      ep.Timeout,
-		ExtraBody:    ep.ExtraBody,
-		ExtraHeaders: ep.ExtraHeaders,
+		URL:             ep.URL,
+		APIKey:          ep.Token,
+		Model:           ep.Model,
+		AuthHeader:      ep.AuthHeader,
+		Timeout:         ep.Timeout,
+		ExtraBody:       ep.ExtraBody,
+		ExtraHeaders:    ep.ExtraHeaders,
+		ReasoningEffort: ep.ReasoningEffort,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -356,6 +358,9 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			continue
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
+	}
+	if c.cfg.ReasoningEffort != "" {
+		opts = append(opts, openaiopt.WithJSONSet("reasoning_effort", c.cfg.ReasoningEffort))
 	}
 	if stream, ok := c.cfg.ExtraBody["stream"].(bool); ok && stream {
 		return c.completionsStreaming(ctx, params, opts...)
@@ -649,6 +654,9 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 			continue
 		}
 		opts = append(opts, option.WithJSONSet(k, v))
+	}
+	if c.cfg.ReasoningEffort != "" {
+		opts = append(opts, option.WithJSONSet("output_config.effort", c.cfg.ReasoningEffort))
 	}
 
 	sdkResp, err := c.sdk.Messages.New(ctx, params, opts...)

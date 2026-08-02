@@ -34,6 +34,7 @@ type reviewOptions struct {
 	background      string
 	backgroundFile  string
 	model           string
+	reasoningEffort string
 	concurrency     int
 	perFileTimeout  int
 	maxTools        int
@@ -134,7 +135,7 @@ func executeReview(opts reviewOptions) error {
 		return err
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model, opts.reasoningEffort)
 	if err != nil {
 		return err
 	}

@@ -1,5 +1,5 @@
 import { isPresetProvider, lookupPreset } from './providers';
-import { OcrConfig } from './types';
+import { OcrConfig, ProviderEntry } from './types';
 
 export type ProviderTab = 'official' | 'custom';
 
@@ -13,6 +13,20 @@ export type ConfigPanelFocus = {
 export interface ConfigEntry {
   key: string;
   value: string;
+}
+
+export function reasoningEffortOptions(protocol: string): string[] {
+  return protocol === 'anthropic'
+    ? ['', 'low', 'medium', 'high', 'xhigh', 'max']
+    : ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+}
+
+export function modelReasoningEffort(entry: ProviderEntry | undefined, model: string): string {
+  return savedModelReasoningEffort(entry, model) ?? '';
+}
+
+export function savedModelReasoningEffort(entry: ProviderEntry | undefined, model: string): string | undefined {
+  return entry?.modelSettings?.[model]?.reasoningEffort;
 }
 
 export function detectInitialTab(config: OcrConfig | null): ProviderTab {
@@ -96,10 +110,12 @@ export function buildOfficialSaveEntries(
   model: string,
   apiKey: string,
   apiKeyChanged: boolean,
+  reasoningEffort: string,
 ): ConfigEntry[] {
   const entries: ConfigEntry[] = [
     { key: 'provider', value: providerName },
     { key: `providers.${providerName}.model`, value: model },
+    { key: 'reasoning_effort', value: reasoningEffort || 'default' },
   ];
   if (apiKeyChanged && apiKey.trim()) {
     entries.push({ key: `providers.${providerName}.api_key`, value: apiKey.trim() });
@@ -115,6 +131,7 @@ export function buildCustomCreateSaveEntries(params: {
   models: string;
   apiKey: string;
   authHeader: string;
+  reasoningEffort: string;
 }): ConfigEntry[] {
   const entries: ConfigEntry[] = [
     { key: `custom_providers.${params.name}.protocol`, value: params.protocol },
@@ -122,6 +139,7 @@ export function buildCustomCreateSaveEntries(params: {
     { key: `custom_providers.${params.name}.model`, value: params.model.trim() },
     { key: `custom_providers.${params.name}.api_key`, value: params.apiKey.trim() },
     { key: 'provider', value: params.name.trim() },
+    { key: 'reasoning_effort', value: params.reasoningEffort || 'default' },
   ];
   const models = params.models.trim();
   if (models) {
@@ -142,12 +160,14 @@ export function buildCustomUpdateSaveEntries(params: {
   apiKey: string;
   apiKeyChanged: boolean;
   authHeader: string;
+  reasoningEffort: string;
 }): ConfigEntry[] {
   const entries: ConfigEntry[] = [
     { key: `custom_providers.${params.name}.protocol`, value: params.protocol },
     { key: `custom_providers.${params.name}.url`, value: params.url.trim() },
     { key: `custom_providers.${params.name}.model`, value: params.model.trim() },
     { key: 'provider', value: params.name },
+    { key: 'reasoning_effort', value: params.reasoningEffort || 'default' },
   ];
   const models = params.models.trim();
   if (models) {

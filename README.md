@@ -123,7 +123,7 @@ ocr config model             # Pick a model for the active provider
 
 ![Provider setup](imgs/providers.jpg)
 
-The interactive UI guides you through provider selection, API key entry, and model configuration, then automatically tests connectivity.
+The interactive UI guides you through provider selection, model-specific reasoning effort, and API key entry, then automatically tests connectivity. Choose **Provider default** to omit the effort field.
 
 For CLI setup, environment variables, custom providers, and other advanced configuration, see [Configuration](https://open-codereview.ai/docs/configuration).
 

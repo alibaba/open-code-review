@@ -97,6 +97,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per file. `0` uses the template default (`30`); values 1–9 are clamped up to `10`; any value `≥ 10` overrides the template default (even if smaller than `30`). |
 | `--model <name>` | — | — | Override the resolved LLM model for this review (e.g., `claude-opus-4-6`). |
+| `--reasoning-effort <value>` | — | — | Override reasoning effort for this run. Use `default` to omit the field; supported values depend on the protocol and model. |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
 | `--tools <path>` | — | embedded | Path to a custom JSON tool-config file. Overrides the embedded tool definitions. |
 
@@ -347,21 +348,21 @@ setup TUIs. Four subcommands:
 ```text
 ocr config set <key> <value>
 ocr config unset custom_providers.<name>   Delete a custom provider
+ocr config unset reasoning_effort          Reset the active model to provider default
 ocr config provider                        Interactive provider setup
 ocr config model                           Interactive model selection
 ```
 
 - **`set`** — write a single config value non-interactively.
-- **`unset`** — delete a custom provider. Only
-  `custom_providers.<name>` is supported. If the deleted provider was the
-  active one, `provider` and `model` are cleared (run `ocr config provider`
-  to pick a new one).
+- **`unset`** — delete a custom provider or reset `reasoning_effort` for the
+  active model. If a deleted provider was active, `provider` and `model` are
+  cleared (run `ocr config provider` to pick a new one).
 - **`provider`** — launch the interactive provider-setup TUI (no extra
   arguments; use `ocr config set provider <name>` for non-interactive
   setup).
-- **`model`** — launch the interactive model-selection TUI (no extra
-  arguments; use `ocr config set model <name>` for non-interactive
-  setup).
+- **`model`** — launch the interactive model and reasoning-effort TUI (no
+  extra arguments; use `ocr config set model <name>` and
+  `ocr config set reasoning_effort <value>` for non-interactive setup).
 
 See [Configuration](../configuration/) for the full key reference,
 schemas, and examples.

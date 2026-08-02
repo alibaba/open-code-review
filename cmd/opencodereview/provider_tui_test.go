@@ -176,7 +176,7 @@ func TestProviderTUI_EscFromModelGoesBackToProvider(t *testing.T) {
 	}
 }
 
-func TestProviderTUI_EscFromAPIKeyGoesBackToModel(t *testing.T) {
+func TestProviderTUI_EscFromAPIKeyGoesBackThroughEffortToModel(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
 
 	result, _ := m.Update(enterKey())
@@ -184,14 +184,25 @@ func TestProviderTUI_EscFromAPIKeyGoesBackToModel(t *testing.T) {
 
 	result, _ = m2.Update(enterKey())
 	m3 := result.(providerTUIModel)
-	if m3.step != stepAPIKey {
-		t.Fatalf("after 2x Enter, step = %d, want %d (stepAPIKey)", m3.step, stepAPIKey)
+	if m3.step != stepEffort {
+		t.Fatalf("after 2x Enter, step = %d, want %d (stepEffort)", m3.step, stepEffort)
 	}
 
-	result, _ = m3.Update(escKey())
+	result, _ = m3.Update(enterKey())
 	m4 := result.(providerTUIModel)
-	if m4.step != stepModel {
-		t.Errorf("after Esc on stepAPIKey, step = %d, want %d (stepModel)", m4.step, stepModel)
+	if m4.step != stepAPIKey {
+		t.Fatalf("after effort confirm, step = %d, want %d (stepAPIKey)", m4.step, stepAPIKey)
+	}
+
+	result, _ = m4.Update(escKey())
+	m5 := result.(providerTUIModel)
+	if m5.step != stepEffort {
+		t.Errorf("after Esc on stepAPIKey, step = %d, want %d (stepEffort)", m5.step, stepEffort)
+	}
+	result, _ = m5.Update(escKey())
+	m6 := result.(providerTUIModel)
+	if m6.step != stepModel {
+		t.Errorf("after Esc on stepEffort, step = %d, want %d (stepModel)", m6.step, stepModel)
 	}
 }
 
@@ -281,11 +292,17 @@ func TestProviderTUI_ManualFormEscRefocusesPreviousInput(t *testing.T) {
 			value:    func(m providerTUIModel) string { return m.manualURLInput.Value() },
 		},
 		{
-			name:     "auth token back to model",
-			fromStep: manualStepAuthToken,
+			name:     "effort back to model",
+			fromStep: manualStepEffort,
 			wantStep: manualStepModel,
 			focused:  func(m providerTUIModel) bool { return m.manualModelInput.Focused() },
 			value:    func(m providerTUIModel) string { return m.manualModelInput.Value() },
+		},
+		{
+			name:     "auth token back to effort",
+			fromStep: manualStepAuthToken,
+			wantStep: manualStepEffort,
+			focused:  func(m providerTUIModel) bool { return true },
 		},
 		{
 			name:     "auth header back to auth token",
@@ -312,10 +329,12 @@ func TestProviderTUI_ManualFormEscRefocusesPreviousInput(t *testing.T) {
 				t.Fatal("previous step input should be focused after Esc")
 			}
 
-			result, _ = m2.Update(charKey('x'))
-			m3 := result.(providerTUIModel)
-			if got := tt.value(m3); !strings.Contains(got, "x") {
-				t.Errorf("input should accept typing after Esc: value = %q", got)
+			if tt.value != nil {
+				result, _ = m2.Update(charKey('x'))
+				m3 := result.(providerTUIModel)
+				if got := tt.value(m3); !strings.Contains(got, "x") {
+					t.Errorf("input should accept typing after Esc: value = %q", got)
+				}
 			}
 		})
 	}
@@ -908,13 +927,18 @@ func TestProviderTUI_EditCustomClearKey_NoMaskedOnStepAPIKey(t *testing.T) {
 	m2.modelIdx = modelIdxForName(t, m2, "test")
 	result, _ = m2.Update(enterKey())
 	m3 := result.(providerTUIModel)
-	if m3.step != stepAPIKey {
-		t.Fatalf("step = %d, want stepAPIKey", m3.step)
+	if m3.step != stepEffort {
+		t.Fatalf("step = %d, want stepEffort", m3.step)
 	}
-	if m3.apiKeyMasked {
+	result, _ = m3.Update(enterKey())
+	m4 := result.(providerTUIModel)
+	if m4.step != stepAPIKey {
+		t.Fatalf("step = %d, want stepAPIKey", m4.step)
+	}
+	if m4.apiKeyMasked {
 		t.Error("apiKeyMasked should be false after clearing key in edit")
 	}
-	got := stripANSI(m3.View().Content)
+	got := stripANSI(m4.View().Content)
 	if strings.Contains(got, "Type or paste to replace the saved key") {
 		t.Errorf("view should not show replace hint; got:\n%s", got)
 	}
@@ -1337,6 +1361,11 @@ func TestProviderTUI_CustomModelInput_AddsSingleName(t *testing.T) {
 
 	result, _ := m.Update(enterKey())
 	m2 := result.(providerTUIModel)
+	if m2.step != stepEffort {
+		t.Fatalf("step = %d, want stepEffort before model is persisted", m2.step)
+	}
+	result, _ = m2.Update(enterKey()) // provider default
+	m2 = result.(providerTUIModel)
 
 	if m2.customModel {
 		t.Error("customModel should be cleared after Enter")
@@ -1440,6 +1469,11 @@ func TestProviderTUI_OfficialTab_CustomModelInput_PersistsName(t *testing.T) {
 
 	result, _ := m.Update(enterKey())
 	m2 := result.(providerTUIModel)
+	if m2.step != stepEffort {
+		t.Fatalf("step = %d, want stepEffort before model is persisted", m2.step)
+	}
+	result, _ = m2.Update(enterKey()) // provider default
+	m2 = result.(providerTUIModel)
 
 	if m2.customModel {
 		t.Error("customModel should be cleared after Enter")
@@ -1866,6 +1900,8 @@ func TestProviderTUI_PersistCustomModelName_SaveFailureRollsBack(t *testing.T) {
 
 	result, _ := m.Update(enterKey())
 	m2 := result.(providerTUIModel)
+	result, _ = m2.Update(enterKey()) // trigger persistence after effort selection
+	m2 = result.(providerTUIModel)
 	if m2.formError == "" {
 		t.Fatal("expected formError on save failure")
 	}
@@ -2489,8 +2525,8 @@ func TestProviderTUI_CancelIncompleteOfficialProviderSwitch_NoPersistedChanges(t
 	if m2.savedInSession {
 		t.Error("savedInSession should be false for cross-provider navigation")
 	}
-	if m2.step != stepAPIKey {
-		t.Fatalf("step = %d, want stepAPIKey", m2.step)
+	if m2.step != stepEffort {
+		t.Fatalf("step = %d, want stepEffort", m2.step)
 	}
 
 	result, _ = m2.Update(escKey())
@@ -2542,8 +2578,8 @@ func TestProviderTUI_SameOfficialProviderModelChange_DefersPersistUntilConfirm(t
 	if m2.savedInSession {
 		t.Error("savedInSession should be false before API key confirm")
 	}
-	if m2.step != stepAPIKey {
-		t.Fatalf("step = %d, want stepAPIKey", m2.step)
+	if m2.step != stepEffort {
+		t.Fatalf("step = %d, want stepEffort", m2.step)
 	}
 	if _, err := os.Stat(configPath); err == nil {
 		t.Fatal("config should not be written before wizard confirm")
@@ -2580,6 +2616,8 @@ func TestProviderTUI_OfficialModelChangeBlockedAtAPIKey_KeepsGlobalModel(t *test
 
 	result, _ := m.Update(enterKey())
 	m2 := result.(providerTUIModel)
+	result, _ = m2.Update(enterKey()) // provider default
+	m2 = result.(providerTUIModel)
 	m2.beginAPIKeyReplace()
 
 	result, cmd := m2.Update(enterKey())

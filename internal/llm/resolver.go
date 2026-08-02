@@ -14,14 +14,15 @@ import (
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
 type ResolvedEndpoint struct {
-	URL          string
-	Token        string
-	Model        string
-	Protocol     string            // canonical protocol name (see protocol.go); resolver normalizes aliases
-	AuthHeader   string            // Anthropic auth header: "x-api-key" or "authorization"
-	Source       string            // human-readable config source label
-	ExtraBody    map[string]any    // vendor-specific request body fields
-	ExtraHeaders map[string]string // extra HTTP headers for the LLM request
+	URL             string
+	Token           string
+	Model           string
+	Protocol        string            // canonical protocol name (see protocol.go); resolver normalizes aliases
+	AuthHeader      string            // Anthropic auth header: "x-api-key" or "authorization"
+	Source          string            // human-readable config source label
+	ExtraBody       map[string]any    // vendor-specific request body fields
+	ExtraHeaders    map[string]string // extra HTTP headers for the LLM request
+	ReasoningEffort string            // optional provider-specific reasoning effort for the selected model
 	// Timeout is the per-request HTTP timeout; 0 means use the client default (5 min).
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
@@ -31,11 +32,12 @@ type ResolvedEndpoint struct {
 
 // Environment variable names for OCR-specific configuration.
 const (
-	envOCRLLMURL          = "OCR_LLM_URL"
-	envOCRLLMToken        = "OCR_LLM_TOKEN"
-	envOCRLLMModel        = "OCR_LLM_MODEL"
-	envOCRLLMAuthHeader   = "OCR_LLM_AUTH_HEADER"
-	envOCRLLMExtraHeaders = "OCR_LLM_EXTRA_HEADERS"
+	envOCRLLMURL             = "OCR_LLM_URL"
+	envOCRLLMToken           = "OCR_LLM_TOKEN"
+	envOCRLLMModel           = "OCR_LLM_MODEL"
+	envOCRLLMAuthHeader      = "OCR_LLM_AUTH_HEADER"
+	envOCRLLMExtraHeaders    = "OCR_LLM_EXTRA_HEADERS"
+	envOCRLLMReasoningEffort = "OCR_LLM_REASONING_EFFORT"
 	// envOCRLLMProtocol overrides the resolved protocol (anthropic |
 	// openai | openai-responses). Takes priority
 	// over OCR_USE_ANTHROPIC when set.
@@ -59,14 +61,22 @@ const (
 // Each strategy requires all three fields (URL, Token, Model) to be non-empty.
 // Returns the first valid strategy's result.
 func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
-	return ResolveEndpointWithModelOverride(configPath, "")
+	return ResolveEndpointWithOverrides(configPath, "", "")
 }
 
 // ResolveEndpointWithModelOverride resolves an endpoint like ResolveEndpoint,
 // but uses modelOverride as the request model when it is non-empty. The override
 // can also supply the otherwise required model for a configured endpoint.
 func ResolveEndpointWithModelOverride(configPath, modelOverride string) (ResolvedEndpoint, error) {
+	return ResolveEndpointWithOverrides(configPath, modelOverride, "")
+}
+
+// ResolveEndpointWithOverrides resolves an endpoint and applies per-run model
+// and reasoning-effort overrides after configuration and environment defaults.
+func ResolveEndpointWithOverrides(configPath, modelOverride, reasoningEffortOverride string) (ResolvedEndpoint, error) {
 	modelOverride = strings.TrimSpace(modelOverride)
+	reasoningEffortOverrideSet := strings.TrimSpace(reasoningEffortOverride) != ""
+	reasoningEffortOverride = NormalizeReasoningEffort(reasoningEffortOverride)
 
 	strategies := []struct {
 		name string
@@ -88,6 +98,15 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 				ep.Source = s.name
 			}
 			ep.Model = stripModelSuffix(ep.Model)
+			if raw := strings.TrimSpace(os.Getenv(envOCRLLMReasoningEffort)); raw != "" {
+				ep.ReasoningEffort = NormalizeReasoningEffort(raw)
+			}
+			if reasoningEffortOverrideSet {
+				ep.ReasoningEffort = reasoningEffortOverride
+			}
+			if err := ValidateReasoningEffort(ep.Protocol, ep.ReasoningEffort); err != nil {
+				return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
+			}
 			// OCR_LLM_TIMEOUT is a global override: applies regardless of
 			// which strategy resolved the endpoint, and takes precedence
 			// over config-file values when set.
@@ -208,28 +227,34 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 
 // llmFileConfig represents the llm section in config.json.
 type llmFileConfig struct {
-	URL          string            `json:"url,omitempty"`
-	AuthToken    string            `json:"auth_token,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`      // anthropic|openai|openai-responses; takes priority over use_anthropic
-	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false; legacy fallback when protocol is empty
-	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	URL           string                         `json:"url,omitempty"`
+	AuthToken     string                         `json:"auth_token,omitempty"`
+	AuthHeader    string                         `json:"auth_header,omitempty"`
+	Model         string                         `json:"model,omitempty"`
+	Protocol      string                         `json:"protocol,omitempty"`      // anthropic|openai|openai-responses; takes priority over use_anthropic
+	UseAnthropic  *bool                          `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false; legacy fallback when protocol is empty
+	TimeoutSec    int                            `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
+	ExtraBody     map[string]any                 `json:"extra_body,omitempty"`
+	ExtraHeaders  map[string]string              `json:"extra_headers,omitempty"`
+	ModelSettings map[string]modelSettingsConfig `json:"model_settings,omitempty"`
+}
+
+type modelSettingsConfig struct {
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
 type providerEntryConfig struct {
-	APIKey       string            `json:"api_key,omitempty"`
-	URL          string            `json:"url,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Models       []string          `json:"models,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	APIKey        string                         `json:"api_key,omitempty"`
+	URL           string                         `json:"url,omitempty"`
+	Protocol      string                         `json:"protocol,omitempty"`
+	Model         string                         `json:"model,omitempty"`
+	Models        []string                       `json:"models,omitempty"`
+	AuthHeader    string                         `json:"auth_header,omitempty"`
+	TimeoutSec    int                            `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
+	ExtraBody     map[string]any                 `json:"extra_body,omitempty"`
+	ExtraHeaders  map[string]string              `json:"extra_headers,omitempty"`
+	ModelSettings map[string]modelSettingsConfig `json:"model_settings,omitempty"`
 }
 
 type configFile struct {
@@ -390,15 +415,16 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 
 	return ResolvedEndpoint{
-		URL:          url,
-		Token:        apiKey,
-		Model:        model,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "provider:" + cfg.Provider,
-		ExtraBody:    extraBody,
-		ExtraHeaders: extraHeaders,
-		Timeout:      timeout,
+		URL:             url,
+		Token:           apiKey,
+		Model:           model,
+		Protocol:        protocol,
+		AuthHeader:      authHeader,
+		Source:          "provider:" + cfg.Provider,
+		ExtraBody:       extraBody,
+		ExtraHeaders:    extraHeaders,
+		Timeout:         timeout,
+		ReasoningEffort: reasoningEffortForModel(entry.ModelSettings, model),
 	}, true, nil
 }
 
@@ -449,7 +475,18 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders, Timeout: timeout}, true, nil
+	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders, Timeout: timeout, ReasoningEffort: reasoningEffortForModel(cfg.Llm.ModelSettings, model)}, true, nil
+}
+
+func reasoningEffortForModel(settings map[string]modelSettingsConfig, model string) string {
+	if setting, ok := settings[model]; ok {
+		return NormalizeReasoningEffort(setting.ReasoningEffort)
+	}
+	stripped := stripModelSuffix(model)
+	if setting, ok := settings[stripped]; ok {
+		return NormalizeReasoningEffort(setting.ReasoningEffort)
+	}
+	return ReasoningEffortDefault
 }
 
 // tryCCEnv reads Claude Code environment variables.

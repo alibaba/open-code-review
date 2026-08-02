@@ -19,8 +19,12 @@ The core of the demo is a single action step:
     llm_url: ${{ secrets.OCR_LLM_URL }}
     llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
     llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_reasoning_effort: ${{ vars.OCR_LLM_REASONING_EFFORT }}
     llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
 ```
+
+`llm_reasoning_effort` is optional. It maps to
+`OCR_LLM_REASONING_EFFORT`; leave it unset to use the provider default.
 
 See [`action.yml`](../../action.yml) for the full list of inputs, outputs, security guidance, and the four comment-posting modes (sticky summary + incremental).
 
@@ -67,9 +71,10 @@ Go to your repository's **Settings → Secrets and variables → Actions**.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `OCR_LLM_MODEL` | Yes | Model name |
+| `OCR_LLM_REASONING_EFFORT` | No | Per-run reasoning effort; unset uses the provider default |
 | `OCR_LLM_USE_ANTHROPIC` | Yes | `true` for Anthropic Claude, `false` for OpenAI-compatible |
 
-> **Note:** `GITHUB_TOKEN` is automatically provided by GitHub Actions with the required `pull-requests: write` permission. The action also sets `llm.extra_body` to disable thinking mode for compatibility with various LLM providers.
+> **Note:** `GITHUB_TOKEN` is automatically provided by GitHub Actions with the required `pull-requests: write` permission. The action also sets `llm.extra_body` to disable thinking mode for compatibility with various LLM providers. Some Anthropic models reject disabled thinking with `xhigh`/`max`; set `llm_extra_body: '{}'` when that model requires thinking to remain enabled.
 
 ## Customization
 
@@ -297,6 +302,7 @@ Mint a token with `actions/create-github-app-token` and pass it via the `github_
     llm_url: ${{ secrets.OCR_LLM_URL }}
     llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
     llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_reasoning_effort: ${{ vars.OCR_LLM_REASONING_EFFORT }}
     llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
 ```
 

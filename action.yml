@@ -17,6 +17,13 @@ inputs:
   llm_model:
     description: Model name (mapped to env OCR_LLM_MODEL).
     required: true
+  llm_reasoning_effort:
+    description: >-
+      Optional model reasoning effort (mapped to env
+      OCR_LLM_REASONING_EFFORT). Supported values depend on the selected
+      protocol and model. Anthropic xhigh/max may require overriding
+      llm_extra_body to remove disabled thinking.
+    required: false
   llm_use_anthropic:
     description: "'true' for Anthropic Claude, 'false' for OpenAI-compatible APIs
       (mapped to env OCR_USE_ANTHROPIC). Required to force an explicit choice."
@@ -267,6 +274,7 @@ runs:
         OCR_LLM_URL: ${{ inputs.llm_url }}
         OCR_LLM_TOKEN: ${{ inputs.llm_auth_token }}
         OCR_LLM_MODEL: ${{ inputs.llm_model }}
+        OCR_LLM_REASONING_EFFORT: ${{ inputs.llm_reasoning_effort }}
         OCR_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
         OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         OCR_LLM_EXTRA_HEADERS: ${{ inputs.llm_extra_headers }}

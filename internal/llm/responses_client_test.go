@@ -569,6 +569,41 @@ func TestOpenAIResponsesClient_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesClient_SendsReasoningEffort(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_test","object":"response","model":"gpt-test","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:             server.URL + "/v1",
+		APIKey:          "test-key",
+		Model:           "gpt-test",
+		ReasoningEffort: "max",
+		ExtraBody: map[string]any{
+			"reasoning": map[string]any{"effort": "low", "summary": "auto"},
+		},
+	})
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{Messages: []Message{{Role: "user", Content: "ping"}}}); err != nil {
+		t.Fatal(err)
+	}
+	reasoning, ok := gotBody["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("reasoning = %#v, want object", gotBody["reasoning"])
+	}
+	if reasoning["effort"] != "max" {
+		t.Errorf("reasoning.effort = %#v, want max", reasoning["effort"])
+	}
+	if reasoning["summary"] != "auto" {
+		t.Errorf("reasoning.summary = %#v, want auto", reasoning["summary"])
+	}
+}
+
 // TestOpenAIResponsesClient_ExtraBodyStreamDropped verifies that an
 // extra_body.stream=true (valid for the Chat Completions client) is NOT
 // forwarded to the Responses API. Forwarding it makes the API answer with SSE

@@ -49,6 +49,11 @@ export interface ProviderEntry {
   model?: string;
   models?: string[];
   authHeader?: string;
+  modelSettings?: Record<string, ModelSettings>;
+}
+
+export interface ModelSettings {
+  reasoningEffort?: string;
 }
 
 export interface OcrConfig {
@@ -62,6 +67,7 @@ export interface OcrConfig {
     model: string;
     useAnthropic: boolean;
     authHeader?: string;
+    modelSettings?: Record<string, ModelSettings>;
   };
   language: string;
 }

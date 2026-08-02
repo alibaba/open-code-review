@@ -91,6 +91,9 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
+	if c.cfg.ReasoningEffort != "" {
+		opts = append(opts, openaiopt.WithJSONSet("reasoning.effort", c.cfg.ReasoningEffort))
+	}
 
 	sdkResp, err := c.sdk.Responses.New(ctx, params, opts...)
 	if err != nil {
