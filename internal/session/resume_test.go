@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -28,7 +29,7 @@ func TestSessionFilePath_ValidID(t *testing.T) {
 	}
 
 	expectedSuffix := filepath.Join("test-sessions", encodeRepoPath("/some/repo"), "abc-123.jsonl")
-	if !contains(path, expectedSuffix) {
+	if !strings.Contains(path, expectedSuffix) {
 		t.Errorf("path %q does not contain expected suffix %q", path, expectedSuffix)
 	}
 }
@@ -643,17 +644,4 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatalf("marshal: %v", err)
 	}
 	return b
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
