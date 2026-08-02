@@ -148,6 +148,7 @@ ocr review --from main --to feature-branch --resume <session-id>
 # 全量文件扫描 —— 审查整个文件而非 diff（无需 git 历史）
 ocr scan                          # 扫描整个仓库
 ocr scan --path internal/agent    # 扫描指定目录或文件
+ocr scan --resume <session-id>   # 恢复中断的全量文件扫描
 
 # 委托模式 — 让你的 AI 编程 agent 自己执行评审
 # OCR 负责文件选择和规则解析；无需配置 LLM

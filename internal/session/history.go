@@ -132,6 +132,15 @@ type SessionOptions struct {
 	Operation string
 }
 
+// ResumeInfo summarizes file-level reuse for a resumed run.
+type ResumeInfo struct {
+	ResumedFrom   string `json:"resumed_from"`
+	ReusedFiles   int64  `json:"reused_files"`
+	RerunFiles    int64  `json:"rerun_files"`
+	PreviousModel string `json:"previous_model,omitempty"`
+	CurrentModel  string `json:"current_model,omitempty"`
+}
+
 // New creates a new SessionHistory with the given repo directory.
 func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory {
 	sessionID := generateUUID()

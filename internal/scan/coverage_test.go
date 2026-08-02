@@ -450,9 +450,12 @@ func TestExecuteSubtask_Success(t *testing.T) {
 	a.currentDate = "2026-06-26 10:00"
 
 	it := model.ScanItem{Path: "main.go", Content: "package main\n", LineCount: 1}
-	err := a.executeSubtask(context.Background(), it)
+	completed, _, err := a.executeSubtask(context.Background(), it)
 	if err != nil {
 		t.Fatalf("executeSubtask: %v", err)
+	}
+	if !completed {
+		t.Fatal("executeSubtask should complete after task_done")
 	}
 	if a.TotalTokensUsed() != 70 {
 		t.Errorf("TotalTokensUsed() = %d, want 70", a.TotalTokensUsed())
@@ -504,9 +507,12 @@ func TestExecuteSubtask_WithPlan(t *testing.T) {
 	a.currentDate = "2026-06-26 10:00"
 
 	it := model.ScanItem{Path: "handler.go", Content: "package h\nfunc Handle() error { return nil }\n", LineCount: 2}
-	err := a.executeSubtask(context.Background(), it)
+	completed, _, err := a.executeSubtask(context.Background(), it)
 	if err != nil {
 		t.Fatalf("executeSubtask: %v", err)
+	}
+	if !completed {
+		t.Fatal("executeSubtask should complete after task_done")
 	}
 }
 
@@ -517,7 +523,7 @@ func TestExecuteSubtask_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := a.executeSubtask(ctx, model.ScanItem{Path: "a.go", Content: "x", LineCount: 1})
+	_, _, err := a.executeSubtask(ctx, model.ScanItem{Path: "a.go", Content: "x", LineCount: 1})
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
 	}
@@ -618,6 +624,78 @@ func TestRun_FullPipeline(t *testing.T) {
 	}
 }
 
+func TestDispatchSubtasks_ResumeSkipsCompletedFiles(t *testing.T) {
+	doneContent := ""
+	client := &fakeScanClient{
+		responses: []*llm.ChatResponse{{
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{
+					Content: &doneContent,
+					ToolCalls: []llm.ToolCall{{
+						ID: "done", Type: "function",
+						Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"},
+					}},
+				},
+			}},
+			Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+		}},
+	}
+
+	cachedItem := model.ScanItem{Path: "cached.go", Content: "package cached\n", LineCount: 1}
+	freshItem := model.ScanItem{Path: "fresh.go", Content: "package fresh\n", LineCount: 1}
+	cachedComment := model.LlmComment{Path: "cached.go", Content: "cached finding"}
+	resume := &session.ResumeState{
+		SessionID:  "prior-session",
+		Model:      "old-model",
+		ReviewMode: session.ReviewModeFullScan,
+		Items: map[string]session.ResumeItem{
+			scanItemFingerprint(cachedItem): {
+				FilePath:    cachedItem.Path,
+				OldPath:     cachedItem.Path,
+				NewPath:     cachedItem.Path,
+				Fingerprint: scanItemFingerprint(cachedItem),
+				Comments:    []model.LlmComment{cachedComment},
+			},
+		},
+	}
+
+	a := NewAgent(Args{
+		Template:         makeTemplateWithFullScan(),
+		LLMClient:        client,
+		Model:            "new-model",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1,
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
+		Resume:           resume,
+		Session: session.New(t.TempDir(), "main", "new-model", session.SessionOptions{
+			ReviewMode:  session.ReviewModeFullScan,
+			ResumedFrom: resume.SessionID,
+		}),
+	})
+	a.items = []model.ScanItem{cachedItem, freshItem}
+	a.currentDate = "2026-06-26"
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if client.idx != 1 {
+		t.Fatalf("LLM calls = %d, want 1 for only the fresh file", client.idx)
+	}
+	if len(comments) != 1 || comments[0].Content != cachedComment.Content {
+		t.Fatalf("comments = %+v, want cached comment only", comments)
+	}
+	info := a.ResumeInfo()
+	if info == nil {
+		t.Fatal("ResumeInfo should be populated")
+	}
+	if info.ResumedFrom != resume.SessionID || info.ReusedFiles != 1 || info.RerunFiles != 1 || info.PreviousModel != "old-model" || info.CurrentModel != "new-model" {
+		t.Fatalf("ResumeInfo = %+v", info)
+	}
+}
 func TestDispatchSubtasks_AllFailed(t *testing.T) {
 	client := &errorScanClient{err: context.DeadlineExceeded}
 

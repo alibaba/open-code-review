@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,7 +54,9 @@ type Args struct {
 	Background            string
 	GitRunner             *gitcmd.Runner
 	Session               *session.SessionHistory
-	MaxFileSizeBytes      int64
+	// Resume is an optional read-only checkpoint index from a previous scan session.
+	Resume           *session.ResumeState
+	MaxFileSizeBytes int64
 	// SkipPlan disables the PLAN_TASK pre-pass even when the template
 	// defines one. Set via the --no-plan CLI flag.
 	SkipPlan bool
@@ -95,6 +98,7 @@ type Agent struct {
 	session        *session.SessionHistory
 	subtaskFailed  int64 // atomic
 	runner         *llmloop.Runner
+	resumeInfo     *session.ResumeInfo
 	projectSummary string // populated post-run by maybeRunProjectSummary
 }
 
@@ -114,7 +118,8 @@ func NewAgent(args Args) *Agent {
 	}
 	if args.Session == nil {
 		args.Session = session.New(args.RepoDir, "", args.Model, session.SessionOptions{
-			ReviewMode: session.ReviewModeFullScan,
+			ReviewMode:  session.ReviewModeFullScan,
+			ResumedFrom: resumedFromSession(args.Resume),
 		})
 	}
 	a := &Agent{
@@ -169,6 +174,15 @@ func (a *Agent) SessionID() string {
 // without synthesizing a manifest for scan.
 func (a *Agent) RunManifest() *session.RunManifest { return nil }
 
+// ResumeInfo returns resume metadata for output. Nil means this was not a resume run.
+func (a *Agent) ResumeInfo() *session.ResumeInfo {
+	if a.resumeInfo == nil {
+		return nil
+	}
+	info := *a.resumeInfo
+	return &info
+}
+
 // FilesReviewed returns the number of items included in this scan.
 func (a *Agent) FilesReviewed() int64 { return int64(len(a.items)) }
 
@@ -208,6 +222,49 @@ func (a *Agent) BudgetExceeded() bool { return false }
 
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
+}
+
+func (a *Agent) initResumeInfo(items []model.ScanItem) {
+	resume := a.args.Resume
+	if resume == nil {
+		return
+	}
+	var reused int64
+	var rerun int64
+	for _, it := range items {
+		if _, ok := resume.Item(scanItemFingerprint(it)); ok {
+			reused++
+		} else {
+			rerun++
+		}
+	}
+	a.resumeInfo = &session.ResumeInfo{
+		ResumedFrom:   resume.SessionID,
+		ReusedFiles:   reused,
+		RerunFiles:    rerun,
+		PreviousModel: resume.Model,
+		CurrentModel:  a.args.Model,
+	}
+	fmt.Fprintf(stdout.Writer(), "[ocr] Resume %s: reusing %d file(s), reviewing %d file(s)\n", resume.SessionID, reused, rerun)
+}
+
+func (a *Agent) resumeItem(fingerprint string) (session.ResumeItem, bool) {
+	if a.args.Resume == nil {
+		return session.ResumeItem{}, false
+	}
+	return a.args.Resume.Item(fingerprint)
+}
+
+func scanItemFingerprint(it model.ScanItem) string {
+	sum := sha256.Sum256([]byte(session.ReviewModeFullScan + "\x00" + it.Path + "\x00" + it.Content))
+	return fmt.Sprintf("%x", sum)
+}
+
+func resumedFromSession(resume *session.ResumeState) string {
+	if resume == nil {
+		return ""
+	}
+	return resume.SessionID
 }
 
 // Run executes the full-scan pipeline: enumerate → filter → token-filter →
@@ -423,6 +480,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	atomic.StoreInt64(&a.subtaskFailed, 0)
+	a.initResumeInfo(a.items)
 
 	strategy := a.resolveBatchStrategy()
 	batches := groupBatches(a.items, strategy, a.args.Template.BatchSize)
@@ -494,21 +552,47 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
 
 	var (
-		wg         sync.WaitGroup
-		dispatched int64
-		budgetHit  bool
+		wg          sync.WaitGroup
+		dispatched  int64
+		budgetHit   bool
+		completedMu sync.Mutex
+		completed   []model.ScanItem
 	)
 
+	recordCompleted := func() {
+		if a.args.CommentWorkerPool != nil {
+			a.args.CommentWorkerPool.Await()
+		}
+		completedMu.Lock()
+		items := append([]model.ScanItem(nil), completed...)
+		completedMu.Unlock()
+		for _, it := range items {
+			fingerprint := scanItemFingerprint(it)
+			comments := a.args.CommentCollector.CommentsForPath(it.Path)
+			a.session.RecordReviewItemDone(it.Path, it.Path, it.Path, fingerprint, comments)
+		}
+	}
+
 	for i := range batch {
+		it := batch[i]
+		fingerprint := scanItemFingerprint(it)
+		if item, ok := a.resumeItem(fingerprint); ok {
+			for _, cm := range item.Comments {
+				a.args.CommentCollector.Add(cm)
+			}
+			a.session.RecordReviewItemReused(it.Path, it.Path, it.Path, fingerprint, a.args.Resume.SessionID, item.Comments)
+			continue
+		}
+
 		// Per-file budget look-ahead. Stop before acquiring a slot so we
 		// don't even queue work that would blow the budget.
 		if a.args.MaxTokensBudget > 0 {
 			used := a.runner.TotalTokensUsed()
-			projected := used + estimateFileTokens(batch[i], a.planEnabled())
+			projected := used + estimateFileTokens(it, a.planEnabled())
 			if projected > a.args.MaxTokensBudget {
 				fmt.Fprintf(stdout.Writer(), "[ocr] token budget reached (used %s + next-file est ≈ %s > budget %s) — skipping %s and remaining files\n",
-					humanTokens(used), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), batch[i].Path)
-				a.recordWarning("token_budget_reached", batch[i].Path,
+					humanTokens(used), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), it.Path)
+				a.recordWarning("token_budget_reached", it.Path,
 					fmt.Sprintf("stopped in batch #%d: used %d tokens + next-file estimate exceeds budget %d", batchIdx, used, a.args.MaxTokensBudget))
 				budgetHit = true
 				break
@@ -519,12 +603,13 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 		case sem <- struct{}{}:
 		case <-ctx.Done():
 			wg.Wait()
+			recordCompleted()
 			return dispatched, budgetHit, ctx.Err()
 		}
 
 		dispatched++
 		wg.Add(1)
-		go func(it model.ScanItem) {
+		go func(it model.ScanItem, fingerprint string) {
 			defer wg.Done()
 			defer func() { <-sem }()
 
@@ -537,18 +622,33 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 				fileCtx = ctx
 			}
 
-			if err := a.executeSubtask(fileCtx, it); err != nil {
+			completedOK, skipReason, err := a.executeSubtask(fileCtx, it)
+			if err != nil {
 				atomic.AddInt64(&a.subtaskFailed, 1)
+				a.session.RecordReviewItemFailed(it.Path, it.Path, it.Path, fingerprint, err.Error())
 				fmt.Fprintf(stdout.Writer(), "[ocr] Scan subtask error for %s (batch #%d): %v\n", it.Path, batchIdx, err)
 				telemetry.ErrorEvent(fileCtx, "scan.subtask.error", err,
 					telemetry.AnyToAttr("file.path", it.Path),
 					telemetry.AnyToAttr("batch.index", batchIdx))
 				a.recordWarning("scan_subtask_error", it.Path, err.Error())
+				return
 			}
-		}(batch[i])
+			if !completedOK {
+				if skipReason != "" {
+					atomic.AddInt64(&a.subtaskFailed, 1)
+					a.session.RecordReviewItemFailed(it.Path, it.Path, it.Path, fingerprint, skipReason)
+					a.recordWarning("scan_subtask_error", it.Path, skipReason)
+				}
+				return
+			}
+			completedMu.Lock()
+			completed = append(completed, it)
+			completedMu.Unlock()
+		}(it, fingerprint)
 	}
 
 	wg.Wait()
+	recordCompleted()
 	return dispatched, budgetHit, nil
 }
 
@@ -562,13 +662,13 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 // is small enough that planning overhead outweighs gain, or the plan call
 // itself fails. Plan failure never blocks the main review — it falls back
 // to v1 (plan-less) behavior.
-func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) error {
+func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "scan.subtask."+it.Path)
 	defer span.End()
 	telemetry.SetAttr(span, "file.path", it.Path)
 
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return false, "", ctx.Err()
 	}
 
 	rule := ""
@@ -591,17 +691,17 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) error {
 			telemetry.AnyToAttr("file.path", it.Path),
 			telemetry.AnyToAttr("tokens", tokenCount),
 			telemetry.AnyToAttr("max_tokens", maxAllowed))
-		return nil
+		return false, "", nil
 	}
 
 	completed, _, err := a.runner.RunPerFile(ctx, messages, it.Path)
 	if err != nil {
-		return err
+		return false, "", err
 	}
 	if !completed {
-		return fmt.Errorf("main_task did not complete before stopping")
+		return false, "main_task did not complete before stopping", nil
 	}
-	return nil
+	return true, "", nil
 }
 
 // maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable

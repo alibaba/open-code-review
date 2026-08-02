@@ -199,6 +199,20 @@ func (s *ResumeState) ValidateOptions(opts SessionOptions) error {
 	return nil
 }
 
+// ValidateScanOptions verifies that the previous session was a full-file scan.
+func (s *ResumeState) ValidateScanOptions() error {
+	if s == nil {
+		return nil
+	}
+	if s.ReviewMode == "" {
+		return fmt.Errorf("resume session %q is missing review mode metadata", s.SessionID)
+	}
+	if s.ReviewMode != ReviewModeFullScan {
+		return fmt.Errorf("resume session review mode %q does not match current mode %q", s.ReviewMode, ReviewModeFullScan)
+	}
+	return nil
+}
+
 func copyLlmComments(in []model.LlmComment) []model.LlmComment {
 	if len(in) == 0 {
 		return nil

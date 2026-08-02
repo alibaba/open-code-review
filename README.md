@@ -148,6 +148,7 @@ ocr review --from main --to feature-branch --resume <session-id>
 # Full-file scan — review whole files instead of a diff (no git history needed)
 ocr scan                          # scan the entire repository
 ocr scan --path internal/agent    # scan a directory or specific files
+ocr scan --resume <session-id>   # resume an interrupted full-file scan
 
 # Delegation mode — let your AI coding agent perform the review itself
 # OCR handles file selection and rule resolution; no LLM configuration needed

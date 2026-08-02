@@ -131,6 +131,9 @@ func validateScanOptions(opts *scanOptions) error {
 	if opts.maxGitProcs < 0 {
 		return fmt.Errorf("--max-git-procs must be a non-negative integer (0 means use default 16)")
 	}
+	if opts.preview && opts.resume != "" {
+		return fmt.Errorf("--preview and --resume cannot be used together")
+	}
 	if opts.maxTokensBudget < 0 {
 		return fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
 	}
@@ -176,6 +179,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().BoolVar(&opts.noSummary, "no-summary", false, "skip the post-run PROJECT_SUMMARY_TASK")
 	cmd.Flags().StringVar(&opts.batch, "batch", "", "override BATCH_STRATEGY: none | by-language | by-directory")
 	addModelFlag(cmd, &opts.model)
+	cmd.Flags().StringVar(&opts.resume, "resume", "", "resume from a previous scan session id")
 	cmd.RegisterFlagCompletionFunc("batch", completeEnum("none", "by-language", "by-directory"))
 }
 
