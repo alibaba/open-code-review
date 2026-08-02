@@ -123,7 +123,7 @@ ocr config model             # 为当前供应商选择模型
 
 ![Provider setup](imgs/providers.jpg)
 
-交互式界面会引导你完成供应商选择、API Key 输入和模型配置，完成后自动测试连通性。
+交互式界面会引导你完成供应商选择、模型专属的 reasoning effort 和 API Key 输入，完成后自动测试连通性。选择 **Provider 默认值** 时不会发送 effort 字段。
 
 命令行设置、环境变量、自定义供应商等高级配置，详见[配置指南](https://open-codereview.ai/docs/configuration)。
 

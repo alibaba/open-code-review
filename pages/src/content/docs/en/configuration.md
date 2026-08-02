@@ -19,7 +19,7 @@ to edit it:
 ocr config provider
 ```
 
-It lets you pick a built-in or custom provider, enter an API key, choose a model, saves everything to the config file, and then runs `ocr llm test` once to verify the endpoint. To switch models later:
+It lets you pick a built-in or custom provider, choose a model and its reasoning effort, enter an API key, save everything to the config file, and then run `ocr llm test` once to verify the endpoint. To switch models or effort later:
 
 ```bash
 ocr config model
@@ -32,8 +32,48 @@ Write to the same config with `ocr config set`:
 ```bash
 ocr config set provider                    anthropic
 ocr config set model                       claude-opus-4-6
+ocr config set reasoning_effort            high
 ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ```
+
+### Reasoning effort (per model)
+
+Reasoning effort is stored for the selected model. Choose `Provider default`,
+run `ocr config unset reasoning_effort`, or set the value to `default` to omit
+the field and let the provider decide:
+
+```bash
+ocr config model
+ocr config set reasoning_effort high
+ocr review --reasoning-effort xhigh
+ocr config unset reasoning_effort
+```
+
+`OCR_LLM_REASONING_EFFORT` provides the same per-run override for CI. Set it
+to `default` to override a stored value and omit the request field.
+
+The JSON remains backward-compatible with existing `models` lists:
+
+```json
+{
+  "providers": {
+    "anthropic": {
+      "models": ["claude-opus-4-8"],
+      "model_settings": {
+        "claude-opus-4-8": { "reasoning_effort": "xhigh" }
+      }
+    }
+  }
+}
+```
+
+OCR sends `reasoning_effort` for OpenAI Chat Completions,
+`reasoning.effort` for OpenAI Responses, and `output_config.effort` for
+Anthropic Messages. OpenAI protocols offer `none`, `minimal`, `low`,
+`medium`, `high`, `xhigh`, and `max`; Anthropic offers `low` through `max`
+without `none` or `minimal`. Actual support is model-dependent. Anthropic
+effort is separate from `thinking`; remove incompatible `thinking` overrides
+if the selected model rejects the combination.
 
 ### Built-in providers
 

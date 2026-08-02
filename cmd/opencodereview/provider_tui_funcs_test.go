@@ -1018,6 +1018,11 @@ func modelTUIEnterCustomModelName(t *testing.T, m modelTUIModel, name string) mo
 	}
 	m2.modelInput.SetValue(name)
 	result, _ = m2.Update(enterKey())
+	m3 := result.(modelTUIModel)
+	if !m3.selectingEffort {
+		t.Fatal("expected reasoning effort selection after entering model name")
+	}
+	result, _ = m3.Update(enterKey()) // provider default
 	return result.(modelTUIModel)
 }
 
@@ -1066,6 +1071,11 @@ func TestModelTUI_Official_ListEnterConfirmsSelection(t *testing.T) {
 	m2.modelIdx = modelTUIIdxForName(t, m2, "picked-model")
 	result, _ := m2.Update(enterKey())
 	m3 := result.(modelTUIModel)
+	if !m3.selectingEffort {
+		t.Fatal("enter on list item should open reasoning effort selection")
+	}
+	result, _ = m3.Update(enterKey()) // keep provider default
+	m3 = result.(modelTUIModel)
 	if !m3.confirmed {
 		t.Error("enter on list item should confirm selection")
 	}
@@ -1091,6 +1101,44 @@ func TestModelTUI_CustomProvider_AddCustomModelStaysOnList(t *testing.T) {
 	}
 	if !m3.savedInSession {
 		t.Error("savedInSession should be true after add")
+	}
+}
+
+func TestModelTUI_AddCustomModelStoresSelectedReasoningEffort(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	m := customConfigModelTUI(t, configPath, []string{"m1"})
+	m.provider.Protocol = llm.ProtocolOpenAIChatCompletions
+	m.modelIdx = len(m.displayModels())
+	result, _ := m.Update(enterKey())
+	m2 := result.(modelTUIModel)
+	m2.modelInput.SetValue("reasoning-model")
+	result, _ = m2.Update(enterKey())
+	m3 := result.(modelTUIModel)
+	if !m3.selectingEffort {
+		t.Fatal("expected effort selection before persisting custom model")
+	}
+	for i, effort := range m3.effortOptions {
+		if effort == "high" {
+			m3.effortIdx = i
+		}
+	}
+	result, _ = m3.Update(enterKey())
+	m4 := result.(modelTUIModel)
+	setting := m4.existingCfg.CustomProviders["my-llm"].ModelSettings["reasoning-model"]
+	if setting.ReasoningEffort != "high" {
+		t.Errorf("stored effort = %q, want high", setting.ReasoningEffort)
+	}
+}
+
+func TestModelTUI_AnthropicEffortOptionsExcludeOpenAIOnlyValues(t *testing.T) {
+	m := customConfigModelTUI(t, "", []string{"m1"})
+	m.provider.Protocol = llm.ProtocolAnthropic
+	m.beginEffortSelection("m1", false)
+	for _, effort := range m.effortOptions {
+		if effort == "none" || effort == "minimal" {
+			t.Errorf("Anthropic effort options include OpenAI-only value %q", effort)
+		}
 	}
 }
 

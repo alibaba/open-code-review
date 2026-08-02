@@ -112,6 +112,31 @@ function setConfigValue(cfg: RawConfig, key: string, value: string): void {
         cfg.model = value;
       }
       break;
+    case 'reasoning_effort': {
+      const normalized = value.trim().toLowerCase() === 'default' ? '' : value.trim().toLowerCase();
+      if (cfg.provider) {
+        const collection = isPresetProvider(cfg.provider) ? cfg.providers : cfg.custom_providers;
+        const entry = collection?.[cfg.provider];
+        const model = typeof entry?.model === 'string' ? entry.model : cfg.model;
+        if (!entry || !model) break;
+        const current = entry.model_settings && typeof entry.model_settings === 'object'
+          ? { ...(entry.model_settings as Record<string, unknown>) }
+          : {};
+        if (normalized) current[model] = { reasoning_effort: normalized };
+        else delete current[model];
+        if (Object.keys(current).length > 0) entry.model_settings = current;
+        else delete entry.model_settings;
+      } else if (cfg.llm && typeof cfg.llm.model === 'string' && cfg.llm.model) {
+        const current = cfg.llm.model_settings && typeof cfg.llm.model_settings === 'object'
+          ? { ...(cfg.llm.model_settings as Record<string, unknown>) }
+          : {};
+        if (normalized) current[cfg.llm.model] = { reasoning_effort: normalized };
+        else delete current[cfg.llm.model];
+        if (Object.keys(current).length > 0) cfg.llm.model_settings = current;
+        else delete cfg.llm.model_settings;
+      }
+      break;
+    }
     case 'llm.url':
       if (!cfg.llm) cfg.llm = {};
       cfg.llm.url = value;

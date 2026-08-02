@@ -129,6 +129,13 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 		f := false
 		cfg.Llm.UseAnthropic = &f
 	}
+	if result.reasoningEffortSet {
+		settings, err := updateReasoningEffort(cfg.Llm.ModelSettings, result.model, protocol, result.reasoningEffort)
+		if err != nil {
+			return err
+		}
+		cfg.Llm.ModelSettings = settings
+	}
 
 	if err := saveConfig(configPath, cfg); err != nil {
 		return err
@@ -138,6 +145,7 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	fmt.Printf("URL: %s\n", result.url)
 	fmt.Printf("Protocol: %s\n", protocol)
 	fmt.Printf("Model: %s\n", result.model)
+	printReasoningEffortResult(result)
 
 	fmt.Println("\nTesting connection...")
 	if err := runLLMTest(); err != nil {
@@ -186,6 +194,13 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	} else {
 		entry.APIKey = ""
 	}
+	if result.reasoningEffortSet {
+		settings, err := updateReasoningEffort(entry.ModelSettings, model, entry.Protocol, result.reasoningEffort)
+		if err != nil {
+			return err
+		}
+		entry.ModelSettings = settings
+	}
 	cfg.CustomProviders[result.provider] = entry
 
 	if !result.isEdit {
@@ -206,12 +221,14 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 			fmt.Printf("\nCustom provider %q updated (not currently active).\n", result.provider)
 		}
 		fmt.Printf("Model: %s\n", model)
+		printReasoningEffortResult(result)
 		fmt.Println("\nTip: run 'ocr config model' to switch model later.")
 		return nil
 	}
 
 	fmt.Printf("\nProvider set to: %s (custom)\n", result.provider)
 	fmt.Printf("Model: %s\n", model)
+	printReasoningEffortResult(result)
 
 	fmt.Println("\nTesting connection...")
 	if err := runLLMTest(); err != nil {
@@ -260,6 +277,17 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 		// Confirmed empty key: clear saved api_key so resolver falls back to $ENV_VAR.
 		entry.APIKey = ""
 	}
+	if result.reasoningEffortSet {
+		protocol := preset.Protocol
+		if entry.Protocol != "" {
+			protocol = entry.Protocol
+		}
+		settings, err := updateReasoningEffort(entry.ModelSettings, model, protocol, result.reasoningEffort)
+		if err != nil {
+			return err
+		}
+		entry.ModelSettings = settings
+	}
 	cfg.Providers[result.provider] = entry
 
 	if cfg.Provider != result.provider {
@@ -274,6 +302,7 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 
 	fmt.Printf("\nProvider set to: %s\n", result.provider)
 	fmt.Printf("Model: %s\n", model)
+	printReasoningEffortResult(result)
 
 	fmt.Println("\nTesting connection...")
 	if err := runLLMTest(); err != nil {
@@ -284,6 +313,17 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 
 	fmt.Println("\nTip: run 'ocr config model' to switch model later.")
 	return nil
+}
+
+func printReasoningEffortResult(result providerTUIResult) {
+	if !result.reasoningEffortSet {
+		return
+	}
+	if result.reasoningEffort == llm.ReasoningEffortDefault {
+		fmt.Println("Reasoning effort: provider default")
+		return
+	}
+	fmt.Printf("Reasoning effort: %s\n", result.reasoningEffort)
 }
 
 func runConfigModel() error {
@@ -358,6 +398,11 @@ func runConfigModel() error {
 		entry := cfg.CustomProviders[cfg.Provider]
 		entry.Model = selectedModel
 		entry.Models = ensureModelInList(entry.Models, selectedModel)
+		settings, err := updateReasoningEffort(entry.ModelSettings, selectedModel, provider.Protocol, final.selectedReasoningEffort())
+		if err != nil {
+			return err
+		}
+		entry.ModelSettings = settings
 		cfg.CustomProviders[cfg.Provider] = entry
 	} else {
 		if cfg.Providers == nil {
@@ -365,6 +410,11 @@ func runConfigModel() error {
 		}
 		entry := cfg.Providers[cfg.Provider]
 		entry.Model = selectedModel
+		settings, err := updateReasoningEffort(entry.ModelSettings, selectedModel, provider.Protocol, final.selectedReasoningEffort())
+		if err != nil {
+			return err
+		}
+		entry.ModelSettings = settings
 		// Use registry-only list: provider.Models was captured before the TUI and
 		// may include stale entry.Models from add/delete during the session.
 		if !llm.ModelListContains(registryModels, selectedModel) {
@@ -379,6 +429,11 @@ func runConfigModel() error {
 	}
 
 	fmt.Printf("\nModel set to: %s\n", selectedModel)
+	if effort := final.selectedReasoningEffort(); effort != "" {
+		fmt.Printf("Reasoning effort: %s\n", effort)
+	} else {
+		fmt.Println("Reasoning effort: provider default")
+	}
 	return nil
 }
 

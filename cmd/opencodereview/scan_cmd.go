@@ -37,6 +37,7 @@ type scanOptions struct {
 	batch           string
 	maxTokensBudget int
 	model           string
+	reasoningEffort string
 }
 
 var scanOpts scanOptions
@@ -128,7 +129,7 @@ func executeScan(opts scanOptions) error {
 		return runScanPreview(cc, scanTpl, scanPaths)
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model, opts.reasoningEffort)
 	if err != nil {
 		return err
 	}

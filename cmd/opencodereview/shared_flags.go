@@ -49,6 +49,11 @@ func addModelFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "model", "", "override LLM model for this run (e.g., claude-opus-4-6)")
 }
 
+func addReasoningEffortFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVar(target, "reasoning-effort", "", "override reasoning effort for this run (provider-dependent)")
+	cmd.RegisterFlagCompletionFunc("reasoning-effort", completeEnum("default", "none", "minimal", "low", "medium", "high", "xhigh", "max"))
+}
+
 func addToolsFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "tools", "", "path to JSON tools config file (default: embedded)")
 }
@@ -153,6 +158,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addConcurrencyFlags(cmd, &opts.concurrency, &opts.perFileTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokensBudget)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addModelFlag(cmd, &opts.model)
+	addReasoningEffortFlag(cmd, &opts.reasoningEffort)
 	addPreviewFlag(cmd, &opts.preview)
 }
 
@@ -176,6 +182,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().BoolVar(&opts.noSummary, "no-summary", false, "skip the post-run PROJECT_SUMMARY_TASK")
 	cmd.Flags().StringVar(&opts.batch, "batch", "", "override BATCH_STRATEGY: none | by-language | by-directory")
 	addModelFlag(cmd, &opts.model)
+	addReasoningEffortFlag(cmd, &opts.reasoningEffort)
 	cmd.RegisterFlagCompletionFunc("batch", completeEnum("none", "by-language", "by-directory"))
 }
 

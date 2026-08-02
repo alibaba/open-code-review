@@ -18,7 +18,7 @@ sidebar:
 ocr config provider
 ```
 
-它会让你选择一个内置或自定义 provider、填入 API key、挑选 model，保存到配置文件后自动运行一次 `ocr llm test` 验证端点。之后想换模型：
+它会让你选择一个内置或自定义 provider、挑选 model 及其 reasoning effort、填入 API key，保存到配置文件后自动运行一次 `ocr llm test` 验证端点。之后想换模型或 effort：
 
 ```bash
 ocr config model
@@ -31,8 +31,47 @@ ocr config model
 ```bash
 ocr config set provider                    anthropic
 ocr config set model                       claude-opus-4-6
+ocr config set reasoning_effort            high
 ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ```
+
+### Reasoning effort（按模型保存）
+
+reasoning effort 会保存到当前选中的模型。选择 `Provider 默认值`、运行
+`ocr config unset reasoning_effort`，或将值设为 `default`，都会省略请求字段，
+交给 provider 自行决定：
+
+```bash
+ocr config model
+ocr config set reasoning_effort high
+ocr review --reasoning-effort xhigh
+ocr config unset reasoning_effort
+```
+
+CI 中可用 `OCR_LLM_REASONING_EFFORT` 做同样的单次覆盖；将它设为 `default`
+会覆盖已保存值，并在请求中省略该字段。
+
+JSON 与现有的 `models` 列表保持兼容：
+
+```json
+{
+  "providers": {
+    "anthropic": {
+      "models": ["claude-opus-4-8"],
+      "model_settings": {
+        "claude-opus-4-8": { "reasoning_effort": "xhigh" }
+      }
+    }
+  }
+}
+```
+
+OCR 对 OpenAI Chat Completions 发送 `reasoning_effort`，对 OpenAI Responses
+发送 `reasoning.effort`，对 Anthropic Messages 发送 `output_config.effort`。
+OpenAI 协议可选 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`；
+Anthropic 没有 `none/minimal`，可选 `low` 到 `max`。具体支持范围仍由模型决定。
+Anthropic 的 effort 与 `thinking` 是两个独立设置；若模型拒绝某种组合，请移除
+不兼容的 `thinking` 覆盖。
 
 ### 内置 provider
 

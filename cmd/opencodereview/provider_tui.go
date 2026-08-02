@@ -18,6 +18,7 @@ type tuiStep int
 const (
 	stepProvider tuiStep = iota
 	stepModel
+	stepEffort
 	stepAPIKey
 )
 
@@ -46,6 +47,7 @@ const (
 	manualStepURL manualStep = iota
 	manualStepProtocol
 	manualStepModel
+	manualStepEffort
 	manualStepAuthToken
 	manualStepAuthHeader
 )
@@ -66,18 +68,20 @@ type customProviderListItem struct {
 }
 
 type providerTUIResult struct {
-	provider         string
-	model            string
-	models           []string
-	apiKey           string
-	isCustom         bool
-	isEdit           bool
-	editTargetName   string
-	isManual         bool
-	url              string
-	protocol         string
-	authHeader       string
-	sessionModelPick map[string]string
+	provider           string
+	model              string
+	models             []string
+	apiKey             string
+	isCustom           bool
+	isEdit             bool
+	editTargetName     string
+	isManual           bool
+	url                string
+	protocol           string
+	authHeader         string
+	reasoningEffort    string
+	reasoningEffortSet bool
+	sessionModelPick   map[string]string
 }
 
 // resolvedModel returns the model to persist, falling back to the in-session pick
@@ -147,9 +151,15 @@ type providerTUIModel struct {
 	manualTokenOriginal   string
 
 	// --- shared model/api-key steps (official + existing custom) ---
-	modelIdx    int
-	customModel bool
-	modelInput  textinput.Model
+	modelIdx           int
+	customModel        bool
+	modelInput         textinput.Model
+	pendingModel       string
+	addingModel        bool
+	effortOptions      []string
+	effortIdx          int
+	reasoningEffort    string
+	reasoningEffortSet bool
 
 	apiKeyInput    textinput.Model
 	apiKeyMasked   bool
@@ -430,6 +440,10 @@ func registryModelsForProvider(name string, fallback []string) []string {
 
 func applyModelDeleteToEntry(entry ProviderEntry, name string) ProviderEntry {
 	entry.Models = removeModels(entry.Models, []string{name})
+	delete(entry.ModelSettings, name)
+	if len(entry.ModelSettings) == 0 {
+		entry.ModelSettings = nil
+	}
 	if entry.Model == name {
 		entry.Model = ""
 	}
@@ -643,6 +657,14 @@ func (m providerTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cancelled = true
 				return m, tea.Quit
 			}
+			if m.step == stepEffort && m.addingModel {
+				m.step = stepModel
+				m.addingModel = false
+				m.pendingModel = ""
+				m.customModel = true
+				m.formError = ""
+				return m, m.modelInput.Focus()
+			}
 			m.step--
 			m.formError = ""
 			return m, nil
@@ -746,22 +768,9 @@ func (m providerTUIModel) updateCustomModelInput(key string, msg tea.KeyPressMsg
 			return m, nil
 		}
 		m.formError = ""
-		persisted, err := m.persistCustomModelName(name)
-		if err != nil {
-			m.formError = err.Error()
-			return m, nil
-		}
-		if !persisted {
-			// No active provider context — refuse with an error message.
-			m.formError = "no active provider to attach this model to"
-			return m, nil
-		}
 		m.customModel = false
 		m.modelInput.Blur()
-		m.modelInput.SetValue("")
-		// Reposition the cursor on the first newly-added model so the user
-		// can see what just landed.
-		m.refreshModelSelectionForCustom()
+		m.beginProviderEffortSelection(name, true)
 		return m, nil
 	default:
 		var cmd tea.Cmd
@@ -777,7 +786,7 @@ func (m providerTUIModel) updateCustomModelInput(key string, msg tea.KeyPressMsg
 //
 // Returns (persisted, error). When no provider is active (neither official
 // nor custom), persisted is false and the caller decides how to handle it.
-func (m *providerTUIModel) persistCustomModelName(name string) (bool, error) {
+func (m *providerTUIModel) persistCustomModelName(name, reasoningEffort string) (bool, error) {
 	if name == "" {
 		return false, fmt.Errorf("model name must not be empty")
 	}
@@ -793,6 +802,11 @@ func (m *providerTUIModel) persistCustomModelName(name string) (bool, error) {
 		entry := m.customProviderEntry(cp.name, cp.entry)
 		prevEntry := cloneProviderEntry(entry)
 		entry.Models = append(entry.Models, name)
+		settings, err := updateReasoningEffort(entry.ModelSettings, name, entry.Protocol, reasoningEffort)
+		if err != nil {
+			return false, err
+		}
+		entry.ModelSettings = settings
 		if m.existingCfg.CustomProviders == nil {
 			m.existingCfg.CustomProviders = make(map[string]ProviderEntry)
 		}
@@ -822,6 +836,11 @@ func (m *providerTUIModel) persistCustomModelName(name string) (bool, error) {
 		entry := m.existingCfg.Providers[provider.Name]
 		prevEntry := cloneProviderEntry(entry)
 		entry.Models = append(entry.Models, name)
+		settings, err := updateReasoningEffort(entry.ModelSettings, name, provider.Protocol, reasoningEffort)
+		if err != nil {
+			return false, err
+		}
+		entry.ModelSettings = settings
 		m.existingCfg.Providers[provider.Name] = entry
 		// Intentionally do not mutate m.providers[officialIdx].Models: that slice
 		// is a read-only snapshot from the provider registry (llm.ListProviders).
@@ -932,7 +951,7 @@ func (m providerTUIModel) updateAPIKeyInput(key string, msg tea.KeyPressMsg) (te
 	switch key {
 	case "esc":
 		m.apiKeyInput.Blur()
-		m.step = stepModel
+		m.step = stepEffort
 		m.formError = ""
 		return m, nil
 	case "enter":
@@ -1187,6 +1206,12 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		Models:     append([]string(nil), v.Models...),
 		AuthHeader: v.AuthHeader,
 	}
+	if v.ModelSettings != nil {
+		out.ModelSettings = make(map[string]ModelSettings, len(v.ModelSettings))
+		for name, settings := range v.ModelSettings {
+			out.ModelSettings[name] = settings
+		}
+	}
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
 		for k, val := range v.ExtraBody {
@@ -1397,6 +1422,24 @@ func (m providerTUIModel) updateManualForm(key string, msg tea.KeyPressMsg) (tea
 				return m, nil
 			}
 		}
+		if m.manualStep == manualStepEffort {
+			switch key {
+			case "up", "k":
+				if m.effortIdx > 0 {
+					m.effortIdx--
+				} else if len(m.effortOptions) > 0 {
+					m.effortIdx = len(m.effortOptions) - 1
+				}
+				return m, nil
+			case "down", "j":
+				if m.effortIdx < len(m.effortOptions)-1 {
+					m.effortIdx++
+				} else {
+					m.effortIdx = 0
+				}
+				return m, nil
+			}
+		}
 		if m.manualStep == manualStepAuthToken && m.manualTokenMasked {
 			m.beginManualTokenReplace()
 		}
@@ -1603,6 +1646,14 @@ func (m providerTUIModel) handleManualFormEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.manualModelInput.Blur()
+		m.beginManualEffortSelection()
+		return m, nil
+	case manualStepEffort:
+		if len(m.effortOptions) == 0 {
+			return m, nil
+		}
+		m.reasoningEffort = m.effortOptions[m.effortIdx]
+		m.reasoningEffortSet = true
 		m.manualStep = manualStepAuthToken
 		return m, m.manualTokenInput.Focus()
 	case manualStepAuthToken:
@@ -1719,6 +1770,8 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 		case tabManual:
 			m.inManualForm = true
 			m.manualStep = manualStepURL
+			m.reasoningEffort = llm.ReasoningEffortDefault
+			m.reasoningEffortSet = false
 			return m, m.manualURLInput.Focus()
 		}
 
@@ -1731,10 +1784,11 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.formError = err.Error()
 			return m, nil
 		}
-		m.step = stepAPIKey
-		m.formError = ""
-		m.loadExistingAPIKey()
-		return m, m.apiKeyInput.Focus()
+		m.beginProviderEffortSelection(m.selectedModelFromState(), false)
+		return m, nil
+
+	case stepEffort:
+		return m.confirmProviderEffort()
 	}
 	return m, nil
 }
@@ -1761,6 +1815,12 @@ func (m providerTUIModel) handleUp() (tea.Model, tea.Cmd) {
 			m.modelIdx--
 		} else {
 			m.modelIdx = m.modelCount() - 1
+		}
+	case stepEffort:
+		if m.effortIdx > 0 {
+			m.effortIdx--
+		} else if len(m.effortOptions) > 0 {
+			m.effortIdx = len(m.effortOptions) - 1
 		}
 	}
 	return m, nil
@@ -1789,8 +1849,101 @@ func (m providerTUIModel) handleDown() (tea.Model, tea.Cmd) {
 		} else {
 			m.modelIdx = 0
 		}
+	case stepEffort:
+		if m.effortIdx < len(m.effortOptions)-1 {
+			m.effortIdx++
+		} else {
+			m.effortIdx = 0
+		}
 	}
 	return m, nil
+}
+
+func (m *providerTUIModel) beginManualEffortSelection() {
+	protocol := cpProtocols[m.manualProtocolIdx]
+	m.effortOptions = append([]string{llm.ReasoningEffortDefault}, llm.ReasoningEffortOptions(protocol)...)
+	m.effortIdx = 0
+	if m.existingCfg != nil && m.existingCfg.Llm.Model == m.manualModelInput.Value() {
+		current := llm.NormalizeReasoningEffort(m.existingCfg.Llm.ModelSettings[m.manualModelInput.Value()].ReasoningEffort)
+		for i, effort := range m.effortOptions {
+			if effort == current {
+				m.effortIdx = i
+				break
+			}
+		}
+	}
+	m.manualStep = manualStepEffort
+}
+
+func (m *providerTUIModel) beginProviderEffortSelection(model string, adding bool) {
+	m.pendingModel = model
+	m.addingModel = adding
+	m.effortOptions = append([]string{llm.ReasoningEffortDefault}, llm.ReasoningEffortOptions(m.modelProtocol())...)
+	m.effortIdx = 0
+	current := m.reasoningEffortForSelectedProvider(model)
+	for i, effort := range m.effortOptions {
+		if effort == current {
+			m.effortIdx = i
+			break
+		}
+	}
+	m.step = stepEffort
+}
+
+func (m providerTUIModel) modelProtocol() string {
+	if m.activeTab == tabCustom {
+		if cp, ok := m.selectedCustomProvider(); ok {
+			return cp.entry.Protocol
+		}
+		return ""
+	}
+	return m.currentProvider().Protocol
+}
+
+func (m providerTUIModel) reasoningEffortForSelectedProvider(model string) string {
+	if m.existingCfg == nil || model == "" {
+		return llm.ReasoningEffortDefault
+	}
+	var settings map[string]ModelSettings
+	if m.activeTab == tabCustom {
+		if cp, ok := m.selectedCustomProvider(); ok {
+			settings = m.customProviderEntry(cp.name, cp.entry).ModelSettings
+		}
+	} else {
+		settings = m.existingCfg.Providers[m.currentProvider().Name].ModelSettings
+	}
+	return llm.NormalizeReasoningEffort(settings[model].ReasoningEffort)
+}
+
+func (m providerTUIModel) confirmProviderEffort() (tea.Model, tea.Cmd) {
+	if len(m.effortOptions) == 0 {
+		return m, nil
+	}
+	effort := m.effortOptions[m.effortIdx]
+	if m.addingModel {
+		name := m.pendingModel
+		persisted, err := m.persistCustomModelName(name, effort)
+		if err != nil {
+			m.formError = err.Error()
+			return m, nil
+		}
+		if !persisted {
+			m.formError = "no active provider to attach this model to"
+			return m, nil
+		}
+		m.addingModel = false
+		m.pendingModel = ""
+		m.modelInput.SetValue("")
+		m.refreshModelSelectionForCustom()
+		m.step = stepModel
+		return m, nil
+	}
+	m.reasoningEffort = effort
+	m.reasoningEffortSet = true
+	m.step = stepAPIKey
+	m.formError = ""
+	m.loadExistingAPIKey()
+	return m, m.apiKeyInput.Focus()
 }
 
 func (m *providerTUIModel) loadExistingAPIKey() {
@@ -1844,10 +1997,12 @@ func (m providerTUIModel) result() providerTUIResult {
 		}
 
 		return providerTUIResult{
-			provider:         p.Name,
-			model:            model,
-			apiKey:           apiKey,
-			sessionModelPick: m.sessionModelPickSnapshot(),
+			provider:           p.Name,
+			model:              model,
+			apiKey:             apiKey,
+			reasoningEffort:    m.reasoningEffort,
+			reasoningEffortSet: m.reasoningEffortSet,
+			sessionModelPick:   m.sessionModelPickSnapshot(),
 		}
 
 	case tabCustom:
@@ -1894,15 +2049,17 @@ func (m providerTUIModel) result() providerTUIResult {
 				apiKey = strings.TrimSpace(m.apiKeyInput.Value())
 			}
 			return providerTUIResult{
-				provider:         cp.name,
-				model:            model,
-				models:           append([]string(nil), cp.entry.Models...),
-				apiKey:           apiKey,
-				isCustom:         true,
-				url:              cp.entry.URL,
-				protocol:         cp.entry.Protocol,
-				authHeader:       cp.entry.AuthHeader,
-				sessionModelPick: m.sessionModelPickSnapshot(),
+				provider:           cp.name,
+				model:              model,
+				models:             append([]string(nil), cp.entry.Models...),
+				apiKey:             apiKey,
+				isCustom:           true,
+				url:                cp.entry.URL,
+				protocol:           cp.entry.Protocol,
+				authHeader:         cp.entry.AuthHeader,
+				reasoningEffort:    m.reasoningEffort,
+				reasoningEffortSet: m.reasoningEffortSet,
+				sessionModelPick:   m.sessionModelPickSnapshot(),
 			}
 		}
 		return providerTUIResult{}
@@ -1914,12 +2071,14 @@ func (m providerTUIModel) result() providerTUIResult {
 		}
 		authHeader, _ := llm.NormalizeAuthHeader(m.manualAuthHeaderInput.Value())
 		return providerTUIResult{
-			isManual:   true,
-			url:        m.manualURLInput.Value(),
-			model:      m.manualModelInput.Value(),
-			apiKey:     apiKey,
-			protocol:   cpProtocols[m.manualProtocolIdx],
-			authHeader: authHeader,
+			isManual:           true,
+			url:                m.manualURLInput.Value(),
+			model:              m.manualModelInput.Value(),
+			apiKey:             apiKey,
+			protocol:           cpProtocols[m.manualProtocolIdx],
+			authHeader:         authHeader,
+			reasoningEffort:    m.reasoningEffort,
+			reasoningEffortSet: m.reasoningEffortSet,
 		}
 	}
 
@@ -1957,6 +2116,13 @@ func renderModelName(name string, isCursor, userAdded bool) string {
 	return renderListName(name, isCursor)
 }
 
+func reasoningEffortLabel(effort string) string {
+	if effort == llm.ReasoningEffortDefault {
+		return "Provider default"
+	}
+	return effort
+}
+
 // --- View ---
 
 func (m providerTUIModel) View() tea.View {
@@ -1968,6 +2134,8 @@ func (m providerTUIModel) View() tea.View {
 		m.viewProvider(&s)
 	case stepModel:
 		m.viewModel(&s)
+	case stepEffort:
+		m.viewProviderEffort(&s)
 	case stepAPIKey:
 		m.viewAPIKey(&s)
 	}
@@ -2186,6 +2354,7 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 		{"URL", m.manualURLInput.Value(), m.manualStep == manualStepURL},
 		{"Protocol", cpProtocols[m.manualProtocolIdx], m.manualStep == manualStepProtocol},
 		{"Model", m.manualModelInput.Value(), m.manualStep == manualStepModel},
+		{"Reasoning effort", reasoningEffortLabel(m.reasoningEffort), m.manualStep == manualStepEffort},
 		{"Auth Token", strings.Repeat("*", len(m.manualTokenInput.Value())), m.manualStep == manualStepAuthToken},
 		{"Auth Header", m.manualAuthHeaderInput.Value(), m.manualStep == manualStepAuthHeader},
 	}
@@ -2208,6 +2377,12 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 				}
 			case manualStepModel:
 				s.WriteString("    " + m.manualModelInput.View() + "\n")
+			case manualStepEffort:
+				for i, effort := range m.effortOptions {
+					label := reasoningEffortLabel(effort)
+					isCursor := i == m.effortIdx
+					s.WriteString("  " + listCursorPrefix(isCursor) + renderListName(label, isCursor) + "\n")
+				}
 			case manualStepAuthToken:
 				s.WriteString("    " + m.manualTokenInput.View() + "\n")
 				if m.manualTokenMasked && m.manualTokenOriginal != "" {
@@ -2247,12 +2422,12 @@ func (m providerTUIModel) viewModel(s *strings.Builder) {
 		if m.activeTab == tabOfficial {
 			userAdded := m.isUserAddedOfficialModel(model)
 			s.WriteString(listCursorPrefixForModel(isCursor, userAdded))
-			s.WriteString(renderModelName(model, isCursor, userAdded))
+			s.WriteString(renderModelName(m.providerModelLabel(model), isCursor, userAdded))
 		} else {
 			// Custom tab: all models are user-managed; pass isCursor as userAdded
 			// so green highlight applies only to the selected row (not registry semantics).
 			s.WriteString(listCursorPrefixForModel(isCursor, isCursor))
-			s.WriteString(renderModelName(model, isCursor, isCursor))
+			s.WriteString(renderModelName(m.providerModelLabel(model), isCursor, isCursor))
 		}
 		s.WriteString("\n")
 	}
@@ -2288,6 +2463,35 @@ func (m providerTUIModel) viewModel(s *strings.Builder) {
 	} else {
 		s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  Esc Back"))
 	}
+	s.WriteString("\n")
+}
+
+func (m providerTUIModel) providerModelLabel(model string) string {
+	effort := m.reasoningEffortForSelectedProvider(model)
+	if effort == llm.ReasoningEffortDefault {
+		return model
+	}
+	return fmt.Sprintf("%s  [effort: %s]", model, effort)
+}
+
+func (m providerTUIModel) viewProviderEffort(s *strings.Builder) {
+	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select reasoning effort (%s)", m.pendingModel)))
+	s.WriteString("\n\n")
+	for i, effort := range m.effortOptions {
+		label := effort
+		if effort == llm.ReasoningEffortDefault {
+			label = "Provider default"
+		}
+		isCursor := i == m.effortIdx
+		s.WriteString(listCursorPrefix(isCursor) + renderListName(label, isCursor) + "\n")
+	}
+	if m.formError != "" {
+		s.WriteString("\n")
+		s.WriteString(tuiErrorStyle.Render("  " + m.formError))
+		s.WriteString("\n")
+	}
+	s.WriteString("\n")
+	s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  Esc Back"))
 	s.WriteString("\n")
 }
 
@@ -2451,12 +2655,18 @@ type modelTUIModel struct {
 	width  int
 	height int
 
-	provider    llm.Provider
-	models      []string
-	modelIdx    int
-	customModel bool
-	modelInput  textinput.Model
-	activeModel string
+	provider        llm.Provider
+	models          []string
+	modelIdx        int
+	customModel     bool
+	modelInput      textinput.Model
+	activeModel     string
+	selectingEffort bool
+	effortOptions   []string
+	effortIdx       int
+	pendingModel    string
+	addingModel     bool
+	selectedEffort  string
 
 	registryModels   []string
 	existingCfg      *Config
@@ -2626,7 +2836,7 @@ func (m *modelTUIModel) refreshModelSelectionAfterAdd(name string) {
 
 // persistAddedModelName appends a model to the provider's Models list in config
 // and saves to disk. It does not change the active model.
-func (m *modelTUIModel) persistAddedModelName(name string) error {
+func (m *modelTUIModel) persistAddedModelName(name, reasoningEffort string) error {
 	if name == "" {
 		return fmt.Errorf("model name must not be empty")
 	}
@@ -2640,6 +2850,11 @@ func (m *modelTUIModel) persistAddedModelName(name string) error {
 		entry := m.existingCfg.CustomProviders[m.providerName]
 		prevEntry := cloneProviderEntry(entry)
 		entry.Models = ensureModelInList(entry.Models, name)
+		settings, err := updateReasoningEffort(entry.ModelSettings, name, m.provider.Protocol, reasoningEffort)
+		if err != nil {
+			return err
+		}
+		entry.ModelSettings = settings
 		m.existingCfg.CustomProviders[m.providerName] = entry
 		if m.configPath != "" {
 			if err := saveConfig(m.configPath, m.existingCfg); err != nil {
@@ -2660,6 +2875,11 @@ func (m *modelTUIModel) persistAddedModelName(name string) error {
 	entry := m.existingCfg.Providers[m.providerName]
 	prevEntry := cloneProviderEntry(entry)
 	entry.Models = ensureModelInList(entry.Models, name)
+	settings, err := updateReasoningEffort(entry.ModelSettings, name, m.provider.Protocol, reasoningEffort)
+	if err != nil {
+		return err
+	}
+	entry.ModelSettings = settings
 	m.existingCfg.Providers[m.providerName] = entry
 	if m.configPath != "" {
 		if err := saveConfig(m.configPath, m.existingCfg); err != nil {
@@ -2698,6 +2918,9 @@ func (m modelTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.confirmingDeleteModel {
 			return m.updateDeleteModelConfirm(key)
 		}
+		if m.selectingEffort {
+			return m.updateEffortSelection(key)
+		}
 
 		if m.customModel {
 			switch key {
@@ -2716,14 +2939,9 @@ func (m modelTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.formError = ""
-				if err := m.persistAddedModelName(name); err != nil {
-					m.formError = err.Error()
-					return m, nil
-				}
 				m.customModel = false
 				m.modelInput.Blur()
-				m.modelInput.SetValue("")
-				m.refreshModelSelectionAfterAdd(name)
+				m.beginEffortSelection(name, true)
 				return m, nil
 			default:
 				var cmd tea.Cmd
@@ -2742,8 +2960,11 @@ func (m modelTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.customModel = true
 				return m, m.modelInput.Focus()
 			}
-			m.confirmed = true
-			return m, tea.Quit
+			models := m.displayModels()
+			if m.modelIdx < len(models) {
+				m.beginEffortSelection(models[m.modelIdx], false)
+			}
+			return m, nil
 		case "up", "k":
 			if m.modelIdx > 0 {
 				m.modelIdx--
@@ -2773,6 +2994,86 @@ func (m modelTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelInput, cmd = m.modelInput.Update(msg)
 			return m, cmd
 		}
+	}
+	return m, nil
+}
+
+func (m *modelTUIModel) beginEffortSelection(model string, adding bool) {
+	m.selectingEffort = true
+	m.pendingModel = model
+	m.addingModel = adding
+	m.effortOptions = append([]string{llm.ReasoningEffortDefault}, llm.ReasoningEffortOptions(m.provider.Protocol)...)
+	m.effortIdx = 0
+	current := m.reasoningEffortForModel(model)
+	for i, effort := range m.effortOptions {
+		if effort == current {
+			m.effortIdx = i
+			break
+		}
+	}
+}
+
+func (m modelTUIModel) reasoningEffortForModel(model string) string {
+	if m.existingCfg == nil || m.providerName == "" {
+		return llm.ReasoningEffortDefault
+	}
+	var settings map[string]ModelSettings
+	if m.isCustomProvider {
+		settings = m.existingCfg.CustomProviders[m.providerName].ModelSettings
+	} else {
+		settings = m.existingCfg.Providers[m.providerName].ModelSettings
+	}
+	return llm.NormalizeReasoningEffort(settings[model].ReasoningEffort)
+}
+
+func (m modelTUIModel) updateEffortSelection(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "ctrl+c":
+		m.cancelled = true
+		return m, tea.Quit
+	case "esc":
+		m.selectingEffort = false
+		m.pendingModel = ""
+		m.formError = ""
+		if m.addingModel {
+			m.addingModel = false
+			m.customModel = true
+			return m, m.modelInput.Focus()
+		}
+		return m, nil
+	case "up", "k":
+		if m.effortIdx > 0 {
+			m.effortIdx--
+		} else {
+			m.effortIdx = len(m.effortOptions) - 1
+		}
+		return m, nil
+	case "down", "j":
+		if m.effortIdx < len(m.effortOptions)-1 {
+			m.effortIdx++
+		} else {
+			m.effortIdx = 0
+		}
+		return m, nil
+	case "enter":
+		effort := m.effortOptions[m.effortIdx]
+		if m.addingModel {
+			name := m.pendingModel
+			if err := m.persistAddedModelName(name, effort); err != nil {
+				m.formError = err.Error()
+				return m, nil
+			}
+			m.selectingEffort = false
+			m.addingModel = false
+			m.pendingModel = ""
+			m.modelInput.SetValue("")
+			m.refreshModelSelectionAfterAdd(name)
+			return m, nil
+		}
+		m.selectedEffort = effort
+		m.selectingEffort = false
+		m.confirmed = true
+		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -2881,6 +3182,9 @@ func (m *modelTUIModel) resetCustomModelInput() {
 }
 
 func (m modelTUIModel) selectedModel() string {
+	if m.pendingModel != "" && m.confirmed {
+		return m.pendingModel
+	}
 	if m.customModel || m.isCustomItem(m.modelIdx) {
 		return m.modelInput.Value()
 	}
@@ -2891,9 +3195,36 @@ func (m modelTUIModel) selectedModel() string {
 	return ""
 }
 
+func (m modelTUIModel) selectedReasoningEffort() string {
+	return m.selectedEffort
+}
+
 func (m modelTUIModel) View() tea.View {
 	var s strings.Builder
 	s.WriteString("\n")
+	if m.selectingEffort {
+		s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select reasoning effort (%s)", m.pendingModel)))
+		s.WriteString("\n\n")
+		for i, effort := range m.effortOptions {
+			label := effort
+			if effort == llm.ReasoningEffortDefault {
+				label = "Provider default"
+			}
+			isCursor := i == m.effortIdx
+			s.WriteString(listCursorPrefix(isCursor) + renderListName(label, isCursor) + "\n")
+		}
+		if m.formError != "" {
+			s.WriteString("\n")
+			s.WriteString(tuiErrorStyle.Render("  " + m.formError))
+			s.WriteString("\n")
+		}
+		s.WriteString("\n")
+		s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  Esc Back"))
+		s.WriteString("\n")
+		v := tea.NewView(s.String())
+		v.AltScreen = true
+		return v
+	}
 	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", m.provider.DisplayName)))
 	s.WriteString("\n\n")
 
@@ -2903,11 +3234,11 @@ func (m modelTUIModel) View() tea.View {
 		if m.isCustomProvider {
 			// All models are user-managed; isCursor drives green highlight on selection.
 			s.WriteString(listCursorPrefixForModel(isCursor, isCursor))
-			s.WriteString(renderModelName(model, isCursor, isCursor))
+			s.WriteString(renderModelName(m.modelLabel(model), isCursor, isCursor))
 		} else {
 			userAdded := m.isUserAddedModel(model)
 			s.WriteString(listCursorPrefixForModel(isCursor, userAdded))
-			s.WriteString(renderModelName(model, isCursor, userAdded))
+			s.WriteString(renderModelName(m.modelLabel(model), isCursor, userAdded))
 		}
 		s.WriteString("\n")
 	}
@@ -2950,4 +3281,12 @@ func (m modelTUIModel) View() tea.View {
 	v := tea.NewView(s.String())
 	v.AltScreen = true
 	return v
+}
+
+func (m modelTUIModel) modelLabel(model string) string {
+	effort := m.reasoningEffortForModel(model)
+	if effort == llm.ReasoningEffortDefault {
+		return model
+	}
+	return fmt.Sprintf("%s  [effort: %s]", model, effort)
 }

@@ -26,6 +26,7 @@ Examples:
   # Provider setup (non-interactive)
   ocr config set provider anthropic
   ocr config set model claude-opus-4-6
+  ocr config set reasoning_effort high
   ocr config set providers.anthropic.api_key "$ANTHROPIC_API_KEY"
 
   # Custom provider
@@ -37,7 +38,7 @@ Examples:
 var configSetCmd = &cobra.Command{
 	Use:     "set <key> <value>",
 	Short:   "Set a configuration value",
-	Example: "  ocr config set llm.model claude-opus-4-6\n  ocr config set provider anthropic",
+	Example: "  ocr config set llm.model claude-opus-4-6\n  ocr config set provider anthropic\n  ocr config set reasoning_effort high",
 	Args:    cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runConfigSet(args[0], args[1])
@@ -47,8 +48,8 @@ var configSetCmd = &cobra.Command{
 var configUnsetCmd = &cobra.Command{
 	Use:     "unset <key>",
 	Short:   "Remove a configuration value",
-	Long:    "Remove a provider, custom_providers.<name>, or mcp_servers.<name>.",
-	Example: "  ocr config unset provider\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github",
+	Long:    "Remove a provider, the active model's reasoning_effort, custom_providers.<name>, or mcp_servers.<name>.",
+	Example: "  ocr config unset provider\n  ocr config unset reasoning_effort\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github",
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runConfigUnset(args[0])
@@ -66,7 +67,7 @@ var configProviderCmd = &cobra.Command{
 
 var configModelCmd = &cobra.Command{
 	Use:   "model",
-	Short: "Interactive model selection",
+	Short: "Interactive model and reasoning effort selection",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runConfigModel()
@@ -139,10 +140,24 @@ func runConfigUnset(key string) error {
 	if key == "provider" {
 		return unsetActiveProvider(configPath)
 	}
+	if key == "reasoning_effort" {
+		cfg, err := loadOrCreateConfig(configPath)
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
+		}
+		if err := setConfigValue(cfg, key, "default"); err != nil {
+			return err
+		}
+		if err := saveConfig(configPath, cfg); err != nil {
+			return err
+		}
+		fmt.Println("Unset reasoning_effort for the active model.")
+		return nil
+	}
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports provider, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, reasoning_effort, custom_providers.<name>, and mcp_servers.<name>")
 	}
 
 	switch parts[0] {
@@ -151,7 +166,7 @@ func runConfigUnset(key string) error {
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports provider, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, reasoning_effort, custom_providers.<name>, and mcp_servers.<name>")
 	}
 }
 
@@ -259,15 +274,20 @@ func deleteCustomProvider(cfg *Config, name string) (bool, error) {
 
 // ProviderEntry holds per-provider configuration in the providers map.
 type ProviderEntry struct {
-	APIKey       string            `json:"api_key,omitempty"`
-	URL          string            `json:"url,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Models       []string          `json:"models,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	APIKey        string                   `json:"api_key,omitempty"`
+	URL           string                   `json:"url,omitempty"`
+	Protocol      string                   `json:"protocol,omitempty"`
+	Model         string                   `json:"model,omitempty"`
+	Models        []string                 `json:"models,omitempty"`
+	AuthHeader    string                   `json:"auth_header,omitempty"`
+	TimeoutSec    int                      `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
+	ExtraBody     map[string]any           `json:"extra_body,omitempty"`
+	ExtraHeaders  map[string]string        `json:"extra_headers,omitempty"`
+	ModelSettings map[string]ModelSettings `json:"model_settings,omitempty"`
+}
+
+type ModelSettings struct {
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // MCPServerConfig holds configuration for a single MCP server.
@@ -296,15 +316,16 @@ type Config struct {
 }
 
 type LlmConfig struct {
-	URL          string            `json:"url,omitempty"`
-	AuthToken    string            `json:"auth_token,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
-	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
-	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	URL           string                   `json:"url,omitempty"`
+	AuthToken     string                   `json:"auth_token,omitempty"`
+	AuthHeader    string                   `json:"auth_header,omitempty"`
+	Model         string                   `json:"model,omitempty"`
+	Protocol      string                   `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
+	UseAnthropic  *bool                    `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
+	TimeoutSec    int                      `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
+	ExtraBody     map[string]any           `json:"extra_body,omitempty"`
+	ExtraHeaders  map[string]string        `json:"extra_headers,omitempty"`
+	ModelSettings map[string]ModelSettings `json:"model_settings,omitempty"`
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -352,6 +373,7 @@ func LoadAppConfig(path string) (*Config, error) {
 var supportedConfigKeys = []string{
 	"provider",
 	"model",
+	"reasoning_effort",
 	"providers.<name>.<field>",
 	"custom_providers.<name>.<field>",
 	"mcp_servers.<name>.<field>",
@@ -363,6 +385,7 @@ var supportedConfigKeys = []string{
 	"llm.use_anthropic",
 	"llm.extra_body",
 	"llm.extra_headers",
+	"llm.reasoning_effort",
 	"language",
 	"telemetry.enabled",
 	"telemetry.exporter",
@@ -423,6 +446,8 @@ func setConfigValue(cfg *Config, key, value string) error {
 		} else {
 			cfg.Model = value
 		}
+	case "reasoning_effort":
+		return setActiveModelReasoningEffort(cfg, value)
 	case "llm.url", "llm.URL":
 		cfg.Llm.URL = value
 	case "llm.auth_token", "llm.AuthToken":
@@ -441,6 +466,19 @@ func setConfigValue(cfg *Config, key, value string) error {
 		cfg.Llm.ExtraHeaders = parsed
 	case "llm.model", "llm.Model":
 		cfg.Llm.Model = value
+	case "llm.reasoning_effort", "llm.ReasoningEffort":
+		protocol := cfg.Llm.Protocol
+		if protocol == "" {
+			protocol = llm.ProtocolAnthropic
+			if cfg.Llm.UseAnthropic != nil && !*cfg.Llm.UseAnthropic {
+				protocol = llm.ProtocolOpenAIChatCompletions
+			}
+		}
+		settings, err := updateReasoningEffort(cfg.Llm.ModelSettings, cfg.Llm.Model, protocol, value)
+		if err != nil {
+			return err
+		}
+		cfg.Llm.ModelSettings = settings
 	case "llm.protocol", "llm.Protocol":
 		normalized := llm.NormalizeProtocol(value)
 		if err := llm.ValidateProtocol(normalized); err != nil {
@@ -501,7 +539,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, model_settings, auth_header, extra_body, extra_headers\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -526,6 +564,12 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 			return fmt.Errorf("invalid model list for %s: %w", key, err)
 		}
 		entry.Models = models
+	case "model_settings":
+		var settings map[string]ModelSettings
+		if err := json.Unmarshal([]byte(value), &settings); err != nil {
+			return fmt.Errorf("invalid JSON for %s: %w", key, err)
+		}
+		entry.ModelSettings = settings
 	case "auth_header":
 		normalized, err := llm.NormalizeAuthHeader(value)
 		if err != nil {
@@ -545,9 +589,82 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 		}
 		entry.ExtraHeaders = parsed
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, model_settings, auth_header, extra_body, extra_headers", field)
 	}
 	return nil
+}
+
+func setActiveModelReasoningEffort(cfg *Config, value string) error {
+	if cfg.Provider == "" {
+		protocol := cfg.Llm.Protocol
+		if protocol == "" {
+			protocol = llm.ProtocolAnthropic
+			if cfg.Llm.UseAnthropic != nil && !*cfg.Llm.UseAnthropic {
+				protocol = llm.ProtocolOpenAIChatCompletions
+			}
+		}
+		settings, err := updateReasoningEffort(cfg.Llm.ModelSettings, cfg.Llm.Model, protocol, value)
+		if err != nil {
+			return err
+		}
+		cfg.Llm.ModelSettings = settings
+		return nil
+	}
+
+	if preset, isPreset := llm.LookupProvider(cfg.Provider); isPreset {
+		if cfg.Providers == nil {
+			cfg.Providers = make(map[string]ProviderEntry)
+		}
+		entry := cfg.Providers[cfg.Provider]
+		model := activeModelForProvider(cfg, cfg.Provider, entry)
+		protocol := preset.Protocol
+		if entry.Protocol != "" {
+			protocol = entry.Protocol
+		}
+		settings, err := updateReasoningEffort(entry.ModelSettings, model, protocol, value)
+		if err != nil {
+			return err
+		}
+		entry.ModelSettings = settings
+		cfg.Providers[cfg.Provider] = entry
+		return nil
+	}
+
+	entry, ok := cfg.CustomProviders[cfg.Provider]
+	if !ok {
+		return fmt.Errorf("provider %q is not configured in custom_providers", cfg.Provider)
+	}
+	model := activeModelForProvider(cfg, cfg.Provider, entry)
+	settings, err := updateReasoningEffort(entry.ModelSettings, model, entry.Protocol, value)
+	if err != nil {
+		return err
+	}
+	entry.ModelSettings = settings
+	cfg.CustomProviders[cfg.Provider] = entry
+	return nil
+}
+
+func updateReasoningEffort(settings map[string]ModelSettings, model, protocol, value string) (map[string]ModelSettings, error) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return settings, fmt.Errorf("no active model configured; select a model before setting reasoning_effort")
+	}
+	effort := llm.NormalizeReasoningEffort(value)
+	if err := llm.ValidateReasoningEffort(protocol, effort); err != nil {
+		return settings, err
+	}
+	if effort == llm.ReasoningEffortDefault {
+		delete(settings, model)
+		if len(settings) == 0 {
+			return nil, nil
+		}
+		return settings, nil
+	}
+	if settings == nil {
+		settings = make(map[string]ModelSettings)
+	}
+	settings[model] = ModelSettings{ReasoningEffort: effort}
+	return settings, nil
 }
 
 func parseModelListValue(value string) ([]string, error) {

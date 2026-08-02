@@ -509,6 +509,73 @@ func TestOpenAIClient_ExtraHeadersSent(t *testing.T) {
 	}
 }
 
+func TestOpenAIClient_SendsReasoningEffort(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-test","object":"chat.completion","model":"gpt-test","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:             server.URL + "/v1",
+		APIKey:          "test-key",
+		Model:           "gpt-test",
+		ReasoningEffort: "high",
+		ExtraBody: map[string]any{
+			"reasoning_effort": "low",
+			"vendor_flag":      "keep-me",
+		},
+	})
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{Messages: []Message{{Role: "user", Content: "ping"}}, MaxTokens: 64}); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["reasoning_effort"] != "high" {
+		t.Errorf("reasoning_effort = %#v, want high", gotBody["reasoning_effort"])
+	}
+	if gotBody["vendor_flag"] != "keep-me" {
+		t.Errorf("vendor_flag = %#v, want keep-me", gotBody["vendor_flag"])
+	}
+}
+
+func TestAnthropicClient_SendsReasoningEffort(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_test","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:             server.URL + "/v1/messages",
+		APIKey:          "test-key",
+		Model:           "claude-test",
+		ReasoningEffort: "xhigh",
+		ExtraBody: map[string]any{
+			"output_config": map[string]any{"effort": "low", "vendor": "keep-me"},
+		},
+	})
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{Messages: []Message{{Role: "user", Content: "ping"}}, MaxTokens: 64}); err != nil {
+		t.Fatal(err)
+	}
+	outputConfig, ok := gotBody["output_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("output_config = %#v, want object", gotBody["output_config"])
+	}
+	if outputConfig["effort"] != "xhigh" {
+		t.Errorf("output_config.effort = %#v, want xhigh", outputConfig["effort"])
+	}
+	if outputConfig["vendor"] != "keep-me" {
+		t.Errorf("output_config.vendor = %#v, want keep-me", outputConfig["vendor"])
+	}
+}
+
 func writeOpenAISSE(t *testing.T, w http.ResponseWriter, events ...string) {
 	t.Helper()
 

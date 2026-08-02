@@ -6,24 +6,38 @@ describe('parseConfig', () => {
     const raw = JSON.stringify({
       provider: 'anthropic',
       providers: {
-        anthropic: { api_key: 'k', model: 'claude-opus-4-6', models: ['claude-opus-4-6'] },
+        anthropic: {
+          api_key: 'k',
+          model: 'claude-opus-4-6',
+          models: ['claude-opus-4-6'],
+          model_settings: { 'claude-opus-4-6': { reasoning_effort: 'high' } },
+        },
       },
       custom_providers: {
         'my-llm': { url: 'https://x', protocol: 'openai', model: 'm', api_key: 'k2' },
       },
-      llm: { url: 'u', auth_token: 't', model: 'm', use_anthropic: true, auth_header: 'x-api-key' },
+      llm: {
+        url: 'u', auth_token: 't', model: 'm', use_anthropic: true, auth_header: 'x-api-key',
+        model_settings: { m: { reasoning_effort: 'low' } },
+      },
       language: 'Chinese',
     });
     expect(parseConfig(raw)).toEqual({
       provider: 'anthropic',
       model: '',
       providers: {
-        anthropic: { apiKey: 'k', url: '', protocol: '', model: 'claude-opus-4-6', models: ['claude-opus-4-6'], authHeader: '' },
+        anthropic: {
+          apiKey: 'k', url: '', protocol: '', model: 'claude-opus-4-6', models: ['claude-opus-4-6'], authHeader: '',
+          modelSettings: { 'claude-opus-4-6': { reasoningEffort: 'high' } },
+        },
       },
       customProviders: {
         'my-llm': { apiKey: 'k2', url: 'https://x', protocol: 'openai', model: 'm', authHeader: '' },
       },
-      llm: { url: 'u', authToken: 't', model: 'm', useAnthropic: true, authHeader: 'x-api-key' },
+      llm: {
+        url: 'u', authToken: 't', model: 'm', useAnthropic: true, authHeader: 'x-api-key',
+        modelSettings: { m: { reasoningEffort: 'low' } },
+      },
       language: 'Chinese',
     });
   });

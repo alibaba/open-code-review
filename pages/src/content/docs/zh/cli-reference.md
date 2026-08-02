@@ -94,6 +94,7 @@ unstaged + untracked 变更。
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
 | `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`30`）；1–9 会被上调到 `10`；任何 `≥ 10` 的值都覆盖模板默认（即使小于 `30`）。 |
 | `--model <name>` | — | — | 为本次评审覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
+| `--reasoning-effort <value>` | — | — | 为本次运行覆盖 reasoning effort。`default` 表示不发送该字段；支持值取决于协议和模型。 |
 | `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |
 | `--tools <path>` | — | 内嵌 | 自定义 JSON 工具配置文件路径。覆盖内嵌工具定义。 |
 
@@ -334,18 +335,20 @@ Rule:
 ```text
 ocr config set <key> <value>
 ocr config unset custom_providers.<name>   Delete a custom provider
+ocr config unset reasoning_effort          将当前模型恢复为 provider 默认值
 ocr config provider                        Interactive provider setup
 ocr config model                           Interactive model selection
 ```
 
 - **`set`**——非交互式写入单个配置值。
-- **`unset`**——删除一个自定义 provider。仅支持
-  `custom_providers.<name>`。若删除的是当前启用的 provider，则 `provider` 和
-  `model` 被清空（运行 `ocr config provider` 重新选择）。
+- **`unset`**——删除一个自定义 provider，或重置当前模型的 `reasoning_effort`。
+  若删除的是当前启用的 provider，则 `provider` 和 `model` 被清空（运行
+  `ocr config provider` 重新选择）。
 - **`provider`**——启动交互式 provider 配置 TUI（无额外参数；非交互式请用
   `ocr config set provider <name>`）。
-- **`model`**——启动交互式 model 选择 TUI（无额外参数；非交互式请用
-  `ocr config set model <name>`）。
+- **`model`**——启动交互式 model 与 reasoning-effort 选择 TUI（无额外参数；
+  非交互式请用 `ocr config set model <name>` 和
+  `ocr config set reasoning_effort <value>`）。
 
 完整的 key 参考、schema 与示例见[配置](../configuration/)。
 

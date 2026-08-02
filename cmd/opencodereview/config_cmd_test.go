@@ -71,6 +71,54 @@ func TestSetConfigValueModelWithProvider(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueReasoningEffortIsPerModel(t *testing.T) {
+	cfg := &Config{
+		Provider: "anthropic",
+		Model:    "claude-opus-4-8",
+		Providers: map[string]ProviderEntry{
+			"anthropic": {
+				ModelSettings: map[string]ModelSettings{
+					"claude-opus-4-7": {ReasoningEffort: "low"},
+				},
+			},
+		},
+	}
+	if err := setConfigValue(cfg, "reasoning_effort", " XHIGH "); err != nil {
+		t.Fatal(err)
+	}
+	settings := cfg.Providers["anthropic"].ModelSettings
+	if got := settings["claude-opus-4-8"].ReasoningEffort; got != "xhigh" {
+		t.Errorf("active model effort = %q, want xhigh", got)
+	}
+	if got := settings["claude-opus-4-7"].ReasoningEffort; got != "low" {
+		t.Errorf("other model effort = %q, want low", got)
+	}
+
+	if err := setConfigValue(cfg, "reasoning_effort", "default"); err != nil {
+		t.Fatal(err)
+	}
+	settings = cfg.Providers["anthropic"].ModelSettings
+	if _, ok := settings["claude-opus-4-8"]; ok {
+		t.Error("default should remove only the active model setting")
+	}
+	if got := settings["claude-opus-4-7"].ReasoningEffort; got != "low" {
+		t.Errorf("other model effort after default = %q, want low", got)
+	}
+}
+
+func TestSetConfigValueReasoningEffortValidatesProtocol(t *testing.T) {
+	cfg := &Config{
+		Provider: "my-anthropic",
+		Model:    "claude-test",
+		CustomProviders: map[string]ProviderEntry{
+			"my-anthropic": {Protocol: llm.ProtocolAnthropic, Model: "claude-test"},
+		},
+	}
+	if err := setConfigValue(cfg, "reasoning_effort", "minimal"); err == nil {
+		t.Fatal("expected Anthropic to reject OpenAI-only minimal effort")
+	}
+}
+
 func TestSetConfigValueProviderEntry(t *testing.T) {
 	cfg := &Config{}
 
@@ -929,8 +977,8 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\n" +
+		"Supported keys: provider, model, reasoning_effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.reasoning_effort, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, url, protocol, model, models, model_settings, auth_header, extra_body, extra_headers\n" +
 		"Protocol values: anthropic, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {

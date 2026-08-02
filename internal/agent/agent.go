@@ -148,10 +148,11 @@ type Args struct {
 // Model and concurrency are not duplicated here; the hash folds them in from
 // Args.Model and Args.MaxConcurrency.
 type RuntimeConfig struct {
-	Protocol     string        // LLM wire protocol (canonical name, e.g. "anthropic")
-	EndpointHost string        // endpoint host[:port] only, credential- and path-free
-	Language     string        // configured review output language
-	Timeout      time.Duration // per-request timeout (0 means client default)
+	Protocol        string        // LLM wire protocol (canonical name, e.g. "anthropic")
+	EndpointHost    string        // endpoint host[:port] only, credential- and path-free
+	Language        string        // configured review output language
+	Timeout         time.Duration // per-request timeout (0 means client default)
+	ReasoningEffort string        // selected model's provider-specific reasoning effort
 }
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
@@ -890,6 +891,7 @@ func (a *Agent) runtimeConfigSHA256() string {
 		"host", r.EndpointHost,
 		"language", r.Language,
 		"timeout", r.Timeout.String(),
+		"reasoning_effort", r.ReasoningEffort,
 		"concurrency", strconv.Itoa(a.args.MaxConcurrency),
 		"max_tokens_budget", strconv.FormatInt(a.args.MaxTokensBudget, 10),
 	)

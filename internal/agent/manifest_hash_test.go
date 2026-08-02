@@ -114,10 +114,11 @@ func TestRuntimeConfigSHA256(t *testing.T) {
 		Model:          "m",
 		MaxConcurrency: 4,
 		RuntimeConfig: RuntimeConfig{
-			Protocol:     "anthropic",
-			EndpointHost: "api.example.com",
-			Language:     "en",
-			Timeout:      30 * time.Second,
+			Protocol:        "anthropic",
+			EndpointHost:    "api.example.com",
+			Language:        "en",
+			Timeout:         30 * time.Second,
+			ReasoningEffort: "medium",
 		},
 	}
 	a := New(baseArgs)
@@ -135,6 +136,7 @@ func TestRuntimeConfigSHA256(t *testing.T) {
 		{"host", func(x *Args) { x.RuntimeConfig.EndpointHost = "api.other.com" }},
 		{"language", func(x *Args) { x.RuntimeConfig.Language = "zh" }},
 		{"timeout", func(x *Args) { x.RuntimeConfig.Timeout = 60 * time.Second }},
+		{"reasoning_effort", func(x *Args) { x.RuntimeConfig.ReasoningEffort = "high" }},
 		{"concurrency", func(x *Args) { x.MaxConcurrency = 8 }},
 		// The aggregate budget changes what coverage a run can even attempt, so two
 		// otherwise-identical runs with different caps must not share an identity.

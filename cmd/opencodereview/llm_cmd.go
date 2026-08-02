@@ -99,6 +99,11 @@ func runLLMTest() error {
 	fmt.Printf("Source: %s\n", ep.Source)
 	fmt.Printf("URL:    %s\n", ep.URL)
 	fmt.Printf("Model:  %s\n", model)
+	if ep.ReasoningEffort != "" {
+		fmt.Printf("Reasoning effort: %s\n", ep.ReasoningEffort)
+	} else {
+		fmt.Println("Reasoning effort: provider default")
+	}
 
 	content := resp.Content()
 	if content == "" {

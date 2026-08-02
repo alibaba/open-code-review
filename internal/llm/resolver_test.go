@@ -887,6 +887,58 @@ func TestResolveEndpointWithModelOverride_LegacyConfigNoValidation(t *testing.T)
 	}
 }
 
+func TestResolveEndpoint_ReasoningEffortPrecedence(t *testing.T) {
+	t.Setenv(envOCRLLMReasoningEffort, "")
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	data := []byte(`{
+		"provider":"anthropic",
+		"model":"claude-opus-4-8",
+		"providers":{"anthropic":{
+			"api_key":"test-token",
+			"model_settings":{
+				"claude-opus-4-8":{"reasoning_effort":"high"},
+				"claude-opus-4-7":{"reasoning_effort":"low"}
+			}
+		}}
+	}`)
+	if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep.ReasoningEffort != "high" {
+		t.Errorf("configured effort = %q, want high", ep.ReasoningEffort)
+	}
+
+	ep, err = ResolveEndpointWithOverrides(cfgPath, "claude-opus-4-7", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep.ReasoningEffort != "low" {
+		t.Errorf("model override effort = %q, want low", ep.ReasoningEffort)
+	}
+
+	t.Setenv(envOCRLLMReasoningEffort, "xhigh")
+	ep, err = ResolveEndpointWithOverrides(cfgPath, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep.ReasoningEffort != "xhigh" {
+		t.Errorf("environment effort = %q, want xhigh", ep.ReasoningEffort)
+	}
+
+	ep, err = ResolveEndpointWithOverrides(cfgPath, "", "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep.ReasoningEffort != ReasoningEffortDefault {
+		t.Errorf("explicit default effort = %q, want omitted", ep.ReasoningEffort)
+	}
+}
+
 func TestParseExtraHeaders(t *testing.T) {
 	tests := []struct {
 		name    string
