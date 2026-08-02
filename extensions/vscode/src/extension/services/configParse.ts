@@ -1,17 +1,19 @@
-import { OcrConfig, ProviderEntry } from '../../shared/types';
+import { ModelSettings, OcrConfig, ProviderEntry } from '../../shared/types';
+
+function parseModelSettings(raw: unknown): Record<string, ModelSettings> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  return Object.fromEntries(Object.entries(raw as Record<string, unknown>).map(([model, value]) => {
+    const setting = value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+    return [model, { reasoningEffort: typeof setting.reasoning_effort === 'string' ? setting.reasoning_effort : '' }];
+  }));
+}
 
 function parseProviderEntry(raw: Record<string, unknown> | undefined): ProviderEntry {
   if (!raw) return {};
   const models = Array.isArray(raw.models)
     ? raw.models.filter((m): m is string => typeof m === 'string')
-    : undefined;
-  const modelSettings = raw.model_settings && typeof raw.model_settings === 'object' && !Array.isArray(raw.model_settings)
-    ? Object.fromEntries(Object.entries(raw.model_settings as Record<string, unknown>).map(([model, value]) => {
-      const setting = value && typeof value === 'object' && !Array.isArray(value)
-        ? value as Record<string, unknown>
-        : {};
-      return [model, { reasoningEffort: typeof setting.reasoning_effort === 'string' ? setting.reasoning_effort : '' }];
-    }))
     : undefined;
   return {
     apiKey: typeof raw.api_key === 'string' ? raw.api_key : '',
@@ -20,7 +22,7 @@ function parseProviderEntry(raw: Record<string, unknown> | undefined): ProviderE
     model: typeof raw.model === 'string' ? raw.model : '',
     models,
     authHeader: typeof raw.auth_header === 'string' ? raw.auth_header : '',
-    modelSettings,
+    modelSettings: parseModelSettings(raw.model_settings),
   };
 }
 
@@ -48,7 +50,7 @@ export function parseConfig(raw: string): OcrConfig | null {
       model: llm.model || '',
       useAnthropic: llm.use_anthropic !== false,
       authHeader: llm.auth_header || '',
-      modelSettings: parseProviderEntry({ model_settings: llm.model_settings }).modelSettings,
+      modelSettings: parseModelSettings(llm.model_settings),
     },
     language: j.language || 'Chinese',
   };

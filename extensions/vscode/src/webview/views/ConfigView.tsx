@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { ConfigEntry, ConfigPanelFocus, ProviderTab, buildCustomCreateSaveEntries, buildCustomUpdateSaveEntries, buildOfficialSaveEntries, describeActiveProvider, detectInitialTab, isConfigReady, listCustomProviderNames, modelReasoningEffort, reasoningEffortOptions } from '../../shared/configUtils';
+import { ConfigEntry, ConfigPanelFocus, ProviderTab, buildCustomCreateSaveEntries, buildCustomUpdateSaveEntries, buildOfficialSaveEntries, describeActiveProvider, detectInitialTab, isConfigReady, listCustomProviderNames, modelReasoningEffort, reasoningEffortOptions, savedModelReasoningEffort } from '../../shared/configUtils';
 import { mergeModelLists, PROVIDER_PRESETS } from '../../shared/providers';
 import { EnvCheckResult, LogLine, OcrConfig } from '../../shared/types';
 import { CliStatus, ConnTest } from '../configStore';
@@ -415,7 +415,8 @@ function OfficialForm({ wide, config, connTest, onBack, onTest, onSave }: FormPr
             onInput={(e) => {
               const nextModel = (e.target as HTMLInputElement).value;
               setCustomModel(nextModel);
-              setReasoningEffort(modelReasoningEffort(savedEntry, nextModel.trim()));
+              const savedEffort = savedModelReasoningEffort(savedEntry, nextModel.trim());
+              if (savedEffort !== undefined) setReasoningEffort(savedEffort);
             }}
             placeholder="model name"
           />
@@ -546,7 +547,8 @@ function CustomForm({
         <input class="form-input" value={model} onInput={(e) => {
           const nextModel = (e.target as HTMLInputElement).value;
           setModel(nextModel);
-          setReasoningEffort(modelReasoningEffort(entry, nextModel.trim()));
+          const savedEffort = savedModelReasoningEffort(entry, nextModel.trim());
+          if (savedEffort !== undefined) setReasoningEffort(savedEffort);
         }} placeholder="model name" />
       </FormItem>
       <FormItem label={t('view.config.modelList')} optional>

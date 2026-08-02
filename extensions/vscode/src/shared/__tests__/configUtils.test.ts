@@ -1,6 +1,7 @@
 import {
   buildOfficialSaveEntries,
   reasoningEffortOptions,
+  savedModelReasoningEffort,
 } from '../configUtils';
 
 describe('reasoning effort config helpers', () => {
@@ -14,5 +15,11 @@ describe('reasoning effort config helpers', () => {
       key: 'reasoning_effort',
       value: 'default',
     });
+  });
+
+  it('distinguishes a saved effort from an unsaved model', () => {
+    const entry = { modelSettings: { saved: { reasoningEffort: 'high' } } };
+    expect(savedModelReasoningEffort(entry, 'saved')).toBe('high');
+    expect(savedModelReasoningEffort(entry, 'new-model')).toBeUndefined();
   });
 });

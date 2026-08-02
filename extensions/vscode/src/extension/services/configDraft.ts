@@ -75,6 +75,17 @@ function setProviderValue(cfg: RawConfig, key: string, value: string): void {
   setCustomProviderField(cfg, name, field, value);
 }
 
+function applyReasoningEffort(target: Record<string, unknown>, model: string, effort: string): void {
+  const raw = target.model_settings;
+  const current = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? { ...(raw as Record<string, unknown>) }
+    : {};
+  if (effort) current[model] = { reasoning_effort: effort };
+  else delete current[model];
+  if (Object.keys(current).length > 0) target.model_settings = current;
+  else delete target.model_settings;
+}
+
 function setConfigValue(cfg: RawConfig, key: string, value: string): void {
   if (key.startsWith('providers.')) {
     setProviderValue(cfg, key, value);
@@ -119,21 +130,9 @@ function setConfigValue(cfg: RawConfig, key: string, value: string): void {
         const entry = collection?.[cfg.provider];
         const model = typeof entry?.model === 'string' ? entry.model : cfg.model;
         if (!entry || !model) break;
-        const current = entry.model_settings && typeof entry.model_settings === 'object'
-          ? { ...(entry.model_settings as Record<string, unknown>) }
-          : {};
-        if (normalized) current[model] = { reasoning_effort: normalized };
-        else delete current[model];
-        if (Object.keys(current).length > 0) entry.model_settings = current;
-        else delete entry.model_settings;
+        applyReasoningEffort(entry, model, normalized);
       } else if (cfg.llm && typeof cfg.llm.model === 'string' && cfg.llm.model) {
-        const current = cfg.llm.model_settings && typeof cfg.llm.model_settings === 'object'
-          ? { ...(cfg.llm.model_settings as Record<string, unknown>) }
-          : {};
-        if (normalized) current[cfg.llm.model] = { reasoning_effort: normalized };
-        else delete current[cfg.llm.model];
-        if (Object.keys(current).length > 0) cfg.llm.model_settings = current;
-        else delete cfg.llm.model_settings;
+        applyReasoningEffort(cfg.llm, cfg.llm.model, normalized);
       }
       break;
     }

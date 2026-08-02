@@ -645,11 +645,14 @@ func setActiveModelReasoningEffort(cfg *Config, value string) error {
 }
 
 func updateReasoningEffort(settings map[string]ModelSettings, model, protocol, value string) (map[string]ModelSettings, error) {
+	effort := llm.NormalizeReasoningEffort(value)
 	model = strings.TrimSpace(model)
 	if model == "" {
+		if effort == llm.ReasoningEffortDefault {
+			return settings, nil
+		}
 		return settings, fmt.Errorf("no active model configured; select a model before setting reasoning_effort")
 	}
-	effort := llm.NormalizeReasoningEffort(value)
 	if err := llm.ValidateReasoningEffort(protocol, effort); err != nil {
 		return settings, err
 	}

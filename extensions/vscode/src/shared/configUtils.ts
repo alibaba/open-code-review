@@ -22,7 +22,11 @@ export function reasoningEffortOptions(protocol: string): string[] {
 }
 
 export function modelReasoningEffort(entry: ProviderEntry | undefined, model: string): string {
-  return entry?.modelSettings?.[model]?.reasoningEffort ?? '';
+  return savedModelReasoningEffort(entry, model) ?? '';
+}
+
+export function savedModelReasoningEffort(entry: ProviderEntry | undefined, model: string): string | undefined {
+  return entry?.modelSettings?.[model]?.reasoningEffort;
 }
 
 export function detectInitialTab(config: OcrConfig | null): ProviderTab {

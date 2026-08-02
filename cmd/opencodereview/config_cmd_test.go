@@ -119,6 +119,16 @@ func TestSetConfigValueReasoningEffortValidatesProtocol(t *testing.T) {
 	}
 }
 
+func TestUnsetReasoningEffortWithoutActiveModelIsNoOp(t *testing.T) {
+	cfg := &Config{}
+	if err := setConfigValue(cfg, "reasoning_effort", "default"); err != nil {
+		t.Fatalf("unset without active model: %v", err)
+	}
+	if cfg.Llm.ModelSettings != nil {
+		t.Errorf("ModelSettings = %v, want nil", cfg.Llm.ModelSettings)
+	}
+}
+
 func TestSetConfigValueProviderEntry(t *testing.T) {
 	cfg := &Config{}
 
