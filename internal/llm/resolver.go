@@ -32,6 +32,18 @@ type ResolvedEndpoint struct {
 	// knob; users can still override via OCR_LLM_TIMEOUT.
 	Timeout    time.Duration
 	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
+
+	// AmbientAuth marks an endpoint that carries no token and needs no base
+	// URL, because the transport supplies both — AWS SigV4 signing derives the
+	// host from the region and the credentials from the environment's own
+	// chain. Completeness checks must treat an empty URL and Token as valid for
+	// these; requiring either would reject a correctly configured endpoint.
+	AmbientAuth bool
+
+	// AWSProfile and AWSRegion override the ambient AWS chain for SigV4
+	// providers. Empty means "let the AWS SDK decide".
+	AWSProfile string
+	AWSRegion  string
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -126,7 +138,10 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		if err != nil {
 			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", strategy.name, err)
 		}
-		if ok && ep.URL != "" && ep.Token != "" && ep.Model != "" {
+		// An ambient-auth endpoint is complete without a URL or token: the
+		// transport supplies both. Everything else still needs all three.
+		complete := ep.Model != "" && (ep.AmbientAuth || (ep.URL != "" && ep.Token != ""))
+		if ok && complete {
 			return finalizeResolvedEndpoint(strategy.name, ep, env), nil
 		}
 	}
@@ -294,6 +309,13 @@ type providerEntryConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+
+	// AWSProfile and AWSRegion apply to ambient-auth providers that sign with
+	// SigV4 (currently bedrock). Both are optional: without them the standard
+	// AWS chain decides, same as any other AWS tool. Setting them in config
+	// makes a review run reproducible without exporting AWS_PROFILE first.
+	AWSProfile string `json:"aws_profile,omitempty"`
+	AWSRegion  string `json:"aws_region,omitempty"`
 }
 
 type configFile struct {
@@ -389,8 +411,11 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		}
 	}
 	// No credential at all is still an error here, before any other validation:
-	// only the command's *execution* is deferred, not the emptiness check.
-	if apiKey == "" && apiKeyCmd == "" {
+	// only the command's *execution* is deferred, not the emptiness check. An
+	// ambient-auth provider (AWS SigV4, for instance) is the exception: it has no
+	// key to configure, since credentials come from the environment's own chain
+	// and the request is signed rather than bearing a token.
+	if apiKey == "" && apiKeyCmd == "" && !(isPreset && preset.AmbientAuth) {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key or api_key_cmd configured and no environment variable fallback found", cfg.Provider)
 	}
 
@@ -499,9 +524,10 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 
 	// Single api_key_cmd resolution site for both preset and custom providers,
 	// as late as possible: everything above can fail without running the
-	// command. apiKey is empty here only when api_key_cmd is set (guaranteed by
-	// the emptiness check above), and a failing command is a hard error.
-	if apiKey == "" {
+	// command. Both are empty only for an ambient-auth provider, which the
+	// emptiness check above lets through and which has no command to run; for
+	// everyone else a failing command is a hard error.
+	if apiKey == "" && apiKeyCmd != "" {
 		resolved, err := resolveKeyCmd(apiKeyCmd, fmt.Sprintf("api_key_cmd for provider %q", cfg.Provider))
 		if err != nil {
 			return ResolvedEndpoint{}, false, err
@@ -521,6 +547,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		ExtraHeaders: extraHeaders,
 		Timeout:      timeout,
 		RetryCodes:   retryCodes,
+		AmbientAuth:  isPreset && preset.AmbientAuth,
+		AWSProfile:   entry.AWSProfile,
+		AWSRegion:    entry.AWSRegion,
 	}, true, nil
 }
 

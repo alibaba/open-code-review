@@ -15,12 +15,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/bedrock"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
@@ -223,6 +226,11 @@ type ClientConfig struct {
 	// the request path changes. That is the state for llm test, and for any
 	// caller that builds a client without one.
 	retryCollector *RetryCollector
+
+	// AWSProfile and AWSRegion are used only by SigV4 providers (bedrock).
+	// Empty means the standard AWS credential chain decides.
+	AWSProfile string
+	AWSRegion  string
 }
 
 // retryCodesMiddleware returns an HTTP middleware that forces the SDK to retry
@@ -276,10 +284,14 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 		ExtraHeaders:   ep.ExtraHeaders,
 		RetryCodes:     ep.RetryCodes,
 		retryCollector: collector,
+		AWSProfile:     ep.AWSProfile,
+		AWSRegion:      ep.AWSRegion,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
 		return NewAnthropicClient(cfg)
+	case ProtocolAnthropicBedrock:
+		return NewAnthropicBedrockClient(cfg)
 	case ProtocolOpenAIResponses:
 		return NewOpenAIResponsesClient(cfg)
 	default:
@@ -730,6 +742,12 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 type AnthropicClient struct {
 	cfg ClientConfig
 	sdk anthropic.Client
+
+	// initErr defers a construction failure to the first request. The client
+	// factory returns an LLMClient with no error channel, and the alternative —
+	// panicking, as the SDK's own bedrock helper does — would surface a Go
+	// stack trace to someone whose real problem is an expired AWS session.
+	initErr error
 }
 
 // NewAnthropicClient creates a new Anthropic Messages API client.
@@ -791,6 +809,103 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	}
 }
 
+// NewAnthropicBedrockClient creates a client for Anthropic models served by AWS
+// Bedrock.
+//
+// The wire format is the Messages API, so this reuses AnthropicClient wholesale;
+// the bedrock middleware from the official SDK handles what differs — SigV4
+// signing, moving the model from the body into the URL path, injecting
+// anthropic_version, and deriving the host from the region.
+//
+// No api_key is involved. Credentials come from the standard AWS chain
+// (AWS_PROFILE, SSO cache, instance role, AWS_ACCESS_KEY_ID…), or from
+// AWS_BEARER_TOKEN_BEDROCK if set. Region comes from AWS_REGION or the active
+// profile.
+func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
+	}
+
+	// The middleware only rewrites requests whose path is already /v1/messages,
+	// so keep cfg.URL in the same shape the plain Anthropic client uses. It is
+	// not turned into a base URL: the region decides the host.
+	if cfg.URL != "" && !strings.HasSuffix(strings.TrimRight(cfg.URL, "/"), "/v1/messages") {
+		cfg.URL = strings.TrimRight(cfg.URL, "/") + "/v1/messages"
+	}
+
+	opts := []option.RequestOption{
+		option.WithMaxRetries(5),
+		option.WithHeader("User-Agent", userAgent("claude")),
+		option.WithRequestTimeout(cfg.Timeout),
+		// Bedrock authenticates by SigV4 signature, added by the middleware
+		// below at transport time. Any API-key header the SDK would otherwise
+		// attach — including an empty one — is rejected outright with
+		// "Invalid API Key format: Must start with pre-defined prefix", so both
+		// are removed here, before signing.
+		option.WithHeaderDel("Authorization"),
+		option.WithHeaderDel("X-Api-Key"),
+	}
+	// ExtraHeaders are applied per request in CompletionsWithCtx, where the
+	// session key template can expand — same as the plain Anthropic client.
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, option.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
+	}
+
+	// Load the AWS config here rather than calling bedrock.WithLoadDefaultConfig,
+	// which panics on failure.
+	var loadOpts []func(*awsconfig.LoadOptions) error
+	if cfg.AWSProfile != "" {
+		loadOpts = append(loadOpts, awsconfig.WithSharedConfigProfile(cfg.AWSProfile))
+	}
+	if cfg.AWSRegion != "" {
+		loadOpts = append(loadOpts, awsconfig.WithRegion(cfg.AWSRegion))
+	}
+	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), loadOpts...)
+	if err != nil {
+		return &AnthropicClient{
+			cfg: cfg,
+			initErr: fmt.Errorf("bedrock: could not load AWS configuration: %w\n"+
+				"  bedrock uses the standard AWS credential chain — set AWS_PROFILE, or run `aws sso login --profile <name>`", err),
+		}
+	}
+	if awsCfg.Region == "" {
+		return &AnthropicClient{
+			cfg: cfg,
+			initErr: fmt.Errorf("bedrock: no AWS region resolved\n" +
+				"  set AWS_REGION, or give the active profile a region — the region decides which bedrock-runtime host is used"),
+		}
+	}
+
+	// Force SigV4 unless a Bedrock bearer token was set deliberately.
+	//
+	// bedrock.WithConfig prefers bearer auth over SigV4 whenever
+	// cfg.BearerAuthTokenProvider is non-nil, and LoadDefaultConfig populates
+	// that provider from the SSO token cache — the OIDC access token, which is
+	// for identity services, not Bedrock. So an SSO-authenticated caller
+	// (i.e. most enterprise setups) silently sends `Authorization: Bearer
+	// <sso-token>` and Bedrock answers 403 "Invalid API Key format: Must start
+	// with pre-defined prefix". Clearing it here restores the SigV4 path.
+	// WithConfig re-reads AWS_BEARER_TOKEN_BEDROCK when the provider is nil, so
+	// an explicitly configured bearer token still wins.
+	if os.Getenv("AWS_BEARER_TOKEN_BEDROCK") == "" {
+		awsCfg.BearerAuthTokenProvider = nil
+	}
+
+	// Appended after the options above so its base URL and middleware win.
+	opts = append(opts, bedrock.WithConfig(awsCfg))
+
+	return &AnthropicClient{
+		cfg: cfg,
+		sdk: anthropic.NewClient(opts...),
+	}
+}
+
 // CompletionsWithCtx sends a chat completion request with context support.
 //
 // The deferred finalizeRequest is this client's boundary for the retry report;
@@ -805,6 +920,10 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		}
 		finalizeRequest(ctx, c.cfg.retryCollector, err)
 	}()
+
+	if c.initErr != nil {
+		return nil, c.initErr
+	}
 
 	model := req.Model
 	if model == "" {

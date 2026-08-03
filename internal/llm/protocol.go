@@ -27,6 +27,14 @@ const (
 	// ProtocolOpenAIResponses is the OpenAI Responses API (/v1/responses),
 	// used by GPT-5.x / o-series models.
 	ProtocolOpenAIResponses = "openai-responses"
+	// ProtocolAnthropicBedrock is the Anthropic Messages API served by AWS
+	// Bedrock. The request body is the same as ProtocolAnthropic — the
+	// difference is transport: requests are SigV4-signed from the ambient AWS
+	// credential chain rather than carrying an API key, the model moves from
+	// the body into the URL path, and the region determines the host. The
+	// official SDK's bedrock middleware performs that rewriting, so this
+	// shares the Anthropic client rather than reimplementing the protocol.
+	ProtocolAnthropicBedrock = "anthropic-bedrock"
 )
 
 // NormalizeProtocol canonicalizes protocol names. It is case-insensitive and
@@ -45,6 +53,8 @@ func NormalizeProtocol(raw string) string {
 		return ProtocolOpenAIChatCompletions
 	case ProtocolOpenAIResponses:
 		return ProtocolOpenAIResponses
+	case ProtocolAnthropicBedrock:
+		return ProtocolAnthropicBedrock
 	default:
 		return normalized
 	}
@@ -54,9 +64,9 @@ func NormalizeProtocol(raw string) string {
 // everything else.
 func ValidateProtocol(p string) error {
 	switch p {
-	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses:
+	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock:
 		return nil
 	default:
-		return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses)
+		return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock)
 	}
 }
