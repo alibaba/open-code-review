@@ -112,7 +112,7 @@ func runLLMTest() error {
 		// Bedrock has no configured URL — the region decides the host — so
 		// report what was resolved instead. A request that reached the wrong
 		// region otherwise fails in a way that looks like a bad model ID.
-		fmt.Printf("Region: %s\n", region)
+		fmt.Printf("Region:  %s\n", region)
 		if profile != "" {
 			fmt.Printf("Profile: %s\n", profile)
 		} else {

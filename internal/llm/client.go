@@ -838,13 +838,10 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 		cfg.SessionKey = NewSessionKey()
 	}
 
-	// The middleware only rewrites requests whose path is already /v1/messages,
-	// so keep cfg.URL in the same shape the plain Anthropic client uses. It is
-	// not turned into a base URL: the region decides the host.
-	if cfg.URL != "" && !strings.HasSuffix(strings.TrimRight(cfg.URL, "/"), "/v1/messages") {
-		cfg.URL = strings.TrimRight(cfg.URL, "/") + "/v1/messages"
-	}
-
+	// cfg.URL is deliberately unused: bedrock.WithConfig is appended last and
+	// installs its own base URL from the resolved region, so anything set here
+	// would be overwritten rather than honoured. A custom endpoint (a VPC
+	// endpoint, say) would need to be threaded through the AWS config instead.
 	opts := []option.RequestOption{
 		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
@@ -895,7 +892,7 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 		}
 	}
 
-	// Force SigV4 unless a Bedrock bearer token was set deliberately.
+	// Drop the credential-chain bearer token, always.
 	//
 	// bedrock.WithConfig prefers bearer auth over SigV4 whenever
 	// cfg.BearerAuthTokenProvider is non-nil, and LoadDefaultConfig populates
@@ -903,12 +900,17 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	// for identity services, not Bedrock. So an SSO-authenticated caller
 	// (i.e. most enterprise setups) silently sends `Authorization: Bearer
 	// <sso-token>` and Bedrock answers 403 "Invalid API Key format: Must start
-	// with pre-defined prefix". Clearing it here restores the SigV4 path.
-	// WithConfig re-reads AWS_BEARER_TOKEN_BEDROCK when the provider is nil, so
-	// an explicitly configured bearer token still wins.
-	if os.Getenv("AWS_BEARER_TOKEN_BEDROCK") == "" {
-		awsCfg.BearerAuthTokenProvider = nil
-	}
+	// with pre-defined prefix".
+	//
+	// Clearing it unconditionally is what gives AWS_BEARER_TOKEN_BEDROCK the
+	// precedence its documentation describes. WithConfig's doc comment says the
+	// variable wins, but the code only consults it when the provider is nil
+	// (bedrock.go: `if cfg.BearerAuthTokenProvider == nil`), so leaving an
+	// SSO-derived provider in place would make a deliberately configured Bedrock
+	// API key unreachable — the same silent substitution, with the user's real
+	// token discarded. Cleared here, WithConfig re-reads the variable and builds
+	// a static provider from it; unset, the SigV4 path runs.
+	awsCfg.BearerAuthTokenProvider = nil
 
 	// Appended after the options above so its base URL and middleware win.
 	opts = append(opts, bedrock.WithConfig(awsCfg))
@@ -963,9 +965,13 @@ func (c *AnthropicClient) explainError(model string, err error) error {
 	msg := err.Error()
 	where := c.bedrockWhere()
 
+	// Order matters here, and the two AccessDenied shapes are why: Bedrock
+	// answers both "your IAM policy forbids this" and "this account has not
+	// enabled the model" with AccessDeniedException, and the fixes have nothing
+	// in common. The specific wording is matched before the generic code.
 	switch {
-	// Checked first: the bearer-token path produces this even when credentials
-	// are otherwise valid, so a later "expired"/"denied" branch would mislabel it.
+	// First: the bearer-token path produces this even when credentials are
+	// otherwise valid, so a later "denied" branch would mislabel it.
 	case strings.Contains(msg, "Invalid API Key format"):
 		if os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "" {
 			return fmt.Errorf("bedrock rejected the token in AWS_BEARER_TOKEN_BEDROCK (%s): %w\n"+
@@ -973,20 +979,30 @@ func (c *AnthropicClient) explainError(model string, err error) error {
 		}
 		return fmt.Errorf("bedrock rejected an API-key header rather than a signature (%s): %w\n"+
 			"  no api_key applies to bedrock; this means a bearer token reached the request, not that a key is missing", where, err)
-	case strings.Contains(msg, "ExpiredToken"), strings.Contains(msg, "expired"),
+	case strings.Contains(msg, "don't have access to the model"),
+		strings.Contains(msg, "not authorized to invoke this API operation"):
+		return fmt.Errorf("bedrock has no access enabled for model %q (%s): %w\n"+
+			"  model access is granted per account and per region in the Bedrock console; an IAM policy alone does not enable it", model, where, err)
+	case strings.Contains(msg, "model identifier is invalid"),
+		strings.Contains(msg, "inference profile") && strings.Contains(msg, "not found"):
+		return fmt.Errorf("bedrock rejected model %q (%s): %w\n"+
+			"  run `aws bedrock list-inference-profiles%s` to see what this account offers — IDs are account- and region-scoped, and a version suffix such as -v1:0 is invalid for the newer families",
+			model, where, err, listProfilesRegionArg(c.awsRegion))
+	// Specific credential codes only. A bare "expired" would also claim an
+	// expired TLS certificate is an SSO problem.
+	case strings.Contains(msg, "ExpiredToken"), strings.Contains(msg, "ExpiredTokenException"),
+		strings.Contains(msg, "SSOProviderInvalidToken"), strings.Contains(msg, "InvalidGrantException"),
 		strings.Contains(msg, "NoCredentialProviders"), strings.Contains(msg, "failed to refresh cached credentials"):
 		return fmt.Errorf("bedrock could not authenticate: AWS credentials are expired or unavailable (%s): %w\n"+
 			"  run `aws sso login%s`, or refresh whichever credential source this profile uses", where, err, ssoLoginProfileArg(c.awsProfile))
 	case strings.Contains(msg, "AccessDenied"):
 		return fmt.Errorf("bedrock denied access to model %q (%s): %w\n"+
-			"  credentials are valid, so this is an IAM policy gap: the identity needs bedrock:InvokeModel on this model in this region", model, where, err)
-	case strings.Contains(msg, "ValidationException"),
-		strings.Contains(msg, "model identifier is invalid"),
-		strings.Contains(msg, "don't have access to the model"):
-		return fmt.Errorf("bedrock rejected model %q (%s): %w\n"+
-			"  run `aws bedrock list-inference-profiles%s` to see what this account offers — IDs are account- and region-scoped, and a version suffix such as -v1:0 is invalid for the newer families",
-			model, where, err, listProfilesRegionArg(c.awsRegion))
+			"  credentials resolved, so this is an authorization gap: the identity needs bedrock:InvokeModel on this model in this region, and the account needs model access enabled for it", model, where, err)
 	}
+	// Everything else — ValidationException on max_tokens, a network reset, a
+	// throttle — keeps the service's own wording. Guessing at a cause here would
+	// send people after the wrong problem, which is the failure this function
+	// exists to prevent.
 	return fmt.Errorf("bedrock request failed (%s): %w", where, err)
 }
 

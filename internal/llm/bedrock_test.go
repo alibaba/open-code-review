@@ -97,6 +97,12 @@ func TestResolveBedrockWithoutAPIKey(t *testing.T) {
 // TestResolveBedrockPassesAWSSettings covers aws_profile / aws_region reaching
 // the client, so a review run is reproducible without exporting AWS_PROFILE.
 func TestResolveBedrockPassesAWSSettings(t *testing.T) {
+	// NewLLMClient loads AWS config for the bedrock protocol; point it at empty
+	// files so the test does not depend on whatever profiles the developer or
+	// the CI runner happens to have.
+	t.Setenv("AWS_CONFIG_FILE", filepath.Join(t.TempDir(), "config"))
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials"))
+
 	path := writeConfig(t, map[string]any{
 		"provider": "bedrock",
 		"model":    "us.anthropic.claude-sonnet-4-6",
@@ -124,6 +130,48 @@ func TestResolveBedrockPassesAWSSettings(t *testing.T) {
 	}
 	if cfg.AWSProfile != "example-profile" || cfg.AWSRegion != "us-west-2" {
 		t.Errorf("ClientConfig AWS settings = %q/%q, want example-profile/us-west-2", cfg.AWSProfile, cfg.AWSRegion)
+	}
+}
+
+// TestBedrockModelOverrideIsNotGatedByThePresetList covers what the preset's
+// own documentation promises: any identifier Bedrock will route. A preset's
+// Models list otherwise acts as an allowlist for --model, which cannot work for
+// identifiers scoped to an account and a region — an application inference
+// profile ARN, the value to use when spend has to be attributed, can never
+// appear in a list compiled upstream.
+func TestBedrockModelOverrideIsNotGatedByThePresetList(t *testing.T) {
+	path := writeConfig(t, map[string]any{
+		"provider":  "bedrock",
+		"model":     "us.anthropic.claude-sonnet-4-6",
+		"providers": map[string]any{"bedrock": map[string]any{"aws_region": "us-west-2"}},
+	})
+
+	for _, model := range []string{
+		"arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/abc123",
+		"us.anthropic.claude-haiku-4-5", // a real ID the preset list does not carry
+	} {
+		ep, err := ResolveEndpointWithModelOverride(path, model)
+		if err != nil {
+			t.Errorf("ResolveEndpointWithModelOverride(%q) = %v, want it accepted", model, err)
+			continue
+		}
+		if ep.Model != model {
+			t.Errorf("resolved model = %q, want %q", ep.Model, model)
+		}
+	}
+}
+
+// TestModelOverrideStillGatedForKeyBasedProviders keeps the relaxation scoped to
+// ambient auth: a typo against a hosted API should still be caught locally.
+func TestModelOverrideStillGatedForKeyBasedProviders(t *testing.T) {
+	path := writeConfig(t, map[string]any{
+		"provider":  "anthropic",
+		"model":     "claude-sonnet-5",
+		"providers": map[string]any{"anthropic": map[string]any{"api_key": "sk-test-not-a-real-key"}},
+	})
+
+	if _, err := ResolveEndpointWithModelOverride(path, "claude-sonnet-5-typo"); err == nil {
+		t.Error("an unlisted model was accepted for a key-based provider; want an error")
 	}
 }
 
@@ -166,9 +214,19 @@ func TestExplainErrorClassifiesBedrockFailures(t *testing.T) {
 			wantAll: []string{"aws sso login --profile example-profile"},
 		},
 		{
-			name:    "IAM gap, not a bad credential",
-			err:     errors.New("operation error Bedrock Runtime: AccessDeniedException: user is not authorized to perform this action"),
-			wantAll: []string{"bedrock:InvokeModel", "IAM policy gap"},
+			// Bedrock answers both "IAM forbids this" and "the account has not
+			// enabled this model" with AccessDeniedException, and the fixes have
+			// nothing in common. This is the model-access shape, verbatim.
+			name:     "model access not enabled for the account",
+			err:      errors.New(`operation error Bedrock Runtime: InvokeModel, https response error StatusCode: 403, AccessDeniedException: You don't have access to the model with the specified model ID.`),
+			wantAll:  []string{"model access is granted per account and per region", "console"},
+			wantNone: []string{"bedrock:InvokeModel"},
+		},
+		{
+			name:     "IAM gap, not a bad credential",
+			err:      errors.New("operation error Bedrock Runtime: AccessDeniedException: User: arn:aws:sts::x:assumed-role/y is not authorized to perform: bedrock:InvokeModel"),
+			wantAll:  []string{"bedrock:InvokeModel", "authorization gap"},
+			wantNone: []string{"sso login"},
 		},
 		{
 			name:    "model absent from the region",
@@ -176,10 +234,25 @@ func TestExplainErrorClassifiesBedrockFailures(t *testing.T) {
 			wantAll: []string{"aws bedrock list-inference-profiles --region us-west-2", "-v1:0"},
 		},
 		{
+			// A request-shape ValidationException is not a model-ID problem, and
+			// telling the user to go list inference profiles wastes their time.
+			name:     "validation error about the request, not the model",
+			err:      errors.New("operation error Bedrock Runtime: ValidationException: Input is too long for requested model."),
+			wantAll:  []string{"Input is too long", "region us-west-2"},
+			wantNone: []string{"list-inference-profiles", "bedrock:InvokeModel"},
+		},
+		{
+			// A bare "expired" match would claim this is an SSO session problem.
+			name:     "expired TLS certificate is not an expired session",
+			err:      errors.New(`Post "https://bedrock-runtime.us-west-2.amazonaws.com/v1/messages": tls: failed to verify certificate: x509: certificate has expired or is not yet valid`),
+			wantAll:  []string{"certificate has expired"},
+			wantNone: []string{"sso login", "credentials are expired"},
+		},
+		{
 			name:     "anything else keeps its own wording and gains context",
 			err:      errors.New("connection reset by peer"),
 			wantAll:  []string{"connection reset by peer", "region us-west-2"},
-			wantNone: []string{"IAM", "sso login"},
+			wantNone: []string{"authorization gap", "sso login"},
 		},
 	}
 
