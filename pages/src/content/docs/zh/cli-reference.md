@@ -114,10 +114,11 @@ ocr review --provider anthropic --model claude-opus-4-6 --format json
 ocr scan --provider openai --model gpt-5.4 --format json
 ```
 
-端点解析遵循以下优先级：显式 CLI 覆盖、完整的 `OCR_LLM_*` 环境配置、已保存的配置。
-不完整的环境策略会继续回退，而不会与其他策略混合。显式选择的 provider 必须存在于
-已保存的 `providers` 或 `custom_providers` 中；使用其已配置的端点时，内置 provider
-的凭据仍可来自该 provider 支持的环境变量。
+显式 `--provider` 会在常规来源解析前，从已保存的 `providers` 或 `custom_providers`
+中选择条目。不传 `--provider` 时，OCR 保持原有来源顺序：已保存的配置、完整的
+`OCR_LLM_*` 环境配置、完整的 Claude Code 环境配置、shell rc 文件。`--model` 会覆盖
+最终选中来源中的 model，但不会改变来源顺序。不完整的策略会继续回退，而不会与其他策略
+混合。选中的内置 provider 仍可从其支持的环境变量读取凭据。
 
 ### 模式
 

@@ -118,12 +118,14 @@ ocr review --provider anthropic --model claude-opus-4-6 --format json
 ocr scan --provider openai --model gpt-5.4 --format json
 ```
 
-Endpoint resolution follows this precedence: explicit CLI overrides, then a
-complete `OCR_LLM_*` environment configuration, then saved configuration. An
-incomplete environment strategy falls through without being mixed with another
-strategy. An explicitly selected provider must exist in saved `providers` or
-`custom_providers`; its configured endpoint is used while built-in provider
-credentials may still come from that provider's supported environment variable.
+An explicit `--provider` selects a saved entry from `providers` or
+`custom_providers` before normal source resolution. Without `--provider`, OCR
+preserves the legacy source order: saved configuration, complete `OCR_LLM_*`
+environment configuration, complete Claude Code environment configuration, then
+shell rc files. `--model` overrides the model within whichever source wins; it
+does not change that source order. Incomplete strategies fall through without
+being mixed. A selected built-in provider's credentials may still come from its
+supported environment variable.
 
 ### Modes
 

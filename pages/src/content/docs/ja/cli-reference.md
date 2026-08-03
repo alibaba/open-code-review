@@ -113,11 +113,12 @@ ocr review --provider anthropic --model claude-opus-4-6 --format json
 ocr scan --provider openai --model gpt-5.4 --format json
 ```
 
-エンドポイントは、明示的な CLI 上書き、完全な `OCR_LLM_*` 環境設定、保存済み設定の
-順で解決されます。不完全な環境設定は別の戦略と混合されず、次の戦略へフォールバックします。
-明示的に選択する provider は、保存済みの `providers` または `custom_providers` に存在する
-必要があります。その設定済みエンドポイントを使用する場合でも、組み込み provider の認証情報は
-その provider が対応する環境変数から取得できます。
+明示的な `--provider` は通常のソース解決より先に、保存済みの `providers` または
+`custom_providers` からエントリを選択します。`--provider` を指定しない場合、OCR は従来の
+ソース順序を維持します: 保存済み設定、完全な `OCR_LLM_*` 環境設定、完全な Claude Code
+環境設定、shell rc ファイルの順です。`--model` は選ばれたソース内の model を上書きしますが、
+ソース順序は変更しません。不完全な戦略は別の戦略と混合されず、次へフォールバックします。
+選択された組み込み provider の認証情報は、対応する環境変数から引き続き取得できます。
 
 ### モード
 

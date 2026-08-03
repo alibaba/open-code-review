@@ -282,7 +282,7 @@ func writeResolverConfig(t *testing.T, cfg configFile) (string, []byte) {
 	return path, data
 }
 
-func TestResolveEndpoint_OCREnvironmentPrecedesConfig(t *testing.T) {
+func TestResolveEndpoint_ConfigPrecedesOCREnvironment(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
 	t.Setenv("OCR_LLM_TOKEN", "env-token")
@@ -294,12 +294,12 @@ func TestResolveEndpoint_OCREnvironmentPrecedesConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveEndpoint: %v", err)
 	}
-	if ep.Source != "OCR environment" || ep.Model != "env-model" || ep.Token != "env-token" {
+	if ep.Source != "OCR config file" || ep.Model != "config-model" || ep.Token != "config-token" {
 		t.Fatalf("endpoint = %+v", ep)
 	}
 }
 
-func TestResolveEndpoint_ClaudeCodeEnvironmentPrecedesConfig(t *testing.T) {
+func TestResolveEndpoint_ConfigPrecedesClaudeCodeEnvironment(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("OCR_LLM_URL", "https://incomplete.example.com/v1")
 	t.Setenv("ANTHROPIC_BASE_URL", "https://claude.example.com")
@@ -312,27 +312,29 @@ func TestResolveEndpoint_ClaudeCodeEnvironmentPrecedesConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveEndpoint: %v", err)
 	}
-	if ep.Source != "Claude Code environment" || ep.Model != "claude-model" {
+	if ep.Source != "OCR config file" || ep.Model != "config-model" || ep.Token != "config-token" {
 		t.Fatalf("endpoint = %+v", ep)
 	}
 }
 
-func TestResolveEndpoint_IncompleteEnvironmentFallsBackToConfig(t *testing.T) {
+func TestResolveEndpoint_IncompleteConfigFallsBackToOCREnvironment(t *testing.T) {
 	clearAllEnv(t)
-	t.Setenv("OCR_LLM_URL", "https://incomplete.example.com/v1")
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	t.Setenv("OCR_LLM_MODEL", "env-model")
 	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{
-		URL: "https://config.example.com/v1", AuthToken: "config-token", Model: "config-model",
+		URL: "https://incomplete-config.example.com/v1",
 	}})
 	ep, err := ResolveEndpoint(path)
 	if err != nil {
 		t.Fatalf("ResolveEndpoint: %v", err)
 	}
-	if ep.Source != "OCR config file" || ep.Token != "config-token" || ep.Model != "config-model" {
+	if ep.Source != "OCR environment" || ep.Token != "env-token" || ep.Model != "env-model" {
 		t.Fatalf("endpoint = %+v", ep)
 	}
 }
 
-func TestResolveEndpoint_InvalidCompleteEnvironmentDoesNotFallBackToConfig(t *testing.T) {
+func TestResolveEndpoint_ConfigPrecedesInvalidCompleteEnvironment(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
 	t.Setenv("OCR_LLM_TOKEN", "env-token")
@@ -341,9 +343,12 @@ func TestResolveEndpoint_InvalidCompleteEnvironmentDoesNotFallBackToConfig(t *te
 	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{
 		URL: "https://config.example.com/v1", AuthToken: "config-token", Model: "config-model",
 	}})
-	_, err := ResolveEndpoint(path)
-	if err == nil || !strings.Contains(err.Error(), "OCR environment") || !strings.Contains(err.Error(), "not-a-protocol") {
-		t.Fatalf("error = %v", err)
+	ep, err := ResolveEndpoint(path)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if ep.Source != "OCR config file" || ep.Model != "config-model" || ep.Token != "config-token" {
+		t.Fatalf("endpoint = %+v", ep)
 	}
 }
 
@@ -351,9 +356,7 @@ func TestResolveEndpointWithOptions_ModelOverrideCompletesOCREnvironment(t *test
 	clearAllEnv(t)
 	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
 	t.Setenv("OCR_LLM_TOKEN", "env-token")
-	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{
-		URL: "https://config.example.com/v1", AuthToken: "config-token", Model: "config-model",
-	}})
+	path, _ := writeResolverConfig(t, configFile{})
 	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{Model: "cli-model"})
 	if err != nil {
 		t.Fatalf("ResolveEndpointWithOptions: %v", err)

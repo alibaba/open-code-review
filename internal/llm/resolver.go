@@ -74,7 +74,7 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 }
 
 // ResolveEndpointWithOptions resolves an endpoint by first honoring an explicit
-// provider selection. Otherwise it processes environment, config, then shell RC
+// provider selection. Otherwise it processes config, environment, then shell RC
 // strategies in priority order, finalizing the first complete endpoint.
 func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (ResolvedEndpoint, error) {
 	opts.Provider = strings.TrimSpace(opts.Provider)
@@ -98,9 +98,9 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		name string
 		fn   func() (ResolvedEndpoint, bool, error)
 	}{
+		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath, opts) }},
 		{"OCR environment", func() (ResolvedEndpoint, bool, error) { return tryOCREnv(opts.Model) }},
 		{"Claude Code environment", func() (ResolvedEndpoint, bool, error) { return tryCCEnv(opts.Model) }},
-		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath, opts) }},
 		{"Shell rc file", func() (ResolvedEndpoint, bool, error) { return tryShellRC(opts.Model) }},
 	}
 
