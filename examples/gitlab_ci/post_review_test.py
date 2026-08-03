@@ -117,7 +117,8 @@ class Recorder:
 
     def __init__(self, note_outcomes=None, disc_outcomes=None,
                  notes=None, notes_read_failure=False,
-                 discussions=None, disc_read_failure=False, diffs=None):
+                 discussions=None, disc_read_failure=False, diffs=None,
+                 update_outcomes=None):
         self.note_calls = []
         self.disc_calls = []
         self.update_calls = []
@@ -127,6 +128,7 @@ class Recorder:
         self.sleeps = []
         self._note_outcomes = list(note_outcomes or [])
         self._disc_outcomes = list(disc_outcomes or [])
+        self._update_outcomes = list(update_outcomes or [])
         self._notes = notes if notes is not None else []
         self._notes_fail = notes_read_failure
         self._discussions = discussions if discussions is not None else []
@@ -149,6 +151,8 @@ class Recorder:
 
     def update_note(self, note_id, body):
         self.update_calls.append((note_id, body))
+        if self._update_outcomes:
+            return self._update_outcomes.pop(0)
         return {"success": True, "url": "https://gitlab.example/note/%s" % note_id}
 
     def list_notes(self):
@@ -471,6 +475,16 @@ class PublishTest(unittest.TestCase):
         self.assertEqual(stats["summary"], 1)
         self.assertEqual(stats["inline"], 0)
 
+    def test_start_line_only_without_end_line_is_no_line(self):
+        # A comment with start_line but a falsy end_line cannot be positioned
+        # (end_line is the GitLab position's new_line), so it must land in
+        # the summary (no_line), not be misclassified as a posting failure.
+        stats, rec = run_publish({"comments": [comment(start_line=10, end_line=0)]})
+        self.assertEqual(stats["summary"], 1)
+        self.assertEqual(stats["inline"], 0)
+        self.assertEqual(stats["failed"], 0)
+        self.assertEqual(len(rec.disc_calls), 0)
+
     def test_route_policy_moves_to_summary(self):
         config = dict(DEFAULT_CONFIG)
         config["route_severity_below"] = "low"
@@ -513,6 +527,25 @@ class StickySummaryTest(unittest.TestCase):
         self.assertEqual(len(rec.note_calls), 0)
         self.assertEqual(len(rec.update_calls), 1)
         self.assertEqual(rec.update_calls[0][0], 42)
+
+    def test_upsert_update_failure_keeps_stale_url(self):
+        existing = [{"id": 42, "body": "%s\nold" % pr.SUMMARY_MARKER, "web_url": "https://x/42"}]
+        rec = Recorder(notes=existing, update_outcomes=[{"success": False, "url": None}])
+        url = pr.upsert_summary(rec, "%s\nnew" % pr.SUMMARY_MARKER, sticky=True)
+        # Update failed -> fall back to the existing note's URL (not None).
+        self.assertEqual(url, "https://x/42")
+        self.assertEqual(len(rec.update_calls), 1)
+
+    def test_finalize_anchor_update_failure_falls_back_to_upsert(self):
+        # Anchor created (id 1001) but the finalize PUT fails -> fall back to
+        # upsert, which (sticky, no existing) posts a fresh note.
+        rec = Recorder(update_outcomes=[{"success": False, "url": None}])
+        url = pr.finalize_summary(rec, "%s\nfinal" % pr.SUMMARY_MARKER,
+                                 sticky=True, anchor_id=1001)
+        # update_note failed, then upsert posted a fresh note (id 1001).
+        self.assertEqual(len(rec.update_calls), 1)
+        self.assertEqual(len(rec.note_calls), 1)
+        self.assertEqual(url, "https://gitlab.example/note/1001")
 
     def test_lgtm_sticky_upsert(self):
         existing = [{"id": 7, "body": "%s\nold" % pr.SUMMARY_MARKER, "web_url": "https://x/7"}]
@@ -1144,6 +1177,16 @@ class BuildConfigTest(unittest.TestCase):
         self.assertEqual(config["fail_on_severity"], "critical")
         self.assertEqual(config["run_tag"], "9-3")
 
+    def test_incremental_overlap_threshold_non_numeric_falls_back(self):
+        # A malformed value must not crash build_config; it falls back to the
+        # default via resolve_threshold.
+        config = pr.build_config({"OCR_INCREMENTAL_OVERLAP_THRESHOLD": "bogus"})
+        self.assertEqual(config["incremental_overlap_threshold"], pr.DEFAULT_OVERLAP_THRESHOLD)
+
+    def test_incremental_overlap_threshold_out_of_range_falls_back(self):
+        config = pr.build_config({"OCR_INCREMENTAL_OVERLAP_THRESHOLD": "2.5"})
+        self.assertEqual(config["incremental_overlap_threshold"], pr.DEFAULT_OVERLAP_THRESHOLD)
+
 
 class StatsGatingTest(unittest.TestCase):
     def test_write_stats_file(self):
@@ -1265,15 +1308,30 @@ class MainAuthHeaderTest(unittest.TestCase):
 
     def test_missing_ci_vars_fails_fast(self):
         env = {"GITLAB_API_TOKEN": "glpat-xxxx"}
+        stats_path = tempfile.NamedTemporaryFile("w", suffix=".env", delete=False)
+        stats_path.close()
+        self.addCleanup(os.unlink, stats_path.name)
         with mock.patch.dict(os.environ, env, clear=True):
-            rc = pr.main(["/tmp/nonexistent.json"])
+            rc = pr.main(["/tmp/nonexistent.json", "--stats-file", stats_path.name])
         self.assertEqual(rc, 1)
+        # Early exit must still write a zero-filled stats file so the dotenv
+        # artifact is present for downstream jobs.
+        with open(stats_path.name) as f:
+            content = f.read()
+        self.assertIn("OCR_COMMENTS_TOTAL=0", content)
+        self.assertIn("OCR_COMMENTS_INLINE=0", content)
 
     def test_missing_token_fails_fast(self):
         env = dict(self.BASE_ENV)
+        stats_path = tempfile.NamedTemporaryFile("w", suffix=".env", delete=False)
+        stats_path.close()
+        self.addCleanup(os.unlink, stats_path.name)
         with mock.patch.dict(os.environ, env, clear=True):
-            rc = pr.main(["/tmp/nonexistent.json"])
+            rc = pr.main(["/tmp/nonexistent.json", "--stats-file", stats_path.name])
         self.assertEqual(rc, 1)
+        with open(stats_path.name) as f:
+            content = f.read()
+        self.assertIn("OCR_COMMENTS_TOTAL=0", content)
 
     def test_fail_on_severity_returns_nonzero(self):
         rc, captured = self.run_main_with_captured_poster(

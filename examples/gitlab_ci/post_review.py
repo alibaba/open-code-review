@@ -88,9 +88,9 @@ SEVERITY_RANK = {s: len(SEVERITIES) - i for i, s in enumerate(SEVERITIES)}
 NO_ROUTING = {"route_by_severity": False, "severity_rank": -1,
               "route_by_category": False, "categories": set()}
 
-# Regex that captures a per-comment id embedded as an HTML comment, used for
-# idempotency reconciliation and bot-discussion detection.
-_COMMENT_ID_RE = re.compile(r"<!--\s*(ocr-[0-9]+-[0-9]+-[0-9a-f]+)\s*-->")
+# Substring that flags a discussion as authored by this bot (used for
+# incremental history detection). The full per-comment id is matched by a
+# plain substring in _is_comment_posted, so no regex is needed here.
 _BOT_MARKER = "<!-- ocr-"
 
 # GitLab returns 400 (not 422) when a discussion position cannot be resolved.
@@ -479,14 +479,14 @@ def parse_diff_hunk_inventory(patch):
     complete = True
 
     def flush():
+        nonlocal complete
         if not current:
             return
         if current["observed"] != current["expected"]:
-            complete_global[0] = False
+            complete = False
         if current["end"] >= current["start"]:
             ranges.append({"start": current["start"], "end": current["end"]})
 
-    complete_global = [complete]
     for line in lines:
         match = hunk_header_re.match(line)
         if match:
@@ -506,7 +506,7 @@ def parse_diff_hunk_inventory(patch):
             current["next"] += 1
             current["observed"] += 1
     flush()
-    return ranges, (saw_hunk and complete_global[0])
+    return ranges, (saw_hunk and complete)
 
 
 def classify_comment_against_diff(comment, diff):
@@ -976,8 +976,11 @@ def upsert_summary(poster, body, sticky):
             return None
         existing = find_summary_note(notes)
         if existing is not None:
-            poster.update_note(existing.get("id"), body)
-            return existing.get("web_url")
+            resp = poster.update_note(existing.get("id"), body)
+            if not (resp or {}).get("success"):
+                log("[summary] failed to update sticky note %s; stale content may remain."
+                    % existing.get("id"))
+            return (resp or {}).get("url") or existing.get("web_url")
     resp = poster.post_note(body)
     return (resp or {}).get("url")
 
@@ -1003,7 +1006,9 @@ def finalize_summary(poster, body, sticky, anchor_id):
     """Phase 2: write the final summary body to the anchored note (or upsert)."""
     if sticky and anchor_id is not None:
         resp = poster.update_note(anchor_id, body)
-        return (resp or {}).get("url")
+        if (resp or {}).get("success"):
+            return (resp or {}).get("url")
+        log("[summary] failed to update anchored note %s; falling back to upsert." % anchor_id)
     return upsert_summary(poster, body, sticky)
 
 
@@ -1047,7 +1052,10 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         path = comment.get("path", "")
         start_line = comment.get("start_line", 0)
         end_line = comment.get("end_line", 0)
-        has_line = bool(start_line and start_line >= 1) or bool(end_line and end_line >= 1)
+        # Inline posting needs a valid end_line (it becomes the GitLab position's
+        # new_line). A start_line-only comment cannot be positioned and must land
+        # in the summary (no_line), not be misclassified as a posting failure.
+        has_line = bool(end_line and end_line >= 1)
         if not has_line or not path:
             no_line.append({"comment": comment, "reason": NO_LINE_REASON})
             continue
@@ -1211,6 +1219,13 @@ def _parse_bool(value, default=False):
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+# Zero-filled stats written on every early-exit / error path so the dotenv
+# artifact is always present for downstream jobs (see .gitlab-ci.yml
+# `reports: dotenv`).
+ZERO_STATS = {"total": 0, "inline": 0, "summary": 0,
+              "routed": 0, "skipped": 0, "failed": 0, "summary_url": None}
+
+
 def build_config(env):
     """Build the config dict from environment variables (with defaults)."""
     return {
@@ -1226,7 +1241,7 @@ def build_config(env):
         # Publication policy + summary + incremental.
         "sticky_summary": _parse_bool(env.get("OCR_STICKY_SUMMARY", "true"), default=True),
         "incremental": _parse_bool(env.get("OCR_INCREMENTAL", "false"), default=False),
-        "incremental_overlap_threshold": float(env.get("OCR_INCREMENTAL_OVERLAP_THRESHOLD", "0.6")),
+        "incremental_overlap_threshold": resolve_threshold(env.get("OCR_INCREMENTAL_OVERLAP_THRESHOLD", "0.6")),
         "route_severity_below": env.get("OCR_ROUTE_SEVERITY_BELOW", ""),
         "route_categories": env.get("OCR_ROUTE_CATEGORIES", ""),
         # Job gating.
@@ -1307,9 +1322,11 @@ def main(argv=None):
         ) if not value]
         if missing:
             log("error: missing required %s (set via CI environment)" % ", ".join(missing))
+            write_stats_file(args.stats_file, ZERO_STATS)
             return 1
         if not api_token:
             log("ERROR: No API token available (GITLAB_API_TOKEN or CI_JOB_TOKEN). Cannot post comments.")
+            write_stats_file(args.stats_file, ZERO_STATS)
             return 1
 
     api_base = "%s/api/v4/projects/%s/merge_requests/%s" % (gitlab_url, project_id, mr_iid)
@@ -1325,9 +1342,7 @@ def main(argv=None):
         result = load_review_result(args.input)
     except (FileNotFoundError, json.JSONDecodeError) as e:
         log("Failed to parse OCR output: %s" % e)
-        stats = {"total": 0, "inline": 0, "summary": 0,
-                 "routed": 0, "skipped": 0, "failed": 0, "summary_url": None}
-        write_stats_file(args.stats_file, stats)
+        write_stats_file(args.stats_file, ZERO_STATS)
         if args.dry_run:
             log("(dry-run: skipping error note post)")
             return 0
