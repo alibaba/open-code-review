@@ -21,6 +21,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/hashline"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -469,7 +470,11 @@ func (a *Agent) injectDiffMap() {
 	for i := range a.diffs {
 		d := &a.diffs[i]
 		if d.NewPath != "/dev/null" {
-			m[d.NewPath] = d.Diff
+			if hashlineAnchorsEnabled() {
+				m[d.NewPath] = hashline.AnnotateDiff(d)
+			} else {
+				m[d.NewPath] = d.Diff
+			}
 		}
 	}
 	dm := tool.NewDiffMap(m)
@@ -1136,13 +1141,17 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 
 	rawMsgs := a.args.Template.MainTask.Messages
 	messages := make([]llm.Message, 0, len(rawMsgs))
+	diffForPrompt := d.Diff
+	if hashlineAnchorsEnabled() {
+		diffForPrompt = hashline.AnnotateDiff(&d)
+	}
 	for _, m := range rawMsgs {
 		content := m.Content
 		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
 		content = strings.ReplaceAll(content, "{{current_file_path}}", newPath)
 		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
 		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
-		content = strings.ReplaceAll(content, "{{diff}}", d.Diff)
+		content = strings.ReplaceAll(content, "{{diff}}", diffForPrompt)
 		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
 		// Always substitute the {{plan_guidance}} token so the literal placeholder
 		// never leaks into the rendered prompt. When the plan phase produced no

@@ -68,6 +68,7 @@ func ReLocateComment(
 	original := cm.ExistingCode
 	cm.ExistingCode = code
 	if ResolveComment(cm, d) {
+		cm.LocMethod = "relocation"
 		return true, resp, messages
 	}
 	cm.ExistingCode = original
