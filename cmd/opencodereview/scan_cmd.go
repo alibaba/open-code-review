@@ -11,6 +11,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/scan"
+	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
 	"github.com/spf13/cobra"
@@ -39,6 +40,7 @@ type scanOptions struct {
 	maxTokensBudget int
 	provider        string
 	model           string
+	resume          string
 }
 
 var scanOpts scanOptions
@@ -68,7 +70,10 @@ var scanCmd = &cobra.Command{
   ocr scan --preview
 
   # Skip the per-file PLAN_TASK pre-pass
-  ocr scan --no-plan`,
+  ocr scan --no-plan
+
+  # Resume a previous full-file scan
+  ocr scan --resume <session-id>`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateScanOptions(&scanOpts); err != nil {
 			return err
@@ -133,6 +138,11 @@ func executeScan(opts scanOptions) error {
 		return runScanPreview(cc, scanTpl, scanPaths)
 	}
 
+	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)
+	if err != nil {
+		return err
+	}
+
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
@@ -184,6 +194,7 @@ func executeScan(opts scanOptions) error {
 		SkipPlan:              opts.noPlan,
 		SkipDedup:             opts.noDedup,
 		SkipSummary:           opts.noSummary,
+		Resume:                resumeState,
 	})
 
 	q := newQuietHandle(opts.outputFormat, opts.audience)
@@ -205,12 +216,29 @@ func executeScan(opts scanOptions) error {
 		span.SetStatus(codes.Error, err.Error())
 		span.RecordError(err)
 		if id := ag.SessionID(); id != "" {
-			fmt.Fprintf(os.Stderr, "[ocr] Session: %s\n", id)
+			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
 	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity)
+}
+
+func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (*session.ResumeState, error) {
+	if opts.resume == "" {
+		return nil, nil
+	}
+	state, err := session.LoadResumeState(repoDir, opts.resume)
+	if err != nil {
+		return nil, fmt.Errorf("load resume session: %w (run 'ocr session list' to see available sessions)", err)
+	}
+	if err := state.ValidateScanOptions(scanPaths); err != nil {
+		return nil, fmt.Errorf("%w (run 'ocr session list' to see available sessions)", err)
+	}
+	if state.CompletedCount() == 0 {
+		return nil, fmt.Errorf("resume session %q has no completed scan items (run 'ocr session list' to see available sessions)", opts.resume)
+	}
+	return state, nil
 }
 
 func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string) error {

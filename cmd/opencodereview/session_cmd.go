@@ -18,6 +18,10 @@ var sessionCmd = &cobra.Command{
 	Use:     "session",
 	Aliases: []string{"sessions"},
 	Short:   "List and inspect saved review sessions",
+	Args:    cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
 var sessionListRepoDir string

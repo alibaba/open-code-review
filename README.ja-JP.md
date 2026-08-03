@@ -148,6 +148,7 @@ ocr review --from main --to feature-branch --resume <session-id>
 # フルファイルスキャン — diffではなくファイル全体をレビュー（git履歴不要）
 ocr scan                          # リポジトリ全体をスキャン
 ocr scan --path internal/agent    # ディレクトリまたは特定のファイルをスキャン
+ocr scan --resume <session-id>   # 中断したフルファイルスキャンを再開
 
 # デリゲートモード — AI コーディングエージェントが自らレビューを実行
 # OCR はファイル選択とルール解決を担当。LLM 設定不要

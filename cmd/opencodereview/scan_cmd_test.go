@@ -188,6 +188,26 @@ func TestParseScanFlags_ProviderAndModelOverrides(t *testing.T) {
 	}
 }
 
+func TestParseScanFlags_Resume(t *testing.T) {
+	opts, err := parseScanFlags([]string{"--resume", "session-123"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.resume != "session-123" {
+		t.Errorf("resume = %q, want session-123", opts.resume)
+	}
+}
+
+func TestParseScanFlags_PreviewWithResume(t *testing.T) {
+	_, err := parseScanFlags([]string{"--preview", "--resume", "session-123"})
+	if err == nil {
+		t.Fatal("expected error for --preview with --resume")
+	}
+	if !strings.Contains(err.Error(), "--preview and --resume") {
+		t.Errorf("error = %q; want preview/resume conflict", err.Error())
+	}
+}
+
 func TestParseScanFlags_AllStringFlags(t *testing.T) {
 	opts, err := parseScanFlags([]string{
 		"--tools", "/tmp/tools.json",
