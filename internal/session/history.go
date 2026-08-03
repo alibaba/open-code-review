@@ -43,6 +43,7 @@ type SessionHistory struct {
 	DiffFrom     string
 	DiffTo       string
 	DiffCommit   string
+	ScanPaths    []string
 	ResumedFrom  string
 	StartTime    time.Time
 	EndTime      time.Time
@@ -124,6 +125,7 @@ type SessionOptions struct {
 	DiffFrom    string
 	DiffTo      string
 	DiffCommit  string
+	ScanPaths   []string
 	ResumedFrom string
 
 	// Operation opts this session into a run manifest. When non-empty (e.g.
@@ -153,6 +155,7 @@ func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory 
 		DiffFrom:     opts.DiffFrom,
 		DiffTo:       opts.DiffTo,
 		DiffCommit:   opts.DiffCommit,
+		ScanPaths:    append([]string(nil), opts.ScanPaths...),
 		ResumedFrom:  opts.ResumedFrom,
 		StartTime:    time.Now(),
 		FileSessions: make(map[string]*FileSession),

@@ -468,3 +468,48 @@ func TestResumeStateSessionStartKeepsRepoDirWhenCwdEmpty(t *testing.T) {
 		t.Fatalf("RepoDir = %q, want caller-provided repo dir", state.RepoDir)
 	}
 }
+
+func TestScanPathScopeResumeRoundTrip(t *testing.T) {
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{
+		ReviewMode: ReviewModeFullScan,
+		ScanPaths:  []string{"./internal/scan/", "cmd/opencodereview"},
+	})
+	sh.RecordReviewItemDone("internal/scan/agent.go", "internal/scan/agent.go", "internal/scan/agent.go", "fp-scan", nil)
+	sh.Finalize()
+
+	state, err := LoadResumeState(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if !state.HasScanPathScope {
+		t.Fatal("HasScanPathScope = false, want true")
+	}
+	if err := state.ValidateScanOptions([]string{"cmd/opencodereview", "internal/scan"}); err != nil {
+		t.Fatalf("ValidateScanOptions: %v", err)
+	}
+	if err := state.ValidateScanOptions(nil); err == nil {
+		t.Fatal("expected whole-repo resume scope mismatch")
+	}
+}
+
+func TestWholeRepoScanPathScopeResumeRoundTrip(t *testing.T) {
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeFullScan})
+	sh.RecordReviewItemDone("main.go", "main.go", "main.go", "fp-main", nil)
+	sh.Finalize()
+
+	state, err := LoadResumeState(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if !state.HasScanPathScope {
+		t.Fatal("HasScanPathScope = false, want true")
+	}
+	if err := state.ValidateScanOptions(nil); err != nil {
+		t.Fatalf("ValidateScanOptions whole repo: %v", err)
+	}
+	if err := state.ValidateScanOptions([]string{"internal/scan"}); err == nil {
+		t.Fatal("expected scoped resume mismatch")
+	}
+}

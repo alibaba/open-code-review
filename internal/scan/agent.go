@@ -54,8 +54,10 @@ type Args struct {
 	Background            string
 	GitRunner             *gitcmd.Runner
 	Session               *session.SessionHistory
-	// Resume is an optional read-only checkpoint index from a previous scan session.
-	Resume           *session.ResumeState
+	// Resume is an optional read-only checkpoint index from a previous scan
+	// session.
+	Resume *session.ResumeState
+
 	MaxFileSizeBytes int64
 	// SkipPlan disables the PLAN_TASK pre-pass even when the template
 	// defines one. Set via the --no-plan CLI flag.
@@ -92,14 +94,15 @@ func (a *Agent) summaryEnabled() bool {
 // tool-use loop to llmloop.Runner and owns only scan-specific concerns
 // (file enumeration, FULL_SCAN_TASK rendering, per-file filtering).
 type Agent struct {
-	args           Args
-	items          []model.ScanItem
-	currentDate    string
-	session        *session.SessionHistory
-	subtaskFailed  int64 // atomic
-	runner         *llmloop.Runner
-	resumeInfo     *session.ResumeInfo
-	projectSummary string // populated post-run by maybeRunProjectSummary
+	args             Args
+	items            []model.ScanItem
+	currentDate      string
+	session          *session.SessionHistory
+	subtaskFailed    int64 // atomic
+	runner           *llmloop.Runner
+	resumeInfo       *session.ResumeInfo
+	scanFingerprints map[string]string
+	projectSummary   string // populated post-run by maybeRunProjectSummary
 }
 
 // ProjectSummary returns the markdown project-level summary produced after
@@ -119,6 +122,7 @@ func NewAgent(args Args) *Agent {
 	if args.Session == nil {
 		args.Session = session.New(args.RepoDir, "", args.Model, session.SessionOptions{
 			ReviewMode:  session.ReviewModeFullScan,
+			ScanPaths:   args.Paths,
 			ResumedFrom: resumedFromSession(args.Resume),
 		})
 	}
@@ -224,6 +228,25 @@ func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
 }
 
+func (a *Agent) initScanFingerprints(items []model.ScanItem) {
+	if len(items) == 0 {
+		return
+	}
+	a.scanFingerprints = make(map[string]string, len(items))
+	for _, it := range items {
+		a.scanFingerprints[it.Path] = scanItemFingerprint(it)
+	}
+}
+
+func (a *Agent) scanItemFingerprint(it model.ScanItem) string {
+	if a != nil && a.scanFingerprints != nil {
+		if fingerprint := a.scanFingerprints[it.Path]; fingerprint != "" {
+			return fingerprint
+		}
+	}
+	return scanItemFingerprint(it)
+}
+
 func (a *Agent) initResumeInfo(items []model.ScanItem) {
 	resume := a.args.Resume
 	if resume == nil {
@@ -232,7 +255,7 @@ func (a *Agent) initResumeInfo(items []model.ScanItem) {
 	var reused int64
 	var rerun int64
 	for _, it := range items {
-		if _, ok := resume.Item(scanItemFingerprint(it)); ok {
+		if _, ok := resume.Item(a.scanItemFingerprint(it)); ok {
 			reused++
 		} else {
 			rerun++
@@ -480,6 +503,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	atomic.StoreInt64(&a.subtaskFailed, 0)
+	a.initScanFingerprints(a.items)
 	a.initResumeInfo(a.items)
 
 	strategy := a.resolveBatchStrategy()
@@ -504,8 +528,10 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		}
 
 		// Drain async comment workers BEFORE dedup so all of this batch's
-		// comments are visible. CommentWorkerPool.Await is cumulative
-		// across batches — that's fine since batches are sequential here.
+		// comments are visible. recordCompleted has its own Await for
+		// checkpoint correctness; this one keeps the dedup input complete.
+		// CommentWorkerPool.Await is cumulative across batches - that is fine
+		// since batches are sequential here.
 		if a.args.CommentWorkerPool != nil {
 			a.args.CommentWorkerPool.Await()
 		}
@@ -560,6 +586,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 	)
 
 	recordCompleted := func() {
+		// Drain async comment writes before checkpointing completed files.
 		if a.args.CommentWorkerPool != nil {
 			a.args.CommentWorkerPool.Await()
 		}
@@ -567,7 +594,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 		items := append([]model.ScanItem(nil), completed...)
 		completedMu.Unlock()
 		for _, it := range items {
-			fingerprint := scanItemFingerprint(it)
+			fingerprint := a.scanItemFingerprint(it)
 			comments := a.args.CommentCollector.CommentsForPath(it.Path)
 			a.session.RecordReviewItemDone(it.Path, it.Path, it.Path, fingerprint, comments)
 		}
@@ -575,7 +602,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 
 	for i := range batch {
 		it := batch[i]
-		fingerprint := scanItemFingerprint(it)
+		fingerprint := a.scanItemFingerprint(it)
 		if item, ok := a.resumeItem(fingerprint); ok {
 			for _, cm := range item.Comments {
 				a.args.CommentCollector.Add(cm)

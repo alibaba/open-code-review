@@ -197,6 +197,7 @@ func TestParseScanFlags_PreviewWithResume(t *testing.T) {
 		t.Errorf("error = %q; want preview/resume conflict", err.Error())
 	}
 }
+
 func TestParseScanFlags_AllStringFlags(t *testing.T) {
 	opts, err := parseScanFlags([]string{
 		"--tools", "/tmp/tools.json",

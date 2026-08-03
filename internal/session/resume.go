@@ -7,21 +7,25 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
 // ResumeState is the replayed, read-only checkpoint index for one prior session.
 type ResumeState struct {
-	SessionID  string
-	RepoDir    string
-	GitBranch  string
-	Model      string
-	ReviewMode string
-	DiffFrom   string
-	DiffTo     string
-	DiffCommit string
-	Items      map[string]ResumeItem
+	SessionID        string
+	RepoDir          string
+	GitBranch        string
+	Model            string
+	ReviewMode       string
+	DiffFrom         string
+	DiffTo           string
+	DiffCommit       string
+	ScanPaths        []string
+	HasScanPathScope bool
+	Items            map[string]ResumeItem
 }
 
 // ResumeItem is a completed file-level checkpoint, keyed by diff fingerprint.
@@ -43,6 +47,7 @@ type resumeRecord struct {
 	DiffFrom        string             `json:"diffFrom"`
 	DiffTo          string             `json:"diffTo"`
 	DiffCommit      string             `json:"diffCommit"`
+	ScanPaths       *[]string          `json:"scanPaths"`
 	FilePath        string             `json:"filePath"`
 	OldPath         string             `json:"oldPath"`
 	NewPath         string             `json:"newPath"`
@@ -147,6 +152,10 @@ func (s *ResumeState) applySessionStart(rec resumeRecord) {
 	s.DiffFrom = rec.DiffFrom
 	s.DiffTo = rec.DiffTo
 	s.DiffCommit = rec.DiffCommit
+	if rec.ScanPaths != nil {
+		s.ScanPaths = normalizeScanPaths(*rec.ScanPaths)
+		s.HasScanPathScope = true
+	}
 }
 
 // CompletedCount returns the number of reusable file-level checkpoints.
@@ -200,7 +209,7 @@ func (s *ResumeState) ValidateOptions(opts SessionOptions) error {
 }
 
 // ValidateScanOptions verifies that the previous session was a full-file scan.
-func (s *ResumeState) ValidateScanOptions() error {
+func (s *ResumeState) ValidateScanOptions(scanPaths []string) error {
 	if s == nil {
 		return nil
 	}
@@ -210,7 +219,53 @@ func (s *ResumeState) ValidateScanOptions() error {
 	if s.ReviewMode != ReviewModeFullScan {
 		return fmt.Errorf("resume session review mode %q does not match current mode %q", s.ReviewMode, ReviewModeFullScan)
 	}
+	current := normalizeScanPaths(scanPaths)
+	if s.HasScanPathScope && !equalStringSlices(s.ScanPaths, current) {
+		return fmt.Errorf("resume session scan path scope %q does not match current scope %q", formatScanScope(s.ScanPaths), formatScanScope(current))
+	}
 	return nil
+}
+
+func normalizeScanPaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		p = strings.TrimPrefix(p, "./")
+		p = strings.TrimSuffix(filepath.ToSlash(p), "/")
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func formatScanScope(paths []string) string {
+	if len(paths) == 0 {
+		return "<whole repo>"
+	}
+	return strings.Join(paths, ",")
 }
 
 func copyLlmComments(in []model.LlmComment) []model.LlmComment {

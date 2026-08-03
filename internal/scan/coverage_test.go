@@ -696,6 +696,7 @@ func TestDispatchSubtasks_ResumeSkipsCompletedFiles(t *testing.T) {
 		t.Fatalf("ResumeInfo = %+v", info)
 	}
 }
+
 func TestDispatchSubtasks_AllFailed(t *testing.T) {
 	client := &errorScanClient{err: context.DeadlineExceeded}
 
@@ -828,5 +829,136 @@ func TestPhaseEnabled(t *testing.T) {
 	}
 	if a3.summaryEnabled() {
 		t.Error("summaryEnabled should be false with SkipSummary")
+	}
+}
+
+func scanTaskDoneResponse() *llm.ChatResponse {
+	doneContent := ""
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{
+				Content: &doneContent,
+				ToolCalls: []llm.ToolCall{{
+					ID: "done", Type: "function",
+					Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"},
+				}},
+			},
+		}},
+		Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+	}
+}
+
+func TestDispatchSubtasks_ResumeRerunsChangedContent(t *testing.T) {
+	oldItem := model.ScanItem{Path: "changed.go", Content: "package changed\nconst v = 1\n", LineCount: 2}
+	newItem := model.ScanItem{Path: "changed.go", Content: "package changed\nconst v = 2\n", LineCount: 2}
+	resume := &session.ResumeState{
+		SessionID:  "prior-session",
+		Model:      "old-model",
+		ReviewMode: session.ReviewModeFullScan,
+		Items: map[string]session.ResumeItem{
+			scanItemFingerprint(oldItem): {
+				FilePath:    oldItem.Path,
+				OldPath:     oldItem.Path,
+				NewPath:     oldItem.Path,
+				Fingerprint: scanItemFingerprint(oldItem),
+				Comments:    []model.LlmComment{{Path: oldItem.Path, Content: "old finding"}},
+			},
+		},
+	}
+	client := &fakeScanClient{responses: []*llm.ChatResponse{scanTaskDoneResponse()}}
+	a := NewAgent(Args{
+		Template:         makeTemplateWithFullScan(),
+		LLMClient:        client,
+		Model:            "new-model",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1,
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
+		Resume:           resume,
+		Session: session.New(t.TempDir(), "main", "new-model", session.SessionOptions{
+			ReviewMode:  session.ReviewModeFullScan,
+			ResumedFrom: resume.SessionID,
+		}),
+	})
+	a.items = []model.ScanItem{newItem}
+	a.currentDate = "2026-06-26"
+
+	_, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if client.idx != 1 {
+		t.Fatalf("LLM calls = %d, want 1 because content changed", client.idx)
+	}
+	info := a.ResumeInfo()
+	if info == nil || info.ReusedFiles != 0 || info.RerunFiles != 1 {
+		t.Fatalf("ResumeInfo = %+v, want 0 reused / 1 rerun", info)
+	}
+}
+
+func TestDispatchSubtasks_ResumeMultiBatchAndChained(t *testing.T) {
+	items := []model.ScanItem{
+		{Path: "a.go", Content: "package p\nconst A = 1\n", LineCount: 2},
+		{Path: "b.go", Content: "package p\nconst B = 1\n", LineCount: 2},
+		{Path: "c.go", Content: "package p\nconst C = 1\n", LineCount: 2},
+		{Path: "d.go", Content: "package p\nconst D = 1\n", LineCount: 2},
+		{Path: "e.go", Content: "package p\nconst E = 1\n", LineCount: 2},
+	}
+	resumeItems := make(map[string]session.ResumeItem)
+	for _, idx := range []int{0, 1, 3} {
+		it := items[idx]
+		fingerprint := scanItemFingerprint(it)
+		resumeItems[fingerprint] = session.ResumeItem{
+			FilePath:    it.Path,
+			OldPath:     it.Path,
+			NewPath:     it.Path,
+			Fingerprint: fingerprint,
+			Comments:    []model.LlmComment{{Path: it.Path, Content: "cached " + it.Path}},
+		}
+	}
+	resume := &session.ResumeState{
+		SessionID:  "resume-of-resume",
+		Model:      "old-model",
+		ReviewMode: session.ReviewModeFullScan,
+		Items:      resumeItems,
+	}
+	tpl := makeTemplateWithFullScan()
+	tpl.BatchStrategy = string(BatchByLanguage)
+	tpl.BatchSize = 2
+	client := &fakeScanClient{responses: []*llm.ChatResponse{scanTaskDoneResponse(), scanTaskDoneResponse()}}
+	a := NewAgent(Args{
+		Template:         tpl,
+		LLMClient:        client,
+		Model:            "new-model",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1,
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
+		Resume:           resume,
+		Session: session.New(t.TempDir(), "main", "new-model", session.SessionOptions{
+			ReviewMode:  session.ReviewModeFullScan,
+			ResumedFrom: resume.SessionID,
+		}),
+	})
+	a.items = items
+	a.currentDate = "2026-06-26"
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if client.idx != 2 {
+		t.Fatalf("LLM calls = %d, want 2 fresh files across multiple batches", client.idx)
+	}
+	if len(comments) != 3 {
+		t.Fatalf("comments = %+v, want 3 cached comments", comments)
+	}
+	info := a.ResumeInfo()
+	if info == nil || info.ReusedFiles != 3 || info.RerunFiles != 2 {
+		t.Fatalf("ResumeInfo = %+v, want 3 reused / 2 rerun", info)
 	}
 }

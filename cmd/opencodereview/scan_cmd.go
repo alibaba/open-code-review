@@ -133,7 +133,7 @@ func executeScan(opts scanOptions) error {
 		return runScanPreview(cc, scanTpl, scanPaths)
 	}
 
-	resumeState, err := loadScanResumeState(cc.RepoDir, opts)
+	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)
 	if err != nil {
 		return err
 	}
@@ -212,7 +212,7 @@ func executeScan(opts scanOptions) error {
 	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q)
 }
 
-func loadScanResumeState(repoDir string, opts scanOptions) (*session.ResumeState, error) {
+func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (*session.ResumeState, error) {
 	if opts.resume == "" {
 		return nil, nil
 	}
@@ -220,7 +220,7 @@ func loadScanResumeState(repoDir string, opts scanOptions) (*session.ResumeState
 	if err != nil {
 		return nil, fmt.Errorf("load resume session: %w (run 'ocr session list' to see available sessions)", err)
 	}
-	if err := state.ValidateScanOptions(); err != nil {
+	if err := state.ValidateScanOptions(scanPaths); err != nil {
 		return nil, fmt.Errorf("%w (run 'ocr session list' to see available sessions)", err)
 	}
 	if state.CompletedCount() == 0 {
