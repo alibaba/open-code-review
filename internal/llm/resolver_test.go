@@ -434,6 +434,71 @@ func TestResolveEndpointWithOptions_ExplicitProvider(t *testing.T) {
 	}
 }
 
+func TestResolveEndpointWithOptions_DifferentProviderDoesNotReuseTopLevelModel(t *testing.T) {
+	tests := []struct {
+		name, provider string
+		cfg            configFile
+	}{
+		{
+			name:     "built-in",
+			provider: "anthropic",
+			cfg: configFile{
+				Provider: "openai",
+				Model:    "gpt-5.4",
+				Providers: map[string]providerEntryConfig{
+					"anthropic": {APIKey: "anthropic-token"},
+				},
+			},
+		},
+		{
+			name:     "custom",
+			provider: "my-gateway",
+			cfg: configFile{
+				Provider: "openai",
+				Model:    "gpt-5.4",
+				CustomProviders: map[string]providerEntryConfig{
+					"my-gateway": {
+						APIKey:   "gateway-token",
+						URL:      "https://gateway.example.com/v1",
+						Protocol: ProtocolOpenAIChatCompletions,
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllEnv(t)
+			path, _ := writeResolverConfig(t, tt.cfg)
+
+			_, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: tt.provider})
+			if err == nil || !strings.Contains(err.Error(), "has no model configured") || !strings.Contains(err.Error(), "pass --model") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestResolveEndpointWithOptions_SameProviderPreservesTopLevelModel(t *testing.T) {
+	clearAllEnv(t)
+	path, _ := writeResolverConfig(t, configFile{
+		Provider: "openai",
+		Model:    "gpt-5.4",
+		Providers: map[string]providerEntryConfig{
+			"openai": {APIKey: "openai-token"},
+		},
+	})
+
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: "openai"})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Provider != "openai" || ep.Model != "gpt-5.4" {
+		t.Fatalf("endpoint = %+v", ep)
+	}
+}
+
 func TestResolveEndpointWithOptions_ExplicitProviderAndModel(t *testing.T) {
 	clearAllEnv(t)
 	path, _ := writeResolverConfig(t, configFile{

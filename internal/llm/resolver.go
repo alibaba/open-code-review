@@ -280,6 +280,9 @@ func tryOCRConfig(path string, opts ResolveOptions) (ResolvedEndpoint, bool, err
 	}
 
 	if opts.Provider != "" {
+		if opts.Provider != cfg.Provider {
+			cfg.Model = ""
+		}
 		cfg.Provider = opts.Provider
 	}
 	if cfg.Provider != "" {
