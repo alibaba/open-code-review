@@ -646,19 +646,6 @@ func mustJSON(t *testing.T, v any) []byte {
 	return b
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
-
 func TestApplySessionStart_SetsScanPathScope(t *testing.T) {
 	paths := []string{"./internal/scan/", "cmd/opencodereview", "internal/scan"}
 	s := &ResumeState{Items: make(map[string]ResumeItem)}
@@ -711,7 +698,7 @@ func TestValidateScanOptions_RejectsScanPathScopeMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected mismatch when prior scoped scan is resumed as whole repo")
 	}
-	if !contains(err.Error(), "scan path scope") {
+	if !strings.Contains(err.Error(), "scan path scope") {
 		t.Fatalf("error = %q, want scan path scope mismatch", err.Error())
 	}
 }
@@ -726,7 +713,7 @@ func TestValidateScanOptions_RejectsWholeRepoScopeMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected mismatch when prior whole-repo scan is resumed with --path")
 	}
-	if !contains(err.Error(), "<whole repo>") {
+	if !strings.Contains(err.Error(), "<whole repo>") {
 		t.Fatalf("error = %q, want whole-repo scope in message", err.Error())
 	}
 }
