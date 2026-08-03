@@ -33,6 +33,8 @@ var registry = []Provider{
 		AuthHeader:  "x-api-key",
 		EnvVar:      "ANTHROPIC_API_KEY",
 		Models: []string{
+			"claude-opus-5",
+			"claude-sonnet-5",
 			"claude-opus-4-8",
 			"claude-opus-4-7",
 			"claude-opus-4-6",
@@ -77,6 +79,7 @@ var registry = []Provider{
 		BaseURL:     "https://dashscope.aliyuncs.com/compatible-mode/v1",
 		EnvVar:      "DASHSCOPE_API_KEY",
 		Models: []string{
+			"qwen3.8-max",
 			"qwen3.7-max",
 			"qwen3.7-plus",
 			"qwen3.6-plus",
@@ -95,6 +98,7 @@ var registry = []Provider{
 		BaseURL:     "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
 		EnvVar:      "DASHSCOPE_TOKENPLAN_KEY",
 		Models: []string{
+			"qwen3.8-max",
 			"qwen3.7-max",
 			"qwen3.7-plus",
 			"qwen3.6-plus",
@@ -143,7 +147,6 @@ var registry = []Provider{
 		BaseURL:     "https://tokenhub.tencentmaas.com/v1",
 		EnvVar:      "TENCENT_TOKENHUB_API_KEY",
 		Models: []string{
-			"hy3-preview",
 			"deepseek-v4-pro",
 			"deepseek-v4-flash",
 			"glm-5.2",
@@ -151,11 +154,10 @@ var registry = []Provider{
 			"glm-5",
 			"glm-5-turbo",
 			"kimi-k2.7-code",
+			"kimi-k2.7-code-highspeed",
 			"kimi-k2.6",
-			"kimi-k2.5",
 			"minimax-m3",
 			"minimax-m2.7",
-			"minimax-m2.5",
 		},
 	},
 	{
@@ -165,7 +167,7 @@ var registry = []Provider{
 		BaseURL:     "https://api.lkeap.cloud.tencent.com/plan/v3",
 		EnvVar:      "TENCENT_HUNYUAN_TOKENPLAN_KEY",
 		Models: []string{
-			"hy3-preview",
+			"hy3",
 		},
 	},
 	{
@@ -190,6 +192,7 @@ var registry = []Provider{
 		BaseURL:     "https://api.moonshot.cn/v1",
 		EnvVar:      "MOONSHOT_API_KEY",
 		Models: []string{
+			"kimi-k3",
 			"kimi-k2.7-code",
 			"kimi-k2.7-code-highspeed",
 			"kimi-k2.6",
