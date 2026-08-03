@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -28,7 +29,7 @@ func TestSessionFilePath_ValidID(t *testing.T) {
 	}
 
 	expectedSuffix := filepath.Join("test-sessions", encodeRepoPath("/some/repo"), "abc-123.jsonl")
-	if !contains(path, expectedSuffix) {
+	if !strings.Contains(path, expectedSuffix) {
 		t.Errorf("path %q does not contain expected suffix %q", path, expectedSuffix)
 	}
 }

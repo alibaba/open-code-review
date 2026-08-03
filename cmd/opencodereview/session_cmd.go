@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -17,6 +18,12 @@ var sessionCmd = &cobra.Command{
 	Use:     "session",
 	Aliases: []string{"sessions"},
 	Short:   "List and inspect saved review sessions",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 {
+			return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
+		}
+		return cmd.Help()
+	},
 }
 
 var sessionListRepoDir string
@@ -37,12 +44,56 @@ var sessionShowRepoDir string
 var sessionShowJSON bool
 
 var sessionShowCmd = &cobra.Command{
-	Use:   "show [flags] <session-id>",
-	Short: "Show one session's metadata and per-file items",
-	Args:  cobra.ExactArgs(1),
+	Use:               "show [flags] <session-id>",
+	Short:             "Show one session's metadata and per-file items",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSessionIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSessionShow(args[0])
 	},
+}
+
+var sessionCommentsRepoDir string
+var sessionCommentsJSON bool
+var sessionCommentsSeverity string
+var sessionCommentsCategory string
+
+var sessionCommentsCmd = &cobra.Command{
+	Use:               "comments [flags] <session-id>",
+	Short:             "Show the review comments recorded in one session",
+	Long:              "Print every review comment persisted in a session, formatted like 'ocr review' terminal output.\nUse --json for machine-readable output and --severity/--category to filter findings.",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSessionIDs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSessionComments(args[0])
+	},
+}
+
+// completeSessionIDs offers the persisted session ids for the current repo
+// (or --repo, when already typed) as shell completions, newest first, with a
+// short summary as the completion description.
+func completeSessionIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) != 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	repo, _ := cmd.Flags().GetString("repo")
+	resolvedRepo, err := resolveWorkingDirForSession(repo)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	summaries, err := session.ListSessions(resolvedRepo)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	completions := make([]string, 0, len(summaries))
+	for _, s := range summaries {
+		if !strings.HasPrefix(s.SessionID, toComplete) {
+			continue
+		}
+		desc := fmt.Sprintf("%s · %d comments · %s", describeStart(s), s.TotalComments, describeStatus(s))
+		completions = append(completions, s.SessionID+"\t"+desc)
+	}
+	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
 func init() {
@@ -53,8 +104,16 @@ func init() {
 	sessionShowCmd.Flags().StringVar(&sessionShowRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
 	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "emit JSON instead of a table")
 
+	sessionCommentsCmd.Flags().StringVar(&sessionCommentsRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	sessionCommentsCmd.Flags().BoolVar(&sessionCommentsJSON, "json", false, "emit the comments as a JSON array")
+	sessionCommentsCmd.Flags().StringVar(&sessionCommentsSeverity, "severity", "", "comma-separated severities to include (critical, high, medium, low)")
+	sessionCommentsCmd.Flags().StringVar(&sessionCommentsCategory, "category", "", "comma-separated categories to include (e.g. bug, security)")
+	sessionCommentsCmd.RegisterFlagCompletionFunc("severity", completeEnum("critical", "high", "medium", "low"))
+	sessionCommentsCmd.RegisterFlagCompletionFunc("category", completeEnum("bug", "security", "performance", "maintainability", "test", "style", "documentation", "other"))
+
 	sessionCmd.AddCommand(sessionListCmd)
 	sessionCmd.AddCommand(sessionShowCmd)
+	sessionCmd.AddCommand(sessionCommentsCmd)
 }
 
 func runSessionList() error {
@@ -106,6 +165,75 @@ func runSessionShow(sessionID string) error {
 
 	printSessionDetail(os.Stdout, summary, items)
 	return nil
+}
+
+func runSessionComments(sessionID string) error {
+	resolvedRepo, err := resolveWorkingDirForSession(sessionCommentsRepoDir)
+	if err != nil {
+		return err
+	}
+	comments, err := session.LoadComments(resolvedRepo, sessionID)
+	if err != nil {
+		return fmt.Errorf("load session %q: %w", sessionID, err)
+	}
+	filtered := filterComments(comments, sessionCommentsSeverity, sessionCommentsCategory)
+
+	if sessionCommentsJSON {
+		if filtered == nil {
+			filtered = []model.LlmComment{}
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(filtered)
+	}
+
+	if len(filtered) == 0 {
+		if len(comments) == 0 {
+			fmt.Printf("No comments recorded in session %s.\n", sessionID)
+		} else {
+			fmt.Printf("No comments match the given filters (%d recorded in session %s).\n", len(comments), sessionID)
+		}
+		return nil
+	}
+	for _, c := range filtered {
+		renderComment(c)
+	}
+	return nil
+}
+
+// filterComments keeps comments whose severity and category are in the given
+// comma-separated, case-insensitive filter lists. Empty filters keep everything.
+func filterComments(comments []model.LlmComment, severities, categories string) []model.LlmComment {
+	sevSet := parseFilterSet(severities)
+	catSet := parseFilterSet(categories)
+	if sevSet == nil && catSet == nil {
+		return comments
+	}
+	var out []model.LlmComment
+	for _, c := range comments {
+		if sevSet != nil && !sevSet[strings.ToLower(c.Severity)] {
+			continue
+		}
+		if catSet != nil && !catSet[strings.ToLower(c.Category)] {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func parseFilterSet(s string) map[string]bool {
+	set := map[string]bool{}
+	for _, part := range strings.Split(s, ",") {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if part != "" {
+			set[part] = true
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
 }
 
 // resolveWorkingDirForSession accepts an explicit --repo flag value and falls

@@ -58,6 +58,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr llm providers` | — | List all built-in LLM providers. |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions. |
 | `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints. |
+| `ocr session comments <id>` | `ocr sessions comments <id>` | Print the review comments recorded in one session. |
 | `ocr viewer` | — | Launch the local web UI for past review sessions (`localhost:5483`). |
 | `ocr version` | — | Print version, commit, platform, build date, and GitHub URL. |
 
@@ -155,6 +156,7 @@ resume from one that matches the same review target:
 ```bash
 ocr session list
 ocr session show <session-id>
+ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
@@ -275,8 +277,9 @@ ocr session <sub-command>
 ocr sessions <sub-command>   (alias)
 
 Sub-commands:
-  list, ls    List recent review sessions for the current repo
-  show <id>   Show one session's metadata and per-file items
+  list, ls        List recent review sessions for the current repo
+  show <id>       Show one session's metadata and per-file items
+  comments <id>   Show the review comments recorded in one session
 ```
 
 ### `ocr session list`
@@ -305,6 +308,26 @@ ocr session show --repo /path/to/repo <session-id>
 |---|---|---|
 | `--repo <path>` | current dir | Repository whose session should be inspected. |
 | `--json` | `false` | Emit session metadata and per-file items as JSON. |
+
+### `ocr session comments`
+
+Prints every review comment persisted in a session, rendered in the same
+style as `ocr review` terminal output (path, line range, severity badge,
+suggestion diff).
+
+```bash
+ocr session comments <session-id>
+ocr session comments --json <session-id>
+ocr session comments --severity high <session-id>
+ocr session comments --severity critical,high --category bug,security <session-id>
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--repo <path>` | current dir | Repository whose session should be inspected. |
+| `--json` | `false` | Emit the comments as a JSON array. |
+| `--severity <list>` | all | Comma-separated severities to include (`critical`, `high`, `medium`, `low`). |
+| `--category <list>` | all | Comma-separated categories to include (e.g. `bug`, `security`). |
 
 ## `ocr rules`
 

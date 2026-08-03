@@ -57,6 +57,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr llm providers` | — | 組み込みの LLM プロバイダーをすべて一覧表示します。 |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 保存されたレビューセッションを一覧表示します。 |
 | `ocr session show <id>` | `ocr sessions show <id>` | 1つのセッションとファイル単位のチェックポイントを表示します。 |
+| `ocr session comments <id>` | `ocr sessions comments <id>` | 1つのセッションに記録されたレビューコメントを表示します。 |
 | `ocr viewer` | — | 過去のレビューセッション用のローカル Web UI を起動します（`localhost:5483`）。 |
 | `ocr version` | — | バージョン、commit、プラットフォーム、ビルド日、GitHub URL を出力します。 |
 
@@ -143,6 +144,7 @@ ocr review -c abc123
 ```bash
 ocr session list
 ocr session show <session-id>
+ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
@@ -255,8 +257,9 @@ ocr session <sub-command>
 ocr sessions <sub-command>   (alias)
 
 Sub-commands:
-  list, ls    List recent review sessions for the current repo
-  show <id>   Show one session's metadata and per-file items
+  list, ls        List recent review sessions for the current repo
+  show <id>       Show one session's metadata and per-file items
+  comments <id>   Show the review comments recorded in one session
 ```
 
 ### `ocr session list`
@@ -285,6 +288,25 @@ ocr session show --repo /path/to/repo <session-id>
 |---|---|---|
 | `--repo <path>` | カレントディレクトリ | セッションを確認するリポジトリ。 |
 | `--json` | `false` | セッションのメタデータとファイル単位の項目を JSON として出力します。 |
+
+### `ocr session comments`
+
+セッションに保存されたすべてのレビューコメントを、`ocr review` のターミナル出力と
+同じスタイル（パス、行範囲、重要度バッジ、提案 diff）で表示します。
+
+```bash
+ocr session comments <session-id>
+ocr session comments --json <session-id>
+ocr session comments --severity high <session-id>
+ocr session comments --severity critical,high --category bug,security <session-id>
+```
+
+| 引数 | デフォルト | 説明 |
+|---|---|---|
+| `--repo <path>` | カレントディレクトリ | セッションを確認するリポジトリ。 |
+| `--json` | `false` | コメントを JSON 配列として出力します。 |
+| `--severity <list>` | すべて | 含める重要度をカンマ区切りで指定します（`critical`、`high`、`medium`、`low`）。 |
+| `--category <list>` | すべて | 含めるカテゴリをカンマ区切りで指定します（例: `bug`、`security`）。 |
 
 ## `ocr rules`
 

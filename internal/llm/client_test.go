@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -506,6 +507,161 @@ func TestOpenAIClient_ExtraHeadersSent(t *testing.T) {
 	}
 	if gotOrgID != "org-abc" {
 		t.Errorf("X-Org-ID = %q, want %q", gotOrgID, "org-abc")
+	}
+}
+
+func TestOpenAIClient_RetriesTruncatedResponse(t *testing.T) {
+	const responseBody = `{
+		"id":"chatcmpl-retry",
+		"object":"chat.completion",
+		"model":"gpt-retry",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"recovered"},"finish_reason":"stop"}]
+	}`
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if request == 1 {
+			w.Header().Set("Content-Length", fmt.Sprint(len(responseBody)))
+			_, _ = fmt.Fprint(w, responseBody[:len(responseBody)/2])
+			return
+		}
+		_, _ = fmt.Fprint(w, responseBody)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-retry",
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+	if got := resp.Content(); got != "recovered" {
+		t.Errorf("Content() = %q, want %q", got, "recovered")
+	}
+}
+
+func TestOpenAIClient_StopsAfterSecondTruncatedResponse(t *testing.T) {
+	const responseBody = `{
+		"id":"chatcmpl-truncated",
+		"object":"chat.completion",
+		"model":"gpt-retry",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"incomplete"},"finish_reason":"stop"}]
+	}`
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", fmt.Sprint(len(responseBody)))
+		_, _ = fmt.Fprint(w, responseBody[:len(responseBody)/2])
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-retry",
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if resp != nil {
+		t.Fatalf("response = %#v, want nil", resp)
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want io.ErrUnexpectedEOF", err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+}
+
+func TestOpenAIClient_DoesNotRetryNonRetryableError(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"error":{"message":"invalid request","type":"invalid_request_error"}}`)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-test",
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if resp != nil {
+		t.Fatalf("response = %#v, want nil", resp)
+	}
+	if err == nil {
+		t.Fatal("error = nil, want API error")
+	}
+	if !strings.Contains(err.Error(), "invalid request") {
+		t.Fatalf("error = %v, want error containing %q", err, "invalid request")
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+}
+
+func TestOpenAIClient_DoesNotRetryTruncatedResponseAfterCancellation(t *testing.T) {
+	const responseBody = `{
+		"id":"chatcmpl-canceled",
+		"object":"chat.completion",
+		"model":"gpt-retry",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"incomplete"},"finish_reason":"stop"}]
+	}`
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", fmt.Sprint(len(responseBody)))
+		_, _ = fmt.Fprint(w, responseBody[:len(responseBody)/2])
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		cancel()
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-retry",
+	})
+
+	resp, err := client.CompletionsWithCtx(ctx, ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if resp != nil {
+		t.Fatalf("response = %#v, want nil", resp)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
 	}
 }
 
