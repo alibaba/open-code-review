@@ -18,10 +18,8 @@ var llmCmd = &cobra.Command{
 	Long:  "LLM utility commands.",
 	Example: `  ocr llm test                   Verify LLM connectivity and configuration
   ocr llm providers              List available built-in providers`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) > 0 {
-			return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
-		}
 		return cmd.Help()
 	},
 }

@@ -12,10 +12,8 @@ var rulesCmd = &cobra.Command{
 	Use:   "rules",
 	Short: "Inspect and debug review rules",
 	Long:  "Inspect and debug review rules.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) > 0 {
-			return fmt.Errorf("unknown command %q for %q", args[0], cmd.CommandPath())
-		}
 		return cmd.Help()
 	},
 }
