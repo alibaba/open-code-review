@@ -22,6 +22,20 @@
 #   OCR_FAILURE_DELAY       - Delay (ms) after a non-rate-limit failure to pace subsequent requests (default: 1000)
 #   OCR_RATE_LIMIT_THRESHOLD - Proactively slow down when GitLab RateLimit-Remaining is at/below this value (default: 10, set 0 to disable)
 #
+# Optional CI/CD Variables (publication behavior, aligned with the GitHub Action):
+#   OCR_STICKY_SUMMARY            - "true" updates the summary note in place across runs (default: true)
+#   OCR_INCREMENTAL              - "true" skips comments whose line range overlaps prior bot discussions (default: false)
+#   OCR_INCREMENTAL_OVERLAP_THRESHOLD - IoU threshold (0-1) for multi-line overlap (default: 0.6)
+#   OCR_ROUTE_SEVERITY_BELOW     - route findings at/below this severity to the summary note (e.g. "low")
+#   OCR_ROUTE_CATEGORIES         - comma-separated categories to route to the summary (e.g. "style,documentation")
+#   OCR_FAIL_ON_SEVERITY         - fail the CI job when a comment's severity is at/above this level (e.g. "critical")
+#
+# Outputs:
+#   /tmp/ocr-stats.env           - dotenv file with OCR_COMMENTS_{TOTAL,INLINE,SUMMARY,ROUTED,SKIPPED,FAILED}
+#                                  and OCR_SUMMARY_URL, exposed to downstream jobs via the dotenv artifact.
+#   /tmp/ocr-result.json         - raw `ocr review --format json` output (artifact).
+#   /tmp/ocr-stderr.log          - OCR stderr (artifact).
+#
 # Note: The pipeline also configures llm.extra_body to '{"thinking": {"type": "disabled"}}'
 #   to disable thinking mode for compatibility with various LLM providers.
 #
@@ -76,3 +90,14 @@ code-review:
     # post_review.py lives alongside this file; copy both into your repo.
     # See examples/gitlab_ci/README.md for setup instructions.
     - python3 post_review.py /tmp/ocr-result.json
+
+  # Expose the review result, stderr, and posting stats to downstream jobs.
+  # The dotenv report carries OCR_COMMENTS_* and OCR_SUMMARY_URL.
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths:
+      - /tmp/ocr-result.json
+      - /tmp/ocr-stderr.log
+    reports:
+      dotenv: /tmp/ocr-stats.env
