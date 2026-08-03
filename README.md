@@ -138,9 +138,6 @@ ocr review
 # Branch range — compare two refs
 ocr review --from main --to feature-branch
 
-# Select a provider/model for this run only — saved configuration is unchanged
-ocr review --provider anthropic --model claude-opus-4-6 --format json
-
 # Single commit
 ocr review --commit abc123
 
@@ -156,19 +153,10 @@ ocr session comments --severity critical,high --json <session-id>
 ocr scan                          # scan the entire repository
 ocr scan --path internal/agent    # scan a directory or specific files
 
-ocr scan --provider openai --model gpt-5.4 --format json
-
 # Delegation mode — let your AI coding agent perform the review itself
 # OCR handles file selection and rule resolution; no LLM configuration needed
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
-```
-
-With `--format json`, OCR reports the resolved LLM in `llm`: the normalized `model` is always present, while `provider` appears only for a named configured provider. A complete process environment takes precedence over saved config unless `--provider` selects a configured endpoint.
-
-```json
-{"llm":{"provider":"anthropic","model":"claude-opus-4-6"}}
-{"llm":{"model":"gpt-5-codex"}}
 ```
 
 ## Documentation

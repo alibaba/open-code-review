@@ -138,9 +138,6 @@ ocr review
 # ブランチ範囲 — 2つのrefを比較
 ocr review --from main --to feature-branch
 
-# この実行だけ provider/model を選択 — 保存済み設定は変更しない
-ocr review --provider anthropic --model claude-opus-4-6 --format json
-
 # 単一コミット
 ocr review --commit abc123
 
@@ -152,19 +149,10 @@ ocr review --from main --to feature-branch --resume <session-id>
 ocr scan                          # リポジトリ全体をスキャン
 ocr scan --path internal/agent    # ディレクトリまたは特定のファイルをスキャン
 
-ocr scan --provider openai --model gpt-5.4 --format json
-
 # デリゲートモード — AI コーディングエージェントが自らレビューを実行
 # OCR はファイル選択とルール解決を担当。LLM 設定不要
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
-```
-
-`--format json` では、OCR は実際に解決した LLM を `llm` に出力します。正規化済みの `model` は常に含まれ、`provider` は名前付きの設定済み provider の場合だけ含まれます。`--provider` で設定済み endpoint を選ばない限り、完全なプロセス環境設定が保存済み config より優先されます。
-
-```json
-{"llm":{"provider":"anthropic","model":"claude-opus-4-6"}}
-{"llm":{"model":"gpt-5-codex"}}
 ```
 
 ## ドキュメント

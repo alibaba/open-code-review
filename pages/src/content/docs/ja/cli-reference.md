@@ -48,6 +48,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | コマンド | エイリアス | 役割 |
 |---|---|---|
 | `ocr review` | `ocr r` | コードレビューを実行してコメントを出力します。 |
+| `ocr scan` | `ocr s` | Git diff を必要とせず、ファイル全体をスキャンします。 |
 | `ocr rules check <file>` | — | あるファイルパスにどのルールが適用され、その出所はどこかを表示します。 |
 | `ocr config set <key> <value>` | — | 設定値を `~/.opencodereview/config.json` に永続化します。 |
 | `ocr config unset custom_providers.<name>` | — | カスタムプロバイダーを削除します（現在有効なものであれば、有効な `provider`/`model` もクリアされます）。 |
@@ -93,13 +94,30 @@ ocr r      [flags]   (alias)
 | `--timeout <minutes>` | — | `10` | ファイルごとの締め切り時間。`0` でタイムアウトを無効化します。 |
 | `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |
 | `--max-tools <n>` | — | テンプレートのデフォルト | ファイルごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`30`）を使用します。1〜9 は `10` に引き上げられます。`≥ 10` の値はすべてテンプレートのデフォルトを上書きします（`30` より小さくても）。 |
-| `--model <name>` | — | — | 今回のレビューについて、解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
+| `--provider <name>` | — | — | 今回の実行で設定済み provider を選択します。`providers` と `custom_providers` の両方の名前を使用できます。 |
+| `--model <name>` | — | — | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
 | `--tools <path>` | — | 埋め込み | カスタム JSON ツール設定ファイルのパス。埋め込みのツール定義を上書きします。 |
 
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
 > `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
+
+### 実行単位の LLM 選択
+
+`review` と `scan` はどちらも `--provider` と `--model` を受け付けます。
+これらの上書きは現在の呼び出しだけに適用され、保存済み設定は変更しません:
+
+```bash
+ocr review --provider anthropic --model claude-opus-4-6 --format json
+ocr scan --provider openai --model gpt-5.4 --format json
+```
+
+エンドポイントは、明示的な CLI 上書き、完全な `OCR_LLM_*` 環境設定、保存済み設定の
+順で解決されます。不完全な環境設定は別の戦略と混合されず、次の戦略へフォールバックします。
+明示的に選択する provider は、保存済みの `providers` または `custom_providers` に存在する
+必要があります。その設定済みエンドポイントを使用する場合でも、組み込み provider の認証情報は
+その provider が対応する環境変数から取得できます。
 
 ### モード
 
@@ -193,6 +211,10 @@ ocr review --format json --audience agent
 ```json
 {
   "status": "success",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-6"
+  },
   "summary": {
     "files_reviewed": 9,
     "comments": 1,
@@ -220,6 +242,7 @@ ocr review --format json --audience agent
 | フィールド | 説明 |
 |---|---|
 | `status` | `success`、`completed_with_warnings`、`completed_with_errors`、または `skipped`。 |
+| `llm` | 解決された LLM の識別情報。正規化済みの `model` は常に含まれ、`provider` は名前付きの設定済み provider の場合だけ含まれます。 |
 | `message` | 任意。人間が読みやすいサマリー（例: `"No comments generated. Looks good to me."`）。 |
 | `summary` | 任意。実行の集計: `files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` の実行時は省略されます。 |
 | `comments` | 常に存在しますが、空の場合があります。各コメントのフィールドは上記の例のとおりです。 |
@@ -233,6 +256,10 @@ ocr review --format json --audience agent
 {
   "status": "skipped",
   "message": "No supported files changed.",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-6"
+  },
   "comments": []
 }
 ```

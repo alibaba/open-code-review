@@ -48,6 +48,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | 命令 | 别名 | 作用 |
 |---|---|---|
 | `ocr review` | `ocr r` | 运行代码评审并输出评论。 |
+| `ocr scan` | `ocr s` | 无需 Git diff，扫描完整文件。 |
 | `ocr rules check <file>` | — | 显示某文件路径适用哪条规则及其来源。 |
 | `ocr config set <key> <value>` | — | 将一个配置值持久化到 `~/.opencodereview/config.json`。 |
 | `ocr config unset custom_providers.<name>` | — | 删除一个自定义 provider（若它是当前启用的，则清空启用的 `provider`/`model`）。 |
@@ -94,13 +95,29 @@ unstaged + untracked 变更。
 | `--timeout <minutes>` | — | `10` | 每文件截止时间。`0` 关闭超时。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
 | `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`30`）；1–9 会被上调到 `10`；任何 `≥ 10` 的值都覆盖模板默认（即使小于 `30`）。 |
-| `--model <name>` | — | — | 为本次评审覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
+| `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
+| `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |
 | `--tools <path>` | — | 内嵌 | 自定义 JSON 工具配置文件路径。覆盖内嵌工具定义。 |
 
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
 > `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。
+
+### 单次运行的 LLM 选择
+
+`review` 和 `scan` 都接受 `--provider` 与 `--model`。这些覆盖仅作用于当前调用，
+不会修改已保存的配置：
+
+```bash
+ocr review --provider anthropic --model claude-opus-4-6 --format json
+ocr scan --provider openai --model gpt-5.4 --format json
+```
+
+端点解析遵循以下优先级：显式 CLI 覆盖、完整的 `OCR_LLM_*` 环境配置、已保存的配置。
+不完整的环境策略会继续回退，而不会与其他策略混合。显式选择的 provider 必须存在于
+已保存的 `providers` 或 `custom_providers` 中；使用其已配置的端点时，内置 provider
+的凭据仍可来自该 provider 支持的环境变量。
 
 ### 模式
 
@@ -200,6 +217,10 @@ ocr review --format json --audience agent
 ```json
 {
   "status": "success",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-6"
+  },
   "summary": {
     "files_reviewed": 9,
     "comments": 1,
@@ -227,6 +248,7 @@ ocr review --format json --audience agent
 | 字段 | 说明 |
 |---|---|
 | `status` | `success`、`completed_with_warnings`、`completed_with_errors` 或 `skipped`。 |
+| `llm` | 实际解析的 LLM 标识。规范化后的 `model` 始终存在；`provider` 仅在使用已命名的配置 provider 时存在。 |
 | `message` | 可选。人类可读摘要，如 `"No comments generated. Looks good to me."`。 |
 | `summary` | 可选。运行聚合：`files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` 运行时省略。 |
 | `comments` | 总是存在，可能为空。每条评论的字段如上例。 |
@@ -241,6 +263,10 @@ ocr review --format json --audience agent
 {
   "status": "skipped",
   "message": "No supported files changed.",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-6"
+  },
   "comments": []
 }
 ```

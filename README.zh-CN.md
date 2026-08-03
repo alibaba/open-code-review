@@ -138,9 +138,6 @@ ocr review
 # 分支范围 —— 比较两个引用
 ocr review --from main --to feature-branch
 
-# 仅为本次运行选择 provider/model —— 不修改已保存的配置
-ocr review --provider anthropic --model claude-opus-4-6 --format json
-
 # 单个提交
 ocr review --commit abc123
 
@@ -152,19 +149,10 @@ ocr review --from main --to feature-branch --resume <session-id>
 ocr scan                          # 扫描整个仓库
 ocr scan --path internal/agent    # 扫描指定目录或文件
 
-ocr scan --provider openai --model gpt-5.4 --format json
-
 # 委托模式 — 让你的 AI 编程 agent 自己执行评审
 # OCR 负责文件选择和规则解析；无需配置 LLM
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
-```
-
-使用 `--format json` 时，OCR 会在 `llm` 中报告实际解析的 LLM：规范化后的 `model` 始终存在，`provider` 仅在使用已命名的配置 provider 时出现。除非 `--provider` 选择配置的 endpoint，否则完整的进程环境配置优先于已保存的 config。
-
-```json
-{"llm":{"provider":"anthropic","model":"claude-opus-4-6"}}
-{"llm":{"model":"gpt-5-codex"}}
 ```
 
 ## 文档

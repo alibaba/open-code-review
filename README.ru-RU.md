@@ -138,9 +138,6 @@ ocr review
 # Диапазон веток — сравнение двух ref'ов
 ocr review --from main --to feature-branch
 
-# Выбрать provider/model только для этого запуска — сохранённая конфигурация не изменится
-ocr review --provider anthropic --model claude-opus-4-6 --format json
-
 # Один коммит
 ocr review --commit abc123
 
@@ -152,19 +149,10 @@ ocr review --from main --to feature-branch --resume <session-id>
 ocr scan                          # сканировать весь репозиторий
 ocr scan --path internal/agent    # сканировать каталог или конкретные файлы
 
-ocr scan --provider openai --model gpt-5.4 --format json
-
 # Режим делегирования — ИИ-агент сам выполняет ревью
 # OCR отвечает за выбор файлов и разрешение правил; настройка LLM не требуется
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
-```
-
-При `--format json` OCR сообщает фактически выбранную LLM в объекте `llm`: нормализованное поле `model` присутствует всегда, а `provider` — только для именованного настроенного provider. Полная конфигурация process environment имеет приоритет над сохранённым config, если `--provider` не выбирает настроенный endpoint.
-
-```json
-{"llm":{"provider":"anthropic","model":"claude-opus-4-6"}}
-{"llm":{"model":"gpt-5-codex"}}
 ```
 
 ## Документация

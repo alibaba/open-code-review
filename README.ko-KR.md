@@ -138,9 +138,6 @@ ocr review
 # Branch range: 두 ref 비교
 ocr review --from main --to feature-branch
 
-# 이번 실행에만 provider/model 선택 — 저장된 설정은 변경하지 않음
-ocr review --provider anthropic --model claude-opus-4-6 --format json
-
 # 단일 commit
 ocr review --commit abc123
 
@@ -152,19 +149,10 @@ ocr review --from main --to feature-branch --resume <session-id>
 ocr scan                          # 전체 repository 스캔
 ocr scan --path internal/agent    # 디렉터리 또는 특정 파일 스캔
 
-ocr scan --provider openai --model gpt-5.4 --format json
-
 # 위임 모드 — AI 코딩 에이전트가 직접 리뷰 수행
 # OCR은 파일 선택과 규칙 해석만 담당; LLM 설정 불필요
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
-```
-
-`--format json` 사용 시 OCR은 실제로 해석된 LLM을 `llm`에 기록합니다. 정규화된 `model`은 항상 포함되고, `provider`는 이름이 있는 구성된 provider일 때만 포함됩니다. `--provider`로 구성된 endpoint를 선택하지 않으면 완전한 프로세스 환경 구성이 저장된 config보다 우선합니다.
-
-```json
-{"llm":{"provider":"anthropic","model":"claude-opus-4-6"}}
-{"llm":{"model":"gpt-5-codex"}}
 ```
 
 ## Documentation
