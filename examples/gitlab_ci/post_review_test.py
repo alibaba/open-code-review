@@ -251,6 +251,14 @@ class RouteCommentTest(unittest.TestCase):
     def test_no_routing_sentinel(self):
         self.assertFalse(pr.route_comment({"severity": "low", "category": "style"}, pr.NO_ROUTING)["routed"])
 
+    def test_sanitizes_control_chars_for_matching(self):
+        decision = pr.route_comment({"category": "sty\nle"}, self.policy)
+        self.assertTrue(decision["routed"])
+        self.assertIn("category style", decision["reason"])
+        decision = pr.route_comment({"severity": "med\nium"}, self.policy)
+        self.assertTrue(decision["routed"])
+        self.assertIn("severity medium", decision["reason"])
+
 
 # --------------------------------------------------------------------------- #
 # publish() with Recorder fake poster (Seam 1)

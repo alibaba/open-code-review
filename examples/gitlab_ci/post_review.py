@@ -121,12 +121,10 @@ def route_comment(comment, policy):
     if not policy or (not policy.get("route_by_severity") and not policy.get("route_by_category")):
         return {"routed": False}
 
-    cat_raw = ""
-    if comment and comment.get("category") is not None:
-        cat_raw = str(comment["category"]).strip().lower()
-    sev_raw = ""
-    if comment and comment.get("severity") is not None:
-        sev_raw = str(comment["severity"]).strip().lower()
+    # Match build_badge: strip control chars before enum matching so badge
+    # labels and routing decisions stay consistent for malformed LLM output.
+    cat_raw = sanitize_metadata(comment.get("category") if comment else None).strip().lower()
+    sev_raw = sanitize_metadata(comment.get("severity") if comment else None).strip().lower()
 
     cat_known = cat_raw != "" and cat_raw in CATEGORIES
     sev_known = sev_raw != "" and sev_raw in SEVERITY_RANK
