@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -265,6 +266,158 @@ func clearAllEnv(t *testing.T) {
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 	} {
 		t.Setenv(k, "")
+	}
+}
+
+func writeResolverConfig(t *testing.T, cfg configFile) (string, []byte) {
+	t.Helper()
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path, data
+}
+
+func TestResolveEndpointWithOptions_ExplicitProvider(t *testing.T) {
+	tests := []struct {
+		name, provider, wantURL, wantToken, wantModel, wantProtocol string
+		cfg                                                         configFile
+	}{
+		{
+			name: "built-in", provider: "anthropic", wantToken: "anthropic-token",
+			wantURL:   "https://api.anthropic.com/v1/messages",
+			wantModel: "claude-sonnet-4-6", wantProtocol: ProtocolAnthropic,
+			cfg: configFile{
+				Provider: "openai",
+				Providers: map[string]providerEntryConfig{
+					"openai":    {APIKey: "openai-token", Model: "gpt-4o"},
+					"anthropic": {APIKey: "anthropic-token", Model: "claude-sonnet-4-6"},
+				},
+			},
+		},
+		{
+			name: "custom", provider: "my-gateway", wantToken: "gateway-token",
+			wantURL:   "https://gateway.example.com/v1",
+			wantModel: "llama-3-8b", wantProtocol: ProtocolOpenAIChatCompletions,
+			cfg: configFile{
+				Provider: "openai",
+				Providers: map[string]providerEntryConfig{
+					"openai": {APIKey: "openai-token", Model: "gpt-4o"},
+				},
+				CustomProviders: map[string]providerEntryConfig{
+					"my-gateway": {APIKey: "gateway-token", URL: "https://gateway.example.com/v1", Protocol: ProtocolOpenAIChatCompletions, Model: "llama-3-8b"},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllEnv(t)
+			t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+			t.Setenv("OCR_LLM_TOKEN", "env-token")
+			t.Setenv("OCR_LLM_MODEL", "env-model")
+			path, before := writeResolverConfig(t, tt.cfg)
+			ep, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: tt.provider})
+			if err != nil {
+				t.Fatalf("ResolveEndpointWithOptions: %v", err)
+			}
+			if ep.Provider != tt.provider || ep.URL != tt.wantURL || ep.Token != tt.wantToken || ep.Model != tt.wantModel || ep.Protocol != tt.wantProtocol {
+				t.Fatalf("endpoint = %+v", ep)
+			}
+			after, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatalf("read config: %v", readErr)
+			}
+			if !bytes.Equal(after, before) {
+				t.Fatalf("successful override changed config: before=%s after=%s", before, after)
+			}
+		})
+	}
+}
+
+func TestResolveEndpointWithOptions_ExplicitProviderAndModel(t *testing.T) {
+	clearAllEnv(t)
+	path, _ := writeResolverConfig(t, configFile{
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "anthropic-token", Model: "claude-sonnet-4-6"},
+		},
+	})
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{
+		Provider: "anthropic",
+		Model:    "claude-opus-4-6",
+	})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Provider != "anthropic" || ep.Model != "claude-opus-4-6" {
+		t.Fatalf("endpoint = %+v", ep)
+	}
+
+	_, err = ResolveEndpointWithOptions(path, ResolveOptions{
+		Provider: "anthropic",
+		Model:    "not-a-registered-model",
+	})
+	if err == nil || !strings.Contains(err.Error(), `model "not-a-registered-model" is not available for provider "anthropic"`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResolveEndpointWithOptions_ExplicitProviderWithoutConfigNamesSection(t *testing.T) {
+	tests := []struct {
+		provider, section string
+	}{
+		{provider: "anthropic", section: "providers"},
+		{provider: "my-gateway", section: "custom_providers"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			clearAllEnv(t)
+			path := filepath.Join(t.TempDir(), "missing.json")
+			_, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: tt.provider})
+			if err == nil || !strings.Contains(err.Error(), tt.provider) || !strings.Contains(err.Error(), tt.section) {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestResolveEndpointWithOptions_UnknownProviderFailsWithoutFallbackOrMutation(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	t.Setenv("OCR_LLM_MODEL", "env-model")
+	path, before := writeResolverConfig(t, configFile{
+		Provider:  "openai",
+		Providers: map[string]providerEntryConfig{"openai": {APIKey: "openai-token", Model: "gpt-4o"}},
+	})
+	_, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: "missing-provider"})
+	if err == nil || !strings.Contains(err.Error(), `provider "missing-provider"`) || !strings.Contains(err.Error(), "custom_providers") {
+		t.Fatalf("error = %v", err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("read config: %v", readErr)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("config changed: before=%s after=%s", before, after)
+	}
+}
+
+func TestResolveEndpointWithOptions_ExplicitProviderDoesNotUseProviderAPIKeyEnvironmentFallback(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "environment-token")
+	path, _ := writeResolverConfig(t, configFile{
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {Model: "claude-sonnet-4-6"},
+		},
+	})
+	_, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: "anthropic"})
+	if err == nil || !strings.Contains(err.Error(), "no api_key configured") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
