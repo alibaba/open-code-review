@@ -60,7 +60,7 @@ func NormalizeProtocol(raw string) string {
 	}
 }
 
-// ValidateProtocol accepts the three canonical protocol names and rejects
+// ValidateProtocol accepts the four canonical protocol names and rejects
 // everything else.
 func ValidateProtocol(p string) error {
 	switch p {

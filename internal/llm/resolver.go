@@ -410,15 +410,6 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 			apiKey = v
 		}
 	}
-	// No credential at all is still an error here, before any other validation:
-	// only the command's *execution* is deferred, not the emptiness check. An
-	// ambient-auth provider (AWS SigV4, for instance) is the exception: it has no
-	// key to configure, since credentials come from the environment's own chain
-	// and the request is signed rather than bearing a token.
-	if apiKey == "" && apiKeyCmd == "" && !(isPreset && preset.AmbientAuth) {
-		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key or api_key_cmd configured and no environment variable fallback found", cfg.Provider)
-	}
-
 	var url, protocol, authHeader, model string
 	var extraBody map[string]any
 
@@ -452,6 +443,25 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		protocol = normalized
 	}
 
+	// Ambient auth follows the protocol actually in force, which is why this is
+	// resolved after the override above rather than read off the preset. A preset
+	// declares ambient auth (AmbientAuth), but an entry may override the preset's
+	// protocol: a bedrock preset switched to "openai" speaks a protocol with no
+	// SigV4 signing and needs a token like anything else. Conversely an entry
+	// that selects the bedrock protocol explicitly signs its requests whatever
+	// the preset says.
+	ambientAuth := protocol == ProtocolAnthropicBedrock ||
+		(isPreset && preset.AmbientAuth && entry.Protocol == "")
+
+	// No credential at all is an error, and it is reported before api_key_cmd
+	// runs: only the command's *execution* is deferred, not the emptiness check.
+	// An ambient-auth provider is the exception — it has no key to configure,
+	// since credentials come from the environment's own chain and the request is
+	// signed rather than bearing a token.
+	if apiKey == "" && apiKeyCmd == "" && !ambientAuth {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key or api_key_cmd configured and no environment variable fallback found", cfg.Provider)
+	}
+
 	if cfg.Model != "" {
 		model = cfg.Model
 	}
@@ -472,7 +482,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	// supported value, and the one to use when spend has to be attributed — can
 	// never appear in a list compiled upstream. The list stays a picker for
 	// `ocr config model`; it does not gate an override.
-	gateOverrideOnModelList := !(isPreset && preset.AmbientAuth)
+	gateOverrideOnModelList := !ambientAuth
 
 	// Apply model override with validation.
 	if modelOverride != "" {
@@ -555,7 +565,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		ExtraHeaders: extraHeaders,
 		Timeout:      timeout,
 		RetryCodes:   retryCodes,
-		AmbientAuth:  isPreset && preset.AmbientAuth,
+		AmbientAuth:  ambientAuth,
 		AWSProfile:   entry.AWSProfile,
 		AWSRegion:    entry.AWSRegion,
 	}, true, nil

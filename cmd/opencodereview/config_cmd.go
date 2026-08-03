@@ -649,15 +649,19 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 }
 
 // providerAcceptsAWSSettings reports whether aws_region / aws_profile mean
-// anything for this provider: a built-in preset that authenticates from the
-// environment, or a custom provider already declared to speak the Bedrock
-// protocol. Storing them anywhere else would be dead config that reads as
-// applied, so it is rejected instead.
+// anything for this provider. Storing them anywhere else would be dead config
+// that reads as applied, so it is rejected instead.
+//
+// The entry's own protocol decides whenever it sets one: a preset's protocol can
+// be overridden per entry (see tryProviderConfig), so `protocol: openai` on the
+// bedrock preset would otherwise still accept AWS settings that nothing reads.
+// Only when the entry is silent does the preset's own AmbientAuth flag answer.
 func providerAcceptsAWSSettings(providerName string, entry *ProviderEntry) bool {
-	if preset, isPreset := llm.LookupProvider(providerName); isPreset {
-		return preset.AmbientAuth
+	if entry.Protocol != "" {
+		return llm.NormalizeProtocol(entry.Protocol) == llm.ProtocolAnthropicBedrock
 	}
-	return llm.NormalizeProtocol(entry.Protocol) == llm.ProtocolAnthropicBedrock
+	preset, isPreset := llm.LookupProvider(providerName)
+	return isPreset && preset.AmbientAuth
 }
 
 // normalizeAWSSetting trims the value and rejects the shapes AWS itself will

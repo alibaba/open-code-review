@@ -133,6 +133,43 @@ func TestResolveBedrockPassesAWSSettings(t *testing.T) {
 	}
 }
 
+// TestAmbientAuthFollowsTheEffectiveProtocol covers the entry-level protocol
+// override. An entry may override a preset's protocol, so reading ambient auth
+// off the preset alone lets `protocol: openai` on the bedrock preset resolve with
+// no token and no URL — an endpoint that cannot work, reported as if configured.
+func TestAmbientAuthFollowsTheEffectiveProtocol(t *testing.T) {
+	t.Run("bedrock preset overridden to a token protocol needs a key again", func(t *testing.T) {
+		path := writeConfig(t, map[string]any{
+			"provider": "bedrock",
+			"model":    "gpt-5.4",
+			"providers": map[string]any{
+				"bedrock": map[string]any{"protocol": "openai", "url": "https://example.invalid/v1"},
+			},
+		})
+		if _, err := ResolveEndpoint(path); err == nil {
+			t.Error("resolved with no api_key after the protocol was overridden away from bedrock; want an error")
+		}
+	})
+
+	t.Run("entry that selects the bedrock protocol signs without a key", func(t *testing.T) {
+		path := writeConfig(t, map[string]any{
+			"provider": "anthropic",
+			"model":    "us.anthropic.claude-sonnet-4-6",
+			"providers": map[string]any{
+				"anthropic": map[string]any{"protocol": ProtocolAnthropicBedrock},
+			},
+		})
+		t.Setenv("ANTHROPIC_API_KEY", "")
+		ep, err := ResolveEndpoint(path)
+		if err != nil {
+			t.Fatalf("ResolveEndpoint: %v", err)
+		}
+		if !ep.AmbientAuth {
+			t.Error("AmbientAuth = false for an entry whose protocol is anthropic-bedrock")
+		}
+	})
+}
+
 // TestBedrockModelOverrideIsNotGatedByThePresetList covers what the preset's
 // own documentation promises: any identifier Bedrock will route. A preset's
 // Models list otherwise acts as an allowlist for --model, which cannot work for

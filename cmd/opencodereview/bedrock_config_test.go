@@ -163,6 +163,32 @@ func TestSetCustomProviderAWSSettingsFollowProtocol(t *testing.T) {
 	}
 }
 
+// TestAWSSettingsRejectedWhenEntryOverridesProtocol covers the same
+// entry-level protocol override the resolver honours: a preset's protocol can be
+// overridden per entry, so `protocol: openai` on the bedrock preset must stop
+// accepting AWS settings that nothing would read.
+func TestAWSSettingsRejectedWhenEntryOverridesProtocol(t *testing.T) {
+	cfg := &Config{}
+	if err := setProviderValue(cfg, "providers.bedrock.protocol", "openai"); err != nil {
+		t.Fatalf("set protocol: %v", err)
+	}
+	err := setProviderValue(cfg, "providers.bedrock.aws_region", "us-west-2")
+	if err == nil {
+		t.Fatal("aws_region accepted on a bedrock entry overridden to protocol openai; want an error")
+	}
+	if !strings.Contains(err.Error(), "does not apply to provider") {
+		t.Errorf("error = %q, want it to explain the field does not apply", err)
+	}
+
+	// Overriding back to the bedrock protocol makes them meaningful again.
+	if err := setProviderValue(cfg, "providers.bedrock.protocol", llm.ProtocolAnthropicBedrock); err != nil {
+		t.Fatalf("set protocol back: %v", err)
+	}
+	if err := setProviderValue(cfg, "providers.bedrock.aws_region", "us-west-2"); err != nil {
+		t.Errorf("aws_region rejected for an explicit bedrock protocol: %v", err)
+	}
+}
+
 func TestCheckAPIKeyRequirement(t *testing.T) {
 	bedrock, ok := llm.LookupProvider("bedrock")
 	if !ok {

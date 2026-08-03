@@ -4,6 +4,7 @@
 // Package llm provides LLM client interfaces supporting multiple protocols.
 // Supported protocols (canonical names, see protocol.go):
 //   - "anthropic" — Anthropic Messages API
+//   - "anthropic-bedrock" — the same API served by AWS Bedrock, SigV4-signed
 //   - "openai" — OpenAI Chat Completions API
 //   - "openai-responses" — OpenAI Responses API
 package llm
