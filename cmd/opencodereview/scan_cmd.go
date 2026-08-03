@@ -58,6 +58,9 @@ var scanCmd = &cobra.Command{
   # Scan multiple files
   ocr scan --path internal/agent/agent.go,internal/diff/scan.go
 
+  # Select a configured provider and model for this run only
+  ocr scan --provider openai --model gpt-5.4 --format json
+
   # Exclude generated files / fixtures
   ocr scan --exclude '**/generated/*,**/testdata/*'
 

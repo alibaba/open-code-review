@@ -69,6 +69,9 @@ var reviewCmd = &cobra.Command{
   ocr review --format json
   ocr review -f json
 
+  # Select a configured provider and model for this run only
+  ocr review --provider anthropic --model claude-opus-4-6 --format json
+
   # Agent mode (summary only, no progress lines)
   ocr review --audience agent
 
