@@ -359,6 +359,71 @@ func TestResolveEndpoint_ProviderModelOverride(t *testing.T) {
 	}
 }
 
+func TestResolveEndpointWithOverrides_ProviderAndModelDoNotMutateConfig(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Model:    "claude-sonnet-4-6",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-sonnet-4-6"},
+			"openai":    {APIKey: "sk-openai-test", Model: "gpt-5.4"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	original, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read original config: %v", err)
+	}
+
+	ep, err := ResolveEndpointWithOverrides(cfgPath, "openai", "gpt-5.4")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.Provider != "openai" || ep.Model != "gpt-5.4" {
+		t.Errorf("resolved provider/model = %q/%q, want openai/gpt-5.4", ep.Provider, ep.Model)
+	}
+	if ep.Token != "sk-openai-test" {
+		t.Errorf("Token = %q, want selected provider token", ep.Token)
+	}
+	if ep.Source != "provider:openai" {
+		t.Errorf("Source = %q, want provider:openai", ep.Source)
+	}
+
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config after resolution: %v", err)
+	}
+	if string(after) != string(original) {
+		t.Fatalf("provider/model override mutated config file")
+	}
+}
+
+func TestResolveEndpointWithOverrides_ProviderMustBeConfigured(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-sonnet-4-6"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := ResolveEndpointWithOverrides(cfgPath, "openai", "gpt-5.4")
+	if err == nil || !strings.Contains(err.Error(), `provider "openai" is set but not configured`) {
+		t.Fatalf("expected unconfigured provider error, got %v", err)
+	}
+}
+
 func TestResolveEndpoint_ProviderEntryModelOverridesDefault(t *testing.T) {
 	clearAllEnv(t)
 

@@ -33,6 +33,7 @@ type reviewOptions struct {
 	audience        string
 	background      string
 	backgroundFile  string
+	provider        string
 	model           string
 	concurrency     int
 	perFileTimeout  int
@@ -73,6 +74,9 @@ var reviewCmd = &cobra.Command{
   # Preview which files will be reviewed
   ocr review --preview
   ocr review -c abc123 -p
+
+  # Select a configured provider/model without changing config.json
+  ocr review --provider anthropic --model claude-opus-4-6
 
   # Exclude generated files / fixtures
   ocr review --exclude '**/generated/*,**/testdata/*'
@@ -134,7 +138,7 @@ func executeReview(opts reviewOptions) error {
 		return err
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.provider, opts.model)
 	if err != nil {
 		return err
 	}

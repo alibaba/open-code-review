@@ -178,6 +178,16 @@ func TestParseScanFlags_ModelOverride(t *testing.T) {
 	}
 }
 
+func TestParseScanFlags_ProviderOverride(t *testing.T) {
+	opts, err := parseScanFlags([]string{"--provider", "openai"})
+	if err != nil {
+		t.Fatalf("parseScanFlags: %v", err)
+	}
+	if opts.provider != "openai" {
+		t.Errorf("provider = %q, want openai", opts.provider)
+	}
+}
+
 func TestParseScanFlags_AllStringFlags(t *testing.T) {
 	opts, err := parseScanFlags([]string{
 		"--tools", "/tmp/tools.json",

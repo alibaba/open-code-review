@@ -49,6 +49,10 @@ func addModelFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "model", "", "override LLM model for this run (e.g., claude-opus-4-6)")
 }
 
+func addProviderFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVar(target, "provider", "", "override configured LLM provider for this run (e.g., anthropic or openai)")
+}
+
 func addToolsFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "tools", "", "path to JSON tools config file (default: embedded)")
 }
@@ -153,6 +157,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	addConcurrencyFlags(cmd, &opts.concurrency, &opts.perFileTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokensBudget)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
+	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
 	addPreviewFlag(cmd, &opts.preview)
 }
@@ -176,6 +181,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().BoolVar(&opts.noDedup, "no-dedup", false, "skip the per-batch DEDUP_TASK")
 	cmd.Flags().BoolVar(&opts.noSummary, "no-summary", false, "skip the post-run PROJECT_SUMMARY_TASK")
 	cmd.Flags().StringVar(&opts.batch, "batch", "", "override BATCH_STRATEGY: none | by-language | by-directory")
+	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
 	cmd.RegisterFlagCompletionFunc("batch", completeEnum("none", "by-language", "by-directory"))
 }

@@ -17,6 +17,7 @@ type ResolvedEndpoint struct {
 	URL          string
 	Token        string
 	Model        string
+	Provider     string            // configured provider name; empty for environment-resolved endpoints
 	Protocol     string            // canonical protocol name (see protocol.go); resolver normalizes aliases
 	AuthHeader   string            // Anthropic auth header: "x-api-key" or "authorization"
 	Source       string            // human-readable config source label
@@ -59,23 +60,40 @@ const (
 // Each strategy requires all three fields (URL, Token, Model) to be non-empty.
 // Returns the first valid strategy's result.
 func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
-	return ResolveEndpointWithModelOverride(configPath, "")
+	return ResolveEndpointWithOverrides(configPath, "", "")
 }
 
 // ResolveEndpointWithModelOverride resolves an endpoint like ResolveEndpoint,
 // but uses modelOverride as the request model when it is non-empty. The override
 // can also supply the otherwise required model for a configured endpoint.
 func ResolveEndpointWithModelOverride(configPath, modelOverride string) (ResolvedEndpoint, error) {
+	return ResolveEndpointWithOverrides(configPath, "", modelOverride)
+}
+
+// ResolveEndpointWithOverrides resolves an endpoint like ResolveEndpoint, but
+// applies providerOverride and modelOverride to this invocation only. Provider
+// overrides are resolved from the configured providers/custom_providers maps;
+// the config file is never modified.
+func ResolveEndpointWithOverrides(configPath, providerOverride, modelOverride string) (ResolvedEndpoint, error) {
+	providerOverride = strings.TrimSpace(providerOverride)
 	modelOverride = strings.TrimSpace(modelOverride)
 
 	strategies := []struct {
 		name string
 		fn   func() (ResolvedEndpoint, bool, error)
 	}{
-		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath, modelOverride) }},
+		{"OCR config file", func() (ResolvedEndpoint, bool, error) {
+			return tryOCRConfig(configPath, providerOverride, modelOverride)
+		}},
 		{"OCR environment", func() (ResolvedEndpoint, bool, error) { return tryOCREnv(modelOverride) }},
 		{"Claude Code environment", func() (ResolvedEndpoint, bool, error) { return tryCCEnv(modelOverride) }},
 		{"Shell rc file", func() (ResolvedEndpoint, bool, error) { return tryShellRC(modelOverride) }},
+	}
+	if providerOverride != "" {
+		// A named provider must come from the user's provider map. Falling back to
+		// an unrelated URL/token environment endpoint would silently ignore the
+		// requested provider.
+		strategies = strategies[:1]
 	}
 
 	for _, s := range strategies {
@@ -118,6 +136,9 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 		}
 	}
 
+	if providerOverride != "" {
+		return ResolvedEndpoint{}, fmt.Errorf("provider override %q could not be resolved from %s", providerOverride, configPath)
+	}
 	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
 }
 
@@ -241,7 +262,7 @@ type configFile struct {
 }
 
 // tryOCRConfig reads the OCR config file.
-func tryOCRConfig(path, modelOverride string) (ResolvedEndpoint, bool, error) {
+func tryOCRConfig(path, providerOverride, modelOverride string) (ResolvedEndpoint, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -255,6 +276,9 @@ func tryOCRConfig(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 		return ResolvedEndpoint{}, false, fmt.Errorf("parse config: %w", err)
 	}
 
+	if providerOverride != "" {
+		cfg.Provider = providerOverride
+	}
 	if cfg.Provider != "" {
 		return tryProviderConfig(cfg, modelOverride)
 	}
@@ -393,6 +417,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		URL:          url,
 		Token:        apiKey,
 		Model:        model,
+		Provider:     cfg.Provider,
 		Protocol:     protocol,
 		AuthHeader:   authHeader,
 		Source:       "provider:" + cfg.Provider,

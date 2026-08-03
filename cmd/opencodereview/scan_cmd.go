@@ -36,6 +36,7 @@ type scanOptions struct {
 	noSummary       bool
 	batch           string
 	maxTokensBudget int
+	provider        string
 	model           string
 }
 
@@ -63,7 +64,10 @@ var scanCmd = &cobra.Command{
   ocr scan --preview
 
   # Skip the per-file PLAN_TASK pre-pass
-  ocr scan --no-plan`,
+  ocr scan --no-plan
+
+  # Select a configured provider/model without changing config.json
+  ocr scan --provider openai --model gpt-5.4`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateScanOptions(&scanOpts); err != nil {
 			return err
@@ -128,7 +132,7 @@ func executeScan(opts scanOptions) error {
 		return runScanPreview(cc, scanTpl, scanPaths)
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.provider, opts.model)
 	if err != nil {
 		return err
 	}
