@@ -39,8 +39,8 @@ Output review spec for host-agent delegation (no LLM required).`,
   # Preview workspace changes
   ocr delegate preview
 
-	# Get rules for multiple files (grouped by content)
-	ocr delegate rule internal/agent/agent.go internal/llm/client.go`,
+  # Get rules for multiple files (grouped by content)
+  ocr delegate rule internal/agent/agent.go internal/llm/client.go`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
