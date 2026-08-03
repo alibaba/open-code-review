@@ -132,7 +132,7 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 type llmRuntime struct {
 	Client       llm.LLMClient
 	Model        string
-	Provider     string // configured provider name (non-secret label; empty for env-resolved endpoints)
+	Provider     string // resolved provider name (non-secret label; empty for non-provider endpoints)
 	PlanToolDefs []llm.ToolDef
 	MainToolDefs []llm.ToolDef
 	Collector    *tool.CommentCollector
@@ -147,9 +147,9 @@ type llmRuntime struct {
 // loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
 // from the user's default config path (applying the configured language to
 // tpl — defaulting when the config file is absent), resolves the LLM
-// endpoint (honoring modelOverride from --model when non-empty), and
+// endpoint (honoring resolveOpts), and
 // returns the runtime bundle. tpl is mutated in place.
-func loadLLMRuntime(tpl *template.Template, toolConfigPath, modelOverride string) (*llmRuntime, error) {
+func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts llm.ResolveOptions) (*llmRuntime, error) {
 	toolEntries, err := toolsconfig.Load(toolConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("load tools: %w", err)
@@ -167,14 +167,13 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath, modelOverride string
 	}
 	// Apply the language directive even when the config file is missing
 	// (upstream #fix: ApplyLanguage with empty lang falls back to default).
-	var lang, provider string
+	var lang string
 	if appCfg != nil {
 		lang = appCfg.Language
-		provider = appCfg.Provider
 	}
 	tpl.ApplyLanguage(lang)
 
-	ep, err := llm.ResolveEndpointWithModelOverride(cfgPath, modelOverride)
+	ep, err := llm.ResolveEndpointWithOptions(cfgPath, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
@@ -182,7 +181,7 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath, modelOverride string
 	return &llmRuntime{
 		Client:       llm.NewLLMClient(ep),
 		Model:        ep.Model,
-		Provider:     provider,
+		Provider:     ep.Provider,
 		PlanToolDefs: planToolDefs,
 		MainToolDefs: mainToolDefs,
 		Collector:    tool.NewCommentCollector(),

@@ -35,6 +35,16 @@ func TestParseReviewFlagsModelOverride(t *testing.T) {
 	}
 }
 
+func TestParseReviewFlagsProviderAndModelOverrides(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--provider", "anthropic", "--model", "claude-opus-4-6"})
+	if err != nil {
+		t.Fatalf("parseReviewFlags: %v", err)
+	}
+	if opts.provider != "anthropic" || opts.model != "claude-opus-4-6" {
+		t.Fatalf("provider=%q model=%q", opts.provider, opts.model)
+	}
+}
+
 func TestParseReviewFlagsResume(t *testing.T) {
 	opts, err := parseReviewFlags([]string{"--from", "main", "--to", "feature", "--resume", "session-123"})
 	if err != nil {

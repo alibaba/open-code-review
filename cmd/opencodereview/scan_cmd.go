@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/scan"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -36,6 +37,7 @@ type scanOptions struct {
 	noSummary       bool
 	batch           string
 	maxTokensBudget int
+	provider        string
 	model           string
 }
 
@@ -128,7 +130,10 @@ func executeScan(opts scanOptions) error {
 		return runScanPreview(cc, scanTpl, scanPaths)
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
+		Provider: opts.provider,
+		Model:    opts.model,
+	})
 	if err != nil {
 		return err
 	}

@@ -178,6 +178,16 @@ func TestParseScanFlags_ModelOverride(t *testing.T) {
 	}
 }
 
+func TestParseScanFlags_ProviderAndModelOverrides(t *testing.T) {
+	opts, err := parseScanFlags([]string{"--provider", "my-gateway", "--model", "llama-3-8b"})
+	if err != nil {
+		t.Fatalf("parseScanFlags: %v", err)
+	}
+	if opts.provider != "my-gateway" || opts.model != "llama-3-8b" {
+		t.Fatalf("provider=%q model=%q", opts.provider, opts.model)
+	}
+}
+
 func TestParseScanFlags_AllStringFlags(t *testing.T) {
 	opts, err := parseScanFlags([]string{
 		"--tools", "/tmp/tools.json",

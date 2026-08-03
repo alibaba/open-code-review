@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
@@ -33,6 +34,7 @@ type reviewOptions struct {
 	audience        string
 	background      string
 	backgroundFile  string
+	provider        string
 	model           string
 	concurrency     int
 	perFileTimeout  int
@@ -134,7 +136,10 @@ func executeReview(opts reviewOptions) error {
 		return err
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
+		Provider: opts.provider,
+		Model:    opts.model,
+	})
 	if err != nil {
 		return err
 	}
