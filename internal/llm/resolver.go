@@ -283,14 +283,14 @@ func tryOCRConfig(path string, opts ResolveOptions) (ResolvedEndpoint, bool, err
 		cfg.Provider = opts.Provider
 	}
 	if cfg.Provider != "" {
-		return tryProviderConfig(cfg, opts.Model, opts.Provider == "")
+		return tryProviderConfig(cfg, opts.Model)
 	}
 
 	return tryLegacyLlmConfig(cfg, opts.Model)
 }
 
 // tryProviderConfig resolves an endpoint from the provider-based configuration.
-func tryProviderConfig(cfg configFile, modelOverride string, allowAPIKeyEnvironmentFallback bool) (ResolvedEndpoint, bool, error) {
+func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, bool, error) {
 	preset, isPreset := LookupProvider(cfg.Provider)
 
 	var entry providerEntryConfig
@@ -309,7 +309,7 @@ func tryProviderConfig(cfg configFile, modelOverride string, allowAPIKeyEnvironm
 	}
 
 	apiKey := entry.APIKey
-	if apiKey == "" && allowAPIKeyEnvironmentFallback {
+	if apiKey == "" {
 		if isPreset && preset.EnvVar != "" {
 			apiKey = os.Getenv(preset.EnvVar)
 		}

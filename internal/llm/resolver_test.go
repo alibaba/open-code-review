@@ -407,17 +407,23 @@ func TestResolveEndpointWithOptions_UnknownProviderFailsWithoutFallbackOrMutatio
 	}
 }
 
-func TestResolveEndpointWithOptions_ExplicitProviderDoesNotUseProviderAPIKeyEnvironmentFallback(t *testing.T) {
+func TestResolveEndpointWithOptions_ExplicitProviderUsesProviderAPIKeyEnvironmentFallback(t *testing.T) {
 	clearAllEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "environment-token")
+	t.Setenv("OCR_LLM_URL", "https://generic-environment.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "generic-environment-token")
+	t.Setenv("OCR_LLM_MODEL", "generic-environment-model")
 	path, _ := writeResolverConfig(t, configFile{
 		Providers: map[string]providerEntryConfig{
 			"anthropic": {Model: "claude-sonnet-4-6"},
 		},
 	})
-	_, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: "anthropic"})
-	if err == nil || !strings.Contains(err.Error(), "no api_key configured") {
-		t.Fatalf("error = %v", err)
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: "anthropic"})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Token != "environment-token" || ep.URL != "https://api.anthropic.com/v1/messages" || ep.Model != "claude-sonnet-4-6" {
+		t.Fatalf("endpoint = %+v", ep)
 	}
 }
 
