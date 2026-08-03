@@ -137,6 +137,10 @@ func executeScan(opts scanOptions) error {
 	if err != nil {
 		return err
 	}
+	llmIdentity := &jsonLLMIdentity{
+		Provider: rt.Provider,
+		Model:    rt.Model,
+	}
 	// Apply language to the scan template too (loadLLMRuntime only mutates
 	// the diff-review template it was handed).
 	if rt.AppCfg != nil {
@@ -203,7 +207,7 @@ func executeScan(opts scanOptions) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q)
+	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity)
 }
 
 func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string) error {

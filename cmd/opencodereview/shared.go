@@ -317,6 +317,7 @@ func emitRunResult(
 	startTime time.Time,
 	outputFormat, audience string,
 	q *quietHandle,
+	llmIdentity *jsonLLMIdentity,
 ) error {
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
@@ -330,7 +331,7 @@ func emitRunResult(
 	manifest := ag.RunManifest()
 
 	if outputFormat == "json" && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
-		return outputJSONNoFiles(traceID)
+		return outputJSONNoFiles(traceID, llmIdentity)
 	}
 
 	// Agent-text audiences need stdout back before PrintTraceSummary so the
@@ -353,7 +354,7 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded())
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest)
 	if summary := ag.ProjectSummary(); summary != "" {
