@@ -8,14 +8,17 @@ binary and lives entirely in the pipeline.  It reads the JSON emitted by
 discussions:
 
   - one inline discussion per comment that maps onto the diff,
-  - a single fallback note collecting comments that could not be placed inline,
+  - optional fail-open category/severity routing (``OCR_ROUTE_SEVERITY_BELOW``,
+    ``OCR_ROUTE_CATEGORIES``) that moves matching findings to summary notes,
+  - separate summary notes for comments without line info, routed-by-policy,
+    and failed inline posts,
   - a final summary note.
 
 The script separates a transport-agnostic :func:`publish` (driven by an
 injectable ``post`` callable) from the GitLab REST transport
-:func:`make_poster`, so the full posting flow — including retry/backoff and
-rate-limit throttling — can be unit-tested with no network access and no
-wall-clock sleep cost.
+:func:`make_poster`, so the full posting flow — including retry/backoff,
+rate-limit throttling, and publication routing — can be unit-tested with no
+network access and no wall-clock sleep cost.
 
 Standard library only (json, urllib) so it runs on any stock python3 image.
 """
@@ -39,6 +42,113 @@ def log(msg):
 
 
 # --------------------------------------------------------------------------- #
+# Category/severity badge + publication routing (fail-open)
+# --------------------------------------------------------------------------- #
+
+# Enumerations from the LLM output schema (internal/config/toolsconfig/tools.json).
+CATEGORIES = [
+    "bug",
+    "security",
+    "performance",
+    "maintainability",
+    "test",
+    "style",
+    "documentation",
+    "other",
+]
+SEVERITIES = ["critical", "high", "medium", "low"]
+SEVERITY_RANK = {s: len(SEVERITIES) - i for i, s in enumerate(SEVERITIES)}
+
+NO_ROUTING = {"route_by_severity": False, "route_by_category": False}
+NO_LINE_REASON = "No line information provided"
+
+
+def sanitize_metadata(value):
+    """Strip C0/C1 control characters from a metadata value."""
+    text = "" if value is None else str(value)
+    return "".join(ch for ch in text if not (("\x00" <= ch <= "\x1f") or ("\x7f" <= ch <= "\x9f")))
+
+
+def build_badge(comment):
+    """Build the category/severity badge for a comment."""
+    category = sanitize_metadata(comment.get("category") if comment else None)
+    severity = sanitize_metadata(comment.get("severity") if comment else None)
+    if category and severity:
+        return "[%s · %s]" % (category, severity)
+    if category:
+        return "[%s]" % category
+    if severity:
+        return "[%s]" % severity
+    return ""
+
+
+def build_policy(severity_threshold=None, categories=None):
+    """Parse fail-open publication policy from raw opt-in inputs."""
+    route_by_severity = False
+    severity_rank = -1
+    if severity_threshold is not None:
+        norm = str(severity_threshold).strip().lower()
+        if norm in SEVERITY_RANK:
+            route_by_severity = True
+            severity_rank = SEVERITY_RANK[norm]
+
+    route_by_category = False
+    category_set = set()
+    if categories is not None:
+        tokens = [
+            t.strip().lower()
+            for t in str(categories).split(",")
+            if t.strip()
+        ]
+        for token in tokens:
+            if token in CATEGORIES:
+                category_set.add(token)
+        if category_set:
+            route_by_category = True
+
+    if not route_by_severity and not route_by_category:
+        return NO_ROUTING
+    return {
+        "route_by_severity": route_by_severity,
+        "severity_rank": severity_rank,
+        "route_by_category": route_by_category,
+        "categories": category_set,
+    }
+
+
+def route_comment(comment, policy):
+    """Decide whether a comment routes to the summary per the policy."""
+    if not policy or (not policy.get("route_by_severity") and not policy.get("route_by_category")):
+        return {"routed": False}
+
+    cat_raw = ""
+    if comment and comment.get("category") is not None:
+        cat_raw = str(comment["category"]).strip().lower()
+    sev_raw = ""
+    if comment and comment.get("severity") is not None:
+        sev_raw = str(comment["severity"]).strip().lower()
+
+    cat_known = cat_raw != "" and cat_raw in CATEGORIES
+    sev_known = sev_raw != "" and sev_raw in SEVERITY_RANK
+
+    if policy.get("route_by_severity") and sev_known and SEVERITY_RANK[sev_raw] <= policy["severity_rank"]:
+        reason = "Routed to summary (severity %s" % sev_raw
+        if cat_known:
+            reason += " · category %s" % cat_raw
+        reason += ")"
+        return {"routed": True, "reason": reason}
+
+    if policy.get("route_by_category") and cat_known and cat_raw in policy.get("categories", set()):
+        reason = "Routed to summary (category %s" % cat_raw
+        if sev_known:
+            reason += " · severity %s" % sev_raw
+        reason += ")"
+        return {"routed": True, "reason": reason}
+
+    return {"routed": False}
+
+
+# --------------------------------------------------------------------------- #
 # Comment formatting (pure)
 # --------------------------------------------------------------------------- #
 
@@ -49,7 +159,11 @@ def format_comment(comment):
     Uses GitLab's ``suggestion:-0+0`` syntax so the suggestion renders as a
     one-click "Apply suggestion" button in the MR diff.
     """
-    body = comment.get("content", "")
+    body = ""
+    badge = build_badge(comment)
+    if badge:
+        body += badge + "\n"
+    body += comment.get("content", "")
 
     existing = comment.get("existing_code", "")
     suggestion = comment.get("suggestion_code", "")
@@ -60,18 +174,24 @@ def format_comment(comment):
     return body
 
 
-def format_comment_fallback(comment):
+def format_comment_fallback(comment, reason=None):
     """Format a comment for fallback (non-inline) display in a note.
 
     Uses ``<details><summary>`` HTML so the suggested change is collapsible
-    in the MR comment thread.
+    in the MR comment thread.  When ``reason`` is provided it is appended as
+    an italic line at the end (routing or posting failure context).
     """
+    md = ""
+    badge = build_badge(comment)
+    if badge:
+        md += badge + "\n"
+
     path = comment.get("path", "unknown")
     start_line = comment.get("start_line", 0)
     end_line = comment.get("end_line", 0)
     content = comment.get("content", "")
 
-    md = "### 📄 `%s`" % path
+    md += "### 📄 `%s`" % path
     if start_line and end_line:
         md += " (L%d-L%d)" % (start_line, end_line)
     md += "\n\n%s" % content
@@ -84,7 +204,26 @@ def format_comment_fallback(comment):
         md += "**After:**\n```\n%s\n```\n\n" % suggestion
         md += "</details>"
 
+    if reason:
+        md += "\n\n*%s*" % reason
+
     return md
+
+
+def build_summary_body(total, inline, summary, routed, failed, warnings):
+    """Merged summary header mirroring the GitHub Action breakdown."""
+    body = "🔍 **OpenCodeReview** found **%d** issue(s) in this MR." % total
+    if total > 0:
+        body += "\n- ✅ Successfully posted inline: %d comment(s)" % inline
+        if summary > 0:
+            body += "\n- 📝 In summary (no line info): %d comment(s)" % summary
+        if routed > 0:
+            body += "\n- 📋 Routed to summary by policy: %d comment(s)" % routed
+        if failed > 0:
+            body += "\n- ❌ Failed to post inline: %d comment(s)" % failed
+    if warnings:
+        body += "\n\n⚠️ %d warning(s) occurred during review." % len(warnings)
+    return body
 
 
 # --------------------------------------------------------------------------- #
@@ -105,29 +244,39 @@ def publish(result, diff_refs, post, config, sleep=_sleep):
     ``config`` provides pacing values (``success_delay``, ``failure_delay``,
     ``rate_limit_threshold``).
 
-    Returns ``{"inline": int, "fallback": int}``.
+    Returns ``{"inline": int, "fallback": int, "routed": int, "failed": int}``.
     """
     success_delay = config["success_delay"]
     failure_delay = config["failure_delay"]
     rate_limit_threshold = config["rate_limit_threshold"]
+    policy = build_policy(
+        severity_threshold=config.get("route_severity_below", ""),
+        categories=config.get("route_categories", ""),
+    )
 
     comments = result.get("comments") or []
     if not comments:
         message = result.get("message", "No comments generated. Looks good to me.")
         post({"body": "✅ **OpenCodeReview**: %s" % message})
-        return {"inline": 0, "fallback": 0}
+        return {"inline": 0, "fallback": 0, "routed": 0, "failed": 0}
 
     success_count = 0
+    no_line_comments = []
+    routed_comments = []
     failed_comments = []
 
     for comment in comments:
         path = comment.get("path", "")
         end_line = comment.get("end_line", 0)
-        start_line = comment.get("start_line", end_line)
         body = format_comment(comment)
 
         if not path or not end_line or not diff_refs:
-            failed_comments.append(comment)
+            no_line_comments.append({"comment": comment, "reason": NO_LINE_REASON})
+            continue
+
+        route = route_comment(comment, policy)
+        if route.get("routed"):
+            routed_comments.append({"comment": comment, "reason": route["reason"]})
             continue
 
         discussion = {
@@ -155,7 +304,10 @@ def publish(result, diff_refs, post, config, sleep=_sleep):
             else:
                 sleep(success_delay)
         else:
-            failed_comments.append(comment)
+            failed_comments.append({
+                "comment": comment,
+                "reason": "Failed to post inline comment",
+            })
             # Failure pacing: rate-limit-exhausted failures get the longer
             # success_delay; other failures get the shorter failure_delay.
             is_rate_limit_exhausted = (
@@ -167,26 +319,42 @@ def publish(result, diff_refs, post, config, sleep=_sleep):
 
     log("Successfully posted %d/%d inline comments." % (success_count, len(comments)))
 
-    # Post fallback for any failed inline comments
-    if failed_comments:
-        fallback_body = "🔍 **OpenCodeReview** found issues that could not be posted inline:\n\n---\n\n"
-        for comment in failed_comments:
-            fallback_body += format_comment_fallback(comment) + "\n\n---\n\n"
-        post({"body": fallback_body})
+    if no_line_comments:
+        note_body = "🔍 **OpenCodeReview** found issues that could not be posted inline:\n\n---\n\n"
+        for item in no_line_comments:
+            note_body += format_comment_fallback(item["comment"], item["reason"]) + "\n\n---\n\n"
+        post({"body": note_body})
 
-    # Post summary last
+    if routed_comments:
+        note_body = "📋 **OpenCodeReview** findings routed to summary by policy:\n\n---\n\n"
+        for item in routed_comments:
+            note_body += format_comment_fallback(item["comment"], item["reason"]) + "\n\n---\n\n"
+        post({"body": note_body})
+
+    if failed_comments:
+        note_body = "❌ **OpenCodeReview** findings that failed to post inline:\n\n---\n\n"
+        for item in failed_comments:
+            note_body += format_comment_fallback(item["comment"], item["reason"]) + "\n\n---\n\n"
+        post({"body": note_body})
+
     total_count = len(comments)
-    failed_count = len(failed_comments)
-    summary = "🔍 **OpenCodeReview** found **%d** issue(s) in this MR." % total_count
-    if total_count > 0:
-        summary += "\n- ✅ %d posted as inline comment(s)" % success_count
-        summary += "\n- 📝 %d posted as summary (missing line info)" % failed_count
     warnings = result.get("warnings") or []
-    if warnings:
-        summary += "\n\n⚠️ %d warning(s) occurred during review." % len(warnings)
+    summary = build_summary_body(
+        total_count,
+        success_count,
+        len(no_line_comments),
+        len(routed_comments),
+        len(failed_comments),
+        warnings,
+    )
     post({"body": summary})
 
-    return {"inline": success_count, "fallback": failed_count}
+    return {
+        "inline": success_count,
+        "fallback": len(no_line_comments),
+        "routed": len(routed_comments),
+        "failed": len(failed_comments),
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -423,6 +591,9 @@ def build_config(env):
         "max_retries": int(env.get("OCR_MAX_RETRIES", "3")),
         "max_retry_delay": int(env.get("OCR_MAX_RETRY_DELAY", "60000")) / 1000,
         "transient_base_delay": 2.0,  # hardcoded, matches heredoc
+        # Publication routing (fail-open; empty = no routing)
+        "route_severity_below": env.get("OCR_ROUTE_SEVERITY_BELOW", ""),
+        "route_categories": env.get("OCR_ROUTE_CATEGORIES", ""),
     }
 
 
