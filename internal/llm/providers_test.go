@@ -76,7 +76,14 @@ func TestLookupProvider_PreservesModelOrder(t *testing.T) {
 	if !ok {
 		t.Fatal("anthropic not found")
 	}
-	expected := []string{"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"}
+	expected := []string{
+		"claude-opus-5",
+		"claude-sonnet-5",
+		"claude-opus-4-8",
+		"claude-opus-4-7",
+		"claude-opus-4-6",
+		"claude-sonnet-4-6",
+	}
 	if len(p.Models) != len(expected) {
 		t.Fatalf("expected %d models, got %d", len(expected), len(p.Models))
 	}
