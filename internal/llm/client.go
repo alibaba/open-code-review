@@ -748,6 +748,15 @@ type AnthropicClient struct {
 	// panicking, as the SDK's own bedrock helper does — would surface a Go
 	// stack trace to someone whose real problem is an expired AWS session.
 	initErr error
+
+	// bedrock marks a client whose requests are SigV4-signed for Bedrock, along
+	// with the region and profile that were actually resolved. Bedrock's
+	// rejections need translating (see explainError) and the resolved region is
+	// worth showing, because a request sent to the wrong one fails in a way that
+	// looks like a bad model ID.
+	bedrock    bool
+	awsRegion  string
+	awsProfile string
 }
 
 // NewAnthropicClient creates a new Anthropic Messages API client.
@@ -869,14 +878,18 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), loadOpts...)
 	if err != nil {
 		return &AnthropicClient{
-			cfg: cfg,
+			cfg:        cfg,
+			bedrock:    true,
+			awsProfile: cfg.AWSProfile,
 			initErr: fmt.Errorf("bedrock: could not load AWS configuration: %w\n"+
-				"  bedrock uses the standard AWS credential chain — set AWS_PROFILE, or run `aws sso login --profile <name>`", err),
+				"  bedrock uses the standard AWS credential chain — set AWS_PROFILE, or run `aws sso login%s`", err, ssoLoginProfileArg(cfg.AWSProfile)),
 		}
 	}
 	if awsCfg.Region == "" {
 		return &AnthropicClient{
-			cfg: cfg,
+			cfg:        cfg,
+			bedrock:    true,
+			awsProfile: cfg.AWSProfile,
 			initErr: fmt.Errorf("bedrock: no AWS region resolved\n" +
 				"  set AWS_REGION, or give the active profile a region — the region decides which bedrock-runtime host is used"),
 		}
@@ -901,9 +914,87 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	opts = append(opts, bedrock.WithConfig(awsCfg))
 
 	return &AnthropicClient{
-		cfg: cfg,
-		sdk: anthropic.NewClient(opts...),
+		cfg:        cfg,
+		sdk:        anthropic.NewClient(opts...),
+		bedrock:    true,
+		awsRegion:  awsCfg.Region,
+		awsProfile: cfg.AWSProfile,
 	}
+}
+
+// BedrockContext reports the AWS region and profile a Bedrock client resolved,
+// so callers can show what a request actually used. ok is false for every other
+// protocol. An empty profile means the ambient chain chose the credentials.
+func (c *AnthropicClient) BedrockContext() (region, profile string, ok bool) {
+	if !c.bedrock {
+		return "", "", false
+	}
+	return c.awsRegion, c.awsProfile, true
+}
+
+func ssoLoginProfileArg(profile string) string {
+	if profile == "" {
+		return ""
+	}
+	return " --profile " + profile
+}
+
+// bedrockWhere describes the region and profile in one clause, for error text.
+func (c *AnthropicClient) bedrockWhere() string {
+	region := c.awsRegion
+	if region == "" {
+		region = "unknown region"
+	}
+	if c.awsProfile == "" {
+		return fmt.Sprintf("region %s, credentials from the ambient AWS chain", region)
+	}
+	return fmt.Sprintf("region %s, profile %s", region, c.awsProfile)
+}
+
+// explainError translates a Bedrock rejection into the action that fixes it.
+// Two of these are actively misleading as the service words them: the API-key
+// complaint has nothing to do with any api_key the user could configure, and a
+// model that is merely absent from the region reads as a malformed identifier.
+// Non-Bedrock clients are unaffected — the error is returned untouched.
+func (c *AnthropicClient) explainError(model string, err error) error {
+	if err == nil || !c.bedrock {
+		return err
+	}
+	msg := err.Error()
+	where := c.bedrockWhere()
+
+	switch {
+	// Checked first: the bearer-token path produces this even when credentials
+	// are otherwise valid, so a later "expired"/"denied" branch would mislabel it.
+	case strings.Contains(msg, "Invalid API Key format"):
+		if os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "" {
+			return fmt.Errorf("bedrock rejected the token in AWS_BEARER_TOKEN_BEDROCK (%s): %w\n"+
+				"  unset that variable to sign requests with SigV4 instead", where, err)
+		}
+		return fmt.Errorf("bedrock rejected an API-key header rather than a signature (%s): %w\n"+
+			"  no api_key applies to bedrock; this means a bearer token reached the request, not that a key is missing", where, err)
+	case strings.Contains(msg, "ExpiredToken"), strings.Contains(msg, "expired"),
+		strings.Contains(msg, "NoCredentialProviders"), strings.Contains(msg, "failed to refresh cached credentials"):
+		return fmt.Errorf("bedrock could not authenticate: AWS credentials are expired or unavailable (%s): %w\n"+
+			"  run `aws sso login%s`, or refresh whichever credential source this profile uses", where, err, ssoLoginProfileArg(c.awsProfile))
+	case strings.Contains(msg, "AccessDenied"):
+		return fmt.Errorf("bedrock denied access to model %q (%s): %w\n"+
+			"  credentials are valid, so this is an IAM policy gap: the identity needs bedrock:InvokeModel on this model in this region", model, where, err)
+	case strings.Contains(msg, "ValidationException"),
+		strings.Contains(msg, "model identifier is invalid"),
+		strings.Contains(msg, "don't have access to the model"):
+		return fmt.Errorf("bedrock rejected model %q (%s): %w\n"+
+			"  run `aws bedrock list-inference-profiles%s` to see what this account offers — IDs are account- and region-scoped, and a version suffix such as -v1:0 is invalid for the newer families",
+			model, where, err, listProfilesRegionArg(c.awsRegion))
+	}
+	return fmt.Errorf("bedrock request failed (%s): %w", where, err)
+}
+
+func listProfilesRegionArg(region string) string {
+	if region == "" {
+		return ""
+	}
+	return " --region " + region
 }
 
 // CompletionsWithCtx sends a chat completion request with context support.
@@ -957,7 +1048,7 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 
 	sdkResp, err := c.sdk.Messages.New(ctx, params, opts...)
 	if err != nil {
-		return nil, err
+		return nil, c.explainError(model, err)
 	}
 
 	return c.mapAnthropicResponse(sdkResp), nil

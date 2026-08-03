@@ -5,8 +5,10 @@ package llm
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -137,6 +139,113 @@ func TestNonAmbientProviderStillRequiresAPIKey(t *testing.T) {
 
 	if _, err := ResolveEndpoint(path); err == nil {
 		t.Fatal("ResolveEndpoint succeeded with no api_key for a non-ambient provider; want an error")
+	}
+}
+
+// TestExplainErrorClassifiesBedrockFailures covers the diagnosis Bedrock's own
+// wording does not give. Two of these are actively misleading: the API-key
+// complaint names a credential the user cannot configure, and a model absent
+// from the region reads as a malformed identifier.
+func TestExplainErrorClassifiesBedrockFailures(t *testing.T) {
+	client := &AnthropicClient{bedrock: true, awsRegion: "us-west-2", awsProfile: "example-profile"}
+
+	tests := []struct {
+		name     string
+		err      error
+		wantAll  []string
+		wantNone []string
+	}{
+		{
+			name:    "bearer token reached the request",
+			err:     errors.New(`403 Forbidden {"Message":"Invalid API Key format: Must start with pre-defined prefix"}`),
+			wantAll: []string{"no api_key applies to bedrock", "region us-west-2", "profile example-profile"},
+		},
+		{
+			name:    "expired session",
+			err:     errors.New("operation error: get credentials: ExpiredToken: the security token included in the request is expired"),
+			wantAll: []string{"aws sso login --profile example-profile"},
+		},
+		{
+			name:    "IAM gap, not a bad credential",
+			err:     errors.New("operation error Bedrock Runtime: AccessDeniedException: user is not authorized to perform this action"),
+			wantAll: []string{"bedrock:InvokeModel", "IAM policy gap"},
+		},
+		{
+			name:    "model absent from the region",
+			err:     errors.New("operation error Bedrock Runtime: ValidationException: The provided model identifier is invalid."),
+			wantAll: []string{"aws bedrock list-inference-profiles --region us-west-2", "-v1:0"},
+		},
+		{
+			name:     "anything else keeps its own wording and gains context",
+			err:      errors.New("connection reset by peer"),
+			wantAll:  []string{"connection reset by peer", "region us-west-2"},
+			wantNone: []string{"IAM", "sso login"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := client.explainError("us.anthropic.claude-sonnet-4-6", tc.err)
+			if got == nil {
+				t.Fatal("explainError returned nil for a non-nil error")
+			}
+			if !errors.Is(got, tc.err) {
+				t.Error("original error is not wrapped; callers lose the service's own message")
+			}
+			for _, want := range tc.wantAll {
+				if !strings.Contains(got.Error(), want) {
+					t.Errorf("message %q does not contain %q", got, want)
+				}
+			}
+			for _, unwanted := range tc.wantNone {
+				if strings.Contains(got.Error(), unwanted) {
+					t.Errorf("message %q should not mention %q", got, unwanted)
+				}
+			}
+		})
+	}
+}
+
+// TestExplainErrorNamesTheBearerTokenVariable separates the two ways the same
+// 403 arrives: an SSO token the SDK attached on its own, versus a token the user
+// set deliberately. The fix differs, so the message has to.
+func TestExplainErrorNamesTheBearerTokenVariable(t *testing.T) {
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "sk-not-a-real-token")
+	client := &AnthropicClient{bedrock: true, awsRegion: "us-west-2"}
+	err := client.explainError("m", errors.New(`{"Message":"Invalid API Key format: Must start with pre-defined prefix"}`))
+	if !strings.Contains(err.Error(), "AWS_BEARER_TOKEN_BEDROCK") {
+		t.Errorf("message %q does not name AWS_BEARER_TOKEN_BEDROCK", err)
+	}
+}
+
+// TestExplainErrorLeavesNonBedrockErrorsAlone keeps the diagnosis scoped: every
+// other protocol shares this client type.
+func TestExplainErrorLeavesNonBedrockErrorsAlone(t *testing.T) {
+	client := &AnthropicClient{}
+	original := errors.New("401 Unauthorized")
+	if got := client.explainError("m", original); got != original {
+		t.Errorf("explainError rewrote a non-bedrock error: %q", got)
+	}
+	if got := client.explainError("m", nil); got != nil {
+		t.Errorf("explainError(nil) = %v, want nil", got)
+	}
+}
+
+// TestBedrockContextReportsResolvedRegion covers what `ocr llm test` prints:
+// bedrock has no configured URL, so the resolved region is the only way to see
+// where a request went.
+func TestBedrockContextReportsResolvedRegion(t *testing.T) {
+	client := &AnthropicClient{bedrock: true, awsRegion: "us-west-2", awsProfile: "example-profile"}
+	region, profile, ok := client.BedrockContext()
+	if !ok {
+		t.Fatal("ok = false for a bedrock client")
+	}
+	if region != "us-west-2" || profile != "example-profile" {
+		t.Errorf("BedrockContext() = %q/%q, want us-west-2/example-profile", region, profile)
+	}
+
+	if _, _, ok := (&AnthropicClient{}).BedrockContext(); ok {
+		t.Error("ok = true for a non-bedrock client")
 	}
 }
 

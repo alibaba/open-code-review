@@ -108,7 +108,19 @@ func runLLMTest() error {
 		model = resp.Model
 	}
 	fmt.Printf("Source: %s\n", ep.Source)
-	fmt.Printf("URL:    %s\n", ep.URL)
+	if region, profile, ok := bedrockContext(llmClient); ok {
+		// Bedrock has no configured URL — the region decides the host — so
+		// report what was resolved instead. A request that reached the wrong
+		// region otherwise fails in a way that looks like a bad model ID.
+		fmt.Printf("Region: %s\n", region)
+		if profile != "" {
+			fmt.Printf("Profile: %s\n", profile)
+		} else {
+			fmt.Printf("Profile: (from the ambient AWS chain)\n")
+		}
+	} else {
+		fmt.Printf("URL:    %s\n", ep.URL)
+	}
 	fmt.Printf("Model:  %s\n", model)
 
 	content := resp.Content()
@@ -118,6 +130,17 @@ func runLLMTest() error {
 	fmt.Printf("%s\n", content)
 	fmt.Println("✓ Connection test successful")
 	return nil
+}
+
+// bedrockContext reports the region and profile a Bedrock client resolved.
+// ok is false for every other client, which keeps the test output unchanged for
+// URL-based providers.
+func bedrockContext(client llm.LLMClient) (region, profile string, ok bool) {
+	c, isAnthropic := client.(*llm.AnthropicClient)
+	if !isAnthropic {
+		return "", "", false
+	}
+	return c.BedrockContext()
 }
 
 func runLLMProviders() {

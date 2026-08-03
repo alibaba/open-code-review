@@ -303,6 +303,16 @@ type ProviderEntry struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+
+	// AWSProfile and AWSRegion pin the credentials and region for providers that
+	// authenticate from the AWS chain (bedrock). Both are optional — without
+	// them the standard chain decides, as with any other AWS tool. They must
+	// exist here as well as in the resolver's own view of the file: config is
+	// unmarshalled into this struct and marshalled back on every write, so a
+	// field missing from it is silently dropped from a hand-written config the
+	// first time any config command runs.
+	AWSProfile string `json:"aws_profile,omitempty"`
+	AWSRegion  string `json:"aws_region,omitempty"`
 }
 
 // MCPServerConfig holds configuration for a single MCP server.
@@ -559,12 +569,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
 
-func applyProviderField(entry *ProviderEntry, field, key, value string) error {
+func applyProviderField(providerName string, entry *ProviderEntry, field, key, value string) error {
 	switch field {
 	case "api_key":
 		entry.APIKey = value
@@ -619,10 +629,50 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		entry.RetryCodes = codes
+	case "aws_region", "aws_profile":
+		normalized, err := normalizeAWSSetting(field, key, value)
+		if err != nil {
+			return err
+		}
+		if !providerAcceptsAWSSettings(providerName, entry) {
+			return fmt.Errorf("%s does not apply to provider %q: aws_region and aws_profile are only used by providers that authenticate from the AWS credential chain (protocol %s)", field, providerName, llm.ProtocolAnthropicBedrock)
+		}
+		if field == "aws_region" {
+			entry.AWSRegion = normalized
+		} else {
+			entry.AWSProfile = normalized
+		}
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
 	}
 	return nil
+}
+
+// providerAcceptsAWSSettings reports whether aws_region / aws_profile mean
+// anything for this provider: a built-in preset that authenticates from the
+// environment, or a custom provider already declared to speak the Bedrock
+// protocol. Storing them anywhere else would be dead config that reads as
+// applied, so it is rejected instead.
+func providerAcceptsAWSSettings(providerName string, entry *ProviderEntry) bool {
+	if preset, isPreset := llm.LookupProvider(providerName); isPreset {
+		return preset.AmbientAuth
+	}
+	return llm.NormalizeProtocol(entry.Protocol) == llm.ProtocolAnthropicBedrock
+}
+
+// normalizeAWSSetting trims the value and rejects the shapes AWS itself will
+// not accept. Region names are deliberately not checked against a fixed list:
+// AWS adds regions faster than any embedded list stays correct, and a wrong one
+// already surfaces at request time.
+func normalizeAWSSetting(field, key, value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil // clearing the field hands the decision back to the AWS chain
+	}
+	if strings.ContainsAny(trimmed, " \t\n") {
+		return "", fmt.Errorf("invalid %s for %s: %q contains whitespace", field, key, value)
+	}
+	return trimmed, nil
 }
 
 func parseModelListValue(value string) ([]string, error) {
@@ -702,7 +752,7 @@ func setProviderValue(cfg *Config, key, value string) error {
 		cfg.Providers = make(map[string]ProviderEntry)
 	}
 	entry := cfg.Providers[parts[1]]
-	if err := applyProviderField(&entry, parts[2], key, value); err != nil {
+	if err := applyProviderField(parts[1], &entry, parts[2], key, value); err != nil {
 		return err
 	}
 	cfg.Providers[parts[1]] = entry
@@ -722,7 +772,7 @@ func setCustomProviderField(cfg *Config, name, field, key, value string) error {
 		cfg.CustomProviders = make(map[string]ProviderEntry)
 	}
 	entry := cfg.CustomProviders[name]
-	if err := applyProviderField(&entry, field, key, value); err != nil {
+	if err := applyProviderField(name, &entry, field, key, value); err != nil {
 		return err
 	}
 	cfg.CustomProviders[name] = entry

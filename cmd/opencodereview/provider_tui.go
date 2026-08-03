@@ -966,6 +966,11 @@ func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	}
 	if m.activeTab == tabOfficial {
 		p := m.currentProvider()
+		if p.AmbientAuth {
+			// Reachable when an existing config is edited: an empty key is the
+			// correct state for a provider that signs from the AWS chain.
+			return true, ""
+		}
 		if officialProviderEnvKeySet(p) {
 			return true, ""
 		}
@@ -1248,6 +1253,8 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		AuthHeader: v.AuthHeader,
 		TimeoutSec: v.TimeoutSec,
 		RetryCodes: append([]int(nil), v.RetryCodes...),
+		AWSProfile: v.AWSProfile,
+		AWSRegion:  v.AWSRegion,
 	}
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
@@ -1799,6 +1806,14 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 		if err := m.syncSessionModelSelection(); err != nil {
 			m.formError = err.Error()
 			return m, nil
+		}
+		if m.activeTab == tabOfficial && m.currentProvider().AmbientAuth {
+			// An ambient-auth provider has no key to collect, so the model step
+			// is the last one. Showing an API-key prompt that must be left blank
+			// would read as a step the user failed to complete.
+			m.formError = ""
+			m.confirmed = true
+			return m, tea.Quit
 		}
 		m.step = stepAPIKey
 		m.formError = ""
