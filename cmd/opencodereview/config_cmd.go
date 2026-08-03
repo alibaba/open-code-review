@@ -28,10 +28,10 @@ Examples:
   ocr config set model claude-opus-4-6
   ocr config set providers.anthropic.api_key "$ANTHROPIC_API_KEY"
 
-	# Custom provider
-	ocr config set provider my-gateway
-	ocr config set custom_providers.my-gateway.url https://gateway.internal.com/v1
-	ocr config set custom_providers.my-gateway.protocol openai`,
+  # Custom provider
+  ocr config set provider my-gateway
+  ocr config set custom_providers.my-gateway.url https://gateway.internal.com/v1
+  ocr config set custom_providers.my-gateway.protocol openai`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
