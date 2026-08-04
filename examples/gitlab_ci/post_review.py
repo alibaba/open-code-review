@@ -176,8 +176,8 @@ def route_comment(comment, policy):
     """
     if not policy or (not policy.get("route_by_severity") and not policy.get("route_by_category")):
         return {"routed": False}
-    cat_raw = str(comment.get("category", "")).strip().lower() if comment else ""
-    sev_raw = str(comment.get("severity", "")).strip().lower() if comment else ""
+    cat_raw = sanitize_metadata(comment.get("category") if comment else None).strip().lower()
+    sev_raw = sanitize_metadata(comment.get("severity") if comment else None).strip().lower()
     cat_known = cat_raw != "" and cat_raw in CATEGORIES
     sev_known = sev_raw != "" and sev_raw in SEVERITY_RANK
 
@@ -260,11 +260,6 @@ def format_comment_fallback(comment, reason=None):
     The Before/After blocks use :func:`fenced_block` so code containing
     backticks still renders.
     """
-    md = ""
-    badge = build_badge(comment)
-    if badge:
-        md += badge + "\n"
-
     path = comment.get("path", "unknown")
     start_line = comment.get("start_line", 0)
     end_line = comment.get("end_line", 0)
