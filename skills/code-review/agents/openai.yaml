@@ -1,3 +1,3 @@
 interface:
   display_name: "Code Review"
-  short_description: "Review a diff with OpenCodeReview (OCR)"
+  short_description: "Review a diff with synchronous OCR MCP"

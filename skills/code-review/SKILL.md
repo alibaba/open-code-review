@@ -1,9 +1,11 @@
 ---
 name: code-review
-description: Review changes since a fixed point with OpenCodeReview (OCR). Use when the user wants to review a branch, PR, commit, or work-in-progress changes.
+description: Review changes since a fixed point with the synchronous OpenCodeReview (OCR) MCP tool. Use when the user wants to review a branch, PR, commit, or work-in-progress changes.
 ---
 
-Review the diff between `HEAD` and a fixed point supplied by the user with one OpenCodeReview run. Keep the fixed point and any available task, repository, or business context as inputs, then return OCR's native review output without imposing an additional report structure or claiming coverage beyond OCR's result.
+Review the diff between `HEAD` and a fixed point supplied by the user with one blocking `ocr_review` MCP call from `ocr-mcp-server`. The call returns only after OCR reaches a terminal result. Keep the fixed point and any available task, repository, or business context as inputs, then return OCR's native review output without imposing an additional report structure or claiming coverage beyond OCR's result.
+
+Do not run `ocr review`, spawn review sub-agents, inspect progress events, or poll for completion. If the MCP tool is unavailable, report the integration error instead of falling back to the CLI.
 
 The issue tracker should have been provided to you — run `/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing.
 
@@ -38,19 +40,22 @@ Look for the originating task requirements, in this order:
 
 If a task source is found, summarize its requirements and only the repository or business context relevant to the changed code, then pass that context to OCR in step 3. Use `--background-file` for a suitable Markdown document when that is shorter and more accurate.
 
-### 3. Run one OCR review
+### 3. Call the synchronous MCP tool
 
-Run exactly one review for the validated range. Always use `--audience agent`; use `--format json` when the result will be consumed by another agent or tool.
+Call the `ocr_review` tool exposed by `ocr-mcp-server` exactly once for the validated range. MCP input is typed JSON; use `from` and `to` for the range, and include `background` or `exclude` only when they are available:
 
-```bash
-ocr review --audience agent --format json \
-  --from <fixed-point> --to HEAD \
-  --background "<concise task requirements, repository, and business context>"
+```json
+{
+  "from": "<fixed-point>",
+  "to": "HEAD",
+  "background": "<concise task requirements, repository, and business context>",
+  "exclude": ["<optional glob>"]
+}
 ```
 
-When no task context is available, omit the final `--background` line. Use `--background-file <path>` instead when the task source is a suitable Markdown document.
+When reviewing a single commit rather than a range, use `commit` instead of `from`/`to`. The MCP server resolves the current Git worktree; do not pass a `repo` or `worktree` argument.
 
-Do not spawn review sub-agents, run a second review, or rerank OCR findings.
+The MCP call is synchronous: wait for its returned result in the same call. Do not retry automatically or issue a status/session-polling call. If a failed commit/range review returns a resumable session ID and the user explicitly requests resume, make one explicit follow-up `ocr_review` call with the same target and `resume` value.
 
 ### 4. Return the OCR result
 
@@ -64,7 +69,6 @@ Do not add a second report structure or assert coverage beyond OCR's result. If 
 
 After OCR finishes, verify:
 
-1. The command exited successfully.
-2. The result is valid JSON when `--format json` was used.
-3. The result contains comments, or explicitly reports that no comments were generated.
-4. Any warnings or partial coverage are preserved in the handoff.
+1. The MCP call returned a terminal result rather than an intermediate progress event.
+2. The result contains comments, or explicitly reports that no comments were generated.
+3. Any warnings, partial coverage, failure reason, or resumable session ID are preserved in the handoff.
