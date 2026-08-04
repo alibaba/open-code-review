@@ -1,5 +1,20 @@
 import DOMPurify from 'dompurify';
 
+const explicitHeadingIdPattern = /\s+\{#([a-zA-Z0-9][a-zA-Z0-9_.:-]*)\}\s*$/;
+
+/** Split an optional trailing `{#id}` marker from the visible heading text. */
+export function parseExplicitHeadingId(text: string): { text: string; id?: string } {
+  const match = text.match(explicitHeadingIdPattern);
+  if (!match || match.index === undefined) {
+    return { text };
+  }
+
+  return {
+    text: text.slice(0, match.index).trimEnd(),
+    id: match[1],
+  };
+}
+
 /**
  * Shared utility to generate heading IDs from text.
  * Used by both extractHeadings (DocsPage TOC) and MarkdownRenderer (heading renderer)

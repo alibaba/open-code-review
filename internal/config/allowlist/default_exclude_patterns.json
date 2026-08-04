@@ -17,5 +17,14 @@
   "**/*.test.ets",
   "**/test/**/*.jl",
   "**/test/**/*.hs",
-  "**/*Spec.hs"
+  "**/*Spec.hs",
+  "**/__snapshots__/**",
+  "**/*.snap",
+  "**/testdata/**",
+  "**/fixtures/**",
+  "**/*.generated.*",
+  "**/*.gen.go",
+  "**/*.pb.go",
+  "**/*.pb.cc",
+  "**/*.pb.h"
 ]

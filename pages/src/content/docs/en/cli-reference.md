@@ -49,6 +49,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | Command | Alias | What it does |
 |---|---|---|
 | `ocr review` | `ocr r` | Run a code review and emit comments. |
+| `ocr scan` | `ocr s` | Scan complete files without requiring a Git diff. |
 | `ocr rules check <file>` | — | Show which rule applies to a given file path and where it came from. |
 | `ocr config set <key> <value>` | — | Persist a config value to `~/.opencodereview/config.json`. |
 | `ocr config unset custom_providers.<name>` | — | Delete a custom provider (clears active `provider`/`model` if it was active). |
@@ -58,6 +59,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr llm providers` | — | List all built-in LLM providers. |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions. |
 | `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints. |
+| `ocr session comments <id>` | `ocr sessions comments <id>` | Print the review comments recorded in one session. |
 | `ocr viewer` | — | Launch the local web UI for past review sessions (`localhost:5483`). |
 | `ocr version` | — | Print version, commit, platform, build date, and GitHub URL. |
 
@@ -96,7 +98,8 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--timeout <minutes>` | — | `10` | Per-file deadline. `0` disables the timeout. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per file. `0` uses the template default (`30`); values 1–9 are clamped up to `10`; any value `≥ 10` overrides the template default (even if smaller than `30`). |
-| `--model <name>` | — | — | Override the resolved LLM model for this review (e.g., `claude-opus-4-6`). |
+| `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
+| `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
 | `--tools <path>` | — | embedded | Path to a custom JSON tool-config file. Overrides the embedded tool definitions. |
 
@@ -104,6 +107,25 @@ staged + unstaged + untracked changes in the current directory's repo.
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
 > `--resume` supports only range or commit reviews and cannot be combined
 > with `--preview`.
+
+### Per-run LLM selection
+
+Both `review` and `scan` accept `--provider` and `--model`. The overrides
+apply only to the current invocation and do not modify saved configuration:
+
+```bash
+ocr review --provider anthropic --model claude-opus-4-6 --format json
+ocr scan --provider openai --model gpt-5.4 --format json
+```
+
+An explicit `--provider` selects a saved entry from `providers` or
+`custom_providers` before normal source resolution. Without `--provider`, OCR
+preserves the legacy source order: saved configuration, complete `OCR_LLM_*`
+environment configuration, complete Claude Code environment configuration, then
+shell rc files. `--model` overrides the model within whichever source wins; it
+does not change that source order. Incomplete strategies fall through without
+being mixed. A selected built-in provider's credentials may still come from its
+supported environment variable.
 
 ### Modes
 
@@ -155,6 +177,7 @@ resume from one that matches the same review target:
 ```bash
 ocr session list
 ocr session show <session-id>
+ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
@@ -208,6 +231,10 @@ ocr review --format json --audience agent
 ```json
 {
   "status": "success",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-6"
+  },
   "summary": {
     "files_reviewed": 9,
     "comments": 1,
@@ -235,6 +262,7 @@ Top-level fields:
 | Field | Notes |
 |---|---|
 | `status` | `success`, `completed_with_warnings`, `completed_with_errors`, or `skipped`. |
+| `llm` | Resolved LLM identity. The normalized `model` is always present; `provider` is present only for a named configured provider. |
 | `message` | Optional. Human-readable summary, e.g. `"No comments generated. Looks good to me."`. |
 | `summary` | Optional. Run aggregates: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (omitempty), `cache_write_tokens` (omitempty), `elapsed`. Omitted for `skipped` runs. |
 | `comments` | Always present, possibly empty. Per-comment fields are the ones in the example above. |
@@ -249,6 +277,10 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 {
   "status": "skipped",
   "message": "No supported files changed.",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-6"
+  },
   "comments": []
 }
 ```
@@ -275,8 +307,9 @@ ocr session <sub-command>
 ocr sessions <sub-command>   (alias)
 
 Sub-commands:
-  list, ls    List recent review sessions for the current repo
-  show <id>   Show one session's metadata and per-file items
+  list, ls        List recent review sessions for the current repo
+  show <id>       Show one session's metadata and per-file items
+  comments <id>   Show the review comments recorded in one session
 ```
 
 ### `ocr session list`
@@ -305,6 +338,26 @@ ocr session show --repo /path/to/repo <session-id>
 |---|---|---|
 | `--repo <path>` | current dir | Repository whose session should be inspected. |
 | `--json` | `false` | Emit session metadata and per-file items as JSON. |
+
+### `ocr session comments`
+
+Prints every review comment persisted in a session, rendered in the same
+style as `ocr review` terminal output (path, line range, severity badge,
+suggestion diff).
+
+```bash
+ocr session comments <session-id>
+ocr session comments --json <session-id>
+ocr session comments --severity high <session-id>
+ocr session comments --severity critical,high --category bug,security <session-id>
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--repo <path>` | current dir | Repository whose session should be inspected. |
+| `--json` | `false` | Emit the comments as a JSON array. |
+| `--severity <list>` | all | Comma-separated severities to include (`critical`, `high`, `medium`, `low`). |
+| `--category <list>` | all | Comma-separated categories to include (e.g. `bug`, `security`). |
 
 ## `ocr rules`
 

@@ -8,7 +8,9 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -362,6 +364,23 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 	}
 
 	sdkResp, err := c.sdk.Chat.Completions.New(ctx, params, opts...)
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		retryResp, retryErr := c.sdk.Chat.Completions.New(ctx, params, opts...)
+		if retryErr == nil {
+			sdkResp = retryResp
+			err = nil
+		} else {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			if !errors.Is(retryErr, io.ErrUnexpectedEOF) {
+				err = retryErr
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
