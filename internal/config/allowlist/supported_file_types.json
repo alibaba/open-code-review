@@ -79,5 +79,7 @@
   ".tfvars",
   ".bicep",
   ".proto",
-  ".nix"
+  ".nix",
+  ".hs",
+  ".lhs"
 ]

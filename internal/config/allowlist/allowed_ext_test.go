@@ -50,6 +50,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".PROTO", true},
 		{".nix", true},
 		{".NIX", true},
+		{".hs", true},
+		{".HS", true},
+		{".lhs", true},
+		{".LHS", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -131,6 +135,18 @@ func TestIsExcludedPath(t *testing.T) {
 		{"julia test file", "test/runtests.jl", true},
 		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
 		{"julia non-test", "src/model.jl", false},
+
+		// Haskell test files
+		{"haskell test directory", "test/Parser.hs", true},
+		{"haskell nested test directory", "packages/core/test/unit/Parser.hs", true},
+		{"haskell spec file", "src/ParserSpec.hs", true},
+		{"haskell root spec file", "ParserSpec.hs", true},
+		{"haskell non-test", "src/Parser.hs", false},
+		{"lhs test directory", "test/Tutorial.lhs", true},
+		{"lhs nested test directory", "packages/core/test/unit/Tutorial.lhs", true},
+		{"lhs spec file", "src/ParserSpec.lhs", true},
+		{"lhs root spec file", "ParserSpec.lhs", true},
+		{"lhs non-test", "src/Tutorial.lhs", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

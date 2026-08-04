@@ -32,6 +32,7 @@
     "**/*.jl": "julia.md",
     "**/*.{tf,hcl,tfvars}": "terraform.md",
     "**/*.bicep": "bicep.md",
-    "**/*.nix": "nix.md"
+    "**/*.nix": "nix.md",
+    "**/*.{hs,lhs}": "haskell.md"
   }
 }

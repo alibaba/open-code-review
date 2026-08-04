@@ -2480,10 +2480,10 @@ fast-levenshtein@^2.0.6:
   resolved "https://registry.npmjs.org/fast-levenshtein/-/fast-levenshtein-2.0.6.tgz#3d8a5c66883a16a30ca8643e851f19baa7797917"
   integrity sha512-DCXu6Ifhqcks7TZKY3Hxp3y6qphY5SJZmrWMDrKcERSOXWQdMhU9Ig/PYrzyw/ul9jOIyh0N4M0tbC5hodg8dw==
 
-fast-uri@>=3.1.4, fast-uri@^3.0.1:
-  version "4.1.1"
-  resolved "https://registry.yarnpkg.com/fast-uri/-/fast-uri-4.1.1.tgz#380cdc10a7d603625eef31ead5303d3e98ec418a"
-  integrity sha512-YPOs1zD5TG2+EZt+r88LwF6mclA7TPkpwMP7ZN3TO2HiHS8TXvq7QA/17iJsV9dubcLo/f8eEYqMBruyQV21hQ==
+fast-uri@>=4.1.2, fast-uri@^3.0.1:
+  version "4.1.2"
+  resolved "https://registry.yarnpkg.com/fast-uri/-/fast-uri-4.1.2.tgz#1e225af32fb0a178db8f14d7d9ba93ff24485694"
+  integrity sha512-TyGmBcbDTZXcb2cj5MV89DrF42DKvb3y5DDUNh95iO+IMeAzMkVSxK1PZRrRIpc9yg8U2GhGdbofNa0LS/a4Bw==
 
 fastq@^1.6.0:
   version "1.20.1"
@@ -4131,10 +4131,10 @@ postcss-value-parser@^4.1.0, postcss-value-parser@^4.2.0:
   resolved "https://registry.npmjs.org/postcss-value-parser/-/postcss-value-parser-4.2.0.tgz#723c09920836ba6d3e5af019f92bc0971c02e514"
   integrity sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ==
 
-postcss@^8.4.40:
-  version "8.5.22"
-  resolved "https://registry.yarnpkg.com/postcss/-/postcss-8.5.22.tgz#086a0d5685a715acf5950ebbcb1538faf3051697"
-  integrity sha512-KBDEIpLrvpv16pp3K0Fw+UCoZfopFjjgeB+0tA/aaThfEE74kKDLrgg603YvOWJyg3+WYtyq3xYsQWsIyZlPqQ==
+postcss@>=8.5.23, postcss@^8.4.40:
+  version "8.5.25"
+  resolved "https://registry.yarnpkg.com/postcss/-/postcss-8.5.25.tgz#5012a598eaaa897f21bbe8553be3cb7bd2bd78cb"
+  integrity sha512-DTPx3RWSSnWyzLxQnlH0rJP+EW5ekl16ZU4/psbIhA0e53kJfdgaN5vKM+xP7yJtXVu+nfdVFmlgFDEKAe4Pyw==
   dependencies:
     nanoid "^3.3.16"
     picocolors "^1.1.1"
@@ -4892,10 +4892,10 @@ undici-types@~8.3.0:
   resolved "https://registry.npmjs.org/undici-types/-/undici-types-8.3.0.tgz#44e9fc9f3244648cdea35e4f9bb2d681e9410809"
   integrity sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==
 
-undici@>=7.28.0, undici@^7.19.0:
-  version "8.5.0"
-  resolved "https://registry.npmjs.org/undici/-/undici-8.5.0.tgz#31ba9021a3d84c15e61cc5e28be2d7c451e66a66"
-  integrity sha512-xamtWoB1EshgjpmlXd7GGm2VfdDtw1+rD8uhry8pSNW3If6S8E0m2T2+orSKeZXEn/aPJMviCpDBA65WJt8zhg==
+undici@>=8.9.0, undici@^7.19.0:
+  version "8.10.0"
+  resolved "https://registry.yarnpkg.com/undici/-/undici-8.10.0.tgz#67ed7c4087f0f40fba7bef3a46f2be80572f2473"
+  integrity sha512-HvltHd7avK13QIw/oLe4qoOLyoVSoafqJ2jYOrtMRBkbYT31eiBQ8O0ehRKZiEZCMEyLFQNIADpgCWC5fALvYQ==
 
 unicorn-magic@^0.1.0:
   version "0.1.0"
