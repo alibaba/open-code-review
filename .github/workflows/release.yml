@@ -13,6 +13,7 @@ jobs:
     timeout-minutes: 15
     container:
       image: golang:1.26.5
+      options: --cpus=2
     strategy:
       matrix:
         include:
