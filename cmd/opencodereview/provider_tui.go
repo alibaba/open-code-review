@@ -1642,7 +1642,7 @@ func (m *providerTUIModel) blurManualStep() {
 	}
 }
 
-func (m providerTUIModel) focusManualStep() tea.Cmd {
+func (m *providerTUIModel) focusManualStep() tea.Cmd {
 	switch m.manualStep {
 	case manualStepURL:
 		return m.manualURLInput.Focus()

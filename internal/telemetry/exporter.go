@@ -46,6 +46,39 @@ func parseOTLPEndpoint(endpoint string) (addr string, insecure bool) {
 	}
 }
 
+// otlpSignalURL builds the URL for one signal from the configured endpoint.
+//
+// OTEL_EXPORTER_OTLP_ENDPOINT is defined by the OpenTelemetry specification as a BASE
+// URL for the HTTP protocols, to which the per-signal path is appended: an endpoint of
+// "https://backend.example.com" sends traces to "https://backend.example.com/v1/traces".
+// WithEndpointURL, by contrast, takes the full signal URL — it assigns u.Path straight
+// to URLPath — so the signal path has to be appended here rather than left to the SDK.
+//
+// Two details this has to get right:
+//
+//   - A bare host:port keeps the meaning parseOTLPEndpoint gave it, TLS, by gaining an
+//     https:// scheme. WithEndpointURL derives Insecure from the scheme
+//     (`u.Scheme != "https"`), which is what the explicit WithInsecure call used to do,
+//     so an existing configuration behaves identically after this change.
+//   - An endpoint that already names the signal path is left alone. Someone who worked
+//     around the missing path support by writing it out in full should not end up with
+//     "/v1/traces/v1/traces".
+func otlpSignalURL(endpoint, signalPath string) string {
+	base := endpoint
+	switch {
+	case len(base) >= 7 && strings.EqualFold(base[:7], "http://"):
+	case len(base) >= 8 && strings.EqualFold(base[:8], "https://"):
+	default:
+		base = "https://" + base
+	}
+
+	base = strings.TrimRight(base, "/")
+	if strings.HasSuffix(base, signalPath) {
+		return base
+	}
+	return base + signalPath
+}
+
 // initOTLPProviders dispatches to the gRPC or HTTP exporter based on cfg.OTLPProtocol.
 func initOTLPProviders(ctx context.Context, res *resource.Resource, cfg Config) {
 	switch cfg.OTLPProtocol {
@@ -99,14 +132,24 @@ func initOTLPGRPCProviders(ctx context.Context, res *resource.Resource, cfg Conf
 }
 
 // initOTLPHTTPProviders sets up OTLP HTTP exporters for traces and metrics.
+//
+// Unlike the gRPC path this uses WithEndpointURL rather than WithEndpoint, so that a
+// base path in OTEL_EXPORTER_OTLP_ENDPOINT is honoured. WithEndpoint takes a bare
+// host:port and cannot express a path, so every request went to /v1/traces at the root
+// of the host regardless of what the endpoint said.
+//
+// That silently excludes any backend reached through a path prefix. Langfuse receives
+// OTLP at /api/public/otel, for instance, so an endpoint of
+// "http://langfuse:3000/api/public/otel" produced requests to
+// "http://langfuse:3000/v1/traces" and every span was dropped with a 404.
+//
+// The signal path is appended by otlpSignalURL rather than by the SDK: WithEndpointURL
+// assigns the URL's path straight to URLPath, so it expects the full signal URL, while
+// OTEL_EXPORTER_OTLP_ENDPOINT is specified as a base. It also derives TLS from the
+// scheme, which is what the separate WithInsecure call was doing by hand.
 func initOTLPHTTPProviders(ctx context.Context, res *resource.Resource, cfg Config) {
-	addr, insecure := parseOTLPEndpoint(cfg.OTLPEndpoint)
-
-	traceOpts := []otlptracehttp.Option{otlptracehttp.WithEndpoint(addr)}
-	if insecure {
-		traceOpts = append(traceOpts, otlptracehttp.WithInsecure())
-	}
-	traceExp, err := otlptracehttp.New(ctx, traceOpts...)
+	traceExp, err := otlptracehttp.New(ctx,
+		otlptracehttp.WithEndpointURL(otlpSignalURL(cfg.OTLPEndpoint, "/v1/traces")))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to create OTLP HTTP trace exporter: %v\n", err)
 		return
@@ -119,11 +162,8 @@ func initOTLPHTTPProviders(ctx context.Context, res *resource.Resource, cfg Conf
 	tracerProvider = tp
 	shutdownFuncs = append(shutdownFuncs, func(ctx context.Context) error { return tp.Shutdown(ctx) })
 
-	metricOpts := []otlpmetrichttp.Option{otlpmetrichttp.WithEndpoint(addr)}
-	if insecure {
-		metricOpts = append(metricOpts, otlpmetrichttp.WithInsecure())
-	}
-	metricExp, err := otlpmetrichttp.New(ctx, metricOpts...)
+	metricExp, err := otlpmetrichttp.New(ctx,
+		otlpmetrichttp.WithEndpointURL(otlpSignalURL(cfg.OTLPEndpoint, "/v1/metrics")))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to create OTLP HTTP metric exporter: %v\n", err)
 		return

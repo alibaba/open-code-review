@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,26 +11,94 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
+	"github.com/spf13/cobra"
 
 	"go.opentelemetry.io/otel/codes"
 )
 
-func runReview(args []string) error {
-	opts, err := parseReviewFlags(args)
-	if err != nil {
-		// parseReviewFlags already wraps with "parse flags: %w" — return as-is.
-		return err
-	}
-	if opts.showHelp {
-		printReviewUsage()
-		return nil
-	}
+type reviewOptions struct {
+	toolConfigPath  string
+	rulePath        string
+	repoDir         string
+	from            string
+	to              string
+	commit          string
+	resume          string
+	excludes        string
+	outputFormat    string
+	audience        string
+	background      string
+	backgroundFile  string
+	provider        string
+	model           string
+	concurrency     int
+	perFileTimeout  int
+	maxTools        int
+	maxGitProcs     int
+	maxTokensBudget int
+	preview         bool
+}
 
-	// review path: git repo is required (diff concepts depend on it).
+var reviewOpts reviewOptions
+
+var reviewCmd = &cobra.Command{
+	Use:     "review [flags]",
+	Aliases: []string{"r"},
+	Short:   "Start a diff-based code review",
+	Long:    "OpenCodeReview - AI-Powered Code Review CLI\n\nStart a diff-based code review using a configurable LLM.",
+	Args:    cobra.NoArgs,
+	Example: `  # Review staged + unstaged + untracked changes in current workspace
+  ocr review
+
+  # Review a branch against its base (merge-base mode)
+  ocr review --from master --to dev-ref
+
+  # Review a specific commit
+  ocr review --commit abc123
+  ocr review -c abc123
+
+  # Resume a previous range review
+  ocr review --from master --to dev-ref --resume <session-id>
+
+  # Output JSON format
+  ocr review --format json
+  ocr review -f json
+
+  # Select a configured provider and model for this run only
+  ocr review --provider anthropic --model claude-opus-4-6 --format json
+
+  # Agent mode (summary only, no progress lines)
+  ocr review --audience agent
+
+  # Preview which files will be reviewed
+  ocr review --preview
+  ocr review -c abc123 -p
+
+  # Exclude generated files / fixtures
+  ocr review --exclude '**/generated/*,**/testdata/*'
+
+  # Provide requirement/business context inline, from a Markdown file, or both
+  ocr review --background "Adding rate limiting to the login API"
+  ocr review --background-file ./docs/requirements.md
+  ocr review --background "Focus on auth" --background-file ./docs/requirements.md`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateReviewOptions(&reviewOpts); err != nil {
+			return err
+		}
+		return executeReview(reviewOpts)
+	},
+}
+
+func init() {
+	registerReviewFlags(reviewCmd, &reviewOpts)
+}
+
+func executeReview(opts reviewOptions) error {
 	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
@@ -70,9 +139,16 @@ func runReview(args []string) error {
 		return err
 	}
 
-	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, opts.model)
+	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
+		Provider: opts.provider,
+		Model:    opts.model,
+	})
 	if err != nil {
 		return err
+	}
+	llmIdentity := &jsonLLMIdentity{
+		Provider: rt.Provider,
+		Model:    rt.Model,
 	}
 
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
@@ -116,10 +192,12 @@ func runReview(args []string) error {
 		MaxConcurrency:        opts.concurrency,
 		ConcurrentTaskTimeout: opts.perFileTimeout,
 		Model:                 rt.Model,
+		Provider:              rt.Provider,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
+		RuntimeConfig:         rt.RuntimeConfig,
 	})
 
 	// Silence progress output during execution; restored before the trace
@@ -142,28 +220,61 @@ func runReview(args []string) error {
 	}
 	startTime := time.Now()
 
-	comments, err := ag.Run(ctx)
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
-		// INV-4: emit a best-effort structured usage record on the failure
-		// path so the cost of the failed attempt is not lost. Budget exhaustion
-		// typically returns partial comments with a nil error and does not
-		// reach here, but a residual edge exists (budget trips, then all
-		// dispatched files error) — emitFailureUsage reports the agent's actual
-		// BudgetExceeded() state, so the record can never contradict it.
-		// Restore the quiet handle early so the stderr line is visible to
-		// agent-text audiences (Restore is idempotent; the deferred Restore is
-		// a no-op).
+	comments, runErr := ag.Run(ctx)
+	manifest := ag.RunManifest()
+	resultErr := reviewResultError(runErr, manifest)
+	if resultErr != nil {
+		span.SetStatus(codes.Error, resultErr.Error())
+		span.RecordError(resultErr)
+	}
+
+	// A successfully constructed manifest is publishable even when execution or
+	// session delivery failed. Emit it first, then return the independent process
+	// error so JSON consumers retain the complete coverage diagnosis.
+	var emitErr error
+	if manifest != nil || runErr == nil {
+		emitErr = emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity)
+		if emitErr != nil {
+			emitErr = fmt.Errorf("emit review result: %w", emitErr)
+		}
+	}
+	if resultErr != nil {
 		q.Restore()
-		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat)
+		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity)
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
-		return fmt.Errorf("review failed: %w", err)
+		return errors.Join(resultErr, emitErr)
 	}
+	return emitErr
+}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q)
+func reviewResultError(runErr error, manifest *session.RunManifest) error {
+	if runErr != nil {
+		return fmt.Errorf("review failed: %w", runErr)
+	}
+	if manifest != nil && manifest.TerminalState == session.StateFailed {
+		// The exit contract is: non-zero only for a run-level failure, or when
+		// every selected item failed. Any usable coverage — even incomplete — exits
+		// 0, so complete/partial/skipped all succeed and only failed lands here.
+		// That makes a budget stop exit 0 whenever anything was covered (it is a
+		// controlled truncation recording no run_failure) and non-zero only when
+		// the cap left nothing covered at all. Partial results are published
+		// regardless: runReview emits the frozen manifest before this error decides
+		// the exit status.
+		//
+		// Reasons stored in the manifest already went through sanitizeReason, so
+		// they are safe to echo on stderr.
+		if rf := manifest.RunFailure; rf != nil {
+			if rf.Reason != "" {
+				return fmt.Errorf("review failed (%s): %s", rf.Classification, rf.Reason)
+			}
+			return fmt.Errorf("review failed (%s)", rf.Classification)
+		}
+		return fmt.Errorf("review failed: %d of %d selected item(s) failed",
+			len(manifest.Coverage.Failed), len(manifest.Coverage.Selected))
+	}
+	return nil
 }
 
 func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeState, error) {

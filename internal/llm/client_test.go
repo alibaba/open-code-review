@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -508,6 +510,161 @@ func TestOpenAIClient_ExtraHeadersSent(t *testing.T) {
 	}
 }
 
+func TestOpenAIClient_RetriesTruncatedResponse(t *testing.T) {
+	const responseBody = `{
+		"id":"chatcmpl-retry",
+		"object":"chat.completion",
+		"model":"gpt-retry",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"recovered"},"finish_reason":"stop"}]
+	}`
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if request == 1 {
+			w.Header().Set("Content-Length", fmt.Sprint(len(responseBody)))
+			_, _ = fmt.Fprint(w, responseBody[:len(responseBody)/2])
+			return
+		}
+		_, _ = fmt.Fprint(w, responseBody)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-retry",
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+	if got := resp.Content(); got != "recovered" {
+		t.Errorf("Content() = %q, want %q", got, "recovered")
+	}
+}
+
+func TestOpenAIClient_StopsAfterSecondTruncatedResponse(t *testing.T) {
+	const responseBody = `{
+		"id":"chatcmpl-truncated",
+		"object":"chat.completion",
+		"model":"gpt-retry",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"incomplete"},"finish_reason":"stop"}]
+	}`
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", fmt.Sprint(len(responseBody)))
+		_, _ = fmt.Fprint(w, responseBody[:len(responseBody)/2])
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-retry",
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if resp != nil {
+		t.Fatalf("response = %#v, want nil", resp)
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want io.ErrUnexpectedEOF", err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+}
+
+func TestOpenAIClient_DoesNotRetryNonRetryableError(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"error":{"message":"invalid request","type":"invalid_request_error"}}`)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-test",
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if resp != nil {
+		t.Fatalf("response = %#v, want nil", resp)
+	}
+	if err == nil {
+		t.Fatal("error = nil, want API error")
+	}
+	if !strings.Contains(err.Error(), "invalid request") {
+		t.Fatalf("error = %v, want error containing %q", err, "invalid request")
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+}
+
+func TestOpenAIClient_DoesNotRetryTruncatedResponseAfterCancellation(t *testing.T) {
+	const responseBody = `{
+		"id":"chatcmpl-canceled",
+		"object":"chat.completion",
+		"model":"gpt-retry",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"incomplete"},"finish_reason":"stop"}]
+	}`
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", fmt.Sprint(len(responseBody)))
+		_, _ = fmt.Fprint(w, responseBody[:len(responseBody)/2])
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		cancel()
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-retry",
+	})
+
+	resp, err := client.CompletionsWithCtx(ctx, ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if resp != nil {
+		t.Fatalf("response = %#v, want nil", resp)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+}
+
 func writeOpenAISSE(t *testing.T, w http.ResponseWriter, events ...string) {
 	t.Helper()
 
@@ -603,15 +760,22 @@ func TestOpenAIClient_StreamOnlyGateway(t *testing.T) {
 	}
 }
 
-func TestOpenAIClient_StreamingRequiresBooleanTrue(t *testing.T) {
+// TestOpenAIClient_NonStreamingRequestDropsStreamField verifies that the
+// "stream" key in extra_body is NOT forwarded to the non-streaming Chat
+// Completions request. Forwarding it makes the API answer with
+// text/event-stream (SSE) while Chat.Completions.New expects a JSON body,
+// breaking every call (see issue #647). Only extra_body.stream=true as a
+// boolean triggers the streaming path; other types (string "true", bool
+// false) must be dropped from the wire body entirely so the server returns
+// JSON. Other extra_body keys are still forwarded.
+func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 	tests := []struct {
-		name       string
-		configured bool
-		value      any
+		name  string
+		value any
 	}{
 		{name: "missing"},
-		{name: "boolean false", configured: true, value: false},
-		{name: "string true", configured: true, value: "true"},
+		{name: "boolean false", value: false},
+		{name: "string true", value: "true"},
 	}
 
 	for _, tt := range tests {
@@ -624,23 +788,8 @@ func TestOpenAIClient_StreamingRequiresBooleanTrue(t *testing.T) {
 					return
 				}
 
-				got, exists := body["stream"]
-				if exists != tt.configured {
-					t.Errorf("stream presence = %t, want %t", exists, tt.configured)
-				}
-				if tt.configured {
-					switch want := tt.value.(type) {
-					case bool:
-						gotBool, ok := got.(bool)
-						if !ok || gotBool != want {
-							t.Errorf("stream = %#v, want boolean %t", got, want)
-						}
-					case string:
-						gotString, ok := got.(string)
-						if !ok || gotString != want {
-							t.Errorf("stream = %#v, want string %q", got, want)
-						}
-					}
+				if _, exists := body["stream"]; exists {
+					t.Errorf("stream field should NOT be present in non-streaming request body, got %v", body["stream"])
 				}
 
 				w.Header().Set("Content-Type", "application/json")
@@ -654,7 +803,7 @@ func TestOpenAIClient_StreamingRequiresBooleanTrue(t *testing.T) {
 			defer server.Close()
 
 			var extraBody map[string]any
-			if tt.configured {
+			if tt.value != nil {
 				extraBody = map[string]any{"stream": tt.value}
 			}
 			client := NewOpenAIClient(ClientConfig{
@@ -1038,6 +1187,60 @@ func TestAnthropicClient_NoExtraHeadersWhenEmpty(t *testing.T) {
 		if k == "X-Custom-Header" || k == "X-Org-Id" {
 			t.Errorf("unexpected custom header %q sent", k)
 		}
+	}
+}
+
+// TestAnthropicClient_ExtraBodyStreamDropped verifies that an
+// extra_body.stream=true is NOT forwarded to the Messages API. Forwarding it
+// makes the API answer with text/event-stream (SSE) while Messages.New expects
+// a JSON body, breaking every call (see issue #647). Other extra_body keys
+// must still be forwarded.
+func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_stream_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "test-key",
+		Model:  "claude-test",
+		ExtraBody: map[string]any{
+			"stream":               true,
+			"keep_me":              "yes",
+			"temperature_override": 0.1,
+		},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "hi"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	if _, present := gotBody["stream"]; present {
+		t.Errorf("request body should NOT contain a stream field, got %v", gotBody["stream"])
+	}
+	if gotBody["keep_me"] != "yes" {
+		t.Errorf("other extra_body keys must still be forwarded; keep_me = %v", gotBody["keep_me"])
+	}
+	if resp.Content() != "ok" {
+		t.Errorf("Content() = %q, want %q", resp.Content(), "ok")
 	}
 }
 

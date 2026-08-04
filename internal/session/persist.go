@@ -30,6 +30,7 @@ type jsonlWriter struct {
 	diffFrom    string
 	diffTo      string
 	diffCommit  string
+	scanPaths   []string
 	resumedFrom string
 	file        *os.File
 	writer      *bufio.Writer
@@ -47,6 +48,7 @@ func newJSONLWriter(sessionID, repoDir, gitBranch, model string, opts SessionOpt
 		diffFrom:    opts.DiffFrom,
 		diffTo:      opts.DiffTo,
 		diffCommit:  opts.DiffCommit,
+		scanPaths:   append([]string(nil), opts.ScanPaths...),
 		resumedFrom: opts.ResumedFrom,
 	}
 	if err := jw.open(); err != nil {
@@ -151,6 +153,9 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	}
 	if jw.diffCommit != "" {
 		rec["diffCommit"] = jw.diffCommit
+	}
+	if jw.reviewMode == ReviewModeFullScan {
+		rec["scanPaths"] = append([]string{}, jw.scanPaths...)
 	}
 	if jw.resumedFrom != "" {
 		rec["resumedFrom"] = jw.resumedFrom
@@ -312,8 +317,13 @@ func (jw *jsonlWriter) WriteToolCall(filePath string, taskType TaskType, toolNam
 	return uuid
 }
 
-// WriteSessionEnd writes the final session_end summary record and closes the file.
-func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64) {
+// WriteSessionEnd writes the final session_end summary record and closes the
+// file. When manifest is non-nil it is embedded under "run_manifest"; session_end
+// is the last physical record of the stream and no separate run_manifest record
+// is appended. The record is flushed before the file is closed. Any marshal,
+// flush or close error is returned so the caller can surface it as a delivery
+// error rather than silently losing the manifest.
+func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest) error {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -328,15 +338,40 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 		"duration_seconds": duration.Seconds(),
 		"llm_failures":     llmFailures,
 	}
-	jw.writeRecordLocked(rec)
+	if manifest != nil {
+		rec["run_manifest"] = manifest
+	}
 	jw.lastUUID = uuid
 
+	// Marshal explicitly (not via writeRecordLocked) so a marshal failure on the
+	// final record is reported rather than swallowed.
+	data, err := json.Marshal(rec)
+	if err != nil {
+		if jw.writer != nil {
+			jw.writer.Flush()
+		}
+		if jw.file != nil {
+			jw.file.Close()
+		}
+		return fmt.Errorf("marshal session_end: %w", err)
+	}
+
+	var writeErr error
 	if jw.writer != nil {
-		jw.writer.Flush()
+		if _, err := jw.writer.Write(data); err != nil {
+			writeErr = fmt.Errorf("write session_end: %w", err)
+		} else if err := jw.writer.WriteByte('\n'); err != nil {
+			writeErr = fmt.Errorf("write session_end: %w", err)
+		} else if err := jw.writer.Flush(); err != nil {
+			writeErr = fmt.Errorf("flush session_end: %w", err)
+		}
 	}
 	if jw.file != nil {
-		jw.file.Close()
+		if err := jw.file.Close(); err != nil && writeErr == nil {
+			writeErr = fmt.Errorf("close session file: %w", err)
+		}
 	}
+	return writeErr
 }
 
 func (jw *jsonlWriter) flushAndClose() {

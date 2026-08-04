@@ -18,7 +18,7 @@ import (
 // order-of-magnitude warning before a large review, not to be
 // billing-accurate. Real usage is always reported from the API response after
 // the run. The estimate also cannot account for agent tool-use inflation
-// (≈300× in the #409 report: 308 files → ≈90.4M tokens), so it is a floor.
+// because tool use can multiply the prompt substantially, so it is a floor.
 const (
 	// promptOverheadTokens approximates the fixed prompt scaffolding per LLM
 	// call (system prompt + template wrappers + tool definitions).

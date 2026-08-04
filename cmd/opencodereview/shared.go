@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -130,18 +132,24 @@ func resolveWorkingDir(input string, requireGit bool) (string, bool, error) {
 type llmRuntime struct {
 	Client       llm.LLMClient
 	Model        string
+	Provider     string // resolved provider name (non-secret label; empty for non-provider endpoints)
 	PlanToolDefs []llm.ToolDef
 	MainToolDefs []llm.ToolDef
 	Collector    *tool.CommentCollector
 	AppCfg       *Config
+	// RuntimeConfig holds the allowlisted, non-secret runtime settings (protocol,
+	// sanitized endpoint host, language, timeout) derived from the resolved
+	// endpoint and app config, for the run manifest's runtime_config_sha256. It
+	// never carries the token or full URL.
+	RuntimeConfig agent.RuntimeConfig
 }
 
 // loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
 // from the user's default config path (applying the configured language to
 // tpl — defaulting when the config file is absent), resolves the LLM
-// endpoint (honoring modelOverride from --model when non-empty), and
+// endpoint (honoring resolveOpts), and
 // returns the runtime bundle. tpl is mutated in place.
-func loadLLMRuntime(tpl *template.Template, toolConfigPath, modelOverride string) (*llmRuntime, error) {
+func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts llm.ResolveOptions) (*llmRuntime, error) {
 	toolEntries, err := toolsconfig.Load(toolConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("load tools: %w", err)
@@ -165,7 +173,7 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath, modelOverride string
 	}
 	tpl.ApplyLanguage(lang)
 
-	ep, err := llm.ResolveEndpointWithModelOverride(cfgPath, modelOverride)
+	ep, err := llm.ResolveEndpointWithOptions(cfgPath, resolveOpts)
 	if err != nil {
 		return nil, fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
@@ -173,11 +181,34 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath, modelOverride string
 	return &llmRuntime{
 		Client:       llm.NewLLMClient(ep),
 		Model:        ep.Model,
+		Provider:     ep.Provider,
 		PlanToolDefs: planToolDefs,
 		MainToolDefs: mainToolDefs,
 		Collector:    tool.NewCommentCollector(),
 		AppCfg:       appCfg,
+		RuntimeConfig: agent.RuntimeConfig{
+			Protocol:     ep.Protocol,
+			EndpointHost: sanitizeEndpointHost(ep.URL),
+			Language:     lang,
+			Timeout:      ep.Timeout,
+		},
 	}, nil
+}
+
+// sanitizeEndpointHost extracts the credential-free host[:port] from a full LLM
+// endpoint URL, dropping scheme, any embedded userinfo, path, query and fragment
+// so no secret material survives into the manifest's runtime_config hash. The
+// host is lowercased for a stable identity (DNS is case-insensitive). An empty
+// or unparseable URL, or one without a host, yields "".
+func sanitizeEndpointHost(rawURL string) string {
+	if strings.TrimSpace(rawURL) == "" {
+		return ""
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return strings.ToLower(u.Host) // u.Host is host[:port]; userinfo lives in u.User
 }
 
 // applyCLIExcludes appends user-supplied --exclude patterns (already split
@@ -255,11 +286,17 @@ type ResultProvider interface {
 	// in JSON output or failure diagnostics. Returns "" when no session was
 	// created.
 	SessionID() string
-	// BudgetExceeded reports whether a token/tool-call budget gate stopped the
-	// run before all files were reviewed. The run still returns partial
-	// comments; this lets the output layer set a typed "budget_exceeded"
-	// status distinct from success / warnings / errors.
+	// BudgetExceeded reports whether the aggregate token budget gate stopped the
+	// run before all files were reviewed. It is a diagnostic signal only — it
+	// feeds summary.budget_exceeded and the failure usage record, and never
+	// decides the run's terminal state. The terminal state comes solely from the
+	// manifest's coverage: the stop marks the undispatched items
+	// failed(budget) without recording a run_failure, so it reads as partial
+	// whenever anything was covered.
 	BudgetExceeded() bool
+	// RunManifest returns the frozen v1 coverage result for review runs. Scan
+	// remains legacy and returns nil.
+	RunManifest() *session.RunManifest
 }
 
 type resumeInfoProvider interface {
@@ -280,6 +317,7 @@ func emitRunResult(
 	startTime time.Time,
 	outputFormat, audience string,
 	q *quietHandle,
+	llmIdentity *jsonLLMIdentity,
 ) error {
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
@@ -290,9 +328,10 @@ func emitRunResult(
 	}
 
 	traceID := telemetry.TraceIDFromContext(ctx)
+	manifest := ag.RunManifest()
 
-	if outputFormat == "json" && len(comments) == 0 && ag.FilesReviewed() == 0 {
-		return outputJSONNoFiles(traceID)
+	if outputFormat == "json" && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
+		return outputJSONNoFiles(traceID, llmIdentity)
 	}
 
 	// Agent-text audiences need stdout back before PrintTraceSummary so the
@@ -315,9 +354,9 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), ag.BudgetExceeded())
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity)
 	}
-	outputTextWithWarnings(comments, ag.Warnings())
+	outputTextWithWarnings(comments, ag.Warnings(), manifest)
 	if summary := ag.ProjectSummary(); summary != "" {
 		fmt.Printf("\n\n──────── Project Summary ────────\n\n%s\n", summary)
 	}

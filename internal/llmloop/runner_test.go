@@ -698,7 +698,7 @@ func TestRunPerFile_ConcurrentFilesCompression_Race(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			msgs := []llm.Message{msg("system", "sys"), msg("user", "review this file")}
-			_, err := r.RunPerFile(context.Background(), msgs, fmt.Sprintf("f%d.go", i))
+			_, _, err := r.RunPerFile(context.Background(), msgs, fmt.Sprintf("f%d.go", i))
 			errs[i] = err
 		}(i)
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/delegate"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/spf13/cobra"
 )
 
 type delegateOptions struct {
@@ -20,72 +21,62 @@ type delegateOptions struct {
 	background     string
 	backgroundFile string
 	maxGitProcs    int
-	showHelp       bool
 }
 
-func runDelegate(args []string) error {
-	if len(args) == 0 {
-		printDelegateUsage()
-		return nil
-	}
+var delegatePreviewOpts delegateOptions
+var delegateRuleOpts delegateOptions
 
-	sub := args[0]
-	switch sub {
-	case "-h", "--help":
-		printDelegateUsage()
-		return nil
-	case "preview":
-		return runDelegatePreview(args[1:])
-	case "rule":
-		return runDelegateRule(args[1:])
-	default:
-		return fmt.Errorf("unknown delegate sub-command: %s\nRun 'ocr delegate -h' for usage", sub)
-	}
+var delegateCmd = &cobra.Command{
+	Use:     "delegate",
+	Aliases: []string{"d"},
+	Short:   "Output review spec for host-agent delegation (no LLM required)",
+	Long: `OpenCodeReview - Delegation Mode
+
+Output review spec for host-agent delegation (no LLM required).`,
+	Example: `  # Preview which files will be reviewed
+  ocr delegate preview --from main --to feature
+
+  # Preview workspace changes
+  ocr delegate preview
+
+  # Get rules for multiple files (grouped by content)
+  ocr delegate rule internal/agent/agent.go internal/llm/client.go`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
-func parseDelegateFlags(args []string) (delegateOptions, []string, error) {
-	a := newOcrFlagSet("ocr delegate")
+var delegatePreviewCmd = &cobra.Command{
+	Use:   "preview [flags]",
+	Short: "Preview reviewable files with mode/ref metadata",
+	Long:  "Outputs reviewable file list with mode/ref metadata for the host agent to construct git commands.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateDelegateOptions(&delegatePreviewOpts); err != nil {
+			return err
+		}
+		return executeDelegatePreview(delegatePreviewOpts)
+	},
+}
 
-	opts := delegateOptions{}
-	a.StringVar(&opts.repoDir, "repo", "", "root directory of the git repository (default: current dir)")
-	a.StringVar(&opts.from, "from", "", "source ref to start diff from (e.g., 'main')")
-	a.StringVar(&opts.to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
-	a.StringVarP(&opts.commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
-	a.StringVar(&opts.excludes, "exclude", "", "comma-separated gitignore-style patterns to exclude")
-	a.StringVar(&opts.rulePath, "rule", "", "path to JSON file with system review rules")
-	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context")
-	a.StringVarP(&opts.backgroundFile, "background-file", "B", "", "path to a Markdown file used as background")
-	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
+var delegateRuleCmd = &cobra.Command{
+	Use:   "rule [flags] <path...>",
+	Short: "Output resolved review rules grouped by content",
+	Long:  "Outputs resolved review rules grouped by content. Accepts multiple paths.",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateDelegateOptions(&delegateRuleOpts); err != nil {
+			return err
+		}
+		return executeDelegateRule(delegateRuleOpts, args)
+	},
+}
 
-	if err := a.Parse(args); err != nil {
-		return opts, nil, fmt.Errorf("parse flags: %w", err)
-	}
-
-	opts.showHelp = a.showHelp
-	if opts.showHelp {
-		return opts, nil, nil
-	}
-
-	// Validate mode exclusivity
-	modeCount := 0
-	if opts.from != "" || opts.to != "" {
-		modeCount++
-	}
-	if opts.commit != "" {
-		modeCount++
-	}
-	if modeCount > 1 {
-		return opts, nil, fmt.Errorf("only one review mode allowed (--from/--to or --commit)")
-	}
-	if opts.from != "" && opts.to == "" {
-		return opts, nil, fmt.Errorf("--to is required when --from is specified")
-	}
-	if opts.to != "" && opts.from == "" {
-		return opts, nil, fmt.Errorf("--from is required when --to is specified")
-	}
-
-	remaining := a.fs.Args()
-	return opts, remaining, nil
+func init() {
+	registerDelegateFlags(delegatePreviewCmd, &delegatePreviewOpts)
+	registerDelegateFlags(delegateRuleCmd, &delegateRuleOpts)
+	delegateCmd.AddCommand(delegatePreviewCmd)
+	delegateCmd.AddCommand(delegateRuleCmd)
 }
 
 // delegateContext holds the shared state for delegate sub-commands.
@@ -166,17 +157,7 @@ func (dc *delegateContext) resolver() rules.Resolver {
 	return dc.cc.Resolver
 }
 
-func runDelegatePreview(args []string) error {
-	opts, _, err := parseDelegateFlags(args)
-	if err != nil {
-		return err
-	}
-	if opts.showHelp {
-		fmt.Println("Usage: ocr delegate preview [flags]")
-		fmt.Println("\nOutputs reviewable file list with mode/ref metadata for the host agent to construct git commands.")
-		return nil
-	}
-
+func executeDelegatePreview(opts delegateOptions) error {
 	dc, err := loadDelegateContext(opts)
 	if err != nil {
 		return err
@@ -188,7 +169,6 @@ func runDelegatePreview(args []string) error {
 		return fmt.Errorf("preview failed: %w", err)
 	}
 
-	// Header with mode info
 	fmt.Printf("# Files (%d reviewable / %d total)\n\n", preview.ReviewableCount, preview.TotalFiles)
 	fmt.Printf("- mode: %s\n", dc.reviewMode())
 	if dc.opts.from != "" {
@@ -225,59 +205,13 @@ func runDelegatePreview(args []string) error {
 	return nil
 }
 
-func runDelegateRule(args []string) error {
-	opts, remaining, err := parseDelegateFlags(args)
-	if err != nil {
-		return err
-	}
-	if opts.showHelp {
-		fmt.Println("Usage: ocr delegate rule [flags] <path...>")
-		fmt.Println("\nOutputs resolved review rules grouped by content. Accepts multiple paths.")
-		return nil
-	}
-	if len(remaining) == 0 {
-		return fmt.Errorf("at least one file path is required\nUsage: ocr delegate rule [flags] <path...>")
-	}
-
+func executeDelegateRule(opts delegateOptions, paths []string) error {
 	dc, err := loadDelegateContext(opts)
 	if err != nil {
 		return err
 	}
 
-	groups := delegate.GroupRules(dc.resolver(), remaining)
+	groups := delegate.GroupRules(dc.resolver(), paths)
 	fmt.Print(delegate.RuleGroupsMarkdown(groups))
 	return nil
-}
-
-func printDelegateUsage() {
-	fmt.Println(`OpenCodeReview - Delegation Mode
-
-Usage:
-  ocr delegate <sub-command> [flags]
-  ocr d <sub-command> [flags]       (alias)
-
-Sub-commands:
-  preview       Preview reviewable files with mode/ref metadata
-  rule          Output resolved review rules grouped by content
-
-Shared Flags:
-  --from string           source ref to start diff from (e.g., 'main')
-  --to string             target ref to end diff at (e.g., 'feature-branch')
-  -c, --commit string     single commit hash or tag to review
-  --repo string           root directory of the git repository (default: current dir)
-  --rule string           path to JSON file with system review rules
-  --exclude string        comma-separated gitignore-style patterns to exclude
-  -b, --background string optional requirement/business context
-  -B, --background-file   path to a Markdown file used as background
-  --max-git-procs int     max concurrent git subprocesses (default 16)
-
-Examples:
-  # Preview which files will be reviewed
-  ocr delegate preview --from main --to feature
-
-  # Preview workspace changes
-  ocr delegate preview
-
-  # Get rules for multiple files (grouped by content)
-  ocr delegate rule internal/agent/agent.go internal/llm/client.go`)
 }

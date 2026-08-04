@@ -158,14 +158,25 @@ matching order:
 | `.github/**/*.{yaml,yml}` | `github_config.md` — other `.github` config YAML. |
 | `**/*.{yaml,yml}` | `yaml.md` |
 | `**/*.java` | `java.md` |
+| `**/*.go` | `go.md` — Go source. |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling). |
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
+| `**/*.astro` | `astro.md` — Astro components and islands. |
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |
 | `**/*.c` | `c.md` |
+| `**/*.py` | `python.md` — Python source. |
 | `**/*.{php,phtml}` | `php.md` — PHP source and PHP templates. |
+| `**/*.proto` | `protobuf.md` — Protocol Buffers wire compatibility. |
+| `**/*.po` | `po.md` — gettext translation source catalogs. |
+| `**/*.pot` | `pot.md` — gettext template files. |
+| `**/*.{graphql,gql}` | `graphql.md` — GraphQL schema and operations. |
+| `**/*.prisma` | `prisma.md` — Prisma schema. |
+| `**/*.jl` | `julia.md` — Julia source. |
+| `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
+| `**/*.bicep` | `bicep.md` — Bicep (Azure) templates. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

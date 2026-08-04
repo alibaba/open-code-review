@@ -9,13 +9,17 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
-// TestEmitRunResult_JSONBudgetExceededStatus verifies that a provider signaling
-// BudgetExceeded()==true produces JSON with status=="budget_exceeded" AND
-// summary.budget_exceeded==true (INV-3 typed status), and that it takes
-// precedence over completed_with_warnings.
-func TestEmitRunResult_JSONBudgetExceededStatus(t *testing.T) {
+// TestEmitRunResult_JSONBudgetStopIsPartial pins the unified terminal-state
+// contract for a controlled budget stop that still covered something: the
+// top-level status comes solely from the manifest's coverage-derived
+// terminal_state ("partial"), and budgetExceeded never overrides it. The budget
+// reason stays observable through three independent outlets — summary.
+// budget_exceeded, the token_budget_reached warning, and the failed items'
+// classification — so nothing is lost by dropping the typed status.
+func TestEmitRunResult_JSONBudgetStopIsPartial(t *testing.T) {
 	ag := &mockResultProvider{
 		filesReviewed:  3,
 		inputTokens:    100,
@@ -24,9 +28,21 @@ func TestEmitRunResult_JSONBudgetExceededStatus(t *testing.T) {
 		warnings:       []agent.AgentWarning{{Type: "token_budget_reached", File: "big.go", Message: "stopped"}},
 		toolCalls:      map[string]int64{"file_read": 2},
 		budgetExceeded: true,
+		manifest: &session.RunManifest{
+			TerminalState: session.StatePartial,
+			Coverage: session.Coverage{
+				Selected:  []session.CoverageItem{{ItemID: "a"}, {ItemID: "b"}},
+				Completed: []session.CoverageItem{{ItemID: "a"}},
+				Failed: []session.CoverageItem{{
+					ItemID:         "b",
+					Classification: session.FailureBudget,
+					Reason:         "aggregate token budget reached before dispatch completed",
+				}},
+			},
+		},
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -35,14 +51,24 @@ func TestEmitRunResult_JSONBudgetExceededStatus(t *testing.T) {
 	if err := json.Unmarshal([]byte(got), &out); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if out.Status != "budget_exceeded" {
-		t.Errorf("status = %q, want budget_exceeded (must take precedence over completed_with_warnings)", out.Status)
+	if out.Status != string(session.StatePartial) {
+		t.Errorf("status = %q, want %q (must mirror manifest.terminal_state, not a typed budget status)",
+			out.Status, session.StatePartial)
 	}
 	if out.Summary == nil || !out.Summary.BudgetExceeded {
 		t.Errorf("summary.budget_exceeded = %v, want true", out.Summary)
 	}
+	if out.Manifest == nil {
+		t.Fatal("manifest must be published")
+	}
+	if out.Manifest.RunFailure != nil {
+		t.Errorf("a controlled budget stop must record no run_failure, got %+v", out.Manifest.RunFailure)
+	}
+	if len(out.Manifest.Coverage.Failed) != 1 || out.Manifest.Coverage.Failed[0].Classification != session.FailureBudget {
+		t.Errorf("coverage.failed = %+v, want one item classified budget", out.Manifest.Coverage.Failed)
+	}
 	// The token_budget_reached warning must still be present in the output so
-	// the reason is observable alongside the typed status.
+	// the reason is observable alongside the coverage-derived status.
 	var foundBudgetWarn bool
 	for _, w := range out.Warnings {
 		if w.Type == "token_budget_reached" {
@@ -55,18 +81,19 @@ func TestEmitRunResult_JSONBudgetExceededStatus(t *testing.T) {
 	}
 }
 
-// TestEmitRunResult_JSONBudgetExceededPrecedenceOverErrors verifies that
-// budget_exceeded takes precedence over completed_with_errors too — a budget
-// trip is a distinct typed terminal state (INV-3 lists completed_with_errors
-// as a status it must be distinct from).
-func TestEmitRunResult_JSONBudgetExceededPrecedenceOverErrors(t *testing.T) {
+// TestEmitRunResult_JSONBudgetDoesNotOverrideLegacyStatus guards the legacy
+// (manifest-less) path: budgetExceeded must not rewrite the warning-derived
+// status there either. Before the unified contract a budget trip forced
+// status=="budget_exceeded" and masked the fact that a subtask had errored;
+// now the error status survives and the budget shows up only in the summary.
+func TestEmitRunResult_JSONBudgetDoesNotOverrideLegacyStatus(t *testing.T) {
 	ag := &mockResultProvider{
 		filesReviewed:  1,
 		warnings:       []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "boom"}},
 		budgetExceeded: true,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -75,8 +102,11 @@ func TestEmitRunResult_JSONBudgetExceededPrecedenceOverErrors(t *testing.T) {
 	if err := json.Unmarshal([]byte(got), &out); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if out.Status != "budget_exceeded" {
-		t.Errorf("status = %q, want budget_exceeded (must take precedence over completed_with_errors)", out.Status)
+	if out.Status != "completed_with_errors" {
+		t.Errorf("status = %q, want completed_with_errors (budgetExceeded must not override it)", out.Status)
+	}
+	if out.Summary == nil || !out.Summary.BudgetExceeded {
+		t.Errorf("summary.budget_exceeded = %v, want true", out.Summary)
 	}
 }
 
@@ -91,7 +121,7 @@ func TestEmitRunResult_JSONNoBudgetIsSuccess(t *testing.T) {
 		totalTokens:   15,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -110,7 +140,7 @@ func TestEmitRunResult_JSONNoBudgetIsSuccess(t *testing.T) {
 
 // TestEmitFailureUsage_TextEmitsStructuredRecord verifies the non-budget
 // failure path emits a structured usage record to stderr with the token totals
-// and budget_exceeded=false (INV-4). Text format.
+// and budget_exceeded=false in text format.
 func TestEmitFailureUsage_TextEmitsStructuredRecord(t *testing.T) {
 	ag := &mockResultProvider{
 		filesReviewed: 4,
@@ -121,7 +151,7 @@ func TestEmitFailureUsage_TextEmitsStructuredRecord(t *testing.T) {
 		sessionID:     "sess-fail-1",
 	}
 	got := captureStderr(t, func() {
-		emitFailureUsage(ag, 42*time.Second, "text")
+		emitFailureUsage(ag, 42*time.Second, "text", nil)
 	})
 	for _, want := range []string{"usage on failure", "1500 total tokens", "5 tool calls", "budget_exceeded=false", "sess-fail-1"} {
 		if !strings.Contains(got, want) {
@@ -131,7 +161,7 @@ func TestEmitFailureUsage_TextEmitsStructuredRecord(t *testing.T) {
 }
 
 // TestEmitFailureUsage_JSONEmitsStructuredRecord verifies the JSON form emits a
-// parseable record to stderr with budget_exceeded=false (INV-4).
+// parseable record to stderr with budget_exceeded=false.
 func TestEmitFailureUsage_JSONEmitsStructuredRecord(t *testing.T) {
 	ag := &mockResultProvider{
 		filesReviewed: 2,
@@ -140,8 +170,9 @@ func TestEmitFailureUsage_JSONEmitsStructuredRecord(t *testing.T) {
 		totalTokens:   280,
 		toolCalls:     map[string]int64{"file_read": 1},
 	}
+	identity := &jsonLLMIdentity{Provider: "openai", Model: "gpt-5.4"}
 	got := captureStderr(t, func() {
-		emitFailureUsage(ag, 5*time.Second, "json")
+		emitFailureUsage(ag, 5*time.Second, "json", identity)
 	})
 	var out jsonOutput
 	if err := json.Unmarshal([]byte(got), &out); err != nil {
@@ -162,6 +193,9 @@ func TestEmitFailureUsage_JSONEmitsStructuredRecord(t *testing.T) {
 	if out.ToolCalls == nil || out.ToolCalls.Total != 1 {
 		t.Errorf("tool_calls.total = %v, want 1", out.ToolCalls)
 	}
+	if out.LLM == nil || out.LLM.Provider != "openai" || out.LLM.Model != "gpt-5.4" {
+		t.Fatalf("llm = %+v", out.LLM)
+	}
 }
 
 // TestEmitFailureUsage_BudgetExceededPropagated closes the residual edge the
@@ -178,7 +212,7 @@ func TestEmitFailureUsage_BudgetExceededPropagated(t *testing.T) {
 		budgetExceeded: true,
 	}
 	got := captureStderr(t, func() {
-		emitFailureUsage(ag, 3*time.Second, "text")
+		emitFailureUsage(ag, 3*time.Second, "text", nil)
 	})
 	if !strings.Contains(got, "budget_exceeded=true") {
 		t.Errorf("text failure record must reflect budget_exceeded=true; got %q", got)
@@ -191,7 +225,7 @@ func TestEmitFailureUsage_BudgetExceededPropagated(t *testing.T) {
 		budgetExceeded: true,
 	}
 	gotJSON := captureStderr(t, func() {
-		emitFailureUsage(ag2, 3*time.Second, "json")
+		emitFailureUsage(ag2, 3*time.Second, "json", nil)
 	})
 	var out jsonOutput
 	if err := json.Unmarshal([]byte(gotJSON), &out); err != nil {
@@ -212,7 +246,7 @@ func TestEmitRunResult_BudgetExceededFalseOmittedFromJSON(t *testing.T) {
 		totalTokens:   10,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, []model.LlmComment{}, time.Now(), "json", "developer", nil)
+		err := emitRunResult(context.Background(), ag, []model.LlmComment{}, time.Now(), "json", "developer", nil, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

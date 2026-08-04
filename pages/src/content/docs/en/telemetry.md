@@ -61,15 +61,45 @@ The result in `~/.opencodereview/config.json`:
 ```bash
 export OCR_ENABLE_TELEMETRY=1
 export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317   # implies exporter=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=grpc             # default. NOTE: only grpc is currently
-                                                    # implemented; http/protobuf and http/json
-                                                    # are accepted but not yet wired up.
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc             # default; http/protobuf and http/json
+                                                    # are also supported
 export OTEL_SERVICE_NAME=open-code-review-prod      # optional; default: open-code-review
 export OCR_CONTENT_LOGGING=0                        # reserved / currently a no-op (see Content logging)
 ```
 
 Setting `OTEL_EXPORTER_OTLP_ENDPOINT` also forces `exporter=otlp` —
 useful for one-off `OTEL_EXPORTER_OTLP_ENDPOINT=… ocr review` runs.
+
+### Endpoint format
+
+The endpoint may be a bare `host:port` or carry a scheme. With a scheme, the
+scheme decides the transport security: `http://` is plaintext, `https://` uses
+TLS. A bare `host:port` uses TLS.
+
+Note that the default port differs by protocol — `4317` for gRPC, `4318` for
+HTTP:
+
+```bash
+# gRPC (default)
+export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+
+# HTTP
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+```
+
+For the HTTP protocols the endpoint is a **base URL**, and the per-signal path
+is appended to it — so `http://localhost:4318` sends traces to
+`http://localhost:4318/v1/traces`. A base path is preserved, which is what
+backends served under a prefix require:
+
+```bash
+# traces go to http://collector:3000/api/public/otel/v1/traces
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:3000/api/public/otel
+```
+
+gRPC has no URL path, so this applies to the HTTP protocols only.
 
 ## What gets exported
 
@@ -267,7 +297,8 @@ and continues; the review still produces its normal output.
 | Symptom | Likely cause |
 |---|---|
 | Nothing exported | `OCR_ENABLE_TELEMETRY` / `telemetry.enabled` is unset. The default is **off**. |
-| OTLP works locally, fails in prod | OCR currently only implements OTLP/gRPC — `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` (or `http/json`) is accepted but not yet wired up, so switching it won't help. Verify the endpoint and that the collector is listening for gRPC. |
+| OTLP works locally, fails in prod | Check that the protocol matches the collector. The default is gRPC, and many managed backends accept OTLP over HTTP only — set `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` and use the HTTP port (`4318`, not `4317`). |
+| Nothing arrives, no error | The exporter is created lazily, so a wrong endpoint fails silently at export time rather than at startup. Check the collector's access log for the path being requested: for the HTTP protocols the endpoint is a base URL and the signal path is appended, so `http://host:4318` posts to `http://host:4318/v1/traces`. |
 | Spans show but no metrics | Some collectors only enable the traces pipeline by default; add a `metrics` pipeline in the config. |
 | Prompts missing from spans | OCR never attaches prompt content to telemetry — see [Content logging](#content-logging). Inspect transcripts via [Session Viewer](../viewer/) instead. |
 

@@ -64,6 +64,8 @@ DEFAULT_CONFIG = {
     "max_retries": 3,
     "max_retry_delay": 60.0,
     "transient_base_delay": 2.0,
+    "route_severity_below": "",
+    "route_categories": "",
 }
 
 
@@ -103,6 +105,11 @@ class FormatCommentTest(unittest.TestCase):
     def test_plain_content(self):
         body = pr.format_comment({"content": "hello world"})
         self.assertEqual(body, "hello world")
+
+    def test_badge_prefix(self):
+        body = pr.format_comment(comment(content="issue", category="bug", severity="high"))
+        self.assertTrue(body.startswith("[bug · high]\n"))
+        self.assertIn("issue", body)
 
     def test_with_suggestion(self):
         body = pr.format_comment(comment(
@@ -155,12 +162,102 @@ class FormatCommentFallbackTest(unittest.TestCase):
         self.assertIn("**After:**\n```\nx = 2\n```", md)
         self.assertIn("</details>", md)
 
+    def test_badge_prefix(self):
+        md = pr.format_comment_fallback(comment(
+            content="issue",
+            category="style",
+            severity="low",
+        ))
+        self.assertTrue(md.startswith("[style · low]\n"))
+
+    def test_reason_appended(self):
+        md = pr.format_comment_fallback(comment(content="issue"), reason="Routed to summary (severity low)")
+        self.assertIn("*Routed to summary (severity low)*", md)
+
     def test_suggestion_without_existing(self):
         md = pr.format_comment_fallback(comment(
             content="fix this",
             suggestion_code="x = 2",
         ))
         self.assertNotIn("<details>", md)
+
+
+# --------------------------------------------------------------------------- #
+# Badge + publication policy
+# --------------------------------------------------------------------------- #
+
+
+class BuildBadgeTest(unittest.TestCase):
+    def test_both(self):
+        self.assertEqual(pr.build_badge({"category": "bug", "severity": "high"}), "[bug · high]")
+
+    def test_category_only(self):
+        self.assertEqual(pr.build_badge({"category": "style"}), "[style]")
+
+    def test_severity_only(self):
+        self.assertEqual(pr.build_badge({"severity": "low"}), "[low]")
+
+    def test_neither(self):
+        self.assertEqual(pr.build_badge({}), "")
+
+    def test_preserves_case(self):
+        self.assertEqual(pr.build_badge({"category": "Bug", "severity": "High"}), "[Bug · High]")
+
+    def test_strips_control_chars(self):
+        self.assertEqual(pr.build_badge({"category": "bu\ng", "severity": "high"}), "[bug · high]")
+
+
+class BuildPolicyTest(unittest.TestCase):
+    def test_empty_is_no_routing(self):
+        self.assertEqual(pr.build_policy(), pr.NO_ROUTING)
+        self.assertEqual(pr.build_policy(severity_threshold="", categories=""), pr.NO_ROUTING)
+
+    def test_unknown_severity_fails_open(self):
+        self.assertEqual(pr.build_policy(severity_threshold="trivial"), pr.NO_ROUTING)
+
+    def test_medium_threshold(self):
+        policy = pr.build_policy(severity_threshold="medium")
+        self.assertTrue(policy["route_by_severity"])
+        self.assertEqual(policy["severity_rank"], pr.SEVERITY_RANK["medium"])
+
+    def test_known_categories(self):
+        policy = pr.build_policy(categories="style, UNKNOWN, documentation")
+        self.assertTrue(policy["route_by_category"])
+        self.assertIn("style", policy["categories"])
+        self.assertIn("documentation", policy["categories"])
+        self.assertNotIn("unknown", policy["categories"])
+
+
+class RouteCommentTest(unittest.TestCase):
+    def setUp(self):
+        self.policy = pr.build_policy(severity_threshold="medium", categories="style,documentation")
+
+    def test_severity_at_or_below_threshold(self):
+        self.assertTrue(pr.route_comment({"severity": "medium"}, self.policy)["routed"])
+        self.assertTrue(pr.route_comment({"severity": "low"}, self.policy)["routed"])
+        self.assertFalse(pr.route_comment({"severity": "high"}, self.policy)["routed"])
+
+    def test_unknown_severity_stays_inline(self):
+        self.assertFalse(pr.route_comment({"severity": "trivial"}, self.policy)["routed"])
+        self.assertFalse(pr.route_comment({"severity": ""}, self.policy)["routed"])
+
+    def test_category_routing(self):
+        self.assertTrue(pr.route_comment({"category": "style"}, self.policy)["routed"])
+        self.assertFalse(pr.route_comment({"category": "bug"}, self.policy)["routed"])
+
+    def test_unknown_category_stays_inline(self):
+        self.assertFalse(pr.route_comment({"category": "unknown"}, self.policy)["routed"])
+
+    def test_no_routing_sentinel(self):
+        self.assertFalse(pr.route_comment({"severity": "low", "category": "style"}, pr.NO_ROUTING)["routed"])
+
+    def test_sanitizes_control_chars_for_matching(self):
+        decision = pr.route_comment({"category": "sty\nle"}, self.policy)
+        self.assertTrue(decision["routed"])
+        self.assertIn("category style", decision["reason"])
+        decision = pr.route_comment({"severity": "med\nium"}, self.policy)
+        self.assertTrue(decision["routed"])
+        self.assertIn("severity medium", decision["reason"])
 
 
 # --------------------------------------------------------------------------- #
@@ -203,7 +300,7 @@ class PublishTest(unittest.TestCase):
         result = {"comments": [comment()]}
         stats, rec = run_publish(result)
 
-        self.assertEqual(stats, {"inline": 1, "fallback": 0})
+        self.assertEqual(stats, {"inline": 1, "fallback": 0, "routed": 0, "failed": 0})
         # 2 calls: inline discussion + summary note
         self.assertEqual(len(rec.calls), 2)
 
@@ -217,32 +314,33 @@ class PublishTest(unittest.TestCase):
         summary = rec.calls[1]
         self.assertNotIn("position", summary)
         self.assertIn("**1** issue(s)", summary["body"])
-        self.assertIn("✅ 1 posted as inline", summary["body"])
+        self.assertIn("Successfully posted inline: 1", summary["body"])
 
     def test_fallback_when_diff_refs_none(self):
         result = {"comments": [comment()]}
         stats, rec = run_publish(result, diff_refs=None)
 
-        self.assertEqual(stats, {"inline": 0, "fallback": 1})
-        # 2 calls: fallback note + summary
+        self.assertEqual(stats, {"inline": 0, "fallback": 1, "routed": 0, "failed": 0})
+        # 2 calls: no-line note + summary
         self.assertEqual(len(rec.calls), 2)
         self.assertIn("could not be posted inline", rec.calls[0]["body"])
-        self.assertIn("📝 1 posted as summary", rec.calls[1]["body"])
+        self.assertIn("In summary (no line info): 1", rec.calls[1]["body"])
 
     def test_inline_error_falls_back(self):
         result = {"comments": [comment()]}
         outcomes = [{"success": False, "rate_limit_remaining": None, "is_rate_limit_exhausted": False}]
         stats, rec = run_publish(result, outcomes=outcomes)
 
-        self.assertEqual(stats, {"inline": 0, "fallback": 1})
-        # 3 calls: failed inline attempt + fallback note + summary
+        self.assertEqual(stats, {"inline": 0, "fallback": 0, "routed": 0, "failed": 1})
+        # 3 calls: failed inline attempt + failed note + summary
         self.assertEqual(len(rec.calls), 3)
+        self.assertIn("failed to post inline", rec.calls[1]["body"].lower())
 
     def test_no_comments_lgtm(self):
         result = {"message": "Looks good to me."}
         stats, rec = run_publish(result)
 
-        self.assertEqual(stats, {"inline": 0, "fallback": 0})
+        self.assertEqual(stats, {"inline": 0, "fallback": 0, "routed": 0, "failed": 0})
         self.assertEqual(len(rec.calls), 1)
         self.assertIn("Looks good to me", rec.calls[0]["body"])
         self.assertIn("✅", rec.calls[0]["body"])
@@ -305,20 +403,50 @@ class PublishTest(unittest.TestCase):
             {"success": True, "rate_limit_remaining": 100, "is_rate_limit_exhausted": False},
         ]
         stats, rec = run_publish(result, outcomes=outcomes)
-        self.assertEqual(stats, {"inline": 2, "fallback": 1})
-        # 4 calls: 3 inline attempts + fallback note + summary = 5 calls
-        # Wait: 3 inline posts + 1 fallback + 1 summary = 5
+        self.assertEqual(stats, {"inline": 2, "fallback": 0, "routed": 0, "failed": 1})
+        # 5 calls: 3 inline attempts + failed note + summary
         self.assertEqual(len(rec.calls), 5)
 
     def test_comment_without_path_falls_back(self):
         result = {"comments": [comment(path="", end_line=0)]}
         stats, rec = run_publish(result)
-        self.assertEqual(stats, {"inline": 0, "fallback": 1})
+        self.assertEqual(stats, {"inline": 0, "fallback": 1, "routed": 0, "failed": 0})
 
     def test_comment_without_end_line_falls_back(self):
         result = {"comments": [comment(end_line=0)]}
         stats, rec = run_publish(result)
-        self.assertEqual(stats, {"inline": 0, "fallback": 1})
+        self.assertEqual(stats, {"inline": 0, "fallback": 1, "routed": 0, "failed": 0})
+
+    def test_severity_routing_to_summary(self):
+        config = dict(DEFAULT_CONFIG)
+        config["route_severity_below"] = "medium"
+        result = {"comments": [comment(severity="low", category="bug")]}
+        stats, rec = run_publish(result, config=config)
+
+        self.assertEqual(stats, {"inline": 0, "fallback": 0, "routed": 1, "failed": 0})
+        self.assertEqual(len(rec.calls), 2)
+        self.assertIn("routed to summary by policy", rec.calls[0]["body"].lower())
+        self.assertIn("Routed to summary (severity low", rec.calls[0]["body"])
+        self.assertIn("Routed to summary by policy: 1", rec.calls[1]["body"])
+
+    def test_category_routing_to_summary(self):
+        config = dict(DEFAULT_CONFIG)
+        config["route_categories"] = "style"
+        result = {"comments": [comment(category="style", severity="high")]}
+        stats, rec = run_publish(result, config=config)
+
+        self.assertEqual(stats, {"inline": 0, "fallback": 0, "routed": 1, "failed": 0})
+        self.assertIn("Routed to summary (category style", rec.calls[0]["body"])
+
+    def test_unknown_metadata_stays_inline(self):
+        config = dict(DEFAULT_CONFIG)
+        config["route_severity_below"] = "medium"
+        config["route_categories"] = "style"
+        result = {"comments": [comment(severity="trivial", category="unknown")]}
+        stats, rec = run_publish(result, config=config)
+
+        self.assertEqual(stats, {"inline": 1, "fallback": 0, "routed": 0, "failed": 0})
+        self.assertIn("position", rec.calls[0])
 
 
 # --------------------------------------------------------------------------- #
@@ -756,6 +884,8 @@ class BuildConfigTest(unittest.TestCase):
         self.assertEqual(config["max_retries"], 3)
         self.assertEqual(config["max_retry_delay"], 60.0)
         self.assertEqual(config["transient_base_delay"], 2)
+        self.assertEqual(config["route_severity_below"], "")
+        self.assertEqual(config["route_categories"], "")
 
     def test_env_overrides(self):
         env = {
@@ -765,6 +895,8 @@ class BuildConfigTest(unittest.TestCase):
             "OCR_RETRY_BASE_DELAY": "3000",
             "OCR_MAX_RETRIES": "5",
             "OCR_MAX_RETRY_DELAY": "120000",
+            "OCR_ROUTE_SEVERITY_BELOW": "low",
+            "OCR_ROUTE_CATEGORIES": "style,documentation",
         }
         config = pr.build_config(env)
         self.assertEqual(config["success_delay"], 5.0)
@@ -773,6 +905,8 @@ class BuildConfigTest(unittest.TestCase):
         self.assertEqual(config["retry_base_delay"], 3.0)
         self.assertEqual(config["max_retries"], 5)
         self.assertEqual(config["max_retry_delay"], 120.0)
+        self.assertEqual(config["route_severity_below"], "low")
+        self.assertEqual(config["route_categories"], "style,documentation")
         # transient_base_delay is always hardcoded
         self.assertEqual(config["transient_base_delay"], 2)
 

@@ -140,13 +140,38 @@ func (r *Runner) CollectPendingComments() []model.LlmComment {
 	return r.deps.CommentCollector.Comments()
 }
 
+// MainLoopStop classifies why RunPerFile stopped without an explicit task_done
+// and without a Go error. It lets the caller attribute a precise, honest failure
+// classification instead of guessing from free text: only a configured limit
+// (max tool-request rounds) is a budget stop; the empty-round and compression
+// exits are genuine but unclassifiable, so they map to the unknown catch-all.
+// StopNone means the loop returned via task_done (completed) or via an error.
+type MainLoopStop int
+
+const (
+	// StopNone — RunPerFile completed via task_done or returned an error; the
+	// stop cause carries no additional meaning.
+	StopNone MainLoopStop = iota
+	// StopMaxRounds — the configured MaxToolRequestTimes round budget was
+	// exhausted before task_done. This is a declared budget limit.
+	StopMaxRounds
+	// StopEmptyRounds — the model returned no usable tool result for too many
+	// consecutive rounds. Not a declared budget; unclassifiable.
+	StopEmptyRounds
+	// StopCompression — context compression exceeded its threshold, so the loop
+	// could not continue. Token/context driven but not a declared budget.
+	StopCompression
+)
+
 // RunPerFile drives the main LLM conversation loop for a single file.
 // It sends messages with the configured tool definitions, executes any
 // tool calls returned by the model, and collects review comments until
 // task_done is called or limits are reached. Token usage and warnings
 // are aggregated on the Runner across all files. The returned bool is true
-// only when the model explicitly calls task_done.
-func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath string) (bool, error) {
+// only when the model explicitly calls task_done with a successful state. The
+// MainLoopStop return classifies a non-completed, non-error stop at its trigger
+// point so the caller never has to infer the cause from text or context state.
+func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath string) (bool, MainLoopStop, error) {
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
@@ -157,10 +182,14 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 	st := &compressionState{}
 	defer r.cancelPendingCompression(st)
 
+	// stop defaults to StopMaxRounds: if the for-loop exits because toolReqCount
+	// reached zero, the run stopped on the round budget. The empty-round and
+	// compression breaks overwrite it at their trigger points.
+	stop := StopMaxRounds
 	for toolReqCount > 0 {
 		select {
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return false, StopNone, ctx.Err()
 		default:
 		}
 
@@ -184,7 +213,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 			llmSpan.End()
 			telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
-			return false, fmt.Errorf("LLM completion error: %w", err)
+			return false, StopNone, fmt.Errorf("LLM completion error: %w", err)
 		}
 		rec.SetResponse(resp, duration)
 		totalTokens := int64(0)
@@ -217,7 +246,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 		for _, call := range calls {
 			cp := r.executeToolCall(ctx, newPath, call, rec)
-			if cp.Completed {
+			if cp.Failed {
+				return false, StopNone, fmt.Errorf("task failed: %s", cp.Data)
+			} else if cp.Completed {
 				results = append(results, tool.ToolCallResult{
 					ToolCallID: call.ID,
 					Name:       call.Function.Name,
@@ -241,12 +272,13 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		}
 
 		if taskCompleted {
-			return true, nil
+			return true, StopNone, nil
 		}
 		if !hasValidResult {
 			consecutiveEmptyRounds++
 			if consecutiveEmptyRounds >= maxConsecutiveEmptyRounds {
 				fmt.Fprintf(stdout.Writer(), "[ocr] Too many empty retries for %s, stopping.\n", newPath)
+				stop = StopEmptyRounds
 				break
 			}
 			fmt.Fprintf(stdout.Writer(), "[ocr] No valid tool results for %s, retrying...\n", newPath)
@@ -257,14 +289,15 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		succeed := r.addNextMessage(ctx, content, calls, results, &messages, newPath, st)
 		if !succeed {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", newPath)
+			stop = StopCompression
 			break
 		}
 	}
 
-	if toolReqCount <= 0 {
+	if stop == StopMaxRounds {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", newPath)
 	}
-	return false, nil
+	return false, stop, nil
 }
 
 // executeToolCall dispatches a single tool call from the LLM response and
@@ -307,7 +340,26 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 	}
 
 	if t == tool.TaskDone {
-		return tool.Complete()
+		args, err := parseToolArgs(call.Function.Arguments)
+		if err != nil {
+			return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
+		}
+		rawState, hasState := args["state"]
+		if !hasState {
+			return tool.Complete()
+		}
+		state, ok := rawState.(string)
+		if !ok {
+			return tool.Of("Error: task_done state must be DONE or FAILED.")
+		}
+		switch state {
+		case "DONE":
+			return tool.Complete()
+		case "FAILED":
+			return tool.Fail("task_done reported FAILED")
+		default:
+			return tool.Of(fmt.Sprintf("Error: invalid task_done state %q; expected DONE or FAILED.", state))
+		}
 	}
 
 	p := lookupTool(r.deps.Tools, t)

@@ -22,6 +22,10 @@
 #   OCR_FAILURE_DELAY       - Delay (ms) after a non-rate-limit failure to pace subsequent requests (default: 1000)
 #   OCR_RATE_LIMIT_THRESHOLD - Proactively slow down when GitLab RateLimit-Remaining is at/below this value (default: 10, set 0 to disable)
 #
+# Optional CI/CD Variables (for category/severity publication routing):
+#   OCR_ROUTE_SEVERITY_BELOW  - Route findings at-or-below this severity (critical/high/medium/low) to summary notes instead of inline (fail-open; empty disables)
+#   OCR_ROUTE_CATEGORIES      - Comma-separated categories to route to summary (bug, security, performance, maintainability, test, style, documentation, other)
+#
 # Note: The pipeline also configures llm.extra_body to '{"thinking": {"type": "disabled"}}'
 #   to disable thinking mode for compatibility with various LLM providers.
 #

@@ -148,6 +148,7 @@ ocr review --from main --to feature-branch --resume <session-id>
 # 전체 파일 스캔 — diff 대신 파일 전체를 리뷰 (git 이력 불필요)
 ocr scan                          # 전체 repository 스캔
 ocr scan --path internal/agent    # 디렉터리 또는 특정 파일 스캔
+ocr scan --resume <session-id>   # 중단된 전체 파일 스캔 재개
 
 # 위임 모드 — AI 코딩 에이전트가 직접 리뷰 수행
 # OCR은 파일 선택과 규칙 해석만 담당; LLM 설정 불필요

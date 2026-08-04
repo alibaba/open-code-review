@@ -9,44 +9,113 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/spf13/cobra"
 )
 
-func runSession(args []string) error {
-	if len(args) == 0 {
-		printSessionUsage()
-		return nil
-	}
-	switch args[0] {
-	case "list", "ls":
-		return runSessionList(args[1:])
-	case "show":
-		return runSessionShow(args[1:])
-	case "-h", "--help":
-		printSessionUsage()
-		return nil
-	default:
-		return fmt.Errorf("unknown session sub-command: %s\nRun 'ocr session -h' for usage", args[0])
-	}
+var sessionCmd = &cobra.Command{
+	Use:     "session",
+	Aliases: []string{"sessions"},
+	Short:   "List and inspect saved review sessions",
+	Args:    cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
-func runSessionList(args []string) error {
-	a := newOcrFlagSet("ocr session list")
-	var repoDir string
-	var asJSON bool
-	var limit int
-	a.StringVar(&repoDir, "repo", "", "root directory of the git repository (default: current dir)")
-	a.BoolVar(&asJSON, "json", false, "emit JSON instead of a table")
-	a.IntVar(&limit, "limit", 20, "cap the number of listed sessions (0 = unlimited)")
-	if err := a.Parse(args); err != nil {
-		return err
-	}
-	if a.showHelp {
-		printSessionListUsage()
-		return nil
-	}
+var sessionListRepoDir string
+var sessionListJSON bool
+var sessionListLimit int
 
-	resolvedRepo, err := resolveWorkingDirForSession(repoDir)
+var sessionListCmd = &cobra.Command{
+	Use:     "list [flags]",
+	Aliases: []string{"ls"},
+	Short:   "List recent review sessions for the current repo",
+	Long:    "List review sessions previously persisted to ~/.opencodereview/sessions/.\nThe session id printed here can be passed to 'ocr review --resume <id>'.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSessionList()
+	},
+}
+
+var sessionShowRepoDir string
+var sessionShowJSON bool
+
+var sessionShowCmd = &cobra.Command{
+	Use:               "show [flags] <session-id>",
+	Short:             "Show one session's metadata and per-file items",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSessionIDs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSessionShow(args[0])
+	},
+}
+
+var sessionCommentsRepoDir string
+var sessionCommentsJSON bool
+var sessionCommentsSeverity string
+var sessionCommentsCategory string
+
+var sessionCommentsCmd = &cobra.Command{
+	Use:               "comments [flags] <session-id>",
+	Short:             "Show the review comments recorded in one session",
+	Long:              "Print every review comment persisted in a session, formatted like 'ocr review' terminal output.\nUse --json for machine-readable output and --severity/--category to filter findings.",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeSessionIDs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSessionComments(args[0])
+	},
+}
+
+// completeSessionIDs offers the persisted session ids for the current repo
+// (or --repo, when already typed) as shell completions, newest first, with a
+// short summary as the completion description.
+func completeSessionIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) != 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	repo, _ := cmd.Flags().GetString("repo")
+	resolvedRepo, err := resolveWorkingDirForSession(repo)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	summaries, err := session.ListSessions(resolvedRepo)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	completions := make([]string, 0, len(summaries))
+	for _, s := range summaries {
+		if !strings.HasPrefix(s.SessionID, toComplete) {
+			continue
+		}
+		desc := fmt.Sprintf("%s · %d comments · %s", describeStart(s), s.TotalComments, describeStatus(s))
+		completions = append(completions, s.SessionID+"\t"+desc)
+	}
+	return completions, cobra.ShellCompDirectiveNoFileComp
+}
+
+func init() {
+	sessionListCmd.Flags().StringVar(&sessionListRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	sessionListCmd.Flags().BoolVar(&sessionListJSON, "json", false, "emit JSON instead of a table")
+	sessionListCmd.Flags().IntVar(&sessionListLimit, "limit", 20, "cap the number of listed sessions (0 = unlimited)")
+
+	sessionShowCmd.Flags().StringVar(&sessionShowRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	sessionShowCmd.Flags().BoolVar(&sessionShowJSON, "json", false, "emit JSON instead of a table")
+
+	sessionCommentsCmd.Flags().StringVar(&sessionCommentsRepoDir, "repo", "", "root directory of the git repository (default: current dir)")
+	sessionCommentsCmd.Flags().BoolVar(&sessionCommentsJSON, "json", false, "emit the comments as a JSON array")
+	sessionCommentsCmd.Flags().StringVar(&sessionCommentsSeverity, "severity", "", "comma-separated severities to include (critical, high, medium, low)")
+	sessionCommentsCmd.Flags().StringVar(&sessionCommentsCategory, "category", "", "comma-separated categories to include (e.g. bug, security)")
+	sessionCommentsCmd.RegisterFlagCompletionFunc("severity", completeEnum("critical", "high", "medium", "low"))
+	sessionCommentsCmd.RegisterFlagCompletionFunc("category", completeEnum("bug", "security", "performance", "maintainability", "test", "style", "documentation", "other"))
+
+	sessionCmd.AddCommand(sessionListCmd)
+	sessionCmd.AddCommand(sessionShowCmd)
+	sessionCmd.AddCommand(sessionCommentsCmd)
+}
+
+func runSessionList() error {
+	resolvedRepo, err := resolveWorkingDirForSession(sessionListRepoDir)
 	if err != nil {
 		return err
 	}
@@ -54,11 +123,11 @@ func runSessionList(args []string) error {
 	if err != nil {
 		return fmt.Errorf("list sessions: %w", err)
 	}
-	if limit > 0 && len(summaries) > limit {
-		summaries = summaries[:limit]
+	if sessionListLimit > 0 && len(summaries) > sessionListLimit {
+		summaries = summaries[:sessionListLimit]
 	}
 
-	if asJSON {
+	if sessionListJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(summaries)
@@ -72,28 +141,8 @@ func runSessionList(args []string) error {
 	return nil
 }
 
-func runSessionShow(args []string) error {
-	a := newOcrFlagSet("ocr session show")
-	var repoDir string
-	var asJSON bool
-	a.StringVar(&repoDir, "repo", "", "root directory of the git repository (default: current dir)")
-	a.BoolVar(&asJSON, "json", false, "emit JSON instead of a table")
-	if err := a.Parse(args); err != nil {
-		return err
-	}
-	if a.showHelp {
-		printSessionShowUsage()
-		return nil
-	}
-
-	rest := a.fs.Args()
-	if len(rest) == 0 {
-		printSessionShowUsage()
-		return fmt.Errorf("session show requires a session ID")
-	}
-	sessionID := rest[0]
-
-	resolvedRepo, err := resolveWorkingDirForSession(repoDir)
+func runSessionShow(sessionID string) error {
+	resolvedRepo, err := resolveWorkingDirForSession(sessionShowRepoDir)
 	if err != nil {
 		return err
 	}
@@ -102,7 +151,7 @@ func runSessionShow(args []string) error {
 		return fmt.Errorf("load session %q: %w", sessionID, err)
 	}
 
-	if asJSON {
+	if sessionShowJSON {
 		payload := struct {
 			Summary *session.Summary     `json:"summary"`
 			Items   []session.ItemDetail `json:"items"`
@@ -114,6 +163,75 @@ func runSessionShow(args []string) error {
 
 	printSessionDetail(os.Stdout, summary, items)
 	return nil
+}
+
+func runSessionComments(sessionID string) error {
+	resolvedRepo, err := resolveWorkingDirForSession(sessionCommentsRepoDir)
+	if err != nil {
+		return err
+	}
+	comments, err := session.LoadComments(resolvedRepo, sessionID)
+	if err != nil {
+		return fmt.Errorf("load session %q: %w", sessionID, err)
+	}
+	filtered := filterComments(comments, sessionCommentsSeverity, sessionCommentsCategory)
+
+	if sessionCommentsJSON {
+		if filtered == nil {
+			filtered = []model.LlmComment{}
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(filtered)
+	}
+
+	if len(filtered) == 0 {
+		if len(comments) == 0 {
+			fmt.Printf("No comments recorded in session %s.\n", sessionID)
+		} else {
+			fmt.Printf("No comments match the given filters (%d recorded in session %s).\n", len(comments), sessionID)
+		}
+		return nil
+	}
+	for _, c := range filtered {
+		renderComment(c)
+	}
+	return nil
+}
+
+// filterComments keeps comments whose severity and category are in the given
+// comma-separated, case-insensitive filter lists. Empty filters keep everything.
+func filterComments(comments []model.LlmComment, severities, categories string) []model.LlmComment {
+	sevSet := parseFilterSet(severities)
+	catSet := parseFilterSet(categories)
+	if sevSet == nil && catSet == nil {
+		return comments
+	}
+	var out []model.LlmComment
+	for _, c := range comments {
+		if sevSet != nil && !sevSet[strings.ToLower(c.Severity)] {
+			continue
+		}
+		if catSet != nil && !catSet[strings.ToLower(c.Category)] {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func parseFilterSet(s string) map[string]bool {
+	set := map[string]bool{}
+	for _, part := range strings.Split(s, ",") {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if part != "" {
+			set[part] = true
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
 }
 
 // resolveWorkingDirForSession accepts an explicit --repo flag value and falls
@@ -170,8 +288,13 @@ func printSessionDetail(w io.Writer, s *session.Summary, items []session.ItemDet
 		fmt.Fprintf(w, "  Duration:  %s\n", s.Duration.Round(time.Second))
 	}
 	fmt.Fprintf(w, "  Status:    %s\n", describeStatus(*s))
-	fmt.Fprintf(w, "  Files:     %d completed, %d reused, %d failed\n",
-		s.CompletedFiles, s.ReusedFiles, s.FailedFiles)
+	if s.RunManifest != nil {
+		fmt.Fprintf(w, "  Coverage:  %d selected = %d completed + %d reused + %d failed + %d waived\n",
+			s.SelectedFiles, s.CompletedFiles, s.ReusedFiles, s.FailedFiles, s.WaivedFiles)
+	} else {
+		fmt.Fprintf(w, "  Files:     %d completed, %d reused, %d failed (legacy checkpoints)\n",
+			s.CompletedFiles, s.ReusedFiles, s.FailedFiles)
+	}
 	fmt.Fprintf(w, "  Comments:  %d\n", s.TotalComments)
 	if s.LLMFailures > 0 {
 		fmt.Fprintf(w, "  LLM err:   %d\n", s.LLMFailures)
@@ -219,6 +342,22 @@ func describeRange(s session.Summary) string {
 }
 
 func describeFiles(s session.Summary) string {
+	if s.RunManifest != nil {
+		parts := []string{fmt.Sprintf("%d", s.SelectedFiles)}
+		if s.ReusedFiles > 0 {
+			parts = append(parts, fmt.Sprintf("reused %d", s.ReusedFiles))
+		}
+		if s.FailedFiles > 0 {
+			parts = append(parts, fmt.Sprintf("failed %d", s.FailedFiles))
+		}
+		if s.WaivedFiles > 0 {
+			parts = append(parts, fmt.Sprintf("waived %d", s.WaivedFiles))
+		}
+		if len(parts) == 1 {
+			return parts[0]
+		}
+		return parts[0] + " (" + strings.Join(parts[1:], ", ") + ")"
+	}
 	total := s.CompletedFiles + s.ReusedFiles
 	if s.ReusedFiles > 0 {
 		return fmt.Sprintf("%d (reused %d)", total, s.ReusedFiles)
@@ -230,10 +369,18 @@ func describeStatus(s session.Summary) string {
 	if s.Aborted {
 		return "aborted"
 	}
-	if s.FailedFiles > 0 {
-		return fmt.Sprintf("completed (%d fail)", s.FailedFiles)
+	if s.RunManifest != nil {
+		switch s.RunManifest.TerminalState {
+		case session.StateComplete, session.StatePartial, session.StateFailed, session.StateSkipped:
+			return string(s.RunManifest.TerminalState)
+		default:
+			return "unknown"
+		}
 	}
-	return "completed"
+	if s.FailedFiles > 0 {
+		return fmt.Sprintf("legacy (%d fail)", s.FailedFiles)
+	}
+	return "legacy"
 }
 
 func describeStart(s session.Summary) string {
@@ -260,40 +407,4 @@ func truncate(s string, n int) string {
 		return "…"
 	}
 	return string(runes[:n-1]) + "…"
-}
-
-func printSessionUsage() {
-	fmt.Println(`Usage:
-  ocr session <sub-command>
-
-Sub-commands:
-  list, ls    List recent review sessions for the current repo
-  show <id>   Show one session's metadata and per-file items
-
-Use "ocr session list -h" or "ocr session show -h" for details.`)
-}
-
-func printSessionListUsage() {
-	fmt.Println(`Usage:
-  ocr session list [flags]
-  ocr session ls [flags]
-
-List review sessions previously persisted to ~/.opencodereview/sessions/. The
-session id printed here can be passed to 'ocr review --resume <id>'.
-
-Flags:
-  --repo string   Root directory of the git repository (default: current dir)
-  --json          Emit JSON instead of a table
-  --limit int     Cap the number of listed sessions (default 20; 0 = unlimited)`)
-}
-
-func printSessionShowUsage() {
-	fmt.Println(`Usage:
-  ocr session show [flags] <session-id>
-
-Show metadata and per-file items for a single session.
-
-Flags:
-  --repo string   Root directory of the git repository (default: current dir)
-  --json          Emit JSON instead of a table`)
 }

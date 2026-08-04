@@ -137,6 +137,19 @@ func (r *SystemRule) Resolve(path string) string {
 	return r.DefaultRule
 }
 
+// CanonicalConfig returns a deterministic, order-stable field list describing this
+// rule set's effective rule-text configuration, for hashing into the run manifest's
+// rule_config_sha256. It covers only rule-text resolution (default plus ordered
+// pattern rules); include/exclude filtering is carried by FileFilter and hashed
+// separately. Order is preserved because first match wins.
+func (r *SystemRule) CanonicalConfig() []string {
+	fields := []string{"layer", "system", "default", r.DefaultRule}
+	for _, pr := range r.PathRules {
+		fields = append(fields, "layer", "system", "pattern", pr.Pattern, "rule", pr.Rule)
+	}
+	return fields
+}
+
 func (r *SystemRule) resolveDetail(path string) RuleDetail {
 	lowerPath := strings.ToLower(path)
 	for _, pr := range r.PathRules {
@@ -379,6 +392,36 @@ func (c *composedResolver) Resolve(path string) string {
 		}
 	}
 	return c.system.Resolve(path)
+}
+
+// CanonicalConfig returns a deterministic, order-stable field list describing the
+// resolver's effective rule-text configuration across every layer (custom >
+// project > global > system, each in declaration order), for hashing into the run
+// manifest's rule_config_sha256. It covers only rule-text resolution; the
+// include/exclude file filter is carried by FileFilter and hashed separately. Each
+// field is tagged with its layer and role so two structurally different configs
+// cannot collide once length-prefixed. Order is never sorted — first match wins.
+func (c *composedResolver) CanonicalConfig() []string {
+	var fields []string
+	appendLayer := func(name string, pr *ProjectRule) {
+		if pr == nil {
+			return
+		}
+		for _, e := range pr.Rules {
+			merge := "0"
+			if e.MergeSystemRule {
+				merge = "1"
+			}
+			fields = append(fields, "layer", name, "path", e.Path, "rule", e.Rule, "merge", merge)
+		}
+	}
+	appendLayer("custom", c.custom)
+	appendLayer("project", c.project)
+	appendLayer("global", c.global)
+	if c.system != nil {
+		fields = append(fields, c.system.CanonicalConfig()...)
+	}
+	return fields
 }
 
 func (c *composedResolver) mergeWithSystemRule(path, rule string) string {

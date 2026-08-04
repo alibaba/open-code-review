@@ -57,9 +57,8 @@ ocr config set telemetry.content_logging false
 ```bash
 export OCR_ENABLE_TELEMETRY=1
 export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317   # implies exporter=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=grpc             # default. NOTE: only grpc is currently
-                                                    # implemented; http/protobuf and http/json
-                                                    # are accepted but not yet wired up.
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc             # default; http/protobuf and http/json
+                                                    # are also supported
 export OTEL_SERVICE_NAME=open-code-review-prod      # optional; default: open-code-review
 export OCR_CONTENT_LOGGING=0                        # reserved / currently a no-op (see Content logging)
 ```

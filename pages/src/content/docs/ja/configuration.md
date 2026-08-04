@@ -82,6 +82,8 @@ ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
 ```
 
+`url` には API の Base URL または完全な `/responses` エンドポイントのどちらを指定してもよく、OCR がどちらの形式も正規化します。
+
 Ollama で動かすローカルモデルは、ローカルの OpenAI 互換エンドポイントを
 指すカスタム provider にすぎません。
 
