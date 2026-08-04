@@ -40,6 +40,7 @@ type reviewOptions struct {
 	perFileTimeout  int
 	maxTools        int
 	maxGitProcs     int
+	maxTokens       int
 	maxTokensBudget int
 	preview         bool
 }
@@ -146,6 +147,11 @@ func executeReview(opts reviewOptions) error {
 	if err != nil {
 		return err
 	}
+	maxTokens, err := resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
+	if err != nil {
+		return err
+	}
+	cc.Template.MaxTokens = maxTokens
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,

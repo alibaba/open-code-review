@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -49,6 +50,43 @@ func TestSetConfigValueModel(t *testing.T) {
 	}
 	if cfg.Model != "claude-opus-4-6" {
 		t.Errorf("Model = %q, want %q", cfg.Model, "claude-opus-4-6")
+	}
+}
+
+func TestSetConfigValueMaxTokens(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "max_tokens", "200000"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.MaxTokens != 200000 {
+		t.Errorf("MaxTokens = %d, want 200000", cfg.MaxTokens)
+	}
+}
+
+func TestSetConfigValueMaxTokensRejectsInvalidValues(t *testing.T) {
+	for _, value := range []string{"0", "-1", "not-a-number"} {
+		t.Run(value, func(t *testing.T) {
+			if err := setConfigValue(&Config{}, "max_tokens", value); err == nil {
+				t.Fatalf("expected max_tokens=%q to be rejected", value)
+			}
+		})
+	}
+}
+
+func TestMaxTokensConfigRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{MaxTokens: 200000}
+
+	if err := saveConfig(path, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+	loaded, err := LoadAppConfig(path)
+	if err != nil {
+		t.Fatalf("LoadAppConfig: %v", err)
+	}
+	if loaded.MaxTokens != 200000 {
+		t.Errorf("MaxTokens = %d, want 200000", loaded.MaxTokens)
 	}
 }
 
@@ -929,7 +967,7 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Supported keys: provider, model, max_tokens, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
 		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\n" +
 		"Protocol values: anthropic, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"

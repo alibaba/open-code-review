@@ -291,6 +291,7 @@ type MCPServerConfig struct {
 type Config struct {
 	Provider        string                     `json:"provider,omitempty"`
 	Model           string                     `json:"model,omitempty"`
+	MaxTokens       int                        `json:"max_tokens,omitempty"`
 	Providers       map[string]ProviderEntry   `json:"providers,omitempty"`
 	CustomProviders map[string]ProviderEntry   `json:"custom_providers,omitempty"`
 	Llm             LlmConfig                  `json:"llm,omitempty"`
@@ -356,6 +357,7 @@ func LoadAppConfig(path string) (*Config, error) {
 var supportedConfigKeys = []string{
 	"provider",
 	"model",
+	"max_tokens",
 	"providers.<name>.<field>",
 	"custom_providers.<name>.<field>",
 	"mcp_servers.<name>.<field>",
@@ -427,6 +429,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		} else {
 			cfg.Model = value
 		}
+	case "max_tokens":
+		maxTokens, err := strconv.Atoi(value)
+		if err != nil || maxTokens <= 0 {
+			return fmt.Errorf("invalid max_tokens %q: must be a positive integer", value)
+		}
+		cfg.MaxTokens = maxTokens
 	case "llm.url", "llm.URL":
 		cfg.Llm.URL = value
 	case "llm.auth_token", "llm.AuthToken":

@@ -127,6 +127,27 @@ The `timeout_sec` keys are not supported by `ocr config set` — edit
 }
 ```
 
+### Per-file prompt limit
+
+OCR defaults to a 58,888-token prompt ceiling for each file review. Increase
+it for a model with a larger context window by saving `max_tokens`:
+
+```bash
+ocr config set max_tokens 200000
+```
+
+The setting applies to both `ocr review` and `ocr scan`. Use `--max-tokens`
+for a one-off override without changing the saved configuration:
+
+```bash
+ocr review --max-tokens 200000
+ocr scan --max-tokens 200000
+```
+
+The per-run flag takes precedence over `max_tokens`; when neither is set, OCR
+uses the embedded task-template default. This limit is per file and is
+independent of `--max-tokens-budget`, which caps total token use for a run.
+
 ### Verify connectivity
 
 ```bash
