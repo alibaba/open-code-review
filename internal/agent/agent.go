@@ -1524,7 +1524,14 @@ func formatToolDefs(toolDefs []llm.ToolDef) string {
 					}
 				}
 			}
-			for name, p := range params {
+			paramNames := make([]string, 0, len(params))
+			for name := range params {
+				paramNames = append(paramNames, name)
+			}
+			sort.Strings(paramNames)
+
+			for _, name := range paramNames {
+				p := params[name]
 				suffix := ""
 				if required[name] {
 					suffix = " (required)"

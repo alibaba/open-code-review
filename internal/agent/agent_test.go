@@ -295,6 +295,55 @@ func TestFormatToolDefs(t *testing.T) {
 		}
 	})
 
+	t.Run("parameters are rendered in sorted order", func(t *testing.T) {
+		defs := []llm.ToolDef{
+			{
+				Type: "function",
+				Function: llm.FunctionDef{
+					Name:        "code_search",
+					Description: "Search code",
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"query": map[string]any{
+								"description": "Query string",
+							},
+							"case_sensitive": map[string]any{
+								"description": "Match case",
+							},
+							"path_glob": map[string]any{
+								"description": "Path glob",
+							},
+							"max_results": map[string]any{
+								"description": "Maximum results",
+							},
+						},
+						"required": []any{"query"},
+					},
+				},
+			},
+		}
+
+		got := formatToolDefs(defs)
+		wantLines := []string{
+			"  - case_sensitive: Match case",
+			"  - max_results: Maximum results",
+			"  - path_glob: Path glob",
+			"  - query: Query string (required)",
+		}
+		last := -1
+		for _, line := range wantLines {
+			idx := strings.Index(got, line)
+			if idx == -1 {
+				t.Fatalf("missing parameter line %q in:\n%s", line, got)
+			}
+			if idx <= last {
+				t.Fatalf("parameter line %q is out of order in:\n%s", line, got)
+			}
+			last = idx
+		}
+	})
+
 	t.Run("tool without parameters", func(t *testing.T) {
 		defs := []llm.ToolDef{
 			{
