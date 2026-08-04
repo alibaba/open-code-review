@@ -22,6 +22,17 @@ import (
 	"github.com/google/uuid"
 )
 
+// ProgressEvent is the intentionally small liveness signal exposed by the
+// MCP adapter. It carries no prompt, response, token, provider, or credential
+// data.
+type ProgressEvent struct {
+	Event string `json:"event"`
+	Phase string `json:"phase"`
+	Path  string `json:"path,omitempty"`
+}
+
+type ProgressFunc func(ProgressEvent)
+
 // Deps bundles all per-call dependencies the Runner needs. Both
 // internal/agent (diff review) and internal/scan (full-file scan) build a
 // Deps from their own state and hand it to NewRunner.
@@ -34,6 +45,7 @@ type Deps struct {
 	CommentCollector  *tool.CommentCollector
 	CommentWorkerPool *CommentWorkerPool
 	Session           *session.SessionHistory
+	Progress          ProgressFunc
 	// DiffLookup is consulted by the code_comment tool path to resolve
 	// line numbers against the file's diff (or against full file content
 	// in scan mode — scan adapters return a synthetic Diff whose
@@ -60,6 +72,12 @@ type Runner struct {
 // NewRunner returns a Runner bound to the given dependencies.
 func NewRunner(deps Deps) *Runner {
 	return &Runner{deps: deps}
+}
+
+func (r *Runner) emitProgress(phase, path string) {
+	if r.deps.Progress != nil {
+		r.deps.Progress(ProgressEvent{Event: "ocr_progress", Phase: phase, Path: path})
+	}
 }
 
 // TotalInputTokens returns the accumulated input/prompt tokens from all LLM calls.
@@ -219,6 +237,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			return false, StopNone, fmt.Errorf("LLM completion error: %w", err)
 		}
 		rec.SetResponse(resp, duration)
+		r.emitProgress("llm_completed", newPath)
 		totalTokens := int64(0)
 		if resp.Usage != nil {
 			totalTokens = resp.Usage.TotalTokens

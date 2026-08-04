@@ -145,6 +145,10 @@ type Args struct {
 	// LLM endpoint and app config; a zero value simply omits those fields from
 	// the hash input.
 	RuntimeConfig RuntimeConfig
+
+	// Progress receives small liveness events for long-running adapters. It is
+	// nil for the normal CLI path.
+	Progress llmloop.ProgressFunc
 }
 
 // RuntimeConfig captures the allowlisted, non-secret runtime settings that
@@ -226,9 +230,16 @@ func New(args Args) *Agent {
 		CommentCollector:  args.CommentCollector,
 		CommentWorkerPool: args.CommentWorkerPool,
 		Session:           args.Session,
+		Progress:          args.Progress,
 		DiffLookup:        a.findDiff,
 	})
 	return a
+}
+
+func (a *Agent) emitProgress(phase, path string) {
+	if a.args.Progress != nil {
+		a.args.Progress(llmloop.ProgressEvent{Event: "ocr_progress", Phase: phase, Path: path})
+	}
 }
 
 // Run executes the full review pipeline: parse diffs -> plan per file -> LLM tool-loop -> collect comments.
@@ -600,6 +611,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 					// only in the local checkpoint / warning.
 					a.markFailed(d, session.FailurePanic, "subtask panicked during review")
 					a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, fmt.Sprintf("panic: %v", r))
+					a.emitProgress("checkpoint", d.NewPath)
 					fmt.Fprintf(stdout.Writer(), "[ocr] Subtask panic for %s: %v\n%s\n", d.NewPath, r, debug.Stack())
 					telemetry.ErrorEvent(ctx, "subtask.panic", fmt.Errorf("panic: %v", r),
 						telemetry.AnyToAttr("file.path", d.NewPath))
@@ -624,6 +636,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 				class, reason := classifyItemError(err)
 				a.markFailed(d, class, reason)
 				a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, err.Error())
+				a.emitProgress("checkpoint", d.NewPath)
 				fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for %s: %v\n", d.NewPath, err)
 				telemetry.ErrorEvent(fileCtx, "subtask.error", err,
 					telemetry.AnyToAttr("file.path", d.NewPath))
@@ -644,12 +657,14 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 							telemetry.AnyToAttr("file.path", d.NewPath))
 						a.recordWarning("subtask_error", d.NewPath, stopErr.Error())
 					}
+					a.emitProgress("checkpoint", d.NewPath)
 				}
 				return
 			}
 			comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
 			a.markCompleted(d)
 			a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+			a.emitProgress("checkpoint", d.NewPath)
 		}(toDispatch[i])
 	}
 
@@ -704,6 +719,7 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 		}
 		a.session.RecordReviewItemReused(effectivePath(d), d.OldPath, d.NewPath, fingerprint, resume.SessionID, item.Comments)
 		a.markReused(d)
+		a.emitProgress("checkpoint", d.NewPath)
 		reused++
 	}
 
@@ -1282,6 +1298,7 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
 	llmSpan.End()
 	rec.SetResponse(resp, duration)
+	a.emitProgress("llm_completed", newPath)
 	a.runner.RecordUsage(resp.Usage)
 
 	indices := parseFilterResponse(resp.Content(), len(comments))
@@ -1504,6 +1521,7 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
 	llmSpan.End()
 	rec.SetResponse(resp, duration)
+	a.emitProgress("llm_completed", newPath)
 	a.runner.RecordUsage(resp.Usage)
 	fmt.Fprintf(stdout.Writer(), "[ocr] Plan completed for %s\n", newPath)
 	return resp.Content(), nil

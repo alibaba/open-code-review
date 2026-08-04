@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -322,6 +323,19 @@ func emitRunResult(
 	q *quietHandle,
 	llmIdentity *jsonLLMIdentity,
 ) error {
+	return emitRunResultTo(ctx, ag, comments, startTime, outputFormat, audience, q, llmIdentity, os.Stdout)
+}
+
+func emitRunResultTo(
+	ctx context.Context,
+	ag ResultProvider,
+	comments []model.LlmComment,
+	startTime time.Time,
+	outputFormat, audience string,
+	q *quietHandle,
+	llmIdentity *jsonLLMIdentity,
+	outWriter io.Writer,
+) error {
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
 	duration := time.Since(startTime)
@@ -334,7 +348,7 @@ func emitRunResult(
 	manifest := ag.RunManifest()
 
 	if outputFormat == "json" && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
-		return outputJSONNoFiles(traceID, llmIdentity)
+		return outputJSONNoFilesTo(outWriter, traceID, llmIdentity)
 	}
 
 	// Agent-text audiences need stdout back before PrintTraceSummary so the
@@ -354,7 +368,7 @@ func emitRunResult(
 		if p, ok := ag.(resumeInfoProvider); ok {
 			resumeInfo = p.ResumeInfo()
 		}
-		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
+		return outputJSONWithWarningsTo(outWriter, comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
 			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity)

@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -294,6 +295,10 @@ type jsonOutput struct {
 }
 
 func outputJSON(comments []model.LlmComment) error {
+	return outputJSONTo(os.Stdout, comments)
+}
+
+func outputJSONTo(outWriter io.Writer, comments []model.LlmComment) error {
 	out := jsonOutput{
 		Status:   "success",
 		Comments: comments,
@@ -301,12 +306,20 @@ func outputJSON(comments []model.LlmComment) error {
 	if len(comments) == 0 {
 		out.Message = "No comments generated. Looks good to me."
 	}
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(outWriter)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
 }
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
+	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
+	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
+	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity) error {
+	return outputJSONWithWarningsTo(os.Stdout, comments, warnings, filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens,
+		duration, projectSummary, toolCalls, traceID, resumeInfo, sessionID, manifest, budgetExceeded, llmIdentity)
+}
+
+func outputJSONWithWarningsTo(outWriter io.Writer, comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity) error {
@@ -370,7 +383,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	// and the budget reason stays observable through three deterministic outlets:
 	// summary.budget_exceeded, the token_budget_reached warning, and
 	// coverage.failed[].classification == "budget".
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(outWriter)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
 }
@@ -403,6 +416,10 @@ func manifestMessage(manifest *session.RunManifest, findings int) string {
 }
 
 func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity) error {
+	return outputJSONNoFilesTo(os.Stdout, traceID, llmIdentity)
+}
+
+func outputJSONNoFilesTo(outWriter io.Writer, traceID string, llmIdentity *jsonLLMIdentity) error {
 	out := jsonOutput{
 		Status:   "skipped",
 		LLM:      llmIdentity,
@@ -413,7 +430,7 @@ func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity) error {
 			ByTool: map[string]int64{},
 		},
 	}
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(outWriter)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
 }
@@ -438,6 +455,10 @@ func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity) error {
 // human-readable [ocr] line. It must never return an error that masks the
 // original failure — all writes are best-effort.
 func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string, llmIdentity *jsonLLMIdentity) {
+	emitFailureUsageTo(os.Stderr, ag, duration, outputFormat, llmIdentity)
+}
+
+func emitFailureUsageTo(outWriter io.Writer, ag ResultProvider, duration time.Duration, outputFormat string, llmIdentity *jsonLLMIdentity) {
 	var toolTotal int64
 	for _, v := range ag.ToolCalls() {
 		toolTotal += v
@@ -463,18 +484,18 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 			},
 			SessionID: ag.SessionID(),
 		}
-		enc := json.NewEncoder(os.Stderr)
+		enc := json.NewEncoder(outWriter)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(out)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "[ocr] usage on failure: %d file(s), %d input + %d output = %d total tokens, %d tool calls, elapsed %s, budget_exceeded=%v",
+	fmt.Fprintf(outWriter, "[ocr] usage on failure: %d file(s), %d input + %d output = %d total tokens, %d tool calls, elapsed %s, budget_exceeded=%v",
 		ag.FilesReviewed(), ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 		toolTotal, duration.Round(time.Second).String(), budgetExceeded)
 	if id := ag.SessionID(); id != "" {
-		fmt.Fprintf(os.Stderr, ", session %s", id)
+		fmt.Fprintf(outWriter, ", session %s", id)
 	}
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(outWriter)
 }
 
 func outputPreviewText(p *agent.DiffPreview) {

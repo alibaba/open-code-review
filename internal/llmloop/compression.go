@@ -245,6 +245,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 		return msgs, fmt.Errorf("memory compression: %w", err)
 	}
 	rec.SetResponse(resp, duration)
+	r.emitProgress("llm_completed", filePath)
 	if resp.Usage != nil {
 		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
 		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)

@@ -15,6 +15,7 @@
     "open-code-review"
   ],
   "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Open Code Review",
     "shortDescription": "Run structured code reviews from local Codex.",

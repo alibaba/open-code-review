@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ocr": {
+      "command": "ocr",
+      "args": ["mcp", "serve"],
+      "required": true,
+      "tool_timeout_sec": 14700
+    }
+  }
+}
