@@ -18,6 +18,8 @@
   "**/test/**/*.jl",
   "**/test/**/*.hs",
   "**/*Spec.hs",
+  "**/test/**/*.lhs",
+  "**/*Spec.lhs",
   "**/__snapshots__/**",
   "**/*.snap",
   "**/testdata/**",

@@ -140,6 +140,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"haskell spec file", "src/ParserSpec.hs", true},
 		{"haskell root spec file", "ParserSpec.hs", true},
 		{"haskell non-test", "src/Parser.hs", false},
+		{"lhs test directory", "test/Tutorial.lhs", true},
+		{"lhs nested test directory", "packages/core/test/unit/Tutorial.lhs", true},
+		{"lhs spec file", "src/ParserSpec.lhs", true},
+		{"lhs root spec file", "ParserSpec.lhs", true},
+		{"lhs non-test", "src/Tutorial.lhs", false},
+
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},
 		{"snap file", "src/components/Button.snap", true},
