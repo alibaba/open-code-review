@@ -260,6 +260,11 @@ def format_comment_fallback(comment, reason=None):
     The Before/After blocks use :func:`fenced_block` so code containing
     backticks still renders.
     """
+    md = ""
+    badge = build_badge(comment)
+    if badge:
+        md += badge + "\n"
+
     path = comment.get("path", "unknown")
     start_line = comment.get("start_line", 0)
     end_line = comment.get("end_line", 0)

@@ -270,8 +270,14 @@ type jsonToolCalls struct {
 	ByTool map[string]int64 `json:"by_tool"`
 }
 
+type jsonLLMIdentity struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model"`
+}
+
 type jsonOutput struct {
 	Status         string               `json:"status"`
+	LLM            *jsonLLMIdentity     `json:"llm,omitempty"`
 	TraceID        string               `json:"trace_id,omitempty"`
 	Message        string               `json:"message,omitempty"`
 	Summary        *jsonSummary         `json:"summary,omitempty"`
@@ -300,10 +306,11 @@ func outputJSON(comments []model.LlmComment) error {
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
-	manifest *session.RunManifest, budgetExceeded bool) error {
+	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	out := jsonOutput{
 		Status:   "success",
+		LLM:      llmIdentity,
 		TraceID:  traceID,
 		Comments: comments,
 		Summary: &jsonSummary{
@@ -392,9 +399,10 @@ func manifestMessage(manifest *session.RunManifest, findings int) string {
 	}
 }
 
-func outputJSONNoFiles(traceID string) error {
+func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity) error {
 	out := jsonOutput{
 		Status:   "skipped",
+		LLM:      llmIdentity,
 		TraceID:  traceID,
 		Message:  "No supported files changed.",
 		Comments: []model.LlmComment{},
@@ -426,7 +434,7 @@ func outputJSONNoFiles(traceID string) error {
 // therefore always carries exactly one JSON document); otherwise a single
 // human-readable [ocr] line. It must never return an error that masks the
 // original failure — all writes are best-effort.
-func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string) {
+func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string, llmIdentity *jsonLLMIdentity) {
 	var toolTotal int64
 	for _, v := range ag.ToolCalls() {
 		toolTotal += v
@@ -435,6 +443,7 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 	if outputFormat == "json" {
 		out := jsonOutput{
 			Status: "failed",
+			LLM:    llmIdentity,
 			Summary: &jsonSummary{
 				FilesReviewed:    ag.FilesReviewed(),
 				TotalTokens:      ag.TotalTokensUsed(),

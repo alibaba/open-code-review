@@ -83,6 +83,25 @@ func runSessionShowCompat(args []string) error {
 	return cmd.Execute()
 }
 
+// runSessionCommentsCompat provides test compatibility for old-style runSessionComments([]string{...}) calls.
+func runSessionCommentsCompat(args []string) error {
+	cmd := &cobra.Command{
+		Use:           "comments",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, a []string) error {
+			return runSessionComments(a[0])
+		},
+	}
+	cmd.Flags().StringVar(&sessionCommentsRepoDir, "repo", "", "")
+	cmd.Flags().BoolVar(&sessionCommentsJSON, "json", false, "")
+	cmd.Flags().StringVar(&sessionCommentsSeverity, "severity", "", "")
+	cmd.Flags().StringVar(&sessionCommentsCategory, "category", "", "")
+	cmd.SetArgs(args)
+	return cmd.Execute()
+}
+
 // runSession provides test compatibility for the old dispatch function.
 func runSession(args []string) error {
 	cmd := &cobra.Command{Use: "session", SilenceUsage: true, SilenceErrors: true}

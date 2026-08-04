@@ -110,6 +110,8 @@ When posting review discussions, the script includes rate-limit handling with ex
 | `OCR_SUCCESS_DELAY` | `2000` | Delay (ms) after a successful discussion post to pace subsequent requests |
 | `OCR_FAILURE_DELAY` | `1000` | Delay (ms) after a non-rate-limit failure to pace subsequent requests |
 | `OCR_RATE_LIMIT_THRESHOLD` | `10` | Proactively slow down when GitLab `RateLimit-Remaining` is at/below this value (set `0` to disable) |
+| `OCR_ROUTE_SEVERITY_BELOW` | _(empty)_ | Optional severity threshold (`critical`, `high`, `medium`, `low`) that routes findings at-or-below it from inline comments to summary notes (fail-open: never drops a finding). Empty or unknown values disable severity routing. |
+| `OCR_ROUTE_CATEGORIES` | _(empty)_ | Optional comma-separated categories (`bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other`) routed from inline to summary notes. Unknown tokens are ignored. Combine with `OCR_ROUTE_SEVERITY_BELOW` to route on either condition. |
 
 These variables are optional — if not configured, sensible defaults are used. Consider increasing delays for self-hosted GitLab instances with aggressive rate-limit configurations or for large MRs that generate numerous review comments. The `OCR_RATE_LIMIT_THRESHOLD` variable enables proactive throttling: when GitLab reports low remaining quota in the `RateLimit-Remaining` response header, the script automatically doubles the pacing delay to avoid hitting 429 errors.
 

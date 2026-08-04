@@ -12,6 +12,10 @@ var rulesCmd = &cobra.Command{
 	Use:   "rules",
 	Short: "Inspect and debug review rules",
 	Long:  "Inspect and debug review rules.",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
 var rulesCheckRepoDir string

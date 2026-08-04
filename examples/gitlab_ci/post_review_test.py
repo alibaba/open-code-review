@@ -199,6 +199,11 @@ class FormatCommentTest(unittest.TestCase):
     def test_plain_content(self):
         self.assertEqual(pr.format_comment({"content": "hello world"}), "hello world")
 
+    def test_badge_prefix(self):
+        body = pr.format_comment(comment(content="issue", category="bug", severity="high"))
+        self.assertTrue(body.startswith("[bug · high]\n"))
+        self.assertIn("issue", body)
+
     def test_with_suggestion(self):
         body = pr.format_comment(comment(content="fix this", existing_code="x = 1", suggestion_code="x = 2"))
         self.assertIn("fix this", body)

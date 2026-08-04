@@ -43,6 +43,7 @@ type SessionHistory struct {
 	DiffFrom     string
 	DiffTo       string
 	DiffCommit   string
+	ScanPaths    []string
 	ResumedFrom  string
 	StartTime    time.Time
 	EndTime      time.Time
@@ -124,12 +125,22 @@ type SessionOptions struct {
 	DiffFrom    string
 	DiffTo      string
 	DiffCommit  string
+	ScanPaths   []string
 	ResumedFrom string
 
 	// Operation opts this session into a run manifest. When non-empty (e.g.
 	// "review") New creates a ManifestBuilder with this operation and the session
 	// ID as its run_id. Empty (the scan/legacy default) leaves the builder nil.
 	Operation string
+}
+
+// ResumeInfo summarizes file-level reuse for a resumed run.
+type ResumeInfo struct {
+	ResumedFrom   string `json:"resumed_from"`
+	ReusedFiles   int64  `json:"reused_files"`
+	RerunFiles    int64  `json:"rerun_files"`
+	PreviousModel string `json:"previous_model,omitempty"`
+	CurrentModel  string `json:"current_model,omitempty"`
 }
 
 // New creates a new SessionHistory with the given repo directory.
@@ -144,6 +155,7 @@ func New(repoDir, gitBranch, model string, opts SessionOptions) *SessionHistory 
 		DiffFrom:     opts.DiffFrom,
 		DiffTo:       opts.DiffTo,
 		DiffCommit:   opts.DiffCommit,
+		ScanPaths:    append([]string(nil), opts.ScanPaths...),
 		ResumedFrom:  opts.ResumedFrom,
 		StartTime:    time.Now(),
 		FileSessions: make(map[string]*FileSession),
