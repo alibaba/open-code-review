@@ -295,7 +295,71 @@ func TestFormatToolDefs(t *testing.T) {
 		}
 	})
 
-	t.Run("parameters are rendered in sorted order", func(t *testing.T) {
+	t.Run("parameters preserve raw JSON order", func(t *testing.T) {
+		raw := json.RawMessage(`{
+			"name":"code_search",
+			"description":"Search code",
+			"parameters":{
+				"type":"object",
+				"properties":{
+					"query":{"description":"Query string"},
+					"path_glob":{"description":"Path glob"},
+					"case_sensitive":{"description":"Match case"},
+					"max_results":{"description":"Maximum results"}
+				},
+				"required":["query"]
+			}
+		}`)
+		defs := []llm.ToolDef{
+			{
+				Type: "function",
+				Function: llm.FunctionDef{
+					Name:          "code_search",
+					Description:   "Search code",
+					RawDefinition: raw,
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"query": map[string]any{
+								"description": "Query string",
+							},
+							"path_glob": map[string]any{
+								"description": "Path glob",
+							},
+							"case_sensitive": map[string]any{
+								"description": "Match case",
+							},
+							"max_results": map[string]any{
+								"description": "Maximum results",
+							},
+						},
+						"required": []any{"query"},
+					},
+				},
+			},
+		}
+
+		got := formatToolDefs(defs)
+		wantLines := []string{
+			"  - query: Query string (required)",
+			"  - path_glob: Path glob",
+			"  - case_sensitive: Match case",
+			"  - max_results: Maximum results",
+		}
+		last := -1
+		for _, line := range wantLines {
+			idx := strings.Index(got, line)
+			if idx == -1 {
+				t.Fatalf("missing parameter line %q in:\n%s", line, got)
+			}
+			if idx <= last {
+				t.Fatalf("parameter line %q is out of order in:\n%s", line, got)
+			}
+			last = idx
+		}
+	})
+
+	t.Run("fallback parameters are sorted when raw order is unavailable", func(t *testing.T) {
 		defs := []llm.ToolDef{
 			{
 				Type: "function",

@@ -177,9 +177,10 @@ type ToolDef struct {
 
 // FunctionDef specifies the metadata for a tool definition.
 type FunctionDef struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	Parameters    map[string]any  `json:"parameters"`
+	RawDefinition json.RawMessage `json:"-"`
 }
 
 // ClientConfig holds configuration for connecting to an LLM service.
