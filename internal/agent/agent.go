@@ -731,7 +731,11 @@ func (a *Agent) reviewMode() string {
 }
 
 func reviewItemFingerprint(mode string, d model.Diff) string {
-	sum := sha256.Sum256([]byte(mode + "\x00" + d.OldPath + "\x00" + d.NewPath + "\x00" + d.Diff))
+	// The patch splitter can leave extra line endings on the final file in a
+	// multi-file patch. Unified diff content lines always carry a marker, so
+	// trimming CR/LF here removes only that position-dependent delimiter.
+	diffText := strings.TrimRight(d.Diff, "\r\n")
+	sum := sha256.Sum256([]byte(mode + "\x00" + d.OldPath + "\x00" + d.NewPath + "\x00" + diffText))
 	return fmt.Sprintf("%x", sum)
 }
 
