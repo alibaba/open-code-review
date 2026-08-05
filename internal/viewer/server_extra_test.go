@@ -156,6 +156,45 @@ func TestRenderTemplate_SessionPage(t *testing.T) {
 	}
 }
 
+func TestRenderTemplate_SecondarySectionsCollapsedByDefault(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary: SessionSummary{
+			SessionID:     "abc",
+			CWD:           "/test",
+			FilesReviewed: []string{"main.go"},
+		},
+		TokenUsage: TokenUsageSummary{
+			FileTokenBreakdown: []FileTokenUsage{{FilePath: "main.go"}},
+		},
+		Files: []*FileGroup{{FilePath: "main.go", Tasks: map[TaskType][]*TaskCard{}}},
+		Comments: []*ReviewComment{{
+			FilePath: "main.go",
+			Content:  "Keep this visible",
+		}},
+	}
+
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session:     vs,
+	})
+
+	body := rr.Body.String()
+	if count := strings.Count(body, `<details class="file-accordion section-accordion">`); count != 2 {
+		t.Fatalf("collapsed secondary section count = %d, want 2", count)
+	}
+	if strings.Contains(body, `<details class="file-accordion section-accordion" open>`) {
+		t.Fatal("secondary sections should be collapsed by default")
+	}
+	if !strings.Contains(body, `<details class="token-breakdown">`) || strings.Contains(body, `<details class="token-breakdown" open>`) {
+		t.Fatal("file token breakdown should be rendered and collapsed by default")
+	}
+	if !strings.Contains(body, `<details class="comment-file-group" open>`) {
+		t.Fatal("review comment groups should remain expanded")
+	}
+}
+
 func TestRenderTemplate_ExecutionError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	// Pass wrong data type to trigger template execution error
