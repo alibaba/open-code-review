@@ -113,6 +113,9 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 		return fmt.Errorf("invalid auth_header: %w", err)
 	}
 	cfg.Llm.AuthHeader = authHeader
+	if result.promptCaching != nil {
+		cfg.Llm.PromptCaching = result.promptCaching
+	}
 	// Write the canonical protocol so resolver picks it up directly. Also
 	// mirror use_anthropic so configs read correctly on older binaries that
 	// predate llm.protocol: anthropic -> true, the OpenAI family (including
@@ -185,6 +188,9 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 		entry.APIKey = result.apiKey
 	} else {
 		entry.APIKey = ""
+	}
+	if result.promptCaching != nil {
+		cfg.Llm.PromptCaching = result.promptCaching
 	}
 	cfg.CustomProviders[result.provider] = entry
 
@@ -259,6 +265,9 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	} else {
 		// Confirmed empty key: clear saved api_key so resolver falls back to $ENV_VAR.
 		entry.APIKey = ""
+	}
+	if result.promptCaching != nil {
+		cfg.Llm.PromptCaching = result.promptCaching
 	}
 	cfg.Providers[result.provider] = entry
 

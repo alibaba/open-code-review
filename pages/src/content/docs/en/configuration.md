@@ -167,6 +167,19 @@ without patching the source:
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
 ```
 
+### Disable Anthropic prompt caching
+
+Anthropic requests mark the final system block and tool definition with
+`cache_control` by default. If an Anthropic-compatible gateway rejects that
+field, disable the markers globally:
+
+```bash
+ocr config set llm.prompt_caching false
+```
+
+The interactive provider setup exposes the same option for Anthropic
+providers. Re-enable it with `ocr config set llm.prompt_caching true`.
+
 ## Configuring the review language
 
 `language` determines which language review comments are written in;

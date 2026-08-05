@@ -169,6 +169,88 @@ func TestBuildAnthropicParams_CacheControl(t *testing.T) {
 	})
 }
 
+func TestBuildAnthropicParams_CacheControlDisabled(t *testing.T) {
+	disabled := false
+	client := NewAnthropicClient(ClientConfig{
+		URL:           "https://api.anthropic.com",
+		PromptCaching: &disabled,
+	})
+	req := ChatRequest{
+		Messages: []Message{
+			{Role: "system", Content: "You are a code reviewer."},
+			{Role: "user", Content: "Review this code."},
+		},
+		Tools: []ToolDef{{
+			Type: "function",
+			Function: FunctionDef{
+				Name:       "read_file",
+				Parameters: map[string]any{"type": "object"},
+			},
+		}},
+	}
+
+	params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+	if err != nil {
+		t.Fatalf("buildAnthropicParams: %v", err)
+	}
+	for i, block := range params.System {
+		if block.CacheControl.Type != "" {
+			t.Errorf("system block %d cache control = %q, want empty", i, block.CacheControl.Type)
+		}
+	}
+	for i, tool := range params.Tools {
+		if tool.OfTool != nil && tool.OfTool.CacheControl.Type != "" {
+			t.Errorf("tool %d cache control = %q, want empty", i, tool.OfTool.CacheControl.Type)
+		}
+	}
+}
+
+func TestAnthropicClient_CacheControlDisabledOmitsRequestField(t *testing.T) {
+	disabled := false
+	var requestBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		requestBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_test","type":"message","role":"assistant","model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:           server.URL + "/v1/messages",
+		APIKey:        "test-key",
+		Model:         "claude-test",
+		PromptCaching: &disabled,
+	})
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{
+			{Role: "system", Content: "Review code."},
+			{Role: "user", Content: "Start."},
+		},
+		Tools: []ToolDef{{
+			Type: "function",
+			Function: FunctionDef{
+				Name:       "read_file",
+				Parameters: map[string]any{"type": "object"},
+			},
+		}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if strings.Contains(requestBody, `"cache_control"`) {
+		t.Fatalf("request includes cache_control while prompt caching is disabled: %s", requestBody)
+	}
+}
+
 func TestBuildAnthropicParams_CacheControl_NoTools(t *testing.T) {
 	client := NewAnthropicClient(ClientConfig{URL: "https://api.anthropic.com"})
 

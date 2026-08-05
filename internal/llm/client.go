@@ -184,13 +184,14 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	URL          string            // Full API endpoint URL
-	APIKey       string            // Bearer token / API key
-	Model        string            // Default model override
-	AuthHeader   string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
-	Timeout      time.Duration     // Request timeout
-	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
-	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
+	URL           string            // Full API endpoint URL
+	APIKey        string            // Bearer token / API key
+	Model         string            // Default model override
+	AuthHeader    string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
+	Timeout       time.Duration     // Request timeout
+	ExtraBody     map[string]any    // Vendor-specific fields merged into every request body
+	ExtraHeaders  map[string]string // Extra HTTP headers sent with every request
+	PromptCaching *bool             // Anthropic cache_control markers; nil defaults to enabled
 }
 
 // --- Factory ---
@@ -206,13 +207,14 @@ type ClientConfig struct {
 // protocol).
 func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 	cfg := ClientConfig{
-		URL:          ep.URL,
-		APIKey:       ep.Token,
-		Model:        ep.Model,
-		AuthHeader:   ep.AuthHeader,
-		Timeout:      ep.Timeout,
-		ExtraBody:    ep.ExtraBody,
-		ExtraHeaders: ep.ExtraHeaders,
+		URL:           ep.URL,
+		APIKey:        ep.Token,
+		Model:         ep.Model,
+		AuthHeader:    ep.AuthHeader,
+		Timeout:       ep.Timeout,
+		ExtraBody:     ep.ExtraBody,
+		ExtraHeaders:  ep.ExtraHeaders,
+		PromptCaching: ep.PromptCaching,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -779,12 +781,17 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 		Messages:  messages,
 	}
 
+	promptCaching := c.cfg.PromptCaching == nil || *c.cfg.PromptCaching
 	if len(systemBlocks) > 0 {
-		systemBlocks[len(systemBlocks)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
+		if promptCaching {
+			systemBlocks[len(systemBlocks)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
+		}
 		params.System = systemBlocks
 	}
 	if len(tools) > 0 {
-		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+		if promptCaching {
+			tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+		}
 		params.Tools = tools
 	}
 	if req.Temperature != nil {

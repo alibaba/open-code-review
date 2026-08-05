@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 func TestMaskKey(t *testing.T) {
@@ -271,6 +273,45 @@ func TestApplyCustomProviderConfig_EmptyKeyClearsSavedAPIKey(t *testing.T) {
 	}
 	if got := cfg.CustomProviders["aaa"].APIKey; got != "" {
 		t.Errorf("APIKey = %q, want empty", got)
+	}
+}
+
+func TestApplyCustomProviderConfig_PersistsPromptCaching(t *testing.T) {
+	disabled := false
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{
+		Provider: "gateway",
+		Model:    "claude-test",
+		CustomProviders: map[string]ProviderEntry{
+			"gateway": {
+				URL:      "https://gateway.example/v1",
+				Protocol: llm.ProtocolAnthropic,
+				APIKey:   "test-key",
+				Model:    "claude-test",
+				Models:   []string{"claude-test"},
+			},
+		},
+	}
+
+	err := applyCustomProviderConfig(configPath, cfg, providerTUIResult{
+		provider:      "gateway",
+		model:         "claude-test",
+		models:        []string{"claude-test"},
+		apiKey:        "test-key",
+		isCustom:      true,
+		url:           "https://gateway.example/v1",
+		protocol:      llm.ProtocolAnthropic,
+		promptCaching: &disabled,
+	})
+	if err != nil {
+		t.Fatalf("applyCustomProviderConfig: %v", err)
+	}
+	diskCfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if diskCfg.Llm.PromptCaching == nil || *diskCfg.Llm.PromptCaching {
+		t.Fatalf("PromptCaching = %v, want false", diskCfg.Llm.PromptCaching)
 	}
 }
 
