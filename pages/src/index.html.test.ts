@@ -21,8 +21,12 @@ const indexCss = readFileSync(join(here, 'styles', 'index.css'), 'utf8');
 
 // Comments explain this block and name the tags they discuss, so structural
 // assertions must not see them — otherwise a tag mentioned in prose reads as a
-// tag in the document.
-const markup = html.replace(/<!--[\s\S]*?-->/g, '').replace(/<!--/g, '');
+// tag in the document. Loop until stable to satisfy CodeQL's multi-character
+// sanitization check.
+let markup = html;
+while (markup.includes('<!--')) {
+  markup = markup.replace(/<!--[\s\S]*?-->/g, '').replace(/<!--/g, '');
+}
 
 const inlineStyle = markup.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
 
