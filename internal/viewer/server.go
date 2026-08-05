@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-//go:embed templates/*.html static/style.css
+//go:embed templates/*.html static/style.css static/session.js
 var assets embed.FS
 
 func StartServer(addr string) error {
@@ -54,9 +54,12 @@ func StartServer(addr string) error {
 	allowed := resolveAllowedHostsFromEnv(addr)
 	guarded := hostGuard(allowed, mux)
 
+	// Outermost layer: set defense-in-depth security headers on every response.
+	handler := securityHeaders(guarded)
+
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: guarded,
+		Handler: handler,
 	}
 
 	fmt.Printf("\nOpen browser: http://%s\n", DisplayAddr(addr))
