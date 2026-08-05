@@ -4,7 +4,7 @@
       "command": "ocr",
       "args": ["mcp", "serve"],
       "required": true,
-      "tool_timeout_sec": 14700
+      "tool_timeout_sec": 1860
     }
   }
 }

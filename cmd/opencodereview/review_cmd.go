@@ -107,13 +107,20 @@ func executeReview(opts reviewOptions) error {
 	return executeReviewContext(context.Background(), opts, os.Stdout, os.Stderr, nil, nil)
 }
 
+type reviewStageFunc func(stage, path string)
+
 func executeReviewContext(ctx context.Context, opts reviewOptions, outputWriter, diagnosticWriter io.Writer, progress llmloop.ProgressFunc, watchdog *reviewWatchdog) error {
+	return executeReviewContextWithStage(ctx, opts, outputWriter, diagnosticWriter, progress, watchdog, nil)
+}
+
+func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outputWriter, diagnosticWriter io.Writer, progress llmloop.ProgressFunc, watchdog *reviewWatchdog, stage reviewStageFunc) error {
 	if outputWriter == nil {
 		outputWriter = os.Stdout
 	}
 	if diagnosticWriter == nil {
 		diagnosticWriter = os.Stderr
 	}
+	setReviewStage(stage, "load_common_context", "")
 	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
@@ -121,10 +128,12 @@ func executeReviewContext(ctx context.Context, opts reviewOptions, outputWriter,
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
+	setReviewStage(stage, "validate_refs", "")
 	if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
 		return err
 	}
 
+	setReviewStage(stage, "resolve_background", "")
 	if opts.commit != "" && opts.background == "" {
 		if msg, err := getCommitMessage(cc.RepoDir, opts.commit); err == nil && msg != "" {
 			opts.background = msg
@@ -149,11 +158,13 @@ func executeReviewContext(ctx context.Context, opts reviewOptions, outputWriter,
 		return runPreview(cc, opts)
 	}
 
+	setReviewStage(stage, "load_resume_state", "")
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
 	if err != nil {
 		return err
 	}
 
+	setReviewStage(stage, "load_llm_runtime", "")
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
@@ -179,6 +190,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions, outputWriter,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
+	setReviewStage(stage, "init_mcp_clients", "")
 	mcpClients := initMCPClientsTo(ctx, rt.AppCfg, tools, cc.RepoDir, Version, diagnosticWriter)
 	defer func() {
 		for _, mc := range mcpClients {
@@ -239,6 +251,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions, outputWriter,
 	}
 	startTime := time.Now()
 
+	setReviewStage(stage, "agent_run", "")
 	comments, runErr := ag.Run(ctx)
 	manifest := ag.RunManifest()
 	resultErr := reviewResultError(runErr, manifest)
@@ -252,6 +265,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions, outputWriter,
 	// error so JSON consumers retain the complete coverage diagnosis.
 	var emitErr error
 	if manifest != nil || runErr == nil {
+		setReviewStage(stage, "emit_result", "")
 		emitErr = emitRunResultTo(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, outputWriter)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
@@ -266,6 +280,12 @@ func executeReviewContext(ctx context.Context, opts reviewOptions, outputWriter,
 		return errors.Join(resultErr, emitErr)
 	}
 	return emitErr
+}
+
+func setReviewStage(stage reviewStageFunc, name, path string) {
+	if stage != nil {
+		stage(name, path)
+	}
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {

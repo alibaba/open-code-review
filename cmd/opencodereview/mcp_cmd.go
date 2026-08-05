@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	mcpReviewMaxDuration = 4 * time.Hour
+	mcpReviewMaxDuration = 30 * time.Minute
 	mcpReviewMinIdle     = 15 * time.Minute
 	mcpReviewIdleGrace   = 5 * time.Minute
 	mcpReviewToolName    = "ocr_review"
@@ -35,13 +35,65 @@ type ocrReviewInput struct {
 	Resume     string   `json:"resume,omitempty"`
 }
 
-type mcpReviewRunner func(context.Context, reviewOptions, io.Writer, llmloop.ProgressFunc, *reviewWatchdog) error
+type mcpReviewRunner func(context.Context, reviewOptions, io.Writer, io.Writer, llmloop.ProgressFunc, reviewStageFunc, *reviewWatchdog) error
+
+const (
+	mcpErrorDeadlineExceeded = "deadline_exceeded"
+	mcpErrorCancelled        = "cancelled"
+	mcpErrorRunner           = "runner_error"
+	mcpErrorInvalidResult    = "invalid_result"
+	mcpErrorIntegration      = "integration_error"
+	mcpErrorPersistence      = "persistence_error"
+)
+
+type reviewDiagnosticSnapshot struct {
+	Stage          string
+	Path           string
+	LastProgressAt string
+}
+
+type reviewDiagnostics struct {
+	mu           sync.Mutex
+	stage        string
+	path         string
+	lastProgress time.Time
+}
+
+func (d *reviewDiagnostics) SetStage(stage, path string) {
+	d.mu.Lock()
+	d.stage = stage
+	d.path = path
+	d.mu.Unlock()
+}
+
+func (d *reviewDiagnostics) Progress(event llmloop.ProgressEvent) {
+	d.mu.Lock()
+	d.stage = event.Phase
+	d.path = event.Path
+	d.lastProgress = time.Now()
+	d.mu.Unlock()
+}
+
+func (d *reviewDiagnostics) Snapshot() reviewDiagnosticSnapshot {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	snapshot := reviewDiagnosticSnapshot{
+		Stage: d.stage,
+		Path:  d.path,
+	}
+	if !d.lastProgress.IsZero() {
+		snapshot.LastProgressAt = d.lastProgress.UTC().Format(time.RFC3339Nano)
+	}
+	return snapshot
+}
 
 type ocrMCPServer struct {
-	repoDir string
-	run     mcpReviewRunner
-	mu      sync.Mutex
-	stderr  sync.Mutex
+	repoDir      string
+	run          mcpReviewRunner
+	maxDuration  time.Duration
+	idleDuration time.Duration
+	mu           sync.Mutex
+	stderr       sync.Mutex
 }
 
 type reviewWatchdog struct {
@@ -53,6 +105,7 @@ type reviewWatchdog struct {
 	stopOnce sync.Once
 	causeMu  sync.Mutex
 	cause    string
+	baseIdle time.Duration
 }
 
 func newReviewWatchdog(parent context.Context, maxDuration, idleDuration time.Duration) *reviewWatchdog {
@@ -69,6 +122,7 @@ func newReviewWatchdog(parent context.Context, maxDuration, idleDuration time.Du
 		activity: make(chan struct{}, 1),
 		update:   make(chan time.Duration, 1),
 		done:     make(chan struct{}),
+		baseIdle: idleDuration,
 	}
 	go w.run(maxDuration, idleDuration)
 	return w
@@ -84,7 +138,7 @@ func (w *reviewWatchdog) Activity() {
 }
 
 func (w *reviewWatchdog) SetLLMTimeout(timeout time.Duration) {
-	idle := mcpReviewMinIdle
+	idle := w.baseIdle
 	if timeout > 0 && timeout+mcpReviewIdleGrace > idle {
 		idle = timeout + mcpReviewIdleGrace
 	}
@@ -181,13 +235,19 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 }
 
 func newOCRMCPProtocolServer(repoDir string, run mcpReviewRunner) *mcpsdk.Server {
+	return newOCRMCPProtocolServerWithDurations(repoDir, run, mcpReviewMaxDuration, mcpReviewMinIdle)
+}
+
+func newOCRMCPProtocolServerWithDurations(repoDir string, run mcpReviewRunner, maxDuration, idleDuration time.Duration) *mcpsdk.Server {
 	state := &ocrMCPServer{
-		repoDir: repoDir,
-		run:     run,
+		repoDir:      repoDir,
+		run:          run,
+		maxDuration:  maxDuration,
+		idleDuration: idleDuration,
 	}
 	if state.run == nil {
-		state.run = func(ctx context.Context, opts reviewOptions, output io.Writer, progress llmloop.ProgressFunc, watchdog *reviewWatchdog) error {
-			return executeReviewContext(ctx, opts, output, io.Discard, progress, watchdog)
+		state.run = func(ctx context.Context, opts reviewOptions, output, diagnostic io.Writer, progress llmloop.ProgressFunc, stage reviewStageFunc, watchdog *reviewWatchdog) error {
+			return executeReviewContextWithStage(ctx, opts, output, diagnostic, progress, watchdog, stage)
 		}
 	}
 
@@ -215,27 +275,34 @@ func newOCRMCPProtocolServer(repoDir string, run mcpReviewRunner) *mcpsdk.Server
 }
 
 func (s *ocrMCPServer) handleReview(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	reviewCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	watchdog := newReviewWatchdog(reviewCtx, s.maxDuration, s.idleDuration)
+	defer watchdog.Stop()
+
 	input, err := decodeOCRReviewInput(req)
 	if err != nil {
-		return mcpToolError(err, nil), nil
+		return mcpToolErrorWithDetails(err, nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
 	}
 	if err := validateOCRReviewInput(input); err != nil {
-		return mcpToolError(err, nil), nil
+		return mcpToolErrorWithDetails(err, nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
 	}
 	if !s.mu.TryLock() {
-		return mcpToolError(errors.New("ocr_review is already running for this worktree"), nil), nil
+		return mcpToolErrorWithDetails(errors.New("ocr_review is already running for this worktree"), nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
 	}
 	defer s.mu.Unlock()
 
-	watchdog := newReviewWatchdog(ctx, mcpReviewMaxDuration, mcpReviewMinIdle)
-	defer watchdog.Stop()
+	var diagnostics reviewDiagnostics
 	progress := func(event llmloop.ProgressEvent) {
+		diagnostics.Progress(event)
 		watchdog.Activity()
 		s.writeProgress(event)
 	}
+	stage := diagnostics.SetStage
 	var output bytes.Buffer
+	var diagnosticOutput bytes.Buffer
 	opts := input.reviewOptions(s.repoDir)
-	err = s.run(watchdog.Context(), opts, &output, progress, watchdog)
+	err = s.run(watchdog.Context(), opts, &output, &diagnosticOutput, progress, stage, watchdog)
 	if cause := watchdog.Cause(); cause != "" {
 		if err == nil {
 			err = errors.New(cause)
@@ -243,15 +310,15 @@ func (s *ocrMCPServer) handleReview(ctx context.Context, req *mcpsdk.CallToolReq
 			err = fmt.Errorf("%w (%s)", err, cause)
 		}
 	}
-	if err == nil && ctx.Err() != nil {
-		err = fmt.Errorf("review cancelled: %w", ctx.Err())
+	if err == nil && reviewCtx.Err() != nil {
+		err = fmt.Errorf("review cancelled: %w", reviewCtx.Err())
 	}
 	if err != nil {
-		return mcpToolError(err, output.Bytes()), nil
+		return mcpToolErrorWithDetails(err, output.Bytes(), classifyMCPReviewError(err, reviewCtx, watchdog), diagnostics.Snapshot(), diagnosticOutput.Bytes()), nil
 	}
 	raw, err := singleJSONObject(output.Bytes())
 	if err != nil {
-		return mcpToolError(fmt.Errorf("ocr review returned invalid JSON: %w", err), output.Bytes()), nil
+		return mcpToolErrorWithDetails(fmt.Errorf("ocr review returned invalid JSON: %w", err), output.Bytes(), mcpErrorInvalidResult, diagnostics.Snapshot(), diagnosticOutput.Bytes()), nil
 	}
 	return &mcpsdk.CallToolResult{
 		Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: string(raw)}},
@@ -347,21 +414,53 @@ func singleJSONObject(raw []byte) ([]byte, error) {
 	return raw, nil
 }
 
-func mcpToolError(err error, raw []byte) *mcpsdk.CallToolResult {
-	diagnostic := map[string]any{"error": err.Error()}
-	if len(bytes.TrimSpace(raw)) > 0 {
-		var result map[string]json.RawMessage
-		if json.Unmarshal(raw, &result) == nil && result != nil {
-			diagnostic["result"] = json.RawMessage(bytes.TrimSpace(raw))
-			if sessionID, ok := result["session_id"]; ok {
-				var id string
-				if json.Unmarshal(sessionID, &id) == nil && id != "" {
-					diagnostic["session_id"] = id
-				}
-			}
-		} else {
-			diagnostic["output"] = string(raw)
+func classifyMCPReviewError(err error, reviewCtx context.Context, watchdog *reviewWatchdog) string {
+	message := err.Error()
+	if strings.Contains(message, "persist") || strings.Contains(message, "session_end") || strings.Contains(message, "finalize session") {
+		return mcpErrorPersistence
+	}
+	if watchdog.Cause() != "" || errors.Is(err, context.DeadlineExceeded) {
+		return mcpErrorDeadlineExceeded
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(reviewCtx.Err(), context.Canceled) {
+		return mcpErrorCancelled
+	}
+	return mcpErrorRunner
+}
+
+func mcpToolErrorWithDetails(err error, raw []byte, errorType string, snapshot reviewDiagnosticSnapshot, diagnosticOutput []byte) *mcpsdk.CallToolResult {
+	diagnostic := map[string]any{
+		"error":            err.Error(),
+		"error_type":       errorType,
+		"stage":            snapshot.Stage,
+		"path":             snapshot.Path,
+		"last_progress_at": snapshot.LastProgressAt,
+		"partial_result":   nil,
+		"coverage":         nil,
+		"session_id":       "",
+		"resumable":        false,
+	}
+	if result, ok := resultObject(raw); ok {
+		diagnostic["partial_result"] = json.RawMessage(bytes.TrimSpace(raw))
+		coverage := resultCoverage(result)
+		diagnostic["coverage"] = coverage
+		if id := resultSessionID(result); id != "" {
+			diagnostic["session_id"] = id
 		}
+		diagnostic["resumable"] = coverageIsResumable(coverage)
+		if errorType == mcpErrorPersistence {
+			diagnostic["resumable"] = false
+		}
+	} else if len(bytes.TrimSpace(raw)) > 0 {
+		diagnostic["output"] = string(raw)
+	}
+	if diagnostic["session_id"] == "" {
+		if id := diagnosticSessionID(diagnosticOutput); id != "" {
+			diagnostic["session_id"] = id
+		}
+	}
+	if len(bytes.TrimSpace(diagnosticOutput)) > 0 {
+		diagnostic["diagnostics"] = string(bytes.TrimSpace(diagnosticOutput))
 	}
 	data, marshalErr := json.Marshal(diagnostic)
 	if marshalErr != nil {
@@ -371,4 +470,59 @@ func mcpToolError(err error, raw []byte) *mcpsdk.CallToolResult {
 		IsError: true,
 		Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: string(data)}},
 	}
+}
+
+func resultObject(raw []byte) (map[string]json.RawMessage, bool) {
+	var result map[string]json.RawMessage
+	if json.Unmarshal(raw, &result) != nil || result == nil {
+		return nil, false
+	}
+	return result, true
+}
+
+func resultSessionID(result map[string]json.RawMessage) string {
+	var id string
+	if json.Unmarshal(result["session_id"], &id) == nil {
+		return id
+	}
+	return ""
+}
+
+func resultCoverage(result map[string]json.RawMessage) json.RawMessage {
+	if coverage, ok := result["coverage"]; ok {
+		return coverage
+	}
+	var manifest map[string]json.RawMessage
+	if json.Unmarshal(result["manifest"], &manifest) == nil {
+		if coverage, ok := manifest["coverage"]; ok {
+			return coverage
+		}
+	}
+	return nil
+}
+
+func coverageIsResumable(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var coverage map[string][]json.RawMessage
+	if json.Unmarshal(raw, &coverage) != nil {
+		return false
+	}
+	return len(coverage["completed"]) > 0 || len(coverage["reused"]) > 0
+}
+
+func diagnosticSessionID(raw []byte) string {
+	const marker = "[ocr] Session:"
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, marker) {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, marker)))
+		if len(fields) > 0 {
+			return fields[0]
+		}
+	}
+	return ""
 }

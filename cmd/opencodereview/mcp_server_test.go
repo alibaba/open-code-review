@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +13,8 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestOCRMCPServerListsOnlyOCRReview(t *testing.T) {
-	cs, stop := connectTestOCRServer(t, func(_ context.Context, _ reviewOptions, out io.Writer, _ llmloop.ProgressFunc, _ *reviewWatchdog) error {
+func TestOCRMCPServerListsReviewTool(t *testing.T) {
+	cs, stop := connectTestOCRServer(t, func(_ context.Context, _ reviewOptions, out, _ io.Writer, _ llmloop.ProgressFunc, _ reviewStageFunc, _ *reviewWatchdog) error {
 		_, _ = io.WriteString(out, `{"status":"success"}`)
 		return nil
 	})
@@ -23,13 +24,25 @@ func TestOCRMCPServerListsOnlyOCRReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(result.Tools) != 1 || result.Tools[0].Name != "ocr_review" {
-		t.Fatalf("tools = %#v, want only ocr_review", result.Tools)
+	names := make([]string, 0, len(result.Tools))
+	var reviewTool *mcpsdk.Tool
+	for _, tool := range result.Tools {
+		names = append(names, tool.Name)
+		if tool.Name == mcpReviewToolName {
+			reviewTool = tool
+		}
+	}
+	sort.Strings(names)
+	if got := strings.Join(names, ","); got != "ocr_review" {
+		t.Fatalf("tools = %#v, want ocr_review", names)
+	}
+	if reviewTool == nil {
+		t.Fatal("ocr_review tool is missing")
 	}
 
-	schema, ok := result.Tools[0].InputSchema.(map[string]any)
+	schema, ok := reviewTool.InputSchema.(map[string]any)
 	if !ok {
-		t.Fatalf("input schema type = %T", result.Tools[0].InputSchema)
+		t.Fatalf("input schema type = %T", reviewTool.InputSchema)
 	}
 	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
@@ -46,8 +59,11 @@ func TestOCRMCPServerListsOnlyOCRReview(t *testing.T) {
 }
 
 func TestOCRMCPReviewReturnsToolErrorWithSession(t *testing.T) {
-	cs, stop := connectTestOCRServer(t, func(_ context.Context, _ reviewOptions, out io.Writer, _ llmloop.ProgressFunc, _ *reviewWatchdog) error {
-		_, _ = io.WriteString(out, `{"status":"failed","session_id":"session-123"}`)
+	cs, stop := connectTestOCRServer(t, func(_ context.Context, _ reviewOptions, out, diagnostic io.Writer, progress llmloop.ProgressFunc, stage reviewStageFunc, _ *reviewWatchdog) error {
+		stage("agent_run", "pkg/a.go")
+		progress(llmloop.ProgressEvent{Phase: "llm_response", Path: "pkg/a.go"})
+		_, _ = io.WriteString(out, `{"status":"partial","session_id":"session-123","manifest":{"coverage":{"completed":[{"path":"pkg/a.go"}]}}}`)
+		_, _ = io.WriteString(diagnostic, "[ocr] Session: session-123 (retry with: --resume session-123)\n")
 		return errors.New("review failed: context canceled")
 	})
 	defer stop()
@@ -63,13 +79,43 @@ func TestOCRMCPReviewReturnsToolErrorWithSession(t *testing.T) {
 		t.Fatal("expected IsError=true")
 	}
 	text := toolText(result)
-	if !strings.Contains(text, "session-123") || !strings.Contains(text, "context canceled") {
-		t.Fatalf("tool error = %q", text)
+	for _, want := range []string{
+		`"error_type":"runner_error"`,
+		`"stage":"llm_response"`,
+		`"path":"pkg/a.go"`,
+		`"last_progress_at":`,
+		`"partial_result":`,
+		`"coverage":`,
+		`"session_id":"session-123"`,
+		`"resumable":true`,
+		`"diagnostics":`,
+		"context canceled",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("tool error missing %q: %s", want, text)
+		}
+	}
+}
+
+func TestMCPPersistenceFailureIsNotResumable(t *testing.T) {
+	result := mcpToolErrorWithDetails(
+		errors.New("finalize session: write session_end"),
+		[]byte(`{"status":"partial","session_id":"session-123","manifest":{"coverage":{"completed":[{"path":"pkg/a.go"}]}}}`),
+		mcpErrorPersistence,
+		reviewDiagnosticSnapshot{},
+		nil,
+	)
+	text := toolText(result)
+	if !strings.Contains(text, `"error_type":"persistence_error"`) {
+		t.Fatalf("error type = %s", text)
+	}
+	if !strings.Contains(text, `"resumable":false`) {
+		t.Fatalf("persistence failure must not be resumable: %s", text)
 	}
 }
 
 func TestOCRMCPReviewRejectsUnknownInput(t *testing.T) {
-	cs, stop := connectTestOCRServer(t, func(_ context.Context, _ reviewOptions, _ io.Writer, _ llmloop.ProgressFunc, _ *reviewWatchdog) error {
+	cs, stop := connectTestOCRServer(t, func(_ context.Context, _ reviewOptions, _ io.Writer, _ io.Writer, _ llmloop.ProgressFunc, _ reviewStageFunc, _ *reviewWatchdog) error {
 		t.Fatal("runner must not run for invalid input")
 		return nil
 	})
@@ -90,7 +136,7 @@ func TestOCRMCPReviewRejectsUnknownInput(t *testing.T) {
 func TestOCRMCPReviewRejectsConcurrentCall(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
-	cs, stop := connectTestOCRServer(t, func(_ context.Context, _ reviewOptions, out io.Writer, _ llmloop.ProgressFunc, _ *reviewWatchdog) error {
+	cs, stop := connectTestOCRServer(t, func(_ context.Context, _ reviewOptions, out, _ io.Writer, _ llmloop.ProgressFunc, _ reviewStageFunc, _ *reviewWatchdog) error {
 		close(started)
 		<-release
 		_, _ = io.WriteString(out, `{"status":"success"}`)

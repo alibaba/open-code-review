@@ -3,9 +3,9 @@ name: code-review
 description: Review changes since a fixed point with the synchronous OpenCodeReview (OCR) MCP tool. Use when the user wants to review a branch, PR, commit, or work-in-progress changes.
 ---
 
-Review the diff between `HEAD` and a fixed point supplied by the user with one blocking `ocr_review` MCP call from `ocr-mcp-server`. The call returns only after OCR reaches a terminal result. Keep the fixed point and any available task, repository, or business context as inputs, then return OCR's native review output without imposing an additional report structure or claiming coverage beyond OCR's result.
+Review the diff between `HEAD` and a fixed point supplied by the user with one blocking `ocr_review` MCP call from `ocr-mcp-server`. The MCP server owns a fixed 30-minute review deadline; the host allows 31 minutes so the server can return a terminal timeout result. The call returns only after OCR reaches a terminal result. Keep the fixed point and any available task, repository, or business context as inputs, then return OCR's native review output without imposing an additional report structure or claiming coverage beyond OCR's result.
 
-Do not run `ocr review`, spawn review sub-agents, inspect progress events, or poll for completion. If the MCP tool is unavailable, report the integration error instead of falling back to the CLI.
+Do not run `ocr review`, spawn review sub-agents, inspect progress events, or poll for completion. Do not terminate a running MCP call because it has produced no intermediate output; wait for the terminal result. If the host interrupts the call, report that interruption as an integration failure rather than treating it as a review result. If the MCP tool is unavailable, report the integration error instead of falling back to the CLI.
 
 The issue tracker should have been provided to you — run `/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing.
 
@@ -55,11 +55,11 @@ Call the `ocr_review` tool exposed by `ocr-mcp-server` exactly once for the vali
 
 When reviewing a single commit rather than a range, use `commit` instead of `from`/`to`. The MCP server resolves the current Git worktree; do not pass a `repo` or `worktree` argument.
 
-The MCP call is synchronous: wait for its returned result in the same call. Do not retry automatically or issue a status/session-polling call. If a failed commit/range review returns a resumable session ID and the user explicitly requests resume, make one explicit follow-up `ocr_review` call with the same target and `resume` value.
+The MCP call is synchronous: wait for its returned result in the same call. Do not retry automatically or issue a status/session-polling call. The server returns terminal failures with `error_type`, `stage`, `last_progress_at`, `path`, `partial_result`, `coverage`, `session_id`, and `resumable` fields. If a failed commit/range review returns `resumable: true` and the user explicitly requests resume, make one explicit follow-up `ocr_review` call with the same target and `resume` value.
 
 ### 4. Return the OCR result
 
-Return OCR's native result with its own `status`, `summary`, `comments`, `warnings`, and optional session or manifest fields. Preserve each finding's path, line range, category, severity, content, and suggestion when present.
+Return OCR's native result with its own `status`, `summary`, `comments`, `warnings`, and optional session or manifest fields. On failure, preserve the terminal error wrapper and its partial result, coverage, diagnostics, and resumability metadata. Preserve each finding's path, line range, category, severity, content, and suggestion when present.
 
 When handing findings back to `/implement`, carry the original task source path or task-context summary alongside the OCR result. The OCR result alone is not a substitute for the original task requirements.
 
@@ -70,5 +70,5 @@ Do not add a second report structure or assert coverage beyond OCR's result. If 
 After OCR finishes, verify:
 
 1. The MCP call returned a terminal result rather than an intermediate progress event.
-2. The result contains comments, or explicitly reports that no comments were generated.
-3. Any warnings, partial coverage, failure reason, or resumable session ID are preserved in the handoff.
+2. A successful result contains comments, or explicitly reports that no comments were generated.
+3. A failure contains its stable `error_type` and preserves warnings, partial coverage, failure reason, and resumability metadata.
