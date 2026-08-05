@@ -280,4 +280,17 @@ func TestParseScanFlags_IntFlags(t *testing.T) {
 	if opts.maxTokensBudget != 100000 {
 		t.Errorf("maxTokensBudget = %d", opts.maxTokensBudget)
 	}
+	if !opts.maxTokensBudgetSet {
+		t.Error("provided --max-tokens-budget must be marked explicit")
+	}
+}
+
+func TestParseScanFlags_ExplicitZeroBudgetIsUnlimited(t *testing.T) {
+	opts, err := parseScanFlags([]string{"--max-tokens-budget", "0"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.maxTokensBudgetSet || opts.maxTokensBudget != 0 {
+		t.Errorf("explicit zero budget = value %d, explicit %v; want 0, true", opts.maxTokensBudget, opts.maxTokensBudgetSet)
+	}
 }

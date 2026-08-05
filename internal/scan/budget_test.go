@@ -120,6 +120,9 @@ func TestBudgetGate_StopsBeforeExceeding(t *testing.T) {
 	if !found {
 		t.Error("expected a token_budget_reached warning")
 	}
+	if !a.BudgetExceeded() {
+		t.Error("BudgetExceeded() = false, want true after the budget gate trips")
+	}
 }
 
 // TestBudgetGate_Unlimited verifies MaxTokensBudget=0 runs every file.
@@ -145,5 +148,8 @@ func TestBudgetGate_Unlimited(t *testing.T) {
 	}
 	if calls := atomic.LoadInt64(&fake.calls); calls != 5 {
 		t.Errorf("unlimited budget should run all 5 files, ran %d", calls)
+	}
+	if a.BudgetExceeded() {
+		t.Error("BudgetExceeded() = true, want false for unlimited budget")
 	}
 }

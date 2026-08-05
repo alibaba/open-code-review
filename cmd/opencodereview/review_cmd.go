@@ -27,26 +27,27 @@ import (
 )
 
 type reviewOptions struct {
-	toolConfigPath  string
-	rulePath        string
-	repoDir         string
-	from            string
-	to              string
-	commit          string
-	resume          string
-	excludes        string
-	outputFormat    string
-	audience        string
-	background      string
-	backgroundFile  string
-	provider        string
-	model           string
-	concurrency     int
-	perFileTimeout  int
-	maxTools        int
-	maxGitProcs     int
-	maxTokensBudget int
-	preview         bool
+	toolConfigPath     string
+	rulePath           string
+	repoDir            string
+	from               string
+	to                 string
+	commit             string
+	resume             string
+	excludes           string
+	outputFormat       string
+	audience           string
+	background         string
+	backgroundFile     string
+	provider           string
+	model              string
+	concurrency        int
+	perFileTimeout     int
+	maxTools           int
+	maxGitProcs        int
+	maxTokensBudget    int
+	maxTokensBudgetSet bool
+	preview            bool
 }
 
 var reviewOpts reviewOptions
@@ -92,10 +93,12 @@ var reviewCmd = &cobra.Command{
   ocr review --background-file ./docs/requirements.md
   ocr review --background "Focus on auth" --background-file ./docs/requirements.md`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateReviewOptions(&reviewOpts); err != nil {
+		opts := reviewOpts
+		opts.maxTokensBudgetSet = cmd.Flags().Changed("max-tokens-budget")
+		if err := validateReviewOptions(&opts); err != nil {
 			return err
 		}
-		return executeReview(reviewOpts)
+		return executeReview(opts)
 	},
 }
 
@@ -205,30 +208,31 @@ func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outp
 	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
 
 	ag := agent.New(agent.Args{
-		RepoDir:               cc.RepoDir,
-		From:                  opts.from,
-		To:                    opts.to,
-		Commit:                opts.commit,
-		ReviewMode:            reviewModeFromOptions(opts),
-		Template:              *cc.Template,
-		SystemRule:            cc.Resolver,
-		FileFilter:            cc.FileFilter,
-		LLMClient:             rt.Client,
-		Tools:                 tools,
-		PlanToolDefs:          rt.PlanToolDefs,
-		MainToolDefs:          rt.MainToolDefs,
-		CommentCollector:      rt.Collector,
-		CommentWorkerPool:     agent.NewCommentWorkerPool(opts.concurrency),
-		MaxConcurrency:        opts.concurrency,
-		ConcurrentTaskTimeout: opts.perFileTimeout,
-		Model:                 rt.Model,
-		Provider:              rt.Provider,
-		Background:            opts.background,
-		GitRunner:             cc.GitRunner,
-		Resume:                resumeState,
-		MaxTokensBudget:       int64(opts.maxTokensBudget),
-		RuntimeConfig:         rt.RuntimeConfig,
-		Progress:              progress,
+		RepoDir:                 cc.RepoDir,
+		From:                    opts.from,
+		To:                      opts.to,
+		Commit:                  opts.commit,
+		ReviewMode:              reviewModeFromOptions(opts),
+		Template:                *cc.Template,
+		SystemRule:              cc.Resolver,
+		FileFilter:              cc.FileFilter,
+		LLMClient:               rt.Client,
+		Tools:                   tools,
+		PlanToolDefs:            rt.PlanToolDefs,
+		MainToolDefs:            rt.MainToolDefs,
+		CommentCollector:        rt.Collector,
+		CommentWorkerPool:       agent.NewCommentWorkerPool(opts.concurrency),
+		MaxConcurrency:          opts.concurrency,
+		ConcurrentTaskTimeout:   opts.perFileTimeout,
+		Model:                   rt.Model,
+		Provider:                rt.Provider,
+		Background:              opts.background,
+		GitRunner:               cc.GitRunner,
+		Resume:                  resumeState,
+		MaxTokensBudget:         int64(opts.maxTokensBudget),
+		MaxTokensBudgetExplicit: opts.maxTokensBudgetSet,
+		RuntimeConfig:           rt.RuntimeConfig,
+		Progress:                progress,
 	})
 
 	// Silence progress output during execution; restored before the trace

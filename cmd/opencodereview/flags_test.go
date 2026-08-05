@@ -109,7 +109,10 @@ func TestParseReviewFlags_BudgetFlagsDefaultZero(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if opts.maxTokensBudget != 0 {
-		t.Errorf("maxTokensBudget = %d, want 0 (default unlimited)", opts.maxTokensBudget)
+		t.Errorf("maxTokensBudget = %d, want 0 before template default resolution", opts.maxTokensBudget)
+	}
+	if opts.maxTokensBudgetSet {
+		t.Error("omitted --max-tokens-budget must not be marked explicit")
 	}
 }
 
@@ -120,6 +123,19 @@ func TestParseReviewFlags_BudgetFlagsParsed(t *testing.T) {
 	}
 	if opts.maxTokensBudget != 120000 {
 		t.Errorf("maxTokensBudget = %d, want 120000", opts.maxTokensBudget)
+	}
+	if !opts.maxTokensBudgetSet {
+		t.Error("provided --max-tokens-budget must be marked explicit")
+	}
+}
+
+func TestParseReviewFlags_ExplicitZeroBudgetIsUnlimited(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--max-tokens-budget", "0"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.maxTokensBudgetSet || opts.maxTokensBudget != 0 {
+		t.Errorf("explicit zero budget = value %d, explicit %v; want 0, true", opts.maxTokensBudget, opts.maxTokensBudgetSet)
 	}
 }
 

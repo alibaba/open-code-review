@@ -728,6 +728,10 @@ func TestDispatchSubtasks_AllFailed(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "failed") {
 		t.Errorf("expected all-failed error, got: %v", err)
 	}
+	warnings := a.Warnings()
+	if len(warnings) != 1 || warnings[0].Type != "scan_subtask_timeout" || warnings[0].Message != "file review exceeded its time limit" {
+		t.Fatalf("warnings = %+v, want one classified timeout", warnings)
+	}
 }
 
 func TestDispatchSubtasks_WithoutTaskDoneIsAllFailed(t *testing.T) {

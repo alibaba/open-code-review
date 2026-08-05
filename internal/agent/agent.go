@@ -136,8 +136,10 @@ type Args struct {
 
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
 	// whole run; dispatch stops once the running total + a per-file look-ahead
-	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
-	MaxTokensBudget int64
+	// would exceed it. An omitted CLI flag is resolved from the template
+	// multiplier; an explicitly supplied 0 remains unlimited.
+	MaxTokensBudget         int64
+	MaxTokensBudgetExplicit bool
 
 	// RuntimeConfig carries the non-secret, allowlisted runtime settings that
 	// identify how this run was configured, for the manifest's
@@ -301,10 +303,23 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		return []model.LlmComment{}, nil
 	}
 
+	est := estimateDiffCost(a.diffs)
+	a.args.MaxTokensBudget = template.ResolveTokenBudget(
+		est.TotalTokens,
+		a.args.MaxTokensBudget,
+		a.args.MaxTokensBudgetExplicit,
+		a.args.Template.MaxTokensBudgetMultiplier,
+	)
+
 	a.currentDate = time.Now().Format("2006-01-02 15:04")
 	telemetry.Event(ctx, "review.started",
 		telemetry.AnyToAttr("file.count", totalChanged),
 		telemetry.AnyToAttr("review.count", reviewCount),
+		telemetry.AnyToAttr("est.total.tokens", est.TotalTokens),
+		telemetry.AnyToAttr("token.budget", a.args.MaxTokensBudget),
+		telemetry.AnyToAttr("token.budget.multiplier", a.args.Template.MaxTokensBudgetMultiplier),
+		telemetry.AnyToAttr("max.tool.rounds", a.args.Template.MaxToolRequestTimes),
+		telemetry.AnyToAttr("timeout.minutes", a.args.ConcurrentTaskTimeout),
 		telemetry.AnyToAttr("repo.dir", a.args.RepoDir))
 
 	// Record file count metric.
@@ -315,12 +330,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// account for agent tool-use inflation, so it is a floor; real usage is
 	// reported from the API after the run.
 	//
-	// Gated behind MaxTokensBudget so users who never opt into a budget see no
-	// new output line (the estimate is only useful to budget-setters comparing
-	// projected cost against their cap). Keeps the prior text-mode output
-	// unchanged for the common unlimited path.
 	if a.args.MaxTokensBudget > 0 {
-		est := estimateDiffCost(a.diffs)
 		fmt.Fprintf(stdout.Writer(), "[ocr] estimated cost: %s\n", est)
 		fmt.Fprintf(stdout.Writer(), "[ocr] token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
 		if est.TotalTokens > a.args.MaxTokensBudget {
@@ -908,6 +918,9 @@ func (a *Agent) runtimeConfigSHA256() string {
 		"timeout", r.Timeout.String(),
 		"concurrency", strconv.Itoa(a.args.MaxConcurrency),
 		"max_tokens_budget", strconv.FormatInt(a.args.MaxTokensBudget, 10),
+		"max_tokens_budget_explicit", strconv.FormatBool(a.args.MaxTokensBudgetExplicit),
+		"max_tokens_budget_multiplier", strconv.FormatFloat(a.args.Template.MaxTokensBudgetMultiplier, 'f', -1, 64),
+		"max_tool_request_times", strconv.Itoa(a.args.Template.MaxToolRequestTimes),
 	)
 }
 

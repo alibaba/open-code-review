@@ -23,27 +23,28 @@ import (
 )
 
 type scanOptions struct {
-	toolConfigPath  string
-	rulePath        string
-	repoDir         string
-	paths           string
-	excludes        string
-	outputFormat    string
-	audience        string
-	background      string
-	concurrency     int
-	perFileTimeout  int
-	maxTools        int
-	maxGitProcs     int
-	preview         bool
-	noPlan          bool
-	noDedup         bool
-	noSummary       bool
-	batch           string
-	maxTokensBudget int
-	provider        string
-	model           string
-	resume          string
+	toolConfigPath     string
+	rulePath           string
+	repoDir            string
+	paths              string
+	excludes           string
+	outputFormat       string
+	audience           string
+	background         string
+	concurrency        int
+	perFileTimeout     int
+	maxTools           int
+	maxGitProcs        int
+	preview            bool
+	noPlan             bool
+	noDedup            bool
+	noSummary          bool
+	batch              string
+	maxTokensBudget    int
+	maxTokensBudgetSet bool
+	provider           string
+	model              string
+	resume             string
 }
 
 var scanOpts scanOptions
@@ -78,10 +79,12 @@ var scanCmd = &cobra.Command{
   # Resume a previous full-file scan
   ocr scan --resume <session-id>`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := validateScanOptions(&scanOpts); err != nil {
+		opts := scanOpts
+		opts.maxTokensBudgetSet = cmd.Flags().Changed("max-tokens-budget")
+		if err := validateScanOptions(&opts); err != nil {
 			return err
 		}
-		return executeScan(scanOpts)
+		return executeScan(opts)
 	},
 }
 
@@ -177,27 +180,28 @@ func executeScan(opts scanOptions) error {
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
 	ag := scan.NewAgent(scan.Args{
-		RepoDir:               cc.RepoDir,
-		Paths:                 scanPaths,
-		Template:              *scanTpl,
-		SystemRule:            cc.Resolver,
-		FileFilter:            cc.FileFilter,
-		LLMClient:             rt.Client,
-		Tools:                 tools,
-		MainToolDefs:          scanToolDefs,
-		CommentCollector:      rt.Collector,
-		CommentWorkerPool:     llmloop.NewCommentWorkerPool(opts.concurrency),
-		MaxConcurrency:        opts.concurrency,
-		ConcurrentTaskTimeout: opts.perFileTimeout,
-		Model:                 rt.Model,
-		Background:            opts.background,
-		GitRunner:             cc.GitRunner,
-		MaxFileSizeBytes:      scanTpl.MaxFileSizeBytes,
-		MaxTokensBudget:       budget,
-		SkipPlan:              opts.noPlan,
-		SkipDedup:             opts.noDedup,
-		SkipSummary:           opts.noSummary,
-		Resume:                resumeState,
+		RepoDir:                 cc.RepoDir,
+		Paths:                   scanPaths,
+		Template:                *scanTpl,
+		SystemRule:              cc.Resolver,
+		FileFilter:              cc.FileFilter,
+		LLMClient:               rt.Client,
+		Tools:                   tools,
+		MainToolDefs:            scanToolDefs,
+		CommentCollector:        rt.Collector,
+		CommentWorkerPool:       llmloop.NewCommentWorkerPool(opts.concurrency),
+		MaxConcurrency:          opts.concurrency,
+		ConcurrentTaskTimeout:   opts.perFileTimeout,
+		Model:                   rt.Model,
+		Background:              opts.background,
+		GitRunner:               cc.GitRunner,
+		MaxFileSizeBytes:        scanTpl.MaxFileSizeBytes,
+		MaxTokensBudget:         budget,
+		SkipPlan:                opts.noPlan,
+		SkipDedup:               opts.noDedup,
+		SkipSummary:             opts.noSummary,
+		Resume:                  resumeState,
+		MaxTokensBudgetExplicit: opts.maxTokensBudgetSet,
 	})
 
 	q := newQuietHandle(opts.outputFormat, opts.audience)

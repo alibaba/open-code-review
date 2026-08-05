@@ -29,7 +29,8 @@
       { "role": "user", "prompt_file": "re_location_task_user.md" }
     ]
   },
-  "MAX_TOOL_REQUEST_TIMES": 30,
+  "MAX_TOOL_REQUEST_TIMES": 75,
+  "MAX_TOKENS_BUDGET_MULTIPLIER": 2.5,
   "PLAN_MODE_LINE_THRESHOLD": 50,
   "MAX_TOKENS": 58888
 }

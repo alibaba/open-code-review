@@ -8,41 +8,44 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 )
 
 // Template holds the native agent task template configuration.
 // Scan-mode fields live in ScanTemplate, not here.
 type Template struct {
-	MainTask              LlmConversation  `json:"MAIN_TASK"`
-	PlanTask              *LlmConversation `json:"PLAN_TASK,omitempty"`
-	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
-	MaxTokens             int              `json:"MAX_TOKENS"`
-	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
-	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD"`
-	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
-	ReviewFilterTask      *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	MainTask                  LlmConversation  `json:"MAIN_TASK"`
+	PlanTask                  *LlmConversation `json:"PLAN_TASK,omitempty"`
+	MemoryCompressionTask     LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
+	MaxTokens                 int              `json:"MAX_TOKENS"`
+	MaxToolRequestTimes       int              `json:"MAX_TOOL_REQUEST_TIMES"`
+	MaxTokensBudgetMultiplier float64          `json:"MAX_TOKENS_BUDGET_MULTIPLIER,omitempty"`
+	PlanModeLineThreshold     int              `json:"PLAN_MODE_LINE_THRESHOLD"`
+	ReLocationTask            *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
+	ReviewFilterTask          *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 }
 
 // ScanTemplate holds the full-file scan task template configuration loaded
 // from scan_template.json. Kept entirely separate from Template so the two
 // pipelines can evolve their prompts and budgets independently.
 type ScanTemplate struct {
-	MainTask              LlmConversation  `json:"MAIN_TASK"`
-	PlanTask              *LlmConversation `json:"PLAN_TASK,omitempty"`
-	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
-	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
-	MaxTokens             int              `json:"MAX_TOKENS"`
-	ToolRequestWaitTimeMs int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
-	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
-	MaxSubtaskExecMinutes int              `json:"MAX_SUBTASK_EXECUTION_TIME_MINUTES"`
-	MaxFileSizeBytes      int64            `json:"MAX_FILE_SIZE_BYTES,omitempty"`
-	MaxTokensBudget       int64            `json:"MAX_TOKENS_BUDGET,omitempty"`
-	BatchStrategy         string           `json:"BATCH_STRATEGY,omitempty"`
-	BatchSize             int              `json:"BATCH_SIZE,omitempty"`
-	DedupTask             *LlmConversation `json:"DEDUP_TASK,omitempty"`
-	DedupMinComments      int              `json:"DEDUP_MIN_COMMENTS,omitempty"`
-	ProjectSummaryTask    *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
+	MainTask                  LlmConversation  `json:"MAIN_TASK"`
+	PlanTask                  *LlmConversation `json:"PLAN_TASK,omitempty"`
+	MemoryCompressionTask     LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
+	ReLocationTask            *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
+	MaxTokens                 int              `json:"MAX_TOKENS"`
+	ToolRequestWaitTimeMs     int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
+	MaxToolRequestTimes       int              `json:"MAX_TOOL_REQUEST_TIMES"`
+	MaxTokensBudgetMultiplier float64          `json:"MAX_TOKENS_BUDGET_MULTIPLIER,omitempty"`
+	MaxSubtaskExecMinutes     int              `json:"MAX_SUBTASK_EXECUTION_TIME_MINUTES"`
+	MaxFileSizeBytes          int64            `json:"MAX_FILE_SIZE_BYTES,omitempty"`
+	MaxTokensBudget           int64            `json:"MAX_TOKENS_BUDGET,omitempty"`
+	BatchStrategy             string           `json:"BATCH_STRATEGY,omitempty"`
+	BatchSize                 int              `json:"BATCH_SIZE,omitempty"`
+	DedupTask                 *LlmConversation `json:"DEDUP_TASK,omitempty"`
+	DedupMinComments          int              `json:"DEDUP_MIN_COMMENTS,omitempty"`
+	ProjectSummaryTask        *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
 }
 
 //go:embed task_template.json prompts/*
@@ -61,14 +64,15 @@ type manifestConversation struct {
 }
 
 type templateManifest struct {
-	MainTask              manifestConversation  `json:"MAIN_TASK"`
-	PlanTask              *manifestConversation `json:"PLAN_TASK,omitempty"`
-	MemoryCompressionTask manifestConversation  `json:"MEMORY_COMPRESSION_TASK"`
-	MaxTokens             int                   `json:"MAX_TOKENS"`
-	MaxToolRequestTimes   int                   `json:"MAX_TOOL_REQUEST_TIMES"`
-	PlanModeLineThreshold int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
-	ReLocationTask        *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
-	ReviewFilterTask      *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	MainTask                  manifestConversation  `json:"MAIN_TASK"`
+	PlanTask                  *manifestConversation `json:"PLAN_TASK,omitempty"`
+	MemoryCompressionTask     manifestConversation  `json:"MEMORY_COMPRESSION_TASK"`
+	MaxTokens                 int                   `json:"MAX_TOKENS"`
+	MaxToolRequestTimes       int                   `json:"MAX_TOOL_REQUEST_TIMES"`
+	MaxTokensBudgetMultiplier float64               `json:"MAX_TOKENS_BUDGET_MULTIPLIER,omitempty"`
+	PlanModeLineThreshold     int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
+	ReLocationTask            *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
+	ReviewFilterTask          *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 }
 
 func resolveConversation(m manifestConversation) (LlmConversation, error) {
@@ -112,6 +116,7 @@ func LoadDefault() (*Template, error) {
 	var tpl Template
 	tpl.MaxTokens = m.MaxTokens
 	tpl.MaxToolRequestTimes = m.MaxToolRequestTimes
+	tpl.MaxTokensBudgetMultiplier = m.MaxTokensBudgetMultiplier
 	tpl.PlanModeLineThreshold = m.PlanModeLineThreshold
 
 	if tpl.MainTask, err = resolveConversation(m.MainTask); err != nil {
@@ -194,6 +199,9 @@ func (t *Template) Validate() error {
 	if t.MaxToolRequestTimes <= 0 {
 		return fmt.Errorf("max_tool_request_times must be positive")
 	}
+	if t.MaxTokensBudgetMultiplier < 0 {
+		return fmt.Errorf("max_tokens_budget_multiplier must be non-negative")
+	}
 	if len(t.MainTask.Messages) == 0 {
 		return fmt.Errorf("main_task.messages must not be empty")
 	}
@@ -208,10 +216,25 @@ func (t *ScanTemplate) Validate() error {
 	if t.MaxToolRequestTimes <= 0 {
 		return fmt.Errorf("scan: max_tool_request_times must be positive")
 	}
+	if t.MaxTokensBudgetMultiplier < 0 {
+		return fmt.Errorf("scan: max_tokens_budget_multiplier must be non-negative")
+	}
 	if len(t.MainTask.Messages) == 0 {
 		return fmt.Errorf("scan: main_task.messages must not be empty")
 	}
 	return nil
+}
+
+// ResolveTokenBudget preserves explicit CLI semantics while deriving the
+// omitted default from the estimated run cost.
+func ResolveTokenBudget(estimated, configured int64, explicitlySet bool, multiplier float64) int64 {
+	if explicitlySet || configured > 0 {
+		return configured
+	}
+	if estimated <= 0 || multiplier <= 0 {
+		return 0
+	}
+	return int64(math.Ceil(float64(estimated) * multiplier))
 }
 
 // LlmConversation is a preset prompt with settings.

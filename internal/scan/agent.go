@@ -73,9 +73,10 @@ type Args struct {
 	SkipSummary bool
 	// MaxTokensBudget, when > 0, caps total token usage (input+output, as
 	// reported by the API). Once the running total exceeds it, no further
-	// batches are dispatched. 0 = unlimited. Set via --max-tokens-budget
-	// or ScanTemplate.MaxTokensBudget.
-	MaxTokensBudget int64
+	// batches are dispatched. An omitted CLI flag is resolved from the template
+	// multiplier; an explicitly supplied 0 remains unlimited.
+	MaxTokensBudget         int64
+	MaxTokensBudgetExplicit bool
 }
 
 // planEnabled / dedupEnabled / summaryEnabled report whether each optional
@@ -106,6 +107,7 @@ type Agent struct {
 	resumeInfo       *session.ResumeInfo
 	scanFingerprints map[string]string
 	projectSummary   string // populated post-run by maybeRunProjectSummary
+	budgetExceeded   bool
 }
 
 // ProjectSummary returns the markdown project-level summary produced after
@@ -219,13 +221,9 @@ func (a *Agent) Warnings() []llmloop.AgentWarning { return a.runner.Warnings() }
 // ToolCalls returns per-tool call counts accumulated during scan.
 func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 
-// BudgetExceeded always returns false for scan. Scan self-limits via its own
-// token budget gate and MaxToolRequestTimes; the typed budget_exceeded status
-// and tool-call-budget plumbing are diff-review-path features (see
-// internal/agent). This method exists only so *scan.Agent satisfies the
-// cmd/opencodereview.ResultProvider interface, keeping scan's JSON output
-// unchanged (status stays success / completed_with_*).
-func (a *Agent) BudgetExceeded() bool { return false }
+// BudgetExceeded reports whether scan stopped dispatching because its
+// aggregate token budget was reached.
+func (a *Agent) BudgetExceeded() bool { return a != nil && a.budgetExceeded }
 
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
@@ -336,6 +334,12 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 
 	// Pre-run cost projection so users aren't surprised by a large scan.
 	est := estimateCost(a.items, a.planEnabled(), a.dedupEnabled(), a.summaryEnabled())
+	a.args.MaxTokensBudget = template.ResolveTokenBudget(
+		est.TotalTokens,
+		a.args.MaxTokensBudget,
+		a.args.MaxTokensBudgetExplicit,
+		a.args.Template.MaxTokensBudgetMultiplier,
+	)
 	fmt.Fprintf(stdout.Writer(), "[ocr] estimated cost: %s\n", est)
 	if a.args.MaxTokensBudget > 0 {
 		fmt.Fprintf(stdout.Writer(), "[ocr] token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
@@ -350,6 +354,10 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		telemetry.AnyToAttr("file.count", totalDiscovered),
 		telemetry.AnyToAttr("review.count", reviewable),
 		telemetry.AnyToAttr("est.total.tokens", est.TotalTokens),
+		telemetry.AnyToAttr("token.budget", a.args.MaxTokensBudget),
+		telemetry.AnyToAttr("token.budget.multiplier", a.args.Template.MaxTokensBudgetMultiplier),
+		telemetry.AnyToAttr("max.tool.rounds", a.args.Template.MaxToolRequestTimes),
+		telemetry.AnyToAttr("timeout.minutes", a.args.ConcurrentTaskTimeout),
 		telemetry.AnyToAttr("repo.dir", a.args.RepoDir))
 	telemetry.RecordFilesReviewed(ctx, int64(reviewable))
 
@@ -524,12 +532,14 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 		n, budgetHit, err := a.dispatchBatch(ctx, bi, batch)
 		dispatched += n
+		if budgetHit {
+			a.budgetExceeded = true
+		}
 		if err != nil {
 			// ctx cancelled mid-batch: stop scheduling further batches but
 			// still return whatever we've collected so far.
 			return a.args.CommentCollector.Comments(), err
 		}
-
 		// Drain async comment workers BEFORE dedup so all of this batch's
 		// comments are visible. recordCompleted has its own Await for
 		// checkpoint correctness; this one keeps the dedup input complete.
@@ -655,12 +665,20 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 			completedOK, skipReason, err := a.executeSubtask(fileCtx, it)
 			if err != nil {
 				atomic.AddInt64(&a.subtaskFailed, 1)
-				a.session.RecordReviewItemFailed(it.Path, it.Path, it.Path, fingerprint, err.Error())
+				reason := err.Error()
+				warningType := "scan_subtask_error"
+				eventName := "scan.subtask.error"
+				if errors.Is(err, context.DeadlineExceeded) {
+					reason = "file review exceeded its time limit"
+					warningType = "scan_subtask_timeout"
+					eventName = "scan.subtask.timeout"
+				}
+				a.session.RecordReviewItemFailed(it.Path, it.Path, it.Path, fingerprint, reason)
 				fmt.Fprintf(stdout.Writer(), "[ocr] Scan subtask error for %s (batch #%d): %v\n", it.Path, batchIdx, err)
-				telemetry.ErrorEvent(fileCtx, "scan.subtask.error", err,
+				telemetry.ErrorEvent(fileCtx, eventName, err,
 					telemetry.AnyToAttr("file.path", it.Path),
 					telemetry.AnyToAttr("batch.index", batchIdx))
-				a.recordWarning("scan_subtask_error", it.Path, err.Error())
+				a.recordWarning(warningType, it.Path, reason)
 				return
 			}
 			if !completedOK {

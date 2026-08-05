@@ -13,8 +13,11 @@ func TestLoadScanDefault_BudgetParsed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadScanDefault: %v", err)
 	}
-	if tpl.MaxToolRequestTimes < 60 {
-		t.Errorf("scan MaxToolRequestTimes(%d) should be >= 60", tpl.MaxToolRequestTimes)
+	if tpl.MaxToolRequestTimes != 150 {
+		t.Errorf("scan MaxToolRequestTimes = %d, want 150", tpl.MaxToolRequestTimes)
+	}
+	if tpl.MaxTokensBudgetMultiplier != 2.5 {
+		t.Errorf("scan MaxTokensBudgetMultiplier = %v, want 2.5", tpl.MaxTokensBudgetMultiplier)
 	}
 	if len(tpl.MainTask.Messages) == 0 {
 		t.Fatal("scan MainTask must be populated from the embedded scan_template.json")
@@ -83,8 +86,11 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	if tpl.MaxTokens != 58888 {
 		t.Errorf("MaxTokens = %d, want 58888", tpl.MaxTokens)
 	}
-	if tpl.MaxToolRequestTimes != 30 {
-		t.Errorf("MaxToolRequestTimes = %d, want 30", tpl.MaxToolRequestTimes)
+	if tpl.MaxToolRequestTimes != 75 {
+		t.Errorf("MaxToolRequestTimes = %d, want 75", tpl.MaxToolRequestTimes)
+	}
+	if tpl.MaxTokensBudgetMultiplier != 2.5 {
+		t.Errorf("MaxTokensBudgetMultiplier = %v, want 2.5", tpl.MaxTokensBudgetMultiplier)
 	}
 	if tpl.PlanModeLineThreshold != 50 {
 		t.Errorf("PlanModeLineThreshold = %d, want 50", tpl.PlanModeLineThreshold)
@@ -187,6 +193,11 @@ func TestValidate_Template_Errors(t *testing.T) {
 			tpl:     Template{MaxTokens: 100, MaxToolRequestTimes: 1, MainTask: LlmConversation{Messages: nil}},
 			wantErr: "main_task.messages must not be empty",
 		},
+		{
+			name:    "negative token budget multiplier",
+			tpl:     Template{MaxTokens: 100, MaxToolRequestTimes: 1, MaxTokensBudgetMultiplier: -1, MainTask: LlmConversation{Messages: []ChatMessage{{Role: "system", Content: "x"}}}},
+			wantErr: "max_tokens_budget_multiplier must be non-negative",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -231,6 +242,11 @@ func TestValidate_ScanTemplate(t *testing.T) {
 			tpl:     ScanTemplate{MaxTokens: 100, MaxToolRequestTimes: 1, MainTask: LlmConversation{Messages: nil}},
 			wantErr: "scan: main_task.messages must not be empty",
 		},
+		{
+			name:    "negative token budget multiplier",
+			tpl:     ScanTemplate{MaxTokens: 100, MaxToolRequestTimes: 1, MaxTokensBudgetMultiplier: -1, MainTask: LlmConversation{Messages: []ChatMessage{{Role: "system", Content: "x"}}}},
+			wantErr: "scan: max_tokens_budget_multiplier must be non-negative",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -252,6 +268,30 @@ func TestLoadScanDefault_Validate(t *testing.T) {
 	}
 	if err := tpl.Validate(); err != nil {
 		t.Errorf("loaded scan template should be valid: %v", err)
+	}
+}
+
+func TestResolveTokenBudget(t *testing.T) {
+	tests := []struct {
+		name       string
+		estimated  int64
+		configured int64
+		explicit   bool
+		multiplier float64
+		want       int64
+	}{
+		{name: "omitted uses multiplier", estimated: 100, multiplier: 2.5, want: 250},
+		{name: "fraction rounds up", estimated: 101, multiplier: 2.5, want: 253},
+		{name: "explicit zero stays unlimited", estimated: 100, explicit: true, multiplier: 2.5, want: 0},
+		{name: "positive override wins", estimated: 100, configured: 123, multiplier: 2.5, want: 123},
+		{name: "zero multiplier disables derived cap", estimated: 100, multiplier: 0, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveTokenBudget(tt.estimated, tt.configured, tt.explicit, tt.multiplier); got != tt.want {
+				t.Fatalf("ResolveTokenBudget() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 

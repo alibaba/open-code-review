@@ -40,6 +40,14 @@ _Avoid_: partial success, retry without a Resume session.
 The named phase and latest affected path reported with a Resumable failure to explain where the review stopped.
 _Avoid_: treating diagnostic stage data as review findings.
 
+**Tool-request round**:
+One LLM completion cycle in a file review, including the model response and any tool calls it requests before the next completion.
+_Avoid_: treating one tool call as one round.
+
+**Aggregate token budget**:
+The input-plus-output token ceiling for a complete review run; reaching it stops dispatching additional files and reports incomplete coverage.
+_Avoid_: confusing it with the per-request `MAX_TOKENS` limit or the per-file timeout.
+
 **MCP call interruption**:
 A host-side interruption that ends the request before a Review result exists; it does not prove that the review reached a terminal state.
 _Avoid_: calling every interruption a Review cancellation.
