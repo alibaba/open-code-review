@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package allowedext provides file-level filtering for code review:
 // an extension allowlist (which file types to review) and a path-based
 // exclude list (which files to skip regardless of extension).

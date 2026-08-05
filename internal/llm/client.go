@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package llm provides LLM client interfaces supporting multiple protocols.
 // Supported protocols (canonical names, see protocol.go):
 //   - "anthropic" — Anthropic Messages API

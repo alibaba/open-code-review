@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // src/extension/providers/__tests__/lineOffset.test.ts
 import { LineOffsetTracker } from '../lineOffset';
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { spawn } from "node:child_process"
 import { type Plugin, tool } from "@opencode-ai/plugin"
 

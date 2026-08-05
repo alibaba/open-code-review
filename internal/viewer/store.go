@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package viewer provides a read-only WebUI for browsing session records
 // produced by open-code-review runs. It scans JSONL files under
 // $HOME/.opencodereview/sessions/, parses them, and exposes structured data.

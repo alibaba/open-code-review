@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 document.querySelectorAll('.response-text').forEach(function(el) {
     const text = el.textContent;
     const esc = function(s) {

@@ -26,6 +26,9 @@ jobs:
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
 
+      - name: Verify license headers
+        run: bash scripts/verify-license.sh
+
       - name: Check formatting
         run: |
           unformatted="$(gofmt -s -l .)"

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package scan implements `ocr scan` — full-file code review. It owns the
 // file-enumeration provider, the per-file orchestrator, and the FULL_SCAN
 // prompt-template plumbing. Shared LLM tool-use loop / memory compression

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 /* Blog content index — imports all markdown files and provides lookup by slug + language */
 
 // English posts

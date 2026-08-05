@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package telemetry provides OpenTelemetry-based observability for OpenCodeReview CLI.
 // It supports console output (for personal use) and OTLP export (for system integration).
 package telemetry

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import React, { useRef, useEffect, useState } from 'react';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';

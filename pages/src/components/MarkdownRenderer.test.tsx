@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { LanguageProvider } from '../i18n';
