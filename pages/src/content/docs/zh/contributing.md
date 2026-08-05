@@ -142,13 +142,22 @@ open-code-review/
 多数贡献触及 `internal/agent/`、`internal/tool/` 或 `internal/llm/`。
 `cmd/opencodereview/` 中的 CLI 层有意保持精简——参数解析后分发到 agent 包。
 
+## 许可证头
+
+每个源文件（`.go`、`.sh`、`.js`、`.mjs`、`.ts`、`.tsx`）都必须包含 SPDX 许可证头。创建新文件后请运行：
+
+```bash
+make license-add
+```
+
+此命令会自动添加所需的许可证头。CI 会拒绝缺少许可证头的 PR。
+
 ## 代码质量检查
 
 开 PR 前：
 
 ```bash
-go fmt ./...
-go vet ./...
+make check      # 格式化、静态检查、验证许可证头
 make test       # race-enabled, runs in CI on every push
 make build      # smoke test the binary builds
 ```
