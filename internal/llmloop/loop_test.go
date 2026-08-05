@@ -14,10 +14,12 @@ import (
 
 type fakeClient struct {
 	responses []*llm.ChatResponse
+	requests  []llm.ChatRequest
 	calls     int
 }
 
-func (f *fakeClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func (f *fakeClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.requests = append(f.requests, req)
 	if f.calls >= len(f.responses) {
 		content := ""
 		return &llm.ChatResponse{
@@ -119,6 +121,26 @@ func TestRunPerFile_TaskDoneImmediately(t *testing.T) {
 	}
 	if runner.TotalOutputTokens() != 5 {
 		t.Errorf("TotalOutputTokens = %d, want 5", runner.TotalOutputTokens())
+	}
+}
+
+func TestRunPerFile_UsesCompletionTokenLimit(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
+	deps := newTestDeps(client)
+	deps.Template.MaxTokens = 200000
+	deps.Template.MaxCompletionTokens = 58888
+	runner := NewRunner(deps)
+
+	_, _, err := runner.RunPerFile(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review")},
+		"main.go",
+	)
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if got := client.requests[0].MaxTokens; got != 58888 {
+		t.Fatalf("request MaxTokens = %d, want 58888", got)
 	}
 }
 

@@ -1257,7 +1257,7 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {
@@ -1480,7 +1480,7 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {

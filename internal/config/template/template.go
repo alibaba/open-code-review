@@ -15,6 +15,9 @@ type Template struct {
 	PlanTask              *LlmConversation `json:"PLAN_TASK,omitempty"`
 	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	MaxTokens             int              `json:"MAX_TOKENS"`
+	// MaxCompletionTokens is a runtime-only output cap. When zero, callers
+	// retain the template's historical MaxTokens behavior.
+	MaxCompletionTokens   int              `json:"-"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
@@ -30,6 +33,7 @@ type ScanTemplate struct {
 	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	MaxTokens             int              `json:"MAX_TOKENS"`
+	MaxCompletionTokens   int              `json:"-"`
 	ToolRequestWaitTimeMs int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	MaxSubtaskExecMinutes int              `json:"MAX_SUBTASK_EXECUTION_TIME_MINUTES"`
@@ -40,6 +44,23 @@ type ScanTemplate struct {
 	DedupTask             *LlmConversation `json:"DEDUP_TASK,omitempty"`
 	DedupMinComments      int              `json:"DEDUP_MIN_COMMENTS,omitempty"`
 	ProjectSummaryTask    *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
+}
+
+// CompletionTokenLimit returns the output cap for LLM requests. Runtime
+// prompt-limit overrides must not silently expand the model's output budget.
+func (t Template) CompletionTokenLimit() int {
+	if t.MaxCompletionTokens > 0 {
+		return t.MaxCompletionTokens
+	}
+	return t.MaxTokens
+}
+
+// CompletionTokenLimit is the scan-template counterpart of Template's method.
+func (t ScanTemplate) CompletionTokenLimit() int {
+	if t.MaxCompletionTokens > 0 {
+		return t.MaxCompletionTokens
+	}
+	return t.MaxTokens
 }
 
 //go:embed task_template.json prompts/*

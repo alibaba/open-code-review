@@ -407,6 +407,33 @@ func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 
 // --- unset tests ---
 
+func TestUnsetMaxTokens(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{Provider: "anthropic", MaxTokens: 200000}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	if err := unsetMaxTokens(configPath); err != nil {
+		t.Fatalf("unsetMaxTokens: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(data), "max_tokens") {
+		t.Errorf("max_tokens should be omitted after unset: %s", data)
+	}
+	loaded, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if loaded.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want anthropic", loaded.Provider)
+	}
+}
+
 func TestUnsetCustomProvider(t *testing.T) {
 	dir := t.TempDir()
 	configPath := dir + "/config.json"

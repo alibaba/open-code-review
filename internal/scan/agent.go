@@ -156,6 +156,7 @@ func toLoopTemplate(s template.ScanTemplate) template.Template {
 	return template.Template{
 		MemoryCompressionTask: s.MemoryCompressionTask,
 		MaxTokens:             s.MaxTokens,
+		MaxCompletionTokens:   s.CompletionTokenLimit(),
 		MaxToolRequestTimes:   s.MaxToolRequestTimes,
 		ReLocationTask:        s.ReLocationTask,
 	}
@@ -763,7 +764,7 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))
@@ -816,7 +817,7 @@ func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.Llm
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))
@@ -891,7 +892,7 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) {
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))

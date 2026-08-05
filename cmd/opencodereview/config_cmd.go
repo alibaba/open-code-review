@@ -143,10 +143,13 @@ func runConfigUnset(key string) error {
 	if key == "provider" {
 		return unsetActiveProvider(configPath)
 	}
+	if key == "max_tokens" {
+		return unsetMaxTokens(configPath)
+	}
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports provider, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, custom_providers.<name>, and mcp_servers.<name>")
 	}
 
 	switch parts[0] {
@@ -155,8 +158,23 @@ func runConfigUnset(key string) error {
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports provider, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, custom_providers.<name>, and mcp_servers.<name>")
 	}
+}
+
+func unsetMaxTokens(configPath string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	cfg.MaxTokens = 0
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Println("Cleared max_tokens; using the embedded template default.")
+	return nil
 }
 
 func unsetActiveProvider(configPath string) error {

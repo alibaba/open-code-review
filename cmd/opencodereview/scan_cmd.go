@@ -151,6 +151,7 @@ func executeScan(opts scanOptions) error {
 	if err != nil {
 		return err
 	}
+	scanTpl.MaxCompletionTokens = scanTpl.MaxTokens
 	maxTokens, err := resolveMaxTokens(scanTpl.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
