@@ -195,6 +195,21 @@ func TestRenderTemplate_SecondarySectionsCollapsedByDefault(t *testing.T) {
 	}
 }
 
+func TestRenderTemplate_HidesEmptyConversationsSection(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session: &ViewSession{
+			Summary: SessionSummary{SessionID: "abc", CWD: "/test"},
+		},
+	})
+
+	if strings.Contains(rr.Body.String(), `<span class="section-title">Conversations</span>`) {
+		t.Fatal("empty conversations section should not be rendered")
+	}
+}
+
 func TestRenderTemplate_ExecutionError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	// Pass wrong data type to trigger template execution error

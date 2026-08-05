@@ -176,6 +176,7 @@
 </details>
 {{end}}
 
+{{if .Session.Files}}
 <details class="file-accordion section-accordion">
     <summary class="file-accordion-header">
         <span class="chevron"></span>
@@ -255,6 +256,7 @@
         </div>
     </div>
 </details>
+{{end}}
 
 <script src="/static/session.js"></script>
 </main>
