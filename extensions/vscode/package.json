@@ -119,6 +119,6 @@
     "linkify-it": ">=5.0.2 <6"
   },
   "dependencies": {
-    "preact": "^10.29.7"
+    "preact": "^10.29.8"
   }
 }
