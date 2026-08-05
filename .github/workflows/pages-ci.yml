@@ -33,6 +33,10 @@ jobs:
         working-directory: pages
         run: npm run lint
 
+      - name: Test
+        working-directory: pages
+        run: npm test
+
       - name: Typecheck
         working-directory: pages
         run: npm run typecheck
