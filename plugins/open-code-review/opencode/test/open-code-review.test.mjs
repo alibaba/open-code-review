@@ -117,6 +117,20 @@ test("plugin registers tools and preserves existing user commands", async () => 
   assert.match(config.command["ocr-health"].template, /ocr_health/)
 })
 
+test("plugin still registers tools when the telemetry log call fails", async () => {
+  const hooks = await OpenCodeReviewPlugin({
+    client: {
+      app: {
+        log: async () => {
+          throw new Error("log service unavailable")
+        },
+      },
+    },
+    worktree: "/tmp/project",
+  })
+  assert.deepEqual(Object.keys(hooks.tool).sort(), ["ocr_health", "ocr_review"])
+})
+
 test("fake OCR helper removes its temporary directory", async () => {
   let temporaryDirectory
   await withFakeOcr("", async (directory) => {
@@ -202,6 +216,20 @@ test("ocr_review rejects incompatible review targets before starting OCR", async
         toolContext(worktree),
       ),
       /cannot be used together/,
+    )
+    await assert.rejects(
+      hooks.tool.ocr_review.execute(
+        { resume: "session-1", commit: "abc" },
+        toolContext(worktree),
+      ),
+      /'resume' cannot be combined/,
+    )
+    await assert.rejects(
+      hooks.tool.ocr_review.execute(
+        { resume: "session-1", from: "main", to: "feature" },
+        toolContext(worktree),
+      ),
+      /'resume' cannot be combined/,
     )
   })
 })
@@ -310,6 +338,42 @@ test("ocr_review force-kills a child that ignores cancellation", async () => {
   )
 })
 
+test("ocr_review kills the whole process group on cancellation", { skip: process.platform === "win32" }, async () => {
+  const grandchildSource = [
+    "require('node:fs').writeFileSync('grandchild.pid', String(process.pid))",
+    "setInterval(() => {}, 1000)",
+  ].join("\n")
+  await withFakeOcr(
+    [
+      "const { spawn } = require('node:child_process')",
+      `const g = spawn(process.execPath, ['-e', ${JSON.stringify(grandchildSource)}], { stdio: 'ignore' })`,
+      "g.unref()",
+      "setInterval(() => {}, 1000)",
+    ].join("\n"),
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const controller = new AbortController()
+      const execution = hooks.tool.ocr_review.execute(
+        {},
+        toolContext(worktree, controller.signal),
+      )
+      const pidPath = join(worktree, "grandchild.pid")
+      await waitForFile(pidPath)
+      const pid = Number(await readFile(pidPath, "utf8"))
+
+      controller.abort()
+      await assert.rejects(execution, /cancelled by OpenCode/)
+      try {
+        await waitForProcessExit(pid)
+      } finally {
+        if (isProcessRunning(pid)) {
+          process.kill(pid, "SIGKILL")
+        }
+      }
+    },
+  )
+})
+
 test("ocr_review terminates after its overall timeout", async () => {
   await withFakeOcr(
     "setInterval(() => {}, 1000)",
@@ -354,6 +418,14 @@ test("ocr_review rejects invalid JSON output", async () => {
   )
 })
 
+test("ocr_review reports no output instead of invalid JSON when OCR prints nothing", async () => {
+  await withFakeOcr("", async (worktree) => {
+    const { hooks } = await loadPlugin(worktree)
+    const output = await hooks.tool.ocr_review.execute({}, toolContext(worktree))
+    assert.match(output, /No changes detected/)
+  })
+})
+
 test("ocr_review preserves valid JSON after validation", async () => {
   await withFakeOcr(
     "console.log('{\"status\":\"success\",\"findings\":[]}')",
@@ -383,6 +455,28 @@ test("ocr_health reports both version success and LLM failure", async () => {
       const output = await hooks.tool.ocr_health.execute(
         {},
         toolContext(worktree),
+      )
+      assert.match(output, /OpenCodeReview 1\.2\.3/)
+      assert.match(output, /LLM connection check failed: missing LLM credentials/)
+    },
+  )
+})
+
+test("ocr_health works when no abort signal is provided", async () => {
+  await withFakeOcr(
+    [
+      "if (process.argv[2] === 'version') {",
+      "  console.log('OpenCodeReview 1.2.3')",
+      "} else {",
+      "  console.error('missing LLM credentials')",
+      "  process.exitCode = 7",
+      "}",
+    ].join("\n"),
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_health.execute(
+        {},
+        { worktree, directory: worktree },
       )
       assert.match(output, /OpenCodeReview 1\.2\.3/)
       assert.match(output, /LLM connection check failed: missing LLM credentials/)
