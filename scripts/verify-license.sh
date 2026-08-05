@@ -25,7 +25,7 @@ IGNORED_PATHS=(
 is_ignored() {
   local file="$1"
   for ignore in "${IGNORED_PATHS[@]}"; do
-    if [[ "$file" == *"$ignore"* ]]; then
+    if [[ "$file" == */"$ignore"* ]] || [[ "$file" == "$ignore"* ]]; then
       return 0
     fi
   done
@@ -60,14 +60,14 @@ while IFS= read -r file; do
     continue
   fi
 
-  year="$(echo "$header" | grep -E "$COPYRIGHT_REGEX" | head -1 | grep -oE '[0-9]{4}')"
+  year="$(echo "$header" | grep -oE 'Copyright ([0-9]{4})' | grep -oE '[0-9]{4}' | head -1)"
   if [ -z "$year" ] || [ "$year" -lt "$MIN_YEAR" ] || [ "$year" -gt "$CURRENT_YEAR" ]; then
     FAILED+=("$file (invalid year: ${year:-none})")
     continue
   fi
 done < <(git ls-files)
 
-if [ ${#FAILED[@]} -gt 0 ]; then
+if [ "${#FAILED[@]}" -gt 0 ]; then
   echo "ERROR: The following files are missing or have invalid license headers:"
   printf '  %s\n' "${FAILED[@]}"
   echo ""

@@ -9,6 +9,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 MIN_YEAR=2026
+SPDX_REGEX="SPDX-License-Identifier: Apache-2.0"
 COPYRIGHT_REGEX="Copyright [0-9]{4} alibaba/open-code-review Contributors"
 
 SLASH_HEADER='// SPDX-License-Identifier: Apache-2.0
@@ -29,7 +30,7 @@ IGNORED_PATHS=(
 is_ignored() {
   local file="$1"
   for ignore in "${IGNORED_PATHS[@]}"; do
-    if [[ "$file" == *"$ignore"* ]]; then
+    if [[ "$file" == */"$ignore"* ]] || [[ "$file" == "$ignore"* ]]; then
       return 0
     fi
   done
@@ -39,12 +40,7 @@ is_ignored() {
 has_header() {
   local header
   header="$(head -20 "$1")"
-  if ! echo "$header" | grep -qE "$COPYRIGHT_REGEX"; then
-    return 1
-  fi
-  local year
-  year="$(echo "$header" | grep -oE 'Copyright ([0-9]{4})' | grep -oE '[0-9]{4}' | head -1)"
-  [ -n "$year" ] && [ "$year" -ge "$MIN_YEAR" ]
+  echo "$header" | grep -qF "$SPDX_REGEX" && echo "$header" | grep -qE "$COPYRIGHT_REGEX"
 }
 
 add_header() {
@@ -52,7 +48,11 @@ add_header() {
   local header="$2"
   local tmp
   tmp=$(mktemp)
-  chmod "$(stat -f '%Lp' "$file")" "$tmp"
+  if stat -f '%Lp' "$file" >/dev/null 2>&1; then
+    chmod "$(stat -f '%Lp' "$file")" "$tmp"
+  else
+    chmod "$(stat -c '%a' "$file")" "$tmp"
+  fi
 
   local first_line
   first_line="$(head -1 "$file")"
