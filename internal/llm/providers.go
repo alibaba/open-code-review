@@ -301,12 +301,9 @@ var registry = []Provider{
 		BaseURL:     "https://api.novita.ai/openai",
 		EnvVar:      "NOVITA_API_KEY",
 		Models: []string{
-			"deepseek/deepseek-v4-pro",
-			"deepseek/deepseek-v4-flash",
-			"qwen/qwen3.7-max",
-			"qwen/qwen3-coder-480b-a35b-instruct",
-			"moonshotai/kimi-k2.7-code",
+			"moonshotai/kimi-k3",
 			"zai-org/glm-5.2",
+			"deepseek/deepseek-v4-flash-0731",
 		},
 	},
 	{
