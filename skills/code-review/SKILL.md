@@ -34,7 +34,7 @@ Look for the originating task requirements, in this order:
 
 1. Issue references in the commit messages (`#123`, `Closes #45`, GitLab `!67`, etc.) — fetch via the workflow in `docs/agents/issue-tracker.md`.
 2. A path the user passed as an argument.
-3. A PRD or task document under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
+3. A spec file under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
 4. Context supplied by the user or still available in the current conversation.
 5. If nothing is found, ask the user where the task requirements are. If they say there is none, omit the background options and continue without inventing requirements.
 
