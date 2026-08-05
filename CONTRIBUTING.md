@@ -194,6 +194,18 @@ feat(agent): add support for custom tool definitions
 - We may request changes — this is normal and collaborative, not adversarial.
 - Once approved, a maintainer will merge your PR.
 
+## Tips for Faster PR Reviews
+
+Want your PR to be reviewed and merged quickly? These practices help:
+
+- **Sign the CLA early** — Many first-time contributors get blocked because they miss the CLA bot comment. Sign the Contributor License Agreement as soon as the bot prompts you — your PR cannot be merged without it.
+- **Ensure all CI checks pass** — PRs with failing checks will not be reviewed. Run `make test` and `make build` locally before pushing to catch issues early.
+- **Keep changes focused and small** — A PR that does one thing well is far easier to review than one that mixes unrelated changes. Smaller PRs get reviewed faster and are less likely to require multiple rounds of revision.
+- **Write a clear, accurate description** — Explain *what* changed and *why*. The description must reflect the actual diff — reviewers lose trust when the two don't match. If the scope shifted during development, update the description before requesting review.
+- **Include tests for behavior changes** — New features or bug fixes without tests raise questions. Tests demonstrate correctness and help reviewers understand the intended behavior.
+- **Follow existing code patterns** — Match the style, naming conventions, and architecture of the surrounding code. Consistency reduces cognitive load for reviewers and avoids style-only review comments.
+- **Respond to feedback promptly** — When a reviewer requests changes, address them quickly to keep the review cycle short. If you disagree, explain your reasoning rather than ignoring the comment.
+
 ## Contributor License Agreement (CLA)
 
 We require all contributors to sign the Alibaba Open Source Contributor License Agreement before we can merge your contributions. This ensures that the project can be distributed under its license terms.
