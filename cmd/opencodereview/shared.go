@@ -83,7 +83,11 @@ func resolveEffort(cfg *Config, cliOverride string) (template.Effort, error) {
 // requireGit=true fails fast when the directory is not a git repo (review
 // path: diff concept requires git). requireGit=false allows non-git
 // directories (scan path: provider falls back to filepath.Walk).
-func loadCommonContext(repoDirInput, rulePath string, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
+//
+// contentRef is the git ref whose file content the rule resolver should
+// inspect when disambiguating ambiguous extensions (see reviewContentRef).
+// Pass "" to read the working tree, which is what scan wants.
+func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
 	tpl, err := template.LoadDefault()
 	if err != nil {
 		return nil, fmt.Errorf("load default template: %w", err)
@@ -100,7 +104,14 @@ func loadCommonContext(repoDirInput, rulePath string, maxTools, maxGitProcs int,
 		return nil, err
 	}
 
-	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath)
+	// Built before the resolver: the sniffer reads file content at contentRef
+	// through this limiter.
+	gitRunner := gitcmd.New(maxGitProcs)
+
+	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath, rules.ResolverOptions{
+		Ref:    contentRef,
+		Runner: gitRunner,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("load rules: %w", err)
 	}
@@ -110,9 +121,24 @@ func loadCommonContext(repoDirInput, rulePath string, maxTools, maxGitProcs int,
 		RepoDir:    repoDir,
 		Resolver:   resolver,
 		FileFilter: fileFilter,
-		GitRunner:  gitcmd.New(maxGitProcs),
+		GitRunner:  gitRunner,
 		IsGitRepo:  isGit,
 	}, nil
+}
+
+// reviewContentRef returns the ref whose content the rule resolver should read,
+// mirroring how diff.Provider picks the ref it passes to finalizeDiff: the head
+// of the range in range mode, the commit in commit mode, and "" for workspace
+// mode (where the working tree is the thing under review).
+func reviewContentRef(from, to, commit string) string {
+	switch {
+	case commit != "":
+		return commit
+	case from != "" && to != "":
+		return to
+	default:
+		return ""
+	}
 }
 
 // resolveWorkingDir returns (absPath, isGitRepo, err). When requireGit is

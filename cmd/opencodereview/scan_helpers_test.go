@@ -31,7 +31,7 @@ func TestLoadScanResumeState(t *testing.T) {
 func TestRunScanPreview(t *testing.T) {
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "y.go", "package y\n", "add y")
-	cc, err := loadCommonContext(dir, "", 0, 0, false)
+	cc, err := loadCommonContext(dir, "", "", 0, 0, false)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestRunScanPreview(t *testing.T) {
 func TestRunScanPreviewJSONFormat(t *testing.T) {
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "y.go", "package y\n", "add y")
-	cc, err := loadCommonContext(dir, "", 0, 0, false)
+	cc, err := loadCommonContext(dir, "", "", 0, 0, false)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestRunScanPreviewCreatesNoSession(t *testing.T) {
 
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "y.go", "package y\n", "add y")
-	cc, err := loadCommonContext(dir, "", 0, 0, false)
+	cc, err := loadCommonContext(dir, "", "", 0, 0, false)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}

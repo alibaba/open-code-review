@@ -48,7 +48,7 @@ func runRulesCheck(filePath string) error {
 		return err
 	}
 
-	resolver, _, err := rules.NewResolver(resolvedRepo, rulesCheckRulePath)
+	resolver, _, err := rules.NewResolver(resolvedRepo, rulesCheckRulePath, rules.ResolverOptions{})
 	if err != nil {
 		return fmt.Errorf("load rules: %w", err)
 	}
@@ -58,7 +58,7 @@ func runRulesCheck(filePath string) error {
 		return fmt.Errorf("resolver does not support detail inspection")
 	}
 
-	detail := dr.ResolveDetail(strings.ToLower(filePath))
+	detail := dr.ResolveDetail(filePath)
 
 	sourceLabel := map[string]string{
 		"custom":  "Custom (--rule)",

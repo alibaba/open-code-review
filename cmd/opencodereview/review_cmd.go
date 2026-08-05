@@ -120,7 +120,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		}
 	}()
 
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, reviewContentRef(opts.from, opts.to, opts.commit), opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
 	}

@@ -285,3 +285,28 @@ func TestResolveWorkingDir_GitRepo(t *testing.T) {
 	}
 	_ = isGit
 }
+
+// reviewContentRef decides which ref the rule resolver reads file content at
+// when disambiguating ambiguous extensions. It must mirror how diff.Provider
+// picks the ref it hands to finalizeDiff, or the sniff would inspect content
+// from a different commit than the one under review.
+func TestReviewContentRef(t *testing.T) {
+	tests := []struct {
+		name, from, to, commit, want string
+	}{
+		{name: "commit mode wins", commit: "abc123", want: "abc123"},
+		{name: "commit wins over a range", from: "main", to: "feat", commit: "abc123", want: "abc123"},
+		{name: "range mode uses the head", from: "main", to: "feat", want: "feat"},
+		{name: "workspace mode has no ref", want: ""},
+		{name: "half a range is not a range", from: "main", want: ""},
+		{name: "to without from is not a range", to: "feat", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := reviewContentRef(tt.from, tt.to, tt.commit); got != tt.want {
+				t.Errorf("reviewContentRef(%q, %q, %q) = %q, want %q",
+					tt.from, tt.to, tt.commit, got, tt.want)
+			}
+		})
+	}
+}

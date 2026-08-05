@@ -93,7 +93,7 @@ type delegateContext struct {
 }
 
 func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, 0, opts.maxGitProcs, true)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, reviewContentRef(opts.from, opts.to, opts.commit), 0, opts.maxGitProcs, true)
 	if err != nil {
 		return nil, err
 	}

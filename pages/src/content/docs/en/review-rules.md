@@ -182,10 +182,44 @@ matching order:
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
+| `**/*.m` | `matlab.md` by default — see [Content sniffing for `.m` files](#content-sniffing-for-m-files) below. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
 plan and main task prompts.
+
+### Content sniffing for `.m` files
+
+`.m` is shared by two unrelated languages — MATLAB and Objective-C — so path
+matching alone can't tell them apart. Before falling back to `matlab.md` for
+a `**/*.m` match, OCR peeks at the file's **first non-blank line**:
+
+| First line looks like | Rule doc used |
+|---|---|
+| `#import`, `#include`, `@interface`, `@implementation`, `@class`, or `@protocol` | `objc.md` |
+| anything else (including no content available to sniff, e.g. a deleted file) | `matlab.md` |
+
+The content is read **at the ref under review**, not from your working tree:
+`ocr review --from/--to` reads via `git show <to>:<path>` and `--commit` via
+`git show <commit>:<path>`, so the sniff is correct even when that ref isn't
+checked out. Workspace reviews, `ocr scan`, and `ocr rules check` have no ref
+and read the working tree, which is the thing they operate on. If the file
+can't be read at all, resolution falls back to `matlab.md`.
+
+`objc.md` currently ships as a copy of the generic `default.md` checklist —
+it's a placeholder in OCR's source
+(`internal/config/rules/rule_docs/objc.md`) for a maintainer to fill in with
+real Objective-C–specific guidance later; since it's compiled into the
+binary via `go:embed`, changing it requires rebuilding OCR from source, not
+just editing the file on disk. If you need Objective-C–specific guidance
+today without rebuilding, use a project-level
+[`.opencodereview/rule.json`](#rule-file-format-layers-1-3) entry matching
+your `.m` paths (e.g. `ios/**/*.m`) — project rules are checked before the
+system layer, so they take priority regardless of the sniff.
+
+`ocr rules check` reports when this sniff fired: the `Pattern` line reads
+`**/*.m (sniffed: objc)` instead of the plain `**/*.m`, so you can tell at a
+glance whether a given `.m` file resolved via the sniff or the default match.
 
 ## Inspecting which rule wins: `ocr rules check`
 
