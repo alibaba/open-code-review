@@ -66,6 +66,23 @@ func TestParseReviewFlags_NegativeMaxTools(t *testing.T) {
 	}
 }
 
+func TestParseReviewFlags_PlanTimeout(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--plan-timeout", "120"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.planTimeoutSecs != 120 {
+		t.Errorf("planTimeoutSecs = %d, want 120", opts.planTimeoutSecs)
+	}
+}
+
+func TestParseReviewFlags_NegativePlanTimeout(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--plan-timeout", "-1"})
+	if err == nil {
+		t.Fatal("expected error for negative plan-timeout")
+	}
+}
+
 func TestParseReviewFlags_MaxToolsBelowMin(t *testing.T) {
 	opts, err := parseReviewFlags([]string{"--max-tools", "5"})
 	if err != nil {

@@ -80,8 +80,8 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	if tpl.ReviewFilterTask == nil {
 		t.Fatal("ReviewFilterTask is nil, expected non-nil")
 	}
-	if tpl.MaxTokens != 58888 {
-		t.Errorf("MaxTokens = %d, want 58888", tpl.MaxTokens)
+	if tpl.MaxTokens != 30000 {
+		t.Errorf("MaxTokens = %d, want 30000", tpl.MaxTokens)
 	}
 	if tpl.MaxToolRequestTimes != 30 {
 		t.Errorf("MaxToolRequestTimes = %d, want 30", tpl.MaxToolRequestTimes)

@@ -36,6 +36,7 @@ type reviewOptions struct {
 	model           string
 	concurrency     int
 	perFileTimeout  int
+	planTimeoutSecs int
 	maxTools        int
 	maxGitProcs     int
 	maxTokensBudget int
@@ -179,6 +180,7 @@ func executeReview(opts reviewOptions) error {
 		CommentWorkerPool:     agent.NewCommentWorkerPool(opts.concurrency),
 		MaxConcurrency:        opts.concurrency,
 		ConcurrentTaskTimeout: opts.perFileTimeout,
+		PlanTaskTimeout:       time.Duration(opts.planTimeoutSecs) * time.Second,
 		Model:                 rt.Model,
 		Provider:              rt.Provider,
 		Background:            opts.background,

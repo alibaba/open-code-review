@@ -101,6 +101,9 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if opts.preview && opts.resume != "" {
 		return fmt.Errorf("--preview and --resume cannot be used together")
 	}
+	if opts.planTimeoutSecs < 0 {
+		return fmt.Errorf("--plan-timeout must be a non-negative integer (0 means no separate timeout)")
+	}
 	if err := validateAudience(opts.audience); err != nil {
 		return err
 	}
@@ -151,6 +154,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	addConcurrencyFlags(cmd, &opts.concurrency, &opts.perFileTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokensBudget)
+	cmd.Flags().IntVar(&opts.planTimeoutSecs, "plan-timeout", 0, "per-file plan task timeout in seconds (0 = use the file timeout only)")
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addModelFlag(cmd, &opts.model)
 	addPreviewFlag(cmd, &opts.preview)
