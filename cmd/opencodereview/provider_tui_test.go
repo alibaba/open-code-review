@@ -2838,6 +2838,95 @@ func TestApplyCustomProviderConfigNormalizesAuthHeader(t *testing.T) {
 	}
 }
 
+func TestApplyProviderConfigClearsPromptCachingForNonAnthropic(t *testing.T) {
+	tests := []struct {
+		name   string
+		apply  func(string, *Config, providerTUIResult) error
+		result providerTUIResult
+	}{
+		{
+			name:  "manual",
+			apply: applyManualConfig,
+			result: providerTUIResult{
+				isManual: true,
+				url:      "https://api.example.com/v1",
+				model:    "gpt-test",
+				apiKey:   "test-key",
+				protocol: llm.ProtocolOpenAIChatCompletions,
+			},
+		},
+		{
+			name:  "custom",
+			apply: applyCustomProviderConfig,
+			result: providerTUIResult{
+				provider: "gateway",
+				model:    "gpt-test",
+				url:      "https://api.example.com/v1",
+				apiKey:   "test-key",
+				protocol: llm.ProtocolOpenAIChatCompletions,
+				isCustom: true,
+			},
+		},
+		{
+			name:  "official",
+			apply: applyOfficialProviderConfig,
+			result: providerTUIResult{
+				provider: "openai",
+				model:    "gpt-4o",
+				apiKey:   "test-key",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			enabled := true
+			cfg := &Config{Llm: LlmConfig{PromptCaching: &enabled}}
+			configPath := filepath.Join(t.TempDir(), "config.json")
+
+			if err := tt.apply(configPath, cfg, tt.result); err != nil {
+				t.Fatalf("apply config: %v", err)
+			}
+			if cfg.Llm.PromptCaching != nil {
+				t.Fatalf("PromptCaching = %v, want nil", *cfg.Llm.PromptCaching)
+			}
+		})
+	}
+}
+
+func TestApplyInactiveOpenAIProviderPreservesPromptCaching(t *testing.T) {
+	enabled := true
+	cfg := &Config{
+		Provider: "anthropic",
+		Llm:      LlmConfig{PromptCaching: &enabled},
+		CustomProviders: map[string]ProviderEntry{
+			"gateway": {
+				URL:      "https://api.example.com/v1",
+				Protocol: llm.ProtocolOpenAIChatCompletions,
+				Model:    "gpt-test",
+			},
+		},
+	}
+	result := providerTUIResult{
+		provider: "gateway",
+		model:    "gpt-test",
+		url:      "https://api.example.com/v1",
+		apiKey:   "test-key",
+		protocol: llm.ProtocolOpenAIChatCompletions,
+		isCustom: true,
+		isEdit:   true,
+	}
+
+	if err := applyCustomProviderConfig(
+		filepath.Join(t.TempDir(), "config.json"), cfg, result,
+	); err != nil {
+		t.Fatalf("apply config: %v", err)
+	}
+	if cfg.Llm.PromptCaching == nil || !*cfg.Llm.PromptCaching {
+		t.Fatalf("PromptCaching = %v, want true", cfg.Llm.PromptCaching)
+	}
+}
+
 // --- protocol normalization / openai-responses support ---
 
 func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {

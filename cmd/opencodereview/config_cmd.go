@@ -300,16 +300,17 @@ type Config struct {
 }
 
 type LlmConfig struct {
-	URL           string            `json:"url,omitempty"`
-	AuthToken     string            `json:"auth_token,omitempty"`
-	AuthHeader    string            `json:"auth_header,omitempty"`
-	Model         string            `json:"model,omitempty"`
-	Protocol      string            `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
-	UseAnthropic  *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
-	TimeoutSec    int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
-	ExtraBody     map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders  map[string]string `json:"extra_headers,omitempty"`
-	PromptCaching *bool             `json:"prompt_caching,omitempty"`
+	URL          string            `json:"url,omitempty"`
+	AuthToken    string            `json:"auth_token,omitempty"`
+	AuthHeader   string            `json:"auth_header,omitempty"`
+	Model        string            `json:"model,omitempty"`
+	Protocol     string            `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
+	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
+	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
+	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	// PromptCaching is the global Anthropic caching toggle for the active provider.
+	PromptCaching *bool `json:"prompt_caching,omitempty"`
 }
 
 // TelemetryConfig holds telemetry-specific settings.

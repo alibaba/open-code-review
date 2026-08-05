@@ -423,6 +423,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		url = ensureMessagesSuffix(url)
 	}
 
+	// Prompt caching is a global behavior toggle shared by Anthropic providers.
 	return ResolvedEndpoint{
 		URL:           url,
 		Token:         apiKey,
