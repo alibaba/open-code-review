@@ -98,7 +98,16 @@ func startStdioTestClient(t *testing.T, mode, marker string) *mcpclient.Client {
 		t.Fatalf("start stdio MCP client: %v", err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	if len(client.Tools()) != 1 || client.Tools()[0].Name != mcpReviewToolName {
+	hasReview, hasWait := false, false
+	for _, tool := range client.Tools() {
+		switch tool.Name {
+		case mcpReviewToolName:
+			hasReview = true
+		case mcpReviewWaitToolName:
+			hasWait = true
+		}
+	}
+	if len(client.Tools()) != 2 || !hasReview || !hasWait {
 		t.Fatalf("tools = %#v", client.Tools())
 	}
 	return client

@@ -9,8 +9,8 @@ The local `ocr` CLI process that analyzes Git changes and emits structured revie
 _Avoid_: using `ocr_review` to mean the CLI process.
 
 **Codex review tools**:
-The local `stdio` MCP server exposes `ocr_review` for one terminal review result.
-_Avoid_: session polling, OpenCode tool.
+The local `stdio` MCP server exposes `ocr_review` for one review and `ocr_review_wait` to recover the terminal result of an existing in-process review.
+_Avoid_: session polling, progress inspection, OpenCode tool.
 
 **OpenCode integration**:
 The separate plugin under `plugins/open-code-review/opencode/` that registers tools for OpenCode. It does not register tools in Codex.
@@ -23,6 +23,10 @@ _Avoid_: treating an intermediate progress update as a review result.
 **Synchronous review**:
 A review request that stays open until OCR returns a terminal Review result, including success, failure, cancellation, or timeout.
 _Avoid_: background review, progress event as result.
+
+**Review wait**:
+A blocking recovery request that waits for the current or most recent in-process review and returns its same terminal Review result; it never starts a second review.
+_Avoid_: treating it as a status or polling API.
 
 **Review deadline**:
 The server-controlled point by which a Synchronous review must return a terminal Review result; the host timeout follows it with a short grace period.

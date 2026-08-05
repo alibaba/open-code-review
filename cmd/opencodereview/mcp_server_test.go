@@ -33,8 +33,8 @@ func TestOCRMCPServerListsReviewTool(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if got := strings.Join(names, ","); got != "ocr_review" {
-		t.Fatalf("tools = %#v, want ocr_review", names)
+	if got := strings.Join(names, ","); got != "ocr_review,ocr_review_wait" {
+		t.Fatalf("tools = %#v, want ocr_review,ocr_review_wait", names)
 	}
 	if reviewTool == nil {
 		t.Fatal("ocr_review tool is missing")
@@ -55,6 +55,22 @@ func TestOCRMCPServerListsReviewTool(t *testing.T) {
 	}
 	if _, ok := properties["repo"]; ok {
 		t.Error("schema must not expose repo")
+	}
+}
+
+func TestOCRMCPReviewWaitRequiresReview(t *testing.T) {
+	cs, stop := connectTestOCRServer(t, func(_ context.Context, _ reviewOptions, _ io.Writer, _ io.Writer, _ llmloop.ProgressFunc, _ reviewStageFunc, _ *reviewWatchdog) error {
+		t.Fatal("runner must not run")
+		return nil
+	})
+	defer stop()
+
+	result, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{Name: mcpReviewWaitToolName})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError || !strings.Contains(toolText(result), "no OCR review") {
+		t.Fatalf("result = %#v, text = %q", result, toolText(result))
 	}
 }
 
@@ -94,6 +110,14 @@ func TestOCRMCPReviewReturnsToolErrorWithSession(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("tool error missing %q: %s", want, text)
 		}
+	}
+
+	wait, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{Name: mcpReviewWaitToolName})
+	if err != nil {
+		t.Fatalf("wait CallTool: %v", err)
+	}
+	if !wait.IsError || toolText(wait) != text {
+		t.Fatalf("wait result = %#v, text = %q; want original result", wait, toolText(wait))
 	}
 }
 
@@ -163,10 +187,30 @@ func TestOCRMCPReviewRejectsConcurrentCall(t *testing.T) {
 		t.Fatalf("second result = %#v, text = %q", second, toolText(second))
 	}
 
+	waitDone := make(chan *mcpsdk.CallToolResult, 1)
+	go func() {
+		result, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{Name: mcpReviewWaitToolName})
+		if err != nil {
+			t.Errorf("wait CallTool: %v", err)
+			waitDone <- nil
+			return
+		}
+		waitDone <- result
+	}()
+	select {
+	case <-waitDone:
+		t.Fatal("ocr_review_wait returned before the review finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+
 	close(release)
 	first := <-firstDone
 	if first.IsError {
 		t.Fatalf("first result = %#v", first)
+	}
+	wait := <-waitDone
+	if wait == nil || wait.IsError || toolText(wait) != `{"status":"success"}` {
+		t.Fatalf("wait result = %#v, text = %q", wait, toolText(wait))
 	}
 }
 

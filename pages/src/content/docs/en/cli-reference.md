@@ -95,7 +95,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--audience <who>` | — | `human` | `human` streams progress lines; `agent` quiets stdout and prints only the final summary / JSON. |
 | `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
 | `--concurrency <n>` | — | `8` | Maximum number of files reviewed in parallel. |
-| `--timeout <minutes>` | — | `10` | Per-file deadline. `0` disables the timeout. |
+| `--timeout <minutes>` | — | `20` | Per-file deadline. `0` disables the timeout. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per file. `0` uses the template default (`30`); values 1–9 are clamped up to `10`; any value `≥ 10` overrides the template default (even if smaller than `30`). |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |

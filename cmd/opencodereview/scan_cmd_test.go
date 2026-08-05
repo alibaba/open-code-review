@@ -122,6 +122,9 @@ func TestParseScanFlags_DefaultsValid(t *testing.T) {
 	if opts.concurrency != 8 {
 		t.Errorf("default concurrency = %d, want 8", opts.concurrency)
 	}
+	if opts.perFileTimeout != 20 {
+		t.Errorf("default perFileTimeout = %d, want 20", opts.perFileTimeout)
+	}
 }
 
 func TestParseScanFlags_PathNarrowsScope(t *testing.T) {

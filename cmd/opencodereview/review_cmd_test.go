@@ -141,4 +141,7 @@ func TestParseReviewFlagsAllowsFromAndTo(t *testing.T) {
 	if opts.from != "main" || opts.to != "HEAD" {
 		t.Fatalf("unexpected opts: from=%q to=%q", opts.from, opts.to)
 	}
+	if opts.perFileTimeout != 20 {
+		t.Fatalf("perFileTimeout = %d, want 20", opts.perFileTimeout)
+	}
 }

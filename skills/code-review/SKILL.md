@@ -3,7 +3,7 @@ name: code-review
 description: Review changes since a fixed point with the synchronous OpenCodeReview (OCR) MCP tool. Use when the user wants to review a branch, PR, commit, or work-in-progress changes.
 ---
 
-Review the diff between `HEAD` and a fixed point supplied by the user with one blocking `ocr_review` MCP call from `ocr-mcp-server`. The MCP server owns a fixed 30-minute review deadline; the host allows 31 minutes so the server can return a terminal timeout result. The call returns only after OCR reaches a terminal result. Keep the fixed point and any available task, repository, or business context as inputs, then return OCR's native review output without imposing an additional report structure or claiming coverage beyond OCR's result.
+Review the diff between `HEAD` and a fixed point supplied by the user with one blocking `ocr_review` MCP call from `ocr-mcp-server`. The MCP server owns a fixed 60-minute review deadline; the host allows 61 minutes so the server can return a terminal timeout result. The call returns only after OCR reaches a terminal result. Keep the fixed point and any available task, repository, or business context as inputs, then return OCR's native review output without imposing an additional report structure or claiming coverage beyond OCR's result.
 
 Do not run `ocr review`, spawn review sub-agents, inspect progress events, or poll for completion. Do not terminate a running MCP call because it has produced no intermediate output; wait for the terminal result. If the host interrupts the call, report that interruption as an integration failure rather than treating it as a review result. If the MCP tool is unavailable, report the integration error instead of falling back to the CLI.
 
@@ -55,7 +55,7 @@ Call the `ocr_review` tool exposed by `ocr-mcp-server` exactly once for the vali
 
 When reviewing a single commit rather than a range, use `commit` instead of `from`/`to`. The MCP server resolves the current Git worktree; do not pass a `repo` or `worktree` argument.
 
-The MCP call is synchronous: wait for its returned result in the same call. Do not retry automatically or issue a status/session-polling call. The server returns terminal failures with `error_type`, `stage`, `last_progress_at`, `path`, `partial_result`, `coverage`, `session_id`, and `resumable` fields. If a failed commit/range review returns `resumable: true` and the user explicitly requests resume, make one explicit follow-up `ocr_review` call with the same target and `resume` value.
+The MCP call is synchronous: wait for its returned result in the same call. Do not retry automatically or issue a status/session-polling call. If `ocr_review` reports that a review is already running, call `ocr_review_wait` exactly once to wait for that existing call and return its terminal result; this is a blocking handoff, not polling. Do not start another review or fall back to the CLI. The server returns terminal failures with `error_type`, `stage`, `last_progress_at`, `path`, `partial_result`, `coverage`, `session_id`, and `resumable` fields. If a failed commit/range review returns `resumable: true` and the user explicitly requests resume, make one explicit follow-up `ocr_review` call with the same target and `resume` value.
 
 ### 4. Return the OCR result
 

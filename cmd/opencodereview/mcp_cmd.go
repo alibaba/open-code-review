@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	mcpReviewMaxDuration = 30 * time.Minute
-	mcpReviewMinIdle     = 15 * time.Minute
-	mcpReviewIdleGrace   = 5 * time.Minute
-	mcpReviewToolName    = "ocr_review"
-	mcpProgressEventName = "ocr_progress"
+	mcpReviewMaxDuration  = 60 * time.Minute
+	mcpReviewMinIdle      = 15 * time.Minute
+	mcpReviewIdleGrace    = 5 * time.Minute
+	mcpReviewToolName     = "ocr_review"
+	mcpReviewWaitToolName = "ocr_review_wait"
+	mcpProgressEventName  = "ocr_progress"
 )
 
 type ocrReviewInput struct {
@@ -36,6 +37,11 @@ type ocrReviewInput struct {
 }
 
 type mcpReviewRunner func(context.Context, reviewOptions, io.Writer, io.Writer, llmloop.ProgressFunc, reviewStageFunc, *reviewWatchdog) error
+
+type mcpReviewExecution struct {
+	done   chan struct{}
+	result *mcpsdk.CallToolResult
+}
 
 const (
 	mcpErrorDeadlineExceeded = "deadline_exceeded"
@@ -93,6 +99,7 @@ type ocrMCPServer struct {
 	maxDuration  time.Duration
 	idleDuration time.Duration
 	mu           sync.Mutex
+	active       *mcpReviewExecution
 	stderr       sync.Mutex
 }
 
@@ -271,15 +278,18 @@ func newOCRMCPProtocolServerWithDurations(repoDir string, run mcpReviewRunner, m
 			},
 		},
 	}, state.handleReview)
+	server.AddTool(&mcpsdk.Tool{
+		Name:        mcpReviewWaitToolName,
+		Description: "Wait for the current or most recent OpenCodeReview call in this worktree and return its terminal result. Use this after ocr_review reports that a review is already running; it does not start or poll a review.",
+		InputSchema: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+		},
+	}, state.handleReviewWait)
 	return server
 }
 
-func (s *ocrMCPServer) handleReview(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
-	reviewCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	watchdog := newReviewWatchdog(reviewCtx, s.maxDuration, s.idleDuration)
-	defer watchdog.Stop()
-
+func (s *ocrMCPServer) handleReview(ctx context.Context, req *mcpsdk.CallToolRequest) (result *mcpsdk.CallToolResult, err error) {
 	input, err := decodeOCRReviewInput(req)
 	if err != nil {
 		return mcpToolErrorWithDetails(err, nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
@@ -287,10 +297,16 @@ func (s *ocrMCPServer) handleReview(ctx context.Context, req *mcpsdk.CallToolReq
 	if err := validateOCRReviewInput(input); err != nil {
 		return mcpToolErrorWithDetails(err, nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
 	}
-	if !s.mu.TryLock() {
-		return mcpToolErrorWithDetails(errors.New("ocr_review is already running for this worktree"), nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
+	execution, ok := s.beginReview()
+	if !ok {
+		return mcpToolErrorWithDetails(errors.New("ocr_review is already running for this worktree; call ocr_review_wait to await its result"), nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
 	}
-	defer s.mu.Unlock()
+	defer func() { s.finishReview(execution, result) }()
+
+	reviewCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	watchdog := newReviewWatchdog(reviewCtx, s.maxDuration, s.idleDuration)
+	defer watchdog.Stop()
 
 	var diagnostics reviewDiagnostics
 	progress := func(event llmloop.ProgressEvent) {
@@ -323,6 +339,47 @@ func (s *ocrMCPServer) handleReview(ctx context.Context, req *mcpsdk.CallToolReq
 	return &mcpsdk.CallToolResult{
 		Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: string(raw)}},
 	}, nil
+}
+
+func (s *ocrMCPServer) handleReviewWait(ctx context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	s.mu.Lock()
+	execution := s.active
+	s.mu.Unlock()
+	if execution == nil {
+		return mcpToolErrorWithDetails(errors.New("no OCR review is running or has completed for this worktree"), nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
+	}
+
+	select {
+	case <-execution.done:
+		if execution.result == nil {
+			return mcpToolErrorWithDetails(errors.New("OCR review finished without a terminal result"), nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
+		}
+		return execution.result, nil
+	case <-ctx.Done():
+		return mcpToolErrorWithDetails(fmt.Errorf("ocr_review_wait cancelled: %w", ctx.Err()), nil, mcpErrorCancelled, reviewDiagnosticSnapshot{}, nil), nil
+	}
+}
+
+func (s *ocrMCPServer) beginReview() (*mcpReviewExecution, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active != nil {
+		select {
+		case <-s.active.done:
+		default:
+			return nil, false
+		}
+	}
+	execution := &mcpReviewExecution{done: make(chan struct{})}
+	s.active = execution
+	return execution, true
+}
+
+func (s *ocrMCPServer) finishReview(execution *mcpReviewExecution, result *mcpsdk.CallToolResult) {
+	s.mu.Lock()
+	execution.result = result
+	close(execution.done)
+	s.mu.Unlock()
 }
 
 func (s *ocrMCPServer) writeProgress(event llmloop.ProgressEvent) {
