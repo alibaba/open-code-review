@@ -90,14 +90,23 @@ fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
 
+### License Headers
+
+Every source file (`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`) must include an SPDX license header. After creating new files, run:
+
+```bash
+make license-add
+```
+
+This automatically adds the required header. CI will reject PRs with missing headers.
+
 ### Code Quality
 
 Before submitting your changes, make sure they pass all checks:
 
 ```bash
-# Format and lint (Go standard tooling)
-go fmt ./...
-go vet ./...
+# Format, lint, and verify license headers
+make check
 
 # Run tests with race detection
 make test
