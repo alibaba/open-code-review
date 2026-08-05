@@ -45,6 +45,30 @@ jobs:
         working-directory: pages
         run: npm run build
 
+      - name: Smoke test
+        working-directory: pages
+        run: |
+          npx serve dist -s -l tcp://127.0.0.1:3999 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          sleep 2
+
+          FAILED=0
+          for path in "/" "/docs/contributing" "/docs/quickstart" "/features"; do
+            BODY=$(curl -sf "http://127.0.0.1:3999${path}")
+            if [ $? -ne 0 ]; then
+              echo "FAIL: ${path} — not reachable"
+              FAILED=1
+            elif ! echo "$BODY" | grep -q '\.bundle\.js'; then
+              echo "FAIL: ${path} — missing bundle reference"
+              FAILED=1
+            else
+              echo "OK: ${path}"
+            fi
+          done
+
+          exit $FAILED
+
       - name: Check bundle size
         working-directory: pages
         run: npm run size
