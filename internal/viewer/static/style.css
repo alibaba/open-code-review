@@ -967,7 +967,7 @@ p {
 
 .comment-code-diff {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 0.75rem;
     margin-top: 0.85rem;
 }
@@ -1029,7 +1029,6 @@ p {
     .token-stats { grid-template-columns: repeat(2, 1fr); }
     .meta { gap: 0.5rem 1rem; font-size: 0.8rem; }
     .table th, .table td { padding: 0.6rem 0.75rem; font-size: 0.82rem; }
-    .comment-code-diff { grid-template-columns: 1fr; }
 }
 
 /* ── Accessibility: reduced motion ── */
