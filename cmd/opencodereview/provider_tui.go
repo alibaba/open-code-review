@@ -2339,9 +2339,37 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 	}
 }
 
+// effectiveBaseURL returns the URL to display in the model-selection step:
+// the official preset's configured override (entry.URL) or preset.BaseURL, or
+// the custom provider's URL. Empty when no provider is selected.
+func (m providerTUIModel) effectiveBaseURL() string {
+	if m.activeTab == tabOfficial {
+		p := m.currentProvider()
+		// A configured override (entry.URL) takes precedence over the preset
+		// default so the model-selection step reflects the gateway in use.
+		if m.existingCfg != nil {
+			if entry, ok := m.existingCfg.Providers[p.Name]; ok && entry.URL != "" {
+				return entry.URL
+			}
+		}
+		if p.BaseURL != "" {
+			return p.BaseURL
+		}
+	}
+	if cp, ok := m.selectedCustomProvider(); ok && cp.entry.URL != "" {
+		return cp.entry.URL
+	}
+	return ""
+}
+
 func (m providerTUIModel) viewModel(s *strings.Builder) {
 	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", m.modelProviderName())))
-	s.WriteString("\n\n")
+	s.WriteString("\n")
+	if url := m.effectiveBaseURL(); url != "" {
+		s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  Base URL: %s", url)))
+		s.WriteString("\n")
+	}
+	s.WriteString("\n")
 
 	models := m.models()
 
@@ -3027,7 +3055,12 @@ func (m modelTUIModel) View() tea.View {
 	var s strings.Builder
 	s.WriteString("\n")
 	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", m.provider.DisplayName)))
-	s.WriteString("\n\n")
+	s.WriteString("\n")
+	if m.provider.BaseURL != "" {
+		s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  Base URL: %s", m.provider.BaseURL)))
+		s.WriteString("\n")
+	}
+	s.WriteString("\n")
 
 	models := m.displayModels()
 	for i, model := range models {

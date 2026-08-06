@@ -61,6 +61,27 @@ environment variable.
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
+### Overriding a built-in provider's Base URL
+
+Every built-in provider has a preset Base URL (shown in the table above).
+To point a built-in provider at a different endpoint — for example a
+self-hosted LiteLLM gateway that is rarely at the preset default
+`http://localhost:4000/v1` — set `providers.<name>.url`:
+
+```bash
+ocr config set provider                   litellm
+ocr config set model                      openai/gpt-5.4
+ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
+ocr config set providers.litellm.url      https://gateway.internal:8000/v1
+```
+
+The configured `url` takes precedence over the preset Base URL. When
+`providers.<name>.url` is unset (or cleared), OCR falls back to the
+preset default — so you only need to set it when your endpoint differs.
+The interactive wizard (`ocr config provider`) exposes this as an
+editable **Base URL** step for built-in providers, pre-filled with the
+preset default.
+
 ### Custom providers
 
 Any provider name not in the table above is treated as custom and must

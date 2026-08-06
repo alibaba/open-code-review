@@ -323,6 +323,12 @@ func runConfigModel() error {
 		if entry, ok := cfg.Providers[cfg.Provider]; ok {
 			currentModel = activeModelForProvider(cfg, cfg.Provider, entry)
 			provider.Models = mergeModelLists(provider.Models, entry.Models)
+			// Surface the effective Base URL: a configured override takes
+			// precedence over the preset default so users can confirm their
+			// gateway is in use from the model picker.
+			if entry.URL != "" {
+				provider.BaseURL = entry.URL
+			}
 		}
 	} else {
 		isCustom = true

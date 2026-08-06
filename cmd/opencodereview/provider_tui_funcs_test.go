@@ -1993,3 +1993,110 @@ func TestProviderTUIView_StepModel_CustomTabDeleteHelp(t *testing.T) {
 		t.Errorf("custom model row should show d Delete hint; got:\n%s", got)
 	}
 }
+
+// TestModelTUI_ShowsEffectiveBaseURL verifies that the standalone model
+// selector (ocr config model) renders the effective Base URL — the configured
+// override rather than the preset default — so users can confirm their gateway.
+func TestModelTUI_ShowsEffectiveBaseURL(t *testing.T) {
+	preset, ok := llm.LookupProvider("litellm")
+	if !ok {
+		t.Skip("litellm provider not in registry")
+	}
+	cfg := &Config{
+		Provider: "litellm",
+		Providers: map[string]ProviderEntry{
+			"litellm": {APIKey: "sk-test", Model: "openai/gpt-5.4", URL: "https://gateway.internal:8000/v1"},
+		},
+	}
+	provider := preset
+	provider.Models = mergeModelLists(preset.Models, cfg.Providers["litellm"].Models)
+	// Mirror runConfigModel's effective-URL resolution.
+	provider.BaseURL = cfg.Providers["litellm"].URL
+
+	m := newModelTUIConfig(modelTUIConfig{
+		Provider:       provider,
+		CurrentModel:   "openai/gpt-5.4",
+		RegistryModels: preset.Models,
+		ExistingCfg:    cfg,
+		ProviderName:   "litellm",
+	})
+	got := stripANSI(m.View().Content)
+	if !strings.Contains(got, "https://gateway.internal:8000/v1") {
+		t.Errorf("model view should show the override Base URL; got:\n%s", got)
+	}
+	if strings.Contains(got, preset.BaseURL) {
+		t.Errorf("model view should not show the preset default %q when an override is set; got:\n%s", preset.BaseURL, got)
+	}
+}
+
+// TestModelTUI_ShowsPresetBaseURLWhenNoOverride verifies the preset default is
+// shown when no override is configured.
+func TestModelTUI_ShowsPresetBaseURLWhenNoOverride(t *testing.T) {
+	preset, ok := llm.LookupProvider("litellm")
+	if !ok {
+		t.Skip("litellm provider not in registry")
+	}
+	cfg := &Config{
+		Provider: "litellm",
+		Providers: map[string]ProviderEntry{
+			"litellm": {APIKey: "sk-test", Model: "openai/gpt-5.4"},
+		},
+	}
+	provider := preset
+	provider.Models = mergeModelLists(preset.Models, cfg.Providers["litellm"].Models)
+
+	m := newModelTUIConfig(modelTUIConfig{
+		Provider:       provider,
+		CurrentModel:   "openai/gpt-5.4",
+		RegistryModels: preset.Models,
+		ExistingCfg:    cfg,
+		ProviderName:   "litellm",
+	})
+	got := stripANSI(m.View().Content)
+	if !strings.Contains(got, preset.BaseURL) {
+		t.Errorf("model view should show the preset default Base URL %q; got:\n%s", preset.BaseURL, got)
+	}
+}
+
+// TestProviderTUI_EffectiveBaseURL verifies the wizard's model-selection step
+// resolves the effective Base URL: override when set, preset default otherwise.
+func TestProviderTUI_EffectiveBaseURL(t *testing.T) {
+	// Override configured.
+	cfg := &Config{
+		Provider: "litellm",
+		Providers: map[string]ProviderEntry{
+			"litellm": {APIKey: "sk-test", Model: "openai/gpt-5.4", URL: "https://gateway.internal:8000/v1"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "litellm" {
+			m.officialIdx = i
+			break
+		}
+	}
+	if got := m.effectiveBaseURL(); got != "https://gateway.internal:8000/v1" {
+		t.Errorf("effectiveBaseURL() = %q, want override", got)
+	}
+
+	// No override: preset default.
+	cfg2 := &Config{
+		Provider: "litellm",
+		Providers: map[string]ProviderEntry{
+			"litellm": {APIKey: "sk-test", Model: "openai/gpt-5.4"},
+		},
+	}
+	m2 := newProviderTUI(cfg2, "")
+	m2.activeTab = tabOfficial
+	for i, p := range m2.providers {
+		if p.Name == "litellm" {
+			m2.officialIdx = i
+			break
+		}
+	}
+	preset, _ := llm.LookupProvider("litellm")
+	if got := m2.effectiveBaseURL(); got != preset.BaseURL {
+		t.Errorf("effectiveBaseURL() = %q, want preset default %q", got, preset.BaseURL)
+	}
+}
