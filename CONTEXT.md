@@ -4,6 +4,13 @@ This context defines how the local Open Code Review CLI is exposed to coding-age
 
 ## Language
 
+**Viewer session**:
+A code-review execution record shown under its repository. Its identity is the session ID.
+_Avoid_: treating a session ID as proof of resumability.
+
+**Session ID search**:
+A lookup within the currently selected repository that matches session IDs only, including case-insensitive partial IDs. It does not search across repositories or session content.
+
 **OCR runner**:
 The local `ocr` CLI process that analyzes Git changes and emits structured review findings.
 _Avoid_: using `ocr_review` to mean the CLI process.

@@ -112,14 +112,26 @@ func TestRenderTemplate_Sessions(t *testing.T) {
 	renderTemplate(rr, "sessions.html", sessionsData{
 		EncodedRepo: "test-repo",
 		RepoName:    "MyProject",
-		Sessions:    []SessionSummary{},
+		Sessions: []SessionSummary{{
+			SessionID: "0123456789abcdef",
+		}},
 	})
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "MyProject") {
-		t.Errorf("expected repo name in sessions template")
+	body := rr.Body.String()
+	for _, required := range []string{
+		"MyProject",
+		`id="session-search-input"`,
+		`id="sessions-table"`,
+		`data-session-id="0123456789abcdef"`,
+		`id="session-search-empty"`,
+		"No sessions match this session ID.",
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("rendered session page missing %q", required)
+		}
 	}
 }
 

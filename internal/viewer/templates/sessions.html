@@ -12,11 +12,15 @@
 <main>
 <h2>Sessions: {{.RepoName}}</h2>
 {{if .Sessions}}
-<table class="table">
+<div class="repository-search">
+    <label for="session-search-input">Search sessions by ID</label>
+    <input id="session-search-input" type="search" placeholder="Search sessions by ID..." autocomplete="off">
+</div>
+<table id="sessions-table" class="table">
     <thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th><th>Files</th><th>Status</th><th>Comments</th><th>Duration</th><th>Started At</th></tr></thead>
     <tbody>
     {{range .Sessions}}
-        <tr>
+        <tr data-session-id="{{.SessionID}}">
             <td><a href="/r/{{$.EncodedRepo}}/{{.SessionID}}">{{.SessionID | printf "%.8s"}}…</a></td>
             <td>{{.GitBranch}}</td>
             <td>{{if .ReviewMode}}{{.ReviewMode}}{{else}}-{{end}}</td>
@@ -30,6 +34,28 @@
     {{end}}
     </tbody>
 </table>
+<p id="session-search-empty" role="status" hidden>No sessions match this session ID.</p>
+<script>
+(() => {
+    const input = document.getElementById("session-search-input");
+    const table = document.getElementById("sessions-table");
+    const empty = document.getElementById("session-search-empty");
+    if (!input || !table || !empty) return;
+
+    const rows = table.querySelectorAll("tbody tr");
+    input.addEventListener("input", () => {
+        const query = input.value.trim().toLowerCase();
+        let visible = 0;
+        rows.forEach((row) => {
+            const sessionId = (row.dataset.sessionId || "").toLowerCase();
+            const matches = sessionId.includes(query);
+            row.hidden = !matches;
+            if (matches) visible++;
+        });
+        empty.hidden = visible > 0;
+    });
+})();
+</script>
 {{else}}
 <p>No sessions found for this repository.</p>
 {{end}}
