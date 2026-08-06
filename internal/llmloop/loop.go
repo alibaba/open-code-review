@@ -332,12 +332,19 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 	if !t.IsKnown() {
 		p, ok := r.deps.Tools.Get(call.Function.Name)
 		if !ok {
+			if rec != nil {
+				rec.AddToolError(call.Function.Name, call.Function.Arguments, tool.NotAvailableMsg, 0)
+			}
 			return tool.Of(tool.NotAvailableMsg)
 		}
 		r.recordToolCall(call.Function.Name)
 		dynArgs, err := parseToolArgs(call.Function.Arguments)
 		if err != nil {
-			return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", call.Function.Name, err))
+			message := fmt.Sprintf("Error parsing tool arguments for %s: %v", call.Function.Name, err)
+			if rec != nil {
+				rec.AddToolError(call.Function.Name, call.Function.Arguments, message, 0)
+			}
+			return tool.Of(message)
 		}
 		telemetry.PrintToolCallStarted(call.Function.Name, dynArgs)
 		_, toolSpan := telemetry.StartToolSpan(ctx, call.Function.Name)
@@ -349,7 +356,11 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 			toolSpan.End()
 			telemetry.RecordToolCall(ctx, call.Function.Name, dur, false)
 			telemetry.PrintToolCallError(call.Function.Name, err)
-			return tool.Of(fmt.Sprintf("Error executing tool %s: %v", call.Function.Name, err))
+			message := fmt.Sprintf("Error executing tool %s: %v", call.Function.Name, err)
+			if rec != nil {
+				rec.AddToolError(call.Function.Name, call.Function.Arguments, message, dur)
+			}
+			return tool.Of(message)
 		}
 		telemetry.RecordToolResult(toolSpan, call.Function.Name, dur.Milliseconds(), nil)
 		toolSpan.End()
@@ -364,7 +375,11 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 	if t == tool.TaskDone {
 		args, err := parseToolArgs(call.Function.Arguments)
 		if err != nil {
-			return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
+			message := fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err)
+			if rec != nil {
+				rec.AddToolError(t.Name(), call.Function.Arguments, message, 0)
+			}
+			return tool.Of(message)
 		}
 		rawState, hasState := args["state"]
 		if !hasState {
@@ -372,7 +387,11 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		}
 		state, ok := rawState.(string)
 		if !ok {
-			return tool.Of("Error: task_done state must be DONE or FAILED.")
+			message := "Error: task_done state must be DONE or FAILED."
+			if rec != nil {
+				rec.AddToolError(t.Name(), call.Function.Arguments, message, 0)
+			}
+			return tool.Of(message)
 		}
 		switch state {
 		case "DONE":
@@ -380,12 +399,19 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		case "FAILED":
 			return tool.Fail("task_done reported FAILED")
 		default:
-			return tool.Of(fmt.Sprintf("Error: invalid task_done state %q; expected DONE or FAILED.", state))
+			message := fmt.Sprintf("Error: invalid task_done state %q; expected DONE or FAILED.", state)
+			if rec != nil {
+				rec.AddToolError(t.Name(), call.Function.Arguments, message, 0)
+			}
+			return tool.Of(message)
 		}
 	}
 
 	p := lookupTool(r.deps.Tools, t)
 	if p == nil {
+		if rec != nil {
+			rec.AddToolError(t.Name(), call.Function.Arguments, tool.NotAvailableMsg, 0)
+		}
 		return tool.Of(tool.NotAvailableMsg)
 	}
 
@@ -393,7 +419,11 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 
 	args, err := parseToolArgs(call.Function.Arguments)
 	if err != nil {
-		return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
+		message := fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err)
+		if rec != nil {
+			rec.AddToolError(t.Name(), call.Function.Arguments, message, 0)
+		}
+		return tool.Of(message)
 	}
 
 	// Always inject the current file path for code_comment.
@@ -414,6 +444,9 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 			telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), fmt.Errorf("%s", errMsg))
 			toolSpan.End()
 			telemetry.RecordToolCall(ctx, t.Name(), dur, false)
+			if rec != nil {
+				rec.AddToolError(t.Name(), call.Function.Arguments, errMsg, dur)
+			}
 			return tool.Of(errMsg)
 		}
 
@@ -494,7 +527,11 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 
 	if err != nil {
 		telemetry.PrintToolCallError(t.Name(), err)
-		return tool.Of(fmt.Sprintf("Error executing tool %s: %v", t.Name(), err))
+		message := fmt.Sprintf("Error executing tool %s: %v", t.Name(), err)
+		if rec != nil {
+			rec.AddToolError(t.Name(), call.Function.Arguments, message, dur)
+		}
+		return tool.Of(message)
 	}
 	telemetry.PrintToolCallFinished(t.Name(), dur)
 	if rec != nil {

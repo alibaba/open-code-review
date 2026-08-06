@@ -481,3 +481,19 @@ func (tr *TaskRecord) AddToolResult(toolName, arguments, result string) {
 		}
 	}
 }
+
+// AddToolError appends a failed tool call to this task record and writes it to
+// the JSONL stream so the viewer can distinguish it from an unrecorded call.
+func (tr *TaskRecord) AddToolError(toolName, arguments, result string, duration time.Duration) {
+	tr.ToolResults = append(tr.ToolResults, ToolResultRecord{
+		ToolName:  toolName,
+		Arguments: arguments,
+		Result:    result,
+	})
+
+	if fs := tr.fileSession; fs != nil {
+		if p := fs.session.persist; p != nil {
+			p.WriteToolCall(fs.FilePath, tr.Type, toolName, arguments, result, false, duration)
+		}
+	}
+}

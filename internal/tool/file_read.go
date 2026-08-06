@@ -5,11 +5,15 @@ package tool
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 )
 
 const fileReadMaxLines = 500
+
+const fileReadNotFoundMessage = "Use file_find to locate the exact path, then retry file_read."
 
 // FileReadProvider reads file content at a given path and optional line range.
 type FileReadProvider struct {
@@ -48,7 +52,11 @@ func (p *FileReadProvider) Execute(ctx context.Context, args map[string]any) (st
 
 	lines, totalLines, err := p.FileReader.ReadLines(ctx, filePath, int(startLine), maxLines)
 	if err != nil {
-		return "", fmt.Errorf("file %q not found: %w", filePath, err)
+		errText := strings.ToLower(err.Error())
+		if errors.Is(err, os.ErrNotExist) || strings.Contains(errText, "does not exist in") || strings.Contains(errText, "exists on disk, but not in") {
+			return "", fmt.Errorf(`file not found: %q. %s`, filePath, fileReadNotFoundMessage)
+		}
+		return "", fmt.Errorf("could not read file %q: %w", filePath, err)
 	}
 
 	if totalLines > 0 && int(startLine)-1 >= totalLines {

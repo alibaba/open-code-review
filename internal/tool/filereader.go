@@ -5,6 +5,7 @@ package tool
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -224,6 +225,8 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = fr.RepoDir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
@@ -242,6 +245,9 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, scanErr)
 	}
 	if waitErr != nil {
+		if stderr.Len() > 0 {
+			return nil, 0, fmt.Errorf("git show %s:%s: %w: %s", fr.Ref, path, waitErr, stderr.String())
+		}
 		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, waitErr)
 	}
 	return collected, totalLines, nil

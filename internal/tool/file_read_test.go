@@ -397,6 +397,54 @@ func TestExecute_MissingFile(t *testing.T) {
 	}
 }
 
+func TestExecute_MissingFileGuidesRecovery(t *testing.T) {
+	fr := &FileReader{RepoDir: t.TempDir(), Mode: ModeWorkspace}
+	p := NewFileRead(fr)
+
+	_, err := p.Execute(context.Background(), map[string]any{"file_path": "missing.txt"})
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+
+	want := `file not found: "missing.txt". Use file_find to locate the exact path, then retry file_read.`
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err, want)
+	}
+}
+
+func TestExecute_MissingFileCommitModeGuidesRecovery(t *testing.T) {
+	dir := setupTestRepo(t)
+	commit := getHeadCommit(t, dir)
+	p := NewFileRead(&FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit})
+
+	_, err := p.Execute(context.Background(), map[string]any{"file_path": "missing.txt"})
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+
+	want := `file not found: "missing.txt". Use file_find to locate the exact path, then retry file_read.`
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err, want)
+	}
+}
+
+func TestExecute_WorktreeOnlyFileCommitModeGuidesRecovery(t *testing.T) {
+	dir := setupTestRepo(t)
+	commit := getHeadCommit(t, dir)
+	writeTestFile(t, dir, "after-commit.txt", "not in the reviewed commit\n")
+	p := NewFileRead(&FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit})
+
+	_, err := p.Execute(context.Background(), map[string]any{"file_path": "after-commit.txt"})
+	if err == nil {
+		t.Fatal("expected error for file missing from reviewed commit")
+	}
+
+	want := `file not found: "after-commit.txt". Use file_find to locate the exact path, then retry file_read.`
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err, want)
+	}
+}
+
 func TestExecute_CommitMode(t *testing.T) {
 	dir := setupTestRepo(t)
 	commit := getHeadCommit(t, dir)

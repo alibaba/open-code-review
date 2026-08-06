@@ -51,6 +51,22 @@ _Avoid_: treating diagnostic stage data as review findings.
 One LLM completion cycle in a file review, including the model response and any tool calls it requests before the next completion.
 _Avoid_: treating one tool call as one round.
 
+**Tool-call failure**:
+A single tool invocation that returns an error, such as an exact file path not being found.
+_Avoid_: treating one failed tool call as a failed file review when the conversation later recovers.
+
+**Conversation completion**:
+A file-scoped LLM task that reaches its terminal completion state after the model has handled any recoverable tool errors.
+_Avoid_: equating task completion with every intermediate tool call succeeding.
+
+**Coverage status**:
+The file-level outcome recorded for the review, based on whether the file-scoped conversation completed, was reused, failed, or waived.
+_Avoid_: deriving it from the presence of any intermediate tool-call failure alone.
+
+**Path lookup recovery**:
+The LLM handles an exact-path lookup failure by finding the canonical path and issuing a new read request; the read tool does not rewrite the path or perform a hidden retry.
+_Avoid_: silently substituting a guessed filename or treating the first failed lookup as the final file outcome.
+
 **Aggregate token budget**:
 The input-plus-output token ceiling for a complete review run; reaching it stops dispatching additional files and reports incomplete coverage.
 _Avoid_: confusing it with the per-request `MAX_TOKENS` limit or the per-file timeout.
