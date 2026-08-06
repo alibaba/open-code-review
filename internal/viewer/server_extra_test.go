@@ -84,10 +84,7 @@ func TestRenderTemplate_WithRepos(t *testing.T) {
 		`id="repository-search-input"`,
 		`id="repositories-table"`,
 		"data-repository-name",
-		`addEventListener("input"`,
-		"toLowerCase()",
-		"name.includes(query)",
-		"row.hidden",
+		`src="/static/repos.js"`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("rendered repository page missing %q", required)
