@@ -30,6 +30,7 @@ var llmCmd = &cobra.Command{
 var llmTestCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Send a test conversation to the configured LLM model",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLLMTest()
 	},
@@ -38,6 +39,7 @@ var llmTestCmd = &cobra.Command{
 var llmProvidersCmd = &cobra.Command{
 	Use:   "providers",
 	Short: "List all built-in LLM providers",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		runLLMProviders()
 	},

@@ -36,6 +36,7 @@ var sessionListCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Short:   "List recent review sessions for the current repo",
 	Long:    "List review sessions previously persisted to ~/.opencodereview/sessions/.\nThe session id printed here can be passed to 'ocr review --resume <id>'.",
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSessionList()
 	},
