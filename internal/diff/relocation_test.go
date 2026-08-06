@@ -32,7 +32,6 @@ func newMockResponse(content string) *llm.ChatResponse {
 
 func makeTask() *template.LlmConversation {
 	return &template.LlmConversation{
-		Timeout: 60,
 		Messages: []template.ChatMessage{
 			{Role: "system", Content: "you are a helper"},
 			{Role: "user", Content: "diff:\n{diff}\n\ncomment:\n{suggestion_content}"},

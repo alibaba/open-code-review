@@ -617,7 +617,6 @@ func TestExecuteReviewFilter_WithTimeout(t *testing.T) {
 		CommentCollector: collector,
 		Template: template.Template{
 			ReviewFilterTask: &template.LlmConversation{
-				Timeout:  30,
 				Messages: []template.ChatMessage{{Role: "user", Content: "{{comments}} {{path}} {{diff}}"}},
 			},
 			MaxTokens:           10000,

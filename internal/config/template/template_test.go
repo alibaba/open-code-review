@@ -68,9 +68,6 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 			t.Errorf("MainTask.Messages[%d].Content is empty", i)
 		}
 	}
-	if tpl.MainTask.Timeout != 0 {
-		t.Errorf("MainTask.Timeout = %d, want 0 (unset in template JSON)", tpl.MainTask.Timeout)
-	}
 	if tpl.PlanTask == nil {
 		t.Fatal("PlanTask is nil, expected non-nil")
 	}
