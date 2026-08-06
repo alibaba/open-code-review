@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -267,8 +268,12 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	// Persist a Base URL override only when it differs from the preset default.
 	// An empty/unchanged value clears any prior override so the preset BaseURL
 	// remains the default, matching the "preset is the fallback" contract.
-	if isPreset && strings.TrimSpace(result.url) != "" && result.url != preset.BaseURL {
-		entry.URL = result.url
+	trimmedURL := strings.TrimSpace(result.url)
+	if isPreset && trimmedURL != "" && trimmedURL != preset.BaseURL {
+		if err := validateBaseURL(trimmedURL); err != nil {
+			return err
+		}
+		entry.URL = trimmedURL
 	} else {
 		entry.URL = ""
 	}
@@ -426,4 +431,21 @@ func maskKey(key string) string {
 		return "***"
 	}
 	return key[:4] + "***" + key[len(key)-4:]
+}
+
+// validateBaseURL checks that a provider Base URL has an http or https scheme
+// and a non-empty host, giving the user immediate feedback in the TUI rather
+// than a runtime failure when the LLM client tries to use it.
+func validateBaseURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid Base URL %q: %w", raw, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("Base URL must use http or https scheme, got %q", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("Base URL %q must include a host", raw)
+	}
+	return nil
 }

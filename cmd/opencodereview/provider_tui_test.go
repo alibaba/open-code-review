@@ -3065,3 +3065,46 @@ func TestProviderTUI_OfficialBaseURLPrefilledWithOverride(t *testing.T) {
 		t.Errorf("after Esc on stepBaseURL, step = %d, want stepModel", m3.step)
 	}
 }
+
+// TestProviderTUI_EffectiveBaseURLReflectsPendingEdit verifies that after the
+// user edits the Base URL in the stepBaseURL step and returns to model
+// selection (Esc), effectiveBaseURL() reflects the in-progress value rather
+// than the stale on-disk config.
+func TestProviderTUI_EffectiveBaseURLReflectsPendingEdit(t *testing.T) {
+	cfg := &Config{
+		Provider: "litellm",
+		Providers: map[string]ProviderEntry{
+			"litellm": {APIKey: "sk-test", Model: "openai/gpt-5.4"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "litellm" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepModel
+	m.modelIdx = modelIdxForName(t, m, "openai/gpt-5.4")
+
+	// Enter the Base URL step.
+	result, _ := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if m2.step != stepBaseURL {
+		t.Fatalf("step = %d, want stepBaseURL", m2.step)
+	}
+
+	// Simulate the user typing a new URL.
+	m2.officialURLInput.SetValue("https://my-new-gateway.internal:9000/v1")
+
+	// Esc back to model selection — the model step should show the pending edit.
+	result, _ = m2.Update(escKey())
+	m3 := result.(providerTUIModel)
+	if m3.step != stepModel {
+		t.Fatalf("after Esc on stepBaseURL, step = %d, want stepModel", m3.step)
+	}
+	if got := m3.effectiveBaseURL(); got != "https://my-new-gateway.internal:9000/v1" {
+		t.Errorf("effectiveBaseURL() = %q, want the pending edit value", got)
+	}
+}

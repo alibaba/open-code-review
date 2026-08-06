@@ -352,16 +352,6 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 			m.apiKeyOriginal = entry.APIKey
 			m.apiKeyMasked = true
 		}
-
-		// Pre-fill the official Base URL input with the effective URL: a
-		// configured override (entry.URL) if present, else the preset default.
-		// Editing this value later overrides preset.BaseURL in the resolver.
-		selected := providers[m.officialIdx]
-		effectiveURL := selected.BaseURL
-		if entry, ok := cfg.Providers[cfg.Provider]; ok && entry.URL != "" {
-			effectiveURL = entry.URL
-		}
-		m.officialURLInput.SetValue(effectiveURL)
 	}
 
 	if cfg.Provider == "" && cfg.Llm.URL != "" {
@@ -2345,6 +2335,12 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 func (m providerTUIModel) effectiveBaseURL() string {
 	if m.activeTab == tabOfficial {
 		p := m.currentProvider()
+		// When the user has an in-progress edit in the Base URL step (e.g. they
+		// typed a new URL and pressed Esc back to model selection), reflect that
+		// pending value rather than the stale on-disk config.
+		if v := strings.TrimSpace(m.officialURLInput.Value()); v != "" {
+			return v
+		}
 		// A configured override (entry.URL) takes precedence over the preset
 		// default so the model-selection step reflects the gateway in use.
 		if m.existingCfg != nil {
