@@ -54,9 +54,10 @@ jobs:
           sleep 2
 
           FAILED=0
+          # `serve -s` rewrites SPA routes to index.html, so this verifies
+          # the built shell is reachable and includes bundle references.
           for path in "/" "/docs/contributing" "/docs/quickstart" "/features"; do
-            BODY=$(curl -sf "http://127.0.0.1:3999${path}")
-            if [ $? -ne 0 ]; then
+            if ! BODY=$(curl -sf "http://127.0.0.1:3999${path}"); then
               echo "FAIL: ${path} — not reachable"
               FAILED=1
             elif ! echo "$BODY" | grep -q '\.bundle\.js'; then
@@ -66,6 +67,14 @@ jobs:
               echo "OK: ${path}"
             fi
           done
+
+          # Also check a real static file to ensure dist assets are served.
+          if ! curl -sf "http://127.0.0.1:3999/404.html" >/dev/null; then
+            echo "FAIL: /404.html — static file not reachable"
+            FAILED=1
+          else
+            echo "OK: /404.html"
+          fi
 
           exit $FAILED
 
