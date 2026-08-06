@@ -43,6 +43,17 @@ func charKey(c rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: c, Text: string(c)}
 }
 
+func selectOfficialProvider(t *testing.T, m *providerTUIModel, name string) {
+	t.Helper()
+	for i, provider := range m.providers {
+		if provider.Name == name {
+			m.officialIdx = i
+			return
+		}
+	}
+	t.Fatalf("provider %q not found", name)
+}
+
 // --- Tab switching tests ---
 
 func TestProviderTUI_TabSwitchRight(t *testing.T) {
@@ -195,6 +206,53 @@ func TestProviderTUI_EscFromAPIKeyGoesBackToModel(t *testing.T) {
 	m4 := result.(providerTUIModel)
 	if m4.step != stepModel {
 		t.Errorf("after Esc on stepAPIKey, step = %d, want %d (stepModel)", m4.step, stepModel)
+	}
+}
+
+func TestProviderTUI_AnthropicAPIKeyAdvancesToPromptCaching(t *testing.T) {
+	m := newProviderTUI(&Config{}, "")
+	selectOfficialProvider(t, &m, "anthropic")
+	m.step = stepAPIKey
+	m.apiKeyInput.SetValue("sk-ant-test")
+
+	result, cmd := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if cmd != nil {
+		t.Fatal("API key confirmation should not quit before prompt caching is configured")
+	}
+	if m2.step != stepPromptCaching {
+		t.Fatalf("step = %d, want stepPromptCaching", m2.step)
+	}
+	if !m2.promptCaching {
+		t.Fatal("prompt caching should default to enabled")
+	}
+
+	result, _ = m2.Update(downKey())
+	m3 := result.(providerTUIModel)
+	if m3.promptCaching {
+		t.Fatal("down should select disabled prompt caching")
+	}
+	result, cmd = m3.Update(enterKey())
+	m4 := result.(providerTUIModel)
+	if cmd == nil || !m4.confirmed {
+		t.Fatal("prompt caching confirmation should finish the wizard")
+	}
+	got := m4.result().promptCaching
+	if got == nil || *got {
+		t.Fatalf("result promptCaching = %v, want false", got)
+	}
+}
+
+func TestProviderTUI_EscFromPromptCachingReturnsToAPIKey(t *testing.T) {
+	m := newProviderTUI(&Config{}, "")
+	m.step = stepPromptCaching
+	result, cmd := m.Update(escKey())
+	m2 := result.(providerTUIModel)
+	if cmd == nil {
+		t.Fatal("API key input should be focused when returning")
+	}
+	if m2.step != stepAPIKey {
+		t.Fatalf("step = %d, want stepAPIKey", m2.step)
 	}
 }
 
@@ -418,6 +476,37 @@ func TestProviderTUI_ManualResult(t *testing.T) {
 	}
 	if r.model != "test-model" {
 		t.Errorf("result model = %q, want %q", r.model, "test-model")
+	}
+}
+
+func TestProviderTUI_ManualAnthropicConfiguresPromptCaching(t *testing.T) {
+	disabled := false
+	m := newProviderTUI(&Config{Llm: LlmConfig{PromptCaching: &disabled}}, "")
+	m.activeTab = tabManual
+	m.inManualForm = true
+	m.manualProtocolIdx = cpProtocolIndex(llm.ProtocolAnthropic)
+	m.manualStep = manualStepAuthHeader
+
+	result, cmd := m.Update(enterKey())
+	m2 := result.(providerTUIModel)
+	if cmd != nil {
+		t.Fatal("auth header confirmation should not quit before prompt caching is configured")
+	}
+	if m2.manualStep != manualStepPromptCaching {
+		t.Fatalf("manualStep = %d, want manualStepPromptCaching", m2.manualStep)
+	}
+	if m2.promptCaching {
+		t.Fatal("prompt caching should retain the configured disabled value")
+	}
+
+	result, _ = m2.Update(rightKey())
+	m3 := result.(providerTUIModel)
+	if !m3.promptCaching {
+		t.Fatal("right should select enabled prompt caching")
+	}
+	got := m3.result().promptCaching
+	if got == nil || !*got {
+		t.Fatalf("result promptCaching = %v, want true", got)
 	}
 }
 
@@ -2749,6 +2838,95 @@ func TestApplyCustomProviderConfigNormalizesAuthHeader(t *testing.T) {
 	}
 	if got := cfg.CustomProviders["test-provider"].AuthHeader; got != "authorization" {
 		t.Errorf("AuthHeader = %q, want %q", got, "authorization")
+	}
+}
+
+func TestApplyProviderConfigClearsPromptCachingForNonAnthropic(t *testing.T) {
+	tests := []struct {
+		name   string
+		apply  func(string, *Config, providerTUIResult) error
+		result providerTUIResult
+	}{
+		{
+			name:  "manual",
+			apply: applyManualConfig,
+			result: providerTUIResult{
+				isManual: true,
+				url:      "https://api.example.com/v1",
+				model:    "gpt-test",
+				apiKey:   "test-key",
+				protocol: llm.ProtocolOpenAIChatCompletions,
+			},
+		},
+		{
+			name:  "custom",
+			apply: applyCustomProviderConfig,
+			result: providerTUIResult{
+				provider: "gateway",
+				model:    "gpt-test",
+				url:      "https://api.example.com/v1",
+				apiKey:   "test-key",
+				protocol: llm.ProtocolOpenAIChatCompletions,
+				isCustom: true,
+			},
+		},
+		{
+			name:  "official",
+			apply: applyOfficialProviderConfig,
+			result: providerTUIResult{
+				provider: "openai",
+				model:    "gpt-4o",
+				apiKey:   "test-key",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			enabled := true
+			cfg := &Config{Llm: LlmConfig{PromptCaching: &enabled}}
+			configPath := filepath.Join(t.TempDir(), "config.json")
+
+			if err := tt.apply(configPath, cfg, tt.result); err != nil {
+				t.Fatalf("apply config: %v", err)
+			}
+			if cfg.Llm.PromptCaching != nil {
+				t.Fatalf("PromptCaching = %v, want nil", *cfg.Llm.PromptCaching)
+			}
+		})
+	}
+}
+
+func TestApplyInactiveOpenAIProviderPreservesPromptCaching(t *testing.T) {
+	enabled := true
+	cfg := &Config{
+		Provider: "anthropic",
+		Llm:      LlmConfig{PromptCaching: &enabled},
+		CustomProviders: map[string]ProviderEntry{
+			"gateway": {
+				URL:      "https://api.example.com/v1",
+				Protocol: llm.ProtocolOpenAIChatCompletions,
+				Model:    "gpt-test",
+			},
+		},
+	}
+	result := providerTUIResult{
+		provider: "gateway",
+		model:    "gpt-test",
+		url:      "https://api.example.com/v1",
+		apiKey:   "test-key",
+		protocol: llm.ProtocolOpenAIChatCompletions,
+		isCustom: true,
+		isEdit:   true,
+	}
+
+	if err := applyCustomProviderConfig(
+		filepath.Join(t.TempDir(), "config.json"), cfg, result,
+	); err != nil {
+		t.Fatalf("apply config: %v", err)
+	}
+	if cfg.Llm.PromptCaching == nil || !*cfg.Llm.PromptCaching {
+		t.Fatalf("PromptCaching = %v, want true", cfg.Llm.PromptCaching)
 	}
 }
 

@@ -22,6 +22,7 @@ const (
 	stepProvider tuiStep = iota
 	stepModel
 	stepAPIKey
+	stepPromptCaching
 )
 
 type providerTab int
@@ -51,6 +52,7 @@ const (
 	manualStepModel
 	manualStepAuthToken
 	manualStepAuthHeader
+	manualStepPromptCaching
 )
 
 // cpProtocols lists the protocol options offered in the Custom and Manual
@@ -80,6 +82,7 @@ type providerTUIResult struct {
 	url              string
 	protocol         string
 	authHeader       string
+	promptCaching    *bool
 	sessionModelPick map[string]string
 }
 
@@ -148,6 +151,7 @@ type providerTUIModel struct {
 	manualTokenInput      textinput.Model
 	manualTokenMasked     bool
 	manualTokenOriginal   string
+	promptCaching         bool
 
 	// --- shared model/api-key steps (official + existing custom) ---
 	modelIdx    int
@@ -298,6 +302,7 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 		activeTab:             tabOfficial,
 		customProviders:       collectCustomProviders(cfg),
 		configPath:            configPath,
+		promptCaching:         configuredPromptCaching(cfg),
 	}
 
 	providerFound := false
@@ -618,6 +623,9 @@ func (m providerTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.step == stepAPIKey {
 			return m.updateAPIKeyInput(key, msg)
+		}
+		if m.step == stepPromptCaching {
+			return m.updatePromptCaching(key)
 		}
 
 		if m.step == stepProvider && (m.creatingCustom || m.editingCustom) {
@@ -944,6 +952,11 @@ func (m providerTUIModel) updateAPIKeyInput(key string, msg tea.KeyPressMsg) (te
 			return m, nil
 		}
 		m.formError = ""
+		if m.selectedProviderProtocol() == llm.ProtocolAnthropic {
+			m.apiKeyInput.Blur()
+			m.step = stepPromptCaching
+			return m, nil
+		}
 		m.confirmed = true
 		return m, tea.Quit
 	case "ctrl+c":
@@ -977,6 +990,7 @@ func (m providerTUIModel) updateCustomProviderForm(key string, msg tea.KeyPressM
 			m.apiKeyInput.SetValue("")
 			m.apiKeyMasked = false
 			m.apiKeyOriginal = ""
+			m.promptCaching = configuredPromptCaching(m.existingCfg)
 			m.formError = ""
 			return m, nil
 		}
@@ -1024,6 +1038,7 @@ func (m *providerTUIModel) enterEditCustomProvider() {
 	m.editTargetName = cp.name
 	m.cpStep = cpStepName
 	m.formError = ""
+	m.promptCaching = configuredPromptCaching(m.existingCfg)
 	m.cpProtocolIdx = cpProtocolIndex(entry.Protocol)
 	m.cpNameInput.SetValue(cp.name)
 	m.cpURLInput.SetValue(entry.URL)
@@ -1092,31 +1107,75 @@ func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cpAuthInput.Blur()
-		if m.editingCustom {
-			r := m.result()
-			if err := m.applyEditCustomProviderSave(); err != nil {
-				return m, nil
-			}
-			// Edit succeeded — drop the user into the model list for this provider.
-			m.editingCustom = false
-			m.editTargetName = ""
-			m.apiKeyInput.SetValue("")
-			m.apiKeyMasked = false
-			m.apiKeyOriginal = ""
-			if idx := m.findCustomIdx(r.provider); idx >= 0 {
-				m.customIdx = idx
-			}
-			m.step = stepModel
-			m.prepareModelSelection(r.provider, m.customProviderEntry(r.provider, ProviderEntry{}).Model)
-			return m, nil
-		}
-		if m.creatingCustom {
-			return m.applyCreateCustomProvider()
-		}
-		m.confirmed = true
-		return m, tea.Quit
+		return m.finishCustomProviderForm()
 	}
 	return m, nil
+}
+
+func (m providerTUIModel) selectedProviderProtocol() string {
+	switch m.activeTab {
+	case tabOfficial:
+		return llm.NormalizeProtocol(m.currentProvider().Protocol)
+	case tabCustom:
+		if cp, ok := m.selectedCustomProvider(); ok {
+			return llm.NormalizeProtocol(cp.entry.Protocol)
+		}
+	}
+	return ""
+}
+
+func (m providerTUIModel) updatePromptCaching(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "ctrl+c":
+		m.cancelled = true
+		return m, tea.Quit
+	case "esc":
+		m.step = stepAPIKey
+		return m, m.apiKeyInput.Focus()
+	case "enter":
+		m.confirmed = true
+		return m, tea.Quit
+	case "up", "down", "left", "right", "h", "j", "k", "l", " ":
+		m.promptCaching = !m.promptCaching
+	}
+	return m, nil
+}
+
+func promptCachingForProtocol(protocol string, enabled bool) *bool {
+	if llm.NormalizeProtocol(protocol) != llm.ProtocolAnthropic {
+		return nil
+	}
+	value := enabled
+	return &value
+}
+
+func configuredPromptCaching(cfg *Config) bool {
+	return cfg == nil || cfg.Llm.PromptCaching == nil || *cfg.Llm.PromptCaching
+}
+
+func (m providerTUIModel) finishCustomProviderForm() (tea.Model, tea.Cmd) {
+	if m.editingCustom {
+		r := m.result()
+		if err := m.applyEditCustomProviderSave(); err != nil {
+			return m, nil
+		}
+		m.editingCustom = false
+		m.editTargetName = ""
+		m.apiKeyInput.SetValue("")
+		m.apiKeyMasked = false
+		m.apiKeyOriginal = ""
+		if idx := m.findCustomIdx(r.provider); idx >= 0 {
+			m.customIdx = idx
+		}
+		m.step = stepModel
+		m.prepareModelSelection(r.provider, m.customProviderEntry(r.provider, ProviderEntry{}).Model)
+		return m, nil
+	}
+	if m.creatingCustom {
+		return m.applyCreateCustomProvider()
+	}
+	m.confirmed = true
+	return m, tea.Quit
 }
 
 func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
@@ -1376,6 +1435,7 @@ func (m providerTUIModel) updateManualForm(key string, msg tea.KeyPressMsg) (tea
 				m.manualTokenMasked = false
 				m.manualTokenOriginal = ""
 			}
+			m.promptCaching = configuredPromptCaching(m.existingCfg)
 			m.formError = ""
 			return m, nil
 		}
@@ -1399,6 +1459,13 @@ func (m providerTUIModel) updateManualForm(key string, msg tea.KeyPressMsg) (tea
 				}
 				return m, nil
 			}
+		}
+		if m.manualStep == manualStepPromptCaching {
+			switch key {
+			case "up", "down", "left", "right", "h", "j", "k", "l", " ":
+				m.promptCaching = !m.promptCaching
+			}
+			return m, nil
 		}
 		if m.manualStep == manualStepAuthToken && m.manualTokenMasked {
 			m.beginManualTokenReplace()
@@ -1586,6 +1653,7 @@ func (m *providerTUIModel) reloadConfigAfterSaveFailure() bool {
 	}
 	m.existingCfg = reloaded
 	m.customProviders = collectCustomProviders(reloaded)
+	m.promptCaching = configuredPromptCaching(reloaded)
 	return true
 }
 
@@ -1624,6 +1692,13 @@ func (m providerTUIModel) handleManualFormEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.manualAuthHeaderInput.Blur()
+		if cpProtocols[m.manualProtocolIdx] == llm.ProtocolAnthropic {
+			m.manualStep = manualStepPromptCaching
+			return m, nil
+		}
+		m.confirmed = true
+		return m, tea.Quit
+	case manualStepPromptCaching:
 		m.confirmed = true
 		return m, tea.Quit
 	}
@@ -1642,6 +1717,8 @@ func (m *providerTUIModel) blurManualStep() {
 		m.manualTokenInput.Blur()
 	case manualStepAuthHeader:
 		m.manualAuthHeaderInput.Blur()
+	case manualStepPromptCaching:
+		// no input to blur
 	}
 }
 
@@ -1657,6 +1734,8 @@ func (m *providerTUIModel) focusManualStep() tea.Cmd {
 		return m.manualTokenInput.Focus()
 	case manualStepAuthHeader:
 		return m.manualAuthHeaderInput.Focus()
+	case manualStepPromptCaching:
+		return nil
 	}
 	return nil
 }
@@ -1677,6 +1756,8 @@ func (m providerTUIModel) passThroughManualInput(msg tea.Msg) (tea.Model, tea.Cm
 		m.manualTokenInput, cmd = m.manualTokenInput.Update(msg)
 	case manualStepAuthHeader:
 		m.manualAuthHeaderInput, cmd = m.manualAuthHeaderInput.Update(msg)
+	case manualStepPromptCaching:
+		return m, nil
 	}
 	if _, ok := msg.(tea.KeyPressMsg); ok {
 		m.formError = ""
@@ -1711,6 +1792,7 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 				m.cpAuthInput.SetValue("")
 				m.apiKeyInput.SetValue("")
 				m.apiKeyMasked = false
+				m.promptCaching = configuredPromptCaching(m.existingCfg)
 				return m, m.cpNameInput.Focus()
 			}
 			cp := m.customProviders[m.customIdx]
@@ -1850,6 +1932,7 @@ func (m providerTUIModel) result() providerTUIResult {
 			provider:         p.Name,
 			model:            model,
 			apiKey:           apiKey,
+			promptCaching:    promptCachingForProtocol(p.Protocol, m.promptCaching),
 			sessionModelPick: m.sessionModelPickSnapshot(),
 		}
 
@@ -1905,6 +1988,7 @@ func (m providerTUIModel) result() providerTUIResult {
 				url:              cp.entry.URL,
 				protocol:         cp.entry.Protocol,
 				authHeader:       cp.entry.AuthHeader,
+				promptCaching:    promptCachingForProtocol(cp.entry.Protocol, m.promptCaching),
 				sessionModelPick: m.sessionModelPickSnapshot(),
 			}
 		}
@@ -1917,12 +2001,13 @@ func (m providerTUIModel) result() providerTUIResult {
 		}
 		authHeader, _ := llm.NormalizeAuthHeader(m.manualAuthHeaderInput.Value())
 		return providerTUIResult{
-			isManual:   true,
-			url:        m.manualURLInput.Value(),
-			model:      m.manualModelInput.Value(),
-			apiKey:     apiKey,
-			protocol:   cpProtocols[m.manualProtocolIdx],
-			authHeader: authHeader,
+			isManual:      true,
+			url:           m.manualURLInput.Value(),
+			model:         m.manualModelInput.Value(),
+			apiKey:        apiKey,
+			protocol:      cpProtocols[m.manualProtocolIdx],
+			authHeader:    authHeader,
+			promptCaching: promptCachingForProtocol(cpProtocols[m.manualProtocolIdx], m.promptCaching),
 		}
 	}
 
@@ -1960,6 +2045,29 @@ func renderModelName(name string, isCursor, userAdded bool) string {
 	return renderListName(name, isCursor)
 }
 
+func promptCachingLabel(enabled bool) string {
+	if enabled {
+		return "Enabled"
+	}
+	return "Disabled"
+}
+
+func viewPromptCachingChoices(s *strings.Builder, enabled bool) {
+	for _, choice := range []struct {
+		label    string
+		selected bool
+	}{
+		{"Enabled", enabled},
+		{"Disabled", !enabled},
+	} {
+		if choice.selected {
+			s.WriteString("    " + tuiCursorStyle.Render(tuiCursor) + " " + tuiSelectedItemStyle.Render(choice.label) + "\n")
+		} else {
+			s.WriteString("      " + tuiItemStyle.Render(choice.label) + "\n")
+		}
+	}
+}
+
 // --- View ---
 
 func (m providerTUIModel) View() tea.View {
@@ -1973,6 +2081,8 @@ func (m providerTUIModel) View() tea.View {
 		m.viewModel(&s)
 	case stepAPIKey:
 		m.viewAPIKey(&s)
+	case stepPromptCaching:
+		m.viewPromptCaching(&s)
 	}
 
 	v := tea.NewView(s.String())
@@ -2192,6 +2302,9 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 		{"Auth Token", strings.Repeat("*", len(m.manualTokenInput.Value())), m.manualStep == manualStepAuthToken},
 		{"Auth Header", m.manualAuthHeaderInput.Value(), m.manualStep == manualStepAuthHeader},
 	}
+	if cpProtocols[m.manualProtocolIdx] == llm.ProtocolAnthropic {
+		fields = append(fields, field{"Prompt caching", promptCachingLabel(m.promptCaching), m.manualStep == manualStepPromptCaching})
+	}
 
 	for _, f := range fields {
 		if f.active {
@@ -2218,6 +2331,8 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 				}
 			case manualStepAuthHeader:
 				s.WriteString("    " + m.manualAuthHeaderInput.View() + "\n")
+			case manualStepPromptCaching:
+				viewPromptCachingChoices(s, m.promptCaching)
 			}
 		} else {
 			display := f.value
@@ -2340,6 +2455,15 @@ func (m providerTUIModel) viewAPIKey(s *strings.Builder) {
 
 	s.WriteString("\n")
 	s.WriteString(tuiHelpStyle.Render("  Enter Confirm  Esc Back"))
+	s.WriteString("\n")
+}
+
+func (m providerTUIModel) viewPromptCaching(s *strings.Builder) {
+	s.WriteString(tuiTitleStyle.Render("  Prompt caching"))
+	s.WriteString("\n\n")
+	viewPromptCachingChoices(s, m.promptCaching)
+	s.WriteString("\n")
+	s.WriteString(tuiHelpStyle.Render("  Arrow keys Select  Enter Confirm  Esc Back"))
 	s.WriteString("\n")
 }
 

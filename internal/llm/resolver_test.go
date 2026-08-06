@@ -1006,6 +1006,38 @@ func TestResolveEndpoint_ProviderExtraBody(t *testing.T) {
 	}
 }
 
+func TestResolveEndpoint_ProviderUsesGlobalPromptCaching(t *testing.T) {
+	clearAllEnv(t)
+	disabled := false
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKey: "sk-ant-test", Model: "claude-sonnet-4-6"},
+		},
+		Llm: llmFileConfig{PromptCaching: &disabled},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.PromptCaching == nil || *ep.PromptCaching {
+		t.Fatalf("PromptCaching = %v, want false", ep.PromptCaching)
+	}
+	client, ok := NewLLMClient(ep).(*AnthropicClient)
+	if !ok {
+		t.Fatal("expected AnthropicClient")
+	}
+	if client.cfg.PromptCaching == nil || *client.cfg.PromptCaching {
+		t.Fatalf("client PromptCaching = %v, want false", client.cfg.PromptCaching)
+	}
+}
+
 func TestResolveEndpointWithModelOverride_ValidModelInPresetList(t *testing.T) {
 	clearAllEnv(t)
 

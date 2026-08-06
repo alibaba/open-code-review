@@ -98,6 +98,16 @@ func removeModels(existing, toRemove []string) []string {
 	return result
 }
 
+func applyPromptCachingConfig(cfg *Config, protocol string, promptCaching *bool) {
+	if llm.NormalizeProtocol(protocol) != llm.ProtocolAnthropic {
+		cfg.Llm.PromptCaching = nil
+		return
+	}
+	if promptCaching != nil {
+		cfg.Llm.PromptCaching = promptCaching
+	}
+}
+
 func applyManualConfig(configPath string, cfg *Config, result providerTUIResult) error {
 	if result.url == "" {
 		return fmt.Errorf("URL is required for manual configuration")
@@ -123,6 +133,7 @@ func applyManualConfig(configPath string, cfg *Config, result providerTUIResult)
 	// older binaries pick the OpenAI auth header/endpoint instead of wrongly
 	// defaulting to anthropic.
 	protocol := llm.NormalizeProtocol(result.protocol)
+	applyPromptCachingConfig(cfg, protocol, result.promptCaching)
 	cfg.Llm.Protocol = protocol
 	switch protocol {
 	case llm.ProtocolAnthropic:
@@ -189,6 +200,9 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	} else {
 		entry.APIKey = ""
 	}
+	if !result.isEdit || cfg.Provider == result.provider || result.promptCaching != nil {
+		applyPromptCachingConfig(cfg, entry.Protocol, result.promptCaching)
+	}
 	cfg.CustomProviders[result.provider] = entry
 
 	if !result.isEdit {
@@ -237,6 +251,10 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	}
 
 	preset, isPreset := llm.LookupProvider(result.provider)
+	protocol := result.protocol
+	if isPreset {
+		protocol = preset.Protocol
+	}
 
 	if result.apiKey == "" {
 		if isPreset && preset.EnvVar != "" {
@@ -263,6 +281,7 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 		// Confirmed empty key: clear saved api_key so resolver falls back to $ENV_VAR.
 		entry.APIKey = ""
 	}
+	applyPromptCachingConfig(cfg, protocol, result.promptCaching)
 	cfg.Providers[result.provider] = entry
 
 	if cfg.Provider != result.provider {

@@ -26,6 +26,9 @@ type ResolvedEndpoint struct {
 	Source       string            // human-readable config source label
 	ExtraBody    map[string]any    // vendor-specific request body fields
 	ExtraHeaders map[string]string // extra HTTP headers for the LLM request
+	// PromptCaching controls Anthropic cache_control markers. Nil preserves the
+	// default behavior (enabled); false disables them for incompatible gateways.
+	PromptCaching *bool
 	// Timeout is the per-request HTTP timeout; 0 means use the client default (5 min).
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
@@ -235,15 +238,16 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 
 // llmFileConfig represents the llm section in config.json.
 type llmFileConfig struct {
-	URL          string            `json:"url,omitempty"`
-	AuthToken    string            `json:"auth_token,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`      // anthropic|openai|openai-responses; takes priority over use_anthropic
-	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false; legacy fallback when protocol is empty
-	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	URL           string            `json:"url,omitempty"`
+	AuthToken     string            `json:"auth_token,omitempty"`
+	AuthHeader    string            `json:"auth_header,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	Protocol      string            `json:"protocol,omitempty"`      // anthropic|openai|openai-responses; takes priority over use_anthropic
+	UseAnthropic  *bool             `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false; legacy fallback when protocol is empty
+	TimeoutSec    int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
+	ExtraBody     map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders  map[string]string `json:"extra_headers,omitempty"`
+	PromptCaching *bool             `json:"prompt_caching,omitempty"`
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
@@ -422,17 +426,19 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		url = ensureMessagesSuffix(url)
 	}
 
+	// Prompt caching is a global behavior toggle shared by Anthropic providers.
 	return ResolvedEndpoint{
-		URL:          url,
-		Token:        apiKey,
-		Model:        model,
-		Provider:     cfg.Provider,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "provider:" + cfg.Provider,
-		ExtraBody:    extraBody,
-		ExtraHeaders: extraHeaders,
-		Timeout:      timeout,
+		URL:           url,
+		Token:         apiKey,
+		Model:         model,
+		Provider:      cfg.Provider,
+		Protocol:      protocol,
+		AuthHeader:    authHeader,
+		Source:        "provider:" + cfg.Provider,
+		ExtraBody:     extraBody,
+		ExtraHeaders:  extraHeaders,
+		PromptCaching: cfg.Llm.PromptCaching,
+		Timeout:       timeout,
 	}, true, nil
 }
 
@@ -483,7 +489,7 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders, Timeout: timeout}, true, nil
+	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders, PromptCaching: cfg.Llm.PromptCaching, Timeout: timeout}, true, nil
 }
 
 // tryCCEnv reads Claude Code environment variables.

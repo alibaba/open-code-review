@@ -179,7 +179,7 @@ func unsetActiveProvider(configPath string) error {
 }
 
 func legacyLLMShadowWarning(provider, key string) string {
-	if provider == "" || !strings.HasPrefix(key, "llm.") {
+	if provider == "" || !strings.HasPrefix(key, "llm.") || key == "llm.prompt_caching" || key == "llm.PromptCaching" {
 		return ""
 	}
 	section := "custom_providers"
@@ -312,6 +312,8 @@ type LlmConfig struct {
 	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	// PromptCaching is the global Anthropic caching toggle for the active provider.
+	PromptCaching *bool `json:"prompt_caching,omitempty"`
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -368,6 +370,7 @@ var supportedConfigKeys = []string{
 	"llm.model",
 	"llm.protocol",
 	"llm.use_anthropic",
+	"llm.prompt_caching",
 	"llm.extra_body",
 	"llm.extra_headers",
 	"language",
@@ -479,6 +482,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		} else if cfg.Llm.Protocol == "" || cfg.Llm.Protocol == llm.ProtocolAnthropic || cfg.Llm.Protocol == llm.ProtocolOpenAIChatCompletions {
 			cfg.Llm.Protocol = llm.ProtocolOpenAIChatCompletions
 		}
+	case "llm.prompt_caching", "llm.PromptCaching":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for llm.prompt_caching: %w", err)
+		}
+		cfg.Llm.PromptCaching = &b
 	case "language", "Language":
 		cfg.Language = value
 	case "telemetry.enabled", "telemetry.Enabled":

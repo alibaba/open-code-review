@@ -833,6 +833,22 @@ func TestSetConfigValueLlmUseAnthropicInvalid(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueLlmPromptCaching(t *testing.T) {
+	cfg := &Config{}
+	if err := setConfigValue(cfg, "llm.prompt_caching", "false"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.Llm.PromptCaching == nil || *cfg.Llm.PromptCaching {
+		t.Fatalf("PromptCaching = %v, want false", cfg.Llm.PromptCaching)
+	}
+}
+
+func TestSetConfigValueLlmPromptCachingInvalid(t *testing.T) {
+	if err := setConfigValue(&Config{}, "llm.prompt_caching", "sometimes"); err == nil {
+		t.Fatal("expected error for invalid boolean")
+	}
+}
+
 func TestSetConfigValueLanguage(t *testing.T) {
 	cfg := &Config{}
 	if err := setConfigValue(cfg, "language", "English"); err != nil {
@@ -932,7 +948,7 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.prompt_caching, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
 		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\n" +
 		"Protocol values: anthropic, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
@@ -1000,6 +1016,9 @@ func TestLegacyLLMShadowWarning(t *testing.T) {
 	}
 	if got := legacyLLMShadowWarning("dashscope", "Llm.model"); got != "" {
 		t.Errorf("warning for invalid mixed-case legacy key = %q", got)
+	}
+	if got := legacyLLMShadowWarning("dashscope", "llm.prompt_caching"); got != "" {
+		t.Errorf("warning for global prompt caching setting = %q", got)
 	}
 	if got := legacyLLMShadowWarning("dashscope", "llm.model"); !strings.Contains(got, "providers.dashscope.<field>") {
 		t.Errorf("preset-provider warning = %q", got)
