@@ -100,7 +100,7 @@ _BOT_MARKER = "<!-- ocr-"
 # inventory returns "unknown" (keeps the current fallback behavior).
 LINE_RESOLUTION_PATTERNS = [
     re.compile(p, re.IGNORECASE) for p in [
-        r"new_line", r"old_line", r"line_range", r"position",
+        r"new_line", r"old_line", r"line_range", r"line_code", r"position",
         r"out of (the )?diff", r"could not be resolved", r"is invalid",
         r"line (range )?out of range",
     ]
@@ -700,18 +700,80 @@ def _maybe_reached_server(resp):
     return status >= 500 or status == 408
 
 
-def fetch_diff_refs(api_base, token, auth_header, config):
-    """Fetch MR diff refs from the ``/versions`` endpoint (or None on failure)."""
+def fetch_diff_refs(api_base, token, auth_header, config, expected_shas=None):
+    """Fetch MR diff refs from the ``/versions`` endpoint (or None on failure).
+
+    When ``expected_shas`` is provided (e.g. ``{"head": ..., "base": ...}``,
+    sourced from the OCR result manifest), select the version whose
+    ``head_commit_sha`` (and, when both are supplied, ``base_commit_sha``)
+    matches what OCR actually reviewed. Without a match — or when
+    ``expected_shas`` is empty — fall back to the newest version by
+    ``created_at``.
+
+    Picking the wrong version is the root cause of GitLab's
+    ``:line_code=>["can't be blank", "must be a valid line code"]`` 400: the
+    MR can be force-pushed or gain a follow-up commit after OCR ran, so
+    ``versions[0]`` no longer describes the diff OCR commented on, and every
+    inline position then fails to resolve. Matching on the manifest's resolved
+    SHAs keeps the position's ``base_sha``/``head_sha`` aligned with the diff
+    OCR actually reviewed.
+    """
     resp = _api_request_with_retry(api_base, token, auth_header, config,
                                    "/versions", method="GET")
-    if resp and resp.get("success"):
-        versions = resp.get("data") or []
-        if versions:
-            latest = versions[0]
-            return {"base_sha": latest.get("base_commit_sha", ""),
-                    "start_sha": latest.get("start_commit_sha", ""),
-                    "head_sha": latest.get("head_commit_sha", "")}
-    return None
+    if not (resp and resp.get("success")):
+        return None
+    versions = resp.get("data") or []
+    if not versions:
+        return None
+    chosen = _pick_version(versions, expected_shas)
+    return {"base_sha": chosen.get("base_commit_sha", ""),
+            "start_sha": chosen.get("start_commit_sha", ""),
+            "head_sha": chosen.get("head_commit_sha", "")}
+
+
+def _pick_version(versions, expected_shas):
+    """Select the MR diff version that matches what OCR reviewed.
+
+    Prefers an exact ``head_commit_sha`` (and ``base_commit_sha`` when both
+    are supplied) match; logs a warning and falls back to the newest version
+    by ``created_at`` when no version matches, so inline posting is still
+    attempted (the per-comment 400 line-resolution fallback handles any
+    residual mismatch). Without ``expected_shas``, returns the newest
+    version explicitly sorted by ``created_at`` (the API does not guarantee
+    insertion order across GitLab versions / mirrors).
+    """
+    expected_head = (expected_shas or {}).get("head")
+    expected_base = (expected_shas or {}).get("base")
+    if expected_head:
+        for v in versions:
+            if v.get("head_commit_sha") != expected_head:
+                continue
+            if expected_base and v.get("base_commit_sha") != expected_base:
+                continue
+            return v
+        log("[diff-refs] no MR version matches OCR reviewed SHAs "
+            "(expected head=%s base=%s); falling back to newest version."
+            % (expected_head, expected_base or "(any)"))
+    return sorted(versions, key=lambda v: v.get("created_at") or "",
+                   reverse=True)[0]
+
+
+def _extract_expected_shas(result):
+    """Pull the SHAs OCR actually reviewed out of the result manifest.
+
+    Returns ``{"head": ..., "base": ...}`` (either key may be absent) or
+    ``{}`` when the manifest is absent (older OCR or non-range mode), in
+    which case ``fetch_diff_refs`` falls back to the newest MR version.
+    """
+    manifest_input = (result.get("manifest") or {}).get("input") or {}
+    shas = {}
+    head = (manifest_input.get("resolved_head") or "").strip()
+    base = (manifest_input.get("resolved_base") or "").strip()
+    if head:
+        shas["head"] = head
+    if base:
+        shas["base"] = base
+    return shas
 
 
 class GitLabPoster:
@@ -768,7 +830,10 @@ class GitLabPoster:
         url = None
         if resp.get("success") and isinstance(resp.get("data"), dict):
             url = resp["data"].get("web_url")
-        return {"success": resp["success"], "url": url}
+        return {"success": resp["success"], "url": url,
+                "http_status": resp.get("http_status"),
+                "error_body": resp.get("error_body"),
+                "rate_limit_remaining": resp.get("rate_limit_remaining")}
 
     def list_notes(self):
         """Return all MR notes, or None when the read failed."""
@@ -922,7 +987,8 @@ class DryRunPoster:
 
     def update_note(self, note_id, body):
         print("--- dry-run update_note[%s] ---\n%s\n" % (note_id, body))
-        return {"success": True, "url": None}
+        return {"success": True, "url": None, "http_status": None,
+                "error_body": None, "rate_limit_remaining": None}
 
     def list_notes(self):
         return []
@@ -952,6 +1018,14 @@ def make_dry_run_poster():
 # --------------------------------------------------------------------------- #
 
 
+def _truncate_error(body, limit=300):
+    """Collapse whitespace and cap length so log lines stay readable."""
+    if not body:
+        return ""
+    s = str(body).replace("\r", " ").replace("\n", " ")
+    return s if len(s) <= limit else s[:limit] + "..."
+
+
 def find_summary_note(notes):
     """Return the (first/oldest) note carrying :data:`SUMMARY_MARKER`, or None."""
     if not notes:
@@ -978,8 +1052,9 @@ def upsert_summary(poster, body, sticky):
         if existing is not None:
             resp = poster.update_note(existing.get("id"), body)
             if not (resp or {}).get("success"):
-                log("[summary] failed to update sticky note %s; stale content may remain."
-                    % existing.get("id"))
+                log("[summary] failed to update sticky note %s (HTTP %s): %s; stale content may remain."
+                    % (existing.get("id"), (resp or {}).get("http_status"),
+                       _truncate_error((resp or {}).get("error_body"))))
             return (resp or {}).get("url") or existing.get("web_url")
     resp = poster.post_note(body)
     return (resp or {}).get("url")
@@ -1008,7 +1083,9 @@ def finalize_summary(poster, body, sticky, anchor_id):
         resp = poster.update_note(anchor_id, body)
         if (resp or {}).get("success"):
             return (resp or {}).get("url")
-        log("[summary] failed to update anchored note %s; falling back to upsert." % anchor_id)
+        log("[summary] failed to update anchored note %s (HTTP %s): %s; falling back to upsert."
+            % (anchor_id, (resp or {}).get("http_status"),
+               _truncate_error((resp or {}).get("error_body"))))
     return upsert_summary(poster, body, sticky)
 
 
@@ -1257,6 +1334,12 @@ def write_stats_file(path, stats):
     for key in ("total", "inline", "summary", "routed", "skipped", "failed"):
         lines.append("OCR_COMMENTS_%s=%d" % (key.upper(), stats.get(key, 0)))
     lines.append("OCR_SUMMARY_URL=%s" % (stats.get("summary_url") or ""))
+    parent = os.path.dirname(path)
+    if parent:
+        try:
+            os.makedirs(parent, exist_ok=True)
+        except OSError:
+            pass  # open() below will surface a real failure if the dir is unusable
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
@@ -1294,12 +1377,12 @@ def parse_args(argv):
     p = argparse.ArgumentParser(
         description="Post `ocr review --format json` output onto a GitLab merge request."
     )
-    p.add_argument("input", nargs="?", default="/tmp/ocr-result.json",
-                   help="review result JSON path (default: /tmp/ocr-result.json)")
-    p.add_argument("--stderr-log", default="/tmp/ocr-stderr.log",
-                   help="OCR stderr log path, read on parse failure (default: /tmp/ocr-stderr.log)")
-    p.add_argument("--stats-file", default="/tmp/ocr-stats.env",
-                   help="dotenv output path for posting stats (default: /tmp/ocr-stats.env)")
+    p.add_argument("input", nargs="?", default=".ocr/ocr-result.json",
+                   help="review result JSON path (default: .ocr/ocr-result.json)")
+    p.add_argument("--stderr-log", default=".ocr/ocr-stderr.log",
+                   help="OCR stderr log path, read on parse failure (default: .ocr/ocr-stderr.log)")
+    p.add_argument("--stats-file", default=".ocr/ocr-stats.env",
+                   help="dotenv output path for posting stats (default: .ocr/ocr-stats.env)")
     p.add_argument("--dry-run", action="store_true",
                    help="print discussions/notes instead of posting them")
     return p.parse_args(argv)
@@ -1367,7 +1450,8 @@ def main(argv=None):
         diff_refs = {"base_sha": "(dry)", "start_sha": "(dry)", "head_sha": "(dry)"}
     else:
         poster = make_poster(api_base, api_token, auth_header, config)
-        diff_refs = fetch_diff_refs(api_base, api_token, auth_header, config)
+        diff_refs = fetch_diff_refs(api_base, api_token, auth_header, config,
+                                    _extract_expected_shas(result))
         if not diff_refs:
             log("Warning: Could not fetch MR versions. Inline comments will use fallback.")
 

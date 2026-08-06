@@ -518,7 +518,7 @@ class StickySummaryTest(unittest.TestCase):
         self.assertEqual(rec.list_notes_calls, 1)
         self.assertEqual(len(rec.note_calls), 1)  # pre-review anchor body
         self.assertEqual(len(rec.update_calls), 1)  # final body
-        self.assertIn(SUMMARY_MARKER if False else pr.SUMMARY_MARKER, rec.note_calls[0])
+        self.assertIn(pr.SUMMARY_MARKER, rec.note_calls[0])
         self.assertEqual(stats["inline"], 1)
 
     def test_existing_summary_is_updated_not_duplicated(self):
@@ -1009,6 +1009,13 @@ class LineResolutionTest(unittest.TestCase):
         self.assertTrue(pr.is_line_resolution_failure("Position out of diff"))
         self.assertTrue(pr.is_line_resolution_failure("the new_line is out of the diff"))
 
+    def test_is_line_resolution_failure_line_code_pattern(self):
+        # GitLab's Note-model form of the same line-resolution failure: the
+        # position's new_line cannot be resolved, so line_code is blank.
+        body = ('{"message":"400 Bad request - Note '
+                '{:line_code=>["can\'t be blank", "must be a valid line code"]}"}')
+        self.assertTrue(pr.is_line_resolution_failure(body))
+
     def test_is_line_resolution_failure_negative(self):
         self.assertFalse(pr.is_line_resolution_failure(""))
         self.assertFalse(pr.is_line_resolution_failure("something unrelated"))
@@ -1142,6 +1149,80 @@ class FetchDiffRefsTest(unittest.TestCase):
             refs = pr.fetch_diff_refs(self.API_BASE, self.TOKEN, self.AUTH_HEADER, DEFAULT_CONFIG)
         self.assertEqual(calls["n"], 2)
         self.assertIsNotNone(refs)
+
+    def _versions(self, *triples):
+        # triples: (base, start, head, [created_at])
+        return [{
+            "base_commit_sha": t[0], "start_commit_sha": t[1],
+            "head_commit_sha": t[2],
+            **({"created_at": t[3]} if len(t) > 3 else {}),
+        } for t in triples]
+
+    def test_picks_version_matching_expected_head(self):
+        versions = self._versions(
+            ("aaa", "bbb", "old-head", "2024-01-01T00:00:00Z"),
+            ("ccc", "ddd", "ocr-head", "2024-01-02T00:00:00Z"),
+        )
+        body = json.dumps(versions).encode()
+        with mock.patch.object(pr.urllib.request, "urlopen",
+                               lambda req, timeout=None: FakeResponse(body)), \
+                mock.patch.object(pr, "_sleep", lambda _s: None):
+            refs = pr.fetch_diff_refs(self.API_BASE, self.TOKEN, self.AUTH_HEADER,
+                                      DEFAULT_CONFIG, {"head": "ocr-head"})
+        self.assertEqual(refs, {"base_sha": "ccc", "start_sha": "ddd", "head_sha": "ocr-head"})
+
+    def test_picks_version_matching_head_and_base(self):
+        # Head matches on both versions but base differs: must pick the one
+        # whose base also matches, not just the first head match.
+        versions = self._versions(
+            ("wrong-base", "bbb", "ocr-head", "2024-01-02T00:00:00Z"),
+            ("ocr-base", "ddd", "ocr-head", "2024-01-01T00:00:00Z"),
+        )
+        body = json.dumps(versions).encode()
+        with mock.patch.object(pr.urllib.request, "urlopen",
+                               lambda req, timeout=None: FakeResponse(body)), \
+                mock.patch.object(pr, "_sleep", lambda _s: None):
+            refs = pr.fetch_diff_refs(self.API_BASE, self.TOKEN, self.AUTH_HEADER,
+                                      DEFAULT_CONFIG, {"head": "ocr-head", "base": "ocr-base"})
+        self.assertEqual(refs["base_sha"], "ocr-base")
+
+    def test_falls_back_to_newest_when_no_sha_match(self):
+        versions = self._versions(
+            ("aaa", "bbb", "v1-head", "2024-01-01T00:00:00Z"),
+            ("ccc", "ddd", "v2-head", "2024-01-02T00:00:00Z"),
+        )
+        body = json.dumps(versions).encode()
+        with mock.patch.object(pr.urllib.request, "urlopen",
+                               lambda req, timeout=None: FakeResponse(body)), \
+                mock.patch.object(pr, "_sleep", lambda _s: None), \
+                mock.patch.object(pr, "log", lambda m: None):
+            refs = pr.fetch_diff_refs(self.API_BASE, self.TOKEN, self.AUTH_HEADER,
+                                      DEFAULT_CONFIG, {"head": "stale-head"})
+        # No version matches "stale-head"; falls back to newest by created_at.
+        self.assertEqual(refs, {"base_sha": "ccc", "start_sha": "ddd", "head_sha": "v2-head"})
+
+    def test_without_expected_shas_picks_newest_by_created_at(self):
+        # API returns oldest-first here; the sort must surface the newest.
+        versions = self._versions(
+            ("aaa", "bbb", "old-head", "2024-01-01T00:00:00Z"),
+            ("ccc", "ddd", "new-head", "2024-01-02T00:00:00Z"),
+        )
+        body = json.dumps(versions).encode()
+        with mock.patch.object(pr.urllib.request, "urlopen",
+                               lambda req, timeout=None: FakeResponse(body)), \
+                mock.patch.object(pr, "_sleep", lambda _s: None):
+            refs = pr.fetch_diff_refs(self.API_BASE, self.TOKEN, self.AUTH_HEADER, DEFAULT_CONFIG)
+        self.assertEqual(refs["head_sha"], "new-head")
+
+    def test_extract_expected_shas_from_manifest(self):
+        result = {"manifest": {"input": {
+            "resolved_base": "  base123  ", "resolved_head": "head456"}}}
+        self.assertEqual(pr._extract_expected_shas(result),
+                         {"head": "head456", "base": "base123"})
+
+    def test_extract_expected_shas_empty_when_no_manifest(self):
+        self.assertEqual(pr._extract_expected_shas({}), {})
+        self.assertEqual(pr._extract_expected_shas({"manifest": {}}), {})
 
 
 # --------------------------------------------------------------------------- #

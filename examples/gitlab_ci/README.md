@@ -143,8 +143,8 @@ Additional behaviors ported from the GitHub Action (always on, no variable):
 
 The pipeline exposes the following to downstream jobs:
 
-- **dotenv report** (`/tmp/ocr-stats.env`): `OCR_COMMENTS_TOTAL`, `OCR_COMMENTS_INLINE`, `OCR_COMMENTS_SUMMARY`, `OCR_COMMENTS_ROUTED`, `OCR_COMMENTS_SKIPPED`, `OCR_COMMENTS_FAILED`, and `OCR_SUMMARY_URL`. Consume them in later stages via the `dotenv` artifact.
-- **Artifacts** (`when: always`, 1 week retention): `/tmp/ocr-result.json` (raw review JSON) and `/tmp/ocr-stderr.log` (OCR stderr), so you can inspect a failed review even when the job fails.
+- **dotenv report** (`.ocr/ocr-stats.env`): `OCR_COMMENTS_TOTAL`, `OCR_COMMENTS_INLINE`, `OCR_COMMENTS_SUMMARY`, `OCR_COMMENTS_ROUTED`, `OCR_COMMENTS_SKIPPED`, `OCR_COMMENTS_FAILED`, and `OCR_SUMMARY_URL`. Consume them in later stages via the `dotenv` artifact.
+- **Artifacts** (`when: always`, 1 week retention): `.ocr/ocr-result.json` (raw review JSON) and `.ocr/ocr-stderr.log` (OCR stderr), so you can inspect a failed review even when the job fails. Paths are project-relative (under `.ocr/`) because GitLab Runner refuses to upload artifacts outside the build directory.
 
 ### Limit concurrency
 
@@ -228,16 +228,17 @@ script:
     ], capture_output=True, text=True)
 
     # Save output for the posting script
-    with open("/tmp/ocr-result.json", "w") as f:
+    os.makedirs(".ocr", exist_ok=True)
+    with open(".ocr/ocr-result.json", "w") as f:
         f.write(result.stdout)
-    with open("/tmp/ocr-stderr.log", "w") as f:
+    with open(".ocr/ocr-stderr.log", "w") as f:
         f.write(result.stderr)
 
     print("OCR review completed.")
     WRAPPER_SCRIPT
 
   # Post review comments to MR
-  - python3 post_review.py /tmp/ocr-result.json
+  - python3 post_review.py .ocr/ocr-result.json
 ```
 
 The key logic: the Python wrapper checks for existing OCR comments before running `ocr review`. If found, it exits early with `sys.exit(0)` before consuming any LLM tokens. To re-trigger a review, users can manually delete the previous OCR comments.
@@ -309,8 +310,8 @@ Add verbose output to the review step:
 
 ```yaml
 script:
-  - cat /tmp/ocr-result.json
-  - cat /tmp/ocr-stderr.log
+  - cat .ocr/ocr-result.json
+  - cat .ocr/ocr-stderr.log
 ```
 
 ## Testing
