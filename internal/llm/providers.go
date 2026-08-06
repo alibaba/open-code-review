@@ -247,6 +247,20 @@ var registry = []Provider{
 		Name:        "minimax",
 		DisplayName: "MiniMax API",
 		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.minimax.io/v1",
+		EnvVar:      "MINIMAX_API_KEY",
+		Models: []string{
+			"MiniMax-M3",
+			"MiniMax-M2.7",
+			"MiniMax-M2.7-highspeed",
+			"MiniMax-M2.5",
+			"MiniMax-M2.5-highspeed",
+		},
+	},
+	{
+		Name:        "minimax-cn",
+		DisplayName: "MiniMax CN API",
+		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.minimaxi.com/v1",
 		EnvVar:      "MINIMAX_API_KEY",
 		Models: []string{
