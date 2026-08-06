@@ -139,6 +139,16 @@ func TestStripMarkdownFences(t *testing.T) {
 			input: "```json\n```",
 			want:  "",
 		},
+		{
+			name:  "single-line json fence without newline",
+			input: "```json",
+			want:  "",
+		},
+		{
+			name:  "bare fence without newline",
+			input: "```",
+			want:  "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

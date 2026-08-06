@@ -296,6 +296,30 @@ func TestTruncateUnicode(t *testing.T) {
 	}
 }
 
+// TestTruncate covers the remaining branches of truncate: newline/tab
+// normalization, the short-enough pass-through, and the n<=1 ellipsis-only case.
+func TestTruncate(t *testing.T) {
+	cases := []struct {
+		name string
+		s    string
+		n    int
+		want string
+	}{
+		{"shorter than limit is unchanged", "abc", 10, "abc"},
+		{"newlines and tabs become spaces", "a\nb\tc", 10, "a b c"},
+		{"n of one collapses to ellipsis", "abcdef", 1, "…"},
+		{"n of zero collapses to ellipsis", "abcdef", 0, "…"},
+		{"exact length is unchanged", "abcd", 4, "abcd"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := truncate(tc.s, tc.n); got != tc.want {
+				t.Errorf("truncate(%q, %d) = %q, want %q", tc.s, tc.n, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunSession_UnknownSubcommand(t *testing.T) {
 	err := runSession([]string{"bogus"})
 	if err == nil {

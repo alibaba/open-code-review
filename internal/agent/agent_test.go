@@ -502,6 +502,31 @@ func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
 	}
 }
 
+// TestAgentGettersNil covers the defensive early returns in the accessor
+// methods when the agent (or its session) was never fully constructed, so
+// callers never advertise a resume target that does not exist.
+func TestAgentGettersNil(t *testing.T) {
+	var nilAgent *Agent
+	if got := nilAgent.SessionID(); got != "" {
+		t.Errorf("nil agent SessionID = %q, want empty", got)
+	}
+	if got := nilAgent.RunManifest(); got != nil {
+		t.Errorf("nil agent RunManifest = %v, want nil", got)
+	}
+
+	// An agent with no session must also return the empty/nil sentinels.
+	empty := &Agent{}
+	if got := empty.SessionID(); got != "" {
+		t.Errorf("sessionless SessionID = %q, want empty", got)
+	}
+	if got := empty.RunManifest(); got != nil {
+		t.Errorf("sessionless RunManifest = %v, want nil", got)
+	}
+	if got := empty.ResumeInfo(); got != nil {
+		t.Errorf("resumeless ResumeInfo = %v, want nil", got)
+	}
+}
+
 func TestCountReviewable(t *testing.T) {
 	a := New(Args{})
 	diffs := []model.Diff{

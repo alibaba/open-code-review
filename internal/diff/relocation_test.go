@@ -207,6 +207,8 @@ func TestExtractCodeBlock(t *testing.T) {
 		{"with surrounding text", "Here:\n```\ncode\n```\ndone", "code"},
 		{"no code block", "just text", ""},
 		{"empty block", "```\n```", ""},
+		{"opening fence without newline", "```go", ""},
+		{"no closing fence", "```\nfoo\nbar", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
