@@ -671,3 +671,66 @@ func TestLoadSession_MultipleTaskTypes(t *testing.T) {
 		t.Errorf("memory_compression_task cards = %d", len(fg.Tasks[MemoryCompressionTask]))
 	}
 }
+
+// TestLoadSession_ReviewComments covers the review_item_done / review_item_reused
+// comment-parsing block: every ReviewComment field, the per-comment path
+// override, and a reused item carrying comments.
+func TestLoadSession_ReviewComments(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeJSONL(t, filepath.Join(repoDir, "comments.jsonl"),
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
+		`{"type":"review_item_done","filePath":"main.go","comments":[{"path":"override.go","content":"use a constant","suggestion_code":"const N = 3","existing_code":"3","start_line":10,"end_line":12,"category":"style","severity":"minor"}]}`,
+		`{"type":"review_item_reused","filePath":"util.go","comments":[{"content":"reused finding"}]}`,
+		`{"type":"session_end","duration_seconds":5,"files_reviewed":["main.go"]}`,
+	)
+
+	vs, err := LoadSession(root, "repo", "comments")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(vs.Comments) != 2 {
+		t.Fatalf("Comments = %d, want 2", len(vs.Comments))
+	}
+	if vs.Summary.CommentCount != 2 {
+		t.Errorf("CommentCount = %d, want 2", vs.Summary.CommentCount)
+	}
+
+	c := vs.Comments[0]
+	// path override replaces the record-level filePath.
+	if c.FilePath != "override.go" {
+		t.Errorf("FilePath = %q, want override.go", c.FilePath)
+	}
+	if c.Content != "use a constant" {
+		t.Errorf("Content = %q", c.Content)
+	}
+	if c.SuggestionCode != "const N = 3" {
+		t.Errorf("SuggestionCode = %q", c.SuggestionCode)
+	}
+	if c.ExistingCode != "3" {
+		t.Errorf("ExistingCode = %q", c.ExistingCode)
+	}
+	if c.StartLine != 10 || c.EndLine != 12 {
+		t.Errorf("lines = %d-%d, want 10-12", c.StartLine, c.EndLine)
+	}
+	if c.Category != "style" {
+		t.Errorf("Category = %q", c.Category)
+	}
+	if c.Severity != "minor" {
+		t.Errorf("Severity = %q", c.Severity)
+	}
+
+	// A reused comment with no path falls back to the record-level filePath.
+	reused := vs.Comments[1]
+	if reused.FilePath != "util.go" {
+		t.Errorf("reused FilePath = %q, want util.go", reused.FilePath)
+	}
+	if reused.Content != "reused finding" {
+		t.Errorf("reused Content = %q", reused.Content)
+	}
+}

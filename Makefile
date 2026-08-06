@@ -37,7 +37,7 @@ PACKAGES := $(shell $(GO) list ./... | grep -v /extensions/)
 test:
 	LC_ALL=C $(GO) test -v -race -count=1 $(PACKAGES)
 
-COVERAGE_THRESHOLD := 80
+COVERAGE_THRESHOLD := 90
 
 coverage:
 	LC_ALL=C $(GO) test -count=1 -coverprofile=coverage.out $(PACKAGES)

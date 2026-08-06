@@ -1380,6 +1380,21 @@ func TestSetMCPServerValue_URLNoHost(t *testing.T) {
 	}
 }
 
+func TestSetMCPServerValue_URLParseError(t *testing.T) {
+	cfg := &Config{}
+	// "://bad" has no scheme, so url.Parse itself fails before the scheme check.
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.url", "://bad"); err == nil {
+		t.Fatal("expected error for unparseable URL, got nil")
+	}
+}
+
+func TestSetMCPServerValue_HeadersEmptyName(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.headers", `{"":"val"}`); err == nil {
+		t.Fatal("expected error for empty header name, got nil")
+	}
+}
+
 func TestSetMCPServerValue_HeadersInvalidJSON(t *testing.T) {
 	cfg := &Config{}
 	if err := setMCPServerValue(cfg, "mcp_servers.gh.headers", "not-json"); err == nil {

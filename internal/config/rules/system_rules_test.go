@@ -1592,3 +1592,100 @@ func TestSystemRulesIntegrity(t *testing.T) {
 		}
 	})
 }
+
+// TestLoadRuleFile covers loadRuleFile's read-error and unmarshal-error
+// branches plus the success path that resolves entries and returns the rule.
+func TestLoadRuleFile(t *testing.T) {
+	t.Run("read error on missing path", func(t *testing.T) {
+		if _, err := loadRuleFile(filepath.Join(t.TempDir(), "nope.json")); err == nil {
+			t.Fatal("expected read error for missing rule file, got nil")
+		}
+	})
+
+	t.Run("unmarshal error on invalid JSON", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "rule.json")
+		if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+			t.Fatalf("write invalid rule: %v", err)
+		}
+		if _, err := loadRuleFile(path); err == nil {
+			t.Fatal("expected unmarshal error for invalid JSON, got nil")
+		}
+	})
+
+	t.Run("valid file returns rule", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "rule.json")
+		if err := os.WriteFile(path, []byte(`{"rules":[{"rule":"be careful"}]}`), 0o644); err != nil {
+			t.Fatalf("write valid rule: %v", err)
+		}
+		pr, err := loadRuleFile(path)
+		if err != nil {
+			t.Fatalf("loadRuleFile: %v", err)
+		}
+		if pr == nil || len(pr.Rules) != 1 || pr.Rules[0].Rule != "be careful" {
+			t.Errorf("unexpected rule: %+v", pr)
+		}
+	})
+}
+
+// TestLoadGlobalRule covers loadGlobalRule's non-NotExist read error,
+// unmarshal error, and success branches by pointing HOME at a temp dir.
+func TestLoadGlobalRule(t *testing.T) {
+	globalRulePath := func(home string) string {
+		return filepath.Join(home, ".opencodereview", "rule.json")
+	}
+
+	t.Run("missing file is not an error", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		pr, err := loadGlobalRule()
+		if err != nil || pr != nil {
+			t.Fatalf("expected nil,nil for missing global rule: pr=%v err=%v", pr, err)
+		}
+	})
+
+	t.Run("read error when path is a directory", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		// Create the rule.json path as a directory so ReadFile fails with a
+		// non-NotExist error (EISDIR), exercising the wrapped-error branch.
+		if err := os.MkdirAll(globalRulePath(home), 0o755); err != nil {
+			t.Fatalf("mkdir rule path: %v", err)
+		}
+		if _, err := loadGlobalRule(); err == nil {
+			t.Fatal("expected read error when rule path is a directory, got nil")
+		}
+	})
+
+	t.Run("unmarshal error on invalid JSON", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		path := globalRulePath(home)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir parent: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("{bad"), 0o644); err != nil {
+			t.Fatalf("write invalid rule: %v", err)
+		}
+		if _, err := loadGlobalRule(); err == nil {
+			t.Fatal("expected unmarshal error for invalid global rule, got nil")
+		}
+	})
+
+	t.Run("valid file returns rule", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		path := globalRulePath(home)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir parent: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(`{"rules":[{"rule":"global rule"}]}`), 0o644); err != nil {
+			t.Fatalf("write valid rule: %v", err)
+		}
+		pr, err := loadGlobalRule()
+		if err != nil {
+			t.Fatalf("loadGlobalRule: %v", err)
+		}
+		if pr == nil || len(pr.Rules) != 1 || pr.Rules[0].Rule != "global rule" {
+			t.Errorf("unexpected rule: %+v", pr)
+		}
+	})
+}
