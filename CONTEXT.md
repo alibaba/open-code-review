@@ -29,7 +29,7 @@ A blocking recovery request that waits for the current or most recent in-process
 _Avoid_: treating it as a status or polling API.
 
 **Review deadline**:
-The server-controlled point by which a Synchronous review must return a terminal Review result; the host timeout follows it with a short grace period.
+The server-controlled idle-watchdog point by which a Synchronous review without OCR activity must return a terminal Review result; active progress has no fixed whole-review deadline, while the host can still cancel the request.
 _Avoid_: host timeout as the review result.
 
 **Resumable failure**:

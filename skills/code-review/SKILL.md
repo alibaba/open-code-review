@@ -3,7 +3,9 @@ name: code-review
 description: Review changes since a fixed point with the synchronous OpenCodeReview (OCR) MCP tool. Use when the user wants to review a branch, PR, commit, or work-in-progress changes.
 ---
 
-Review the diff between `HEAD` and a fixed point supplied by the user with one blocking `ocr_review` MCP call from `ocr-mcp-server`. The MCP server owns a fixed 60-minute review deadline; the host allows 61 minutes so the server can return a terminal timeout result. The call returns only after OCR reaches a terminal result. Keep the fixed point and any available task, repository, or business context as inputs, then return OCR's native review output without imposing an additional report structure or claiming coverage beyond OCR's result.
+Review the diff between `HEAD` and a fixed point supplied by the user with one blocking `ocr_review` MCP call from `ocr-mcp-server`. The MCP server has no fixed whole-review maximum duration; active progress can continue until the caller cancels, while the idle watchdog still stops a review with no OCR activity. The call returns only after OCR reaches a terminal result. Keep the fixed point and any available task, repository, or business context as inputs, then return OCR's native review output without imposing an additional report structure or claiming coverage beyond OCR's result.
+
+The MCP review uses an unlimited aggregate token budget by default. Per-file tool-request rounds, per-file timeouts, provider request limits, and the MCP server deadline still bound execution.
 
 Do not run `ocr review`, spawn review sub-agents, inspect progress events, or poll for completion. Do not terminate a running MCP call because it has produced no intermediate output; wait for the terminal result. If the host interrupts the call, report that interruption as an integration failure rather than treating it as a review result. If the MCP tool is unavailable, report the integration error instead of falling back to the CLI.
 

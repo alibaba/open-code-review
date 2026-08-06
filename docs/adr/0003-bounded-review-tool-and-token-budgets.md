@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: superseded
+superseded_by: 0004-unlimited-default-aggregate-token-budget.md
 ---
 
 # Bounded review tool and token budgets

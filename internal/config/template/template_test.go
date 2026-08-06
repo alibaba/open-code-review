@@ -16,8 +16,8 @@ func TestLoadScanDefault_BudgetParsed(t *testing.T) {
 	if tpl.MaxToolRequestTimes != 150 {
 		t.Errorf("scan MaxToolRequestTimes = %d, want 150", tpl.MaxToolRequestTimes)
 	}
-	if tpl.MaxTokensBudgetMultiplier != 2.5 {
-		t.Errorf("scan MaxTokensBudgetMultiplier = %v, want 2.5", tpl.MaxTokensBudgetMultiplier)
+	if tpl.MaxTokensBudgetMultiplier != 0 {
+		t.Errorf("scan MaxTokensBudgetMultiplier = %v, want 0 (unlimited default)", tpl.MaxTokensBudgetMultiplier)
 	}
 	if len(tpl.MainTask.Messages) == 0 {
 		t.Fatal("scan MainTask must be populated from the embedded scan_template.json")
@@ -89,8 +89,8 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	if tpl.MaxToolRequestTimes != 75 {
 		t.Errorf("MaxToolRequestTimes = %d, want 75", tpl.MaxToolRequestTimes)
 	}
-	if tpl.MaxTokensBudgetMultiplier != 2.5 {
-		t.Errorf("MaxTokensBudgetMultiplier = %v, want 2.5", tpl.MaxTokensBudgetMultiplier)
+	if tpl.MaxTokensBudgetMultiplier != 0 {
+		t.Errorf("MaxTokensBudgetMultiplier = %v, want 0 (unlimited default)", tpl.MaxTokensBudgetMultiplier)
 	}
 	if tpl.PlanModeLineThreshold != 50 {
 		t.Errorf("PlanModeLineThreshold = %d, want 50", tpl.PlanModeLineThreshold)

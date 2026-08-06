@@ -19,12 +19,14 @@ import (
 )
 
 const (
-	mcpReviewMaxDuration  = 60 * time.Minute
-	mcpReviewMinIdle      = 15 * time.Minute
-	mcpReviewIdleGrace    = 5 * time.Minute
-	mcpReviewToolName     = "ocr_review"
-	mcpReviewWaitToolName = "ocr_review_wait"
-	mcpProgressEventName  = "ocr_progress"
+	// A zero max duration disables the whole-review timer. Per-file rounds,
+	// provider limits, idle watchdog, and caller cancellation remain active.
+	mcpReviewMaxDuration  time.Duration = 0
+	mcpReviewMinIdle                    = 15 * time.Minute
+	mcpReviewIdleGrace                  = 5 * time.Minute
+	mcpReviewToolName                   = "ocr_review"
+	mcpReviewWaitToolName               = "ocr_review_wait"
+	mcpProgressEventName                = "ocr_progress"
 )
 
 type ocrReviewInput struct {
@@ -176,9 +178,16 @@ func (w *reviewWatchdog) Stop() {
 
 func (w *reviewWatchdog) run(maxDuration, idleDuration time.Duration) {
 	idleTimer := time.NewTimer(idleDuration)
-	maxTimer := time.NewTimer(maxDuration)
+	var maxTimer *time.Timer
+	var maxTimerC <-chan time.Time
+	if maxDuration > 0 {
+		maxTimer = time.NewTimer(maxDuration)
+		maxTimerC = maxTimer.C
+	}
 	defer stopTimer(idleTimer)
-	defer stopTimer(maxTimer)
+	if maxTimer != nil {
+		defer stopTimer(maxTimer)
+	}
 
 	for {
 		select {
@@ -190,7 +199,7 @@ func (w *reviewWatchdog) run(maxDuration, idleDuration time.Duration) {
 			w.setCause(fmt.Sprintf("MCP idle timeout after %s without OCR activity", idleDuration))
 			w.cancel()
 			return
-		case <-maxTimer.C:
+		case <-maxTimerC:
 			w.setCause(fmt.Sprintf("MCP maximum duration exceeded (%s)", maxDuration))
 			w.cancel()
 			return

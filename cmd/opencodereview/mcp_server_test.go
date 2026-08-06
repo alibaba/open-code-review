@@ -238,6 +238,18 @@ func TestReviewWatchdogResetsOnActivity(t *testing.T) {
 	}
 }
 
+func TestReviewWatchdogZeroMaxDurationUsesIdleOnly(t *testing.T) {
+	w := newReviewWatchdog(context.Background(), 0, 100*time.Millisecond)
+	defer w.Stop()
+
+	time.Sleep(30 * time.Millisecond)
+	select {
+	case <-w.Context().Done():
+		t.Fatalf("watchdog canceled with zero max duration: %s", w.Cause())
+	default:
+	}
+}
+
 func connectTestOCRServer(t *testing.T, run mcpReviewRunner) (*mcpsdk.ClientSession, func()) {
 	t.Helper()
 	clientTransport, serverTransport := mcpsdk.NewInMemoryTransports()
