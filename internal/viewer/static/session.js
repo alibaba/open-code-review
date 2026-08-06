@@ -9,7 +9,10 @@ document.querySelectorAll('.response-text').forEach(function(el) {
     };
     const codeBlocks = [];
     let html = esc(text);
-    html = html.replace(/
+    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+        codeBlocks.push(code.replace(/^\n|\n$/g, ''));
+        return '%%CODEBLOCK_' + (codeBlocks.length - 1) + '%%';
+    });
     html = html
         .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
