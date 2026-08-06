@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-//go:embed templates/*.html static/style.css static/session.js
+//go:embed templates/*.html static/style.css static/session.js static/repos.js
 var assets embed.FS
 
 func StartServer(addr string) error {
