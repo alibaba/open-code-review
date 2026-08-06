@@ -54,6 +54,7 @@ var delegatePreviewCmd = &cobra.Command{
 	Use:   "preview [flags]",
 	Short: "Preview reviewable files with mode/ref metadata",
 	Long:  "Outputs reviewable file list with mode/ref metadata for the host agent to construct git commands.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateDelegateOptions(&delegatePreviewOpts); err != nil {
 			return err
