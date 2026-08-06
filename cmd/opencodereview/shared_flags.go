@@ -148,7 +148,13 @@ func validateScanOptions(opts *scanOptions) error {
 }
 
 func validateDelegateOptions(opts *delegateOptions) error {
-	return validateDiffMode(opts.from, opts.to, opts.commit)
+	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
+		return err
+	}
+	if opts.format != "text" && opts.format != "json" {
+		return fmt.Errorf("invalid --format value %q: must be 'text' or 'json'", opts.format)
+	}
+	return nil
 }
 
 // registerReviewFlags registers all review command flags on cmd, binding to opts.
@@ -201,4 +207,6 @@ func registerDelegateFlags(cmd *cobra.Command, opts *delegateOptions) {
 	addRuleFlag(cmd, &opts.rulePath)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
+	cmd.Flags().StringVarP(&opts.format, "format", "f", "text", "output format: text or json")
+	cmd.RegisterFlagCompletionFunc("format", completeEnum("text", "json"))
 }

@@ -41,7 +41,7 @@ No LLM configuration is needed for delegation mode.
 ### Step 1: Preview — Determine What to Review
 
 ```bash
-ocr delegate preview [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
+ocr delegate preview --format json [--from <ref> --to <ref>] [--commit <hash>] [--exclude <patterns>]
 ```
 
 This outputs:
@@ -61,7 +61,7 @@ This outputs:
 ### Step 2: Get Rules for Files
 
 ```bash
-ocr delegate rule <path1> <path2> ...
+ocr delegate rule --format json <path1> <path2> ...
 ```
 
 Pass the reviewable file paths from Step 1. Output is grouped by rule content — files sharing the same rule appear under one group, avoiding repetition.
@@ -90,11 +90,16 @@ cat <path>
 
 ### Step 4: Review Each File
 
-For each reviewable file:
+Create a checklist containing every `reviewable_files` entry. For each reviewable file:
+
+Use `(path, status)` as the checklist identity. Workspace mode can report the same path twice when a staged deletion is followed by an untracked recreation.
 
 1. Get its diff (Step 3)
 2. Consult its Rule Group (from Step 2) for the review checklist
 3. Conduct a thorough review, using appropriate context tools as needed
+4. Mark the file `reviewed`, or `skipped` with a concrete reason
+
+For large changes, review in bounded batches grouped by shared rules and diff size. Do not stop after finding the first high-severity issue.
 
 ### Step 5: Format Output
 
@@ -110,6 +115,8 @@ Each comment must follow this structure:
 | severity | enum | no | critical, high, medium, low |
 
 ### Step 6: Classify and Report
+
+Before reporting, verify that every previewed file is accounted for. Include `total_files`, `reviewed_files`, `skipped_files`, and `coverage_rate` in the summary. A skipped file must include its reason.
 
 Group findings by severity:
 
@@ -145,6 +152,7 @@ If the user requested "review and fix":
 | `--exclude <patterns>` | Comma-separated exclude patterns |
 | `-b, --background <text>` | Business context |
 | `-B, --background-file <path>` | Business context from Markdown file |
+| `-f, --format <text\|json>` | Output format; use `json` for agent integrations |
 
 ## Gotchas
 
@@ -153,3 +161,4 @@ If the user requested "review and fix":
 - **Working directory matters** — `ocr delegate` operates on the Git repo at the current directory. Use `--repo /path` to override.
 - **Untracked files in workspace mode** — `preview` includes untracked files. For these, read the file directly instead of using `git diff`.
 - **Background context** — pass `--background` to `preview` when you have requirement context; it appears in the output for your reference during review.
+- **Coverage is mandatory** — every `reviewable_files` entry must end as reviewed or explicitly skipped; do not silently omit files.

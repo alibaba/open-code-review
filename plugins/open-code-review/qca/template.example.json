@@ -1,0 +1,71 @@
+{
+  "name": "Open Code Review",
+  "description": "Review code with the QCA host model and OpenCodeReview deterministic delegation tooling.",
+  "model": "ultimate",
+  "system": "Use the open-code-review-delegate Skill for every review. OCR only performs deterministic file selection and rule resolution; the QCA host model performs all review reasoning. Run only `ocr delegate preview --format json` and `ocr delegate rule --format json`; never run `ocr review` or request OCR LLM credentials. Account for every previewed file, review large changes in bounded batches, remain read-only, and report findings plus coverage.",
+  "tools": [
+    {
+      "type": "agent_toolset_20260401",
+      "configs": [
+        {
+          "name": "Bash",
+          "enabled": true,
+          "permission_policy": {
+            "type": "always_allow"
+          }
+        },
+        {
+          "name": "Read",
+          "enabled": true,
+          "permission_policy": {
+            "type": "always_allow"
+          }
+        },
+        {
+          "name": "Glob",
+          "enabled": true,
+          "permission_policy": {
+            "type": "always_allow"
+          }
+        },
+        {
+          "name": "Grep",
+          "enabled": true,
+          "permission_policy": {
+            "type": "always_allow"
+          }
+        },
+        {
+          "name": "Write",
+          "enabled": false
+        },
+        {
+          "name": "Edit",
+          "enabled": false
+        }
+      ]
+    }
+  ],
+  "mcp_servers": [],
+  "skills": [
+    {
+      "type": "custom",
+      "skill_id": "skill_open_code_review_delegate",
+      "version": "1",
+      "enabled": true
+    }
+  ],
+  "environment_id": "env_code_review",
+  "vault_ids": [],
+  "environment_variables": {
+    "OCR_NO_UPDATE": "1"
+  },
+  "metadata": {
+    "category": "code-review",
+    "integration": "open-code-review",
+    "execution_mode": "delegation",
+    "template_version": "1",
+    "delegate_schema_version": "1",
+    "ocr_version": "PIN_AT_PUBLISH_TIME"
+  }
+}
