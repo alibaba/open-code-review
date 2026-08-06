@@ -69,7 +69,7 @@ func TestRenderTemplate_WithRepos(t *testing.T) {
 	rr := httptest.NewRecorder()
 	renderTemplate(rr, "repos.html", map[string]any{
 		"Repos": []RepoInfo{
-			{EncodedPath: "my-project", SessionCount: 3},
+			{EncodedPath: "my-project", SessionCount: 3, SessionIDs: []string{"session-1"}},
 			{EncodedPath: "other-project", SessionCount: 1},
 		},
 	})
@@ -84,6 +84,10 @@ func TestRenderTemplate_WithRepos(t *testing.T) {
 		`id="repository-search-input"`,
 		`id="repositories-table"`,
 		"data-repository-name",
+		`data-session-id="session-1"`,
+		`href="/r/my-project/session-1"`,
+		"Search repositories or sessions",
+		"No repositories or sessions match your search.",
 		`addEventListener("input"`,
 		"toLowerCase()",
 		"name.includes(query)",

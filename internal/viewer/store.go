@@ -34,6 +34,7 @@ func SessionsRoot() (string, error) {
 type RepoInfo struct {
 	EncodedPath  string // encoded directory name on disk
 	SessionCount int
+	SessionIDs   []string
 	LastModified time.Time
 }
 
@@ -61,6 +62,7 @@ func DiscoverRepos(root string) ([]RepoInfo, error) {
 		}
 		for _, se := range subEntries {
 			if strings.HasSuffix(se.Name(), ".jsonl") {
+				info.SessionIDs = append(info.SessionIDs, strings.TrimSuffix(se.Name(), ".jsonl"))
 				info.SessionCount++
 				if fi, err := se.Info(); err == nil {
 					if fi.ModTime().After(info.LastModified) {

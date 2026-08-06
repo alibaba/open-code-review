@@ -94,6 +94,14 @@ func TestDiscoverRepos_FindsRepos(t *testing.T) {
 	if repos[1].SessionCount != 2 {
 		t.Errorf("repo-a session count = %d, want 2", repos[1].SessionCount)
 	}
+	if len(repos[1].SessionIDs) != 2 {
+		t.Fatalf("repo-a session IDs = %d, want 2", len(repos[1].SessionIDs))
+	}
+	for i, want := range []string{"session1", "session2"} {
+		if repos[1].SessionIDs[i] != want {
+			t.Errorf("repo-a session ID %d = %q, want %q", i, repos[1].SessionIDs[i], want)
+		}
+	}
 }
 
 func TestDiscoverRepos_SkipsDirsWithNoJSONL(t *testing.T) {

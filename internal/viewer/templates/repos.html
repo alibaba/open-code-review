@@ -13,35 +13,55 @@
 <h2>Repositories</h2>
 {{if .Repos}}
 <div class="repository-search">
-    <label for="repository-search-input">Search repositories</label>
-    <input id="repository-search-input" type="search" placeholder="Search repositories..." autocomplete="off">
+    <label for="repository-search-input">Search repositories or sessions</label>
+    <input id="repository-search-input" type="search" placeholder="Search repositories or sessions..." autocomplete="off">
 </div>
 <table id="repositories-table" class="table">
     <thead><tr><th>Repository</th><th>Sessions</th><th>Last Modified</th></tr></thead>
     <tbody>
     {{range .Repos}}
+        {{$repo := .}}
         <tr>
             <td data-repository-name><a href="/r/{{.EncodedPath}}">{{.EncodedPath}}</a></td>
-            <td>{{.SessionCount}}</td>
+            <td>
+                {{.SessionCount}}
+                {{range .SessionIDs}}
+                <div data-session-id="{{.}}" hidden><a href="/r/{{$repo.EncodedPath}}/{{.}}">{{. | truncate 12}}</a></div>
+                {{end}}
+            </td>
             <td>{{formatTime .LastModified}}</td>
         </tr>
     {{end}}
     </tbody>
 </table>
+<p id="repository-search-empty" role="status" hidden>No repositories or sessions match your search.</p>
 <script>
 (() => {
     const input = document.getElementById("repository-search-input");
     const table = document.getElementById("repositories-table");
-    if (!input || !table) return;
+    const empty = document.getElementById("repository-search-empty");
+    if (!input || !table || !empty) return;
 
     const rows = table.querySelectorAll("tbody tr");
     input.addEventListener("input", () => {
         const query = input.value.trim().toLowerCase();
+        let visible = 0;
         rows.forEach((row) => {
             const nameCell = row.querySelector("[data-repository-name]");
             const name = nameCell ? nameCell.textContent.trim().toLowerCase() : "";
-            row.hidden = !name.includes(query);
+            const sessionLinks = row.querySelectorAll("[data-session-id]");
+            let matchingSessions = 0;
+            sessionLinks.forEach((session) => {
+                const sessionId = (session.dataset.sessionId || "").toLowerCase();
+                const matches = query !== "" && sessionId.includes(query);
+                session.hidden = !matches;
+                if (matches) matchingSessions++;
+            });
+            const matches = query === "" || name.includes(query) || matchingSessions > 0;
+            row.hidden = !matches;
+            if (matches) visible++;
         });
+        empty.hidden = visible > 0;
     });
 })();
 </script>

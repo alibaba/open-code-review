@@ -9,7 +9,7 @@ A code-review execution record shown under its repository. Its identity is the s
 _Avoid_: treating a session ID as proof of resumability.
 
 **Session ID search**:
-A lookup within the currently selected repository that matches session IDs only, including case-insensitive partial IDs. It does not search across repositories or session content.
+A lookup by session ID. The repository page searches within the selected repository, while the repository index searches across all repositories. Both support case-insensitive partial IDs and exclude session content.
 
 **OCR runner**:
 The local `ocr` CLI process that analyzes Git changes and emits structured review findings.
