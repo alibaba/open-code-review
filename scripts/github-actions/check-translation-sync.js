@@ -46,7 +46,7 @@ const README_FILES = [
 // Docs live under pages/src/content/docs/<locale>/**. English is authored under
 // en/; zh/, ja/, and ru/ mirror the exact same relative sub-paths.
 const DOCS_EN_PREFIX = "pages/src/content/docs/en/";
-const DOCS_LOCALES = ["zh", "ja", "ru"];
+const DOCS_LOCALES = ["zh", "ja", "ko", "ru"];
 
 // ---------------------------------------------------------------------------
 // Markdown heading parsing
