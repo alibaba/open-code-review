@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -262,6 +263,14 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	} else {
 		// Confirmed empty key: clear saved api_key so resolver falls back to $ENV_VAR.
 		entry.APIKey = ""
+	}
+	// Persist a Base URL override only when it differs from the preset default.
+	// An empty/unchanged value clears any prior override so the preset BaseURL
+	// remains the default, matching the "preset is the fallback" contract.
+	if isPreset && strings.TrimSpace(result.url) != "" && result.url != preset.BaseURL {
+		entry.URL = result.url
+	} else {
+		entry.URL = ""
 	}
 	cfg.Providers[result.provider] = entry
 
