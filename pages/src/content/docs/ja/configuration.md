@@ -57,7 +57,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
 | `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
-| `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_API_KEY` |
+| `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
 
 ### カスタム provider
 

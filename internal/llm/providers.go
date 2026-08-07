@@ -343,7 +343,7 @@ var registry = []Provider{
 		DisplayName: "SiliconFlow API",
 		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.siliconflow.com/v1",
-		EnvVar:      "SILICONFLOW_API_KEY",
+		EnvVar:      "SILICONFLOW_GLOBAL_API_KEY",
 		Models: []string{
 			"deepseek-ai/DeepSeek-V3.2",
 			"deepseek-ai/DeepSeek-V4-Pro",
