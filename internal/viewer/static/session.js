@@ -51,7 +51,7 @@ document.querySelectorAll('.response-text').forEach(function(el) {
     function updateFilterState() {
         filters.forEach(function(filter) {
             const isActive = activeKind === filter.dataset.filterKind &&
-                activeValue === filter.dataset.filterValue;
+                activeValue === (filter.dataset.filterValue || '');
             filter.classList.toggle('is-active', isActive);
             filter.setAttribute('aria-pressed', String(isActive));
         });
