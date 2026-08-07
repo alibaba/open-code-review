@@ -297,6 +297,36 @@ Non-fatal warnings (a single sub-agent failed, a file exceeded the token
 threshold, etc.) are printed inline; in JSON mode they're added to the
 `warnings` array.
 
+## `ocr scan`
+
+Full-file review without a Git diff. Each file's current content is read
+from the working tree and sent to the LLM — useful for auditing an
+unfamiliar codebase or a directory with no meaningful diff.
+
+```text
+ocr scan [flags]
+ocr s      [flags]   (alias)
+```
+
+With no `--path`, the whole repository is scanned.
+
+### Flags
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--path <list>` | - | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). |
+| `--exclude <patterns>` | - | - | Comma-separated gitignore-style patterns to skip (e.g., `**/generated/*,*.pb.go`); merged with `rule.json` excludes. |
+| `--preview` | `-p` | `false` | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. |
+
+```bash
+ocr scan --preview                              # see what would be scanned
+ocr scan --path internal/agent                  # scan one directory
+ocr scan --path internal/agent,internal/llm/client.go
+ocr scan --exclude '**/generated/*,*.pb.go'
+```
+
+See `ocr scan -h` for the full flag list.
+
 ## `ocr session`
 
 Lists and inspects local review session logs saved under

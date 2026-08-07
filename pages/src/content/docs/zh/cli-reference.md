@@ -283,6 +283,35 @@ ocr review --format json --audience agent
 非致命警告（单个子 agent 失败、某文件超过 token 阈值等）内联打印；JSON 模式下
 会加入 `warnings` 数组。
 
+## `ocr scan`
+
+无需 Git diff 的全文件扫描。直接从工作树读取每个文件的当前内容交给
+LLM 评审——适合审计陌生代码库或没有有意义 diff 的目录。
+
+```text
+ocr scan [flags]
+ocr s      [flags]   (alias)
+```
+
+不传 `--path` 时，扫描整个仓库。
+
+### 参数
+
+| 参数 | 简写 | 默认 | 说明 |
+|---|---|---|---|
+| `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。 |
+| `--exclude <patterns>` | - | - | 逗号分隔的 gitignore 风格排除模式（如 `**/generated/*,*.pb.go`）；与 `rule.json` 的 excludes 合并。 |
+| `--preview` | `-p` | `false` | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。 |
+
+```bash
+ocr scan --preview                              # 查看会扫描哪些文件
+ocr scan --path internal/agent                  # 扫描单个目录
+ocr scan --path internal/agent,internal/llm/client.go
+ocr scan --exclude '**/generated/*,*.pb.go'
+```
+
+完整参数列表见 `ocr scan -h`。
+
 ## `ocr session`
 
 列出和查看保存在 `~/.opencodereview/sessions/` 下的本地评审会话日志。
