@@ -104,9 +104,9 @@ code-review:
       ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
       # Optional config: only written when the CI var is non-empty, so an unset
       # variable does not clobber a previously-configured value.
-      [ -n "$OCR_LANGUAGE" ] && ocr config set language "$OCR_LANGUAGE"
-      [ -n "$OCR_LLM_AUTH_HEADER" ] && ocr config set llm.auth_header "$OCR_LLM_AUTH_HEADER"
-      [ -n "$OCR_LLM_EXTRA_HEADERS" ] && ocr config set llm.extra_headers "$OCR_LLM_EXTRA_HEADERS"
+      if [ -n "$OCR_LANGUAGE" ]; then ocr config set language "$OCR_LANGUAGE"; fi
+      if [ -n "$OCR_LLM_AUTH_HEADER" ]; then ocr config set llm.auth_header "$OCR_LLM_AUTH_HEADER"; fi
+      if [ -n "$OCR_LLM_EXTRA_HEADERS" ]; then ocr config set llm.extra_headers "$OCR_LLM_EXTRA_HEADERS"; fi
       # OCR_LLM_TIMEOUT is read natively by OCR from the env (no `ocr config set`
       # key exists for it); GitLab CI/CD variables are already exported into the
       # job env, so leaving it unset/empty = use OCR's default.
@@ -120,9 +120,9 @@ code-review:
       mkdir -p .ocr
       echo "Reviewing MR: ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME} against ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
       ARGS=(--from "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" --to "${CI_COMMIT_SHA}" --format json --audience agent)
-      [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
-      [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
-      [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")
+      if [ -n "$OCR_REVIEW_CONCURRENCY" ]; then ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY"); fi
+      if [ -n "$OCR_BACKGROUND" ]; then ARGS+=(--background "$OCR_BACKGROUND"); fi
+      if [ -n "$OCR_RULE" ]; then ARGS+=(--rule "$OCR_RULE"); fi
       set +e
       ocr review "${ARGS[@]}" > .ocr/ocr-result.json 2>.ocr/ocr-stderr.log
       OCR_EXIT_CODE=$?
@@ -139,15 +139,25 @@ code-review:
     # NB: run unconditionally so a crashed OCR still surfaces its stderr on the
     # MR summary (post_review.py posts the stderr note on parse failure); the
     # job-fail gate below then turns the pipeline red on a non-zero OCR exit.
-    - python3 post_review.py .ocr/ocr-result.json
+    # Capture the exit code so the gate below runs regardless of whether
+    # post_review.py failed on severity gating or a posting error.
+    - |
+      set +e
+      python3 post_review.py .ocr/ocr-result.json
+      POST_EXIT_CODE=$?
+      set -e
 
-    # Fail the job on OCR error (mirrors the GitHub Action). post_review.py has
-    # already posted any stderr to the MR summary by this point, so the failure
-    # is visible both as a red pipeline and on the MR.
+    # Fail the job on OCR error or severity gate (mirrors the GitHub Action).
+    # post_review.py has already posted any stderr to the MR summary by this
+    # point, so the failure is visible both as a red pipeline and on the MR.
     - |
       if [ "$OCR_EXIT_CODE" != "0" ]; then
         echo "ocr review exited with code ${OCR_EXIT_CODE}; see MR summary for stderr."
         exit "$OCR_EXIT_CODE"
+      fi
+      if [ "$POST_EXIT_CODE" != "0" ]; then
+        echo "post_review.py exited with code ${POST_EXIT_CODE}; see MR summary for details."
+        exit "$POST_EXIT_CODE"
       fi
 
   # Expose the review result, stderr, and posting stats to downstream jobs.

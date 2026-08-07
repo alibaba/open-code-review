@@ -86,6 +86,10 @@ def wrap_summary_body(content, run_tag):
 # summary-only comment explains why it is here.
 NO_LINE_REASON = "No line information provided"
 
+# Reason attached to comments that have valid line info but could not be posted
+# inline because the MR version/diff-refs endpoint was unavailable.
+DIFF_REFS_UNAVAILABLE_REASON = "diff refs unavailable"
+
 # Default IoU threshold for the incremental multi-line overlap test. Two
 # multi-line comments are considered the same when their line-range IoU
 # exceeds this value.
@@ -1246,9 +1250,11 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
         comment = it["comment"]
         path = comment.get("path", "")
         end_line = comment.get("end_line", 0)
-        start_line = comment.get("start_line", end_line)
-        if not path or not end_line or not diff_refs:
+        if not path or not end_line:
             failed_comments.append({"comment": comment, "reason": NO_LINE_REASON})
+            continue
+        if not diff_refs:
+            failed_comments.append({"comment": comment, "reason": DIFF_REFS_UNAVAILABLE_REASON})
             continue
         discussion = {
             "body": it["body"],
