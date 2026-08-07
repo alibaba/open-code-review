@@ -95,6 +95,7 @@ unstaged + untracked 变更。
 | `--timeout <minutes>` | — | `10` | 每文件截止时间。`0` 关闭超时。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
 | `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`30`）；1–9 会被上调到 `10`；任何 `≥ 10` 的值都覆盖模板默认（即使小于 `30`）。 |
+| `--max-tokens <n>` | — | 配置或模板默认 | 每文件提示词 token 上限。覆盖本次运行已保存的 `max_tokens` 设置。 |
 | `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
 | `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |
