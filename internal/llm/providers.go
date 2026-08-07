@@ -345,7 +345,15 @@ var registry = []Provider{
 		BaseURL:     "https://api.siliconflow.com/v1",
 		EnvVar:      "SILICONFLOW_API_KEY",
 		Models: []string{
-			// PLACEHOLDER
+			"deepseek-ai/DeepSeek-V3.2",
+			"deepseek-ai/Deepseek-v4-pro",
+			"deepseek-ai/DeepSeek-V3",
+			"deepseek-ai/DeepSeek-R1",
+			"Qwen/Qwen3-32B",
+			"Qwen/Qwen3-14B",
+			"moonshotai/Kimi-K2.5",
+			"zai-org/GLM-5",
+			"baidu/ERNIE-4.5-300B-A47B",
 		},
 	},
 }
