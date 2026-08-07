@@ -296,7 +296,7 @@ var registry = []Provider{
 	},
 	{
 		Name:        "novita",
-		DisplayName: "Novita AI",
+		DisplayName: "Novita API",
 		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.novita.ai/openai",
 		EnvVar:      "NOVITA_API_KEY",
