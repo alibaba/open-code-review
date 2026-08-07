@@ -34,15 +34,11 @@ const (
 	}`
 )
 
-// finalizeForTest stands in for the client return boundary, which P3 adds.
-//
-// It exists so P2 can assert on a frozen report at all: Freeze refuses to build
-// one while any logical request is unfinalized. P3 must delete this helper and
-// let the client boundary finalize instead — leaving it in place would keep the
-// Freeze-level tests green even if P3 forgot to wire one of the three clients.
-func finalizeForTest(c *RetryCollector, m RequestMeta, reqErr error) {
-	c.Finalize(m, reqErr, false)
-}
+// Every test below reaches Freeze without finalizing anything itself: the
+// client boundary in CompletionsWithCtx does it. That is deliberate — Freeze
+// refuses to build a report while any logical request is unfinalized, so a
+// client that lost its boundary defer turns these Freeze assertions red instead
+// of silently reporting nothing.
 
 // attemptsFor returns a copy of the attempts recorded for m.
 //
@@ -149,7 +145,6 @@ func TestObserverRecordsRateLimitedThenSuccess(t *testing.T) {
 		t.Errorf("attempt 2 observed_backoff_ms = %d, want >= 30 (server asked for 40)", second.ObservedBackoffMS)
 	}
 
-	finalizeForTest(c, m, nil)
 	rep, err := c.Freeze("test-run-id")
 	if err != nil {
 		t.Fatalf("Freeze: %v", err)
@@ -200,7 +195,6 @@ func TestObserverRecordsExhaustedRetries(t *testing.T) {
 		}
 	}
 
-	finalizeForTest(c, m, err)
 	rep, freezeErr := c.Freeze("test-run-id")
 	if freezeErr != nil {
 		t.Fatalf("Freeze: %v", freezeErr)
@@ -297,7 +291,6 @@ func TestObserverRecordsRetryDirectiveOnSuccess(t *testing.T) {
 		t.Errorf("attempt 2 sdk_retry_directive = %v, want absent", *got[1].SDKRetryDirective)
 	}
 
-	finalizeForTest(c, m, nil)
 	rep, err := c.Freeze("test-run-id")
 	if err != nil {
 		t.Fatalf("Freeze: %v", err)
@@ -387,7 +380,6 @@ func TestObserverIgnoresOverriddenRetryCountHeader(t *testing.T) {
 	if len(got) != 2 || got[0].Number != 1 || got[1].Number != 2 {
 		t.Fatalf("attempts = %+v, want two numbered 1 and 2", got)
 	}
-	finalizeForTest(c, m, nil)
 	if _, err := c.Freeze("test-run-id"); err != nil {
 		t.Fatalf("Freeze: %v", err)
 	}
@@ -424,7 +416,6 @@ func TestObserverDropsRequestsWithoutIdentity(t *testing.T) {
 	if err == nil {
 		t.Fatal("CompletionsWithCtx succeeded, want an error")
 	}
-	finalizeForTest(c, m, err)
 
 	rep, freezeErr := c.Freeze("test-run-id")
 	if freezeErr != nil {
@@ -569,7 +560,6 @@ func TestObserverConcurrentRequests(t *testing.T) {
 		if got := attemptsFor(t, c, m); len(got) != 2 {
 			t.Errorf("%s recorded %d attempts, want 2", m.FilePath, len(got))
 		}
-		finalizeForTest(c, m, nil)
 	}
 
 	rep, err := c.Freeze("test-run-id")
