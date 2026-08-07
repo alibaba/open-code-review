@@ -135,7 +135,7 @@ cd your-project
 # ワークスペースモード — ステージ済み・未ステージ・未追跡のすべての変更をレビュー
 ocr review
 
-# ブランチ範囲 — 2つのrefを比較
+# ブランチ範囲 — main から分岐した後の feature-branch の変更をレビュー（マージベースモード）
 ocr review --from main --to feature-branch
 
 # 単一コミット

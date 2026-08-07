@@ -31,6 +31,38 @@ func TestLookupProvider_KnownProviders(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_MiniMaxDetails(t *testing.T) {
+	tests := []struct {
+		name, wantURL, wantEnvVar string
+	}{
+		{
+			name:       "minimax",
+			wantURL:    "https://api.minimax.io/v1",
+			wantEnvVar: "MINIMAX_GLOBAL_API_KEY",
+		},
+		{
+			name:       "minimax-cn",
+			wantURL:    "https://api.minimaxi.com/v1",
+			wantEnvVar: "MINIMAX_API_KEY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, ok := LookupProvider(tt.name)
+			if !ok {
+				t.Fatalf("LookupProvider(%q) returned false, want true", tt.name)
+			}
+			if provider.BaseURL != tt.wantURL {
+				t.Errorf("LookupProvider(%q).BaseURL = %q, want %q", tt.name, provider.BaseURL, tt.wantURL)
+			}
+			if provider.EnvVar != tt.wantEnvVar {
+				t.Errorf("LookupProvider(%q).EnvVar = %q, want %q", tt.name, provider.EnvVar, tt.wantEnvVar)
+			}
+		})
+	}
+}
+
 func TestLookupProvider_Unknown(t *testing.T) {
 	_, ok := LookupProvider("nonexistent-provider")
 	if ok {
@@ -43,7 +75,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "iflytek", "kimi", "litellm", "mimo", "minimax", "ollama-cloud", "openai", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "iflytek", "kimi", "litellm", "mimo", "minimax", "minimax-cn", "ollama-cloud", "openai", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
