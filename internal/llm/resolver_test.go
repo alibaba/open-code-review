@@ -267,6 +267,7 @@ func clearAllEnv(t *testing.T) {
 		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_AUTH_HEADER", "OCR_USE_ANTHROPIC", "OCR_LLM_PROTOCOL",
 		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+		"MINIMAX_GLOBAL_API_KEY", "MINIMAX_API_KEY",
 	} {
 		t.Setenv(k, "")
 	}
@@ -762,6 +763,81 @@ func TestResolveEndpoint_ProviderAPIKeyEnvFallback(t *testing.T) {
 	}
 	if ep.Token != "env-api-key" {
 		t.Errorf("Token = %q, want %q (should fall back to env var)", ep.Token, "env-api-key")
+	}
+}
+
+func TestResolveEndpoint_MiniMaxProviderEnvFallback(t *testing.T) {
+	tests := []struct {
+		name, provider, envName, wantToken, wantURL string
+	}{
+		{
+			name:      "global",
+			provider:  "minimax",
+			envName:   "MINIMAX_GLOBAL_API_KEY",
+			wantToken: "global-token",
+			wantURL:   "https://api.minimax.io/v1",
+		},
+		{
+			name:      "china",
+			provider:  "minimax-cn",
+			envName:   "MINIMAX_API_KEY",
+			wantToken: "china-token",
+			wantURL:   "https://api.minimaxi.com/v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllEnv(t)
+			t.Setenv(tt.envName, tt.wantToken)
+			path, _ := writeResolverConfig(t, configFile{
+				Providers: map[string]providerEntryConfig{
+					tt.provider: {Model: "MiniMax-M3"},
+				},
+			})
+
+			ep, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: tt.provider})
+			if err != nil {
+				t.Fatalf("ResolveEndpointWithOptions: %v", err)
+			}
+			if ep.Provider != tt.provider || ep.Token != tt.wantToken || ep.URL != tt.wantURL || ep.Model != "MiniMax-M3" {
+				t.Fatalf("endpoint = %+v", ep)
+			}
+		})
+	}
+}
+
+func TestResolveEndpoint_MiniMaxProviderRejectsOtherRegionEnv(t *testing.T) {
+	tests := []struct {
+		name, provider, wrongEnvName string
+	}{
+		{
+			name:         "global rejects china key",
+			provider:     "minimax",
+			wrongEnvName: "MINIMAX_API_KEY",
+		},
+		{
+			name:         "china rejects global key",
+			provider:     "minimax-cn",
+			wrongEnvName: "MINIMAX_GLOBAL_API_KEY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllEnv(t)
+			t.Setenv(tt.wrongEnvName, "wrong-region-token")
+			path, _ := writeResolverConfig(t, configFile{
+				Providers: map[string]providerEntryConfig{
+					tt.provider: {Model: "MiniMax-M3"},
+				},
+			})
+
+			_, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: tt.provider})
+			if err == nil || !strings.Contains(err.Error(), "has no api_key configured and no environment variable fallback found") {
+				t.Fatalf("error = %v", err)
+			}
+		})
 	}
 }
 

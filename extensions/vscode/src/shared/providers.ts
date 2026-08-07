@@ -119,7 +119,7 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
     displayName: 'MiniMax API',
     protocol: 'openai',
     baseUrl: 'https://api.minimax.io/v1',
-    envVar: 'MINIMAX_API_KEY',
+    envVar: 'MINIMAX_GLOBAL_API_KEY',
     models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed'],
   },
   {
