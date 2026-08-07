@@ -82,11 +82,35 @@ type Runner struct {
 	warnings              []AgentWarning
 	toolCallsMu           sync.Mutex
 	toolCalls             map[string]int64
+	// bg tracks every background goroutine that can still issue an LLM
+	// request after RunPerFile returned. WaitBackground joins them so a
+	// retry-report Freeze at the run boundary cannot observe an
+	// un-finalized request. See WaitBackground.
+	bg sync.WaitGroup
 }
 
 // NewRunner returns a Runner bound to the given dependencies.
 func NewRunner(deps Deps) *Runner {
 	return &Runner{deps: deps}
+}
+
+// WaitBackground blocks until every background job started by this Runner has
+// returned. Background memory compression is the only such job, and
+// cancelPendingCompression cancels it without waiting — its goroutine can
+// therefore still be inside an LLM request after RunPerFile returned. Callers
+// that freeze a retry report at the run boundary must join here first:
+// RetryCollector.Freeze rejects any request that has not been finalized and
+// discards the whole report, which would otherwise be an intermittent race.
+//
+// Every pending job has already been cancelled by the time the last
+// RunPerFile returns (cancelPendingCompression runs as a deferred call on
+// every exit, and triggerAsyncCompression refuses to start a second job while
+// one is pending), so this normally returns quickly — but the wait length
+// ultimately depends on the LLM client honouring context cancellation, and no
+// additional deadline is imposed here: the job already carries its own
+// timeout.
+func (r *Runner) WaitBackground() {
+	r.bg.Wait()
 }
 
 // TotalInputTokens returns the accumulated input/prompt tokens from all LLM calls.

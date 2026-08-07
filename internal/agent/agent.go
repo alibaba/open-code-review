@@ -350,6 +350,13 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
 	}
+	// Join background memory compression before anything freezes run-level
+	// state. Those jobs are cancelled rather than awaited when a conversation
+	// ends, so their LLM request can still be in flight here; a retry report
+	// frozen at the command boundary would then see an un-finalized request
+	// and be discarded wholesale. Cheap in the normal case — every job has
+	// already been cancelled by now.
+	a.runner.WaitBackground()
 	// Freeze coverage into the immutable manifest before session_end embeds it,
 	// so the CLI and the persisted session serialize the identical object. A
 	// persistence failure is a delivery error in its own right: when the review

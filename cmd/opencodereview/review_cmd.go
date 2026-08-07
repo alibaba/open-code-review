@@ -232,6 +232,24 @@ func executeReview(opts reviewOptions) error {
 
 	comments, runErr := ag.Run(ctx)
 	manifest := ag.RunManifest()
+
+	// Freeze the retry report at the same boundary as the manifest: ag.Run has
+	// returned and joined its background work, so every request this run made is
+	// finalized and the report can no longer change. run_id is the session's
+	// in-memory UUID (ag.Session().SessionID) rather than ag.SessionID(), which
+	// returns "" when persistence failed — the report's logical_request_id must
+	// stay stable and unique per run even for an unpersisted session.
+	retryReport, freezeErr := rt.RetryCollector.Freeze(ag.Session().SessionID)
+	if freezeErr != nil {
+		// A construction error means the collector's invariants were violated, so
+		// the report is self-contradictory and must not be published at all
+		// (Freeze already returned nil). It joins the *publish* error, never
+		// runErr: the review itself may have fully succeeded, and folding it into
+		// runErr would make reviewResultError report a bogus "review failed",
+		// write a failure usage record and print a misleading --resume hint.
+		freezeErr = fmt.Errorf("freeze retry report: %w", freezeErr)
+	}
+
 	resultErr := reviewResultError(runErr, manifest)
 	if resultErr != nil {
 		span.SetStatus(codes.Error, resultErr.Error())
@@ -242,21 +260,30 @@ func executeReview(opts reviewOptions) error {
 	// session delivery failed. Emit it first, then return the independent process
 	// error so JSON consumers retain the complete coverage diagnosis.
 	var emitErr error
-	if manifest != nil || runErr == nil {
-		emitErr = emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity)
+	emitted := manifest != nil || runErr == nil
+	if emitted {
+		emitErr = emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		}
 	}
 	if resultErr != nil {
 		q.Restore()
-		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity)
+		// The report has exactly one exit per run. emitRunResult already published
+		// it whenever it ran (which it does even for a fully failed run, since a
+		// failed manifest is still publishable), so the failure-usage path gets it
+		// only when that call was skipped entirely.
+		failureReport := retryReport
+		if emitted {
+			failureReport = nil
+		}
+		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
-		return errors.Join(resultErr, emitErr)
+		return errors.Join(resultErr, emitErr, freezeErr)
 	}
-	return emitErr
+	return errors.Join(emitErr, freezeErr)
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {

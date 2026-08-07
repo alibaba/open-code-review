@@ -297,7 +297,11 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 	st.pendingJob = job
 	st.mu.Unlock()
 
+	// Registered before the goroutine starts so WaitBackground can never miss
+	// a job that was launched but has not run yet.
+	r.bg.Add(1)
 	go func() {
+		defer r.bg.Done()
 		defer cancel()
 		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, filePath)
 

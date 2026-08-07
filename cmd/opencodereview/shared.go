@@ -172,6 +172,13 @@ type llmRuntime struct {
 	RuntimeConfig agent.RuntimeConfig
 }
 
+// newRetryCollector builds the per-run retry collector. It is a variable so a
+// test can hand back a collector whose invariants are already violated, which is
+// the only way to exercise the Freeze construction-error branch from the
+// outside: every production path finalizes every logical request on every exit,
+// so a well-behaved run can never produce one.
+var newRetryCollector = llm.NewRetryCollector
+
 // loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
 // from the user's default config path (applying the configured language to
 // tpl — defaulting when the config file is absent), resolves the LLM
@@ -206,7 +213,7 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 		return nil, fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
 
-	retryCollector := llm.NewRetryCollector()
+	retryCollector := newRetryCollector()
 
 	return &llmRuntime{
 		Client:         llm.NewLLMClient(ep, retryCollector),
@@ -341,6 +348,13 @@ type resumeInfoProvider interface {
 //
 // q is the silencing handle returned by newQuietHandle; pass nil if no
 // silencing was set up (in which case the early restore is a no-op).
+//
+// retryReport is the frozen LLM retry report, or nil when there is nothing to
+// report (a clean run, or a caller that produces no report at all — `ocr scan`
+// never freezes one). It is passed as a parameter rather than added to
+// ResultProvider because the collector belongs to llmRuntime, not to the
+// agent; putting it on the interface would force internal/scan.Agent to
+// implement a method that is always nil.
 func emitRunResult(
 	ctx context.Context,
 	ag ResultProvider,
@@ -349,6 +363,7 @@ func emitRunResult(
 	outputFormat, audience string,
 	q *quietHandle,
 	llmIdentity *jsonLLMIdentity,
+	retryReport *llm.RetryReport,
 ) error {
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
@@ -385,9 +400,13 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity)
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, retryReport)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest)
+	// Between the comments/warnings block and the project summary: the report is
+	// run-level diagnostics about how the comments were obtained, so it reads
+	// after them but must not separate the summary from the end of output.
+	outputRetryReportText(os.Stdout, retryReport)
 	if summary := ag.ProjectSummary(); summary != "" {
 		fmt.Printf("\n\n──────── Project Summary ────────\n\n%s\n", summary)
 	}
