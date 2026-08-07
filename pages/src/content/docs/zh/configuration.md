@@ -119,6 +119,27 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
 }
 ```
 
+### 每文件 prompt 上限
+
+OCR 默认为每个文件评审设置 58,888 token 的 prompt 上限。如果你的模型有更大的上下文
+窗口，可通过保存 `max_tokens` 来提升：
+
+```bash
+ocr config set max_tokens 200000
+```
+
+该设置对 `ocr review` 和 `ocr scan` 均生效。使用 `--max-tokens` 可在不改变已保存
+配置的情况下临时覆盖：
+
+```bash
+ocr review --max-tokens 200000
+ocr scan --max-tokens 200000
+```
+
+单次运行参数优先于 `max_tokens`；两者均未设置时，OCR 使用内嵌任务模板的默认值。该
+限制按文件粒度生效，与模型的输出 token 上限以及限制单次运行总 token 用量的
+`--max-tokens-budget` 相互独立。可通过 `ocr config unset max_tokens` 恢复内嵌默认值。
+
 ### 验证连通性
 
 ```bash
