@@ -309,7 +309,8 @@ func previewFiles(preview *agent.DiffPreview, reviewable bool) []delegatePreview
 func ruleGroupsJSON(groups []delegate.RuleGroup) []delegateRuleGroupJSON {
 	out := make([]delegateRuleGroupJSON, 0, len(groups))
 	for _, group := range groups {
-		files := append([]string(nil), group.Files...)
+		files := make([]string, 0, len(group.Files))
+		files = append(files, group.Files...)
 		out = append(out, delegateRuleGroupJSON{
 			GroupID: group.ID,
 			Source:  group.Source,

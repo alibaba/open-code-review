@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/delegate"
 )
 
 func captureDelegateStdout(t *testing.T, fn func()) []byte {
@@ -153,6 +155,30 @@ func TestExecuteDelegateRuleJSON(t *testing.T) {
 	}
 	if len(got.Groups[0].Files) != 1 || got.Groups[0].Files[0] != "README.md" || got.Groups[0].Rule == "" {
 		t.Fatalf("unexpected rule group: %#v", got.Groups[0])
+	}
+}
+
+func TestRuleGroupsJSONEmptyFiles(t *testing.T) {
+	groups := ruleGroupsJSON([]delegate.RuleGroup{{ID: 1}})
+	if len(groups) != 1 {
+		t.Fatalf("groups = %#v", groups)
+	}
+	if groups[0].Files == nil || len(groups[0].Files) != 0 {
+		t.Fatalf("files must be an empty, non-nil slice: %#v", groups[0].Files)
+	}
+	payload, err := json.Marshal(groups[0])
+	if err != nil {
+		t.Fatalf("marshal rule group: %v", err)
+	}
+	if string(payload) == "" || !json.Valid(payload) {
+		t.Fatalf("invalid JSON: %s", payload)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("decode rule group: %v", err)
+	}
+	if files, ok := decoded["files"].([]any); !ok || len(files) != 0 {
+		t.Fatalf("files JSON must be []: %s", payload)
 	}
 }
 

@@ -171,6 +171,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Codex](plugins/open-code-review/README.md#codex) — 호출 가능한 리뷰 스킬이 포함된 플러그인 설치
   - [Cursor](plugins/open-code-review/README.md#cursor) — 이식 가능한 리뷰 스킬이 포함된 플러그인 설치
   - [OpenCode](plugins/open-code-review/opencode/README.md) — 네이티브 리뷰 도구와 슬래시 명령 설치
+  - [QCA Forward](plugins/open-code-review/qca/README.md) — QCA 호스트 모델과 게시 가능한 템플릿으로 위임 모드 실행
   - [Skill 호환 에이전트](https://open-codereview.ai/docs/agent-skill) — 이식 가능한 에이전트 스킬 설치
 - 리뷰 실행 모드 — 연동 후 리뷰를 수행할 LLM 선택
   - [기본 모드(OCR 관리)](https://open-codereview.ai/docs/configuration) — OCR이 설정된 LLM을 사용해 리뷰 수행
