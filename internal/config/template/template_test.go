@@ -110,7 +110,9 @@ func TestLoadDefault_PlaceholdersPresent(t *testing.T) {
 	}{
 		{"MainTask user has current_file_path", tpl.MainTask.Messages[1].Content, "{{current_file_path}}"},
 		{"MainTask user has diff", tpl.MainTask.Messages[1].Content, "{{diff}}"},
+		{"MainTask has MCP instructions", tpl.MainTask.Messages[0].Content, "{{mcp_instructions}}"},
 		{"PlanTask system has plan_tools", tpl.PlanTask.Messages[0].Content, "{{plan_tools}}"},
+		{"PlanTask has MCP instructions", tpl.PlanTask.Messages[0].Content, "{{mcp_instructions}}"},
 		{"MemoryCompression user has context", tpl.MemoryCompressionTask.Messages[1].Content, "{{context}}"},
 		{"ReviewFilter user has comments", tpl.ReviewFilterTask.Messages[1].Content, "{{comments}}"},
 		{"ReLocation user has diff (single brace)", tpl.ReLocationTask.Messages[1].Content, "{diff}"},

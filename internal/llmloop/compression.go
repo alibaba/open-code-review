@@ -5,6 +5,7 @@ package llmloop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -209,7 +210,7 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 // messages, summarizing the compress zone while preserving the active zone
 // intact. Returns rebuilt as [frozen] + [compressed_summary appended to
 // the user prompt] + [active].
-func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
+func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePath string, persistCancellation bool) ([]llm.Message, error) {
 	if len(r.deps.Template.MemoryCompressionTask.Messages) == 0 || len(msgs) <= 2 {
 		return msgs[:min(len(msgs), 2)], nil
 	}
@@ -238,7 +239,9 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 	fs := r.deps.Session.GetOrCreateFileSession(filePath)
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, compressionMsgs)
 	if err != nil {
-		rec.SetError(err, duration)
+		if persistCancellation || !errors.Is(err, context.Canceled) {
+			rec.SetError(err, duration)
+		}
 		// Return msgs unchanged: truncating to frozenEnd would discard all
 		// conversation context, which is worse than staying over the token
 		// limit temporarily.
@@ -292,7 +295,7 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 
 	go func() {
 		defer cancel()
-		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, filePath)
+		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, filePath, false)
 
 		st.mu.Lock()
 		defer st.mu.Unlock()

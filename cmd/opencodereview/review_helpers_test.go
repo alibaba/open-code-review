@@ -83,3 +83,23 @@ func TestInitMCPClients(t *testing.T) {
 		}
 	})
 }
+
+func TestIsCodebaseMemoryServer(t *testing.T) {
+	tests := []struct {
+		name       string
+		serverName string
+		toolNames  []string
+		want       bool
+	}{
+		{name: "named server", serverName: "codebase-memory-mcp", want: true},
+		{name: "tool signature", serverName: "other", toolNames: []string{"index_status", "search_graph"}, want: true},
+		{name: "partial tool set", serverName: "other", toolNames: []string{"index_status"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isCodebaseMemoryServer(tt.serverName, tt.toolNames); got != tt.want {
+				t.Errorf("isCodebaseMemoryServer(%q, %v) = %v, want %v", tt.serverName, tt.toolNames, got, tt.want)
+			}
+		})
+	}
+}

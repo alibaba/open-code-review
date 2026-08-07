@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenCodeReview review flow reference</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <header class="masthead">
+    <p class="eyebrow">Reference · OpenCodeReview</p>
+    <h1>Review flow at a glance</h1>
+    <p class="lede">把一次 diff review 壓縮成一張圖：CLI 組裝 runtime，Agent 按檔案派工，Runner 在每個檔案內反覆呼叫 LLM 和 tools，最後由 collector、manifest、emitter 收尾。</p>
+    <div class="meta">
+      <span class="tag">diff review</span>
+      <span class="tag">source-driven</span>
+      <span class="tag">quick reference</span>
+    </div>
+  </header>
+
+  <section class="card callout">
+    <strong>一句話：</strong>
+    ToolDef 告訴模型能呼叫什麼；Registry/Provider 決定這個呼叫真的做什麼。
+  </section>
+
+  <ol class="flow">
+    <li><div><strong>CLI orchestration</strong><span>executeReviewContextWithStage 讀 template、rules、resume、LLM config。</span></div></li>
+    <li><div><strong>Runtime assembly</strong><span>loadLLMRuntime 產生 LLM client 與 plan/main ToolDef；buildToolRegistry 綁定內建 Provider；MCP tools 追加到同一 registry。</span></div></li>
+    <li><div><strong>Agent input</strong><span>agent.New 建立 session、manifest 與共享 llmloop.Runner。</span></div></li>
+    <li><div><strong>Diff preparation</strong><span>agent.Run 載入 git diff、建立 DiffMap、過濾檔案、估算 token budget。</span></div></li>
+    <li><div><strong>Per-file dispatch</strong><span>dispatchSubtasks 以 semaphore 限制並行；每個檔案獨立 timeout、checkpoint 和錯誤分類。</span></div></li>
+    <li><div><strong>Prompt rendering</strong><span>executeSubtask 將 diff、路徑、規則、background、plan guidance 填進 MAIN_TASK。</span></div></li>
+    <li><div><strong>Tool loop</strong><span>RunPerFile 呼叫 LLM，executeToolCall 執行 tool，把結果 append 回 messages，直到 task_done 或達到 stop 條件。</span></div></li>
+    <li><div><strong>Result delivery</strong><span>code_comment 進入 CommentCollector；agent finalize session/manifest；CLI emitRunResultTo 輸出 text 或 JSON。</span></div></li>
+  </ol>
+
+  <h2>Harness 對照表</h2>
+  <table>
+    <thead><tr><th>Harness 概念</th><th>OpenCodeReview 對應</th><th>責任</th></tr></thead>
+    <tbody>
+      <tr><td>Prompt</td><td><code>task_template.json</code> + <code>prompts/*.md</code></td><td>定義角色、review scope、placeholder 與停止規則。</td></tr>
+      <tr><td>Tool schema</td><td><code>tools.json</code> → <code>llm.ToolDef</code></td><td>告訴模型名稱、描述、參數 JSON schema。</td></tr>
+      <tr><td>Tool implementation</td><td><code>tool.Provider</code> + <code>Registry</code></td><td>把工具名稱解析成 Go 執行邏輯。</td></tr>
+      <tr><td>LLM adapter</td><td><code>llm.LLMClient</code></td><td>送出 <code>ChatRequest</code>，回傳 content、tool calls、usage。</td></tr>
+      <tr><td>Agent runner</td><td><code>llmloop.Runner.RunPerFile</code></td><td>維持單檔 conversation state，處理 round、retry、compression。</td></tr>
+      <tr><td>State / trace</td><td><code>session.SessionHistory</code> + telemetry</td><td>保存 request、response、tool result、checkpoint、token 與 coverage。</td></tr>
+      <tr><td>Final output</td><td><code>CommentCollector</code> + manifest + emitter</td><td>把 finding、部分完成狀態和診斷資訊交給 CLI 或整合端。</td></tr>
+    </tbody>
+  </table>
+
+  <h2>最重要的 loop</h2>
+  <pre>messages = rendered MAIN_TASK
+repeat until task_done or stop:
+    response = LLMClient.CompletionsWithCtx(messages, MainToolDefs)
+    for call in response.ToolCalls:
+        result = Registry.Provider.Execute(arguments)
+    messages += assistant tool-call + tool results
+    maybe compress context
+comments = CommentCollector.Comments()</pre>
+
+  <h2>Source map</h2>
+  <ul>
+    <li><a href="../cmd/opencodereview/review_cmd.go">cmd/opencodereview/review_cmd.go</a>：orchestration 與 built-in registry。</li>
+    <li><a href="../internal/agent/agent.go">internal/agent/agent.go</a>：diff review pipeline。</li>
+    <li><a href="../internal/llmloop/loop.go">internal/llmloop/loop.go</a>：共用 tool loop。</li>
+    <li><a href="../internal/tool/definitions.go">internal/tool/definitions.go</a>：Registry/Provider abstraction。</li>
+    <li><a href="../internal/session">internal/session</a>：session history 與 coverage manifest。</li>
+  </ul>
+
+  <footer>
+    下一課：<a href="../lessons/0001-review-runner-mental-model.html">從 executeReviewContextWithStage 追到一輪 tool call</a>。
+  </footer>
+</main>
+</body>
+</html>

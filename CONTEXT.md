@@ -98,3 +98,27 @@ _Avoid_: resuming a mutable workspace review or assuming an unfinished file is r
 **Progress event**:
 A machine-readable JSONL record written to stderr while OCR runs; it signals review activity without mixing with the final JSON result on stdout.
 _Avoid_: treating progress events as the terminal review result.
+
+**Structural context**:
+Repository-level evidence about definitions, callers, dependencies, and architecture that supplements the current diff. Structural context can support a finding about changed code, but it does not expand the finding scope to untouched files.
+_Avoid_: treating a referenced external file as the review target.
+
+**MCP tool availability**:
+The complete configured codebase-memory capability surface is visible to the review agent. Availability means the agent may select a tool; it does not mean every tool must be called for every file.
+_Avoid_: confusing exposed tools with mandatory tool calls.
+
+**MCP query phase**:
+The part of a review where the agent gathers repository-level structural context. It starts by checking index readiness, initializes a missing or stale index once, then selects the structural query needed for the current claim.
+_Avoid_: indexing as an unbounded per-file review loop.
+
+**Index readiness**:
+The state that determines whether repository structural context is current enough to support a query. A missing or stale index requires initialization before graph evidence is treated as reliable.
+_Avoid_: treating a successful query response as proof that the index covers every relevant file.
+
+**Structural query fallback**:
+Using ordinary text or file inspection when the structural context service is unavailable or its coverage is insufficient, while stating the resulting limitation.
+_Avoid_: silently presenting a text-search approximation as a complete relationship query.
+
+**Review search distinction**:
+The built-in `code_search` provides direct repository text search; codebase-memory `search_code` provides text search enriched with structural context. Both can be available because they answer different evidence questions.
+_Avoid_: assuming either search surface replaces the other for every query.

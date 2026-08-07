@@ -20,9 +20,11 @@ import (
 type fakeAgentClient struct {
 	responses []*llm.ChatResponse
 	calls     int
+	requests  []llm.ChatRequest
 }
 
-func (f *fakeAgentClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func (f *fakeAgentClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.requests = append(f.requests, req)
 	if f.calls >= len(f.responses) {
 		content := ""
 		return &llm.ChatResponse{

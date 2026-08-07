@@ -113,6 +113,10 @@ type Args struct {
 	// injected into plan and main_task prompts via {{requirement_background}}.
 	Background string
 
+	// MCPInstructions is injected only when the configured MCP servers expose
+	// codebase-memory tools.
+	MCPInstructions string
+
 	// Model is the user-configured model name used as fallback when
 	// template phases (plan/memory_compression) don't specify one.
 	Model string
@@ -1179,6 +1183,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingCurrent)
 		content = strings.ReplaceAll(content, "{{diff}}", d.Diff)
 		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
+		content = strings.ReplaceAll(content, "{{mcp_instructions}}", a.args.MCPInstructions)
 		// Always substitute the {{plan_guidance}} token so the literal placeholder
 		// never leaks into the rendered prompt. When the plan phase produced no
 		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
@@ -1504,6 +1509,7 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 		content = strings.ReplaceAll(content, "{{change_files}}", changeFiles)
 		content = strings.ReplaceAll(content, "{{diff}}", rawDiff)
 		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
+		content = strings.ReplaceAll(content, "{{mcp_instructions}}", a.args.MCPInstructions)
 		content = strings.ReplaceAll(content, "{{plan_tools}}", formatToolDefs(a.args.PlanToolDefs))
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}

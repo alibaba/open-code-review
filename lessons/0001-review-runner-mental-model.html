@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lesson 01 · OpenCodeReview review runner</title>
+  <link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+<main>
+  <header class="masthead">
+    <p class="eyebrow">Lesson 01 · 10 minutes</p>
+    <h1>先把 review 看成兩層 loop</h1>
+    <p class="lede">你對 harness 的直覺是對的：這裡確實有 prompt、LLM、tools、state。但理解它的關鍵是先分開「逐檔派工」和「單檔對話」兩個 loop。</p>
+    <div class="meta">
+      <span class="tag">核心心智模型</span>
+      <span class="tag">diff review</span>
+      <span class="tag">retrieval practice</span>
+    </div>
+  </header>
+
+  <section class="card callout">
+    <strong>本課完成標準：</strong>
+    你能指出一次 review 中，哪個函式決定 review 哪些檔案，哪個函式真正反覆呼叫 LLM，以及 finding 何時進入 collector。
+  </section>
+
+  <h2>1. 先看全貌</h2>
+  <p>diff review 的主路徑可以先壓成這條線：</p>
+  <ol class="flow">
+    <li><div><strong>executeReviewContextWithStage</strong><span>組裝 template、rules、LLM runtime、built-in tools、MCP tools。</span></div></li>
+    <li><div><strong>agent.New</strong><span>建立 session、manifest，並注入一個共用的 llmloop.Runner。</span></div></li>
+    <li><div><strong>agent.Run</strong><span>解析 diff、建立 DiffMap、過濾檔案、估算 token budget。</span></div></li>
+    <li><div><strong>dispatchSubtasks</strong><span>每個 changed file 啟一個受 concurrency 與 timeout 控制的 subtask。</span></div></li>
+    <li><div><strong>executeSubtask</strong><span>渲染 plan/main prompt，然後把單檔 conversation 交給 Runner。</span></div></li>
+    <li><div><strong>RunPerFile</strong><span>LLM → tool calls → tool results → 下一輪，直到 task_done 或 stop。</span></div></li>
+  </ol>
+  <p class="source">Source：<a href="../cmd/opencodereview/review_cmd.go">review_cmd.go</a>、<a href="../internal/agent/agent.go">agent.go</a>、<a href="../internal/llmloop/loop.go">loop.go</a>。</p>
+
+  <h2>2. Harness 元件要放在哪一層</h2>
+  <div class="grid">
+    <article class="card">
+      <h3>Prompt</h3>
+      <p><code>task_template.json</code> 指向 prompt 檔案；<code>executeSubtask</code> 再把 <code>{{diff}}</code>、<code>{{current_file_path}}</code>、<code>{{system_rule}}</code> 等 placeholder 替換成這一檔的實際資料。</p>
+      <p>所以 template 是靜態藍圖，真正送出的 <code>messages</code> 是 per-file、per-run 的結果。</p>
+    </article>
+    <article class="card">
+      <h3>Tool schema</h3>
+      <p><code>tools.json</code> 經過 <code>BuildToolDefs</code> 變成 <code>llm.ToolDef</code>。它只描述模型可見的名稱、說明和參數，不會自己執行。</p>
+    </article>
+    <article class="card">
+      <h3>Tool implementation</h3>
+      <p><code>buildToolRegistry</code> 將 <code>file_read</code>、<code>file_find</code>、<code>file_read_diff</code>、<code>code_search</code>、<code>code_comment</code> 綁到 Go Provider。MCP tools 也註冊進同一個 registry。</p>
+    </article>
+    <article class="card">
+      <h3>LLM loop</h3>
+      <p><code>RunPerFile</code> 將 <code>MainToolDefs</code> 放進每次 <code>ChatRequest</code>，讀取 response 的 tool calls，再由 <code>executeToolCall</code> 執行。</p>
+    </article>
+  </div>
+
+  <h2>3. 一輪 tool call 實際發生什麼</h2>
+  <pre>messages
+  ↓
+LLMClient.CompletionsWithCtx(messages, MainToolDefs)
+  ↓
+assistant response: code_search(...)
+  ↓
+executeToolCall → Registry.Get → Provider.Execute
+  ↓
+tool result
+  ↓
+messages += assistant tool call + tool result
+  ↓
+下一次 CompletionsWithCtx</pre>
+  <p>模型的回覆如果沒有 tool call，loop 會補一個 retry 訊息。模型呼叫 <code>code_comment</code> 時，runtime 會解析 comment、用目前檔案路徑覆寫模型可能 hallucinate 的 path，必要時重新定位行號，最後加入 <code>CommentCollector</code>。模型呼叫 <code>task_done</code> 且 state 是 <code>DONE</code>，這個檔案才算完成。</p>
+
+  <section class="card warning">
+    <h3>這裡最容易搞混的三件事</h3>
+    <ol>
+      <li><strong>ToolDef 不是 tool。</strong> 前者是給 LLM 看的 schema，後者是 registry 裡真正會執行的 Provider。</li>
+      <li><strong>Agent 不是單一 conversation。</strong> Agent 管整個 diff review；Runner 的一次 <code>RunPerFile</code> 才是單一檔案的 conversation。</li>
+      <li><strong>code_comment 不是最終輸出。</strong> 它先進 collector，之後還要經過 review filter、manifest/session 和 emitter。</li>
+    </ol>
+  </section>
+
+  <h2>4. 不看答案，先回想</h2>
+  <div class="card">
+    <p>請先用自己的話回答，再打開答案：</p>
+    <p><strong>問題：</strong>如果模型決定呼叫 <code>file_read</code>，從「模型知道這個工具存在」到「檔案內容回到下一輪 prompt」，中間至少經過哪兩個不同角色？</p>
+    <details>
+      <summary>顯示自我檢查</summary>
+      <p>第一個角色是 <strong>ToolDef</strong>：它讓模型知道名稱和參數 schema。第二個角色是 <strong>Registry 裡的 Provider</strong>：<code>executeToolCall</code> 依名稱找到它並執行，結果再被包成 tool-result message append 回 conversation。</p>
+    </details>
+  </div>
+
+  <h2>5. 只讀這幾個 source point</h2>
+  <ul>
+    <li><a href="../cmd/opencodereview/review_cmd.go">executeReviewContextWithStage / buildToolRegistry</a>：看 runtime 如何組裝。</li>
+    <li><a href="../internal/agent/agent.go">executeSubtask / agent.Run</a>：看 prompt 如何被填值、檔案如何派工。</li>
+    <li><a href="../internal/llmloop/loop.go">RunPerFile / executeToolCall</a>：看真正的 round-trip。</li>
+    <li><a href="../internal/config/toolsconfig/tools.json">tools.json</a>：對照模型看到的 tool schema。</li>
+    <li><a href="../reference/review-flow.html">Review flow reference</a>：回看整張速查圖。</li>
+  </ul>
+
+  <footer>
+    這是第一課。下一輪可以直接問我「逐行走一個 code_comment case」，或先回答上面的問題；你的回答能證明哪些概念已經進入 learning record。
+  </footer>
+</main>
+</body>
+</html>

@@ -127,6 +127,21 @@ The interactive UI guides you through provider selection, API key entry, and mod
 
 For CLI setup, environment variables, custom providers, and other advanced configuration, see [Configuration](https://open-codereview.ai/docs/configuration).
 
+To give `ocr review` structural code context from `codebase-memory-mcp`, add the server to `~/.opencodereview/config.json` and leave `tools` omitted so every server tool is exposed:
+
+```json
+{
+  "mcp_servers": {
+    "codebase-memory-mcp": {
+      "command": "your-codebase-memory-mcp-command",
+      "args": []
+    }
+  }
+}
+```
+
+When connected, OCR lets the agent choose the MCP tools and injects the index-status, re-index, structural-query, and fallback workflow. MCP processes start with the reviewed repository as their working directory.
+
 **2. Review**
 
 ```bash

@@ -19,6 +19,8 @@ Please keep your responses concise and objective.
 - Context tools are for understanding purposes only. Findings from other files must NOT become the subject of your comments.
 - If you discover a potential issue in another file while gathering context, ignore it — your task is limited to the current diffs.
 
+{{mcp_instructions}}
+
 ## Reply limit
 - If the current code review task is complete, call `task_done` to end the task.
 - If a code issue has been identified and confirmed, call the `code_comment` tool to provide feedback.

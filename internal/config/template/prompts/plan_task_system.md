@@ -6,6 +6,8 @@ Analyze code change content, identify potential risk points, and plan appropriat
 ## Tool Descriptions
 {{plan_tools}}
 
+{{mcp_instructions}}
+
 ## Output Format
 Strictly follow the JSON format below. Do not include any additional explanatory text:
 

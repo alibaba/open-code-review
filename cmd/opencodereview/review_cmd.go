@@ -206,6 +206,7 @@ func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outp
 	mcpToolDefs := mcp.CollectToolDefs(mcpClients, tools)
 	rt.PlanToolDefs = append(rt.PlanToolDefs, mcpToolDefs...)
 	rt.MainToolDefs = append(rt.MainToolDefs, mcpToolDefs...)
+	mcpInstructions := codebaseMemoryInstructions(mcpClients)
 
 	ag := agent.New(agent.Args{
 		RepoDir:                 cc.RepoDir,
@@ -227,6 +228,7 @@ func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outp
 		Model:                   rt.Model,
 		Provider:                rt.Provider,
 		Background:              opts.background,
+		MCPInstructions:         mcpInstructions,
 		GitRunner:               cc.GitRunner,
 		Resume:                  resumeState,
 		MaxTokensBudget:         int64(opts.maxTokensBudget),
@@ -428,6 +430,48 @@ func runPreview(cc *commonContext, opts reviewOptions) error {
 
 func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {
 	return initMCPClientsTo(ctx, cfg, tools, repoDir, version, os.Stderr)
+}
+
+const codebaseMemoryInstructionsText = `## Structural and relationship queries
+When you need callers, callees, dependencies, import graphs, call chains, or change-impact analysis:
+1. Prefer the connected codebase-memory MCP tools.
+2. Call index_status first.
+3. If the index is missing or stale, call index_repository once, then retry.
+4. Choose the relevant tools: search_graph, trace_path, get_code_snippet, query_graph, get_architecture, or detect_changes.
+5. If structural tools are unavailable, use language-server, build-tool, or text-search approximations and state the limitation.
+
+All connected codebase-memory tools are available; call only the tools needed for the current question. Use built-in code_search for literal review searches and codebase-memory search_code for graph-augmented code search; they are complementary.
+Use MCP tools for context only. Keep findings anchored to the current diff, and do not invoke destructive or maintenance operations unless the user explicitly asks.`
+
+func codebaseMemoryInstructions(clients []*mcp.Client) string {
+	for _, client := range clients {
+		toolNames := make([]string, 0, len(client.Tools()))
+		for _, tool := range client.Tools() {
+			toolNames = append(toolNames, tool.Name)
+		}
+		if isCodebaseMemoryServer(client.Name(), toolNames) {
+			return codebaseMemoryInstructionsText
+		}
+	}
+	return ""
+}
+
+func isCodebaseMemoryServer(serverName string, toolNames []string) bool {
+	serverName = strings.ToLower(serverName)
+	if strings.Contains(serverName, "codebase-memory") || strings.Contains(serverName, "codebase_memory") {
+		return true
+	}
+	hasIndexStatus := false
+	hasSearchGraph := false
+	for _, toolName := range toolNames {
+		switch toolName {
+		case "index_status":
+			hasIndexStatus = true
+		case "search_graph":
+			hasSearchGraph = true
+		}
+	}
+	return hasIndexStatus && hasSearchGraph
 }
 
 func initMCPClientsTo(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string, diagnosticWriter io.Writer) []*mcp.Client {

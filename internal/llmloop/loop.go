@@ -557,7 +557,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	if CountMessagesTokens(*messages) > warnLimit {
 		r.cancelPendingCompression(st)
 		var err error
-		if *messages, err = r.runCompression(ctx, *messages, filePath); err != nil {
+		if *messages, err = r.runCompression(ctx, *messages, filePath, true); err != nil {
 			// Compression failed; continue with over-limit messages — the
 			// post-append check below will retry.
 			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
@@ -578,7 +578,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	if finalCount > warnLimit {
 		r.cancelPendingCompression(st)
 		var err error
-		if *messages, err = r.runCompression(ctx, *messages, filePath); err != nil {
+		if *messages, err = r.runCompression(ctx, *messages, filePath, true); err != nil {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
 		}
 		finalCount = CountMessagesTokens(*messages)

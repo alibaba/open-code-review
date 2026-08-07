@@ -328,7 +328,7 @@ func TestRunCompression_EmptyTemplate(t *testing.T) {
 		msg("user", "prompt"),
 		msg("assistant", "resp"),
 	}
-	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	got, err := r.runCompression(context.Background(), msgs, "test.go", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestRunCompression_ShortMessages(t *testing.T) {
 	r := newTestRunner(&fakeLLMClient{}, tpl)
 
 	msgs := []llm.Message{msg("system", "sys"), msg("user", "prompt")}
-	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	got, err := r.runCompression(context.Background(), msgs, "test.go", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestRunCompression_Success(t *testing.T) {
 		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
 	}
 
-	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	got, err := r.runCompression(context.Background(), msgs, "test.go", true)
 	if err != nil {
 		t.Fatalf("runCompression: %v", err)
 	}
@@ -422,12 +422,52 @@ func TestRunCompression_LLMError(t *testing.T) {
 		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
 	}
 
-	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	got, err := r.runCompression(context.Background(), msgs, "test.go", true)
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if len(got) != len(msgs) {
 		t.Errorf("expected messages unchanged on error, got %d vs %d", len(got), len(msgs))
+	}
+}
+
+func TestRunCompression_BackgroundCancellationNotRecorded(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t_tempDir = t.TempDir()
+	client := &fakeLLMClient{err: context.Canceled}
+	tpl := template.Template{
+		MemoryCompressionTask: template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "{{context}}"}},
+		},
+		MaxTokens: 50,
+	}
+	r := newTestRunner(client, tpl)
+
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+	}
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, msg("assistant", strings.Repeat("word ", 100)))
+		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
+	}
+
+	got, err := r.runCompression(context.Background(), msgs, "test.go", false)
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+	if len(got) != len(msgs) {
+		t.Errorf("expected messages unchanged on cancellation, got %d vs %d", len(got), len(msgs))
+	}
+	if err := r.deps.Session.Finalize(); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	summary, err := session.LoadSummary(r.deps.Session.RepoDir, r.deps.Session.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSummary: %v", err)
+	}
+	if summary.LLMFailures != 0 {
+		t.Errorf("LLMFailures = %d, want 0 for background cancellation", summary.LLMFailures)
 	}
 }
 
@@ -458,7 +498,7 @@ func TestRunCompression_EmptySummary(t *testing.T) {
 		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
 	}
 
-	got, err := r.runCompression(context.Background(), msgs, "test.go")
+	got, err := r.runCompression(context.Background(), msgs, "test.go", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

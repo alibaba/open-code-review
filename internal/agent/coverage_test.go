@@ -361,15 +361,16 @@ func TestExecutePlanPhase(t *testing.T) {
 	}
 
 	a := New(Args{
-		LLMClient:  client,
-		Model:      "test",
-		Session:    sess,
-		Background: "test background",
+		LLMClient:       client,
+		Model:           "test",
+		Session:         sess,
+		Background:      "test background",
+		MCPInstructions: "use structural MCP context",
 		Template: template.Template{
 			PlanTask: &template.LlmConversation{
 				Messages: []template.ChatMessage{
 					{Role: "system", Content: "You are a planner. Date: {{current_system_date_time}}"},
-					{Role: "user", Content: "Plan review for {{current_file_path}}. Rule: {{system_rule}}. Changes: {{change_files}}. Diff: {{diff}}. Background: {{requirement_background}}. Tools: {{plan_tools}}"},
+					{Role: "user", Content: "Plan review for {{current_file_path}}. Rule: {{system_rule}}. Changes: {{change_files}}. Diff: {{diff}}. Background: {{requirement_background}}. MCP: {{mcp_instructions}}. Tools: {{plan_tools}}"},
 				},
 			},
 			MaxTokens:           10000,
@@ -388,6 +389,10 @@ func TestExecutePlanPhase(t *testing.T) {
 	}
 	if a.TotalInputTokens() != 20 {
 		t.Errorf("TotalInputTokens = %d, want 20", a.TotalInputTokens())
+	}
+	got := fmt.Sprint(client.requests[0].Messages[1].Content)
+	if !strings.Contains(got, "use structural MCP context") || strings.Contains(got, "{{mcp_instructions}}") {
+		t.Errorf("MCP instructions were not rendered: %q", got)
 	}
 }
 
