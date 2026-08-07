@@ -293,7 +293,7 @@ ocr scan [flags]
 ocr s      [flags]   (alias)
 ```
 
-不传 `--path` 时，扫描整个仓库。
+不传入 `--path` 时，扫描整个仓库。
 
 ### 参数
 
