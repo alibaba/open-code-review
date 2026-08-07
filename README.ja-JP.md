@@ -145,6 +145,10 @@ ocr review --commit abc123
 ocr session list
 ocr review --from main --to feature-branch --resume <session-id>
 
+# 保存されたセッションに記録されたレビューコメントを表示
+ocr session comments <session-id>
+ocr session comments --severity critical,high --json <session-id>
+
 # フルファイルスキャン — diffではなくファイル全体をレビュー（git履歴不要）
 ocr scan                          # リポジトリ全体をスキャン
 ocr scan --path internal/agent    # ディレクトリまたは特定のファイルをスキャン
