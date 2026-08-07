@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> The request-period idle-watchdog behavior and idle-duration derivation in this ADR are superseded by [ADR 0007](0007-pause-idle-watchdog-during-llm-requests.md). The fixed whole-review deadline was later removed by [ADR 0004](0004-unlimited-default-aggregate-token-budget.md); the MCP transport and result-contract decisions remain accepted.
+
 # Expose OCR to Codex through a local stdio MCP server
 
 Codex needs one callable `ocr_review` capability that waits for the local OCR process and returns its terminal result without session polling. We will add a local `stdio` MCP server to the Codex plugin and reuse the existing `ocr` CLI, because review execution depends on the current Git worktree and local OCR configuration; the separate OpenCode integration is not a Codex tool.

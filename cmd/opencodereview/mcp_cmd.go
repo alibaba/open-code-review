@@ -11,8 +11,10 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
@@ -23,7 +25,6 @@ const (
 	// provider limits, idle watchdog, and caller cancellation remain active.
 	mcpReviewMaxDuration  time.Duration = 0
 	mcpReviewMinIdle                    = 15 * time.Minute
-	mcpReviewIdleGrace                  = 5 * time.Minute
 	mcpReviewToolName                   = "ocr_review"
 	mcpReviewWaitToolName               = "ocr_review_wait"
 	mcpProgressEventName                = "ocr_progress"
@@ -106,15 +107,31 @@ type ocrMCPServer struct {
 }
 
 type reviewWatchdog struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	activity chan struct{}
-	update   chan time.Duration
-	done     chan struct{}
-	stopOnce sync.Once
-	causeMu  sync.Mutex
-	cause    string
-	baseIdle time.Duration
+	ctx           context.Context
+	cancel        context.CancelFunc
+	activity      chan struct{}
+	requestEvents chan watchdogRequestEvent
+	done          chan struct{}
+	stopOnce      sync.Once
+	causeMu       sync.Mutex
+	cause         string
+	inFlight      atomic.Int64
+}
+
+type watchdogRequestEvent struct {
+	begin bool
+	ack   chan struct{}
+}
+
+type watchdogLLMClient struct {
+	inner    llm.LLMClient
+	watchdog *reviewWatchdog
+}
+
+func (c watchdogLLMClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.watchdog.BeginLLMRequest()
+	defer c.watchdog.EndLLMRequest()
+	return c.inner.CompletionsWithCtx(ctx, req)
 }
 
 func newReviewWatchdog(parent context.Context, maxDuration, idleDuration time.Duration) *reviewWatchdog {
@@ -126,12 +143,11 @@ func newReviewWatchdog(parent context.Context, maxDuration, idleDuration time.Du
 	}
 	ctx, cancel := context.WithCancel(parent)
 	w := &reviewWatchdog{
-		ctx:      ctx,
-		cancel:   cancel,
-		activity: make(chan struct{}, 1),
-		update:   make(chan time.Duration, 1),
-		done:     make(chan struct{}),
-		baseIdle: idleDuration,
+		ctx:           ctx,
+		cancel:        cancel,
+		activity:      make(chan struct{}, 1),
+		requestEvents: make(chan watchdogRequestEvent),
+		done:          make(chan struct{}),
 	}
 	go w.run(maxDuration, idleDuration)
 	return w
@@ -146,13 +162,24 @@ func (w *reviewWatchdog) Activity() {
 	}
 }
 
-func (w *reviewWatchdog) SetLLMTimeout(timeout time.Duration) {
-	idle := w.baseIdle
-	if timeout > 0 && timeout+mcpReviewIdleGrace > idle {
-		idle = timeout + mcpReviewIdleGrace
-	}
+func (w *reviewWatchdog) BeginLLMRequest() {
+	w.inFlight.Add(1)
+	w.requestLLM(true)
+}
+
+func (w *reviewWatchdog) EndLLMRequest() {
+	w.inFlight.Add(-1)
+	w.requestLLM(false)
+}
+
+func (w *reviewWatchdog) requestLLM(begin bool) {
+	event := watchdogRequestEvent{begin: begin, ack: make(chan struct{})}
 	select {
-	case w.update <- idle:
+	case w.requestEvents <- event:
+		select {
+		case <-event.ack:
+		case <-w.ctx.Done():
+		}
 	case <-w.ctx.Done():
 	}
 }
@@ -192,10 +219,24 @@ func (w *reviewWatchdog) run(maxDuration, idleDuration time.Duration) {
 	for {
 		select {
 		case <-w.activity:
-			resetTimer(idleTimer, idleDuration)
-		case idleDuration = <-w.update:
-			resetTimer(idleTimer, idleDuration)
+			if w.inFlight.Load() == 0 {
+				resetTimer(idleTimer, idleDuration)
+			}
+		case event := <-w.requestEvents:
+			if event.begin {
+				stopTimer(idleTimer)
+			} else if w.inFlight.Load() == 0 {
+				resetTimer(idleTimer, idleDuration)
+			}
+			close(event.ack)
 		case <-idleTimer.C:
+			// BeginLLMRequest increments the counter before publishing its
+			// event. Check the counter here so a ready request cannot lose
+			// the race to the timer's select case.
+			if w.inFlight.Load() > 0 {
+				resetTimer(idleTimer, idleDuration)
+				continue
+			}
 			w.setCause(fmt.Sprintf("MCP idle timeout after %s without OCR activity", idleDuration))
 			w.cancel()
 			return

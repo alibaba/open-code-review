@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -246,6 +247,150 @@ func TestReviewWatchdogZeroMaxDurationUsesIdleOnly(t *testing.T) {
 	select {
 	case <-w.Context().Done():
 		t.Fatalf("watchdog canceled with zero max duration: %s", w.Cause())
+	default:
+	}
+}
+
+func TestReviewWatchdogTriggersWithoutActivity(t *testing.T) {
+	w := newReviewWatchdog(context.Background(), 0, 25*time.Millisecond)
+	defer w.Stop()
+
+	select {
+	case <-w.Context().Done():
+		if !strings.Contains(w.Cause(), "idle timeout") {
+			t.Fatalf("cause = %q", w.Cause())
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("watchdog did not cancel without activity")
+	}
+}
+
+type blockingLLMClient struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingLLMClient) CompletionsWithCtx(ctx context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	close(c.started)
+	select {
+	case <-c.release:
+		return &llm.ChatResponse{}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestLLMRequestKeepsWatchdogPaused(t *testing.T) {
+	w := newReviewWatchdog(context.Background(), 0, 25*time.Millisecond)
+	defer w.Stop()
+
+	inner := &blockingLLMClient{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	client := watchdogLLMClient{inner: inner, watchdog: w}
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.CompletionsWithCtx(w.Context(), llm.ChatRequest{})
+		done <- err
+	}()
+
+	select {
+	case <-inner.started:
+	case <-time.After(time.Second):
+		t.Fatal("LLM request did not start")
+	}
+
+	select {
+	case <-w.Context().Done():
+		t.Fatalf("watchdog canceled during active LLM request: %s", w.Cause())
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(inner.release)
+	if err := <-done; err != nil {
+		t.Fatalf("LLM request: %v", err)
+	}
+}
+
+func TestConcurrentLLMRequestsKeepWatchdogPausedUntilLastReturn(t *testing.T) {
+	w := newReviewWatchdog(context.Background(), 0, 25*time.Millisecond)
+	defer w.Stop()
+
+	first := &blockingLLMClient{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	second := &blockingLLMClient{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	firstClient := watchdogLLMClient{inner: first, watchdog: w}
+	secondClient := watchdogLLMClient{inner: second, watchdog: w}
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := firstClient.CompletionsWithCtx(w.Context(), llm.ChatRequest{})
+		firstDone <- err
+	}()
+	go func() {
+		_, err := secondClient.CompletionsWithCtx(w.Context(), llm.ChatRequest{})
+		secondDone <- err
+	}()
+
+	for _, started := range []<-chan struct{}{first.started, second.started} {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("LLM request did not start")
+		}
+	}
+
+	close(first.release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first LLM request: %v", err)
+	}
+
+	select {
+	case <-w.Context().Done():
+		t.Fatalf("watchdog canceled while second LLM request was active: %s", w.Cause())
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(second.release)
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second LLM request: %v", err)
+	}
+
+	select {
+	case <-w.Context().Done():
+		if !strings.Contains(w.Cause(), "idle timeout") {
+			t.Fatalf("cause = %q", w.Cause())
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("watchdog did not resume after the last LLM request returned")
+	}
+}
+
+func TestLLMRequestPreservesPerRequestTimeout(t *testing.T) {
+	w := newReviewWatchdog(context.Background(), 0, 200*time.Millisecond)
+	defer w.Stop()
+
+	inner := &blockingLLMClient{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	client := watchdogLLMClient{inner: inner, watchdog: w}
+	requestCtx, cancel := context.WithTimeout(w.Context(), 25*time.Millisecond)
+	defer cancel()
+
+	_, err := client.CompletionsWithCtx(requestCtx, llm.ChatRequest{})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("LLM error = %v, want context deadline exceeded", err)
+	}
+	select {
+	case <-w.Context().Done():
+		t.Fatalf("watchdog canceled with cause %q", w.Cause())
 	default:
 	}
 }

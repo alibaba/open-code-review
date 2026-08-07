@@ -176,7 +176,7 @@ func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outp
 		return err
 	}
 	if watchdog != nil {
-		watchdog.SetLLMTimeout(rt.RuntimeConfig.Timeout)
+		rt.Client = watchdogLLMClient{inner: rt.Client, watchdog: watchdog}
 	}
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,

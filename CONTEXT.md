@@ -36,7 +36,7 @@ A blocking recovery request that waits for the current or most recent in-process
 _Avoid_: treating it as a status or polling API.
 
 **Review deadline**:
-The server-controlled idle-watchdog point by which a Synchronous review without OCR activity must return a terminal Review result; active progress has no fixed whole-review deadline, while the host can still cancel the request.
+The server-controlled idle-watchdog point by which a Synchronous review with no meaningful OCR progress and no LLM request in flight must return a terminal Review result; the idle watchdog pauses while one or more LLM requests are in flight, while the host can still cancel the request.
 _Avoid_: host timeout as the review result.
 
 **Resumable failure**:
@@ -50,6 +50,10 @@ _Avoid_: treating diagnostic stage data as review findings.
 **Tool-request round**:
 One LLM completion cycle in a file review, including the model response and any tool calls it requests before the next completion.
 _Avoid_: treating one tool call as one round.
+
+**LLM request in flight**:
+The interval from entering the shared `CompletionsWithCtx` request wrapper until that call returns, including provider success, provider error, per-request timeout, or cancellation. Concurrent requests contribute to one in-flight count.
+_Avoid_: ending the interval only when a successful response or progress event is emitted.
 
 **Tool-call failure**:
 A single tool invocation that returns an error, such as an exact file path not being found.
@@ -70,6 +74,10 @@ _Avoid_: silently substituting a guessed filename or treating the first failed l
 **Aggregate token budget**:
 The input-plus-output token ceiling for a complete review run; reaching it stops dispatching additional files and reports incomplete coverage.
 _Avoid_: confusing it with the per-request `MAX_TOKENS` limit or the per-file timeout.
+
+**Per-request timeout**:
+The provider HTTP timeout applied independently to each LLM request. It remains active while the MCP idle watchdog is paused and stays separate from the per-file timeout, aggregate token budget, and idle watchdog.
+_Avoid_: replacing the request timeout with a heartbeat or using the idle watchdog as the request timeout.
 
 **MCP call interruption**:
 A host-side interruption that ends the request before a Review result exists; it does not prove that the review reached a terminal state.
@@ -96,8 +104,16 @@ A persisted OCR review state identified by a session ID that can reuse completed
 _Avoid_: resuming a mutable workspace review or assuming an unfinished file is reusable.
 
 **Progress event**:
-A machine-readable JSONL record written to stderr while OCR runs; it signals review activity without mixing with the final JSON result on stdout.
+A machine-readable JSONL record written to stderr while OCR runs; it signals meaningful OCR activity such as a completed LLM response or persisted file checkpoint without mixing with the final JSON result on stdout.
 _Avoid_: treating progress events as the terminal review result.
+
+**Idle watchdog**:
+The MCP server timer that observes gaps without meaningful Progress events while no LLM request is in flight. It pauses when the in-flight count is positive and resumes when the count reaches zero.
+_Avoid_: using it to bound an active provider request.
+
+**Synthetic heartbeat**:
+A periodic liveness signal emitted while an LLM request is in flight. OCR does not use it to reset the idle watchdog because it cannot establish provider progress.
+_Avoid_: treating process liveness as review progress.
 
 **Structural context**:
 Repository-level evidence about definitions, callers, dependencies, and architecture that supplements the current diff. Structural context can support a finding about changed code, but it does not expand the finding scope to untouched files.
