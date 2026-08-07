@@ -275,6 +275,34 @@ ocr review --format json --audience agent
 
 致命的でない警告（個々のサブエージェントの失敗、あるファイルが token しきい値を超過、など）はインラインで出力されます。JSON モードでは `warnings` 配列に追加されます。
 
+## `ocr scan`
+
+Git diff を必要としないファイル全体のレビュー。作業ツリーから各ファイルの現在の内容を読み込み、LLM に送信します。馴染みのないコードベースや、意味のある diff がないディレクトリの監査に便利です。
+
+```text
+ocr scan [flags]
+ocr s      [flags]   (alias)
+```
+
+`--path` を渡さない場合、リポジトリ全体をスキャンします。
+
+### 引数
+
+| 引数 | 短縮形 | デフォルト | 説明 |
+|---|---|---|---|
+| `--path <list>` | - | リポジトリ全体 | スキャン対象のリポジトリ相対ディレクトリまたはファイル（カンマ区切り、例: `internal/agent`、`internal/llm/client.go`）。 |
+| `--exclude <patterns>` | - | - | 除外する gitignore 形式のパターン（カンマ区切り、例: `**/generated/*,*.pb.go`）。`rule.json` の excludes とマージされます。 |
+| `--preview` | `-p` | `false` | LLM を呼び出さずにファイルを列挙・フィルタリングします。ファイルリスト、レビュー対象/除外数、総行数、ファイルごとの除外理由を出力します。 |
+
+```bash
+ocr scan --preview                              # スキャン対象を確認
+ocr scan --path internal/agent                  # 単一ディレクトリをスキャン
+ocr scan --path internal/agent,internal/llm/client.go
+ocr scan --exclude '**/generated/*,*.pb.go'
+```
+
+完全なフラグリストは `ocr scan -h` を参照してください。
+
 ## `ocr session`
 
 `~/.opencodereview/sessions/` 配下に保存されたローカルレビューセッションログを一覧表示・確認します。
