@@ -27,7 +27,7 @@ func TestExecuteToolCall_TaskDone(t *testing.T) {
 	call := func(args string) tool.TaskCheckpoint {
 		return newRunner().executeToolCall(context.Background(), "file.go", llm.ToolCall{
 			Function: llm.FunctionCall{Name: tool.TaskDone.Name(), Arguments: args},
-		}, nil)
+		}, nil, "")
 	}
 
 	t.Run("parse error", func(t *testing.T) {
@@ -96,7 +96,7 @@ func TestExecuteToolCall_CodeCommentAsyncPool(t *testing.T) {
 			Name:      tool.CodeComment.Name(),
 			Arguments: `{"comments":[{"content":"issue","existing_code":"foo"}]}`,
 		},
-	}, rec)
+	}, rec, "")
 
 	if cp.Data != tool.CommentSucceed {
 		t.Fatalf("cp.Data = %q, want CommentSucceed", cp.Data)
@@ -144,7 +144,7 @@ func TestExecuteToolCall_CodeCommentDiffResolved(t *testing.T) {
 			Name:      tool.CodeComment.Name(),
 			Arguments: `{"comments":[{"content":"issue","existing_code":"foo bar"}]}`,
 		},
-	}, rec)
+	}, rec, "")
 
 	if cp.Data != tool.CommentSucceed {
 		t.Fatalf("cp.Data = %q, want CommentSucceed", cp.Data)
@@ -160,5 +160,69 @@ func TestExecuteToolCall_CodeCommentDiffResolved(t *testing.T) {
 	// ResolveComment should have located "foo bar" on line 2 of NewFileContent.
 	if comments[0].StartLine != 2 {
 		t.Errorf("comment StartLine = %d, want 2 (resolved from file content)", comments[0].StartLine)
+	}
+}
+
+// TestExecuteToolCall_CodeCommentThinkingBackfill covers the thinking backfill:
+// when the current turn carries reasoning content, comments without an explicit
+// thinking get the turn reasoning; explicit thinking wins.
+func TestExecuteToolCall_CodeCommentThinkingBackfill(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	r := NewRunner(Deps{Tools: reg, CommentCollector: collector})
+
+	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
+		Function: llm.FunctionCall{
+			Name: tool.CodeComment.Name(),
+			Arguments: `{"comments":[` +
+				`{"content":"a","existing_code":"x"},` +
+				`{"content":"b","existing_code":"y","thinking":"explicit"}]}`,
+		},
+	}, nil, "turn reasoning")
+
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("cp.Data = %q, want CommentSucceed", cp.Data)
+	}
+	comments := collector.Comments()
+	if len(comments) != 2 {
+		t.Fatalf("collected %d comments, want 2", len(comments))
+	}
+	if comments[0].Thinking != "turn reasoning" {
+		t.Errorf("comments[0].Thinking = %q, want backfilled turn reasoning", comments[0].Thinking)
+	}
+	if comments[1].Thinking != "explicit" {
+		t.Errorf("comments[1].Thinking = %q, want explicit thinking preserved", comments[1].Thinking)
+	}
+}
+
+// TestExecuteToolCall_CodeCommentNoReasoning verifies comments keep an empty
+// thinking when the turn has no reasoning content.
+func TestExecuteToolCall_CodeCommentNoReasoning(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	r := NewRunner(Deps{Tools: reg, CommentCollector: collector})
+
+	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
+		Function: llm.FunctionCall{
+			Name:      tool.CodeComment.Name(),
+			Arguments: `{"comments":[{"content":"a","existing_code":"x"}]}`,
+		},
+	}, nil, "")
+
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("cp.Data = %q, want CommentSucceed", cp.Data)
+	}
+	comments := collector.Comments()
+	if len(comments) != 1 {
+		t.Fatalf("collected %d comments, want 1", len(comments))
+	}
+	if comments[0].Thinking != "" {
+		t.Errorf("comments[0].Thinking = %q, want empty", comments[0].Thinking)
 	}
 }

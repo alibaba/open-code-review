@@ -89,8 +89,11 @@ is optional but encouraged. `path` is a top-level optional override —
 if omitted, the agent injects the file currently under review. The
 agent also injects `path` automatically when the model leaves it out, so
 the model rarely needs to set it explicitly. `thinking` (per-comment)
-captures the model's reasoning and is preserved on the comment but not
-shown in the final review output.
+captures the model's reasoning and is preserved on the comment; OCR
+backfills it from the reasoning content the model emits on the current
+turn (or the turn's message when there is none), and includes it in
+the JSON output (the terminal output does not
+render it).
 
 > **`thinking` is a runtime-only field.** OCR parses and stores it, but
 > it is deliberately **not** listed in the `code_comment` schema
