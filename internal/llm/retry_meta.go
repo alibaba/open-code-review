@@ -136,8 +136,16 @@ func WithRequestMeta(ctx context.Context, m RequestMeta) context.Context {
 	return context.WithValue(ctx, requestMetaKey{}, m)
 }
 
-// requestMetaFromContext returns the RequestMeta attached to ctx, if any.
-func requestMetaFromContext(ctx context.Context) (RequestMeta, bool) {
+// RequestMetaFromContext returns the RequestMeta attached to ctx, if any.
+//
+// It is exported so the packages that stamp identity — internal/llmloop and
+// internal/agent — can assert in their own tests that a request reached the
+// client carrying the right meta, and that scan's requests carry none. A
+// package-local export_test.go cannot serve that: it is only visible to tests
+// of package llm, and none of the call sites live here. The accessor is
+// read-only and stays inside internal/, so it adds no mutation path and no
+// repository-external API.
+func RequestMetaFromContext(ctx context.Context) (RequestMeta, bool) {
 	if ctx == nil {
 		return RequestMeta{}, false
 	}

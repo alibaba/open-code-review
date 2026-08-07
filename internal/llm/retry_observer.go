@@ -34,7 +34,7 @@ func newRetryObserver(collector *RetryCollector) retryObserver {
 		// it, so the value is still visible here. Requests without identity —
 		// scan and llm test — go straight through: the collector would drop them
 		// anyway, and skipping the timestamps keeps those paths untouched.
-		meta, ok := requestMetaFromContext(req.Context())
+		meta, ok := RequestMetaFromContext(req.Context())
 		if collector == nil || !ok {
 			return next(req)
 		}

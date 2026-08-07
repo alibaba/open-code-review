@@ -39,6 +39,33 @@ type Deps struct {
 	// in scan mode — scan adapters return a synthetic Diff whose
 	// NewFileContent is the whole file and Diff is empty).
 	DiffLookup func(path string) *model.Diff
+
+	// NewRequestMeta builds the retry-report identity for one logical LLM
+	// request. Non-nil only for review: the retry report describes ocr review,
+	// and this Runner is shared with scan (internal/scan.Agent calls RunPerFile),
+	// so main_task, memory compression and re-location all run under both modes.
+	//
+	// The gate has to be this field rather than a Provider string, because an
+	// empty provider is a legitimate value for an unnamed endpoint — it cannot
+	// double as "identity disabled". Leaving it nil (what scan does) keeps every
+	// request exactly as it was before request identity existed.
+	//
+	// requestNo must be the RequestNo of the session.TaskRecord already created
+	// for this request, so the report joins against the session JSONL.
+	NewRequestMeta func(filePath string, taskType session.TaskType, requestNo int) llm.RequestMeta
+}
+
+// requestCtx returns ctx carrying the identity of one logical LLM request, or
+// ctx unchanged when identity is disabled (scan) or the meta is unusable.
+//
+// Callers must invoke it after AppendTaskRecord and pass that record's
+// RequestNo — the fixed order is AppendTaskRecord -> requestCtx ->
+// CompletionsWithCtx -> SetResponse/SetError.
+func (r *Runner) requestCtx(ctx context.Context, filePath string, taskType session.TaskType, requestNo int) context.Context {
+	if r.deps.NewRequestMeta == nil {
+		return ctx
+	}
+	return llm.WithRequestMeta(ctx, r.deps.NewRequestMeta(filePath, taskType, requestNo))
 }
 
 // Runner is a per-session (across files) executor of the LLM tool-use
@@ -202,8 +229,12 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
 		startTime := time.Now()
 
+		// Scoped to this round: ctx itself must stay identity-free so each
+		// iteration's meta replaces the previous one instead of nesting.
+		reqCtx := r.requestCtx(ctx, newPath, session.MainTask, rec.RequestNo)
+
 		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
-		resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+		resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 			Model:     r.deps.Model,
 			Messages:  messages,
 			Tools:     r.deps.MainToolDefs,
@@ -420,11 +451,23 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 				}
 				if d != nil {
 					if !diff.ResolveComment(cm, d) && r.deps.Template.ReLocationTask != nil {
+						// rlStart stays ahead of prompt construction, which is
+						// where it sat when ReLocateComment built the messages
+						// itself — moving it would silently change what
+						// TaskRecord.Duration measures.
 						rlStart := time.Now()
-						_, resp, msgs := diff.ReLocateComment(rctx, cm, d, r.deps.LLMClient, r.deps.Template.ReLocationTask, r.deps.Model, r.deps.Template.CompletionTokenLimit())
-						if msgs != nil {
+						msgs := diff.BuildReLocationMessages(cm, d, r.deps.Template.ReLocationTask)
+						if len(msgs) > 0 {
 							fs := r.deps.Session.GetOrCreateFileSession(cm.Path)
 							rlRec := fs.AppendTaskRecord(session.ReLocationTask, msgs)
+							// FilePath is cm.Path so it cannot drift from the file
+							// session opened above — that join is what the report
+							// needs. It equals newPath whenever newPath is set,
+							// because the path arg is overridden with it further
+							// up, but reading it from the comment keeps the two
+							// aligned without depending on that.
+							reqCtx := r.requestCtx(rctx, cm.Path, session.ReLocationTask, rlRec.RequestNo)
+							_, resp := diff.ReLocateComment(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
 							if resp != nil {
 								rlRec.SetResponse(resp, time.Since(rlStart))
 								if resp.Usage != nil {

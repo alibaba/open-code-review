@@ -103,7 +103,7 @@ func reviseAttempt(ctx context.Context, collector *RetryCollector, class ErrorCl
 	if collector == nil {
 		return
 	}
-	meta, ok := requestMetaFromContext(ctx)
+	meta, ok := RequestMetaFromContext(ctx)
 	if !ok {
 		return
 	}
@@ -130,7 +130,7 @@ func finalizeRequest(ctx context.Context, collector *RetryCollector, reqErr erro
 	if collector == nil {
 		return
 	}
-	meta, ok := requestMetaFromContext(ctx)
+	meta, ok := RequestMetaFromContext(ctx)
 	if !ok {
 		return
 	}

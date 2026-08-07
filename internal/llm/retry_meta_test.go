@@ -138,7 +138,7 @@ func TestWithRequestMeta(t *testing.T) {
 	t.Run("round trip", func(t *testing.T) {
 		m := testMeta()
 		ctx := WithRequestMeta(context.Background(), m)
-		got, ok := requestMetaFromContext(ctx)
+		got, ok := RequestMetaFromContext(ctx)
 		if !ok || got != m {
 			t.Fatalf("got (%+v, %v), want (%+v, true)", got, ok, m)
 		}
@@ -148,13 +148,13 @@ func TestWithRequestMeta(t *testing.T) {
 		m := testMeta()
 		m.Model = ""
 		ctx := WithRequestMeta(context.Background(), m)
-		if _, ok := requestMetaFromContext(ctx); ok {
+		if _, ok := RequestMetaFromContext(ctx); ok {
 			t.Fatal("invalid meta was attached to the context")
 		}
 	})
 
 	t.Run("bare context carries nothing", func(t *testing.T) {
-		if _, ok := requestMetaFromContext(context.Background()); ok {
+		if _, ok := RequestMetaFromContext(context.Background()); ok {
 			t.Fatal("empty context reported a meta")
 		}
 	})
@@ -168,7 +168,7 @@ func TestWithRequestMeta(t *testing.T) {
 			t.Fatalf("WithRequestMeta(nil, ...) = %v, want nil", got)
 		}
 		//nolint:staticcheck // deliberately passing a nil context
-		if m, ok := requestMetaFromContext(nil); ok || m != (RequestMeta{}) {
+		if m, ok := RequestMetaFromContext(nil); ok || m != (RequestMeta{}) {
 			t.Fatalf("got (%+v, %v), want (zero, false)", m, ok)
 		}
 	})
