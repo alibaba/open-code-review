@@ -163,6 +163,26 @@ class Recorder:
         self.list_disc_calls += 1
         return None if self._disc_fail else self._discussions
 
+    @property
+    def final_summary_body(self):
+        """The final summary body across the anchor→finalize two-phase flow.
+
+        With the per-run anchor, the pre-review body lands in ``post_note``
+        (note_calls) and the final body lands in ``update_note`` (update_calls).
+        LGTM / read-unavailable paths may put the final body directly in
+        ``post_note``. This helper returns whichever carries the final body.
+        """
+        if self.update_calls:
+            return self.update_calls[-1][1]
+        if self.note_calls:
+            return self.note_calls[-1]
+        return ""
+
+    @property
+    def summary_call_count(self):
+        """Total summary note operations (anchor post + finalize update)."""
+        return len(self.note_calls) + len(self.update_calls)
+
     def post_discussion(self, discussion, comment_id=None):
         self.disc_calls.append(discussion)
         if self._disc_outcomes:
@@ -365,22 +385,24 @@ class PublishTest(unittest.TestCase):
         self.assertEqual(stats["inline"], 1)
         self.assertEqual(stats["failed"], 0)
         self.assertEqual(len(rec.disc_calls), 1)
-        self.assertEqual(len(rec.note_calls), 1)  # final summary
+        # Two-phase summary: anchor (post_note) + finalize (update_note).
+        self.assertEqual(rec.summary_call_count, 2)
         inline = rec.disc_calls[0]
         self.assertEqual(inline["position"]["new_path"], "main.py")
         self.assertEqual(inline["position"]["new_line"], 10)
         self.assertIn("possible issue", inline["body"])
-        self.assertIn("**1** issue(s)", rec.note_calls[0])
-        self.assertIn("Successfully posted inline: 1 comment(s)", rec.note_calls[0])
+        self.assertIn("**1** issue(s)", rec.final_summary_body)
+        self.assertIn("Successfully posted inline: 1 comment(s)", rec.final_summary_body)
 
     def test_fallback_when_diff_refs_none(self):
         stats, rec = run_publish({"comments": [comment()]}, diff_refs=None)
         self.assertEqual(stats["inline"], 0)
         self.assertEqual(stats["failed"], 1)
-        # No discussions, one summary note carrying the failed rendering.
+        # No discussions; summary still anchors first, then finalizes with the
+        # failed-comment rendering.
         self.assertEqual(len(rec.disc_calls), 0)
-        self.assertEqual(len(rec.note_calls), 1)
-        self.assertIn("Could not be posted inline", rec.note_calls[0])
+        self.assertEqual(rec.summary_call_count, 2)
+        self.assertIn("Could not be posted inline", rec.final_summary_body)
 
     def test_inline_error_falls_back(self):
         stats, rec = run_publish(
@@ -392,17 +414,21 @@ class PublishTest(unittest.TestCase):
         self.assertEqual(stats["inline"], 0)
         self.assertEqual(stats["failed"], 1)
         self.assertEqual(len(rec.disc_calls), 1)
-        self.assertEqual(len(rec.note_calls), 1)
+        self.assertEqual(rec.summary_call_count, 2)
 
     def test_no_comments_lgtm(self):
         stats, rec = run_publish({"message": "Looks good to me."})
         self.assertEqual(stats["inline"], 0)
-        self.assertEqual(rec.note_calls[0], "<!-- ocr-summary -->\n✅ **OpenCodeReview**: Looks good to me.")
+        # LGTM path goes straight through upsert_summary (no anchor phase), so
+        # the final body lands in post_note when no prior summary note exists.
+        self.assertEqual(rec.final_summary_body,
+                         "<!-- ocr-summary -->\n<!-- ocr-summary-run:42-7 -->\n"
+                         "✅ **OpenCodeReview**: Looks good to me.")
 
     def test_warnings_in_summary(self):
         stats, rec = run_publish({"comments": [comment()], "warnings": [{"file": "a.py", "message": "skipped"}]})
-        self.assertIn("1 warning(s)", rec.note_calls[0])
-        self.assertIn("`a.py`: skipped", rec.note_calls[0])
+        self.assertIn("1 warning(s)", rec.final_summary_body)
+        self.assertIn("`a.py`: skipped", rec.final_summary_body)
 
     def test_success_pacing(self):
         stats, rec = run_publish(
@@ -566,6 +592,74 @@ class StickySummaryTest(unittest.TestCase):
         self.assertIsNone(stats["summary_url"])
         # Discussions still attempted.
         self.assertEqual(len(rec.disc_calls), 1)
+
+
+class NonStickySummaryTest(unittest.TestCase):
+    """Non-sticky mode now uses a per-run tag so the pre-review anchor and the
+    finalize phase reuse the same note within a run (instead of always creating
+    a fresh note), mirroring the GitHub Action's SUMMARY_TAG mechanism."""
+
+    def test_cold_start_creates_anchor_then_updates_same_note(self):
+        # Non-sticky: anchor creates note N, finalize updates N (not a new note).
+        stats, rec = run_publish({"comments": [comment()]})  # DEFAULT_CONFIG is non-sticky
+        self.assertEqual(rec.summary_call_count, 2)  # 1 post + 1 update
+        self.assertEqual(len(rec.note_calls), 1)  # anchor (pre-review body)
+        self.assertEqual(len(rec.update_calls), 1)  # finalize (final body)
+        # The anchor body carries the per-run tag; the final body updates the
+        # same note id the anchor created (Recorder's first post_note -> 1001).
+        self.assertIn(pr.summary_tag_for("42-7"), rec.note_calls[0])
+        self.assertEqual(rec.update_calls[0][0], 1001)
+
+    def test_existing_same_run_note_is_reused_not_duplicated(self):
+        # Simulate a prior call in THIS run that already created the anchor note
+        # (carrying this run's tag). The anchor phase must find and reuse it.
+        tag = pr.summary_tag_for("42-7")
+        existing = [{"id": 55, "body": "%s\n%s\nold" % (pr.SUMMARY_MARKER, tag),
+                     "web_url": "https://x/55"}]
+        stats, rec = run_publish({"comments": [comment()]}, poster=Recorder(notes=existing))
+        # Anchor found the existing note -> no new post; finalize updates id 55.
+        self.assertEqual(len(rec.note_calls), 0)
+        self.assertEqual(len(rec.update_calls), 1)
+        self.assertEqual(rec.update_calls[0][0], 55)
+
+    def test_existing_different_run_note_is_not_reused(self):
+        # A note from a DIFFERENT run carries a different tag; non-sticky must
+        # NOT reuse it (it should create a fresh note for this run).
+        other_tag = pr.summary_tag_for("99-1")
+        existing = [{"id": 55, "body": "%s\n%s\nold" % (pr.SUMMARY_MARKER, other_tag),
+                     "web_url": "https://x/55"}]
+        stats, rec = run_publish({"comments": [comment()]}, poster=Recorder(notes=existing))
+        # No same-run note found -> anchor posts a new note; finalize updates it.
+        self.assertEqual(len(rec.note_calls), 1)
+        self.assertEqual(len(rec.update_calls), 1)
+
+
+class SummaryTagPureTest(unittest.TestCase):
+    def test_summary_tag_format(self):
+        self.assertEqual(pr.summary_tag_for("42-7"), "<!-- ocr-summary-run:42-7 -->")
+
+    def test_wrap_summary_body_embeds_both_markers(self):
+        body = pr.wrap_summary_body("content here", "42-7")
+        self.assertIn(pr.SUMMARY_MARKER, body)
+        self.assertIn(pr.summary_tag_for("42-7"), body)
+        self.assertIn("content here", body)
+
+    def test_find_summary_note_by_tag_newest_first(self):
+        tag = pr.summary_tag_for("1-1")
+        old = {"id": 1, "body": "no marker"}
+        stale = {"id": 2, "body": "%s\n%s\nstale" % (pr.SUMMARY_MARKER, tag)}
+        fresh = {"id": 3, "body": "%s\n%s\nfresh" % (pr.SUMMARY_MARKER, tag)}
+        # list_notes returns oldest-first; find_summary_note must return newest.
+        self.assertEqual(pr.find_summary_note([old, stale, fresh], tag=tag)["id"], 3)
+
+    def test_find_summary_note_marker_when_no_tag(self):
+        # Sticky path: no tag -> match the cross-run SUMMARY_MARKER.
+        n = {"id": 9, "body": "%s\nx" % pr.SUMMARY_MARKER}
+        self.assertEqual(pr.find_summary_note([{"id": 1, "body": "x"}, n])["id"], 9)
+
+    def test_find_summary_note_returns_none_when_no_match(self):
+        self.assertIsNone(pr.find_summary_note([], tag="<!-- ocr-summary-run:1-1 -->"))
+        self.assertIsNone(pr.find_summary_note([{"id": 1, "body": "nope"}]))
 
 
 # --------------------------------------------------------------------------- #
@@ -926,6 +1020,65 @@ class GitLabPosterTest(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# Read-API pacing (mirrors the GitHub Action's readWithPacing)
+# --------------------------------------------------------------------------- #
+
+
+class ReadPacingTest(unittest.TestCase):
+    API_BASE = "https://gitlab.example/api/v4/projects/1/merge_requests/2"
+    TOKEN = "test-token"
+    AUTH_HEADER = "PRIVATE-TOKEN"
+
+    def _poster(self, config_overrides=None):
+        cfg = dict(DEFAULT_CONFIG)
+        cfg.update(config_overrides or {})
+        return pr.make_poster(self.API_BASE, self.TOKEN, self.AUTH_HEADER, cfg)
+
+    def test_paces_with_read_success_delay_after_successful_read(self):
+        sleeps = []
+        poster = self._poster({"read_success_delay": 0.4,
+                               "read_low_remaining_spacing": 9.0,
+                               "rate_limit_threshold": 3})
+        resp = FakeResponse(b'[]', headers={})  # no RateLimit-Remaining header
+        with mock.patch.object(pr.urllib.request, "urlopen",
+                               lambda req, timeout=None: resp), \
+                mock.patch.object(pr, "_sleep", sleeps.append):
+            out = poster.list_notes()
+        self.assertEqual(out, [])  # empty list, not None
+        # The read succeeded with no quota info -> normal read_success_delay.
+        self.assertEqual(sleeps, [0.4])
+
+    def test_paces_with_long_spacing_when_quota_low(self):
+        sleeps = []
+        poster = self._poster({"read_success_delay": 0.4,
+                               "read_low_remaining_spacing": 9.0,
+                               "rate_limit_threshold": 10})
+        # remaining=2 <= threshold 10 -> long spacing.
+        resp = FakeResponse(b'[]', headers={"RateLimit-Remaining": "2"})
+        with mock.patch.object(pr.urllib.request, "urlopen",
+                               lambda req, timeout=None: resp), \
+                mock.patch.object(pr, "_sleep", sleeps.append):
+            poster.list_notes()
+        self.assertEqual(sleeps, [9.0])
+
+    def test_no_pacing_sleep_on_failed_read(self):
+        sleeps = []
+        poster = self._poster({"read_success_delay": 0.4,
+                               "rate_limit_threshold": 3})
+        with mock.patch.object(pr.urllib.request, "urlopen",
+                               lambda req, timeout=None:
+                                   (_ for _ in ()).throw(http_error(500, b"boom"))), \
+                mock.patch.object(pr, "_sleep", sleeps.append), \
+                mock.patch.object(pr.random, "random", lambda: 0.5):
+            out = poster.list_notes()
+        # Read failed after retries -> None; only retry backoff sleeps, no
+        # read_success_delay (the pacing sleep only runs on success).
+        self.assertIsNone(out)
+        self.assertTrue(all(s != 0.4 for s in sleeps),
+                        "read_success_delay must not fire on a failed read; got %r" % sleeps)
+
+
+# --------------------------------------------------------------------------- #
 # Idempotent post_discussion (Group B3)
 # --------------------------------------------------------------------------- #
 
@@ -1062,7 +1215,7 @@ class FallbackPublishTest(unittest.TestCase):
         stats = pr.publish({"comments": [comment()]}, DIFF_REFS, rec, config, sleep=NOOP_SLEEP)
         self.assertEqual(rec.diff_calls, 1)
         self.assertEqual(stats["failed"], 1)
-        self.assertIn("out of diff", rec.note_calls[0])
+        self.assertIn("out of diff", rec.final_summary_body)
 
 
 # --------------------------------------------------------------------------- #
@@ -1263,6 +1416,17 @@ class BuildConfigTest(unittest.TestCase):
         self.assertEqual(config["fail_on_severity"], "critical")
         self.assertEqual(config["run_tag"], "9-3")
 
+    def test_read_pacing_defaults_and_overrides(self):
+        # Defaults mirror the GitHub Action's readWithPacing knobs.
+        config = pr.build_config({})
+        self.assertEqual(config["read_success_delay"], 0.5)
+        self.assertEqual(config["read_low_remaining_spacing"], 5.0)
+        # Overridable via env.
+        config = pr.build_config({"OCR_READ_SUCCESS_DELAY": "250",
+                                  "OCR_READ_LOW_REMAINING_SPACING": "8000"})
+        self.assertEqual(config["read_success_delay"], 0.25)
+        self.assertEqual(config["read_low_remaining_spacing"], 8.0)
+
     def test_incremental_overlap_threshold_non_numeric_falls_back(self):
         # A malformed value must not crash build_config; it falls back to the
         # default via resolve_threshold.
@@ -1369,9 +1533,20 @@ class MainAuthHeaderTest(unittest.TestCase):
         stats_path.close()
         self.addCleanup(os.unlink, stats_path.name)
 
+        # Canned urlopen so the real GitLabPoster never hits the network (the
+        # host "gitlab.example" has no DNS and would stall on every read/write).
+        # GETs return an empty list (no notes/discussions/diffs); writes return
+        # a minimal note object. The auth-header selection under test happens
+        # before any of these bodies matter.
+        def fake_urlopen(req, timeout=None):
+            if req.method == "GET":
+                return FakeResponse(b"[]")
+            return FakeResponse(b'{"id": 1, "web_url": "https://gitlab.example/note/1"}')
+
         with mock.patch.dict(os.environ, env, clear=True), \
                 mock.patch.object(pr, "make_poster", CapturingPoster), \
                 mock.patch.object(pr, "fetch_diff_refs", lambda *a, **kw: DIFF_REFS), \
+                mock.patch.object(pr.urllib.request, "urlopen", fake_urlopen), \
                 mock.patch.object(pr, "_sleep", lambda _s: None):
             rc = pr.main([f.name, "--stats-file", stats_path.name])
         return rc, captured

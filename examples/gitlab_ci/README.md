@@ -40,6 +40,14 @@ Go to your project's **Settings → CI/CD → Variables** and add:
 | `OCR_LLM_AUTH_TOKEN` | Yes | Yes | API authentication token |
 | `OCR_LLM_MODEL` | Yes | No | Model name (e.g., `gpt-4o`) — OCR has no built-in default model and fails when this is unset |
 | `GITLAB_API_TOKEN` | No | Yes | GitLab access token with `api` scope (falls back to `CI_JOB_TOKEN` if not set) |
+| `OCR_VERSION` | No | No | npm version spec for `@alibaba-group/open-code-review` (default: `latest`). Pin it (e.g. `1.8.8` or `~1.8`) for reproducible reviews. |
+| `OCR_LANGUAGE` | No | No | Review output language, written via `ocr config set language` (e.g. `English`, `中文`). Defaults to OCR's built-in default. |
+| `OCR_LLM_AUTH_HEADER` | No | No | Custom auth header name, written via `ocr config set llm.auth_header` (e.g. `x-api-key` for some providers). |
+| `OCR_LLM_EXTRA_HEADERS` | No | No | Extra headers `K=V,K=V`, written via `ocr config set llm.extra_headers`. |
+| `OCR_LLM_TIMEOUT` | No | No | LLM request timeout in seconds (read natively by OCR from the env). Unset/empty = OCR's default. |
+| `OCR_REVIEW_CONCURRENCY` | No | No | Max concurrent file reviews, passed via `ocr review --concurrency` (default: 8). |
+| `OCR_BACKGROUND` | No | No | Business/requirement context, passed via `ocr review --background` (e.g. the MR title). |
+| `OCR_RULE` | No | No | Path to a custom rules JSON file, passed via `ocr review --rule`. |
 
 > **Note:** GitLab CI/CD does not support variables with values shorter than 8 characters, so `use_anthropic` cannot be set as a CI variable. The pipeline sets it to `false` by default. If you need to use Anthropic Claude models, you'll need to modify the `.gitlab-ci.yml` script directly.
 >
@@ -82,21 +90,15 @@ OCR supports both OpenAI and Anthropic API formats:
 
 ## Customization
 
+Most review behavior is configurable via CI/CD Variables (see the table above) — no YAML edits required. The recipes below cover the remaining cases.
+
 ### Use a specific OCR version
 
-```yaml
-script:
-  - npm install -g @alibaba-group/open-code-review@1.0.0
-```
+Set the `OCR_VERSION` CI/CD variable (e.g. `1.8.8` or `~1.8`). Unset defaults to `latest`.
 
 ### Add custom review rules
 
-Use the `--rule` flag to pass a custom rules JSON file:
-
-```yaml
-script:
-  - ocr review --rule ./my-rules.json --from origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --to $CI_COMMIT_SHA
-```
+Set the `OCR_RULE` CI/CD variable to the path of a custom rules JSON file (passed to `ocr review --rule`). For rules that live inside the repo, commit the file and point `OCR_RULE` at its path.
 
 ### Adjust retry and delay settings
 
@@ -109,7 +111,9 @@ When posting review discussions, the script includes rate-limit handling with ex
 | `OCR_MAX_RETRY_DELAY` | `60000` | Maximum delay (ms) per single retry, caps both `Retry-After` and backoff |
 | `OCR_SUCCESS_DELAY` | `2000` | Delay (ms) after a successful discussion post to pace subsequent requests |
 | `OCR_FAILURE_DELAY` | `1000` | Delay (ms) after a non-rate-limit failure to pace subsequent requests |
-| `OCR_RATE_LIMIT_THRESHOLD` | `10` | Proactively slow down when GitLab `RateLimit-Remaining` is at/below this value (set `0` to disable) |
+| `OCR_RATE_LIMIT_THRESHOLD` | `10` | Proactively slow down when GitLab `RateLimit-Remaining` is at/below this value (set `0` to disable). Applies to both writes (doubles the pacing delay) and reads (switches to the longer read spacing). |
+| `OCR_READ_SUCCESS_DELAY` | `500` | Delay (ms) after a successful read (`list_notes`/`list_discussions`/`get_mr_diffs`) to pace read API calls, mirroring the GitHub Action's `readWithPacing`. |
+| `OCR_READ_LOW_REMAINING_SPACING` | `5000` | Longer delay (ms) used after a read when the remaining quota is at/below `OCR_RATE_LIMIT_THRESHOLD`. |
 | `OCR_ROUTE_SEVERITY_BELOW` | _(empty)_ | Optional severity threshold (`critical`, `high`, `medium`, `low`) that routes findings at-or-below it from inline comments to summary notes (fail-open: never drops a finding). Empty or unknown values disable severity routing. |
 | `OCR_ROUTE_CATEGORIES` | _(empty)_ | Optional comma-separated categories (`bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other`) routed from inline to summary notes. Unknown tokens are ignored. Combine with `OCR_ROUTE_SEVERITY_BELOW` to route on either condition. |
 
@@ -148,20 +152,20 @@ The pipeline exposes the following to downstream jobs:
 
 ### Limit concurrency
 
-Adjust the `--concurrency` flag for large MRs to control the number of concurrent LLM requests:
+Set the `OCR_REVIEW_CONCURRENCY` CI/CD variable (passed to `ocr review --concurrency`). For large MRs, lowering this caps concurrent LLM requests:
 
 ```yaml
-script:
-  - ocr review --concurrency 5 --from origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --to $CI_COMMIT_SHA
+variables:
+  OCR_REVIEW_CONCURRENCY: "5"
 ```
 
 ### Provide background context
 
-Use the `--background` flag to pass additional context that helps OCR better understand the purpose of the changes:
+Set the `OCR_BACKGROUND` CI/CD variable (passed to `ocr review --background`). A common choice is the MR title:
 
 ```yaml
-script:
-  - ocr review --background "$CI_MERGE_REQUEST_TITLE" --from origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --to $CI_COMMIT_SHA
+variables:
+  OCR_BACKGROUND: "$CI_MERGE_REQUEST_TITLE"
 ```
 
 This is particularly useful when your MR titles follow semantic conventions (e.g., `feat(auth): add OAuth2 support`) that clearly summarize what the MR implements. The background information helps OCR provide more relevant and context-aware review comments.

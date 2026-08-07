@@ -63,6 +63,24 @@ def log(msg):
 # find it across runs. Embedded verbatim in the summary body.
 SUMMARY_MARKER = "<!-- ocr-summary -->"
 
+# Per-run HTML marker embedded alongside SUMMARY_MARKER so the non-sticky
+# summary path can locate THIS run's note (find-by-tag) instead of always
+# creating a new one. Lets the pre-review anchor and the finalize phase reuse
+# the same note within a run, so non-sticky mode can show a live "posting…"
+# body without producing duplicate notes. Format: <!-- ocr-summary-run:TAG -->.
+def summary_tag_for(run_tag):
+    return "<!-- ocr-summary-run:%s -->" % run_tag
+
+
+def wrap_summary_body(content, run_tag):
+    """Prefix the summary body with both the cross-run marker and the per-run tag.
+
+    Sticky mode finds the note by SUMMARY_MARKER (cross-run reuse); non-sticky
+    finds it by the per-run tag (run-internal reuse, run-external new). Both
+    markers are always embedded so the same body serves either matching mode.
+    """
+    return "%s\n%s\n%s" % (SUMMARY_MARKER, summary_tag_for(run_tag), content)
+
 # Reason attached to comments that have no valid line range and therefore can
 # never be posted as inline comments. Surfaced in the summary so every
 # summary-only comment explains why it is here.
@@ -803,6 +821,28 @@ class GitLabPoster:
         return _api_request_with_retry(self.api_base, self.token, self.auth_header,
                                        self.config, endpoint, data, method)
 
+    def _read_with_pacing(self, endpoint):
+        """Read with proactive pacing, mirroring the GitHub Action's readWithPacing.
+
+        Reads are cheaper than writes but still consume the primary rate limit
+        and can trip the secondary limit when issued in a tight loop (a large MR
+        pages through list_notes/list_discussions/get_mr_diffs repeatedly). After
+        a successful read, sleep ``read_success_delay`` — or
+        ``read_low_remaining_spacing`` (a longer spacing) when the response's
+        ``RateLimit-Remaining`` is at/below ``rate_limit_threshold``. Retry on
+        rate-limit/transient errors is handled by the underlying ``_retry``.
+        """
+        resp = self._retry(endpoint, method="GET")
+        if not resp.get("success"):
+            return resp
+        remaining = resp.get("rate_limit_remaining")
+        threshold = self.config.get("rate_limit_threshold", 0)
+        if threshold > 0 and remaining is not None and remaining <= threshold:
+            _sleep(self.config.get("read_low_remaining_spacing", 5.0))
+        else:
+            _sleep(self.config.get("read_success_delay", 0.5))
+        return resp
+
     def mr_url(self):
         """Best-effort MR web URL (cached). None when unavailable."""
         if self._mr_url_fetched:
@@ -840,7 +880,7 @@ class GitLabPoster:
         all_notes = []
         page = 1
         while page <= self.MAX_PAGES:
-            resp = self._retry("/notes?per_page=100&page=%d" % page, method="GET")
+            resp = self._read_with_pacing("/notes?per_page=100&page=%d" % page)
             if not resp.get("success"):
                 return None
             data = resp.get("data") or []
@@ -855,7 +895,7 @@ class GitLabPoster:
         all_disc = []
         page = 1
         while page <= self.MAX_PAGES:
-            resp = self._retry("/discussions?per_page=100&page=%d" % page, method="GET")
+            resp = self._read_with_pacing("/discussions?per_page=100&page=%d" % page)
             if not resp.get("success"):
                 return None
             data = resp.get("data") or []
@@ -937,7 +977,7 @@ class GitLabPoster:
         max_pages = 30
         page = 1
         while page <= max_pages:
-            resp = self._retry("/diffs?per_page=%d&page=%d" % (per_page, page), method="GET")
+            resp = self._read_with_pacing("/diffs?per_page=%d&page=%d" % (per_page, page))
             if not resp.get("success"):
                 complete = False
                 break
@@ -1026,43 +1066,59 @@ def _truncate_error(body, limit=300):
     return s if len(s) <= limit else s[:limit] + "..."
 
 
-def find_summary_note(notes):
-    """Return the (first/oldest) note carrying :data:`SUMMARY_MARKER`, or None."""
+def find_summary_note(notes, tag=None):
+    """Return the newest note carrying the summary marker (or per-run tag).
+
+    ``tag`` selects the matching needle: when provided, match this run's
+    per-run ``SUMMARY_TAG`` (used by non-sticky mode so the anchor and finalize
+    phases reuse the same note within a run); otherwise match the cross-run
+    :data:`SUMMARY_MARKER` (sticky mode). Iterates newest-first so non-sticky
+    per-run matching picks the note just created in the anchor phase, not a
+    stale one from a prior run that happens to carry the same marker.
+    """
     if not notes:
         return None
-    for note in notes:
+    needle = tag or SUMMARY_MARKER
+    for note in reversed(notes):
         body = note.get("body") or ""
-        if SUMMARY_MARKER in body:
+        if needle in body:
             return note
     return None
 
 
-def upsert_summary(poster, body, sticky):
-    """Find-or-create/update a sticky summary note (or just create when non-sticky).
+def upsert_summary(poster, body, sticky, tag=None):
+    """Find-or-create/update a summary note.
 
-    Returns the note URL (best-effort) or None when the read API is unavailable
-    and a sticky write would risk duplicating.
+    Sticky matches the cross-run :data:`SUMMARY_MARKER`; non-sticky matches
+    this run's ``tag`` (per-run), so retries within a run update the note in
+    place rather than creating duplicates. Returns the note URL (best-effort)
+    or None when the read API is unavailable and a write would risk duplicating.
     """
-    if sticky:
-        notes = poster.list_notes()
-        if notes is None:
-            log("[summary] cannot list notes for sticky upsert; skipping to avoid duplicate.")
-            return None
-        existing = find_summary_note(notes)
-        if existing is not None:
-            resp = poster.update_note(existing.get("id"), body)
-            if not (resp or {}).get("success"):
-                log("[summary] failed to update sticky note %s (HTTP %s): %s; stale content may remain."
-                    % (existing.get("id"), (resp or {}).get("http_status"),
-                       _truncate_error((resp or {}).get("error_body"))))
-            return (resp or {}).get("url") or existing.get("web_url")
+    notes = poster.list_notes()
+    if notes is None:
+        log("[summary] cannot list notes for %s upsert; skipping to avoid duplicate."
+            % ("sticky" if sticky else "non-sticky"))
+        return None
+    needle = SUMMARY_MARKER if sticky else tag
+    existing = find_summary_note(notes, tag=needle) if needle else None
+    if existing is not None:
+        resp = poster.update_note(existing.get("id"), body)
+        if not (resp or {}).get("success"):
+            log("[summary] failed to update note %s (HTTP %s): %s; stale content may remain."
+                % (existing.get("id"), (resp or {}).get("http_status"),
+                   _truncate_error((resp or {}).get("error_body"))))
+        return (resp or {}).get("url") or existing.get("web_url")
     resp = poster.post_note(body)
     return (resp or {}).get("url")
 
 
-def ensure_summary_anchor(poster, body):
-    """Phase 1: find-or-create the sticky summary note before posting discussions.
+def ensure_summary_anchor(poster, body, sticky, tag=None):
+    """Phase 1: find-or-create the summary note before posting discussions.
 
+    Runs in both sticky and non-sticky modes so the pre-review body ("⏳
+    Posting review comments…") is visible while inline comments post. Sticky
+    reuses the cross-run summary note; non-sticky reuses this run's note (so
+    :func:`finalize_summary` updates it instead of creating a duplicate).
     Returns the note id (existing or newly created), or None when the read API
     is unavailable so the caller defers to :func:`finalize_summary`.
     """
@@ -1070,23 +1126,24 @@ def ensure_summary_anchor(poster, body):
     if notes is None:
         log("[summary] cannot check for existing summary before review; skipping anchor.")
         return None
-    existing = find_summary_note(notes)
+    needle = SUMMARY_MARKER if sticky else tag
+    existing = find_summary_note(notes, tag=needle) if needle else None
     if existing is not None:
         return existing.get("id")
     resp = poster.post_note(body)
     return (resp or {}).get("id")
 
 
-def finalize_summary(poster, body, sticky, anchor_id):
+def finalize_summary(poster, body, sticky, anchor_id, tag=None):
     """Phase 2: write the final summary body to the anchored note (or upsert)."""
-    if sticky and anchor_id is not None:
+    if anchor_id is not None:
         resp = poster.update_note(anchor_id, body)
         if (resp or {}).get("success"):
             return (resp or {}).get("url")
         log("[summary] failed to update anchored note %s (HTTP %s): %s; falling back to upsert."
             % (anchor_id, (resp or {}).get("http_status"),
                _truncate_error((resp or {}).get("error_body"))))
-    return upsert_summary(poster, body, sticky)
+    return upsert_summary(poster, body, sticky, tag=tag)
 
 
 # --------------------------------------------------------------------------- #
@@ -1117,8 +1174,10 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     # No comments: LGTM summary (sticky-aware).
     if not comments:
         message = result.get("message", "No comments generated. Looks good to me.")
-        body = "%s\n✅ **OpenCodeReview**: %s" % (SUMMARY_MARKER, message)
-        stats["summary_url"] = upsert_summary(poster, body, sticky)
+        body = wrap_summary_body("✅ **OpenCodeReview**: %s" % message,
+                                 config.get("run_tag", "0-0"))
+        stats["summary_url"] = upsert_summary(poster, body, sticky,
+                                             tag=summary_tag_for(config.get("run_tag", "0-0")))
         return stats
 
     # Partition: inline / no-line / routed.
@@ -1166,15 +1225,19 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
                     % (stats["skipped"], len(kept)))
             inline_items = kept
 
-    # Sticky summary anchor (pre-review body) — created before discussions so it
-    # pins above them on the first run.
+    # Summary anchor (pre-review body) — created before discussions so it pins
+    # above them on the first run. Runs in both sticky and non-sticky modes: the
+    # pre-review body ("⏳ Posting review comments…") is visible while inline
+    # comments post. The per-run SUMMARY_TAG lets non-sticky mode reuse this
+    # same note at finalize instead of creating a duplicate.
+    run_tag = config.get("run_tag", "0-0")
     anchor_id = None
-    if sticky:
-        anchor_body = "%s\n%s" % (
-            SUMMARY_MARKER,
-            build_pre_review_summary_body(stats["total"], no_line, routed, warnings),
-        )
-        anchor_id = ensure_summary_anchor(poster, anchor_body)
+    anchor_body = wrap_summary_body(
+        build_pre_review_summary_body(stats["total"], no_line, routed, warnings),
+        run_tag,
+    )
+    anchor_id = ensure_summary_anchor(poster, anchor_body, sticky,
+                                      tag=summary_tag_for(run_tag))
 
     # Post inline discussions.
     diff_cache = {"diff": None, "fetched": False}
@@ -1237,8 +1300,10 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     if not inline_items and stats["skipped"] > 0:
         summary_body += "\n\n---\n\nℹ️ All inline comments overlapped with existing reviews; nothing new was posted."
     summary_body += format_warnings(warnings)
-    full_body = "%s\n%s" % (SUMMARY_MARKER, summary_body)
-    stats["summary_url"] = finalize_summary(poster, full_body, sticky, anchor_id)
+    run_tag = config.get("run_tag", "0-0")
+    full_body = wrap_summary_body(summary_body, run_tag)
+    stats["summary_url"] = finalize_summary(poster, full_body, sticky, anchor_id,
+                                           tag=summary_tag_for(run_tag))
     if not stats["summary_url"]:
         stats["summary_url"] = poster.mr_url()
     return stats
@@ -1310,6 +1375,11 @@ def build_config(env):
         "success_delay": int(env.get("OCR_SUCCESS_DELAY", "2000")) / 1000,
         "failure_delay": int(env.get("OCR_FAILURE_DELAY", "1000")) / 1000,
         "rate_limit_threshold": int(env.get("OCR_RATE_LIMIT_THRESHOLD", "10")),
+        # Read-API pacing (cheaper than writes but still consumes the primary
+        # rate limit; mirrors the GitHub Action's readWithPacing so a large MR
+        # does not hammer list_notes/list_discussions/get_mr_diffs).
+        "read_success_delay": int(env.get("OCR_READ_SUCCESS_DELAY", "500")) / 1000,
+        "read_low_remaining_spacing": int(env.get("OCR_READ_LOW_REMAINING_SPACING", "5000")) / 1000,
         # Retry (used by make_poster / fetch_diff_refs).
         "retry_base_delay": int(env.get("OCR_RETRY_BASE_DELAY", "2000")) / 1000,
         "max_retries": int(env.get("OCR_MAX_RETRIES", "3")),
@@ -1437,9 +1507,13 @@ def main(argv=None):
             pass
         if stderr_content:
             poster = make_poster(api_base, api_token, auth_header, config)
-            body = "%s\n⚠️ **OpenCodeReview** encountered an error:\n%s" % (
-                SUMMARY_MARKER, fenced_block(stderr_content))
-            upsert_summary(poster, body, config.get("sticky_summary", True))
+            run_tag = config.get("run_tag", "0-0")
+            body = wrap_summary_body(
+                "⚠️ **OpenCodeReview** encountered an error:\n%s" % fenced_block(stderr_content),
+                run_tag,
+            )
+            upsert_summary(poster, body, config.get("sticky_summary", True),
+                           tag=summary_tag_for(run_tag))
         return 0
 
     comments = result.get("comments", [])
