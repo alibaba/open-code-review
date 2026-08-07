@@ -151,6 +151,10 @@ code-review:
     # post_review.py has already posted any stderr to the MR summary by this
     # point, so the failure is visible both as a red pipeline and on the MR.
     - |
+      # Default OCR/POST exit codes so the gate below is safe even if a
+      # prior step was skipped (e.g., post_review.py step never reached).
+      : "${OCR_EXIT_CODE:=0}"
+      : "${POST_EXIT_CODE:=0}"
       if [ "$OCR_EXIT_CODE" != "0" ]; then
         echo "ocr review exited with code ${OCR_EXIT_CODE}; see MR summary for stderr."
         exit "$OCR_EXIT_CODE"
