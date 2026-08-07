@@ -338,6 +338,16 @@ var registry = []Provider{
 			"deepseek/deepseek-chat",
 		},
 	},
+	{
+		Name:        "siliconflow",
+		DisplayName: "SiliconFlow API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.siliconflow.com/v1",
+		EnvVar:      "SILICONFLOW_API_KEY",
+		Models: []string{
+			// PLACEHOLDER
+		},
+	},
 }
 
 var registryMap map[string]Provider
