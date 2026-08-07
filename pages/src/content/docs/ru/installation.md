@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-Установить CLI `ocr` можно четырьмя способами.
+Установить CLI `ocr` можно пятью способами.
 
 ## npm (рекомендуется)
 
@@ -38,6 +38,20 @@ export OCR_NO_UPDATE=1
 
 ```bash
 npm uninstall -g @alibaba-group/open-code-review
+```
+
+## Homebrew (macOS / Linux)
+
+```bash
+brew install open-code-review
+```
+
+Формула собирает `ocr` из исходников и устанавливает бинарник.
+
+Для обновления:
+
+```bash
+brew upgrade open-code-review
 ```
 
 ## Скрипт установки (curl | sh)

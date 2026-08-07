@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-`ocr` CLI をインストールするには、サポートされた 4 つの方法があります。
+`ocr` CLI をインストールするには、サポートされた 5 つの方法があります。
 
 ## NPM（推奨）
 
@@ -38,6 +38,20 @@ export OCR_NO_UPDATE=1
 
 ```bash
 npm uninstall -g @alibaba-group/open-code-review
+```
+
+## Homebrew（macOS / Linux）
+
+```bash
+brew install open-code-review
+```
+
+この formula はソースからビルドして `ocr` バイナリをインストールします。
+
+後でアップグレードするには：
+
+```bash
+brew upgrade open-code-review
 ```
 
 ## インストールスクリプト（curl | sh）

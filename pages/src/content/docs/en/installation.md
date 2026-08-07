@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-There are four supported ways to install the `ocr` CLI.
+There are five supported ways to install the `ocr` CLI.
 
 ## NPM (recommended)
 
@@ -39,6 +39,20 @@ export OCR_NO_UPDATE=1
 
 ```bash
 npm uninstall -g @alibaba-group/open-code-review
+```
+
+## Homebrew (macOS / Linux)
+
+```bash
+brew install open-code-review
+```
+
+The formula installs the `ocr` binary built from source.
+
+To upgrade later:
+
+```bash
+brew upgrade open-code-review
 ```
 
 ## Install script (curl | sh)
