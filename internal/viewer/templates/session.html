@@ -110,11 +110,24 @@
 <div class="comments-section">
     <h3>Review Comments ({{len .Session.Comments}} findings)</h3>
     {{with severityCounts .Session.Comments}}
-    <div class="severity-bar">
-        {{if .Critical}}<span class="severity-badge severity-critical">Critical: {{.Critical}}</span>{{end}}
-        {{if .High}}<span class="severity-badge severity-high">High: {{.High}}</span>{{end}}
-        {{if .Medium}}<span class="severity-badge severity-medium">Medium: {{.Medium}}</span>{{end}}
-        {{if .Low}}<span class="severity-badge severity-low">Low: {{.Low}}</span>{{end}}
+    <div class="comment-filter-bar severity-filters" aria-label="Filter comments by severity">
+        <button type="button" class="comment-filter-chip filter-all is-active" data-filter-kind="all" data-filter-value="" aria-pressed="true">All: {{len $.Session.Comments}}</button>
+        {{if .Critical}}<button type="button" class="comment-filter-chip severity-critical" data-filter-kind="severity" data-filter-value="critical" aria-pressed="false">Critical: {{.Critical}}</button>{{end}}
+        {{if .High}}<button type="button" class="comment-filter-chip severity-high" data-filter-kind="severity" data-filter-value="high" aria-pressed="false">High: {{.High}}</button>{{end}}
+        {{if .Medium}}<button type="button" class="comment-filter-chip severity-medium" data-filter-kind="severity" data-filter-value="medium" aria-pressed="false">Medium: {{.Medium}}</button>{{end}}
+        {{if .Low}}<button type="button" class="comment-filter-chip severity-low" data-filter-kind="severity" data-filter-value="low" aria-pressed="false">Low: {{.Low}}</button>{{end}}
+    </div>
+    {{end}}
+    {{with categoryCounts .Session.Comments}}
+    <div class="comment-filter-bar category-filters" aria-label="Filter comments by category">
+        {{if .Bug}}<button type="button" class="comment-filter-chip cat-bug" data-filter-kind="category" data-filter-value="bug" aria-pressed="false">Bug: {{.Bug}}</button>{{end}}
+        {{if .Security}}<button type="button" class="comment-filter-chip cat-security" data-filter-kind="category" data-filter-value="security" aria-pressed="false">Security: {{.Security}}</button>{{end}}
+        {{if .Performance}}<button type="button" class="comment-filter-chip cat-performance" data-filter-kind="category" data-filter-value="performance" aria-pressed="false">Performance: {{.Performance}}</button>{{end}}
+        {{if .Maintainability}}<button type="button" class="comment-filter-chip cat-maintainability" data-filter-kind="category" data-filter-value="maintainability" aria-pressed="false">Maintainability: {{.Maintainability}}</button>{{end}}
+        {{if .Test}}<button type="button" class="comment-filter-chip cat-test" data-filter-kind="category" data-filter-value="test" aria-pressed="false">Test: {{.Test}}</button>{{end}}
+        {{if .Style}}<button type="button" class="comment-filter-chip cat-style" data-filter-kind="category" data-filter-value="style" aria-pressed="false">Style: {{.Style}}</button>{{end}}
+        {{if .Documentation}}<button type="button" class="comment-filter-chip cat-documentation" data-filter-kind="category" data-filter-value="documentation" aria-pressed="false">Documentation: {{.Documentation}}</button>{{end}}
+        {{if .Other}}<button type="button" class="comment-filter-chip cat-other" data-filter-kind="category" data-filter-value="other" aria-pressed="false">Other: {{.Other}}</button>{{end}}
     </div>
     {{end}}
     <div class="comment-groups">
@@ -123,11 +136,11 @@
         <summary class="comment-file-header">
             <span class="chevron"></span>
             <span class="file-path">{{.FilePath}}</span>
-            <span class="file-count-badge">{{len .Comments}} comments</span>
+            <span class="file-count-badge" data-comment-count>{{len .Comments}} comments</span>
         </summary>
         <div class="comment-file-body">
         {{range .Comments}}
-            <div class="comment-card">
+            <div class="comment-card" data-comment-card data-category="{{commentCategory .Category}}" data-severity="{{commentSeverity .Severity}}">
                 <div class="comment-meta">
                     {{if .Category}}<span class="comment-badge {{categoryClass .Category}}">{{.Category}}</span>{{end}}
                     {{if .Severity}}<span class="comment-badge {{severityClass .Severity}}">{{.Severity}}</span>{{end}}
@@ -156,6 +169,7 @@
     </details>
     {{end}}
     </div>
+    <p class="comment-filter-empty" data-comment-filter-empty hidden>No comments match this filter.</p>
 </div>
 {{end}}
 
