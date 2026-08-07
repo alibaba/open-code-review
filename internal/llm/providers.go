@@ -346,7 +346,7 @@ var registry = []Provider{
 		EnvVar:      "SILICONFLOW_API_KEY",
 		Models: []string{
 			"deepseek-ai/DeepSeek-V3.2",
-			"deepseek-ai/Deepseek-v4-pro",
+			"deepseek-ai/DeepSeek-V4-Pro",
 			"deepseek-ai/DeepSeek-V3",
 			"deepseek-ai/DeepSeek-R1",
 			"Qwen/Qwen3-32B",
