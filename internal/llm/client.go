@@ -205,6 +205,16 @@ type ClientConfig struct {
 	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
 	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
 	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+
+	// retryCollector receives one record per real HTTP attempt. It is
+	// unexported because it is not configuration: it is a handle on the current
+	// run, owned by llmRuntime and set only by NewLLMClient, and the three
+	// exported constructors keep their signatures because of it.
+	//
+	// A nil collector is fully inert: no middleware is mounted and nothing about
+	// the request path changes. That is the state for llm test, and for any
+	// caller that builds a client without one.
+	retryCollector *RetryCollector
 }
 
 // retryCodesMiddleware returns an HTTP middleware that forces the SDK to retry
@@ -243,16 +253,21 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // The defensive default keeps legacy callers that somehow bypass resolver
 // normalization working (they previously got OpenAIClient for any non-anthropic
 // protocol).
-func NewLLMClient(ep ResolvedEndpoint) LLMClient {
+//
+// collector observes every HTTP attempt the returned client makes; pass nil to
+// build a client that is not observed. It is a parameter rather than a field on
+// ResolvedEndpoint because it belongs to the run, not to the endpoint.
+func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 	cfg := ClientConfig{
-		URL:          ep.URL,
-		APIKey:       ep.Token,
-		Model:        ep.Model,
-		AuthHeader:   ep.AuthHeader,
-		Timeout:      ep.Timeout,
-		ExtraBody:    ep.ExtraBody,
-		ExtraHeaders: ep.ExtraHeaders,
-		RetryCodes:   ep.RetryCodes,
+		URL:            ep.URL,
+		APIKey:         ep.Token,
+		Model:          ep.Model,
+		AuthHeader:     ep.AuthHeader,
+		Timeout:        ep.Timeout,
+		ExtraBody:      ep.ExtraBody,
+		ExtraHeaders:   ep.ExtraHeaders,
+		RetryCodes:     ep.RetryCodes,
+		retryCollector: collector,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -362,6 +377,9 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	return &OpenAIClient{
@@ -684,6 +702,9 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	return &AnthropicClient{

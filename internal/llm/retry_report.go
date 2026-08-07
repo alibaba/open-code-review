@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // RetryReportSchemaVersion is the contract version of the emitted report.
@@ -93,9 +94,12 @@ const (
 
 // AttemptRecord is one observed real HTTP attempt.
 //
-// Number and Outcome are assigned by the collector; values passed in are
-// ignored. Diagnostic fields carry observed values only — no request or response
-// bodies, no prompts, no URLs, no raw SDK error strings.
+// Number, Outcome, DurationToHeadersMS and ObservedBackoffMS are assigned by the
+// collector; values passed in are ignored. The two durations are derived from the
+// timestamps RecordAttempt receives, because ObservedBackoffMS spans two attempts
+// and only the collector holds per-request state. Diagnostic fields carry
+// observed values only — no request or response bodies, no prompts, no URLs, no
+// raw SDK error strings.
 type AttemptRecord struct {
 	Number       int            `json:"attempt"`
 	Outcome      AttemptOutcome `json:"outcome"`
@@ -222,6 +226,15 @@ type requestEntry struct {
 	// "Finalize runs exactly once per logical request" is machine-checked
 	// instead of only asserted in prose.
 	violation string
+	// lastAttemptEnd is when the previous attempt of this logical request
+	// finished, and is the only state ObservedBackoffMS needs. It lives here
+	// rather than in the observer because one observer instance serves every
+	// concurrent request: keyed per-request state is exactly what the collector
+	// already is.
+	//
+	// It stays zero until an attempt is actually appended, so a dropped attempt
+	// never becomes the baseline for the next gap.
+	lastAttemptEnd time.Time
 }
 
 func (e *requestEntry) hasErrorAttempt() bool {
@@ -256,16 +269,23 @@ func NewRetryCollector() *RetryCollector {
 
 // RecordAttempt appends one observed HTTP attempt for m.
 //
+// startedAt and endedAt bracket the real HTTP call: the observer takes them
+// immediately before and after the SDK's transport call returns response
+// headers. They are passed in rather than read from a clock here so the
+// collector stays a pure aggregator and the derived durations are fully
+// deterministic in tests; no clock abstraction is needed.
+//
 // An invalid meta is dropped: without identity there is nothing to aggregate
 // against, which is also how scan and llm test requests stay out of the report.
-// Number and Outcome on a are derived here, so the observer cannot desynchronize
-// the numbering from the real call order.
+// Number, Outcome and both durations on a are derived here, so the observer can
+// neither desynchronize the numbering from the real call order nor invent a
+// backoff it cannot measure.
 //
 // An attempt arriving after Finalize is recorded as a violation and dropped
 // rather than appended, the same way ReviseLastAttempt behaves: the outcome was
 // already decided without knowledge of this attempt, so mutating the sequence
 // afterwards could only produce a record that contradicts it.
-func (c *RetryCollector) RecordAttempt(m RequestMeta, a AttemptRecord) {
+func (c *RetryCollector) RecordAttempt(m RequestMeta, a AttemptRecord, startedAt, endedAt time.Time) {
 	if c == nil || !m.valid() {
 		return
 	}
@@ -313,8 +333,36 @@ func (c *RetryCollector) RecordAttempt(m RequestMeta, a AttemptRecord) {
 		e.violation = "non-2xx attempt recorded without a classification"
 	}
 
+	// Derived from the observed timestamps, never from what the caller put in a.
+	//
+	// The gap is skipped on a zero baseline rather than on "this is attempt 1".
+	// The two differ on the OpenAI Chat Completions EOF recovery, which makes a
+	// second SDK call under the same logical request: that call's first attempt
+	// does have a predecessor, and its gap measures the client-side re-call
+	// interval rather than an SDK backoff. That is still a real measured
+	// interval, which is all the field claims to be.
+	a.DurationToHeadersMS = nonNegativeMillis(endedAt.Sub(startedAt))
+	a.ObservedBackoffMS = 0
+	if !e.lastAttemptEnd.IsZero() {
+		a.ObservedBackoffMS = nonNegativeMillis(startedAt.Sub(e.lastAttemptEnd))
+	}
+
 	a.Number = len(e.attempts) + 1
 	e.attempts = append(e.attempts, a)
+	e.lastAttemptEnd = endedAt
+}
+
+// nonNegativeMillis converts d to milliseconds, flooring at zero.
+//
+// Timestamps taken from time.Now carry a monotonic reading, so a real attempt
+// can never measure negative. Hand-built time.Time values have no monotonic
+// reading and can, so the floor exists to keep a nonsensical negative out of the
+// report rather than to paper over a real inversion.
+func nonNegativeMillis(d time.Duration) int64 {
+	if d <= 0 {
+		return 0
+	}
+	return d.Milliseconds()
 }
 
 // ReviseLastAttempt rewrites the last attempt of m as an error.

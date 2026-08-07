@@ -14,7 +14,18 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
+
+// recordUntimed records an attempt with zero timestamps.
+//
+// These tests are about numbering, outcome and aggregation, where the derived
+// durations are noise: zero timestamps make both of them 0 and leave
+// lastAttemptEnd zero, so no attempt here ever gets an observed backoff. The
+// timing derivation is covered on its own in TestRecordAttemptDerivesTimings.
+func recordUntimed(c *RetryCollector, m RequestMeta, a AttemptRecord) {
+	c.RecordAttempt(m, a, time.Time{}, time.Time{})
+}
 
 func errAttempt(class ErrorClass, phase FailurePhase, status int) AttemptRecord {
 	return AttemptRecord{ErrorClass: class, FailurePhase: phase, StatusCode: status}
@@ -161,7 +172,7 @@ func TestFinalizeDecisionOrder(t *testing.T) {
 			c := NewRetryCollector()
 			m := testMeta()
 			for _, a := range tc.attempts {
-				c.RecordAttempt(m, a)
+				recordUntimed(c, m, a)
 			}
 			c.Finalize(m, tc.reqErr, tc.parentCancelled)
 			if got := c.entries[m].outcome; got != tc.want {
@@ -196,8 +207,8 @@ func TestRecordAttemptNumbersAndDerivesOutcome(t *testing.T) {
 
 	// A caller-supplied number and outcome are ignored: numbering follows the
 	// real call order, never the SDK's retry-count header.
-	c.RecordAttempt(m, AttemptRecord{Number: 99, Outcome: AttemptError, StatusCode: 200})
-	c.RecordAttempt(m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
+	recordUntimed(c, m, AttemptRecord{Number: 99, Outcome: AttemptError, StatusCode: 200})
+	recordUntimed(c, m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
 
 	got := c.entries[m].attempts
 	if len(got) != 2 {
@@ -214,6 +225,59 @@ func TestRecordAttemptNumbersAndDerivesOutcome(t *testing.T) {
 	}
 }
 
+// Both durations are derived from the observed timestamps, so a caller cannot
+// report a backoff it never measured. The first attempt has no predecessor and
+// therefore no gap; the second measures the real interval, which spans the SDK's
+// backoff sleep because that happens outside the middleware.
+func TestRecordAttemptDerivesTimings(t *testing.T) {
+	c := NewRetryCollector()
+	m := testMeta()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Supplied durations are ignored the same way Number and Outcome are.
+	first := errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429)
+	first.DurationToHeadersMS = 9999
+	first.ObservedBackoffMS = 9999
+	c.RecordAttempt(m, first, base, base.Add(120*time.Millisecond))
+	c.RecordAttempt(m, okAttempt(), base.Add(1120*time.Millisecond), base.Add(1200*time.Millisecond))
+
+	got := c.entries[m].attempts
+	if got[0].DurationToHeadersMS != 120 {
+		t.Errorf("attempt 1 duration_to_headers_ms = %d, want 120", got[0].DurationToHeadersMS)
+	}
+	if got[0].ObservedBackoffMS != 0 {
+		t.Errorf("attempt 1 observed_backoff_ms = %d, want 0 (no predecessor)", got[0].ObservedBackoffMS)
+	}
+	if got[1].DurationToHeadersMS != 80 {
+		t.Errorf("attempt 2 duration_to_headers_ms = %d, want 80", got[1].DurationToHeadersMS)
+	}
+	// 1120 - 120: from the end of attempt 1 to the start of attempt 2.
+	if got[1].ObservedBackoffMS != 1000 {
+		t.Errorf("attempt 2 observed_backoff_ms = %d, want 1000", got[1].ObservedBackoffMS)
+	}
+}
+
+// Timestamps from time.Now carry a monotonic reading and cannot invert, so this
+// only guards hand-built times. It still has to hold: a negative duration in the
+// report would be nonsense, and floored-at-zero is the honest answer when the
+// clock says the attempt ended before it started.
+func TestRecordAttemptFloorsInvertedTimestamps(t *testing.T) {
+	c := NewRetryCollector()
+	m := testMeta()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	c.RecordAttempt(m, okAttempt(), base.Add(50*time.Millisecond), base)
+	// Starts before its predecessor ended, so the gap is negative too.
+	c.RecordAttempt(m, okAttempt(), base.Add(-50*time.Millisecond), base.Add(-100*time.Millisecond))
+
+	for i, a := range c.entries[m].attempts {
+		if a.DurationToHeadersMS != 0 || a.ObservedBackoffMS != 0 {
+			t.Errorf("attempt %d = duration %d, backoff %d, want both 0",
+				i+1, a.DurationToHeadersMS, a.ObservedBackoffMS)
+		}
+	}
+}
+
 // An observer that reports a non-2xx status without classifying it contradicts
 // the strongest fact it had. The failure mode this closes is silence, not noise:
 // derived as a success, the attempt makes Finalize decide succeeded, the listing
@@ -223,7 +287,7 @@ func TestRecordAttemptNumbersAndDerivesOutcome(t *testing.T) {
 func TestRecordAttemptRejectsUnclassifiedErrorStatus(t *testing.T) {
 	c := NewRetryCollector()
 	m := testMeta()
-	c.RecordAttempt(m, AttemptRecord{StatusCode: 500})
+	recordUntimed(c, m, AttemptRecord{StatusCode: 500})
 	c.Finalize(m, nil, false)
 
 	// The attempt is kept so the state stays inspectable...
@@ -250,7 +314,7 @@ func TestRecordAttemptAcceptsUnclassifiedSuccessStatus(t *testing.T) {
 	for _, status := range []int{200, 201, 299, 0} {
 		c := NewRetryCollector()
 		m := testMeta()
-		c.RecordAttempt(m, AttemptRecord{StatusCode: status})
+		recordUntimed(c, m, AttemptRecord{StatusCode: status})
 		if got := c.entries[m].violation; got != "" {
 			t.Fatalf("status %d flagged a violation: %q", status, got)
 		}
@@ -261,7 +325,7 @@ func TestRecordAttemptDropsRequestsWithoutIdentity(t *testing.T) {
 	c := NewRetryCollector()
 	m := testMeta()
 	m.TaskType = "" // e.g. a scan or llm test request: no RequestMeta in context
-	c.RecordAttempt(m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
+	recordUntimed(c, m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
 
 	if len(c.entries) != 0 {
 		t.Fatalf("expected the attempt to be dropped, got %d entries", len(c.entries))
@@ -276,7 +340,7 @@ func TestNilCollectorIsInert(t *testing.T) {
 	var c *RetryCollector
 	m := testMeta()
 
-	c.RecordAttempt(m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
+	recordUntimed(c, m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
 	c.ReviseLastAttempt(m, ErrorClassNetwork, FailurePhaseResponseDecode)
 	c.Finalize(m, errors.New("boom"), true)
 
@@ -308,7 +372,7 @@ func TestCollectorRejectsInvalidInput(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				c := NewRetryCollector()
-				c.RecordAttempt(m, okAttempt())
+				recordUntimed(c, m, okAttempt())
 				c.ReviseLastAttempt(m, tc.class, tc.phase)
 				if got := c.entries[m].attempts[0]; got.Outcome != AttemptSuccess {
 					t.Fatalf("attempt was revised with invalid input: %+v", got)
@@ -319,7 +383,7 @@ func TestCollectorRejectsInvalidInput(t *testing.T) {
 
 	t.Run("revision without identity", func(t *testing.T) {
 		c := NewRetryCollector()
-		c.RecordAttempt(m, okAttempt())
+		recordUntimed(c, m, okAttempt())
 		c.ReviseLastAttempt(invalid, ErrorClassNetwork, FailurePhaseResponseDecode)
 		if got := c.entries[m].attempts[0]; got.Outcome != AttemptSuccess {
 			t.Fatalf("an unidentified revision reached another entry: %+v", got)
@@ -339,7 +403,7 @@ func TestCollectorRejectsInvalidInput(t *testing.T) {
 
 	t.Run("finalize without identity", func(t *testing.T) {
 		c := NewRetryCollector()
-		c.RecordAttempt(m, okAttempt())
+		recordUntimed(c, m, okAttempt())
 		c.Finalize(invalid, nil, false)
 		if c.entries[m].finalized {
 			t.Fatal("an unidentified Finalize finalized another entry")
@@ -351,7 +415,7 @@ func TestReviseLastAttempt(t *testing.T) {
 	t.Run("rewrites a success attempt", func(t *testing.T) {
 		c := NewRetryCollector()
 		m := testMeta()
-		c.RecordAttempt(m, okAttempt())
+		recordUntimed(c, m, okAttempt())
 		c.ReviseLastAttempt(m, ErrorClassNetwork, FailurePhaseResponseDecode)
 
 		last := c.entries[m].attempts[0]
@@ -370,7 +434,7 @@ func TestReviseLastAttempt(t *testing.T) {
 	t.Run("never overwrites a status-code classification", func(t *testing.T) {
 		c := NewRetryCollector()
 		m := testMeta()
-		c.RecordAttempt(m, errAttempt(ErrorClassProvider, FailurePhaseHTTP, 500))
+		recordUntimed(c, m, errAttempt(ErrorClassProvider, FailurePhaseHTTP, 500))
 		c.ReviseLastAttempt(m, ErrorClassUnknown, FailurePhaseResponseDecode)
 
 		last := c.entries[m].attempts[0]
@@ -383,7 +447,7 @@ func TestReviseLastAttempt(t *testing.T) {
 		for _, phase := range []FailurePhase{FailurePhaseStream, FailurePhaseResponseStatus} {
 			c := NewRetryCollector()
 			m := testMeta()
-			c.RecordAttempt(m, okAttempt())
+			recordUntimed(c, m, okAttempt())
 			c.ReviseLastAttempt(m, ErrorClassProvider, phase)
 			if got := c.entries[m].attempts[0].FailurePhase; got != phase {
 				t.Fatalf("phase = %s, want %s", got, phase)
@@ -395,7 +459,7 @@ func TestReviseLastAttempt(t *testing.T) {
 func TestFreezeReturnsNothingWhenNoRetryHappened(t *testing.T) {
 	c := NewRetryCollector()
 	m := testMeta()
-	c.RecordAttempt(m, okAttempt())
+	recordUntimed(c, m, okAttempt())
 	c.Finalize(m, nil, false)
 
 	rep, err := c.Freeze("run-1")
@@ -412,20 +476,20 @@ func TestFreezeAggregatesAndSorts(t *testing.T) {
 
 	recovered := testMeta()
 	recovered.RequestNo = 2
-	c.RecordAttempt(recovered, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
-	c.RecordAttempt(recovered, okAttempt())
+	recordUntimed(c, recovered, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
+	recordUntimed(c, recovered, okAttempt())
 	c.Finalize(recovered, nil, false)
 
 	failed := testMeta()
 	failed.FilePath = "config.go"
-	c.RecordAttempt(failed, errAttempt(ErrorClassProvider, FailurePhaseHTTP, 402))
+	recordUntimed(c, failed, errAttempt(ErrorClassProvider, FailurePhaseHTTP, 402))
 	c.Finalize(failed, errors.New("payment required"), false)
 
 	// A first-try success stays out of requests but still counts in
 	// total_requests.
 	quiet := testMeta()
 	quiet.FilePath = "quiet.go"
-	c.RecordAttempt(quiet, okAttempt())
+	recordUntimed(c, quiet, okAttempt())
 	c.Finalize(quiet, nil, false)
 
 	rep, err := c.Freeze("run-1")
@@ -457,7 +521,7 @@ func TestFreezeAggregatesAndSorts(t *testing.T) {
 func TestFreezeListsCancelledRequestWithoutErrorAttempt(t *testing.T) {
 	c := NewRetryCollector()
 	m := testMeta()
-	c.RecordAttempt(m, okAttempt())
+	recordUntimed(c, m, okAttempt())
 	c.Finalize(m, nil, true)
 
 	rep, err := c.Freeze("run-1")
@@ -478,8 +542,8 @@ func TestFreezeSucceededRequestWithExtraAttempt(t *testing.T) {
 	c := NewRetryCollector()
 	m := testMeta()
 	directive := true
-	c.RecordAttempt(m, AttemptRecord{StatusCode: 200, SDKRetryDirective: &directive})
-	c.RecordAttempt(m, okAttempt())
+	recordUntimed(c, m, AttemptRecord{StatusCode: 200, SDKRetryDirective: &directive})
+	recordUntimed(c, m, okAttempt())
 	c.Finalize(m, nil, false)
 
 	rep, err := c.Freeze("run-1")
@@ -519,7 +583,7 @@ func TestFreezeRejectsOrderingViolations(t *testing.T) {
 			name: "attempt after finalize",
 			mut: func(c *RetryCollector, m RequestMeta) {
 				c.Finalize(m, nil, false)
-				c.RecordAttempt(m, okAttempt())
+				recordUntimed(c, m, okAttempt())
 			},
 			want: "attempt recorded after Finalize",
 		},
@@ -541,8 +605,8 @@ func TestFreezeRejectsOrderingViolations(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := NewRetryCollector()
 			m := testMeta()
-			c.RecordAttempt(m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
-			c.RecordAttempt(m, okAttempt())
+			recordUntimed(c, m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
+			recordUntimed(c, m, okAttempt())
 			tc.mut(c, m)
 
 			rep, err := c.Freeze("run-1")
@@ -568,7 +632,7 @@ func TestFreezeErrorIdentifiesTheRequest(t *testing.T) {
 	m.FilePath = "internal/pay/charge.go"
 	m.TaskType = "review_filter"
 	m.RequestNo = 7
-	c.RecordAttempt(m, okAttempt()) // recorded but never finalized
+	recordUntimed(c, m, okAttempt()) // recorded but never finalized
 
 	_, err := c.Freeze("run-1")
 	if err == nil {
@@ -592,7 +656,7 @@ func TestFreezeErrorIsDeterministic(t *testing.T) {
 			m := testMeta()
 			m.FilePath = fmt.Sprintf("file%02d.go", i)
 			m.RequestNo = i
-			c.RecordAttempt(m, okAttempt()) // none of them finalized
+			recordUntimed(c, m, okAttempt()) // none of them finalized
 		}
 		return c
 	}
@@ -613,8 +677,8 @@ func TestFreezeRejectsInvalidRunID(t *testing.T) {
 	for _, runID := range []string{"", "run\x001"} {
 		c := NewRetryCollector()
 		m := testMeta()
-		c.RecordAttempt(m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
-		c.RecordAttempt(m, okAttempt())
+		recordUntimed(c, m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
+		recordUntimed(c, m, okAttempt())
 		c.Finalize(m, nil, false)
 
 		rep, err := c.Freeze(runID)
@@ -650,8 +714,8 @@ func TestFreezeRefusesEntryWithNoAttempt(t *testing.T) {
 func TestFreezeSuppressesReportWhenValidationFails(t *testing.T) {
 	c := NewRetryCollector()
 	m := testMeta()
-	c.RecordAttempt(m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
-	c.RecordAttempt(m, okAttempt())
+	recordUntimed(c, m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
+	recordUntimed(c, m, okAttempt())
 	c.Finalize(m, nil, false)
 	c.entries[m].attempts[1].Number = 7
 
@@ -743,8 +807,8 @@ func TestProviderIsEmittedEvenWhenEmpty(t *testing.T) {
 	c := NewRetryCollector()
 	m := testMeta()
 	m.Provider = ""
-	c.RecordAttempt(m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
-	c.RecordAttempt(m, okAttempt())
+	recordUntimed(c, m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
+	recordUntimed(c, m, okAttempt())
 	c.Finalize(m, nil, false)
 
 	rep, err := c.Freeze("run-1")
@@ -812,8 +876,8 @@ func TestRetryCollectorConcurrentUse(t *testing.T) {
 			m := testMeta()
 			m.FilePath = fmt.Sprintf("file%02d.go", n)
 			m.RequestNo = n
-			c.RecordAttempt(m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
-			c.RecordAttempt(m, okAttempt())
+			recordUntimed(c, m, errAttempt(ErrorClassRateLimited, FailurePhaseHTTP, 429))
+			recordUntimed(c, m, okAttempt())
 			c.Finalize(m, nil, false)
 		}(i)
 	}

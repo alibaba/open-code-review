@@ -157,7 +157,14 @@ type llmRuntime struct {
 	PlanToolDefs []llm.ToolDef
 	MainToolDefs []llm.ToolDef
 	Collector    *tool.CommentCollector
-	AppCfg       *Config
+	// RetryCollector observes every LLM HTTP attempt this run makes. It is
+	// created here rather than on the session or the agent because the client is
+	// built before either exists, and it is per-run rather than package-level so
+	// two runs in one process cannot share data. scan gets one too; its requests
+	// carry no RequestMeta, so every attempt is dropped and the frozen report is
+	// nil.
+	RetryCollector *llm.RetryCollector
+	AppCfg         *Config
 	// RuntimeConfig holds the allowlisted, non-secret runtime settings (protocol,
 	// sanitized endpoint host, language, timeout) derived from the resolved
 	// endpoint and app config, for the run manifest's runtime_config_sha256. It
@@ -199,14 +206,17 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 		return nil, fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
 
+	retryCollector := llm.NewRetryCollector()
+
 	return &llmRuntime{
-		Client:       llm.NewLLMClient(ep),
-		Model:        ep.Model,
-		Provider:     ep.Provider,
-		PlanToolDefs: planToolDefs,
-		MainToolDefs: mainToolDefs,
-		Collector:    tool.NewCommentCollector(),
-		AppCfg:       appCfg,
+		Client:         llm.NewLLMClient(ep, retryCollector),
+		Model:          ep.Model,
+		Provider:       ep.Provider,
+		PlanToolDefs:   planToolDefs,
+		MainToolDefs:   mainToolDefs,
+		Collector:      tool.NewCommentCollector(),
+		RetryCollector: retryCollector,
+		AppCfg:         appCfg,
 		RuntimeConfig: agent.RuntimeConfig{
 			Protocol:     ep.Protocol,
 			EndpointHost: sanitizeEndpointHost(ep.URL),
