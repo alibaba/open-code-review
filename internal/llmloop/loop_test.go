@@ -81,6 +81,33 @@ func fileReadToolCallResponse(callID, args string) *llm.ChatResponse {
 	}
 }
 
+func textResponse(content string) *llm.ChatResponse {
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
+		Model:   "fake",
+		Usage:   &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+	}
+}
+
+func codeCommentResponse() *llm.ChatResponse {
+	content := ""
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{
+			Content: &content,
+			ToolCalls: []llm.ToolCall{{
+				ID:   "comment_1",
+				Type: "function",
+				Function: llm.FunctionCall{
+					Name:      "code_comment",
+					Arguments: `{"comments":[{"content":"issue","existing_code":"package main","category":"bug","severity":"medium"}]}`,
+				},
+			}},
+		}}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+	}
+}
+
 type fakeFileReadProvider struct {
 	result string
 }
@@ -91,14 +118,21 @@ func (f *fakeFileReadProvider) Execute(_ context.Context, _ map[string]any) (str
 }
 
 func newTestDeps(client llm.LLMClient) Deps {
+	collector := tool.NewCommentCollector()
 	reg := tool.NewRegistry()
 	reg.Register(&fakeFileReadProvider{result: "package main\n"})
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	return Deps{
-		LLMClient:        client,
-		Model:            "fake",
-		Template:         template.Template{MaxTokens: 100000, MaxToolRequestTimes: 10},
-		Tools:            reg,
-		CommentCollector: tool.NewCommentCollector(),
+		LLMClient: client,
+		Model:     "fake",
+		Template:  template.Template{MaxTokens: 100000, MaxToolRequestTimes: 10},
+		Tools:     reg,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+		},
+		CommentCollector: collector,
 		Session:          session.New("/tmp/test-repo", "main", "fake", session.SessionOptions{}),
 	}
 }
@@ -309,12 +343,11 @@ func TestRunPerFile_UnknownTool(t *testing.T) {
 }
 
 func TestRunPerFile_MaxToolRequestsWithoutTaskDoneDoesNotComplete(t *testing.T) {
-	content := ""
-	client := &fakeClient{responses: []*llm.ChatResponse{{
-		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
-		Model:   "fake",
-		Usage:   &llm.UsageInfo{PromptTokens: 5, CompletionTokens: 5},
-	}}}
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		textResponse("Unable to finalize."),
+		textResponse("Still unable to finalize."),
+	}}
 	deps := newTestDeps(client)
 	deps.Template.MaxToolRequestTimes = 1
 	runner := NewRunner(deps)
@@ -329,6 +362,99 @@ func TestRunPerFile_MaxToolRequestsWithoutTaskDoneDoesNotComplete(t *testing.T) 
 	}
 	if stop != StopMaxRounds {
 		t.Fatalf("expected StopMaxRounds, got %v", stop)
+	}
+	if client.calls != 3 {
+		t.Fatalf("LLM calls = %d, want one context round and two failed finalization rounds", client.calls)
+	}
+}
+
+func TestRunPerFile_FinalizesAfterToolRoundBudget(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		taskDoneResponse(),
+	}}
+	deps := newTestDeps(client)
+	deps.Template.MaxToolRequestTimes = 1
+	runner := NewRunner(deps)
+
+	completed, stop, err := runner.RunPerFile(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review")},
+		"main.go",
+	)
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if !completed || stop != StopNone {
+		t.Fatalf("completed = %v, stop = %v; want completed finalization", completed, stop)
+	}
+	if client.calls != 2 {
+		t.Fatalf("LLM calls = %d, want one context round and one finalization round", client.calls)
+	}
+	assertFinalizationTools(t, client.requests[1].Tools)
+}
+
+func TestRunPerFile_TextOnlyResponseEntersFinalization(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		textResponse("Analysis complete; no issues found."),
+		taskDoneResponse(),
+	}}
+	runner := NewRunner(newTestDeps(client))
+
+	completed, stop, err := runner.RunPerFile(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review")},
+		"main.go",
+	)
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if !completed || stop != StopNone {
+		t.Fatalf("completed = %v, stop = %v; want completed finalization", completed, stop)
+	}
+	assertFinalizationTools(t, client.requests[1].Tools)
+}
+
+func TestRunPerFile_FinalizationCompletesAfterCommentsAndTaskDone(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		codeCommentResponse(),
+		taskDoneResponse(),
+	}}
+	deps := newTestDeps(client)
+	deps.Template.MaxToolRequestTimes = 1
+	runner := NewRunner(deps)
+
+	completed, stop, err := runner.RunPerFile(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review")},
+		"main.go",
+	)
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if !completed || stop != StopNone {
+		t.Fatalf("completed = %v, stop = %v; want task_done after submitted comments", completed, stop)
+	}
+	if len(runner.CollectPendingComments()) != 1 {
+		t.Fatal("expected the finalization comment to be collected")
+	}
+}
+
+func assertFinalizationTools(t *testing.T, defs []llm.ToolDef) {
+	t.Helper()
+	if len(defs) != 2 {
+		t.Fatalf("finalization tools = %d, want task_done and code_comment", len(defs))
+	}
+	want := map[string]bool{"task_done": true, "code_comment": true}
+	for _, def := range defs {
+		if !want[def.Function.Name] {
+			t.Fatalf("unexpected finalization tool %q", def.Function.Name)
+		}
+		delete(want, def.Function.Name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing finalization tools: %v", want)
 	}
 }
 

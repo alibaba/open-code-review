@@ -166,6 +166,23 @@ const (
 	StopCompression
 )
 
+const (
+	maxFinalizationRounds = 2
+	finalizationPrompt    = "Finish the review using the evidence already gathered. Submit all confirmed findings with code_comment, then call task_done with state DONE. Do not request more context."
+)
+
+// finalizationToolDefs prevents a model that has already finished reasoning,
+// or exhausted its context rounds, from opening another investigation branch.
+func finalizationToolDefs(defs []llm.ToolDef) []llm.ToolDef {
+	final := make([]llm.ToolDef, 0, 2)
+	for _, def := range defs {
+		if def.Function.Name == tool.CodeComment.Name() || def.Function.Name == tool.TaskDone.Name() {
+			final = append(final, def)
+		}
+	}
+	return final
+}
+
 // RunPerFile drives the main LLM conversation loop for a single file.
 // It sends messages with the configured tool definitions, executes any
 // tool calls returned by the model, and collects review comments until
@@ -179,6 +196,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
 	sessionID := uuid.NewString()
+	finalizationRounds := 0
+	finalizationStop := StopNone
+	finalTools := finalizationToolDefs(r.deps.MainToolDefs)
 
 	// Async compression is owned by this conversation alone; the deferred
 	// cancel aborts any job still in flight when the conversation ends.
@@ -189,14 +209,21 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 	// reached zero, the run stopped on the round budget. The empty-round and
 	// compression breaks overwrite it at their trigger points.
 	stop := StopMaxRounds
-	for toolReqCount > 0 {
+	for toolReqCount > 0 || finalizationRounds > 0 {
 		select {
 		case <-ctx.Done():
 			return false, StopNone, ctx.Err()
 		default:
 		}
 
-		toolReqCount--
+		finalizing := finalizationRounds > 0
+		toolDefs := r.deps.MainToolDefs
+		if finalizing {
+			finalizationRounds--
+			toolDefs = finalTools
+		} else {
+			toolReqCount--
+		}
 
 		fs := r.deps.Session.GetOrCreateFileSession(newPath)
 		rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
@@ -206,7 +233,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 			Model:     r.deps.Model,
 			Messages:  messages,
-			Tools:     r.deps.MainToolDefs,
+			Tools:     toolDefs,
 			MaxTokens: r.deps.Template.CompletionTokenLimit(),
 			SessionID: sessionID,
 		})
@@ -235,11 +262,24 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		calls := resp.ToolCalls()
 
 		if len(calls) == 0 {
-			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", newPath)
-			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
-			if content != "" {
-				messages = append(messages[:len(messages)-1], llm.NewTextMessage("assistant", content), messages[len(messages)-1])
+			if finalizing {
+				if content != "" {
+					messages = append(messages, llm.NewTextMessage("assistant", content))
+				}
+				if finalizationRounds > 0 {
+					messages = append(messages, llm.NewTextMessage("user", finalizationPrompt))
+					continue
+				}
+				stop = finalizationStop
+				break
 			}
+			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", newPath)
+			if content != "" {
+				messages = append(messages, llm.NewTextMessage("assistant", content))
+			}
+			messages = append(messages, llm.NewTextMessage("user", finalizationPrompt))
+			finalizationRounds = maxFinalizationRounds
+			finalizationStop = StopEmptyRounds
 			continue
 		}
 
@@ -294,6 +334,19 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", newPath)
 			stop = StopCompression
 			break
+		}
+		if finalizing {
+			if finalizationRounds > 0 {
+				messages = append(messages, llm.NewTextMessage("user", finalizationPrompt))
+				continue
+			}
+			stop = finalizationStop
+			break
+		}
+		if toolReqCount == 0 {
+			messages = append(messages, llm.NewTextMessage("user", finalizationPrompt))
+			finalizationRounds = maxFinalizationRounds
+			finalizationStop = StopMaxRounds
 		}
 	}
 
