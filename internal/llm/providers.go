@@ -338,6 +338,24 @@ var registry = []Provider{
 			"deepseek/deepseek-chat",
 		},
 	},
+	{
+		Name:        "siliconflow-cn",
+		DisplayName: "SiliconFlow CN API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.siliconflow.cn/v1",
+		EnvVar:      "SILICONFLOW_API_KEY",
+		Models: []string{
+			"deepseek-ai/DeepSeek-V3.2",
+			"deepseek-ai/DeepSeek-V4-Pro",
+			"deepseek-ai/DeepSeek-V3",
+			"deepseek-ai/DeepSeek-R1",
+			"Qwen/Qwen3-32B",
+			"Qwen/Qwen3-14B",
+			"moonshotai/Kimi-K2.5",
+			"zai-org/GLM-5",
+			"baidu/ERNIE-4.5-300B-A47B",
+		},
+	},
 }
 
 var registryMap map[string]Provider
