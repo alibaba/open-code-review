@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-`ocr` CLI をインストールするには、サポートされた 5 つの方法があります。
+`ocr` CLI をインストールするには、サポートされた 6 つの方法があります。
 
 ## NPM（推奨）
 
@@ -52,6 +52,20 @@ brew install open-code-review
 
 ```bash
 brew upgrade open-code-review
+```
+
+## MacPorts（macOS）
+
+```bash
+sudo port install open-code-review
+```
+
+この port はソースからビルドして `ocr` バイナリをインストールします。
+
+後でアップグレードするには：
+
+```bash
+sudo port upgrade open-code-review
 ```
 
 ## インストールスクリプト（curl | sh）

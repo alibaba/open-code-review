@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-Установить CLI `ocr` можно пятью способами.
+Установить CLI `ocr` можно шестью способами.
 
 ## npm (рекомендуется)
 
@@ -52,6 +52,20 @@ brew install open-code-review
 
 ```bash
 brew upgrade open-code-review
+```
+
+## MacPorts (macOS)
+
+```bash
+sudo port install open-code-review
+```
+
+Порт собирает `ocr` из исходников и устанавливает бинарник.
+
+Для обновления:
+
+```bash
+sudo port upgrade open-code-review
 ```
 
 ## Скрипт установки (curl | sh)
