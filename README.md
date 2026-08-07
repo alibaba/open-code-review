@@ -175,6 +175,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
   - [Codex](plugins/open-code-review/README.md#codex) — install a plugin with callable review skills
   - [Cursor](plugins/open-code-review/README.md#cursor) — install a plugin with portable review skills
   - [OpenCode](plugins/open-code-review/opencode/README.md) — install native review tools and slash commands
+  - [QCA Forward](plugins/open-code-review/qca/README.md) — run delegation mode with the QCA host model and a ready-to-publish template
   - [Skill-compatible agents](https://open-codereview.ai/docs/agent-skill) — install the portable agent skill
 - Review Execution Modes — after integration, choose which LLM performs the review
   - [Default (OCR-managed)](https://open-codereview.ai/docs/configuration) — OCR runs the review using its configured LLM
