@@ -275,9 +275,37 @@ func TestExecuteReviewFilter_RemovesComments(t *testing.T) {
 	}
 
 	collector := tool.NewCommentCollector()
-	collector.Add(model.LlmComment{Path: "a.go", Content: "keep this"})
-	collector.Add(model.LlmComment{Path: "a.go", Content: "remove this"})
-	collector.Add(model.LlmComment{Path: "a.go", Content: "also keep"})
+	collector.Add(model.LlmComment{
+		Path:           "a.go",
+		Content:        "keep this",
+		SuggestionCode: "keep suggestion",
+		ExistingCode:   "same code",
+		StartLine:      10,
+		EndLine:        10,
+		Category:       "bug",
+		Severity:       "high",
+	})
+	collector.Add(model.LlmComment{Path: "b.go", Content: "other file"})
+	collector.Add(model.LlmComment{
+		Path:           "a.go",
+		Content:        "remove this duplicate",
+		SuggestionCode: "duplicate suggestion",
+		ExistingCode:   "same code",
+		StartLine:      10,
+		EndLine:        10,
+		Category:       "bug",
+		Severity:       "high",
+	})
+	collector.Add(model.LlmComment{
+		Path:           "a.go",
+		Content:        "complementary finding",
+		SuggestionCode: "different suggestion",
+		ExistingCode:   "same code",
+		StartLine:      10,
+		EndLine:        10,
+		Category:       "security",
+		Severity:       "critical",
+	})
 
 	a := New(Args{
 		LLMClient:        client,
@@ -301,9 +329,69 @@ func TestExecuteReviewFilter_RemovesComments(t *testing.T) {
 		t.Fatalf("expected 2 comments after filter, got %d", len(comments))
 	}
 	for _, c := range comments {
-		if c.Content == "remove this" {
+		if c.Content == "remove this duplicate" {
 			t.Error("filtered comment should have been removed")
 		}
+	}
+	if other := collector.CommentsForPath("b.go"); len(other) != 1 || other[0].Content != "other file" {
+		t.Fatalf("comment for another path was changed: %+v", other)
+	}
+	if comments[0].SuggestionCode != "keep suggestion" || comments[0].Category != "bug" || comments[0].Severity != "high" {
+		t.Errorf("surviving canonical metadata changed: %+v", comments[0])
+	}
+	if comments[1].SuggestionCode != "different suggestion" || comments[1].Category != "security" || comments[1].Severity != "critical" {
+		t.Errorf("surviving complementary metadata changed: %+v", comments[1])
+	}
+}
+
+func TestExecuteReviewFilter_ResolvesPayloadWithoutMutatingCollector(t *testing.T) {
+	tmpDir := t.TempDir()
+	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+	filterResp := `[]`
+	client := &fakeAgentClient{
+		responses: []*llm.ChatResponse{{
+			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &filterResp}}},
+			Usage:   &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+		}},
+	}
+	collector := tool.NewCommentCollector()
+	collector.Add(model.LlmComment{
+		Path:         "a.go",
+		Content:      "The result is not checked.",
+		ExistingCode: "result := doWork()",
+	})
+
+	a := New(Args{
+		LLMClient:        client,
+		Model:            "test",
+		Session:          sess,
+		CommentCollector: collector,
+		Template: template.Template{
+			ReviewFilterTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Filter {{comments}} for {{path}} in {{diff}}"}},
+			},
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+		},
+	})
+
+	d := model.Diff{
+		NewPath: "a.go",
+		Diff:    "@@ -1,2 +1,3 @@\n package sample\n+result := doWork()\n return nil\n",
+	}
+	a.executeReviewFilter(context.Background(), d, "a.go")
+
+	if len(client.requests) != 1 {
+		t.Fatalf("expected one filter request, got %d", len(client.requests))
+	}
+	prompt := client.requests[0].Messages[0].ExtractText()
+	if !strings.Contains(prompt, `"start_line":2`) || !strings.Contains(prompt, `"end_line":2`) {
+		t.Fatalf("filter payload did not contain resolved location:\n%s", prompt)
+	}
+	comments := collector.CommentsForPath("a.go")
+	if len(comments) != 1 || comments[0].StartLine != 0 || comments[0].EndLine != 0 {
+		t.Fatalf("collector comment was mutated while resolving filter payload: %+v", comments)
 	}
 }
 
@@ -338,6 +426,40 @@ func TestExecuteReviewFilter_LLMError(t *testing.T) {
 	comments := collector.CommentsForPath("a.go")
 	if len(comments) != 1 {
 		t.Errorf("comments should be unchanged on LLM error, got %d", len(comments))
+	}
+}
+
+func TestExecuteReviewFilter_MalformedResponseKeepsComments(t *testing.T) {
+	tmpDir := t.TempDir()
+	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+	malformed := "not valid JSON"
+	client := &fakeAgentClient{
+		responses: []*llm.ChatResponse{{
+			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &malformed}}},
+		}},
+	}
+	collector := tool.NewCommentCollector()
+	collector.Add(model.LlmComment{Path: "a.go", Content: "keep me"})
+
+	a := New(Args{
+		LLMClient:        client,
+		Model:            "test",
+		Session:          sess,
+		CommentCollector: collector,
+		Template: template.Template{
+			ReviewFilterTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "{{comments}} {{path}} {{diff}}"}},
+			},
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+		},
+	})
+
+	a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x"}, "a.go")
+	comments := collector.CommentsForPath("a.go")
+	if len(comments) != 1 || comments[0].Content != "keep me" {
+		t.Fatalf("malformed filter response changed comments: %+v", comments)
 	}
 }
 

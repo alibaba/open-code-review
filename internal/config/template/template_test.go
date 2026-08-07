@@ -119,6 +119,33 @@ func TestLoadDefault_PlaceholdersPresent(t *testing.T) {
 	}
 }
 
+func TestLoadDefault_ReviewFilterPromptIncludesDuplicateRules(t *testing.T) {
+	tpl, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault() error: %v", err)
+	}
+
+	var prompt strings.Builder
+	for _, message := range tpl.ReviewFilterTask.Messages {
+		prompt.WriteString(message.Content)
+		prompt.WriteByte('\n')
+	}
+	content := strings.ToLower(prompt.String())
+	for _, required := range []string{
+		"high-confidence near-duplicates",
+		"same underlying technical claim",
+		"start_line",
+		"end_line",
+		"existing_code",
+		"preserve complementary findings",
+		"if the relationship is uncertain, keep both",
+	} {
+		if !strings.Contains(content, strings.ToLower(required)) {
+			t.Errorf("review filter prompt does not contain %q", required)
+		}
+	}
+}
+
 func TestValidate_PassesOnDefault(t *testing.T) {
 	tpl, err := LoadDefault()
 	if err != nil {
