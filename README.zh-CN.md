@@ -145,10 +145,6 @@ ocr review --commit abc123
 ocr session list
 ocr review --from main --to feature-branch --resume <session-id>
 
-# 输出已保存会话中记录的评审评论
-ocr session comments <session-id>
-ocr session comments --severity critical,high --json <session-id>
-
 # 全量文件扫描 —— 审查整个文件而非 diff（无需 git 历史）
 ocr scan                          # 扫描整个仓库
 ocr scan --path internal/agent    # 扫描指定目录或文件
