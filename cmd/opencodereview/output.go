@@ -477,6 +477,23 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 	fmt.Fprintln(os.Stderr)
 }
 
+// outputPreview renders a preview in the requested output format. Any format
+// other than "json" falls back to the human view, matching how the rest of the
+// CLI treats --format.
+func outputPreview(p *agent.DiffPreview, outputFormat string) error {
+	if outputFormat == "json" {
+		return outputPreviewJSON(p)
+	}
+	outputPreviewText(p)
+	return nil
+}
+
+func outputPreviewJSON(p *agent.DiffPreview) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(p)
+}
+
 func outputPreviewText(p *agent.DiffPreview) {
 	if p.TotalFiles == 0 {
 		fmt.Println("No files changed.")
