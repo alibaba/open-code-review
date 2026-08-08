@@ -4,6 +4,17 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
+import { useNpmDownloads } from '../hooks/useNpmDownloads';
+
+// npm 包名，用于拉取外部真实下载量
+const NPM_PACKAGE = '@alibaba-group/open-code-review';
+
+// 将下载量压缩为紧凑格式，与其它指标风格一致：149176 -> "149K+"
+function formatNpmDownloads(n: number): string {
+  if (n >= 1_000_000) return `${Math.floor(n / 1_000_000)}M+`;
+  if (n >= 1_000) return `${Math.floor(n / 1_000)}K+`;
+  return `${n}`;
+}
 
 // 从字符串中解析数字和前后缀
 function parseStatValue(value: string): { prefix: string; number: number; suffix: string } {
@@ -57,6 +68,8 @@ const CountUpValue: React.FC<{ value: string; isVisible: boolean }> = ({ value, 
 const HighlightsSection: React.FC = () => {
   const { t } = useTranslation();
   const { isMobile, isTablet } = useResponsive();
+  // 实时拉取 npm 月下载量，代表外部社区真实使用量
+  const npm = useNpmDownloads(NPM_PACKAGE, 'last-month');
   const sectionRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
 
@@ -78,8 +91,13 @@ const HighlightsSection: React.FC = () => {
 
   const stats = [
     { value: t('highlights.stat1Value'), label: t('highlights.stat1Label'), caption: t('highlights.stat1Caption') },
-    { value: t('highlights.stat2Value'), label: t('highlights.stat2Label'), caption: t('highlights.stat2Caption') },
     { value: t('highlights.stat3Value'), label: t('highlights.stat3Label'), caption: t('highlights.stat3Caption') },
+    {
+      // 实时 npm 月下载量；请求未完成或失败时回退到 i18n 中的兜底静态值
+      value: npm.downloads !== null ? formatNpmDownloads(npm.downloads) : t('highlights.stat2Value'),
+      label: t('highlights.stat2Label'),
+      caption: t('highlights.stat2Caption'),
+    },
     { value: t('highlights.stat4Value'), label: t('highlights.stat4Label'), caption: t('highlights.stat4Caption') },
     { value: t('highlights.stat5Value'), label: t('highlights.stat5Label'), caption: t('highlights.stat5Caption') },
   ];
