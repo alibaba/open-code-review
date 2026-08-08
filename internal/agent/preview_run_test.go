@@ -48,7 +48,7 @@ func TestPreview(t *testing.T) {
 	}
 
 	a := New(Args{RepoDir: dir})
-	preview, err := a.Preview(context.Background())
+	preview, err := a.preview(context.Background())
 	if err != nil {
 		t.Fatalf("Preview error: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestPreviewEmptyEntriesNotNil(t *testing.T) {
 	dir := initPreviewRepo(t)
 
 	a := New(Args{RepoDir: dir})
-	preview, err := a.Preview(context.Background())
+	preview, err := a.preview(context.Background())
 	if err != nil {
 		t.Fatalf("Preview error: %v", err)
 	}

@@ -108,7 +108,7 @@ func TestPreview_DoesNotMutateAgentItems(t *testing.T) {
 	if got := a.items; got != nil {
 		t.Fatalf("pre-Preview items should be nil, got %v", got)
 	}
-	if _, err := a.Preview(t.Context()); err != nil {
+	if _, err := a.preview(t.Context()); err != nil {
 		t.Fatalf("Preview: %v", err)
 	}
 	if a.items != nil {
@@ -125,7 +125,7 @@ func TestPreview_EmptyResultEntriesIsNonNilSlice(t *testing.T) {
 		RepoDir:  repo,
 		Template: makeTemplateWithFullScan(),
 	})
-	got, err := a.Preview(t.Context())
+	got, err := a.preview(t.Context())
 	if err != nil {
 		t.Fatalf("Preview: %v", err)
 	}

@@ -68,6 +68,30 @@ func silenceStdout(t *testing.T, fn func()) {
 	fn()
 }
 
+// freshOCRHome points the OCR home at a temp dir so a test can assert on what a
+// command wrote there. It also neutralizes global git config: git resolves that
+// via XDG_CONFIG_HOME as well, so overriding HOME alone would still pick up the
+// developer's settings (e.g. commit.gpgsign, which fails without their keyring).
+func freshOCRHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	return home
+}
+
+// assertNoSessionStore fails if the session store was created under home.
+// Preview neither runs nor finalizes a review, so it must not open persistence
+// at all; session.New creates this directory before writing its JSONL file.
+func assertNoSessionStore(t *testing.T, home string) {
+	t.Helper()
+	store := filepath.Join(home, ".opencodereview", "sessions")
+	if _, err := os.Stat(store); !os.IsNotExist(err) {
+		t.Errorf("preview created the session store at %s (stat err = %v)", store, err)
+	}
+}
+
 func TestExecuteDelegatePreview_Workspace(t *testing.T) {
 	dir := initTestGitRepo(t)
 	// Uncommitted change so the workspace preview has at least one entry.
@@ -102,6 +126,22 @@ func TestExecuteDelegatePreview_Commit(t *testing.T) {
 			t.Fatalf("executeDelegatePreview(commit) error: %v", err)
 		}
 	})
+}
+
+// TestExecuteDelegatePreviewCreatesNoSession covers the third preview entry
+// point, which built its agent the same leaky way as review and scan.
+func TestExecuteDelegatePreviewCreatesNoSession(t *testing.T) {
+	home := freshOCRHome(t)
+
+	dir := initTestGitRepo(t)
+	gitCommitFile(t, dir, "d.go", "package d\n", "add d")
+	silenceStdout(t, func() {
+		if err := executeDelegatePreview(delegateOptions{repoDir: dir, commit: "HEAD"}); err != nil {
+			t.Fatalf("executeDelegatePreview error: %v", err)
+		}
+	})
+
+	assertNoSessionStore(t, home)
 }
 
 func TestExecuteDelegateRule(t *testing.T) {
