@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -75,10 +76,12 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 	out := make([]llm.Message, len(msgs))
 	for i, m := range msgs {
 		out[i] = llm.Message{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  append([]llm.ToolCall(nil), m.ToolCalls...),
+			Role:          m.Role,
+			Content:       m.Content,
+			ToolCallID:    m.ToolCallID,
+			ToolCalls:     append([]llm.ToolCall(nil), m.ToolCalls...),
+			Phase:         m.Phase,
+			ResponseItems: append([]json.RawMessage(nil), m.ResponseItems...),
 		}
 	}
 	return out

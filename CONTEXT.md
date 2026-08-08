@@ -71,6 +71,18 @@ _Avoid_: equating task completion with every intermediate tool call succeeding.
 The file-level outcome recorded for the review, based on whether the file-scoped conversation completed, was reused, failed, or waived.
 _Avoid_: deriving it from the presence of any intermediate tool-call failure alone.
 
+**Review completion**:
+The review as a whole reaches completion only after every item in its declared scope reaches conversation completion. A partial review result can contain useful findings while remaining incomplete.
+_Avoid_: treating returned findings or process exit success as proof of complete coverage.
+
+**Quality-first review**:
+When deeper model reasoning increases execution time or cost, preserving review quality takes precedence over latency and cost within the explicit safety boundaries.
+_Avoid_: lowering reasoning effort solely to avoid a timeout.
+
+**Effort-preserving recovery**:
+Recovery from a failed review keeps the same reasoning quality target; it may spend more time or use another attempt, but completion is not purchased by reducing review effort.
+_Avoid_: treating a lower-effort retry as equivalent to the original review.
+
 **Path lookup recovery**:
 The LLM handles an exact-path lookup failure by finding the canonical path and issuing a new read request; the read tool does not rewrite the path or perform a hidden retry.
 _Avoid_: silently substituting a guessed filename or treating the first failed lookup as the final file outcome.

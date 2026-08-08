@@ -47,10 +47,12 @@ type LLMClient interface {
 // or an array of content blocks (used by Claude for multi-part content).
 // ToolCallID is used by OpenAI-format APIs to identify which tool call this result responds to.
 type Message struct {
-	Role       string     `json:"role"`
-	Content    any        `json:"content"`                // string or []ContentBlock
-	ToolCallID string     `json:"tool_call_id,omitempty"` // OpenAI tool call identifier
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // assistant tool invocations
+	Role          string            `json:"role"`
+	Content       any               `json:"content"`                // string or []ContentBlock
+	ToolCallID    string            `json:"tool_call_id,omitempty"` // OpenAI tool call identifier
+	ToolCalls     []ToolCall        `json:"tool_calls,omitempty"`   // assistant tool invocations
+	Phase         string            `json:"phase,omitempty"`        // Responses API assistant phase
+	ResponseItems []json.RawMessage `json:"-"`                      // Responses API items required for replay
 }
 
 // ContentBlock represents a single block within a multi-part message content.
@@ -67,14 +69,26 @@ func NewTextMessage(role, content string) Message {
 	return Message{Role: role, Content: content}
 }
 
+// NewAssistantMessage creates an assistant text message, preserving the
+// Responses API phase when one was returned by the model.
+func NewAssistantMessage(content, phase string) Message {
+	return Message{Role: "assistant", Content: content, Phase: phase}
+}
+
 // NewToolCallMessage creates an assistant message with text content and tool invocations.
 func NewToolCallMessage(content string, toolCalls []ToolCall) Message {
+	return NewToolCallMessageWithPhase(content, toolCalls, "")
+}
+
+// NewToolCallMessageWithPhase creates an assistant tool-call message and keeps
+// the Responses API phase for the next stateless request.
+func NewToolCallMessageWithPhase(content string, toolCalls []ToolCall, phase string) Message {
 	var tc []ToolCall
 	if len(toolCalls) > 0 {
 		tc = make([]ToolCall, len(toolCalls))
 		copy(tc, toolCalls)
 	}
-	return Message{Role: "assistant", Content: content, ToolCalls: tc}
+	return Message{Role: "assistant", Content: content, ToolCalls: tc, Phase: phase}
 }
 
 // NewToolResultMessage creates a tool-role message with the given result.
@@ -136,10 +150,12 @@ type FunctionCall struct {
 
 // ResponseMessage extends Message with optional reasoning content.
 type ResponseMessage struct {
-	Role             string     `json:"role"`
-	Content          *string    `json:"content,omitempty"`
-	ReasoningContent string     `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	Role             string            `json:"role"`
+	Content          *string           `json:"content,omitempty"`
+	ReasoningContent string            `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall        `json:"tool_calls,omitempty"`
+	Phase            string            `json:"phase,omitempty"`
+	ResponseItems    []json.RawMessage `json:"-"`
 }
 
 // ChatResponse is the parsed result of a completion request.
@@ -169,6 +185,23 @@ func (r *ChatResponse) ToolCalls() []ToolCall {
 		return nil
 	}
 	return r.Choices[0].Message.ToolCalls
+}
+
+// Phase returns the Responses API assistant phase from the first choice.
+func (r *ChatResponse) Phase() string {
+	if len(r.Choices) == 0 {
+		return ""
+	}
+	return r.Choices[0].Message.Phase
+}
+
+// ResponseItems returns the raw Responses API output items needed to replay
+// reasoning state on the next stateless request.
+func (r *ChatResponse) ResponseItems() []json.RawMessage {
+	if len(r.Choices) == 0 {
+		return nil
+	}
+	return append([]json.RawMessage(nil), r.Choices[0].Message.ResponseItems...)
 }
 
 // ToolDef defines a tool/function available to the model.

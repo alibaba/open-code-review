@@ -498,6 +498,91 @@ func TestMapResponsesResponse_ReasoningAggregated(t *testing.T) {
 	}
 }
 
+func TestMapResponsesResponse_PreservesMessagePhase(t *testing.T) {
+	client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
+	body := `{
+		"id":"resp_phase",
+		"object":"response",
+		"model":"gpt-5.6-luna",
+		"status":"completed",
+		"output":[{"type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"inspect the file"}]}]
+	}`
+
+	resp := client.mapResponsesResponse(unmarshalResponsesBody(t, body))
+	if got := resp.Phase(); got != "commentary" {
+		t.Errorf("Phase() = %q, want %q", got, "commentary")
+	}
+}
+
+func TestBuildResponsesParams_PreservesAssistantMessagePhase(t *testing.T) {
+	client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
+	params := client.buildResponsesParams("gpt-5.6-luna", ChatRequest{
+		Messages: []Message{
+			{Role: "assistant", Content: "inspect the file", Phase: "commentary"},
+		},
+	})
+
+	if len(params.Input.OfInputItemList) != 1 || params.Input.OfInputItemList[0].OfMessage == nil {
+		t.Fatal("expected one assistant message input item")
+	}
+	if got := string(params.Input.OfInputItemList[0].OfMessage.Phase); got != "commentary" {
+		t.Errorf("assistant phase = %q, want %q", got, "commentary")
+	}
+}
+
+func TestMapResponsesResponse_PreservesReasoningItemsForReplay(t *testing.T) {
+	client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
+	body := `{
+		"id":"resp_reasoning",
+		"object":"response",
+		"model":"gpt-5.6-luna",
+		"status":"completed",
+		"output":[{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"inspect"}],"encrypted_content":"opaque"}]
+	}`
+
+	resp := client.mapResponsesResponse(unmarshalResponsesBody(t, body))
+	items := resp.ResponseItems()
+	if len(items) != 1 {
+		t.Fatalf("ResponseItems() length = %d, want 1", len(items))
+	}
+	var got map[string]any
+	if err := json.Unmarshal(items[0], &got); err != nil {
+		t.Fatalf("unmarshal replay item: %v", err)
+	}
+	if got["type"] != "reasoning" || got["id"] != "rs_1" {
+		t.Errorf("replayed reasoning item = %v", got)
+	}
+}
+
+func TestBuildResponsesParams_ReplaysReasoningBeforeFunctionCall(t *testing.T) {
+	client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
+	params := client.buildResponsesParams("gpt-5.6-luna", ChatRequest{
+		Messages: []Message{
+			{
+				Role: "assistant",
+				ResponseItems: []json.RawMessage{
+					json.RawMessage(`{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque"}`),
+				},
+				ToolCalls: []ToolCall{{
+					ID: "call_1",
+					Function: FunctionCall{Name: "file_read", Arguments: `{"file_path":"main.go"}`},
+				}},
+			},
+		},
+	})
+
+	items := params.Input.OfInputItemList
+	if len(items) != 2 {
+		t.Fatalf("input item count = %d, want 2", len(items))
+	}
+	if items[0].OfReasoning == nil {
+		t.Fatal("reasoning item was not replayed")
+	}
+	if items[1].OfFunctionCall == nil {
+		t.Fatal("function call was not preserved after reasoning item")
+	}
+}
+
 // TestOpenAIResponsesClient_EndToEnd hits a fake server to make sure the
 // request body carries store=false, prompt_cache_key, and instructions, and
 // that the SDK path matches our cfg.URL contract.

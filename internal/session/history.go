@@ -7,6 +7,7 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -363,10 +364,12 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 	cp := make([]llm.Message, len(msgs))
 	for i, m := range msgs {
 		cp[i] = llm.Message{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  append([]llm.ToolCall(nil), m.ToolCalls...),
+			Role:          m.Role,
+			Content:       m.Content,
+			ToolCallID:    m.ToolCallID,
+			ToolCalls:     append([]llm.ToolCall(nil), m.ToolCalls...),
+			Phase:         m.Phase,
+			ResponseItems: append([]json.RawMessage(nil), m.ResponseItems...),
 		}
 	}
 	return cp
@@ -378,6 +381,7 @@ func copyMessagesForJSON(msgs []llm.Message) any {
 		Role       string `json:"role"`
 		Content    any    `json:"content"`
 		ToolCallID string `json:"tool_call_id,omitempty"`
+		Phase      string `json:"phase,omitempty"`
 	}
 	out := make([]msg, 0, len(msgs))
 	for _, m := range msgs {
@@ -385,6 +389,7 @@ func copyMessagesForJSON(msgs []llm.Message) any {
 			Role:       m.Role,
 			Content:    m.Content,
 			ToolCallID: m.ToolCallID,
+			Phase:      m.Phase,
 		})
 	}
 	return out

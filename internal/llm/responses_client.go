@@ -5,6 +5,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -146,8 +147,18 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 		case "user":
 			input = append(input, responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser))
 		case "assistant":
+			for _, raw := range msg.ResponseItems {
+				var item responses.ResponseInputItemUnionParam
+				if err := json.Unmarshal(raw, &item); err == nil {
+					input = append(input, item)
+				}
+			}
 			if content != "" {
-				input = append(input, responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleAssistant))
+				assistantMessage := responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleAssistant)
+				if assistantMessage.OfMessage != nil && msg.Phase != "" {
+					assistantMessage.OfMessage.Phase = responses.EasyInputMessagePhase(msg.Phase)
+				}
+				input = append(input, assistantMessage)
 			}
 			for _, tc := range msg.ToolCalls {
 				input = append(input, responses.ResponseInputItemParamOfFunctionCall(tc.Function.Arguments, tc.ID, tc.Function.Name))
@@ -213,11 +224,9 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 
 	var toolCalls []ToolCall
 	var reasoningParts []string
+	var responseItems []json.RawMessage
+	var phase string
 	for _, item := range sdkResp.Output {
-		// TODO(phase): ResponseOutputMessage.Phase (commentary/final_answer) is
-		// currently dropped. For gpt-5.3-codex+ models, preserve and resend
-		// Phase on assistant messages to avoid performance degradation. See
-		// DESIGN_STATE_CACHE_PHASE.md §3.
 		switch item.Type {
 		case "function_call":
 			fc := item.AsFunctionCall()
@@ -229,7 +238,15 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 					Arguments: fc.Arguments,
 				},
 			})
+		case "message":
+			message := item.AsMessage()
+			if message.Phase != "" {
+				phase = string(message.Phase)
+			}
 		case "reasoning":
+			if raw := item.RawJSON(); raw != "" {
+				responseItems = append(responseItems, json.RawMessage(raw))
+			}
 			// Best-effort: aggregate every summary entry's Text (not just the
 			// first) so multi-paragraph reasoning isn't truncated.
 			r := item.AsReasoning()
@@ -273,6 +290,8 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 				Content:          contentPtr,
 				ReasoningContent: reasoningContent,
 				ToolCalls:        toolCalls,
+				Phase:            phase,
+				ResponseItems:    responseItems,
 			},
 			FinishReason: finishReason,
 		}},

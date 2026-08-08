@@ -684,7 +684,7 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 	}}
 
 	st := &compressionState{}
-	ok := r.addNextMessage(context.Background(), strings.Repeat("word ", 200), calls, results, &msgs, "f.go", st)
+	ok := r.addNextMessage(context.Background(), strings.Repeat("word ", 200), "", nil, calls, results, &msgs, "f.go", st)
 
 	if !ok {
 		t.Error("expected true: sync compression should bring the count under the warning threshold")

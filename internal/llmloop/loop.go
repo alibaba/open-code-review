@@ -252,12 +252,15 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 		content := resp.Content()
 		calls := resp.ToolCalls()
+		responseItems := resp.ResponseItems()
 
 		if len(calls) == 0 {
 			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", newPath)
 			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
 			if content != "" {
-				messages = append(messages[:len(messages)-1], llm.NewTextMessage("assistant", content), messages[len(messages)-1])
+				assistant := llm.NewAssistantMessage(content, resp.Phase())
+				assistant.ResponseItems = responseItems
+				messages = append(messages[:len(messages)-1], assistant, messages[len(messages)-1])
 			}
 			continue
 		}
@@ -308,7 +311,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			consecutiveEmptyRounds = 0
 		}
 
-		succeed := r.addNextMessage(ctx, content, calls, results, &messages, newPath, st)
+		succeed := r.addNextMessage(ctx, content, resp.Phase(), responseItems, calls, results, &messages, newPath, st)
 		if !succeed {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", newPath)
 			stop = StopCompression
@@ -545,7 +548,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 // warning (80%) MaxTokens thresholds. Returns false when even after
 // synchronous compression the conversation is still over the warning
 // threshold — caller should stop the loop in that case.
-func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]llm.Message, filePath string, st *compressionState) bool {
+func (r *Runner) addNextMessage(ctx context.Context, assistantContent, assistantPhase string, assistantResponseItems []json.RawMessage, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]llm.Message, filePath string, st *compressionState) bool {
 	maxAllowed := r.deps.Template.MaxTokens
 	softLimit := int(float64(maxAllowed) * tokenSoftThreshold)
 	warnLimit := PromptTokenLimit(maxAllowed)
@@ -565,9 +568,13 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	}
 
 	if len(toolCalls) > 0 {
-		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls))
+		assistant := llm.NewToolCallMessageWithPhase(assistantContent, toolCalls, assistantPhase)
+		assistant.ResponseItems = assistantResponseItems
+		*messages = append(*messages, assistant)
 	} else if assistantContent != "" {
-		*messages = append(*messages, llm.NewTextMessage("assistant", assistantContent))
+		assistant := llm.NewAssistantMessage(assistantContent, assistantPhase)
+		assistant.ResponseItems = assistantResponseItems
+		*messages = append(*messages, assistant)
 	}
 
 	for _, rs := range results {
