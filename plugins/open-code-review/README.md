@@ -4,6 +4,17 @@ Open Code Review ships platform-specific integrations for Claude Code, Codex,
 and Cursor. Choose your platform below instead of adapting installation
 instructions written for a different agent.
 
+The plugin root also includes an Agent Plugins Specification v1 manifest at
+`plugin.json`. Its portable component is the bundled `skills/` directory. The
+native `.codex-plugin`, `.cursor-plugin`, and Claude Code manifests remain
+separate because they carry host-specific metadata and behavior.
+
+The native Codex MCP configuration stays in `.mcp.json`. It starts
+`ocr mcp serve` from the host task's Git worktree, while the portable Agent
+Plugins format only provides plugin-root and plugin-data working directories.
+The root portable package therefore does not declare that workspace-bound MCP
+server.
+
 All integrations require Git 2.41 or later. Install the `ocr` CLI first:
 
 ```bash

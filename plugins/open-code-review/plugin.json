@@ -1,0 +1,18 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "open-code-review",
+  "version": "1.0.0",
+  "description": "AI-powered code review for Git changes, commits, and branch comparisons.",
+  "author": {
+    "name": "Alibaba"
+  },
+  "homepage": "https://github.com/alibaba/open-code-review",
+  "repository": "https://github.com/alibaba/open-code-review",
+  "license": "Apache-2.0",
+  "keywords": [
+    "code-review",
+    "ai-agent",
+    "git",
+    "quality"
+  ]
+}
