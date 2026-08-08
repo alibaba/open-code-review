@@ -554,7 +554,7 @@ func TestOpenAIClient_RetriesTruncatedResponse(t *testing.T) {
 	}
 }
 
-func TestOpenAIClient_StopsAfterSecondTruncatedResponse(t *testing.T) {
+func TestOpenAIClient_StopsAfterThirdTruncatedResponse(t *testing.T) {
 	const responseBody = `{
 		"id":"chatcmpl-truncated",
 		"object":"chat.completion",
@@ -586,8 +586,37 @@ func TestOpenAIClient_StopsAfterSecondTruncatedResponse(t *testing.T) {
 	if !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("error = %v, want io.ErrUnexpectedEOF", err)
 	}
-	if got := requests.Load(); got != 2 {
-		t.Fatalf("requests = %d, want 2", got)
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("requests = %d, want 3", got)
+	}
+}
+
+func TestOpenAIClient_RetriesTransientServerError(t *testing.T) {
+	const responseBody = `{"id":"chatcmpl-retry","object":"chat.completion","model":"gpt-retry","choices":[{"index":0,"message":{"role":"assistant","content":"recovered"},"finish_reason":"stop"}]}`
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request := requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if request < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprint(w, `{"error":{"message":"temporarily unavailable"}}`)
+			return
+		}
+		_, _ = fmt.Fprint(w, responseBody)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{URL: server.URL + "/v1", APIKey: "test-key", Model: "gpt-retry"})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{Messages: []Message{{Role: "user", Content: "ping"}}})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("requests = %d, want 3", got)
+	}
+	if got := resp.Content(); got != "recovered" {
+		t.Errorf("Content() = %q, want %q", got, "recovered")
 	}
 }
 
@@ -1103,7 +1132,9 @@ func TestOpenAIClient_StreamingReasoningContent(t *testing.T) {
 }
 
 func TestOpenAIClient_StreamingIncomplete(t *testing.T) {
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
 		writeOpenAISSE(t, w,
 			`{"id":"chatcmpl-incomplete","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[{"index":0,"delta":{"role":"assistant","content":"partial"},"finish_reason":null}]}`,
 		)
@@ -1125,6 +1156,12 @@ func TestOpenAIClient_StreamingIncomplete(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "ended before choice 0 finished") {
 		t.Fatalf("error = %v, want error containing %q", err, "ended before choice 0 finished")
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want io.ErrUnexpectedEOF", err)
+	}
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("requests = %d, want 3", got)
 	}
 }
 

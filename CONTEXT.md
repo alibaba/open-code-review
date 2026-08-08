@@ -16,8 +16,12 @@ The local `ocr` CLI process that analyzes Git changes and emits structured revie
 _Avoid_: using `ocr_review` to mean the CLI process.
 
 **Codex review tools**:
-The local `stdio` MCP server exposes `ocr_review` for one review and `ocr_review_wait` to recover the terminal result of an existing in-process review.
+The local `stdio` MCP server exposes `ocr_review` for one review, `ocr_review_wait` to recover the terminal result of an existing in-process review, and `ocr_review_cancel` for explicit cancellation.
 _Avoid_: session polling, progress inspection, OpenCode tool.
+
+**Detached review**:
+An in-process review that continues after the MCP request transport is interrupted while the local MCP server remains alive. `ocr_review_wait` can return its terminal Review result; if the server process ends, recovery uses a Resume session.
+_Avoid_: treating a lost caller connection as review cancellation.
 
 **OpenCode integration**:
 The separate plugin under `plugins/open-code-review/opencode/` that registers tools for OpenCode. It does not register tools in Codex.
@@ -32,7 +36,7 @@ A review request that stays open until OCR returns a terminal Review result, inc
 _Avoid_: background review, progress event as result.
 
 **Review wait**:
-A blocking recovery request that waits for the current or most recent in-process review and returns its same terminal Review result; it never starts a second review.
+A blocking recovery request that waits for the current or most recent in-process review and returns its same terminal Review result; it can attach to a Detached review, but never starts a second review.
 _Avoid_: treating it as a status or polling API.
 
 **Review deadline**:
@@ -80,11 +84,11 @@ The provider HTTP timeout applied independently to each LLM request. It remains 
 _Avoid_: replacing the request timeout with a heartbeat or using the idle watchdog as the request timeout.
 
 **MCP call interruption**:
-A host-side interruption that ends the request before a Review result exists; it does not prove that the review reached a terminal state.
+A host-side interruption that ends the MCP request before a Review result exists. It does not cancel a Detached review and does not prove that the review reached a terminal state.
 _Avoid_: calling every interruption a Review cancellation.
 
 **User cancellation**:
-An explicit MCP call interruption requesting that a Synchronous review stop; the server propagates it through the review and completes cleanup.
+An explicit request to stop a Synchronous or Detached review; the server propagates it through the review, preserves completed checkpoints, and completes cleanup.
 _Avoid_: promising a Review result to an interrupted caller.
 
 **Partial review result**:

@@ -22,12 +22,13 @@ import (
 
 const (
 	// A zero max duration disables the whole-review timer. Per-file rounds,
-	// provider limits, idle watchdog, and caller cancellation remain active.
-	mcpReviewMaxDuration  time.Duration = 0
-	mcpReviewMinIdle                    = 15 * time.Minute
-	mcpReviewToolName                   = "ocr_review"
-	mcpReviewWaitToolName               = "ocr_review_wait"
-	mcpProgressEventName                = "ocr_progress"
+	// provider limits, idle watchdog, and explicit cancellation remain active.
+	mcpReviewMaxDuration    time.Duration = 0
+	mcpReviewMinIdle                      = 15 * time.Minute
+	mcpReviewToolName                     = "ocr_review"
+	mcpReviewCancelToolName               = "ocr_review_cancel"
+	mcpReviewWaitToolName                 = "ocr_review_wait"
+	mcpProgressEventName                  = "ocr_progress"
 )
 
 type ocrReviewInput struct {
@@ -42,6 +43,8 @@ type ocrReviewInput struct {
 type mcpReviewRunner func(context.Context, reviewOptions, io.Writer, io.Writer, llmloop.ProgressFunc, reviewStageFunc, *reviewWatchdog) error
 
 type mcpReviewExecution struct {
+	ctx    context.Context
+	cancel context.CancelFunc
 	done   chan struct{}
 	result *mcpsdk.CallToolResult
 }
@@ -99,6 +102,7 @@ func (d *reviewDiagnostics) Snapshot() reviewDiagnosticSnapshot {
 type ocrMCPServer struct {
 	repoDir      string
 	run          mcpReviewRunner
+	serverCtx    context.Context
 	maxDuration  time.Duration
 	idleDuration time.Duration
 	mu           sync.Mutex
@@ -287,7 +291,7 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("start MCP server: %w", err)
 	}
-	server := newOCRMCPProtocolServer(repoDir, nil)
+	server := newOCRMCPProtocolServerWithContext(repoDir, nil, cmd.Context(), mcpReviewMaxDuration, mcpReviewMinIdle)
 	return server.Run(cmd.Context(), &mcpsdk.StdioTransport{})
 }
 
@@ -296,9 +300,17 @@ func newOCRMCPProtocolServer(repoDir string, run mcpReviewRunner) *mcpsdk.Server
 }
 
 func newOCRMCPProtocolServerWithDurations(repoDir string, run mcpReviewRunner, maxDuration, idleDuration time.Duration) *mcpsdk.Server {
+	return newOCRMCPProtocolServerWithContext(repoDir, run, context.Background(), maxDuration, idleDuration)
+}
+
+func newOCRMCPProtocolServerWithContext(repoDir string, run mcpReviewRunner, serverCtx context.Context, maxDuration, idleDuration time.Duration) *mcpsdk.Server {
+	if serverCtx == nil {
+		serverCtx = context.Background()
+	}
 	state := &ocrMCPServer{
 		repoDir:      repoDir,
 		run:          run,
+		serverCtx:    serverCtx,
 		maxDuration:  maxDuration,
 		idleDuration: idleDuration,
 	}
@@ -314,7 +326,7 @@ func newOCRMCPProtocolServerWithDurations(repoDir string, run mcpReviewRunner, m
 	)
 	server.AddTool(&mcpsdk.Tool{
 		Name:        mcpReviewToolName,
-		Description: "Run one blocking OpenCodeReview review for this MCP server's current Git worktree. The call returns only after the review is complete, failed, cancelled, or timed out. Use commit or from+to for resumable reviews; omit both to review current workspace changes.",
+		Description: "Run one blocking OpenCodeReview review for this MCP server's current Git worktree. If the caller disconnects, the server keeps the review running; use ocr_review_wait to retrieve its terminal result. Use ocr_review_cancel for explicit cancellation. Use commit or from+to for resumable reviews; omit both to review current workspace changes.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -329,8 +341,16 @@ func newOCRMCPProtocolServerWithDurations(repoDir string, run mcpReviewRunner, m
 		},
 	}, state.handleReview)
 	server.AddTool(&mcpsdk.Tool{
+		Name:        mcpReviewCancelToolName,
+		Description: "Cancel the currently running OpenCodeReview call for this worktree. Completed checkpoints remain available for a later resumable commit or range review.",
+		InputSchema: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+		},
+	}, state.handleReviewCancel)
+	server.AddTool(&mcpsdk.Tool{
 		Name:        mcpReviewWaitToolName,
-		Description: "Wait for the current or most recent OpenCodeReview call in this worktree and return its terminal result. Use this after ocr_review reports that a review is already running; it does not start or poll a review.",
+		Description: "Wait for the current or most recent OpenCodeReview call in this worktree and return its terminal result. Use this after caller disconnection or after ocr_review reports that a review is already running; it does not start or poll a review.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -353,8 +373,7 @@ func (s *ocrMCPServer) handleReview(ctx context.Context, req *mcpsdk.CallToolReq
 	}
 	defer func() { s.finishReview(execution, result) }()
 
-	reviewCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	reviewCtx := execution.ctx
 	watchdog := newReviewWatchdog(reviewCtx, s.maxDuration, s.idleDuration)
 	defer watchdog.Stop()
 
@@ -410,6 +429,24 @@ func (s *ocrMCPServer) handleReviewWait(ctx context.Context, _ *mcpsdk.CallToolR
 	}
 }
 
+func (s *ocrMCPServer) handleReviewCancel(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	s.mu.Lock()
+	execution := s.active
+	s.mu.Unlock()
+	if execution == nil {
+		return mcpToolErrorWithDetails(errors.New("no OCR review is running for this worktree"), nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
+	}
+	select {
+	case <-execution.done:
+		return mcpToolErrorWithDetails(errors.New("no OCR review is running for this worktree"), nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
+	default:
+	}
+	execution.cancel()
+	return &mcpsdk.CallToolResult{
+		Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: `{"status":"cancelling"}`}},
+	}, nil
+}
+
 func (s *ocrMCPServer) beginReview() (*mcpReviewExecution, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -420,7 +457,8 @@ func (s *ocrMCPServer) beginReview() (*mcpReviewExecution, bool) {
 			return nil, false
 		}
 	}
-	execution := &mcpReviewExecution{done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(s.serverCtx)
+	execution := &mcpReviewExecution{ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	s.active = execution
 	return execution, true
 }
@@ -430,6 +468,7 @@ func (s *ocrMCPServer) finishReview(execution *mcpReviewExecution, result *mcpsd
 	execution.result = result
 	close(execution.done)
 	s.mu.Unlock()
+	execution.cancel()
 }
 
 func (s *ocrMCPServer) writeProgress(event llmloop.ProgressEvent) {

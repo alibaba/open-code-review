@@ -11,7 +11,6 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -317,7 +316,7 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
 		openaiopt.WithBaseURL(sdkBaseURL),
-		openaiopt.WithMaxRetries(5),
+		openaiopt.WithMaxRetries(0),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 	}
@@ -364,32 +363,18 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 	if stream, ok := c.cfg.ExtraBody["stream"].(bool); ok && stream {
-		return c.completionsStreaming(ctx, params, opts...)
+		return withLLMRetry(ctx, func(ctx context.Context) (*ChatResponse, error) {
+			return c.completionsStreaming(ctx, params, opts...)
+		})
 	}
 
-	sdkResp, err := c.sdk.Chat.Completions.New(ctx, params, opts...)
-	if errors.Is(err, io.ErrUnexpectedEOF) {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+	return withLLMRetry(ctx, func(ctx context.Context) (*ChatResponse, error) {
+		sdkResp, err := c.sdk.Chat.Completions.New(ctx, params, opts...)
+		if err != nil {
+			return nil, err
 		}
-		retryResp, retryErr := c.sdk.Chat.Completions.New(ctx, params, opts...)
-		if retryErr == nil {
-			sdkResp = retryResp
-			err = nil
-		} else {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, ctxErr
-			}
-			if !errors.Is(retryErr, io.ErrUnexpectedEOF) {
-				err = retryErr
-			}
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	return c.mapOpenAIResponse(sdkResp), nil
+		return c.mapOpenAIResponse(sdkResp), nil
+	})
 }
 
 func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.ChatCompletionNewParams, opts ...openaiopt.RequestOption) (*ChatResponse, error) {
@@ -446,7 +431,7 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 	}
 	for _, index := range choiceOrder {
 		if !finishedChoices[index] {
-			return nil, fmt.Errorf("OpenAI streaming response ended before choice %d finished", index)
+			return nil, fmt.Errorf("%w: OpenAI streaming response ended before choice %d finished", io.ErrUnexpectedEOF, index)
 		}
 	}
 
@@ -622,7 +607,7 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 
 	opts := []option.RequestOption{
 		option.WithBaseURL(sdkBaseURL),
-		option.WithMaxRetries(5),
+		option.WithMaxRetries(0),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
 	}
@@ -674,12 +659,13 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		opts = append(opts, option.WithJSONSet(k, v))
 	}
 
-	sdkResp, err := c.sdk.Messages.New(ctx, params, opts...)
-	if err != nil {
-		return nil, err
-	}
-
-	return c.mapAnthropicResponse(sdkResp), nil
+	return withLLMRetry(ctx, func(ctx context.Context) (*ChatResponse, error) {
+		sdkResp, err := c.sdk.Messages.New(ctx, params, opts...)
+		if err != nil {
+			return nil, err
+		}
+		return c.mapAnthropicResponse(sdkResp), nil
+	})
 }
 
 // buildAnthropicParams converts the shared ChatRequest into Anthropic SDK parameters.

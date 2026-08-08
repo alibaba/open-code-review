@@ -39,7 +39,7 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
 		openaiopt.WithBaseURL(sdkBaseURL),
-		openaiopt.WithMaxRetries(5),
+		openaiopt.WithMaxRetries(0),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 	}
@@ -95,25 +95,27 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 
-	sdkResp, err := c.sdk.Responses.New(ctx, params, opts...)
-	if err != nil {
-		return nil, err
-	}
+	return withLLMRetry(ctx, func(ctx context.Context) (*ChatResponse, error) {
+		sdkResp, err := c.sdk.Responses.New(ctx, params, opts...)
+		if err != nil {
+			return nil, err
+		}
 
-	// The Responses API returns HTTP 200 even when the response object is in a
-	// terminal failure state (failed/cancelled) or a non-terminal background
-	// state (queued/in_progress). The SDK therefore returns a nil Go error in
-	// those cases. Surface them as real errors so callers (ocr llm test, the
-	// review loop) that branch on err != nil actually fail instead of treating
-	// a dead response as success.
-	switch sdkResp.Status {
-	case responses.ResponseStatusFailed, responses.ResponseStatusCancelled:
-		return nil, fmt.Errorf("openai-responses request did not complete: status=%s", sdkResp.Status)
-	case responses.ResponseStatusQueued, responses.ResponseStatusInProgress:
-		return nil, fmt.Errorf("openai-responses returned non-terminal status=%s (background/async mode is not supported)", sdkResp.Status)
-	}
+		// The Responses API returns HTTP 200 even when the response object is in a
+		// terminal failure state (failed/cancelled) or a non-terminal background
+		// state (queued/in_progress). The SDK therefore returns a nil Go error in
+		// those cases. Surface them as real errors so callers (ocr llm test, the
+		// review loop) that branch on err != nil actually fail instead of treating
+		// a dead response as success.
+		switch sdkResp.Status {
+		case responses.ResponseStatusFailed, responses.ResponseStatusCancelled:
+			return nil, fmt.Errorf("openai-responses request did not complete: status=%s", sdkResp.Status)
+		case responses.ResponseStatusQueued, responses.ResponseStatusInProgress:
+			return nil, fmt.Errorf("openai-responses returned non-terminal status=%s (background/async mode is not supported)", sdkResp.Status)
+		}
 
-	return c.mapResponsesResponse(sdkResp), nil
+		return c.mapResponsesResponse(sdkResp), nil
+	})
 }
 
 // buildResponsesParams converts the shared ChatRequest into Responses API

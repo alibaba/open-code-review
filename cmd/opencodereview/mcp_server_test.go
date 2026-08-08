@@ -34,8 +34,8 @@ func TestOCRMCPServerListsReviewTool(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if got := strings.Join(names, ","); got != "ocr_review,ocr_review_wait" {
-		t.Fatalf("tools = %#v, want ocr_review,ocr_review_wait", names)
+	if got := strings.Join(names, ","); got != "ocr_review,ocr_review_cancel,ocr_review_wait" {
+		t.Fatalf("tools = %#v, want ocr_review,ocr_review_cancel,ocr_review_wait", names)
 	}
 	if reviewTool == nil {
 		t.Fatal("ocr_review tool is missing")
@@ -56,6 +56,78 @@ func TestOCRMCPServerListsReviewTool(t *testing.T) {
 	}
 	if _, ok := properties["repo"]; ok {
 		t.Error("schema must not expose repo")
+	}
+}
+
+func TestOCRMCPReviewDetachesFromCallerAndCanBeCancelled(t *testing.T) {
+	started := make(chan context.Context, 1)
+	cs, stop := connectTestOCRServer(t, func(ctx context.Context, _ reviewOptions, _ io.Writer, _ io.Writer, _ llmloop.ProgressFunc, _ reviewStageFunc, _ *reviewWatchdog) error {
+		started <- ctx
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	defer stop()
+
+	callCtx, cancelCall := context.WithCancel(context.Background())
+	firstDone := make(chan *mcpsdk.CallToolResult, 1)
+	go func() {
+		result, err := cs.CallTool(callCtx, &mcpsdk.CallToolParams{Name: mcpReviewToolName})
+		if err != nil {
+			firstDone <- &mcpsdk.CallToolResult{IsError: true, Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: err.Error()}}}
+			return
+		}
+		firstDone <- result
+	}()
+
+	reviewCtx := <-started
+	cancelCall()
+	select {
+	case <-reviewCtx.Done():
+		t.Fatal("caller cancellation canceled the detached review")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	cancelResult, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{Name: mcpReviewCancelToolName})
+	if err != nil {
+		t.Fatalf("cancel CallTool: %v", err)
+	}
+	if cancelResult.IsError || toolText(cancelResult) != `{"status":"cancelling"}` {
+		t.Fatalf("cancel result = %#v, text = %q", cancelResult, toolText(cancelResult))
+	}
+
+	select {
+	case <-reviewCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("explicit cancellation did not stop the review")
+	}
+
+	wait, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{Name: mcpReviewWaitToolName})
+	if err != nil {
+		t.Fatalf("wait CallTool: %v", err)
+	}
+	if !wait.IsError || !strings.Contains(toolText(wait), `"error_type":"cancelled"`) {
+		t.Fatalf("wait result = %#v, text = %q", wait, toolText(wait))
+	}
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("ocr_review did not finish after explicit cancellation")
+	}
+}
+
+func TestOCRMCPReviewCancelRequiresReview(t *testing.T) {
+	cs, stop := connectTestOCRServer(t, func(_ context.Context, _ reviewOptions, _ io.Writer, _ io.Writer, _ llmloop.ProgressFunc, _ reviewStageFunc, _ *reviewWatchdog) error {
+		t.Fatal("runner must not run")
+		return nil
+	})
+	defer stop()
+
+	result, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{Name: mcpReviewCancelToolName})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !result.IsError || !strings.Contains(toolText(result), "no OCR review") {
+		t.Fatalf("result = %#v, text = %q", result, toolText(result))
 	}
 }
 

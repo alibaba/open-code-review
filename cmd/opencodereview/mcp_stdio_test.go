@@ -54,7 +54,7 @@ func TestOCRMCPStdioIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("host cancellation reaches runner", func(t *testing.T) {
+	t.Run("host cancellation detaches and explicit cancellation reaches runner", func(t *testing.T) {
 		marker := t.TempDir() + "/review"
 		client := startStdioTestClient(t, "cancel", marker)
 
@@ -72,7 +72,22 @@ func TestOCRMCPStdioIntegration(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("cancelled MCP call did not return")
 		}
+
+		cancelResult, err := client.CallTool(context.Background(), mcpReviewCancelToolName, nil)
+		if err != nil {
+			t.Fatalf("cancel tool: %v", err)
+		}
+		if cancelResult != `{"status":"cancelling"}` {
+			t.Fatalf("cancel result = %s", cancelResult)
+		}
 		waitForFile(t, marker+".cancelled")
+		waitResult, err := client.CallTool(context.Background(), mcpReviewWaitToolName, nil)
+		if err != nil {
+			t.Fatalf("wait after cancellation: %v", err)
+		}
+		if !strings.Contains(waitResult, `"error_type":"cancelled"`) {
+			t.Fatalf("wait result after cancellation = %s", waitResult)
+		}
 
 		result, err := client.CallTool(context.Background(), mcpReviewToolName, nil)
 		if err != nil {
@@ -98,16 +113,18 @@ func startStdioTestClient(t *testing.T, mode, marker string) *mcpclient.Client {
 		t.Fatalf("start stdio MCP client: %v", err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	hasReview, hasWait := false, false
+	hasReview, hasCancel, hasWait := false, false, false
 	for _, tool := range client.Tools() {
 		switch tool.Name {
 		case mcpReviewToolName:
 			hasReview = true
+		case mcpReviewCancelToolName:
+			hasCancel = true
 		case mcpReviewWaitToolName:
 			hasWait = true
 		}
 	}
-	if len(client.Tools()) != 2 || !hasReview || !hasWait {
+	if len(client.Tools()) != 3 || !hasReview || !hasCancel || !hasWait {
 		t.Fatalf("tools = %#v", client.Tools())
 	}
 	return client

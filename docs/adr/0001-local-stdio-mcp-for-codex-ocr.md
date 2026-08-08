@@ -8,6 +8,8 @@ status: accepted
 
 Codex needs one callable `ocr_review` capability that waits for the local OCR process and returns its terminal result without session polling. We will add a local `stdio` MCP server to the Codex plugin and reuse the existing `ocr` CLI, because review execution depends on the current Git worktree and local OCR configuration; the separate OpenCode integration is not a Codex tool.
 
+The execution-lifecycle and provider-request retry decisions are refined by [ADR 0008](0008-detached-review-recovery.md).
+
 The tool returns OCR JSON only when the in-process review runner completes successfully. A runner error, timeout, cancellation, persistence failure, or invalid JSON is a tool error with a stable error type and captured diagnostics, so Codex cannot mistake an execution failure for a completed review.
 
 The input surface stays typed and small: the current worktree by default, or one commit or a `from`/`to` range, plus business context and exclusions. The server owns the worktree and rejects arbitrary CLI arguments.
@@ -26,7 +28,7 @@ The bundled MCP server sets Codex's `tool_timeout_sec` to 61 minutes, leaving on
 
 When a run fails with a reusable session, the MCP tool returns a structured resumable error containing the session ID. Codex performs one explicit follow-up call with the same target and `resume` value; the MCP server does not hide an automatic retry.
 
-User cancellation follows the same checkpoint-preserving path: the child is stopped, completed checkpoints remain available, and the terminal error includes the session ID when one exists so a later explicit `resume` call can continue.
+An explicit user cancellation follows the checkpoint-preserving path: the child is stopped, completed checkpoints remain available, and the terminal error includes the session ID when one exists so a later explicit `resume` call can continue. A host transport interruption is handled as a Detached review when the server process remains alive.
 
 The server lives in the existing Go `ocr` binary as `ocr mcp serve`. The Codex plugin starts that command over local `stdio`; the server invokes the repository's review and session implementation in-process without adding a second runtime.
 
@@ -34,6 +36,6 @@ The plugin resolves `ocr` from `PATH` and reports a clear setup error when it is
 
 The plugin does not set a fixed server `cwd`. `ocr mcp serve` inherits the Codex task's working directory, resolves its Git root with `git rev-parse --show-toplevel`, and binds the server instance to that worktree. Startup fails clearly when the directory is not a Git worktree. Separate tasks and worktrees therefore use separate server instances without a `repo` or `worktree` tool argument.
 
-The MCP surface exposes `ocr_review` and the recovery-only `ocr_review_wait`. The wait tool only attaches to the current or most recent in-process review and returns its terminal result; it does not start, cancel, or poll a review. User cancellation is a host-side interruption propagated through the review context; health checks and preview remain CLI workflows.
+The MCP surface exposes `ocr_review`, the recovery-only `ocr_review_wait`, and explicit `ocr_review_cancel`. The wait tool only attaches to the current or most recent in-process review and returns its terminal result; it does not start, cancel, or poll a review. User cancellation uses the explicit cancel operation; health checks and preview remain CLI workflows.
 
 Concurrency is scoped to a server instance and its worktree: one active review per instance, while separate Codex tasks with separate worktrees and server processes may review in parallel. A second `ocr_review` call returns `busy`; `ocr_review_wait` can attach to that existing execution without queueing a second review.
