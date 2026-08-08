@@ -76,7 +76,7 @@ A convenience installer that wraps the GitHub Release binary download
 machines:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
 It honours two environment variables:
@@ -91,7 +91,7 @@ The script supports `darwin` and `linux` on `amd64` / `arm64`.
 On Windows (PowerShell 5.1+), use the PowerShell installer instead:
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
 It honours the same `OCR_INSTALL_DIR` and `OCR_VERSION` variables (set via

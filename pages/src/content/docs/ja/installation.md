@@ -74,7 +74,7 @@ GitHub Release バイナリのダウンロード（検証付き）をラップ�
 イメージやヘッドレス環境に適しています。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
 2 つの環境変数を認識します。
@@ -89,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/insta
 Windows（PowerShell 5.1+）では、代わりに PowerShell インストーラーを使用してください：
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
 同じ `OCR_INSTALL_DIR` と `OCR_VERSION` を認識します（`$env:OCR_INSTALL_DIR` /

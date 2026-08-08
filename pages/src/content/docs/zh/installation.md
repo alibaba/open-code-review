@@ -72,7 +72,7 @@ sudo port upgrade open-code-review
 镜像和无界面环境：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
 它识别两个环境变量：
@@ -87,7 +87,7 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/insta
 在 Windows（PowerShell 5.1+）上，请改用 PowerShell 安装脚本：
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
 它同样识别 `OCR_INSTALL_DIR` 与 `OCR_VERSION`（通过 `$env:OCR_INSTALL_DIR` /

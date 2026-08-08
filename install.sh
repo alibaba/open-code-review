@@ -4,9 +4,9 @@
 # Copyright 2026 alibaba/open-code-review Contributors
 
 # Install the ocr (Open Code Review) CLI from GitHub releases.
-#   curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+#   curl -fsSL https://open-codereview.ai/install.sh | sh
 # Prefer to inspect first:
-#   curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh -o install.sh
+#   curl -fsSL https://open-codereview.ai/install.sh -o install.sh
 #   less install.sh && sh install.sh
 # Env: OCR_INSTALL_DIR (default /usr/local/bin), OCR_VERSION (default latest).
 set -eu
@@ -23,7 +23,7 @@ main() {
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   case "$os" in
     darwin|linux) ;;
-    *) err "unsupported OS: $os (on Windows use: irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex)" ;;
+    *) err "unsupported OS: $os (on Windows use: irm https://open-codereview.ai/install.ps1 | iex)" ;;
   esac
 
   arch="$(uname -m)"
