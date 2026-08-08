@@ -112,7 +112,7 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 		if severity, ok := obj["severity"].(string); ok {
 			cm.Severity = normalizeCodeCommentSeverity(severity)
 		}
-		if path, ok := args["path"].(string); ok {
+		if path, ok := obj["path"].(string); ok && path != "" {
 			cm.Path = path
 		}
 

@@ -15,20 +15,16 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
-// planBlockPattern matches the optional "Review Plan" section in a MAIN_TASK
+// planBlockPattern matches the "Review Plan" section in a MAIN_TASK
 // template user message: a header line beginning with "### " whose text
 // contains "Review Plan" (with an optional "(Optional)" suffix), the
 // {{plan_guidance}} placeholder on its own line, and one trailing blank line.
 var planBlockPattern = regexp.MustCompile(
 	`(?m)^### [^\n]*Review Plan[^\n]*\n\{\{plan_guidance\}\}\n\n?`)
 
-// stripEmptyPlanBlock removes the "### Review Plan …\n{{plan_guidance}}\n\n"
+// stripEmptyPlanBlock removes the "### Review Directive\n{{plan_guidance}}\n\n"
 // wrapper from a MAIN_TASK user message when the plan phase produced no
-// guidance. The previous implementation hard-coded a single Chinese literal,
-// which did not match the actual English template shipped in
-// task_template.json, so the literal token "{{plan_guidance}}" leaked into
-// the rendered prompt on every review where the plan phase was skipped or
-// failed. Strip is a no-op when the wrapper is absent.
+// guidance. Strip is a no-op when the wrapper is absent.
 func stripEmptyPlanBlock(content string) string {
 	return planBlockPattern.ReplaceAllString(content, "")
 }

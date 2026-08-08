@@ -134,7 +134,7 @@ func TestExecuteReviewFilter_Identity(t *testing.T) {
 		},
 	})
 
-	a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x"}, "a.go")
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}})
 
 	meta, ok := client.only(t)
 	if !ok {

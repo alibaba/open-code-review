@@ -93,7 +93,7 @@ func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *se
 			MaxTokens:           100000,
 			MaxToolRequestTimes: 5,
 			MainTask: template.LlmConversation{
-				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{current_file_path}} {{diff}}"}},
+				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diffs}}"}},
 			},
 		},
 		MainToolDefs: []llm.ToolDef{{
@@ -420,7 +420,7 @@ func TestManifestFlowBudgetAndSkipped(t *testing.T) {
 	t.Run("single-item budget stop", func(t *testing.T) {
 		a := newManifestFlowAgent(t, []model.Diff{{OldPath: "budget.go", NewPath: "budget.go", Diff: "+x", Insertions: 1}}, nil)
 		a.args.Template.MaxTokens = 100
-		a.args.Template.MainTask.Messages[0].Content = strings.Repeat("context ", 200) + "{{diff}}"
+		a.args.Template.MainTask.Messages[0].Content = strings.Repeat("context ", 200) + "{{diffs}}"
 		if _, err := a.dispatchSubtasks(context.Background()); err != nil {
 			t.Fatalf("business stop is represented by coverage, not a dispatch error: %v", err)
 		}

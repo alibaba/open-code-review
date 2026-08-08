@@ -57,7 +57,7 @@ func budgetAgentTestTemplate() template.Template {
 		MainTask: template.LlmConversation{
 			Messages: []template.ChatMessage{
 				{Role: "system", Content: "review"},
-				{Role: "user", Content: "review {{diff}} for {{current_file_path}}"},
+				{Role: "user", Content: "review {{diffs}}"},
 			},
 		},
 	}

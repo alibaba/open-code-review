@@ -75,13 +75,18 @@
                     "low"
                   ],
                   "description": "The severity of the issue."
+                },
+                "path": {
+                  "type": "string",
+                  "description": "The relative file path this comment applies to."
                 }
               },
               "required": [
                 "content",
                 "existing_code",
                 "category",
-                "severity"
+                "severity",
+                "path"
               ]
             }
           }
