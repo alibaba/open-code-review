@@ -354,9 +354,9 @@ var registry = []Provider{
 			"moonshotai/Kimi-K2.5",
 			"zai-org/GLM-5",
 			"baidu/ERNIE-4.5-300B-A47B",
-      },
-  },
-  {
+		},
+	},
+	{
 		Name:        "mistral",
 		DisplayName: "Mistral AI",
 		Protocol:    ProtocolOpenAIChatCompletions,
