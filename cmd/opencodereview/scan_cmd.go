@@ -139,7 +139,7 @@ func executeScan(opts scanOptions) error {
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
-		return runScanPreview(cc, scanTpl, scanPaths)
+		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat)
 	}
 
 	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)
@@ -251,7 +251,7 @@ func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (
 	return state, nil
 }
 
-func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string) error {
+func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string) error {
 	ag := scan.NewAgent(scan.Args{
 		RepoDir:          cc.RepoDir,
 		Paths:            scanPaths,
@@ -267,6 +267,5 @@ func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths
 	if err != nil {
 		return fmt.Errorf("scan preview failed: %w", err)
 	}
-	outputPreviewText(preview)
-	return nil
+	return outputPreview(preview, outputFormat)
 }

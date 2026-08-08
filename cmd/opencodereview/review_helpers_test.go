@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -22,6 +23,36 @@ func TestRunPreview(t *testing.T) {
 			t.Fatalf("runPreview error: %v", err)
 		}
 	})
+}
+
+func TestRunPreviewJSONFormat(t *testing.T) {
+	dir := initTestGitRepo(t)
+	gitCommitFile(t, dir, "main.go", "package main\n", "add main")
+	gitCommitFile(t, dir, "notes.md", "# notes\n", "add notes")
+	cc, err := loadCommonContext(dir, "", 0, 0, true)
+	if err != nil {
+		t.Fatalf("loadCommonContext: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := runPreview(cc, reviewOptions{commit: "HEAD", outputFormat: "json"}); err != nil {
+			t.Errorf("runPreview error: %v", err)
+		}
+	})
+
+	got := decodeSinglePreviewJSON(t, out)
+	if got.TotalFiles != 1 {
+		t.Fatalf("total_files = %d, want 1 (HEAD adds notes.md only)", got.TotalFiles)
+	}
+	if got.Entries[0].Path != "notes.md" {
+		t.Errorf("path = %q, want notes.md", got.Entries[0].Path)
+	}
+	if got.Entries[0].WillReview {
+		t.Error("notes.md should be excluded by the extension allowlist")
+	}
+	if got.Entries[0].ExcludeReason != model.ExcludeExtension {
+		t.Errorf("exclude_reason = %q, want %q", got.Entries[0].ExcludeReason, model.ExcludeExtension)
+	}
 }
 
 func TestLoadReviewResumeState(t *testing.T) {
