@@ -127,7 +127,7 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 
 // preview runs the agent's file-selection logic and returns the preview result.
 func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, error) {
-	ag := agent.New(agent.Args{
+	return agent.Preview(ctx, agent.Args{
 		RepoDir:    dc.cc.RepoDir,
 		From:       dc.opts.from,
 		To:         dc.opts.to,
@@ -135,7 +135,6 @@ func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, err
 		FileFilter: dc.cc.FileFilter,
 		GitRunner:  dc.cc.GitRunner,
 	})
-	return ag.Preview(ctx)
 }
 
 // mergeBase computes the merge-base for range mode. Returns "" for other modes.
