@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.repository == 'alibaba/open-code-review'
     runs-on: self-hosted
     timeout-minutes: 10
     container:
@@ -47,6 +48,7 @@ jobs:
           path: _site
 
   deploy:
+    if: github.repository == 'alibaba/open-code-review'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
