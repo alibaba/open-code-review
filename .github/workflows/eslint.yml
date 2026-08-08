@@ -20,9 +20,12 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
+          cache-dependency-path: pages/package-lock.json
 
       - name: Install dependencies
+        working-directory: pages
         run: npm ci
 
       - name: Run ESLint
+        working-directory: pages
         run: npm run lint
