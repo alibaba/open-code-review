@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -601,4 +602,23 @@ func TestOutputPreviewText_WithExcludedFiles(t *testing.T) {
 	if !strings.Contains(got, "default_path") {
 		t.Errorf("expected exclude reason, got %q", got)
 	}
+}
+
+// decodeSinglePreviewJSON asserts that s is exactly one JSON value followed
+// only by the encoder's trailing newline. Automation consuming --format json
+// relies on this: a stray banner or progress line on stdout would break it.
+func decodeSinglePreviewJSON(t *testing.T, s string) model.Preview {
+	t.Helper()
+	if strings.ContainsRune(s, '\x1b') {
+		t.Errorf("stdout contains an ANSI escape:\n%q", s)
+	}
+	dec := json.NewDecoder(strings.NewReader(s))
+	var got model.Preview
+	if err := dec.Decode(&got); err != nil {
+		t.Fatalf("decode preview JSON: %v\nstdout was:\n%q", err, s)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		t.Errorf("expected EOF after the first JSON value, got err=%v\nstdout was:\n%q", err, s)
+	}
+	return got
 }

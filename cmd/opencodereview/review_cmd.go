@@ -389,8 +389,7 @@ func runPreview(cc *commonContext, opts reviewOptions) error {
 		return fmt.Errorf("preview failed: %w", err)
 	}
 
-	outputPreviewText(preview)
-	return nil
+	return outputPreview(preview, opts.outputFormat)
 }
 
 func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {
