@@ -115,6 +115,46 @@ func TestOCRMCPReviewDetachesFromCallerAndCanBeCancelled(t *testing.T) {
 	}
 }
 
+func TestOCRMCPReviewWaitsAfterCallerCancellation(t *testing.T) {
+	started := make(chan context.Context, 1)
+	release := make(chan struct{})
+	cs, stop := connectTestOCRServer(t, func(ctx context.Context, _ reviewOptions, out io.Writer, _ io.Writer, _ llmloop.ProgressFunc, _ reviewStageFunc, _ *reviewWatchdog) error {
+		started <- ctx
+		select {
+		case <-release:
+			_, _ = io.WriteString(out, `{"status":"success"}`)
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	defer stop()
+
+	callCtx, cancelCall := context.WithCancel(context.Background())
+	callDone := make(chan error, 1)
+	go func() {
+		_, err := cs.CallTool(callCtx, &mcpsdk.CallToolParams{Name: mcpReviewToolName})
+		callDone <- err
+	}()
+
+	<-started
+	cancelCall()
+	select {
+	case <-callDone:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled MCP call did not return")
+	}
+
+	close(release)
+	result, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{Name: mcpReviewWaitToolName})
+	if err != nil {
+		t.Fatalf("wait CallTool: %v", err)
+	}
+	if result.IsError || toolText(result) != `{"status":"success"}` {
+		t.Fatalf("wait result = %#v, text = %q", result, toolText(result))
+	}
+}
+
 func TestOCRMCPReviewCancelRequiresReview(t *testing.T) {
 	cs, stop := connectTestOCRServer(t, func(_ context.Context, _ reviewOptions, _ io.Writer, _ io.Writer, _ llmloop.ProgressFunc, _ reviewStageFunc, _ *reviewWatchdog) error {
 		t.Fatal("runner must not run")

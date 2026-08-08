@@ -59,7 +59,7 @@ func retryableLLMError(ctx context.Context, err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return ctx.Err() == nil
 	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
 

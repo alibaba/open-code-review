@@ -12,6 +12,6 @@ If the MCP server process ends, recovery uses the existing local session JSONL: 
 
 ## Consequences
 
-- A disconnected caller may not receive the final result, while the server can continue consuming provider resources until completion, explicit cancellation, or an existing watchdog/deadline stops it.
+- A disconnected caller may not receive the final result, while the server can continue consuming provider resources until completion, explicit cancellation, provider/per-file limits, or the idle watchdog stops it.
 - `ocr_review_wait` only recovers an execution retained by the same live MCP server process.
 - A process termination can lose the in-flight request, but completed file checkpoints remain the recovery boundary.

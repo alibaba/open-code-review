@@ -9,8 +9,8 @@ Keep Codex review as one synchronous `ocr_review` call. The MCP server owns the 
 ## Considered Options
 
 - **Asynchronous job plus status polling**: rejected because it changes the existing one-terminal-result contract. The recovery-only `ocr_review_wait` tool is accepted because it blocks on the existing in-process call and returns that same terminal result.
-- **Four-hour blocking call**: rejected because the host can terminate an unproductive call before a useful terminal error is visible; the active review remains bounded by provider limits and the idle watchdog.
-- **Separate `ocr_cancel`/`ocr_reset` tools**: the original synchronous contract rejected them; that decision is superseded for cancellation by ADR 0008 because detached execution requires an explicit stop operation.
+- **Fixed whole-review deadline**: not adopted because detached execution and `ocr_review_wait` recover a live review after host transport interruption; safety comes from per-file/provider limits and the idle watchdog for non-LLM gaps.
+- **Separate `ocr_cancel`/`ocr_reset` tools**: the original contract rejected these names and no reset operation is provided. ADR 0008 adds `ocr_review_cancel` for explicit cancellation while `ocr_review_wait` and persisted-session `resume` handle recovery.
 
 ## Consequences
 

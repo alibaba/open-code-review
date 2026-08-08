@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/openai/openai-go/v3/responses"
@@ -654,6 +655,46 @@ func TestOpenAIResponsesClient_EndToEnd(t *testing.T) {
 
 	if resp.Content() != "pong" {
 		t.Errorf("Content() = %q, want %q", resp.Content(), "pong")
+	}
+}
+
+func TestOpenAIResponsesClient_RetriesTransientServerError(t *testing.T) {
+	const responseBody = `{
+		"id":"resp_retry",
+		"object":"response",
+		"model":"gpt-5.4",
+		"status":"completed",
+		"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"recovered"}]}],
+		"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+	}`
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-5.4",
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("requests = %d, want 3", got)
+	}
+	if got := resp.Content(); got != "recovered" {
+		t.Errorf("Content() = %q, want %q", got, "recovered")
 	}
 }
 

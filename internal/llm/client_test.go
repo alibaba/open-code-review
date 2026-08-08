@@ -653,6 +653,20 @@ func TestOpenAIClient_DoesNotRetryNonRetryableError(t *testing.T) {
 	}
 }
 
+func TestLLMRetry_DoesNotRetryPlainEOF(t *testing.T) {
+	var calls atomic.Int32
+	_, err := withLLMRetry(context.Background(), func(context.Context) (*ChatResponse, error) {
+		calls.Add(1)
+		return nil, io.EOF
+	})
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("error = %v, want io.EOF", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("calls = %d, want 1", got)
+	}
+}
+
 func TestOpenAIClient_DoesNotRetryTruncatedResponseAfterCancellation(t *testing.T) {
 	const responseBody = `{
 		"id":"chatcmpl-canceled",
