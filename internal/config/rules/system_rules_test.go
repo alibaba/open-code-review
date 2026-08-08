@@ -112,6 +112,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"service.proto", "Wire Compatibility"},
 		{"src/Main.hs", "Partial Functions"},
 		{"examples/Tutorial.lhs", "Partial Functions"},
+		{"src/parser.nim", "Memory and Lifetime Safety"},
+		{"scripts/build.nims", "Memory and Lifetime Safety"},
+		{"project.nimble", "Memory and Lifetime Safety"},
 	}
 
 	for _, tt := range tests {
