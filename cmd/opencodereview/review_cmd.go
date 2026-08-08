@@ -375,7 +375,7 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 }
 
 func runPreview(cc *commonContext, opts reviewOptions) error {
-	ag := agent.New(agent.Args{
+	preview, err := agent.Preview(context.Background(), agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
 		To:         opts.to,
@@ -383,8 +383,6 @@ func runPreview(cc *commonContext, opts reviewOptions) error {
 		FileFilter: cc.FileFilter,
 		GitRunner:  cc.GitRunner,
 	})
-
-	preview, err := ag.Preview(context.Background())
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)
 	}

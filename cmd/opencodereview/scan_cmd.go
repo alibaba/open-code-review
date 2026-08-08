@@ -252,7 +252,7 @@ func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (
 }
 
 func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string) error {
-	ag := scan.NewAgent(scan.Args{
+	preview, err := scan.Preview(context.Background(), scan.Args{
 		RepoDir:          cc.RepoDir,
 		Paths:            scanPaths,
 		FileFilter:       cc.FileFilter,
@@ -262,8 +262,6 @@ func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths
 		// value so MaxFileSizeBytes is consistent.
 		Template: *scanTpl,
 	})
-
-	preview, err := ag.Preview(context.Background())
 	if err != nil {
 		return fmt.Errorf("scan preview failed: %w", err)
 	}

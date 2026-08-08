@@ -77,3 +77,28 @@ func TestRunScanPreviewJSONFormat(t *testing.T) {
 		t.Errorf("y.go missing from scan preview: %+v", got.Entries)
 	}
 }
+
+// TestRunScanPreviewCreatesNoSession mirrors TestRunPreviewCreatesNoSession:
+// scan.NewAgent auto-creates a session too, so scan preview leaked the same
+// unfinalized JSONL artifact.
+func TestRunScanPreviewCreatesNoSession(t *testing.T) {
+	home := freshOCRHome(t)
+
+	dir := initTestGitRepo(t)
+	gitCommitFile(t, dir, "y.go", "package y\n", "add y")
+	cc, err := loadCommonContext(dir, "", 0, 0, false)
+	if err != nil {
+		t.Fatalf("loadCommonContext: %v", err)
+	}
+	scanTpl, err := template.LoadScanDefault()
+	if err != nil {
+		t.Fatalf("LoadScanDefault: %v", err)
+	}
+	silenceStdout(t, func() {
+		if err := runScanPreview(cc, scanTpl, nil, "text"); err != nil {
+			t.Fatalf("runScanPreview error: %v", err)
+		}
+	})
+
+	assertNoSessionStore(t, home)
+}
