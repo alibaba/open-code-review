@@ -82,22 +82,7 @@ const TopProgressBar: React.FC = () => (
       pointerEvents: 'none',
     }}
   >
-    <div
-      style={{
-        height: '100%',
-        background: '#756BFF',
-        animation: 'ocr-transition-bar 1.2s ease-in-out infinite',
-      }}
-    />
-    <style>{`
-      @keyframes ocr-transition-bar {
-        0%   { width: 0%; margin-left: 0%; }
-        30%  { width: 40%; margin-left: 0%; }
-        60%  { width: 30%; margin-left: 40%; }
-        85%  { width: 10%; margin-left: 70%; }
-        100% { width: 0%; margin-left: 100%; }
-      }
-    `}</style>
+    <div className="ocr-transition-bar" />
   </div>
 );
 
