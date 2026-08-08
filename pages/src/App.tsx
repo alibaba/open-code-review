@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import React, { Suspense, useEffect } from 'react';
+import React, { Suspense, useEffect, useState, useTransition } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import LandingPage from './components/LandingPage';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -70,13 +70,55 @@ const RouteErrorFallback: React.FC<{ reset: () => void }> = ({ reset }) => {
   );
 };
 
+const TopProgressBar: React.FC = () => (
+  <div
+    style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: 2,
+      zIndex: 200,
+      pointerEvents: 'none',
+    }}
+  >
+    <div
+      style={{
+        height: '100%',
+        background: '#756BFF',
+        animation: 'ocr-transition-bar 1.2s ease-in-out infinite',
+      }}
+    />
+    <style>{`
+      @keyframes ocr-transition-bar {
+        0%   { width: 0%; margin-left: 0%; }
+        30%  { width: 40%; margin-left: 0%; }
+        60%  { width: 30%; margin-left: 40%; }
+        85%  { width: 10%; margin-left: 70%; }
+        100% { width: 0%; margin-left: 100%; }
+      }
+    `}</style>
+  </div>
+);
+
 const App: React.FC = () => {
+  const [isPending, startTransition] = useTransition();
+  const location = useLocation();
+  const [displayLocation, setDisplayLocation] = useState(location);
+
+  useEffect(() => {
+    startTransition(() => {
+      setDisplayLocation(location);
+    });
+  }, [location]);
+
   return (
     <>
       <ScrollToTop />
+      {isPending && <TopProgressBar />}
       <ErrorBoundary reloadOnChunkError fallback={(_error, reset) => <RouteErrorFallback reset={reset} />}>
         <Suspense fallback={<div style={{ minHeight: '100vh', background: '#000000' }} />}>
-          <Routes>
+          <Routes location={displayLocation}>
             <Route path="/" element={<LandingPage><FeaturesPage /></LandingPage>} />
             <Route path="/features" element={<LandingPage><FeaturesRoutePage /></LandingPage>} />
             <Route path="/benchmark" element={<LandingPage><BenchmarkPage /></LandingPage>} />
