@@ -55,6 +55,28 @@ func TestRunPreviewJSONFormat(t *testing.T) {
 	}
 }
 
+// TestRunPreviewCreatesNoSession pins that previewing never opens session
+// persistence. Building the agent with agent.New auto-created a session, which
+// left an unfinalized (and usually empty) JSONL file under the OCR home even
+// though preview never runs or finalizes a review.
+func TestRunPreviewCreatesNoSession(t *testing.T) {
+	home := freshOCRHome(t)
+
+	dir := initTestGitRepo(t)
+	gitCommitFile(t, dir, "x.go", "package x\n", "add x")
+	cc, err := loadCommonContext(dir, "", 0, 0, true)
+	if err != nil {
+		t.Fatalf("loadCommonContext: %v", err)
+	}
+	silenceStdout(t, func() {
+		if err := runPreview(cc, reviewOptions{commit: "HEAD"}); err != nil {
+			t.Fatalf("runPreview error: %v", err)
+		}
+	})
+
+	assertNoSessionStore(t, home)
+}
+
 func TestLoadReviewResumeState(t *testing.T) {
 	dir := initTestGitRepo(t)
 
