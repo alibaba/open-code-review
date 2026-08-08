@@ -75,7 +75,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "iflytek", "kimi", "litellm", "mimo", "minimax", "minimax-cn", "ollama-cloud", "openai", "siliconflow", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "iflytek", "kimi", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "ollama-cloud", "openai", "siliconflow", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -268,6 +268,41 @@ func TestLookupProvider_LiteLLMDetails(t *testing.T) {
 		"groq/llama-4-scout-17b-16e-instruct",
 		"mistral/mistral-large-latest",
 		"deepseek/deepseek-chat",
+	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
+}
+
+func TestLookupProvider_MistralDetails(t *testing.T) {
+	p, ok := LookupProvider("mistral")
+	if !ok {
+		t.Fatal("mistral not found")
+	}
+	if p.DisplayName != "Mistral AI" {
+		t.Errorf("DisplayName = %q, want %q", p.DisplayName, "Mistral AI")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://api.mistral.ai/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://api.mistral.ai/v1")
+	}
+	if p.EnvVar != "MISTRAL_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "MISTRAL_API_KEY")
+	}
+	if p.AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
+	}
+	expectedModels := []string{
+		"codestral-latest",
+		"mistral-large-latest",
+		"mistral-small-latest",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))

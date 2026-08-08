@@ -70,6 +70,8 @@ func (a *Agent) Preview(ctx context.Context) (*DiffPreview, error) {
 		TotalInsertions: a.totalInsertions,
 		TotalDeletions:  a.totalDeletions,
 		TotalFiles:      len(a.diffs),
+		// Non-nil so an empty diff marshals as `"files":[]`, not `"files":null`.
+		Entries: make([]DiffPreviewEntry, 0, len(a.diffs)),
 	}
 
 	for _, d := range a.diffs {

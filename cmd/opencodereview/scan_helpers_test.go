@@ -39,8 +39,41 @@ func TestRunScanPreview(t *testing.T) {
 		t.Fatalf("LoadScanDefault: %v", err)
 	}
 	silenceStdout(t, func() {
-		if err := runScanPreview(cc, scanTpl, nil); err != nil {
+		if err := runScanPreview(cc, scanTpl, nil, "text"); err != nil {
 			t.Fatalf("runScanPreview error: %v", err)
 		}
 	})
+}
+
+func TestRunScanPreviewJSONFormat(t *testing.T) {
+	dir := initTestGitRepo(t)
+	gitCommitFile(t, dir, "y.go", "package y\n", "add y")
+	cc, err := loadCommonContext(dir, "", 0, 0, false)
+	if err != nil {
+		t.Fatalf("loadCommonContext: %v", err)
+	}
+	scanTpl, err := template.LoadScanDefault()
+	if err != nil {
+		t.Fatalf("LoadScanDefault: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := runScanPreview(cc, scanTpl, nil, "json"); err != nil {
+			t.Errorf("runScanPreview error: %v", err)
+		}
+	})
+
+	got := decodeSinglePreviewJSON(t, out)
+	var found bool
+	for _, e := range got.Entries {
+		if e.Path == "y.go" {
+			found = true
+			if e.Status != "scan" || !e.WillReview {
+				t.Errorf("y.go = %+v, want a selected scan entry", e)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("y.go missing from scan preview: %+v", got.Entries)
+	}
 }
