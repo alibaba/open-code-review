@@ -120,6 +120,7 @@
     {{end}}
     {{with categoryCounts .Session.Comments}}
     <div class="comment-filter-bar category-filters" aria-label="Filter comments by category">
+        <button type="button" class="comment-filter-chip filter-all is-active" data-filter-kind="all" data-filter-value="" aria-pressed="true">All: {{len $.Session.Comments}}</button>
         {{if .Bug}}<button type="button" class="comment-filter-chip cat-bug" data-filter-kind="category" data-filter-value="bug" aria-pressed="false">Bug: {{.Bug}}</button>{{end}}
         {{if .Security}}<button type="button" class="comment-filter-chip cat-security" data-filter-kind="category" data-filter-value="security" aria-pressed="false">Security: {{.Security}}</button>{{end}}
         {{if .Performance}}<button type="button" class="comment-filter-chip cat-performance" data-filter-kind="category" data-filter-value="performance" aria-pressed="false">Performance: {{.Performance}}</button>{{end}}
