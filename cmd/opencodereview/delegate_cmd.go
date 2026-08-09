@@ -1,8 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/config/rules"
@@ -21,6 +26,7 @@ type delegateOptions struct {
 	background     string
 	backgroundFile string
 	maxGitProcs    int
+	format         string
 }
 
 var delegatePreviewOpts delegateOptions
@@ -41,12 +47,17 @@ Output review spec for host-agent delegation (no LLM required).`,
 
   # Get rules for multiple files (grouped by content)
   ocr delegate rule internal/agent/agent.go internal/llm/client.go`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
 var delegatePreviewCmd = &cobra.Command{
 	Use:   "preview [flags]",
 	Short: "Preview reviewable files with mode/ref metadata",
 	Long:  "Outputs reviewable file list with mode/ref metadata for the host agent to construct git commands.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateDelegateOptions(&delegatePreviewOpts); err != nil {
 			return err
@@ -116,7 +127,7 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 
 // preview runs the agent's file-selection logic and returns the preview result.
 func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, error) {
-	ag := agent.New(agent.Args{
+	return agent.Preview(ctx, agent.Args{
 		RepoDir:    dc.cc.RepoDir,
 		From:       dc.opts.from,
 		To:         dc.opts.to,
@@ -124,7 +135,6 @@ func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, err
 		FileFilter: dc.cc.FileFilter,
 		GitRunner:  dc.cc.GitRunner,
 	})
-	return ag.Preview(ctx)
 }
 
 // mergeBase computes the merge-base for range mode. Returns "" for other modes.
@@ -164,6 +174,26 @@ func executeDelegatePreview(opts delegateOptions) error {
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)
 	}
+	mergeBase := dc.mergeBase(ctx)
+	if opts.format == "json" {
+		return writeDelegateJSON(delegatePreviewJSON{
+			SchemaVersion:   delegateSchemaVersion,
+			Mode:            dc.reviewMode(),
+			Repository:      dc.cc.RepoDir,
+			From:            dc.opts.from,
+			To:              dc.opts.to,
+			Commit:          dc.opts.commit,
+			MergeBase:       mergeBase,
+			Background:      dc.opts.background,
+			TotalFiles:      preview.TotalFiles,
+			ReviewableCount: preview.ReviewableCount,
+			ExcludedCount:   preview.ExcludedCount,
+			TotalInsertions: preview.TotalInsertions,
+			TotalDeletions:  preview.TotalDeletions,
+			ReviewableFiles: previewFiles(preview, true),
+			ExcludedFiles:   previewFiles(preview, false),
+		})
+	}
 
 	fmt.Printf("# Files (%d reviewable / %d total)\n\n", preview.ReviewableCount, preview.TotalFiles)
 	fmt.Printf("- mode: %s\n", dc.reviewMode())
@@ -176,7 +206,7 @@ func executeDelegatePreview(opts delegateOptions) error {
 	if dc.opts.commit != "" {
 		fmt.Printf("- commit: %s\n", dc.opts.commit)
 	}
-	if mergeBase := dc.mergeBase(ctx); mergeBase != "" {
+	if mergeBase != "" {
 		fmt.Printf("- merge_base: %s\n", mergeBase)
 	}
 	if dc.opts.background != "" {
@@ -208,6 +238,93 @@ func executeDelegateRule(opts delegateOptions, paths []string) error {
 	}
 
 	groups := delegate.GroupRules(dc.resolver(), paths)
+	if opts.format == "json" {
+		return writeDelegateJSON(delegateRulesJSON{
+			SchemaVersion: delegateSchemaVersion,
+			Groups:        ruleGroupsJSON(groups),
+		})
+	}
 	fmt.Print(delegate.RuleGroupsMarkdown(groups))
 	return nil
+}
+
+const delegateSchemaVersion = "1"
+
+type delegatePreviewFileJSON struct {
+	Path          string `json:"path"`
+	Status        string `json:"status"`
+	Insertions    int64  `json:"insertions"`
+	Deletions     int64  `json:"deletions"`
+	ExcludeReason string `json:"exclude_reason,omitempty"`
+}
+
+type delegatePreviewJSON struct {
+	SchemaVersion   string                    `json:"schema_version"`
+	Mode            string                    `json:"mode"`
+	Repository      string                    `json:"repository"`
+	From            string                    `json:"from,omitempty"`
+	To              string                    `json:"to,omitempty"`
+	Commit          string                    `json:"commit,omitempty"`
+	MergeBase       string                    `json:"merge_base,omitempty"`
+	Background      string                    `json:"background,omitempty"`
+	TotalFiles      int                       `json:"total_files"`
+	ReviewableCount int                       `json:"reviewable_count"`
+	ExcludedCount   int                       `json:"excluded_count"`
+	TotalInsertions int64                     `json:"total_insertions"`
+	TotalDeletions  int64                     `json:"total_deletions"`
+	ReviewableFiles []delegatePreviewFileJSON `json:"reviewable_files"`
+	ExcludedFiles   []delegatePreviewFileJSON `json:"excluded_files"`
+}
+
+type delegateRuleGroupJSON struct {
+	GroupID int      `json:"group_id"`
+	Source  string   `json:"source"`
+	Pattern string   `json:"pattern"`
+	Files   []string `json:"files"`
+	Rule    string   `json:"rule"`
+}
+
+type delegateRulesJSON struct {
+	SchemaVersion string                  `json:"schema_version"`
+	Groups        []delegateRuleGroupJSON `json:"groups"`
+}
+
+func previewFiles(preview *agent.DiffPreview, reviewable bool) []delegatePreviewFileJSON {
+	files := make([]delegatePreviewFileJSON, 0)
+	for _, entry := range preview.Entries {
+		if entry.WillReview != reviewable {
+			continue
+		}
+		files = append(files, delegatePreviewFileJSON{
+			Path:          entry.Path,
+			Status:        entry.Status,
+			Insertions:    entry.Insertions,
+			Deletions:     entry.Deletions,
+			ExcludeReason: string(entry.ExcludeReason),
+		})
+	}
+	return files
+}
+
+func ruleGroupsJSON(groups []delegate.RuleGroup) []delegateRuleGroupJSON {
+	out := make([]delegateRuleGroupJSON, 0, len(groups))
+	for _, group := range groups {
+		files := make([]string, 0, len(group.Files))
+		files = append(files, group.Files...)
+		out = append(out, delegateRuleGroupJSON{
+			GroupID: group.ID,
+			Source:  group.Source,
+			Pattern: group.Pattern,
+			Files:   files,
+			Rule:    group.Text,
+		})
+	}
+	return out
+}
+
+func writeDelegateJSON(value any) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(value)
 }

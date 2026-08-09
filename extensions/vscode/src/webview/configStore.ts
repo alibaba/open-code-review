@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { ConfigPanelFocus, isConfigReady } from '../shared/configUtils';
 import { ConfigPanelHostToWebview, HostToWebview } from '../shared/messages';
 import { EnvCheckResult, OcrConfig, LogLine } from '../shared/types';

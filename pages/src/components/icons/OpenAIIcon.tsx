@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import React from 'react';
 
 const OpenAIIcon: React.FC<{ className?: string }> = ({ className }) => (

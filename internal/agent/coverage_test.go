@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package agent
 
 import (
@@ -647,7 +650,6 @@ func TestExecuteReviewFilter_WithTimeout(t *testing.T) {
 		CommentCollector: collector,
 		Template: template.Template{
 			ReviewFilterTask: &template.LlmConversation{
-				Timeout:  30,
 				Messages: []template.ChatMessage{{Role: "user", Content: "{{comments}} {{path}} {{diff}}"}},
 			},
 			MaxTokens:           10000,

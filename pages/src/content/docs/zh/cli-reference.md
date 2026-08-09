@@ -48,6 +48,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | 命令 | 别名 | 作用 |
 |---|---|---|
 | `ocr review` | `ocr r` | 运行代码评审并输出评论。 |
+| `ocr scan` | `ocr s` | 无需 Git diff，扫描完整文件。 |
 | `ocr rules check <file>` | — | 显示某文件路径适用哪条规则及其来源。 |
 | `ocr config set <key> <value>` | — | 将一个配置值持久化到 `~/.opencodereview/config.json`。 |
 | `ocr config unset custom_providers.<name>` | — | 删除一个自定义 provider（若它是当前启用的，则清空启用的 `provider`/`model`）。 |
@@ -57,6 +58,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr llm providers` | — | 列出所有内置 LLM provider。 |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话。 |
 | `ocr session show <id>` | `ocr sessions show <id>` | 查看单个会话及其逐文件检查点。 |
+| `ocr session comments <id>` | `ocr sessions comments <id>` | 输出单个会话中记录的评审评论。 |
 | `ocr viewer` | — | 启动用于历史评审会话的本地 Web UI（`localhost:5483`）。 |
 | `ocr version` | — | 打印版本、commit、平台、构建日期与 GitHub URL。 |
 
@@ -84,7 +86,7 @@ unstaged + untracked 变更。
 | `--from <ref>` | — | — | diff 起始 ref（如 `main`）。 |
 | `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
-| `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。 |
+| `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）或 `json`（机器可读的评论数组）。 |
 | `--audience <who>` | — | `human` | `human` 流式输出进度行；`agent` 静默 stdout，只打印最终摘要 / JSON。 |
@@ -93,13 +95,31 @@ unstaged + untracked 变更。
 | `--timeout <minutes>` | — | `10` | 每文件截止时间。`0` 关闭超时。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
 | `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`30`）；1–9 会被上调到 `10`；任何 `≥ 10` 的值都覆盖模板默认（即使小于 `30`）。 |
-| `--model <name>` | — | — | 为本次评审覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
+| `--max-tokens <n>` | — | 配置或模板默认 | 每文件提示词 token 上限。覆盖本次运行已保存的 `max_tokens` 设置。 |
+| `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
+| `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |
 | `--tools <path>` | — | 内嵌 | 自定义 JSON 工具配置文件路径。覆盖内嵌工具定义。 |
 
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
 > `--resume` 仅支持区间或单 commit 评审，不能与 `--preview` 同时使用。
+
+### 单次运行的 LLM 选择
+
+`review` 和 `scan` 都接受 `--provider` 与 `--model`。这些覆盖仅作用于当前调用，
+不会修改已保存的配置：
+
+```bash
+ocr review --provider anthropic --model claude-opus-4-6 --format json
+ocr scan --provider openai --model gpt-5.4 --format json
+```
+
+显式 `--provider` 会在常规来源解析前，从已保存的 `providers` 或 `custom_providers`
+中选择条目。不传 `--provider` 时，OCR 保持原有来源顺序：已保存的配置、完整的
+`OCR_LLM_*` 环境配置、完整的 Claude Code 环境配置、shell rc 文件。`--model` 会覆盖
+最终选中来源中的 model，但不会改变来源顺序。不完整的策略会继续回退，而不会与其他策略
+混合。选中的内置 provider 仍可从其支持的环境变量读取凭据。
 
 ### 模式
 
@@ -146,6 +166,7 @@ ocr review -c abc123
 ```bash
 ocr session list
 ocr session show <session-id>
+ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
@@ -198,6 +219,10 @@ ocr review --format json --audience agent
 ```json
 {
   "status": "success",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-6"
+  },
   "summary": {
     "files_reviewed": 9,
     "comments": 1,
@@ -225,6 +250,7 @@ ocr review --format json --audience agent
 | 字段 | 说明 |
 |---|---|
 | `status` | `success`、`completed_with_warnings`、`completed_with_errors` 或 `skipped`。 |
+| `llm` | 实际解析的 LLM 标识。规范化后的 `model` 始终存在；`provider` 仅在使用已命名的配置 provider 时存在。 |
 | `message` | 可选。人类可读摘要，如 `"No comments generated. Looks good to me."`。 |
 | `summary` | 可选。运行聚合：`files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` 运行时省略。 |
 | `comments` | 总是存在，可能为空。每条评论的字段如上例。 |
@@ -239,6 +265,10 @@ ocr review --format json --audience agent
 {
   "status": "skipped",
   "message": "No supported files changed.",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-6"
+  },
   "comments": []
 }
 ```
@@ -253,6 +283,35 @@ ocr review --format json --audience agent
 非致命警告（单个子 agent 失败、某文件超过 token 阈值等）内联打印；JSON 模式下
 会加入 `warnings` 数组。
 
+## `ocr scan`
+
+无需 Git diff 的全文件扫描。直接从工作树读取每个文件的当前内容交给
+LLM 评审——适合审计陌生代码库或没有有意义 diff 的目录。
+
+```text
+ocr scan [flags]
+ocr s      [flags]   (alias)
+```
+
+不传入 `--path` 时，扫描整个仓库。
+
+### 参数
+
+| 参数 | 简写 | 默认 | 说明 |
+|---|---|---|---|
+| `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。 |
+| `--exclude <patterns>` | - | - | 逗号分隔的 gitignore 风格排除模式（如 `**/generated/*,*.pb.go`）；与 `rule.json` 的 excludes 合并。 |
+| `--preview` | `-p` | `false` | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。支持 `--format json`。 |
+
+```bash
+ocr scan --preview                              # 查看会扫描哪些文件
+ocr scan --path internal/agent                  # 扫描单个目录
+ocr scan --path internal/agent,internal/llm/client.go
+ocr scan --exclude '**/generated/*,*.pb.go'
+```
+
+完整参数列表见 `ocr scan -h`。
+
 ## `ocr session`
 
 列出和查看保存在 `~/.opencodereview/sessions/` 下的本地评审会话日志。
@@ -263,8 +322,9 @@ ocr session <sub-command>
 ocr sessions <sub-command>   (alias)
 
 Sub-commands:
-  list, ls    List recent review sessions for the current repo
-  show <id>   Show one session's metadata and per-file items
+  list, ls        List recent review sessions for the current repo
+  show <id>       Show one session's metadata and per-file items
+  comments <id>   Show the review comments recorded in one session
 ```
 
 ### `ocr session list`
@@ -293,6 +353,25 @@ ocr session show --repo /path/to/repo <session-id>
 |---|---|---|
 | `--repo <path>` | 当前目录 | 要查看会话的仓库。 |
 | `--json` | `false` | 以 JSON 输出会话元数据和逐文件条目。 |
+
+### `ocr session comments`
+
+输出会话中保存的所有评审评论，渲染风格与 `ocr review` 的终端输出一致
+（路径、行范围、严重程度标签、建议 diff）。
+
+```bash
+ocr session comments <session-id>
+ocr session comments --json <session-id>
+ocr session comments --severity high <session-id>
+ocr session comments --severity critical,high --category bug,security <session-id>
+```
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `--repo <path>` | 当前目录 | 要查看会话的仓库。 |
+| `--json` | `false` | 以 JSON 数组输出评论。 |
+| `--severity <list>` | 全部 | 逗号分隔的要包含的严重程度（`critical`、`high`、`medium`、`low`）。 |
+| `--category <list>` | 全部 | 逗号分隔的要包含的类别（如 `bug`、`security`）。 |
 
 ## `ocr rules`
 
@@ -427,6 +506,78 @@ ocr -V
 打印构建时写入的版本信息、短 Git commit（存在时）、平台
 （`<GOOS>/<GOARCH>`）、构建日期（存在时），以及 GitHub URL
 （`https://github.com/alibaba/open-code-review`）。
+
+
+## ocr completion
+
+为 `ocr` 生成 shell 补全脚本，以便在 shell 中对命令名、参数和标志进行 Tab 补全。
+
+### Bash
+
+仅当前会话生效：
+
+```bash
+source <(ocr completion bash)
+```
+
+持久生效（Linux）：
+
+```bash
+ocr completion bash > /etc/bash_completion.d/ocr
+```
+
+持久生效（macOS）：
+
+```bash
+ocr completion bash > $(brew --prefix)/etc/bash_completion.d/ocr
+```
+
+### Zsh
+
+如果 shell 补全尚未启用，请先执行一次：
+
+```bash
+echo "autoload -U compinit; compinit" >> ~/.zshrc
+```
+
+然后持久加载补全：
+
+```bash
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+需要打开一个新的 shell 才能生效。
+
+### Fish
+
+仅当前会话生效：
+
+```bash
+ocr completion fish | source
+```
+
+持久生效：
+
+```bash
+ocr completion fish > ~/.config/fish/completions/ocr.fish
+```
+
+### PowerShell
+
+仅当前会话生效：
+
+```powershell
+ocr completion powershell | Out-String | Invoke-Expression
+```
+
+持久生效 —— 先生成脚本，再从 PowerShell 配置文件中加载：
+
+```powershell
+ocr completion powershell > ocr.ps1
+```
+
+然后在 PowerShell 配置文件中添加一行以加载 `ocr.ps1`。
+
 
 ## 提示与注意
 

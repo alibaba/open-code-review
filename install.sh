@@ -1,4 +1,8 @@
 #!/bin/sh
+
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 alibaba/open-code-review Contributors
+
 # Install the ocr (Open Code Review) CLI from GitHub releases.
 #   curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
 # Prefer to inspect first:

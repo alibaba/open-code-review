@@ -12,18 +12,23 @@
 <main>
 <h2>Repositories</h2>
 {{if .Repos}}
-<table class="table">
+<div class="repository-search">
+    <label for="repository-search-input">Search repositories</label>
+    <input id="repository-search-input" type="search" placeholder="Search repositories..." autocomplete="off">
+</div>
+<table id="repositories-table" class="table">
     <thead><tr><th>Repository</th><th>Sessions</th><th>Last Modified</th></tr></thead>
     <tbody>
     {{range .Repos}}
         <tr>
-            <td><a href="/r/{{.EncodedPath}}">{{.EncodedPath}}</a></td>
+            <td data-repository-name><a href="/r/{{.EncodedPath}}">{{.EncodedPath}}</a></td>
             <td>{{.SessionCount}}</td>
             <td>{{formatTime .LastModified}}</td>
         </tr>
     {{end}}
     </tbody>
 </table>
+<script src="/static/repos.js"></script>
 {{else}}
 <p>No session data found. Run a code review first.</p>
 {{end}}

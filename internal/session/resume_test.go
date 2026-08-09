@@ -1,9 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package session
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -28,7 +32,7 @@ func TestSessionFilePath_ValidID(t *testing.T) {
 	}
 
 	expectedSuffix := filepath.Join("test-sessions", encodeRepoPath("/some/repo"), "abc-123.jsonl")
-	if !contains(path, expectedSuffix) {
+	if !strings.Contains(path, expectedSuffix) {
 		t.Errorf("path %q does not contain expected suffix %q", path, expectedSuffix)
 	}
 }
@@ -645,15 +649,74 @@ func mustJSON(t *testing.T, v any) []byte {
 	return b
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
+func TestApplySessionStart_SetsScanPathScope(t *testing.T) {
+	paths := []string{"./internal/scan/", "cmd/opencodereview", "internal/scan"}
+	s := &ResumeState{Items: make(map[string]ResumeItem)}
+	s.applySessionStart(resumeRecord{
+		SessionID:  "s1",
+		ReviewMode: ReviewModeFullScan,
+		ScanPaths:  &paths,
+	})
+	want := []string{"cmd/opencodereview", "internal/scan"}
+	if !s.HasScanPathScope {
+		t.Fatal("HasScanPathScope = false, want true")
+	}
+	if len(s.ScanPaths) != len(want) {
+		t.Fatalf("ScanPaths = %v, want %v", s.ScanPaths, want)
+	}
+	for i := range want {
+		if s.ScanPaths[i] != want[i] {
+			t.Fatalf("ScanPaths = %v, want %v", s.ScanPaths, want)
 		}
 	}
-	return false
+}
+
+func TestValidateScanOptions_AllowsLegacySessionWithoutPathScope(t *testing.T) {
+	s := &ResumeState{SessionID: "s1", ReviewMode: ReviewModeFullScan}
+	if err := s.ValidateScanOptions([]string{"internal/scan"}); err != nil {
+		t.Fatalf("ValidateScanOptions: %v", err)
+	}
+}
+
+func TestValidateScanOptions_ScanPathScopeMatchesNormalized(t *testing.T) {
+	s := &ResumeState{
+		SessionID:        "s1",
+		ReviewMode:       ReviewModeFullScan,
+		ScanPaths:        []string{"cmd/opencodereview", "internal/scan"},
+		HasScanPathScope: true,
+	}
+	if err := s.ValidateScanOptions([]string{"./internal/scan/", "cmd/opencodereview"}); err != nil {
+		t.Fatalf("ValidateScanOptions: %v", err)
+	}
+}
+
+func TestValidateScanOptions_RejectsScanPathScopeMismatch(t *testing.T) {
+	s := &ResumeState{
+		SessionID:        "s1",
+		ReviewMode:       ReviewModeFullScan,
+		ScanPaths:        []string{"internal/agent"},
+		HasScanPathScope: true,
+	}
+	err := s.ValidateScanOptions(nil)
+	if err == nil {
+		t.Fatal("expected mismatch when prior scoped scan is resumed as whole repo")
+	}
+	if !strings.Contains(err.Error(), "scan path scope") {
+		t.Fatalf("error = %q, want scan path scope mismatch", err.Error())
+	}
+}
+
+func TestValidateScanOptions_RejectsWholeRepoScopeMismatch(t *testing.T) {
+	s := &ResumeState{
+		SessionID:        "s1",
+		ReviewMode:       ReviewModeFullScan,
+		HasScanPathScope: true,
+	}
+	err := s.ValidateScanOptions([]string{"internal/agent"})
+	if err == nil {
+		t.Fatal("expected mismatch when prior whole-repo scan is resumed with --path")
+	}
+	if !strings.Contains(err.Error(), "<whole repo>") {
+		t.Fatalf("error = %q, want whole-repo scope in message", err.Error())
+	}
 }

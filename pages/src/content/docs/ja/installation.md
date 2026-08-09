@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-`ocr` CLI をインストールするには、サポートされた 4 つの方法があります。
+`ocr` CLI をインストールするには、サポートされた 6 つの方法があります。
 
 ## NPM（推奨）
 
@@ -38,6 +38,34 @@ export OCR_NO_UPDATE=1
 
 ```bash
 npm uninstall -g @alibaba-group/open-code-review
+```
+
+## Homebrew（macOS / Linux）
+
+```bash
+brew install open-code-review
+```
+
+この formula はソースからビルドして `ocr` バイナリをインストールします。
+
+後でアップグレードするには：
+
+```bash
+brew upgrade open-code-review
+```
+
+## MacPorts（macOS）
+
+```bash
+sudo port install open-code-review
+```
+
+この port はソースからビルドして `ocr` バイナリをインストールします。
+
+後でアップグレードするには：
+
+```bash
+sudo port upgrade open-code-review
 ```
 
 ## インストールスクリプト（curl | sh）
@@ -162,6 +190,21 @@ ocr review --help       # review コマンドの完全な引数リスト
 which ocr
 echo $PATH
 ```
+
+## シェル補完を有効にする（任意）
+
+`ocr` は bash、zsh、fish、PowerShell の Tab 補完に対応しています。
+
+```bash
+# bash
+source <(ocr completion bash)
+
+# zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+fish、PowerShell、および永続化の詳しい設定方法は [CLI リファレンス](./cli-reference.md#ocr-completion) を参照してください。
+
 
 ## OCR が状態を保存する場所
 

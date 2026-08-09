@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -18,11 +21,16 @@ var llmCmd = &cobra.Command{
 	Long:  "LLM utility commands.",
 	Example: `  ocr llm test                   Verify LLM connectivity and configuration
   ocr llm providers              List available built-in providers`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
 var llmTestCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Send a test conversation to the configured LLM model",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLLMTest()
 	},
@@ -31,6 +39,7 @@ var llmTestCmd = &cobra.Command{
 var llmProvidersCmd = &cobra.Command{
 	Use:   "providers",
 	Short: "List all built-in LLM providers",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		runLLMProviders()
 	},

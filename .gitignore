@@ -6,6 +6,8 @@
 
 dist/
 npm/*/bin/
+coverage.out
+coverage.html
 .claude/plans
 .claude/commands/comment.md
 .claude/commands/read-issue.md

@@ -1,8 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -169,7 +173,7 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "fail"}}
-	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", nil, false)
+	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", nil, false, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -282,7 +286,7 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	comments := []model.LlmComment{{Path: "b.go", Content: "test"}}
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "c.go", Message: "failed"}}
-	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", nil, false)
+	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", nil, false, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -320,7 +324,7 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "warning", Message: "something"}}
-	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", nil, false)
+	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", nil, false, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -348,7 +352,8 @@ func TestOutputJSONNoFiles(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := outputJSONNoFiles("test-trace-id-456")
+	identity := &jsonLLMIdentity{Provider: "anthropic", Model: "claude-opus-4-6"}
+	err := outputJSONNoFiles("test-trace-id-456", identity)
 
 	_ = w.Close()
 	os.Stdout = old
@@ -369,6 +374,9 @@ func TestOutputJSONNoFiles(t *testing.T) {
 	}
 	if out.TraceID != "test-trace-id-456" {
 		t.Errorf("trace_id = %q, want test-trace-id-456", out.TraceID)
+	}
+	if out.LLM == nil || out.LLM.Provider != "anthropic" || out.LLM.Model != "claude-opus-4-6" {
+		t.Fatalf("llm = %+v", out.LLM)
 	}
 }
 
@@ -594,4 +602,23 @@ func TestOutputPreviewText_WithExcludedFiles(t *testing.T) {
 	if !strings.Contains(got, "default_path") {
 		t.Errorf("expected exclude reason, got %q", got)
 	}
+}
+
+// decodeSinglePreviewJSON asserts that s is exactly one JSON value followed
+// only by the encoder's trailing newline. Automation consuming --format json
+// relies on this: a stray banner or progress line on stdout would break it.
+func decodeSinglePreviewJSON(t *testing.T, s string) model.Preview {
+	t.Helper()
+	if strings.ContainsRune(s, '\x1b') {
+		t.Errorf("stdout contains an ANSI escape:\n%q", s)
+	}
+	dec := json.NewDecoder(strings.NewReader(s))
+	var got model.Preview
+	if err := dec.Decode(&got); err != nil {
+		t.Fatalf("decode preview JSON: %v\nstdout was:\n%q", err, s)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		t.Errorf("expected EOF after the first JSON value, got err=%v\nstdout was:\n%q", err, s)
+	}
+	return got
 }

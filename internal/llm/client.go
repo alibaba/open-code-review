@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package llm provides LLM client interfaces supporting multiple protocols.
 // Supported protocols (canonical names, see protocol.go):
 //   - "anthropic" — Anthropic Messages API
@@ -177,9 +180,10 @@ type ToolDef struct {
 
 // FunctionDef specifies the metadata for a tool definition.
 type FunctionDef struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	Parameters    map[string]any  `json:"parameters"`
+	RawDefinition json.RawMessage `json:"-"`
 }
 
 // ClientConfig holds configuration for connecting to an LLM service.

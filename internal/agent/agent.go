@@ -1,6 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -8,7 +12,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -183,13 +189,7 @@ type Agent struct {
 }
 
 // ResumeInfo summarizes file-level reuse for a resumed review.
-type ResumeInfo struct {
-	ResumedFrom   string `json:"resumed_from"`
-	ReusedFiles   int64  `json:"reused_files"`
-	RerunFiles    int64  `json:"rerun_files"`
-	PreviousModel string `json:"previous_model,omitempty"`
-	CurrentModel  string `json:"current_model,omitempty"`
-}
+type ResumeInfo = session.ResumeInfo
 
 // New creates a new Agent from the given arguments.
 func New(args Args) *Agent {
@@ -1268,7 +1268,7 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {
@@ -1497,7 +1497,7 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {
@@ -1531,6 +1531,17 @@ func formatToolDefs(toolDefs []llm.ToolDef) string {
 	for _, td := range toolDefs {
 		fn := &td.Function
 		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", fn.Name, fn.Description))
+		if orderedParams, ok := orderedToolParameters(fn.RawDefinition); ok {
+			sb.WriteString("  Parameters:\n")
+			for _, p := range orderedParams {
+				suffix := ""
+				if p.Required {
+					suffix = " (required)"
+				}
+				sb.WriteString(fmt.Sprintf("  - %s: %s%s\n", p.Name, p.Description, suffix))
+			}
+			continue
+		}
 		if params, ok := fn.Parameters["properties"].(map[string]any); ok && len(params) > 0 {
 			sb.WriteString("  Parameters:\n")
 			required := make(map[string]bool)
@@ -1541,7 +1552,8 @@ func formatToolDefs(toolDefs []llm.ToolDef) string {
 					}
 				}
 			}
-			for name, p := range params {
+			for _, name := range slices.Sorted(maps.Keys(params)) {
+				p := params[name]
 				suffix := ""
 				if required[name] {
 					suffix = " (required)"
@@ -1556,6 +1568,73 @@ func formatToolDefs(toolDefs []llm.ToolDef) string {
 		}
 	}
 	return sb.String()
+}
+
+type orderedToolParameter struct {
+	Name        string
+	Description string
+	Required    bool
+}
+
+func orderedToolParameters(raw json.RawMessage) ([]orderedToolParameter, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+
+	var def struct {
+		Parameters struct {
+			Required   []string        `json:"required"`
+			Properties json.RawMessage `json:"properties"`
+		} `json:"parameters"`
+	}
+	if err := json.Unmarshal(raw, &def); err != nil || len(def.Parameters.Properties) == 0 {
+		return nil, false
+	}
+
+	required := make(map[string]bool, len(def.Parameters.Required))
+	for _, name := range def.Parameters.Required {
+		required[name] = true
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(def.Parameters.Properties))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, false
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return nil, false
+	}
+
+	var params []orderedToolParameter
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return nil, false
+		}
+		name, ok := keyTok.(string)
+		if !ok {
+			return nil, false
+		}
+		var meta struct {
+			Description string `json:"description"`
+		}
+		if err := dec.Decode(&meta); err != nil {
+			return nil, false
+		}
+		params = append(params, orderedToolParameter{
+			Name:        name,
+			Description: meta.Description,
+			Required:    required[name],
+		})
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, false
+	}
+
+	if len(params) == 0 {
+		return nil, false
+	}
+	return params, true
 }
 
 // findDiff returns the Diff for the given file path, or nil if not found.
@@ -1582,6 +1661,7 @@ func BuildToolDefs(entries []toolsconfig.ToolConfigEntry, planOnly bool) []llm.T
 			fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: failed to parse tool definition %q: %v\n", e.Name, err)
 			continue
 		}
+		fn.RawDefinition = defRaw
 		defs = append(defs, llm.ToolDef{
 			Type:     "function",
 			Function: fn,

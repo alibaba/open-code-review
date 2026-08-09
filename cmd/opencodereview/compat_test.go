@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import "github.com/spf13/cobra"
@@ -79,6 +82,25 @@ func runSessionShowCompat(args []string) error {
 	}
 	cmd.Flags().StringVar(&sessionShowRepoDir, "repo", "", "")
 	cmd.Flags().BoolVar(&sessionShowJSON, "json", false, "")
+	cmd.SetArgs(args)
+	return cmd.Execute()
+}
+
+// runSessionCommentsCompat provides test compatibility for old-style runSessionComments([]string{...}) calls.
+func runSessionCommentsCompat(args []string) error {
+	cmd := &cobra.Command{
+		Use:           "comments",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, a []string) error {
+			return runSessionComments(a[0])
+		},
+	}
+	cmd.Flags().StringVar(&sessionCommentsRepoDir, "repo", "", "")
+	cmd.Flags().BoolVar(&sessionCommentsJSON, "json", false, "")
+	cmd.Flags().StringVar(&sessionCommentsSeverity, "severity", "", "")
+	cmd.Flags().StringVar(&sessionCommentsCategory, "category", "", "")
 	cmd.SetArgs(args)
 	return cmd.Execute()
 }

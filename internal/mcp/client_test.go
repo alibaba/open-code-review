@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package mcp
 
 import (
@@ -104,6 +107,28 @@ func TestNewRemoteClient_HeaderExpandsToEmpty(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Authorization") {
 		t.Errorf("error = %q, want mention of header name 'Authorization'", err.Error())
+	}
+}
+
+// TestNewRemoteClient_ConnectFailure exercises the success path of header
+// expansion (non-empty value) plus HTTP client / transport construction, then
+// the connect-failure return when the endpoint refuses the connection.
+func TestNewRemoteClient_ConnectFailure(t *testing.T) {
+	t.Setenv("OCR_TEST_TOKEN", "secret-value")
+
+	_, err := NewRemoteClient(
+		context.Background(),
+		"test-srv",
+		// Port 1 is reserved and refuses connections immediately.
+		"http://127.0.0.1:1/mcp",
+		map[string]string{"Authorization": "Bearer $OCR_TEST_TOKEN"},
+		"v0.0.1-test",
+	)
+	if err == nil {
+		t.Fatal("expected error when the endpoint refuses the connection, got nil")
+	}
+	if !strings.Contains(err.Error(), "connect to remote MCP server") {
+		t.Errorf("error = %q, want mention of 'connect to remote MCP server'", err.Error())
 	}
 }
 

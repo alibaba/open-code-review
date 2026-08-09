@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -32,6 +35,10 @@ Examples:
   ocr config set provider my-gateway
   ocr config set custom_providers.my-gateway.url https://gateway.internal.com/v1
   ocr config set custom_providers.my-gateway.protocol openai`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
 var configSetCmd = &cobra.Command{
@@ -139,10 +146,13 @@ func runConfigUnset(key string) error {
 	if key == "provider" {
 		return unsetActiveProvider(configPath)
 	}
+	if key == "max_tokens" {
+		return unsetMaxTokens(configPath)
+	}
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports provider, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, custom_providers.<name>, and mcp_servers.<name>")
 	}
 
 	switch parts[0] {
@@ -151,8 +161,23 @@ func runConfigUnset(key string) error {
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports provider, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, custom_providers.<name>, and mcp_servers.<name>")
 	}
+}
+
+func unsetMaxTokens(configPath string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	cfg.MaxTokens = 0
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Println("Cleared max_tokens; using the embedded template default.")
+	return nil
 }
 
 func unsetActiveProvider(configPath string) error {
@@ -287,6 +312,7 @@ type MCPServerConfig struct {
 type Config struct {
 	Provider        string                     `json:"provider,omitempty"`
 	Model           string                     `json:"model,omitempty"`
+	MaxTokens       int                        `json:"max_tokens,omitempty"`
 	Providers       map[string]ProviderEntry   `json:"providers,omitempty"`
 	CustomProviders map[string]ProviderEntry   `json:"custom_providers,omitempty"`
 	Llm             LlmConfig                  `json:"llm,omitempty"`
@@ -352,6 +378,7 @@ func LoadAppConfig(path string) (*Config, error) {
 var supportedConfigKeys = []string{
 	"provider",
 	"model",
+	"max_tokens",
 	"providers.<name>.<field>",
 	"custom_providers.<name>.<field>",
 	"mcp_servers.<name>.<field>",
@@ -423,6 +450,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		} else {
 			cfg.Model = value
 		}
+	case "max_tokens":
+		maxTokens, err := strconv.Atoi(value)
+		if err != nil || maxTokens <= 0 {
+			return fmt.Errorf("invalid max_tokens %q: must be a positive integer", value)
+		}
+		cfg.MaxTokens = maxTokens
 	case "llm.url", "llm.URL":
 		cfg.Llm.URL = value
 	case "llm.auth_token", "llm.AuthToken":

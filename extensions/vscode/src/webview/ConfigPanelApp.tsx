@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { I18nContext, resolveLocale } from './I18nProvider';
 import { useCallback, useEffect, useReducer } from 'preact/hooks';
 import { bridge } from './bridge';

@@ -47,7 +47,7 @@ make test
 
 If everything passes, you're ready to contribute.
 
-> **Note:** The `upstream` remote is read-only for contributors — it is used to pull the latest changes from the main repository. You cannot push directly to upstream. All contributions must be pushed to your fork (`origin`) and submitted via Pull Request.
+> **Note:** The `upstream` remote is read-only for contributors — it is used to pull the latest changes from the main repository. You cannot push directly to upstream. All commits must be pushed to your fork (`origin`) and submitted via Pull Request.
 
 ## Development Workflow
 
@@ -90,14 +90,23 @@ fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
 
+### License Headers
+
+Every source file (`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`) must include an SPDX license header. After creating new files, run:
+
+```bash
+make license-add
+```
+
+This automatically adds the required header. CI will reject PRs with missing headers.
+
 ### Code Quality
 
 Before submitting your changes, make sure they pass all checks:
 
 ```bash
-# Format and lint (Go standard tooling)
-go fmt ./...
-go vet ./...
+# Format, lint, and verify license headers
+make check
 
 # Run tests with race detection
 make test
@@ -193,6 +202,18 @@ feat(agent): add support for custom tool definitions
 - A maintainer will review your PR, usually within a few business days.
 - We may request changes — this is normal and collaborative, not adversarial.
 - Once approved, a maintainer will merge your PR.
+
+## Tips for Faster PR Reviews
+
+Want your PR to be reviewed and merged quickly? These practices help:
+
+- **Sign the CLA early** — Many first-time contributors get blocked because they miss the CLA bot comment. Sign the Contributor License Agreement as soon as the bot prompts you — your PR cannot be merged without it.
+- **Ensure all CI checks pass** — PRs with failing checks will not be reviewed. Run `make test` and `make build` locally before pushing to catch issues early.
+- **Keep changes focused and small** — A PR that does one thing well is far easier to review than one that mixes unrelated changes. Smaller PRs get reviewed faster and are less likely to require multiple rounds of revision.
+- **Write a clear, accurate description** — Explain *what* changed and *why*. The description must reflect the actual diff — reviewers lose trust when the two don't match. If the scope shifted during development, update the description before requesting review.
+- **Include tests for behavior changes** — New features or bug fixes without tests raise questions. Tests demonstrate correctness and help reviewers understand the intended behavior.
+- **Follow existing code patterns** — Match the style, naming conventions, and architecture of the surrounding code. Consistency reduces cognitive load for reviewers and avoids style-only review comments.
+- **Respond to feedback promptly** — When a reviewer requests changes, address them quickly to keep the review cycle short. If you disagree, explain your reasoning rather than ignoring the comment.
 
 ## Contributor License Agreement (CLA)
 

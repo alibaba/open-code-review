@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llm
 
 import (
@@ -33,6 +36,8 @@ var registry = []Provider{
 		AuthHeader:  "x-api-key",
 		EnvVar:      "ANTHROPIC_API_KEY",
 		Models: []string{
+			"claude-opus-5",
+			"claude-sonnet-5",
 			"claude-opus-4-8",
 			"claude-opus-4-7",
 			"claude-opus-4-6",
@@ -46,6 +51,9 @@ var registry = []Provider{
 		BaseURL:     "https://api.openai.com/v1",
 		EnvVar:      "OPENAI_API_KEY",
 		Models: []string{
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+			"gpt-5.6-luna",
 			"gpt-5.5",
 			"gpt-5.4",
 			"gpt-5.4-mini",
@@ -77,6 +85,7 @@ var registry = []Provider{
 		BaseURL:     "https://dashscope.aliyuncs.com/compatible-mode/v1",
 		EnvVar:      "DASHSCOPE_API_KEY",
 		Models: []string{
+			"qwen3.8-max",
 			"qwen3.7-max",
 			"qwen3.7-plus",
 			"qwen3.6-plus",
@@ -95,6 +104,7 @@ var registry = []Provider{
 		BaseURL:     "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
 		EnvVar:      "DASHSCOPE_TOKENPLAN_KEY",
 		Models: []string{
+			"qwen3.8-max",
 			"qwen3.7-max",
 			"qwen3.7-plus",
 			"qwen3.6-plus",
@@ -143,7 +153,6 @@ var registry = []Provider{
 		BaseURL:     "https://tokenhub.tencentmaas.com/v1",
 		EnvVar:      "TENCENT_TOKENHUB_API_KEY",
 		Models: []string{
-			"hy3-preview",
 			"deepseek-v4-pro",
 			"deepseek-v4-flash",
 			"glm-5.2",
@@ -151,11 +160,10 @@ var registry = []Provider{
 			"glm-5",
 			"glm-5-turbo",
 			"kimi-k2.7-code",
+			"kimi-k2.7-code-highspeed",
 			"kimi-k2.6",
-			"kimi-k2.5",
 			"minimax-m3",
 			"minimax-m2.7",
-			"minimax-m2.5",
 		},
 	},
 	{
@@ -165,7 +173,7 @@ var registry = []Provider{
 		BaseURL:     "https://api.lkeap.cloud.tencent.com/plan/v3",
 		EnvVar:      "TENCENT_HUNYUAN_TOKENPLAN_KEY",
 		Models: []string{
-			"hy3-preview",
+			"hy3",
 		},
 	},
 	{
@@ -190,6 +198,7 @@ var registry = []Provider{
 		BaseURL:     "https://api.moonshot.cn/v1",
 		EnvVar:      "MOONSHOT_API_KEY",
 		Models: []string{
+			"kimi-k3",
 			"kimi-k2.7-code",
 			"kimi-k2.7-code-highspeed",
 			"kimi-k2.6",
@@ -237,6 +246,20 @@ var registry = []Provider{
 	{
 		Name:        "minimax",
 		DisplayName: "MiniMax API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.minimax.io/v1",
+		EnvVar:      "MINIMAX_GLOBAL_API_KEY",
+		Models: []string{
+			"MiniMax-M3",
+			"MiniMax-M2.7",
+			"MiniMax-M2.7-highspeed",
+			"MiniMax-M2.5",
+			"MiniMax-M2.5-highspeed",
+		},
+	},
+	{
+		Name:        "minimax-cn",
+		DisplayName: "MiniMax CN API",
 		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.minimaxi.com/v1",
 		EnvVar:      "MINIMAX_API_KEY",
@@ -313,6 +336,22 @@ var registry = []Provider{
 			"groq/llama-4-scout-17b-16e-instruct",
 			"mistral/mistral-large-latest",
 			"deepseek/deepseek-chat",
+		},
+	},
+	{
+		Name:        "mistral",
+		DisplayName: "Mistral AI",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.mistral.ai/v1",
+		EnvVar:      "MISTRAL_API_KEY",
+		// Deliberately minimal list to keep this preset low-maintenance for
+		// alibaba/open-code-review maintainers. Users can point to any other
+		// Mistral model via `ocr config set model <name>`; the preset only
+		// seeds the picker UI. See https://docs.mistral.ai/getting-started/models/models_overview/
+		Models: []string{
+			"codestral-latest",
+			"mistral-large-latest",
+			"mistral-small-latest",
 		},
 	},
 }

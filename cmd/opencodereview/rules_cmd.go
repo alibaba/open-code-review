@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -12,6 +15,10 @@ var rulesCmd = &cobra.Command{
 	Use:   "rules",
 	Short: "Inspect and debug review rules",
 	Long:  "Inspect and debug review rules.",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
 var rulesCheckRepoDir string

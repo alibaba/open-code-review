@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package session
 
 import (
@@ -30,6 +33,7 @@ type jsonlWriter struct {
 	diffFrom    string
 	diffTo      string
 	diffCommit  string
+	scanPaths   []string
 	resumedFrom string
 	file        *os.File
 	writer      *bufio.Writer
@@ -47,6 +51,7 @@ func newJSONLWriter(sessionID, repoDir, gitBranch, model string, opts SessionOpt
 		diffFrom:    opts.DiffFrom,
 		diffTo:      opts.DiffTo,
 		diffCommit:  opts.DiffCommit,
+		scanPaths:   append([]string(nil), opts.ScanPaths...),
 		resumedFrom: opts.ResumedFrom,
 	}
 	if err := jw.open(); err != nil {
@@ -151,6 +156,9 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	}
 	if jw.diffCommit != "" {
 		rec["diffCommit"] = jw.diffCommit
+	}
+	if jw.reviewMode == ReviewModeFullScan {
+		rec["scanPaths"] = append([]string{}, jw.scanPaths...)
 	}
 	if jw.resumedFrom != "" {
 		rec["resumedFrom"] = jw.resumedFrom

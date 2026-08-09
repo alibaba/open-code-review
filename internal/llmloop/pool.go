@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package llmloop carries the per-file LLM tool-use loop shared by `ocr
 // review` (diff-based) and `ocr scan` (full-file). It owns the chat
 // completion conversation state, three-zone memory compression, tool-call

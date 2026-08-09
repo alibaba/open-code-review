@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llmloop
 
 import (
@@ -228,7 +231,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  compressionMsgs,
-		MaxTokens: r.deps.Template.MaxTokens,
+		MaxTokens: r.deps.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 

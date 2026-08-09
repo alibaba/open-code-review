@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llmloop
 
 import (
@@ -204,7 +207,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			Model:     r.deps.Model,
 			Messages:  messages,
 			Tools:     r.deps.MainToolDefs,
-			MaxTokens: r.deps.Template.MaxTokens,
+			MaxTokens: r.deps.Template.CompletionTokenLimit(),
 			SessionID: sessionID,
 		})
 		duration := time.Since(startTime)
@@ -405,7 +408,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 				if d != nil {
 					if !diff.ResolveComment(cm, d) && r.deps.Template.ReLocationTask != nil {
 						rlStart := time.Now()
-						_, resp, msgs := diff.ReLocateComment(rctx, cm, d, r.deps.LLMClient, r.deps.Template.ReLocationTask, r.deps.Model, r.deps.Template.MaxTokens)
+						_, resp, msgs := diff.ReLocateComment(rctx, cm, d, r.deps.LLMClient, r.deps.Template.ReLocationTask, r.deps.Model, r.deps.Template.CompletionTokenLimit())
 						if msgs != nil {
 							fs := r.deps.Session.GetOrCreateFileSession(cm.Path)
 							rlRec := fs.AppendTaskRecord(session.ReLocationTask, msgs)

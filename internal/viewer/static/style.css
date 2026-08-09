@@ -216,6 +216,29 @@ h3 {
     letter-spacing: -0.02em;
 }
 
+.repository-search {
+    display: grid;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+}
+.repository-search label {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+.repository-search input {
+    width: min(100%, 24rem);
+    padding: 0.5rem 0.65rem;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font: inherit;
+}
+.repository-search input:focus {
+    outline: 2px solid var(--link);
+    outline-offset: 1px;
+}
+
 /* ── Table ── */
 .table {
     width: 100%;
@@ -397,6 +420,26 @@ h3 {
 }
 .token-table tbody tr:hover { background: var(--accent-soft); }
 
+.token-breakdown-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    list-style: none;
+    padding: 0.25rem 0 0.75rem;
+}
+.token-breakdown-toggle::-webkit-details-marker { display: none; }
+.token-breakdown-toggle::marker { content: none; }
+.token-breakdown-toggle .file-count-badge { margin-left: auto; }
+.token-breakdown[open] > .token-breakdown-toggle .chevron-sm { transform: rotate(45deg); }
+.token-breakdown-body {
+    overflow-x: auto;
+    padding-top: 0.25rem;
+}
+
 /* ── File List ── */
 .file-list {
     list-style: none;
@@ -523,6 +566,18 @@ h3 {
 
 .file-accordion-body {
     padding: 1rem 1.25rem 1.25rem;
+}
+
+.section-accordion {
+    margin-top: 1.25rem;
+}
+.section-title {
+    flex: 1;
+    font-weight: 600;
+}
+.section-accordion .file-list,
+.section-accordion .conversations {
+    margin: 0;
 }
 
 /* Task Group */

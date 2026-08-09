@@ -15,5 +15,19 @@
   "**/*_test.rs",
   "**/oh_modules/**",
   "**/*.test.ets",
-  "**/test/**/*.jl"
+  "**/test/**/*.jl",
+  "**/test/**/*.hs",
+  "**/*Spec.hs",
+  "**/test/**/*.lhs",
+  "**/*Spec.lhs",
+  "**/tests/**/*.nim",
+  "**/__snapshots__/**",
+  "**/*.snap",
+  "**/testdata/**",
+  "**/fixtures/**",
+  "**/*.generated.*",
+  "**/*.gen.go",
+  "**/*.pb.go",
+  "**/*.pb.cc",
+  "**/*.pb.h"
 ]

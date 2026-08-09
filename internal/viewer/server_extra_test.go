@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package viewer
 
 import (
@@ -67,14 +70,25 @@ func TestRenderTemplate_WithRepos(t *testing.T) {
 	renderTemplate(rr, "repos.html", map[string]any{
 		"Repos": []RepoInfo{
 			{EncodedPath: "my-project", SessionCount: 3},
+			{EncodedPath: "other-project", SessionCount: 1},
 		},
 	})
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "my-project") {
-		t.Errorf("expected repo name in rendered output")
+	body := rr.Body.String()
+	for _, required := range []string{
+		"my-project",
+		"other-project",
+		`id="repository-search-input"`,
+		`id="repositories-table"`,
+		"data-repository-name",
+		`src="/static/repos.js"`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("rendered repository page missing %q", required)
+		}
 	}
 }
 
@@ -139,6 +153,60 @@ func TestRenderTemplate_SessionPage(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
+	}
+}
+
+func TestRenderTemplate_SecondarySectionsCollapsedByDefault(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{
+		Summary: SessionSummary{
+			SessionID:     "abc",
+			CWD:           "/test",
+			FilesReviewed: []string{"main.go"},
+		},
+		TokenUsage: TokenUsageSummary{
+			FileTokenBreakdown: []FileTokenUsage{{FilePath: "main.go"}},
+		},
+		Files: []*FileGroup{{FilePath: "main.go", Tasks: map[TaskType][]*TaskCard{}}},
+		Comments: []*ReviewComment{{
+			FilePath: "main.go",
+			Content:  "Keep this visible",
+		}},
+	}
+
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session:     vs,
+	})
+
+	body := rr.Body.String()
+	if count := strings.Count(body, `<details class="file-accordion section-accordion">`); count != 2 {
+		t.Fatalf("collapsed secondary section count = %d, want 2", count)
+	}
+	if strings.Contains(body, `<details class="file-accordion section-accordion" open>`) {
+		t.Fatal("secondary sections should be collapsed by default")
+	}
+	if !strings.Contains(body, `<details class="token-breakdown">`) || strings.Contains(body, `<details class="token-breakdown" open>`) {
+		t.Fatal("file token breakdown should be rendered and collapsed by default")
+	}
+	if !strings.Contains(body, `<details class="comment-file-group" open>`) {
+		t.Fatal("review comment groups should remain expanded")
+	}
+}
+
+func TestRenderTemplate_HidesEmptyConversationsSection(t *testing.T) {
+	rr := httptest.NewRecorder()
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session: &ViewSession{
+			Summary: SessionSummary{SessionID: "abc", CWD: "/test"},
+		},
+	})
+
+	if strings.Contains(rr.Body.String(), `<span class="section-title">Conversations</span>`) {
+		t.Fatal("empty conversations section should not be rendered")
 	}
 }
 

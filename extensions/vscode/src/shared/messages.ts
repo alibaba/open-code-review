@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import {
   CliResult, CliRunOptions, CommentSyncState, EnvCheckResult, FileChange, GitState, LogLine,
   OcrConfig, ReviewMode, ReviewState,

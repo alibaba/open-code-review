@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { spawnSync } from 'child_process';
 
 const DELIM = '_OCR_ENV_DELIM_';
