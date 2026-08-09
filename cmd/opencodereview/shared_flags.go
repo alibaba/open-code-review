@@ -104,6 +104,9 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if opts.planTimeoutSecs < 0 {
 		return fmt.Errorf("--plan-timeout must be a non-negative integer (0 means no separate timeout)")
 	}
+	if opts.maxTokens < 0 {
+		return fmt.Errorf("--max-tokens must be a non-negative integer (0 means use template default)")
+	}
 	if err := validateAudience(opts.audience); err != nil {
 		return err
 	}
@@ -155,6 +158,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	addConcurrencyFlags(cmd, &opts.concurrency, &opts.perFileTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokensBudget)
 	cmd.Flags().IntVar(&opts.planTimeoutSecs, "plan-timeout", 0, "per-file plan task timeout in seconds (0 = use the file timeout only)")
+	cmd.Flags().IntVar(&opts.maxTokens, "max-tokens", 0, "maximum tokens retained in each LLM conversation (0 = template default)")
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addModelFlag(cmd, &opts.model)
 	addPreviewFlag(cmd, &opts.preview)

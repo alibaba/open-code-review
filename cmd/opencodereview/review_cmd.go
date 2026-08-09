@@ -37,6 +37,7 @@ type reviewOptions struct {
 	concurrency     int
 	perFileTimeout  int
 	planTimeoutSecs int
+	maxTokens       int
 	maxTools        int
 	maxGitProcs     int
 	maxTokensBudget int
@@ -98,6 +99,9 @@ func executeReview(opts reviewOptions) error {
 	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
+	}
+	if opts.maxTokens > 0 {
+		cc.Template.MaxTokens = opts.maxTokens
 	}
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 

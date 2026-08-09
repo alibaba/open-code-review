@@ -83,6 +83,23 @@ func TestParseReviewFlags_NegativePlanTimeout(t *testing.T) {
 	}
 }
 
+func TestParseReviewFlags_MaxTokens(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--max-tokens", "30000"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.maxTokens != 30000 {
+		t.Errorf("maxTokens = %d, want 30000", opts.maxTokens)
+	}
+}
+
+func TestParseReviewFlags_NegativeMaxTokens(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--max-tokens", "-1"})
+	if err == nil {
+		t.Fatal("expected error for negative max-tokens")
+	}
+}
+
 func TestParseReviewFlags_MaxToolsBelowMin(t *testing.T) {
 	opts, err := parseReviewFlags([]string{"--max-tools", "5"})
 	if err != nil {
