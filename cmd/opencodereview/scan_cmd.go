@@ -33,6 +33,7 @@ type scanOptions struct {
 	background         string
 	concurrency        int
 	perFileTimeout     int
+	perFileTimeoutSet  bool
 	maxTools           int
 	maxGitProcs        int
 	preview            bool
@@ -81,6 +82,7 @@ var scanCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := scanOpts
 		opts.maxTokensBudgetSet = cmd.Flags().Changed("max-tokens-budget")
+		opts.perFileTimeoutSet = cmd.Flags().Changed("timeout")
 		if err := validateScanOptions(&opts); err != nil {
 			return err
 		}
@@ -156,6 +158,8 @@ func executeScan(opts scanOptions) error {
 	if err != nil {
 		return err
 	}
+	opts.perFileTimeout = applyModelPerFileTimeout(rt.Model, opts.perFileTimeout, opts.perFileTimeoutSet)
+	scanTpl.MaxToolRequestTimes = applyModelMaxToolRequestTimes(rt.Model, scanTpl.MaxToolRequestTimes)
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,

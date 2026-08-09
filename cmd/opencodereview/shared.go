@@ -43,6 +43,31 @@ type commonContext struct {
 	IsGitRepo bool
 }
 
+const (
+	defaultPerFileTimeoutMinutes   = 20
+	gpt56LunaPerFileTimeoutMinutes = 120
+	gpt56LunaMaxToolRequestTimes   = 150
+)
+
+func isGpt56Luna(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return normalized == "gpt-5.6-luna" || normalized == "gpt5.6-luna"
+}
+
+func applyModelPerFileTimeout(model string, current int, explicit bool) int {
+	if explicit || !isGpt56Luna(model) {
+		return current
+	}
+	return gpt56LunaPerFileTimeoutMinutes
+}
+
+func applyModelMaxToolRequestTimes(model string, current int) int {
+	if !isGpt56Luna(model) || current >= gpt56LunaMaxToolRequestTimes {
+		return current
+	}
+	return gpt56LunaMaxToolRequestTimes
+}
+
 // loadCommonContext validates the working directory, loads the embedded
 // template, raises MaxToolRequestTimes when maxTools exceeds the default,
 // resolves the absolute repo path, loads system review rules, and creates

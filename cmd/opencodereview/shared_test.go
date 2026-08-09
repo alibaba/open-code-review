@@ -39,6 +39,33 @@ func TestApplyCLIExcludes_NilFileFilter(t *testing.T) {
 	}
 }
 
+func TestModelDefaults_Gpt56Luna(t *testing.T) {
+	if got := applyModelPerFileTimeout("gpt-5.6-luna", defaultPerFileTimeoutMinutes, false); got != 120 {
+		t.Errorf("gpt-5.6-luna timeout = %d, want 120", got)
+	}
+	if got := applyModelMaxToolRequestTimes("gpt5.6-luna", 75); got != 150 {
+		t.Errorf("gpt5.6-luna max tools = %d, want 150", got)
+	}
+}
+
+func TestModelDefaults_ExplicitTimeoutWins(t *testing.T) {
+	if got := applyModelPerFileTimeout("gpt-5.6-luna", 30, true); got != 30 {
+		t.Errorf("explicit timeout = %d, want 30", got)
+	}
+	if got := applyModelMaxToolRequestTimes("gpt-5.6-luna", 200); got != 200 {
+		t.Errorf("existing higher max tools = %d, want 200", got)
+	}
+}
+
+func TestModelDefaults_OtherModelUnchanged(t *testing.T) {
+	if got := applyModelPerFileTimeout("gpt-5.4", 20, false); got != 20 {
+		t.Errorf("other model timeout = %d, want 20", got)
+	}
+	if got := applyModelMaxToolRequestTimes("gpt-5.4", 75); got != 75 {
+		t.Errorf("other model max tools = %d, want 75", got)
+	}
+}
+
 func TestNewQuietHandle_NoOp(t *testing.T) {
 	h := newQuietHandle("text", "developer")
 	if h.fn != nil {

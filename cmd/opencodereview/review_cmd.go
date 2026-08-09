@@ -43,6 +43,7 @@ type reviewOptions struct {
 	model              string
 	concurrency        int
 	perFileTimeout     int
+	perFileTimeoutSet  bool
 	maxTools           int
 	maxGitProcs        int
 	maxTokensBudget    int
@@ -95,6 +96,7 @@ var reviewCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := reviewOpts
 		opts.maxTokensBudgetSet = cmd.Flags().Changed("max-tokens-budget")
+		opts.perFileTimeoutSet = cmd.Flags().Changed("timeout")
 		if err := validateReviewOptions(&opts); err != nil {
 			return err
 		}
@@ -175,6 +177,8 @@ func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outp
 	if err != nil {
 		return err
 	}
+	opts.perFileTimeout = applyModelPerFileTimeout(rt.Model, opts.perFileTimeout, opts.perFileTimeoutSet)
+	cc.Template.MaxToolRequestTimes = applyModelMaxToolRequestTimes(rt.Model, cc.Template.MaxToolRequestTimes)
 	if watchdog != nil {
 		rt.Client = watchdogLLMClient{inner: rt.Client, watchdog: watchdog}
 	}

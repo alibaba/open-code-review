@@ -42,7 +42,7 @@ func addExcludeFlag(cmd *cobra.Command, target *string) {
 
 func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, maxGitProcs, maxTokensBudget *int) {
 	cmd.Flags().IntVar(concurrency, "concurrency", 8, "max concurrent file reviews")
-	cmd.Flags().IntVar(timeout, "timeout", 20, "concurrent task timeout in minutes")
+	cmd.Flags().IntVar(timeout, "timeout", defaultPerFileTimeoutMinutes, "concurrent task timeout in minutes")
 	cmd.Flags().IntVar(maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	cmd.Flags().IntVar(maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; omitted or explicitly set 0 is unlimited, positive values cap the run; dispatch stops once exceeded and skipped files are reported as failed(budget). Partial results are published and review exits 0; it exits non-zero only if every selected item failed")
@@ -177,7 +177,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file scans")
-	cmd.Flags().IntVar(&opts.perFileTimeout, "timeout", 20, "concurrent task timeout in minutes")
+	cmd.Flags().IntVar(&opts.perFileTimeout, "timeout", defaultPerFileTimeoutMinutes, "concurrent task timeout in minutes")
 	cmd.Flags().IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage; omitted or explicitly set 0 is unlimited, positive values cap the run; dispatch stops once exceeded")
