@@ -34,7 +34,7 @@ export const ja: TranslationKeys = {
   'highlights.stat2Caption': 'npm 過去30日の実ダウンロード数',
   'highlights.stat3Value': '3M+',
   'highlights.stat3Label': '実タスク',
-  'highlights.stat3Caption': 'Alibabaグループ内で実戦検証済み',
+  'highlights.stat3Caption': '実行済みのコードレビュータスク',
   'highlights.stat4Value': '1/9',
   'highlights.stat4Label': 'トークンコスト',
   'highlights.stat4Caption': 'Claude Code との比較 · 1,000 PR',

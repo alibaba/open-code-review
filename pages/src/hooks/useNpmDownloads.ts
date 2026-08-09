@@ -35,23 +35,25 @@ export function useNpmDownloads(pkg: string, period: Period = 'last-month'): Npm
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
 
-    // pkg may be a scoped package name (containing `/`), so encode it before interpolation to keep the URL path valid
-    fetch(`https://api.npmjs.org/downloads/point/${period}/${encodeURIComponent(pkg)}`, {
-      signal: controller.signal,
-    })
-      .then((r) => {
+    (async () => {
+      try {
+        // pkg may be a scoped package name (containing `/`), so encode it before interpolation to keep the URL path valid
+        const r = await fetch(`https://api.npmjs.org/downloads/point/${period}/${encodeURIComponent(pkg)}`, {
+          signal: controller.signal,
+        });
         if (!r.ok) throw new Error(`npm downloads API responded ${r.status}`);
-        return r.json();
-      })
-      .then((data: { downloads?: number }) => {
+        const data: { downloads?: number } = await r.json();
         if (cancelled) return;
         if (typeof data.downloads !== 'number') throw new Error('unexpected payload');
         setState({ downloads: data.downloads, loading: false, error: false });
-      })
-      .catch(() => {
+      } catch {
         if (cancelled) return;
         setState({ downloads: null, loading: false, error: true });
-      });
+      } finally {
+        // Clear the timeout as soon as the request settles, so it doesn't linger and abort a finished request
+        clearTimeout(timeout);
+      }
+    })();
 
     return () => {
       cancelled = true;

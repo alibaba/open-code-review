@@ -32,7 +32,7 @@ export const en = {
   'highlights.stat2Caption': 'Real npm downloads · last 30 days',
   'highlights.stat3Value': '3M+',
   'highlights.stat3Label': 'REAL-WORLD TASKS',
-  'highlights.stat3Caption': 'Battle-tested inside Alibaba Group',
+  'highlights.stat3Caption': 'Code review tasks executed to date',
   'highlights.stat4Value': '1/9',
   'highlights.stat4Label': 'TOKEN COST',
   'highlights.stat4Caption': 'vs. Claude Code · 1,000 PRs',

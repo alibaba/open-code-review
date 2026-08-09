@@ -34,7 +34,7 @@ export const zh: TranslationKeys = {
   'highlights.stat2Caption': 'npm 近 30 天真实下载',
   'highlights.stat3Value': '3M+',
   'highlights.stat3Label': '真实任务',
-  'highlights.stat3Caption': '经阿里巴巴集团内部实战验证',
+  'highlights.stat3Caption': '已执行的代码审查任务',
   'highlights.stat4Value': '1/9',
   'highlights.stat4Label': 'TOKEN 成本',
   'highlights.stat4Caption': '对比 Claude Code · 1,000 个 PR',
