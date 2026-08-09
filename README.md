@@ -145,10 +145,6 @@ ocr review --commit abc123
 ocr session list
 ocr review --from main --to feature-branch --resume <session-id>
 
-# Print the review comments recorded in a saved session
-ocr session comments <session-id>
-ocr session comments --severity critical,high --json <session-id>
-
 # Full-file scan — review whole files instead of a diff (no git history needed)
 ocr scan                          # scan the entire repository
 ocr scan --path internal/agent    # scan a directory or specific files
