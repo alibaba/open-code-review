@@ -2033,9 +2033,11 @@ func (m providerTUIModel) viewOfficialTab(s *strings.Builder) {
 
 	for i, p := range m.providers {
 		isCursor := i == m.officialIdx
-		s.WriteString(listCursorPrefix(isCursor) + renderListName(p.DisplayName, isCursor))
+		s.WriteString(listCursorPrefix(isCursor))
+		s.WriteString(renderListName(p.DisplayName, isCursor))
 		if activeModel := m.officialProviderActiveModel(p); activeModel != "" {
-			s.WriteString("  " + tuiDimStyle.Render("("+activeModel+")"))
+			s.WriteString("  ")
+			s.WriteString(tuiDimStyle.Render("(" + activeModel + ")"))
 		}
 		s.WriteString("\n")
 	}
@@ -2059,7 +2061,8 @@ func (m providerTUIModel) viewCustomTab(s *strings.Builder) {
 		s.WriteString(listCursorPrefixForModel(isCursor, highlight))
 		s.WriteString(renderModelName(cp.name, isCursor, highlight))
 		if activeModel != "" {
-			s.WriteString("  " + tuiDimStyle.Render("("+activeModel+")"))
+			s.WriteString("  ")
+			s.WriteString(tuiDimStyle.Render("(" + activeModel + ")"))
 		}
 		s.WriteString("\n")
 	}
@@ -2071,9 +2074,11 @@ func (m providerTUIModel) viewCustomTab(s *strings.Builder) {
 	}
 	addLabel := "+ Add custom provider"
 	if m.customIdx == addIdx {
-		s.WriteString(cursor + tuiSelectedItemStyle.Render(addLabel))
+		s.WriteString(cursor)
+		s.WriteString(tuiSelectedItemStyle.Render(addLabel))
 	} else {
-		s.WriteString(cursor + tuiDimStyle.Render(addLabel))
+		s.WriteString(cursor)
+		s.WriteString(tuiDimStyle.Render(addLabel))
 	}
 	s.WriteString("\n")
 
@@ -2115,29 +2120,44 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 
 	for _, f := range fields {
 		if f.active {
-			s.WriteString("  " + tuiSelectedItemStyle.Render(f.label+":") + "\n")
+			s.WriteString("  ")
+			s.WriteString(tuiSelectedItemStyle.Render(f.label + ":"))
+			s.WriteString("\n")
 			switch m.cpStep {
 			case cpStepName:
-				s.WriteString("    " + m.cpNameInput.View() + "\n")
+				s.WriteString("    ")
+				s.WriteString(m.cpNameInput.View())
+				s.WriteString("\n")
 			case cpStepProtocol:
 				for i, proto := range cpProtocols {
 					if i == m.cpProtocolIdx {
 						cur := "    " + tuiCursorStyle.Render(tuiCursor) + " "
-						s.WriteString(cur + tuiSelectedItemStyle.Render(proto) + "\n")
+						s.WriteString(cur)
+						s.WriteString(tuiSelectedItemStyle.Render(proto))
+						s.WriteString("\n")
 					} else {
 						cur := "      "
-						s.WriteString(cur + tuiItemStyle.Render(proto) + "\n")
+						s.WriteString(cur)
+						s.WriteString(tuiItemStyle.Render(proto))
+						s.WriteString("\n")
 					}
 				}
 			case cpStepBaseURL:
-				s.WriteString("    " + m.cpURLInput.View() + "\n")
+				s.WriteString("    ")
+				s.WriteString(m.cpURLInput.View())
+				s.WriteString("\n")
 			case cpStepAPIKey:
-				s.WriteString("    " + m.apiKeyInput.View() + "\n")
+				s.WriteString("    ")
+				s.WriteString(m.apiKeyInput.View())
+				s.WriteString("\n")
 				if m.apiKeyMasked && m.apiKeyOriginal != "" {
-					s.WriteString(tuiDimStyle.Render("    "+savedSecretReplaceHint(m.apiKeyOriginal)) + "\n")
+					s.WriteString(tuiDimStyle.Render("    " + savedSecretReplaceHint(m.apiKeyOriginal)))
+					s.WriteString("\n")
 				}
 			case cpStepAuthHeader:
-				s.WriteString("    " + m.cpAuthInput.View() + "\n")
+				s.WriteString("    ")
+				s.WriteString(m.cpAuthInput.View())
+				s.WriteString("\n")
 			}
 		} else {
 			display := f.value
@@ -2145,9 +2165,13 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 				display = "(Authorization)"
 			}
 			if display == "" {
-				s.WriteString("  " + tuiDimStyle.Render(f.label+":") + "\n")
+				s.WriteString("  ")
+				s.WriteString(tuiDimStyle.Render(f.label + ":"))
+				s.WriteString("\n")
 			} else {
-				s.WriteString("  " + tuiDimStyle.Render(f.label+": "+display) + "\n")
+				s.WriteString("  ")
+				s.WriteString(tuiDimStyle.Render(f.label + ": " + display))
+				s.WriteString("\n")
 			}
 		}
 	}
@@ -2195,29 +2219,44 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 
 	for _, f := range fields {
 		if f.active {
-			s.WriteString("  " + tuiSelectedItemStyle.Render(f.label+":") + "\n")
+			s.WriteString("  ")
+			s.WriteString(tuiSelectedItemStyle.Render(f.label + ":"))
+			s.WriteString("\n")
 			switch m.manualStep {
 			case manualStepURL:
-				s.WriteString("    " + m.manualURLInput.View() + "\n")
+				s.WriteString("    ")
+				s.WriteString(m.manualURLInput.View())
+				s.WriteString("\n")
 			case manualStepProtocol:
 				for i, proto := range cpProtocols {
 					if i == m.manualProtocolIdx {
 						cur := "    " + tuiCursorStyle.Render(tuiCursor) + " "
-						s.WriteString(cur + tuiSelectedItemStyle.Render(proto) + "\n")
+						s.WriteString(cur)
+						s.WriteString(tuiSelectedItemStyle.Render(proto))
+						s.WriteString("\n")
 					} else {
 						cur := "      "
-						s.WriteString(cur + tuiItemStyle.Render(proto) + "\n")
+						s.WriteString(cur)
+						s.WriteString(tuiItemStyle.Render(proto))
+						s.WriteString("\n")
 					}
 				}
 			case manualStepModel:
-				s.WriteString("    " + m.manualModelInput.View() + "\n")
+				s.WriteString("    ")
+				s.WriteString(m.manualModelInput.View())
+				s.WriteString("\n")
 			case manualStepAuthToken:
-				s.WriteString("    " + m.manualTokenInput.View() + "\n")
+				s.WriteString("    ")
+				s.WriteString(m.manualTokenInput.View())
+				s.WriteString("\n")
 				if m.manualTokenMasked && m.manualTokenOriginal != "" {
-					s.WriteString(tuiDimStyle.Render("    "+savedSecretReplaceHint(m.manualTokenOriginal)) + "\n")
+					s.WriteString(tuiDimStyle.Render("    " + savedSecretReplaceHint(m.manualTokenOriginal)))
+					s.WriteString("\n")
 				}
 			case manualStepAuthHeader:
-				s.WriteString("    " + m.manualAuthHeaderInput.View() + "\n")
+				s.WriteString("    ")
+				s.WriteString(m.manualAuthHeaderInput.View())
+				s.WriteString("\n")
 			}
 		} else {
 			display := f.value
@@ -2225,9 +2264,13 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 				display = "(Authorization)"
 			}
 			if display == "" {
-				s.WriteString("  " + tuiDimStyle.Render(f.label+":") + "\n")
+				s.WriteString("  ")
+				s.WriteString(tuiDimStyle.Render(f.label + ":"))
+				s.WriteString("\n")
 			} else {
-				s.WriteString("  " + tuiDimStyle.Render(f.label+": "+display) + "\n")
+				s.WriteString("  ")
+				s.WriteString(tuiDimStyle.Render(f.label + ": " + display))
+				s.WriteString("\n")
 			}
 		}
 	}
@@ -2264,18 +2307,22 @@ func (m providerTUIModel) viewModel(s *strings.Builder) {
 	isCursor := m.modelIdx == customIdx
 	customLabel := "Enter custom model name..."
 	if isCursor {
-		s.WriteString(listCursorPrefix(isCursor) + tuiSelectedItemStyle.Render(customLabel))
+		s.WriteString(listCursorPrefix(isCursor))
+		s.WriteString(tuiSelectedItemStyle.Render(customLabel))
 	} else {
-		s.WriteString(listCursorPrefix(isCursor) + tuiDimStyle.Render(customLabel))
+		s.WriteString(listCursorPrefix(isCursor))
+		s.WriteString(tuiDimStyle.Render(customLabel))
 	}
 	s.WriteString("\n")
 
 	if m.customModel {
 		s.WriteString("\n")
-		s.WriteString("  " + m.modelInput.View())
+		s.WriteString("  ")
+		s.WriteString(m.modelInput.View())
 		if m.formError != "" {
 			s.WriteString("\n")
-			s.WriteString("  " + tuiErrorStyle.Render(m.formError))
+			s.WriteString("  ")
+			s.WriteString(tuiErrorStyle.Render(m.formError))
 		}
 		s.WriteString("\n")
 	}
@@ -2283,7 +2330,8 @@ func (m providerTUIModel) viewModel(s *strings.Builder) {
 	s.WriteString("\n")
 
 	if m.confirmingDeleteModel {
-		s.WriteString("  " + tuiSelectedItemStyle.Render(fmt.Sprintf("Delete %q? (y/n)", m.deleteModelName)))
+		s.WriteString("  ")
+		s.WriteString(tuiSelectedItemStyle.Render(fmt.Sprintf("Delete %q? (y/n)", m.deleteModelName)))
 		s.WriteString("\n")
 		s.WriteString(tuiHelpStyle.Render("  y Confirm · n/Esc Cancel"))
 	} else if m.cursorOnDeletableModel() {
@@ -2305,7 +2353,8 @@ func (m providerTUIModel) viewAPIKey(s *strings.Builder) {
 	s.WriteString(tuiTitleStyle.Render(title))
 	s.WriteString("\n\n")
 
-	s.WriteString("  " + m.apiKeyInput.View())
+	s.WriteString("  ")
+	s.WriteString(m.apiKeyInput.View())
 	s.WriteString("\n")
 
 	// When an API key is already saved, the input starts masked. Surface a
@@ -2919,15 +2968,18 @@ func (m modelTUIModel) View() tea.View {
 	isCursor := m.modelIdx == customIdx
 	customLabel := "Enter custom model name..."
 	if isCursor {
-		s.WriteString(listCursorPrefix(isCursor) + tuiSelectedItemStyle.Render(customLabel))
+		s.WriteString(listCursorPrefix(isCursor))
+		s.WriteString(tuiSelectedItemStyle.Render(customLabel))
 	} else {
-		s.WriteString(listCursorPrefix(isCursor) + tuiDimStyle.Render(customLabel))
+		s.WriteString(listCursorPrefix(isCursor))
+		s.WriteString(tuiDimStyle.Render(customLabel))
 	}
 	s.WriteString("\n")
 
 	if m.customModel {
 		s.WriteString("\n")
-		s.WriteString("  " + m.modelInput.View())
+		s.WriteString("  ")
+		s.WriteString(m.modelInput.View())
 		s.WriteString("\n")
 	}
 
@@ -2940,7 +2992,8 @@ func (m modelTUIModel) View() tea.View {
 	s.WriteString("\n")
 
 	if m.confirmingDeleteModel {
-		s.WriteString("  " + tuiSelectedItemStyle.Render(fmt.Sprintf("Delete %q? (y/n)", m.deleteModelName)))
+		s.WriteString("  ")
+		s.WriteString(tuiSelectedItemStyle.Render(fmt.Sprintf("Delete %q? (y/n)", m.deleteModelName)))
 		s.WriteString("\n")
 		s.WriteString(tuiHelpStyle.Render("  y Confirm · n/Esc Cancel"))
 	} else if m.cursorOnUserAddedModel() {
