@@ -407,52 +407,24 @@ func TestWhyExcluded_PriorityOrder(t *testing.T) {
 	}
 }
 
-func TestShouldReview(t *testing.T) {
+// TestSelectFilesDeletionGate covers the one gate selectFiles adds over the
+// static ones: a deletion is never selected, however reviewable its path looks.
+// The static gates themselves are covered by the whyExcluded tables above.
+func TestSelectFilesDeletionGate(t *testing.T) {
 	agent := New(Args{})
 
-	tests := []struct {
-		name     string
-		diff     model.Diff
-		expected bool
-	}{
-		{
-			name: "binary file should not be reviewed",
-			diff: model.Diff{
-				NewPath:  "image.png",
-				IsBinary: true,
-			},
-			expected: false,
-		},
-		{
-			name: "regular go file should be reviewed",
-			diff: model.Diff{
-				NewPath: "main.go",
-			},
-			expected: true,
-		},
-		{
-			name: "test file should not be reviewed",
-			diff: model.Diff{
-				NewPath: "main_test.go",
-			},
-			expected: false,
-		},
-		{
-			name: "unsupported extension should not be reviewed",
-			diff: model.Diff{
-				NewPath: "README.md",
-			},
-			expected: false,
-		},
+	diffs := []model.Diff{
+		{OldPath: "main.go", NewPath: "main.go"},
+		{OldPath: "gone.go", NewPath: "/dev/null", IsDeleted: true},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := agent.shouldReview(tt.diff)
-			if got != tt.expected {
-				t.Errorf("shouldReview() = %v, want %v", got, tt.expected)
-			}
-		})
+	decisions := agent.selectFiles(diffs)
+	if !decisions[0].selected() {
+		t.Errorf("main.go reason = %q, want selected", decisions[0].Reason)
+	}
+	if decisions[1].selected() || decisions[1].Reason != ExcludeDeleted {
+		t.Errorf("gone.go = (selected=%v, reason=%q), want (false, %q)",
+			decisions[1].selected(), decisions[1].Reason, ExcludeDeleted)
 	}
 }
 
