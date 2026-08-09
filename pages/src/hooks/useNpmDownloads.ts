@@ -12,12 +12,12 @@ interface NpmDownloadsState {
 }
 
 /**
- * 实时获取某个 npm 包的下载量。
- * 数据源为 npm 官方统计 API（支持 CORS，可在纯静态页面直接调用）。
- * 请求失败时 error 为 true，调用方可据此优雅降级。
+ * Fetch the live download count for an npm package.
+ * The data source is the official npm stats API (CORS-enabled, callable directly from a purely static page).
+ * When the request fails, `error` is true so callers can degrade gracefully.
  *
- * 当前用于 HighlightsSection 的「NPM 社区下载量」指标：请求进行中或失败时，
- * 组件回退到 i18n 中的兜底静态值。
+ * Currently used by the "NPM community downloads" stat in HighlightsSection: while the
+ * request is in flight or has failed, the component falls back to the static i18n value.
  */
 export function useNpmDownloads(pkg: string, period: Period = 'last-month'): NpmDownloadsState {
   const [state, setState] = useState<NpmDownloadsState>({
@@ -30,11 +30,12 @@ export function useNpmDownloads(pkg: string, period: Period = 'last-month'): Npm
     let cancelled = false;
     setState({ downloads: null, loading: true, error: false });
 
-    // 弱网或 API 无响应时，超时后 abort 请求并降级，避免界面长期卡在 loading
+    // On a slow network or an unresponsive API, abort the request after a timeout and degrade,
+    // so the UI does not stay stuck in the loading state indefinitely
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
 
-    // pkg 可能是 scoped 包名（含 `/`），编码后再插值以保证 URL 路径合法
+    // pkg may be a scoped package name (containing `/`), so encode it before interpolation to keep the URL path valid
     fetch(`https://api.npmjs.org/downloads/point/${period}/${encodeURIComponent(pkg)}`, {
       signal: controller.signal,
     })
