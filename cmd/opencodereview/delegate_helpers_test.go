@@ -6,6 +6,8 @@ package main
 import (
 	"context"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestValidateDelegateOptions(t *testing.T) {
@@ -31,6 +33,42 @@ func TestValidateDelegateOptions(t *testing.T) {
 				t.Errorf("validateDelegateOptions() err = %v, wantErr %v", err, c.wantErr)
 			}
 		})
+	}
+}
+
+func TestDelegateFlags_RegisterJSONFormat(t *testing.T) {
+	var opts delegateOptions
+	cmd := &cobra.Command{
+		Use:           "preview",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return validateDelegateOptions(&opts)
+		},
+	}
+	registerDelegateFlags(cmd, &opts)
+	cmd.SetArgs([]string{"--format", "json"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("delegate preview rejected --format json: %v", err)
+	}
+	if opts.format != "json" {
+		t.Fatalf("format = %q, want json", opts.format)
+	}
+
+	formatFlag := cmd.Flags().Lookup("format")
+	if formatFlag == nil {
+		t.Fatal("delegate preview did not register --format")
+	}
+	if formatFlag.Shorthand != "f" {
+		t.Fatalf("format shorthand = %q, want f", formatFlag.Shorthand)
+	}
+
+	for _, command := range []*cobra.Command{delegatePreviewCmd, delegateRuleCmd} {
+		if command.Flags().Lookup("format") == nil {
+			t.Errorf("%s did not register --format", command.Name())
+		}
 	}
 }
 

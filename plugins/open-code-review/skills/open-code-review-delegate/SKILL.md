@@ -41,6 +41,20 @@ npm install -g @alibaba-group/open-code-review
 
 No LLM configuration is needed for delegation mode.
 
+The delegation JSON workflow requires an OCR CLI release that supports the
+`--format` flag on both `delegate preview` and `delegate rule`. Verify the
+installed binary before starting:
+
+```bash
+ocr delegate preview --help
+```
+
+Continue only when the help output includes `--format` (or `-f`). If the flag
+is missing, the installed CLI is older than this skill's JSON protocol. Upgrade
+OCR to a release that supports delegation JSON output before continuing; do not
+silently fall back to text output because the steps below consume structured
+fields such as `reviewable_files`, `mode`, and `merge_base`.
+
 ## Workflow
 
 ### Step 1: Preview — Determine What to Review
