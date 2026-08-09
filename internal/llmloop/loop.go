@@ -247,12 +247,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		taskCompleted := false
 		hasValidResult := false
 
-		// Prefer the model's native reasoning content; fall back to the
-		// assistant message of this turn for models that do not expose it.
+		// Capture the model's native reasoning content for this turn. Models
+		// without a reasoning channel leave it empty.
 		thinking := resp.ReasoningContent()
-		if thinking == "" {
-			thinking = content
-		}
 		for _, call := range calls {
 			cp := r.executeToolCall(ctx, newPath, call, rec, thinking)
 			if cp.Failed {

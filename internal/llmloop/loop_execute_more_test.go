@@ -8,11 +8,114 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
+
+// scriptedLLMClient returns a fixed sequence of responses, one per call,
+// letting tests drive the full main loop turn by turn.
+type scriptedLLMClient struct {
+	responses []*llm.ChatResponse
+	calls     int
+}
+
+func (s *scriptedLLMClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	if s.calls >= len(s.responses) {
+		return s.responses[len(s.responses)-1], nil
+	}
+	resp := s.responses[s.calls]
+	s.calls++
+	return resp, nil
+}
+
+// newThinkingTestRunner builds a Runner wired for a full RunPerFile pass:
+// a scripted LLM client, the code_comment tool, and a comment collector.
+func newThinkingTestRunner(t *testing.T, client llm.LLMClient) (*Runner, *tool.CommentCollector) {
+	t.Helper()
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+	r := NewRunner(Deps{
+		LLMClient:        client,
+		Model:            "test-model",
+		Template:         template.Template{MaxToolRequestTimes: 5, MaxTokens: 1000000},
+		Tools:            reg,
+		CommentCollector: collector,
+		MainToolDefs:     []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: tool.CodeComment.Name()}}},
+		Session:          session.New(t.TempDir(), "main", "test-model", session.SessionOptions{ReviewMode: "diff"}),
+	})
+	return r, collector
+}
+
+func codeCommentResponse(reasoning, content string) *llm.ChatResponse {
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{
+			Content:          &content,
+			ReasoningContent: reasoning,
+			ToolCalls: []llm.ToolCall{{
+				ID:   "call_comment",
+				Type: "function",
+				Function: llm.FunctionCall{
+					Name:      tool.CodeComment.Name(),
+					Arguments: `{"comments":[{"content":"issue","existing_code":"x"}]}`,
+				},
+			}},
+		}}},
+	}
+}
+
+// TestRunPerFile_BackfillsThinkingFromReasoningContent verifies the full
+// wiring: the model's native reasoning_content on a tool-calling turn is
+// backfilled into the comment's thinking, while the turn's assistant
+// content is ignored.
+func TestRunPerFile_BackfillsThinkingFromReasoningContent(t *testing.T) {
+	client := &scriptedLLMClient{responses: []*llm.ChatResponse{
+		codeCommentResponse("native reasoning", "I'll now leave a comment on this file"),
+		taskDoneResponse(),
+	}}
+	r, collector := newThinkingTestRunner(t, client)
+
+	ok, _, err := r.RunPerFile(context.Background(), []llm.Message{msg("user", "review")}, "file.go")
+	if err != nil || !ok {
+		t.Fatalf("RunPerFile = (%v, err %v), want completed", ok, err)
+	}
+
+	comments := collector.Comments()
+	if len(comments) != 1 {
+		t.Fatalf("collected %d comments, want 1", len(comments))
+	}
+	if comments[0].Thinking != "native reasoning" {
+		t.Errorf("comment Thinking = %q, want native reasoning_content", comments[0].Thinking)
+	}
+}
+
+// TestRunPerFile_NoFallbackToContent is a regression test: when a turn has
+// assistant content but no reasoning_content, the comment thinking must stay
+// empty. It fails if the removed `thinking = content` fallback returns.
+func TestRunPerFile_NoFallbackToContent(t *testing.T) {
+	client := &scriptedLLMClient{responses: []*llm.ChatResponse{
+		codeCommentResponse("", "I'll now leave a comment on this file"),
+		taskDoneResponse(),
+	}}
+	r, collector := newThinkingTestRunner(t, client)
+
+	ok, _, err := r.RunPerFile(context.Background(), []llm.Message{msg("user", "review")}, "file.go")
+	if err != nil || !ok {
+		t.Fatalf("RunPerFile = (%v, err %v), want completed", ok, err)
+	}
+
+	comments := collector.Comments()
+	if len(comments) != 1 {
+		t.Fatalf("collected %d comments, want 1", len(comments))
+	}
+	if comments[0].Thinking != "" {
+		t.Errorf("comment Thinking = %q, want empty (no content fallback)", comments[0].Thinking)
+	}
+}
 
 // TestExecuteToolCall_TaskDone covers every branch of the task_done handling:
 // argument parse error, missing state (implicit completion), non-string state,

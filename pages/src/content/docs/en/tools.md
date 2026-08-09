@@ -91,7 +91,7 @@ agent also injects `path` automatically when the model leaves it out, so
 the model rarely needs to set it explicitly. `thinking` (per-comment)
 captures the model's reasoning and is preserved on the comment; OCR
 backfills it from the reasoning content the model emits on the current
-turn (or the turn's message when there is none), and includes it in
+turn (it stays empty when the model emits none), and includes it in
 the JSON output (the terminal output does not
 render it).
 
