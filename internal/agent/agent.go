@@ -1355,7 +1355,9 @@ func (a *Agent) buildChangeFilesExcept(excludePath string) string {
 		case d.OldPath != d.NewPath:
 			status = "RENAMED"
 		}
-		sb.WriteString(status + "   " + d.NewPath)
+		sb.WriteString(status)
+		sb.WriteString("   ")
+		sb.WriteString(d.NewPath)
 		if i < len(a.diffs)-1 {
 			sb.WriteString("\n")
 		}
