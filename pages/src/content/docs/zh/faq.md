@@ -94,7 +94,7 @@ node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
 ```
 
-五种排除原因对应[文件过滤](../review-rules/#how-files-are-filtered)中的门：
+这些排除原因对应[文件过滤](../review-rules/#how-files-are-filtered)中的门：
 
 | 原因 | 修复 |
 |---|---|
@@ -103,6 +103,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `unsupported_ext` | 把扩展名加入你的 `include` 列表以绕过白名单门。 |
 | `default_path` | 把文件加入 `include`——那会覆盖内置测试文件排除模式。 |
 | `deleted` | 无需处理——没有新内容可评审。 |
+| `too_large` | 仅 diff 本身就超过 `max_tokens` 的 80%。调高 `--max-tokens`（或已保存的 `max_tokens`），或把改动拆成更小的 commit。 |
 
 ### 我的自定义规则没触发
 

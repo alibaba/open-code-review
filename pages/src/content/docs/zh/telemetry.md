@@ -97,6 +97,7 @@ LLM 往返和工具执行**不**作为单独 span 发出——它们只出现在
 | `subtask.execute.<file>` | `file.path`、`lines.changed`、`lines.inserted`、`lines.deleted` |
 | `event.review.started` | `file.count`、`review.count`、`repo.dir` |
 | `event.plan.skipped` | `file.path`、`lines.changed`、`threshold` |
+| `event.review.skipped` | `reason`（`too_large` / `deleted` / `no_supported_files`）、`file.count`、`too_large.count` |
 | `event.plan.failed` | `file.path`、`message` |
 | `event.token.threshold.exceeded` | `file.path`、`tokens`、`max_tokens` |
 | `event.subtask.error` | `file.path`、`error` |
@@ -124,6 +125,7 @@ OCR 通过 OTel meter 记录数值 metric——计数与直方图，由 collecto
 |---|---|
 | `review.started` | diff 已加载；我们知道将评审多少文件。 |
 | `no.files.changed` | diff 解析出零文件。 |
+| `review.skipped` | 选择结果为空，没有文件可评审；`reason` 为 `too_large`、`deleted` 或 `no_supported_files`。 |
 | `plan.skipped` | 某文件低于 `PLAN_MODE_LINE_THRESHOLD`。 |
 | `plan.failed` | plan 阶段出错；main 循环无 plan 运行。 |
 | `token.threshold.exceeded` | 初始 prompt token > `MAX_TOKENS` 的 80 %；文件被跳过。 |

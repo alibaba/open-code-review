@@ -267,15 +267,47 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	a.injectDiffMap()
 	a.args.Tools.Freeze()
 
+	// Apply the one pre-dispatch selection — the same call `--preview` makes —
+	// so the set reported here is the set registerCoverage seals below.
+	decisions := a.selectFiles(a.diffs)
+	kept, counts := summarizeSelection(decisions)
 	totalChanged := len(a.diffs)
-	reviewCount := a.countReviewable(a.diffs)
+	reviewCount := counts.Selected
 	fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) changed, reviewing %d in %s\n", totalChanged, reviewCount, a.args.RepoDir)
 
-	a.diffs = a.filterDiffs(a.diffs)
+	a.logExclusions(decisions)
+	a.diffs = kept
+
+	// One run-level skip signal, keyed on the selected set rather than on what
+	// the run keeps: deletions are retained for prompt context but never
+	// reviewed, so a deletion-only changeset is skipped too. The cause goes in an
+	// attribute because no event name is accurate on its own — a size-gated skip
+	// can coexist with statically filtered files — and the reasons are ordered
+	// most-actionable first.
+	if counts.Selected == 0 {
+		skipReason := "no_supported_files"
+		switch {
+		case counts.TooLarge > 0:
+			skipReason = "too_large"
+		case len(kept) > 0:
+			skipReason = "deleted"
+		}
+		telemetry.Event(ctx, "review.skipped",
+			telemetry.AnyToAttr("reason", skipReason),
+			telemetry.AnyToAttr("file.count", totalChanged),
+			telemetry.AnyToAttr("too_large.count", counts.TooLarge))
+	}
 
 	if len(a.diffs) == 0 {
-		fmt.Fprintln(stdout.Writer(), "[ocr] No supported files changed. Skipping review.")
-		telemetry.Event(ctx, "no.files.changed")
+		// no.files.changed keeps firing for the case it always covered, so existing
+		// consumers are unaffected; it stayed silent when the size gate emptied the
+		// set, which is the reading review.skipped adds.
+		if counts.TooLarge > 0 {
+			fmt.Fprintf(stdout.Writer(), "[ocr] %d file(s) exceeded the token size limit; nothing left to review. Skipping review.\n", counts.TooLarge)
+		} else {
+			fmt.Fprintln(stdout.Writer(), "[ocr] No supported files changed. Skipping review.")
+			telemetry.Event(ctx, "no.files.changed")
+		}
 		// No item was ever selected: finalize yields a skipped manifest (no
 		// run_failure), which is the correct terminal state for "nothing to do".
 		// A persistence failure here is still a delivery error — a clean skip
@@ -492,15 +524,6 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	defer func() {
 		telemetry.RecordReviewDuration(ctx, time.Since(startTime))
 	}()
-
-	// Pre-filter: discard diffs whose diff content alone exceeds 80% of the token threshold.
-	a.diffs = a.filterLargeDiffs(a.diffs)
-	if len(a.diffs) == 0 {
-		// Everything oversized: nothing is selected, so this is a skipped run
-		// (empty coverage → terminal_state=skipped), not a hard error.
-		fmt.Fprintln(stdout.Writer(), "[ocr] All changed files exceeded the token size limit. Skipping review.")
-		return nil, nil
-	}
 
 	// Pre-dispatch pass: freeze the coverage denominator before any reuse or
 	// concurrent dispatch. Register every non-deleted planned item (reused and
@@ -1372,76 +1395,41 @@ func (a *Agent) resolveSystemRule(path string) string {
 	return a.args.SystemRule.Resolve(path)
 }
 
-// filterLargeDiffs drops diffs whose diff content alone consumes more than 80% of MaxTokens.
-func (a *Agent) filterLargeDiffs(diffs []model.Diff) []model.Diff {
-	limit := llmloop.PromptTokenLimit(a.args.Template.MaxTokens)
-	if limit <= 0 {
-		return diffs
-	}
-	var kept []model.Diff
-	skipped := 0
-
-	for _, d := range diffs {
-		tokens := llm.CountTokens(d.Diff)
-		if tokens > limit {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
-				d.NewPath, tokens, a.args.Template.MaxTokens)
-			skipped++
+// logExclusions reports the files the selection dropped: the static gates
+// first with their rollup, then the size gate with its own, so the two groups
+// stay distinguishable in the log. Deletions are not reported — they are
+// excluded from review but not dropped from the run, as before.
+func (a *Agent) logExclusions(decisions []fileDecision) {
+	staticSkipped := 0
+	for _, dec := range decisions {
+		// Listed exhaustively rather than defaulted, so a reason added later
+		// cannot silently inherit the path/extension wording.
+		switch dec.Reason {
+		case ExcludeBinary:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", effectivePath(dec.Diff))
+		case ExcludeUserRule, ExcludeExtension, ExcludeDefaultPath:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", effectivePath(dec.Diff))
+		default:
 			continue
 		}
-		kept = append(kept, d)
+		staticSkipped++
+	}
+	if staticSkipped > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", staticSkipped)
 	}
 
-	if skipped > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", skipped)
-	}
-	return kept
-}
-
-// countReviewable counts diffs that will survive all filters and are not pure deletions.
-func (a *Agent) countReviewable(diffs []model.Diff) int {
-	count := 0
-	for _, d := range diffs {
-		if !a.shouldReview(d) {
+	tooLarge := 0
+	for _, dec := range decisions {
+		if dec.Reason != ExcludeTooLarge {
 			continue
 		}
-		if d.IsDeleted {
-			continue
-		}
-		count++
+		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
+			dec.Diff.NewPath, dec.DiffTokens, a.args.Template.MaxTokens)
+		tooLarge++
 	}
-	return count
-}
-
-// shouldReview applies the filter algorithm via whyExcluded.
-func (a *Agent) shouldReview(d model.Diff) bool {
-	return a.whyExcluded(d) == ExcludeNone
-}
-
-// filterDiffs drops diffs that should not be reviewed based on user-configured
-// include/exclude patterns and default extension/path filters.
-func (a *Agent) filterDiffs(diffs []model.Diff) []model.Diff {
-	var kept []model.Diff
-	skipped := 0
-
-	for _, d := range diffs {
-		path := effectivePath(d)
-		if !a.shouldReview(d) {
-			if d.IsBinary {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", path)
-			} else {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", path)
-			}
-			skipped++
-			continue
-		}
-		kept = append(kept, d)
+	if tooLarge > 0 {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", tooLarge)
 	}
-
-	if skipped > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", skipped)
-	}
-	return kept
 }
 
 // extFromPath returns the file extension with leading dot, lowercased.

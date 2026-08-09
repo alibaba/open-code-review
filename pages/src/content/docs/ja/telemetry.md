@@ -97,6 +97,7 @@ LLM の往復とツールの実行は個別の span としては発行**され�
 | `subtask.execute.<file>` | `file.path`、`lines.changed`、`lines.inserted`、`lines.deleted` |
 | `event.review.started` | `file.count`、`review.count`、`repo.dir` |
 | `event.plan.skipped` | `file.path`、`lines.changed`、`threshold` |
+| `event.review.skipped` | `reason`（`too_large` / `deleted` / `no_supported_files`）、`file.count`、`too_large.count` |
 | `event.plan.failed` | `file.path`、`message` |
 | `event.token.threshold.exceeded` | `file.path`、`tokens`、`max_tokens` |
 | `event.subtask.error` | `file.path`、`error` |
@@ -124,6 +125,7 @@ OCR は OTel meter を通じて数値 metric を記録します——カウン�
 |---|---|
 | `review.started` | diff がロードされた。何ファイルをレビューするか判明している。 |
 | `no.files.changed` | diff の解析で 0 ファイルとなった。 |
+| `review.skipped` | 選択の結果、レビュー対象が残らなかった。`reason` は `too_large`、`deleted`、`no_supported_files` のいずれか。 |
 | `plan.skipped` | あるファイルが `PLAN_MODE_LINE_THRESHOLD` を下回った。 |
 | `plan.failed` | plan フェーズでエラー。main ループは plan なしで実行される。 |
 | `token.threshold.exceeded` | 初期 prompt token が `MAX_TOKENS` の 80 % を超えた。ファイルはスキップされる。 |
