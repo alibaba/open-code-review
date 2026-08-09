@@ -55,6 +55,21 @@ To upgrade later:
 brew upgrade open-code-review
 ```
 
+#### Shell Completion
+
+To enable shell completion after installing via Homebrew:
+
+```bash
+# zsh
+ocr completion zsh > "$(brew --prefix)/share/zsh/site-functions/_ocr"
+
+# bash
+ocr completion bash > "$(brew --prefix)/etc/bash_completion.d/ocr"
+
+# fish
+ocr completion fish > ~/.config/fish/completions/ocr.fish
+```
+
 ## MacPorts (macOS)
 
 ```bash
