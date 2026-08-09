@@ -52,6 +52,21 @@ brew install open-code-review
 brew upgrade open-code-review
 ```
 
+#### Shell 自动补全
+
+通过 Homebrew 安装后，若需开启 Shell 自动补全：
+
+```bash
+# zsh
+ocr completion zsh > "$(brew --prefix)/share/zsh/site-functions/_ocr"
+
+# bash
+ocr completion bash > "$(brew --prefix)/etc/bash_completion.d/ocr"
+
+# fish
+ocr completion fish > ~/.config/fish/completions/ocr.fish
+```
+
 ## MacPorts（macOS）
 
 ```bash
