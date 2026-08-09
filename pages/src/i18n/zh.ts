@@ -27,12 +27,12 @@ export const zh: TranslationKeys = {
 
   // Highlights
   'highlights.stat1Value': '20K+',
-  'highlights.stat1Label': '活跃用户',
+  'highlights.stat1Label': '内部活跃用户',
   'highlights.stat1Caption': '经阿里巴巴集团内部实战验证',
-  'highlights.stat2Value': '> 30%',
-  'highlights.stat2Label': '采纳率',
-  'highlights.stat2Caption': '经阿里巴巴集团内部实战验证',
-  'highlights.stat3Value': '1M+',
+  'highlights.stat2Value': '150K+',
+  'highlights.stat2Label': 'NPM 社区下载量',
+  'highlights.stat2Caption': 'npm 近 30 天真实下载',
+  'highlights.stat3Value': '3M+',
   'highlights.stat3Label': '真实任务',
   'highlights.stat3Caption': '已执行的代码审查任务',
   'highlights.stat4Value': '1/9',
