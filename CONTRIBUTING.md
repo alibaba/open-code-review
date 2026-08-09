@@ -47,7 +47,7 @@ make test
 
 If everything passes, you're ready to contribute.
 
-> **Note:** The `upstream` remote is read-only for contributors — it is used to pull the latest changes from the main repository. You cannot push directly to upstream. All contributions must be pushed to your fork (`origin`) and submitted via Pull Request.
+> **Note:** The `upstream` remote is read-only for contributors — it is used to pull the latest changes from the main repository. You cannot push directly to upstream. All commits must be pushed to your fork (`origin`) and submitted via Pull Request.
 
 ## Development Workflow
 
