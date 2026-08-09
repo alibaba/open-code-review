@@ -4,10 +4,33 @@
 package agent
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 )
+
+type fakeGroupingClient struct {
+	response string
+	err      error
+}
+
+func (f *fakeGroupingClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	content := f.response
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{Role: "assistant", Content: &content},
+		}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{TotalTokens: 100},
+	}, nil
+}
 
 func TestToSingleFileGroups(t *testing.T) {
 	diffs := []model.Diff{
@@ -150,6 +173,109 @@ func TestEnforceGroupTokenBudget_Split(t *testing.T) {
 	result := enforceGroupTokenBudget(groups, 100)
 	if len(result) != 2 {
 		t.Fatalf("got %d groups, want 2 (split)", len(result))
+	}
+}
+
+func TestEnforceMaxFilesPerGroup_NoSplit(t *testing.T) {
+	groups := []FileGroup{
+		{Label: "small", Diffs: []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}}},
+	}
+	result := enforceMaxFilesPerGroup(groups)
+	if len(result) != 1 {
+		t.Fatalf("got %d groups, want 1", len(result))
+	}
+}
+
+func TestEnforceMaxFilesPerGroup_Split(t *testing.T) {
+	diffs := make([]model.Diff, 25)
+	for i := range diffs {
+		diffs[i] = model.Diff{NewPath: "file" + string(rune('a'+i)) + ".go"}
+	}
+	groups := []FileGroup{{Label: "big", Diffs: diffs}}
+	result := enforceMaxFilesPerGroup(groups)
+	if len(result) != 3 {
+		t.Fatalf("got %d groups, want 3 (25 files / 10 max = 3 chunks)", len(result))
+	}
+	if len(result[0].Diffs) != 10 || len(result[1].Diffs) != 10 || len(result[2].Diffs) != 5 {
+		t.Errorf("chunk sizes: %d, %d, %d", len(result[0].Diffs), len(result[1].Diffs), len(result[2].Diffs))
+	}
+}
+
+func TestFileGroupKey_Single(t *testing.T) {
+	key := fileGroupKey([]model.Diff{{NewPath: "a.go"}})
+	if key != "a.go" {
+		t.Errorf("got %q, want %q", key, "a.go")
+	}
+}
+
+func TestFileGroupKey_Multiple(t *testing.T) {
+	key := fileGroupKey([]model.Diff{{NewPath: "b.go"}, {NewPath: "a.go"}})
+	if key != "a.go,b.go" {
+		t.Errorf("got %q, want %q (sorted)", key, "a.go,b.go")
+	}
+}
+
+func TestGroupDiffs_SingleFile(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}}
+	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0)
+	if len(result.groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(result.groups))
+	}
+}
+
+func TestGroupDiffs_NoGroupingTask(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}}
+	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0)
+	if len(result.groups) != 2 {
+		t.Fatalf("got %d groups, want 2 (fallback to per-file)", len(result.groups))
+	}
+}
+
+func TestGroupDiffs_LLMError_Fallback(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}}
+	client := &fakeGroupingClient{err: fmt.Errorf("connection refused")}
+	tpl := template.Template{
+		GroupingTask: &template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_metadata_table}}"}},
+		},
+	}
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
+	if len(result.groups) != 2 {
+		t.Fatalf("got %d groups, want 2 (fallback on error)", len(result.groups))
+	}
+}
+
+func TestGroupDiffs_LLMSuccess(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}, {NewPath: "c.go"}}
+	client := &fakeGroupingClient{
+		response: `[{"label":"ab","files":["a.go","b.go"]},{"label":"c","files":["c.go"]}]`,
+	}
+	tpl := template.Template{
+		GroupingTask: &template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_metadata_table}}"}},
+		},
+	}
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
+	if len(result.groups) != 2 {
+		t.Fatalf("got %d groups, want 2", len(result.groups))
+	}
+	if result.groups[0].Label != "ab" {
+		t.Errorf("group 0 label = %q, want %q", result.groups[0].Label, "ab")
+	}
+	if len(result.groups[0].Diffs) != 2 {
+		t.Errorf("group 0 has %d diffs, want 2", len(result.groups[0].Diffs))
+	}
+}
+
+func TestCallGroupingLLM_EmptyResponse(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}}
+	client := &fakeGroupingClient{response: ""}
+	task := &template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_metadata_table}}"}},
+	}
+	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task)
+	if err == nil {
+		t.Fatal("expected error for empty response")
 	}
 }
 
