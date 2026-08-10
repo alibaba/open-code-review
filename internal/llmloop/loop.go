@@ -249,6 +249,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 		// Capture the model's native reasoning content for this turn. Models
 		// without a reasoning channel leave it empty.
+		// Reasoning is turn-level, so all tool calls in this turn share it.
 		thinking := resp.ReasoningContent()
 		for _, call := range calls {
 			cp := r.executeToolCall(ctx, newPath, call, rec, thinking)
@@ -401,6 +402,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 			return tool.Of(errMsg)
 		}
 
+		// Batched comments share the turn's thinking.
 		if thinking != "" {
 			for i := range comments {
 				if comments[i].Thinking == "" {
