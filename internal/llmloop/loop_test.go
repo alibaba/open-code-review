@@ -525,7 +525,7 @@ func TestExecuteToolCall_ArgumentsEdgeCases(t *testing.T) {
 					Name:      tt.toolName,
 					Arguments: tt.arguments,
 				},
-			}, nil)
+			}, nil, "")
 
 			if tt.wantContains != "" && !strings.Contains(cp.Data, tt.wantContains) {
 				t.Errorf("cp.Data = %q, want substring %q", cp.Data, tt.wantContains)
@@ -581,7 +581,7 @@ func TestExecuteToolCall_CodeCommentOverridesHallucinatedPath(t *testing.T) {
 			Name:      "code_comment",
 			Arguments: string(argsJSON),
 		},
-	}, nil)
+	}, nil, "")
 	if cp.Data != tool.CommentSucceed {
 		t.Fatalf("unexpected result: %+v", cp)
 	}

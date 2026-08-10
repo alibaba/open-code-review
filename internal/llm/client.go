@@ -172,6 +172,14 @@ func (r *ChatResponse) ToolCalls() []ToolCall {
 	return r.Choices[0].Message.ToolCalls
 }
 
+// ReasoningContent extracts the reasoning content of the first choice, if any.
+func (r *ChatResponse) ReasoningContent() string {
+	if len(r.Choices) == 0 {
+		return ""
+	}
+	return r.Choices[0].Message.ReasoningContent
+}
+
 // ToolDef defines a tool/function available to the model.
 type ToolDef struct {
 	Type     string      `json:"type"`
