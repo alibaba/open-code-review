@@ -764,10 +764,9 @@ func sanitizeRetryCodes(codes []int) (filtered []int, warnings []string, err err
 }
 
 // ParseRetryCodes parses a comma-separated list of HTTP status codes that
-// should trigger retry. Only 4xx codes not already retried by the SDK
-// (408, 409, 429) are accepted; 5xx codes are rejected because the SDK
-// retries all of them by default. SDK-default codes are silently filtered
-// out and reported as warnings. An empty input returns nil.
+// should trigger retry. Non-4xx codes return an error; SDK-default codes
+// (408, 409, 429) are filtered out and reported via warnings; the
+// remaining codes are returned. An empty input returns nil.
 func ParseRetryCodes(raw string) ([]int, []string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
