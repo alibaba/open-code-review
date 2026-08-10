@@ -4,31 +4,153 @@
 package llmloop
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 )
+
+type countingLLMClient struct {
+	calls int
+}
+
+func (c *countingLLMClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.calls++
+	summary := "compressed summary"
+	return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}}}}, nil
+}
 
 func msg(role, text string) llm.Message {
 	return llm.NewTextMessage(role, text)
 }
 
-func TestCountMessagesTokens(t *testing.T) {
-	msgs := []llm.Message{
-		msg("user", "hello world"),
-		msg("assistant", "hi there"),
-	}
-	got := CountMessagesTokens(msgs)
-	if got <= 0 {
-		t.Errorf("expected positive token count, got %d", got)
+func replayableAssistantToolConversation(userPrompt string) []llm.Message {
+	toolCalls := []llm.ToolCall{{ID: "call-1", Type: "function", Function: llm.FunctionCall{Name: "file_read", Arguments: `{}`}}}
+	return []llm.Message{
+		msg("system", "system"),
+		msg("user", userPrompt),
+		llm.NewReplayStateMessageForTesting("inspect", toolCalls),
+		llm.NewToolResultMessage("call-1", "result"),
 	}
 }
 
-func TestCountMessagesTokens_Empty(t *testing.T) {
-	got := CountMessagesTokens(nil)
-	if got != 0 {
-		t.Errorf("expected 0 for nil, got %d", got)
+func newCompressionTestRunner(t *testing.T, client llm.LLMClient, maxTokens int) *Runner {
+	t.Helper()
+	t_tempDir = t.TempDir()
+	return newTestRunner(client, template.Template{
+		MaxTokens:             maxTokens,
+		MemoryCompressionTask: template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "Summarize {{context}}"}}},
+	})
+}
+
+func TestCompressionRetainsOversizedLatestRoundWithReplayState(t *testing.T) {
+	t_tempDir = t.TempDir()
+	visible := strings.Repeat("visible ", 100)
+	toolCalls := []llm.ToolCall{{ID: "call-1", Type: "function", Function: llm.FunctionCall{Name: "file_read", Arguments: `{}`}}}
+	messages := []llm.Message{
+		msg("system", "system"),
+		msg("user", "review"),
+		llm.NewReplayStateMessageForTesting(visible, toolCalls),
+		llm.NewToolResultMessage("call-1", "result"),
+	}
+	runner := newTestRunner(&fakeLLMClient{response: &llm.ChatResponse{}}, template.Template{
+		MaxTokens:             10,
+		MemoryCompressionTask: template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "Summarize {{context}}"}}},
+	})
+	got, err := runner.runCompression(context.Background(), messages, "test.go")
+	if err == nil {
+		t.Fatal("expected oversized replay-carrying round to stop compression")
+	}
+	if len(got) != len(messages) || got[2].Role != "assistant" || got[3].ToolCallID != "call-1" {
+		t.Fatalf("compression dropped or split latest assistant/tool round: %+v", got)
+	}
+}
+
+// TestCompressionDegradesOversizedLatestRoundWithoutReplayState pins the
+// pre-envelope behavior: an oversized latest round that carries no opaque
+// replay state is summarized like any other round instead of aborting the
+// review.
+func TestCompressionDegradesOversizedLatestRoundWithoutReplayState(t *testing.T) {
+	t_tempDir = t.TempDir()
+	visible := strings.Repeat("visible ", 100)
+	turn := (&llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{
+		Content:   &visible,
+		ToolCalls: []llm.ToolCall{{ID: "call-1", Type: "function", Function: llm.FunctionCall{Name: "file_read", Arguments: `{}`}}},
+	}}}}).AssistantTurn().Message()
+	messages := []llm.Message{
+		msg("system", "system"),
+		msg("user", "review"),
+		turn,
+		llm.NewToolResultMessage("call-1", "result"),
+	}
+	summary := "condensed history"
+	runner := newTestRunner(&fakeLLMClient{response: &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}}},
+	}}, template.Template{
+		MaxTokens:             10,
+		MemoryCompressionTask: template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "Summarize {{context}}"}}},
+	})
+	got, err := runner.runCompression(context.Background(), messages, "test.go")
+	if err != nil {
+		t.Fatalf("runCompression: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected degradation to frozen zone + summary, got %d messages", len(got))
+	}
+	if !strings.Contains(got[1].ExtractText(), "<previous_review_summary>") {
+		t.Fatalf("summary missing from rebuilt prompt: %s", got[1].ExtractText())
+	}
+}
+
+func TestCompressionRetainsLatestAssistantToolRoundWhenFrozenZoneConsumesBudget(t *testing.T) {
+	client := &countingLLMClient{}
+	messages := replayableAssistantToolConversation(strings.Repeat("frozen prompt ", 100))
+	runner := newCompressionTestRunner(t, client, 100)
+
+	got, err := runner.runCompression(context.Background(), messages, "test.go")
+
+	if err == nil {
+		t.Fatal("expected frozen zone to leave too little budget for the latest replayable round")
+	}
+	if client.calls != 0 {
+		t.Fatalf("compression client calls = %d, want 0", client.calls)
+	}
+	if len(got) != len(messages) {
+		t.Fatalf("compression dropped or split latest assistant/tool round: %+v", got)
+	}
+	if !got[2].IsReplayable() || len(got[2].ToolCalls) != 1 || got[2].ToolCalls[0].ID != "call-1" {
+		t.Fatalf("compression changed latest assistant replay: %+v", got[2])
+	}
+	if got[3].Role != "tool" || got[3].ToolCallID != "call-1" || got[3].ExtractText() != "result" {
+		t.Fatalf("compression detached latest tool result: %+v", got[3])
+	}
+}
+
+func TestCompressionAllFittingConversationIsNoOp(t *testing.T) {
+	client := &countingLLMClient{}
+	messages := replayableAssistantToolConversation("review")
+	runner := newCompressionTestRunner(t, client, 1000)
+
+	got, err := runner.runCompression(context.Background(), messages, "test.go")
+
+	if err != nil {
+		t.Fatalf("runCompression: %v", err)
+	}
+	if client.calls != 0 {
+		t.Fatalf("compression client calls = %d, want 0", client.calls)
+	}
+	if len(got) != len(messages) {
+		t.Fatalf("all-fitting conversation changed: %+v", got)
+	}
+	for i := range messages {
+		if got[i].Role != messages[i].Role || got[i].ExtractText() != messages[i].ExtractText() || got[i].ToolCallID != messages[i].ToolCallID {
+			t.Errorf("all-fitting message %d changed: got %+v, want %+v", i, got[i], messages[i])
+		}
+	}
+	if len(got[2].ToolCalls) != 1 || got[2].ToolCalls[0].ID != "call-1" {
+		t.Fatalf("all-fitting assistant replay changed: %+v", got[2])
 	}
 }
 
@@ -125,8 +247,8 @@ func TestPartitionMessages_FrozenZoneReservesBudget(t *testing.T) {
 		msg("tool", roundText),
 	}
 
-	frozenTokens := CountMessagesTokens(messages[:2])
-	oneRound := CountMessagesTokens(messages[2:4])
+	frozenTokens := llm.ApproxMessagesTokenCount(messages[:2])
+	oneRound := llm.ApproxMessagesTokenCount(messages[2:4])
 	// Budget admits the frozen zone plus one round with headroom, but not
 	// two rounds on top of the frozen zone. Without the frozen reservation
 	// both rounds would appear to fit.
@@ -150,6 +272,37 @@ func TestPartitionMessages_FrozenZoneReservesBudget(t *testing.T) {
 	}
 	if result.compressEnd != 4 {
 		t.Errorf("compressEnd = %d, want 4 (older round compressed)", result.compressEnd)
+	}
+}
+
+func TestPartitionMessages_ReservesFrozenZoneTokens(t *testing.T) {
+	messages := replayableAssistantToolConversation(strings.Repeat("frozen prompt ", 100))
+
+	result := partitionMessages(messages, 100, 0)
+
+	if result.activeCount != 0 || !result.activeTooLarge {
+		t.Fatalf("partition kept replayable round despite frozen-zone budget: %+v", result)
+	}
+}
+
+func TestPartitionMessages_ReservesPreviousSummaryTokens(t *testing.T) {
+	messages := replayableAssistantToolConversation(strings.Repeat("frozen ", 40))
+	const (
+		maxTokens             = 100
+		previousSummaryTokens = 40
+	)
+	frozenAndRoundTokens := llm.ApproxMessagesTokenCount(messages)
+	if frozenAndRoundTokens > PromptTokenLimit(maxTokens) {
+		t.Fatalf("test setup without summary already exceeds budget: %d", frozenAndRoundTokens)
+	}
+	if frozenAndRoundTokens+previousSummaryTokens <= PromptTokenLimit(maxTokens) {
+		t.Fatalf("test setup with summary still fits budget: %d", frozenAndRoundTokens+previousSummaryTokens)
+	}
+
+	result := partitionMessages(messages, maxTokens, previousSummaryTokens)
+
+	if result.activeCount != 0 || !result.activeTooLarge {
+		t.Fatalf("partition kept replayable round despite reserved summary budget: %+v", result)
 	}
 }
 
@@ -219,18 +372,6 @@ func TestBuildMessageXML(t *testing.T) {
 	}
 	if !strings.Contains(got, "hello") || !strings.Contains(got, "world") {
 		t.Errorf("missing content: %s", got)
-	}
-}
-
-func TestCopyMessages(t *testing.T) {
-	orig := []llm.Message{msg("user", "a"), msg("assistant", "b")}
-	cp := copyMessages(orig)
-	if len(cp) != 2 {
-		t.Fatalf("len = %d, want 2", len(cp))
-	}
-	cp[0] = msg("system", "mutated")
-	if orig[0].Role == "system" {
-		t.Error("copyMessages should return independent slice")
 	}
 }
 

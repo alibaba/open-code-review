@@ -71,27 +71,6 @@ func buildMessageXML(msgs []llm.Message) string {
 	return sb.String()
 }
 
-func copyMessages(msgs []llm.Message) []llm.Message {
-	out := make([]llm.Message, len(msgs))
-	for i, m := range msgs {
-		out[i] = llm.Message{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  append([]llm.ToolCall(nil), m.ToolCalls...),
-		}
-	}
-	return out
-}
-
-func countMessagesTokens(msgs []llm.Message) int {
-	var total int
-	for _, m := range msgs {
-		total += llm.CountTokens(m.ExtractText())
-	}
-	return total
-}
-
 func reviewModeString(from, to, commit string) string {
 	if commit != "" {
 		return session.ReviewModeCommit

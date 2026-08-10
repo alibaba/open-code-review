@@ -231,14 +231,14 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		llmSpan.End()
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
-		content := resp.Content()
-		calls := resp.ToolCalls()
+		assistantTurn := resp.AssistantTurn()
+		calls := assistantTurn.ToolCalls()
 
 		if len(calls) == 0 {
 			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", newPath)
 			var additions []llm.Message
-			if content != "" {
-				additions = append(additions, llm.NewTextMessage("assistant", content))
+			if !assistantTurn.IsEmpty() {
+				additions = append(additions, assistantTurn.Message())
 			}
 			additions = append(additions, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
 			if !r.appendMessagesWithCompression(ctx, additions, &messages, newPath, st) {
@@ -299,7 +299,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			consecutiveEmptyRounds = 0
 		}
 
-		additions := []llm.Message{llm.NewToolCallMessage(content, calls)}
+		additions := []llm.Message{assistantTurn.Message()}
 		for _, rs := range results {
 			additions = append(additions, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
 		}
@@ -523,7 +523,7 @@ func (r *Runner) appendMessagesWithCompression(ctx context.Context, additions []
 
 	// A conversation can already be over the warning threshold before this
 	// round's messages are appended (e.g. an oversized initial prompt).
-	if CountMessagesTokens(*messages) > warnLimit {
+	if llm.ApproxMessagesTokenCount(*messages) > warnLimit {
 		r.cancelPendingCompression(st)
 		var err error
 		if *messages, err = r.runCompression(ctx, *messages, filePath); err != nil {
@@ -535,14 +535,14 @@ func (r *Runner) appendMessagesWithCompression(ctx context.Context, additions []
 
 	*messages = append(*messages, additions...)
 
-	finalCount := CountMessagesTokens(*messages)
+	finalCount := llm.ApproxMessagesTokenCount(*messages)
 	if finalCount > warnLimit {
 		r.cancelPendingCompression(st)
 		var err error
 		if *messages, err = r.runCompression(ctx, *messages, filePath); err != nil {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
 		}
-		finalCount = CountMessagesTokens(*messages)
+		finalCount = llm.ApproxMessagesTokenCount(*messages)
 	}
 
 	// Trigger async compression only after all appends for this update, so

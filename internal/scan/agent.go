@@ -711,7 +711,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 
 	messages := a.renderMessages(it, rule, planGuidance)
 
-	tokenCount := llmloop.CountMessagesTokens(messages)
+	tokenCount := llm.ApproxMessagesTokenCount(messages)
 	maxAllowed := a.args.Template.MaxTokens
 	tokenLimit := llmloop.PromptTokenLimit(maxAllowed)
 	if tokenCount > tokenLimit {

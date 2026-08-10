@@ -147,43 +147,6 @@ func TestBuildMessageXML(t *testing.T) {
 	}
 }
 
-func TestCopyMessages(t *testing.T) {
-	orig := []llm.Message{
-		llm.NewTextMessage("user", "a"),
-		llm.NewTextMessage("assistant", "b"),
-	}
-
-	cp := copyMessages(orig)
-
-	if len(cp) != len(orig) {
-		t.Fatalf("copyMessages length = %d, want %d", len(cp), len(orig))
-	}
-
-	cp = append(cp, llm.NewTextMessage("user", "c"))
-	if len(cp) != len(orig)+1 {
-		t.Errorf("appended copy length = %d, want %d", len(cp), len(orig)+1)
-	}
-	if len(orig) != 2 {
-		t.Error("copyMessages: appending to copy modified original slice")
-	}
-}
-
-func TestCountMessagesTokens(t *testing.T) {
-	msgs := []llm.Message{
-		llm.NewTextMessage("user", "hello world"),
-	}
-
-	count := countMessagesTokens(msgs)
-	if count <= 0 {
-		t.Errorf("countMessagesTokens() = %d, want > 0", count)
-	}
-
-	empty := countMessagesTokens(nil)
-	if empty != 0 {
-		t.Errorf("countMessagesTokens(nil) = %d, want 0", empty)
-	}
-}
-
 func TestReviewModeString(t *testing.T) {
 	tests := []struct {
 		from, to, commit string

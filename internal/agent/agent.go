@@ -1164,7 +1164,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
-	tokenCount := llmloop.CountMessagesTokens(messages)
+	tokenCount := llm.ApproxMessagesTokenCount(messages)
 	maxAllowed := a.args.Template.MaxTokens
 	tokenLimit := llmloop.PromptTokenLimit(maxAllowed)
 	if tokenCount > tokenLimit {

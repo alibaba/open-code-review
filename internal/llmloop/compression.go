@@ -40,10 +40,11 @@ type round struct {
 // partitionResult describes how messages should be split for compression.
 // An empty compress zone is represented by compressEnd == frozenEnd.
 type partitionResult struct {
-	frozenEnd   int
-	compressEnd int
-	rounds      []round
-	activeCount int
+	frozenEnd      int
+	compressEnd    int
+	rounds         []round
+	activeCount    int
+	activeTooLarge bool
 }
 
 // compressionJob tracks an in-flight background compression operation.
@@ -62,17 +63,6 @@ type compressionJob struct {
 type compressionState struct {
 	mu         sync.Mutex
 	pendingJob *compressionJob
-}
-
-// CountMessagesTokens returns the rough token count of msgs by summing the
-// per-message text token count. Exported because both review and scan top
-// layers may want it for pre-flight checks.
-func CountMessagesTokens(msgs []llm.Message) int {
-	var total int
-	for _, m := range msgs {
-		total += llm.CountTokens(m.ExtractText())
-	}
-	return total
 }
 
 // groupIntoRounds parses messages[start:] into logical
@@ -101,7 +91,11 @@ func groupIntoRounds(messages []llm.Message, start int) []round {
 // compressed summary.
 func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int, reservedTokens int) int {
 	budget := PromptTokenLimit(maxTokens) - reservedTokens
-	if budget <= 0 {
+	if len(rounds) == 0 {
+		return 0
+	}
+	latestTokens := roundTokenCount(rounds[len(rounds)-1], messages)
+	if budget <= 0 || latestTokens > budget {
 		return 0
 	}
 
@@ -119,9 +113,9 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 }
 
 func roundTokenCount(r round, messages []llm.Message) int {
-	total := llm.CountTokens(messages[r.assistantIdx].ExtractText())
+	total := messages[r.assistantIdx].ApproxTokenCount()
 	for _, ti := range r.toolIdxs {
-		total += llm.CountTokens(messages[ti].ExtractText())
+		total += messages[ti].ApproxTokenCount()
 	}
 	return total
 }
@@ -144,8 +138,15 @@ func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEs
 
 	// The frozen zone (and any summary already folded into it) occupies part
 	// of the prompt budget; rounds only get what remains.
-	reservedTokens := CountMessagesTokens(messages[:result.frozenEnd]) + prevSummaryTokenEstimate
+	reservedTokens := llm.ApproxMessagesTokenCount(messages[:result.frozenEnd]) + prevSummaryTokenEstimate
 	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, reservedTokens)
+	latest := result.rounds[len(result.rounds)-1]
+	if result.activeCount == 0 && messages[latest.assistantIdx].HasReplayState() {
+		// An oversized latest round without provider replay state degrades
+		// through summarization below; one carrying an opaque envelope cannot
+		// be truncated without corrupting the provider contract.
+		result.activeTooLarge = true
+	}
 	if result.activeCount >= len(result.rounds) {
 		// Everything fits — no compression needed. Leave the compress zone
 		// empty: compressing rounds that still fit the budget would discard
@@ -208,13 +209,6 @@ func buildMessageXML(msgs []llm.Message) string {
 	return sb.String()
 }
 
-// copyMessages creates a shallow copy of a message slice.
-func copyMessages(msgs []llm.Message) []llm.Message {
-	out := make([]llm.Message, len(msgs))
-	copy(out, msgs)
-	return out
-}
-
 // runCompression performs three-zone memory compression on the given
 // messages, summarizing the compress zone while preserving the active zone
 // intact. Returns rebuilt as [frozen] + [compressed_summary appended to
@@ -228,6 +222,9 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 	}
 
 	part := partitionMessages(msgs, r.deps.Template.MaxTokens, 0)
+	if part.activeTooLarge {
+		return msgs, fmt.Errorf("latest assistant/tool round exceeds compression budget")
+	}
 	if part.compressEnd <= part.frozenEnd {
 		return msgs, nil
 	}
@@ -296,7 +293,7 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 		st.mu.Unlock()
 		return
 	}
-	msgSnapshot := copyMessages(messages)
+	msgSnapshot := llm.CloneMessages(messages)
 	asyncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	job := &compressionJob{done: make(chan struct{}), cancel: cancel, snapshotLen: len(messages)}
 	st.pendingJob = job

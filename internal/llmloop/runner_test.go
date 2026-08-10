@@ -317,7 +317,7 @@ func TestPartitionMessages_CompressionNeeded(t *testing.T) {
 	}
 }
 
-func TestRunCompression_EmptyTemplate(t *testing.T) {
+func TestRunCompression_EmptyTemplatePreservesConversation(t *testing.T) {
 	t_tempDir = t.TempDir()
 	r := newTestRunner(&fakeLLMClient{}, template.Template{
 		MaxTokens: 1000,
@@ -335,7 +335,12 @@ func TestRunCompression_EmptyTemplate(t *testing.T) {
 	// Without a compression template there is nothing to summarize into;
 	// the conversation must be kept rather than truncated to the frozen zone.
 	if len(got) != len(msgs) {
-		t.Errorf("expected %d messages (conversation preserved), got %d", len(msgs), len(got))
+		t.Fatalf("compression without a template dropped history: got %d messages, want %d", len(got), len(msgs))
+	}
+	for i := range msgs {
+		if got[i].Role != msgs[i].Role || got[i].ExtractText() != msgs[i].ExtractText() {
+			t.Errorf("message %d changed: got %+v, want %+v", i, got[i], msgs[i])
+		}
 	}
 }
 
