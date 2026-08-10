@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package diff
 
 import (
@@ -228,7 +231,7 @@ func splitAndNormalize(code string) []string {
 }
 
 // normalizeLine removes leading/trailing whitespace and strips any leading
-// '+' or '-' diff marker (mirrors Java's processTargetLineCode).
+// '+' or '-' diff marker.
 func normalizeLine(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "+")

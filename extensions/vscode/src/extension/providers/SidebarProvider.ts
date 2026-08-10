@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { resolveLocale, toHtmlLang } from '../../shared/i18n';
 import * as vscode from 'vscode';
 import { ConfigPanelFocus } from '../../shared/configUtils';

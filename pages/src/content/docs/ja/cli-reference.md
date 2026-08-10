@@ -48,6 +48,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | コマンド | エイリアス | 役割 |
 |---|---|---|
 | `ocr review` | `ocr r` | コードレビューを実行してコメントを出力します。 |
+| `ocr scan` | `ocr s` | Git diff を必要とせず、ファイル全体をスキャンします。 |
 | `ocr rules check <file>` | — | あるファイルパスにどのルールが適用され、その出所はどこかを表示します。 |
 | `ocr config set <key> <value>` | — | 設定値を `~/.opencodereview/config.json` に永続化します。 |
 | `ocr config unset custom_providers.<name>` | — | カスタムプロバイダーを削除します（現在有効なものであれば、有効な `provider`/`model` もクリアされます）。 |
@@ -57,6 +58,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr llm providers` | — | 組み込みの LLM プロバイダーをすべて一覧表示します。 |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 保存されたレビューセッションを一覧表示します。 |
 | `ocr session show <id>` | `ocr sessions show <id>` | 1つのセッションとファイル単位のチェックポイントを表示します。 |
+| `ocr session comments <id>` | `ocr sessions comments <id>` | 1つのセッションに記録されたレビューコメントを表示します。 |
 | `ocr viewer` | — | 過去のレビューセッション用のローカル Web UI を起動します（`localhost:5483`）。 |
 | `ocr version` | — | バージョン、commit、プラットフォーム、ビルド日、GitHub URL を出力します。 |
 
@@ -83,7 +85,7 @@ ocr r      [flags]   (alias)
 | `--from <ref>` | — | — | diff の開始 ref（例: `main`）。 |
 | `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
-| `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。 |
+| `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）または `json`（機械可読なコメント配列）。 |
 | `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します。`agent` は stdout を静音化し、最終サマリー / JSON のみを出力します。 |
@@ -92,13 +94,32 @@ ocr r      [flags]   (alias)
 | `--timeout <minutes>` | — | `10` | ファイルごとの締め切り時間。`0` でタイムアウトを無効化します。 |
 | `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |
 | `--max-tools <n>` | — | テンプレートのデフォルト | ファイルごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`30`）を使用します。1〜9 は `10` に引き上げられます。`≥ 10` の値はすべてテンプレートのデフォルトを上書きします（`30` より小さくても）。 |
-| `--model <name>` | — | — | 今回のレビューについて、解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
+| `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | ファイルごとのプロンプトトークン上限。この実行で保存済みの `max_tokens` 設定を上書きします。 |
+| `--provider <name>` | — | — | 今回の実行で設定済み provider を選択します。`providers` と `custom_providers` の両方の名前を使用できます。 |
+| `--model <name>` | — | — | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
 | `--tools <path>` | — | 埋め込み | カスタム JSON ツール設定ファイルのパス。埋め込みのツール定義を上書きします。 |
 
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
 > `--resume` は範囲または単一 commit レビューのみ対応し、`--preview` とは併用できません。
+
+### 実行単位の LLM 選択
+
+`review` と `scan` はどちらも `--provider` と `--model` を受け付けます。
+これらの上書きは現在の呼び出しだけに適用され、保存済み設定は変更しません:
+
+```bash
+ocr review --provider anthropic --model claude-opus-4-6 --format json
+ocr scan --provider openai --model gpt-5.4 --format json
+```
+
+明示的な `--provider` は通常のソース解決より先に、保存済みの `providers` または
+`custom_providers` からエントリを選択します。`--provider` を指定しない場合、OCR は従来の
+ソース順序を維持します: 保存済み設定、完全な `OCR_LLM_*` 環境設定、完全な Claude Code
+環境設定、shell rc ファイルの順です。`--model` は選ばれたソース内の model を上書きしますが、
+ソース順序は変更しません。不完全な戦略は別の戦略と混合されず、次へフォールバックします。
+選択された組み込み provider の認証情報は、対応する環境変数から引き続き取得できます。
 
 ### モード
 
@@ -143,6 +164,7 @@ ocr review -c abc123
 ```bash
 ocr session list
 ocr session show <session-id>
+ocr session comments <session-id>
 ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
@@ -191,6 +213,10 @@ ocr review --format json --audience agent
 ```json
 {
   "status": "success",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-6"
+  },
   "summary": {
     "files_reviewed": 9,
     "comments": 1,
@@ -218,6 +244,7 @@ ocr review --format json --audience agent
 | フィールド | 説明 |
 |---|---|
 | `status` | `success`、`completed_with_warnings`、`completed_with_errors`、または `skipped`。 |
+| `llm` | 解決された LLM の識別情報。正規化済みの `model` は常に含まれ、`provider` は名前付きの設定済み provider の場合だけ含まれます。 |
 | `message` | 任意。人間が読みやすいサマリー（例: `"No comments generated. Looks good to me."`）。 |
 | `summary` | 任意。実行の集計: `files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` の実行時は省略されます。 |
 | `comments` | 常に存在しますが、空の場合があります。各コメントのフィールドは上記の例のとおりです。 |
@@ -231,6 +258,10 @@ ocr review --format json --audience agent
 {
   "status": "skipped",
   "message": "No supported files changed.",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-6"
+  },
   "comments": []
 }
 ```
@@ -244,6 +275,34 @@ ocr review --format json --audience agent
 
 致命的でない警告（個々のサブエージェントの失敗、あるファイルが token しきい値を超過、など）はインラインで出力されます。JSON モードでは `warnings` 配列に追加されます。
 
+## `ocr scan`
+
+Git diff を必要としないファイル全体のレビュー。作業ツリーから各ファイルの現在の内容を読み込み、LLM に送信します。馴染みのないコードベースや、意味のある diff がないディレクトリの監査に便利です。
+
+```text
+ocr scan [flags]
+ocr s      [flags]   (alias)
+```
+
+`--path` を渡さない場合、リポジトリ全体をスキャンします。
+
+### 引数
+
+| 引数 | 短縮形 | デフォルト | 説明 |
+|---|---|---|---|
+| `--path <list>` | - | リポジトリ全体 | スキャン対象のリポジトリ相対ディレクトリまたはファイル（カンマ区切り、例: `internal/agent`、`internal/llm/client.go`）。 |
+| `--exclude <patterns>` | - | - | 除外する gitignore 形式のパターン（カンマ区切り、例: `**/generated/*,*.pb.go`）。`rule.json` の excludes とマージされます。 |
+| `--preview` | `-p` | `false` | LLM を呼び出さずにファイルを列挙・フィルタリングします。ファイルリスト、レビュー対象/除外数、総行数、ファイルごとの除外理由を出力します。`--format json` に対応しています。 |
+
+```bash
+ocr scan --preview                              # スキャン対象を確認
+ocr scan --path internal/agent                  # 単一ディレクトリをスキャン
+ocr scan --path internal/agent,internal/llm/client.go
+ocr scan --exclude '**/generated/*,*.pb.go'
+```
+
+完全なフラグリストは `ocr scan -h` を参照してください。
+
 ## `ocr session`
 
 `~/.opencodereview/sessions/` 配下に保存されたローカルレビューセッションログを一覧表示・確認します。
@@ -255,8 +314,9 @@ ocr session <sub-command>
 ocr sessions <sub-command>   (alias)
 
 Sub-commands:
-  list, ls    List recent review sessions for the current repo
-  show <id>   Show one session's metadata and per-file items
+  list, ls        List recent review sessions for the current repo
+  show <id>       Show one session's metadata and per-file items
+  comments <id>   Show the review comments recorded in one session
 ```
 
 ### `ocr session list`
@@ -285,6 +345,25 @@ ocr session show --repo /path/to/repo <session-id>
 |---|---|---|
 | `--repo <path>` | カレントディレクトリ | セッションを確認するリポジトリ。 |
 | `--json` | `false` | セッションのメタデータとファイル単位の項目を JSON として出力します。 |
+
+### `ocr session comments`
+
+セッションに保存されたすべてのレビューコメントを、`ocr review` のターミナル出力と
+同じスタイル（パス、行範囲、重要度バッジ、提案 diff）で表示します。
+
+```bash
+ocr session comments <session-id>
+ocr session comments --json <session-id>
+ocr session comments --severity high <session-id>
+ocr session comments --severity critical,high --category bug,security <session-id>
+```
+
+| 引数 | デフォルト | 説明 |
+|---|---|---|
+| `--repo <path>` | カレントディレクトリ | セッションを確認するリポジトリ。 |
+| `--json` | `false` | コメントを JSON 配列として出力します。 |
+| `--severity <list>` | すべて | 含める重要度をカンマ区切りで指定します（`critical`、`high`、`medium`、`low`）。 |
+| `--category <list>` | すべて | 含めるカテゴリをカンマ区切りで指定します（例: `bug`、`security`）。 |
 
 ## `ocr rules`
 
@@ -407,6 +486,76 @@ ocr -V
 ```
 
 ビルド時に書き込まれたバージョン情報、短い Git commit（存在する場合）、プラットフォーム（`<GOOS>/<GOARCH>`）、ビルド日（存在する場合）、そして GitHub URL（`https://github.com/alibaba/open-code-review`）を出力します。
+
+## ocr completion
+
+`ocr` のシェル補完スクリプトを生成し、シェル内でコマンド名・フラグ・引数を Tab 補完できるようにします。
+
+### Bash
+
+現在のセッションのみ：
+
+```bash
+source <(ocr completion bash)
+```
+
+永続化（Linux）：
+
+```bash
+ocr completion bash > /etc/bash_completion.d/ocr
+```
+
+永続化（macOS）：
+
+```bash
+ocr completion bash > $(brew --prefix)/etc/bash_completion.d/ocr
+```
+
+### Zsh
+
+シェル補完がまだ有効になっていない場合は、一度だけ実行してください：
+
+```bash
+echo "autoload -U compinit; compinit" >> ~/.zshrc
+```
+
+その後、補完を永続的に読み込みます：
+
+```bash
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+反映させるには新しいシェルを開始する必要があります。
+
+### Fish
+
+現在のセッションのみ：
+
+```bash
+ocr completion fish | source
+```
+
+永続化：
+
+```bash
+ocr completion fish > ~/.config/fish/completions/ocr.fish
+```
+
+### PowerShell
+
+現在のセッションのみ：
+
+```powershell
+ocr completion powershell | Out-String | Invoke-Expression
+```
+
+永続化 —— スクリプトを生成し、PowerShell プロファイルから読み込みます：
+
+```powershell
+ocr completion powershell > ocr.ps1
+```
+
+その後、`ocr.ps1` を読み込む行を PowerShell プロファイルに追加してください。
 
 ## ヒントと注意点
 

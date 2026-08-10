@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llmloop
 
 import (
@@ -14,10 +17,12 @@ import (
 
 type fakeClient struct {
 	responses []*llm.ChatResponse
+	requests  []llm.ChatRequest
 	calls     int
 }
 
-func (f *fakeClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func (f *fakeClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.requests = append(f.requests, req)
 	if f.calls >= len(f.responses) {
 		content := ""
 		return &llm.ChatResponse{
@@ -30,7 +35,7 @@ func (f *fakeClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*
 	return resp, nil
 }
 
-func taskDoneResponse() *llm.ChatResponse {
+func taskDoneResponseWithArguments(arguments string) *llm.ChatResponse {
 	content := ""
 	return &llm.ChatResponse{
 		Choices: []llm.Choice{{
@@ -41,7 +46,7 @@ func taskDoneResponse() *llm.ChatResponse {
 					Type: "function",
 					Function: llm.FunctionCall{
 						Name:      "task_done",
-						Arguments: `{}`,
+						Arguments: arguments,
 					},
 				}},
 			},
@@ -49,6 +54,10 @@ func taskDoneResponse() *llm.ChatResponse {
 		Model: "fake",
 		Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
 	}
+}
+
+func taskDoneResponse() *llm.ChatResponse {
+	return taskDoneResponseWithArguments(`{}`)
 }
 
 func fileReadToolCallResponse(callID, args string) *llm.ChatResponse {
@@ -100,7 +109,7 @@ func TestRunPerFile_TaskDoneImmediately(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review this file")}
-	completed, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, _, err := runner.RunPerFile(context.Background(), msgs, "main.go")
 	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
 	}
@@ -118,6 +127,104 @@ func TestRunPerFile_TaskDoneImmediately(t *testing.T) {
 	}
 }
 
+func TestRunPerFile_UsesCompletionTokenLimit(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
+	deps := newTestDeps(client)
+	deps.Template.MaxTokens = 200000
+	deps.Template.MaxCompletionTokens = 58888
+	runner := NewRunner(deps)
+
+	_, _, err := runner.RunPerFile(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review")},
+		"main.go",
+	)
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if got := client.requests[0].MaxTokens; got != 58888 {
+		t.Fatalf("request MaxTokens = %d, want 58888", got)
+	}
+}
+
+func TestRunPerFile_TaskDoneExplicitDone(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		taskDoneResponseWithArguments(`{"state":"DONE"}`),
+	}}
+	runner := NewRunner(newTestDeps(client))
+
+	completed, _, err := runner.RunPerFile(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review this file")},
+		"main.go",
+	)
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if !completed {
+		t.Fatal("expected task_done DONE to complete RunPerFile")
+	}
+}
+
+func TestRunPerFile_TaskDoneFailed(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		taskDoneResponseWithArguments(`{"state":"FAILED"}`),
+	}}
+	runner := NewRunner(newTestDeps(client))
+
+	completed, _, err := runner.RunPerFile(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review this file")},
+		"main.go",
+	)
+	if err == nil || !strings.Contains(err.Error(), "task_done reported FAILED") {
+		t.Fatalf("expected task_done FAILED error, got %v", err)
+	}
+	if completed {
+		t.Fatal("task_done FAILED must not complete RunPerFile")
+	}
+	if client.calls != 1 {
+		t.Fatalf("expected terminal failure after 1 LLM call, got %d", client.calls)
+	}
+}
+
+func TestRunPerFile_InvalidTaskDoneStateRetries(t *testing.T) {
+	tests := []struct {
+		name      string
+		arguments string
+	}{
+		{name: "unknown state", arguments: `{"state":"UNKNOWN"}`},
+		{name: "empty state", arguments: `{"state":""}`},
+		{name: "non-string state", arguments: `{"state":1}`},
+		{name: "malformed arguments", arguments: `{"state":`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &fakeClient{responses: []*llm.ChatResponse{
+				taskDoneResponseWithArguments(tt.arguments),
+				taskDoneResponseWithArguments(`{"state":"DONE"}`),
+			}}
+			runner := NewRunner(newTestDeps(client))
+
+			completed, _, err := runner.RunPerFile(
+				context.Background(),
+				[]llm.Message{llm.NewTextMessage("user", "review this file")},
+				"main.go",
+			)
+			if err != nil {
+				t.Fatalf("RunPerFile: %v", err)
+			}
+			if !completed {
+				t.Fatal("expected retry to complete with task_done DONE")
+			}
+			if client.calls != 2 {
+				t.Fatalf("expected invalid state to be retried, got %d LLM calls", client.calls)
+			}
+		})
+	}
+}
+
 func TestRunPerFile_ToolCallThenDone(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
@@ -127,7 +234,7 @@ func TestRunPerFile_ToolCallThenDone(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	completed, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, _, err := runner.RunPerFile(context.Background(), msgs, "main.go")
 	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
 	}
@@ -156,7 +263,7 @@ func TestRunPerFile_ContextCancelled(t *testing.T) {
 	cancel()
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	completed, err := runner.RunPerFile(ctx, msgs, "main.go")
+	completed, _, err := runner.RunPerFile(ctx, msgs, "main.go")
 	if err == nil {
 		t.Error("expected error for cancelled context")
 	}
@@ -189,7 +296,7 @@ func TestRunPerFile_UnknownTool(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	completed, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, _, err := runner.RunPerFile(context.Background(), msgs, "main.go")
 	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
 	}
@@ -213,12 +320,75 @@ func TestRunPerFile_MaxToolRequestsWithoutTaskDoneDoesNotComplete(t *testing.T) 
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	completed, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
 	if err != nil {
 		t.Fatalf("RunPerFile: %v", err)
 	}
 	if completed {
 		t.Fatal("RunPerFile completed without task_done")
+	}
+	if stop != StopMaxRounds {
+		t.Fatalf("expected StopMaxRounds, got %v", stop)
+	}
+}
+
+func TestRunPerFile_EmptyToolResultsStopWithEmptyRounds(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		fileReadToolCallResponse("call_2", `{"path":"main.go"}`),
+		fileReadToolCallResponse("call_3", `{"path":"main.go"}`),
+	}}
+	deps := newTestDeps(client)
+	reg := tool.NewRegistry()
+	reg.Register(&fakeFileReadProvider{result: ""})
+	deps.Tools = reg
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if completed {
+		t.Fatal("RunPerFile completed without task_done")
+	}
+	if stop != StopEmptyRounds {
+		t.Fatalf("stop = %v, want StopEmptyRounds", stop)
+	}
+	if client.calls != 3 {
+		t.Fatalf("LLM calls = %d, want 3 empty rounds", client.calls)
+	}
+}
+
+func TestRunPerFile_UncompressibleContextStopsWithCompression(t *testing.T) {
+	emptySummary := ""
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		{
+			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &emptySummary}}},
+			Model:   "fake",
+		},
+	}}
+	deps := newTestDeps(client)
+	deps.Template.MaxTokens = 20
+	deps.Template.MemoryCompressionTask = template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "Summarize: {{context}}"}},
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", strings.Repeat("word ", 100))}
+	completed, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if completed {
+		t.Fatal("RunPerFile completed without task_done")
+	}
+	if stop != StopCompression {
+		t.Fatalf("stop = %v, want StopCompression", stop)
+	}
+	if client.calls != 2 {
+		t.Fatalf("LLM calls = %d, want one main call and one compression call", client.calls)
 	}
 }
 
@@ -355,7 +525,7 @@ func TestExecuteToolCall_ArgumentsEdgeCases(t *testing.T) {
 					Name:      tt.toolName,
 					Arguments: tt.arguments,
 				},
-			}, nil)
+			}, nil, "")
 
 			if tt.wantContains != "" && !strings.Contains(cp.Data, tt.wantContains) {
 				t.Errorf("cp.Data = %q, want substring %q", cp.Data, tt.wantContains)
@@ -411,7 +581,7 @@ func TestExecuteToolCall_CodeCommentOverridesHallucinatedPath(t *testing.T) {
 			Name:      "code_comment",
 			Arguments: string(argsJSON),
 		},
-	}, nil)
+	}, nil, "")
 	if cp.Data != tool.CommentSucceed {
 		t.Fatalf("unexpected result: %+v", cp)
 	}

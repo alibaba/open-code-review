@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import React, { useMemo, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { Marked, Renderer } from 'marked';
@@ -5,7 +8,7 @@ import DOMPurify from 'dompurify';
 import { useTranslation } from '../i18n';
 import { useCopyToast } from '../hooks/useCopyToast';
 import copyIcon from '../assets/icons/icon-copy.svg';
-import { generateHeadingId } from '../utils/headingId';
+import { generateHeadingId, parseExplicitHeadingId } from '../utils/headingId';
 
 type Mermaid = typeof import('mermaid')['default'];
 
@@ -75,10 +78,11 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => {
       return `<img src="${escapeAttr(href)}" alt="${escapeAttr(text)}"${titleAttr} />`;
     };
     renderer.heading = function ({ text, depth }: { text: string; depth: number }) {
-      const id = generateHeadingId(text);
+      const { text: headingText, id: explicitId } = parseExplicitHeadingId(text);
+      const id = explicitId ?? generateHeadingId(headingText);
       // Escape id attribute value to prevent XSS
       const safeId = id.replace(/"/g, '&quot;');
-      return `<h${depth} id="${safeId}">${text}</h${depth}>\n`;
+      return `<h${depth} id="${safeId}">${headingText}</h${depth}>\n`;
     };
     // Strip trailing newlines from code blocks to avoid empty line at bottom
     renderer.code = function ({ text, lang, escaped }: { text: string; lang?: string; escaped?: boolean }) {

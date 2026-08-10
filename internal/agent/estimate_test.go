@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package agent
 
 import (
@@ -59,7 +62,7 @@ func TestEstimateDiffFileTokens_ZeroForSkipped(t *testing.T) {
 
 // TestEstimateDiffCost verifies the aggregate estimate sums per-file costs,
 // skips deleted/empty diffs, and satisfies TotalTokens == Input + Output. Used
-// by the pre-review scale warning (INV-5).
+// by the pre-review scale warning.
 func TestEstimateDiffCost(t *testing.T) {
 	diffs := []model.Diff{
 		{NewPath: "a.go", Diff: "+a\n"},

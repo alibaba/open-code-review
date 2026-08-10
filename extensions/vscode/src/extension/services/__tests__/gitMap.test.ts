@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // src/extension/services/__tests__/gitMap.test.ts
 import { execFile } from 'child_process';
 import path from 'path';

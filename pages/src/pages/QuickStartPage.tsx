@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import React from 'react';
 import QuickStartSection from '../components/QuickStartSection';
 import Footer from '../components/Footer';

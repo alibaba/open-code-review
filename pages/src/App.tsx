@@ -1,7 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import React, { Suspense, useEffect } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import LandingPage from './components/LandingPage';
 import ErrorBoundary from './components/ErrorBoundary';
+import { useTransitionedLocation } from './hooks/useTransitionedLocation';
 import { useTranslation } from './i18n';
 import FeaturesPage from './pages/FeaturesPage';
 import FeaturesRoutePage from './pages/FeaturesRoutePage';
@@ -11,8 +15,7 @@ const QuickStartPage = React.lazy(() => import(/* webpackChunkName: "quickstart-
 const DocsPage = React.lazy(() => import(/* webpackChunkName: "docs-page" */ './pages/DocsPage'));
 const BlogPage = React.lazy(() => import(/* webpackChunkName: "blog-page" */ './pages/BlogPage'));
 
-const ScrollToTop: React.FC = () => {
-  const { pathname } = useLocation();
+const ScrollToTop: React.FC<{ pathname: string }> = ({ pathname }) => {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
@@ -68,12 +71,19 @@ const RouteErrorFallback: React.FC<{ reset: () => void }> = ({ reset }) => {
 };
 
 const App: React.FC = () => {
+  // Route changes are applied inside a React transition so the previous page
+  // stays visible while a lazy route's chunk downloads. The plain black
+  // Suspense fallback is then only reachable on first paint, which removes
+  // the black flash on in-app navigation without losing the intentional
+  // dark background on initial load.
+  const displayLocation = useTransitionedLocation();
+
   return (
     <>
-      <ScrollToTop />
+      <ScrollToTop pathname={displayLocation.pathname} />
       <ErrorBoundary reloadOnChunkError fallback={(_error, reset) => <RouteErrorFallback reset={reset} />}>
         <Suspense fallback={<div style={{ minHeight: '100vh', background: '#000000' }} />}>
-          <Routes>
+          <Routes location={displayLocation}>
             <Route path="/" element={<LandingPage><FeaturesPage /></LandingPage>} />
             <Route path="/features" element={<LandingPage><FeaturesRoutePage /></LandingPage>} />
             <Route path="/benchmark" element={<LandingPage><BenchmarkPage /></LandingPage>} />

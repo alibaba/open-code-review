@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-安装 `ocr` CLI 有四种受支持的方式。
+安装 `ocr` CLI 有六种受支持的方式。
 
 ## NPM（推荐）
 
@@ -36,6 +36,34 @@ export OCR_NO_UPDATE=1
 
 ```bash
 npm uninstall -g @alibaba-group/open-code-review
+```
+
+## Homebrew（macOS / Linux）
+
+```bash
+brew install open-code-review
+```
+
+该 formula 会从源码构建并安装 `ocr` 二进制。
+
+后续升级：
+
+```bash
+brew upgrade open-code-review
+```
+
+## MacPorts（macOS）
+
+```bash
+sudo port install open-code-review
+```
+
+该 port 会从源码构建并安装 `ocr` 二进制。
+
+后续升级：
+
+```bash
+sudo port upgrade open-code-review
 ```
 
 ## 安装脚本（curl | sh）
@@ -159,6 +187,22 @@ ocr review --help       # 完整的 review 命令参数列表
 which ocr
 echo $PATH
 ```
+
+
+## 启用 Shell 补全（可选）
+
+`ocr` 支持 bash、zsh、fish 和 PowerShell 的 Tab 补全。
+
+```bash
+# bash
+source <(ocr completion bash)
+
+# zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+完整的 fish、PowerShell 及持久化配置说明，请参见 [CLI 参考](./cli-reference.md#ocr-completion)。
+
 
 ## OCR 在哪里存放状态
 

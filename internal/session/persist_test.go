@@ -1,12 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package session
 
 import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -236,6 +241,116 @@ func TestSessionFilePermissions(t *testing.T) {
 	}
 }
 
+func TestFinalizeSurfacesWriterCreationErrorWithoutStdout(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// A regular file at this path makes creation of the sessions directory fail
+	// deterministically on every platform.
+	if err := os.WriteFile(filepath.Join(tmpHome, ".opencodereview"), []byte("blocked"), 0o600); err != nil {
+		t.Fatalf("create blocking file: %v", err)
+	}
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdout pipe: %v", err)
+	}
+	os.Stdout = w
+	sh := New(t.TempDir(), "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	os.Stdout = oldStdout
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stdout writer: %v", err)
+	}
+	stdout, readErr := io.ReadAll(r)
+	if closeErr := r.Close(); readErr == nil {
+		readErr = closeErr
+	}
+	if readErr != nil {
+		t.Fatalf("read captured stdout: %v", readErr)
+	}
+	if len(stdout) != 0 {
+		t.Fatalf("session creation failure wrote to stdout: %q", stdout)
+	}
+	if sh.HasPersistence() {
+		t.Fatal("session must not report persistence when writer creation failed")
+	}
+
+	err1 := sh.Finalize()
+	err2 := sh.Finalize()
+	for i, finalizeErr := range []error{err1, err2} {
+		if finalizeErr == nil || !strings.Contains(finalizeErr.Error(), "create session writer") {
+			t.Fatalf("Finalize call %d error = %v, want cached writer creation error", i+1, finalizeErr)
+		}
+	}
+}
+
+// TestFinalizeSurfacesWriteError verifies that when the session_end write fails,
+// Finalize returns that error instead of swallowing it,
+// so callers can surface a delivery failure rather than claim a clean run. We
+// force the failure by closing the underlying file out from under the buffered
+// writer; the Flush inside WriteSessionEnd then errors on the closed fd.
+func TestFinalizeSurfacesWriteError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	if sh.persist == nil || sh.persist.file == nil {
+		t.Fatal("expected an open persist writer")
+	}
+	if err := sh.persist.file.Close(); err != nil {
+		t.Fatalf("pre-close session file: %v", err)
+	}
+
+	if err := sh.Finalize(); err == nil {
+		t.Fatal("Finalize returned nil despite a write failure; persistence error was swallowed")
+	}
+}
+
+// TestFinalizeReplaysWriteErrorOnEveryCall verifies that every call observes the
+// cached write error instead of a later call falsely reporting success.
+func TestFinalizeReplaysWriteErrorOnEveryCall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	if sh.persist == nil || sh.persist.file == nil {
+		t.Fatal("expected an open persist writer")
+	}
+	if err := sh.persist.file.Close(); err != nil {
+		t.Fatalf("pre-close session file: %v", err)
+	}
+
+	err1 := sh.Finalize()
+	err2 := sh.Finalize()
+	if err1 == nil || err2 == nil {
+		t.Fatalf("every Finalize call must replay the write failure; got err1=%v err2=%v", err1, err2)
+	}
+}
+
+// TestFinalizeWritesSessionEndExactlyOnce verifies that repeated Finalize calls
+// do not append a second session_end record.
+func TestFinalizeWritesSessionEndExactlyOnce(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("first finalize: %v", err)
+	}
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("second finalize: %v", err)
+	}
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	n := 0
+	for _, r := range records {
+		if r["type"] == "session_end" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("session_end record count = %d, want exactly 1", n)
+	}
+}
+
 func TestSessionEndIncludesFailures(t *testing.T) {
 	repoDir := t.TempDir()
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
@@ -354,5 +469,50 @@ func TestResumeStateSessionStartKeepsRepoDirWhenCwdEmpty(t *testing.T) {
 
 	if state.RepoDir != "/repo/from/caller" {
 		t.Fatalf("RepoDir = %q, want caller-provided repo dir", state.RepoDir)
+	}
+}
+
+func TestScanPathScopeResumeRoundTrip(t *testing.T) {
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{
+		ReviewMode: ReviewModeFullScan,
+		ScanPaths:  []string{"./internal/scan/", "cmd/opencodereview"},
+	})
+	sh.RecordReviewItemDone("internal/scan/agent.go", "internal/scan/agent.go", "internal/scan/agent.go", "fp-scan", nil)
+	sh.Finalize()
+
+	state, err := LoadResumeState(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if !state.HasScanPathScope {
+		t.Fatal("HasScanPathScope = false, want true")
+	}
+	if err := state.ValidateScanOptions([]string{"cmd/opencodereview", "internal/scan"}); err != nil {
+		t.Fatalf("ValidateScanOptions: %v", err)
+	}
+	if err := state.ValidateScanOptions(nil); err == nil {
+		t.Fatal("expected whole-repo resume scope mismatch")
+	}
+}
+
+func TestWholeRepoScanPathScopeResumeRoundTrip(t *testing.T) {
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeFullScan})
+	sh.RecordReviewItemDone("main.go", "main.go", "main.go", "fp-main", nil)
+	sh.Finalize()
+
+	state, err := LoadResumeState(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	if !state.HasScanPathScope {
+		t.Fatal("HasScanPathScope = false, want true")
+	}
+	if err := state.ValidateScanOptions(nil); err != nil {
+		t.Fatalf("ValidateScanOptions whole repo: %v", err)
+	}
+	if err := state.ValidateScanOptions([]string{"internal/scan"}); err == nil {
+		t.Fatal("expected scoped resume mismatch")
 	}
 }

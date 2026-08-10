@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -262,6 +265,62 @@ func TestProviderTUI_ManualFormEscFromURLExitsForm(t *testing.T) {
 	}
 	if m5.cancelled {
 		t.Error("should not be cancelled when exiting form")
+	}
+}
+
+func TestProviderTUI_ManualFormEscRefocusesPreviousInput(t *testing.T) {
+	tests := []struct {
+		name     string
+		fromStep manualStep
+		wantStep manualStep
+		focused  func(m providerTUIModel) bool
+		value    func(m providerTUIModel) string
+	}{
+		{
+			name:     "protocol back to url",
+			fromStep: manualStepProtocol,
+			wantStep: manualStepURL,
+			focused:  func(m providerTUIModel) bool { return m.manualURLInput.Focused() },
+			value:    func(m providerTUIModel) string { return m.manualURLInput.Value() },
+		},
+		{
+			name:     "auth token back to model",
+			fromStep: manualStepAuthToken,
+			wantStep: manualStepModel,
+			focused:  func(m providerTUIModel) bool { return m.manualModelInput.Focused() },
+			value:    func(m providerTUIModel) string { return m.manualModelInput.Value() },
+		},
+		{
+			name:     "auth header back to auth token",
+			fromStep: manualStepAuthHeader,
+			wantStep: manualStepAuthToken,
+			focused:  func(m providerTUIModel) bool { return m.manualTokenInput.Focused() },
+			value:    func(m providerTUIModel) string { return m.manualTokenInput.Value() },
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newProviderTUI(&Config{}, "")
+			m.activeTab = tabManual
+			m.inManualForm = true
+			m.manualStep = tt.fromStep
+
+			result, _ := m.Update(escKey())
+			m2 := result.(providerTUIModel)
+			if m2.manualStep != tt.wantStep {
+				t.Fatalf("manualStep = %d, want %d", m2.manualStep, tt.wantStep)
+			}
+			if !tt.focused(m2) {
+				t.Fatal("previous step input should be focused after Esc")
+			}
+
+			result, _ = m2.Update(charKey('x'))
+			m3 := result.(providerTUIModel)
+			if got := tt.value(m3); !strings.Contains(got, "x") {
+				t.Errorf("input should accept typing after Esc: value = %q", got)
+			}
+		})
 	}
 }
 

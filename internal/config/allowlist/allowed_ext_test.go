@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package allowedext
 
 import (
@@ -48,6 +51,18 @@ func TestIsAllowedExt(t *testing.T) {
 		{".BICEP", true},
 		{".proto", true},
 		{".PROTO", true},
+		{".nix", true},
+		{".NIX", true},
+		{".hs", true},
+		{".HS", true},
+		{".lhs", true},
+		{".LHS", true},
+		{".nim", true},
+		{".NIM", true},
+		{".nims", true},
+		{".NIMS", true},
+		{".nimble", true},
+		{".NIMBLE", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -129,6 +144,51 @@ func TestIsExcludedPath(t *testing.T) {
 		{"julia test file", "test/runtests.jl", true},
 		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
 		{"julia non-test", "src/model.jl", false},
+
+		// Haskell test files
+		{"haskell test directory", "test/Parser.hs", true},
+		{"haskell nested test directory", "packages/core/test/unit/Parser.hs", true},
+		{"haskell spec file", "src/ParserSpec.hs", true},
+		{"haskell root spec file", "ParserSpec.hs", true},
+		{"haskell non-test", "src/Parser.hs", false},
+		{"lhs test directory", "test/Tutorial.lhs", true},
+		{"lhs nested test directory", "packages/core/test/unit/Tutorial.lhs", true},
+		{"lhs spec file", "src/ParserSpec.lhs", true},
+		{"lhs root spec file", "ParserSpec.lhs", true},
+		{"lhs non-test", "src/Tutorial.lhs", false},
+
+		// Nim test files
+		{"nim test directory", "tests/parser_test.nim", true},
+		{"nim nested test directory", "packages/core/tests/unit/parser_test.nim", true},
+		{"nim non-test", "src/parser.nim", false},
+		{"nim tests in filename", "src/tests_helper.nim", false},
+
+		// Snapshot files
+		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},
+		{"snap file", "src/components/Button.snap", true},
+		{"snap deeply nested", "packages/ui/src/__snapshots__/util.snap", true},
+
+		// Test data directories
+		{"testdata go", "internal/parser/testdata/input.json", true},
+		{"testdata nested", "pkg/a/b/testdata/golden.txt", true},
+		{"fixtures dir", "test/fixtures/sample.json", true},
+		{"fixtures nested", "spec/fixtures/users.yml", true},
+
+		// Generated code
+		{"generated go", "api/types.generated.go", true},
+		{"generated ts", "src/graphql/schema.generated.ts", true},
+		{"gen go", "proto/message.gen.go", true},
+		{"pb go", "api/v1/service.pb.go", true},
+		{"pb cc", "proto/message.pb.cc", true},
+		{"pb h", "proto/message.pb.h", true},
+
+		// Non-matches for new patterns
+		{"snapshots in name", "src/snapshots/util.ts", false},
+		{"testdata in filename", "src/testdata.go", false},
+		{"fixtures in filename", "src/fixtures.ts", false},
+		{"generated not dotted", "src/generated/code.go", false},
+		{"gen not suffix", "src/gen/util.go", false},
+		{"pb not suffix", "src/pb/client.go", false},
 
 		// Case insensitive
 		{"case insensitive go", "Foo/Bar_Test.go", true},

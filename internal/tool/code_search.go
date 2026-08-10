@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package tool
 
 import (
@@ -78,7 +81,14 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 	cmdArgs = append(cmdArgs, "-e", searchText)
 
 	if ref := p.FileReader.Ref; ref != "" {
-		cmdArgs = append(cmdArgs, "--end-of-options")
+		if strings.HasPrefix(ref, "-") {
+			// Defense-in-depth: reject option-like refs here even though
+			// validateReviewRefs already verifies the ref upstream.
+			// NOTE: git grep < 2.45 does not support --end-of-options before
+			// the revision, so this is the one git invocation where we can't
+			// rely on that separator.
+			return nil
+		}
 		cmdArgs = append(cmdArgs, ref)
 	}
 
@@ -125,6 +135,9 @@ func (p *CodeSearchProvider) runGitGrep(parentCtx context.Context, cmdArgs []str
 
 func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, caseSensitive bool, usePerlRegexp bool, pathspec []string) (string, error) {
 	cmdArgs := p.buildGrepArgs(searchText, caseSensitive, usePerlRegexp, false, pathspec)
+	if cmdArgs == nil {
+		return "Error: ref must not start with '-'", nil
+	}
 
 	outStr, errStr, err := p.runGitGrep(ctx, cmdArgs)
 

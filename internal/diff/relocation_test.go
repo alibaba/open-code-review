@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package diff
 
 import (
@@ -29,7 +32,6 @@ func newMockResponse(content string) *llm.ChatResponse {
 
 func makeTask() *template.LlmConversation {
 	return &template.LlmConversation{
-		Timeout: 60,
 		Messages: []template.ChatMessage{
 			{Role: "system", Content: "you are a helper"},
 			{Role: "user", Content: "diff:\n{diff}\n\ncomment:\n{suggestion_content}"},
@@ -204,6 +206,8 @@ func TestExtractCodeBlock(t *testing.T) {
 		{"with surrounding text", "Here:\n```\ncode\n```\ndone", "code"},
 		{"no code block", "just text", ""},
 		{"empty block", "```\n```", ""},
+		{"opening fence without newline", "```go", ""},
+		{"no closing fence", "```\nfoo\nbar", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

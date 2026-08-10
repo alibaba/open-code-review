@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { useT } from '../I18nProvider';
 import { useRef, useEffect } from 'preact/hooks';
 import { LogLine } from '../../shared/types';

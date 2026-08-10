@@ -1,10 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package rules
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 func TestExpandBraces_NoBraces(t *testing.T) {
@@ -104,6 +110,11 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"infra/main.bicep", "Hardcoded Secrets"},
 		{"api/v1/user.proto", "Wire Compatibility"},
 		{"service.proto", "Wire Compatibility"},
+		{"src/Main.hs", "Partial Functions"},
+		{"examples/Tutorial.lhs", "Partial Functions"},
+		{"src/parser.nim", "Memory and Lifetime Safety"},
+		{"scripts/build.nims", "Memory and Lifetime Safety"},
+		{"project.nimble", "Memory and Lifetime Safety"},
 	}
 
 	for _, tt := range tests {
@@ -1498,4 +1509,186 @@ func TestResolveRuleEntries_GlobalRuleFileResolution(t *testing.T) {
 	if entries[0].Rule != "global reusable rule" {
 		t.Errorf("global rule file should be resolved, got %q", entries[0].Rule)
 	}
+}
+
+// referencedRuleFiles reads the embedded system_rules.json and returns the set of
+// rule_docs filenames it references (default_rule + every path_rule_map value).
+// A plain map decode is enough here: we only need the value set, not key order.
+func referencedRuleFiles(t *testing.T) map[string]bool {
+	t.Helper()
+	data, err := rulesFS.ReadFile("system_rules.json")
+	if err != nil {
+		t.Fatalf("read embedded system_rules.json: %v", err)
+	}
+	var raw struct {
+		DefaultRule string            `json:"default_rule"`
+		PathRuleMap map[string]string `json:"path_rule_map"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal system_rules.json: %v", err)
+	}
+	refs := make(map[string]bool, len(raw.PathRuleMap)+1)
+	if raw.DefaultRule != "" {
+		refs[raw.DefaultRule] = true
+	}
+	for _, name := range raw.PathRuleMap {
+		refs[name] = true
+	}
+	return refs
+}
+
+func TestSystemRulesIntegrity(t *testing.T) {
+	rule, err := LoadDefault()
+	if err != nil {
+		t.Fatalf("LoadDefault: %v", err)
+	}
+
+	t.Run("file_existence", func(t *testing.T) {
+		refs := referencedRuleFiles(t)
+		for name := range refs {
+			if _, err := rulesFS.ReadFile("rule_docs/" + name); err != nil {
+				t.Errorf("rule_docs/%s referenced by system_rules.json but not embedded: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("pattern_validity", func(t *testing.T) {
+		// Resolve expands braces before matching, so validate each expanded arm
+		// rather than the raw pattern (which may contain "{go,py}").
+		for _, pr := range rule.PathRules {
+			for _, p := range expandBraces(pr.Pattern) {
+				if !doublestar.ValidatePattern(p) {
+					t.Errorf("pattern %q (expanded from %q) is not a valid glob", p, pr.Pattern)
+				}
+			}
+		}
+	})
+
+	t.Run("no_orphan_files", func(t *testing.T) {
+		refs := referencedRuleFiles(t)
+		entries, err := rulesFS.ReadDir("rule_docs")
+		if err != nil {
+			t.Fatalf("read embedded rule_docs: %v", err)
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			if !refs[e.Name()] {
+				t.Errorf("rule_docs/%s is not referenced by system_rules.json (orphan file)", e.Name())
+			}
+		}
+	})
+
+	t.Run("no_duplicate_patterns", func(t *testing.T) {
+		// SystemRule.UnmarshalJSON preserves declaration order via a streaming
+		// decoder, so duplicate keys survive in PathRules rather than being
+		// silently collapsed by a map decode.
+		seen := make(map[string]int)
+		for _, pr := range rule.PathRules {
+			seen[pr.Pattern]++
+		}
+		for pattern, count := range seen {
+			if count > 1 {
+				t.Errorf("pattern %q appears %d times in path_rule_map", pattern, count)
+			}
+		}
+	})
+}
+
+// TestLoadRuleFile covers loadRuleFile's read-error and unmarshal-error
+// branches plus the success path that resolves entries and returns the rule.
+func TestLoadRuleFile(t *testing.T) {
+	t.Run("read error on missing path", func(t *testing.T) {
+		if _, err := loadRuleFile(filepath.Join(t.TempDir(), "nope.json")); err == nil {
+			t.Fatal("expected read error for missing rule file, got nil")
+		}
+	})
+
+	t.Run("unmarshal error on invalid JSON", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "rule.json")
+		if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+			t.Fatalf("write invalid rule: %v", err)
+		}
+		if _, err := loadRuleFile(path); err == nil {
+			t.Fatal("expected unmarshal error for invalid JSON, got nil")
+		}
+	})
+
+	t.Run("valid file returns rule", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "rule.json")
+		if err := os.WriteFile(path, []byte(`{"rules":[{"rule":"be careful"}]}`), 0o644); err != nil {
+			t.Fatalf("write valid rule: %v", err)
+		}
+		pr, err := loadRuleFile(path)
+		if err != nil {
+			t.Fatalf("loadRuleFile: %v", err)
+		}
+		if pr == nil || len(pr.Rules) != 1 || pr.Rules[0].Rule != "be careful" {
+			t.Errorf("unexpected rule: %+v", pr)
+		}
+	})
+}
+
+// TestLoadGlobalRule covers loadGlobalRule's non-NotExist read error,
+// unmarshal error, and success branches by pointing HOME at a temp dir.
+func TestLoadGlobalRule(t *testing.T) {
+	globalRulePath := func(home string) string {
+		return filepath.Join(home, ".opencodereview", "rule.json")
+	}
+
+	t.Run("missing file is not an error", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		pr, err := loadGlobalRule()
+		if err != nil || pr != nil {
+			t.Fatalf("expected nil,nil for missing global rule: pr=%v err=%v", pr, err)
+		}
+	})
+
+	t.Run("read error when path is a directory", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		// Create the rule.json path as a directory so ReadFile fails with a
+		// non-NotExist error (EISDIR), exercising the wrapped-error branch.
+		if err := os.MkdirAll(globalRulePath(home), 0o755); err != nil {
+			t.Fatalf("mkdir rule path: %v", err)
+		}
+		if _, err := loadGlobalRule(); err == nil {
+			t.Fatal("expected read error when rule path is a directory, got nil")
+		}
+	})
+
+	t.Run("unmarshal error on invalid JSON", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		path := globalRulePath(home)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir parent: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("{bad"), 0o644); err != nil {
+			t.Fatalf("write invalid rule: %v", err)
+		}
+		if _, err := loadGlobalRule(); err == nil {
+			t.Fatal("expected unmarshal error for invalid global rule, got nil")
+		}
+	})
+
+	t.Run("valid file returns rule", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		path := globalRulePath(home)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir parent: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(`{"rules":[{"rule":"global rule"}]}`), 0o644); err != nil {
+			t.Fatalf("write valid rule: %v", err)
+		}
+		pr, err := loadGlobalRule()
+		if err != nil {
+			t.Fatalf("loadGlobalRule: %v", err)
+		}
+		if pr == nil || len(pr.Rules) != 1 || pr.Rules[0].Rule != "global rule" {
+			t.Errorf("unexpected rule: %+v", pr)
+		}
+	})
 }

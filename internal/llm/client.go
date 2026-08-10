@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package llm provides LLM client interfaces supporting multiple protocols.
 // Supported protocols (canonical names, see protocol.go):
 //   - "anthropic" — Anthropic Messages API
@@ -8,7 +11,10 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -167,6 +173,14 @@ func (r *ChatResponse) ToolCalls() []ToolCall {
 	return r.Choices[0].Message.ToolCalls
 }
 
+// ReasoningContent extracts the reasoning content of the first choice, if any.
+func (r *ChatResponse) ReasoningContent() string {
+	if len(r.Choices) == 0 {
+		return ""
+	}
+	return r.Choices[0].Message.ReasoningContent
+}
+
 // ToolDef defines a tool/function available to the model.
 type ToolDef struct {
 	Type     string      `json:"type"`
@@ -175,9 +189,10 @@ type ToolDef struct {
 
 // FunctionDef specifies the metadata for a tool definition.
 type FunctionDef struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	Parameters    map[string]any  `json:"parameters"`
+	RawDefinition json.RawMessage `json:"-"`
 }
 
 // ClientConfig holds configuration for connecting to an LLM service.
@@ -189,6 +204,32 @@ type ClientConfig struct {
 	Timeout      time.Duration     // Request timeout
 	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
 	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
+	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+}
+
+// retryCodesMiddleware returns an HTTP middleware that forces the SDK to retry
+// responses whose status code is in the given set, by injecting the
+// x-should-retry: true response header. Returns nil when codes is empty.
+// The returned function is structurally compatible with both option.Middleware
+// (Anthropic SDK) and openaiopt.Middleware (OpenAI SDK).
+func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+	if len(codes) == 0 {
+		return nil
+	}
+	codeSet := make(map[int]bool, len(codes))
+	for _, c := range codes {
+		codeSet[c] = true
+	}
+	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+		resp, err := next(req)
+		if err != nil {
+			return resp, err
+		}
+		if codeSet[resp.StatusCode] {
+			resp.Header.Set("x-should-retry", "true")
+		}
+		return resp, err
+	}
 }
 
 // --- Factory ---
@@ -211,6 +252,7 @@ func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 		Timeout:      ep.Timeout,
 		ExtraBody:    ep.ExtraBody,
 		ExtraHeaders: ep.ExtraHeaders,
+		RetryCodes:   ep.RetryCodes,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -318,6 +360,9 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
 
 	return &OpenAIClient{
 		cfg: cfg,
@@ -346,6 +391,15 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 
 	var opts []openaiopt.RequestOption
 	for k, v := range c.cfg.ExtraBody {
+		// Skip the "stream" key here. The streaming decision below uses a
+		// dedicated boolean check, and when streaming is enabled the SDK's
+		// NewStreaming method sets stream=true on the wire itself. When
+		// streaming is NOT enabled, leaving the key in the body would make
+		// the API answer with text/event-stream and the non-streaming path
+		// fails to decode (see issue #647).
+		if k == "stream" {
+			continue
+		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 	if stream, ok := c.cfg.ExtraBody["stream"].(bool); ok && stream {
@@ -353,6 +407,23 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 	}
 
 	sdkResp, err := c.sdk.Chat.Completions.New(ctx, params, opts...)
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		retryResp, retryErr := c.sdk.Chat.Completions.New(ctx, params, opts...)
+		if retryErr == nil {
+			sdkResp = retryResp
+			err = nil
+		} else {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			if !errors.Is(retryErr, io.ErrUnexpectedEOF) {
+				err = retryErr
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -611,6 +682,9 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, option.WithHeader(k, v))
 	}
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, option.WithMiddleware(mw))
+	}
 
 	return &AnthropicClient{
 		cfg: cfg,
@@ -632,6 +706,13 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 
 	var opts []option.RequestOption
 	for k, v := range c.cfg.ExtraBody {
+		// This client is non-streaming: it calls Messages.New, which expects a
+		// single JSON body. If a provider config sets extra_body.stream=true,
+		// forwarding it here makes the API answer with SSE and every call fails
+		// to decode. Drop the key rather than forward it.
+		if k == "stream" {
+			continue
+		}
 		opts = append(opts, option.WithJSONSet(k, v))
 	}
 

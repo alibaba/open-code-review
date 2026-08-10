@@ -1,13 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/delegate"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/spf13/cobra"
 )
 
 type delegateOptions struct {
@@ -20,72 +26,64 @@ type delegateOptions struct {
 	background     string
 	backgroundFile string
 	maxGitProcs    int
-	showHelp       bool
+	format         string
 }
 
-func runDelegate(args []string) error {
-	if len(args) == 0 {
-		printDelegateUsage()
-		return nil
-	}
+var delegatePreviewOpts delegateOptions
+var delegateRuleOpts delegateOptions
 
-	sub := args[0]
-	switch sub {
-	case "-h", "--help":
-		printDelegateUsage()
-		return nil
-	case "preview":
-		return runDelegatePreview(args[1:])
-	case "rule":
-		return runDelegateRule(args[1:])
-	default:
-		return fmt.Errorf("unknown delegate sub-command: %s\nRun 'ocr delegate -h' for usage", sub)
-	}
+var delegateCmd = &cobra.Command{
+	Use:     "delegate",
+	Aliases: []string{"d"},
+	Short:   "Output review spec for host-agent delegation (no LLM required)",
+	Long: `OpenCodeReview - Delegation Mode
+
+Output review spec for host-agent delegation (no LLM required).`,
+	Example: `  # Preview which files will be reviewed
+  ocr delegate preview --from main --to feature
+
+  # Preview workspace changes
+  ocr delegate preview
+
+  # Get rules for multiple files (grouped by content)
+  ocr delegate rule internal/agent/agent.go internal/llm/client.go`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
 }
 
-func parseDelegateFlags(args []string) (delegateOptions, []string, error) {
-	a := newOcrFlagSet("ocr delegate")
+var delegatePreviewCmd = &cobra.Command{
+	Use:   "preview [flags]",
+	Short: "Preview reviewable files with mode/ref metadata",
+	Long:  "Outputs reviewable file list with mode/ref metadata for the host agent to construct git commands.",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateDelegateOptions(&delegatePreviewOpts); err != nil {
+			return err
+		}
+		return executeDelegatePreview(delegatePreviewOpts)
+	},
+}
 
-	opts := delegateOptions{}
-	a.StringVar(&opts.repoDir, "repo", "", "root directory of the git repository (default: current dir)")
-	a.StringVar(&opts.from, "from", "", "source ref to start diff from (e.g., 'main')")
-	a.StringVar(&opts.to, "to", "", "target ref to end diff at (e.g., 'feature-branch')")
-	a.StringVarP(&opts.commit, "commit", "c", "", "single commit hash or tag to review (vs its parent)")
-	a.StringVar(&opts.excludes, "exclude", "", "comma-separated gitignore-style patterns to exclude")
-	a.StringVar(&opts.rulePath, "rule", "", "path to JSON file with system review rules")
-	a.StringVarP(&opts.background, "background", "b", "", "optional requirement/business context")
-	a.StringVarP(&opts.backgroundFile, "background-file", "B", "", "path to a Markdown file used as background")
-	a.IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
+var delegateRuleCmd = &cobra.Command{
+	Use:   "rule [flags] <path...>",
+	Short: "Output resolved review rules grouped by content",
+	Long:  "Outputs resolved review rules grouped by content. Accepts multiple paths.",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateDelegateOptions(&delegateRuleOpts); err != nil {
+			return err
+		}
+		return executeDelegateRule(delegateRuleOpts, args)
+	},
+}
 
-	if err := a.Parse(args); err != nil {
-		return opts, nil, fmt.Errorf("parse flags: %w", err)
-	}
-
-	opts.showHelp = a.showHelp
-	if opts.showHelp {
-		return opts, nil, nil
-	}
-
-	// Validate mode exclusivity
-	modeCount := 0
-	if opts.from != "" || opts.to != "" {
-		modeCount++
-	}
-	if opts.commit != "" {
-		modeCount++
-	}
-	if modeCount > 1 {
-		return opts, nil, fmt.Errorf("only one review mode allowed (--from/--to or --commit)")
-	}
-	if opts.from != "" && opts.to == "" {
-		return opts, nil, fmt.Errorf("--to is required when --from is specified")
-	}
-	if opts.to != "" && opts.from == "" {
-		return opts, nil, fmt.Errorf("--from is required when --to is specified")
-	}
-
-	remaining := a.fs.Args()
-	return opts, remaining, nil
+func init() {
+	registerDelegateFlags(delegatePreviewCmd, &delegatePreviewOpts)
+	registerDelegateFlags(delegateRuleCmd, &delegateRuleOpts)
+	delegateCmd.AddCommand(delegatePreviewCmd)
+	delegateCmd.AddCommand(delegateRuleCmd)
 }
 
 // delegateContext holds the shared state for delegate sub-commands.
@@ -129,7 +127,7 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 
 // preview runs the agent's file-selection logic and returns the preview result.
 func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, error) {
-	ag := agent.New(agent.Args{
+	return agent.Preview(ctx, agent.Args{
 		RepoDir:    dc.cc.RepoDir,
 		From:       dc.opts.from,
 		To:         dc.opts.to,
@@ -137,7 +135,6 @@ func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, err
 		FileFilter: dc.cc.FileFilter,
 		GitRunner:  dc.cc.GitRunner,
 	})
-	return ag.Preview(ctx)
 }
 
 // mergeBase computes the merge-base for range mode. Returns "" for other modes.
@@ -166,17 +163,7 @@ func (dc *delegateContext) resolver() rules.Resolver {
 	return dc.cc.Resolver
 }
 
-func runDelegatePreview(args []string) error {
-	opts, _, err := parseDelegateFlags(args)
-	if err != nil {
-		return err
-	}
-	if opts.showHelp {
-		fmt.Println("Usage: ocr delegate preview [flags]")
-		fmt.Println("\nOutputs reviewable file list with mode/ref metadata for the host agent to construct git commands.")
-		return nil
-	}
-
+func executeDelegatePreview(opts delegateOptions) error {
 	dc, err := loadDelegateContext(opts)
 	if err != nil {
 		return err
@@ -187,8 +174,27 @@ func runDelegatePreview(args []string) error {
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)
 	}
+	mergeBase := dc.mergeBase(ctx)
+	if opts.format == "json" {
+		return writeDelegateJSON(delegatePreviewJSON{
+			SchemaVersion:   delegateSchemaVersion,
+			Mode:            dc.reviewMode(),
+			Repository:      dc.cc.RepoDir,
+			From:            dc.opts.from,
+			To:              dc.opts.to,
+			Commit:          dc.opts.commit,
+			MergeBase:       mergeBase,
+			Background:      dc.opts.background,
+			TotalFiles:      preview.TotalFiles,
+			ReviewableCount: preview.ReviewableCount,
+			ExcludedCount:   preview.ExcludedCount,
+			TotalInsertions: preview.TotalInsertions,
+			TotalDeletions:  preview.TotalDeletions,
+			ReviewableFiles: previewFiles(preview, true),
+			ExcludedFiles:   previewFiles(preview, false),
+		})
+	}
 
-	// Header with mode info
 	fmt.Printf("# Files (%d reviewable / %d total)\n\n", preview.ReviewableCount, preview.TotalFiles)
 	fmt.Printf("- mode: %s\n", dc.reviewMode())
 	if dc.opts.from != "" {
@@ -200,7 +206,7 @@ func runDelegatePreview(args []string) error {
 	if dc.opts.commit != "" {
 		fmt.Printf("- commit: %s\n", dc.opts.commit)
 	}
-	if mergeBase := dc.mergeBase(ctx); mergeBase != "" {
+	if mergeBase != "" {
 		fmt.Printf("- merge_base: %s\n", mergeBase)
 	}
 	if dc.opts.background != "" {
@@ -225,59 +231,100 @@ func runDelegatePreview(args []string) error {
 	return nil
 }
 
-func runDelegateRule(args []string) error {
-	opts, remaining, err := parseDelegateFlags(args)
-	if err != nil {
-		return err
-	}
-	if opts.showHelp {
-		fmt.Println("Usage: ocr delegate rule [flags] <path...>")
-		fmt.Println("\nOutputs resolved review rules grouped by content. Accepts multiple paths.")
-		return nil
-	}
-	if len(remaining) == 0 {
-		return fmt.Errorf("at least one file path is required\nUsage: ocr delegate rule [flags] <path...>")
-	}
-
+func executeDelegateRule(opts delegateOptions, paths []string) error {
 	dc, err := loadDelegateContext(opts)
 	if err != nil {
 		return err
 	}
 
-	groups := delegate.GroupRules(dc.resolver(), remaining)
+	groups := delegate.GroupRules(dc.resolver(), paths)
+	if opts.format == "json" {
+		return writeDelegateJSON(delegateRulesJSON{
+			SchemaVersion: delegateSchemaVersion,
+			Groups:        ruleGroupsJSON(groups),
+		})
+	}
 	fmt.Print(delegate.RuleGroupsMarkdown(groups))
 	return nil
 }
 
-func printDelegateUsage() {
-	fmt.Println(`OpenCodeReview - Delegation Mode
+const delegateSchemaVersion = "1"
 
-Usage:
-  ocr delegate <sub-command> [flags]
-  ocr d <sub-command> [flags]       (alias)
+type delegatePreviewFileJSON struct {
+	Path          string `json:"path"`
+	Status        string `json:"status"`
+	Insertions    int64  `json:"insertions"`
+	Deletions     int64  `json:"deletions"`
+	ExcludeReason string `json:"exclude_reason,omitempty"`
+}
 
-Sub-commands:
-  preview       Preview reviewable files with mode/ref metadata
-  rule          Output resolved review rules grouped by content
+type delegatePreviewJSON struct {
+	SchemaVersion   string                    `json:"schema_version"`
+	Mode            string                    `json:"mode"`
+	Repository      string                    `json:"repository"`
+	From            string                    `json:"from,omitempty"`
+	To              string                    `json:"to,omitempty"`
+	Commit          string                    `json:"commit,omitempty"`
+	MergeBase       string                    `json:"merge_base,omitempty"`
+	Background      string                    `json:"background,omitempty"`
+	TotalFiles      int                       `json:"total_files"`
+	ReviewableCount int                       `json:"reviewable_count"`
+	ExcludedCount   int                       `json:"excluded_count"`
+	TotalInsertions int64                     `json:"total_insertions"`
+	TotalDeletions  int64                     `json:"total_deletions"`
+	ReviewableFiles []delegatePreviewFileJSON `json:"reviewable_files"`
+	ExcludedFiles   []delegatePreviewFileJSON `json:"excluded_files"`
+}
 
-Shared Flags:
-  --from string           source ref to start diff from (e.g., 'main')
-  --to string             target ref to end diff at (e.g., 'feature-branch')
-  -c, --commit string     single commit hash or tag to review
-  --repo string           root directory of the git repository (default: current dir)
-  --rule string           path to JSON file with system review rules
-  --exclude string        comma-separated gitignore-style patterns to exclude
-  -b, --background string optional requirement/business context
-  -B, --background-file   path to a Markdown file used as background
-  --max-git-procs int     max concurrent git subprocesses (default 16)
+type delegateRuleGroupJSON struct {
+	GroupID int      `json:"group_id"`
+	Source  string   `json:"source"`
+	Pattern string   `json:"pattern"`
+	Files   []string `json:"files"`
+	Rule    string   `json:"rule"`
+}
 
-Examples:
-  # Preview which files will be reviewed
-  ocr delegate preview --from main --to feature
+type delegateRulesJSON struct {
+	SchemaVersion string                  `json:"schema_version"`
+	Groups        []delegateRuleGroupJSON `json:"groups"`
+}
 
-  # Preview workspace changes
-  ocr delegate preview
+func previewFiles(preview *agent.DiffPreview, reviewable bool) []delegatePreviewFileJSON {
+	files := make([]delegatePreviewFileJSON, 0)
+	for _, entry := range preview.Entries {
+		if entry.WillReview != reviewable {
+			continue
+		}
+		files = append(files, delegatePreviewFileJSON{
+			Path:          entry.Path,
+			Status:        entry.Status,
+			Insertions:    entry.Insertions,
+			Deletions:     entry.Deletions,
+			ExcludeReason: string(entry.ExcludeReason),
+		})
+	}
+	return files
+}
 
-  # Get rules for multiple files (grouped by content)
-  ocr delegate rule internal/agent/agent.go internal/llm/client.go`)
+func ruleGroupsJSON(groups []delegate.RuleGroup) []delegateRuleGroupJSON {
+	out := make([]delegateRuleGroupJSON, 0, len(groups))
+	for _, group := range groups {
+		files := make([]string, 0, len(group.Files))
+		files = append(files, group.Files...)
+		out = append(out, delegateRuleGroupJSON{
+			GroupID: group.ID,
+			Source:  group.Source,
+			Pattern: group.Pattern,
+			Files:   files,
+			Rule:    group.Text,
+		})
+	}
+	return out
+}
+
+func writeDelegateJSON(value any) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(value)
 }

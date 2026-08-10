@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 export interface OcrProviderPreset {
   name: string;
   displayName: string;
@@ -114,6 +117,14 @@ export const PROVIDER_PRESETS: OcrProviderPreset[] = [
   {
     name: 'minimax',
     displayName: 'MiniMax API',
+    protocol: 'openai',
+    baseUrl: 'https://api.minimax.io/v1',
+    envVar: 'MINIMAX_GLOBAL_API_KEY',
+    models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed'],
+  },
+  {
+    name: 'minimax-cn',
+    displayName: 'MiniMax CN API',
     protocol: 'openai',
     baseUrl: 'https://api.minimaxi.com/v1',
     envVar: 'MINIMAX_API_KEY',

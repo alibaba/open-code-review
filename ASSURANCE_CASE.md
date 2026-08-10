@@ -88,6 +88,7 @@ The following maps [OWASP Top 10](https://owasp.org/www-project-top-ten/) and [C
 | Weakness | Applicability | Countermeasure |
 |----------|---------------|----------------|
 | **A03:2021 Injection** (CWE-78 OS Command Injection) | All `exec.Command` calls use `git` with explicit argument lists — no shell interpolation. `--end-of-options` prevents flag injection. | Mitigated |
+| **A03:2021 Injection** (CWE-79 Cross-site Scripting) | Viewer template output is HTML-escaped by `html/template`. Defense-in-depth: every viewer response carries a strict Content-Security-Policy (`default-src 'self'`, no `unsafe-inline`) plus `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, and `Permissions-Policy` (`internal/viewer/securityheaders.go`). | Mitigated |
 | **A01:2021 Broken Access Control** (CWE-22 Path Traversal) | Agent file-read tool validates paths with `pathutil.WithinBase()` before and after symlink resolution (`internal/tool/filereader.go:91-112`). | Mitigated |
 | **A02:2021 Cryptographic Failures** | All API communication uses HTTPS/TLS 1.2+. Go's default TLS configuration is used without weakening. `InsecureSkipVerify` is never set. | Mitigated |
 | **A07:2021 Auth Failures** (CWE-798 Hard-coded Credentials) | API keys are read exclusively from environment variables, never embedded in code or config files, never logged. | Mitigated |

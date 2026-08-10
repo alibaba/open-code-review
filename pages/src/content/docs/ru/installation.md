@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-Установить CLI `ocr` можно четырьмя способами.
+Установить CLI `ocr` можно шестью способами.
 
 ## npm (рекомендуется)
 
@@ -38,6 +38,34 @@ export OCR_NO_UPDATE=1
 
 ```bash
 npm uninstall -g @alibaba-group/open-code-review
+```
+
+## Homebrew (macOS / Linux)
+
+```bash
+brew install open-code-review
+```
+
+Формула собирает `ocr` из исходников и устанавливает бинарник.
+
+Для обновления:
+
+```bash
+brew upgrade open-code-review
+```
+
+## MacPorts (macOS)
+
+```bash
+sudo port install open-code-review
+```
+
+Порт собирает `ocr` из исходников и устанавливает бинарник.
+
+Для обновления:
+
+```bash
+sudo port upgrade open-code-review
 ```
 
 ## Скрипт установки (curl | sh)
@@ -164,6 +192,22 @@ ocr review --help       # полный список флагов команды 
 which ocr
 echo $PATH
 ```
+
+## Включение автодополнения оболочки (опционально)
+
+`ocr` поддерживает автодополнение по Tab для bash, zsh, fish и PowerShell.
+
+```bash
+# bash
+source <(ocr completion bash)
+
+# zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+Подробности по fish, PowerShell и постоянной настройке см. в
+[CLI Reference](./cli-reference.md#ocr-completion).
+
 
 ## Где OCR хранит состояние
 

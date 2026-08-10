@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { describeActiveProvider, isConfigReady } from '../../shared/configUtils';
 import { ReviewMode } from '../../shared/types';
 import { initialState, reducer } from '../store';

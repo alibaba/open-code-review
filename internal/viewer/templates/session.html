@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Session Detail - Open Code Review Viewer</title>
+
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav class="breadcrumb"><a href="/">Open Code Review Viewer</a> &rsaquo; <a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a> &rsaquo; Session {{.Session.Summary.SessionID | truncate 12}}</nav>
+<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a><span class="sep">/</span><a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a><span class="sep">/</span><span class="current">{{.Session.Summary.SessionID | truncate 12}}</span></nav>
 <main>
 <div class="session-header">
     <h2>Session: {{.Session.Summary.SessionID}}</h2>
@@ -25,8 +26,22 @@
         <span><strong>Model:</strong> <code>{{.Session.Summary.Model}}</code></span>
         <span><strong>Duration:</strong> {{formatDuration .Session.Summary.DurationSec}}</span>
         <span><strong>Files:</strong> {{.Session.Summary.FileCount}}</span>
+        <span><strong>Status:</strong> {{if .Session.Summary.Aborted}}aborted{{else if .Session.Summary.Legacy}}legacy{{else}}{{.Session.Summary.TerminalState}}{{end}}</span>
     </div>
 </div>
+
+{{if .Session.Summary.RunManifest}}
+<div class="token-summary">
+    <h3>Coverage</h3>
+    <div class="token-stats">
+        <div class="token-item"><div class="token-value">{{.Session.Summary.SelectedCount}}</div><div class="token-label">Selected</div></div>
+        <div class="token-item"><div class="token-value">{{.Session.Summary.CompletedCount}}</div><div class="token-label">Completed</div></div>
+        <div class="token-item"><div class="token-value">{{.Session.Summary.ReusedCount}}</div><div class="token-label">Reused</div></div>
+        <div class="token-item"><div class="token-value{{if .Session.Summary.FailedCount}} badge-error{{end}}">{{.Session.Summary.FailedCount}}</div><div class="token-label">Failed</div></div>
+        <div class="token-item"><div class="token-value">{{.Session.Summary.WaivedCount}}</div><div class="token-label">Waived</div></div>
+    </div>
+</div>
+{{end}}
 
 <div class="token-summary">
     <h3>Token Usage</h3>
@@ -65,34 +80,111 @@
         {{end}}
     </div>
     {{with .Session.TokenUsage.FileTokenBreakdown}}
-    <table class="token-table">
-        <thead><tr><th>File</th><th>Prompt</th><th>Completion</th>{{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<th>Cache Read</th><th>Cache Write</th>{{end}}<th>Total</th></tr></thead>
-        <tbody>
-        {{range .}}
-            <tr>
-                <td title="{{.FilePath}}">{{.FilePath | truncate 60}}</td>
-                <td title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</td>
-                <td title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</td>
-                {{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<td title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</td><td title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</td>{{end}}
-                <td title="{{add .PromptTokens .CompletionTokens}}"><strong>{{formatNumber (add .PromptTokens .CompletionTokens)}}</strong></td>
-            </tr>
-        {{end}}
-        </tbody>
-    </table>
+    <details class="token-breakdown">
+        <summary class="token-breakdown-toggle">
+            <span class="chevron-sm"></span>
+            <span>File breakdown</span>
+            <span class="file-count-badge">{{len .}} files</span>
+        </summary>
+        <div class="token-breakdown-body">
+            <table class="token-table">
+                <thead><tr><th>File</th><th>Prompt</th><th>Completion</th>{{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<th>Cache Read</th><th>Cache Write</th>{{end}}<th>Total</th></tr></thead>
+                <tbody>
+                {{range .}}
+                    <tr>
+                        <td title="{{.FilePath}}">{{.FilePath | truncate 60}}</td>
+                        <td title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</td>
+                        <td title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</td>
+                        {{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<td title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</td><td title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</td>{{end}}
+                        <td title="{{add .PromptTokens .CompletionTokens}}"><strong>{{formatNumber (add .PromptTokens .CompletionTokens)}}</strong></td>
+                    </tr>
+                {{end}}
+                </tbody>
+            </table>
+        </div>
+    </details>
     {{end}}
 </div>
 
-{{if .Session.Summary.FilesReviewed}}
-<h3>Files Reviewed</h3>
-<ul class="file-list">
-{{range .Session.Summary.FilesReviewed}}
-    <li>{{.}}</li>
-{{end}}
-</ul>
+{{if .Session.Comments}}
+<div class="comments-section">
+    <h3>Review Comments ({{len .Session.Comments}} findings)</h3>
+    {{with severityCounts .Session.Comments}}
+    <div class="severity-bar">
+        {{if .Critical}}<span class="severity-badge severity-critical">Critical: {{.Critical}}</span>{{end}}
+        {{if .High}}<span class="severity-badge severity-high">High: {{.High}}</span>{{end}}
+        {{if .Medium}}<span class="severity-badge severity-medium">Medium: {{.Medium}}</span>{{end}}
+        {{if .Low}}<span class="severity-badge severity-low">Low: {{.Low}}</span>{{end}}
+    </div>
+    {{end}}
+    <div class="comment-groups">
+    {{range groupCommentsByFile .Session.Comments}}
+    <details class="comment-file-group" open>
+        <summary class="comment-file-header">
+            <span class="chevron"></span>
+            <span class="file-path">{{.FilePath}}</span>
+            <span class="file-count-badge">{{len .Comments}} comments</span>
+        </summary>
+        <div class="comment-file-body">
+        {{range .Comments}}
+            <div class="comment-card">
+                <div class="comment-meta">
+                    {{if .Category}}<span class="comment-badge {{categoryClass .Category}}">{{.Category}}</span>{{end}}
+                    {{if .Severity}}<span class="comment-badge {{severityClass .Severity}}">{{.Severity}}</span>{{end}}
+                    {{if .StartLine}}<span class="comment-lines">L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}</span>{{end}}
+                </div>
+                <div class="comment-content">{{.Content}}</div>
+                {{if or .ExistingCode .SuggestionCode}}
+                <div class="comment-code-diff">
+                    {{if .ExistingCode}}
+                    <div class="code-panel code-existing">
+                        <div class="code-panel-label">Existing Code</div>
+                        <pre><code>{{.ExistingCode}}</code></pre>
+                    </div>
+                    {{end}}
+                    {{if .SuggestionCode}}
+                    <div class="code-panel code-suggestion">
+                        <div class="code-panel-label">Suggested Change</div>
+                        <pre><code>{{.SuggestionCode}}</code></pre>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
+            </div>
+        {{end}}
+        </div>
+    </details>
+    {{end}}
+    </div>
+</div>
 {{end}}
 
-<h3>Conversations ({{len .Session.Files}} files)</h3>
-<div class="conversations">
+{{if .Session.Summary.FilesReviewed}}
+<details class="file-accordion section-accordion">
+    <summary class="file-accordion-header">
+        <span class="chevron"></span>
+        <span class="section-title">Files Reviewed</span>
+        <span class="file-count-badge">{{len .Session.Summary.FilesReviewed}} files</span>
+    </summary>
+    <div class="file-accordion-body">
+        <ul class="file-list">
+        {{range .Session.Summary.FilesReviewed}}
+            <li>{{.}}</li>
+        {{end}}
+        </ul>
+    </div>
+</details>
+{{end}}
+
+{{if .Session.Files}}
+<details class="file-accordion section-accordion">
+    <summary class="file-accordion-header">
+        <span class="chevron"></span>
+        <span class="section-title">Conversations</span>
+        <span class="file-count-badge">{{len .Session.Files}} files</span>
+    </summary>
+    <div class="file-accordion-body">
+        <div class="conversations">
 {{range .Session.Files}}
 <details class="file-accordion">
     <summary class="file-accordion-header">
@@ -161,37 +253,12 @@
     </div>
 </details>
 {{end}}
-</div>
+        </div>
+    </div>
+</details>
+{{end}}
 
-<script>
-document.querySelectorAll('.response-text').forEach(function(el) {
-    var text = el.textContent;
-    var esc = function(s) {
-        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    };
-    var codeBlocks = [];
-    var html = esc(text);
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
-        codeBlocks.push(code.replace(/^\n|\n$/g, ''));
-        return '%%CODEBLOCK_' + (codeBlocks.length - 1) + '%%';
-    });
-    html = html
-        .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/^### (.+)$/gm, '<div class="md-h3">$1</div>')
-        .replace(/^## (.+)$/gm, '<div class="md-h2">$1</div>')
-        .replace(/^# (.+)$/gm, '<div class="md-h1">$1</div>')
-        .replace(/^[-*] (.+)$/gm, '<div class="md-li">&bull; $1</div>')
-        .replace(/\n{2,}/g, '<br><br>')
-        .replace(/\n/g, '<br>');
-    codeBlocks.forEach(function(code, i) {
-        html = html.replace('%%CODEBLOCK_' + i + '%%',
-            '<pre class="code-block"><code>' + code + '</code></pre>');
-    });
-    el.innerHTML = html;
-});
-</script>
+<script src="/static/session.js"></script>
 </main>
 </body>
 </html>

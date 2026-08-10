@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { OcrConfig, ProviderEntry } from '../../shared/types';
 
 function parseProviderEntry(raw: Record<string, unknown> | undefined): ProviderEntry {

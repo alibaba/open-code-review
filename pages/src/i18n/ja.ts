@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { TranslationKeys } from './types';
 
 export const ja: TranslationKeys = {
@@ -24,14 +27,14 @@ export const ja: TranslationKeys = {
 
   // Highlights
   'highlights.stat1Value': '20K+',
-  'highlights.stat1Label': 'アクティブユーザー',
+  'highlights.stat1Label': '社内アクティブユーザー',
   'highlights.stat1Caption': 'Alibabaグループ内で実戦検証済み',
-  'highlights.stat2Value': '> 30%',
-  'highlights.stat2Label': '採用率',
-  'highlights.stat2Caption': 'Alibabaグループ内で実戦検証済み',
-  'highlights.stat3Value': '1M+',
+  'highlights.stat2Value': '150K+',
+  'highlights.stat2Label': 'NPM コミュニティダウンロード',
+  'highlights.stat2Caption': 'npm 過去30日の実ダウンロード数',
+  'highlights.stat3Value': '3M+',
   'highlights.stat3Label': '実タスク',
-  'highlights.stat3Caption': '実行されたコードレビュータスク',
+  'highlights.stat3Caption': '実行済みのコードレビュータスク',
   'highlights.stat4Value': '1/9',
   'highlights.stat4Label': 'トークンコスト',
   'highlights.stat4Caption': 'Claude Code との比較 · 1,000 PR',

@@ -1,10 +1,51 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package viewer
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/session"
 )
+
+type dataErrorReader struct {
+	data []byte
+	err  error
+}
+
+func (r *dataErrorReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	if len(r.data) == 0 {
+		return n, r.err
+	}
+	return n, nil
+}
+
+func TestReadJSONLLinesDiscardsPartialDataOnNonEOFError(t *testing.T) {
+	errRead := errors.New("read failed")
+	r := &dataErrorReader{data: []byte("complete\npartial"), err: errRead}
+	var visited []string
+
+	err := readJSONLLines(r, func(line []byte) {
+		visited = append(visited, string(line))
+	})
+	if !errors.Is(err, errRead) {
+		t.Fatalf("readJSONLLines error = %v, want %v", err, errRead)
+	}
+	if len(visited) != 1 || visited[0] != "complete\n" {
+		t.Fatalf("visited records = %q, want only the complete line", visited)
+	}
+}
 
 func TestSessionsRoot(t *testing.T) {
 	root, err := SessionsRoot()
@@ -162,6 +203,58 @@ func TestLoadSession_FullParse(t *testing.T) {
 	}
 }
 
+func TestLoadSession_TaskDoneStates(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeJSONL(t, filepath.Join(repoDir, "terminal-states.jsonl"),
+		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":1,"messages":[]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","tool_calls":[{"name":"task_done","arguments":"{}"}]}`,
+		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":2,"messages":[]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","tool_calls":[{"name":"task_done","arguments":"{\"state\":\"DONE\"}"}]}`,
+		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":3,"messages":[]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","tool_calls":[{"name":"task_done","arguments":"{\"state\":\"FAILED\"}"}]}`,
+		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":4,"messages":[]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","tool_calls":[{"name":"task_done","arguments":"{\"state\":\"\"}"}]}`,
+		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":5,"messages":[]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","tool_calls":[{"name":"task_done","arguments":"{\"state\":\"\"}"},{"name":"file_read","arguments":"{\"path\":\"main.go\"}"}]}`,
+		`{"type":"tool_call","filePath":"main.go","taskType":"main_task","tool_name":"file_read","result":"package main","ok":true,"duration_ms":20}`,
+	)
+
+	vs, err := LoadSession(root, "repo", "terminal-states")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vs.Files) != 1 {
+		t.Fatalf("files = %d, want 1", len(vs.Files))
+	}
+	cards := vs.Files[0].Tasks[MainTask]
+	if len(cards) != 5 {
+		t.Fatalf("main_task cards = %d, want 5", len(cards))
+	}
+	wantOK := []bool{true, true, false, false}
+	for i, want := range wantOK {
+		if len(cards[i].ToolCalls) != 1 {
+			t.Fatalf("card %d tool calls = %d, want 1", i, len(cards[i].ToolCalls))
+		}
+		if got := cards[i].ToolCalls[0].Ok; got != want {
+			t.Errorf("card %d task_done Ok = %v, want %v", i, got, want)
+		}
+	}
+	if len(cards[4].ToolCalls) != 2 {
+		t.Fatalf("card 4 tool calls = %d, want 2", len(cards[4].ToolCalls))
+	}
+	if cards[4].ToolCalls[0].Ok || cards[4].ToolCalls[0].Result != "" {
+		t.Errorf("invalid task_done received another tool's result: %+v", cards[4].ToolCalls[0])
+	}
+	if !cards[4].ToolCalls[1].Ok || cards[4].ToolCalls[1].Result != "package main" {
+		t.Errorf("file_read result was not matched by name: %+v", cards[4].ToolCalls[1])
+	}
+}
+
 func TestLoadSession_MissingFile(t *testing.T) {
 	root := t.TempDir()
 	repoDir := filepath.Join(root, "repo")
@@ -172,6 +265,93 @@ func TestLoadSession_MissingFile(t *testing.T) {
 	_, err := LoadSession(root, "repo", "nonexistent")
 	if err == nil {
 		t.Error("expected error for missing session file")
+	}
+}
+
+func TestLoadSessionReadsV1Manifest(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(repoDir, "manifest.jsonl"),
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
+		`{"type":"session_end","duration_seconds":1,"run_manifest":{"schema_version":"ocr.run-manifest/v1","run_id":"run-1","operation":"review","terminal_state":"complete","repository":{},"input":{"mode":"workspace"},"execution":{},"coverage":{"selected":[{"item_id":"a","path":"a.go"},{"item_id":"b","path":"b.go"}],"completed":[{"item_id":"a","path":"a.go"}],"reused":[{"item_id":"b","path":"b.go"}],"failed":[],"waived":[]},"elapsed_ms":1000}}`)
+
+	vs, err := LoadSession(root, "repo", "manifest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vs.Summary.RunManifest == nil || vs.Summary.TerminalState != "complete" || vs.Summary.FileCount != 2 {
+		t.Fatalf("summary = %+v", vs.Summary)
+	}
+	if vs.Summary.CompletedCount != 1 || vs.Summary.ReusedCount != 1 || vs.Summary.FailedCount != 0 || vs.Summary.WaivedCount != 0 {
+		t.Fatalf("coverage counts = %+v", vs.Summary)
+	}
+}
+
+func TestViewerReadsSessionEndLargerThanScannerLimit(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	const itemCount = 35000
+	items := make([]session.CoverageItem, 0, itemCount)
+	for i := range itemCount {
+		id := fmt.Sprintf("%064x", i)
+		items = append(items, session.CoverageItem{
+			ItemID:      id,
+			Path:        fmt.Sprintf("pkg/file-%05d.go", i),
+			Fingerprint: id,
+		})
+	}
+	manifest := session.RunManifest{
+		SchemaVersion: session.ManifestSchemaVersion,
+		RunID:         "large",
+		Operation:     session.OperationReview,
+		TerminalState: session.StateComplete,
+		Input:         session.ManifestInput{Mode: session.InputModeWorkspace},
+		Coverage: session.Coverage{
+			Selected:  items,
+			Completed: items,
+			Reused:    []session.CoverageItem{},
+			Failed:    []session.CoverageItem{},
+			Waived:    []session.CoverageItem{},
+		},
+		ElapsedMS: 1000,
+	}
+	sessionEndData, err := json.Marshal(map[string]any{
+		"type":             "session_end",
+		"duration_seconds": 1,
+		"run_manifest":     manifest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessionEndData) <= 10*1024*1024 {
+		t.Fatalf("session_end size = %d, want more than former 10 MiB limit", len(sessionEndData))
+	}
+	path := filepath.Join(repoDir, "large.jsonl")
+	writeJSONL(t, path,
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
+		string(sessionEndData),
+	)
+
+	summary, err := peekSession(path)
+	if err != nil {
+		t.Fatalf("peek large session: %v", err)
+	}
+	if summary.RunManifest == nil || summary.TerminalState != "complete" || summary.FileCount != itemCount {
+		t.Fatalf("peek summary = %+v", summary)
+	}
+
+	vs, err := LoadSession(root, "repo", "large")
+	if err != nil {
+		t.Fatalf("load large session: %v", err)
+	}
+	if vs.Summary.RunManifest == nil || vs.Summary.TerminalState != "complete" || vs.Summary.FileCount != itemCount {
+		t.Fatalf("loaded summary = %+v", vs.Summary)
 	}
 }
 
@@ -489,5 +669,68 @@ func TestLoadSession_MultipleTaskTypes(t *testing.T) {
 	}
 	if len(fg.Tasks[MemoryCompressionTask]) != 1 {
 		t.Errorf("memory_compression_task cards = %d", len(fg.Tasks[MemoryCompressionTask]))
+	}
+}
+
+// TestLoadSession_ReviewComments covers the review_item_done / review_item_reused
+// comment-parsing block: every ReviewComment field, the per-comment path
+// override, and a reused item carrying comments.
+func TestLoadSession_ReviewComments(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeJSONL(t, filepath.Join(repoDir, "comments.jsonl"),
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
+		`{"type":"review_item_done","filePath":"main.go","comments":[{"path":"override.go","content":"use a constant","suggestion_code":"const N = 3","existing_code":"3","start_line":10,"end_line":12,"category":"style","severity":"minor"}]}`,
+		`{"type":"review_item_reused","filePath":"util.go","comments":[{"content":"reused finding"}]}`,
+		`{"type":"session_end","duration_seconds":5,"files_reviewed":["main.go"]}`,
+	)
+
+	vs, err := LoadSession(root, "repo", "comments")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(vs.Comments) != 2 {
+		t.Fatalf("Comments = %d, want 2", len(vs.Comments))
+	}
+	if vs.Summary.CommentCount != 2 {
+		t.Errorf("CommentCount = %d, want 2", vs.Summary.CommentCount)
+	}
+
+	c := vs.Comments[0]
+	// path override replaces the record-level filePath.
+	if c.FilePath != "override.go" {
+		t.Errorf("FilePath = %q, want override.go", c.FilePath)
+	}
+	if c.Content != "use a constant" {
+		t.Errorf("Content = %q", c.Content)
+	}
+	if c.SuggestionCode != "const N = 3" {
+		t.Errorf("SuggestionCode = %q", c.SuggestionCode)
+	}
+	if c.ExistingCode != "3" {
+		t.Errorf("ExistingCode = %q", c.ExistingCode)
+	}
+	if c.StartLine != 10 || c.EndLine != 12 {
+		t.Errorf("lines = %d-%d, want 10-12", c.StartLine, c.EndLine)
+	}
+	if c.Category != "style" {
+		t.Errorf("Category = %q", c.Category)
+	}
+	if c.Severity != "minor" {
+		t.Errorf("Severity = %q", c.Severity)
+	}
+
+	// A reused comment with no path falls back to the record-level filePath.
+	reused := vs.Comments[1]
+	if reused.FilePath != "util.go" {
+		t.Errorf("reused FilePath = %q, want util.go", reused.FilePath)
+	}
+	if reused.Content != "reused finding" {
+		t.Errorf("reused Content = %q", reused.Content)
 	}
 }

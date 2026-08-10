@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package diff
 
 import (
@@ -81,6 +84,89 @@ func TestIsPathExcluded(t *testing.T) {
 	}
 }
 
+// allowListGitignore is the "ignore everything, then re-include" idiom from
+// github/gitignore's Go.AllowList.gitignore. Repositories using it are the
+// reason negation patterns cannot be discarded: the leading `*` matches every
+// basename, so without honouring the `!` lines every file in the repository
+// looks excluded and a review silently covers nothing.
+var allowListGitignore = []string{
+	"*",
+	"!/.github/**/*",
+	"!/.gitignore",
+	"!/.tool-versions",
+	"!/.golangci.yml",
+	"!Taskfile.yml",
+	"!*.go",
+	"!go.sum",
+	"!go.mod",
+	"!README.md",
+	"!LICENSE",
+	"!scripts/*",
+	"!*/",
+}
+
+func TestIsPathExcluded_AllowListGitignore(t *testing.T) {
+	tests := []struct {
+		name    string
+		relPath string
+		want    bool
+	}{
+		{"go file at root", "main.go", false},
+		{"go file nested", "internal/diff/git.go", false},
+		{"go test file nested", "internal/diff/git_test.go", false},
+		{"go.mod", "go.mod", false},
+		{"go.sum", "go.sum", false},
+		{"readme", "README.md", false},
+		{"license", "LICENSE", false},
+		{"root-anchored dotfile", ".golangci.yml", false},
+		{"root-anchored tool-versions", ".tool-versions", false},
+		{"doublestar workflow", ".github/workflows/ci.yml", false},
+		{"script by dir glob", "scripts/build.sh", false},
+		{"taskfile", "Taskfile.yml", false},
+
+		// Still excluded: nothing re-includes these. A negated directory-only
+		// pattern (`!*/`) must not re-include a file, or the trailing entry
+		// would readmit everything below the root.
+		{"build artifact at root", "coverage.out", true},
+		{"build artifact nested", "internal/diff/coverage.out", true},
+		{"binary at root", "ocr", true},
+		{"unrelated yaml nested", "internal/testdata/fixture.yaml", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsPathExcluded(".", tt.relPath, allowListGitignore)
+			if got != tt.want {
+				t.Errorf("IsPathExcluded(%q) = %v, want %v", tt.relPath, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsPathExcluded_LastMatchWins pins ordering semantics: gitignore resolves
+// a path by the LAST pattern that matches it, not the first.
+func TestIsPathExcluded_LastMatchWins(t *testing.T) {
+	tests := []struct {
+		name     string
+		relPath  string
+		patterns []string
+		want     bool
+	}{
+		{"negation after exclusion re-includes", "important.log", []string{"*.log", "!important.log"}, false},
+		{"exclusion after negation re-excludes", "important.log", []string{"!important.log", "*.log"}, true},
+		{"negation of unmatched path is inert", "main.go", []string{"!important.log"}, false},
+		{"hardcoded dirs are not negatable", ".git/config", []string{"!.git/config"}, true},
+		{"blocklist still works", "debug.log", []string{"*.log"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsPathExcluded(".", tt.relPath, tt.patterns)
+			if got != tt.want {
+				t.Errorf("IsPathExcluded(%q, %v) = %v, want %v", tt.relPath, tt.patterns, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMatchGitignorePattern(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -97,6 +183,11 @@ func TestMatchGitignorePattern(t *testing.T) {
 		{"full path no match", "src/api.md", "docs/*.md", false},
 		{"negation pattern", "important.log", "!important.log", false},
 		{"path suffix match", "src/generated/api.go", "generated/api.go", true},
+		// The suffix has to begin on a path component. "othersrc" ends in
+		// "src", which would complete the pattern on a plain string suffix
+		// check and exclude a directory git never matched.
+		{"path suffix respects component boundary", "othersrc/main.go", "src/main.go", false},
+		{"path suffix at root is not a suffix match", "src/main.go", "rc/main.go", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

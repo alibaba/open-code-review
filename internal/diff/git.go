@@ -1,14 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package diff
 
 import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -84,6 +90,64 @@ func NewWorkspaceProvider(repoDir string, runner *gitcmd.Runner) *Provider {
 		repoDir: repoDir,
 		mode:    ModeWorkspace,
 		runner:  runner,
+	}
+}
+
+// InputResolution carries this run's frozen, immutable commit endpoints, per the
+// run-manifest input-mode matrix. An empty field means "not applicable or not
+// resolvable" — a root commit and a merge commit have no single comparison base,
+// an unborn workspace has no HEAD, and a workspace has no immutable head — and a
+// caller must never treat an empty value as a real endpoint or fabricate one.
+// ExactRange is populated only when both a unique base and a head resolve.
+type InputResolution struct {
+	ResolvedBase string
+	ResolvedHead string
+	ExactRange   string
+}
+
+// ResolveInput freezes this run's commit endpoints by asking git, following the
+// input-mode matrix:
+//
+//   - range:     base = merge-base(from,to); head = the commit `to` resolves to;
+//     exact_range = base..head only when both resolve.
+//   - commit:    head = the commit resolved from `commit`; base is the first
+//     parent used by the diff, and exact_range = first-parent..head. A root
+//     commit has no base or exact range.
+//   - workspace: base = current HEAD when the repository has one (empty on an
+//     unborn repository); head and range stay empty (a workspace has no immutable
+//     head).
+//
+// Commit mode follows the same first-parent comparison used by GetDiff. Root
+// commits have no parent, so only their resolved head is available.
+//
+// It runs read-only git queries and never returns an error: an unresolvable
+// endpoint is reported as an empty field, never a fabricated SHA.
+func (p *Provider) ResolveInput(ctx context.Context) InputResolution {
+	switch p.mode {
+	case ModeRange:
+		base := p.MergeBase(ctx)
+		head := p.resolveCommit(ctx, p.to)
+		r := InputResolution{ResolvedBase: base, ResolvedHead: head}
+		if base != "" && head != "" {
+			r.ExactRange = base + ".." + head
+		}
+		return r
+	case ModeCommit:
+		head := p.resolveCommit(ctx, p.commit)
+		r := InputResolution{ResolvedHead: head}
+		if parents := p.commitParents(ctx, p.commit); len(parents) > 0 && head != "" {
+			// GetDiff renders merge commits against their first parent, so the
+			// manifest must record that same concrete comparison base.
+			r.ResolvedBase = parents[0]
+			r.ExactRange = parents[0] + ".." + head
+		}
+		return r
+	case ModeWorkspace:
+		// base = current HEAD if the repository has one; an unborn repository has
+		// no HEAD, so this stays empty rather than fabricating a base.
+		return InputResolution{ResolvedBase: p.resolveCommit(ctx, "HEAD")}
+	default:
+		return InputResolution{}
 	}
 }
 
@@ -184,8 +248,16 @@ func (p *Provider) loadGitignorePatterns() []string {
 
 // isPathExcluded returns true when the given relative file path should be skipped
 // based on hardcoded dir rules or .gitignore patterns.
+//
+// Patterns are resolved the way git resolves them: in file order, with the LAST
+// matching pattern deciding, and a leading "!" inverting that pattern's verdict.
+// Order matters because the "allow list" idiom (ignore everything with `*`, then
+// re-include with `!` lines — github/gitignore ships one per language) is only
+// correct under last-match-wins. Treating negations as unmatchable made every
+// file in such a repository look excluded, so a review silently covered nothing.
 func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bool {
-	// Hardcoded directory prefix checks
+	// Hardcoded directory prefix checks. These are an unconditional blocklist:
+	// a .gitignore negation cannot re-admit .git/ or node_modules/.
 	for _, prefix := range providerDirIgnoreDirs {
 		dirPart := strings.TrimSuffix(prefix, "/")
 		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
@@ -193,45 +265,89 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 		}
 	}
 
-	// .gitignore pattern matching
+	excluded := false
 	for _, pat := range gitignorePatterns {
-		if matchGitignorePattern(relPath, pat) {
-			return true
+		body, negated := strings.CutPrefix(pat, "!")
+		if body == "" {
+			continue
+		}
+
+		// Directory-only patterns (trailing "/") apply to directories, never to
+		// files. Git uses a negated one such as `!*/` to keep descending into
+		// subdirectories, not to re-admit the files inside them — honouring it
+		// here would readmit everything below the root.
+		if negated && strings.HasSuffix(body, "/") {
+			continue
+		}
+
+		if matchGitignoreBody(relPath, body) {
+			excluded = !negated
 		}
 	}
-	return false
+	return excluded
 }
 
 // matchGitignorePattern checks if relPath matches a single .gitignore pattern.
+//
+// Polarity is not this function's concern: a negated pattern reports false, so
+// callers testing one pattern in isolation still read it as "does this exclude
+// the path". Ordered resolution across a whole pattern list, where negations do
+// carry meaning, lives in isPathExcluded.
 func matchGitignorePattern(relPath, pat string) bool {
-	// Directory-only patterns (trailing /)
-	if before, ok := strings.CutSuffix(pat, "/"); ok {
-		dirName := before
-		// Match if any path segment equals the dir name
-		segments := strings.Split(relPath, "/")
-		return slices.Contains(segments, dirName)
-	}
-
-	// Negation patterns are not needed for exclusion purposes
 	if strings.HasPrefix(pat, "!") {
 		return false
 	}
+	return matchGitignoreBody(relPath, pat)
+}
 
-	// Patterns without / match basename
-	if !strings.Contains(pat, "/") {
-		base := filepath.Base(relPath)
-		if matched, _ := filepath.Match(pat, base); matched {
-			return true
+// matchGitignoreBody reports whether relPath matches a single pattern body —
+// the pattern with any leading "!" already stripped.
+func matchGitignoreBody(relPath, body string) bool {
+	// Directory-only patterns (trailing /)
+	if before, ok := strings.CutSuffix(body, "/"); ok {
+		// Only a real directory component can match, so the final segment (the
+		// file's own name) is excluded from consideration: `vendor/` must not
+		// match a *file* named "vendor", and `*/` must not match every path.
+		segments := strings.Split(relPath, "/")
+		return slices.Contains(segments[:max(len(segments)-1, 0)], before)
+	}
+
+	// A leading "/" anchors the pattern to the repository root rather than
+	// making it a path pattern; "/.golangci.yml" addresses the root file.
+	anchored := false
+	if trimmed, ok := strings.CutPrefix(body, "/"); ok {
+		body, anchored = trimmed, true
+	}
+
+	// "**" is not expressible with filepath.Match, so patterns containing it go
+	// through doublestar, which implements gitignore's globstar semantics.
+	if strings.Contains(body, "**") {
+		matched, err := doublestar.Match(body, relPath)
+		return err == nil && matched
+	}
+
+	// Patterns without / match basename — unless anchored, where the pattern
+	// addresses that name at the root only.
+	if !strings.Contains(body, "/") {
+		target := filepath.Base(relPath)
+		if anchored {
+			target = relPath
 		}
-		return false
+		matched, _ := filepath.Match(body, target)
+		return matched
 	}
 
 	// Patterns with / match against the full relative path
-	if matched, _ := filepath.Match(pat, relPath); matched {
+	if matched, _ := filepath.Match(body, relPath); matched {
 		return true
 	}
-	// Also try matching against suffix of path
-	if strings.HasSuffix(relPath, pat) {
+	// Also try matching against suffix of path, but not for anchored patterns:
+	// "/docs/api.md" names one file, not any path ending that way.
+	//
+	// The leading "/" makes the suffix start on a path component: without it
+	// "src/main.go" also matches "othersrc/main.go", because the tail of
+	// "othersrc" completes the pattern.
+	if !anchored && strings.HasSuffix(relPath, "/"+body) {
 		return true
 	}
 
@@ -262,6 +378,158 @@ func (p *Provider) computeMergeBase(ctx context.Context, from, to string) string
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+// RemoteIdentity returns a stable, credential-free identity string for the
+// repository's "origin" remote, suitable for hashing into the run manifest's
+// repository.identity_sha256. It reads the configured origin URL and canonicalizes
+// it — dropping any embedded userinfo, query and fragment (so credentials never
+// leak), lowercasing the host while keeping any port, and trimming a trailing
+// ".git"/"/" — so the same repository yields the same identity regardless of how
+// it was cloned. It returns "" when there is no origin remote, or when origin is
+// a local-filesystem remote (the caller then omits repository identity).
+func (p *Provider) RemoteIdentity(ctx context.Context) string {
+	out, err := p.runGit(ctx, "remote", "get-url", "origin")
+	if err != nil {
+		return ""
+	}
+	return canonicalRemote(firstLine(out))
+}
+
+// canonicalRemote reduces a git remote URL to a stable, credential-free identity
+// string for hashing into repository.identity_sha256, so the same repository
+// yields the same identity regardless of transport or embedded credentials.
+//
+// Network remotes canonicalize to "host[:port]/path": the host is lowercased and
+// any port is KEPT (two remotes differing only in port are distinct endpoints),
+// while the path preserves case and loses a trailing ".git"/"/".
+//
+// Local remotes (file://, absolute/relative filesystem paths, Windows drive
+// paths, UNC shares) have no stable network identity and no credentials to
+// strip; they canonicalize to "" so the caller omits repository identity, the
+// same behavior as a missing origin.
+//
+// An empty or unrecognizable input yields "".
+func canonicalRemote(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	// Drop query (?…) and fragment (#…): never part of repository identity.
+	if i := strings.IndexAny(s, "?#"); i >= 0 {
+		s = s[:i]
+	}
+	// Local remotes carry no stable network identity (see doc comment). Detect
+	// them before the scp split so a Windows "C:\…" path is not mistaken for a
+	// "host:path" with host "c".
+	if isLocalRemote(s) {
+		return ""
+	}
+	// scheme://[user[:pass]@]host[:port]/path. url.Host is "host[:port]" and
+	// never includes userinfo, so credentials drop out and the port is kept.
+	if strings.Contains(s, "://") {
+		if u, err := url.Parse(s); err == nil && u.Scheme != "" && u.Host != "" {
+			return joinHostPath(strings.ToLower(u.Host), u.Path)
+		}
+		return ""
+	}
+	// scp-like: [user@]host:path. The userinfo "@" lives in the host segment,
+	// which ends at the FIRST ":"; split there first so any "@" inside the path
+	// is preserved rather than truncated as if it were userinfo.
+	colon := strings.IndexByte(s, ':')
+	if colon < 0 {
+		return ""
+	}
+	hostSeg, path := s[:colon], s[colon+1:]
+	if at := strings.LastIndexByte(hostSeg, '@'); at >= 0 {
+		hostSeg = hostSeg[at+1:]
+	}
+	host := strings.ToLower(hostSeg)
+	if host == "" {
+		return ""
+	}
+	return joinHostPath(host, path)
+}
+
+// joinHostPath assembles the canonical "host[/path]" form, trimming a leading
+// "/" and a trailing ".git"/"/" from the path while preserving its case.
+func joinHostPath(host, path string) string {
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimSuffix(path, "/")
+	path = strings.TrimSuffix(path, ".git")
+	path = strings.TrimSuffix(path, "/")
+	if path == "" {
+		return host
+	}
+	return host + "/" + path
+}
+
+// isLocalRemote reports whether a remote URL points at the local filesystem
+// rather than a network host: a file:// URL, a POSIX absolute/relative/home
+// path, a Windows drive path (X:\ or X:/), or a UNC share (\\server\share).
+func isLocalRemote(s string) bool {
+	switch {
+	case strings.HasPrefix(s, "file://"):
+		return true
+	case strings.HasPrefix(s, "/"), strings.HasPrefix(s, "~"):
+		return true
+	case strings.HasPrefix(s, "./"), strings.HasPrefix(s, "../"), s == ".", s == "..":
+		return true
+	case strings.HasPrefix(s, `\\`): // UNC \\server\share
+		return true
+	}
+	// Windows drive path: X:\ or X:/. Require a separator after the colon so a
+	// single-letter scp host ("c:path") is not misread — real hosts have a dot.
+	if len(s) >= 3 && isASCIILetter(s[0]) && s[1] == ':' && (s[2] == '\\' || s[2] == '/') {
+		return true
+	}
+	return false
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// resolveCommit returns the immutable commit SHA a ref points at, or "" when the
+// ref does not resolve to a commit (e.g. an unborn HEAD, or a bad ref). The
+// ^{commit} peel collapses a tag or tree ref to its commit; --verify --quiet
+// makes an unresolvable ref exit non-zero silently rather than printing an error.
+func (p *Provider) resolveCommit(ctx context.Context, ref string) string {
+	out, err := p.runGit(ctx, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return ""
+	}
+	return firstLine(out)
+}
+
+// commitParents returns the parent commit SHAs of ref: zero for a root commit,
+// one for an ordinary commit, and 2+ for a merge. It uses `rev-list --parents -n
+// 1`, whose single line is "<commit> <parent1> <parent2>…" — the leading commit
+// token is dropped, the rest are the parents. `rev-list` (unlike `rev-parse`)
+// does not echo --end-of-options, so the marker stays safe against a ref that
+// looks like an option. An error yields nil so the caller treats it as "no
+// unique base".
+func (p *Provider) commitParents(ctx context.Context, ref string) []string {
+	out, err := p.runGit(ctx, "rev-list", "--parents", "-n", "1", "--end-of-options", ref)
+	if err != nil {
+		return nil
+	}
+	fields := strings.Fields(firstLine(out))
+	if len(fields) <= 1 {
+		return nil // root commit (only the commit itself, no parents) or empty
+	}
+	return fields[1:]
+}
+
+// firstLine returns the first non-empty trimmed line of git output, so a stray
+// trailing newline or an unexpected second line never pollutes a resolved SHA.
+func firstLine(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if s := strings.TrimSpace(line); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func (p *Provider) workspaceTrackedDiff(ctx context.Context) (string, error) {

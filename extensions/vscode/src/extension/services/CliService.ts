@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { t, resolveLocale } from '../../shared/i18n';
 import * as vscode from 'vscode';
 import { spawn } from 'child_process';
@@ -30,9 +33,10 @@ export class CliService {
     return env.ocr.ok;
   }
 
-  private probeCommand(bin: string, args: string[]): Promise<{ ok: boolean; version?: string }> {
+  private probeCommand(bin: string): Promise<{ ok: boolean; version?: string }> {
     return new Promise((resolve) => {
-      const proc = spawn(resolveBin(bin), args, { env: getShellEnv() });
+      // shell: true is safe here because args are hardcoded ['--version'] — no user input.
+      const proc = spawn(resolveBin(bin), ['--version'], { env: getShellEnv(), shell: process.platform === 'win32' });
       let stdout = '';
       let errored = false;
       proc.stdout?.on('data', (d) => { stdout += d.toString(); });
@@ -53,10 +57,10 @@ export class CliService {
       const cached = this.getCachedEnvironment();
       if (cached) return cached;
     }
-    const node = await this.probeCommand('node', ['--version']);
-    const npm = node.ok ? await this.probeCommand('npm', ['--version']) : { ok: false };
+    const node = await this.probeCommand('node');
+    const npm = node.ok ? await this.probeCommand('npm') : { ok: false };
     const ocr = node.ok && npm.ok
-      ? await this.probeCommand(this.cliPath, ['--version'])
+      ? await this.probeCommand(this.cliPath)
       : { ok: false };
     const env = { node, npm, ocr };
     this.envCache = { env, at: Date.now() };
@@ -158,7 +162,10 @@ export class CliService {
     if (this.current && this.current.pid) {
       this.current.kill('SIGTERM');
       const proc = this.current;
-      setTimeout(() => { if (!proc.killed) proc.kill('SIGKILL'); }, 3000);
+      const forceKillTimer = setTimeout(() => {
+        if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+      }, 3000);
+      proc.once('close', () => clearTimeout(forceKillTimer));
     }
   }
 }

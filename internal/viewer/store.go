@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package viewer provides a read-only WebUI for browsing session records
 // produced by open-code-review runs. It scans JSONL files under
 // $HOME/.opencodereview/sessions/, parses them, and exposes structured data.
@@ -5,13 +8,17 @@ package viewer
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 // SessionsRoot returns the root directory where session JSONL files are stored.
@@ -75,19 +82,29 @@ func DiscoverRepos(root string) ([]RepoInfo, error) {
 
 // SessionSummary is built from session_start and session_end records.
 type SessionSummary struct {
-	SessionID     string
-	Timestamp     time.Time
-	CWD           string
-	GitBranch     string
-	Model         string
-	ReviewMode    string
-	DiffFrom      string
-	DiffTo        string
-	DiffCommit    string
-	FilesReviewed []string
-	DurationSec   float64
-	FileCount     int
-	LLMFailures   int
+	SessionID      string
+	Timestamp      time.Time
+	CWD            string
+	GitBranch      string
+	Model          string
+	ReviewMode     string
+	DiffFrom       string
+	DiffTo         string
+	DiffCommit     string
+	FilesReviewed  []string
+	DurationSec    float64
+	FileCount      int
+	LLMFailures    int
+	CommentCount   int
+	Aborted        bool
+	Legacy         bool
+	TerminalState  string
+	SelectedCount  int
+	CompletedCount int
+	ReusedCount    int
+	FailedCount    int
+	WaivedCount    int
+	RunManifest    *session.RunManifest
 }
 
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
@@ -118,7 +135,8 @@ func ListSessions(root, encodedRepo string) ([]SessionSummary, error) {
 	return summaries, nil
 }
 
-// peekSession reads only the first and last record of a JSONL file.
+// peekSession reads the first record, all review_item records (for comment
+// count), and the last record of a JSONL file.
 func peekSession(path string) (SessionSummary, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -126,20 +144,15 @@ func peekSession(path string) (SessionSummary, error) {
 	}
 	defer f.Close()
 
-	var summary SessionSummary
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-
+	summary := SessionSummary{Aborted: true}
 	var lastLine []byte
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	readErr := readJSONLLines(f, func(line []byte) {
 		lastLine = append([]byte(nil), line...)
 
 		if summary.Timestamp.IsZero() {
 			var rec map[string]any
 			if err := json.Unmarshal(line, &rec); err != nil {
-				continue
+				return
 			}
 			if ts, ok := rec["timestamp"].(string); ok {
 				summary.Timestamp, _ = time.Parse(time.RFC3339, ts)
@@ -165,39 +178,74 @@ func peekSession(path string) (SessionSummary, error) {
 			if v, ok := rec["diffCommit"].(string); ok {
 				summary.DiffCommit = v
 			}
+			return
 		}
-	}
+
+		// Count comments from review_item_done/reused records
+		if len(line) > 0 && (bytes.Contains(line, []byte(`"review_item_done"`)) || bytes.Contains(line, []byte(`"review_item_reused"`))) {
+			var rec map[string]any
+			if err := json.Unmarshal(line, &rec); err == nil {
+				if comments, ok := rec["comments"].([]any); ok {
+					summary.CommentCount += len(comments)
+				}
+			}
+		}
+	})
 
 	if len(lastLine) > 0 {
 		var rec map[string]any
 		if err := json.Unmarshal(lastLine, &rec); err == nil {
 			if typ, _ := rec["type"].(string); typ == "session_end" {
-				if dur, ok := rec["duration_seconds"].(float64); ok {
-					summary.DurationSec = dur
-				}
-				if files, ok := rec["files_reviewed"].([]any); ok {
-					summary.FilesReviewed = make([]string, 0, len(files))
-					for _, fv := range files {
-						if s, ok := fv.(string); ok {
-							summary.FilesReviewed = append(summary.FilesReviewed, s)
-						}
-					}
-				}
-				if f, ok := rec["llm_failures"].(float64); ok {
-					summary.LLMFailures = int(f)
-				}
+				applySessionEnd(&summary, rec)
 			}
 		}
 	}
-	summary.FileCount = len(summary.FilesReviewed)
-	return summary, scanner.Err()
+	return summary, readErr
+}
+
+// readJSONLLines visits each physical JSONL record without bufio.Scanner's
+// fixed token ceiling. session_end embeds the complete run manifest and can
+// legitimately exceed the former 10 MiB scanner limit on very large reviews.
+func readJSONLLines(r io.Reader, visit func([]byte)) error {
+	reader := bufio.NewReaderSize(r, 64*1024)
+	for {
+		line, err := reader.ReadBytes('\n')
+		switch err {
+		case nil:
+			visit(line)
+			continue
+		case io.EOF:
+			if len(line) > 0 {
+				visit(line)
+			}
+			return nil
+		default:
+			// ReadBytes may return partial data together with a non-EOF error.
+			// Discard it rather than presenting a corrupt fragment as a JSONL
+			// record to callers.
+			return err
+		}
+	}
+}
+
+// ReviewComment represents a single code review finding from a session.
+type ReviewComment struct {
+	FilePath       string
+	Content        string
+	SuggestionCode string
+	ExistingCode   string
+	StartLine      int
+	EndLine        int
+	Category       string // bug, security, performance, maintainability, test, style, documentation, other
+	Severity       string // critical, high, medium, low
 }
 
 // ViewSession holds fully parsed records for one session.
 type ViewSession struct {
 	Summary    SessionSummary
 	TokenUsage TokenUsageSummary
-	Files      []*FileGroup // ordered by file path
+	Files      []*FileGroup     // ordered by file path
+	Comments   []*ReviewComment // review findings from review_item_done/reused records
 }
 
 // TokenUsageSummary aggregates token counts across the session.
@@ -269,16 +317,13 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	defer f.Close()
 
 	vs := &ViewSession{Files: make([]*FileGroup, 0)}
+	vs.Summary.Aborted = true
 	fileIndex := make(map[string]*FileGroup)
 
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-
-	for scanner.Scan() {
+	readErr := readJSONLLines(f, func(line []byte) {
 		var rec map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
-			continue // skip malformed lines
+		if err := json.Unmarshal(line, &rec); err != nil {
+			return // skip malformed lines
 		}
 		typ, _ := rec["type"].(string)
 
@@ -386,7 +431,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 							args, _ := tm["arguments"].(string)
 							info := ToolCallInfo{Name: name, Arguments: args}
 							if name == "task_done" {
-								info.Ok = true
+								info.Ok = taskDoneSucceeded(args)
 							}
 							card.ToolCalls = append(card.ToolCalls, info)
 						}
@@ -414,6 +459,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 			}
 
 		case "tool_call":
+			toolName, _ := rec["tool_name"].(string)
 			result, _ := rec["result"].(string)
 			okVal := true
 			if b, hasOk := rec["ok"].(bool); hasOk {
@@ -432,7 +478,10 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				if len(cards) > 0 {
 					card := cards[len(cards)-1]
 					for ti := range card.ToolCalls {
-						if card.ToolCalls[ti].Result == "" && !card.ToolCalls[ti].Ok {
+						// Older session records omitted tool_name, so retain
+						// positional matching only for those records.
+						if (toolName == "" || card.ToolCalls[ti].Name == toolName) &&
+							card.ToolCalls[ti].Result == "" && !card.ToolCalls[ti].Ok {
 							card.ToolCalls[ti].Result = result
 							card.ToolCalls[ti].Ok = okVal
 							card.ToolCalls[ti].DurationMs = durationMs
@@ -442,24 +491,47 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				}
 			}
 
-		case "session_end":
-			if dur, ok := rec["duration_seconds"].(float64); ok {
-				vs.Summary.DurationSec = dur
-			}
-			if files, ok := rec["files_reviewed"].([]any); ok {
-				vs.Summary.FilesReviewed = make([]string, 0, len(files))
-				for _, fv := range files {
-					if s, ok2 := fv.(string); ok2 {
-						vs.Summary.FilesReviewed = append(vs.Summary.FilesReviewed, s)
+		case "review_item_done", "review_item_reused":
+			fp, _ := rec["filePath"].(string)
+			if comments, ok := rec["comments"].([]any); ok {
+				for _, c := range comments {
+					cm, ok := c.(map[string]any)
+					if !ok {
+						continue
 					}
+					rc := &ReviewComment{FilePath: fp}
+					if v, ok := cm["path"].(string); ok && v != "" {
+						rc.FilePath = v
+					}
+					if v, ok := cm["content"].(string); ok {
+						rc.Content = v
+					}
+					if v, ok := cm["suggestion_code"].(string); ok {
+						rc.SuggestionCode = v
+					}
+					if v, ok := cm["existing_code"].(string); ok {
+						rc.ExistingCode = v
+					}
+					if v, ok := cm["start_line"].(float64); ok {
+						rc.StartLine = int(v)
+					}
+					if v, ok := cm["end_line"].(float64); ok {
+						rc.EndLine = int(v)
+					}
+					if v, ok := cm["category"].(string); ok {
+						rc.Category = v
+					}
+					if v, ok := cm["severity"].(string); ok {
+						rc.Severity = v
+					}
+					vs.Comments = append(vs.Comments, rc)
 				}
 			}
-			vs.Summary.FileCount = len(vs.Summary.FilesReviewed)
-			if f, ok := rec["llm_failures"].(float64); ok {
-				vs.Summary.LLMFailures = int(f)
-			}
+
+		case "session_end":
+			applySessionEnd(&vs.Summary, rec)
 		}
-	}
+	})
 
 	// Aggregate token usage across all task cards
 	fileBreakdown := make([]FileTokenUsage, 0, len(vs.Files))
@@ -492,5 +564,58 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	})
 
 	vs.Summary.SessionID = sessionID
-	return vs, scanner.Err()
+	vs.Summary.CommentCount = len(vs.Comments)
+	return vs, readErr
+}
+
+func applySessionEnd(summary *SessionSummary, rec map[string]any) {
+	summary.Aborted = false
+	if dur, ok := rec["duration_seconds"].(float64); ok {
+		summary.DurationSec = dur
+	}
+	if files, ok := rec["files_reviewed"].([]any); ok {
+		summary.FilesReviewed = make([]string, 0, len(files))
+		for _, fv := range files {
+			if s, ok := fv.(string); ok {
+				summary.FilesReviewed = append(summary.FilesReviewed, s)
+			}
+		}
+	}
+	if f, ok := rec["llm_failures"].(float64); ok {
+		summary.LLMFailures = int(f)
+	}
+
+	if raw, ok := rec["run_manifest"]; ok {
+		data, err := json.Marshal(raw)
+		if err == nil {
+			var manifest session.RunManifest
+			if err := json.Unmarshal(data, &manifest); err == nil && manifest.SchemaVersion == session.ManifestSchemaVersion {
+				summary.RunManifest = &manifest
+				summary.TerminalState = string(manifest.TerminalState)
+				summary.SelectedCount = len(manifest.Coverage.Selected)
+				summary.CompletedCount = len(manifest.Coverage.Completed)
+				summary.ReusedCount = len(manifest.Coverage.Reused)
+				summary.FailedCount = len(manifest.Coverage.Failed)
+				summary.WaivedCount = len(manifest.Coverage.Waived)
+				summary.FileCount = summary.SelectedCount
+			}
+		}
+	}
+	if summary.RunManifest == nil {
+		summary.Legacy = true
+		summary.FileCount = len(summary.FilesReviewed)
+	}
+}
+
+func taskDoneSucceeded(arguments string) bool {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return false
+	}
+	state, hasState := args["state"]
+	if !hasState {
+		return true
+	}
+	stateString, ok := state.(string)
+	return ok && stateString == "DONE"
 }

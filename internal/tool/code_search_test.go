@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package tool
 
 import (
@@ -33,15 +36,28 @@ func TestBuildGrepArgs_CommitMode(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "abc1234"})
 	args := p.buildGrepArgs("myFunc", false, false, false, []string{"pkg/"})
 
-	assertContainsInOrder(t, args, "-e", "myFunc", "--end-of-options", "abc1234", "--", "pkg/")
+	assertContainsInOrder(t, args, "-e", "myFunc", "abc1234", "--", "pkg/")
 	assertNotContains(t, args, "--untracked")
+	assertNotContains(t, args, "--end-of-options")
 }
 
-func TestBuildGrepArgs_RefUsesEndOfOptions(t *testing.T) {
+func TestBuildGrepArgs_RejectsOptionLikeRef(t *testing.T) {
 	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "-O./pwn.sh"})
 	args := p.buildGrepArgs("myFunc", false, false, false, nil)
+	if args != nil {
+		t.Fatalf("expected buildGrepArgs to return nil for option-like ref, got %v", args)
+	}
+}
 
-	assertContainsInOrder(t, args, "-e", "myFunc", "--end-of-options", "-O./pwn.sh", "--")
+func TestGitGrep_RejectsOptionLikeRef(t *testing.T) {
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: "-O./pwn.sh"})
+	result, err := p.gitGrep(context.Background(), "myFunc", false, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "Error: ref must not start with '-'" {
+		t.Fatalf("unexpected result: %s", result)
+	}
 }
 
 func TestBuildGrepArgs_PatternStartingWithDash(t *testing.T) {

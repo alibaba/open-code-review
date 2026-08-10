@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package viewer
 
 import (
@@ -243,5 +246,42 @@ func TestPeekSession_NoSessionEnd(t *testing.T) {
 	}
 	if s.FileCount != 0 {
 		t.Errorf("FileCount should be 0 without session_end, got %d", s.FileCount)
+	}
+	if !s.Aborted || s.Legacy {
+		t.Fatalf("unfinished session flags = aborted:%v legacy:%v", s.Aborted, s.Legacy)
+	}
+}
+
+func TestPeekSessionUsesV1ManifestCoverage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "manifest.jsonl")
+	writeJSONL(t, path,
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
+		`{"type":"session_end","duration_seconds":2,"files_reviewed":["legacy.go"],"run_manifest":{"schema_version":"ocr.run-manifest/v1","run_id":"run-1","operation":"review","terminal_state":"partial","repository":{},"input":{"mode":"workspace"},"execution":{},"coverage":{"selected":[{"item_id":"a","path":"a.go"},{"item_id":"b","path":"b.go"}],"completed":[{"item_id":"a","path":"a.go"}],"reused":[],"failed":[{"item_id":"b","path":"b.go","classification":"provider"}],"waived":[]},"elapsed_ms":2000}}`)
+
+	s, err := peekSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Aborted || s.Legacy || s.RunManifest == nil {
+		t.Fatalf("manifest flags = aborted:%v legacy:%v manifest:%v", s.Aborted, s.Legacy, s.RunManifest)
+	}
+	if s.TerminalState != "partial" || s.FileCount != 2 || s.SelectedCount != 2 || s.CompletedCount != 1 || s.FailedCount != 1 {
+		t.Fatalf("manifest summary = %+v", s)
+	}
+}
+
+func TestPeekSessionUnknownManifestIsLegacy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "future.jsonl")
+	writeJSONL(t, path,
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z"}`,
+		`{"type":"session_end","files_reviewed":["a.go"],"run_manifest":{"schema_version":"ocr.run-manifest/v2","terminal_state":"complete"}}`)
+	s, err := peekSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Legacy || s.RunManifest != nil || s.FileCount != 1 {
+		t.Fatalf("future schema summary = %+v", s)
 	}
 }

@@ -20,11 +20,57 @@
   <meta name="twitter:description" content="The open source code review agent." />
   <meta name="twitter:image" content="https://open-codereview.ai/og-image.png" />
 
+  <!-- Critical paint state, inlined because every rule in src/styles/index.css
+       ships inside the deferred JS chunks (style-loader, no MiniCssExtractPlugin).
+       Until the last chunk executes there is no stylesheet at all, so the browser
+       paints its default white canvas. Colours must stay in sync with the `body`
+       rule in src/styles/index.css so nothing shifts when the runtime CSS lands;
+       src/index.html.test.ts asserts they still match. Keep this block ahead of
+       the links below — that ordering is what makes it critical CSS. -->
+  <style>
+    html, body { margin: 0; background-color: #000000; color: #ffffff; }
+
+    /* Boot indicator. Present only while #root has no children, so React mounting
+       removes it with no JS teardown of our own. */
+    #root:empty::after {
+      content: "";
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      width: 28px;
+      height: 28px;
+      margin: -14px 0 0 -14px;
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      border-top-color: rgba(255, 255, 255, 0.6);
+      border-radius: 50%;
+      animation: ocr-boot-spin 0.8s linear infinite;
+    }
+
+    @keyframes ocr-boot-spin { to { transform: rotate(360deg); } }
+
+    /* Still shows the ring, just without the motion. */
+    @media (prefers-reduced-motion: reduce) {
+      #root:empty::after { animation: none; }
+    }
+  </style>
+
   <link rel="icon" type="image/svg+xml" href="<%= require('./logo.svg') %>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <!-- Loaded without blocking first paint: `media="print"` does not match the
+       screen, so the browser fetches these without holding up rendering, and the
+       onload handler switches them on once they arrive. Otherwise the two CDN
+       round-trips gate first paint and the inline block above cannot apply until
+       they finish. Text swaps in via the font URL's own display=swap, and the
+       Font Awesome icons only appear well below the fold (WhySection).
+       The <noscript> copies keep both stylesheets render-blocking-but-applied
+       when scripting is off, since the onload swap cannot run there. -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" media="print" onload="this.media='all'" />
+  <noscript>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  </noscript>
 </head>
 <body>
   <div id="root"></div>

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import * as vscode from 'vscode';
 import { COMMANDS } from '../shared/constants';
 import { CommentProvider } from './providers/CommentProvider';

@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { spawn } from "node:child_process"
 import { type Plugin, tool } from "@opencode-ai/plugin"
 
 interface ReviewInput {
-  repo?: string
   commit?: string
   from?: string
   to?: string
@@ -60,13 +62,16 @@ function pushValue(args: string[], flag: string, value: string | number | undefi
   }
 }
 
-function buildReviewArgs(input: ReviewInput): string[] {
+function buildReviewArgs(input: ReviewInput, repo: string): string[] {
   const hasRange = input.from !== undefined || input.to !== undefined
   if (hasRange && (!input.from || !input.to)) {
     throw new Error("Both 'from' and 'to' are required for a branch comparison.")
   }
   if (input.commit && hasRange) {
     throw new Error("Use either 'commit' or a 'from'/'to' range, not both.")
+  }
+  if (input.resume && (input.commit || hasRange)) {
+    throw new Error("'resume' cannot be combined with 'commit' or a 'from'/'to' range.")
   }
   if (input.preview && input.resume) {
     throw new Error("'preview' and 'resume' cannot be used together.")
@@ -76,8 +81,8 @@ function buildReviewArgs(input: ReviewInput): string[] {
   if (!input.preview) {
     args.push("--format", "json")
   }
+  args.push("--repo", repo)
 
-  pushValue(args, "--repo", input.repo)
   pushValue(args, "--commit", input.commit)
   pushValue(args, "--from", input.from)
   pushValue(args, "--to", input.to)
@@ -123,6 +128,7 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
         cwd: options.cwd,
         env: process.env,
         shell: false,
+        detached: true,
       },
     )
     child.stdin.end()
@@ -146,12 +152,25 @@ async function runOcr(args: string[], options: RunOptions): Promise<RunResult> {
       callback()
     }
 
+    const killProcessGroup = (signal: NodeJS.Signals): void => {
+      if (closed || child.pid === undefined) return
+      if (process.platform === "win32") {
+        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" })
+        return
+      }
+      try {
+        process.kill(-child.pid, signal)
+      } catch {
+        child.kill(signal)
+      }
+    }
+
     const terminateChild = (): void => {
       if (closed) return
-      child.kill("SIGTERM")
+      killProcessGroup("SIGTERM")
       forceKillTimer ??= setTimeout(() => {
         if (!closed) {
-          child.kill("SIGKILL")
+          killProcessGroup("SIGKILL")
         }
       }, 3_000)
     }
@@ -238,6 +257,9 @@ function formatReviewResult(result: RunResult, preview: boolean): string {
   if (preview) {
     return result.stdout || "No files changed."
   }
+  if (result.stdout === "") {
+    return "No changes detected; OCR produced no output."
+  }
   try {
     JSON.parse(result.stdout)
     return result.stdout
@@ -270,13 +292,17 @@ const reviewArgs = {
 }
 
 export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
-  await client.app.log({
-    body: {
-      service: "open-code-review",
-      level: "info",
-      message: "OpenCodeReview tools registered",
-    },
-  })
+  try {
+    await client.app.log({
+      body: {
+        service: "open-code-review",
+        level: "info",
+        message: "OpenCodeReview tools registered",
+      },
+    })
+  } catch {
+    // Best-effort telemetry; a failed log call must not block tool registration.
+  }
 
   return {
     config: async (config) => {
@@ -304,10 +330,7 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
         async execute(args, context) {
           const input = args as ReviewInput
           const cwd = context.worktree || context.directory || worktree
-          const result = await runOcr(buildReviewArgs({
-            ...input,
-            repo: cwd,
-          }), { cwd, signal: context.abort })
+          const result = await runOcr(buildReviewArgs(input, cwd), { cwd, signal: context.abort })
           return formatReviewResult(result, input.preview === true)
         },
       }),
@@ -332,7 +355,7 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
           const rejected = [version, llm].find(
             (result): result is PromiseRejectedResult => result.status === "rejected",
           )
-          if (context.abort.aborted && rejected) {
+          if (context.abort?.aborted && rejected) {
             throw rejected.reason
           }
 

@@ -1,7 +1,8 @@
 .PHONY: build test clean run help fmt vet check coverage \
 	build-all dist sha256sum version-info \
 	build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-arm64 \
-	build-windows-amd64 build-windows-arm64
+	build-windows-amd64 build-windows-arm64 \
+	license-check license-add
 
 BINARY_NAME := opencodereview
 GO          := go
@@ -36,7 +37,7 @@ PACKAGES := $(shell $(GO) list ./... | grep -v /extensions/)
 test:
 	LC_ALL=C $(GO) test -v -race -count=1 $(PACKAGES)
 
-COVERAGE_THRESHOLD := 80
+COVERAGE_THRESHOLD := 90
 
 coverage:
 	LC_ALL=C $(GO) test -count=1 -coverprofile=coverage.out $(PACKAGES)
@@ -63,11 +64,17 @@ fmt:
 vet:
 	LC_ALL=C $(GO) vet $(PACKAGES)
 
-check:
+check: license-check
 	$(GO) mod tidy
 	gofmt -s -w .
 	LC_ALL=C $(GO) vet $(PACKAGES)
 	@echo "check passed"
+
+license-check:
+	@bash scripts/verify-license.sh
+
+license-add:
+	@bash scripts/add-license.sh
 
 # ── Cross-platform targets ───────────────────────────────────────────────────
 build-linux-amd64:

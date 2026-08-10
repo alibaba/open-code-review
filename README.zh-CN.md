@@ -18,7 +18,7 @@
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
-  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
+  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
   <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
@@ -135,7 +135,7 @@ cd your-project
 # 工作区模式 —— 审查所有暂存、未暂存和未跟踪的变更
 ocr review
 
-# 分支范围 —— 比较两个引用
+# 分支范围 —— 评审 feature-branch 自与 main 分叉以来的变更（合并基准模式）
 ocr review --from main --to feature-branch
 
 # 单个提交
@@ -148,6 +148,7 @@ ocr review --from main --to feature-branch --resume <session-id>
 # 全量文件扫描 —— 审查整个文件而非 diff（无需 git 历史）
 ocr scan                          # 扫描整个仓库
 ocr scan --path internal/agent    # 扫描指定目录或文件
+ocr scan --resume <session-id>   # 恢复中断的全量文件扫描
 
 # 委托模式 — 让你的 AI 编程 agent 自己执行评审
 # OCR 负责文件选择和规则解析；无需配置 LLM
@@ -170,6 +171,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Codex](plugins/open-code-review/README.md#codex) —— 安装包含可调用评审 Skill 的插件
   - [Cursor](plugins/open-code-review/README.md#cursor) —— 安装包含可移植评审 Skill 的插件
   - [OpenCode](plugins/open-code-review/opencode/README.md) —— 安装原生评审工具和斜杠命令
+  - [QCA Forward](plugins/open-code-review/qca/README.md) —— 使用 QCA 宿主模型运行委托模式，并提供可发布的模板
   - [兼容 Skill 的 Agent](https://open-codereview.ai/docs/agent-skill) —— 安装可移植的 Agent Skill
 - 评审执行模式 —— 完成集成后，选择由哪个 LLM 执行评审
   - [默认模式（OCR 驱动）](https://open-codereview.ai/docs/configuration) —— OCR 使用其已配置的 LLM 执行评审

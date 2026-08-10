@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -8,6 +11,36 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 )
+
+func TestResolveMaxTokensPrecedence(t *testing.T) {
+	tests := []struct {
+		name        string
+		cfg         *Config
+		cliOverride int
+		template    int
+		want        int
+		wantErr     bool
+	}{
+		{name: "template default", template: 58888, want: 58888},
+		{name: "zero config is unset", cfg: &Config{}, template: 58888, want: 58888},
+		{name: "saved config", cfg: &Config{MaxTokens: 128000}, template: 58888, want: 128000},
+		{name: "cli overrides config", cfg: &Config{MaxTokens: 128000}, cliOverride: 200000, template: 58888, want: 200000},
+		{name: "negative config", cfg: &Config{MaxTokens: -1}, template: 58888, wantErr: true},
+		{name: "negative cli", cliOverride: -1, template: 58888, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveMaxTokens(tt.template, tt.cfg, tt.cliOverride)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("resolveMaxTokens() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("resolveMaxTokens() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestApplyCLIExcludes_Empty(t *testing.T) {
 	cc := &commonContext{FileFilter: &rules.FileFilter{Exclude: []string{"a"}}}

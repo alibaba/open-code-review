@@ -1,12 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package telemetry
 
 import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/sdk/resource"
 )
@@ -200,5 +206,95 @@ func TestInitOTLPProviders_ProtocolRouting(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOTLPSignalURL(t *testing.T) {
+	cases := []struct {
+		name     string
+		endpoint string
+		signal   string
+		want     string
+	}{
+		{"http scheme keeps its scheme", "http://192.0.2.1:4318", "/v1/traces", "http://192.0.2.1:4318/v1/traces"},
+		{"https scheme keeps its scheme", "https://otel.example.com:4318", "/v1/traces", "https://otel.example.com:4318/v1/traces"},
+		{"bare host:port gains https to keep TLS", "localhost:4318", "/v1/traces", "https://localhost:4318/v1/traces"},
+		{"a base path is preserved", "http://langfuse:3000/api/public/otel", "/v1/traces", "http://langfuse:3000/api/public/otel/v1/traces"},
+		{"a trailing slash does not double up", "http://192.0.2.1:4318/", "/v1/traces", "http://192.0.2.1:4318/v1/traces"},
+		{"an endpoint already naming the signal is left alone", "http://192.0.2.1:4318/v1/traces", "/v1/traces", "http://192.0.2.1:4318/v1/traces"},
+		{"metrics get their own path", "http://192.0.2.1:4318", "/v1/metrics", "http://192.0.2.1:4318/v1/metrics"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := otlpSignalURL(tc.endpoint, tc.signal); got != tc.want {
+				t.Errorf("otlpSignalURL(%q, %q) = %q, want %q", tc.endpoint, tc.signal, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestInitOTLPHTTPProviders_HonoursBasePath is the regression test for the bug this
+// exporter had: WithEndpoint takes a bare host:port, so a base path in
+// OTEL_EXPORTER_OTLP_ENDPOINT was discarded and every span went to /v1/traces at the
+// root of the host. Backends addressed through a path prefix therefore answered 404
+// and no telemetry arrived, with nothing in the exporter to say why.
+//
+// The assertion is on the request path the collector actually receives, because that is
+// the thing that was wrong — a unit test of the URL helper alone would not have caught
+// it, since the helper did not exist and the discarding happened in the exporter option.
+//
+// It also covers the TLS decision that moved into WithEndpointURL. httptest.NewServer
+// speaks plaintext and its URL carries an http:// scheme, so the request only arrives if
+// Insecure was resolved to true from that scheme — which is what the explicit
+// WithInsecure call used to do. A regression there shows up here as a timeout rather
+// than as a wrong path.
+func TestInitOTLPHTTPProviders_HonoursBasePath(t *testing.T) {
+	const basePath = "/api/public/otel"
+
+	gotPath := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case gotPath <- r.URL.Path:
+		default:
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tracerProvider = nil
+	meterProvider = nil
+	shutdownFuncs = nil
+	defer func() {
+		for _, fn := range shutdownFuncs {
+			_ = fn(context.Background())
+		}
+		tracerProvider = nil
+		meterProvider = nil
+		shutdownFuncs = nil
+	}()
+
+	cfg := Config{
+		Exporter:     "otlp",
+		OTLPEndpoint: srv.URL + basePath,
+		OTLPProtocol: "http/protobuf",
+	}
+	initOTLPHTTPProviders(context.Background(), resource.Default(), cfg)
+	if tracerProvider == nil {
+		t.Fatal("tracerProvider was not set")
+	}
+
+	_, span := tracerProvider.Tracer("test").Start(context.Background(), "probe")
+	span.End()
+	if err := tracerProvider.ForceFlush(context.Background()); err != nil {
+		t.Fatalf("ForceFlush() = %v", err)
+	}
+
+	select {
+	case path := <-gotPath:
+		if want := basePath + "/v1/traces"; path != want {
+			t.Errorf("collector received %q, want %q", path, want)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the collector was never called; the endpoint's base path was discarded")
 	}
 }

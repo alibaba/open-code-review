@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -1186,12 +1189,19 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		Model:      v.Model,
 		Models:     append([]string(nil), v.Models...),
 		AuthHeader: v.AuthHeader,
+		TimeoutSec: v.TimeoutSec,
+		RetryCodes: append([]int(nil), v.RetryCodes...),
 	}
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
 		for k, val := range v.ExtraBody {
-			// Shallow copy only: nested maps/slices inside val are not cloned.
 			out.ExtraBody[k] = val
+		}
+	}
+	if v.ExtraHeaders != nil {
+		out.ExtraHeaders = make(map[string]string, len(v.ExtraHeaders))
+		for k, val := range v.ExtraHeaders {
+			out.ExtraHeaders[k] = val
 		}
 	}
 	return out
@@ -1642,7 +1652,7 @@ func (m *providerTUIModel) blurManualStep() {
 	}
 }
 
-func (m providerTUIModel) focusManualStep() tea.Cmd {
+func (m *providerTUIModel) focusManualStep() tea.Cmd {
 	switch m.manualStep {
 	case manualStepURL:
 		return m.manualURLInput.Focus()

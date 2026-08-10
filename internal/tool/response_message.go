@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package tool
 
 // ToolCallResult holds a single tool call and its execution result.
@@ -7,14 +10,18 @@ type ToolCallResult struct {
 	Result     string // output from the tool
 }
 
-// TaskCheckpoint mirrors the Java TaskCheckPoint — signals completion or carries data back to the LLM.
+// TaskCheckpoint signals terminal completion or failure, or carries data back to the LLM.
 type TaskCheckpoint struct {
 	Data      string
 	Completed bool
+	Failed    bool
 }
 
 // Complete returns a checkpoint signaling task completion.
 func Complete() TaskCheckpoint { return TaskCheckpoint{Completed: true} }
+
+// Fail returns a checkpoint signaling terminal task failure.
+func Fail(data string) TaskCheckpoint { return TaskCheckpoint{Data: data, Failed: true} }
 
 // Of returns a checkpoint with data.
 func Of(data string) TaskCheckpoint { return TaskCheckpoint{Data: data, Completed: false} }

@@ -141,14 +141,25 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `.github/**/*.{yaml,yml}` | `github_config.md`——其他 `.github` 配置 YAML。 |
 | `**/*.{yaml,yml}` | `yaml.md` |
 | `**/*.java` | `java.md` |
+| `**/*.go` | `go.md`——Go 源代码。 |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。 |
 | `**/*.ets` | `arkts.md`——ArkTS / HarmonyOS。 |
+| `**/*.astro` | `astro.md`——Astro 组件与 islands。 |
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |
 | `**/*.c` | `c.md` |
+| `**/*.py` | `python.md`——Python 源代码。 |
 | `**/*.{php,phtml}` | `php.md`——PHP 源代码和 PHP 模板。 |
+| `**/*.proto` | `protobuf.md`——Protocol Buffers 线协议兼容性。 |
+| `**/*.po` | `po.md`——gettext 翻译源目录。 |
+| `**/*.pot` | `pot.md`——gettext 模板文件。 |
+| `**/*.{graphql,gql}` | `graphql.md`——GraphQL schema 与操作。 |
+| `**/*.prisma` | `prisma.md`——Prisma schema。 |
+| `**/*.jl` | `julia.md`——Julia 源代码。 |
+| `**/*.{tf,hcl,tfvars}` | `terraform.md`——Terraform / HCL。 |
+| `**/*.bicep` | `bicep.md`——Bicep（Azure）模板。 |
 | *(fallback)* | `default.md` |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。

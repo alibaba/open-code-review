@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -10,7 +13,79 @@ import (
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/spf13/cobra"
 )
+
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Manage configuration settings",
+	Long: `Configuration management.
+
+Examples:
+  # Provider setup (interactive)
+  ocr config provider
+  ocr config model
+
+  # Provider setup (non-interactive)
+  ocr config set provider anthropic
+  ocr config set model claude-opus-4-6
+  ocr config set providers.anthropic.api_key "$ANTHROPIC_API_KEY"
+
+  # Custom provider
+  ocr config set provider my-gateway
+  ocr config set custom_providers.my-gateway.url https://gateway.internal.com/v1
+  ocr config set custom_providers.my-gateway.protocol openai`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
+	},
+}
+
+var configSetCmd = &cobra.Command{
+	Use:     "set <key> <value>",
+	Short:   "Set a configuration value",
+	Example: "  ocr config set llm.model claude-opus-4-6\n  ocr config set provider anthropic",
+	Args:    cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runConfigSet(args[0], args[1])
+	},
+}
+
+var configUnsetCmd = &cobra.Command{
+	Use:     "unset <key>",
+	Short:   "Remove a configuration value",
+	Long:    "Remove a provider, custom_providers.<name>, or mcp_servers.<name>.",
+	Example: "  ocr config unset provider\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github",
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runConfigUnset(args[0])
+	},
+}
+
+var configProviderCmd = &cobra.Command{
+	Use:   "provider",
+	Short: "Interactive provider setup",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runConfigProvider()
+	},
+}
+
+var configModelCmd = &cobra.Command{
+	Use:   "model",
+	Short: "Interactive model selection",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runConfigModel()
+	},
+}
+
+func init() {
+	configCmd.AddCommand(configSetCmd)
+	configCmd.AddCommand(configUnsetCmd)
+	configCmd.AddCommand(configProviderCmd)
+	configCmd.AddCommand(configModelCmd)
+}
 
 // Default config file location: ~/.opencodereview/config.json
 func defaultConfigPath() (string, error) {
@@ -29,40 +104,6 @@ func resolveConfigPath() (string, error) {
 		return p, nil
 	}
 	return defaultConfigPath()
-}
-
-func runConfig(args []string) error {
-	if len(args) == 0 {
-		printConfigUsage()
-		return nil
-	}
-
-	switch args[0] {
-	case "provider":
-		if len(args) != 1 {
-			return fmt.Errorf("config provider does not accept arguments; use 'ocr config set provider <name>' for non-interactive setup")
-		}
-		return runConfigProvider()
-	case "model":
-		if len(args) != 1 {
-			return fmt.Errorf("config model does not accept arguments; use 'ocr config set model <name>' for non-interactive setup")
-		}
-		return runConfigModel()
-	}
-
-	action, err := parseConfigArgs(args)
-	if err != nil {
-		return err
-	}
-
-	switch action.subCmd {
-	case "set":
-		return runConfigSet(action.key, action.value)
-	case "unset":
-		return runConfigUnset(action.key)
-	default:
-		return fmt.Errorf("unknown config sub-command: %s", action.subCmd)
-	}
 }
 
 func runConfigSet(key, value string) error {
@@ -105,10 +146,13 @@ func runConfigUnset(key string) error {
 	if key == "provider" {
 		return unsetActiveProvider(configPath)
 	}
+	if key == "max_tokens" {
+		return unsetMaxTokens(configPath)
+	}
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports provider, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, custom_providers.<name>, and mcp_servers.<name>")
 	}
 
 	switch parts[0] {
@@ -117,8 +161,23 @@ func runConfigUnset(key string) error {
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports provider, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, custom_providers.<name>, and mcp_servers.<name>")
 	}
+}
+
+func unsetMaxTokens(configPath string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	cfg.MaxTokens = 0
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Println("Cleared max_tokens; using the embedded template default.")
+	return nil
 }
 
 func unsetActiveProvider(configPath string) error {
@@ -234,6 +293,7 @@ type ProviderEntry struct {
 	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes   []int             `json:"retry_codes,omitempty"`
 }
 
 // MCPServerConfig holds configuration for a single MCP server.
@@ -253,6 +313,7 @@ type MCPServerConfig struct {
 type Config struct {
 	Provider        string                     `json:"provider,omitempty"`
 	Model           string                     `json:"model,omitempty"`
+	MaxTokens       int                        `json:"max_tokens,omitempty"`
 	Providers       map[string]ProviderEntry   `json:"providers,omitempty"`
 	CustomProviders map[string]ProviderEntry   `json:"custom_providers,omitempty"`
 	Llm             LlmConfig                  `json:"llm,omitempty"`
@@ -271,6 +332,7 @@ type LlmConfig struct {
 	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes   []int             `json:"retry_codes,omitempty"`
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -310,6 +372,32 @@ func LoadAppConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse app config: %w", err)
 	}
 	return &cfg, nil
+}
+
+// supportedConfigKeys is the single source of truth for the top-level config
+// keys accepted by setConfigValue. The unknown-key error message is generated
+// from this list so the two cannot drift apart when a new key is added.
+var supportedConfigKeys = []string{
+	"provider",
+	"model",
+	"max_tokens",
+	"providers.<name>.<field>",
+	"custom_providers.<name>.<field>",
+	"mcp_servers.<name>.<field>",
+	"llm.url",
+	"llm.auth_token",
+	"llm.auth_header",
+	"llm.model",
+	"llm.protocol",
+	"llm.use_anthropic",
+	"llm.extra_body",
+	"llm.extra_headers",
+	"llm.retry_codes",
+	"language",
+	"telemetry.enabled",
+	"telemetry.exporter",
+	"telemetry.otlp_endpoint",
+	"telemetry.content_logging",
 }
 
 func setConfigValue(cfg *Config, key, value string) error {
@@ -365,6 +453,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		} else {
 			cfg.Model = value
 		}
+	case "max_tokens":
+		maxTokens, err := strconv.Atoi(value)
+		if err != nil || maxTokens <= 0 {
+			return fmt.Errorf("invalid max_tokens %q: must be a positive integer", value)
+		}
+		cfg.MaxTokens = maxTokens
 	case "llm.url", "llm.URL":
 		cfg.Llm.URL = value
 	case "llm.auth_token", "llm.AuthToken":
@@ -442,8 +536,17 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid JSON for llm.extra_body: %w", err)
 		}
 		cfg.Llm.ExtraBody = m
+	case "llm.retry_codes", "llm.RetryCodes":
+		codes, warnings, err := llm.ParseRetryCodes(value)
+		if err != nil {
+			return err
+		}
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
+		}
+		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key)
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -486,8 +589,17 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 			return fmt.Errorf("invalid extra headers for %s: %w", key, err)
 		}
 		entry.ExtraHeaders = parsed
+	case "retry_codes":
+		codes, warnings, err := llm.ParseRetryCodes(value)
+		if err != nil {
+			return fmt.Errorf("invalid retry codes for %s: %w", key, err)
+		}
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
+		}
+		entry.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes", field)
 	}
 	return nil
 }

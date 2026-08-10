@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llmloop
 
 import (
@@ -170,23 +173,20 @@ func TestCommentWorkerPool_AwaitKeyWaitsForOwnKey(t *testing.T) {
 func TestCommentWorkerPool_AwaitKeyConcurrentSubmitOtherKey(t *testing.T) {
 	p := NewCommentWorkerPool(4)
 
-	stop := make(chan struct{})
+	const submissionsPerProducer = 200
+	start := make(chan struct{})
 	var submits atomic.Int64
 	var producerWg sync.WaitGroup
 	for i := 0; i < 4; i++ {
 		producerWg.Add(1)
 		go func() {
 			defer producerWg.Done()
-			for {
-				select {
-				case <-stop:
-					return
-				default:
-					p.SubmitFor("producer.go", func() ([]model.LlmComment, error) {
-						return nil, nil
-					})
-					submits.Add(1)
-				}
+			<-start
+			for j := 0; j < submissionsPerProducer; j++ {
+				p.SubmitFor("producer.go", func() ([]model.LlmComment, error) {
+					return nil, nil
+				})
+				submits.Add(1)
 			}
 		}()
 	}
@@ -201,6 +201,7 @@ func TestCommentWorkerPool_AwaitKeyConcurrentSubmitOtherKey(t *testing.T) {
 		drainerWg.Add(1)
 		go func() {
 			defer drainerWg.Done()
+			<-start
 			for j := 0; j < 200; j++ {
 				p.SubmitFor(key, func() ([]model.LlmComment, error) {
 					return []model.LlmComment{{Path: key}}, nil
@@ -210,15 +211,15 @@ func TestCommentWorkerPool_AwaitKeyConcurrentSubmitOtherKey(t *testing.T) {
 			}
 		}()
 	}
+	close(start)
 	drainerWg.Wait()
-	close(stop)
 	producerWg.Wait()
 
 	if drained.Load() != 800 {
 		t.Errorf("drained = %d, want 800", drained.Load())
 	}
-	if submits.Load() == 0 {
-		t.Error("producers never submitted")
+	if want := int64(4 * submissionsPerProducer); submits.Load() != want {
+		t.Errorf("producer submissions = %d, want %d", submits.Load(), want)
 	}
 	p.Await()
 }

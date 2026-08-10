@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package model
 
 // ScanItem represents a single file enumerated by full-scan mode. Unlike

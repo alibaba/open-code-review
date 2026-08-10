@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llm
 
 import (
@@ -17,6 +20,7 @@ type ResolvedEndpoint struct {
 	URL          string
 	Token        string
 	Model        string
+	Provider     string
 	Protocol     string            // canonical protocol name (see protocol.go); resolver normalizes aliases
 	AuthHeader   string            // Anthropic auth header: "x-api-key" or "authorization"
 	Source       string            // human-readable config source label
@@ -26,7 +30,8 @@ type ResolvedEndpoint struct {
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
 	// knob; users can still override via OCR_LLM_TIMEOUT.
-	Timeout time.Duration
+	Timeout    time.Duration
+	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -40,8 +45,8 @@ const (
 	// openai | openai-responses). Takes priority
 	// over OCR_USE_ANTHROPIC when set.
 	envOCRLLMProtocol = "OCR_LLM_PROTOCOL"
-	// envOCRLLMTimeout is a global override applied in ResolveEndpointWithModelOverride
-	// after any strategy resolves, rather than inside tryOCREnv like other OCR_LLM_* vars.
+	// envOCRLLMTimeout is a global override applied by finalizeResolvedEndpoint after
+	// ResolveEndpointWithOptions selects a strategy, rather than inside tryOCREnv like other OCR_LLM_* vars.
 	// This lets it override timeout for all resolution paths (OCR env, config file,
 	// provider config, Claude Code env, shell RC).
 	envOCRLLMTimeout   = "OCR_LLM_TIMEOUT"
@@ -55,70 +60,93 @@ const (
 	envCCModel   = "ANTHROPIC_MODEL"
 )
 
-// ResolveEndpoint reads from 4 strategy sources in priority order.
-// Each strategy requires all three fields (URL, Token, Model) to be non-empty.
-// Returns the first valid strategy's result.
-func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
-	return ResolveEndpointWithModelOverride(configPath, "")
+// ResolveOptions controls per-run endpoint resolution overrides.
+type ResolveOptions struct {
+	Provider string
+	Model    string
 }
 
-// ResolveEndpointWithModelOverride resolves an endpoint like ResolveEndpoint,
-// but uses modelOverride as the request model when it is non-empty. The override
-// can also supply the otherwise required model for a configured endpoint.
+// ResolveEndpoint resolves an endpoint without per-run overrides.
+func ResolveEndpoint(configPath string) (ResolvedEndpoint, error) {
+	return ResolveEndpointWithOptions(configPath, ResolveOptions{})
+}
+
+// ResolveEndpointWithModelOverride is a compatibility wrapper around
+// ResolveEndpointWithOptions for callers that only override the model.
 func ResolveEndpointWithModelOverride(configPath, modelOverride string) (ResolvedEndpoint, error) {
-	modelOverride = strings.TrimSpace(modelOverride)
+	return ResolveEndpointWithOptions(configPath, ResolveOptions{Model: modelOverride})
+}
+
+// ResolveEndpointWithOptions resolves an endpoint by first honoring an explicit
+// provider selection. Otherwise it processes config, environment, then shell RC
+// strategies in priority order, finalizing the first complete endpoint.
+func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (ResolvedEndpoint, error) {
+	opts.Provider = strings.TrimSpace(opts.Provider)
+	opts.Model = strings.TrimSpace(opts.Model)
+	if opts.Provider != "" {
+		ep, ok, err := tryOCRConfig(configPath, opts)
+		if err != nil {
+			return ResolvedEndpoint{}, fmt.Errorf("resolve OCR config file: %w", err)
+		}
+		if !ok {
+			section := "custom_providers"
+			if _, isPreset := LookupProvider(opts.Provider); isPreset {
+				section = "providers"
+			}
+			return ResolvedEndpoint{}, fmt.Errorf("resolve OCR config file: provider %q is not configured in %s section because the config file does not exist", opts.Provider, section)
+		}
+		return finalizeResolvedEndpoint("OCR config file", ep)
+	}
 
 	strategies := []struct {
 		name string
 		fn   func() (ResolvedEndpoint, bool, error)
 	}{
-		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath, modelOverride) }},
-		{"OCR environment", func() (ResolvedEndpoint, bool, error) { return tryOCREnv(modelOverride) }},
-		{"Claude Code environment", func() (ResolvedEndpoint, bool, error) { return tryCCEnv(modelOverride) }},
-		{"Shell rc file", func() (ResolvedEndpoint, bool, error) { return tryShellRC(modelOverride) }},
+		{"OCR config file", func() (ResolvedEndpoint, bool, error) { return tryOCRConfig(configPath, opts) }},
+		{"OCR environment", func() (ResolvedEndpoint, bool, error) { return tryOCREnv(opts.Model) }},
+		{"Claude Code environment", func() (ResolvedEndpoint, bool, error) { return tryCCEnv(opts.Model) }},
+		{"Shell rc file", func() (ResolvedEndpoint, bool, error) { return tryShellRC(opts.Model) }},
 	}
 
-	for _, s := range strategies {
-		ep, ok, err := s.fn()
+	for _, strategy := range strategies {
+		ep, ok, err := strategy.fn()
 		if err != nil {
-			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
+			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", strategy.name, err)
 		}
 		if ok && ep.URL != "" && ep.Token != "" && ep.Model != "" {
-			if ep.Source == "" {
-				ep.Source = s.name
-			}
-			ep.Model = stripModelSuffix(ep.Model)
-			// OCR_LLM_TIMEOUT is a global override: applies regardless of
-			// which strategy resolved the endpoint, and takes precedence
-			// over config-file values when set.
-			envTimeout, ok, err := parseTimeoutEnv()
-			if err != nil {
-				return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
-			}
-			if ok {
-				ep.Timeout = envTimeout
-			}
-			// OCR_LLM_EXTRA_HEADERS is a global override: merges into
-			// extra headers regardless of which strategy resolved the
-			// endpoint. Env values take precedence over config-file values.
-			if raw := os.Getenv(envOCRLLMExtraHeaders); raw != "" {
-				envHeaders, err := ParseExtraHeaders(raw)
-				if err != nil {
-					return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", s.name, err)
-				}
-				if ep.ExtraHeaders == nil {
-					ep.ExtraHeaders = envHeaders
-				} else {
-					for k, v := range envHeaders {
-						ep.ExtraHeaders[k] = v
-					}
-				}
-			}
-			return ep, nil
+			return finalizeResolvedEndpoint(strategy.name, ep)
 		}
 	}
 
 	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
+}
+
+func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint) (ResolvedEndpoint, error) {
+	if ep.Source == "" {
+		ep.Source = source
+	}
+	ep.Model = stripModelSuffix(ep.Model)
+	envTimeout, ok, err := parseTimeoutEnv()
+	if err != nil {
+		return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", source, err)
+	}
+	if ok {
+		ep.Timeout = envTimeout
+	}
+	if raw := os.Getenv(envOCRLLMExtraHeaders); raw != "" {
+		envHeaders, err := ParseExtraHeaders(raw)
+		if err != nil {
+			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", source, err)
+		}
+		if ep.ExtraHeaders == nil {
+			ep.ExtraHeaders = envHeaders
+		} else {
+			for key, value := range envHeaders {
+				ep.ExtraHeaders[key] = value
+			}
+		}
+	}
+	return ep, nil
 }
 
 // parseTimeoutEnv reads and validates the OCR_LLM_TIMEOUT environment variable.
@@ -217,6 +245,7 @@ type llmFileConfig struct {
 	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes   []int             `json:"retry_codes,omitempty"`
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
@@ -230,6 +259,7 @@ type providerEntryConfig struct {
 	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes   []int             `json:"retry_codes,omitempty"`
 }
 
 type configFile struct {
@@ -241,7 +271,7 @@ type configFile struct {
 }
 
 // tryOCRConfig reads the OCR config file.
-func tryOCRConfig(path, modelOverride string) (ResolvedEndpoint, bool, error) {
+func tryOCRConfig(path string, opts ResolveOptions) (ResolvedEndpoint, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -255,11 +285,17 @@ func tryOCRConfig(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 		return ResolvedEndpoint{}, false, fmt.Errorf("parse config: %w", err)
 	}
 
+	if opts.Provider != "" {
+		if opts.Provider != cfg.Provider {
+			cfg.Model = ""
+		}
+		cfg.Provider = opts.Provider
+	}
 	if cfg.Provider != "" {
-		return tryProviderConfig(cfg, modelOverride)
+		return tryProviderConfig(cfg, opts.Model)
 	}
 
-	return tryLegacyLlmConfig(cfg, modelOverride)
+	return tryLegacyLlmConfig(cfg, opts.Model)
 }
 
 // tryProviderConfig resolves an endpoint from the provider-based configuration.
@@ -385,6 +421,11 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 	}
 
+	retryCodes, _, err := sanitizeRetryCodes(entry.RetryCodes)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+	}
+
 	if protocol == ProtocolAnthropic {
 		url = ensureMessagesSuffix(url)
 	}
@@ -393,12 +434,14 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		URL:          url,
 		Token:        apiKey,
 		Model:        model,
+		Provider:     cfg.Provider,
 		Protocol:     protocol,
 		AuthHeader:   authHeader,
 		Source:       "provider:" + cfg.Provider,
 		ExtraBody:    extraBody,
 		ExtraHeaders: extraHeaders,
 		Timeout:      timeout,
+		RetryCodes:   retryCodes,
 	}, true, nil
 }
 
@@ -449,7 +492,23 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders, Timeout: timeout}, true, nil
+	retryCodes, _, err := sanitizeRetryCodes(cfg.Llm.RetryCodes)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
+	}
+
+	return ResolvedEndpoint{
+		URL:          cfg.Llm.URL,
+		Token:        cfg.Llm.AuthToken,
+		Model:        model,
+		Protocol:     protocol,
+		AuthHeader:   authHeader,
+		Source:       "OCR config file",
+		ExtraBody:    cfg.Llm.ExtraBody,
+		ExtraHeaders: cfg.Llm.ExtraHeaders,
+		Timeout:      timeout,
+		RetryCodes:   retryCodes,
+	}, true, nil
 }
 
 // tryCCEnv reads Claude Code environment variables.
@@ -685,4 +744,54 @@ func ensureMessagesSuffix(rawURL string) string {
 		return rawURL
 	}
 	return u + "/v1/messages"
+}
+
+// sanitizeRetryCodes filters out SDK-default codes (408, 409, 429) and returns
+// the remaining valid codes, any warnings for filtered codes, and an error if
+// any code is outside the 4xx range.
+func sanitizeRetryCodes(codes []int) (filtered []int, warnings []string, err error) {
+	for _, code := range codes {
+		if code < 400 || code > 499 {
+			return nil, nil, fmt.Errorf("invalid retry code %d: must be a 4xx status code (5xx codes are already retried by default)", code)
+		}
+		if code == 408 || code == 409 || code == 429 {
+			warnings = append(warnings, fmt.Sprintf("retry code %d is unnecessary (SDK already retries it) and will be ignored", code))
+			continue
+		}
+		filtered = append(filtered, code)
+	}
+	return filtered, warnings, nil
+}
+
+// ParseRetryCodes parses a comma-separated list of HTTP status codes that
+// should trigger retry. Non-4xx codes return an error; SDK-default codes
+// (408, 409, 429) are filtered out and reported via warnings; the
+// remaining codes are returned. An empty input returns nil.
+func ParseRetryCodes(raw string) ([]int, []string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	seen := make(map[int]bool, len(parts))
+	codes := make([]int, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		code, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid retry code %q: must be an integer", p)
+		}
+		if !seen[code] {
+			seen[code] = true
+			codes = append(codes, code)
+		}
+	}
+	filtered, warnings, err := sanitizeRetryCodes(codes)
+	if err != nil {
+		return nil, nil, err
+	}
+	return filtered, warnings, nil
 }
