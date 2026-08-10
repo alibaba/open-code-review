@@ -18,6 +18,7 @@ import (
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
+	openai "github.com/openai/openai-go/v3"
 )
 
 func TestNewOpenAIClient_URLNormalization(t *testing.T) {
@@ -1253,15 +1254,10 @@ func TestOpenAIClient_StreamingUsage(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenAIClient(ClientConfig{
-		URL:    server.URL + "/v1",
-		APIKey: "test-key",
-		Model:  "gpt-usage",
-		ExtraBody: map[string]any{
-			"stream": true,
-			"stream_options": map[string]any{
-				"include_usage": true,
-			},
-		},
+		URL:       server.URL + "/v1",
+		APIKey:    "test-key",
+		Model:     "gpt-usage",
+		ExtraBody: map[string]any{"stream": true},
 	})
 
 	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
@@ -1284,6 +1280,32 @@ func TestOpenAIClient_StreamingUsage(t *testing.T) {
 	}
 	if resp.Usage.CacheReadTokens != 4 {
 		t.Errorf("CacheReadTokens = %d, want 4", resp.Usage.CacheReadTokens)
+	}
+}
+
+func TestOpenAIClient_StreamingIgnoresCommentOnlyEvents(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, ": keepalive\n\n")
+		writeOpenAISSE(t, w,
+			`{"id":"chatcmpl-heartbeat","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}`,
+			`{"id":"chatcmpl-heartbeat","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL: server.URL + "/v1", APIKey: "test-key", Model: "gpt-stream",
+		ExtraBody: map[string]any{"stream": true},
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := resp.Content(); got != "ok" {
+		t.Fatalf("content = %q, want %q", got, "ok")
 	}
 }
 
@@ -1318,6 +1340,64 @@ func TestOpenAIClient_StreamingReasoningContent(t *testing.T) {
 	}
 	if resp.Choices[0].Message.Content == nil || *resp.Choices[0].Message.Content != "answer" {
 		t.Errorf("Content = %#v, want %q", resp.Choices[0].Message.Content, "answer")
+	}
+}
+
+func TestOpenAIStreamChoiceState_PreservesReasoningPresence(t *testing.T) {
+	tests := []struct {
+		name        string
+		delta       string
+		wantPresent bool
+		wantValue   string
+	}{
+		{name: "absent", delta: `{}`},
+		{name: "explicit empty", delta: `{"reasoning_content":""}`, wantPresent: true},
+		{name: "streamed fragments", delta: `{"reasoning_content":"private"}`, wantPresent: true, wantValue: "private"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &openAIStreamChoiceState{}
+			if err := state.addDelta(tt.delta); err != nil {
+				t.Fatalf("addDelta: %v", err)
+			}
+			raw, err := state.finalize(openai.ChatCompletionMessage{}, openAIReplayPolicy{replayReasoningContent: true})
+			if err != nil {
+				t.Fatalf("finalize: %v", err)
+			}
+			var message map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &message); err != nil {
+				t.Fatalf("decode replay: %v", err)
+			}
+			value, present := message["reasoning_content"]
+			if present != tt.wantPresent {
+				t.Fatalf("reasoning_content present = %v, want %v (replay=%s)", present, tt.wantPresent, raw)
+			}
+			if present && string(value) != fmt.Sprintf("%q", tt.wantValue) {
+				t.Fatalf("reasoning_content = %s, want %q", value, tt.wantValue)
+			}
+		})
+	}
+}
+
+// TestOpenAIStreamChoiceState_StripsReasoningForRejectingProviders pins the
+// per-provider policy on the streaming path: reasoning_content stays out of
+// the envelope while remaining available to the normalized view.
+func TestOpenAIStreamChoiceState_StripsReasoningForRejectingProviders(t *testing.T) {
+	state := &openAIStreamChoiceState{}
+	if err := state.addDelta(`{"reasoning_content":"private"}`); err != nil {
+		t.Fatalf("addDelta: %v", err)
+	}
+	raw, err := state.finalize(openai.ChatCompletionMessage{}, openAIReplayPolicy{replayReasoningContent: false})
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if strings.Contains(string(raw), "reasoning_content") {
+		t.Fatalf("reasoning_content must be stripped for rejecting providers: %s", raw)
+	}
+	var normalized ResponseMessage
+	state.applyNormalizedFields(&normalized)
+	if normalized.ReasoningContent != "private" {
+		t.Fatalf("normalized ReasoningContent = %q, want %q", normalized.ReasoningContent, "private")
 	}
 }
 
@@ -1764,5 +1844,32 @@ func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
 	}
 	if got := resp.Content(); got != "success" {
 		t.Errorf("Content() = %q, want %q", got, "success")
+	}
+}
+
+// TestOpenAIStreamChoiceState_MergesToolCallContinuationWithoutIndex pins the
+// gateway quirk fix: a tool-call fragment carrying neither index nor id is a
+// continuation of the most recent call, not a new positional item.
+func TestOpenAIStreamChoiceState_MergesToolCallContinuationWithoutIndex(t *testing.T) {
+	state := &openAIStreamChoiceState{}
+	deltas := []string{
+		`{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"file_read","arguments":"{\"pa"}}]}`,
+		`{"tool_calls":[{"function":{"arguments":"th\":\"main.go\"}"}}]}`,
+	}
+	for _, delta := range deltas {
+		if err := state.addDelta(delta); err != nil {
+			t.Fatalf("addDelta(%s): %v", delta, err)
+		}
+	}
+	if len(state.toolCalls) != 1 {
+		t.Fatalf("tool calls = %d, want a single merged call: %#v", len(state.toolCalls), state.toolCalls)
+	}
+	call := asOpenAIObject(state.toolCalls[0])
+	if got := call["id"]; got != "call-1" {
+		t.Fatalf("merged call id = %v, want %q", got, "call-1")
+	}
+	function := asOpenAIObject(call["function"])
+	if got := function["arguments"]; got != `{"path":"main.go"}` {
+		t.Fatalf("merged arguments = %v, want %q", got, `{"path":"main.go"}`)
 	}
 }

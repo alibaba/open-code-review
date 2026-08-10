@@ -265,6 +265,7 @@ func clearAllEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_AUTH_HEADER", "OCR_USE_ANTHROPIC", "OCR_LLM_PROTOCOL",
+		"OCR_LLM_ASSISTANT_REPLAY",
 		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 		"MINIMAX_GLOBAL_API_KEY", "MINIMAX_API_KEY",
@@ -2386,5 +2387,154 @@ func TestResolveEndpoint_RedundantRetryCodesFiltered(t *testing.T) {
 	}
 	if len(ep.RetryCodes) != 1 || ep.RetryCodes[0] != 403 {
 		t.Errorf("RetryCodes = %v, want [403] (429 should be filtered)", ep.RetryCodes)
+	}
+}
+
+func TestResolveEndpoint_ProviderAssistantReplayNative(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "openai",
+		Providers: map[string]providerEntryConfig{
+			"openai": {APIKey: "sk-openai-test", Model: "gpt-4o", AssistantReplay: "native"},
+		},
+	}
+	cfgPath, _ := writeResolverConfig(t, cfg)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.AssistantReplay != AssistantReplayNative {
+		t.Errorf("AssistantReplay = %q, want %q", ep.AssistantReplay, AssistantReplayNative)
+	}
+	if ep.Provider != "openai" {
+		t.Errorf("Provider = %q, want %q", ep.Provider, "openai")
+	}
+}
+
+func TestResolveEndpoint_LegacyLlmAssistantReplayNative(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:             "https://api.example.com/v1",
+			AuthToken:       "test-token",
+			Model:           "gpt-4o",
+			Protocol:        "openai",
+			AssistantReplay: "Native", // canonicalized case-insensitively
+		},
+	}
+	cfgPath, _ := writeResolverConfig(t, cfg)
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.AssistantReplay != AssistantReplayNative {
+		t.Errorf("AssistantReplay = %q, want %q", ep.AssistantReplay, AssistantReplayNative)
+	}
+}
+
+func TestResolveEndpoint_AssistantReplayRejectsUnknownValue(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:             "https://api.example.com/v1",
+			AuthToken:       "test-token",
+			Model:           "gpt-4o",
+			Protocol:        "openai",
+			AssistantReplay: "always",
+		},
+	}
+	cfgPath, _ := writeResolverConfig(t, cfg)
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for unsupported assistant_replay value, got nil")
+	}
+	if !strings.Contains(err.Error(), "assistant_replay") {
+		t.Errorf("error %q should mention assistant_replay", err)
+	}
+}
+
+func TestResolveEndpoint_AssistantReplayEnvOverride(t *testing.T) {
+	t.Run("opts in without config support", func(t *testing.T) {
+		clearAllEnv(t)
+		t.Setenv("OCR_LLM_URL", "https://api.example.com/v1")
+		t.Setenv("OCR_LLM_TOKEN", "test-token")
+		t.Setenv("OCR_LLM_MODEL", "gpt-4o")
+		t.Setenv("OCR_USE_ANTHROPIC", "false")
+		t.Setenv("OCR_LLM_ASSISTANT_REPLAY", "native")
+
+		ep, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ep.AssistantReplay != AssistantReplayNative {
+			t.Errorf("AssistantReplay = %q, want %q", ep.AssistantReplay, AssistantReplayNative)
+		}
+	})
+
+	t.Run("explicit default overrides config opt-in", func(t *testing.T) {
+		clearAllEnv(t)
+		cfg := configFile{
+			Llm: llmFileConfig{
+				URL:             "https://api.example.com/v1",
+				AuthToken:       "test-token",
+				Model:           "gpt-4o",
+				Protocol:        "openai",
+				AssistantReplay: "native",
+			},
+		}
+		cfgPath, _ := writeResolverConfig(t, cfg)
+		t.Setenv("OCR_LLM_ASSISTANT_REPLAY", "default")
+
+		ep, err := ResolveEndpoint(cfgPath)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ep.AssistantReplay != "" {
+			t.Errorf("AssistantReplay = %q, want empty", ep.AssistantReplay)
+		}
+	})
+
+	t.Run("invalid env value fails resolution", func(t *testing.T) {
+		clearAllEnv(t)
+		t.Setenv("OCR_LLM_URL", "https://api.example.com/v1")
+		t.Setenv("OCR_LLM_TOKEN", "test-token")
+		t.Setenv("OCR_LLM_MODEL", "gpt-4o")
+		t.Setenv("OCR_LLM_ASSISTANT_REPLAY", "verbatim")
+
+		_, err := ResolveEndpoint(filepath.Join(t.TempDir(), "nonexistent.json"))
+		if err == nil {
+			t.Fatal("expected error for unsupported OCR_LLM_ASSISTANT_REPLAY value, got nil")
+		}
+		if !strings.Contains(err.Error(), "OCR_LLM_ASSISTANT_REPLAY") {
+			t.Errorf("error %q should mention OCR_LLM_ASSISTANT_REPLAY", err)
+		}
+	})
+}
+
+func TestNewLLMClientThreadsAssistantReplay(t *testing.T) {
+	ep := ResolvedEndpoint{
+		URL:      "https://api.example.com/v1",
+		Token:    "test-token",
+		Model:    "gpt-4o",
+		Protocol: ProtocolOpenAIChatCompletions,
+	}
+
+	if client, ok := NewLLMClient(ep).(*OpenAIClient); !ok {
+		t.Fatal("expected *OpenAIClient")
+	} else if client.nativeReplayEnabled() {
+		t.Error("native replay should be off by default")
+	}
+
+	ep.AssistantReplay = AssistantReplayNative
+	if client, ok := NewLLMClient(ep).(*OpenAIClient); !ok {
+		t.Fatal("expected *OpenAIClient")
+	} else if !client.nativeReplayEnabled() {
+		t.Error("native replay should be on when the endpoint opts in")
 	}
 }

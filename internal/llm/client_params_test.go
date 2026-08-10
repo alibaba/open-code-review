@@ -4,6 +4,8 @@
 package llm
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -191,5 +193,25 @@ func TestBuildToolInputSchema_Empty(t *testing.T) {
 	schema := buildToolInputSchema(map[string]any{})
 	if schema.Properties != nil || len(schema.Required) != 0 || schema.ExtraFields != nil {
 		t.Errorf("empty input produced non-empty schema: %+v", schema)
+	}
+}
+
+// TestBuildOpenAIParams_EmptyAssistantContentKeepsContentField pins the wire
+// contract for assistant messages without tool calls: content must be present
+// even when empty ({"role":"assistant"} alone is rejected by strict servers).
+func TestBuildOpenAIParams_EmptyAssistantContentKeepsContentField(t *testing.T) {
+	client := NewOpenAIClient(ClientConfig{URL: "https://api.example.com/v1"})
+	params := client.buildOpenAIParams("m", ChatRequest{Messages: []Message{
+		{Role: "assistant", Content: ""},
+	}})
+	if len(params.Messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(params.Messages))
+	}
+	payload, err := json.Marshal(params.Messages[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(payload), `"content":""`) {
+		t.Fatalf("empty assistant content field missing from wire message: %s", payload)
 	}
 }

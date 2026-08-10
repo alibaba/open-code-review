@@ -26,6 +26,9 @@ type ResolvedEndpoint struct {
 	Source       string            // human-readable config source label
 	ExtraBody    map[string]any    // vendor-specific request body fields
 	ExtraHeaders map[string]string // extra HTTP headers for the LLM request
+	// AssistantReplay opts into provider-native assistant turn replay
+	// (AssistantReplayNative); empty keeps the normalized rebuild.
+	AssistantReplay string
 	// Timeout is the per-request HTTP timeout; 0 means use the client default (5 min).
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
@@ -51,6 +54,10 @@ const (
 	// provider config, Claude Code env, shell RC).
 	envOCRLLMTimeout   = "OCR_LLM_TIMEOUT"
 	envOCRUseAnthropic = "OCR_USE_ANTHROPIC"
+	// envOCRLLMAssistantReplay is a global override applied by
+	// finalizeResolvedEndpoint, like envOCRLLMTimeout, so it can opt any
+	// resolution path into native assistant turn replay.
+	envOCRLLMAssistantReplay = "OCR_LLM_ASSISTANT_REPLAY"
 )
 
 // Environment variable names from Claude Code configuration.
@@ -146,7 +153,29 @@ func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint) (ResolvedEndpo
 			}
 		}
 	}
+	if raw := strings.TrimSpace(os.Getenv(envOCRLLMAssistantReplay)); raw != "" {
+		replay, err := NormalizeAssistantReplay(raw)
+		if err != nil {
+			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %s: %w", source, envOCRLLMAssistantReplay, err)
+		}
+		ep.AssistantReplay = replay
+	}
 	return ep, nil
+}
+
+// NormalizeAssistantReplay normalizes an assistant_replay setting to its
+// canonical form. Only "native" (opt in) and the explicit defaults "" /
+// "default" (normalized rebuild) are recognized; anything else is an error so
+// a typo cannot silently disable the requested behavior.
+func NormalizeAssistantReplay(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "default":
+		return "", nil
+	case AssistantReplayNative:
+		return AssistantReplayNative, nil
+	default:
+		return "", fmt.Errorf("unsupported assistant_replay value %q; expected %q or %q", raw, AssistantReplayNative, "default")
+	}
 }
 
 // parseTimeoutEnv reads and validates the OCR_LLM_TIMEOUT environment variable.
@@ -246,6 +275,8 @@ type llmFileConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	// AssistantReplay: "native" opts into provider-native assistant turn replay.
+	AssistantReplay string `json:"assistant_replay,omitempty"`
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
@@ -260,6 +291,8 @@ type providerEntryConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	// AssistantReplay: "native" opts into provider-native assistant turn replay.
+	AssistantReplay string `json:"assistant_replay,omitempty"`
 }
 
 type configFile struct {
@@ -426,22 +459,28 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 	}
 
+	assistantReplay, err := NormalizeAssistantReplay(entry.AssistantReplay)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+	}
+
 	if protocol == ProtocolAnthropic {
 		url = ensureMessagesSuffix(url)
 	}
 
 	return ResolvedEndpoint{
-		URL:          url,
-		Token:        apiKey,
-		Model:        model,
-		Provider:     cfg.Provider,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "provider:" + cfg.Provider,
-		ExtraBody:    extraBody,
-		ExtraHeaders: extraHeaders,
-		Timeout:      timeout,
-		RetryCodes:   retryCodes,
+		URL:             url,
+		Token:           apiKey,
+		Model:           model,
+		Provider:        cfg.Provider,
+		Protocol:        protocol,
+		AuthHeader:      authHeader,
+		Source:          "provider:" + cfg.Provider,
+		ExtraBody:       extraBody,
+		ExtraHeaders:    extraHeaders,
+		Timeout:         timeout,
+		RetryCodes:      retryCodes,
+		AssistantReplay: assistantReplay,
 	}, true, nil
 }
 
@@ -497,17 +536,23 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}
 
+	assistantReplay, err := NormalizeAssistantReplay(cfg.Llm.AssistantReplay)
+	if err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
+	}
+
 	return ResolvedEndpoint{
-		URL:          cfg.Llm.URL,
-		Token:        cfg.Llm.AuthToken,
-		Model:        model,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "OCR config file",
-		ExtraBody:    cfg.Llm.ExtraBody,
-		ExtraHeaders: cfg.Llm.ExtraHeaders,
-		Timeout:      timeout,
-		RetryCodes:   retryCodes,
+		URL:             cfg.Llm.URL,
+		Token:           cfg.Llm.AuthToken,
+		Model:           model,
+		Protocol:        protocol,
+		AuthHeader:      authHeader,
+		Source:          "OCR config file",
+		ExtraBody:       cfg.Llm.ExtraBody,
+		ExtraHeaders:    cfg.Llm.ExtraHeaders,
+		Timeout:         timeout,
+		RetryCodes:      retryCodes,
+		AssistantReplay: assistantReplay,
 	}, true, nil
 }
 

@@ -4,6 +4,8 @@
 package llm
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,6 +57,124 @@ func TestNewToolCallMessage_NilCalls(t *testing.T) {
 	m := NewToolCallMessage("text", nil)
 	if m.ToolCalls != nil {
 		t.Errorf("expected nil ToolCalls for nil input, got %v", m.ToolCalls)
+	}
+}
+
+func TestAssistantTurnMessageKeepsReplayStateOutOfNormalizedJSON(t *testing.T) {
+	empty := ""
+	resp := &ChatResponse{Choices: []Choice{{Message: ResponseMessage{
+		Content:   &empty,
+		ToolCalls: []ToolCall{{ID: "call-1", Type: "function", Function: FunctionCall{Name: "file_read", Arguments: `{}`}}},
+	}}}}
+	rawMessage := json.RawMessage(`{"role":"assistant","content":null,"reasoning_details":[{"type":"reasoning.text","text":"private reasoning"}],"tool_calls":[{"id":"call-1","type":"function","function":{"name":"file_read","arguments":"{}"}}]}`)
+	resp.turn = openAIAssistantTurnFromResponse(resp, rawMessage)
+
+	turn := resp.AssistantTurn()
+	if got := turn.Content(); got != "" {
+		t.Fatalf("AssistantTurn.Content() = %q, want empty visible content", got)
+	}
+	history, err := json.Marshal(turn.Message())
+	if err != nil {
+		t.Fatalf("marshal normalized history: %v", err)
+	}
+	if bytes.Contains(history, []byte("reasoning_details")) {
+		t.Fatalf("normalized history exposed provider replay state: %s", history)
+	}
+
+	params := (&OpenAIClient{}).buildOpenAIParams("fake", ChatRequest{Messages: []Message{turn.Message()}})
+	wire, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal OpenAI params: %v", err)
+	}
+	if !bytes.Contains(wire, []byte(`"reasoning_details"`)) {
+		t.Fatalf("OpenAI replay omitted reasoning_details: %s", wire)
+	}
+}
+
+func TestMessageApproxTokenCountIncludesOpaqueReplay(t *testing.T) {
+	visible := "visible"
+	resp := &ChatResponse{Choices: []Choice{{Message: ResponseMessage{
+		Content: &visible,
+	}}}}
+	rawMessage := json.RawMessage(`{"role":"assistant","content":"visible","reasoning_details":[{"type":"reasoning.text","text":"private reasoning private reasoning"}]}`)
+	message := openAIAssistantTurnFromResponse(resp, rawMessage).Message()
+	if got, want := message.ApproxTokenCount(), CountTokens(visible); got <= want {
+		t.Fatalf("replay-aware token estimate = %d, want greater than visible-only estimate %d", got, want)
+	}
+}
+
+func TestChatResponseApproxCompletionTokenCountIncludesOpaqueReplay(t *testing.T) {
+	visible := "visible"
+	resp := &ChatResponse{Choices: []Choice{{Message: ResponseMessage{
+		Content:   &visible,
+		ToolCalls: []ToolCall{{ID: "call-1", Type: "function", Function: FunctionCall{Name: "file_read", Arguments: `{}`}}},
+	}}}}
+	rawMessage := json.RawMessage(`{"role":"assistant","content":"visible","reasoning_content":"private reasoning private reasoning","vendor_state":{"nonce":"opaque"},"tool_calls":[{"id":"call-1","type":"function","function":{"name":"file_read","arguments":"{}"}}]}`)
+	resp.turn = openAIAssistantTurnFromResponse(resp, rawMessage)
+
+	if got, visibleOnly := resp.ApproxCompletionTokenCount(), CountTokens(visible); got <= visibleOnly {
+		t.Fatalf("completion token estimate = %d, want greater than visible-only estimate %d", got, visibleOnly)
+	}
+}
+
+func TestCloneMessagesRetainsAdapterReplayAndIsolatesNormalizedState(t *testing.T) {
+	visible := "original visible"
+	response := &ChatResponse{Choices: []Choice{{Message: ResponseMessage{
+		Content:          &visible,
+		ReasoningContent: "private reasoning",
+		ToolCalls:        []ToolCall{{ID: "call-1", Type: "function", Function: FunctionCall{Name: "file_read", Arguments: `{}`}}},
+	}}}}
+	rawMessage := json.RawMessage(`{"role":"assistant","content":"original visible","reasoning_content":"private reasoning","vendor_state":{"nonce":"opaque"},"tool_calls":[{"id":"call-1","type":"function","function":{"name":"file_read","arguments":"{}"}}]}`)
+	original := []Message{openAIAssistantTurnFromResponse(response, rawMessage).Message()}
+
+	cloned := CloneMessages(original)
+	cloned[0].Content = "mutated normalized content"
+	cloned[0].ToolCalls[0].ID = "mutated-call"
+	if original[0].ToolCalls[0].ID != "call-1" {
+		t.Fatalf("CloneMessages aliased normalized tool calls: %+v", original[0].ToolCalls)
+	}
+
+	params := (&OpenAIClient{}).buildOpenAIParams("fake", ChatRequest{Messages: cloned})
+	wire, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal replayed clone: %v", err)
+	}
+	if !bytes.Contains(wire, []byte(`"content":"original visible"`)) ||
+		!bytes.Contains(wire, []byte(`"id":"call-1"`)) ||
+		!bytes.Contains(wire, []byte(`"vendor_state":{"nonce":"opaque"}`)) {
+		t.Fatalf("normalized mutation changed adapter-owned replay: %s", wire)
+	}
+}
+
+func TestApproxMessagesTokenCountIncludesReplay(t *testing.T) {
+	visible := "visible"
+	response := &ChatResponse{Choices: []Choice{{Message: ResponseMessage{
+		Content: &visible,
+	}}}}
+	rawMessage := json.RawMessage(`{"role":"assistant","content":"visible","reasoning_details":[{"type":"reasoning.text","text":"private reasoning"}]}`)
+	message := openAIAssistantTurnFromResponse(response, rawMessage).Message()
+	if got, visibleOnly := ApproxMessagesTokenCount([]Message{message}), CountTokens(visible); got <= visibleOnly {
+		t.Fatalf("conversation token estimate = %d, want greater than visible-only estimate %d", got, visibleOnly)
+	}
+	if got := ApproxMessagesTokenCount(nil); got != 0 {
+		t.Fatalf("empty conversation token estimate = %d, want 0", got)
+	}
+}
+
+func TestChatResponseAssistantTurnFallbackDoesNotInventOpenAIReplay(t *testing.T) {
+	empty := ""
+	resp := &ChatResponse{Choices: []Choice{{Message: ResponseMessage{
+		Content:          &empty,
+		ReasoningContent: "provider-native reasoning",
+	}}}}
+	turn := resp.AssistantTurn()
+	if turn.replay != nil {
+		t.Fatalf("generic response fallback invented provider replay state: %+v", turn)
+	}
+	// The reasoning text itself still rides in normalized content, matching
+	// the pre-turn resp.Content() history rebuild.
+	if turn.Content() != "provider-native reasoning" {
+		t.Fatalf("Content() = %q, want reasoning substitution without an envelope", turn.Content())
 	}
 }
 
@@ -329,5 +449,29 @@ func TestUserAgent(t *testing.T) {
 	got2 := userAgent("")
 	if got2 != "open-code-review/dev" {
 		t.Errorf("userAgent('') = %q", got2)
+	}
+}
+
+func TestCloneMessagesIsolatesContentBlocks(t *testing.T) {
+	original := []Message{{
+		Role: "user",
+		Content: []ContentBlock{{
+			Type:      "tool_result",
+			ToolUseID: "call-1",
+			Content:   []ContentBlock{{Type: "text", Text: "original nested"}},
+		}},
+	}}
+
+	cloned := CloneMessages(original)
+	blocks, ok := cloned[0].Content.([]ContentBlock)
+	if !ok {
+		t.Fatalf("cloned content type = %T, want []ContentBlock", cloned[0].Content)
+	}
+	blocks[0].ToolUseID = "mutated-call"
+	blocks[0].Content[0].Text = "mutated nested"
+
+	got := original[0].Content.([]ContentBlock)
+	if got[0].ToolUseID != "call-1" || got[0].Content[0].Text != "original nested" {
+		t.Fatalf("CloneMessages aliased content blocks: %+v", got)
 	}
 }

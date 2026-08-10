@@ -23,6 +23,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared"
 	tiktoken "github.com/pkoukk/tiktoken-go"
 )
@@ -49,10 +50,78 @@ type LLMClient interface {
 // or an array of content blocks (used by Claude for multi-part content).
 // ToolCallID is used by OpenAI-format APIs to identify which tool call this result responds to.
 type Message struct {
-	Role       string     `json:"role"`
-	Content    any        `json:"content"`                // string or []ContentBlock
-	ToolCallID string     `json:"tool_call_id,omitempty"` // OpenAI tool call identifier
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // assistant tool invocations
+	Role       string         `json:"role"`
+	Content    any            `json:"content"`                // string or []ContentBlock
+	ToolCallID string         `json:"tool_call_id,omitempty"` // OpenAI tool call identifier
+	ToolCalls  []ToolCall     `json:"tool_calls,omitempty"`   // assistant tool invocations
+	replay     replayEnvelope `json:"-"`                      // provider-owned continuation state
+}
+
+// replayEnvelope is intentionally private: orchestration can carry a
+// provider's continuation state but cannot inspect or reconstruct it.
+type replayEnvelope interface {
+	isReplayEnvelope()
+	tokenCount() int
+}
+
+// openAIReplay is the OpenAI Chat Completions adapter's native continuation
+// envelope. It owns the complete assistant message used by the next provider
+// request; its fields never enter normalized messages or persisted logs.
+type openAIReplay struct {
+	assistantMessage json.RawMessage
+	approxTokenCount int
+}
+
+func (openAIReplay) isReplayEnvelope() {}
+func (r openAIReplay) tokenCount() int { return r.approxTokenCount }
+
+func newOpenAIReplay(assistantMessage json.RawMessage) replayEnvelope {
+	if len(assistantMessage) == 0 || !openAIMessageHasReplayState(assistantMessage) {
+		return nil
+	}
+	if !openAIReplayToolCallsAreValid(assistantMessage) {
+		return nil
+	}
+	return openAIReplay{
+		assistantMessage: append(json.RawMessage(nil), assistantMessage...),
+		approxTokenCount: CountTokens(string(assistantMessage)),
+	}
+}
+
+// AssistantTurn is the finalized assistant response exposed to the loop.
+// Content and ToolCalls are the normalized view used for tool execution;
+// Message retains the adapter-owned continuation state for the next request.
+type AssistantTurn struct {
+	content   string
+	toolCalls []ToolCall
+	replay    replayEnvelope
+}
+
+// Content returns visible assistant text without substituting hidden reasoning.
+func (t AssistantTurn) Content() string { return t.content }
+
+// IsEmpty reports whether the provider returned no visible content, tool
+// calls, or continuation state worth replaying.
+func (t AssistantTurn) IsEmpty() bool {
+	return t.content == "" && len(t.toolCalls) == 0 && t.replay == nil
+}
+
+// ToolCalls returns a copy of the assistant's tool calls.
+func (t AssistantTurn) ToolCalls() []ToolCall {
+	if len(t.toolCalls) == 0 {
+		return nil
+	}
+	calls := make([]ToolCall, len(t.toolCalls))
+	copy(calls, t.toolCalls)
+	return calls
+}
+
+// Message returns the complete assistant turn for replay. The continuation
+// state is not part of the normalized JSON projection of Message.
+func (t AssistantTurn) Message() Message {
+	m := NewToolCallMessage(t.content, t.toolCalls)
+	m.replay = t.replay
+	return m
 }
 
 // ContentBlock represents a single block within a multi-part message content.
@@ -87,6 +156,36 @@ func NewToolResultMessage(toolCallID, result string) Message {
 		Content:    result,
 		ToolCallID: toolCallID,
 	}
+}
+
+// Clone copies a message while retaining opaque provider replay state.
+func (m Message) Clone() Message {
+	cp := m
+	cp.ToolCalls = append([]ToolCall(nil), m.ToolCalls...)
+	if blocks, ok := m.Content.([]ContentBlock); ok {
+		cp.Content = cloneContentBlocks(blocks)
+	}
+	return cp
+}
+
+func cloneContentBlocks(blocks []ContentBlock) []ContentBlock {
+	cloned := append([]ContentBlock(nil), blocks...)
+	for i := range cloned {
+		if len(cloned[i].Content) > 0 {
+			cloned[i].Content = cloneContentBlocks(cloned[i].Content)
+		}
+	}
+	return cloned
+}
+
+// CloneMessages copies a conversation while retaining adapter-owned replay
+// envelopes and isolating mutable normalized slices.
+func CloneMessages(messages []Message) []Message {
+	cloned := make([]Message, len(messages))
+	for i, message := range messages {
+		cloned[i] = message.Clone()
+	}
+	return cloned
 }
 
 // ExtractText returns the concatenated text content from a Message's Content field.
@@ -136,7 +235,9 @@ type FunctionCall struct {
 	Arguments string `json:"arguments"` // JSON-encoded string
 }
 
-// ResponseMessage extends Message with optional reasoning content.
+// ResponseMessage extends Message with optional reasoning content. Refusal
+// text is not normalized: it stays inside the adapter-owned replay envelope,
+// which is its only consumer.
 type ResponseMessage struct {
 	Role             string     `json:"role"`
 	Content          *string    `json:"content,omitempty"`
@@ -150,6 +251,104 @@ type ChatResponse struct {
 	Model   string     `json:"-"`
 	Choices []Choice   `json:"-"`
 	Usage   *UsageInfo `json:"-"` // Token usage extracted from API response
+	turn    *AssistantTurn
+}
+
+// AssistantTurn returns the complete first-choice assistant turn. Responses
+// produced by an adapter carry its finalized replay state; the fallback keeps
+// custom LLMClient implementations backward compatible.
+func (r *ChatResponse) AssistantTurn() AssistantTurn {
+	if r == nil {
+		return AssistantTurn{}
+	}
+	if r.turn != nil {
+		return *r.turn
+	}
+	if len(r.Choices) == 0 {
+		return AssistantTurn{}
+	}
+	msg := r.Choices[0].Message
+	var content string
+	if msg.Content != nil && *msg.Content != "" {
+		content = strings.TrimSpace(stripThinkTags(*msg.Content))
+	} else {
+		// Parity with the pre-turn history rebuild (resp.Content()): a turn
+		// whose only text lives in the reasoning channel replays that text,
+		// since nothing else carries it forward.
+		content = msg.ReasoningContent
+	}
+	return AssistantTurn{
+		content:   content,
+		toolCalls: append([]ToolCall(nil), msg.ToolCalls...),
+	}
+}
+
+// ApproxCompletionTokenCount estimates the complete first-choice response,
+// preferring provider-owned replay state when an adapter supplied it. This
+// keeps hidden reasoning and tool-call payloads in accounting without exposing
+// them through the normalized response projection.
+func (r *ChatResponse) ApproxCompletionTokenCount() int {
+	if r == nil || len(r.Choices) == 0 {
+		return 0
+	}
+	if r.turn != nil {
+		if r.turn.replay != nil {
+			return r.turn.replay.tokenCount()
+		}
+		if r.turn.IsEmpty() {
+			return 0
+		}
+	}
+	raw, err := json.Marshal(r.Choices[0].Message)
+	if err != nil {
+		return CountTokens(r.Content())
+	}
+	return CountTokens(string(raw))
+}
+
+// ApproxTokenCount returns a rough request-token estimate while keeping
+// provider-native replay text opaque to callers.
+func (m Message) ApproxTokenCount() int {
+	if m.replay != nil {
+		return m.replay.tokenCount()
+	}
+	return CountTokens(m.ExtractText())
+}
+
+// ApproxMessagesTokenCount returns the rough token count of a conversation,
+// including provider-owned replay text without exposing that text to callers.
+func ApproxMessagesTokenCount(messages []Message) int {
+	var total int
+	for _, message := range messages {
+		total += message.ApproxTokenCount()
+	}
+	return total
+}
+
+// IsReplayable reports whether the message carries an assistant continuation
+// that must remain intact across provider requests.
+func (m Message) IsReplayable() bool {
+	return m.replay != nil || len(m.ToolCalls) > 0
+}
+
+// HasReplayState reports whether the message carries an opaque provider
+// replay envelope. Unlike IsReplayable, a plain normalized tool-call message
+// does not qualify: it can be rebuilt or summarized without corrupting a
+// provider contract.
+func (m Message) HasReplayState() bool {
+	return m.replay != nil
+}
+
+// NewReplayStateMessageForTesting returns an assistant message carrying a
+// synthetic opaque replay envelope. It exists so packages that consume replay
+// semantics (e.g. llmloop compression) can exercise envelope-dependent paths
+// without a provider round trip; production envelopes are only ever attached
+// by protocol adapters.
+func NewReplayStateMessageForTesting(content string, toolCalls []ToolCall) Message {
+	m := NewToolCallMessage(content, toolCalls)
+	raw, _ := json.Marshal(map[string]any{"role": "assistant", "content": content})
+	m.replay = openAIReplay{assistantMessage: raw, approxTokenCount: CountTokens(content)}
+	return m
 }
 
 // Content extracts the text content from the first choice, falling back to reasoning content.
@@ -195,16 +394,24 @@ type FunctionDef struct {
 	RawDefinition json.RawMessage `json:"-"`
 }
 
+// AssistantReplayNative opts a configured endpoint into provider-native
+// assistant turn replay: the complete assistant message a provider returned
+// is carried back verbatim on the next tool turn instead of being rebuilt
+// from the normalized projection. Any other value keeps the rebuild.
+const AssistantReplayNative = "native"
+
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	URL          string            // Full API endpoint URL
-	APIKey       string            // Bearer token / API key
-	Model        string            // Default model override
-	AuthHeader   string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
-	Timeout      time.Duration     // Request timeout
-	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
-	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
-	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+	URL             string            // Full API endpoint URL
+	APIKey          string            // Bearer token / API key
+	Model           string            // Default model override
+	Provider        string            // Resolved provider name (e.g. "deepseek"); informs provider-specific wire quirks
+	AssistantReplay string            // AssistantReplayNative enables native turn replay; default keeps the normalized rebuild
+	AuthHeader      string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
+	Timeout         time.Duration     // Request timeout
+	ExtraBody       map[string]any    // Vendor-specific fields merged into every request body
+	ExtraHeaders    map[string]string // Extra HTTP headers sent with every request
+	RetryCodes      []int             // Additional HTTP status codes that trigger retry
 }
 
 // retryCodesMiddleware returns an HTTP middleware that forces the SDK to retry
@@ -245,14 +452,16 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // protocol).
 func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 	cfg := ClientConfig{
-		URL:          ep.URL,
-		APIKey:       ep.Token,
-		Model:        ep.Model,
-		AuthHeader:   ep.AuthHeader,
-		Timeout:      ep.Timeout,
-		ExtraBody:    ep.ExtraBody,
-		ExtraHeaders: ep.ExtraHeaders,
-		RetryCodes:   ep.RetryCodes,
+		URL:             ep.URL,
+		APIKey:          ep.Token,
+		Model:           ep.Model,
+		Provider:        ep.Provider,
+		AssistantReplay: ep.AssistantReplay,
+		AuthHeader:      ep.AuthHeader,
+		Timeout:         ep.Timeout,
+		ExtraBody:       ep.ExtraBody,
+		ExtraHeaders:    ep.ExtraHeaders,
+		RetryCodes:      ep.RetryCodes,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -461,9 +670,7 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 	defer stream.Close()
 
 	accumulator := openai.ChatCompletionAccumulator{}
-	reasoningByChoice := make(map[int64]*strings.Builder)
-	seenChoices := make(map[int64]bool)
-	finishedChoices := make(map[int64]bool)
+	choiceStates := make(map[int64]*openAIStreamChoiceState)
 	var choiceOrder []int64
 	var usage *UsageInfo
 	for stream.Next() {
@@ -474,29 +681,18 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 			}
 		}
 		for _, choice := range chunk.Choices {
-			if !seenChoices[choice.Index] {
-				seenChoices[choice.Index] = true
+			state := choiceStates[choice.Index]
+			if state == nil {
+				state = &openAIStreamChoiceState{}
+				choiceStates[choice.Index] = state
 				choiceOrder = append(choiceOrder, choice.Index)
 			}
 			if choice.FinishReason != "" {
-				finishedChoices[choice.Index] = true
+				state.finished = true
 			}
-
-			extra, ok := choice.Delta.JSON.ExtraFields["reasoning_content"]
-			if !ok {
-				continue
+			if err := state.addDelta(choice.Delta.RawJSON()); err != nil {
+				return nil, fmt.Errorf("accumulate OpenAI streaming choice %d: %w", choice.Index, err)
 			}
-
-			var reasoningContent string
-			if err := json.Unmarshal([]byte(extra.Raw()), &reasoningContent); err != nil {
-				reasoningContent = extra.Raw()
-			}
-			builder := reasoningByChoice[choice.Index]
-			if builder == nil {
-				builder = &strings.Builder{}
-				reasoningByChoice[choice.Index] = builder
-			}
-			builder.WriteString(reasoningContent)
 		}
 		if !accumulator.AddChunk(chunk) {
 			return nil, fmt.Errorf("OpenAI streaming response contained inconsistent chunks")
@@ -509,20 +705,33 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 		return nil, fmt.Errorf("OpenAI streaming response contained no choices")
 	}
 	for _, index := range choiceOrder {
-		if !finishedChoices[index] {
+		if !choiceStates[index].finished {
 			return nil, fmt.Errorf("OpenAI streaming response ended before choice %d finished", index)
 		}
 	}
 
-	resp := c.mapOpenAIResponse(&accumulator.ChatCompletion)
+	resp := c.mapOpenAIResponseNormalized(&accumulator.ChatCompletion)
 	if usage != nil {
 		resp.Usage = usage
 	}
+	var firstReplayMessage json.RawMessage
 	for i := range resp.Choices {
-		builder := reasoningByChoice[accumulator.Choices[i].Index]
-		if builder != nil {
-			resp.Choices[i].Message.ReasoningContent = builder.String()
+		index := accumulator.Choices[i].Index
+		state := choiceStates[index]
+		if state == nil {
+			continue
 		}
+		state.applyNormalizedFields(&resp.Choices[i].Message)
+		if i == 0 && c.nativeReplayEnabled() {
+			var err error
+			firstReplayMessage, err = state.finalize(accumulator.Choices[i].Message, c.replayPolicy())
+			if err != nil {
+				return nil, fmt.Errorf("finalize OpenAI streaming assistant message: %w", err)
+			}
+		}
+	}
+	if len(resp.Choices) > 0 {
+		resp.turn = openAIAssistantTurnFromResponse(resp, firstReplayMessage)
 	}
 
 	return resp, nil
@@ -543,13 +752,18 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 		case "tool":
 			messages = append(messages, openai.ToolMessage(content, msg.ToolCallID))
 		case "assistant":
-			if len(msg.ToolCalls) == 0 {
-				messages = append(messages, openai.AssistantMessage(content))
-			} else {
-				asst := openai.ChatCompletionAssistantMessageParam{}
-				if content != "" {
-					asst.Content.OfString = openai.String(content)
-				}
+			if replay, ok := msg.replay.(openAIReplay); ok {
+				asst := param.Override[openai.ChatCompletionAssistantMessageParam](replay.assistantMessage)
+				messages = append(messages, openai.ChatCompletionMessageParamUnion{OfAssistant: &asst})
+				continue
+			}
+			asst := openai.ChatCompletionAssistantMessageParam{}
+			// Content may only be omitted on tool-call messages; a bare
+			// {"role":"assistant"} is rejected by strict servers.
+			if content != "" || len(msg.ToolCalls) == 0 {
+				asst.Content.OfString = openai.String(content)
+			}
+			if len(msg.ToolCalls) > 0 {
 				for _, tc := range msg.ToolCalls {
 					asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
 						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
@@ -561,8 +775,8 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 						},
 					})
 				}
-				messages = append(messages, openai.ChatCompletionMessageParamUnion{OfAssistant: &asst})
 			}
+			messages = append(messages, openai.ChatCompletionMessageParamUnion{OfAssistant: &asst})
 		default:
 			messages = append(messages, openai.UserMessage(content))
 		}
@@ -595,8 +809,24 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 	return params
 }
 
-// mapOpenAIResponse converts the SDK response into ChatResponse.
+// mapOpenAIResponse converts the SDK response into ChatResponse, attaching
+// the provider-native replay envelope when the endpoint opted into it.
 func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatResponse {
+	resp := c.mapOpenAIResponseNormalized(sdkResp)
+	var firstReplayMessage json.RawMessage
+	if c.nativeReplayEnabled() && len(sdkResp.Choices) > 0 && sdkResp.Choices[0].Message.RawJSON() != "" {
+		if replayMessage, err := openAIReplayMessageFromResponse(sdkResp.Choices[0].Message, c.replayPolicy()); err == nil {
+			firstReplayMessage = replayMessage
+		}
+	}
+	resp.turn = openAIAssistantTurnFromResponse(resp, firstReplayMessage)
+	return resp
+}
+
+// mapOpenAIResponseNormalized converts the SDK response into the normalized
+// ChatResponse without attaching a turn: the streaming path finalizes its own
+// per-choice state and envelope on top of this.
+func (c *OpenAIClient) mapOpenAIResponseNormalized(sdkResp *openai.ChatCompletion) *ChatResponse {
 	rawJSON := sdkResp.RawJSON()
 
 	usage := resolveUsage([]byte(rawJSON))
@@ -625,16 +855,22 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 			})
 		}
 
-		content := ch.Message.Content
 		var contentPtr *string
-		if content != "" {
+		if rawContent := ch.Message.JSON.Content.Raw(); rawContent != "" && rawContent != "null" {
+			var content string
+			if err := json.Unmarshal([]byte(rawContent), &content); err == nil {
+				contentPtr = &content
+			}
+		} else if ch.Message.Content != "" {
+			content := ch.Message.Content
 			contentPtr = &content
 		}
 
 		var reasoningContent string
-		if extra, ok := ch.Message.JSON.ExtraFields["reasoning_content"]; ok && extra.Valid() {
-			if err := json.Unmarshal([]byte(extra.Raw()), &reasoningContent); err != nil {
-				reasoningContent = extra.Raw()
+		if extra, ok := ch.Message.JSON.ExtraFields["reasoning_content"]; ok {
+			rawReasoning := extra.Raw()
+			if rawReasoning != "" && rawReasoning != "null" {
+				reasoningContent = decodeReasoningContent([]byte(rawReasoning))
 			}
 		}
 
@@ -655,6 +891,71 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 		Choices: choices,
 		Usage:   usage,
 	}
+}
+
+func decodeReasoningContent(raw []byte) string {
+	var content string
+	if err := json.Unmarshal(raw, &content); err != nil {
+		return string(raw)
+	}
+	return content
+}
+
+func openAIAssistantTurnFromResponse(resp *ChatResponse, rawMessage json.RawMessage) *AssistantTurn {
+	if resp == nil || len(resp.Choices) == 0 {
+		return nil
+	}
+	msg := resp.Choices[0].Message
+	replay := newOpenAIReplay(rawMessage)
+	// The normalized view follows the same contract as the generic fallback:
+	// think tags stripped, and — only when no opaque envelope carries the
+	// turn — reasoning substituted for empty content, matching the
+	// pre-envelope history rebuild.
+	var content string
+	if msg.Content != nil && *msg.Content != "" {
+		content = strings.TrimSpace(stripThinkTags(*msg.Content))
+	} else if replay == nil {
+		content = msg.ReasoningContent
+	}
+	return &AssistantTurn{
+		content:   content,
+		toolCalls: append([]ToolCall(nil), msg.ToolCalls...),
+		replay:    replay,
+	}
+}
+
+func openAIMessageHasReplayState(rawMessage json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(rawMessage, &fields); err != nil {
+		return false
+	}
+	for name, raw := range fields {
+		if name == "role" {
+			continue
+		}
+		var value any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return true
+		}
+		switch v := value.(type) {
+		case nil:
+		case string:
+			if v != "" {
+				return true
+			}
+		case []any:
+			if len(v) > 0 {
+				return true
+			}
+		case map[string]any:
+			if len(v) > 0 {
+				return true
+			}
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 // --- AnthropicClient ---
