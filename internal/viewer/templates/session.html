@@ -111,7 +111,8 @@
     <h3>Review Comments ({{len .Session.Comments}} findings)</h3>
     {{with severityCounts .Session.Comments}}
     <div class="comment-filter-bar severity-filters" aria-label="Filter comments by severity">
-        <button type="button" class="comment-filter-chip filter-all is-active" data-filter-kind="all" data-filter-value="" aria-pressed="true">All: {{len $.Session.Comments}}</button>
+        <span class="comment-filter-label">Severity:</span>
+        <button type="button" class="comment-filter-chip filter-all is-active" data-filter-kind="severity" data-filter-value="all" aria-pressed="true">All: {{len $.Session.Comments}}</button>
         {{if .Critical}}<button type="button" class="comment-filter-chip severity-critical" data-filter-kind="severity" data-filter-value="critical" aria-pressed="false">Critical: {{.Critical}}</button>{{end}}
         {{if .High}}<button type="button" class="comment-filter-chip severity-high" data-filter-kind="severity" data-filter-value="high" aria-pressed="false">High: {{.High}}</button>{{end}}
         {{if .Medium}}<button type="button" class="comment-filter-chip severity-medium" data-filter-kind="severity" data-filter-value="medium" aria-pressed="false">Medium: {{.Medium}}</button>{{end}}
@@ -120,7 +121,8 @@
     {{end}}
     {{with categoryCounts .Session.Comments}}
     <div class="comment-filter-bar category-filters" aria-label="Filter comments by category">
-        <button type="button" class="comment-filter-chip filter-all is-active" data-filter-kind="all" data-filter-value="" aria-pressed="true">All: {{len $.Session.Comments}}</button>
+        <span class="comment-filter-label">Category:</span>
+        <button type="button" class="comment-filter-chip filter-all is-active" data-filter-kind="category" data-filter-value="all" aria-pressed="true">All: {{len $.Session.Comments}}</button>
         {{if .Bug}}<button type="button" class="comment-filter-chip cat-bug" data-filter-kind="category" data-filter-value="bug" aria-pressed="false">Bug: {{.Bug}}</button>{{end}}
         {{if .Security}}<button type="button" class="comment-filter-chip cat-security" data-filter-kind="category" data-filter-value="security" aria-pressed="false">Security: {{.Security}}</button>{{end}}
         {{if .Performance}}<button type="button" class="comment-filter-chip cat-performance" data-filter-kind="category" data-filter-value="performance" aria-pressed="false">Performance: {{.Performance}}</button>{{end}}

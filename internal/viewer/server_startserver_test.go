@@ -73,11 +73,11 @@ func TestParseTemplate_SessionWithComments(t *testing.T) {
 		t.Error("rendered page missing Review Comments section")
 	}
 	body := rr.Body.String()
-	if strings.Count(body, `data-filter-kind="all"`) != 2 {
-		t.Errorf("All filter count = %d, want 2 (severity and category)", strings.Count(body, `data-filter-kind="all"`))
-	}
 	for _, want := range []string{
-		`data-filter-kind="all"`,
+		`<span class="comment-filter-label">Severity:</span>`,
+		`<span class="comment-filter-label">Category:</span>`,
+		`data-filter-kind="severity" data-filter-value="all"`,
+		`data-filter-kind="category" data-filter-value="all"`,
 		`data-filter-kind="severity" data-filter-value="critical"`,
 		`data-filter-kind="category" data-filter-value="bug"`,
 		`data-filter-kind="category" data-filter-value="other"`,

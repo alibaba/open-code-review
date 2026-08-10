@@ -38,20 +38,19 @@ document.querySelectorAll('.response-text').forEach(function(el) {
         return;
     }
 
-    let activeKind = 'all';
-    let activeValue = '';
+    let activeSeverity = 'all';
+    let activeCategory = 'all';
 
     function cardMatches(card) {
-        if (activeKind === 'all') {
-            return true;
-        }
-        return card.dataset[activeKind] === activeValue;
+        return (activeSeverity === 'all' || card.dataset.severity === activeSeverity) &&
+            (activeCategory === 'all' || card.dataset.category === activeCategory);
     }
 
     function updateFilterState() {
         filters.forEach(function(filter) {
-            const isActive = activeKind === filter.dataset.filterKind &&
-                activeValue === (filter.dataset.filterValue || '');
+            const kind = filter.dataset.filterKind;
+            const activeValue = kind === 'severity' ? activeSeverity : activeCategory;
+            const isActive = activeValue === filter.dataset.filterValue;
             filter.classList.toggle('is-active', isActive);
             filter.setAttribute('aria-pressed', String(isActive));
         });
@@ -83,13 +82,11 @@ document.querySelectorAll('.response-text').forEach(function(el) {
     filters.forEach(function(filter) {
         filter.addEventListener('click', function() {
             const kind = filter.dataset.filterKind;
-            const value = filter.dataset.filterValue || '';
-            if (kind === 'all' || (activeKind === kind && activeValue === value)) {
-                activeKind = 'all';
-                activeValue = '';
+            const value = filter.dataset.filterValue;
+            if (kind === 'severity') {
+                activeSeverity = activeSeverity === value ? 'all' : value;
             } else {
-                activeKind = kind;
-                activeValue = value;
+                activeCategory = activeCategory === value ? 'all' : value;
             }
             updateFilterState();
         });

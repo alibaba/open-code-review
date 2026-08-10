@@ -881,12 +881,19 @@ p {
 
 .comment-filter-bar {
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
     gap: 0.5rem;
     margin-bottom: 0.65rem;
 }
 .category-filters {
     margin-bottom: 1.25rem;
+}
+.comment-filter-label {
+    min-width: 4.75rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 600;
 }
 .comment-filter-chip {
     appearance: none;
