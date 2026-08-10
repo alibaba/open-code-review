@@ -345,7 +345,7 @@ func (fs *FileSession) AppendTaskRecord(taskType TaskType, messages []llm.Messag
 	rec := &TaskRecord{
 		Type:            taskType,
 		RequestNo:       len(fs.TaskRecords[taskType]) + 1,
-		RequestMessages: copyMessages(messages),
+		RequestMessages: llm.CloneMessages(messages),
 		fileSession:     fs,
 	}
 	fs.TaskRecords[taskType] = append(fs.TaskRecords[taskType], rec)
@@ -355,21 +355,6 @@ func (fs *FileSession) AppendTaskRecord(taskType TaskType, messages []llm.Messag
 	}
 
 	return rec
-}
-
-// copyMessages returns a deep copy of a messages slice so that future mutations
-// don't corrupt stored records.
-func copyMessages(msgs []llm.Message) []llm.Message {
-	cp := make([]llm.Message, len(msgs))
-	for i, m := range msgs {
-		cp[i] = llm.Message{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  append([]llm.ToolCall(nil), m.ToolCalls...),
-		}
-	}
-	return cp
 }
 
 // copyMessagesForJSON produces a JSON-friendly slice for persistence.
@@ -411,10 +396,8 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 		cacheReadTokens = int(resp.Usage.CacheReadTokens)
 		cacheWriteTokens = int(resp.Usage.CacheWriteTokens)
 	} else {
-		for _, m := range tr.RequestMessages {
-			promptTokens += llm.CountTokens(m.ExtractText())
-		}
-		completionTokens = llm.CountTokens(content)
+		promptTokens = llm.ApproxMessagesTokenCount(tr.RequestMessages)
+		completionTokens = resp.ApproxCompletionTokenCount()
 	}
 
 	usage := &TokenUsage{

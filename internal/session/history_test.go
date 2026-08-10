@@ -150,6 +150,28 @@ func TestSetResponse(t *testing.T) {
 	}
 }
 
+func TestSetResponse_EstimatesCompleteNormalizedResponseWithoutUsage(t *testing.T) {
+	sh := New("/tmp/repo", "main", "model", SessionOptions{})
+	fs := sh.GetOrCreateFileSession("file.go")
+	rec := fs.AppendTaskRecord(MainTask, []llm.Message{llm.NewTextMessage("user", "hi")})
+
+	content := "visible"
+	resp := &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{
+		Content:          &content,
+		ReasoningContent: "private reasoning private reasoning",
+		ToolCalls: []llm.ToolCall{{
+			ID:       "call-1",
+			Type:     "function",
+			Function: llm.FunctionCall{Name: "file_read", Arguments: `{}`},
+		}},
+	}}}}
+
+	rec.SetResponse(resp, time.Second)
+	if got, visibleOnly := rec.Response.Usage.CompletionTokens, llm.CountTokens(content); got <= visibleOnly {
+		t.Fatalf("completion token estimate = %d, want greater than visible-only estimate %d", got, visibleOnly)
+	}
+}
+
 func TestSetResponse_EmptyResponse(t *testing.T) {
 	sh := New("/tmp/repo", "main", "model", SessionOptions{})
 	fs := sh.GetOrCreateFileSession("file.go")

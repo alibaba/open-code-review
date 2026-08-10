@@ -5,9 +5,12 @@ package session
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -200,6 +204,66 @@ func TestSetErrorWritesJSONL(t *testing.T) {
 	}
 	if !found {
 		t.Error("no llm_error record found in JSONL")
+	}
+}
+
+func TestLLMRequestPersistenceRedactsAdapterReplay(t *testing.T) {
+	var requests [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requests = append(requests, body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"response","object":"chat.completion","model":"fake","choices":[{"index":0,"message":{"role":"assistant","content":"visible","reasoning_content":"private reasoning","vendor_state":{"nonce":"opaque"},"tool_calls":[{"id":"call-1","type":"function","function":{"name":"file_read","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`)
+	}))
+	defer server.Close()
+
+	client := llm.NewOpenAIClient(llm.ClientConfig{URL: server.URL + "/v1", APIKey: "test", Model: "fake", AssistantReplay: llm.AssistantReplayNative})
+	response, err := client.CompletionsWithCtx(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{llm.NewTextMessage("user", "review")},
+	})
+	if err != nil {
+		t.Fatalf("first completion: %v", err)
+	}
+
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "fake", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	defer sh.Finalize()
+	record := sh.GetOrCreateFileSession("main.go").AppendTaskRecord(MainTask, []llm.Message{
+		response.AssistantTurn().Message(),
+	})
+	if _, err := client.CompletionsWithCtx(context.Background(), llm.ChatRequest{Messages: record.RequestMessages}); err != nil {
+		t.Fatalf("replay completion: %v", err)
+	}
+	if len(requests) != 2 || !strings.Contains(string(requests[1]), `"reasoning_content":"private reasoning"`) {
+		t.Fatalf("in-memory task record lost adapter replay: %s", requests[len(requests)-1])
+	}
+	if strings.Contains(string(requests[1]), "vendor_state") {
+		t.Fatalf("replay echoed unknown vendor field without a request contract: %s", requests[1])
+	}
+
+	if sh.persist == nil {
+		t.Fatal("expected session persistence")
+	}
+	sh.persist.mu.Lock()
+	err = sh.persist.writer.Flush()
+	sh.persist.mu.Unlock()
+	if err != nil {
+		t.Fatalf("flush session: %v", err)
+	}
+	path := sessionJSONLPath(t, repoDir, sh.SessionID)
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read persisted session: %v", err)
+	}
+	if strings.Contains(string(persisted), "private reasoning") || strings.Contains(string(persisted), "vendor_state") {
+		t.Fatalf("persisted redacted projection exposed adapter replay: %s", persisted)
+	}
+	if !strings.Contains(string(persisted), `"content":"visible"`) {
+		t.Fatalf("persisted projection omitted visible assistant content: %s", persisted)
 	}
 }
 
