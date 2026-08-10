@@ -293,6 +293,7 @@ type ProviderEntry struct {
 	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes   []int             `json:"retry_codes,omitempty"`
 }
 
 // MCPServerConfig holds configuration for a single MCP server.
@@ -331,6 +332,7 @@ type LlmConfig struct {
 	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes   []int             `json:"retry_codes,omitempty"`
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -390,6 +392,7 @@ var supportedConfigKeys = []string{
 	"llm.use_anthropic",
 	"llm.extra_body",
 	"llm.extra_headers",
+	"llm.retry_codes",
 	"language",
 	"telemetry.enabled",
 	"telemetry.exporter",
@@ -533,8 +536,17 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid JSON for llm.extra_body: %w", err)
 		}
 		cfg.Llm.ExtraBody = m
+	case "llm.retry_codes", "llm.RetryCodes":
+		codes, warnings, err := llm.ParseRetryCodes(value)
+		if err != nil {
+			return err
+		}
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
+		}
+		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -577,8 +589,17 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 			return fmt.Errorf("invalid extra headers for %s: %w", key, err)
 		}
 		entry.ExtraHeaders = parsed
+	case "retry_codes":
+		codes, warnings, err := llm.ParseRetryCodes(value)
+		if err != nil {
+			return fmt.Errorf("invalid retry codes for %s: %w", key, err)
+		}
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
+		}
+		entry.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes", field)
 	}
 	return nil
 }
