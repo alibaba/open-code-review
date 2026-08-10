@@ -1388,3 +1388,162 @@ func TestStripThinkTags(t *testing.T) {
 		})
 	}
 }
+
+func TestRetryCodesMiddleware_Nil(t *testing.T) {
+	mw := retryCodesMiddleware(nil)
+	if mw != nil {
+		t.Fatal("expected nil middleware for empty codes")
+	}
+	mw = retryCodesMiddleware([]int{})
+	if mw != nil {
+		t.Fatal("expected nil middleware for zero-length codes")
+	}
+}
+
+func TestRetryCodesMiddleware_SetsHeader(t *testing.T) {
+	mw := retryCodesMiddleware([]int{403, 400})
+
+	resp := &http.Response{
+		StatusCode: 403,
+		Header:     http.Header{},
+	}
+	next := func(req *http.Request) (*http.Response, error) {
+		return resp, nil
+	}
+
+	got, err := mw(nil, next)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Header.Get("x-should-retry") != "true" {
+		t.Error("expected x-should-retry: true for status 403")
+	}
+}
+
+func TestRetryCodesMiddleware_NoHeaderForNonMatchingCode(t *testing.T) {
+	mw := retryCodesMiddleware([]int{403})
+
+	resp := &http.Response{
+		StatusCode: 401,
+		Header:     http.Header{},
+	}
+	next := func(req *http.Request) (*http.Response, error) {
+		return resp, nil
+	}
+
+	got, err := mw(nil, next)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Header.Get("x-should-retry") != "" {
+		t.Errorf("unexpected x-should-retry header for status 401: %q", got.Header.Get("x-should-retry"))
+	}
+}
+
+func TestRetryCodesMiddleware_PassthroughError(t *testing.T) {
+	mw := retryCodesMiddleware([]int{403})
+
+	wantErr := errors.New("connection refused")
+	next := func(req *http.Request) (*http.Response, error) {
+		return nil, wantErr
+	}
+
+	resp, err := mw(nil, next)
+	if err != wantErr {
+		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+	if resp != nil {
+		t.Fatal("expected nil response on error")
+	}
+}
+
+func TestOpenAIClient_RetryCodesTriggersRetry(t *testing.T) {
+	const responseBody = `{
+		"id":"chatcmpl-retry",
+		"object":"chat.completion",
+		"model":"gpt-test",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"success"},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+	}`
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if n <= 2 {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:        server.URL + "/v1",
+		APIKey:     "test-key",
+		Model:      "gpt-test",
+		RetryCodes: []int{403},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := requests.Load(); got < 3 {
+		t.Fatalf("requests = %d, want >= 3 (should retry on 403)", got)
+	}
+	if got := resp.Content(); got != "success" {
+		t.Errorf("Content() = %q, want %q", got, "success")
+	}
+}
+
+func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if n <= 2 {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg-test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"success"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:        server.URL + "/v1/messages",
+		APIKey:     "test-key",
+		Model:      "claude-test",
+		AuthHeader: "x-api-key",
+		RetryCodes: []int{403},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := requests.Load(); got < 3 {
+		t.Fatalf("requests = %d, want >= 3 (should retry on 403)", got)
+	}
+	if got := resp.Content(); got != "success" {
+		t.Errorf("Content() = %q, want %q", got, "success")
+	}
+}

@@ -2223,3 +2223,132 @@ func TestEnsureMessagesSuffix(t *testing.T) {
 		})
 	}
 }
+
+func TestParseRetryCodes(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    []int
+		wantErr string
+	}{
+		{name: "empty string", input: "", want: nil},
+		{name: "whitespace only", input: "   ", want: nil},
+		{name: "single code", input: "403", want: []int{403}},
+		{name: "multiple codes", input: "403,400", want: []int{403, 400}},
+		{name: "with spaces", input: " 403 , 400 ", want: []int{403, 400}},
+		{name: "deduplicates", input: "403,403,400", want: []int{403, 400}},
+		{name: "rejects non-integer", input: "abc", wantErr: "invalid retry code"},
+		{name: "rejects 2xx", input: "200", wantErr: "must be a 4xx status code"},
+		{name: "rejects 3xx", input: "301", wantErr: "must be a 4xx status code"},
+		{name: "rejects 5xx", input: "500", wantErr: "must be a 4xx status code"},
+		{name: "rejects 600", input: "600", wantErr: "must be a 4xx status code"},
+		{name: "rejects 408", input: "408", wantErr: "unnecessary"},
+		{name: "rejects 409", input: "409", wantErr: "unnecessary"},
+		{name: "rejects 429", input: "429", wantErr: "unnecessary"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseRetryCodes(tt.input)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("got[%d] = %d, want %d", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestResolveEndpoint_ProviderRetryCodes(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.json")
+	cfg := configFile{
+		Provider: "test",
+		Model:    "m",
+		CustomProviders: map[string]providerEntryConfig{
+			"test": {
+				APIKey:     "k",
+				URL:        "http://localhost/v1",
+				Protocol:   "openai",
+				Model:      "m",
+				RetryCodes: []int{403, 400},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	os.WriteFile(cfgFile, data, 0o644)
+
+	ep, err := ResolveEndpoint(cfgFile)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if len(ep.RetryCodes) != 2 || ep.RetryCodes[0] != 403 || ep.RetryCodes[1] != 400 {
+		t.Errorf("RetryCodes = %v, want [403, 400]", ep.RetryCodes)
+	}
+}
+
+func TestResolveEndpoint_LegacyLlmRetryCodes(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.json")
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:        "http://localhost/v1/messages",
+			AuthToken:  "t",
+			Model:      "m",
+			Protocol:   "anthropic",
+			RetryCodes: []int{403},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	os.WriteFile(cfgFile, data, 0o644)
+
+	ep, err := ResolveEndpoint(cfgFile)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if len(ep.RetryCodes) != 1 || ep.RetryCodes[0] != 403 {
+		t.Errorf("RetryCodes = %v, want [403]", ep.RetryCodes)
+	}
+}
+
+func TestResolveEndpoint_InvalidRetryCodes(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.json")
+	cfg := configFile{
+		Provider: "test",
+		Model:    "m",
+		CustomProviders: map[string]providerEntryConfig{
+			"test": {
+				APIKey:     "k",
+				URL:        "http://localhost/v1",
+				Protocol:   "openai",
+				Model:      "m",
+				RetryCodes: []int{429},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	os.WriteFile(cfgFile, data, 0o644)
+
+	_, err := ResolveEndpoint(cfgFile)
+	if err == nil {
+		t.Fatal("expected error for invalid retry code 429")
+	}
+	if !strings.Contains(err.Error(), "unnecessary") {
+		t.Errorf("error %q does not mention unnecessary", err.Error())
+	}
+}
