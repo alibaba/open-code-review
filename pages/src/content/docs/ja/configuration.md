@@ -54,7 +54,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
-| `minimax` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
+| `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
+| `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
@@ -82,6 +83,8 @@ ocr config set custom_providers.openai-responses-gateway.protocol     openai-res
 ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
 ```
+
+`url` には API の Base URL または完全な `/responses` エンドポイントのどちらを指定してもよく、OCR がどちらの形式も正規化します。
 
 Ollama で動かすローカルモデルは、ローカルの OpenAI 互換エンドポイントを
 指すカスタム provider にすぎません。
@@ -123,6 +126,30 @@ Ollama は API key を無視しますが、カスタム provider は空でない
   }
 }
 ```
+
+### ファイルごとのプロンプト上限
+
+OCR はデフォルトで、ファイルごとのレビューにおいて 58,888 トークンのプロンプト上限を
+使用します。より大きなコンテキストウィンドウを持つモデル向けに、`max_tokens` を
+保存して上限を引き上げられます。
+
+```bash
+ocr config set max_tokens 200000
+```
+
+この設定は `ocr review` と `ocr scan` の両方に適用されます。保存済みの設定を
+変更せずに一度だけ上書きするには `--max-tokens` を使用します。
+
+```bash
+ocr review --max-tokens 200000
+ocr scan --max-tokens 200000
+```
+
+実行時のフラグは `max_tokens` より優先されます。どちらも設定されていない場合、
+OCR は組み込みのタスクテンプレートのデフォルト値を使用します。この上限はファイル
+単位であり、モデルの出力トークン上限、および実行全体のトークン使用量を制限する
+`--max-tokens-budget` のいずれとも独立しています。組み込みのデフォルトに戻すには
+`ocr config unset max_tokens` を実行してください。
 
 ### 接続性を検証する
 

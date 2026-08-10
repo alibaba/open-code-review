@@ -53,7 +53,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
-| `minimax` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
+| `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
+| `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
@@ -80,6 +81,8 @@ ocr config set custom_providers.openai-responses-gateway.protocol     openai-res
 ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
 ```
+
+`url` 既可以填 API 的 Base URL，也可以填完整的 `/responses` 端点，OCR 会自动归一化处理。
 
 用 Ollama 跑本地模型，就是一个指向本地 OpenAI 兼容端点的自定义 provider：
 
@@ -117,6 +120,28 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
   }
 }
 ```
+
+### 每文件提示词上限
+
+OCR 默认为每次文件评审设置 58,888 token 的提示词上限。如果模型上下文窗口更大，
+可以通过保存 `max_tokens` 来提高上限：
+
+```bash
+ocr config set max_tokens 200000
+```
+
+该设置同时作用于 `ocr review` 和 `ocr scan`。使用 `--max-tokens` 可以在不修改
+已保存配置的情况下临时覆盖一次：
+
+```bash
+ocr review --max-tokens 200000
+ocr scan --max-tokens 200000
+```
+
+单次运行的参数优先级高于 `max_tokens`；如果两者都未设置，OCR 会使用内置任务模板
+的默认值。该上限按文件计算，与模型的输出 token 上限、以及限制单次运行总 token
+用量的 `--max-tokens-budget` 都相互独立。可以用 `ocr config unset max_tokens`
+恢复为内置默认值。
 
 ### 验证连通性
 

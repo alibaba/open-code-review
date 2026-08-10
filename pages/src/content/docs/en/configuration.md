@@ -56,7 +56,8 @@ environment variable.
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
-| `minimax` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
+| `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
+| `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
@@ -84,6 +85,8 @@ ocr config set custom_providers.openai-responses-gateway.protocol     openai-res
 ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
 ```
+
+The `url` can be either the API base URL or the full `/responses` endpoint — OCR normalizes it either way.
 
 A local model served by Ollama is just a custom provider pointing at the
 local OpenAI-compatible endpoint:
@@ -125,6 +128,29 @@ The `timeout_sec` keys are not supported by `ocr config set` — edit
   }
 }
 ```
+
+### Per-file prompt limit
+
+OCR defaults to a 58,888-token prompt ceiling for each file review. Increase
+it for a model with a larger context window by saving `max_tokens`:
+
+```bash
+ocr config set max_tokens 200000
+```
+
+The setting applies to both `ocr review` and `ocr scan`. Use `--max-tokens`
+for a one-off override without changing the saved configuration:
+
+```bash
+ocr review --max-tokens 200000
+ocr scan --max-tokens 200000
+```
+
+The per-run flag takes precedence over `max_tokens`; when neither is set, OCR
+uses the embedded task-template default. This limit is per file and is
+independent of both the model's output-token cap and `--max-tokens-budget`,
+which caps total token use for a run. Restore the embedded default with
+`ocr config unset max_tokens`.
 
 ### Verify connectivity
 
