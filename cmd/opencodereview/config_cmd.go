@@ -537,9 +537,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.ExtraBody = m
 	case "llm.retry_codes", "llm.RetryCodes":
-		codes, err := llm.ParseRetryCodes(value)
+		codes, warnings, err := llm.ParseRetryCodes(value)
 		if err != nil {
 			return err
+		}
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
@@ -587,9 +590,12 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 		}
 		entry.ExtraHeaders = parsed
 	case "retry_codes":
-		codes, err := llm.ParseRetryCodes(value)
+		codes, warnings, err := llm.ParseRetryCodes(value)
 		if err != nil {
 			return fmt.Errorf("invalid retry codes for %s: %w", key, err)
+		}
+		for _, w := range warnings {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		entry.RetryCodes = codes
 	default:

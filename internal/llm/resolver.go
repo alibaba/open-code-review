@@ -421,7 +421,8 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 	}
 
-	if err := validateRetryCodes(entry.RetryCodes); err != nil {
+	retryCodes, _, err := sanitizeRetryCodes(entry.RetryCodes)
+	if err != nil {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 	}
 
@@ -440,7 +441,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		ExtraBody:    extraBody,
 		ExtraHeaders: extraHeaders,
 		Timeout:      timeout,
-		RetryCodes:   entry.RetryCodes,
+		RetryCodes:   retryCodes,
 	}, true, nil
 }
 
@@ -491,7 +492,8 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}
 
-	if err := validateRetryCodes(cfg.Llm.RetryCodes); err != nil {
+	retryCodes, _, err := sanitizeRetryCodes(cfg.Llm.RetryCodes)
+	if err != nil {
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}
 
@@ -505,7 +507,7 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		ExtraBody:    cfg.Llm.ExtraBody,
 		ExtraHeaders: cfg.Llm.ExtraHeaders,
 		Timeout:      timeout,
-		RetryCodes:   cfg.Llm.RetryCodes,
+		RetryCodes:   retryCodes,
 	}, true, nil
 }
 
@@ -744,28 +746,32 @@ func ensureMessagesSuffix(rawURL string) string {
 	return u + "/v1/messages"
 }
 
-// validateRetryCodes checks that every code is a 4xx status code not already
-// retried by the SDK (408, 409, 429). Returns an error on the first violation.
-func validateRetryCodes(codes []int) error {
+// sanitizeRetryCodes filters out SDK-default codes (408, 409, 429) and returns
+// the remaining valid codes, any warnings for filtered codes, and an error if
+// any code is outside the 4xx range.
+func sanitizeRetryCodes(codes []int) (filtered []int, warnings []string, err error) {
 	for _, code := range codes {
 		if code < 400 || code > 499 {
-			return fmt.Errorf("invalid retry code %d: must be a 4xx status code (5xx codes are already retried by default)", code)
+			return nil, nil, fmt.Errorf("invalid retry code %d: must be a 4xx status code (5xx codes are already retried by default)", code)
 		}
 		if code == 408 || code == 409 || code == 429 {
-			return fmt.Errorf("retry code %d is unnecessary: the SDK already retries this status code", code)
+			warnings = append(warnings, fmt.Sprintf("retry code %d is unnecessary (SDK already retries it) and will be ignored", code))
+			continue
 		}
+		filtered = append(filtered, code)
 	}
-	return nil
+	return filtered, warnings, nil
 }
 
 // ParseRetryCodes parses a comma-separated list of HTTP status codes that
 // should trigger retry. Only 4xx codes not already retried by the SDK
 // (408, 409, 429) are accepted; 5xx codes are rejected because the SDK
-// retries all of them by default. An empty input returns nil.
-func ParseRetryCodes(raw string) ([]int, error) {
+// retries all of them by default. SDK-default codes are silently filtered
+// out and reported as warnings. An empty input returns nil.
+func ParseRetryCodes(raw string) ([]int, []string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	parts := strings.Split(raw, ",")
 	seen := make(map[int]bool, len(parts))
@@ -777,15 +783,16 @@ func ParseRetryCodes(raw string) ([]int, error) {
 		}
 		code, err := strconv.Atoi(p)
 		if err != nil {
-			return nil, fmt.Errorf("invalid retry code %q: must be an integer", p)
+			return nil, nil, fmt.Errorf("invalid retry code %q: must be an integer", p)
 		}
 		if !seen[code] {
 			seen[code] = true
 			codes = append(codes, code)
 		}
 	}
-	if err := validateRetryCodes(codes); err != nil {
-		return nil, err
+	filtered, warnings, err := sanitizeRetryCodes(codes)
+	if err != nil {
+		return nil, nil, err
 	}
-	return codes, nil
+	return filtered, warnings, nil
 }
