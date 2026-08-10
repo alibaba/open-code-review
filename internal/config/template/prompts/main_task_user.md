@@ -3,7 +3,9 @@
 {{change_files}}
 </other_changed_files>
 
+<review_files>
 {{diffs}}
+</review_files>
 
 Current time in the real world: {{current_system_date_time}}
 
