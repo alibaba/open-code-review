@@ -38,6 +38,7 @@ type round struct {
 }
 
 // partitionResult describes how messages should be split for compression.
+// An empty compress zone is represented by compressEnd == frozenEnd.
 type partitionResult struct {
 	frozenEnd   int
 	compressEnd int
@@ -107,10 +108,7 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 	count := 0
 	tokensUsed := 0
 	for i := len(rounds) - 1; i >= 0; i-- {
-		roundTokens := llm.CountTokens(messages[rounds[i].assistantIdx].ExtractText())
-		for _, ti := range rounds[i].toolIdxs {
-			roundTokens += llm.CountTokens(messages[ti].ExtractText())
-		}
+		roundTokens := roundTokenCount(rounds[i], messages)
 		if tokensUsed+roundTokens > budget {
 			break
 		}
@@ -118,6 +116,14 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 		count++
 	}
 	return count
+}
+
+func roundTokenCount(r round, messages []llm.Message) int {
+	total := llm.CountTokens(messages[r.assistantIdx].ExtractText())
+	for _, ti := range r.toolIdxs {
+		total += llm.CountTokens(messages[ti].ExtractText())
+	}
+	return total
 }
 
 // partitionMessages divides messages into frozen, compress, and active zones.
@@ -136,11 +142,15 @@ func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEs
 		return result
 	}
 
-	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, prevSummaryTokenEstimate)
+	// The frozen zone (and any summary already folded into it) occupies part
+	// of the prompt budget; rounds only get what remains.
+	reservedTokens := CountMessagesTokens(messages[:result.frozenEnd]) + prevSummaryTokenEstimate
+	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, reservedTokens)
 	if result.activeCount >= len(result.rounds) {
-		// Everything fits — no compression needed.
-		result.compressEnd = len(messages)
-		result.activeCount = 0
+		// Everything fits — no compression needed. Leave the compress zone
+		// empty: compressing rounds that still fit the budget would discard
+		// live context the model can keep verbatim.
+		result.compressEnd = result.frozenEnd
 		return result
 	}
 
@@ -210,8 +220,11 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 // intact. Returns rebuilt as [frozen] + [compressed_summary appended to
 // the user prompt] + [active].
 func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
+	// No compression template or nothing beyond the frozen zone: keep the
+	// conversation as is. Truncating to the frozen zone here would discard
+	// every round of live context.
 	if len(r.deps.Template.MemoryCompressionTask.Messages) == 0 || len(msgs) <= 2 {
-		return msgs[:min(len(msgs), 2)], nil
+		return msgs, nil
 	}
 
 	part := partitionMessages(msgs, r.deps.Template.MaxTokens, 0)

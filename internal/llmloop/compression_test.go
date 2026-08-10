@@ -100,11 +100,56 @@ func TestPartitionMessages_EverythingFits(t *testing.T) {
 		msg("tool", "ok"),
 	}
 	result := partitionMessages(messages, 100000, 0)
-	if result.activeCount != 0 {
-		t.Errorf("activeCount = %d, want 0 (everything fits)", result.activeCount)
+	if result.activeCount != 1 {
+		t.Errorf("activeCount = %d, want 1 (the only round fits)", result.activeCount)
 	}
-	if result.compressEnd != len(messages) {
-		t.Errorf("compressEnd = %d, want %d", result.compressEnd, len(messages))
+	// Everything fits: the compress zone must be empty so live rounds are
+	// kept verbatim instead of being summarized away.
+	if result.compressEnd != result.frozenEnd {
+		t.Errorf("compressEnd = %d, want frozenEnd %d (empty compress zone)", result.compressEnd, result.frozenEnd)
+	}
+}
+
+// TestPartitionMessages_FrozenZoneReservesBudget verifies that the frozen
+// zone's own tokens count against the prompt budget when sizing the active
+// zone: with a fat frozen prompt only the newest round fits, so the older
+// round must land in the compress zone.
+func TestPartitionMessages_FrozenZoneReservesBudget(t *testing.T) {
+	roundText := strings.Repeat("round content ", 100)
+	messages := []llm.Message{
+		msg("system", "sys"),
+		msg("user", strings.Repeat("frozen prompt content ", 200)),
+		msg("assistant", roundText),
+		msg("tool", roundText),
+		msg("assistant", roundText),
+		msg("tool", roundText),
+	}
+
+	frozenTokens := CountMessagesTokens(messages[:2])
+	oneRound := CountMessagesTokens(messages[2:4])
+	// Budget admits the frozen zone plus one round with headroom, but not
+	// two rounds on top of the frozen zone. Without the frozen reservation
+	// both rounds would appear to fit.
+	budget := frozenTokens + oneRound + oneRound/2
+	maxTokens := budget * 5 / 4 // PromptTokenLimit is 80% of MaxTokens
+
+	actualBudget := PromptTokenLimit(maxTokens)
+	if actualBudget-frozenTokens < oneRound {
+		t.Fatalf("test setup: one round (%d tokens) must fit budget %d after reserving %d", oneRound, actualBudget, frozenTokens)
+	}
+	if actualBudget-frozenTokens >= 2*oneRound {
+		t.Fatalf("test setup: two rounds (%d tokens) must not fit budget %d after reserving %d", 2*oneRound, actualBudget, frozenTokens)
+	}
+	if actualBudget < 2*oneRound {
+		t.Fatalf("test setup: two rounds (%d tokens) must fit budget %d when the frozen zone is ignored", 2*oneRound, actualBudget)
+	}
+
+	result := partitionMessages(messages, maxTokens, 0)
+	if result.activeCount != 1 {
+		t.Errorf("activeCount = %d, want 1 (frozen zone must reserve budget)", result.activeCount)
+	}
+	if result.compressEnd != 4 {
+		t.Errorf("compressEnd = %d, want 4 (older round compressed)", result.compressEnd)
 	}
 }
 

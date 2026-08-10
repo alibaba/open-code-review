@@ -332,8 +332,10 @@ func TestRunCompression_EmptyTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 2 {
-		t.Errorf("expected 2 (frozen only), got %d", len(got))
+	// Without a compression template there is nothing to summarize into;
+	// the conversation must be kept rather than truncated to the frozen zone.
+	if len(got) != len(msgs) {
+		t.Errorf("expected %d messages (conversation preserved), got %d", len(msgs), len(got))
 	}
 }
 
@@ -644,7 +646,11 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 	}}
 
 	st := &compressionState{}
-	ok := r.addNextMessage(context.Background(), strings.Repeat("word ", 200), calls, results, &msgs, "f.go", st)
+	additions := []llm.Message{llm.NewToolCallMessage(strings.Repeat("word ", 200), calls)}
+	for _, rs := range results {
+		additions = append(additions, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
+	}
+	ok := r.appendMessagesWithCompression(context.Background(), additions, &msgs, "f.go", st)
 
 	if !ok {
 		t.Error("expected true: sync compression should bring the count under the warning threshold")
