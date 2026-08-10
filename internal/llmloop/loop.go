@@ -573,7 +573,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		telemetry.PrintToolCallStarted(t.Name(), args)
 		_, toolSpan := telemetry.StartToolSpan(ctx, t.Name())
 
-		comments, errMsg := tool.ParseComments(args)
+		comments, errMsg := tool.ParseCommentsWithPath(args, newPath)
 		if errMsg != "" {
 			dur := time.Since(startTime)
 			telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), fmt.Errorf("%s", errMsg))

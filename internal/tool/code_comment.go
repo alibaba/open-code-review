@@ -69,9 +69,20 @@ func (p *CodeCommentProvider) Execute(_ context.Context, args map[string]any) (s
 	return CommentSucceed, nil
 }
 
+// ParseCommentsWithPath is like ParseComments but uses defaultPath as a fallback
+// when individual comment objects omit the path field.
+func ParseCommentsWithPath(args map[string]any, defaultPath string) ([]model.LlmComment, string) {
+	comments, errMsg := parseCommentsInner(args, defaultPath)
+	return comments, errMsg
+}
+
 // ParseComments extracts LlmComment entries from tool call arguments without writing
 // to the Collector. Returns parsed comments and an error message (empty on success).
 func ParseComments(args map[string]any) ([]model.LlmComment, string) {
+	return parseCommentsInner(args, "")
+}
+
+func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmComment, string) {
 	var rawComments []any
 	if arr, ok := args["comments"].([]any); ok && len(arr) > 0 {
 		rawComments = arr
@@ -114,6 +125,9 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 		}
 		if path, ok := obj["path"].(string); ok && path != "" {
 			cm.Path = path
+		}
+		if cm.Path == "" {
+			cm.Path = defaultPath
 		}
 
 		if cm.Path == "" || cm.Content == "" {
