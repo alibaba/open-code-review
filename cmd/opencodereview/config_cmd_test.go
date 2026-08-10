@@ -1473,3 +1473,49 @@ func TestSetMCPServerValue_HeadersEmptyValue(t *testing.T) {
 		t.Fatal("expected error for empty header value, got nil")
 	}
 }
+
+func TestSetConfigValueLlmRetryCodesRedundantWarning(t *testing.T) {
+	cfg := &Config{}
+	stderr := captureConfigStderr(t, func() {
+		if err := setConfigValue(cfg, "llm.retry_codes", "429,403"); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "WARNING") || !strings.Contains(stderr, "429") {
+		t.Errorf("expected warning about 429 on stderr, got %q", stderr)
+	}
+	if len(cfg.Llm.RetryCodes) != 1 || cfg.Llm.RetryCodes[0] != 403 {
+		t.Errorf("RetryCodes = %v, want [403]", cfg.Llm.RetryCodes)
+	}
+}
+
+func TestSetConfigValueProviderRetryCodesRedundantWarning(t *testing.T) {
+	cfg := &Config{}
+	stderr := captureConfigStderr(t, func() {
+		if err := setConfigValue(cfg, "custom_providers.test.retry_codes", "408,400"); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "WARNING") || !strings.Contains(stderr, "408") {
+		t.Errorf("expected warning about 408 on stderr, got %q", stderr)
+	}
+	entry := cfg.CustomProviders["test"]
+	if len(entry.RetryCodes) != 1 || entry.RetryCodes[0] != 400 {
+		t.Errorf("RetryCodes = %v, want [400]", entry.RetryCodes)
+	}
+}
+
+func TestSetConfigValueLlmRetryCodesNoWarningForValidCodes(t *testing.T) {
+	cfg := &Config{}
+	stderr := captureConfigStderr(t, func() {
+		if err := setConfigValue(cfg, "llm.retry_codes", "403,400"); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Errorf("expected no stderr output, got %q", stderr)
+	}
+	if len(cfg.Llm.RetryCodes) != 2 {
+		t.Errorf("RetryCodes = %v, want [403 400]", cfg.Llm.RetryCodes)
+	}
+}
