@@ -245,6 +245,51 @@ func TestCloneProviderEntry_NilExtraBody(t *testing.T) {
 	}
 }
 
+func TestCloneProviderEntry_TimeoutAndRetryCodes(t *testing.T) {
+	orig := ProviderEntry{
+		APIKey:       "key",
+		URL:          "http://localhost",
+		TimeoutSec:   30,
+		RetryCodes:   []int{403, 400},
+		ExtraHeaders: map[string]string{"X-Custom": "val", "X-Other": "val2"},
+	}
+	clone := cloneProviderEntry(orig)
+
+	if clone.TimeoutSec != 30 {
+		t.Errorf("TimeoutSec = %d, want 30", clone.TimeoutSec)
+	}
+	if len(clone.RetryCodes) != 2 || clone.RetryCodes[0] != 403 || clone.RetryCodes[1] != 400 {
+		t.Errorf("RetryCodes = %v, want [403 400]", clone.RetryCodes)
+	}
+	if clone.ExtraHeaders["X-Custom"] != "val" || clone.ExtraHeaders["X-Other"] != "val2" {
+		t.Errorf("ExtraHeaders = %v, want map with X-Custom and X-Other", clone.ExtraHeaders)
+	}
+
+	clone.RetryCodes = append(clone.RetryCodes, 401)
+	if len(orig.RetryCodes) != 2 {
+		t.Error("modifying clone should not affect original RetryCodes")
+	}
+
+	clone.ExtraHeaders["X-New"] = "new"
+	if _, ok := orig.ExtraHeaders["X-New"]; ok {
+		t.Error("modifying clone should not affect original ExtraHeaders")
+	}
+}
+
+func TestCloneProviderEntry_NilRetryCodesAndExtraHeaders(t *testing.T) {
+	orig := ProviderEntry{
+		APIKey: "key",
+		URL:    "http://localhost",
+	}
+	clone := cloneProviderEntry(orig)
+	if clone.RetryCodes != nil {
+		t.Errorf("RetryCodes should remain nil, got %v", clone.RetryCodes)
+	}
+	if clone.ExtraHeaders != nil {
+		t.Errorf("ExtraHeaders should remain nil, got %v", clone.ExtraHeaders)
+	}
+}
+
 func TestCustomListCount(t *testing.T) {
 	cfg := &Config{
 		CustomProviders: map[string]ProviderEntry{
