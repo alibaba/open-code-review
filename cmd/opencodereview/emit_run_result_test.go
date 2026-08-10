@@ -16,6 +16,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 )
@@ -557,5 +558,166 @@ func TestEmitRunResult_JSONIncludesSessionID(t *testing.T) {
 	}
 	if out.SessionID != "session-99" {
 		t.Errorf("session_id = %q, want session-99", out.SessionID)
+	}
+}
+
+// --- retry report at the emit boundary (#368 P5) ---
+// These cases pin how a frozen retry report reaches the two run exits,
+// emitRunResult and emitFailureUsage. The report's own rendering is covered by
+// retry_report_output_test.go; retryReportFixture lives there too.
+
+func TestEmitRunResult_JSONCarriesRetryReport(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 2, manifest: mockManifest(session.StateComplete)}
+	rep := retryReportFixture()
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, rep); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.RetryReport == nil {
+		t.Fatalf("retry_report missing from JSON output: %s", got)
+	}
+	if out.RetryReport.SchemaVersion != llm.RetryReportSchemaVersion {
+		t.Errorf("schema_version = %q", out.RetryReport.SchemaVersion)
+	}
+	if out.RetryReport.TotalRequests != 12 || out.RetryReport.FailedRequests != 1 {
+		t.Errorf("aggregates not carried through: %+v", out.RetryReport)
+	}
+}
+
+// A run with nothing to report must emit exactly the pre-#368 JSON shape.
+func TestEmitRunResult_JSONOmitsRetryReportWhenNil(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 2, manifest: mockManifest(session.StateComplete)}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	if strings.Contains(got, "retry_report") {
+		t.Errorf("nil report must not appear in JSON, got %s", got)
+	}
+}
+
+// Order is part of the terminal contract: comments/manifest first, then the
+// retry report, then the project summary.
+func TestEmitRunResult_TextReportOrder(t *testing.T) {
+	ag := &mockResultProvider{
+		filesReviewed:  2,
+		manifest:       mockManifest(session.StateComplete),
+		projectSummary: "PROJECT-SUMMARY-MARKER",
+	}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil, nil, retryReportFixture()); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	report := strings.Index(got, "LLM retry report:")
+	summary := strings.Index(got, "PROJECT-SUMMARY-MARKER")
+	if report < 0 {
+		t.Fatalf("report missing from text output: %s", got)
+	}
+	if summary < 0 || report > summary {
+		t.Errorf("report must precede the project summary\n%s", got)
+	}
+	if !strings.Contains(got, "- config.go / main_task #1: provider(402) -> failed") {
+		t.Errorf("per-request lines missing: %s", got)
+	}
+}
+
+func TestEmitRunResult_TextOmitsReportWhenNil(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 2, manifest: mockManifest(session.StateComplete)}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil, nil, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	if strings.Contains(got, "LLM retry report") {
+		t.Errorf("nil report must print nothing, got %s", got)
+	}
+}
+
+// JSON mode must keep stdout a single JSON document, so the text renderer never
+// runs there.
+func TestEmitRunResult_JSONHasNoReportText(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 2, manifest: mockManifest(session.StateComplete)}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, retryReportFixture()); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	if strings.Contains(got, "LLM retry report:") {
+		t.Errorf("JSON mode must not emit the terminal summary: %s", got)
+	}
+	dec := json.NewDecoder(strings.NewReader(got))
+	var first jsonOutput
+	if err := dec.Decode(&first); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if dec.More() {
+		t.Error("stdout must carry exactly one JSON document")
+	}
+}
+
+func TestEmitFailureUsage_JSONCarriesRetryReport(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 1, sessionID: "sess-1"}
+	got := captureStderr(t, func() {
+		emitFailureUsage(ag, time.Second, "json", nil, retryReportFixture())
+	})
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, got)
+	}
+	if out.Status != "failed" {
+		t.Errorf("status = %q, want failed", out.Status)
+	}
+	if out.RetryReport == nil || out.RetryReport.FailedRequests != 1 {
+		t.Fatalf("retry_report missing or wrong on the failure exit: %s", got)
+	}
+}
+
+func TestEmitFailureUsage_TextCarriesRetryReport(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 1}
+	got := captureStderr(t, func() {
+		emitFailureUsage(ag, time.Second, "text", nil, retryReportFixture())
+	})
+	usage := strings.Index(got, "[ocr] usage on failure:")
+	report := strings.Index(got, "LLM retry report:")
+	if usage < 0 || report < 0 || usage > report {
+		t.Errorf("report must follow the usage line on stderr:\n%s", got)
+	}
+}
+
+func TestEmitFailureUsage_NilReportUnchanged(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 1}
+	got := captureStderr(t, func() {
+		emitFailureUsage(ag, time.Second, "text", nil, nil)
+	})
+	if strings.Contains(got, "LLM retry report") {
+		t.Errorf("nil report must print nothing, got %q", got)
+	}
+}
+
+// warningsForOutput is unrelated to the report, but the text exit now writes
+// between the warnings block and the project summary; keep a case where both
+// warnings and a report are present so the two cannot interleave.
+func TestEmitRunResult_TextReportWithWarnings(t *testing.T) {
+	ag := &mockResultProvider{
+		filesReviewed: 1,
+		warnings:      []agent.AgentWarning{{Type: "subtask_error", File: "b.go", Message: "boom"}},
+	}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil, nil, retryReportFixture()); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	if !strings.Contains(got, "LLM retry report:") {
+		t.Errorf("report missing: %s", got)
+	}
+	if strings.Count(got, "LLM retry report:") != 1 {
+		t.Errorf("report emitted more than once: %s", got)
 	}
 }
