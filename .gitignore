@@ -13,7 +13,6 @@ coverage.html
 .claude/commands/read-issue.md
 .claude/settings.local.json
 
-CLAUDE.md
 pages/package-lock.json
 scripts/hooks/
 scripts/publish/.env.internal
