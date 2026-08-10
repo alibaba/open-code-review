@@ -13,10 +13,11 @@ on:
       - "pages/src/content/docs/**"
       - "scripts/github-actions/check-translation-sync.*"
 
+permissions:
+  contents: read
+
 jobs:
   translation-sync:
-    permissions:
-      contents: read
     runs-on: self-hosted
     timeout-minutes: 10
     container:
