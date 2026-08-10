@@ -912,8 +912,8 @@ p {
 .comment-filter-chip:hover,
 .comment-filter-chip.is-active { opacity: 1; }
 .comment-filter-chip.is-active {
-    border-color: currentColor;
-    box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px currentColor;
+    border-color: transparent;
+    box-shadow: 0 0 0 2px currentColor;
 }
 .comment-filter-chip:focus-visible {
     outline: 2px solid var(--link);
