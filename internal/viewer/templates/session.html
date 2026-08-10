@@ -11,7 +11,10 @@
 <nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a><span class="sep">/</span><a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a><span class="sep">/</span><span class="current">{{.Session.Summary.SessionID | truncate 12}}</span></nav>
 <main>
 <div class="session-header">
-    <h2>Session: {{.Session.Summary.SessionID}}</h2>
+    <div class="page-heading">
+        <a class="back-link" href="/r/{{.EncodedRepo}}" aria-label="Back to sessions"><span aria-hidden="true">&larr;</span> Back</a>
+        <h2>Session: {{.Session.Summary.SessionID}}</h2>
+    </div>
     <div class="meta">
         <span><strong>CWD:</strong> {{.Session.Summary.CWD}}</span>
         <span><strong>Branch:</strong> {{.Session.Summary.GitBranch}}</span>
