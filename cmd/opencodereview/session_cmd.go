@@ -284,6 +284,14 @@ func printSessionDetail(w io.Writer, s *session.Summary, items []session.ItemDet
 	if s.ResumedFrom != "" {
 		fmt.Fprintf(w, "  Resumed:   from session %s\n", s.ResumedFrom)
 	}
+	if l := s.ResumeLineage; l != nil {
+		fmt.Fprintf(w, "  Parent:    run %s\n", l.ParentRunID)
+		if l.IsTransition() {
+			fmt.Fprintf(w, "  Transition: %s → %s\n",
+				describeTarget(l.SourceProvider, l.SourceModel),
+				describeTarget(l.TargetProvider, l.TargetModel))
+		}
+	}
 	fmt.Fprintf(w, "  Started:   %s\n", describeStart(*s))
 	if !s.EndTime.IsZero() {
 		fmt.Fprintf(w, "  Ended:     %s\n", s.EndTime.Local().Format("2006-01-02 15:04:05"))
@@ -322,6 +330,20 @@ func printSessionDetail(w io.Writer, s *session.Summary, items []session.ItemDet
 		fmt.Fprintf(tw, "  %s\t%s\t%d\t%s\n", it.Type, it.FilePath, it.Comments, note)
 	}
 	tw.Flush()
+}
+
+// describeTarget renders a provider/model pair for the transition line. Either
+// side may be empty (a non-provider endpoint records no provider name).
+func describeTarget(provider, model string) string {
+	switch {
+	case provider == "" && model == "":
+		return "-"
+	case provider == "":
+		return model
+	case model == "":
+		return provider
+	}
+	return provider + "/" + model
 }
 
 func displayMode(m string) string {

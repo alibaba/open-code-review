@@ -183,12 +183,26 @@ ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
 
-Resume is strict by design:
+Resume is strict by design. Checkpoints are only reused when the resumed run
+would review the same thing the parent did:
 
 - workspace reviews cannot be resumed
-- range reviews must use the same `--from` and `--to`
-- commit reviews must use the same `--commit`
+- the review mode must match: a range session cannot be resumed as a commit one
+- the resolved input must match. Ref *spellings* are not compared — `abc1234`
+  and `abc1234def` name the same commit — but if the same refs now resolve to a
+  different diff, or the rules or filters changed the selected file set, the
+  whole resume is rejected rather than partially reused
+- a provider or model change must be asked for explicitly with `--provider` /
+  `--model`. A change that arrived through config or the environment is rejected
+- the parent must carry a run manifest, which is what its input is verified
+  against. A run killed with Ctrl-C never wrote one, and sessions older than run
+  manifests never had one
+- only files the parent's manifest settled are reused. A checkpoint the manifest
+  does not account for, or one that is unreadable, costs that file its
+  checkpoint and nothing more — it is simply reviewed again
 - `--preview` and `--resume` cannot be used together
+
+A rejected resume writes nothing: no session, no manifest, no LLM call.
 
 ### Output
 
@@ -358,6 +372,9 @@ ocr session list --json
 | `--limit <n>` | `20` | Cap the number of listed sessions. Use `0` for unlimited. |
 
 ### `ocr session show`
+
+A resumed run also prints the run it continued, and the provider/model
+transition when the resume crossed one.
 
 ```bash
 ocr session show <session-id>

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -157,17 +158,30 @@ func executeReview(opts reviewOptions) error {
 		return err
 	}
 	cc.Template.MaxTokens = maxTokens
+
+	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
+	// input it returns pins the run to the very commits this check passed on, so
+	// the decision cannot be undone by a ref moving afterwards.
+	sealed, err := validateResumeIdentity(context.Background(), cc, opts, rt, resumeState)
+	if err != nil {
+		return err
+	}
+
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,
 	}
 
+	var sealedInput *diff.InputResolution
+	if sealed != nil {
+		sealedInput = &sealed.Resolution
+	}
+
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
-	ref, _ := mode.RefValue(opts.to, opts.commit)
 	fileReader := &tool.FileReader{
 		RepoDir: cc.RepoDir,
 		Mode:    mode,
-		Ref:     ref,
+		Ref:     fileReadRef(mode, opts, sealedInput),
 		Runner:  cc.GitRunner,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
@@ -207,6 +221,7 @@ func executeReview(opts reviewOptions) error {
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
+		SealedInput:           sealedInput,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
@@ -327,17 +342,79 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 	if current.ReviewMode == session.ReviewModeWorkspace {
 		return nil, fmt.Errorf("resume requires --from/--to or --commit; workspace resume is not supported")
 	}
-	state, err := session.LoadResumeState(repoDir, opts.resume)
+	state, err := session.LoadReviewResumeState(repoDir, opts.resume)
 	if err != nil {
 		return nil, fmt.Errorf("load resume session: %w (run 'ocr session list' to see available sessions)", err)
 	}
 	if err := state.ValidateOptions(current); err != nil {
 		return nil, fmt.Errorf("%w (run 'ocr session list' to see available sessions)", err)
 	}
-	if state.CompletedCount() == 0 {
-		return nil, fmt.Errorf("resume session %q has no completed review items (run 'ocr session list' to see available sessions)", opts.resume)
-	}
+	// A parent whose every item failed is deliberately allowed through: it has a
+	// verifiable manifest, so its whole selected set can simply be re-dispatched.
+	// Whether the checkpoints may be reused at all is decided later, by
+	// validateResumeIdentity, once the input identity is known.
 	return state, nil
+}
+
+// validateResumeIdentity rejects a resume whose input, rules, provider or model
+// no longer match the parent run.
+//
+// It must run before agent.New: agent.New creates the session, and session.New
+// writes session_start immediately, so validating any later would leave an orphan
+// session on disk behind every rejection. It must also run after max-tokens is
+// resolved, because the per-file token ceiling decides which large diffs are
+// dropped and therefore which files the input identity covers.
+//
+// provider and model are explicit exactly when their flag was passed on this
+// command line: both default to the empty string and nothing else can set them,
+// so a provider that changed via config file or environment stays implicit —
+// which is the transition this check exists to reject.
+func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState) (*agent.SealedInput, error) {
+	if state == nil {
+		return nil, nil
+	}
+	sealed, err := agent.ResolveIdentity(ctx, agent.Args{
+		RepoDir:    cc.RepoDir,
+		From:       opts.from,
+		To:         opts.to,
+		Commit:     opts.commit,
+		ReviewMode: reviewModeFromOptions(opts),
+		Template:   *cc.Template,
+		SystemRule: cc.Resolver,
+		FileFilter: cc.FileFilter,
+		GitRunner:  cc.GitRunner,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve current input identity: %w", err)
+	}
+	if err := state.ValidateResume(session.ResumeRequest{
+		Identity:         sealed.Identity,
+		Provider:         rt.Provider,
+		Model:            rt.Model,
+		ProviderExplicit: opts.provider != "",
+		ModelExplicit:    opts.model != "",
+	}); err != nil {
+		return nil, err
+	}
+	return sealed, nil
+}
+
+// fileReadRef picks the ref file_read resolves paths against.
+//
+// A sealed input replaces the ref the user typed with the commit that ref
+// resolved to at admission. The diff under review is pinned to that same commit,
+// so leaving the reader on a moving ref would let the model read one version of a
+// file while reviewing the diff of another. Workspace mode has no ref at all, and
+// keeps none: its content is the working tree, which is what the diff describes.
+func fileReadRef(mode tool.ReviewMode, opts reviewOptions, sealed *diff.InputResolution) string {
+	ref, ok := mode.RefValue(opts.to, opts.commit)
+	if !ok {
+		return ""
+	}
+	if sealed != nil && sealed.ResolvedHead != "" {
+		return sealed.ResolvedHead
+	}
+	return ref
 }
 
 func reviewModeFromOptions(opts reviewOptions) string {

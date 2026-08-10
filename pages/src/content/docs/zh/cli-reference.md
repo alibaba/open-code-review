@@ -171,12 +171,22 @@ ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
 
-恢复逻辑是严格的：
+恢复逻辑是严格的。只有当本次运行评审的对象与父运行完全一致时，checkpoint 才会被复用：
 
 - 工作区评审不能恢复
-- 区间评审必须使用相同的 `--from` 和 `--to`
-- 单 commit 评审必须使用相同的 `--commit`
+- 评审模式必须一致：区间会话不能以单 commit 模式恢复
+- 解析后的输入必须一致。ref 的*写法*不参与比较（`abc1234` 与 `abc1234def`
+  指向同一个 commit），但如果相同的 ref 现在解析到不同的 diff，或规则、过滤器
+  改变了选中的文件集合，整次恢复会被拒绝，而不是部分复用
+- 切换 provider 或 model 必须通过 `--provider` / `--model` 显式声明；经由配置
+  文件或环境变量发生的变化一律拒绝
+- 父运行必须带有 run manifest，输入正是拿它来校验的。被 Ctrl-C 终止的运行没写出
+  manifest，早于 run manifest 的老 session 则从来就没有
+- 只有父 manifest 认领过的文件才会复用。manifest 未认领或已损坏的 checkpoint 只
+  影响它自己那个文件——该文件重新评审一次，其余不受影响
 - `--preview` 和 `--resume` 不能同时使用
+
+被拒绝的恢复不会留下任何产物：不创建 session、不写 manifest、不调用 LLM。
 
 ### 输出
 
@@ -342,6 +352,8 @@ ocr session list --json
 | `--limit <n>` | `20` | 限制列出的会话数量。使用 `0` 表示不限制。 |
 
 ### `ocr session show`
+
+恢复的运行还会打印它所继续的父运行，若这次恢复跨了 provider 或 model，也会打印这次切换。
 
 ```bash
 ocr session show <session-id>

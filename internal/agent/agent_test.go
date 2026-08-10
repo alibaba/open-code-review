@@ -583,6 +583,12 @@ func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
 				}},
 			},
 		},
+		// The checkpoint line alone earns no reuse: coverage is the parent
+		// manifest's to state, so a.go is only eligible because the parent settled
+		// it as completed.
+		Manifest: &session.RunManifest{
+			Coverage: session.Coverage{Completed: []session.CoverageItem{{ItemID: fp, Fingerprint: fp}}},
+		},
 	}
 	collector := tool.NewCommentCollector()
 	sess := session.New(t.TempDir(), "feature", "openai-model", session.SessionOptions{
