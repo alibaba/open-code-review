@@ -61,7 +61,7 @@ func codeCommentResponse(reasoning, content string) *llm.ChatResponse {
 				Type: "function",
 				Function: llm.FunctionCall{
 					Name:      tool.CodeComment.Name(),
-					Arguments: `{"comments":[{"content":"issue","existing_code":"x"}]}`,
+					Arguments: `{"comments":[{"content":"issue","existing_code":"x","path":"file.go"}]}`,
 				},
 			}},
 		}}},
@@ -281,8 +281,8 @@ func TestExecuteToolCall_CodeCommentThinkingBackfill(t *testing.T) {
 		Function: llm.FunctionCall{
 			Name: tool.CodeComment.Name(),
 			Arguments: `{"comments":[` +
-				`{"content":"a","existing_code":"x"},` +
-				`{"content":"b","existing_code":"y","thinking":"explicit"}]}`,
+				`{"content":"a","existing_code":"x","path":"file.go"},` +
+				`{"content":"b","existing_code":"y","thinking":"explicit","path":"file.go"}]}`,
 		},
 	}, nil, "turn reasoning")
 
@@ -314,7 +314,7 @@ func TestExecuteToolCall_CodeCommentNoReasoning(t *testing.T) {
 	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
 		Function: llm.FunctionCall{
 			Name:      tool.CodeComment.Name(),
-			Arguments: `{"comments":[{"content":"a","existing_code":"x"}]}`,
+			Arguments: `{"comments":[{"content":"a","existing_code":"x","path":"file.go"}]}`,
 		},
 	}, nil, "")
 
