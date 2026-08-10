@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -760,6 +761,133 @@ func TestOpenAIClient_StreamOnlyGateway(t *testing.T) {
 	}
 	if resp.Choices[0].FinishReason != "stop" {
 		t.Errorf("finish reason = %q, want %q", resp.Choices[0].FinishReason, "stop")
+	}
+}
+
+// TestOpenAIClient_StreamingRequestsUsageByDefault verifies that streaming
+// requests ask for the final usage chunk via stream_options.include_usage
+// when the provider config does not set stream_options itself.
+// OpenAI-compatible servers omit usage from streams unless asked, silently
+// losing token accounting for every streamed request.
+func TestOpenAIClient_StreamingRequestsUsageByDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		streamOptions, ok := body["stream_options"].(map[string]any)
+		if !ok || streamOptions["include_usage"] != true {
+			t.Errorf("stream_options = %#v, want include_usage true", body["stream_options"])
+			http.Error(w, "usage request required", http.StatusBadRequest)
+			return
+		}
+
+		writeOpenAISSE(t, w,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":null}]}`,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1,"model":"gpt-stream","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`,
+		)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:       server.URL + "/v1",
+		APIKey:    "test-key",
+		Model:     "gpt-stream",
+		ExtraBody: map[string]any{"stream": true},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if resp.Usage == nil {
+		t.Fatal("Usage = nil, want usage from the final stream chunk")
+	}
+	if resp.Usage.PromptTokens != 12 || resp.Usage.CompletionTokens != 3 || resp.Usage.TotalTokens != 15 {
+		t.Errorf("Usage = %+v, want prompt 12 / completion 3 / total 15", resp.Usage)
+	}
+}
+
+// TestOpenAIClient_StreamOptionsConfigOverrides verifies the three
+// extra_body.stream_options states: an explicit object replaces the
+// include_usage default, an explicit null suppresses the field entirely
+// (for gateways that reject stream_options), and non-streaming requests
+// never carry the field regardless of config.
+func TestOpenAIClient_StreamOptionsConfigOverrides(t *testing.T) {
+	tests := []struct {
+		name       string
+		extraBody  map[string]any
+		want       any
+		wantAbsent bool
+	}{
+		{
+			name:      "explicit object replaces default",
+			extraBody: map[string]any{"stream": true, "stream_options": map[string]any{"include_usage": false}},
+			want:      map[string]any{"include_usage": false},
+		},
+		{
+			name:       "explicit null suppresses field",
+			extraBody:  map[string]any{"stream": true, "stream_options": nil},
+			wantAbsent: true,
+		},
+		{
+			name:       "non-streaming never sends stream_options",
+			extraBody:  map[string]any{"stream_options": map[string]any{"include_usage": true}},
+			wantAbsent: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			streaming, _ := tt.extraBody["stream"].(bool)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode request body: %v", err)
+					http.Error(w, "invalid request body", http.StatusBadRequest)
+					return
+				}
+
+				value, present := body["stream_options"]
+				if tt.wantAbsent {
+					if present {
+						t.Errorf("stream_options = %#v, want absent", value)
+					}
+				} else if !reflect.DeepEqual(value, tt.want) {
+					t.Errorf("stream_options = %#v, want %#v", value, tt.want)
+				}
+
+				if streaming {
+					writeOpenAISSE(t, w,
+						`{"id":"chatcmpl-s","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}`,
+						`{"id":"chatcmpl-s","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+					)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"id":"chatcmpl-n","object":"chat.completion","created":1,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)
+			}))
+			defer server.Close()
+
+			client := NewOpenAIClient(ClientConfig{
+				URL:       server.URL + "/v1",
+				APIKey:    "test-key",
+				Model:     "m",
+				ExtraBody: tt.extraBody,
+			})
+
+			if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages: []Message{{Role: "user", Content: "ping"}},
+			}); err != nil {
+				t.Fatalf("CompletionsWithCtx: %v", err)
+			}
+		})
 	}
 }
 
