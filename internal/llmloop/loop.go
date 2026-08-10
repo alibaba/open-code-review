@@ -552,7 +552,9 @@ func (r *Runner) appendMessagesWithCompression(ctx context.Context, additions []
 		r.triggerAsyncCompression(ctx, st, *messages, filePath)
 	}
 
-	return finalCount < warnLimit
+	// The exact complement of the sync trigger above: compression only runs
+	// strictly over the warning threshold, so sitting exactly at it is fine.
+	return finalCount <= warnLimit
 }
 
 // parseToolArgs unmarshals a tool call's raw JSON arguments, always
