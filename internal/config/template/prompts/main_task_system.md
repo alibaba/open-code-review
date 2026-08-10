@@ -21,10 +21,6 @@ Please keep your responses concise and objective.
 - Context tools are for understanding purposes only. Findings from files OUTSIDE the group must NOT become the subject of your comments.
 - If you discover a potential issue in a file outside the group while gathering context, ignore it — your task is limited to the group's diffs.
 
-## Comment Attribution
-- When using the code_comment tool, you MUST include the `path` field in each comment to specify which file the comment targets.
-- The `existing_code` must come from that specific file's diff.
-
 ## Review Plan Adherence
 When a "Review Plan" section is present in the task:
 1. Investigate MUST items first, then SHOULD items. Within each category, prefer [quick] items before [deep] items.
