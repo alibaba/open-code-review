@@ -247,8 +247,12 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		taskCompleted := false
 		hasValidResult := false
 
+		// Capture the model's native reasoning content for this turn. Models
+		// without a reasoning channel leave it empty.
+		// Reasoning is turn-level, so all tool calls in this turn share it.
+		thinking := resp.ReasoningContent()
 		for _, call := range calls {
-			cp := r.executeToolCall(ctx, newPath, call, rec)
+			cp := r.executeToolCall(ctx, newPath, call, rec, thinking)
 			if cp.Failed {
 				return false, StopNone, fmt.Errorf("task failed: %s", cp.Data)
 			} else if cp.Completed {
@@ -307,7 +311,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 // records the result in session history. code_comment handling includes
 // optional async dispatch through CommentWorkerPool plus line-number
 // resolution / re-location.
-func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.ToolCall, rec *session.TaskRecord) tool.TaskCheckpoint {
+func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.ToolCall, rec *session.TaskRecord, thinking string) tool.TaskCheckpoint {
 	t := tool.OfName(call.Function.Name)
 
 	if !t.IsKnown() {
@@ -396,6 +400,15 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 			toolSpan.End()
 			telemetry.RecordToolCall(ctx, t.Name(), dur, false)
 			return tool.Of(errMsg)
+		}
+
+		// Batched comments share the turn's thinking.
+		if thinking != "" {
+			for i := range comments {
+				if comments[i].Thinking == "" {
+					comments[i].Thinking = thinking
+				}
+			}
 		}
 
 		resolveAndCollect := func(rctx context.Context) {
