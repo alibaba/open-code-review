@@ -628,7 +628,11 @@ dispatchLoop:
 	for gi := range groups {
 		group := groups[gi]
 
-		// Per-group budget look-ahead.
+		// Per-group budget look-ahead, checked BEFORE acquiring the semaphore:
+		// if tokens already spent plus an estimate of this group's cost would
+		// exceed the budget, stop scheduling further groups. Any group already
+		// in flight is allowed to finish — overrun is bounded by in-flight
+		// count (≤ concurrency).
 		if a.args.MaxTokensBudget > 0 {
 			used := a.runner.TotalTokensUsed()
 			var groupEst int64
@@ -643,6 +647,13 @@ dispatchLoop:
 				a.recordWarning("token_budget_reached", firstPath,
 					fmt.Sprintf("stopped dispatch: used %d tokens + group estimate %d = projected %d exceeds budget %d", used, groupEst, projected, a.args.MaxTokensBudget))
 				a.budgetExceeded = true
+				// Deliberately NOT SetRunFailure: budget exhaustion is a controlled
+				// coverage truncation, not a run-level failure. SetRunFailure would
+				// force terminal_state=failed regardless of coverage, and claim the
+				// single first-wins slot blocking genuine run-level causes (deadline,
+				// cancellation). Record a pending failure cause instead — Finalize
+				// attributes undispatched items to failed(budget) while the terminal
+				// state stays coverage-derived.
 				if b := a.session.Manifest(); b != nil {
 					if err := b.SetPendingFailureCause(session.FailureBudget, "aggregate token budget reached before dispatch completed"); err != nil {
 						a.recordWarning("manifest_error", "", err.Error())
@@ -667,6 +678,9 @@ dispatchLoop:
 		go func(g FileGroup) {
 			defer wg.Done()
 			defer func() { <-sem }() // release
+			// A panic while reviewing one group must be isolated exactly like an
+			// error return: counted in subtaskFailed and recorded as a warning,
+			// so other groups still complete and the all-failed rollup stays correct.
 			defer func() {
 				if r := recover(); r != nil {
 					atomic.AddInt64(&a.subtaskFailed, int64(len(g.Diffs)))
@@ -1318,6 +1332,8 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		return completed, stop, nil
 	}()
 	if err == nil {
+		// REVIEW_FILTER_TASK needs to see all comments produced by this group's
+		// async pool workers, so drain the pool for this key first.
 		if a.args.CommentWorkerPool != nil {
 			a.args.CommentWorkerPool.AwaitKey(groupKey)
 		}
