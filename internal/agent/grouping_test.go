@@ -236,7 +236,7 @@ func TestGroupDiffs_LLMError_Fallback(t *testing.T) {
 	client := &fakeGroupingClient{err: fmt.Errorf("connection refused")}
 	tpl := template.Template{
 		GroupingTask: &template.LlmConversation{
-			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_metadata_table}}"}},
+			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 		},
 	}
 	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
@@ -252,7 +252,7 @@ func TestGroupDiffs_LLMSuccess(t *testing.T) {
 	}
 	tpl := template.Template{
 		GroupingTask: &template.LlmConversation{
-			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_metadata_table}}"}},
+			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 		},
 	}
 	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
@@ -271,7 +271,7 @@ func TestCallGroupingLLM_EmptyResponse(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}}
 	client := &fakeGroupingClient{response: ""}
 	task := &template.LlmConversation{
-		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_metadata_table}}"}},
+		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 	}
 	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task)
 	if err == nil {
@@ -284,7 +284,7 @@ func TestBuildFileMetadataTable(t *testing.T) {
 		{NewPath: "a.go", IsNew: true, Insertions: 10, Deletions: 0},
 		{NewPath: "b.go", IsDeleted: true, Insertions: 0, Deletions: 5},
 	}
-	table := buildFileMetadataTable(diffs)
+	table := buildFileList(diffs)
 	if !contains(table, "ADDED") || !contains(table, "DELETED") {
 		t.Errorf("table missing status:\n%s", table)
 	}

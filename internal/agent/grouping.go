@@ -64,11 +64,11 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 		}
 	}()
 
-	table := buildFileMetadataTable(diffs)
+	fileList := buildFileList(diffs)
 
 	messages := make([]llm.Message, 0, len(task.Messages))
 	for _, m := range task.Messages {
-		content := strings.ReplaceAll(m.Content, "{{file_metadata_table}}", table)
+		content := strings.ReplaceAll(m.Content, "{{file_list}}", fileList)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
@@ -92,7 +92,7 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 	return groups, usage, err
 }
 
-func buildFileMetadataTable(diffs []model.Diff) string {
+func buildFileList(diffs []model.Diff) string {
 	var sb strings.Builder
 	for _, d := range diffs {
 		status := "MODIFIED"
