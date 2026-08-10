@@ -30,9 +30,9 @@ func addBackgroundFlags(cmd *cobra.Command, background, backgroundFile *string) 
 }
 
 func addOutputFlags(cmd *cobra.Command, format, audience *string) {
-	cmd.Flags().StringVarP(format, "format", "f", "text", "output format: text or json")
+	cmd.Flags().StringVarP(format, "format", "f", "text", "output format: text, json, or sarif")
 	cmd.Flags().StringVar(audience, "audience", "human", "output audience: human (show progress) or agent (summary only)")
-	cmd.RegisterFlagCompletionFunc("format", completeEnum("text", "json"))
+	cmd.RegisterFlagCompletionFunc("format", completeEnum("text", "json", "sarif"))
 	cmd.RegisterFlagCompletionFunc("audience", completeEnum("human", "agent"))
 }
 
@@ -215,6 +215,6 @@ func registerDelegateFlags(cmd *cobra.Command, opts *delegateOptions) {
 	addRuleFlag(cmd, &opts.rulePath)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
-	cmd.Flags().StringVarP(&opts.format, "format", "f", "text", "output format: text or json")
+	cmd.Flags().StringVarP(&opts.format, "format", "f", "text", "output format: text or json (sarif is not supported by delegate mode)")
 	cmd.RegisterFlagCompletionFunc("format", completeEnum("text", "json"))
 }
