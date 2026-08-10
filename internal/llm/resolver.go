@@ -30,7 +30,8 @@ type ResolvedEndpoint struct {
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
 	// knob; users can still override via OCR_LLM_TIMEOUT.
-	Timeout time.Duration
+	Timeout    time.Duration
+	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -244,6 +245,7 @@ type llmFileConfig struct {
 	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes   []int             `json:"retry_codes,omitempty"`
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
@@ -257,6 +259,7 @@ type providerEntryConfig struct {
 	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes   []int             `json:"retry_codes,omitempty"`
 }
 
 type configFile struct {
@@ -418,6 +421,10 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 	}
 
+	if err := validateRetryCodes(entry.RetryCodes); err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+	}
+
 	if protocol == ProtocolAnthropic {
 		url = ensureMessagesSuffix(url)
 	}
@@ -433,6 +440,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		ExtraBody:    extraBody,
 		ExtraHeaders: extraHeaders,
 		Timeout:      timeout,
+		RetryCodes:   entry.RetryCodes,
 	}, true, nil
 }
 
@@ -483,7 +491,22 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}
 
-	return ResolvedEndpoint{URL: cfg.Llm.URL, Token: cfg.Llm.AuthToken, Model: model, Protocol: protocol, AuthHeader: authHeader, Source: "OCR config file", ExtraBody: cfg.Llm.ExtraBody, ExtraHeaders: cfg.Llm.ExtraHeaders, Timeout: timeout}, true, nil
+	if err := validateRetryCodes(cfg.Llm.RetryCodes); err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
+	}
+
+	return ResolvedEndpoint{
+		URL:          cfg.Llm.URL,
+		Token:        cfg.Llm.AuthToken,
+		Model:        model,
+		Protocol:     protocol,
+		AuthHeader:   authHeader,
+		Source:       "OCR config file",
+		ExtraBody:    cfg.Llm.ExtraBody,
+		ExtraHeaders: cfg.Llm.ExtraHeaders,
+		Timeout:      timeout,
+		RetryCodes:   cfg.Llm.RetryCodes,
+	}, true, nil
 }
 
 // tryCCEnv reads Claude Code environment variables.
@@ -719,4 +742,50 @@ func ensureMessagesSuffix(rawURL string) string {
 		return rawURL
 	}
 	return u + "/v1/messages"
+}
+
+// validateRetryCodes checks that every code is a 4xx status code not already
+// retried by the SDK (408, 409, 429). Returns an error on the first violation.
+func validateRetryCodes(codes []int) error {
+	for _, code := range codes {
+		if code < 400 || code > 499 {
+			return fmt.Errorf("invalid retry code %d: must be a 4xx status code (5xx codes are already retried by default)", code)
+		}
+		if code == 408 || code == 409 || code == 429 {
+			return fmt.Errorf("retry code %d is unnecessary: the SDK already retries this status code", code)
+		}
+	}
+	return nil
+}
+
+// ParseRetryCodes parses a comma-separated list of HTTP status codes that
+// should trigger retry. Only 4xx codes not already retried by the SDK
+// (408, 409, 429) are accepted; 5xx codes are rejected because the SDK
+// retries all of them by default. An empty input returns nil.
+func ParseRetryCodes(raw string) ([]int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	seen := make(map[int]bool, len(parts))
+	codes := make([]int, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		code, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid retry code %q: must be an integer", p)
+		}
+		if !seen[code] {
+			seen[code] = true
+			codes = append(codes, code)
+		}
+	}
+	if err := validateRetryCodes(codes); err != nil {
+		return nil, err
+	}
+	return codes, nil
 }
