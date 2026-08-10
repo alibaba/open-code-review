@@ -1,4 +1,4 @@
-// The following is the list of other files changed in this update (not in this review group).
+Other files changed in this update (not in this review group):
 <other_changed_files>
 {{change_files}}
 </other_changed_files>

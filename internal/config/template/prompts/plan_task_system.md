@@ -13,9 +13,11 @@ Summary: (one sentence: what this change does and its scope)
 MUST INVESTIGATE
 1. [quick|deep] (file path + problem location + nature + potential impact)
    → (tool name + arguments: e.g., "file_read path/to/file.go — check whether X handles Y")
+2. ...
 
 SHOULD INVESTIGATE
-2. ...
+1. [quick|deep] (file path + problem location + nature + potential impact)
+   → ...
 
 ## Severity Definitions
 - MUST: security vulnerabilities, data loss, system crashes, critical logic errors, race conditions
