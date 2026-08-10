@@ -227,6 +227,91 @@ func TestBuildAnthropicParams_CacheControl_NoSystem(t *testing.T) {
 	}
 }
 
+func TestBuildAnthropicParams_DynamicCacheBreakpoint(t *testing.T) {
+	client := NewAnthropicClient(ClientConfig{URL: "https://api.anthropic.com"})
+
+	t.Run("conversation ending in tool result", func(t *testing.T) {
+		req := ChatRequest{
+			Messages: []Message{
+				{Role: "system", Content: "You are a code reviewer."},
+				{Role: "user", Content: "Review this code."},
+				{
+					Role:    "assistant",
+					Content: "Let me check.",
+					ToolCalls: []ToolCall{{
+						ID:   "call_1",
+						Type: "function",
+						Function: FunctionCall{
+							Name:      "code_comment",
+							Arguments: `{}`,
+						},
+					}},
+				},
+				{Role: "tool", ToolCallID: "call_1", Content: "Successfully commented."},
+			},
+			Tools: []ToolDef{
+				{Type: "function", Function: FunctionDef{Name: "code_comment", Description: "comment", Parameters: map[string]any{"type": "object"}}},
+			},
+		}
+
+		params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+		if err != nil {
+			t.Fatalf("buildAnthropicParams: %v", err)
+		}
+
+		last := params.Messages[len(params.Messages)-1]
+		if len(last.Content) == 0 {
+			t.Fatal("last message has no content blocks")
+		}
+		lastBlock := last.Content[len(last.Content)-1]
+		if lastBlock.OfToolResult == nil {
+			t.Fatal("last block is not a tool_result block")
+		}
+		if lastBlock.OfToolResult.CacheControl.Type != "ephemeral" {
+			t.Errorf("last tool_result CacheControl.Type = %q, want %q", lastBlock.OfToolResult.CacheControl.Type, "ephemeral")
+		}
+
+		// Earlier user message stays unmarked.
+		earlier := params.Messages[0]
+		if len(earlier.Content) == 0 {
+			t.Fatal("earlier user message has no content blocks")
+		}
+		earlierBlock := earlier.Content[0]
+		if earlierBlock.OfText == nil {
+			t.Fatal("earlier block is not a text block")
+		}
+		if earlierBlock.OfText.CacheControl.Type != "" {
+			t.Errorf("earlier user text CacheControl.Type = %q, want empty", earlierBlock.OfText.CacheControl.Type)
+		}
+	})
+
+	t.Run("conversation ending in user text", func(t *testing.T) {
+		req := ChatRequest{
+			Messages: []Message{
+				{Role: "system", Content: "You are a planner."},
+				{Role: "user", Content: "Plan the review."},
+			},
+		}
+
+		params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+		if err != nil {
+			t.Fatalf("buildAnthropicParams: %v", err)
+		}
+
+		last := params.Messages[len(params.Messages)-1]
+		if len(last.Content) == 0 {
+			t.Fatal("last message has no content blocks")
+		}
+		lastBlock := last.Content[len(last.Content)-1]
+		if lastBlock.OfText == nil {
+			t.Fatal("last block is not a text block")
+		}
+		if lastBlock.OfText.CacheControl.Type != "ephemeral" {
+			t.Errorf("last user text CacheControl.Type = %q, want %q", lastBlock.OfText.CacheControl.Type, "ephemeral")
+		}
+	})
+}
+
 func TestBuildAnthropicParams_NullToolCallArguments(t *testing.T) {
 	// "arguments": null (as emitted by some OpenAI-compatible gateways)
 	// unmarshals a pre-initialized map back to nil; the Anthropic API
