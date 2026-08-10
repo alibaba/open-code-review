@@ -30,8 +30,8 @@ const binarySniffWindow = 8000
 
 // DefaultMaxFileSizeBytes is the default hard cap on how large a single
 // file may be before the scanner skips it. The real review-feasibility
-// limit is the per-file token budget (filterLargeScans, ~188 KB at
-// MaxTokens=58888) — this byte cap exists only to stop us from reading
+// limit is the per-file token budget (filterLargeScans, roughly 700 KB at
+// MaxTokens=262144) — this byte cap exists only to stop us from reading
 // multi-MB dumps into memory. Callers can override via NewProvider.
 const DefaultMaxFileSizeBytes int64 = 2 << 20 // 2 MiB
 

@@ -102,10 +102,12 @@ type TaskRecord struct {
 // Uses actual token counts from the API response when available,
 // falling back to local estimation via tiktoken.
 type TokenUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+	PromptTokens     int             `json:"prompt_tokens"`
+	CompletionTokens int             `json:"completion_tokens"`
+	TotalTokens      int             `json:"total_tokens,omitempty"`
+	CacheReadTokens  int             `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int             `json:"cache_write_tokens,omitempty"`
+	Status           llm.UsageStatus `json:"status,omitempty"`
 }
 
 // ResponseRecord holds the parsed LLM response.
@@ -409,24 +411,39 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 		content = *choice.Message.Content
 	}
 
-	var promptTokens, completionTokens, cacheReadTokens, cacheWriteTokens int
+	var promptTokens, completionTokens, totalTokens, cacheReadTokens, cacheWriteTokens int
+	status := resp.UsageStatus
 	if resp.Usage != nil {
 		promptTokens = int(resp.Usage.PromptTokens)
 		completionTokens = int(resp.Usage.CompletionTokens)
+		totalTokens = int(resp.Usage.TotalTokens)
+		if totalTokens == 0 {
+			totalTokens = promptTokens + completionTokens
+		}
 		cacheReadTokens = int(resp.Usage.CacheReadTokens)
 		cacheWriteTokens = int(resp.Usage.CacheWriteTokens)
+		if status == "" {
+			status = llm.UsageStatusActual
+		}
+	} else if status == llm.UsageStatusUnknown {
+		// Preserve unknown as unknown. Zero is not a substitute for missing
+		// usage when the provider and estimator both failed.
 	} else {
 		for _, m := range tr.RequestMessages {
 			promptTokens += llm.CountTokens(m.ExtractText())
 		}
 		completionTokens = llm.CountTokens(content)
+		totalTokens = promptTokens + completionTokens
+		status = llm.UsageStatusEstimated
 	}
 
 	usage := &TokenUsage{
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
+		TotalTokens:      totalTokens,
 		CacheReadTokens:  cacheReadTokens,
 		CacheWriteTokens: cacheWriteTokens,
+		Status:           status,
 	}
 
 	tr.Response = &ResponseRecord{

@@ -400,6 +400,37 @@ func TestRunCompression_Success(t *testing.T) {
 	}
 }
 
+func TestRunCompression_ReplacesPreviousSummary(t *testing.T) {
+	t_tempDir = t.TempDir()
+	summaryText := "new summary"
+	r := newTestRunner(&fakeLLMClient{response: &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summaryText}}},
+	}}, template.Template{
+		MemoryCompressionTask: template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "Summarize: {{context}}"}},
+		},
+		MaxTokens: 50,
+	})
+
+	msgs := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt\n\n<previous_review_summary>\nold summary\n</previous_review_summary>"),
+	}
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, msg("assistant", strings.Repeat("word ", 100)))
+		msgs = append(msgs, msg("tool", strings.Repeat("data ", 50)))
+	}
+
+	got, err := r.runCompression(context.Background(), msgs, "test.go", true)
+	if err != nil {
+		t.Fatalf("runCompression: %v", err)
+	}
+	text := got[1].ExtractText()
+	if strings.Contains(text, "old summary") || strings.Count(text, "<previous_review_summary>") != 1 {
+		t.Errorf("previous summary accumulated: %s", text)
+	}
+}
+
 func TestRunCompression_LLMError(t *testing.T) {
 	t_tempDir = t.TempDir()
 	client := &fakeLLMClient{

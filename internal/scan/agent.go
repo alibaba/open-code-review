@@ -144,6 +144,8 @@ func NewAgent(args Args) *Agent {
 		CommentCollector:  args.CommentCollector,
 		CommentWorkerPool: args.CommentWorkerPool,
 		Session:           args.Session,
+		ContextBudget:     int64(args.Template.MaxTokens),
+		MaxTokensBudget:   args.MaxTokensBudget,
 		// DiffLookup returns a synthetic Diff so the code_comment tool's
 		// line-number resolver (resolveFromFileContent) can match against
 		// the full file content of the scanned file.
@@ -161,6 +163,7 @@ func toLoopTemplate(s template.ScanTemplate) template.Template {
 	return template.Template{
 		MemoryCompressionTask: s.MemoryCompressionTask,
 		MaxTokens:             s.MaxTokens,
+		MaxOutputTokens:       s.OutputTokens(),
 		MaxToolRequestTimes:   s.MaxToolRequestTimes,
 		ReLocationTask:        s.ReLocationTask,
 	}
@@ -215,6 +218,14 @@ func (a *Agent) TotalCacheWriteTokens() int64 {
 	return a.runner.TotalCacheWriteTokens()
 }
 
+// UsageStatus reports whether aggregate token totals are actual, estimated,
+// or contain unknown requests.
+func (a *Agent) UsageStatus() string { return string(a.runner.UsageStatus()) }
+
+// UnknownUsageRequests reports requests with neither provider usage nor a
+// usable local estimate.
+func (a *Agent) UnknownUsageRequests() int64 { return a.runner.UnknownUsageRequests() }
+
 // Warnings returns the warnings recorded by the LLM runner.
 func (a *Agent) Warnings() []llmloop.AgentWarning { return a.runner.Warnings() }
 
@@ -223,7 +234,9 @@ func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 
 // BudgetExceeded reports whether scan stopped dispatching because its
 // aggregate token budget was reached.
-func (a *Agent) BudgetExceeded() bool { return a != nil && a.budgetExceeded }
+func (a *Agent) BudgetExceeded() bool {
+	return a != nil && (a.budgetExceeded || (a.runner != nil && a.runner.TokenAccounting().Snapshot().BudgetExceeded))
+}
 
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
@@ -340,6 +353,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		a.args.MaxTokensBudgetExplicit,
 		a.args.Template.MaxTokensBudgetMultiplier,
 	)
+	a.runner.SetTokenBudget(a.args.MaxTokensBudget)
 	fmt.Fprintf(stdout.Writer(), "[ocr] estimated cost: %s\n", est)
 	if a.args.MaxTokensBudget > 0 {
 		fmt.Fprintf(stdout.Writer(), "[ocr] token budget: %s (dispatch stops once exceeded)\n", humanTokens(a.args.MaxTokensBudget))
@@ -437,7 +451,8 @@ func (a *Agent) filterScanItems(items []model.ScanItem) []model.ScanItem {
 	return kept
 }
 
-// filterLargeScans drops items whose content exceeds 80% of MaxTokens.
+// filterLargeScans drops items whose content exceeds the effective 85%
+// preflight ceiling.
 func (a *Agent) filterLargeScans(items []model.ScanItem) []model.ScanItem {
 	limit := llmloop.PromptTokenLimit(a.args.Template.MaxTokens)
 	if limit <= 0 {
@@ -446,9 +461,19 @@ func (a *Agent) filterLargeScans(items []model.ScanItem) []model.ScanItem {
 	var kept []model.ScanItem
 	skipped := 0
 	for _, it := range items {
-		tokens := llm.CountTokens(it.Content)
+		estimate := llm.EstimateChatRequest(llm.ChatRequest{
+			Model:    a.args.Model,
+			Messages: []llm.Message{{Role: "user", Content: it.Content}},
+			Tools:    a.args.MainToolDefs,
+		})
+		if estimate.Status == llm.UsageStatusUnknown {
+			a.recordWarning("token_estimate_unknown", it.Path, "skipping file because its request token estimate is unavailable")
+			skipped++
+			continue
+		}
+		tokens := int(estimate.InputTokens)
 		if tokens > limit {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 85%% of max_tokens(%d))\n",
 				it.Path, tokens, a.args.Template.MaxTokens)
 			skipped++
 			continue
@@ -456,7 +481,7 @@ func (a *Agent) filterLargeScans(items []model.ScanItem) []model.ScanItem {
 		kept = append(kept, it)
 	}
 	if skipped > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", skipped)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 85%% of max_tokens\n", skipped)
 	}
 	return kept
 }
@@ -623,6 +648,12 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 			a.session.RecordReviewItemReused(it.Path, it.Path, it.Path, fingerprint, a.args.Resume.SessionID, item.Comments)
 			continue
 		}
+		if a.runner.TokenAccounting().Snapshot().BudgetExceeded {
+			a.budgetExceeded = true
+			a.recordWarning("token_budget_reached", it.Path, "aggregate token budget exceeded before dispatch")
+			budgetHit = true
+			break
+		}
 
 		// Per-file budget look-ahead. Stop before acquiring a slot so we
 		// don't even queue work that would blow the budget.
@@ -683,6 +714,11 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 			}
 			if !completedOK {
 				if skipReason != "" {
+					if skipReason == "aggregate token budget reached before review completed" {
+						a.session.RecordReviewItemFailed(it.Path, it.Path, it.Path, fingerprint, skipReason)
+						a.recordWarning("token_budget_reached", it.Path, skipReason)
+						return
+					}
 					atomic.AddInt64(&a.subtaskFailed, 1)
 					a.session.RecordReviewItemFailed(it.Path, it.Path, it.Path, fingerprint, skipReason)
 					a.recordWarning("scan_subtask_error", it.Path, skipReason)
@@ -697,6 +733,9 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 
 	wg.Wait()
 	recordCompleted()
+	if a.runner.TokenAccounting().Snapshot().BudgetExceeded {
+		budgetHit = true
+	}
 	return dispatched, budgetHit, nil
 }
 
@@ -728,18 +767,25 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 
 	messages := a.renderMessages(it, rule, planGuidance)
 
-	tokenCount := llmloop.CountMessagesTokens(messages)
+	requestEstimate := llm.EstimateChatRequest(llm.ChatRequest{
+		Model:    a.args.Model,
+		Messages: messages,
+		Tools:    a.args.MainToolDefs,
+	})
 	maxAllowed := a.args.Template.MaxTokens
-	tokenLimit := llmloop.PromptTokenLimit(maxAllowed)
-	if tokenCount > tokenLimit {
-		msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d)", tokenCount, 80, maxAllowed)
+	tokenLimit := llm.EffectivePreflightCeiling(int64(maxAllowed))
+	if requestEstimate.Status != llm.UsageStatusUnknown && requestEstimate.InputTokens > tokenLimit {
+		msg := fmt.Sprintf("prompt tokens (%d) exceed the 85%% preflight ceiling (%d) of max_tokens(%d)", requestEstimate.InputTokens, tokenLimit, maxAllowed)
 		fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: %s for %s\n", msg, it.Path)
 		a.recordWarning("token_threshold_exceeded", it.Path, msg)
 		telemetry.Event(ctx, "token.threshold.exceeded",
 			telemetry.AnyToAttr("file.path", it.Path),
-			telemetry.AnyToAttr("tokens", tokenCount),
+			telemetry.AnyToAttr("tokens", requestEstimate.InputTokens),
 			telemetry.AnyToAttr("max_tokens", maxAllowed))
 		return false, "", nil
+	}
+	if requestEstimate.Status == llm.UsageStatusUnknown {
+		return false, "request token estimate unavailable before review", nil
 	}
 
 	completed, _, err := a.runner.RunPerFile(ctx, messages, it.Path)
@@ -747,6 +793,9 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		return false, "", err
 	}
 	if !completed {
+		if a.runner.TokenAccounting().Snapshot().BudgetExceeded {
+			return false, "aggregate token budget reached before review completed", nil
+		}
 		return false, "main_task did not complete before stopping", nil
 	}
 	return true, "", nil
@@ -781,18 +830,22 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
 	startTime := time.Now()
 
-	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	resp, err := a.runner.LLMClient().CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.OutputTokens(),
 	})
 	if err != nil {
+		if errors.Is(err, llm.ErrTokenBudgetExceeded) {
+			rec.SetError(err, time.Since(startTime))
+			a.recordWarning("token_budget_reached", it.Path, "aggregate token budget exceeded before plan dispatch")
+			return noPlan
+		}
 		rec.SetError(err, time.Since(startTime))
 		fmt.Fprintf(stdout.Writer(), "[ocr] scan plan failed for %s: %v (falling back to plan-less)\n", it.Path, err)
 		return noPlan
 	}
 	rec.SetResponse(resp, time.Since(startTime))
-	a.runner.RecordUsage(resp.Usage)
 
 	guidance := formatPlanGuidance(resp.Content())
 	if guidance == "" {
@@ -834,18 +887,22 @@ func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.Llm
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, messages) // reuse existing task type
 	startTime := time.Now()
 
-	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	resp, err := a.runner.LLMClient().CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.OutputTokens(),
 	})
 	if err != nil {
+		if errors.Is(err, llm.ErrTokenBudgetExceeded) {
+			rec.SetError(err, time.Since(startTime))
+			a.recordWarning("token_budget_reached", pathKey, "aggregate token budget exceeded before project-summary dispatch")
+			return
+		}
 		rec.SetError(err, time.Since(startTime))
 		fmt.Fprintf(stdout.Writer(), "[ocr] scan project summary failed: %v\n", err)
 		return
 	}
 	rec.SetResponse(resp, time.Since(startTime))
-	a.runner.RecordUsage(resp.Usage)
 
 	body := strings.TrimSpace(llmloop.StripMarkdownFences(resp.Content()))
 	if body == "" {
@@ -909,18 +966,22 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) {
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, messages) // reuse existing task type; no scan-specific type to invent
 	startTime := time.Now()
 
-	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	resp, err := a.runner.LLMClient().CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.OutputTokens(),
 	})
 	if err != nil {
+		if errors.Is(err, llm.ErrTokenBudgetExceeded) {
+			rec.SetError(err, time.Since(startTime))
+			a.recordWarning("token_budget_reached", pathKey, "aggregate token budget exceeded before dedup dispatch")
+			return
+		}
 		rec.SetError(err, time.Since(startTime))
 		fmt.Fprintf(stdout.Writer(), "[ocr] scan dedup failed for batch #%d: %v (keeping originals)\n", batchIdx, err)
 		return
 	}
 	rec.SetResponse(resp, time.Since(startTime))
-	a.runner.RecordUsage(resp.Usage)
 
 	deduped, ok := applyDedupGroups(resp.Content(), batchComments)
 	if !ok {

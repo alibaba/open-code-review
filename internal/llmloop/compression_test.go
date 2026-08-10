@@ -100,11 +100,39 @@ func TestPartitionMessages_EverythingFits(t *testing.T) {
 		msg("tool", "ok"),
 	}
 	result := partitionMessages(messages, 100000, 0)
-	if result.activeCount != 0 {
-		t.Errorf("activeCount = %d, want 0 (everything fits)", result.activeCount)
+	if result.activeCount != len(result.rounds) {
+		t.Errorf("activeCount = %d, want %d (everything fits)", result.activeCount, len(result.rounds))
 	}
-	if result.compressEnd != len(messages) {
-		t.Errorf("compressEnd = %d, want %d", result.compressEnd, len(messages))
+	if result.compressEnd != result.frozenEnd {
+		t.Errorf("compressEnd = %d, want frozenEnd %d", result.compressEnd, result.frozenEnd)
+	}
+}
+
+func TestPartitionMessages_ReservesFrozenPromptTokens(t *testing.T) {
+	messages := []llm.Message{
+		msg("system", strings.Repeat("system ", 40)),
+		msg("user", strings.Repeat("prompt ", 40)),
+		msg("assistant", strings.Repeat("reply ", 20)),
+		msg("tool", strings.Repeat("result ", 20)),
+	}
+
+	result := partitionMessages(messages, 100, 0)
+	if result.activeCount != 0 {
+		t.Errorf("activeCount = %d, want 0 when frozen prompt consumes the budget", result.activeCount)
+	}
+}
+
+func TestStripPreviousReviewSummaryOnlyRemovesTrailingBlock(t *testing.T) {
+	const block = "\n\n<previous_review_summary>\nold\n</previous_review_summary>"
+	if got := stripPreviousReviewSummary("prompt" + block); got != "prompt" {
+		t.Fatalf("trailing summary = %q, want prompt", got)
+	}
+	original := "prompt" + block + "\nuser text"
+	if got := stripPreviousReviewSummary(original); got != original {
+		t.Fatalf("summary-like prompt content was truncated: %q", got)
+	}
+	if got := stripPreviousReviewSummary("prompt\n\n<previous_review_summary>\nunclosed"); got != "prompt\n\n<previous_review_summary>\nunclosed" {
+		t.Fatalf("unclosed summary was truncated: %q", got)
 	}
 }
 
@@ -199,10 +227,10 @@ func TestPromptTokenLimit(t *testing.T) {
 		{name: "one truncates to zero", maxTokens: 1, want: 0},
 		{name: "four truncates to three", maxTokens: 4, want: 3},
 		{name: "five rounds to exact 4.0 via float half-ULP", maxTokens: 5, want: 4},
-		{name: "typical 4k context", maxTokens: 4096, want: 3276},
-		{name: "default max tokens", maxTokens: 58888, want: 47110},
-		{name: "typical 128k context", maxTokens: 128000, want: 102400},
-		{name: "typical 200k context", maxTokens: 200000, want: 160000},
+		{name: "typical 4k context", maxTokens: 4096, want: 3481},
+		{name: "default max tokens", maxTokens: 58888, want: 50054},
+		{name: "typical 128k context", maxTokens: 128000, want: 108800},
+		{name: "typical 200k context", maxTokens: 200000, want: 170000},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -214,14 +242,13 @@ func TestPromptTokenLimit(t *testing.T) {
 }
 
 // TestPromptTokenLimitMatchesReplacedExpression pins the one-time migration:
-// PromptTokenLimit replaced a literal `maxTokens*4/5` at four call sites, so the
+// PromptTokenLimit replaces the one-time 15% safety margin at all call sites, so the
 // float form must agree with the integer form it replaced across the realistic
-// max_tokens range. This is specific to tokenWarningThreshold being 0.80 — if the
-// threshold ever changes, delete this test rather than "fixing" it.
+// max_tokens range.
 func TestPromptTokenLimitMatchesReplacedExpression(t *testing.T) {
 	for _, maxTokens := range []int{0, 1, 2, 3, 4, 5, 7, 40, 100, 1000, 4096, 8192, 32768, 58888, 128000, 200000, 1_000_000} {
-		if got, want := PromptTokenLimit(maxTokens), maxTokens*4/5; got != want {
-			t.Errorf("PromptTokenLimit(%d) = %d, want %d (maxTokens*4/5)", maxTokens, got, want)
+		if got, want := PromptTokenLimit(maxTokens), maxTokens*85/100; got != want {
+			t.Errorf("PromptTokenLimit(%d) = %d, want %d (maxTokens*85/100)", maxTokens, got, want)
 		}
 	}
 }

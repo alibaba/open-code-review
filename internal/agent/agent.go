@@ -237,6 +237,8 @@ func New(args Args) *Agent {
 		CommentWorkerPool: args.CommentWorkerPool,
 		Session:           args.Session,
 		Progress:          args.Progress,
+		ContextBudget:     int64(args.Template.MaxTokens),
+		MaxTokensBudget:   args.MaxTokensBudget,
 		DiffLookup:        a.findDiff,
 	})
 	return a
@@ -314,6 +316,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		a.args.MaxTokensBudgetExplicit,
 		a.args.Template.MaxTokensBudgetMultiplier,
 	)
+	a.runner.SetTokenBudget(a.args.MaxTokensBudget)
 
 	a.currentDate = time.Now().Format("2006-01-02 15:04")
 	telemetry.Event(ctx, "review.started",
@@ -411,8 +414,8 @@ func (a *Agent) Diffs() []model.Diff {
 	return a.diffs
 }
 
-// TotalTokensUsed returns PromptTokens + CompletionTokens across all LLM calls.
-// For Anthropic, PromptTokens already includes cache read/write tokens.
+// TotalTokensUsed returns the aggregate provider total across all LLM calls.
+// When the provider splits usage, this is PromptTokens + CompletionTokens.
 func (a *Agent) TotalTokensUsed() int64 { return a.runner.TotalTokensUsed() }
 
 // TotalInputTokens returns the accumulated input/prompt tokens from all LLM calls.
@@ -426,6 +429,14 @@ func (a *Agent) TotalCacheReadTokens() int64 { return a.runner.TotalCacheReadTok
 
 // TotalCacheWriteTokens returns the accumulated cache write tokens from all LLM calls.
 func (a *Agent) TotalCacheWriteTokens() int64 { return a.runner.TotalCacheWriteTokens() }
+
+// UsageStatus reports whether aggregate token totals are actual, estimated,
+// or contain unknown requests.
+func (a *Agent) UsageStatus() string { return string(a.runner.UsageStatus()) }
+
+// UnknownUsageRequests reports requests with neither provider usage nor a
+// usable local estimate.
+func (a *Agent) UnknownUsageRequests() int64 { return a.runner.UnknownUsageRequests() }
 
 // ProjectSummary returns the markdown project-level summary. Always empty
 // for the diff-review path; defined so *Agent satisfies the
@@ -449,7 +460,9 @@ func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 // and exit code: partial/0 whenever anything was covered, failed/non-zero only
 // when the cap left nothing covered. Per-file token/tool-round exhaustion
 // does NOT set this flag — it is an item-level failed(budget) outcome instead.
-func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded }
+func (a *Agent) BudgetExceeded() bool {
+	return a != nil && (a.budgetExceeded || (a.runner != nil && a.runner.TokenAccounting().Snapshot().BudgetExceeded))
+}
 
 // recordWarning adds a non-fatal warning to the agent's warning list.
 func (a *Agent) recordWarning(warningType, file, message string) {
@@ -518,7 +531,8 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		telemetry.RecordReviewDuration(ctx, time.Since(startTime))
 	}()
 
-	// Pre-filter: discard diffs whose diff content alone exceeds 80% of the token threshold.
+	// Pre-filter: discard diffs whose diff content alone exceeds the effective
+	// preflight ceiling.
 	a.diffs = a.filterLargeDiffs(a.diffs)
 	if len(a.diffs) == 0 {
 		// Everything oversized: nothing is selected, so this is a skipped run
@@ -557,6 +571,16 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	for i := range toDispatch {
 		if toDispatch[i].IsDeleted {
 			continue
+		}
+		if a.runner.TokenAccounting().Snapshot().BudgetExceeded {
+			a.budgetExceeded = true
+			a.recordWarning("token_budget_reached", toDispatch[i].NewPath, "aggregate token budget exceeded before dispatch")
+			if b := a.session.Manifest(); b != nil {
+				if err := b.SetPendingFailureCause(session.FailureBudget, "aggregate token budget reached before dispatch completed"); err != nil {
+					a.recordWarning("manifest_error", "", err.Error())
+				}
+			}
+			break
 		}
 
 		// Per-file budget look-ahead, checked BEFORE acquiring the semaphore
@@ -925,6 +949,8 @@ func (a *Agent) runtimeConfigSHA256() string {
 		"max_tokens_budget_explicit", strconv.FormatBool(a.args.MaxTokensBudgetExplicit),
 		"max_tokens_budget_multiplier", strconv.FormatFloat(a.args.Template.MaxTokensBudgetMultiplier, 'f', -1, 64),
 		"max_tool_request_times", strconv.Itoa(a.args.Template.MaxToolRequestTimes),
+		"max_context_tokens", strconv.Itoa(a.args.Template.MaxTokens),
+		"max_output_tokens", strconv.Itoa(a.args.Template.OutputTokens()),
 	)
 }
 
@@ -1049,6 +1075,8 @@ func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, stri
 	switch stop {
 	case llmloop.StopMaxRounds:
 		return session.FailureBudget, "reached the maximum tool-request rounds without finishing"
+	case llmloop.StopBudgetExceeded:
+		return session.FailureBudget, "aggregate token budget reached before review completed"
 	default: // StopEmptyRounds, StopCompression, StopNone
 		return session.FailureUnknown, "main task stopped before completing"
 	}
@@ -1161,6 +1189,14 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 		var err error
 		planResult, err = a.executePlanPhase(ctx, newPath, d.Diff, changeFilesExcludingCurrent, rule)
 		if err != nil {
+			if errors.Is(err, llm.ErrTokenBudgetExceeded) {
+				return false, &subtaskStop{
+					class:         session.FailureBudget,
+					reason:        "aggregate token budget reached before review completed",
+					checkpoint:    "aggregate token budget reached before plan dispatch",
+					reportAsError: false,
+				}, nil
+			}
 			fmt.Fprintf(stdout.Writer(), "[ocr] Plan phase failed for %s: %v (continuing without plan)\n", newPath, err)
 			telemetry.Eventf(ctx, "plan.failed", err.Error(),
 				telemetry.AnyToAttr("file.path", newPath))
@@ -1198,16 +1234,20 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
-	tokenCount := llmloop.CountMessagesTokens(messages)
+	requestEstimate := llm.EstimateChatRequest(llm.ChatRequest{
+		Model:    a.args.Model,
+		Messages: messages,
+		Tools:    a.args.MainToolDefs,
+	})
 	maxAllowed := a.args.Template.MaxTokens
-	tokenLimit := llmloop.PromptTokenLimit(maxAllowed)
-	if tokenCount > tokenLimit {
-		msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d)", tokenCount, 80, maxAllowed)
+	tokenLimit := llm.EffectivePreflightCeiling(int64(maxAllowed))
+	if requestEstimate.Status != llm.UsageStatusUnknown && requestEstimate.InputTokens > tokenLimit {
+		msg := fmt.Sprintf("prompt tokens (%d) exceed the 85%% preflight ceiling (%d) of max_tokens(%d)", requestEstimate.InputTokens, tokenLimit, maxAllowed)
 		fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: %s for %s\n", msg, newPath)
 		a.recordWarning("token_threshold_exceeded", newPath, msg)
 		telemetry.Event(ctx, "token.threshold.exceeded",
 			telemetry.AnyToAttr("file.path", newPath),
-			telemetry.AnyToAttr("tokens", tokenCount),
+			telemetry.AnyToAttr("tokens", requestEstimate.InputTokens),
 			telemetry.AnyToAttr("max_tokens", maxAllowed))
 		// The prompt itself blows the configured token budget: an explicit,
 		// declared budget stop. Keep the detailed token message only in the
@@ -1254,7 +1294,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 			class:         class,
 			reason:        reason,
 			checkpoint:    "main_task did not complete before stopping",
-			reportAsError: true,
+			reportAsError: mainStop != llmloop.StopBudgetExceeded,
 		}, nil
 	}
 	return true, nil, nil
@@ -1294,13 +1334,20 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	startTime := time.Now()
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
-	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	resp, err := a.runner.LLMClient().CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.OutputTokens(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {
+		if errors.Is(err, llm.ErrTokenBudgetExceeded) {
+			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+			llmSpan.End()
+			rec.SetError(err, duration)
+			a.recordWarning("token_budget_reached", newPath, "aggregate token budget exceeded before review-filter dispatch")
+			return
+		}
 		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 		llmSpan.End()
 		rec.SetError(err, duration)
@@ -1317,7 +1364,6 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	llmSpan.End()
 	rec.SetResponse(resp, duration)
 	a.emitProgress("llm_completed", newPath)
-	a.runner.RecordUsage(resp.Usage)
 
 	indices := parseFilterResponse(resp.Content(), len(comments))
 	telemetry.SetAttr(span, "comments.filtered", len(indices))
@@ -1407,7 +1453,8 @@ func (a *Agent) resolveSystemRule(path string) string {
 	return a.args.SystemRule.Resolve(path)
 }
 
-// filterLargeDiffs drops diffs whose diff content alone consumes more than 80% of MaxTokens.
+// filterLargeDiffs drops diffs whose diff content alone consumes more than the
+// effective 85% preflight ceiling.
 func (a *Agent) filterLargeDiffs(diffs []model.Diff) []model.Diff {
 	limit := llmloop.PromptTokenLimit(a.args.Template.MaxTokens)
 	if limit <= 0 {
@@ -1417,9 +1464,19 @@ func (a *Agent) filterLargeDiffs(diffs []model.Diff) []model.Diff {
 	skipped := 0
 
 	for _, d := range diffs {
-		tokens := llm.CountTokens(d.Diff)
+		estimate := llm.EstimateChatRequest(llm.ChatRequest{
+			Model:    a.args.Model,
+			Messages: []llm.Message{{Role: "user", Content: d.Diff}},
+			Tools:    a.args.MainToolDefs,
+		})
+		if estimate.Status == llm.UsageStatusUnknown {
+			a.recordWarning("token_estimate_unknown", d.NewPath, "skipping file because its request token estimate is unavailable")
+			skipped++
+			continue
+		}
+		tokens := int(estimate.InputTokens)
 		if tokens > limit {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 80%% of max_tokens(%d))\n",
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s (~%d tokens exceeds 85%% of max_tokens(%d))\n",
 				d.NewPath, tokens, a.args.Template.MaxTokens)
 			skipped++
 			continue
@@ -1428,7 +1485,7 @@ func (a *Agent) filterLargeDiffs(diffs []model.Diff) []model.Diff {
 	}
 
 	if skipped > 0 {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 80%% of max_tokens\n", skipped)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Pre-filtered %d file(s) exceeding 85%% of max_tokens\n", skipped)
 	}
 	return kept
 }
@@ -1519,13 +1576,20 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	startTime := time.Now()
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
-	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	resp, err := a.runner.LLMClient().CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.MaxTokens,
+		MaxTokens: a.args.Template.OutputTokens(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {
+		if errors.Is(err, llm.ErrTokenBudgetExceeded) {
+			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+			llmSpan.End()
+			rec.SetError(err, duration)
+			a.recordWarning("token_budget_reached", newPath, "aggregate token budget exceeded before plan dispatch")
+			return "", err
+		}
 		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 		llmSpan.End()
 		rec.SetError(err, duration)
@@ -1541,7 +1605,6 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	llmSpan.End()
 	rec.SetResponse(resp, duration)
 	a.emitProgress("llm_completed", newPath)
-	a.runner.RecordUsage(resp.Usage)
 	fmt.Fprintf(stdout.Writer(), "[ocr] Plan completed for %s\n", newPath)
 	return resp.Content(), nil
 }

@@ -393,10 +393,12 @@ func emitRunResultTo(
 		if p, ok := ag.(resumeInfoProvider); ok {
 			resumeInfo = p.ResumeInfo()
 		}
-		return outputJSONWithWarningsTo(outWriter, comments, ag.Warnings(), ag.FilesReviewed(),
+		usageStatus, unknownRequests := usageDiagnostics(ag)
+		return outputJSONWithWarningsAndDiagnosticsTo(outWriter, comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity)
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity,
+			usageStatus, unknownRequests)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest)
 	if summary := ag.ProjectSummary(); summary != "" {

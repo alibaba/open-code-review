@@ -81,10 +81,12 @@ func fileReadToolCallResponse(callID, args string) *llm.ChatResponse {
 
 type fakeFileReadProvider struct {
 	result string
+	calls  int
 }
 
 func (f *fakeFileReadProvider) Tool() tool.Tool { return tool.FileRead }
 func (f *fakeFileReadProvider) Execute(_ context.Context, _ map[string]any) (string, error) {
+	f.calls++
 	return f.result, nil
 }
 
@@ -122,6 +124,33 @@ func TestRunPerFile_TaskDoneImmediately(t *testing.T) {
 	}
 	if runner.TotalOutputTokens() != 5 {
 		t.Errorf("TotalOutputTokens = %d, want 5", runner.TotalOutputTokens())
+	}
+}
+
+func TestRunPerFile_RepeatedContextQueryDoesNotCountAsProgress(t *testing.T) {
+	args := `{"file_path":"main.go"}`
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", args),
+		fileReadToolCallResponse("call_2", args),
+		fileReadToolCallResponse("call_3", args),
+		fileReadToolCallResponse("call_4", args),
+	}}
+	deps := newTestDeps(client)
+	provider := &fakeFileReadProvider{result: "package main\n"}
+	deps.Tools.Register(provider)
+	runner := NewRunner(deps)
+
+	completed, stop, err := runner.RunPerFile(context.Background(), []llm.Message{
+		llm.NewTextMessage("user", "review this file"),
+	}, "main.go")
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if completed || stop != StopEmptyRounds {
+		t.Fatalf("completed=%v stop=%v, want false and StopEmptyRounds", completed, stop)
+	}
+	if provider.calls != 1 {
+		t.Errorf("file_read executions = %d, want 1", provider.calls)
 	}
 }
 

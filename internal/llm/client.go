@@ -164,6 +164,9 @@ type ChatResponse struct {
 	Model   string     `json:"-"`
 	Choices []Choice   `json:"-"`
 	Usage   *UsageInfo `json:"-"` // Token usage extracted from API response
+	// UsageStatus is set by the shared accounting seam. Protocol clients leave
+	// it empty because they only report provider usage, when available.
+	UsageStatus UsageStatus `json:"-"`
 }
 
 // Content extracts the text content from the first choice, falling back to reasoning content.
@@ -317,13 +320,36 @@ func CountTokensForModel(text string, modelName string) int {
 }
 
 func encodingForModel(modelName string) string {
+	encoding, _ := tokenizerEncodingForModel(modelName)
+	return encoding
+}
+
+// tokenizerEncodingForModel returns the best local tokenizer and whether the
+// mapping is known to be model-specific. Luna currently uses a conservative
+// cl100k_base fallback because tiktoken has no provider-exact Luna encoding;
+// callers must keep that estimate labelled as estimated.
+func tokenizerEncodingForModel(modelName string) (string, bool) {
 	lower := strings.ToLower(modelName)
 	switch {
 	case strings.Contains(lower, "o1") || strings.Contains(lower, "o3") || strings.Contains(lower, "o4"):
-		return "o200k_base"
+		return "o200k_base", true
+	case strings.Contains(lower, "gpt-4"), strings.Contains(lower, "gpt-3.5"):
+		return "cl100k_base", true
 	default:
-		return "cl100k_base"
+		return "cl100k_base", false
 	}
+}
+
+func countTokensForModelExact(text, modelName string) (int, bool, string) {
+	encName, _ := tokenizerEncodingForModel(modelName)
+	tke, err := defaultTokenizer.getOrLoad(encName)
+	if err != nil {
+		return 0, false, encName
+	}
+	if text == "" {
+		return 0, true, encName
+	}
+	return len(tke.Encode(text, nil, nil)), true, encName
 }
 
 // --- OpenAIClient ---
