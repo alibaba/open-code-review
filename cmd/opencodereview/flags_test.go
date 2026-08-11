@@ -176,3 +176,37 @@ func TestParseReviewFlags_ShortFlags(t *testing.T) {
 		t.Error("expected preview=true")
 	}
 }
+
+func TestParseReviewFlags_OutputPath(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"long flag", []string{"--output", "result.json"}, "result.json"},
+		{"short flag", []string{"-o", "result.json"}, "result.json"},
+		{"stdout dash", []string{"-o", "-"}, "-"},
+		{"default empty", []string{}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts, err := parseReviewFlags(tc.args)
+			if err != nil {
+				t.Fatalf("parseReviewFlags: %v", err)
+			}
+			if opts.outputPath != tc.want {
+				t.Errorf("outputPath = %q, want %q", opts.outputPath, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseScanFlags_OutputPath(t *testing.T) {
+	opts, err := parseScanFlags([]string{"--output", "scan.json"})
+	if err != nil {
+		t.Fatalf("parseScanFlags: %v", err)
+	}
+	if opts.outputPath != "scan.json" {
+		t.Errorf("outputPath = %q, want scan.json", opts.outputPath)
+	}
+}
