@@ -19,6 +19,9 @@ func TestLoadScanDefault_BudgetParsed(t *testing.T) {
 	if tpl.MaxTokensBudgetMultiplier != 0 {
 		t.Errorf("scan MaxTokensBudgetMultiplier = %v, want 0 (unlimited default)", tpl.MaxTokensBudgetMultiplier)
 	}
+	if tpl.MaxTokens != 262144 || tpl.MaxOutputTokens != 16384 {
+		t.Errorf("scan token limits = %d/%d, want 262144/16384", tpl.MaxTokens, tpl.MaxOutputTokens)
+	}
 	if len(tpl.MainTask.Messages) == 0 {
 		t.Fatal("scan MainTask must be populated from the embedded scan_template.json")
 	}
@@ -83,8 +86,11 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	if tpl.ReviewFilterTask == nil {
 		t.Fatal("ReviewFilterTask is nil, expected non-nil")
 	}
-	if tpl.MaxTokens != 58888 {
-		t.Errorf("MaxTokens = %d, want 58888", tpl.MaxTokens)
+	if tpl.MaxTokens != 262144 {
+		t.Errorf("MaxTokens = %d, want 262144", tpl.MaxTokens)
+	}
+	if tpl.MaxOutputTokens != 16384 {
+		t.Errorf("MaxOutputTokens = %d, want 16384", tpl.MaxOutputTokens)
 	}
 	if tpl.MaxToolRequestTimes != 75 {
 		t.Errorf("MaxToolRequestTimes = %d, want 75", tpl.MaxToolRequestTimes)
@@ -94,6 +100,15 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	}
 	if tpl.PlanModeLineThreshold != 50 {
 		t.Errorf("PlanModeLineThreshold = %d, want 50", tpl.PlanModeLineThreshold)
+	}
+}
+
+func TestOutputTokens_BackwardCompatibleFallback(t *testing.T) {
+	if got := (Template{MaxTokens: 58888}).OutputTokens(); got != 58888 {
+		t.Errorf("Template.OutputTokens() = %d, want 58888", got)
+	}
+	if got := (ScanTemplate{MaxTokens: 58888, MaxOutputTokens: 16384}).OutputTokens(); got != 16384 {
+		t.Errorf("ScanTemplate.OutputTokens() = %d, want 16384", got)
 	}
 }
 

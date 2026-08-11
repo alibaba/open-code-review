@@ -260,11 +260,13 @@ func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, cont
 		"content":     content,
 		"tool_calls":  toolCalls,
 		"duration_ms": duration.Milliseconds(),
-		"usage": map[string]int{
+		"usage": map[string]any{
 			"prompt_tokens":      usage.PromptTokens,
 			"completion_tokens":  usage.CompletionTokens,
+			"total_tokens":       usage.TotalTokens,
 			"cache_read_tokens":  usage.CacheReadTokens,
 			"cache_write_tokens": usage.CacheWriteTokens,
+			"status":             usage.Status,
 		},
 	}
 	jw.writeRecordLocked(rec)

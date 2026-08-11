@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -19,16 +18,19 @@ import (
 
 // Compression thresholds, as fractions of MaxTokens.
 const (
-	tokenSoftThreshold    = 0.60 // async background compression
-	tokenWarningThreshold = 0.80 // immediate sync compression
+	tokenSoftThreshold = 0.60 // async background compression
 )
 
-// PromptTokenLimit returns tokenWarningThreshold (80%) of maxTokens. It is
-// shared by the agent and scan pre-flight gates, their large-input filters, and
-// computeActiveZoneSize so the threshold has a single definition. Non-positive
-// input is not special-cased — each caller decides what that means.
+// PromptTokenLimit returns the one effective context ceiling after the 15%
+// safety margin. All preflight and compression partitioning uses this value.
 func PromptTokenLimit(maxTokens int) int {
-	return int(float64(maxTokens) * tokenWarningThreshold)
+	return int(llm.EffectivePreflightCeiling(int64(maxTokens)))
+}
+
+// PreflightTokenLimit returns the one effective ceiling used before provider
+// dispatch. It applies the 15% safety margin exactly once.
+func PreflightTokenLimit(maxTokens int) int {
+	return PromptTokenLimit(maxTokens)
 }
 
 // round groups consecutive messages starting with an assistant message
@@ -73,6 +75,28 @@ func CountMessagesTokens(msgs []llm.Message) int {
 		total += llm.CountTokens(m.ExtractText())
 	}
 	return total
+}
+
+// CountMessagesTokensForModel estimates the complete semantic message payload
+// with roles, tool calls, replay items and phase metadata included.
+func CountMessagesTokensForModel(msgs []llm.Message, model string, tools []llm.ToolDef) int64 {
+	return llm.EstimateChatRequest(llm.ChatRequest{
+		Model:    model,
+		Messages: msgs,
+		Tools:    tools,
+	}).InputTokens
+}
+
+// CountMessageTokensForModel returns only the incremental message cost. The
+// request model and tool definitions are fixed overhead and belong to the
+// complete request estimate, not once per retained round.
+func CountMessageTokensForModel(msgs []llm.Message, model string) int64 {
+	withMessages := llm.EstimateChatRequest(llm.ChatRequest{Model: model, Messages: msgs})
+	modelOnly := llm.EstimateChatRequest(llm.ChatRequest{Model: model})
+	if withMessages.InputTokens <= modelOnly.InputTokens {
+		return 0
+	}
+	return withMessages.InputTokens - modelOnly.InputTokens
 }
 
 // groupIntoRounds parses messages[start:] into logical
@@ -121,6 +145,30 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 	return count
 }
 
+func computeActiveZoneSizeForRequest(rounds []round, messages []llm.Message, maxTokens int, reservedTokens int, model string, tools []llm.ToolDef) int {
+	budget := PromptTokenLimit(maxTokens) - reservedTokens
+	if budget <= 0 {
+		return 0
+	}
+
+	count := 0
+	tokensUsed := int64(0)
+	for i := len(rounds) - 1; i >= 0; i-- {
+		roundMessages := make([]llm.Message, 0, 1+len(rounds[i].toolIdxs))
+		roundMessages = append(roundMessages, messages[rounds[i].assistantIdx])
+		for _, ti := range rounds[i].toolIdxs {
+			roundMessages = append(roundMessages, messages[ti])
+		}
+		roundTokens := CountMessageTokensForModel(roundMessages, model)
+		if tokensUsed+roundTokens > int64(budget) {
+			break
+		}
+		tokensUsed += roundTokens
+		count++
+	}
+	return count
+}
+
 // partitionMessages divides messages into frozen, compress, and active zones.
 // Frozen zone is always messages[0:2]. Active zone preserves the K most
 // recent complete rounds based on available token budget.
@@ -137,11 +185,43 @@ func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEs
 		return result
 	}
 
-	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, prevSummaryTokenEstimate)
+	frozenTokens := CountMessagesTokens(messages[:min(result.frozenEnd, len(messages))])
+	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, frozenTokens+prevSummaryTokenEstimate)
+	if result.activeCount >= len(result.rounds) {
+		result.compressEnd = result.frozenEnd
+		result.activeCount = len(result.rounds)
+		return result
+	}
+
+	activeStartIdx := len(result.rounds) - result.activeCount
+	lastCompressRound := result.rounds[activeStartIdx-1]
+	if len(lastCompressRound.toolIdxs) > 0 {
+		result.compressEnd = lastCompressRound.toolIdxs[len(lastCompressRound.toolIdxs)-1] + 1
+	} else {
+		result.compressEnd = lastCompressRound.assistantIdx + 1
+	}
+	return result
+}
+
+func partitionMessagesForRequest(messages []llm.Message, maxTokens int, prevSummaryTokenEstimate int, model string, tools []llm.ToolDef) partitionResult {
+	result := partitionResult{frozenEnd: 2}
+	if len(messages) <= 2 {
+		result.compressEnd = len(messages)
+		return result
+	}
+
+	result.rounds = groupIntoRounds(messages, 2)
+	if len(result.rounds) == 0 {
+		result.compressEnd = len(messages)
+		return result
+	}
+
+	frozenTokens := CountMessagesTokensForModel(messages[:min(result.frozenEnd, len(messages))], model, tools)
+	result.activeCount = computeActiveZoneSizeForRequest(result.rounds, messages, maxTokens, int(frozenTokens)+prevSummaryTokenEstimate, model, tools)
 	if result.activeCount >= len(result.rounds) {
 		// Everything fits — no compression needed.
-		result.compressEnd = len(messages)
-		result.activeCount = 0
+		result.compressEnd = result.frozenEnd
+		result.activeCount = len(result.rounds)
 		return result
 	}
 
@@ -215,7 +295,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 		return msgs[:min(len(msgs), 2)], nil
 	}
 
-	part := partitionMessages(msgs, r.deps.Template.MaxTokens, 0)
+	part := partitionMessagesForRequest(msgs, r.deps.Template.MaxTokens, 0, r.deps.Model, r.deps.MainToolDefs)
 	if part.compressEnd <= part.frozenEnd {
 		return msgs, nil
 	}
@@ -229,10 +309,10 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 	}
 
 	startTime := time.Now()
-	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	resp, err := r.client.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  compressionMsgs,
-		MaxTokens: r.deps.Template.MaxTokens,
+		MaxTokens: r.deps.Template.OutputTokens(),
 	})
 	duration := time.Since(startTime)
 
@@ -249,13 +329,6 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 	}
 	rec.SetResponse(resp, duration)
 	r.emitProgress("llm_completed", filePath)
-	if resp.Usage != nil {
-		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
-		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
-		atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
-	}
-
 	rawSummary := stripMarkdownFences(resp.Content())
 	if rawSummary == "" {
 		// Empty summary: keep the original conversation rather than dropping
@@ -267,7 +340,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 	copy(rebuilt, msgs[:2])
 
 	userMsg := rebuilt[1]
-	currentText := userMsg.ExtractText()
+	currentText := stripPreviousReviewSummary(userMsg.ExtractText())
 	rebuilt[1] = llm.NewTextMessage(userMsg.Role, currentText+"\n\n<previous_review_summary>\n"+rawSummary+"\n</previous_review_summary>")
 
 	for i := part.compressEnd; i < len(msgs); i++ {
@@ -275,6 +348,23 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 	}
 
 	return rebuilt, nil
+}
+
+func stripPreviousReviewSummary(text string) string {
+	const (
+		open  = "\n\n<previous_review_summary>\n"
+		close = "\n</previous_review_summary>"
+	)
+	start := strings.LastIndex(text, open)
+	closeAt := strings.LastIndex(text, close)
+	if start < 0 || closeAt < start+len(open) {
+		return text
+	}
+	end := closeAt + len(close)
+	if strings.TrimSpace(text[end:]) != "" {
+		return text
+	}
+	return text[:start]
 }
 
 // triggerAsyncCompression kicks off a background compression job for the

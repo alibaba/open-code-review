@@ -6,9 +6,10 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -46,6 +47,9 @@ type Deps struct {
 	CommentWorkerPool *CommentWorkerPool
 	Session           *session.SessionHistory
 	Progress          ProgressFunc
+	TokenAccounting   *llm.TokenAccounting
+	ContextBudget     int64
+	MaxTokensBudget   int64
 	// DiffLookup is consulted by the code_comment tool path to resolve
 	// line numbers against the file's diff (or against full file content
 	// in scan mode — scan adapters return a synthetic Diff whose
@@ -58,20 +62,29 @@ type Deps struct {
 // call; background memory compression is scoped to each RunPerFile
 // conversation (see compressionState).
 type Runner struct {
-	deps                  Deps
-	totalInputTokens      int64 // atomically updated
-	totalOutputTokens     int64
-	totalCacheReadTokens  int64
-	totalCacheWriteTokens int64
-	warningsMu            sync.Mutex
-	warnings              []AgentWarning
-	toolCallsMu           sync.Mutex
-	toolCalls             map[string]int64
+	deps        Deps
+	accounting  *llm.TokenAccounting
+	client      *llm.AccountingClient
+	warningsMu  sync.Mutex
+	warnings    []AgentWarning
+	toolCallsMu sync.Mutex
+	toolCalls   map[string]int64
 }
 
 // NewRunner returns a Runner bound to the given dependencies.
 func NewRunner(deps Deps) *Runner {
-	return &Runner{deps: deps}
+	accounting := deps.TokenAccounting
+	if accounting == nil {
+		accounting = llm.NewTokenAccounting(llm.TokenAccountingOptions{
+			ContextBudget:   deps.ContextBudget,
+			AggregateBudget: deps.MaxTokensBudget,
+		})
+	}
+	return &Runner{
+		deps:       deps,
+		accounting: accounting,
+		client:     llm.NewAccountingClient(deps.LLMClient, accounting),
+	}
 }
 
 func (r *Runner) emitProgress(phase, path string) {
@@ -81,20 +94,46 @@ func (r *Runner) emitProgress(phase, path string) {
 }
 
 // TotalInputTokens returns the accumulated input/prompt tokens from all LLM calls.
-func (r *Runner) TotalInputTokens() int64 { return atomic.LoadInt64(&r.totalInputTokens) }
+func (r *Runner) TotalInputTokens() int64 { return r.accounting.Snapshot().InputTokens }
 
 // TotalOutputTokens returns the accumulated completion tokens from all LLM calls.
-func (r *Runner) TotalOutputTokens() int64 { return atomic.LoadInt64(&r.totalOutputTokens) }
+func (r *Runner) TotalOutputTokens() int64 { return r.accounting.Snapshot().OutputTokens }
 
 // TotalCacheReadTokens returns the accumulated cache read tokens.
-func (r *Runner) TotalCacheReadTokens() int64 { return atomic.LoadInt64(&r.totalCacheReadTokens) }
+func (r *Runner) TotalCacheReadTokens() int64 { return r.accounting.Snapshot().CacheReadTokens }
 
 // TotalCacheWriteTokens returns the accumulated cache write tokens.
-func (r *Runner) TotalCacheWriteTokens() int64 { return atomic.LoadInt64(&r.totalCacheWriteTokens) }
+func (r *Runner) TotalCacheWriteTokens() int64 { return r.accounting.Snapshot().CacheWriteTokens }
 
-// TotalTokensUsed returns input + output.
+// TotalTokensUsed returns the provider total when input/output are not
+// separately available, otherwise input + output.
 func (r *Runner) TotalTokensUsed() int64 {
-	return r.TotalInputTokens() + r.TotalOutputTokens()
+	return r.accounting.Snapshot().TotalTokens
+}
+
+// LLMClient returns the shared accounting seam for phase-specific callers.
+func (r *Runner) LLMClient() llm.LLMClient { return r.client }
+
+// TokenAccounting returns the shared aggregate store used by every phase.
+func (r *Runner) TokenAccounting() *llm.TokenAccounting { return r.accounting }
+
+// SetTokenBudget applies the resolved positive cap after template/CLI
+// resolution. Zero preserves unlimited behavior.
+func (r *Runner) SetTokenBudget(maxTokens int64) {
+	if r != nil && r.accounting != nil {
+		r.accounting.SetAggregateBudget(maxTokens)
+	}
+}
+
+// UsageStatus reports the aggregate certainty level of completed requests.
+func (r *Runner) UsageStatus() llm.UsageStatus {
+	return r.accounting.Snapshot().UsageStatus
+}
+
+// UnknownUsageRequests reports requests for which neither provider usage nor
+// a local complete-request estimate was available.
+func (r *Runner) UnknownUsageRequests() int64 {
+	return r.accounting.Snapshot().UnknownRequests
 }
 
 // Warnings returns a copy of the accumulated warnings.
@@ -142,13 +181,7 @@ func (r *Runner) recordToolCall(name string) {
 // in agent / future scan phases) that perform their own LLM calls outside
 // RunPerFile.
 func (r *Runner) RecordUsage(u *llm.UsageInfo) {
-	if u == nil {
-		return
-	}
-	atomic.AddInt64(&r.totalInputTokens, u.PromptTokens)
-	atomic.AddInt64(&r.totalOutputTokens, u.CompletionTokens)
-	atomic.AddInt64(&r.totalCacheReadTokens, u.CacheReadTokens)
-	atomic.AddInt64(&r.totalCacheWriteTokens, u.CacheWriteTokens)
+	r.accounting.RecordExternal(u)
 }
 
 // CollectPendingComments awaits any async comment-processing workers and
@@ -182,6 +215,10 @@ const (
 	// StopCompression — context compression exceeded its threshold, so the loop
 	// could not continue. Token/context driven but not a declared budget.
 	StopCompression
+	// StopBudgetExceeded means the shared aggregate token gate rejected the
+	// next request. Existing findings remain valid and callers classify the
+	// item as a controlled budget stop.
+	StopBudgetExceeded
 )
 
 // RunPerFile drives the main LLM conversation loop for a single file.
@@ -197,6 +234,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
 	sessionID := uuid.NewString()
+	contextResults := make(map[string]string)
 
 	// Async compression is owned by this conversation alone; the deferred
 	// cancel aborts any job still in flight when the conversation ends.
@@ -216,20 +254,46 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 		toolReqCount--
 
+		req := llm.ChatRequest{
+			Model:     r.deps.Model,
+			Messages:  messages,
+			Tools:     r.deps.MainToolDefs,
+			MaxTokens: r.deps.Template.OutputTokens(),
+			SessionID: sessionID,
+		}
+		if err := r.fitRequest(ctx, &req, &messages, newPath, st); err != nil {
+			switch {
+			case errors.Is(err, llm.ErrTokenBudgetExceeded):
+				r.RecordWarning("token_budget_reached", newPath, "aggregate token budget exceeded before main-task dispatch")
+				return false, StopBudgetExceeded, nil
+			case errors.Is(err, llm.ErrContextBudgetExceeded):
+				return false, StopCompression, nil
+			default:
+				return false, StopNone, err
+			}
+		}
+
 		fs := r.deps.Session.GetOrCreateFileSession(newPath)
 		rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
 		startTime := time.Now()
 
 		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
-		resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
-			Model:     r.deps.Model,
-			Messages:  messages,
-			Tools:     r.deps.MainToolDefs,
-			MaxTokens: r.deps.Template.MaxTokens,
-			SessionID: sessionID,
-		})
+		resp, err := r.client.CompletionsWithCtx(ctx, req)
 		duration := time.Since(startTime)
 		if err != nil {
+			if errors.Is(err, llm.ErrTokenBudgetExceeded) {
+				rec.SetError(err, duration)
+				telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+				llmSpan.End()
+				r.RecordWarning("token_budget_reached", newPath, "aggregate token budget exceeded before main-task dispatch")
+				return false, StopBudgetExceeded, nil
+			}
+			if errors.Is(err, llm.ErrContextBudgetExceeded) {
+				rec.SetError(err, duration)
+				telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+				llmSpan.End()
+				return false, StopCompression, nil
+			}
 			rec.SetError(err, duration)
 			telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 			llmSpan.End()
@@ -241,10 +305,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		totalTokens := int64(0)
 		if resp.Usage != nil {
 			totalTokens = resp.Usage.TotalTokens
-			atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
-			atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
-			atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-			atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
+			if totalTokens == 0 {
+				totalTokens = resp.Usage.PromptTokens + resp.Usage.CompletionTokens
+			}
 		}
 		telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
 		llmSpan.End()
@@ -270,6 +333,18 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		hasValidResult := false
 
 		for _, call := range calls {
+			t := tool.OfName(call.Function.Name)
+			if t == tool.FileRead || t == tool.FileFind || t == tool.FileReadDiff || t == tool.CodeSearch {
+				key := call.Function.Name + "\x00" + call.Function.Arguments
+				if cached, duplicate := contextResults[key]; duplicate {
+					results = append(results, tool.ToolCallResult{
+						ToolCallID: call.ID,
+						Name:       call.Function.Name,
+						Result:     "No new evidence: this exact context query already ran. Earlier result:\n" + cached,
+					})
+					continue
+				}
+			}
 			cp := r.executeToolCall(ctx, newPath, call, rec)
 			if cp.Failed {
 				return false, StopNone, fmt.Errorf("task failed: %s", cp.Data)
@@ -281,6 +356,11 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 				})
 				taskCompleted = true
 			} else if cp.Data != "" {
+				if t == tool.FileRead || t == tool.FileFind || t == tool.FileReadDiff || t == tool.CodeSearch {
+					if isUsableContextResult(cp.Data) {
+						contextResults[call.Function.Name+"\x00"+call.Function.Arguments] = cp.Data
+					}
+				}
 				results = append(results, tool.ToolCallResult{
 					ToolCallID: call.ID,
 					Name:       call.Function.Name,
@@ -313,6 +393,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 		succeed := r.addNextMessage(ctx, content, resp.Phase(), responseItems, calls, results, &messages, newPath, st)
 		if !succeed {
+			if r.accounting.Snapshot().BudgetExceeded {
+				return false, StopBudgetExceeded, nil
+			}
 			fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", newPath)
 			stop = StopCompression
 			break
@@ -323,6 +406,11 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", newPath)
 	}
 	return false, stop, nil
+}
+
+func isUsableContextResult(result string) bool {
+	trimmed := strings.TrimSpace(result)
+	return trimmed != "" && !strings.HasPrefix(trimmed, "Error") && !strings.HasPrefix(trimmed, "code_search timed out.")
 }
 
 // executeToolCall dispatches a single tool call from the LLM response and
@@ -463,18 +551,12 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 				if d != nil {
 					if !diff.ResolveComment(cm, d) && r.deps.Template.ReLocationTask != nil {
 						rlStart := time.Now()
-						_, resp, msgs := diff.ReLocateComment(rctx, cm, d, r.deps.LLMClient, r.deps.Template.ReLocationTask, r.deps.Model, r.deps.Template.MaxTokens)
+						_, resp, msgs := diff.ReLocateComment(rctx, cm, d, r.client, r.deps.Template.ReLocationTask, r.deps.Model, r.deps.Template.OutputTokens())
 						if msgs != nil {
 							fs := r.deps.Session.GetOrCreateFileSession(cm.Path)
 							rlRec := fs.AppendTaskRecord(session.ReLocationTask, msgs)
 							if resp != nil {
 								rlRec.SetResponse(resp, time.Since(rlStart))
-								if resp.Usage != nil {
-									atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
-									atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
-									atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-									atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
-								}
 							} else {
 								rlRec.SetError(fmt.Errorf("re-location LLM call failed"), time.Since(rlStart))
 							}
@@ -545,19 +627,20 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 
 // addNextMessage extends the conversation with the assistant message and
 // tool responses, applying three-zone compression at the soft (60%) and
-// warning (80%) MaxTokens thresholds. Returns false when even after
+// effective preflight MaxTokens thresholds. Returns false when even after
 // synchronous compression the conversation is still over the warning
 // threshold — caller should stop the loop in that case.
 func (r *Runner) addNextMessage(ctx context.Context, assistantContent, assistantPhase string, assistantResponseItems []json.RawMessage, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]llm.Message, filePath string, st *compressionState) bool {
 	maxAllowed := r.deps.Template.MaxTokens
 	softLimit := int(float64(maxAllowed) * tokenSoftThreshold)
 	warnLimit := PromptTokenLimit(maxAllowed)
+	didSyncCompression := false
 
 	r.tryApplyPendingCompression(st, messages)
 
 	// A conversation can already be over the warning threshold before this
 	// round's messages are appended (e.g. an oversized initial prompt).
-	if CountMessagesTokens(*messages) > warnLimit {
+	if r.messageInputTokens(*messages) > int64(warnLimit) {
 		r.cancelPendingCompression(st)
 		var err error
 		if *messages, err = r.runCompression(ctx, *messages, filePath, true); err != nil {
@@ -565,6 +648,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent, assistant
 			// post-append check below will retry.
 			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
 		}
+		didSyncCompression = true
 	}
 
 	if len(toolCalls) > 0 {
@@ -581,24 +665,67 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent, assistant
 		*messages = append(*messages, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
 	}
 
-	finalCount := CountMessagesTokens(*messages)
+	finalCount := int(r.messageInputTokens(*messages))
 	if finalCount > warnLimit {
 		r.cancelPendingCompression(st)
 		var err error
 		if *messages, err = r.runCompression(ctx, *messages, filePath, true); err != nil {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Memory compression failed: %v\n", err)
 		}
-		finalCount = CountMessagesTokens(*messages)
+		didSyncCompression = true
+		finalCount = int(r.messageInputTokens(*messages))
 	}
 
 	// Trigger async compression only after all appends for this update, so
 	// a job is never started and then immediately cancelled by the same
 	// call (#384), and never started when we are about to return false.
-	if finalCount > softLimit && finalCount < warnLimit {
+	if !didSyncCompression && finalCount > softLimit && finalCount < warnLimit {
 		r.triggerAsyncCompression(ctx, st, *messages, filePath)
 	}
 
-	return finalCount < warnLimit
+	return finalCount <= warnLimit
+}
+
+func (r *Runner) messageInputTokens(messages []llm.Message) int64 {
+	if r == nil || r.accounting == nil {
+		return int64(CountMessagesTokens(messages))
+	}
+	return r.accounting.Estimate(llm.ChatRequest{
+		Model:    r.deps.Model,
+		Messages: messages,
+		Tools:    r.deps.MainToolDefs,
+	}).InputTokens
+}
+
+func (r *Runner) requestFits(req llm.ChatRequest) bool {
+	max := r.accounting.Snapshot().ContextBudget
+	if max <= 0 {
+		return true
+	}
+	// The configured context budget and provider output limit are independent:
+	// this gate applies the single safety margin to input only.
+	est := r.accounting.Estimate(req)
+	return est.Status == llm.UsageStatusUnknown || est.InputTokens <= llm.EffectivePreflightCeiling(max)
+}
+
+// fitRequest applies the same complete-request estimate used by the
+// AccountingClient before dispatch. It gives compression one chance to reduce
+// the active conversation; the provider seam remains the final guard.
+func (r *Runner) fitRequest(ctx context.Context, req *llm.ChatRequest, messages *[]llm.Message, filePath string, st *compressionState) error {
+	if r.requestFits(*req) {
+		return nil
+	}
+	r.cancelPendingCompression(st)
+	rebuilt, err := r.runCompression(ctx, *messages, filePath, true)
+	if err != nil {
+		return err
+	}
+	*messages = rebuilt
+	req.Messages = rebuilt
+	if r.requestFits(*req) {
+		return nil
+	}
+	return fmt.Errorf("%w: complete request remains over the preflight ceiling", llm.ErrContextBudgetExceeded)
 }
 
 // parseToolArgs unmarshals a tool call's raw JSON arguments, always

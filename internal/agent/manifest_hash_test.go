@@ -145,6 +145,8 @@ func TestRuntimeConfigSHA256(t *testing.T) {
 		{"max_tokens_budget_explicit", func(x *Args) { x.MaxTokensBudgetExplicit = true }},
 		{"max_tokens_budget_multiplier", func(x *Args) { x.Template.MaxTokensBudgetMultiplier = 2.5 }},
 		{"max_tool_request_times", func(x *Args) { x.Template.MaxToolRequestTimes = 75 }},
+		{"max_context_tokens", func(x *Args) { x.Template.MaxTokens = 262144 }},
+		{"max_output_tokens", func(x *Args) { x.Template.MaxOutputTokens = 16384 }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

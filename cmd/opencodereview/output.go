@@ -265,6 +265,8 @@ type jsonSummary struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int64  `json:"cache_write_tokens,omitempty"`
+	UsageStatus      string `json:"usage_status,omitempty"`
+	UnknownRequests  int64  `json:"unknown_usage_requests,omitempty"`
 	Elapsed          string `json:"elapsed"`
 	BudgetExceeded   bool   `json:"budget_exceeded,omitempty"`
 }
@@ -315,14 +317,22 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity) error {
-	return outputJSONWithWarningsTo(os.Stdout, comments, warnings, filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens,
-		duration, projectSummary, toolCalls, traceID, resumeInfo, sessionID, manifest, budgetExceeded, llmIdentity)
+	return outputJSONWithWarningsAndDiagnosticsTo(os.Stdout, comments, warnings, filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens,
+		duration, projectSummary, toolCalls, traceID, resumeInfo, sessionID, manifest, budgetExceeded, llmIdentity, "", 0)
 }
 
 func outputJSONWithWarningsTo(outWriter io.Writer, comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity) error {
+	return outputJSONWithWarningsAndDiagnosticsTo(outWriter, comments, warnings, filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens,
+		duration, projectSummary, toolCalls, traceID, resumeInfo, sessionID, manifest, budgetExceeded, llmIdentity, "", 0)
+}
+
+func outputJSONWithWarningsAndDiagnosticsTo(outWriter io.Writer, comments []model.LlmComment, warnings []agent.AgentWarning,
+	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
+	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
+	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, usageStatus string, unknownRequests int64) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	out := jsonOutput{
 		Status:   "success",
@@ -337,6 +347,8 @@ func outputJSONWithWarningsTo(outWriter io.Writer, comments []model.LlmComment, 
 			OutputTokens:     outputTokens,
 			CacheReadTokens:  cacheReadTokens,
 			CacheWriteTokens: cacheWriteTokens,
+			UsageStatus:      usageStatus,
+			UnknownRequests:  unknownRequests,
 			Elapsed:          duration.Round(time.Second).String(),
 			BudgetExceeded:   budgetExceeded,
 		},
@@ -415,6 +427,18 @@ func manifestMessage(manifest *session.RunManifest, findings int) string {
 	}
 }
 
+type usageDiagnosticsProvider interface {
+	UsageStatus() string
+	UnknownUsageRequests() int64
+}
+
+func usageDiagnostics(ag ResultProvider) (string, int64) {
+	if p, ok := ag.(usageDiagnosticsProvider); ok {
+		return p.UsageStatus(), p.UnknownUsageRequests()
+	}
+	return "", 0
+}
+
 func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity) error {
 	return outputJSONNoFilesTo(os.Stdout, traceID, llmIdentity)
 }
@@ -464,6 +488,7 @@ func emitFailureUsageTo(outWriter io.Writer, ag ResultProvider, duration time.Du
 		toolTotal += v
 	}
 	budgetExceeded := ag.BudgetExceeded()
+	usageStatus, unknownRequests := usageDiagnostics(ag)
 	if outputFormat == "json" {
 		out := jsonOutput{
 			Status: "failed",
@@ -475,6 +500,8 @@ func emitFailureUsageTo(outWriter io.Writer, ag ResultProvider, duration time.Du
 				OutputTokens:     ag.TotalOutputTokens(),
 				CacheReadTokens:  ag.TotalCacheReadTokens(),
 				CacheWriteTokens: ag.TotalCacheWriteTokens(),
+				UsageStatus:      usageStatus,
+				UnknownRequests:  unknownRequests,
 				Elapsed:          duration.Round(time.Second).String(),
 				BudgetExceeded:   budgetExceeded,
 			},

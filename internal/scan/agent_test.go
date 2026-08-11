@@ -267,18 +267,16 @@ func exactNTokens(t *testing.T, n int) string {
 	return s
 }
 
-// TestFilterLargeScans_Boundary pins the 80% threshold exactly: with
-// MaxTokens=100 the limit is 80, so an 80-token item is kept and an 81-token
-// one is dropped. TestFilterLargeScans above uses margins wide enough to pass
-// at any threshold, so it does not pin the value.
+// TestFilterLargeScans_Boundary verifies the complete semantic request
+// estimate, including message framing, is used by the effective 85% ceiling.
 func TestFilterLargeScans_Boundary(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	tpl.MaxTokens = 100 // threshold = 80
 	a := newAgentForTest(t, tpl)
 
 	in := []model.ScanItem{
-		{Path: "at-limit.go", Content: exactNTokens(t, 80)},
-		{Path: "over-limit.go", Content: exactNTokens(t, 81)},
+		{Path: "at-limit.go", Content: exactNTokens(t, 60)},
+		{Path: "over-limit.go", Content: exactNTokens(t, 100)},
 	}
 	out := a.filterLargeScans(in)
 	if len(out) != 1 {

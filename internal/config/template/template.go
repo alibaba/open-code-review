@@ -19,6 +19,7 @@ type Template struct {
 	PlanTask                  *LlmConversation `json:"PLAN_TASK,omitempty"`
 	MemoryCompressionTask     LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	MaxTokens                 int              `json:"MAX_TOKENS"`
+	MaxOutputTokens           int              `json:"MAX_OUTPUT_TOKENS,omitempty"`
 	MaxToolRequestTimes       int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	MaxTokensBudgetMultiplier float64          `json:"MAX_TOKENS_BUDGET_MULTIPLIER,omitempty"`
 	PlanModeLineThreshold     int              `json:"PLAN_MODE_LINE_THRESHOLD"`
@@ -35,6 +36,7 @@ type ScanTemplate struct {
 	MemoryCompressionTask     LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	ReLocationTask            *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	MaxTokens                 int              `json:"MAX_TOKENS"`
+	MaxOutputTokens           int              `json:"MAX_OUTPUT_TOKENS,omitempty"`
 	ToolRequestWaitTimeMs     int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
 	MaxToolRequestTimes       int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	MaxTokensBudgetMultiplier float64          `json:"MAX_TOKENS_BUDGET_MULTIPLIER,omitempty"`
@@ -68,6 +70,7 @@ type templateManifest struct {
 	PlanTask                  *manifestConversation `json:"PLAN_TASK,omitempty"`
 	MemoryCompressionTask     manifestConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	MaxTokens                 int                   `json:"MAX_TOKENS"`
+	MaxOutputTokens           int                   `json:"MAX_OUTPUT_TOKENS,omitempty"`
 	MaxToolRequestTimes       int                   `json:"MAX_TOOL_REQUEST_TIMES"`
 	MaxTokensBudgetMultiplier float64               `json:"MAX_TOKENS_BUDGET_MULTIPLIER,omitempty"`
 	PlanModeLineThreshold     int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
@@ -115,6 +118,7 @@ func LoadDefault() (*Template, error) {
 
 	var tpl Template
 	tpl.MaxTokens = m.MaxTokens
+	tpl.MaxOutputTokens = m.MaxOutputTokens
 	tpl.MaxToolRequestTimes = m.MaxToolRequestTimes
 	tpl.MaxTokensBudgetMultiplier = m.MaxTokensBudgetMultiplier
 	tpl.PlanModeLineThreshold = m.PlanModeLineThreshold
@@ -135,6 +139,22 @@ func LoadDefault() (*Template, error) {
 		return nil, err
 	}
 	return &tpl, nil
+}
+
+// OutputTokens keeps older custom templates working while separating the
+// provider response limit from the local conversation-context budget.
+func (t Template) OutputTokens() int {
+	if t.MaxOutputTokens > 0 {
+		return t.MaxOutputTokens
+	}
+	return t.MaxTokens
+}
+
+func (t ScanTemplate) OutputTokens() int {
+	if t.MaxOutputTokens > 0 {
+		return t.MaxOutputTokens
+	}
+	return t.MaxTokens
 }
 
 // LoadScanDefault parses the embedded scan_template.json.
@@ -196,6 +216,9 @@ func (t *Template) Validate() error {
 	if t.MaxTokens <= 0 {
 		return fmt.Errorf("max_tokens must be positive")
 	}
+	if t.MaxOutputTokens < 0 {
+		return fmt.Errorf("max_output_tokens must be non-negative")
+	}
 	if t.MaxToolRequestTimes <= 0 {
 		return fmt.Errorf("max_tool_request_times must be positive")
 	}
@@ -212,6 +235,9 @@ func (t *Template) Validate() error {
 func (t *ScanTemplate) Validate() error {
 	if t.MaxTokens <= 0 {
 		return fmt.Errorf("scan: max_tokens must be positive")
+	}
+	if t.MaxOutputTokens < 0 {
+		return fmt.Errorf("scan: max_output_tokens must be non-negative")
 	}
 	if t.MaxToolRequestTimes <= 0 {
 		return fmt.Errorf("scan: max_tool_request_times must be positive")

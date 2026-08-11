@@ -526,18 +526,16 @@ func exactNTokens(t *testing.T, n int) string {
 	return s
 }
 
-// TestFilterLargeDiffs_Boundary pins the 80% threshold exactly: with
-// MaxTokens=100 the limit is 80, so an 80-token diff is kept and an 81-token
-// one is dropped. TestFilterLargeDiffs above uses margins wide enough to pass
-// at any threshold, so it does not pin the value.
+// TestFilterLargeDiffs_Boundary verifies the complete semantic request
+// estimate, including message framing, is used by the effective 85% ceiling.
 func TestFilterLargeDiffs_Boundary(t *testing.T) {
 	a := New(Args{
 		Template: template.Template{MaxTokens: 100},
 	})
 
 	diffs := []model.Diff{
-		{NewPath: "at-limit.go", Diff: exactNTokens(t, 80)},
-		{NewPath: "over-limit.go", Diff: exactNTokens(t, 81)},
+		{NewPath: "at-limit.go", Diff: exactNTokens(t, 60)},
+		{NewPath: "over-limit.go", Diff: exactNTokens(t, 100)},
 	}
 
 	kept := a.filterLargeDiffs(diffs)
