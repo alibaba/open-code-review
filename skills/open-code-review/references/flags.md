@@ -12,7 +12,7 @@
 | `--exclude` | | `""` | Comma-separated gitignore-style exclude patterns |
 | `--concurrency` | | `8` | Maximum concurrent file worker count |
 | `--timeout` | | `10` | Per-file timeout in minutes |
-| `--max-tools` | | Template default | Maximum tool-call turns per file (min 10) |
+| `--max-tools` | | Template default | Maximum tool-call turns per file (review mode: min 10; scan mode: only takes effect when greater than template default) |
 | `--max-git-procs` | | `16` | Maximum concurrent git sub-processes |
 | `--max-tokens-budget` | | `0` (unlimited) | Token budget cap; outputs partial results gracefully if exceeded |
 | `--provider` | | Configured Provider | Per-run override for LLM Provider (e.g. `openai`, `anthropic`) |

@@ -35,6 +35,13 @@ ocr config unset mcp_servers.docs
 | `tools` | JSON array allowlist filter |
 | `setup` | Shell command executed before startup (stdio) |
 
+## Behavioral Details
+
+- `headers` values must be non-empty (validated on `set`); an empty value after `$ENV_VAR` expansion fails at runtime.
+- MCP tools whose names collide with built-in tools are skipped with a warning; tools in the `tools` allowlist that do not exist on the server are also warned about.
+- `setup` runs in the repository root directory with a 5-minute timeout; on failure it prints an error and skips that server — the review proceeds without it.
+- Invalid JSON in `args` / `env` / `tools` / `headers` reports an error.
+
 ## Built-in Tools
 
 MCP server tools are registered alongside the following built-in agent tools:

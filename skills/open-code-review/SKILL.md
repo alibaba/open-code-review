@@ -57,8 +57,8 @@ LLM not configured & user does not want to configure?
 
 Analyze the review target and extract concise business context to improve review quality.
 
-- Short context (< 2000 chars): `--background "context"` / `-b "context"`
-- Long context (PRD/docs): write to a temporary `.md` file, `--background-file <path>` / `-B <path>` (max 1 MB, hard limit 8000 chars)
+- Short context: `--background "context"` / `-b "context"` (inline string, passed through raw — no sanitization, no length limit)
+- Long context (PRD/docs): write to a temporary `.md` file, `--background-file <path>` / `-B <path>` (max 1 MB; control characters stripped, wrapped in `<ocr_user_background>` tags; soft limit 2000 chars, hard limit 8000)
 
 ### Step 2: Execute Review or Scan
 
@@ -90,9 +90,22 @@ JSON output core structure:
 
 ```json
 {
-  "status": "complete | partial | failed | skipped",
+  "status": "review: complete | partial | failed | skipped; scan: success | completed_with_warnings | completed_with_errors",
   "session_id": "...",
-  "summary": { "files_reviewed": 12, "comments": 5, "total_tokens": 45000, "elapsed": "32s", "budget_exceeded": false },
+  "llm": { "provider": "anthropic", "model": "claude-opus-5" },
+  "trace_id": "...",
+  "summary": {
+    "files_reviewed": 12,
+    "comments": 5,
+    "total_tokens": 45000,
+    "input_tokens": 40000,
+    "output_tokens": 5000,
+    "cache_read_tokens": 12000,
+    "cache_write_tokens": 3000,
+    "elapsed": "32s",
+    "budget_exceeded": false
+  },
+  "tool_calls": { "total": 58, "by_tool": { "file_read": 40, "code_search": 18 } },
   "comments": [{
     "path": "src/auth/login.ts",
     "content": "Review comment content",
@@ -101,12 +114,16 @@ JSON output core structure:
     "category": "security",
     "severity": "high",
     "suggestion_code": "Optional fix suggestion",
-    "existing_code": "Original code"
+    "existing_code": "Original code",
+    "thinking": "Optional: LLM reasoning"
   }],
   "warnings": [{ "file": "...", "message": "...", "type": "timeout" }],
-  "manifest": { "terminal_state": "complete", "coverage": { "selected": 12, "completed": 10, "failed": 2 } }
+  "project_summary": "Optional: scan-mode repository summary",
+  "manifest": { "terminal_state": "complete", "coverage": { "selected": 12, "completed": 10, "reused": 0, "failed": 2, "waived": 0 } }
 }
 ```
+
+> **Structure notes**: `manifest` is emitted in review mode only (scan has no manifest, so scan `status` uses the `success` variants); `tool_calls` is always emitted; `llm`, `trace_id`, `project_summary`, `resume`, `message` are optional; run-level failures emit a `status:"failed"` JSON object to **stderr**.
 
 Classify by severity:
 
@@ -152,7 +169,7 @@ If no issues found: "Review complete — 0 issues found across N files."
 - **Working directory matters** — `ocr` operates on the git repo in cwd. Use `--repo /path` to override.
 - **Workspace mode includes untracked files** — Bare `ocr review` reviews staged + unstaged + untracked changes.
 - **Plan phase at 50+ lines** — Diffs exceeding 50 changed lines run a pre-review risk analysis plan phase.
-- **Background sanitization** — Control characters stripped; wrapped in `<ocr_user_background>` tags; soft limit 2000 chars, hard limit 8000.
+- **Background sanitization** — Applies to `--background-file` (`-B`) only: control characters stripped, content wrapped in `<ocr_user_background>` tags; soft limit 2000 chars, hard limit 8000. Inline `--background` (`-b`) is passed through raw with no sanitization or length limit.
 - **Ref injection defense** — `--from`/`--to`/`--commit` values cannot start with `-`.
 - **Scan mode needs no git** — `ocr scan` runs on non-git directories.
 - **Resume conditions** — `ocr scan` fully supports `--resume`; `ocr review` supports `--resume` only in `--from/--to` or `--commit` modes (not workspace mode).
@@ -164,8 +181,8 @@ If no issues found: "Review complete — 0 issues found across N files."
 
 After review completes:
 
-1. Command exit code is 0
-2. JSON `status` field is `"complete"` (or `"partial"` with acceptable warnings)
+1. Command exit code is 0 (non-zero only on run-level failure or when every selected item failed)
+2. JSON `status` field: `"complete"` for review (or `"partial"` with acceptable warnings); `"success"` for scan (`completed_with_warnings` / `completed_with_errors` acceptable — inspect `warnings`)
 3. `comments` array structured as expected
 4. `summary.files_reviewed` matches target count
 
