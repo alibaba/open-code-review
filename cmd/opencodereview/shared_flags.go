@@ -40,7 +40,7 @@ func addOutputFlags(cmd *cobra.Command, format, audience *string) {
 // instead of stdout. "" or "-" keeps stdout; a real path is created lazily on
 // the first write so a failed run never truncates an existing file.
 func addOutputPathFlag(cmd *cobra.Command, target *string) {
-	cmd.Flags().StringVarP(target, "output", "o", "", "write results to a UTF-8 file (use '-' for stdout)")
+	cmd.Flags().StringVarP(target, "output", "o", "", "write results to a UTF-8 file (default: stdout; '-' also means stdout)")
 }
 
 func addExcludeFlag(cmd *cobra.Command, target *string) {

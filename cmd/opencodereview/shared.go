@@ -360,23 +360,36 @@ func (w *stripAnsiWriter) Write(p []byte) (int, error) {
 				w.state = ansiOSCEsc
 			}
 		case ansiOSCEsc:
-			w.pending = append(w.pending, c)
 			if c == '\\' { // ST terminates the OSC string
 				w.state = ansiNormal
 				w.pending = w.pending[:0]
 			} else {
-				// Not a valid ST; discard the malformed sequence up to here.
+				// Not a valid ST. The OSC ends here without one (e.g. a bare
+				// ESC terminator, which some terminals accept). The trailing
+				// byte is not part of the sequence and must be re-parsed:
+				// an ESC starts a new escape sequence, anything else is text.
 				w.state = ansiNormal
 				w.pending = w.pending[:0]
+				if c == 0x1b {
+					w.state = ansiEsc
+					w.pending = append(w.pending, c)
+				} else {
+					out = append(out, c)
+				}
 			}
 		}
 	}
 
 	if len(out) > 0 {
-		if n, err := w.dst.Write(out); err != nil {
-			return 0, err
-		} else if n != len(out) {
-			return 0, io.ErrShortWrite
+		n, err := w.dst.Write(out)
+		if err != nil {
+			// The state machine has already consumed p; report the error but
+			// still return len(p) so a caller that retries on n < len(p) does
+			// not feed the same bytes through the state machine a second time.
+			return len(p), err
+		}
+		if n != len(out) {
+			return len(p), io.ErrShortWrite
 		}
 	}
 	return len(p), nil

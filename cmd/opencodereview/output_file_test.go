@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -363,5 +364,58 @@ func TestEmitRunResult_TextWriteFailurePropagates(t *testing.T) {
 	w := &lazyFileWriter{path: filepath.Join(t.TempDir(), "no", "such", "out.txt")}
 	if err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil, nil, w); err == nil {
 		t.Fatal("emitRunResult must propagate the output write failure")
+	}
+}
+
+// TestStripAnsiWriter_OSCBareEscKeepsTrailingText pins the regression where an
+// OSC string terminated by a bare ESC (no ST '\') swallowed the first byte of
+// the following text instead of re-parsing it.
+func TestStripAnsiWriter_OSCBareEscKeepsTrailingText(t *testing.T) {
+	var buf bytes.Buffer
+	w := &stripAnsiWriter{dst: &buf}
+	in := "before\033]0;window title\033hello"
+	want := "beforehello"
+	if _, err := w.Write([]byte(in)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if buf.String() != want {
+		t.Fatalf("got %q, want %q", buf.String(), want)
+	}
+}
+
+// TestStripAnsiWriter_OSCBareEscThenNewEscape pins that a bare-ESC-terminated
+// OSC followed by a new escape sequence starts a fresh sequence instead of
+// leaking or dropping bytes.
+func TestStripAnsiWriter_OSCBareEscThenNewEscape(t *testing.T) {
+	var buf bytes.Buffer
+	w := &stripAnsiWriter{dst: &buf}
+	in := "before\033]0;window title\033\033[31mhello"
+	want := "beforehello"
+	if _, err := w.Write([]byte(in)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if buf.String() != want {
+		t.Fatalf("got %q, want %q", buf.String(), want)
+	}
+}
+
+// failingWriter always fails; used to pin the Write return-value contract.
+type failingWriter struct{ err error }
+
+func (f *failingWriter) Write([]byte) (int, error) { return 0, f.err }
+
+// TestStripAnsiWriter_WriteFailureReturnsConsumedLen pins that Write reports
+// the underlying error but still returns len(p): the state machine has already
+// consumed the input, so returning 0 would make a caller retry the same bytes
+// and corrupt the stream.
+func TestStripAnsiWriter_WriteFailureReturnsConsumedLen(t *testing.T) {
+	boom := &failingWriter{err: errors.New("boom")}
+	w := &stripAnsiWriter{dst: boom}
+	n, err := w.Write([]byte("plain text"))
+	if n != len("plain text") {
+		t.Fatalf("n = %d, want %d (input was consumed even though dst failed)", n, len("plain text"))
+	}
+	if err == nil {
+		t.Fatal("expected underlying write error to propagate")
 	}
 }
