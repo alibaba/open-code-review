@@ -19,6 +19,10 @@ local_ref='uses:[[:space:]]*\./'
 
 bad=""
 for file in "${files[@]}"; do
+  if [ ! -f "$file" ]; then
+    echo "ERROR: $file not found; the pin check cannot run." >&2
+    exit 1
+  fi
   hits="$(grep -nE 'uses:' "$file" || true)"
   [ -n "$hits" ] || continue
   while IFS= read -r line; do
