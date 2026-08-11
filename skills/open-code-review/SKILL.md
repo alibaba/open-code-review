@@ -64,9 +64,10 @@ Analyze the review target and extract concise business context to improve review
 
 **Always use `--audience agent`** (suppresses progress UI). Prefer `--format json`.
 
-> 💡 **Prevent console truncation**: When reviewing many files or running a full-repo `scan`, stdout may exceed the host agent's tool output buffer (e.g. ~45KB) and be hard-truncated, corrupting the JSON.
+> 💡 **Prevent console truncation**: When reviewing many files or running a full-repo `scan`, stdout may exceed the host agent's tool output buffer and be hard-truncated, corrupting the JSON.
 > - **Anticipate large reviews**: redirect to a file directly (e.g. `ocr scan --audience agent --format json -b "ctx" > scratch/ocr_result.json`), then read it with a file-reading tool. Note that run-level failure JSON goes to **stderr** — don't miss it when redirecting stdout.
 > - **Already truncated**: **no need to re-run `ocr`** — extract comments on demand via `ocr session comments <session-id> --severity high,critical --json`.
+> - **Windows PowerShell**: PowerShell 5's `>` redirect writes UTF-16 by default, which corrupts JSON — use `Out-File -Encoding utf8` or run through bash instead.
 
 #### Review Mode (Diff-based)
 
@@ -179,7 +180,7 @@ If no issues found: "Review complete — 0 issues found across N files."
 - **Resume conditions** — `ocr scan` fully supports `--resume`; `ocr review` supports `--resume` only in `--from/--to` or `--commit` modes (not workspace mode).
 - **`--preview` and `--resume` are mutually exclusive.**
 - **Language configuration** — Default: English. Switch via `ocr config set language 中文`.
-- **Avoid tool-buffer truncation** — stdout exceeding the host agent's tool output buffer (e.g. ~45KB) gets hard-truncated, corrupting JSON. For large runs, redirect to a file (`> scratch/ocr_result.json`) and read it with a file-reading tool; if truncation already happened, no need to re-run `ocr` — extract via `ocr session comments <session-id>`.
+- **Avoid tool-buffer truncation** — stdout exceeding the host agent's tool output buffer gets hard-truncated, corrupting JSON. For large runs, redirect to a file (`> scratch/ocr_result.json`) and read it with a file-reading tool; if truncation already happened, no need to re-run `ocr` — extract via `ocr session comments <session-id>`. On Windows PowerShell, use `Out-File -Encoding utf8` instead of `>` (PowerShell 5's `>` writes UTF-16 and corrupts JSON).
 - **Do not test connectivity pre-emptively** — Execute review/scan directly; troubleshoot only on actual LLM failure (see troubleshooting.md).
 
 ## Verification
