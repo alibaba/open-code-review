@@ -294,6 +294,8 @@ type ProviderEntry struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	// AssistantReplay: "native" opts into provider-native assistant turn replay.
+	AssistantReplay string `json:"assistant_replay,omitempty"`
 }
 
 // MCPServerConfig holds configuration for a single MCP server.
@@ -333,6 +335,8 @@ type LlmConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	// AssistantReplay: "native" opts into provider-native assistant turn replay.
+	AssistantReplay string `json:"assistant_replay,omitempty"`
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -393,6 +397,7 @@ var supportedConfigKeys = []string{
 	"llm.extra_body",
 	"llm.extra_headers",
 	"llm.retry_codes",
+	"llm.assistant_replay",
 	"language",
 	"telemetry.enabled",
 	"telemetry.exporter",
@@ -545,8 +550,14 @@ func setConfigValue(cfg *Config, key, value string) error {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		cfg.Llm.RetryCodes = codes
+	case "llm.assistant_replay", "llm.AssistantReplay":
+		normalized, err := llm.NormalizeAssistantReplay(value)
+		if err != nil {
+			return err
+		}
+		cfg.Llm.AssistantReplay = normalized
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, assistant_replay\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -598,8 +609,14 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		entry.RetryCodes = codes
+	case "assistant_replay":
+		normalized, err := llm.NormalizeAssistantReplay(value)
+		if err != nil {
+			return fmt.Errorf("invalid assistant replay for %s: %w", key, err)
+		}
+		entry.AssistantReplay = normalized
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, assistant_replay", field)
 	}
 	return nil
 }

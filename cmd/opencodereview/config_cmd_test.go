@@ -997,8 +997,8 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, max_tokens, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\n" +
+		"Supported keys: provider, model, max_tokens, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, llm.assistant_replay, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, assistant_replay\n" +
 		"Protocol values: anthropic, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
@@ -1517,5 +1517,38 @@ func TestSetConfigValueLlmRetryCodesNoWarningForValidCodes(t *testing.T) {
 	}
 	if len(cfg.Llm.RetryCodes) != 2 {
 		t.Errorf("RetryCodes = %v, want [403 400]", cfg.Llm.RetryCodes)
+	}
+}
+
+func TestSetConfigValueLlmAssistantReplay(t *testing.T) {
+	cfg := &Config{}
+	if err := setConfigValue(cfg, "llm.assistant_replay", "Native"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.Llm.AssistantReplay != llm.AssistantReplayNative {
+		t.Errorf("AssistantReplay = %q, want %q (canonicalized)", cfg.Llm.AssistantReplay, llm.AssistantReplayNative)
+	}
+	if err := setConfigValue(cfg, "llm.assistant_replay", "default"); err != nil {
+		t.Fatalf("setConfigValue back to default: %v", err)
+	}
+	if cfg.Llm.AssistantReplay != "" {
+		t.Errorf("AssistantReplay = %q, want empty after explicit default", cfg.Llm.AssistantReplay)
+	}
+	if err := setConfigValue(cfg, "llm.assistant_replay", "always"); err == nil {
+		t.Fatal("expected error for unsupported assistant_replay value")
+	}
+}
+
+func TestSetConfigValueProviderAssistantReplay(t *testing.T) {
+	cfg := &Config{}
+	if err := setConfigValue(cfg, "custom_providers.test.assistant_replay", "native"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if entry := cfg.CustomProviders["test"]; entry.AssistantReplay != llm.AssistantReplayNative {
+		t.Errorf("AssistantReplay = %q, want %q", entry.AssistantReplay, llm.AssistantReplayNative)
+	}
+	err := setConfigValue(cfg, "custom_providers.test.assistant_replay", "verbatim")
+	if err == nil || !strings.Contains(err.Error(), "assistant_replay") {
+		t.Fatalf("error = %v, want assistant_replay validation error", err)
 	}
 }
