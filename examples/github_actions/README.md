@@ -4,7 +4,7 @@ This directory provides a ready-to-use GitHub Actions workflow demo that integra
 
 ## Quick Start: `ocr-review.yml`
 
-The simplest adoption path: this demo delegates every step — checkout, OCR install, review, comment posting, artifact upload — to the official reusable composite action at [`action.yml`](../../action.yml) via a single `uses: alibaba/open-code-review@main` step. It covers both automatic PR review (`pull_request_target: opened/synchronize/reopened`) and on-demand re-review via comments (`/open-code-review` or `@open-code-review`). No inline scripts to maintain — `@main` always runs the latest action; pin to a version tag or commit SHA when reproducibility matters.
+The simplest adoption path: this demo delegates every step — checkout, OCR install, review, comment posting, artifact upload — to the official reusable composite action at [`action.yml`](../../action.yml) via a single `uses: alibaba/open-code-review@main` step. It covers both automatic PR review (`pull_request_target: opened/synchronize/reopened`) and on-demand re-review via comments (`/open-code-review` or `@open-code-review`). No inline scripts to maintain — `@main` always runs the latest action; see [Reproducible pinning](#reproducible-pinning) when you need runs to be repeatable.
 
 ```bash
 mkdir -p .github/workflows
@@ -23,6 +23,22 @@ The core of the demo is a single action step:
 ```
 
 See [`action.yml`](../../action.yml) for the full list of inputs, outputs, security guidance, and the four comment-posting modes (sticky summary + incremental).
+
+## Reproducible pinning
+
+The Action is an orchestrator: it installs the OCR CLI from npm at run time (`ocr_version`, default `latest`). Pinning only the Action reference therefore does **not** freeze review behavior — a new CLI release still changes what runs. For a fully reproducible setup, pin both:
+
+```yaml
+- uses: alibaba/open-code-review@<full-commit-sha> # vX.Y.Z
+  with:
+    ocr_version: 'X.Y.Z'
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+```
+
+Take the commit SHA from the [releases page](https://github.com/alibaba/open-code-review/releases) and keep the `# vX.Y.Z` comment next to it so update tooling (Dependabot, Renovate) can track it. Every action referenced *inside* [`action.yml`](../../action.yml) is itself pinned to a full commit SHA (enforced by `scripts/verify-action-pins.sh` in CI), so the outer SHA transitively freezes the whole workflow — only the two coordinates above are yours to choose.
 
 ## Running on a self-hosted runner
 

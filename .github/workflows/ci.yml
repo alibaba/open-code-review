@@ -29,6 +29,9 @@ jobs:
       - name: Verify license headers
         run: bash scripts/verify-license.sh
 
+      - name: Verify action pins
+        run: bash scripts/verify-action-pins.sh
+
       - name: Check formatting
         run: |
           unformatted="$(gofmt -s -l .)"
