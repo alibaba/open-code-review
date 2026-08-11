@@ -556,7 +556,13 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 	case "api_key":
 		entry.APIKey = value
 	case "url":
-		entry.URL = value
+		trimmedURL := strings.TrimSpace(value)
+		if trimmedURL != "" {
+			if err := validateBaseURL(trimmedURL); err != nil {
+				return fmt.Errorf("invalid URL for %s: %w", key, err)
+			}
+		}
+		entry.URL = trimmedURL
 	case "protocol":
 		normalized := llm.NormalizeProtocol(value)
 		if err := llm.ValidateProtocol(normalized); err != nil {

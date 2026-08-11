@@ -64,6 +64,26 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
+### Переопределение Base URL встроенного провайдера
+
+У каждого встроенного провайдера есть предустановленный Base URL
+(см. таблицу выше). Чтобы направить встроенный провайдер на другую конечную
+точку — например, на собственный шлюз LiteLLM, который редко находится по
+предустановленному адресу `http://localhost:4000/v1` — задайте
+`providers.<name>.url`:
+
+```bash
+ocr config set provider                   litellm
+ocr config set model                      openai/gpt-5.4
+ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
+ocr config set providers.litellm.url      https://gateway.internal:8000/v1
+```
+
+Заданный `url` имеет приоритет над предустановленным Base URL. Если
+`providers.<name>.url` не задан (или очищен), OCR возвращается к
+предустановленному значению по умолчанию — поэтому его нужно задавать только
+когда ваша конечная точка отличается.
+
 ### Пользовательские провайдеры
 
 Любое имя провайдера, которого нет в таблице выше, считается

@@ -21,7 +21,6 @@ type tuiStep int
 const (
 	stepProvider tuiStep = iota
 	stepModel
-	stepBaseURL // official-tab only: edit the provider Base URL (defaults to preset)
 	stepAPIKey
 )
 
@@ -138,9 +137,6 @@ type providerTUIModel struct {
 	cpNameInput     textinput.Model
 	cpURLInput      textinput.Model
 	cpAuthInput     textinput.Model
-
-	// --- tab: official (Base URL override) ---
-	officialURLInput textinput.Model
 
 	// --- tab: manual ---
 	inManualForm          bool
@@ -267,10 +263,6 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 	cpAuth.Placeholder = "optional, leave empty for default (Authorization)"
 	cpAuth.SetWidth(55)
 
-	officialURL := textinput.New()
-	officialURL.Placeholder = "leave empty for provider default"
-	officialURL.SetWidth(50)
-
 	manualURL := textinput.New()
 	manualURL.Placeholder = "enter your API base URL"
 	manualURL.SetWidth(50)
@@ -297,7 +289,6 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 		cpNameInput:           cpName,
 		cpURLInput:            cpURL,
 		cpAuthInput:           cpAuth,
-		officialURLInput:      officialURL,
 		manualURLInput:        manualURL,
 		manualModelInput:      manualModel,
 		manualAuthHeaderInput: manualAuthHeader,
@@ -629,10 +620,6 @@ func (m providerTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateAPIKeyInput(key, msg)
 		}
 
-		if m.step == stepBaseURL {
-			return m.updateOfficialURLInput(key, msg)
-		}
-
 		if m.step == stepProvider && (m.creatingCustom || m.editingCustom) {
 			return m.updateCustomProviderForm(key, msg)
 		}
@@ -721,11 +708,6 @@ func (m providerTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	default:
-		if m.step == stepBaseURL {
-			var cmd tea.Cmd
-			m.officialURLInput, cmd = m.officialURLInput.Update(msg)
-			return m, cmd
-		}
 		if m.step == stepProvider && (m.creatingCustom || m.editingCustom) {
 			return m.passThroughCPInput(msg)
 		}
@@ -949,43 +931,10 @@ func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	return false, "API key is required"
 }
 
-// updateOfficialURLInput handles the official-tab Base URL step. Enter advances
-// to the API key step (regardless of whether the field was edited); Esc/Back
-// returns to the model step.
-func (m providerTUIModel) updateOfficialURLInput(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch key {
-	case "esc":
-		m.officialURLInput.Blur()
-		m.step = stepModel
-		m.formError = ""
-		return m, nil
-	case "enter":
-		m.officialURLInput.Blur()
-		m.step = stepAPIKey
-		m.formError = ""
-		m.loadExistingAPIKey()
-		return m, m.apiKeyInput.Focus()
-	case "ctrl+c":
-		m.cancelled = true
-		return m, tea.Quit
-	default:
-		var cmd tea.Cmd
-		m.officialURLInput, cmd = m.officialURLInput.Update(msg)
-		m.formError = ""
-		return m, cmd
-	}
-}
-
 func (m providerTUIModel) updateAPIKeyInput(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc":
 		m.apiKeyInput.Blur()
-		// Official providers have an intermediate Base URL step; custom and
-		// manual providers go straight back to model selection.
-		if m.activeTab == tabOfficial {
-			m.step = stepBaseURL
-			return m, m.officialURLInput.Focus()
-		}
 		m.step = stepModel
 		m.formError = ""
 		return m, nil
@@ -1792,20 +1741,6 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.formError = err.Error()
 			return m, nil
 		}
-		// Official providers offer an editable Base URL step (defaults to the
-		// preset); custom providers already capture a URL at creation time, so
-		// they advance straight to the API key.
-		if m.activeTab == tabOfficial {
-			m.step = stepBaseURL
-			m.formError = ""
-			m.loadOfficialURL()
-			return m, m.officialURLInput.Focus()
-		}
-		m.step = stepAPIKey
-		m.formError = ""
-		m.loadExistingAPIKey()
-		return m, m.apiKeyInput.Focus()
-	case stepBaseURL:
 		m.step = stepAPIKey
 		m.formError = ""
 		m.loadExistingAPIKey()
@@ -1891,21 +1826,6 @@ func (m *providerTUIModel) loadExistingAPIKey() {
 	}
 }
 
-// loadOfficialURL pre-fills the official Base URL input with the effective URL
-// for the currently selected provider: a configured override (entry.URL) when
-// set, otherwise the preset default (preset.BaseURL). Leaving the field at the
-// preset default persists no url field, so the preset remains the default.
-func (m *providerTUIModel) loadOfficialURL() {
-	p := m.currentProvider()
-	effectiveURL := p.BaseURL
-	if m.existingCfg != nil {
-		if entry, ok := m.existingCfg.Providers[p.Name]; ok && entry.URL != "" {
-			effectiveURL = entry.URL
-		}
-	}
-	m.officialURLInput.SetValue(effectiveURL)
-}
-
 func (m providerTUIModel) selectedModelFromState() string {
 	if m.modelInput.Value() != "" && (m.customModel || m.isCustomModelItem(m.modelIdx)) {
 		return m.modelInput.Value()
@@ -1937,7 +1857,6 @@ func (m providerTUIModel) result() providerTUIResult {
 			provider:         p.Name,
 			model:            model,
 			apiKey:           apiKey,
-			url:              strings.TrimSpace(m.officialURLInput.Value()),
 			sessionModelPick: m.sessionModelPickSnapshot(),
 		}
 
@@ -2059,8 +1978,6 @@ func (m providerTUIModel) View() tea.View {
 		m.viewProvider(&s)
 	case stepModel:
 		m.viewModel(&s)
-	case stepBaseURL:
-		m.viewBaseURL(&s)
 	case stepAPIKey:
 		m.viewAPIKey(&s)
 	}
@@ -2329,43 +2246,9 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 	}
 }
 
-// effectiveBaseURL returns the URL to display in the model-selection step:
-// the official preset's configured override (entry.URL) or preset.BaseURL, or
-// the custom provider's URL. Empty when no provider is selected.
-func (m providerTUIModel) effectiveBaseURL() string {
-	if m.activeTab == tabOfficial {
-		p := m.currentProvider()
-		// When the user has an in-progress edit in the Base URL step (e.g. they
-		// typed a new URL and pressed Esc back to model selection), reflect that
-		// pending value rather than the stale on-disk config.
-		if v := strings.TrimSpace(m.officialURLInput.Value()); v != "" {
-			return v
-		}
-		// A configured override (entry.URL) takes precedence over the preset
-		// default so the model-selection step reflects the gateway in use.
-		if m.existingCfg != nil {
-			if entry, ok := m.existingCfg.Providers[p.Name]; ok && entry.URL != "" {
-				return entry.URL
-			}
-		}
-		if p.BaseURL != "" {
-			return p.BaseURL
-		}
-	}
-	if cp, ok := m.selectedCustomProvider(); ok && cp.entry.URL != "" {
-		return cp.entry.URL
-	}
-	return ""
-}
-
 func (m providerTUIModel) viewModel(s *strings.Builder) {
 	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", m.modelProviderName())))
-	s.WriteString("\n")
-	if url := m.effectiveBaseURL(); url != "" {
-		s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  Base URL: %s", url)))
-		s.WriteString("\n")
-	}
-	s.WriteString("\n")
+	s.WriteString("\n\n")
 
 	models := m.models()
 
@@ -2415,35 +2298,6 @@ func (m providerTUIModel) viewModel(s *strings.Builder) {
 	} else {
 		s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  Enter Confirm  Esc Back"))
 	}
-	s.WriteString("\n")
-}
-
-// viewBaseURL renders the official-tab Base URL step. The field is pre-filled
-// with the effective URL (override or preset default); editing it overrides
-// preset.BaseURL when persisted, leaving it unchanged keeps the preset default.
-func (m providerTUIModel) viewBaseURL(s *strings.Builder) {
-	provider := m.currentProvider()
-	title := fmt.Sprintf("  Edit Base URL (%s)", provider.DisplayName)
-	s.WriteString(tuiTitleStyle.Render(title))
-	s.WriteString("\n\n")
-	s.WriteString("  " + m.officialURLInput.View())
-	s.WriteString("\n")
-
-	preset, isPreset := llm.LookupProvider(provider.Name)
-	if isPreset && preset.BaseURL != "" {
-		s.WriteString("\n")
-		s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  Default: %s  (leave unchanged to keep the preset default)", preset.BaseURL)))
-		s.WriteString("\n")
-	}
-
-	if m.formError != "" {
-		s.WriteString("\n")
-		s.WriteString(tuiErrorStyle.Render("  " + m.formError))
-		s.WriteString("\n")
-	}
-
-	s.WriteString("\n")
-	s.WriteString(tuiHelpStyle.Render("  Enter Confirm  Esc Back"))
 	s.WriteString("\n")
 }
 

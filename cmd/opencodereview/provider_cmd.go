@@ -266,15 +266,15 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 		entry.APIKey = ""
 	}
 	// Persist a Base URL override only when it differs from the preset default.
-	// An empty/unchanged value clears any prior override so the preset BaseURL
-	// remains the default, matching the "preset is the fallback" contract.
+	// An empty value means the official wizard did not edit Base URL, so preserve
+	// an existing override; an explicit preset default clears the override.
 	trimmedURL := strings.TrimSpace(result.url)
 	if isPreset && trimmedURL != "" && trimmedURL != preset.BaseURL {
 		if err := validateBaseURL(trimmedURL); err != nil {
 			return err
 		}
 		entry.URL = trimmedURL
-	} else {
+	} else if isPreset && trimmedURL == preset.BaseURL {
 		entry.URL = ""
 	}
 	cfg.Providers[result.provider] = entry
@@ -434,8 +434,8 @@ func maskKey(key string) string {
 }
 
 // validateBaseURL checks that a provider Base URL has an http or https scheme
-// and a non-empty host, giving the user immediate feedback in the TUI rather
-// than a runtime failure when the LLM client tries to use it.
+// and a non-empty host, giving the user immediate feedback rather than
+// a runtime failure when the LLM client tries to use it.
 func validateBaseURL(raw string) error {
 	parsed, err := url.Parse(raw)
 	if err != nil {

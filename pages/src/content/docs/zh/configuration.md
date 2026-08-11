@@ -58,6 +58,22 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
+### 覆盖内置 provider 的 Base URL
+
+每个内置 provider 都有一个预设 Base URL（见上表）。要将内置 provider
+指向不同的端点——例如自建的 LiteLLM 网关，其地址很少是预设默认值
+`http://localhost:4000/v1`——设置 `providers.<name>.url`：
+
+```bash
+ocr config set provider                   litellm
+ocr config set model                      openai/gpt-5.4
+ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
+ocr config set providers.litellm.url      https://gateway.internal:8000/v1
+```
+
+配置的 `url` 优先于预设 Base URL。当 `providers.<name>.url` 未设置（或
+被清除）时，OCR 回退到预设默认值——因此只需在端点不同时才设置。
+
 ### 自定义 provider
 
 任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`

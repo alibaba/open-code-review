@@ -179,7 +179,7 @@ func TestProviderTUI_EscFromModelGoesBackToProvider(t *testing.T) {
 	}
 }
 
-func TestProviderTUI_EscFromAPIKeyGoesBackToBaseURL(t *testing.T) {
+func TestProviderTUI_EscFromAPIKeyGoesBackToModel(t *testing.T) {
 	m := newProviderTUI(&Config{}, "")
 
 	result, _ := m.Update(enterKey())
@@ -187,20 +187,14 @@ func TestProviderTUI_EscFromAPIKeyGoesBackToBaseURL(t *testing.T) {
 
 	result, _ = m2.Update(enterKey())
 	m3 := result.(providerTUIModel)
-	if m3.step != stepBaseURL {
-		t.Fatalf("after 2x Enter, step = %d, want %d (stepBaseURL)", m3.step, stepBaseURL)
+	if m3.step != stepAPIKey {
+		t.Fatalf("after 2x Enter, step = %d, want %d (stepAPIKey)", m3.step, stepAPIKey)
 	}
 
-	result, _ = m3.Update(enterKey())
+	result, _ = m3.Update(escKey())
 	m4 := result.(providerTUIModel)
-	if m4.step != stepAPIKey {
-		t.Fatalf("after 3x Enter, step = %d, want %d (stepAPIKey)", m4.step, stepAPIKey)
-	}
-
-	result, _ = m4.Update(escKey())
-	m5 := result.(providerTUIModel)
-	if m5.step != stepBaseURL {
-		t.Errorf("after Esc on stepAPIKey, step = %d, want %d (stepBaseURL)", m5.step, stepBaseURL)
+	if m4.step != stepModel {
+		t.Errorf("after Esc on stepAPIKey, step = %d, want %d (stepModel)", m4.step, stepModel)
 	}
 }
 
@@ -2498,8 +2492,8 @@ func TestProviderTUI_CancelIncompleteOfficialProviderSwitch_NoPersistedChanges(t
 	if m2.savedInSession {
 		t.Error("savedInSession should be false for cross-provider navigation")
 	}
-	if m2.step != stepBaseURL {
-		t.Fatalf("step = %d, want stepBaseURL", m2.step)
+	if m2.step != stepAPIKey {
+		t.Fatalf("step = %d, want stepAPIKey", m2.step)
 	}
 
 	result, _ = m2.Update(escKey())
@@ -2551,8 +2545,8 @@ func TestProviderTUI_SameOfficialProviderModelChange_DefersPersistUntilConfirm(t
 	if m2.savedInSession {
 		t.Error("savedInSession should be false before API key confirm")
 	}
-	if m2.step != stepBaseURL {
-		t.Fatalf("step = %d, want stepBaseURL", m2.step)
+	if m2.step != stepAPIKey {
+		t.Fatalf("step = %d, want stepAPIKey", m2.step)
 	}
 	if _, err := os.Stat(configPath); err == nil {
 		t.Fatal("config should not be written before wizard confirm")
@@ -2589,20 +2583,9 @@ func TestProviderTUI_OfficialModelChangeBlockedAtAPIKey_KeepsGlobalModel(t *test
 
 	result, _ := m.Update(enterKey())
 	m2 := result.(providerTUIModel)
-	if m2.step != stepBaseURL {
-		t.Fatalf("step = %d, want stepBaseURL", m2.step)
-	}
+	m2.beginAPIKeyReplace()
 
-	// Advance from the Base URL step to the API key step, then attempt to
-	// confirm without a key (should be blocked).
-	result, _ = m2.Update(enterKey())
-	m2b := result.(providerTUIModel)
-	if m2b.step != stepAPIKey {
-		t.Fatalf("step = %d, want stepAPIKey", m2b.step)
-	}
-	m2b.beginAPIKeyReplace()
-
-	result, cmd := m2b.Update(enterKey())
+	result, cmd := m2.Update(enterKey())
 	m3 := result.(providerTUIModel)
 	if cmd != nil {
 		t.Error("Enter without key or env should not quit")
@@ -2994,117 +2977,5 @@ func TestProviderTUIResult_ManualProtocolIsCanonical(t *testing.T) {
 		if r.protocol != want {
 			t.Errorf("manualProtocolIdx=%d: result.protocol = %q, want %q", i, r.protocol, want)
 		}
-	}
-}
-
-// TestProviderTUI_OfficialBaseURLPrefilledWithPreset verifies that entering the
-// official Base URL step pre-fills the input with the preset default when no
-// override is configured.
-func TestProviderTUI_OfficialBaseURLPrefilledWithPreset(t *testing.T) {
-	cfg := &Config{
-		Provider: "litellm",
-		Providers: map[string]ProviderEntry{
-			"litellm": {APIKey: "sk-test", Model: "openai/gpt-5.4"},
-		},
-	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "litellm" {
-			m.officialIdx = i
-			break
-		}
-	}
-	m.step = stepModel
-	m.modelIdx = modelIdxForName(t, m, "openai/gpt-5.4")
-
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-	if m2.step != stepBaseURL {
-		t.Fatalf("step = %d, want stepBaseURL", m2.step)
-	}
-	preset, _ := llm.LookupProvider("litellm")
-	if got := m2.officialURLInput.Value(); got != preset.BaseURL {
-		t.Errorf("officialURLInput = %q, want preset default %q", got, preset.BaseURL)
-	}
-}
-
-// TestProviderTUI_OfficialBaseURLPrefilledWithOverride verifies that a
-// configured providers.<name>.url is shown in the Base URL step.
-func TestProviderTUI_OfficialBaseURLPrefilledWithOverride(t *testing.T) {
-	cfg := &Config{
-		Provider: "litellm",
-		Providers: map[string]ProviderEntry{
-			"litellm": {APIKey: "sk-test", Model: "openai/gpt-5.4", URL: "https://gateway.internal:8000/v1"},
-		},
-	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "litellm" {
-			m.officialIdx = i
-			break
-		}
-	}
-	m.step = stepModel
-	m.modelIdx = modelIdxForName(t, m, "openai/gpt-5.4")
-
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-	if m2.step != stepBaseURL {
-		t.Fatalf("step = %d, want stepBaseURL", m2.step)
-	}
-	if got := m2.officialURLInput.Value(); got != "https://gateway.internal:8000/v1" {
-		t.Errorf("officialURLInput = %q, want configured override", got)
-	}
-
-	// Esc from the Base URL step returns to model selection.
-	result, _ = m2.Update(escKey())
-	m3 := result.(providerTUIModel)
-	if m3.step != stepModel {
-		t.Errorf("after Esc on stepBaseURL, step = %d, want stepModel", m3.step)
-	}
-}
-
-// TestProviderTUI_EffectiveBaseURLReflectsPendingEdit verifies that after the
-// user edits the Base URL in the stepBaseURL step and returns to model
-// selection (Esc), effectiveBaseURL() reflects the in-progress value rather
-// than the stale on-disk config.
-func TestProviderTUI_EffectiveBaseURLReflectsPendingEdit(t *testing.T) {
-	cfg := &Config{
-		Provider: "litellm",
-		Providers: map[string]ProviderEntry{
-			"litellm": {APIKey: "sk-test", Model: "openai/gpt-5.4"},
-		},
-	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	for i, p := range m.providers {
-		if p.Name == "litellm" {
-			m.officialIdx = i
-			break
-		}
-	}
-	m.step = stepModel
-	m.modelIdx = modelIdxForName(t, m, "openai/gpt-5.4")
-
-	// Enter the Base URL step.
-	result, _ := m.Update(enterKey())
-	m2 := result.(providerTUIModel)
-	if m2.step != stepBaseURL {
-		t.Fatalf("step = %d, want stepBaseURL", m2.step)
-	}
-
-	// Simulate the user typing a new URL.
-	m2.officialURLInput.SetValue("https://my-new-gateway.internal:9000/v1")
-
-	// Esc back to model selection — the model step should show the pending edit.
-	result, _ = m2.Update(escKey())
-	m3 := result.(providerTUIModel)
-	if m3.step != stepModel {
-		t.Fatalf("after Esc on stepBaseURL, step = %d, want stepModel", m3.step)
-	}
-	if got := m3.effectiveBaseURL(); got != "https://my-new-gateway.internal:9000/v1" {
-		t.Errorf("effectiveBaseURL() = %q, want the pending edit value", got)
 	}
 }

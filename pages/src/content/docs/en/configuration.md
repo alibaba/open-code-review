@@ -78,9 +78,6 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 The configured `url` takes precedence over the preset Base URL. When
 `providers.<name>.url` is unset (or cleared), OCR falls back to the
 preset default — so you only need to set it when your endpoint differs.
-The interactive wizard (`ocr config provider`) exposes this as an
-editable **Base URL** step for built-in providers, pre-filled with the
-preset default.
 
 ### Custom providers
 

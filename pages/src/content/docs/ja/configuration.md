@@ -59,6 +59,24 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
+### 組み込み provider の Base URL を上書きする
+
+各組み込み provider にはプリセット Base URL があります（上表を参照）。
+組み込み provider を別のエンドポイントに向けるには——例えば、プリセット
+デフォルト `http://localhost:4000/v1` とは異なることが多い自前 LiteLLM
+ゲートウェイなど——`providers.<name>.url` を設定します：
+
+```bash
+ocr config set provider                   litellm
+ocr config set model                      openai/gpt-5.4
+ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
+ocr config set providers.litellm.url      https://gateway.internal:8000/v1
+```
+
+設定した `url` はプリセット Base URL より優先されます。
+`providers.<name>.url` が未設定（または削除）の場合、OCR はプリセット
+デフォルトにフォールバックします——エンドポイントが異なる場合のみ設定すればよいです。
+
 ### カスタム provider
 
 上記の表にない provider 名はすべてカスタムとみなされ、少なくとも `url` と

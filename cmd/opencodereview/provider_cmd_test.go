@@ -383,8 +383,7 @@ func TestPrintWizardCancelled(t *testing.T) {
 }
 
 // TestApplyOfficialProviderConfig_PersistsURLOverride verifies that a custom
-// Base URL entered in the wizard is persisted to providers.<name>.url, while a
-// value equal to the preset default is cleared so the preset remains the default.
+// Base URL entered via `ocr config set` is persisted to providers.<name>.url.
 func TestApplyOfficialProviderConfig_PersistsURLOverride(t *testing.T) {
 	t.Setenv("LITELLM_API_KEY", "sk-litellm")
 	dir := t.TempDir()
@@ -412,10 +411,34 @@ func TestApplyOfficialProviderConfig_PersistsURLOverride(t *testing.T) {
 	}
 }
 
-// TestApplyOfficialProviderConfig_ClearsURLWhenPresetDefault verifies that
-// submitting the preset default Base URL writes no url field, so the preset
-// BaseURL remains the resolver default.
-func TestApplyOfficialProviderConfig_ClearsURLWhenPresetDefault(t *testing.T) {
+// TestApplyOfficialProviderConfig_PreservesURLWhenWizardOmitsURL verifies that
+// the URL configured through `ocr config set` survives a later provider wizard
+// confirmation, whose official flow no longer edits Base URL.
+func TestApplyOfficialProviderConfig_PreservesURLWhenWizardOmitsURL(t *testing.T) {
+	t.Setenv("LITELLM_API_KEY", "sk-litellm")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	wantURL := "https://old-gateway.internal:9000/v1"
+	cfg := &Config{
+		Providers: map[string]ProviderEntry{
+			"litellm": {URL: wantURL},
+		},
+	}
+
+	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
+		provider: "litellm",
+		model:    "openai/gpt-5.4",
+		apiKey:   "sk-litellm",
+	})
+	if err != nil {
+		t.Fatalf("applyOfficialProviderConfig: %v", err)
+	}
+	if got := cfg.Providers["litellm"].URL; got != wantURL {
+		t.Errorf("persisted URL = %q, want existing override %q", got, wantURL)
+	}
+}
+
+func TestApplyOfficialProviderConfig_ClearsURLWhenWizardProvidesPresetDefault(t *testing.T) {
 	t.Setenv("LITELLM_API_KEY", "sk-litellm")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
@@ -424,8 +447,11 @@ func TestApplyOfficialProviderConfig_ClearsURLWhenPresetDefault(t *testing.T) {
 			"litellm": {URL: "https://old-gateway.internal:9000/v1"},
 		},
 	}
+	preset, ok := llm.LookupProvider("litellm")
+	if !ok {
+		t.Fatal("litellm preset not found")
+	}
 
-	preset, _ := llm.LookupProvider("litellm")
 	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
 		provider: "litellm",
 		model:    "openai/gpt-5.4",
@@ -436,7 +462,7 @@ func TestApplyOfficialProviderConfig_ClearsURLWhenPresetDefault(t *testing.T) {
 		t.Fatalf("applyOfficialProviderConfig: %v", err)
 	}
 	if got := cfg.Providers["litellm"].URL; got != "" {
-		t.Errorf("persisted URL = %q, want empty (preset default should not persist a url)", got)
+		t.Errorf("persisted URL = %q, want empty after explicit preset default", got)
 	}
 }
 
