@@ -49,20 +49,45 @@ func TestGroupIntoRounds(t *testing.T) {
 		t.Fatalf("expected 3 rounds, got %d", len(rounds))
 	}
 
-	if rounds[0].assistantIdx != 2 {
-		t.Errorf("round[0].assistantIdx = %d, want 2", rounds[0].assistantIdx)
+	if rounds[0].assistantIdx != 2 || rounds[0].end != 5 {
+		t.Errorf("round[0] = [%d,%d), want [2,5) covering both tool results", rounds[0].assistantIdx, rounds[0].end)
 	}
-	if len(rounds[0].toolIdxs) != 2 {
-		t.Errorf("round[0] should have 2 tool messages, got %d", len(rounds[0].toolIdxs))
+	if rounds[1].assistantIdx != 5 || rounds[1].end != 7 {
+		t.Errorf("round[1] = [%d,%d), want [5,7)", rounds[1].assistantIdx, rounds[1].end)
 	}
-	if rounds[1].assistantIdx != 5 {
-		t.Errorf("round[1].assistantIdx = %d, want 5", rounds[1].assistantIdx)
+	if rounds[2].assistantIdx != 7 || rounds[2].end != 8 {
+		t.Errorf("round[2] = [%d,%d), want [7,8) with no tool messages", rounds[2].assistantIdx, rounds[2].end)
 	}
-	if rounds[2].assistantIdx != 7 {
-		t.Errorf("round[2].assistantIdx = %d, want 7", rounds[2].assistantIdx)
+}
+
+// TestGroupIntoRounds_RetryNudgesStayWithTheirRound covers the no-tool retry
+// shape: assistant text answers interleaved with user retry nudges. Rounds
+// must span those nudges — with index-only bookkeeping they belonged to no
+// round, so partition boundaries and token accounting never saw them.
+func TestGroupIntoRounds_RetryNudgesStayWithTheirRound(t *testing.T) {
+	messages := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		msg("assistant", "chatter"),
+		msg("user", "You did not successfully call any tools. Please try again or use task_done if finished."),
+		msg("assistant", "more chatter"),
+		msg("user", "You did not successfully call any tools. Please try again or use task_done if finished."),
+		msg("assistant", "resp"),
+		msg("tool", "result"),
 	}
-	if len(rounds[2].toolIdxs) != 0 {
-		t.Errorf("round[2] should have 0 tool messages")
+
+	rounds := groupIntoRounds(messages, 2)
+	if len(rounds) != 3 {
+		t.Fatalf("expected 3 rounds, got %d", len(rounds))
+	}
+	if rounds[0].assistantIdx != 2 || rounds[0].end != 4 {
+		t.Errorf("round[0] = [%d,%d), want [2,4) including its retry nudge", rounds[0].assistantIdx, rounds[0].end)
+	}
+	if rounds[1].assistantIdx != 4 || rounds[1].end != 6 {
+		t.Errorf("round[1] = [%d,%d), want [4,6) including its retry nudge", rounds[1].assistantIdx, rounds[1].end)
+	}
+	if rounds[2].assistantIdx != 6 || rounds[2].end != 8 {
+		t.Errorf("round[2] = [%d,%d), want [6,8)", rounds[2].assistantIdx, rounds[2].end)
 	}
 }
 
