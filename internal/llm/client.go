@@ -411,9 +411,21 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			// Ask for the final usage chunk by default.
 			params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
 		} else if streamOptions != nil {
-			// An explicit stream_options in extra_body replaces the default.
-			// An explicit null suppresses the field entirely, for gateways
-			// that reject stream_options.
+			// An explicit stream_options in extra_body replaces the default,
+			// but usage stays requested unless include_usage itself is spelled
+			// out: configuring an unrelated stream option must not silently
+			// disable cost accounting. An explicit null suppresses the field
+			// entirely, for gateways that reject stream_options.
+			if object, ok := streamOptions.(map[string]any); ok {
+				if _, has := object["include_usage"]; !has {
+					merged := make(map[string]any, len(object)+1)
+					for key, value := range object {
+						merged[key] = value
+					}
+					merged["include_usage"] = true
+					streamOptions = merged
+				}
+			}
 			opts = append(opts, openaiopt.WithJSONSet("stream_options", streamOptions))
 		}
 		return c.completionsStreaming(ctx, params, opts...)
