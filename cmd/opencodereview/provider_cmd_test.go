@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 func TestMaskKey(t *testing.T) {
@@ -382,35 +380,6 @@ func TestPrintWizardCancelled(t *testing.T) {
 	}
 }
 
-// TestApplyOfficialProviderConfig_PersistsURLOverride verifies that a custom
-// Base URL entered via `ocr config set` is persisted to providers.<name>.url.
-func TestApplyOfficialProviderConfig_PersistsURLOverride(t *testing.T) {
-	t.Setenv("LITELLM_API_KEY", "sk-litellm")
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{}
-
-	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
-		provider: "litellm",
-		model:    "openai/gpt-5.4",
-		apiKey:   "sk-litellm",
-		url:      "https://gateway.internal:8000/v1",
-	})
-	if err != nil {
-		t.Fatalf("applyOfficialProviderConfig: %v", err)
-	}
-	if got := cfg.Providers["litellm"].URL; got != "https://gateway.internal:8000/v1" {
-		t.Errorf("persisted URL = %q, want https://gateway.internal:8000/v1", got)
-	}
-	diskCfg, err := loadOrCreateConfig(configPath)
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	if got := diskCfg.Providers["litellm"].URL; got != "https://gateway.internal:8000/v1" {
-		t.Errorf("disk URL = %q, want https://gateway.internal:8000/v1", got)
-	}
-}
-
 // TestApplyOfficialProviderConfig_PreservesURLWhenWizardOmitsURL verifies that
 // the URL configured through `ocr config set` survives a later provider wizard
 // confirmation, whose official flow no longer edits Base URL.
@@ -438,114 +407,27 @@ func TestApplyOfficialProviderConfig_PreservesURLWhenWizardOmitsURL(t *testing.T
 	}
 }
 
-func TestApplyOfficialProviderConfig_ClearsURLWhenWizardProvidesPresetDefault(t *testing.T) {
+func TestApplyOfficialProviderConfig_IgnoresURLFromResult(t *testing.T) {
 	t.Setenv("LITELLM_API_KEY", "sk-litellm")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
+	wantURL := "https://configured-gateway.internal:9000/v1"
 	cfg := &Config{
 		Providers: map[string]ProviderEntry{
-			"litellm": {URL: "https://old-gateway.internal:9000/v1"},
+			"litellm": {URL: wantURL},
 		},
 	}
-	preset, ok := llm.LookupProvider("litellm")
-	if !ok {
-		t.Fatal("litellm preset not found")
-	}
 
 	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
 		provider: "litellm",
 		model:    "openai/gpt-5.4",
 		apiKey:   "sk-litellm",
-		url:      preset.BaseURL,
+		url:      "https://stale-result.internal:8000/v1",
 	})
 	if err != nil {
 		t.Fatalf("applyOfficialProviderConfig: %v", err)
 	}
-	if got := cfg.Providers["litellm"].URL; got != "" {
-		t.Errorf("persisted URL = %q, want empty after explicit preset default", got)
-	}
-}
-
-// TestApplyOfficialProviderConfig_TrimsURLWhitespace verifies that a Base URL
-// with surrounding whitespace is trimmed before comparison and persistence, so
-// whitespace-polluted values are never written to the config file.
-func TestApplyOfficialProviderConfig_TrimsURLWhitespace(t *testing.T) {
-	t.Setenv("LITELLM_API_KEY", "sk-litellm")
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{}
-
-	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
-		provider: "litellm",
-		model:    "openai/gpt-5.4",
-		apiKey:   "sk-litellm",
-		url:      "  https://gateway.internal:8000/v1  ",
-	})
-	if err != nil {
-		t.Fatalf("applyOfficialProviderConfig: %v", err)
-	}
-	if got := cfg.Providers["litellm"].URL; got != "https://gateway.internal:8000/v1" {
-		t.Errorf("persisted URL = %q, want trimmed value", got)
-	}
-}
-
-// TestApplyOfficialProviderConfig_RejectsInvalidScheme verifies that a Base URL
-// without an http/https scheme is rejected with a clear error at config time
-// rather than failing later at runtime.
-func TestApplyOfficialProviderConfig_RejectsInvalidScheme(t *testing.T) {
-	t.Setenv("LITELLM_API_KEY", "sk-litellm")
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{}
-
-	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
-		provider: "litellm",
-		model:    "openai/gpt-5.4",
-		apiKey:   "sk-litellm",
-		url:      "ftp://example.com/v1",
-	})
-	if err == nil {
-		t.Fatal("expected error for non-http scheme, got nil")
-	}
-}
-
-// TestApplyOfficialProviderConfig_RejectsMissingScheme verifies that a Base URL
-// lacking a scheme (e.g. a bare host) is rejected at config time.
-func TestApplyOfficialProviderConfig_RejectsMissingScheme(t *testing.T) {
-	t.Setenv("LITELLM_API_KEY", "sk-litellm")
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{}
-
-	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
-		provider: "litellm",
-		model:    "openai/gpt-5.4",
-		apiKey:   "sk-litellm",
-		url:      "api.example.com/v1",
-	})
-	if err == nil {
-		t.Fatal("expected error for URL missing scheme, got nil")
-	}
-}
-
-// TestApplyOfficialProviderConfig_AcceptsHTTP verifies that plain http:// URLs
-// are accepted (the default litellm preset is http://localhost:4000/v1).
-func TestApplyOfficialProviderConfig_AcceptsHTTP(t *testing.T) {
-	t.Setenv("LITELLM_API_KEY", "sk-litellm")
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	cfg := &Config{}
-
-	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
-		provider: "litellm",
-		model:    "openai/gpt-5.4",
-		apiKey:   "sk-litellm",
-		url:      "http://my-litellm.local:4000/v1",
-	})
-	if err != nil {
-		t.Fatalf("applyOfficialProviderConfig: %v", err)
-	}
-	if got := cfg.Providers["litellm"].URL; got != "http://my-litellm.local:4000/v1" {
-		t.Errorf("persisted URL = %q, want http URL", got)
+	if got := cfg.Providers["litellm"].URL; got != wantURL {
+		t.Errorf("persisted URL = %q, want existing URL %q", got, wantURL)
 	}
 }

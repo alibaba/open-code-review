@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -264,18 +263,6 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	} else {
 		// Confirmed empty key: clear saved api_key so resolver falls back to $ENV_VAR.
 		entry.APIKey = ""
-	}
-	// Persist a Base URL override only when it differs from the preset default.
-	// An empty value means the official wizard did not edit Base URL, so preserve
-	// an existing override; an explicit preset default clears the override.
-	trimmedURL := strings.TrimSpace(result.url)
-	if isPreset && trimmedURL != "" && trimmedURL != preset.BaseURL {
-		if err := validateBaseURL(trimmedURL); err != nil {
-			return err
-		}
-		entry.URL = trimmedURL
-	} else if isPreset && trimmedURL == preset.BaseURL {
-		entry.URL = ""
 	}
 	cfg.Providers[result.provider] = entry
 
