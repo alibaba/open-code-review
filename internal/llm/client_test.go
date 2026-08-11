@@ -814,11 +814,12 @@ func TestOpenAIClient_StreamingRequestsUsageByDefault(t *testing.T) {
 	}
 }
 
-// TestOpenAIClient_StreamOptionsConfigOverrides verifies the three
-// extra_body.stream_options states: an explicit object replaces the
-// include_usage default, an explicit null suppresses the field entirely
-// (for gateways that reject stream_options), and non-streaming requests
-// never carry the field regardless of config.
+// TestOpenAIClient_StreamOptionsConfigOverrides verifies the
+// extra_body.stream_options states: an explicit include_usage value is
+// respected, an object configuring only unrelated options keeps the usage
+// default merged in, an explicit null suppresses the field entirely (for
+// gateways that reject stream_options), and non-streaming requests never
+// carry the field regardless of config.
 func TestOpenAIClient_StreamOptionsConfigOverrides(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -827,9 +828,14 @@ func TestOpenAIClient_StreamOptionsConfigOverrides(t *testing.T) {
 		wantAbsent bool
 	}{
 		{
-			name:      "explicit object replaces default",
+			name:      "explicit include_usage false is respected",
 			extraBody: map[string]any{"stream": true, "stream_options": map[string]any{"include_usage": false}},
 			want:      map[string]any{"include_usage": false},
+		},
+		{
+			name:      "unrelated option keeps the usage default",
+			extraBody: map[string]any{"stream": true, "stream_options": map[string]any{"continuous_usage_stats": true}},
+			want:      map[string]any{"continuous_usage_stats": true, "include_usage": true},
 		},
 		{
 			name:       "explicit null suppresses field",
