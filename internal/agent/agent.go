@@ -1231,13 +1231,25 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute.group."+groupKey)
 	defer span.End()
 
-	var totalChanged int64
+	// totalChanged is the group's aggregate churn, reported as-is in telemetry.
+	// maxFileChanged is the largest single-file churn and is what gates the plan
+	// phase: PLAN_MODE_LINE_THRESHOLD was calibrated per file, so summing a
+	// group's diffs would push almost every group over the threshold and make
+	// the plan phase effectively unconditional. Gating on the biggest member
+	// keeps the original "is any single file substantial enough to warrant
+	// planning?" semantics regardless of how many files share a group.
+	var totalChanged, maxFileChanged int64
 	for _, d := range g.Diffs {
-		totalChanged += d.Insertions + d.Deletions
+		changed := d.Insertions + d.Deletions
+		totalChanged += changed
+		if changed > maxFileChanged {
+			maxFileChanged = changed
+		}
 	}
 	telemetry.SetAttr(span, "group.label", groupKey)
 	telemetry.SetAttr(span, "group.file_count", len(g.Diffs))
 	telemetry.SetAttr(span, "lines.changed", totalChanged)
+	telemetry.SetAttr(span, "lines.changed.max_file", maxFileChanged)
 
 	if ctx.Err() != nil {
 		return false, nil, ctx.Err()
@@ -1256,11 +1268,15 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 
 	// Phase 1: Plan (skip when changes are below threshold)
 	var planResult string
-	if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 && threshold > 0 && totalChanged < int64(threshold) {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping plan phase for group %q (%d lines < threshold %d)\n", groupKey, totalChanged, threshold)
+	if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 && threshold > 0 && maxFileChanged < int64(threshold) {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping plan phase for group %q (largest file %d lines < threshold %d)\n", groupKey, maxFileChanged, threshold)
+		// lines.changed stays on the event with its original aggregate meaning so
+		// existing dashboards keep resolving; lines.changed.max_file is additive and
+		// carries the value the skip decision was actually made on.
 		telemetry.Event(ctx, "plan.skipped",
 			telemetry.AnyToAttr("group.label", groupKey),
 			telemetry.AnyToAttr("lines.changed", totalChanged),
+			telemetry.AnyToAttr("lines.changed.max_file", maxFileChanged),
 			telemetry.AnyToAttr("threshold", threshold))
 	} else if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 {
 		var err error

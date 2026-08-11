@@ -19,9 +19,16 @@ SHOULD INVESTIGATE
 1. [quick|deep] (file path + problem location + nature + potential impact)
    → ...
 
+CONSIDER
+1. [quick|deep] (file path + problem location + nature + potential impact)
+   → ...
+
 ## Severity Definitions
 - MUST: security vulnerabilities, data loss, system crashes, critical logic errors, race conditions
 - SHOULD: performance issues, edge cases, maintainability risks, error handling gaps
+- CONSIDER: readability, naming, duplication, or cross-file inconsistency issues that a
+  reviewer would reasonably raise in a PR. Include an item here if you are unsure whether
+  it matters — the reviewer downstream decides whether to comment on it.
 
 ## Verification Cost Tags
 - [quick]: can be confirmed or refuted in 1-2 tool calls (e.g., check a single function signature, verify a null check exists)
@@ -35,5 +42,4 @@ SHOULD INVESTIGATE
 5. If you cannot determine a concrete verification action, omit the → line for that item
 6. Items within each category should be ordered by confidence (most certain risk first)
 7. If a category has no items, write "(none)"
-8. Do not report code style, readability, or non-critical best practice issues
-9. If the changes are straightforward with no identifiable risks, output only the Summary line and write "(none)" for all categories. Do not invent issues.
+8. If the changes are straightforward with no identifiable risks, output only the Summary line and write "(none)" for all categories. Do not invent issues.

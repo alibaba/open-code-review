@@ -96,7 +96,7 @@ LLM の往復とツールの実行は個別の span としては発行**され�
 | `diff.parse` | `files.changed`、`lines.inserted`、`lines.deleted` |
 | `subtask.execute.<file>` | `file.path`、`lines.changed`、`lines.inserted`、`lines.deleted` |
 | `event.review.started` | `file.count`、`review.count`、`repo.dir` |
-| `event.plan.skipped` | `file.path`、`lines.changed`、`threshold` |
+| `event.plan.skipped` | `group.label`、`lines.changed`、`lines.changed.max_file`、`threshold` |
 | `event.plan.failed` | `file.path`、`message` |
 | `event.token.threshold.exceeded` | `file.path`、`tokens`、`max_tokens` |
 | `event.subtask.error` | `file.path`、`error` |
