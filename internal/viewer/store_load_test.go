@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/session"
@@ -222,6 +223,41 @@ func TestLoadSession_Running(t *testing.T) {
 	}
 	if !vs.Summary.Running || vs.Summary.Aborted {
 		t.Fatalf("running session flags = running:%v aborted:%v", vs.Summary.Running, vs.Summary.Aborted)
+	}
+}
+
+func TestLoadSession_ActivityProbeFailureKeepsData(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repoDir, "probe-error.jsonl")
+	writeJSONL(t, path,
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`)
+
+	lockPath := strings.TrimSuffix(path, ".jsonl") + ".lock"
+	if err := os.Mkdir(lockPath, 0700); err != nil {
+		t.Fatalf("create invalid session lock: %v", err)
+	}
+
+	summaries, err := ListSessions(root, "repo")
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %d, want 1", len(summaries))
+	}
+
+	vs, err := LoadSession(root, "repo", "probe-error")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if vs.Summary.CWD != "/x" || vs.Summary.Model != "m" {
+		t.Fatalf("summary = %+v", vs.Summary)
+	}
+	if vs.Summary.Running || !vs.Summary.Aborted {
+		t.Fatalf("flags = running:%v aborted:%v", vs.Summary.Running, vs.Summary.Aborted)
 	}
 }
 

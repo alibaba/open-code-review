@@ -201,9 +201,7 @@ func peekSession(path string) (SessionSummary, error) {
 			}
 		}
 	}
-	if err := updateSessionActivity(path, &summary); err != nil {
-		return SessionSummary{}, err
-	}
+	updateSessionActivity(path, &summary)
 	return summary, readErr
 }
 
@@ -569,9 +567,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs.Summary.SessionID = sessionID
 	vs.Summary.CommentCount = len(vs.Comments)
-	if err := updateSessionActivity(path, &vs.Summary); err != nil && readErr == nil {
-		readErr = err
-	}
+	updateSessionActivity(path, &vs.Summary)
 	return vs, readErr
 }
 
@@ -615,18 +611,18 @@ func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 	}
 }
 
-func updateSessionActivity(path string, summary *SessionSummary) error {
+func updateSessionActivity(path string, summary *SessionSummary) {
 	if summary == nil || !summary.Aborted {
-		return nil
+		return
 	}
 
 	running, err := session.IsSessionActive(path)
 	if err != nil {
-		return fmt.Errorf("check session activity: %w", err)
+		// Activity detection is advisory; probe failures must not hide readable data.
+		return
 	}
 	summary.Running = running
 	summary.Aborted = !running
-	return nil
 }
 
 func taskDoneSucceeded(arguments string) bool {

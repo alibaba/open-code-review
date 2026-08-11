@@ -6,6 +6,7 @@ package viewer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -251,6 +252,29 @@ func TestPeekSession_NoSessionEnd(t *testing.T) {
 	}
 	if !s.Aborted || s.Running || s.Legacy {
 		t.Fatalf("unfinished session flags = running:%v aborted:%v legacy:%v", s.Running, s.Aborted, s.Legacy)
+	}
+}
+
+func TestPeekSession_ActivityProbeFailureKeepsSummary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "probe-error.jsonl")
+	writeJSONL(t, path,
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`)
+
+	lockPath := strings.TrimSuffix(path, ".jsonl") + ".lock"
+	if err := os.Mkdir(lockPath, 0700); err != nil {
+		t.Fatalf("create invalid session lock: %v", err)
+	}
+
+	summary, err := peekSession(path)
+	if err != nil {
+		t.Fatalf("peekSession: %v", err)
+	}
+	if summary.CWD != "/x" || summary.Model != "m" {
+		t.Fatalf("summary = %+v", summary)
+	}
+	if summary.Running || !summary.Aborted {
+		t.Fatalf("flags = running:%v aborted:%v", summary.Running, summary.Aborted)
 	}
 }
 

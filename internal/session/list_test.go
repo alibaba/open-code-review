@@ -4,6 +4,7 @@
 package session
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -100,6 +101,57 @@ func TestListSessionsReportsRunningSession(t *testing.T) {
 	}
 	if !summary.Running || summary.Aborted {
 		t.Fatalf("running detail flags = running:%v aborted:%v", summary.Running, summary.Aborted)
+	}
+}
+
+func TestSessionSummariesSurviveActivityProbeFailure(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	if sh.persist == nil {
+		t.Fatal("session persistence was not initialized")
+	}
+	path, err := SessionFilePath(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	sh.persist.flushAndClose()
+
+	lockPath := sessionLockPath(path)
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatalf("remove session lock: %v", err)
+	}
+	if err := os.Mkdir(lockPath, 0700); err != nil {
+		t.Fatalf("create invalid session lock: %v", err)
+	}
+
+	summaries, err := ListSessions(repoDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %d, want 1", len(summaries))
+	}
+	if summaries[0].Running || !summaries[0].Aborted {
+		t.Fatalf("list flags = running:%v aborted:%v", summaries[0].Running, summaries[0].Aborted)
+	}
+
+	summary, err := LoadSummary(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSummary: %v", err)
+	}
+	if summary.Running || !summary.Aborted {
+		t.Fatalf("summary flags = running:%v aborted:%v", summary.Running, summary.Aborted)
+	}
+
+	detail, items, err := LoadDetail(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadDetail: %v", err)
+	}
+	if len(items) != 0 || detail.Running || !detail.Aborted {
+		t.Fatalf("detail = %+v, items = %d", detail, len(items))
 	}
 }
 

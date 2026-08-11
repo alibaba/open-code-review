@@ -159,9 +159,7 @@ func LoadDetail(repoDir, sessionID string) (*Summary, []ItemDetail, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := updateSummaryActivity(summary); err != nil {
-		return nil, nil, err
-	}
+	updateSummaryActivity(summary)
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
 	}
@@ -180,9 +178,7 @@ func loadSummaryFromFile(path, sessionID, repoDir string) (*Summary, error) {
 	}); err != nil {
 		return nil, err
 	}
-	if err := updateSummaryActivity(summary); err != nil {
-		return nil, err
-	}
+	updateSummaryActivity(summary)
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
 	}
@@ -274,18 +270,18 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 	}
 }
 
-func updateSummaryActivity(summary *Summary) error {
+func updateSummaryActivity(summary *Summary) {
 	if summary == nil || !summary.Aborted {
-		return nil
+		return
 	}
 
 	running, err := IsSessionActive(summary.FilePath)
 	if err != nil {
-		return fmt.Errorf("check session activity: %w", err)
+		// Activity detection is advisory; probe failures must not hide readable data.
+		return
 	}
 	summary.Running = running
 	summary.Aborted = !running
-	return nil
 }
 
 func recordToItem(rec summaryRecord) (ItemDetail, bool) {

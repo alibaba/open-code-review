@@ -6,7 +6,6 @@
 package session
 
 import (
-	"errors"
 	"os"
 	"syscall"
 )
@@ -16,7 +15,7 @@ func tryLockSessionFile(file *os.File) (locked, supported bool, err error) {
 	if err == nil {
 		return true, true, nil
 	}
-	if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+	if err == syscall.EWOULDBLOCK || err == syscall.EAGAIN {
 		return false, true, nil
 	}
 	return false, true, err
