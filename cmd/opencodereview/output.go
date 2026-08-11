@@ -486,7 +486,9 @@ func outputPreview(p *agent.DiffPreview, outputFormat string, out io.Writer) err
 		return outputPreviewJSON(p, out)
 	}
 	outputPreviewText(p, out)
-	return nil
+	// outputPreviewText drops fmt.Fprintf write errors; surface deferred
+	// writer errors so a failed --output write fails the command non-zero.
+	return writeOutError(out)
 }
 
 func outputPreviewJSON(p *agent.DiffPreview, out io.Writer) error {

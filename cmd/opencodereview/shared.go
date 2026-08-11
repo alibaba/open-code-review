@@ -329,13 +329,18 @@ func (w *stripAnsiWriter) Write(p []byte) (int, error) {
 			}
 		case ansiEsc:
 			w.pending = append(w.pending, c)
-			switch c {
-			case '[':
+			switch {
+			case c == '[':
 				w.state = ansiCSI
-			case ']':
+			case c == ']', c == 'P', c == '^', c == '_':
+				// OSC, DCS, PM and APC strings all run until ST (or BEL for
+				// OSC); treat them uniformly through the OSC state.
 				w.state = ansiOSC
+			case c >= 0x20 && c <= 0x2f:
+				// Intermediate byte of a multi-byte escape (e.g. ESC ( B);
+				// keep collecting so the whole sequence is discarded.
 			default:
-				// Single-byte escape sequence (e.g. ESC ( B). Discard.
+				// Single-byte escape sequence. Discard.
 				w.state = ansiNormal
 				w.pending = w.pending[:0]
 			}
@@ -380,15 +385,18 @@ func (w *stripAnsiWriter) Write(p []byte) (int, error) {
 // lazyFileWriter defers os.Create until the first Write so a run that never
 // produces output (LLM failure, preview error, interruption) leaves an
 // existing target file untouched instead of truncating it to zero bytes. The
-// "Results written" hint is printed to stderr only once the file is actually
-// created, so agents never see a path hint for a file that stayed empty.
+// "Results written" hint is printed to stderr only after the first successful
+// Write, so agents never see a path hint for a file that stayed empty or was
+// never persisted.
 type lazyFileWriter struct {
 	path     string
 	strip    bool // strip ANSI when the target format is text
 	once     sync.Once
 	file     *os.File
 	stripper *stripAnsiWriter
-	err      error
+	err      error // os.Create error
+	writeErr error // first error from a Write
+	hinted   bool  // hint already printed after a successful Write
 }
 
 func (w *lazyFileWriter) Write(p []byte) (int, error) {
@@ -402,15 +410,46 @@ func (w *lazyFileWriter) Write(p []byte) (int, error) {
 		if w.strip {
 			w.stripper = &stripAnsiWriter{dst: f}
 		}
-		fmt.Fprintf(os.Stderr, "[ocr] Results written to %s\n", w.path)
 	})
 	if w.err != nil {
 		return 0, w.err
 	}
+	var n int
+	var err error
 	if w.stripper != nil {
-		return w.stripper.Write(p)
+		n, err = w.stripper.Write(p)
+	} else {
+		n, err = w.file.Write(p)
 	}
-	return w.file.Write(p)
+	if err != nil && w.writeErr == nil {
+		w.writeErr = err
+	}
+	if err == nil && !w.hinted {
+		w.hinted = true
+		fmt.Fprintf(os.Stderr, "[ocr] Results written to %s\n", w.path)
+	}
+	return n, err
+}
+
+// Err returns the first error encountered while creating or writing the
+// underlying file, or nil if none occurred. Text-mode rendering drops the
+// per-write errors of fmt.Fprintf, so callers use this to surface write
+// failures (e.g. permission denied on the first write) as a command error —
+// matching JSON mode, where Encoder.Encode propagates the same failure.
+func (w *lazyFileWriter) Err() error {
+	if w.err != nil {
+		return w.err
+	}
+	return w.writeErr
+}
+
+// writeOutError surfaces deferred write errors from writers that record them
+// (lazyFileWriter); plain writers such as os.Stdout report nil.
+func writeOutError(out io.Writer) error {
+	if r, ok := out.(interface{ Err() error }); ok {
+		return r.Err()
+	}
+	return nil
 }
 
 // Close closes the underlying file. It is a no-op when the file was never
@@ -544,5 +583,8 @@ func emitRunResult(
 	if summary := ag.ProjectSummary(); summary != "" {
 		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", summary)
 	}
-	return nil
+	// Text rendering ignores fmt.Fprintf write errors; surface them here so a
+	// failed --output write (permission, disk full) fails the command non-zero
+	// exactly like JSON mode does via Encoder.Encode.
+	return writeOutError(out)
 }

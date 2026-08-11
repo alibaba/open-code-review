@@ -5,10 +5,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- stripAnsiWriter ---
@@ -110,11 +112,39 @@ func TestStripAnsiWriter_SequenceSplitMidParameter(t *testing.T) {
 	}
 }
 
-func TestStripAnsiWriter_StripsSingleByteEscape(t *testing.T) {
+func TestStripAnsiWriter_StripsMultiByteEscape(t *testing.T) {
 	var buf bytes.Buffer
 	w := &stripAnsiWriter{dst: &buf}
-	in := "a\033(Bb" // ESC ( B: select charset; the 2-byte ESC ( sequence is discarded
-	want := "aBb"
+	in := "a\033(Bb" // ESC ( B: two-byte escape with intermediate byte 0x20-0x2f
+	want := "ab"
+	if _, err := w.Write([]byte(in)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if buf.String() != want {
+		t.Fatalf("got %q, want %q", buf.String(), want)
+	}
+}
+
+func TestStripAnsiWriter_MultiByteEscapeSplitAcrossWrites(t *testing.T) {
+	var buf bytes.Buffer
+	w := &stripAnsiWriter{dst: &buf}
+	// ESC ( is split mid-sequence; the intermediate byte '(' must keep the
+	// escape open so the trailing 'B' is discarded with it.
+	for _, p := range []string{"a\x1b(", "B", "b"} {
+		if _, err := w.Write([]byte(p)); err != nil {
+			t.Fatalf("write %q: %v", p, err)
+		}
+	}
+	if buf.String() != "ab" {
+		t.Fatalf("got %q, want %q", buf.String(), "ab")
+	}
+}
+
+func TestStripAnsiWriter_StripsDCS(t *testing.T) {
+	var buf bytes.Buffer
+	w := &stripAnsiWriter{dst: &buf}
+	in := "a\033P1;2|data\033\\b" // DCS string terminated by ST (ESC \)
+	want := "ab"
 	if _, err := w.Write([]byte(in)); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -285,5 +315,53 @@ func TestLazyFileWriter_JSONKeepsBytesUnchanged(t *testing.T) {
 	}
 	if string(data) != payload {
 		t.Fatalf("json file content = %q, want unchanged bytes", data)
+	}
+}
+
+// --- deferred write-error propagation ---
+
+// TestLazyFileWriter_ErrOnCreateFailure pins that a failed lazy create is
+// reported through Err() so text-mode callers can surface it as a command
+// error (JSON mode already propagates it via Encoder.Encode).
+func TestLazyFileWriter_ErrOnCreateFailure(t *testing.T) {
+	w := &lazyFileWriter{path: filepath.Join(t.TempDir(), "no", "such", "out.json")}
+	if _, err := w.Write([]byte("x")); err == nil {
+		t.Fatal("expected the first write to fail")
+	}
+	if w.Err() == nil {
+		t.Fatal("Err() must report the create failure")
+	}
+}
+
+func TestWriteOutError_StdoutNil(t *testing.T) {
+	if err := writeOutError(os.Stdout); err != nil {
+		t.Fatalf("writeOutError(os.Stdout) = %v, want nil", err)
+	}
+}
+
+func TestWriteOutError_NilAfterSuccessfulWrite(t *testing.T) {
+	w, closeFn, err := resolveOutputWriter(filepath.Join(t.TempDir(), "out.json"), "json")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if _, err := w.Write([]byte(`{}`)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := closeFn(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if err := writeOutError(w); err != nil {
+		t.Fatalf("writeOutError = %v, want nil", err)
+	}
+}
+
+// TestEmitRunResult_TextWriteFailurePropagates pins the text/json parity: a
+// --output write failure in text mode must make emitRunResult return an error
+// (exit non-zero), exactly like JSON mode does.
+func TestEmitRunResult_TextWriteFailurePropagates(t *testing.T) {
+	ag := &mockResultProvider{filesReviewed: 2}
+	w := &lazyFileWriter{path: filepath.Join(t.TempDir(), "no", "such", "out.txt")}
+	if err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil, nil, w); err == nil {
+		t.Fatal("emitRunResult must propagate the output write failure")
 	}
 }
