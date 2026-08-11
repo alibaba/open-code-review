@@ -203,6 +203,28 @@ func TestLoadSession_FullParse(t *testing.T) {
 	}
 }
 
+func TestLoadSession_Running(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeWorkspace})
+	defer sh.Finalize()
+
+	path, err := session.SessionFilePath(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	root := filepath.Dir(filepath.Dir(path))
+	encodedRepo := filepath.Base(filepath.Dir(path))
+	vs, err := LoadSession(root, encodedRepo, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if !vs.Summary.Running || vs.Summary.Aborted {
+		t.Fatalf("running session flags = running:%v aborted:%v", vs.Summary.Running, vs.Summary.Aborted)
+	}
+}
+
 func TestLoadSession_TaskDoneStates(t *testing.T) {
 	root := t.TempDir()
 	repoDir := filepath.Join(root, "repo")

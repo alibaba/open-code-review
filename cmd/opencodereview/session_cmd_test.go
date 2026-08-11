@@ -372,3 +372,10 @@ func TestSessionDisplayDoesNotInferLegacyComplete(t *testing.T) {
 		t.Fatalf("status = %q", got)
 	}
 }
+
+func TestSessionDisplayUsesRunningStatus(t *testing.T) {
+	summary := session.Summary{Running: true, Aborted: true}
+	if got := describeStatus(summary); got != "running" {
+		t.Fatalf("describeStatus = %q, want running", got)
+	}
+}

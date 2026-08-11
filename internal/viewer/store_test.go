@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func writeJSONL(t *testing.T, path string, lines ...string) {
@@ -247,8 +249,31 @@ func TestPeekSession_NoSessionEnd(t *testing.T) {
 	if s.FileCount != 0 {
 		t.Errorf("FileCount should be 0 without session_end, got %d", s.FileCount)
 	}
-	if !s.Aborted || s.Legacy {
-		t.Fatalf("unfinished session flags = aborted:%v legacy:%v", s.Aborted, s.Legacy)
+	if !s.Aborted || s.Running || s.Legacy {
+		t.Fatalf("unfinished session flags = running:%v aborted:%v legacy:%v", s.Running, s.Aborted, s.Legacy)
+	}
+}
+
+func TestPeekSession_Running(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeWorkspace})
+	if sh == nil {
+		t.Fatal("session.New returned nil")
+	}
+	defer sh.Finalize()
+
+	path, err := session.SessionFilePath(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	summary, err := peekSession(path)
+	if err != nil {
+		t.Fatalf("peekSession: %v", err)
+	}
+	if !summary.Running || summary.Aborted {
+		t.Fatalf("running session flags = running:%v aborted:%v", summary.Running, summary.Aborted)
 	}
 }
 

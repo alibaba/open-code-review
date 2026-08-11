@@ -55,6 +55,9 @@ func TestListSessions_SortsAndAggregates(t *testing.T) {
 	if !got[0].Aborted {
 		t.Errorf("newest session was interrupted; expected Aborted=true")
 	}
+	if got[0].Running {
+		t.Errorf("newest interrupted session was marked running")
+	}
 	if got[1].Aborted {
 		t.Errorf("older session was finalized; expected Aborted=false")
 	}
@@ -66,6 +69,37 @@ func TestListSessions_SortsAndAggregates(t *testing.T) {
 	}
 	if got[0].CompletedFiles != 2 {
 		t.Errorf("newest CompletedFiles = %d, want 2", got[0].CompletedFiles)
+	}
+}
+
+func TestListSessionsReportsRunningSession(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	if sh.persist == nil {
+		t.Fatal("session persistence was not initialized")
+	}
+	defer sh.persist.flushAndClose()
+
+	got, err := ListSessions(repoDir)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(got))
+	}
+	if !got[0].Running || got[0].Aborted {
+		t.Fatalf("running session flags = running:%v aborted:%v", got[0].Running, got[0].Aborted)
+	}
+
+	summary, _, err := LoadDetail(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadDetail: %v", err)
+	}
+	if !summary.Running || summary.Aborted {
+		t.Fatalf("running detail flags = running:%v aborted:%v", summary.Running, summary.Aborted)
 	}
 }
 
@@ -259,13 +293,8 @@ func writeTestSession(t *testing.T, repoDir, from, to string, comments []model.L
 	} else {
 		// Simulate an aborted run: flush the writer without emitting session_end.
 		if sh.persist != nil {
+			sh.persist.flushAndClose()
 			sh.persist.mu.Lock()
-			if sh.persist.writer != nil {
-				sh.persist.writer.Flush()
-			}
-			if sh.persist.file != nil {
-				_ = sh.persist.file.Close()
-			}
 			sh.persist.writer = nil
 			sh.persist.file = nil
 			sh.persist.mu.Unlock()

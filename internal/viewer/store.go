@@ -96,6 +96,7 @@ type SessionSummary struct {
 	FileCount      int
 	LLMFailures    int
 	CommentCount   int
+	Running        bool
 	Aborted        bool
 	Legacy         bool
 	TerminalState  string
@@ -199,6 +200,9 @@ func peekSession(path string) (SessionSummary, error) {
 				applySessionEnd(&summary, rec)
 			}
 		}
+	}
+	if err := updateSessionActivity(path, &summary); err != nil {
+		return SessionSummary{}, err
 	}
 	return summary, readErr
 }
@@ -565,10 +569,14 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 	vs.Summary.SessionID = sessionID
 	vs.Summary.CommentCount = len(vs.Comments)
+	if err := updateSessionActivity(path, &vs.Summary); err != nil && readErr == nil {
+		readErr = err
+	}
 	return vs, readErr
 }
 
 func applySessionEnd(summary *SessionSummary, rec map[string]any) {
+	summary.Running = false
 	summary.Aborted = false
 	if dur, ok := rec["duration_seconds"].(float64); ok {
 		summary.DurationSec = dur
@@ -605,6 +613,20 @@ func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 		summary.Legacy = true
 		summary.FileCount = len(summary.FilesReviewed)
 	}
+}
+
+func updateSessionActivity(path string, summary *SessionSummary) error {
+	if summary == nil || !summary.Aborted {
+		return nil
+	}
+
+	running, err := session.IsSessionActive(path)
+	if err != nil {
+		return fmt.Errorf("check session activity: %w", err)
+	}
+	summary.Running = running
+	summary.Aborted = !running
+	return nil
 }
 
 func taskDoneSucceeded(arguments string) bool {
