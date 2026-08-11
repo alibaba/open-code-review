@@ -60,6 +60,22 @@ func TestLoadDefault_HasNoScanFields(t *testing.T) {
 	}
 }
 
+func TestCompletionTokenLimit(t *testing.T) {
+	review := Template{MaxTokens: 200000}
+	if got := review.CompletionTokenLimit(); got != 200000 {
+		t.Fatalf("review fallback = %d, want 200000", got)
+	}
+	review.MaxCompletionTokens = 58888
+	if got := review.CompletionTokenLimit(); got != 58888 {
+		t.Fatalf("review runtime limit = %d, want 58888", got)
+	}
+
+	scan := ScanTemplate{MaxTokens: 128000, MaxCompletionTokens: 4096}
+	if got := scan.CompletionTokenLimit(); got != 4096 {
+		t.Fatalf("scan runtime limit = %d, want 4096", got)
+	}
+}
+
 func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	tpl, err := LoadDefault()
 	if err != nil {

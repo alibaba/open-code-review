@@ -47,6 +47,9 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
 
 	return &OpenAIResponsesClient{
 		cfg: cfg,

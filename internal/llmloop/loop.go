@@ -332,6 +332,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		taskCompleted := false
 		hasValidResult := false
 
+		thinking := resp.ReasoningContent()
 		for _, call := range calls {
 			t := tool.OfName(call.Function.Name)
 			if t == tool.FileRead || t == tool.FileFind || t == tool.FileReadDiff || t == tool.CodeSearch {
@@ -345,7 +346,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 					continue
 				}
 			}
-			cp := r.executeToolCall(ctx, newPath, call, rec)
+			cp := r.executeToolCall(ctx, newPath, call, rec, thinking)
 			if cp.Failed {
 				return false, StopNone, fmt.Errorf("task failed: %s", cp.Data)
 			} else if cp.Completed {
@@ -417,7 +418,11 @@ func isUsableContextResult(result string) bool {
 // records the result in session history. code_comment handling includes
 // optional async dispatch through CommentWorkerPool plus line-number
 // resolution / re-location.
-func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.ToolCall, rec *session.TaskRecord) tool.TaskCheckpoint {
+func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.ToolCall, rec *session.TaskRecord, thinkingArgs ...string) tool.TaskCheckpoint {
+	var thinking string
+	if len(thinkingArgs) > 0 {
+		thinking = thinkingArgs[0]
+	}
 	t := tool.OfName(call.Function.Name)
 
 	if !t.IsKnown() {
@@ -539,6 +544,11 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 				rec.AddToolError(t.Name(), call.Function.Arguments, errMsg, dur)
 			}
 			return tool.Of(errMsg)
+		}
+		for i := range comments {
+			if comments[i].Thinking == "" {
+				comments[i].Thinking = thinking
+			}
 		}
 
 		resolveAndCollect := func(rctx context.Context) {

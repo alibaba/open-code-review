@@ -14,9 +14,12 @@ func TestValidateDelegateOptions(t *testing.T) {
 		opts    delegateOptions
 		wantErr bool
 	}{
-		{"workspace", delegateOptions{}, false},
-		{"commit", delegateOptions{commit: "abc"}, false},
-		{"range", delegateOptions{from: "main", to: "dev"}, false},
+		{"workspace", delegateOptions{format: "text"}, false},
+		{"commit", delegateOptions{commit: "abc", format: "text"}, false},
+		{"range", delegateOptions{from: "main", to: "dev", format: "text"}, false},
+		{"json format", delegateOptions{format: "json"}, false},
+		{"empty format", delegateOptions{}, true},
+		{"invalid format", delegateOptions{format: "yaml"}, true},
 		{"from without to", delegateOptions{from: "main"}, true},
 		{"to without from", delegateOptions{to: "dev"}, true},
 		{"commit and range mixed", delegateOptions{commit: "abc", from: "main", to: "dev"}, true},

@@ -85,7 +85,7 @@ ocr r      [flags]   (alias)
 | `--from <ref>` | — | — | diff の開始 ref（例: `main`）。 |
 | `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
-| `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。 |
+| `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）または `json`（機械可読なコメント配列）。 |
 | `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します。`agent` は stdout を静音化し、最終サマリー / JSON のみを出力します。 |
@@ -94,6 +94,7 @@ ocr r      [flags]   (alias)
 | `--timeout <minutes>` | — | `20` | ファイルごとの締め切り時間。`0` でタイムアウトを無効化します。 |
 | `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |
 | `--max-tools <n>` | — | テンプレートのデフォルト | ファイルごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`30`）を使用します。1〜9 は `10` に引き上げられます。`≥ 10` の値はすべてテンプレートのデフォルトを上書きします（`30` より小さくても）。 |
+| `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | ファイルごとのプロンプトトークン上限。この実行で保存済みの `max_tokens` 設定を上書きします。 |
 | `--provider <name>` | — | — | 今回の実行で設定済み provider を選択します。`providers` と `custom_providers` の両方の名前を使用できます。 |
 | `--model <name>` | — | — | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
@@ -273,6 +274,34 @@ ocr review --format json --audience agent
 | `1` | 致命的エラー。引数の誤り、LLM エンドポイントを解決できない、すべてのファイルごとのサブエージェントが失敗した、などです。エラーテキストは stderr に出力されます。 |
 
 致命的でない警告（個々のサブエージェントの失敗、あるファイルが token しきい値を超過、など）はインラインで出力されます。JSON モードでは `warnings` 配列に追加されます。
+
+## `ocr scan`
+
+Git diff を必要としないファイル全体のレビュー。作業ツリーから各ファイルの現在の内容を読み込み、LLM に送信します。馴染みのないコードベースや、意味のある diff がないディレクトリの監査に便利です。
+
+```text
+ocr scan [flags]
+ocr s      [flags]   (alias)
+```
+
+`--path` を渡さない場合、リポジトリ全体をスキャンします。
+
+### 引数
+
+| 引数 | 短縮形 | デフォルト | 説明 |
+|---|---|---|---|
+| `--path <list>` | - | リポジトリ全体 | スキャン対象のリポジトリ相対ディレクトリまたはファイル（カンマ区切り、例: `internal/agent`、`internal/llm/client.go`）。 |
+| `--exclude <patterns>` | - | - | 除外する gitignore 形式のパターン（カンマ区切り、例: `**/generated/*,*.pb.go`）。`rule.json` の excludes とマージされます。 |
+| `--preview` | `-p` | `false` | LLM を呼び出さずにファイルを列挙・フィルタリングします。ファイルリスト、レビュー対象/除外数、総行数、ファイルごとの除外理由を出力します。`--format json` に対応しています。 |
+
+```bash
+ocr scan --preview                              # スキャン対象を確認
+ocr scan --path internal/agent                  # 単一ディレクトリをスキャン
+ocr scan --path internal/agent,internal/llm/client.go
+ocr scan --exclude '**/generated/*,*.pb.go'
+```
+
+完全なフラグリストは `ocr scan -h` を参照してください。
 
 ## `ocr session`
 

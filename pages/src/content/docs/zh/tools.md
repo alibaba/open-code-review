@@ -78,8 +78,8 @@ OCR 自动计算行号。
 `comments` 是数组，因此模型可以在一次工具调用中发出多条评论。`content` 和
 `existing_code` 必需；`suggestion_code` 可选但建议提供。`path` 是顶层可选覆盖——
 省略时，agent 会注入当前评审的文件。即便模型省略，agent 也会自动注入 `path`，因此
-模型极少需要显式设置。`thinking`（按评论）捕获模型推理，保留在评论上，但不会
-在最终评审输出中显示。
+模型极少需要显式设置。`thinking`（按评论）捕获模型推理，保留在评论上；OCR 会用
+模型当轮输出的推理内容自动回填（模型未输出推理内容时保持为空），并包含在 JSON 输出中（终端输出不渲染）。
 
 > **`thinking` 是运行时专属字段。** OCR 会解析并存储它，但有意**不**把它列入
 > 给模型的 `code_comment` schema（`tools.json` 中只有 `content`、

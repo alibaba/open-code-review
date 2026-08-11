@@ -54,7 +54,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
-| `minimax` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
+| `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
+| `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
 
 ### カスタム provider
@@ -124,6 +125,51 @@ Ollama は API key を無視しますが、カスタム provider は空でない
   }
 }
 ```
+
+### 追加のリトライ対象ステータスコード
+
+一部の LLM プロバイダーでは、レート制限に対して `403` や `400` を返すなど、
+一時的なエラーを標準外の 4xx ステータスコードで表すことがあります。
+`retry_codes` を使うと、OCR はこれらのリクエストに対して既存の SDK の
+リトライ機構を使用します。
+
+`retry_codes` は整数の配列です。`llm.retry_codes` または
+`custom_providers.<name>.retry_codes` に設定できます。`ocr config set` では、
+コードをカンマ区切りで指定します。
+
+```bash
+ocr config set llm.retry_codes 403,400
+ocr config set custom_providers.my-gateway.retry_codes 403,400
+```
+
+指定できるのは 4xx の HTTP ステータスコードだけです。`408`、`409`、`429` は
+SDK がすでにリトライするため、設定ファイルから読み込む際には無視されます。
+`ocr config set` で指定した場合は、OCR が警告を出し、これらのコードを保存しません。
+5xx のレスポンスも SDK がデフォルトでリトライするため、`retry_codes` には追加できません。
+
+### ファイルごとのプロンプト上限
+
+OCR はデフォルトで、ファイルごとのレビューにおいて 58,888 トークンのプロンプト上限を
+使用します。より大きなコンテキストウィンドウを持つモデル向けに、`max_tokens` を
+保存して上限を引き上げられます。
+
+```bash
+ocr config set max_tokens 200000
+```
+
+この設定は `ocr review` と `ocr scan` の両方に適用されます。保存済みの設定を
+変更せずに一度だけ上書きするには `--max-tokens` を使用します。
+
+```bash
+ocr review --max-tokens 200000
+ocr scan --max-tokens 200000
+```
+
+実行時のフラグは `max_tokens` より優先されます。どちらも設定されていない場合、
+OCR は組み込みのタスクテンプレートのデフォルト値を使用します。この上限はファイル
+単位であり、モデルの出力トークン上限、および実行全体のトークン使用量を制限する
+`--max-tokens-budget` のいずれとも独立しています。組み込みのデフォルトに戻すには
+`ocr config unset max_tokens` を実行してください。
 
 ### 接続性を検証する
 

@@ -46,6 +46,7 @@ type reviewOptions struct {
 	perFileTimeoutSet  bool
 	maxTools           int
 	maxGitProcs        int
+	maxTokens          int
 	maxTokensBudget    int
 	maxTokensBudgetSet bool
 	preview            bool
@@ -168,12 +169,16 @@ func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outp
 	if err != nil {
 		return err
 	}
-
 	setReviewStage(stage, "load_llm_runtime", "")
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
 	})
+	if err != nil {
+		return err
+	}
+	cc.Template.MaxCompletionTokens = cc.Template.OutputTokens()
+	cc.Template.MaxTokens, err = resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
 	}
@@ -414,7 +419,7 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 }
 
 func runPreview(cc *commonContext, opts reviewOptions) error {
-	ag := agent.New(agent.Args{
+	preview, err := agent.Preview(context.Background(), agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
 		To:         opts.to,
@@ -423,13 +428,11 @@ func runPreview(cc *commonContext, opts reviewOptions) error {
 		GitRunner:  cc.GitRunner,
 	})
 
-	preview, err := ag.Preview(context.Background())
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)
 	}
 
-	outputPreviewText(preview)
-	return nil
+	return outputPreview(preview, opts.outputFormat)
 }
 
 func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {

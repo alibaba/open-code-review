@@ -247,6 +247,20 @@ var registry = []Provider{
 		Name:        "minimax",
 		DisplayName: "MiniMax API",
 		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.minimax.io/v1",
+		EnvVar:      "MINIMAX_GLOBAL_API_KEY",
+		Models: []string{
+			"MiniMax-M3",
+			"MiniMax-M2.7",
+			"MiniMax-M2.7-highspeed",
+			"MiniMax-M2.5",
+			"MiniMax-M2.5-highspeed",
+		},
+	},
+	{
+		Name:        "minimax-cn",
+		DisplayName: "MiniMax CN API",
+		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.minimaxi.com/v1",
 		EnvVar:      "MINIMAX_API_KEY",
 		Models: []string{
@@ -322,6 +336,22 @@ var registry = []Provider{
 			"groq/llama-4-scout-17b-16e-instruct",
 			"mistral/mistral-large-latest",
 			"deepseek/deepseek-chat",
+		},
+	},
+	{
+		Name:        "mistral",
+		DisplayName: "Mistral AI",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.mistral.ai/v1",
+		EnvVar:      "MISTRAL_API_KEY",
+		// Deliberately minimal list to keep this preset low-maintenance for
+		// alibaba/open-code-review maintainers. Users can point to any other
+		// Mistral model via `ocr config set model <name>`; the preset only
+		// seeds the picker UI. See https://docs.mistral.ai/getting-started/models/models_overview/
+		Models: []string{
+			"codestral-latest",
+			"mistral-large-latest",
+			"mistral-small-latest",
 		},
 	},
 }

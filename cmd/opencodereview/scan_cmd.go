@@ -36,6 +36,7 @@ type scanOptions struct {
 	perFileTimeoutSet  bool
 	maxTools           int
 	maxGitProcs        int
+	maxTokens          int
 	preview            bool
 	noPlan             bool
 	noDedup            bool
@@ -143,18 +144,22 @@ func executeScan(opts scanOptions) error {
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
-		return runScanPreview(cc, scanTpl, scanPaths)
+		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat)
 	}
 
 	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)
 	if err != nil {
 		return err
 	}
-
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
 		Provider: opts.provider,
 		Model:    opts.model,
 	})
+	if err != nil {
+		return err
+	}
+	scanTpl.MaxCompletionTokens = scanTpl.OutputTokens()
+	scanTpl.MaxTokens, err = resolveMaxTokens(scanTpl.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
 	}
@@ -252,8 +257,8 @@ func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (
 	return state, nil
 }
 
-func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string) error {
-	ag := scan.NewAgent(scan.Args{
+func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string) error {
+	preview, err := scan.Preview(context.Background(), scan.Args{
 		RepoDir:          cc.RepoDir,
 		Paths:            scanPaths,
 		FileFilter:       cc.FileFilter,
@@ -264,10 +269,8 @@ func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths
 		Template: *scanTpl,
 	})
 
-	preview, err := ag.Preview(context.Background())
 	if err != nil {
 		return fmt.Errorf("scan preview failed: %w", err)
 	}
-	outputPreviewText(preview)
-	return nil
+	return outputPreview(preview, outputFormat)
 }

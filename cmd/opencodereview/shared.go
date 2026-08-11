@@ -68,6 +68,22 @@ func applyModelMaxToolRequestTimes(model string, current int) int {
 	return gpt56LunaMaxToolRequestTimes
 }
 
+func resolveMaxTokens(templateDefault int, cfg *Config, cliOverride int) (int, error) {
+	if cliOverride < 0 {
+		return 0, fmt.Errorf("--max-tokens must be a non-negative integer")
+	}
+	if cliOverride > 0 {
+		return cliOverride, nil
+	}
+	if cfg == nil || cfg.MaxTokens == 0 {
+		return templateDefault, nil
+	}
+	if cfg.MaxTokens < 0 {
+		return 0, fmt.Errorf("invalid max_tokens in app config: must be a positive integer")
+	}
+	return cfg.MaxTokens, nil
+}
+
 // loadCommonContext validates the working directory, loads the embedded
 // template, raises MaxToolRequestTimes when maxTools exceeds the default,
 // resolves the absolute repo path, loads system review rules, and creates

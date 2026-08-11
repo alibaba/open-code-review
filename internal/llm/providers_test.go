@@ -31,6 +31,38 @@ func TestLookupProvider_KnownProviders(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_MiniMaxDetails(t *testing.T) {
+	tests := []struct {
+		name, wantURL, wantEnvVar string
+	}{
+		{
+			name:       "minimax",
+			wantURL:    "https://api.minimax.io/v1",
+			wantEnvVar: "MINIMAX_GLOBAL_API_KEY",
+		},
+		{
+			name:       "minimax-cn",
+			wantURL:    "https://api.minimaxi.com/v1",
+			wantEnvVar: "MINIMAX_API_KEY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider, ok := LookupProvider(tt.name)
+			if !ok {
+				t.Fatalf("LookupProvider(%q) returned false, want true", tt.name)
+			}
+			if provider.BaseURL != tt.wantURL {
+				t.Errorf("LookupProvider(%q).BaseURL = %q, want %q", tt.name, provider.BaseURL, tt.wantURL)
+			}
+			if provider.EnvVar != tt.wantEnvVar {
+				t.Errorf("LookupProvider(%q).EnvVar = %q, want %q", tt.name, provider.EnvVar, tt.wantEnvVar)
+			}
+		})
+	}
+}
+
 func TestLookupProvider_Unknown(t *testing.T) {
 	_, ok := LookupProvider("nonexistent-provider")
 	if ok {
@@ -43,7 +75,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "iflytek", "kimi", "litellm", "mimo", "minimax", "ollama-cloud", "openai", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "iflytek", "kimi", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "ollama-cloud", "openai", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -236,6 +268,41 @@ func TestLookupProvider_LiteLLMDetails(t *testing.T) {
 		"groq/llama-4-scout-17b-16e-instruct",
 		"mistral/mistral-large-latest",
 		"deepseek/deepseek-chat",
+	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
+}
+
+func TestLookupProvider_MistralDetails(t *testing.T) {
+	p, ok := LookupProvider("mistral")
+	if !ok {
+		t.Fatal("mistral not found")
+	}
+	if p.DisplayName != "Mistral AI" {
+		t.Errorf("DisplayName = %q, want %q", p.DisplayName, "Mistral AI")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://api.mistral.ai/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://api.mistral.ai/v1")
+	}
+	if p.EnvVar != "MISTRAL_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "MISTRAL_API_KEY")
+	}
+	if p.AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
+	}
+	expectedModels := []string{
+		"codestral-latest",
+		"mistral-large-latest",
+		"mistral-small-latest",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))

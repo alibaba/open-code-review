@@ -6,6 +6,7 @@ package main
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,6 +53,43 @@ func TestSetConfigValueModel(t *testing.T) {
 	}
 	if cfg.Model != "claude-opus-4-6" {
 		t.Errorf("Model = %q, want %q", cfg.Model, "claude-opus-4-6")
+	}
+}
+
+func TestSetConfigValueMaxTokens(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "max_tokens", "200000"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.MaxTokens != 200000 {
+		t.Errorf("MaxTokens = %d, want 200000", cfg.MaxTokens)
+	}
+}
+
+func TestSetConfigValueMaxTokensRejectsInvalidValues(t *testing.T) {
+	for _, value := range []string{"0", "-1", "not-a-number"} {
+		t.Run(value, func(t *testing.T) {
+			if err := setConfigValue(&Config{}, "max_tokens", value); err == nil {
+				t.Fatalf("expected max_tokens=%q to be rejected", value)
+			}
+		})
+	}
+}
+
+func TestMaxTokensConfigRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{MaxTokens: 200000}
+
+	if err := saveConfig(path, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+	loaded, err := LoadAppConfig(path)
+	if err != nil {
+		t.Fatalf("LoadAppConfig: %v", err)
+	}
+	if loaded.MaxTokens != 200000 {
+		t.Errorf("MaxTokens = %d, want 200000", loaded.MaxTokens)
 	}
 }
 
@@ -371,6 +409,33 @@ func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 }
 
 // --- unset tests ---
+
+func TestUnsetMaxTokens(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{Provider: "anthropic", MaxTokens: 200000}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	if err := unsetMaxTokens(configPath); err != nil {
+		t.Fatalf("unsetMaxTokens: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(data), "max_tokens") {
+		t.Errorf("max_tokens should be omitted after unset: %s", data)
+	}
+	loaded, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if loaded.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want anthropic", loaded.Provider)
+	}
+}
 
 func TestUnsetCustomProvider(t *testing.T) {
 	dir := t.TempDir()
@@ -932,8 +997,8 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\n" +
+		"Supported keys: provider, model, max_tokens, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\n" +
 		"Protocol values: anthropic, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
@@ -1406,5 +1471,51 @@ func TestSetMCPServerValue_HeadersEmptyValue(t *testing.T) {
 	cfg := &Config{}
 	if err := setMCPServerValue(cfg, "mcp_servers.gh.headers", `{"Authorization":""}`); err == nil {
 		t.Fatal("expected error for empty header value, got nil")
+	}
+}
+
+func TestSetConfigValueLlmRetryCodesRedundantWarning(t *testing.T) {
+	cfg := &Config{}
+	stderr := captureConfigStderr(t, func() {
+		if err := setConfigValue(cfg, "llm.retry_codes", "429,403"); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "WARNING") || !strings.Contains(stderr, "429") {
+		t.Errorf("expected warning about 429 on stderr, got %q", stderr)
+	}
+	if len(cfg.Llm.RetryCodes) != 1 || cfg.Llm.RetryCodes[0] != 403 {
+		t.Errorf("RetryCodes = %v, want [403]", cfg.Llm.RetryCodes)
+	}
+}
+
+func TestSetConfigValueProviderRetryCodesRedundantWarning(t *testing.T) {
+	cfg := &Config{}
+	stderr := captureConfigStderr(t, func() {
+		if err := setConfigValue(cfg, "custom_providers.test.retry_codes", "408,400"); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "WARNING") || !strings.Contains(stderr, "408") {
+		t.Errorf("expected warning about 408 on stderr, got %q", stderr)
+	}
+	entry := cfg.CustomProviders["test"]
+	if len(entry.RetryCodes) != 1 || entry.RetryCodes[0] != 400 {
+		t.Errorf("RetryCodes = %v, want [400]", entry.RetryCodes)
+	}
+}
+
+func TestSetConfigValueLlmRetryCodesNoWarningForValidCodes(t *testing.T) {
+	cfg := &Config{}
+	stderr := captureConfigStderr(t, func() {
+		if err := setConfigValue(cfg, "llm.retry_codes", "403,400"); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Errorf("expected no stderr output, got %q", stderr)
+	}
+	if len(cfg.Llm.RetryCodes) != 2 {
+		t.Errorf("RetryCodes = %v, want [403 400]", cfg.Llm.RetryCodes)
 	}
 }

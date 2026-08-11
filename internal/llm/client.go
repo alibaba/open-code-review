@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -190,6 +191,14 @@ func (r *ChatResponse) ToolCalls() []ToolCall {
 	return r.Choices[0].Message.ToolCalls
 }
 
+// ReasoningContent extracts the reasoning content of the first choice, if any.
+func (r *ChatResponse) ReasoningContent() string {
+	if len(r.Choices) == 0 {
+		return ""
+	}
+	return r.Choices[0].Message.ReasoningContent
+}
+
 // Phase returns the Responses API assistant phase from the first choice.
 func (r *ChatResponse) Phase() string {
 	if len(r.Choices) == 0 {
@@ -230,6 +239,24 @@ type ClientConfig struct {
 	Timeout      time.Duration     // Request timeout
 	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
 	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
+	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+}
+
+func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+	if len(codes) == 0 {
+		return nil
+	}
+	codeSet := make(map[int]bool, len(codes))
+	for _, code := range codes {
+		codeSet[code] = true
+	}
+	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+		resp, err := next(req)
+		if err == nil && codeSet[resp.StatusCode] {
+			resp.Header.Set("x-should-retry", "true")
+		}
+		return resp, err
+	}
 }
 
 // --- Factory ---
@@ -252,6 +279,7 @@ func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 		Timeout:      ep.Timeout,
 		ExtraBody:    ep.ExtraBody,
 		ExtraHeaders: ep.ExtraHeaders,
+		RetryCodes:   ep.RetryCodes,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -375,12 +403,15 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
 		openaiopt.WithBaseURL(sdkBaseURL),
-		openaiopt.WithMaxRetries(0),
+		openaiopt.WithMaxRetries(5),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 	}
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, openaiopt.WithHeader(k, v))
+	}
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, openaiopt.WithMiddleware(mw))
 	}
 
 	return &OpenAIClient{
@@ -666,7 +697,7 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 
 	opts := []option.RequestOption{
 		option.WithBaseURL(sdkBaseURL),
-		option.WithMaxRetries(0),
+		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
 	}
@@ -686,6 +717,9 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, option.WithHeader(k, v))
+	}
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, option.WithMiddleware(mw))
 	}
 
 	return &AnthropicClient{
@@ -835,6 +869,14 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	if len(tools) > 0 {
 		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
 		params.Tools = tools
+	}
+	if len(messages) > 0 {
+		last := &messages[len(messages)-1]
+		if len(last.Content) > 0 {
+			if cc := last.Content[len(last.Content)-1].GetCacheControl(); cc != nil {
+				*cc = anthropic.NewCacheControlEphemeralParam()
+			}
+		}
 	}
 	if req.Temperature != nil {
 		params.Temperature = anthropic.Float(*req.Temperature)

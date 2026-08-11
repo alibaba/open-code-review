@@ -88,10 +88,7 @@ func TestRenderTemplate_WithRepos(t *testing.T) {
 		`href="/r/my-project/session-1"`,
 		"Search repositories or sessions",
 		"No repositories or sessions match your search.",
-		`addEventListener("input"`,
-		"toLowerCase()",
-		"name.includes(query)",
-		"row.hidden",
+		`<script src="/static/repos.js"></script>`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("rendered repository page missing %q", required)

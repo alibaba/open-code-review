@@ -35,7 +35,7 @@ func TestExecuteToolCall_DynamicNotRegistered(t *testing.T) {
 
 	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
 		Function: llm.FunctionCall{Name: "totally_unknown", Arguments: `{}`},
-	}, nil)
+	}, nil, "")
 
 	if cp.Data != tool.NotAvailableMsg {
 		t.Errorf("cp.Data = %q, want NotAvailableMsg", cp.Data)
@@ -52,7 +52,7 @@ func TestExecuteToolCall_DynamicExecuteError(t *testing.T) {
 
 	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
 		Function: llm.FunctionCall{Name: "dyn_fail", Arguments: `{}`},
-	}, nil)
+	}, nil, "")
 
 	if !strings.Contains(cp.Data, "Error executing tool dyn_fail") {
 		t.Errorf("cp.Data = %q, want execute-error message", cp.Data)
@@ -71,7 +71,7 @@ func TestExecuteToolCall_DynamicSuccessRecordsResult(t *testing.T) {
 	rec := &session.TaskRecord{}
 	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
 		Function: llm.FunctionCall{Name: "dyn_ok", Arguments: `{"k":"v"}`},
-	}, rec)
+	}, rec, "")
 
 	if cp.Data != "ok" {
 		t.Errorf("cp.Data = %q, want ok", cp.Data)
@@ -93,7 +93,7 @@ func TestExecuteToolCall_KnownToolNotRegistered(t *testing.T) {
 
 	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
 		Function: llm.FunctionCall{Name: tool.FileRead.Name(), Arguments: `{"path":"x"}`},
-	}, nil)
+	}, nil, "")
 
 	if cp.Data != tool.NotAvailableMsg {
 		t.Errorf("cp.Data = %q, want NotAvailableMsg", cp.Data)
@@ -138,7 +138,7 @@ func TestExecuteToolCall_DynamicParseError(t *testing.T) {
 
 	cp := r.executeToolCall(context.Background(), "file.go", llm.ToolCall{
 		Function: llm.FunctionCall{Name: "dyn_ok", Arguments: `{bad`},
-	}, nil)
+	}, nil, "")
 
 	if !strings.Contains(cp.Data, "Error parsing tool arguments for dyn_ok") {
 		t.Errorf("cp.Data = %q, want parse-error message", cp.Data)

@@ -40,11 +40,12 @@ func addExcludeFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 }
 
-func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, maxGitProcs, maxTokensBudget *int) {
+func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, maxGitProcs, maxTokens, maxTokensBudget *int) {
 	cmd.Flags().IntVar(concurrency, "concurrency", 8, "max concurrent file reviews")
 	cmd.Flags().IntVar(timeout, "timeout", defaultPerFileTimeoutMinutes, "concurrent task timeout in minutes")
 	cmd.Flags().IntVar(maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	cmd.Flags().IntVar(maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
+	cmd.Flags().IntVar(maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")
 	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; omitted or explicitly set 0 is unlimited, positive values cap the run; dispatch stops once exceeded and skipped files are reported as failed(budget). Partial results are published and review exits 0; it exits non-zero only if every selected item failed")
 }
 
@@ -122,6 +123,9 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if opts.maxGitProcs < 0 {
 		return fmt.Errorf("--max-git-procs must be a non-negative integer (0 means use default 16)")
 	}
+	if opts.maxTokens < 0 {
+		return fmt.Errorf("--max-tokens must be a non-negative integer (0 means use configured or template default)")
+	}
 	if opts.maxTokensBudget < 0 {
 		return fmt.Errorf("--max-tokens-budget must be a non-negative integer (explicit 0 means unlimited)")
 	}
@@ -138,6 +142,9 @@ func validateScanOptions(opts *scanOptions) error {
 	if opts.maxGitProcs < 0 {
 		return fmt.Errorf("--max-git-procs must be a non-negative integer (0 means use default 16)")
 	}
+	if opts.maxTokens < 0 {
+		return fmt.Errorf("--max-tokens must be a non-negative integer (0 means use configured or template default)")
+	}
 	if opts.preview && opts.resume != "" {
 		return fmt.Errorf("--preview and --resume cannot be used together")
 	}
@@ -148,7 +155,13 @@ func validateScanOptions(opts *scanOptions) error {
 }
 
 func validateDelegateOptions(opts *delegateOptions) error {
-	return validateDiffMode(opts.from, opts.to, opts.commit)
+	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
+		return err
+	}
+	if opts.format != "text" && opts.format != "json" {
+		return fmt.Errorf("invalid --format value %q: must be 'text' or 'json'", opts.format)
+	}
+	return nil
 }
 
 // registerReviewFlags registers all review command flags on cmd, binding to opts.
@@ -161,7 +174,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	cmd.RegisterFlagCompletionFunc("resume", completeSessionIDs)
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
-	addConcurrencyFlags(cmd, &opts.concurrency, &opts.perFileTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokensBudget)
+	addConcurrencyFlags(cmd, &opts.concurrency, &opts.perFileTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokens, &opts.maxTokensBudget)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
@@ -180,6 +193,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().IntVar(&opts.perFileTimeout, "timeout", defaultPerFileTimeoutMinutes, "concurrent task timeout in minutes")
 	cmd.Flags().IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
+	cmd.Flags().IntVar(&opts.maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")
 	cmd.Flags().IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage; omitted or explicitly set 0 is unlimited, positive values cap the run; dispatch stops once exceeded")
 	cmd.Flags().StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the scan")
 	cmd.Flags().BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be scanned without running the LLM")

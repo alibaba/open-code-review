@@ -20,6 +20,7 @@ type Template struct {
 	MemoryCompressionTask     LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	MaxTokens                 int              `json:"MAX_TOKENS"`
 	MaxOutputTokens           int              `json:"MAX_OUTPUT_TOKENS,omitempty"`
+	MaxCompletionTokens       int              `json:"-"`
 	MaxToolRequestTimes       int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	MaxTokensBudgetMultiplier float64          `json:"MAX_TOKENS_BUDGET_MULTIPLIER,omitempty"`
 	PlanModeLineThreshold     int              `json:"PLAN_MODE_LINE_THRESHOLD"`
@@ -37,6 +38,7 @@ type ScanTemplate struct {
 	ReLocationTask            *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	MaxTokens                 int              `json:"MAX_TOKENS"`
 	MaxOutputTokens           int              `json:"MAX_OUTPUT_TOKENS,omitempty"`
+	MaxCompletionTokens       int              `json:"-"`
 	ToolRequestWaitTimeMs     int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
 	MaxToolRequestTimes       int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	MaxTokensBudgetMultiplier float64          `json:"MAX_TOKENS_BUDGET_MULTIPLIER,omitempty"`
@@ -144,6 +146,9 @@ func LoadDefault() (*Template, error) {
 // OutputTokens keeps older custom templates working while separating the
 // provider response limit from the local conversation-context budget.
 func (t Template) OutputTokens() int {
+	if t.MaxCompletionTokens > 0 {
+		return t.MaxCompletionTokens
+	}
 	if t.MaxOutputTokens > 0 {
 		return t.MaxOutputTokens
 	}
@@ -151,11 +156,18 @@ func (t Template) OutputTokens() int {
 }
 
 func (t ScanTemplate) OutputTokens() int {
+	if t.MaxCompletionTokens > 0 {
+		return t.MaxCompletionTokens
+	}
 	if t.MaxOutputTokens > 0 {
 		return t.MaxOutputTokens
 	}
 	return t.MaxTokens
 }
+
+func (t Template) CompletionTokenLimit() int { return t.OutputTokens() }
+
+func (t ScanTemplate) CompletionTokenLimit() int { return t.OutputTokens() }
 
 // LoadScanDefault parses the embedded scan_template.json.
 func LoadScanDefault() (*ScanTemplate, error) {
