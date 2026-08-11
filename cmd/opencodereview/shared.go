@@ -6,10 +6,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
@@ -286,6 +288,166 @@ func (h *quietHandle) Restore() {
 	h.fn = nil
 }
 
+// stripAnsiState is the ANSI escape parsing state for stripAnsiWriter.
+type stripAnsiState int
+
+const (
+	ansiNormal stripAnsiState = iota
+	ansiEsc
+	ansiCSI
+	ansiOSC
+	ansiOSCEsc
+)
+
+// stripAnsiWriter removes ANSI escape sequences (colors, cursor moves, OSC
+// control strings) from the byte stream it forwards, so terminal-only
+// decoration never reaches --output files. It tolerates sequences split
+// arbitrarily across Write calls: any in-progress sequence is buffered and
+// carried to the next Write. Payload bytes (non-ESC) pass through unchanged,
+// so stripping only discards decoration, never result content.
+type stripAnsiWriter struct {
+	dst     io.Writer
+	state   stripAnsiState
+	pending []byte // partial escape sequence carried across Write calls
+}
+
+func (w *stripAnsiWriter) Write(p []byte) (int, error) {
+	// Only new bytes are fed to the state machine. w.pending holds bytes that
+	// already entered an escape sequence in earlier calls — re-feeding them
+	// would re-parse the sequence start (e.g. '[' would be mistaken for a CSI
+	// final byte once the state is already ansiCSI) and leak the sequence into
+	// the output. The pending buffer is discarded wholesale on completion.
+	var out []byte
+	for _, c := range p {
+		switch w.state {
+		case ansiNormal:
+			if c == 0x1b {
+				w.state = ansiEsc
+				w.pending = append(w.pending, c)
+			} else {
+				out = append(out, c)
+			}
+		case ansiEsc:
+			w.pending = append(w.pending, c)
+			switch c {
+			case '[':
+				w.state = ansiCSI
+			case ']':
+				w.state = ansiOSC
+			default:
+				// Single-byte escape sequence (e.g. ESC ( B). Discard.
+				w.state = ansiNormal
+				w.pending = w.pending[:0]
+			}
+		case ansiCSI:
+			w.pending = append(w.pending, c)
+			if c >= 0x40 && c <= 0x7e {
+				w.state = ansiNormal
+				w.pending = w.pending[:0]
+			}
+		case ansiOSC:
+			w.pending = append(w.pending, c)
+			switch c {
+			case 0x07: // BEL terminates an OSC string
+				w.state = ansiNormal
+				w.pending = w.pending[:0]
+			case 0x1b: // possible ST terminator (ESC \)
+				w.state = ansiOSCEsc
+			}
+		case ansiOSCEsc:
+			w.pending = append(w.pending, c)
+			if c == '\\' { // ST terminates the OSC string
+				w.state = ansiNormal
+				w.pending = w.pending[:0]
+			} else {
+				// Not a valid ST; discard the malformed sequence up to here.
+				w.state = ansiNormal
+				w.pending = w.pending[:0]
+			}
+		}
+	}
+
+	if len(out) > 0 {
+		if n, err := w.dst.Write(out); err != nil {
+			return 0, err
+		} else if n != len(out) {
+			return 0, io.ErrShortWrite
+		}
+	}
+	return len(p), nil
+}
+
+// lazyFileWriter defers os.Create until the first Write so a run that never
+// produces output (LLM failure, preview error, interruption) leaves an
+// existing target file untouched instead of truncating it to zero bytes. The
+// "Results written" hint is printed to stderr only once the file is actually
+// created, so agents never see a path hint for a file that stayed empty.
+type lazyFileWriter struct {
+	path     string
+	strip    bool // strip ANSI when the target format is text
+	once     sync.Once
+	file     *os.File
+	stripper *stripAnsiWriter
+	err      error
+}
+
+func (w *lazyFileWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() {
+		f, err := os.Create(w.path)
+		if err != nil {
+			w.err = fmt.Errorf("create output file %s: %w", w.path, err)
+			return
+		}
+		w.file = f
+		if w.strip {
+			w.stripper = &stripAnsiWriter{dst: f}
+		}
+		fmt.Fprintf(os.Stderr, "[ocr] Results written to %s\n", w.path)
+	})
+	if w.err != nil {
+		return 0, w.err
+	}
+	if w.stripper != nil {
+		return w.stripper.Write(p)
+	}
+	return w.file.Write(p)
+}
+
+// Close closes the underlying file. It is a no-op when the file was never
+// created (no output produced), so failure paths cannot leave a fresh empty
+// file behind.
+func (w *lazyFileWriter) Close() error {
+	if w.file == nil {
+		return nil
+	}
+	return w.file.Close()
+}
+
+// resolveOutputWriter resolves the --output target into a writer plus a
+// cleanup function.
+//   - "" or "-"      → os.Stdout with a no-op cleanup (colors preserved, no hint)
+//   - otherwise      → a lazyFileWriter over os.Create(path), deferred until the
+//     first Write; text format wraps the file in stripAnsiWriter so ANSI
+//     colors never reach the result file.
+//
+// Fail-fast checks (directory target, missing parent) run here without
+// creating or truncating anything; deeper errors (permissions, disk) surface
+// on the first Write and fail the command non-zero.
+func resolveOutputWriter(path, format string) (io.Writer, func() error, error) {
+	if path == "" || path == "-" {
+		return os.Stdout, func() error { return nil }, nil
+	}
+	if st, err := os.Stat(path); err == nil && st.IsDir() {
+		return nil, nil, fmt.Errorf("--output %q is a directory", path)
+	}
+	parent := filepath.Dir(path)
+	if st, err := os.Stat(parent); err != nil || !st.IsDir() {
+		return nil, nil, fmt.Errorf("--output directory does not exist: %s", parent)
+	}
+	w := &lazyFileWriter{path: path, strip: format == "text"}
+	return w, w.Close, nil
+}
+
 // ResultProvider abstracts the metadata both internal/agent.Agent and
 // internal/scan.Agent expose post-run, so emitRunResult can finalize
 // either without knowing which kind it has.
@@ -339,6 +501,7 @@ func emitRunResult(
 	outputFormat, audience string,
 	q *quietHandle,
 	llmIdentity *jsonLLMIdentity,
+	out io.Writer,
 ) error {
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
@@ -352,7 +515,7 @@ func emitRunResult(
 	manifest := ag.RunManifest()
 
 	if outputFormat == "json" && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
-		return outputJSONNoFiles(traceID, llmIdentity)
+		return outputJSONNoFiles(traceID, llmIdentity, out)
 	}
 
 	// Agent-text audiences need stdout back before PrintTraceSummary so the
@@ -375,11 +538,11 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity)
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out)
 	}
-	outputTextWithWarnings(comments, ag.Warnings(), manifest)
+	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
 	if summary := ag.ProjectSummary(); summary != "" {
-		fmt.Printf("\n\n──────── Project Summary ────────\n\n%s\n", summary)
+		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", summary)
 	}
 	return nil
 }
