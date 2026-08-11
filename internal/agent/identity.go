@@ -45,6 +45,14 @@ type SealedInput struct {
 func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	defer stdout.Quiet()()
 
+	resolution, err := resolveInputBeforeDiff(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	if resolution != nil {
+		args.SealedInput = resolution
+	}
+
 	a := &Agent{args: args}
 	if err := a.loadDiffs(ctx); err != nil {
 		return nil, fmt.Errorf("load diffs: %w", err)
@@ -52,6 +60,44 @@ func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	a.diffs = a.filterDiffs(a.diffs)
 	a.diffs = a.filterLargeDiffs(a.diffs)
 	return &SealedInput{Identity: a.runIdentity(), Resolution: a.inputResolution}, nil
+}
+
+// resolveInputBeforeDiff turns every moving head ref into an immutable commit
+// before the diff used for admission is loaded. Range mode then computes its
+// merge-base against that frozen head; commit mode needs only the frozen head.
+func resolveInputBeforeDiff(ctx context.Context, args Args) (*diff.InputResolution, error) {
+	switch {
+	case args.Commit != "":
+		head, err := resolveCommitHead(ctx, args, args.Commit)
+		if err != nil {
+			return nil, err
+		}
+		return &diff.InputResolution{ResolvedHead: head}, nil
+	case args.From != "" && args.To != "":
+		from, err := resolveCommitHead(ctx, args, args.From)
+		if err != nil {
+			return nil, err
+		}
+		head, err := resolveCommitHead(ctx, args, args.To)
+		if err != nil {
+			return nil, err
+		}
+		resolved := diff.NewProvider(args.RepoDir, from, head, args.GitRunner).ResolveInput(ctx)
+		if resolved.ResolvedBase == "" {
+			return nil, fmt.Errorf("resolve merge-base between %q and %q", args.From, args.To)
+		}
+		return &resolved, nil
+	default:
+		return nil, nil
+	}
+}
+
+func resolveCommitHead(ctx context.Context, args Args, ref string) (string, error) {
+	head := diff.NewCommitProvider(args.RepoDir, ref, args.GitRunner).ResolveInput(ctx).ResolvedHead
+	if head == "" {
+		return "", fmt.Errorf("resolve commit %q", ref)
+	}
+	return head, nil
 }
 
 // runIdentity reads the identity off the agent's current selection.
