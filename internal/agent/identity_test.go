@@ -164,3 +164,36 @@ func TestResolveIdentityTracksConfigChanges(t *testing.T) {
 		}
 	})
 }
+
+func TestResolveInputBeforeDiffCommit(t *testing.T) {
+	dir := sealRepo(t)
+	gitIn(t, dir, "remote", "add", "origin", "https://example.com/org/repo.git")
+	sealed, err := ResolveIdentity(context.Background(), Args{RepoDir: dir, Commit: "HEAD"})
+	if err != nil {
+		t.Fatalf("ResolveIdentity: %v", err)
+	}
+	if sealed.Resolution.ResolvedHead == "" {
+		t.Fatalf("commit resolve must freeze its head, got %+v", sealed.Resolution)
+	}
+	if sealed.Identity.RepositorySHA256 == "" {
+		t.Fatal("resolved identity must include the repository identity")
+	}
+}
+
+func TestResolveInputBeforeDiffRejectsInvalidRefs(t *testing.T) {
+	dir := sealRepo(t)
+	for _, tc := range []struct {
+		name string
+		args Args
+	}{
+		{"commit", Args{RepoDir: dir, Commit: "missing"}},
+		{"range from", Args{RepoDir: dir, From: "missing", To: "feature"}},
+		{"range to", Args{RepoDir: dir, From: "main", To: "missing"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ResolveIdentity(context.Background(), tc.args); err == nil {
+				t.Fatal("unresolvable ref must fail before loading the diff")
+			}
+		})
+	}
+}
