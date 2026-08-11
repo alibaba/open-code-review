@@ -153,6 +153,256 @@ function computeChecksum(filePath) {
   });
 }
 
+// Default PATHEXT on Windows when the variable is unset/empty.
+const DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC";
+
+// File names a shell may resolve for the `ocr` command. POSIX executes the
+// plain name only; Windows probes the PATHEXT variants in the same order
+// cmd.exe would, plus the bare name last for POSIX-like shells (Git Bash).
+function ocrCandidateNames(isWindows, pathExtEnv) {
+  if (!isWindows) {
+    return ["ocr"];
+  }
+  const raw = pathExtEnv && String(pathExtEnv).trim() ? pathExtEnv : DEFAULT_PATHEXT;
+  const names = String(raw)
+    .split(";")
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.startsWith("."))
+    .map((e) => "ocr" + e);
+  names.push("ocr");
+  return Array.from(new Set(names));
+}
+
+// Path comparisons must be case-insensitive on Windows: realpath output and
+// env-derived paths (npm_config_prefix, shim targets) can legitimately
+// differ in casing (drive letter, profile dir, junctions).
+function pathsEqual(a, b, isWindows) {
+  return isWindows ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+function pathHasPrefix(p, prefix, isWindows) {
+  return isWindows
+    ? p.toLowerCase().startsWith(prefix.toLowerCase())
+    : p.startsWith(prefix);
+}
+
+// Walk PATH in order and return every entry that contains an `ocr` executable
+// as { dir, name, path }. Within one directory only the first matching
+// variant is reported, mirroring how a shell resolves that directory.
+// candidateNames defaults to ocrCandidateNames(isWindows).
+function findOcrOnPath(pathEnv, isWindows, pathSep, candidateNames) {
+  const names = candidateNames || ocrCandidateNames(isWindows);
+  const found = [];
+  const seenDirs = new Set();
+  for (const dir of String(pathEnv || "").split(pathSep || (isWindows ? ";" : ":"))) {
+    if (!dir) {
+      continue;
+    }
+    let realDir = dir;
+    try {
+      realDir = fs.realpathSync(dir);
+    } catch (_) {
+      // Leave the dir as written; a stat failure below skips it anyway.
+    }
+    const key = isWindows ? realDir.toLowerCase() : realDir;
+    if (seenDirs.has(key)) {
+      continue;
+    }
+    seenDirs.add(key);
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      try {
+        const st = fs.statSync(candidate); // follows symlinks
+        if (!st.isFile()) {
+          continue;
+        }
+        if (!isWindows && (st.mode & 0o111) === 0) {
+          continue; // not executable on POSIX
+        }
+        found.push({ dir, name, path: candidate });
+        break; // first matching variant in this directory wins
+      } catch (_) {
+        // Missing or unreadable entry: try the next variant.
+      }
+    }
+  }
+  return found;
+}
+
+// True when a resolved PATH entry belongs to *this* installation: either a
+// symlink to bin/ocr.js (npm/yarn/pnpm on POSIX) or a package-manager shim
+// (npm .cmd/.ps1 on Windows, wrapper scripts elsewhere) that launches it.
+function isOurCommand(filePath, packageRoot, pkgName, isWindows) {
+  const ourJs = path.join(packageRoot, "bin", "ocr.js");
+  let real = filePath;
+  try {
+    real = fs.realpathSync(filePath);
+  } catch (_) {
+    // Keep the raw path; the comparison below simply won't match.
+  }
+  try {
+    if (pathsEqual(real, fs.realpathSync(ourJs), isWindows)) {
+      return true;
+    }
+  } catch (_) {
+    // bin/ocr.js missing: fall through to the shim content check.
+  }
+  try {
+    const st = fs.statSync(filePath);
+    if (st.isFile() && st.size < 4096) {
+      // Shims embed the script they launch; compare with normalized slashes
+      // and casing (the embedded path follows the installer's casing).
+      const content = fs.readFileSync(filePath, "utf8").replace(/\\/g, "/").toLowerCase();
+      if (content.includes(`node_modules/${pkgName}/bin/ocr.js`.toLowerCase())) {
+        return true;
+      }
+    }
+  } catch (_) {
+    // Unreadable candidate: treat as foreign.
+  }
+  return false;
+}
+
+// For a global install npm links `ocr` into <prefix>/bin (POSIX) or <prefix>
+// (Windows). Returns that directory when packageRoot lives under the global
+// prefix, otherwise null (a local install does not expect a PATH command).
+function globalBinDir(packageRoot, isWindows, env) {
+  const prefix = env && env.npm_config_prefix;
+  if (!prefix) {
+    return null;
+  }
+  const globalRoot = isWindows
+    ? path.join(prefix, "node_modules")
+    : path.join(prefix, "lib", "node_modules");
+  if (!pathHasPrefix(packageRoot, globalRoot + path.sep, isWindows)) {
+    return null;
+  }
+  return isWindows ? prefix : path.join(prefix, "bin");
+}
+
+// Classify how `ocr` resolves in the installing shell right after install.
+//
+// Why this exists: shells cache command locations (the bash/zsh hash table).
+// If the session ever ran a different executable named `ocr` before this
+// install, the *current* terminal keeps running that cached location even
+// though the real `ocr` now sits earlier on PATH; only new terminals resolve
+// correctly. The installer cannot clear the parent shell's cache, so it must
+// detect the situation and tell the user (see printPathResolutionNotice).
+//
+// Returns one of:
+//   { status: "ok", resolved }                 resolves here, no lookalikes
+//   { status: "stale-hash-risk", resolved,
+//     stale: [paths] }                         resolves here, but another ocr
+//                                              exists that open shells may have
+//                                              cached
+//   { status: "shadowed", resolved,
+//     ours: [paths] }                          a different executable wins in
+//                                              every terminal, though ours is
+//                                              also on PATH
+//   { status: "not-on-path", binDir,
+//     occupiedBy }                             global install, but this
+//                                              installation's `ocr` is not
+//                                              resolvable; occupiedBy is the
+//                                              foreign executable holding the
+//                                              name, or null
+//   { status: "unknown" }                      not resolvable; local install
+function checkOcrCommand(opts) {
+  const { packageRoot, pkgName, pathEnv, isWindows, env } = opts;
+  const pathSep = opts.pathSep || (isWindows ? ";" : ":");
+  const names = ocrCandidateNames(isWindows, env && env.PATHEXT);
+  const found = findOcrOnPath(pathEnv, isWindows, pathSep, names);
+  // Classify each entry once; isOurCommand performs filesystem I/O.
+  const classified = found.map((f) => ({
+    dir: f.dir,
+    name: f.name,
+    path: f.path,
+    ours: isOurCommand(f.path, packageRoot, pkgName, isWindows),
+  }));
+  const ours = classified.filter((f) => f.ours);
+  if (ours.length === 0) {
+    // This installation has no resolvable `ocr` on PATH. For global installs
+    // we know where the command should live, so report that — including who
+    // currently occupies the command name, if anyone.
+    const binDir = globalBinDir(packageRoot, isWindows, env);
+    if (!binDir) {
+      return { status: "unknown" };
+    }
+    return {
+      status: "not-on-path",
+      binDir,
+      occupiedBy: classified.length > 0 ? classified[0].path : null,
+    };
+  }
+  const foreign = classified.filter((f) => !f.ours);
+  const first = classified[0];
+  if (first.ours) {
+    if (foreign.length > 0) {
+      return {
+        status: "stale-hash-risk",
+        resolved: first.path,
+        stale: foreign.map((f) => f.path),
+      };
+    }
+    return { status: "ok", resolved: first.path };
+  }
+  return {
+    status: "shadowed",
+    resolved: first.path,
+    ours: ours.map((f) => f.path),
+  };
+}
+
+// Render the classification from checkOcrCommand as install-time notices.
+function printPathResolutionNotice() {
+  let result;
+  try {
+    result = checkOcrCommand({
+      packageRoot,
+      pkgName: loadPackageJson().name,
+      pathEnv: process.env.PATH || "",
+      isWindows: IS_WINDOWS,
+      env: process.env,
+    });
+  } catch (e) {
+    warn(`Could not verify how the ocr command resolves: ${e.message}`);
+    return;
+  }
+  switch (result.status) {
+    case "ok":
+      break;
+    case "stale-hash-risk":
+      warn(`Another executable named 'ocr' exists on your PATH: ${result.stale.join(", ")}.`);
+      warn("Terminals opened before this install may have cached that location and keep");
+      warn("running it instead of OpenCodeReview (new terminals are not affected).");
+      warn("If 'ocr' misbehaves in your current terminal, refresh the shell's command cache:");
+      warn("  bash/zsh: hash -r    (zsh also: rehash)    or simply open a new terminal");
+      warn("Verify with: ocr version   (expected output: open-code-review vX.Y.Z ...)");
+      break;
+    case "shadowed": {
+      const oursNote = result.ours.length > 0 ? ` (${result.ours[0]})` : "";
+      warn(`'ocr' resolves to ${result.resolved}, which takes precedence over the`);
+      warn(`OpenCodeReview you just installed${oursNote}. Commands like 'ocr config`);
+      warn("provider' will run that other program in every terminal. Remove or rename the");
+      warn("file above, or move OpenCodeReview's bin directory earlier in your PATH.");
+      warn("Verify with: ocr version   (expected output: open-code-review vX.Y.Z ...)");
+      break;
+    }
+    case "not-on-path":
+      if (result.occupiedBy) {
+        warn(`'ocr' resolves to ${result.occupiedBy}, but that is a different program: the`);
+        warn(`ocr you just installed is not resolvable on PATH. It should live in`);
+        warn(`${result.binDir}; add that directory to your PATH (earlier than the entry`);
+        warn("above), then open a new terminal.");
+      } else {
+        warn(`'ocr' was not found on your PATH. Add ${result.binDir} to your PATH (then open`);
+        warn("a new terminal), or run the binary from that directory directly.");
+      }
+      break;
+    default:
+      break; // local install without a PATH entry: nothing to verify
+  }
+}
+
 async function main() {
   info("OpenCodeReview Installer");
   info("=========================");
@@ -161,6 +411,7 @@ async function main() {
   if (existing && existing.fromPlatformPkg) {
     info("Binary provided by platform package, skipping download.");
     info(`  ${existing.path}`);
+    printPathResolutionNotice();
     return;
   }
 
@@ -250,6 +501,7 @@ async function main() {
   info("  ocr version             Show version info");
   info("  ocr config set          Configure your LLM provider");
   info("  ocr review              Start a code review");
+  printPathResolutionNotice();
 }
 
 if (require.main === module) {
@@ -268,5 +520,12 @@ if (require.main === module) {
     downloadText,
     downloadBinary,
     computeChecksum,
+    ocrCandidateNames,
+    pathsEqual,
+    pathHasPrefix,
+    findOcrOnPath,
+    isOurCommand,
+    globalBinDir,
+    checkOcrCommand,
   };
 }
