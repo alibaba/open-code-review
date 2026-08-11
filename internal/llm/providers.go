@@ -318,6 +318,18 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "novita",
+		DisplayName: "Novita API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.novita.ai/openai",
+		EnvVar:      "NOVITA_API_KEY",
+		Models: []string{
+			"moonshotai/kimi-k3",
+			"zai-org/glm-5.2",
+			"deepseek/deepseek-v4-flash-0731",
+		},
+	},
+	{
 		Name:        "litellm",
 		DisplayName: "LiteLLM AI Gateway",
 		Protocol:    ProtocolOpenAIChatCompletions,
