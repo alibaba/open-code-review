@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,13 +18,106 @@ import (
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
-var (
-	diffHeaderRe = regexp.MustCompile(`^diff --git a/(.+?) b/(.+)$`)
-	// Anchored: git emits the marker at column 0 ("Binary files a/x and b/y
-	// differ"). Content lines inside hunks always carry a leading "+", "-"
-	// or " " prefix, so an anchored match can never misfire on file content.
-	binaryRe = regexp.MustCompile(`^Binary files `)
-)
+// Anchored: git emits the marker at column 0 ("Binary files a/x and b/y
+// differ"). Content lines inside hunks always carry a leading "+", "-"
+// or " " prefix, so an anchored match can never misfire on file content.
+var binaryRe = regexp.MustCompile(`^Binary files `)
+
+// parseDiffHeader extracts the old and new paths from a "diff --git" header.
+// Git C-quotes paths containing control characters. Unquoted paths may contain
+// spaces, including the literal delimiter-looking substring " b/"; for normal
+// modifications both operands name the same path, so prefer the split that
+// yields equal paths. Rename headers later provide authoritative paths when
+// the operands genuinely differ.
+func parseDiffHeader(line string) (oldPath, newPath string, ok bool) {
+	rest, ok := strings.CutPrefix(line, "diff --git ")
+	if !ok {
+		return "", "", false
+	}
+
+	oldToken, newToken, ok := splitDiffHeaderPaths(rest)
+	if !ok {
+		return "", "", false
+	}
+	oldPath, ok = decodeGitPathToken(oldToken, "a/")
+	if !ok {
+		return "", "", false
+	}
+	newPath, ok = decodeGitPathToken(newToken, "b/")
+	if !ok {
+		return "", "", false
+	}
+	return oldPath, newPath, true
+}
+
+func splitDiffHeaderPaths(header string) (oldToken, newToken string, ok bool) {
+	if strings.HasPrefix(header, `"`) {
+		quoted, err := strconv.QuotedPrefix(header)
+		if err != nil {
+			return "", "", false
+		}
+		remainder, found := strings.CutPrefix(header[len(quoted):], " ")
+		if !found || remainder == "" {
+			return "", "", false
+		}
+		return quoted, remainder, true
+	}
+
+	// If only the new path is quoted, its opening quote makes the separator
+	// unambiguous. A quote in the old path would make Git quote that operand too.
+	if i := strings.Index(header, ` "b/`); i >= 0 {
+		return header[:i], header[i+1:], true
+	}
+
+	// Unquoted paths are not tokenized on spaces by Git. Try every " b/"
+	// occurrence and prefer the split for a regular same-path modification.
+	for offset := 0; offset < len(header); {
+		i := strings.Index(header[offset:], " b/")
+		if i < 0 {
+			break
+		}
+		i += offset
+		oldCandidate := header[:i]
+		newCandidate := header[i+1:]
+		oldDecoded, oldOK := decodeGitPathToken(oldCandidate, "a/")
+		newDecoded, newOK := decodeGitPathToken(newCandidate, "b/")
+		if oldOK && newOK && oldDecoded == newDecoded {
+			return oldCandidate, newCandidate, true
+		}
+		offset = i + 1
+	}
+
+	// Renames and copies normally have different operands. Their extended
+	// headers correct the provisional paths later, so retain the historical
+	// first-delimiter fallback for those sections.
+	i := strings.Index(header, " b/")
+	if i < 0 {
+		return "", "", false
+	}
+	return header[:i], header[i+1:], true
+}
+
+func decodeGitPathToken(token, prefix string) (string, bool) {
+	if strings.HasPrefix(token, `"`) {
+		quoted, err := strconv.QuotedPrefix(token)
+		if err != nil || quoted != token {
+			return "", false
+		}
+		token, err = strconv.Unquote(quoted)
+		if err != nil {
+			return "", false
+		}
+	}
+	path, ok := strings.CutPrefix(token, prefix)
+	return path, ok
+}
+
+func decodeExtendedGitPath(path string) string {
+	if decoded, ok := decodeGitPathToken(path, ""); ok {
+		return decoded
+	}
+	return path
+}
 
 // ParseDiffText splits the unified diff text into per-file Diff structs.
 // ref, if non-empty, is a git ref used to read new-file content via
@@ -47,7 +141,7 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	defer cancel()
 
 	for _, line := range lines {
-		if m := diffHeaderRe.FindStringSubmatch(line); m != nil {
+		if oldPath, newPath, ok := parseDiffHeader(line); ok {
 			// Flush previous diff
 			if current != nil {
 				current.Diff = strings.TrimSuffix(buf.String(), "\n")
@@ -56,8 +150,8 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 				buf.Reset()
 			}
 			current = &model.Diff{
-				OldPath: m[1],
-				NewPath: m[2],
+				OldPath: oldPath,
+				NewPath: newPath,
 			}
 			inHunk = false
 		}
@@ -84,10 +178,10 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 		case strings.HasPrefix(line, "rename from "):
 			// Authoritative old path for renames; more reliable than the
 			// "diff --git" header when paths contain spaces.
-			current.OldPath = strings.TrimPrefix(line, "rename from ")
+			current.OldPath = decodeExtendedGitPath(strings.TrimPrefix(line, "rename from "))
 			current.IsRenamed = true
 		case strings.HasPrefix(line, "rename to "):
-			current.NewPath = strings.TrimPrefix(line, "rename to ")
+			current.NewPath = decodeExtendedGitPath(strings.TrimPrefix(line, "rename to "))
 			current.IsRenamed = true
 		// git emits "--- /dev/null" / "+++ /dev/null" without a/ b/ prefixes.
 		// Guarded by inHunk: inside a hunk the same strings can be content

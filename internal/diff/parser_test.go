@@ -5,9 +5,166 @@ package diff
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestParseDiffHeader(t *testing.T) {
+	tests := []struct {
+		name    string
+		header  string
+		wantOld string
+		wantNew string
+		wantOK  bool
+	}{
+		{
+			name:    "ordinary path",
+			header:  "diff --git a/main.go b/main.go",
+			wantOld: "main.go",
+			wantNew: "main.go",
+			wantOK:  true,
+		},
+		{
+			name:    "delimiter substring in path",
+			header:  "diff --git a/dir b/file.go b/dir b/file.go",
+			wantOld: "dir b/file.go",
+			wantNew: "dir b/file.go",
+			wantOK:  true,
+		},
+		{
+			name:    "both paths quoted",
+			header:  `diff --git "a/tab\told.go" "b/tab\tnew.go"`,
+			wantOld: "tab\told.go",
+			wantNew: "tab\tnew.go",
+			wantOK:  true,
+		},
+		{
+			name:    "new path quoted",
+			header:  `diff --git a/old.go "b/tab\tnew.go"`,
+			wantOld: "old.go",
+			wantNew: "tab\tnew.go",
+			wantOK:  true,
+		},
+		{
+			name:    "old path quoted",
+			header:  `diff --git "a/tab\told.go" b/new.go`,
+			wantOld: "tab\told.go",
+			wantNew: "new.go",
+			wantOK:  true,
+		},
+		{
+			name:   "not a git diff header",
+			header: "@@ -1 +1 @@",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldPath, newPath, ok := parseDiffHeader(tt.header)
+			if ok != tt.wantOK || oldPath != tt.wantOld || newPath != tt.wantNew {
+				t.Errorf("parseDiffHeader(%q) = %q, %q, %v; want %q, %q, %v",
+					tt.header, oldPath, newPath, ok, tt.wantOld, tt.wantNew, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestParseDiffText_PathContainingHeaderDelimiter(t *testing.T) {
+	repo := t.TempDir()
+	relPath := "dir b/file.go"
+	fullPath := filepath.Join(repo, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("create test directory: %v", err)
+	}
+	const wantContent = "package demo\nconst Value = 2\n"
+	if err := os.WriteFile(fullPath, []byte(wantContent), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+
+	diffText := `diff --git a/dir b/file.go b/dir b/file.go
+index 74f3ac7..c32d45f 100644
+--- a/dir b/file.go
++++ b/dir b/file.go
+@@ -1,2 +1,2 @@
+ package demo
+-const Value = 1
++const Value = 2
+`
+
+	diffs, err := ParseDiffText(context.Background(), diffText, repo, "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("got %d diffs, want 1", len(diffs))
+	}
+	d := diffs[0]
+	if d.OldPath != relPath || d.NewPath != relPath {
+		t.Errorf("OldPath/NewPath = %q/%q, want %q/%q",
+			d.OldPath, d.NewPath, relPath, relPath)
+	}
+	if d.NewFileContent != wantContent {
+		t.Errorf("NewFileContent = %q, want %q", d.NewFileContent, wantContent)
+	}
+}
+
+func TestParseDiffText_CQuotedPath(t *testing.T) {
+	repo := t.TempDir()
+	relPath := "tab\tfile.go"
+	const wantContent = "package demo\nconst Value = 2\n"
+	if err := os.WriteFile(filepath.Join(repo, relPath), []byte(wantContent), 0o644); err != nil {
+		t.Skipf("filesystem does not support tab in file names: %v", err)
+	}
+
+	diffText := `diff --git "a/tab\tfile.go" "b/tab\tfile.go"
+index 74f3ac7..c32d45f 100644
+--- "a/tab\tfile.go"
++++ "b/tab\tfile.go"
+@@ -1,2 +1,2 @@
+ package demo
+-const Value = 1
++const Value = 2
+`
+
+	diffs, err := ParseDiffText(context.Background(), diffText, repo, "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("got %d diffs, want 1", len(diffs))
+	}
+	d := diffs[0]
+	if d.OldPath != relPath || d.NewPath != relPath {
+		t.Errorf("OldPath/NewPath = %q/%q, want %q/%q",
+			d.OldPath, d.NewPath, relPath, relPath)
+	}
+	if d.NewFileContent != wantContent {
+		t.Errorf("NewFileContent = %q, want %q", d.NewFileContent, wantContent)
+	}
+}
+
+func TestParseDiffText_CQuotedRename(t *testing.T) {
+	diffText := `diff --git "a/tab\told.go" "b/tab\tnew.go"
+similarity index 100%
+rename from "tab\told.go"
+rename to "tab\tnew.go"
+`
+
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("got %d diffs, want 1", len(diffs))
+	}
+	d := diffs[0]
+	if !d.IsRenamed || d.OldPath != "tab\told.go" || d.NewPath != "tab\tnew.go" {
+		t.Errorf("got IsRenamed=%v OldPath=%q NewPath=%q, want true/%q/%q",
+			d.IsRenamed, d.OldPath, d.NewPath, "tab\told.go", "tab\tnew.go")
+	}
+}
 
 func TestParseDiffText_StripsIndexHeadersFromPromptDiff(t *testing.T) {
 	diffText := `diff --git a/first.go b/first.go
