@@ -347,7 +347,6 @@ var registry = []Provider{
 		Models: []string{
 			"deepseek-ai/DeepSeek-V4-Pro",
 			"deepseek-ai/DeepSeek-V4-Flash",
-			"meituan-longcat/LongCat-2.0",
 			"Qwen/Qwen3.6-27B",
 			"moonshotai/Kimi-K2.7-Code",
 			"zai-org/GLM-5.2",
