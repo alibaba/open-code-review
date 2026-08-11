@@ -735,7 +735,7 @@ func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {
 
 func TestDispatchSubtasks_TokenThresholdSkipIsNotReusableCheckpoint(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 	sess := session.New(repoDir, "feature", "fake", session.SessionOptions{
 		ReviewMode: session.ReviewModeRange,
@@ -803,7 +803,7 @@ func TestDispatchSubtasks_TokenThresholdSkipIsNotReusableCheckpoint(t *testing.T
 
 func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 	sess := session.New(repoDir, "feature", "fake", session.SessionOptions{
 		ReviewMode: session.ReviewModeRange,

@@ -85,7 +85,7 @@ func makeBudgetDiffs(n int) []model.Diff {
 // BudgetExceeded()==true with partial results returned.
 // Overrun is bounded by at most (concurrency) in-flight files — here 1.
 func TestDispatchSubtasks_TokenBudgetStopsDispatch(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	const perCall = 50_000
 	fake := &fakeBudgetAgentClient{perCallTokens: perCall}
 	a := New(Args{
@@ -179,7 +179,7 @@ func TestDispatchSubtasks_TokenBudgetStopsDispatch(t *testing.T) {
 // the entire difference between this and the partial/exit-0 case above — the
 // boundary is deliberate, so it gets its own guard.
 func TestDispatchSubtasks_TokenBudgetBeforeFirstFileIsFailed(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	fake := &fakeBudgetAgentClient{perCallTokens: 50_000}
 	a := New(Args{
 		LLMClient:        fake,
@@ -243,7 +243,7 @@ func TestDispatchSubtasks_TokenBudgetBeforeFirstFileIsFailed(t *testing.T) {
 // TestDispatchSubtasks_UnlimitedBudget verifies MaxTokensBudget=0 runs every
 // file (default behavior unchanged — regression guard).
 func TestDispatchSubtasks_UnlimitedBudget(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	fake := &fakeBudgetAgentClient{perCallTokens: 50_000}
 	a := New(Args{
 		LLMClient:        fake,

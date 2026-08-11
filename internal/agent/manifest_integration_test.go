@@ -43,7 +43,7 @@ func (manifestFlowClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequ
 
 func newManifestFlowAgent(t *testing.T, diffs []model.Diff, resume *session.ResumeState) *Agent {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
 		ReviewMode:  session.ReviewModeRange,
@@ -134,7 +134,7 @@ func TestManifestFlowCompleteAndPartial(t *testing.T) {
 }
 
 func TestManifestFlowRunInputFailureIsPersisted(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
 		ReviewMode: session.ReviewModeRange,

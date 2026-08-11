@@ -27,7 +27,7 @@ func loadTestTemplate(t *testing.T) *template.Template {
 // config file on disk, so LoadAppConfig returns nil,nil) and asserts the
 // runtime bundle is fully populated.
 func TestLoadLLMRuntime_Success(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	t.Setenv("OCR_LLM_URL", "https://api.example.test/v1")
 	t.Setenv("OCR_LLM_TOKEN", "tok-123")
 	t.Setenv("OCR_LLM_MODEL", "test-model")
@@ -56,7 +56,7 @@ func TestLoadLLMRuntime_Success(t *testing.T) {
 
 // TestLoadLLMRuntime_BadToolConfig covers the toolsconfig.Load failure branch.
 func TestLoadLLMRuntime_BadToolConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	tpl := loadTestTemplate(t)
 	_, err := loadLLMRuntime(tpl, filepath.Join(t.TempDir(), "no-such-tools.json"), llm.ResolveOptions{})
 	if err == nil || !strings.Contains(err.Error(), "load tools") {
@@ -67,7 +67,7 @@ func TestLoadLLMRuntime_BadToolConfig(t *testing.T) {
 // TestLoadLLMRuntime_UnresolvableEndpoint covers the ResolveEndpointWithOptions
 // failure branch: no config file and no env vars means no endpoint resolves.
 func TestLoadLLMRuntime_UnresolvableEndpoint(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	// Clear any inherited resolution sources.
 	t.Setenv("OCR_LLM_URL", "")
 	t.Setenv("OCR_LLM_TOKEN", "")
@@ -87,7 +87,7 @@ func TestLoadLLMRuntime_UnresolvableEndpoint(t *testing.T) {
 // by writing an invalid config.json at the default HOME-based path.
 func TestLoadLLMRuntime_BadAppConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	cfgDir := filepath.Join(home, ".opencodereview")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)

@@ -13,7 +13,7 @@ import (
 // TestScanAgent_SessionID_Persistent covers the non-empty return of SessionID:
 // a session with a JSONL writer reports its persisted ID.
 func TestScanAgent_SessionID_Persistent(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	sess := session.New(t.TempDir(), "", "model-x", session.SessionOptions{
 		ReviewMode: session.ReviewModeFullScan,
 	})

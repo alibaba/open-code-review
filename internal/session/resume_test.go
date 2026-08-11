@@ -24,7 +24,7 @@ func TestSessionFilePath_EmptyID(t *testing.T) {
 
 func TestSessionFilePath_ValidID(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	path, err := SessionFilePath("/some/repo", "abc-123")
 	if err != nil {
@@ -463,7 +463,7 @@ func TestCopyLlmComments_DeepCopy(t *testing.T) {
 
 func TestLoadResumeState_NonexistentFile(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	_, err := LoadResumeState("/some/repo", "nonexistent-session")
 	if err == nil {
@@ -473,7 +473,7 @@ func TestLoadResumeState_NonexistentFile(t *testing.T) {
 
 func TestLoadResumeState_EmptyFile(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := "/test/repo"
 	sessionID := "empty-session"
@@ -499,7 +499,7 @@ func TestLoadResumeState_EmptyFile(t *testing.T) {
 
 func TestLoadResumeState_MultipleRecords(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := "/test/multi"
 	sessionID := "multi-session"
@@ -572,7 +572,7 @@ func TestLoadResumeState_MultipleRecords(t *testing.T) {
 
 func TestLoadResumeState_InvalidJSON(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := "/test/invalid"
 	sessionID := "bad-json"
@@ -595,7 +595,7 @@ func TestLoadResumeState_InvalidJSON(t *testing.T) {
 
 func TestLoadResumeState_FailThenRedone(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := "/test/redo"
 	sessionID := "redo-session"

@@ -11,7 +11,7 @@ import (
 
 func TestShellRCFiles(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	if got := shellRCFiles(); len(got) != 0 {
 		t.Errorf("shellRCFiles() with no rc files = %v, want empty", got)
@@ -29,7 +29,7 @@ func TestShellRCFiles(t *testing.T) {
 
 func TestTryShellRC(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 
 	// No rc files: not found, no error.
 	if _, ok, err := tryShellRC(""); ok || err != nil {

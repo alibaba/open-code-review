@@ -200,7 +200,7 @@ func TestEmitRunResult_JSONSkippedIncludesManifest(t *testing.T) {
 }
 
 func TestEmitRunResult_JSONManifestMatchesPersistedSessionEnd(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
 		ReviewMode: session.ReviewModeRange,

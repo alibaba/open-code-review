@@ -13,7 +13,7 @@ import (
 // error): when the computed sessions dir path is occupied by a regular file,
 // os.ReadDir fails with ENOTDIR and ListSessions must surface it.
 func TestListSessions_DirIsFile(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 
 	dir, err := SessionsDir(repoDir)
