@@ -119,7 +119,7 @@ func (s *openAIStreamChoiceState) applyNormalizedFields(msg *ResponseMessage) {
 	}
 }
 
-func (s *openAIStreamChoiceState) finalize(message openai.ChatCompletionMessage, policy openAIReplayPolicy) (json.RawMessage, error) {
+func (s *openAIStreamChoiceState) finalize(message openai.ChatCompletionMessage) (json.RawMessage, error) {
 	fields := openAIReplayFields{
 		providerFields:   s.providerFields,
 		contentPresent:   s.content.seen,
@@ -135,7 +135,7 @@ func (s *openAIStreamChoiceState) finalize(message openai.ChatCompletionMessage,
 	if s.refusal.seen {
 		message.Refusal = s.refusal.String()
 	}
-	return marshalOpenAIReplayMessage(message.ToAssistantMessageParam(), fields, policy)
+	return marshalOpenAIReplayMessage(message.ToAssistantMessageParam(), fields)
 }
 
 func mergeOpenAIReasoningDetails(current, delta []any) []any {

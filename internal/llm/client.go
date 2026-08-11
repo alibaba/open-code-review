@@ -405,7 +405,6 @@ type ClientConfig struct {
 	URL             string            // Full API endpoint URL
 	APIKey          string            // Bearer token / API key
 	Model           string            // Default model override
-	Provider        string            // Resolved provider name (e.g. "deepseek"); informs provider-specific wire quirks
 	AssistantReplay string            // AssistantReplayNative enables native turn replay; default keeps the normalized rebuild
 	AuthHeader      string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
 	Timeout         time.Duration     // Request timeout
@@ -455,7 +454,6 @@ func NewLLMClient(ep ResolvedEndpoint) LLMClient {
 		URL:             ep.URL,
 		APIKey:          ep.Token,
 		Model:           ep.Model,
-		Provider:        ep.Provider,
 		AssistantReplay: ep.AssistantReplay,
 		AuthHeader:      ep.AuthHeader,
 		Timeout:         ep.Timeout,
@@ -724,7 +722,7 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 		state.applyNormalizedFields(&resp.Choices[i].Message)
 		if i == 0 && c.nativeReplayEnabled() {
 			var err error
-			firstReplayMessage, err = state.finalize(accumulator.Choices[i].Message, c.replayPolicy())
+			firstReplayMessage, err = state.finalize(accumulator.Choices[i].Message)
 			if err != nil {
 				return nil, fmt.Errorf("finalize OpenAI streaming assistant message: %w", err)
 			}
@@ -815,7 +813,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 	resp := c.mapOpenAIResponseNormalized(sdkResp)
 	var firstReplayMessage json.RawMessage
 	if c.nativeReplayEnabled() && len(sdkResp.Choices) > 0 && sdkResp.Choices[0].Message.RawJSON() != "" {
-		if replayMessage, err := openAIReplayMessageFromResponse(sdkResp.Choices[0].Message, c.replayPolicy()); err == nil {
+		if replayMessage, err := openAIReplayMessageFromResponse(sdkResp.Choices[0].Message); err == nil {
 			firstReplayMessage = replayMessage
 		}
 	}

@@ -1360,7 +1360,7 @@ func TestOpenAIStreamChoiceState_PreservesReasoningPresence(t *testing.T) {
 			if err := state.addDelta(tt.delta); err != nil {
 				t.Fatalf("addDelta: %v", err)
 			}
-			raw, err := state.finalize(openai.ChatCompletionMessage{}, openAIReplayPolicy{replayReasoningContent: true})
+			raw, err := state.finalize(openai.ChatCompletionMessage{})
 			if err != nil {
 				t.Fatalf("finalize: %v", err)
 			}
@@ -1379,20 +1379,21 @@ func TestOpenAIStreamChoiceState_PreservesReasoningPresence(t *testing.T) {
 	}
 }
 
-// TestOpenAIStreamChoiceState_StripsReasoningForRejectingProviders pins the
-// per-provider policy on the streaming path: reasoning_content stays out of
-// the envelope while remaining available to the normalized view.
-func TestOpenAIStreamChoiceState_StripsReasoningForRejectingProviders(t *testing.T) {
+// TestOpenAIStreamChoiceState_KeepsReasoningInEnvelopeAndNormalizedView pins
+// the streaming path: accumulated reasoning_content lands in the replay
+// envelope (DeepSeek thinking mode requires it passed back on tool turns)
+// and stays available to the normalized view.
+func TestOpenAIStreamChoiceState_KeepsReasoningInEnvelopeAndNormalizedView(t *testing.T) {
 	state := &openAIStreamChoiceState{}
 	if err := state.addDelta(`{"reasoning_content":"private"}`); err != nil {
 		t.Fatalf("addDelta: %v", err)
 	}
-	raw, err := state.finalize(openai.ChatCompletionMessage{}, openAIReplayPolicy{replayReasoningContent: false})
+	raw, err := state.finalize(openai.ChatCompletionMessage{})
 	if err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
-	if strings.Contains(string(raw), "reasoning_content") {
-		t.Fatalf("reasoning_content must be stripped for rejecting providers: %s", raw)
+	if !strings.Contains(string(raw), `"reasoning_content":"private"`) {
+		t.Fatalf("reasoning_content must be carried in the envelope: %s", raw)
 	}
 	var normalized ResponseMessage
 	state.applyNormalizedFields(&normalized)

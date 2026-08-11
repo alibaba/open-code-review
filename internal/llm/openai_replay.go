@@ -34,29 +34,11 @@ var openAIReplayExtensionAllowlist = map[string]bool{
 	"reasoning_details": true, // OpenRouter reasoning block preservation
 }
 
-// providersRejectingReasoningReplay are OpenAI-protocol providers that
-// document a hard error when reasoning_content appears in input messages.
-var providersRejectingReasoningReplay = map[string]bool{
-	"deepseek": true,
-}
-
-// openAIReplayPolicy captures per-provider replay quirks that change what a
-// valid continuation request may carry.
-type openAIReplayPolicy struct {
-	replayReasoningContent bool
-}
-
-func (c *OpenAIClient) replayPolicy() openAIReplayPolicy {
-	return openAIReplayPolicy{
-		replayReasoningContent: !providersRejectingReasoningReplay[c.cfg.Provider],
-	}
-}
-
 func (c *OpenAIClient) nativeReplayEnabled() bool {
 	return c.cfg.AssistantReplay == AssistantReplayNative
 }
 
-func openAIReplayMessageFromResponse(message openai.ChatCompletionMessage, policy openAIReplayPolicy) (json.RawMessage, error) {
+func openAIReplayMessageFromResponse(message openai.ChatCompletionMessage) (json.RawMessage, error) {
 	response, err := decodeOpenAIObject(message.RawJSON())
 	if err != nil {
 		return nil, err
@@ -82,10 +64,10 @@ func openAIReplayMessageFromResponse(message openai.ChatCompletionMessage, polic
 			fields.providerFields[field] = value
 		}
 	}
-	return marshalOpenAIReplayMessage(message.ToAssistantMessageParam(), fields, policy)
+	return marshalOpenAIReplayMessage(message.ToAssistantMessageParam(), fields)
 }
 
-func marshalOpenAIReplayMessage(param openai.ChatCompletionAssistantMessageParam, fields openAIReplayFields, policy openAIReplayPolicy) (json.RawMessage, error) {
+func marshalOpenAIReplayMessage(param openai.ChatCompletionAssistantMessageParam, fields openAIReplayFields) (json.RawMessage, error) {
 	rawParam, err := json.Marshal(param)
 	if err != nil {
 		return nil, fmt.Errorf("marshal OpenAI assistant request message: %w", err)
@@ -107,7 +89,11 @@ func marshalOpenAIReplayMessage(param openai.ChatCompletionAssistantMessageParam
 			request["content"] = fields.content
 		}
 	}
-	if fields.reasoningPresent && policy.replayReasoningContent {
+	// reasoning_content replays exactly as received. DeepSeek's thinking
+	// mode requires it passed back on tool-call turns (400 when missing)
+	// and documents that it is ignored elsewhere, so stripping it here
+	// would break the providers replay exists for.
+	if fields.reasoningPresent {
 		request["reasoning_content"] = fields.reasoningContent
 	}
 	if len(fields.reasoningDetails) > 0 {

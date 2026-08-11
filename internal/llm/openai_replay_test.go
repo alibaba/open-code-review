@@ -32,7 +32,7 @@ func TestOpenAIReplayEnvelopeSurvivesMissingToolCallType(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	envelope, err := openAIReplayMessageFromResponse(message, openAIReplayPolicy{replayReasoningContent: true})
+	envelope, err := openAIReplayMessageFromResponse(message)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,10 +70,8 @@ func TestNewOpenAIReplayRejectsCorruptToolCalls(t *testing.T) {
 }
 
 // TestOpenAIReplayExtensionPolicy pins the extension policy: fields with a
-// known request-side replay contract survive (reasoning_content by default,
-// reasoning_details), unknown vendor fields never do, and providers that
-// document a hard error on replayed reasoning_content (DeepSeek) have it
-// stripped.
+// known request-side replay contract survive (reasoning_content,
+// reasoning_details), while unknown vendor fields are never echoed back.
 func TestOpenAIReplayExtensionPolicy(t *testing.T) {
 	raw := `{"role":"assistant","content":"visible","reasoning_content":"hidden chain","reasoning_details":[{"type":"reasoning.text","text":"chain"}],"some_vendor_field":{"a":1}}`
 	var message openai.ChatCompletionMessage
@@ -81,44 +79,42 @@ func TestOpenAIReplayExtensionPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Run("default policy", func(t *testing.T) {
-		envelope, err := openAIReplayMessageFromResponse(message, openAIReplayPolicy{replayReasoningContent: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		object := decodeReplayEnvelope(t, envelope)
-		if object["reasoning_content"] != "hidden chain" {
-			t.Fatalf("reasoning_content must replay by default: %s", envelope)
-		}
-		if _, ok := object["reasoning_details"].([]any); !ok {
-			t.Fatalf("reasoning_details must survive replay: %s", envelope)
-		}
-		if strings.Contains(string(envelope), "some_vendor_field") {
-			t.Fatalf("unknown vendor fields must not be echoed on replay: %s", envelope)
-		}
-	})
-
-	t.Run("reasoning-rejecting provider", func(t *testing.T) {
-		envelope, err := openAIReplayMessageFromResponse(message, openAIReplayPolicy{replayReasoningContent: false})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(envelope), "reasoning_content") {
-			t.Fatalf("reasoning_content must be stripped for rejecting providers: %s", envelope)
-		}
-	})
+	envelope, err := openAIReplayMessageFromResponse(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := decodeReplayEnvelope(t, envelope)
+	if object["reasoning_content"] != "hidden chain" {
+		t.Fatalf("reasoning_content must replay: %s", envelope)
+	}
+	if _, ok := object["reasoning_details"].([]any); !ok {
+		t.Fatalf("reasoning_details must survive replay: %s", envelope)
+	}
+	if strings.Contains(string(envelope), "some_vendor_field") {
+		t.Fatalf("unknown vendor fields must not be echoed on replay: %s", envelope)
+	}
 }
 
-// TestOpenAIReplayPolicyByProvider pins the provider table: DeepSeek
-// documents a 400 when reasoning_content appears in input messages.
-func TestOpenAIReplayPolicyByProvider(t *testing.T) {
-	deepseek := NewOpenAIClient(ClientConfig{URL: "https://api.deepseek.com", Provider: "deepseek"})
-	if deepseek.replayPolicy().replayReasoningContent {
-		t.Fatal("deepseek must not replay reasoning_content")
+// TestOpenAIReplayKeepsReasoningForToolTurns pins the DeepSeek thinking-mode
+// contract: reasoning_content on a tool-call turn must be passed back to the
+// API verbatim (the API returns 400 when it is missing), so the envelope may
+// never strip it.
+func TestOpenAIReplayKeepsReasoningForToolTurns(t *testing.T) {
+	raw := `{"role":"assistant","content":"","reasoning_content":"tool-turn chain","tool_calls":[{"id":"call-1","type":"function","function":{"name":"file_read","arguments":"{}"}}]}`
+	var message openai.ChatCompletionMessage
+	if err := json.Unmarshal([]byte(raw), &message); err != nil {
+		t.Fatal(err)
 	}
-	generic := NewOpenAIClient(ClientConfig{URL: "https://api.example.com/v1"})
-	if !generic.replayPolicy().replayReasoningContent {
-		t.Fatal("providers without a documented rejection replay reasoning_content")
+	envelope, err := openAIReplayMessageFromResponse(message)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object := decodeReplayEnvelope(t, envelope)
+	if object["reasoning_content"] != "tool-turn chain" {
+		t.Fatalf("tool-turn reasoning_content must be passed back verbatim: %s", envelope)
+	}
+	if _, present := object["tool_calls"]; !present {
+		t.Fatalf("tool calls must survive alongside reasoning: %s", envelope)
 	}
 }
 
