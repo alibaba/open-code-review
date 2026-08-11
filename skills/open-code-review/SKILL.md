@@ -1,236 +1,176 @@
 ---
 name: open-code-review
 description: >
-  Performs AI-powered code review on Git changes using the `ocr` CLI from
+  Performs AI-powered code review and repository scanning using the `ocr` CLI from
   alibaba/open-code-review. Use when the user asks to review code, review
-  a pull request, review staged/unstaged changes, review a commit, or
-  compare branches for code quality issues. Produces line-level review
-  comments and can automatically apply fixes when requested. With appropriate
-  review rules, can detect various types of issues including bugs, security
-  vulnerabilities, performance problems, and code quality concerns.
+  a PR, review staged/unstaged changes, review a commit, compare branches, scan
+  repository files, or resume an interrupted review. Supports diff-based review,
+  full-file scanning, and delegate mode. Produces line-level review comments with
+  severity/category classifications and can automatically apply fixes.
 license: Apache-2.0
 compatibility: >
   Requires the `ocr` CLI installed (via `npm install -g
-  @alibaba-group/open-code-review` or GitHub release binary). Requires a
-  configured LLM (Anthropic or OpenAI-compatible) before first run.
+  @alibaba-group/open-code-review` or GitHub release binary). Review and scan modes
+  require a configured LLM provider (Anthropic, OpenAI-compatible, or others).
+  Delegate mode requires no OCR-side LLM configuration.
 metadata:
   author: alibaba
   homepage: https://github.com/alibaba/open-code-review
-  version: "1.0.0"
+  version: "2.1.0"
 ---
 
 # Open Code Review
 
-A skill for invoking [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`) — an open-source AI code review CLI that reads Git diffs and generates structured, line-level review comments.
+A skill for invoking [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`) — an open-source AI code review CLI that reads Git diffs or scans source files and delegates to tool-calling LLM agents to generate structured, line-level review comments.
 
-## Prerequisites check
+## Progressive Reference Navigation
 
-Before starting a review, verify the environment:
+Read specific references based on task needs; do not load all files at once:
 
-```bash
-# 1. Check the CLI is installed
-which ocr || echo "NOT INSTALLED"
+| Scenario | Reference File |
+|----------|----------------|
+| Complete flag reference & defaults | [references/flags.md](./references/flags.md) |
+| Installation / LLM config / Per-run overrides | [references/llm-config.md](./references/llm-config.md) |
+| Custom review rules format & debugging | [references/rules.md](./references/rules.md) |
+| MCP Server integration & config | [references/mcp.md](./references/mcp.md) |
+| Troubleshooting / Performance tuning / Session management | [references/troubleshooting.md](./references/troubleshooting.md) |
 
-# 2. Verify LLM connectivity
-ocr llm test
+## Mode Selection
+
 ```
+User Request → Has git diff context?
+  ├─ YES → Review Mode
+  │         ├─ Single commit → --commit <hash>
+  │         ├─ Branch comparison → --from <ref> --to <ref>
+  │         └─ Workspace (staged+unstaged+untracked) → No extra flag
+  └─ NO → Scan Mode
+           ├─ Entire repository → No --path
+           └─ Specific path/directory → --path <paths>
 
-If `ocr` is not installed, install it first:
-
-```bash
-npm install -g @alibaba-group/open-code-review
+LLM not configured & user does not want to configure?
+  → Switch to `open-code-review-delegate` skill (host agent conducts review; OCR handles file selection & rule resolution)
 ```
-
-If `ocr llm test` fails, the user must configure an LLM. Guide them with one of these options:
-
-**Option A — Environment variables (highest priority, recommended for CI):**
-
-```bash
-export OCR_LLM_URL=https://api.anthropic.com/v1/messages
-export OCR_LLM_TOKEN=<api-key>
-export OCR_LLM_MODEL=claude-opus-4-6
-export OCR_USE_ANTHROPIC=true
-```
-
-**Option B — Persistent config:**
-
-```bash
-ocr config set llm.url https://api.anthropic.com/v1/messages
-ocr config set llm.auth_token <api-key>
-ocr config set llm.model claude-opus-4-6
-ocr config set llm.use_anthropic true
-```
-
-Stop here and ask the user to provide credentials — never invent or hardcode API keys.
 
 ## Workflow
 
 ### Step 1: Gather Business Context
 
-Analyze the review target (commits, branch, or changes) to extract concise business context. Pass this context via `--background` to improve review quality.
+Analyze the review target and extract concise business context to improve review quality.
 
-### Step 2: Run Code Review
+- Short context (< 2000 chars): `--background "context"` / `-b "context"`
+- Long context (PRD/docs): write to a temporary `.md` file, `--background-file <path>` / `-B <path>` (max 1 MB, hard limit 8000 chars)
 
-Run the OCR command with appropriate flags. **Always pass business context via `--background`** when available:
+### Step 2: Execute Review or Scan
 
-```bash
-ocr review --audience agent --background "business context here" [user-args]
+**Always use `--audience agent`** (suppresses progress UI). Prefer `--format json`.
+
+#### Review Mode (Diff-based)
+
+| User Intent | Command |
+|-------------|---------|
+| "Review my changes" | `ocr review --audience agent --format json -b "ctx"` |
+| "Review feature PR" | `ocr review --audience agent --format json -b "ctx" --from main --to feature` |
+| "Review commit abc123" | `ocr review --audience agent --format json -b "ctx" --commit abc123` |
+| "Which files will be reviewed?" | `ocr review --preview --format json` |
+| "Resume interrupted review" | `ocr review --audience agent --format json --resume <session-id>` |
+
+#### Scan Mode (Full-file, No Diff Required)
+
+| User Intent | Command |
+|-------------|---------|
+| "Scan the whole repo" | `ocr scan --audience agent --format json -b "ctx"` |
+| "Scan src/auth/ for security" | `ocr scan --audience agent --format json --path src/auth -b "security audit"` |
+| "Fast scan without summary" | `ocr scan --audience agent --format json --no-summary --no-dedup` |
+| "Resume interrupted scan" | `ocr scan --audience agent --format json --resume <session-id>` |
+| "Which files will be scanned?" | `ocr scan --preview --format json` |
+
+### Step 3: Classify and Parse
+
+JSON output core structure:
+
+```json
+{
+  "status": "complete | partial | failed | skipped",
+  "session_id": "...",
+  "summary": { "files_reviewed": 12, "comments": 5, "total_tokens": 45000, "elapsed": "32s", "budget_exceeded": false },
+  "comments": [{
+    "path": "src/auth/login.ts",
+    "content": "Review comment content",
+    "start_line": 42,
+    "end_line": 45,
+    "category": "security",
+    "severity": "high",
+    "suggestion_code": "Optional fix suggestion",
+    "existing_code": "Original code"
+  }],
+  "warnings": [{ "file": "...", "message": "...", "type": "timeout" }],
+  "manifest": { "terminal_state": "complete", "coverage": { "selected": 12, "completed": 10, "failed": 2 } }
+}
 ```
 
-**Argument handling:**
+Classify by severity:
 
-- **Background context** (RECOMMENDED): use `--background "context"` or `-b "context"` to provide business context for better review quality
-- **Default** (no user arguments): reviews staged, unstaged, and untracked changes (workspace mode)
-- **Specific commit**: use `--commit` or `-c` to review a single commit against its parent
-- **Branch comparison**: use `--from <ref>` and `--to <ref>` to review diff between two refs
-- **Timeout**: default timeout is 10 minutes per file; adjust with `--timeout <minutes>`
-- **Concurrency**: default concurrency is 8 file workers; reduce with `--concurrency <n>` if rate limits are hit
-- **Preview mode**: use `--preview` or `-p` to preview which files will be reviewed without running the LLM
-- **Installation**: if `ocr` command is not found, install it by running `npm i -g @alibaba-group/open-code-review`
+- **critical / high** → Must report. Bugs, security risks, data loss risks, clear defects.
+- **medium** → Report with context. Performance issues, error-handling flaws, maintainability concerns.
+- **low** → Silently discard unless user requests full verbosity.
 
-**Common invocation patterns:**
+Categories: `bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other`.
 
-| User says | Command to run |
-|-----------|---------------|
-| "review my changes" / "review the working copy" | `ocr review --audience agent -b "context"` |
-| "review this PR" / "review feature branch" | `ocr review --audience agent -b "context" --from main --to <branch>` |
-| "review commit abc123" | `ocr review --audience agent -b "context" --commit abc123` |
-| "what would be reviewed?" (dry-run) | `ocr review --preview` |
-
-**Output mode:**
-
-- Always use `--audience agent` to suppress progress UI and emit only the final summary
-- **Prevent output truncation**: For large reviews or restricted tool environments, redirect output to a temporary file (`ocr review --audience agent ... > /tmp/ocr_out.txt 2>&1`) and inspect it in full via a file reading tool instead of piping through `tail` or `head`, which drops earlier review comments.
-
-### Step 3: Classify and Report
-
-For each comment from the review output, classify by priority and report all issues to the user:
-
-- **High**: Obvious bugs, security issues, clear mistakes, or well-founded suggestions with precise fix proposals
-- **Medium**: Reasonable concerns but context-dependent, style/performance suggestions, or fixes that require manual implementation
-- **Low**: Likely false positives, lacking sufficient context, nitpicks, or meaningless suggestions
-
-Report all comments grouped by priority level.
-
-### Step 4: Fix
-
-Before applying fixes, check whether the user requested automatic fixes:
-
-- If the user explicitly requested "review and fix" or similar, proceed with automatic fixes
-- If the user only requested "review" without fix intent, ask for permission before applying any changes
-
-When fixing issues and suggestions:
-
-- Focus on High and Medium priority items
-- Apply fixes directly to the code when safe and well-defined
-- For complex fixes requiring manual intervention, clearly describe what needs to be done
-- Always verify fixes with the user before committing
-
-## Output Format
-
-Each comment contains:
-
-- `path`: File path
-- `content`: Review comment text
-- `start_line` / `end_line`: Line range (both 0 means positioning failed)
-- `suggestion_code`: Optional fix suggestion
-- `existing_code`: Optional original code snippet
-- `thinking`: Optional LLM reasoning process
-
-After filtering comments by priority, present results using this template:
+### Step 4: Report
 
 ```markdown
 ## Code Review Results
 
-**Files reviewed**: N
-**Issues found**: X high priority / Y medium priority
+**Files Reviewed**: N | **Issues Found**: X high / Y medium | **Tokens Used**: Z
 
-### High Priority
+### High / Critical
 
-- **`path/to/file.java:42`** — Brief description
-  > Recommendation: How to fix
+- **`path/to/file.ts:42-45`** [security] — Brief description
+  > Fix recommendation
 
-### Medium Priority
+### Medium
 
-- **`path/to/file.ts:88`** — Brief description
-  > Recommendation: How to fix (if applicable)
+- **`path/to/file.go:88`** [performance] — Brief description
+  > Recommendation
 ```
 
-If the review found no issues after filtering, simply state: "Review complete — no issues found in N files."
+If no issues found: "Review complete — 0 issues found across N files."
 
-**Priority classification:**
+**Handling mispositioned comments** (`start_line` and `end_line` are 0): Read the comment content, inspect the target file, locate the target code section, and report/fix at the correct position.
 
-- **High**: Obvious bugs, security issues, clear mistakes, or well-founded suggestions with precise fix proposals
-- **Medium**: Reasonable concerns but context-dependent, style/performance suggestions, or fixes that require manual implementation
-- **Low**: Discarded silently (likely false positives, lacking context, nitpicks, or meaningless suggestions)
+### Step 5: Fix (Optional)
 
-**Handling mispositioned comments:**
+- User asks "review and fix" → Fix critical/high items directly.
+- User asks "review" only → Ask for permission before modifying code.
+- Apply safe and well-defined fixes directly.
+- Verify fixes pass compilation/tests before marking complete.
 
-When `start_line` and `end_line` are both `0`, the comment failed to locate the exact position in the file. In such cases:
+## Gotchas & Notes
 
-1. Read the comment content to understand the issue
-2. Examine the target file mentioned in the comment
-3. Identify the relevant code section based on the comment's context
-4. Apply the fix or suggestion to the correct location
+- **Always use `--audience agent`** — `human` mode outputs progress UI that pollutes agent output.
+- **Per-run overrides** — Override provider/model/token-limit on single runs using `--provider <name>`, `--model <name>`, or `--max-tokens <n>`.
+- **Working directory matters** — `ocr` operates on the git repo in cwd. Use `--repo /path` to override.
+- **Workspace mode includes untracked files** — Bare `ocr review` reviews staged + unstaged + untracked changes.
+- **Plan phase at 50+ lines** — Diffs exceeding 50 changed lines run a pre-review risk analysis plan phase.
+- **Background sanitization** — Control characters stripped; wrapped in `<ocr_user_background>` tags; soft limit 2000 chars, hard limit 8000.
+- **Ref injection defense** — `--from`/`--to`/`--commit` values cannot start with `-`.
+- **Scan mode needs no git** — `ocr scan` runs on non-git directories.
+- **Resume conditions** — `ocr scan` fully supports `--resume`; `ocr review` supports `--resume` only in `--from/--to` or `--commit` modes (not workspace mode).
+- **`--preview` and `--resume` are mutually exclusive.**
+- **Language configuration** — Default: English. Switch via `ocr config set language 中文`.
+- **Do not test connectivity pre-emptively** — Execute review/scan directly; troubleshoot only on actual LLM failure (see troubleshooting.md).
 
-## Custom Review Rules
+## Verification
 
-If the user wants project-specific rules, OCR resolves them in this priority order:
+After review completes:
 
-1. `--rule <path>` flag (highest)
-2. `<repo>/.opencodereview/rule.json`
-3. `~/.opencodereview/rule.json`
-4. Built-in system defaults (lowest)
-
-By default, the first matching user rule replaces the built-in system rule. Set `merge_system_rule: true` on a rule entry when the matched system rule and user rule should both be included.
-
-Rule file format:
-
-```json
-{
-  "rules": [
-    {
-      "path": "**/*.java",
-      "rule": "All new methods must validate required parameters for null",
-      "merge_system_rule": true
-    },
-    {
-      "path": "**/*mapper*.xml",
-      "rule": "Check SQL for injection risks and missing closing tags"
-    }
-  ]
-}
-```
-
-To preview which rule applies to a file before reviewing:
-
-```bash
-ocr rules check src/main/java/com/example/Foo.java
-```
-
-## Gotchas
-
-- **LLM must be configured first** — `ocr review` will fail loudly if no LLM is reachable. Always run `ocr llm test` before the first review.
-- **Working directory matters** — `ocr review` operates on the Git repo at the current directory. Use `--repo /path/to/repo` to run from elsewhere.
-- **Untracked files are reviewed in workspace mode** — running bare `ocr review` includes staged, unstaged, *and* untracked changes. Stage selectively if you want narrower scope.
-- **Large diffs may hit token limits** — files with very large diffs may be truncated. The default `MAX_TOKENS` is 58888 per request.
-- **Plan phase triggers at 50 lines** — diffs exceeding 50 changed lines run an extra risk-analysis phase before main review. This adds latency but improves quality.
-- **Don't pass `--audience human`** — it streams progress UI that pollutes output. Always use `--audience agent`.
-- **Comment language follows config** — set `language` config to `English` or `Chinese` (default: Chinese) to control review comment language.
-- **Avoid output truncation** — Large review runs produce verbose output. Never pipe command output to `tail` or `head` as it drops review comments from earlier sections. Redirect output to a file and read it in full.
-
-## Validation
-
-After the review completes, verify success by checking:
-
-1. The command exited with code 0
-2. Comments were generated (or "No comments generated" message appears)
-3. Warnings (if any) are displayed in stderr
-
-If errors occurred, check the stderr warnings for details about which files failed and why.
+1. Command exit code is 0
+2. JSON `status` field is `"complete"` (or `"partial"` with acceptable warnings)
+3. `comments` array structured as expected
+4. `summary.files_reviewed` matches target count
 
 ## References
 
-- Full docs: https://github.com/alibaba/open-code-review
-- NPM package: https://www.npmjs.com/package/@alibaba-group/open-code-review
-- Issue tracker: https://github.com/alibaba/open-code-review/issues
+- Homepage & Docs: https://github.com/alibaba/open-code-review
+- NPM Package: https://www.npmjs.com/package/@alibaba-group/open-code-review
+- Issue Tracker: https://github.com/alibaba/open-code-review/issues
