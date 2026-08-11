@@ -130,8 +130,8 @@ Ollama は API key を無視しますが、カスタム provider は空でない
 
 一部の LLM プロバイダーでは、レート制限に対して `403` や `400` を返すなど、
 一時的なエラーを標準外の 4xx ステータスコードで表すことがあります。
-`retry_codes` を使うと、OCR はこれらのリクエストに対して既存の SDK の
-リトライ機構を使用します。
+`retry_codes` を使うと、OCR はすべての LLM protocol で共有する上限付きの
+リトライポリシーでこれらのリクエストを再試行します。
 
 `retry_codes` は整数の配列です。`llm.retry_codes` または
 `custom_providers.<name>.retry_codes` に設定できます。`ocr config set` では、
@@ -142,10 +142,11 @@ ocr config set llm.retry_codes 403,400
 ocr config set custom_providers.my-gateway.retry_codes 403,400
 ```
 
-指定できるのは 4xx の HTTP ステータスコードだけです。`408`、`409`、`429` は
-SDK がすでにリトライするため、設定ファイルから読み込む際には無視されます。
+指定できるのは追加の 4xx HTTP ステータスコードだけです。`408`、`409`、`429` は
+OCR の共有リトライポリシーに含まれるため、設定ファイルから読み込む際には無視されます。
 `ocr config set` で指定した場合は、OCR が警告を出し、これらのコードを保存しません。
-5xx のレスポンスも SDK がデフォルトでリトライするため、`retry_codes` には追加できません。
+5xx のレスポンスも共有リトライポリシーに含まれるため、`retry_codes` には追加できません。
+各 provider リクエストの試行回数は合計 3 回までです。
 
 ### ファイルごとのプロンプト上限
 

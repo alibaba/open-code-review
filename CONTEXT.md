@@ -59,6 +59,10 @@ _Avoid_: treating one tool call as one round.
 The interval from entering the shared `CompletionsWithCtx` request wrapper until that call returns, including provider success, provider error, per-request timeout, or cancellation. Concurrent requests contribute to one in-flight count.
 _Avoid_: ending the interval only when a successful response or progress event is emitted.
 
+**Provider retry budget**:
+The total attempt limit for one LLM request across Chat Completions, Anthropic, and Responses. The initial attempt and all retries share this limit, including retries requested by configured `retry_codes`.
+_Avoid_: treating `retry_codes` as a second retry layer or multiplying the budget by provider SDK behavior.
+
 **Tool-call failure**:
 A single tool invocation that returns an error, such as an exact file path not being found.
 _Avoid_: treating one failed tool call as a failed file review when the conversation later recovers.

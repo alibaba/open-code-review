@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -242,23 +241,6 @@ type ClientConfig struct {
 	RetryCodes   []int             // Additional HTTP status codes that trigger retry
 }
 
-func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
-	if len(codes) == 0 {
-		return nil
-	}
-	codeSet := make(map[int]bool, len(codes))
-	for _, code := range codes {
-		codeSet[code] = true
-	}
-	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
-		resp, err := next(req)
-		if err == nil && codeSet[resp.StatusCode] {
-			resp.Header.Set("x-should-retry", "true")
-		}
-		return resp, err
-	}
-}
-
 // --- Factory ---
 
 // NewLLMClient creates the appropriate client based on the resolved endpoint protocol.
@@ -403,17 +385,13 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
 		openaiopt.WithBaseURL(sdkBaseURL),
-		openaiopt.WithMaxRetries(5),
+		openaiopt.WithMaxRetries(0),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 	}
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
-	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
-		opts = append(opts, openaiopt.WithMiddleware(mw))
-	}
-
 	return &OpenAIClient{
 		cfg: cfg,
 		sdk: openai.NewClient(opts...),
@@ -455,7 +433,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 	if stream, ok := c.cfg.ExtraBody["stream"].(bool); ok && stream {
 		return withLLMRetry(ctx, func(ctx context.Context) (*ChatResponse, error) {
 			return c.completionsStreaming(ctx, params, opts...)
-		})
+		}, c.cfg.RetryCodes)
 	}
 
 	return withLLMRetry(ctx, func(ctx context.Context) (*ChatResponse, error) {
@@ -464,7 +442,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			return nil, err
 		}
 		return c.mapOpenAIResponse(sdkResp), nil
-	})
+	}, c.cfg.RetryCodes)
 }
 
 func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.ChatCompletionNewParams, opts ...openaiopt.RequestOption) (*ChatResponse, error) {
@@ -697,7 +675,7 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 
 	opts := []option.RequestOption{
 		option.WithBaseURL(sdkBaseURL),
-		option.WithMaxRetries(5),
+		option.WithMaxRetries(0),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
 	}
@@ -718,10 +696,6 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, option.WithHeader(k, v))
 	}
-	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
-		opts = append(opts, option.WithMiddleware(mw))
-	}
-
 	return &AnthropicClient{
 		cfg: cfg,
 		sdk: anthropic.NewClient(opts...),
@@ -758,7 +732,7 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 			return nil, err
 		}
 		return c.mapAnthropicResponse(sdkResp), nil
-	})
+	}, c.cfg.RetryCodes)
 }
 
 // buildAnthropicParams converts the shared ChatRequest into Anthropic SDK parameters.

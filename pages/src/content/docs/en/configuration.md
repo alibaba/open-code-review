@@ -132,7 +132,7 @@ The `timeout_sec` keys are not supported by `ocr config set` — edit
 
 Some LLM providers use non-standard 4xx status codes for transient errors, such
 as returning `403` or `400` for rate limiting. Use `retry_codes` to make OCR
-retry these requests using the existing SDK retry mechanism.
+retry these requests through the shared, bounded retry policy used by every LLM protocol.
 
 `retry_codes` is an array of integers. It can be set as `llm.retry_codes` or
 `custom_providers.<name>.retry_codes`. When using `ocr config set`, pass the codes as
@@ -143,11 +143,12 @@ ocr config set llm.retry_codes 403,400
 ocr config set custom_providers.my-gateway.retry_codes 403,400
 ```
 
-Only 4xx HTTP status codes are accepted. `408`, `409`, and `429` are already
-retried by the SDK. When read from the config file, these redundant codes are
+Only additional 4xx HTTP status codes are accepted. `408`, `409`, and `429` are
+already covered by OCR's shared retry policy. When read from the config file, these redundant codes are
 ignored. When supplied through `ocr config set`, OCR also prints a warning and
-omits them from the saved value. All 5xx responses are already retried by the
-SDK and cannot be added to `retry_codes`.
+omits them from the saved value. All 5xx responses are covered by the shared
+retry policy and cannot be added to `retry_codes`. Each provider request is
+attempted at most three times total.
 
 ### Per-file prompt limit
 

@@ -752,6 +752,34 @@ func TestLLMRetry_DoesNotRetryPlainEOF(t *testing.T) {
 	}
 }
 
+func TestLLMRetry_UsesSingleTotalAttemptBudget(t *testing.T) {
+	var calls atomic.Int32
+	_, err := withLLMRetry(context.Background(), func(context.Context) (*ChatResponse, error) {
+		calls.Add(1)
+		return nil, io.ErrUnexpectedEOF
+	})
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want io.ErrUnexpectedEOF", err)
+	}
+	if got := calls.Load(); got != llmMaxAttempts {
+		t.Fatalf("calls = %d, want %d", got, llmMaxAttempts)
+	}
+}
+
+func TestRetryableHTTPStatus_UsesConfiguredCodes(t *testing.T) {
+	for _, status := range []int{408, 409, 429, 500, 503} {
+		if !retryableHTTPStatus(status) {
+			t.Errorf("retryableHTTPStatus(%d) = false, want true", status)
+		}
+	}
+	if !retryableHTTPStatus(403, []int{403}) {
+		t.Error("configured 403 should be retryable")
+	}
+	if retryableHTTPStatus(403) {
+		t.Error("unconfigured 403 should not be retryable")
+	}
+}
+
 func TestOpenAIClient_DoesNotRetryTruncatedResponseAfterCancellation(t *testing.T) {
 	const responseBody = `{
 		"id":"chatcmpl-canceled",
@@ -1522,74 +1550,6 @@ func TestStripThinkTags(t *testing.T) {
 				t.Errorf("stripThinkTags(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestRetryCodesMiddleware_Nil(t *testing.T) {
-	mw := retryCodesMiddleware(nil)
-	if mw != nil {
-		t.Fatal("expected nil middleware for empty codes")
-	}
-	mw = retryCodesMiddleware([]int{})
-	if mw != nil {
-		t.Fatal("expected nil middleware for zero-length codes")
-	}
-}
-
-func TestRetryCodesMiddleware_SetsHeader(t *testing.T) {
-	mw := retryCodesMiddleware([]int{403, 400})
-
-	resp := &http.Response{
-		StatusCode: 403,
-		Header:     http.Header{},
-	}
-	next := func(req *http.Request) (*http.Response, error) {
-		return resp, nil
-	}
-
-	got, err := mw(nil, next)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.Header.Get("x-should-retry") != "true" {
-		t.Error("expected x-should-retry: true for status 403")
-	}
-}
-
-func TestRetryCodesMiddleware_NoHeaderForNonMatchingCode(t *testing.T) {
-	mw := retryCodesMiddleware([]int{403})
-
-	resp := &http.Response{
-		StatusCode: 401,
-		Header:     http.Header{},
-	}
-	next := func(req *http.Request) (*http.Response, error) {
-		return resp, nil
-	}
-
-	got, err := mw(nil, next)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got.Header.Get("x-should-retry") != "" {
-		t.Errorf("unexpected x-should-retry header for status 401: %q", got.Header.Get("x-should-retry"))
-	}
-}
-
-func TestRetryCodesMiddleware_PassthroughError(t *testing.T) {
-	mw := retryCodesMiddleware([]int{403})
-
-	wantErr := errors.New("connection refused")
-	next := func(req *http.Request) (*http.Response, error) {
-		return nil, wantErr
-	}
-
-	resp, err := mw(nil, next)
-	if err != wantErr {
-		t.Fatalf("expected %v, got %v", wantErr, err)
-	}
-	if resp != nil {
-		t.Fatal("expected nil response on error")
 	}
 }
 

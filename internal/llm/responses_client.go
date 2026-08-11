@@ -47,10 +47,6 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
-	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
-		opts = append(opts, openaiopt.WithMiddleware(mw))
-	}
-
 	return &OpenAIResponsesClient{
 		cfg: cfg,
 		sdk: openai.NewClient(opts...),
@@ -119,7 +115,7 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		}
 
 		return c.mapResponsesResponse(sdkResp), nil
-	})
+	}, c.cfg.RetryCodes)
 }
 
 // buildResponsesParams converts the shared ChatRequest into Responses API

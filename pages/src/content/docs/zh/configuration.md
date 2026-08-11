@@ -123,7 +123,8 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
 ### 额外的重试状态码
 
 有些 LLM 提供商会用非标准的 4xx 状态码表示临时错误，例如在限流时返回 `403` 或
-`400`。可通过 `retry_codes` 让 OCR 对这类请求使用 SDK 现有的重试机制。
+`400`。可通过 `retry_codes` 让 OCR 对这类请求使用所有 LLM protocol 共用的
+有上限重试策略。
 
 `retry_codes` 是整数数组，可配置为 `llm.retry_codes` 或
 `custom_providers.<name>.retry_codes`。通过 `ocr config set` 设置时，以逗号分隔
@@ -134,10 +135,10 @@ ocr config set llm.retry_codes 403,400
 ocr config set custom_providers.my-gateway.retry_codes 403,400
 ```
 
-只接受 4xx HTTP 状态码。`408`、`409` 和 `429` 已由 SDK 重试；直接从配置文件
-读取时，这些冗余状态码会被忽略。通过 `ocr config set` 设置时，OCR 还会输出
-警告，并且不会把这些状态码保存到配置中。所有 5xx 响应也已由 SDK 默认重试，
-因此不能加入 `retry_codes`。
+只接受额外的 4xx HTTP 状态码。`408`、`409` 和 `429` 已由 OCR 共用的重试策略
+处理；直接从配置文件读取时，这些冗余状态码会被忽略。通过 `ocr config set` 设置时，
+OCR 还会输出警告，并且不会把这些状态码保存到配置中。所有 5xx 响应也由共用的重试
+策略处理，因此不能加入 `retry_codes`。每个 provider request 最多尝试三次。
 
 ### 每文件提示词上限
 
