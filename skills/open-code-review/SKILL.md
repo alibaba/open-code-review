@@ -72,7 +72,7 @@ Analyze the review target and extract concise business context to improve review
 | "Review feature PR" | `ocr review --audience agent --format json -b "ctx" --from main --to feature` |
 | "Review commit abc123" | `ocr review --audience agent --format json -b "ctx" --commit abc123` |
 | "Which files will be reviewed?" | `ocr review --preview --format json` |
-| "Resume interrupted review" | `ocr review --audience agent --format json --resume <session-id>` |
+| "Resume interrupted review" | `ocr review --audience agent --format json --from main --to feature --resume <session-id>` |
 
 #### Scan Mode (Full-file, No Diff Required)
 

@@ -17,7 +17,7 @@
 | `--max-tokens-budget` | | `0` (unlimited) | Token budget cap; outputs partial results gracefully if exceeded |
 | `--provider` | | Configured Provider | Per-run override for LLM Provider (e.g. `openai`, `anthropic`) |
 | `--model` | | Configured Model | Per-run override for LLM model |
-| `--max-tokens` | | `58888` | Per-run override for per-file prompt token limit |
+| `--max-tokens` | | `0` | Per-run override for per-file prompt token limit (0 = template/configured default) |
 | `--resume` | | `""` | Resumes an interrupted session ID (`scan` supports all; `review` requires `--from/--to` or `--commit`) |
 | `--tools` | | Built-in | Path to JSON tools configuration file |
 | `--preview` | `-p` | `false` | Dry-run: lists target files without invoking LLM (supports `--format json`) |

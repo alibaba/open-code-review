@@ -5,7 +5,7 @@
 | Symptom | Action |
 |---------|--------|
 | Rate limit errors | Lower `--concurrency` to 2-4 |
-| Frequent 429 / 50x errors | Configure `ocr config set llm.retry_codes 429,500,502,503` |
+| Frequent 429 / 5xx errors | Configure `ocr config set llm.retry_codes 429,500,502,503` |
 | Excessive token cost | Set `--max-tokens-budget 500000` (or lower) |
 | Single large file truncated | Set `--max-tokens 200000` or `ocr config set max_tokens 200000` |
 | Large file timeouts | Increase `--timeout 20` |
