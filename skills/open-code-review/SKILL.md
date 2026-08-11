@@ -64,6 +64,10 @@ Analyze the review target and extract concise business context to improve review
 
 **Always use `--audience agent`** (suppresses progress UI). Prefer `--format json`.
 
+> 💡 **Prevent console truncation**: When reviewing many files or running a full-repo `scan`, stdout may exceed the host agent's tool output buffer (e.g. ~45KB) and be hard-truncated, corrupting the JSON.
+> - **Anticipate large reviews**: redirect to a file directly (e.g. `ocr scan --audience agent --format json -b "ctx" > scratch/ocr_result.json`), then read it with a file-reading tool. Note that run-level failure JSON goes to **stderr** — don't miss it when redirecting stdout.
+> - **Already truncated**: **no need to re-run `ocr`** — extract comments on demand via `ocr session comments <session-id> --severity high,critical --json`.
+
 #### Review Mode (Diff-based)
 
 | User Intent | Command |
@@ -175,6 +179,7 @@ If no issues found: "Review complete — 0 issues found across N files."
 - **Resume conditions** — `ocr scan` fully supports `--resume`; `ocr review` supports `--resume` only in `--from/--to` or `--commit` modes (not workspace mode).
 - **`--preview` and `--resume` are mutually exclusive.**
 - **Language configuration** — Default: English. Switch via `ocr config set language 中文`.
+- **Avoid tool-buffer truncation** — stdout exceeding the host agent's tool output buffer (e.g. ~45KB) gets hard-truncated, corrupting JSON. For large runs, redirect to a file (`> scratch/ocr_result.json`) and read it with a file-reading tool; if truncation already happened, no need to re-run `ocr` — extract via `ocr session comments <session-id>`.
 - **Do not test connectivity pre-emptively** — Execute review/scan directly; troubleshoot only on actual LLM failure (see troubleshooting.md).
 
 ## Verification
@@ -191,3 +196,4 @@ After review completes:
 - Homepage & Docs: https://github.com/alibaba/open-code-review
 - NPM Package: https://www.npmjs.com/package/@alibaba-group/open-code-review
 - Issue Tracker: https://github.com/alibaba/open-code-review/issues
+- Official site: https://open-codereview.ai
