@@ -45,6 +45,7 @@ type reviewOptions struct {
 	maxGitProcs     int
 	maxTokens       int
 	maxTokensBudget int
+	noFilter        bool
 	preview         bool
 }
 
@@ -207,6 +208,7 @@ func executeReview(opts reviewOptions) error {
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
+		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
 

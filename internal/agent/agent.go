@@ -139,6 +139,10 @@ type Args struct {
 	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
 	MaxTokensBudget int64
 
+	// SkipFilter disables the REVIEW_FILTER_TASK even when the template
+	// defines one. Set via the --no-filter CLI flag.
+	SkipFilter bool
+
 	// RuntimeConfig carries the non-secret, allowlisted runtime settings that
 	// identify how this run was configured, for the manifest's
 	// runtime_config_sha256. It is populated by the cmd layer from the resolved
@@ -1235,6 +1239,12 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 
 	ft := a.args.Template.ReviewFilterTask
 	if ft == nil || len(ft.Messages) == 0 {
+		return
+	}
+
+	if a.args.SkipFilter {
+		telemetry.SetAttr(span, "skipped", true)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for %s (--no-filter)\n", newPath)
 		return
 	}
 
