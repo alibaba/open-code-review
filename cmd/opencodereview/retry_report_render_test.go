@@ -59,7 +59,7 @@ func retryReportFixture() *llm.RetryReport {
 // The expected rendering is fixed by docs/368/LLM请求重试实施细节.md §5, so the
 // text contract is asserted whole rather than by substring.
 const wantRetryReportText = `
-LLM retry report: 1/12 requests retried, 2 retries, 1 recovered, 1 failed
+LLM retry report: 1/12 requests retried, 2 retries, 1 recovered, 1 failed, 0 cancelled
 - payment.go / main_task #2: rate_limited(429) -> overloaded(529) -> success
 - config.go / main_task #1: provider(402) -> failed
 `
@@ -113,7 +113,7 @@ func TestOutputRetryReportText_SucceededAfterRetry(t *testing.T) {
 			},
 		}},
 	}
-	want := "\nLLM retry report: 1/1 requests retried, 1 retry, 0 recovered, 0 failed\n" +
+	want := "\nLLM retry report: 1/1 requests retried, 1 retry, 0 recovered, 0 failed, 0 cancelled\n" +
 		"- payment.go / main_task #2: success -> success\n"
 	var buf bytes.Buffer
 	outputRetryReportText(&buf, rep)
@@ -126,9 +126,9 @@ func TestOutputRetryReportText_SucceededAfterRetry(t *testing.T) {
 // failure only by the trailing outcome, so that suffix is part of the contract.
 func TestOutputRetryReportText_CancelledSuffix(t *testing.T) {
 	rep := &llm.RetryReport{
-		SchemaVersion:  llm.RetryReportSchemaVersion,
-		TotalRequests:  1,
-		FailedRequests: 1,
+		SchemaVersion:     llm.RetryReportSchemaVersion,
+		TotalRequests:     1,
+		CancelledRequests: 1,
 		Requests: []llm.RequestReport{{
 			LogicalRequestID: "aaa",
 			Model:            "claude-test",
@@ -139,10 +139,25 @@ func TestOutputRetryReportText_CancelledSuffix(t *testing.T) {
 			Attempts:         []llm.AttemptRecord{{Number: 1, Outcome: llm.AttemptSuccess}},
 		}},
 	}
+	want := "\nLLM retry report: 0/1 requests retried, 0 retries, 0 recovered, 0 failed, 1 cancelled\n" +
+		"- payment.go / memory_compression_task #1: success -> cancelled\n"
 	var buf bytes.Buffer
 	outputRetryReportText(&buf, rep)
-	if !strings.Contains(buf.String(), "#1: success -> cancelled\n") {
-		t.Errorf("cancelled must be visible in the chain, got %q", buf.String())
+	if got := buf.String(); got != want {
+		t.Errorf("text report mismatch\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestRetryAttemptChain_CancelledAttemptNotDuplicated(t *testing.T) {
+	r := llm.RequestReport{
+		Outcome: llm.OutcomeCancelled,
+		Attempts: []llm.AttemptRecord{{
+			Number: 1, Outcome: llm.AttemptError,
+			ErrorClass: llm.ErrorClassCancelled, FailurePhase: llm.FailurePhaseContext,
+		}},
+	}
+	if got, want := retryAttemptChain(r), "cancelled"; got != want {
+		t.Errorf("chain = %q, want %q", got, want)
 	}
 }
 
@@ -186,7 +201,8 @@ func TestRetryReportJSON_KeySetIsAllowlisted(t *testing.T) {
 	allowedTop := map[string]bool{
 		"schema_version": true, "total_requests": true, "retried_requests": true,
 		"total_retries": true, "recovered_requests": true, "failed_requests": true,
-		"requests": true,
+		"cancelled_requests": true,
+		"requests":           true,
 	}
 	for k := range top {
 		if !allowedTop[k] {
@@ -288,7 +304,7 @@ func TestRetryReport_TerminalAndJSONReadSameFrozenResult(t *testing.T) {
 		t.Fatal("retry_report missing")
 	}
 
-	wantHeader := "LLM retry report: 1/2 requests retried, 1 retry, 1 recovered, 1 failed"
+	wantHeader := "LLM retry report: 1/2 requests retried, 1 retry, 1 recovered, 1 failed, 0 cancelled"
 	if !strings.Contains(text.String(), wantHeader) {
 		t.Errorf("terminal header = %q, want it to contain %q", text.String(), wantHeader)
 	}

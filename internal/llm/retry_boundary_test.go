@@ -422,9 +422,9 @@ func TestBoundaryCancelDuringBackoffIsCancelled(t *testing.T) {
 		t.Errorf("outcome = %s, want cancelled even though the last attempt is an HTTP error",
 			rep.Requests[0].Outcome)
 	}
-	if rep.FailedRequests != 1 || rep.RecoveredRequests != 0 {
-		t.Errorf("failed %d recovered %d, want 1/0 (cancelled counts as not-succeeded)",
-			rep.FailedRequests, rep.RecoveredRequests)
+	if rep.CancelledRequests != 1 || rep.FailedRequests != 0 || rep.RecoveredRequests != 0 {
+		t.Errorf("cancelled %d failed %d recovered %d, want 1/0/0",
+			rep.CancelledRequests, rep.FailedRequests, rep.RecoveredRequests)
 	}
 }
 

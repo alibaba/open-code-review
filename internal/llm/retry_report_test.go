@@ -516,7 +516,7 @@ func TestFreezeAggregatesAndSorts(t *testing.T) {
 }
 
 // A request cancelled after a single clean attempt has no error attempt and no
-// retry, yet it counts in failed_requests. It must still be listed, or the
+// retry, yet it counts in cancelled_requests. It must still be listed, or the
 // aggregates would not be verifiable from the report alone.
 func TestFreezeListsCancelledRequestWithoutErrorAttempt(t *testing.T) {
 	c := NewRetryCollector()
@@ -531,7 +531,7 @@ func TestFreezeListsCancelledRequestWithoutErrorAttempt(t *testing.T) {
 	if rep == nil || len(rep.Requests) != 1 {
 		t.Fatalf("cancelled request was not listed: %+v", rep)
 	}
-	if rep.Requests[0].Outcome != OutcomeCancelled || rep.FailedRequests != 1 {
+	if rep.Requests[0].Outcome != OutcomeCancelled || rep.CancelledRequests != 1 || rep.FailedRequests != 0 {
 		t.Fatalf("unexpected report: %+v", *rep)
 	}
 }
@@ -760,6 +760,7 @@ func TestValidateReportCatchesInconsistency(t *testing.T) {
 		"retried count mismatch":        func(r *RetryReport) { r.RetriedRequests = 5 },
 		"recovered count mismatch":      func(r *RetryReport) { r.RecoveredRequests = 0 },
 		"failed count mismatch":         func(r *RetryReport) { r.FailedRequests = 1 },
+		"cancelled count mismatch":      func(r *RetryReport) { r.CancelledRequests = 1 },
 		"non contiguous numbering":      func(r *RetryReport) { r.Requests[0].Attempts[1].Number = 3 },
 		"recovered without error":       func(r *RetryReport) { r.Requests[0].Attempts[0] = AttemptRecord{Number: 1, Outcome: AttemptSuccess} },
 		"success attempt carries class": func(r *RetryReport) { r.Requests[0].Attempts[1].ErrorClass = ErrorClassUnknown },

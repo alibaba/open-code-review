@@ -109,6 +109,8 @@ func NewRunner(deps Deps) *Runner {
 // ultimately depends on the LLM client honouring context cancellation, and no
 // additional deadline is imposed here: the job already carries its own
 // timeout.
+// Scan does not currently call this because it freezes no retry report; its
+// analogous session-finalization race is outside this change.
 func (r *Runner) WaitBackground() {
 	r.bg.Wait()
 }

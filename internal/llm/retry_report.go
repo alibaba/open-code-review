@@ -150,6 +150,7 @@ type RetryReport struct {
 	TotalRetries      int             `json:"total_retries"`
 	RecoveredRequests int             `json:"recovered_requests"`
 	FailedRequests    int             `json:"failed_requests"`
+	CancelledRequests int             `json:"cancelled_requests"`
 	Requests          []RequestReport `json:"requests"`
 }
 
@@ -525,15 +526,17 @@ func (c *RetryCollector) Freeze(runID string) (*RetryReport, error) {
 		switch e.outcome {
 		case OutcomeRecovered:
 			rep.RecoveredRequests++
-		case OutcomeFailed, OutcomeCancelled:
+		case OutcomeFailed:
 			rep.FailedRequests++
+		case OutcomeCancelled:
+			rep.CancelledRequests++
 		}
 
 		// Listing rule: anything that retried, anything that saw an error, and
 		// anything whose outcome is not succeeded. The last clause is what keeps
 		// the aggregates verifiable from the listed requests alone — a request
 		// cancelled after a single clean attempt has no error attempt and no
-		// retry, yet it is counted in FailedRequests, so it must be listed.
+		// retry, yet it is counted in CancelledRequests, so it must be listed.
 		if len(e.attempts) == 1 && !e.hasErrorAttempt() && e.outcome == OutcomeSucceeded {
 			continue
 		}
@@ -578,7 +581,7 @@ func validateReport(rep *RetryReport) error {
 	}
 
 	seen := make(map[string]struct{}, len(rep.Requests))
-	var retries, retried, recovered, failed int
+	var retries, retried, recovered, failed, cancelled int
 
 	for _, r := range rep.Requests {
 		if _, dup := seen[r.LogicalRequestID]; dup {
@@ -627,8 +630,10 @@ func validateReport(rep *RetryReport) error {
 			if len(r.Attempts) < 2 {
 				return fmt.Errorf("retry report: succeeded request listed with a single attempt")
 			}
-		case OutcomeFailed, OutcomeCancelled:
+		case OutcomeFailed:
 			failed++
+		case OutcomeCancelled:
+			cancelled++
 		default:
 			return fmt.Errorf("retry report: unknown request outcome %q", r.Outcome)
 		}
@@ -653,6 +658,9 @@ func validateReport(rep *RetryReport) error {
 	}
 	if failed != rep.FailedRequests {
 		return fmt.Errorf("retry report: failed_requests %d != %d", rep.FailedRequests, failed)
+	}
+	if cancelled != rep.CancelledRequests {
+		return fmt.Errorf("retry report: cancelled_requests %d != %d", rep.CancelledRequests, cancelled)
 	}
 	return nil
 }

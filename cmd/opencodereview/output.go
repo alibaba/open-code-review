@@ -402,9 +402,9 @@ func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
 	if rep.TotalRetries == 1 {
 		retryWord = "retry"
 	}
-	fmt.Fprintf(w, "\nLLM retry report: %d/%d requests retried, %d %s, %d recovered, %d failed\n",
+	fmt.Fprintf(w, "\nLLM retry report: %d/%d requests retried, %d %s, %d recovered, %d failed, %d cancelled\n",
 		rep.RetriedRequests, rep.TotalRequests, rep.TotalRetries, retryWord,
-		rep.RecoveredRequests, rep.FailedRequests)
+		rep.RecoveredRequests, rep.FailedRequests, rep.CancelledRequests)
 	for _, r := range rep.Requests {
 		fmt.Fprintf(w, "- %s / %s #%d: %s\n",
 			sanitizeTerminal(r.FilePath), sanitizeTerminal(r.TaskType),
@@ -415,13 +415,13 @@ func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
 // retryAttemptChain renders one logical request's attempts as
 // "rate_limited(429) -> overloaded(529) -> success".
 //
-// A trailing request-level outcome is appended only for failed and cancelled:
-// a recovered or succeeded request already ends in a "success" attempt, so
-// repeating the outcome there would be noise, whereas a request that never
-// succeeded would otherwise end on its last error with no sign of how it
-// finished. cancelled in particular is a routine outcome (background memory
-// compression is deliberately abandoned at the end of every file), so it must
-// be visibly distinct from a provider failure.
+// A trailing request-level outcome is appended for failed and, when the last
+// attempt does not already say so, cancelled. A recovered or succeeded request
+// already ends in a "success" attempt, so repeating the outcome there would be
+// noise, whereas a request that never succeeded would otherwise end on its last
+// error with no sign of how it finished. cancelled in particular is a routine
+// outcome (background memory compression is deliberately abandoned at the end
+// of every file), so it must be visibly distinct from a provider failure.
 func retryAttemptChain(r llm.RequestReport) string {
 	parts := make([]string, 0, len(r.Attempts)+1)
 	for _, a := range r.Attempts {
@@ -434,7 +434,9 @@ func retryAttemptChain(r llm.RequestReport) string {
 			parts = append(parts, string(a.ErrorClass))
 		}
 	}
-	if r.Outcome == llm.OutcomeFailed || r.Outcome == llm.OutcomeCancelled {
+	if r.Outcome == llm.OutcomeFailed ||
+		(r.Outcome == llm.OutcomeCancelled &&
+			(len(parts) == 0 || parts[len(parts)-1] != string(llm.OutcomeCancelled))) {
 		parts = append(parts, string(r.Outcome))
 	}
 	return strings.Join(parts, " -> ")
