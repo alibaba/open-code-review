@@ -57,7 +57,9 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
 | `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
-| `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
+| `siliconflow`  | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
+| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
+| `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
 ### カスタム provider
 
@@ -126,6 +128,27 @@ Ollama は API key を無視しますが、カスタム provider は空でない
   }
 }
 ```
+
+### 追加のリトライ対象ステータスコード
+
+一部の LLM プロバイダーでは、レート制限に対して `403` や `400` を返すなど、
+一時的なエラーを標準外の 4xx ステータスコードで表すことがあります。
+`retry_codes` を使うと、OCR はこれらのリクエストに対して既存の SDK の
+リトライ機構を使用します。
+
+`retry_codes` は整数の配列です。`llm.retry_codes` または
+`custom_providers.<name>.retry_codes` に設定できます。`ocr config set` では、
+コードをカンマ区切りで指定します。
+
+```bash
+ocr config set llm.retry_codes 403,400
+ocr config set custom_providers.my-gateway.retry_codes 403,400
+```
+
+指定できるのは 4xx の HTTP ステータスコードだけです。`408`、`409`、`429` は
+SDK がすでにリトライするため、設定ファイルから読み込む際には無視されます。
+`ocr config set` で指定した場合は、OCR が警告を出し、これらのコードを保存しません。
+5xx のレスポンスも SDK がデフォルトでリトライするため、`retry_codes` には追加できません。
 
 ### ファイルごとのプロンプト上限
 

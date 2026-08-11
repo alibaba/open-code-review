@@ -879,12 +879,47 @@ p {
     font-size: 1rem;
 }
 
-.severity-bar {
+.comment-filter-bar {
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
     gap: 0.5rem;
+    margin-bottom: 0.65rem;
+}
+.category-filters {
     margin-bottom: 1.25rem;
 }
+.comment-filter-label {
+    min-width: 4.75rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+.comment-filter-chip {
+    appearance: none;
+    border: 1px solid transparent;
+    border-radius: 20px;
+    padding: 0.3em 0.75em;
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1.35;
+    cursor: pointer;
+    transition: opacity var(--transition), box-shadow var(--transition), border-color var(--transition);
+}
+.comment-filter-chip:not(.is-active) { opacity: 0.72; }
+.comment-filter-chip:hover,
+.comment-filter-chip.is-active { opacity: 1; }
+.comment-filter-chip.is-active {
+    border-color: transparent;
+    box-shadow: 0 0 0 2px currentColor;
+}
+.comment-filter-chip:focus-visible {
+    outline: 2px solid var(--link);
+    outline-offset: 2px;
+}
+.filter-all { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
 .severity-badge {
     padding: 0.3em 0.75em;
     border-radius: 20px;
@@ -970,6 +1005,11 @@ p {
 .cat-bug { background: #fef2f2; color: #dc2626; }
 .cat-security { background: #fdf2f8; color: #be185d; }
 .cat-performance { background: #fff7ed; color: #ea580c; }
+.cat-maintainability { background: #eff6ff; color: #2563eb; }
+.cat-test { background: #f0fdf4; color: #15803d; }
+.cat-style { background: #f5f3ff; color: #7c3aed; }
+.cat-documentation { background: #ecfeff; color: #0e7490; }
+.cat-other { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
 .cat-default { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
 .severity-default { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
 
@@ -977,7 +1017,19 @@ p {
     .cat-bug { background: rgba(220, 38, 38, 0.12); color: #fca5a5; }
     .cat-security { background: rgba(190, 24, 93, 0.12); color: #f9a8d4; }
     .cat-performance { background: rgba(234, 88, 12, 0.12); color: #fdba74; }
+    .cat-maintainability { background: rgba(37, 99, 235, 0.12); color: #93c5fd; }
+    .cat-test { background: rgba(21, 128, 61, 0.12); color: #86efac; }
+    .cat-style { background: rgba(124, 58, 237, 0.12); color: #c4b5fd; }
+    .cat-documentation { background: rgba(14, 116, 144, 0.12); color: #67e8f9; }
+    .cat-other { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
     .cat-default { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
+}
+
+.comment-filter-empty {
+    margin: 1.25rem 0 0;
+    color: var(--text-muted);
+    text-align: center;
+    font-size: 0.85rem;
 }
 
 .comment-lines {
