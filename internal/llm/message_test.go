@@ -475,3 +475,83 @@ func TestCloneMessagesIsolatesContentBlocks(t *testing.T) {
 		t.Fatalf("CloneMessages aliased content blocks: %+v", got)
 	}
 }
+
+func TestMessageReplayStateAccessors(t *testing.T) {
+	plain := NewTextMessage("assistant", "hello")
+	if plain.IsReplayable() || plain.HasReplayState() {
+		t.Fatal("plain text message must not report replay state")
+	}
+
+	toolOnly := NewToolCallMessage("", []ToolCall{{ID: "call-1", Type: "function"}})
+	if !toolOnly.IsReplayable() {
+		t.Fatal("tool-call message must be replayable")
+	}
+	if toolOnly.HasReplayState() {
+		t.Fatal("normalized tool-call message must not report an envelope")
+	}
+
+	enveloped := NewReplayStateMessageForTesting("body", nil)
+	if !enveloped.IsReplayable() || !enveloped.HasReplayState() {
+		t.Fatal("synthetic envelope message must report replay state")
+	}
+	if got, want := enveloped.ApproxTokenCount(), CountTokens("body"); got != want {
+		t.Fatalf("ApproxTokenCount = %d, want envelope estimate %d", got, want)
+	}
+	if got, want := plain.ApproxTokenCount(), CountTokens("hello"); got != want {
+		t.Fatalf("plain ApproxTokenCount = %d, want text estimate %d", got, want)
+	}
+}
+
+func TestChatResponseApproxCompletionTokenCountBranches(t *testing.T) {
+	var nilResp *ChatResponse
+	if got := nilResp.ApproxCompletionTokenCount(); got != 0 {
+		t.Fatalf("nil response estimate = %d, want 0", got)
+	}
+	if got := (&ChatResponse{}).ApproxCompletionTokenCount(); got != 0 {
+		t.Fatalf("empty response estimate = %d, want 0", got)
+	}
+
+	empty := ""
+	emptyTurn := &ChatResponse{Choices: []Choice{{Message: ResponseMessage{Content: &empty}}}}
+	emptyTurn.turn = &AssistantTurn{}
+	if got := emptyTurn.ApproxCompletionTokenCount(); got != 0 {
+		t.Fatalf("empty adapter turn estimate = %d, want 0", got)
+	}
+
+	visible := "visible"
+	fallback := &ChatResponse{Choices: []Choice{{Message: ResponseMessage{Content: &visible}}}}
+	if got := fallback.ApproxCompletionTokenCount(); got <= 0 {
+		t.Fatalf("fallback estimate = %d, want > 0", got)
+	}
+}
+
+func TestChatResponseReasoningContentAccessor(t *testing.T) {
+	if got := (&ChatResponse{}).ReasoningContent(); got != "" {
+		t.Fatalf("no-choice ReasoningContent = %q, want empty", got)
+	}
+	resp := &ChatResponse{Choices: []Choice{{Message: ResponseMessage{ReasoningContent: "chain"}}}}
+	if got := resp.ReasoningContent(); got != "chain" {
+		t.Fatalf("ReasoningContent = %q, want %q", got, "chain")
+	}
+}
+
+func TestAssistantTurnToolCallsReturnsCopy(t *testing.T) {
+	turn := AssistantTurn{toolCalls: []ToolCall{{ID: "call-1", Type: "function"}}}
+	calls := turn.ToolCalls()
+	calls[0].ID = "mutated"
+	if turn.toolCalls[0].ID != "call-1" {
+		t.Fatal("ToolCalls must return a copy, not the backing slice")
+	}
+	if (AssistantTurn{}).ToolCalls() != nil {
+		t.Fatal("empty turn must return nil tool calls")
+	}
+}
+
+func TestDecodeReasoningContent(t *testing.T) {
+	if got := decodeReasoningContent([]byte(`"quoted chain"`)); got != "quoted chain" {
+		t.Fatalf("decoded = %q, want unquoted string", got)
+	}
+	if got := decodeReasoningContent([]byte(`{not json`)); got != "{not json" {
+		t.Fatalf("decoded = %q, want raw passthrough for invalid JSON", got)
+	}
+}

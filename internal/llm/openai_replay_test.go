@@ -178,3 +178,51 @@ func TestOpenAIAssistantTurnWithoutEnvelopeFallsBackToReasoning(t *testing.T) {
 		t.Fatalf("Content() = %q, want reasoning fallback without envelope", turn.Content())
 	}
 }
+
+func TestOverlayOpenAICustomToolExtensions(t *testing.T) {
+	request := map[string]any{"name": "tool", "input": "typed-input"}
+	response := map[string]any{"name": "resp-name", "input": "resp-input", "vendor_note": "keep"}
+	merged := overlayOpenAICustomToolExtensions(request, response)
+	if merged["name"] != "tool" || merged["input"] != "typed-input" {
+		t.Fatalf("SDK-owned custom tool fields must win: %#v", merged)
+	}
+	if merged["vendor_note"] != "keep" {
+		t.Fatalf("vendor extension must be overlaid: %#v", merged)
+	}
+}
+
+func TestOpenAIRequestAudioVariants(t *testing.T) {
+	if got := openAIRequestAudio("not-an-object"); got != nil {
+		t.Fatalf("non-object audio = %#v, want nil", got)
+	}
+	if got := openAIRequestAudio(map[string]any{"data": "x"}); got != nil {
+		t.Fatalf("audio without id = %#v, want nil", got)
+	}
+	got := openAIRequestAudio(map[string]any{"id": "audio-1", "data": "response-only"})
+	if len(got) != 1 || got["id"] != "audio-1" {
+		t.Fatalf("audio = %#v, want request-safe id only", got)
+	}
+}
+
+// TestMapOpenAIResponseReplayGating pins the flag boundary itself: the
+// normalized adapter turn is always attached, but the opaque replay envelope
+// exists only when the endpoint opted into native replay.
+func TestMapOpenAIResponseReplayGating(t *testing.T) {
+	raw := `{"id":"r","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi","reasoning_content":"chain"},"finish_reason":"stop"}]}`
+	var sdkResp openai.ChatCompletion
+	if err := json.Unmarshal([]byte(raw), &sdkResp); err != nil {
+		t.Fatal(err)
+	}
+
+	off := NewOpenAIClient(ClientConfig{URL: "https://api.example.com/v1"})
+	offResp := off.mapOpenAIResponse(&sdkResp)
+	if offResp.turn == nil || offResp.turn.replay != nil {
+		t.Fatalf("default client must attach a normalized turn without an envelope: %+v", offResp.turn)
+	}
+
+	on := NewOpenAIClient(ClientConfig{URL: "https://api.example.com/v1", AssistantReplay: AssistantReplayNative})
+	onResp := on.mapOpenAIResponse(&sdkResp)
+	if onResp.turn == nil || onResp.turn.replay == nil {
+		t.Fatal("opted-in client must attach an adapter turn with a replay envelope")
+	}
+}

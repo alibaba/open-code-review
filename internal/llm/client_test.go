@@ -1874,3 +1874,79 @@ func TestOpenAIStreamChoiceState_MergesToolCallContinuationWithoutIndex(t *testi
 		t.Fatalf("merged arguments = %v, want %q", got, `{"path":"main.go"}`)
 	}
 }
+
+// TestOpenAIStreamChoiceState_AssemblesProviderFields pins delta assembly
+// across the full field switch: reasoning_details text fragments merge by
+// index, response-only fields (role, annotations) are dropped, null-then-text
+// content resolves to text, legacy function_call fragments concatenate, and
+// unknown provider fields are kept as opaque snapshots for the envelope.
+func TestOpenAIStreamChoiceState_AssemblesProviderFields(t *testing.T) {
+	state := &openAIStreamChoiceState{}
+	deltas := []string{
+		`{"role":"assistant","content":null,"annotations":[{"type":"url_citation"}]}`,
+		`{"content":"vis","reasoning_details":[{"index":0,"type":"reasoning.text","text":"part one "}],"function_call":{"name":"file_","arguments":"{\"a\":"},"vendor_state":{"nonce":"n1"}}`,
+		`{"content":"ible","reasoning_details":[{"index":0,"text":"part two"},{"index":1,"type":"reasoning.encrypted","data":"opaque"}],"function_call":{"name":"read","arguments":"1}"},"audio":{"id":"audio-1","data":"resp"}}`,
+	}
+	for _, delta := range deltas {
+		if err := state.addDelta(delta); err != nil {
+			t.Fatalf("addDelta(%s): %v", delta, err)
+		}
+	}
+	raw, err := state.finalize(openai.ChatCompletionMessage{})
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	envelope := string(raw)
+
+	if !strings.Contains(envelope, `"content":"visible"`) {
+		t.Fatalf("null-then-text content must resolve to the text: %s", envelope)
+	}
+	if !strings.Contains(envelope, `"text":"part one part two"`) {
+		t.Fatalf("reasoning_details text fragments must concatenate by index: %s", envelope)
+	}
+	if !strings.Contains(envelope, `"data":"opaque"`) {
+		t.Fatalf("distinct reasoning_details index must append: %s", envelope)
+	}
+	if strings.Contains(envelope, "annotations") {
+		t.Fatalf("response-only annotations must not enter the envelope: %s", envelope)
+	}
+	if strings.Contains(envelope, "vendor_state") {
+		t.Fatalf("unknown provider fields must not be echoed without a contract: %s", envelope)
+	}
+	if !strings.Contains(envelope, `"function_call":{"arguments":"{\"a\":1}","name":"file_read"}`) &&
+		!strings.Contains(envelope, `"function_call":{"name":"file_read","arguments":"{\"a\":1}"}`) {
+		t.Fatalf("legacy function_call fragments must concatenate: %s", envelope)
+	}
+	if !strings.Contains(envelope, `"audio":{"id":"audio-1"}`) {
+		t.Fatalf("audio must reduce to its request-safe id: %s", envelope)
+	}
+
+	var normalized ResponseMessage
+	state.applyNormalizedFields(&normalized)
+	if normalized.Content == nil || *normalized.Content != "visible" {
+		t.Fatalf("normalized content = %v, want visible", normalized.Content)
+	}
+}
+
+// TestOpenAIStreamChoiceState_NullContentStaysNull pins exact null presence:
+// a stream that only ever sends content:null must finalize with content null
+// in the envelope and nil in the normalized view.
+func TestOpenAIStreamChoiceState_NullContentStaysNull(t *testing.T) {
+	state := &openAIStreamChoiceState{}
+	if err := state.addDelta(`{"role":"assistant","content":null}`); err != nil {
+		t.Fatalf("addDelta: %v", err)
+	}
+	raw, err := state.finalize(openai.ChatCompletionMessage{})
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if !strings.Contains(string(raw), `"content":null`) {
+		t.Fatalf("null content presence must survive: %s", raw)
+	}
+	content := "preset"
+	normalized := ResponseMessage{Content: &content}
+	state.applyNormalizedFields(&normalized)
+	if normalized.Content != nil {
+		t.Fatalf("normalized content = %v, want nil for explicit null", normalized.Content)
+	}
+}
