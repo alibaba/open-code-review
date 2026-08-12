@@ -75,7 +75,7 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 		cmdArgs = append(cmdArgs, "-F")
 	}
 
-	cmdArgs = append(cmdArgs, "-n", "--no-color")
+	cmdArgs = append(cmdArgs, "-z", "-n", "--no-color")
 	cmdArgs = append(cmdArgs, "--max-count", fmt.Sprintf("%d", gitGrepMaxCount))
 
 	cmdArgs = append(cmdArgs, "-e", searchText)
@@ -176,35 +176,36 @@ func (p *CodeSearchProvider) gitGrep(ctx context.Context, searchText string, cas
 	var fileOrder []string
 	seen := make(map[string]bool)
 
-	hasRef := p.FileReader.Ref != ""
-	splitN := 3
-	offset := 0
-	if hasRef {
-		splitN = 4
-		offset = 1
-	}
-
 	var sb strings.Builder
 	if truncated {
 		sb.WriteString(fmt.Sprintf("Note: The results have been truncated. Only showing first %d results.\n", gitGrepMaxCount))
 	}
 
-	for _, line := range lines {
-		if line == "" {
-			continue
+	remaining := outStr
+	for remaining != "" {
+		fname, rest, ok := strings.Cut(remaining, "\x00")
+		if !ok {
+			break
 		}
-		parts := strings.SplitN(line, ":", splitN)
-		if len(parts) < splitN {
-			continue
+		lineNum, rest, ok := strings.Cut(rest, "\x00")
+		if !ok {
+			break
 		}
-		fname := parts[offset]
+		var content string
+		content, remaining, _ = strings.Cut(rest, "\n")
+		if ref := p.FileReader.Ref; ref != "" {
+			fname, ok = strings.CutPrefix(fname, ref+":")
+			if !ok {
+				continue
+			}
+		}
 		m := match{}
-		ln, parseErr := strconv.Atoi(parts[offset+1])
+		ln, parseErr := strconv.Atoi(lineNum)
 		if parseErr != nil {
 			continue
 		}
 		m.lineNum = ln
-		m.content = parts[offset+2]
+		m.content = content
 		if !seen[fname] {
 			seen[fname] = true
 			fileOrder = append(fileOrder, fname)
