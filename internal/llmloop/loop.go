@@ -323,6 +323,11 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newP
 			"- Call task_done if you have nothing more to report.\n"+
 			"No other tools are available. Do not attempt further analysis."))
 
+	if ctx.Err() != nil {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round skipped for %s: context cancelled\n", newPath)
+		return
+	}
+
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  messages,
@@ -348,7 +353,8 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newP
 	}
 
 	fs := r.deps.Session.GetOrCreateFileSession(newPath)
-	rec := fs.AppendTaskRecord(session.MainTask, nil)
+	rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
+	rec.SetResponse(resp, 0)
 	thinking := resp.ReasoningContent()
 	for _, call := range calls {
 		r.executeToolCall(ctx, newPath, call, rec, thinking)
