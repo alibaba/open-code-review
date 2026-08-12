@@ -4,6 +4,7 @@
 package gitcmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,8 @@ type GitVersion struct {
 }
 
 var gitVersionMin = GitVersion{Major: 2, Minor: 41, Patch: 0}
+
+var ErrGitVersionTooOld = errors.New("git version below minimum supported")
 
 func (v GitVersion) String() string {
 	return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
@@ -79,6 +82,7 @@ func checkGitVersion(w io.Writer, getVersion func() ([]byte, error)) (string, er
 	}
 	if msg, ok := versionWarning(v); ok {
 		fmt.Fprint(w, msg)
+		return v.String(), fmt.Errorf("%w: %s", ErrGitVersionTooOld, v.String())
 	}
 	return v.String(), nil
 }

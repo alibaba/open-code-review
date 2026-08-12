@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -24,7 +25,9 @@ func main() {
 	}
 
 	if _, err := gitcmd.CheckGitVersion(); err != nil {
-		_ = err
+		if !errors.Is(err, gitcmd.ErrGitVersionTooOld) {
+			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		}
 	}
 
 	if err := rootCmd.Execute(); err != nil {

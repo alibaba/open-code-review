@@ -131,8 +131,11 @@ func TestCheckGitVersion(t *testing.T) {
 			return []byte("git version 2.30.0\n"), nil
 		}
 		ver, err := checkGitVersion(&buf, getVersion)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		if err == nil {
+			t.Fatal("expected ErrGitVersionTooOld, got nil")
+		}
+		if !errors.Is(err, ErrGitVersionTooOld) {
+			t.Errorf("expected ErrGitVersionTooOld, got %v", err)
 		}
 		if ver != "2.30.0" {
 			t.Errorf("version = %q, want %q", ver, "2.30.0")
@@ -177,6 +180,14 @@ func TestCheckGitVersion_Real(t *testing.T) {
 		t.Skip("git not found in PATH")
 	}
 	ver, err := CheckGitVersion()
+	if errors.Is(err, ErrGitVersionTooOld) {
+		// Allowed: installed git is older than minimum. Version string must
+		// still be populated so the caller can inspect it.
+		if ver == "" {
+			t.Error("expected non-empty version string even when too old")
+		}
+		return
+	}
 	if err != nil {
 		t.Fatalf("CheckGitVersion() error: %v", err)
 	}
