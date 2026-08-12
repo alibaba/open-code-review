@@ -82,7 +82,7 @@ jobs:
         working-directory: pages
         run: npm run size
 
-  check-container:
+  build-container:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
