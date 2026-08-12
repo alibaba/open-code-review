@@ -9,6 +9,7 @@ import { useResponsive } from '../hooks/useResponsive';
 import ErrorBoundary from './ErrorBoundary';
 import npmIcon from '../assets/icons/npm.svg';
 import brewIcon from '../assets/icons/brew.svg';
+import macportsIcon from '../assets/icons/macports.svg';
 import copyIcon from '../assets/icons/icon-copy.svg';
 
 const ColorBends = React.lazy(() => import(/* webpackChunkName: "color-bends" */ './ColorBends'));
@@ -125,6 +126,7 @@ const terminalLines = [
 const INSTALL_CHANNELS = [
   { key: 'npm', labelKey: 'hero.installNpm', cmd: 'npm i -g @alibaba-group/open-code-review', icons: [npmIcon] },
   { key: 'brew', labelKey: 'hero.installBrew', cmd: 'brew install open-code-review', icons: [brewIcon] },
+  { key: 'macports', labelKey: 'hero.installMacPorts', cmd: 'sudo port install open-code-review', icons: [macportsIcon] },
 ];
 
 const HeroSection: React.FC = () => {
