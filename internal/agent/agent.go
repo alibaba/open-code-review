@@ -1153,7 +1153,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 		// Always substitute the {{plan_guidance}} token so the literal placeholder
 		// never leaks into the rendered prompt. When the plan phase produced no
 		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
-		// (any language variant) so the LLM does not see a dangling section header.
+		// so the LLM does not see a dangling section header.
 		// Strip MUST run before ReplaceAll: the regex requires the literal
 		// {{plan_guidance}} token to be present; if we replace first, the token
 		// is gone and the wrapper can't be matched.
