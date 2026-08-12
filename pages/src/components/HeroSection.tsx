@@ -6,11 +6,9 @@ import ReactDOM from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
-import ColorBends from './ColorBends';
+import ErrorBoundary from './ErrorBoundary';
 import npmIcon from '../assets/icons/npm.svg';
-import appleIcon from '../assets/icons/apple.svg';
-import linuxIcon from '../assets/icons/linux.svg';
-import windowsIcon from '../assets/icons/windows.svg';
+import brewIcon from '../assets/icons/brew.svg';
 import copyIcon from '../assets/icons/icon-copy.svg';
 
 const ColorBends = React.lazy(() => import(/* webpackChunkName: "color-bends" */ './ColorBends'));
@@ -126,8 +124,7 @@ const terminalLines = [
 
 const INSTALL_CHANNELS = [
   { key: 'npm', labelKey: 'hero.installNpm', cmd: 'npm i -g @alibaba-group/open-code-review', icons: [npmIcon] },
-  { key: 'unix', labelKey: 'hero.installUnix', cmd: 'curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh', icons: [appleIcon, linuxIcon] },
-  { key: 'windows', labelKey: 'hero.installWindows', cmd: 'irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex', icons: [windowsIcon] },
+  { key: 'brew', labelKey: 'hero.installBrew', cmd: 'brew install open-code-review', icons: [brewIcon] },
 ];
 
 const HeroSection: React.FC = () => {
@@ -137,6 +134,7 @@ const HeroSection: React.FC = () => {
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [showShaderBackground, setShowShaderBackground] = useState(false);
+  const [activeChannel, setActiveChannel] = useState(0);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -208,7 +206,8 @@ const HeroSection: React.FC = () => {
       style={{
         width: '100vw',
         marginLeft: 'calc(-50vw + 50%)',
-        height: isMobile ? 1000 : isTablet ? 900 : 860,
+        minHeight: isMobile ? 'auto' : isTablet ? 700 : 680,
+        paddingBottom: isMobile ? 60 : 80,
         position: 'relative',
         overflow: 'hidden',
         display: 'flex',
@@ -255,7 +254,7 @@ const HeroSection: React.FC = () => {
           left: 0,
           bottom: 0,
           width: '100%',
-          height: 276,
+          height: 200,
           background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, #000000 100%)',
           zIndex: 1,
         }}
@@ -268,13 +267,13 @@ const HeroSection: React.FC = () => {
           zIndex: 2,
           display: 'flex',
           flexDirection: twoCol ? 'row' : 'column',
-          alignItems: 'center',
+          alignItems: twoCol ? 'center' : 'center',
           justifyContent: 'center',
-          paddingTop: isMobile ? 80 : 170,
+          paddingTop: isMobile ? 72 : isTablet ? 120 : 140,
           paddingLeft: isMobile ? 20 : 40,
           paddingRight: isMobile ? 20 : 40,
-          gap: twoCol ? 56 : isMobile ? 24 : 32,
-          maxWidth: twoCol ? 1200 : isMobile ? '100%' : 742,
+          gap: twoCol ? 48 : isMobile ? 28 : 36,
+          maxWidth: twoCol ? 1140 : isMobile ? '100%' : 742,
           width: '100%',
         }}
       >
@@ -325,124 +324,114 @@ const HeroSection: React.FC = () => {
             </p>
           </div>
 
-          {/* Install channels */}
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-              width: '100%',
-              maxWidth: 460,
-            }}
-          >
-            {INSTALL_CHANNELS.map((ch) => (
-              <div key={ch.key} style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {ch.key === 'unix' ? (() => {
-                    const parts = t(ch.labelKey).split('/');
-                    const macLabel = (parts[0] ?? '').trim();
-                    const linuxLabel = (parts[1] ?? '').trim();
-                    return (
-                      <>
-                        <img src={ch.icons[0]} alt="" style={{ width: 14, height: 14, flexShrink: 0 }} />
-                        <span style={{ fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>
-                          {macLabel}{linuxLabel ? ' /' : ''}
-                        </span>
-                        {linuxLabel && (
-                          <>
-                            <img src={ch.icons[1]} alt="" style={{ width: 14, height: 14, flexShrink: 0 }} />
-                            <span style={{ fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>
-                              {linuxLabel}
-                            </span>
-                          </>
-                        )}
-                      </>
-                    );
-                  })() : (
-                    <>
-                      {ch.icons.map((icon, idx) => (
-                        <img key={idx} src={icon} alt="" style={{ width: 14, height: 14, flexShrink: 0 }} />
-                      ))}
-                      <span style={{ fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>
-                        {t(ch.labelKey)}
-                      </span>
-                    </>
-                  )}
-                </div>
-                <div
+          {/* Install channels — tab switcher */}
+          <div style={{ width: '100%', maxWidth: 460 }}>
+            <div style={{ display: 'flex', gap: 0, marginBottom: 8 }}>
+              {INSTALL_CHANNELS.map((ch, idx) => (
+                <button
+                  key={ch.key}
+                  onClick={() => setActiveChannel(idx)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 8,
-                    height: 32,
-                    padding: '0 12px',
-                    background: 'rgba(0,0,0,0.8)',
-                    border: '1px solid rgba(255,255,255,0.16)',
-                    borderRadius: 6,
-                    width: '100%',
+                    gap: 6,
+                    padding: '6px 14px',
+                    background: activeChannel === idx ? 'rgba(255,255,255,0.1)' : 'transparent',
+                    border: 'none',
+                    borderBottom: activeChannel === idx ? '2px solid rgba(255,255,255,0.8)' : '2px solid transparent',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
                   }}
                 >
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontFamily: 'Menlo, monospace',
-                      color: 'rgba(255,255,255,0.85)',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {ch.cmd}
+                  {ch.icons.map((icon, i) => (
+                    <img key={i} src={icon} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: activeChannel === idx ? 1 : 0.5 }} />
+                  ))}
+                  <span style={{ fontSize: 13, fontWeight: 500, color: activeChannel === idx ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.45)' }}>
+                    {t(ch.labelKey)}
                   </span>
-                  <img
-                    src={copyIcon}
-                    alt="Copy"
-                    style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
-                    onClick={() => handleCopy(ch.cmd)}
-                  />
-                </div>
-              </div>
-            ))}
+                </button>
+              ))}
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                height: 36,
+                padding: '0 14px',
+                background: 'rgba(0,0,0,0.75)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 8,
+                width: '100%',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 13,
+                  fontFamily: 'Menlo, monospace',
+                  color: 'rgba(255,255,255,0.85)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {INSTALL_CHANNELS[activeChannel].cmd}
+              </span>
+              <img
+                src={copyIcon}
+                alt="Copy"
+                style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0, opacity: 0.7 }}
+                onClick={() => handleCopy(INSTALL_CHANNELS[activeChannel].cmd)}
+              />
+            </div>
           </div>
 
           {/* Buttons */}
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
             <a
               href="#quickstart"
               style={{
-                height: 32,
+                height: 40,
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
                 gap: 6,
-                padding: '4px 12px',
+                padding: '0 20px',
                 background: '#ffffff',
-                border: '1px solid #EBEBEB',
-                borderRadius: 6,
-                color: 'rgba(0,0,0,0.77)',
-                fontSize: 14,
-                fontWeight: 500,
+                border: 'none',
+                borderRadius: 8,
+                color: '#111',
+                fontSize: 15,
+                fontWeight: 600,
                 textDecoration: 'none',
+                boxShadow: '0 2px 12px rgba(255,255,255,0.15)',
+                transition: 'transform 0.15s, box-shadow 0.15s',
               }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(255,255,255,0.25)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 12px rgba(255,255,255,0.15)'; }}
             >
               {t('hero.quickStart')}
             </a>
             <Link
               to="/docs"
               style={{
-                height: 32,
+                height: 40,
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                padding: '4px 12px',
-                background: 'rgba(0,0,0,0.9)',
-                borderRadius: 6,
-                color: '#fff',
-                fontSize: 14,
-                border: '1px solid rgba(255,255,255,0.16)',
+                padding: '0 20px',
+                background: 'rgba(255,255,255,0.06)',
+                borderRadius: 8,
+                color: 'rgba(255,255,255,0.9)',
+                fontSize: 15,
+                fontWeight: 500,
+                border: '1px solid rgba(255,255,255,0.18)',
                 textDecoration: 'none',
+                transition: 'background 0.15s, border-color 0.15s',
               }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)'; }}
             >
               {t('hero.learnMore')}
             </Link>

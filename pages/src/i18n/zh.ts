@@ -20,9 +20,8 @@ export const zh: TranslationKeys = {
   'hero.terminal': '终端',
   'hero.copied': '已复制',
   'hero.copyFailed': '复制失败',
-  'hero.installNpm': 'Npm 下载',
-  'hero.installUnix': 'macOS / Linux',
-  'hero.installWindows': 'Windows PowerShell',
+  'hero.installNpm': 'npm',
+  'hero.installBrew': 'Homebrew',
 
   // Error boundary
   'error.pageLoadFailed': '页面加载失败。',
