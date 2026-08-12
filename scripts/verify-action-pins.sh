@@ -16,7 +16,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-files=("action.yml" .github/workflows/*.yml)
+# nullglob so an absent *.yaml matchless glob vanishes instead of
+# surviving as a literal (which the missing-file guard would then fail on).
+# GitHub executes both .yml and .yaml workflow files.
+shopt -s nullglob
+files=("action.yml" .github/workflows/*.yml .github/workflows/*.yaml)
+shopt -u nullglob
 # The whole line must be a pinned reference: only list/indent syntax before
 # `uses:`, a 40-hex SHA, and a strict `# vX.Y.Z` comment with nothing after
 # it. Without the anchors a floating tag would be accepted whenever a
@@ -24,7 +29,10 @@ files=("action.yml" .github/workflows/*.yml)
 # trailing comment), and a `# v7` comment would satisfy the format the
 # check claims to enforce. Anything unusual (quoted values, extra trailing
 # content) fails closed rather than being guessed at.
-directive='^[[:space:]]*(-[[:space:]]+)?uses:'
+# The directive filter also matches flow-mapping openers ("- {uses: …}"),
+# which the pinned pattern below never accepts — so flow-style entries fail
+# closed as unusual syntax instead of being silently skipped.
+directive='^[[:space:]]*(-[[:space:]]+)?(\{[[:space:]]*)?uses:'
 pinned='^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}[[:space:]]+#[[:space:]]*v[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$'
 local_ref='^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*\./'
 
