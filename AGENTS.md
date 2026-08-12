@@ -13,6 +13,7 @@ open-code-review (`ocr`) is an AI-powered code review CLI tool written in Go (mo
   ocr review --audience agent --background "briefly summarize the background requirements"
   ```
 - Commit messages must be written in English.
+- Verify line endings. Line endings must be LF, not CRLF. Run `git add --renormalize .` to correct line endings and commit them. New binary files must have their extensions added to .gitattributes. 
 
 ## License Headers
 
