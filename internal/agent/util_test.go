@@ -28,23 +28,13 @@ func TestStripEmptyPlanBlock(t *testing.T) {
 			want:  "header\ntail",
 		},
 		{
-			name:  "chinese template wrapper is removed",
-			input: "header\n### 审查计划\n{{plan_guidance}}\n\ntail",
-			want:  "header\ntail",
-		},
-		{
-			name:  "chinese optional wrapper is removed",
-			input: "header\n### 审查计划（可选）\n{{plan_guidance}}\n\ntail",
-			want:  "header\ntail",
-		},
-		{
 			name:  "no wrapper present is a no-op",
 			input: "no plan block here\njust text",
 			want:  "no plan block here\njust text",
 		},
 		{
 			name:  "multiple wrappers all removed",
-			input: "### Review Plan (Optional)\n{{plan_guidance}}\n\nmiddle\n### 审查计划\n{{plan_guidance}}\n\nend",
+			input: "### Review Plan (Optional)\n{{plan_guidance}}\n\nmiddle\n### Review Plan\n{{plan_guidance}}\n\nend",
 			want:  "middle\nend",
 		},
 	}

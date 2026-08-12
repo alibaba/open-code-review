@@ -284,11 +284,20 @@ type quietHandle struct {
 	fn func()
 }
 
-// newQuietHandle silences stdout when outputFormat=="json" or
-// audience=="agent"; otherwise the returned handle is a no-op restorer.
+// isMachineReadable reports whether the output format writes a structured
+// document to stdout that must not be interleaved with progress text.
+// Both json and sarif suppress [ocr] progress lines and trace summaries.
+func isMachineReadable(outputFormat string) bool {
+	return outputFormat == "json" || outputFormat == "sarif"
+}
+
+// newQuietHandle silences stdout for machine-readable formats (json, sarif)
+// or when audience=="agent"; otherwise the returned handle is a no-op
+// restorer. This prevents [ocr] progress lines from corrupting the structured
+// output document on stdout.
 func newQuietHandle(outputFormat, audience string) *quietHandle {
 	h := &quietHandle{}
-	if outputFormat == "json" || audience == "agent" {
+	if isMachineReadable(outputFormat) || audience == "agent" {
 		h.fn = stdout.Quiet()
 	}
 	return h
@@ -376,17 +385,24 @@ func emitRunResult(
 	traceID := telemetry.TraceIDFromContext(ctx)
 	manifest := ag.RunManifest()
 
-	if outputFormat == "json" && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
-		return outputJSONNoFiles(traceID, llmIdentity)
+	// JSON and SARIF are machine-readable formats written to stdout; they
+	// share the same suppression of trace summaries and early stdout restore.
+	machineReadable := isMachineReadable(outputFormat)
+
+	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
+		if outputFormat == "json" {
+			return outputJSONNoFiles(traceID, llmIdentity)
+		}
+		return outputSARIF(nil, Version, ag.Warnings(), manifest)
 	}
 
 	// Agent-text audiences need stdout back before PrintTraceSummary so the
 	// summary line lands on their terminal.
-	if audience == "agent" && outputFormat != "json" {
+	if audience == "agent" && !machineReadable {
 		q.Restore()
 	}
 
-	if outputFormat != "json" {
+	if !machineReadable {
 		telemetry.PrintTraceSummary(ag.FilesReviewed(), int64(len(comments)),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration)
@@ -401,6 +417,9 @@ func emitRunResult(
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
 			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, retryReport)
+	}
+	if outputFormat == "sarif" {
+		return outputSARIF(comments, Version, ag.Warnings(), manifest)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest)
 	// Between the comments/warnings block and the project summary: the report is

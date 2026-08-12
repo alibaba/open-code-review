@@ -11,13 +11,15 @@ export const en = {
   'navbar.getStarted': 'Get Started',
 
   // Hero
-  'hero.title': 'AI Code Review\nValidated on Millions of\nReal-World Tasks',
+  'hero.title': 'AI Code Review\nValidated on Millions of Real-World Tasks',
   'hero.description': 'Open Code Review brings Alibaba\'s battle-tested code review Agent into your workflow. Connect any LLM, keep data fully private, and get review comments developers actually adopt.',
   'hero.quickStart': 'Quick Start',
   'hero.learnMore': 'Learn More',
   'hero.terminal': 'Terminal',
   'hero.copied': 'Copied!',
   'hero.copyFailed': 'Copy failed',
+  'hero.installNpm': 'npm',
+  'hero.installBrew': 'Homebrew',
 
   // Error boundary
   'error.pageLoadFailed': 'Failed to load this page.',

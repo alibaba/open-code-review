@@ -141,6 +141,10 @@ type Args struct {
 	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
 	MaxTokensBudget int64
 
+	// SkipFilter disables the REVIEW_FILTER_TASK even when the template
+	// defines one. Set via the --no-filter CLI flag.
+	SkipFilter bool
+
 	// RuntimeConfig carries the non-secret, allowlisted runtime settings that
 	// identify how this run was configured, for the manifest's
 	// runtime_config_sha256. It is populated by the cmd layer from the resolved
@@ -1187,7 +1191,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 		// Always substitute the {{plan_guidance}} token so the literal placeholder
 		// never leaks into the rendered prompt. When the plan phase produced no
 		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
-		// (any language variant) so the LLM does not see a dangling section header.
+		// so the LLM does not see a dangling section header.
 		// Strip MUST run before ReplaceAll: the regex requires the literal
 		// {{plan_guidance}} token to be present; if we replace first, the token
 		// is gone and the wrapper can't be matched.
@@ -1269,6 +1273,12 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 
 	ft := a.args.Template.ReviewFilterTask
 	if ft == nil || len(ft.Messages) == 0 {
+		return
+	}
+
+	if a.args.SkipFilter {
+		telemetry.SetAttr(span, "skipped", true)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for %s (--no-filter)\n", newPath)
 		return
 	}
 

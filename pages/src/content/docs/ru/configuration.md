@@ -62,6 +62,9 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 | `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
 | `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
+| `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
+| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
+| `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
 ### Пользовательские провайдеры
 
@@ -132,6 +135,29 @@ Ollama игнорирует API-ключ, однако для пользоват
   }
 }
 ```
+
+### Дополнительные HTTP-коды для повторных попыток
+
+Некоторые LLM-провайдеры используют нестандартные HTTP-коды 4xx для временных
+ошибок — например, возвращают `403` или `400` при ограничении частоты запросов.
+Параметр `retry_codes` позволяет OCR повторять такие запросы с помощью
+существующего механизма повторных попыток SDK.
+
+`retry_codes` — массив целых чисел. Параметр можно задать как
+`llm.retry_codes` или `custom_providers.<name>.retry_codes`. При использовании
+`ocr config set` передавайте коды через запятую:
+
+```bash
+ocr config set llm.retry_codes 403,400
+ocr config set custom_providers.my-gateway.retry_codes 403,400
+```
+
+Допускаются только HTTP-коды 4xx. SDK уже автоматически повторяет запросы при
+ответах с кодами `408`, `409` и `429`, поэтому при чтении файла конфигурации
+OCR игнорирует эти избыточные коды. Если задать их через `ocr config set`, OCR также выводит
+предупреждение и не сохраняет их в конфигурации. При ответах 5xx SDK уже
+выполняет повторные попытки по умолчанию, поэтому такие коды нельзя добавлять
+в `retry_codes`.
 
 ### Лимит запроса на файл
 

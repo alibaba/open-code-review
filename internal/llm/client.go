@@ -917,6 +917,16 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
 		params.Tools = tools
 	}
+	// Dynamic breakpoint on the latest message so multi-turn history is
+	// cached incrementally: read the full previous prefix, write only the delta.
+	if len(messages) > 0 {
+		last := &messages[len(messages)-1]
+		if len(last.Content) > 0 {
+			if cc := last.Content[len(last.Content)-1].GetCacheControl(); cc != nil {
+				*cc = anthropic.NewCacheControlEphemeralParam()
+			}
+		}
+	}
 	if req.Temperature != nil {
 		params.Temperature = anthropic.Float(*req.Temperature)
 	}

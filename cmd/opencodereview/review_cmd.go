@@ -45,6 +45,7 @@ type reviewOptions struct {
 	maxGitProcs     int
 	maxTokens       int
 	maxTokensBudget int
+	noFilter        bool
 	preview         bool
 }
 
@@ -207,6 +208,7 @@ func executeReview(opts reviewOptions) error {
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
+		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
 
@@ -224,7 +226,7 @@ func executeReview(opts reviewOptions) error {
 	var traceID string
 	if telemetry.IsEnabled() {
 		traceID = telemetry.TraceIDFromContext(ctx)
-		if opts.outputFormat != "json" {
+		if !isMachineReadable(opts.outputFormat) {
 			fmt.Fprintf(os.Stderr, "[ocr] TraceID: %s\n", traceID)
 		}
 	}
@@ -243,11 +245,9 @@ func executeReview(opts reviewOptions) error {
 	if freezeErr != nil {
 		// A construction error means the collector's invariants were violated, so
 		// the report is self-contradictory and must not be published at all
-		// (Freeze already returned nil). It joins the *publish* error, never
-		// runErr: the review itself may have fully succeeded, and folding it into
-		// runErr would make reviewResultError report a bogus "review failed",
-		// write a failure usage record and print a misleading --resume hint.
-		freezeErr = fmt.Errorf("freeze retry report: %w", freezeErr)
+		// (Freeze already returned nil). Retry reporting is observability only, so
+		// its invariant failure must not change the review's exit status.
+		fmt.Fprintf(os.Stderr, "[ocr] warning: freeze retry report: %v (retry report suppressed)\n", freezeErr)
 	}
 
 	resultErr := reviewResultError(runErr, manifest)
@@ -281,9 +281,9 @@ func executeReview(opts reviewOptions) error {
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
-		return errors.Join(resultErr, emitErr, freezeErr)
+		return errors.Join(resultErr, emitErr)
 	}
-	return errors.Join(emitErr, freezeErr)
+	return emitErr
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {

@@ -555,10 +555,14 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 	outputRetryReportText(os.Stderr, retryReport)
 }
 
-// outputPreview renders a preview in the requested output format. Any format
-// other than "json" falls back to the human view, matching how the rest of the
-// CLI treats --format.
+// outputPreview renders a preview in the requested output format. sarif is
+// rejected with an error because a preview contains file/rule metadata, not
+// review findings — there is no SARIF result to emit, and a differently-shaped
+// document would confuse consumers expecting a SARIF report.
 func outputPreview(p *agent.DiffPreview, outputFormat string) error {
+	if outputFormat == "sarif" {
+		return fmt.Errorf("--format sarif is not supported with --preview: SARIF output requires completed review findings")
+	}
 	if outputFormat == "json" {
 		return outputPreviewJSON(p)
 	}

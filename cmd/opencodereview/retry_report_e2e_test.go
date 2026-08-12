@@ -220,11 +220,11 @@ func TestReviewE2E_AllFilesFailTextPublishesReportOnce(t *testing.T) {
 	}
 }
 
-// 决策 4: a report-construction error is a publish-side failure. It must not be
-// reported as a failed review, must not print a --resume hint, must not emit a
-// failure-usage record, and must not publish a partial report — while the
-// review's own result is still published.
-func TestReviewE2E_FreezeErrorIsAPublishError(t *testing.T) {
+// 决策 4: a report-construction error is an observability warning. It must not
+// change a successful review's exit status, print a --resume hint, emit a
+// failure-usage record, or publish a partial report — while the review's own
+// result is still published.
+func TestReviewE2E_FreezeErrorIsAWarning(t *testing.T) {
 	repoDir := retryTestRepo(t)
 	startFakeLLM(t, newFakeLLM())
 
@@ -233,14 +233,12 @@ func TestReviewE2E_FreezeErrorIsAPublishError(t *testing.T) {
 	t.Cleanup(func() { newRetryCollector = orig })
 
 	out, errOut, err := runReviewCapturingBoth(t, repoDir, "json")
-	if err == nil {
-		t.Fatalf("a report construction error must surface\nstdout: %s", out)
+	if err != nil {
+		t.Fatalf("retry-report observability must not fail a successful review: %v\nstderr: %s", err, errOut)
 	}
-	if !strings.Contains(err.Error(), "freeze retry report") {
-		t.Errorf("error = %v, want it to name the freeze step", err)
-	}
-	if strings.Contains(err.Error(), "review failed") {
-		t.Errorf("a publish-side error must not be reported as a failed review: %v", err)
+	if !strings.Contains(errOut, "[ocr] warning: freeze retry report:") ||
+		!strings.Contains(errOut, "(retry report suppressed)") {
+		t.Errorf("freeze warning missing or incomplete:\n%s", errOut)
 	}
 	if strings.Contains(errOut, "--resume") {
 		t.Errorf("no resume hint belongs on a successful review:\n%s", errOut)

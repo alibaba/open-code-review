@@ -40,8 +40,9 @@ func TestStartServer_AddrInUse(t *testing.T) {
 }
 
 // TestParseTemplate_SessionWithComments renders session.html with review
-// comments spanning every severity and category so the funcMap closures
-// (severityCounts, severityClass, categoryClass, groupCommentsByFile) execute.
+// comments spanning several severities and categories so the template helpers
+// (severityCounts, categoryCounts, severityClass, categoryClass,
+// groupCommentsByFile, and the normalization helpers) execute.
 func TestParseTemplate_SessionWithComments(t *testing.T) {
 	tmpl, err := parseTemplate("session.html")
 	if err != nil {
@@ -70,5 +71,34 @@ func TestParseTemplate_SessionWithComments(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "Review Comments") {
 		t.Error("rendered page missing Review Comments section")
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`<span class="comment-filter-label">Severity:</span>`,
+		`<span class="comment-filter-label">Category:</span>`,
+		`data-filter-kind="severity" data-filter-value="all"`,
+		`data-filter-kind="category" data-filter-value="all"`,
+		`data-filter-kind="severity" data-filter-value="critical"`,
+		`data-filter-kind="category" data-filter-value="bug"`,
+		`data-filter-kind="category" data-filter-value="other"`,
+		`data-comment-card data-category="bug" data-severity="critical"`,
+		`data-comment-card data-category="other" data-severity="low"`,
+		`data-comment-filter-empty`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered page missing %q", want)
+		}
+	}
+}
+
+func TestCategoryCounts_NormalizesUnknownCategories(t *testing.T) {
+	counts := categoryCounts([]*ReviewComment{
+		{Category: "bug"},
+		{Category: "MAINTAINABILITY"},
+		{Category: ""},
+		{Category: "not-a-category"},
+	})
+	if counts.Bug != 1 || counts.Maintainability != 1 || counts.Other != 2 {
+		t.Fatalf("unexpected category counts: %+v", counts)
 	}
 }

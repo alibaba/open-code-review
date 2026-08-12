@@ -56,6 +56,9 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
 | `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
+| `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
+| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
+| `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
 ### 自定义 provider
 
@@ -119,6 +122,25 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
   }
 }
 ```
+
+### 额外的重试状态码
+
+有些 LLM 提供商会用非标准的 4xx 状态码表示临时错误，例如在限流时返回 `403` 或
+`400`。可通过 `retry_codes` 让 OCR 对这类请求使用 SDK 现有的重试机制。
+
+`retry_codes` 是整数数组，可配置为 `llm.retry_codes` 或
+`custom_providers.<name>.retry_codes`。通过 `ocr config set` 设置时，以逗号分隔
+传入状态码：
+
+```bash
+ocr config set llm.retry_codes 403,400
+ocr config set custom_providers.my-gateway.retry_codes 403,400
+```
+
+只接受 4xx HTTP 状态码。`408`、`409` 和 `429` 已由 SDK 重试；直接从配置文件
+读取时，这些冗余状态码会被忽略。通过 `ocr config set` 设置时，OCR 还会输出
+警告，并且不会把这些状态码保存到配置中。所有 5xx 响应也已由 SDK 默认重试，
+因此不能加入 `retry_codes`。
 
 ### 每文件提示词上限
 

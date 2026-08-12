@@ -95,6 +95,83 @@ type SeverityCount struct {
 	Low      int
 }
 
+// CategoryCount holds counts for each review comment category.
+type CategoryCount struct {
+	Bug             int
+	Security        int
+	Performance     int
+	Maintainability int
+	Test            int
+	Style           int
+	Documentation   int
+	Other           int
+}
+
+var knownCommentCategories = map[string]struct{}{
+	"bug":             {},
+	"security":        {},
+	"performance":     {},
+	"maintainability": {},
+	"test":            {},
+	"style":           {},
+	"documentation":   {},
+	"other":           {},
+}
+
+func normalizedCommentCategory(category string) string {
+	category = strings.ToLower(strings.TrimSpace(category))
+	if _, ok := knownCommentCategories[category]; ok {
+		return category
+	}
+	return "other"
+}
+
+func normalizedCommentSeverity(severity string) string {
+	return strings.ToLower(strings.TrimSpace(severity))
+}
+
+func categoryCounts(comments []*ReviewComment) CategoryCount {
+	var counts CategoryCount
+	for _, comment := range comments {
+		switch normalizedCommentCategory(comment.Category) {
+		case "bug":
+			counts.Bug++
+		case "security":
+			counts.Security++
+		case "performance":
+			counts.Performance++
+		case "maintainability":
+			counts.Maintainability++
+		case "test":
+			counts.Test++
+		case "style":
+			counts.Style++
+		case "documentation":
+			counts.Documentation++
+		default:
+			counts.Other++
+		}
+	}
+	return counts
+}
+
+func severityCounts(comments []*ReviewComment) SeverityCount {
+	var counts SeverityCount
+	for _, comment := range comments {
+		switch strings.ToLower(strings.TrimSpace(comment.Severity)) {
+		case "critical":
+			counts.Critical++
+		case "high":
+			counts.High++
+		case "medium":
+			counts.Medium++
+		case "low":
+			counts.Low++
+		}
+	}
+	return counts
+}
+
 func parseTemplate(name string) (*template.Template, error) {
 	funcMap := template.FuncMap{
 		"formatDuration": formatDuration,
@@ -164,24 +241,12 @@ func parseTemplate(name string) (*template.Template, error) {
 			}
 			return groups
 		},
-		"severityCounts": func(comments []*ReviewComment) SeverityCount {
-			var sc SeverityCount
-			for _, c := range comments {
-				switch c.Severity {
-				case "critical":
-					sc.Critical++
-				case "high":
-					sc.High++
-				case "medium":
-					sc.Medium++
-				case "low":
-					sc.Low++
-				}
-			}
-			return sc
-		},
+		"severityCounts":  severityCounts,
+		"categoryCounts":  categoryCounts,
+		"commentCategory": normalizedCommentCategory,
+		"commentSeverity": normalizedCommentSeverity,
 		"severityClass": func(s string) string {
-			switch s {
+			switch normalizedCommentSeverity(s) {
 			case "critical":
 				return "severity-critical"
 			case "high":
@@ -195,13 +260,23 @@ func parseTemplate(name string) (*template.Template, error) {
 			}
 		},
 		"categoryClass": func(s string) string {
-			switch s {
+			switch normalizedCommentCategory(s) {
 			case "bug":
 				return "cat-bug"
 			case "security":
 				return "cat-security"
 			case "performance":
 				return "cat-performance"
+			case "maintainability":
+				return "cat-maintainability"
+			case "test":
+				return "cat-test"
+			case "style":
+				return "cat-style"
+			case "documentation":
+				return "cat-documentation"
+			case "other":
+				return "cat-other"
 			default:
 				return "cat-default"
 			}

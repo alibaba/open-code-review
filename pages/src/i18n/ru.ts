@@ -13,13 +13,15 @@ export const ru: TranslationKeys = {
   'navbar.getStarted': 'Начать работу',
 
   // Hero
-  'hero.title': 'Код-ревью с ИИ,\nпроверенное на миллионах\nреальных задач',
+  'hero.title': 'Код-ревью с ИИ,\nпроверенное на миллионах реальных задач',
   'hero.description': 'Open Code Review разработали в Alibaba и проверили на реальных проектах компании. Он встраивается в привычный процесс разработки и работает с выбранной вами LLM. Вы сами решаете, куда передаются данные. Замечания агента разработчики действительно учитывают.',
   'hero.quickStart': 'Быстрый старт',
   'hero.learnMore': 'Подробнее',
   'hero.terminal': 'Терминал',
   'hero.copied': 'Скопировано!',
   'hero.copyFailed': 'Не удалось скопировать',
+  'hero.installNpm': 'npm',
+  'hero.installBrew': 'Homebrew',
 
   // Error boundary
   'error.pageLoadFailed': 'Не удалось загрузить страницу.',

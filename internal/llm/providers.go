@@ -318,6 +318,18 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "novita",
+		DisplayName: "Novita API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.novita.ai/openai",
+		EnvVar:      "NOVITA_API_KEY",
+		Models: []string{
+			"moonshotai/kimi-k3",
+			"zai-org/glm-5.2",
+			"deepseek/deepseek-v4-flash-0731",
+		},
+	},
+	{
 		Name:        "litellm",
 		DisplayName: "LiteLLM AI Gateway",
 		Protocol:    ProtocolOpenAIChatCompletions,
@@ -336,6 +348,34 @@ var registry = []Provider{
 			"groq/llama-4-scout-17b-16e-instruct",
 			"mistral/mistral-large-latest",
 			"deepseek/deepseek-chat",
+		},
+	},
+	{
+		Name:        "siliconflow",
+		DisplayName: "SiliconFlow API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.siliconflow.com/v1",
+		EnvVar:      "SILICONFLOW_GLOBAL_API_KEY",
+		Models: []string{
+			"deepseek-ai/DeepSeek-V4-Pro",
+			"deepseek-ai/DeepSeek-V4-Flash",
+			"Qwen/Qwen3.6-27B",
+			"moonshotai/Kimi-K2.7-Code",
+			"zai-org/GLM-5.2",
+		},
+	},
+	{
+		Name:        "siliconflow-cn",
+		DisplayName: "SiliconFlow CN API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.siliconflow.cn/v1",
+		EnvVar:      "SILICONFLOW_API_KEY",
+		Models: []string{
+			"deepseek-ai/DeepSeek-V4-Pro",
+			"deepseek-ai/DeepSeek-V4-Flash",
+			"Qwen/Qwen3.6-27B",
+			"moonshotai/Kimi-K2.7-Code",
+			"zai-org/GLM-5.2",
 		},
 	},
 	{

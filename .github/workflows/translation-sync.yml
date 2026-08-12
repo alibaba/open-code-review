@@ -13,6 +13,9 @@ on:
       - "pages/src/content/docs/**"
       - "scripts/github-actions/check-translation-sync.*"
 
+permissions:
+  contents: read
+
 jobs:
   translation-sync:
     runs-on: self-hosted

@@ -20,6 +20,8 @@ export const ja: TranslationKeys = {
   'hero.terminal': 'ターミナル',
   'hero.copied': 'コピーしました',
   'hero.copyFailed': 'コピー失敗',
+  'hero.installNpm': 'npm',
+  'hero.installBrew': 'Homebrew',
 
   // Error boundary
   'error.pageLoadFailed': 'ページの読み込みに失敗しました。',
