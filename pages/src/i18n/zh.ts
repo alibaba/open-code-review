@@ -170,6 +170,8 @@ export const zh: TranslationKeys = {
   'docs.reviewAgentDesc': '仅输出最终摘要，不显示执行过程，适用于自动化流水线。',
   'docs.reviewPreviewLabel': 'Dry-Run 预览',
   'docs.reviewPreviewDesc': '列出将被审查的文件及统计信息（文件总数、变更行数），但不调用 LLM，不产生费用 —— 适合在正式审查前确认范围。',
+  'docs.reviewToggles': '审查阶段开关：--no-filter',
+  'docs.reviewTogglesFilterDesc': '保留所有评审评论，并跳过每个文件的 REVIEW_FILTER_TASK LLM 后处理调用。',
   'docs.reviewFlags': '参数参考',
   'docs.reviewFlagCol1': '参数',
   'docs.reviewFlagCol2': '描述',

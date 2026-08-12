@@ -168,6 +168,8 @@ export const ru: TranslationKeys = {
   'docs.reviewAgentDesc': 'Показывает только итоговую сводку без хода выполнения. Такой режим удобен для автоматизации.',
   'docs.reviewPreviewLabel': 'Предпросмотр без выполнения',
   'docs.reviewPreviewDesc': 'Показывает файлы, которые попадут в ревью, их количество и число изменённых строк. LLM не вызывается, токены не расходуются.',
+  'docs.reviewToggles': 'Переключатель этапа ревью: --no-filter',
+  'docs.reviewTogglesFilterDesc': 'Сохраняет все комментарии ревью и пропускает вызов LLM постобработки REVIEW_FILTER_TASK для каждого файла.',
   'docs.reviewFlags': 'Справочник флагов',
   'docs.reviewFlagCol1': 'Флаг',
   'docs.reviewFlagCol2': 'Описание',

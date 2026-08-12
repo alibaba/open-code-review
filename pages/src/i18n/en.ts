@@ -166,6 +166,8 @@ export const en = {
   'docs.reviewAgentDesc': 'Output only the final summary without execution process, suitable for automation pipelines.',
   'docs.reviewPreviewLabel': 'Dry-Run Preview',
   'docs.reviewPreviewDesc': 'Lists the files that would be reviewed along with stats (file count, changed lines) — no LLM calls, no cost. Useful for checking scope before a full review.',
+  'docs.reviewToggles': 'Review Stage Toggle: --no-filter',
+  'docs.reviewTogglesFilterDesc': 'Keeps all review comments and skips the per-file REVIEW_FILTER_TASK LLM post-processing call.',
   'docs.reviewFlags': 'Flag Reference',
   'docs.reviewFlagCol1': 'Flag',
   'docs.reviewFlagCol2': 'Description',

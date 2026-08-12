@@ -170,6 +170,8 @@ export const ja: TranslationKeys = {
   'docs.reviewAgentDesc': '実行プロセスを表示せず最終サマリーのみ出力。自動化パイプラインに適しています。',
   'docs.reviewPreviewLabel': 'Dry-Run プレビュー',
   'docs.reviewPreviewDesc': 'レビュー対象のファイル一覧と統計情報（ファイル数、変更行数）を表示します。LLM 呼び出しなし、コストなし —— 本番レビュー前にスコープを確認するのに役立ちます。',
+  'docs.reviewToggles': 'レビューステージの切り替え：--no-filter',
+  'docs.reviewTogglesFilterDesc': 'すべてのレビューコメントを保持し、ファイルごとの REVIEW_FILTER_TASK LLM 後処理呼び出しをスキップします。',
   'docs.reviewFlags': 'フラグリファレンス',
   'docs.reviewFlagCol1': 'フラグ',
   'docs.reviewFlagCol2': '説明',
