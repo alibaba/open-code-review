@@ -303,8 +303,68 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 	if stop == StopMaxRounds {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", newPath)
+		r.runGraceRound(ctx, messages, newPath, sessionID)
 	}
 	return false, stop, nil
+}
+
+// runGraceRound performs one final LLM call after the tool-request budget is
+// exhausted, giving the model a chance to submit any findings it identified
+// but did not yet report via code_comment.
+func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newPath string, sessionID string) {
+	graceDefs := graceRoundToolDefs(r.deps.MainToolDefs)
+	if len(graceDefs) == 0 {
+		return
+	}
+
+	messages = append(messages, llm.NewTextMessage("user",
+		"Your tool-call budget is exhausted. This is your FINAL round. You may ONLY:\n"+
+			"- Call code_comment to submit any findings you have identified but not yet reported.\n"+
+			"- Call task_done if you have nothing more to report.\n"+
+			"No other tools are available. Do not attempt further analysis."))
+
+	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+		Model:     r.deps.Model,
+		Messages:  messages,
+		Tools:     graceDefs,
+		MaxTokens: r.deps.Template.CompletionTokenLimit(),
+		SessionID: sessionID,
+	})
+	if err != nil {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", newPath, err)
+		return
+	}
+
+	if resp.Usage != nil {
+		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
+		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
+		atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
+		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
+	}
+
+	calls := resp.ToolCalls()
+	if len(calls) == 0 {
+		return
+	}
+
+	fs := r.deps.Session.GetOrCreateFileSession(newPath)
+	rec := fs.AppendTaskRecord(session.MainTask, nil)
+	thinking := resp.ReasoningContent()
+	for _, call := range calls {
+		r.executeToolCall(ctx, newPath, call, rec, thinking)
+	}
+}
+
+// graceRoundToolDefs returns the subset of tool definitions containing only
+// code_comment and task_done.
+func graceRoundToolDefs(defs []llm.ToolDef) []llm.ToolDef {
+	out := make([]llm.ToolDef, 0, 2)
+	for _, d := range defs {
+		if d.Function.Name == "code_comment" || d.Function.Name == "task_done" {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // executeToolCall dispatches a single tool call from the LLM response and
