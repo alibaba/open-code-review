@@ -45,6 +45,7 @@ type reviewOptions struct {
 	maxGitProcs     int
 	maxTokens       int
 	maxTokensBudget int
+	noFilter        bool
 	preview         bool
 }
 
@@ -207,6 +208,7 @@ func executeReview(opts reviewOptions) error {
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
+		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
 
@@ -224,7 +226,7 @@ func executeReview(opts reviewOptions) error {
 	var traceID string
 	if telemetry.IsEnabled() {
 		traceID = telemetry.TraceIDFromContext(ctx)
-		if opts.outputFormat != "json" {
+		if !isMachineReadable(opts.outputFormat) {
 			fmt.Fprintf(os.Stderr, "[ocr] TraceID: %s\n", traceID)
 		}
 	}
