@@ -1227,7 +1227,8 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 }
 
 // executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are
-// provably incorrect based solely on the diff. Errors are logged and silently ignored.
+// provably incorrect or high-confidence near-duplicates. Errors are logged and
+// silently ignored so filtering remains fail-open.
 func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath string) {
 	ctx, span := telemetry.StartSpan(ctx, "review_filter.execute")
 	defer span.End()
@@ -1244,7 +1245,11 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	}
 	telemetry.SetAttr(span, "comments.before", len(comments))
 
-	commentsJSON := buildFilterCommentsJSON(comments)
+	// Resolve locations on a temporary copy. The collector's comments must stay
+	// untouched because they are persisted after this filter returns and are
+	// resolved again by the final output stage.
+	resolvedComments := diff.ResolveLineNumbers(comments, []model.Diff{d})
+	commentsJSON := buildFilterCommentsJSON(resolvedComments)
 
 	messages := make([]llm.Message, 0, len(ft.Messages))
 	for _, m := range ft.Messages {
@@ -1294,19 +1299,33 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for %s\n", len(indices), newPath)
 }
 
-// buildFilterCommentsJSON serializes comments into a JSON array with generated IDs.
+// buildFilterCommentsJSON serializes comments into a JSON array with generated
+// IDs and the metadata needed to identify high-confidence duplicates. Line
+// numbers are always present; zero means that location resolution failed.
 func buildFilterCommentsJSON(comments []model.LlmComment) string {
 	type filterComment struct {
-		ID           string `json:"id"`
-		Content      string `json:"content"`
-		ExistingCode string `json:"existing_code,omitempty"`
+		ID             string `json:"id"`
+		Path           string `json:"path"`
+		Content        string `json:"content"`
+		SuggestionCode string `json:"suggestion_code,omitempty"`
+		ExistingCode   string `json:"existing_code,omitempty"`
+		StartLine      int    `json:"start_line"`
+		EndLine        int    `json:"end_line"`
+		Category       string `json:"category,omitempty"`
+		Severity       string `json:"severity,omitempty"`
 	}
 	items := make([]filterComment, len(comments))
 	for i, cm := range comments {
 		items[i] = filterComment{
-			ID:           fmt.Sprintf("c-%d", i),
-			Content:      cm.Content,
-			ExistingCode: cm.ExistingCode,
+			ID:             fmt.Sprintf("c-%d", i),
+			Path:           cm.Path,
+			Content:        cm.Content,
+			SuggestionCode: cm.SuggestionCode,
+			ExistingCode:   cm.ExistingCode,
+			StartLine:      cm.StartLine,
+			EndLine:        cm.EndLine,
+			Category:       cm.Category,
+			Severity:       cm.Severity,
 		}
 	}
 	data, _ := json.Marshal(items)

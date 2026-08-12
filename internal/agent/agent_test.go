@@ -20,9 +20,11 @@ import (
 type fakeAgentClient struct {
 	responses []*llm.ChatResponse
 	calls     int
+	requests  []llm.ChatRequest
 }
 
-func (f *fakeAgentClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func (f *fakeAgentClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.requests = append(f.requests, req)
 	if f.calls >= len(f.responses) {
 		content := ""
 		return &llm.ChatResponse{
@@ -101,7 +103,16 @@ func TestBuildFilterCommentsJSON(t *testing.T) {
 		{
 			name: "single comment",
 			comments: []model.LlmComment{
-				{Content: "fix this", ExistingCode: "old code"},
+				{
+					Path:           "src/a.go",
+					Content:        "fix this",
+					SuggestionCode: "fixed code",
+					ExistingCode:   "old code",
+					StartLine:      12,
+					EndLine:        13,
+					Category:       "bug",
+					Severity:       "high",
+				},
 			},
 			wantIDs: []string{"c-0"},
 		},
@@ -121,9 +132,15 @@ func TestBuildFilterCommentsJSON(t *testing.T) {
 			got := buildFilterCommentsJSON(tt.comments)
 
 			var items []struct {
-				ID           string `json:"id"`
-				Content      string `json:"content"`
-				ExistingCode string `json:"existing_code,omitempty"`
+				ID             string `json:"id"`
+				Path           string `json:"path"`
+				Content        string `json:"content"`
+				SuggestionCode string `json:"suggestion_code,omitempty"`
+				ExistingCode   string `json:"existing_code,omitempty"`
+				StartLine      int    `json:"start_line"`
+				EndLine        int    `json:"end_line"`
+				Category       string `json:"category,omitempty"`
+				Severity       string `json:"severity,omitempty"`
 			}
 			if err := json.Unmarshal([]byte(got), &items); err != nil {
 				t.Fatalf("invalid JSON: %v\nraw: %s", err, got)
@@ -140,8 +157,20 @@ func TestBuildFilterCommentsJSON(t *testing.T) {
 				if item.Content != tt.comments[i].Content {
 					t.Errorf("items[%d].Content = %q, want %q", i, item.Content, tt.comments[i].Content)
 				}
+				if item.Path != tt.comments[i].Path {
+					t.Errorf("items[%d].Path = %q, want %q", i, item.Path, tt.comments[i].Path)
+				}
+				if item.SuggestionCode != tt.comments[i].SuggestionCode {
+					t.Errorf("items[%d].SuggestionCode = %q, want %q", i, item.SuggestionCode, tt.comments[i].SuggestionCode)
+				}
 				if item.ExistingCode != tt.comments[i].ExistingCode {
 					t.Errorf("items[%d].ExistingCode = %q, want %q", i, item.ExistingCode, tt.comments[i].ExistingCode)
+				}
+				if item.StartLine != tt.comments[i].StartLine || item.EndLine != tt.comments[i].EndLine {
+					t.Errorf("items[%d] line range = %d-%d, want %d-%d", i, item.StartLine, item.EndLine, tt.comments[i].StartLine, tt.comments[i].EndLine)
+				}
+				if item.Category != tt.comments[i].Category || item.Severity != tt.comments[i].Severity {
+					t.Errorf("items[%d] classification = %s/%s, want %s/%s", i, item.Category, item.Severity, tt.comments[i].Category, tt.comments[i].Severity)
 				}
 			}
 		})
