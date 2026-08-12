@@ -5,5 +5,4 @@
 *.jpeg binary
 *.gif binary
 *.ico binary
-*.svg binary
 *.tiktoken binary
