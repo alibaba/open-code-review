@@ -178,7 +178,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
-	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "skip the per-file REVIEW_FILTER_TASK")
+	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
 	addPreviewFlag(cmd, &opts.preview)
 }
 
