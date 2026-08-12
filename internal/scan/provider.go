@@ -263,7 +263,6 @@ func (p *Provider) gitLs(ctx context.Context, args ...string) ([]string, error) 
 	raw := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
 	files := make([]string, 0, len(raw))
 	for _, f := range raw {
-		f = strings.TrimSpace(f)
 		if f != "" {
 			files = append(files, f)
 		}

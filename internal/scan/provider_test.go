@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -172,6 +173,32 @@ func TestProvider_Enumerate_FullRepo(t *testing.T) {
 				t.Errorf("binary item must not store content, got %d bytes", len(it.Content))
 			}
 		}
+	}
+}
+
+func TestProvider_Enumerate_PreservesWhitespacePaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows filenames cannot end with spaces")
+	}
+
+	repo := initTestRepo(t)
+	writeFile(t, repo, " leading.go", []byte("package leading\n"))
+	writeFile(t, repo, "trailing.go ", []byte("package trailing\n"))
+	gitCommit(t, repo, "add whitespace paths")
+
+	got, err := NewProvider(repo, nil, nil, 0).Enumerate(context.Background())
+	if err != nil {
+		t.Fatalf("Enumerate: %v", err)
+	}
+
+	paths := make([]string, 0, len(got))
+	for _, item := range got {
+		paths = append(paths, item.Path)
+	}
+	sort.Strings(paths)
+	want := []string{" leading.go", "trailing.go "}
+	if !reflect.DeepEqual(paths, want) {
+		t.Errorf("paths = %q, want %q", paths, want)
 	}
 }
 
