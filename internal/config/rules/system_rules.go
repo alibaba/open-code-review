@@ -224,7 +224,7 @@ func (f *FileFilter) IsUserExcluded(path string) bool {
 	for _, pattern := range f.Exclude {
 		expanded := expandBraces(pattern)
 		for _, p := range expanded {
-			if matched, _ := doublestar.Match(p, lowerPath); matched {
+			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {
 				return true
 			}
 		}
@@ -242,7 +242,7 @@ func (f *FileFilter) IsUserIncluded(path string) bool {
 	for _, pattern := range f.Include {
 		expanded := expandBraces(pattern)
 		for _, p := range expanded {
-			if matched, _ := doublestar.Match(p, lowerPath); matched {
+			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {
 				return true
 			}
 		}

@@ -677,8 +677,8 @@ func TestFileFilter_IsUserIncluded_EmptyInclude(t *testing.T) {
 
 func TestFileFilter_CaseInsensitive(t *testing.T) {
 	f := &FileFilter{
-		Include: []string{"src/**/*.java"},
-		Exclude: []string{"**/generated/**"},
+		Include: []string{"src/**/*.java", "**/CHANGELOG.md"},
+		Exclude: []string{"**/generated/**", "README.md"},
 	}
 
 	if !f.IsUserIncluded("SRC/Main/Foo.Java") {
@@ -686,6 +686,14 @@ func TestFileFilter_CaseInsensitive(t *testing.T) {
 	}
 	if !f.IsUserExcluded("SRC/Generated/Api.java") {
 		t.Errorf("expected case-insensitive exclude match")
+	}
+
+	// Verify patterns containing uppercase letters also match.
+	if !f.IsUserIncluded("docs/changelog.md") {
+		t.Errorf("expected uppercase include pattern to match case-insensitively")
+	}
+	if !f.IsUserExcluded("readme.md") {
+		t.Errorf("expected uppercase exclude pattern to match case-insensitively")
 	}
 }
 
