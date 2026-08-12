@@ -44,8 +44,10 @@ jobs:
       
       - name: Check line endings
         run: |
-          git add --renormalize .
-          git diff --quiet || { echo 'Line endings must end with LF. Have you normalized line endings?'; exit 1; }
+          if git ls-files --eol | grep -v 'i/lf\|i/none\|i/-text'; then
+            echo 'Line endings must end with LF. Have you normalized line endings?'
+            exit 1
+          fi
         
       - name: Check go.mod is tidy
         run: |
