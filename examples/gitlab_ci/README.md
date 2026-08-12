@@ -41,7 +41,7 @@ Go to your project's **Settings → CI/CD → Variables** and add:
 | `OCR_LLM_MODEL` | Yes | No | Model name (e.g., `gpt-4o`) — OCR has no built-in default model and fails when this is unset |
 | `GITLAB_API_TOKEN` | No | Yes | GitLab access token with `api` scope (falls back to `CI_JOB_TOKEN` if not set) |
 | `OCR_VERSION` | No | No | npm version spec for `@alibaba-group/open-code-review` (default: `latest`). Pin it (e.g. `1.8.8` or `~1.8`) for reproducible reviews. |
-| `OCR_LANGUAGE` | No | No | Review output language, written via `ocr config set language` (e.g. `English`, `中文`). Defaults to OCR's built-in default. |
+| `OCR_LANGUAGE` | No | No | Review output language, written via `ocr config set language` (e.g. `English`, `Chinese`). Defaults to OCR's built-in default. |
 | `OCR_LLM_AUTH_HEADER` | No | No | Custom auth header name, written via `ocr config set llm.auth_header` (e.g. `x-api-key` for some providers). |
 | `OCR_LLM_EXTRA_HEADERS` | No | No | Extra headers `K=V,K=V`, written via `ocr config set llm.extra_headers`. |
 | `OCR_LLM_TIMEOUT` | No | No | LLM request timeout in seconds (read natively by OCR from the env). Unset/empty = OCR's default. |
