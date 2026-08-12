@@ -692,7 +692,7 @@ func TestSanitizeReasonTruncatesAndSingleLine(t *testing.T) {
 		t.Fatal("newlines not collapsed")
 	}
 	// Multibyte input must not be cut mid-rune.
-	multibyte := strings.Repeat("世", maxReasonLen+50)
+	multibyte := strings.Repeat("世", maxReasonLen+50) // allow-cjk: fixture exercises multibyte truncation
 	if !utf8.ValidString(sanitizeReason(multibyte)) {
 		t.Fatal("truncation produced invalid UTF-8")
 	}

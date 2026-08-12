@@ -119,7 +119,7 @@ const terminalLines = [
   { num: 9, content: <span>&nbsp;</span> },
   { num: 10, content: <span style={{ color: TC.dim }}>─── internal/auth/login.go:42-45 ───</span> },
   { num: 11, content: <span style={{ color: TC.text }}>Consider using bcrypt cost factor ≥ 12 for password hashing.</span> },
-  { num: 12, content: <span className="terminal-cursor" style={{ color: TC.text }}>｜</span> },
+  { num: 12, content: <span className="terminal-cursor" style={{ color: TC.text }}>｜</span> }, // allow-cjk: fullwidth bar renders the terminal cursor
 ];
 
 const INSTALL_CHANNELS = [

@@ -23,7 +23,9 @@ open-code-review (`ocr`) is an AI-powered code review CLI tool written in Go (mo
 ## Code Style
 
 - After writing code, run `make check` to format and check the code.
-- `make check` runs: license check, `go mod tidy`, `gofmt -s -w .`, and `go vet`.
+- `make check` runs: license check, CJK check, `go mod tidy`, `gofmt -s -w .`, and `go vet`.
+- Source files are English-only — comments, identifiers and strings alike. Translated prose belongs in `README.<locale>.md`, `pages/src/content/docs/<locale>/` or an i18n table. `make cjk-check` enforces this in CI; it also rejects fullwidth punctuation (`：`, `（`), which is easy to leave behind in an otherwise English sentence.
+- When CJK text is intentional (an encoding fixture, a language-switcher label), append an `allow-cjk: <reason>` marker comment to that line rather than widening the allowlist in `scripts/verify-cjk.go`.
 
 ## Testing
 

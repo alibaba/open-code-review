@@ -10,8 +10,8 @@ import type { Language } from '../i18n/types';
 
 const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
-  { value: 'zh', label: '中文' },
-  { value: 'ja', label: '日本語' },
+  { value: 'zh', label: '中文' }, // allow-cjk: language options are labelled in their own language
+  { value: 'ja', label: '日本語' }, // allow-cjk: language options are labelled in their own language
   { value: 'ru', label: 'Русский' },
 ];
 

@@ -94,7 +94,7 @@ func TestSanitizeTerminal(t *testing.T) {
 		{"strips carriage return", "fake\rreal", "fakereal"},
 		{"empty string", "", ""},
 		{"only control chars", "\x1b\x07\x00\x7f", ""},
-		{"unicode preserved", "代码审查 レビュー 🔍", "代码审查 レビュー 🔍"},
+		{"unicode preserved", "代码审查 レビュー 🔍", "代码审查 レビュー 🔍"}, // allow-cjk: fixture asserts non-ASCII output is preserved verbatim
 		{"mixed safe and unsafe", "path\x1b[0m/file.go", "path[0m/file.go"},
 		{"strips C1 CSI (U+009B)", "before\u009bafter", "beforeafter"},
 		{"strips C1 OSC (U+009D)", "before\u009dafter", "beforeafter"},
