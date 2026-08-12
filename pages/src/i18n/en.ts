@@ -20,6 +20,7 @@ export const en = {
   'hero.copyFailed': 'Copy failed',
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
+  'hero.installMacPorts': 'MacPorts',
 
   // Error boundary
   'error.pageLoadFailed': 'Failed to load this page.',

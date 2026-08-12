@@ -22,6 +22,7 @@ export const ru: TranslationKeys = {
   'hero.copyFailed': 'Не удалось скопировать',
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
+  'hero.installMacPorts': 'MacPorts',
 
   // Error boundary
   'error.pageLoadFailed': 'Не удалось загрузить страницу.',
