@@ -41,7 +41,12 @@ jobs:
             gofmt -s -d .
             exit 1
           fi
-
+      
+      - name: Check line endings
+        run: |
+          git add --renormalize .
+          git diff --quiet || { echo 'Line endings must end with LF. Have you normalized line endings?'; exit 1; }
+        
       - name: Check go.mod is tidy
         run: |
           go mod tidy
