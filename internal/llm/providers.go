@@ -356,15 +356,15 @@ var registry = []Provider{
 		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.siliconflow.com/v1",
 		EnvVar:      "SILICONFLOW_GLOBAL_API_KEY",
-    Models: []string{
+		Models: []string{
 			"deepseek-ai/DeepSeek-V4-Pro",
 			"deepseek-ai/DeepSeek-V4-Flash",
 			"Qwen/Qwen3.6-27B",
 			"moonshotai/Kimi-K2.7-Code",
 			"zai-org/GLM-5.2",
 		},
-  },
-  {
+	},
+	{
 		Name:        "siliconflow-cn",
 		DisplayName: "SiliconFlow CN API",
 		Protocol:    ProtocolOpenAIChatCompletions,
