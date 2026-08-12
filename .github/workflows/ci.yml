@@ -32,8 +32,8 @@ jobs:
       - name: Verify action pins
         run: bash scripts/verify-action-pins.sh
 
-      - name: Verify sources are English-only
-        run: go run scripts/verify-cjk.go
+      - name: Verify sources contain no unapproved non-English text
+        run: go run scripts/verify-english-only.go
 
       - name: Check formatting
         run: |

@@ -287,11 +287,11 @@ func TestRunSessionShow_MissingID(t *testing.T) {
 }
 
 func TestTruncateUnicode(t *testing.T) {
-	got := truncate("错误原因：超过限制", 6) // allow-cjk: fixture exercises rune-boundary truncation
+	got := truncate("错误原因：超过限制", 6) // allow-non-english: fixture exercises rune-boundary truncation
 	if !strings.HasSuffix(got, "…") {
 		t.Fatalf("expected ellipsis suffix, got %q", got)
 	}
-	if !strings.Contains(got, "错误") { // allow-cjk: fixture exercises rune-boundary truncation
+	if !strings.Contains(got, "错误") { // allow-non-english: fixture exercises rune-boundary truncation
 		t.Fatalf("expected valid truncated unicode text, got %q", got)
 	}
 }
