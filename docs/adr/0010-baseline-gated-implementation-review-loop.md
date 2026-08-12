@@ -2,38 +2,42 @@
 status: accepted
 ---
 
-# Baseline-gated implementation review loop
+# Base-gated implementation and range-review loop
 
-Review-driven implementation keeps one immutable `BASE_SHA` from before the
-initial review through the final gate. This prevents a moving `HEAD~N` ref from
-silently changing the review scope after implementation commits and makes the
-result recoverable across an interrupted OCR call.
+The implementation and review skills share one explicit baseline and one task
+source. `/base` writes the immutable baseline manifest to `.scratch/base`.
+`implement` and `code-review` refuse to continue when that manifest is absent or
+invalid. The baseline remains unchanged until `/base reset` is used.
 
 ## Decision
 
-Capture the exact `BASE_SHA` before the initial `/code-review`. Run the initial
-review explicitly with the task context, then let `/implement` classify every
-finding as `fix`, `reject-with-evidence`, or `accepted-risk`. `code-review`
-owns finding generation and terminal-result recovery; `implement` owns the
-disposition and implementation workflow.
+`.scratch/base` records a full `base_sha`, a lowercase task-source `source`, and
+exactly one of an external `ref` or a user `summary`. The host agent reads the
+external task once per round and passes the complete payload to both
+implementation and OCR. It does not store the payload in repository state.
 
-Run baseline focused checks before editing, repeat them after the change, and
-run the full suite once at the end. Record known baseline failures and block
-new failures. Commit one logical implementation change, then run the final
-review over `BASE_SHA..HEAD`. If the review call is interrupted, recover it
-with `ocr_review_wait` or the same persisted session with `resume` instead of
-starting a second review.
+`code-review` provides range review only. It reviews the fixed baseline through
+the current `HEAD`, resolves both endpoints to full SHAs, rejects non-ancestor
+ranges, excludes `.scratch/**`, and skips OCR for an empty range.
 
-Completion requires a terminal final review, no unaccepted high or critical
-finding, and no new test failure. An `accepted-risk` remains an open risk and
-requires an explicit acceptance owner, impact, mitigation, and follow-up
-condition before it can pass the gate.
+The MCP adapter remains the owner of finding identity and repetition state. It
+adds a stable `finding_id` to completed native OCR comments and maintains
+`.scratch/finding-counts.json`. Three consecutive appearances mark a finding
+`deferred_for_human`; the implement loop skips that finding and continues other
+work. A completed review with no finding clears disappeared IDs. `/base reset`
+clears all counters.
+
+`implement` runs an unbounded convergence loop. It assumes the baseline passed
+existing tests, runs focused checks during editing, runs the full suite at the
+end, commits only the work it changed, and reaches `completed` only when the
+final range review is clean, the full suite passes, and no finding is deferred.
 
 ## Consequences
 
-- Relative refs such as `HEAD~38` are not used as the long-lived review boundary.
-- The initial review remains an explicit workflow step; `/implement` owns the
-  final gate after its commit.
-- Partial OCR findings do not count as a completed review.
-- The workflow can finish with a documented accepted risk without claiming
-  that the risk was fixed.
+- Review scope cannot drift as commits accumulate.
+- Task requirements remain authoritative because OCR receives the same raw
+  external payload as implement.
+- OCR core, CLI native output, and persisted OCR session schema remain unchanged.
+- Repository-local `.scratch` state is never staged or committed.
+- A finding that remains unresolved for three completed reviews is surfaced for
+  human handling without blocking unrelated fixes.

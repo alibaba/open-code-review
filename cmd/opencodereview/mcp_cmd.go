@@ -326,14 +326,14 @@ func newOCRMCPProtocolServerWithContext(repoDir string, run mcpReviewRunner, ser
 	)
 	server.AddTool(&mcpsdk.Tool{
 		Name:        mcpReviewToolName,
-		Description: "Run one blocking OpenCodeReview review for this MCP server's current Git worktree. If the caller disconnects, the server keeps the review running; use ocr_review_wait to retrieve its terminal result. Use ocr_review_cancel for explicit cancellation. Use commit or from+to for resumable reviews; omit both to review current workspace changes.",
+		Description: "Run one blocking OpenCodeReview review for this MCP server's current Git worktree. Range callers may omit to and it defaults to the current HEAD. If the caller disconnects, the server keeps the review running; use ocr_review_wait to retrieve its terminal result. Use ocr_review_cancel for explicit cancellation.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"commit":     map[string]any{"type": "string", "description": "Commit ref to review against its first parent."},
-				"from":       map[string]any{"type": "string", "description": "Base commit or branch for a range review; must be paired with to."},
-				"to":         map[string]any{"type": "string", "description": "Head commit or branch for a range review; must be paired with from."},
+				"from":       map[string]any{"type": "string", "description": "Base commit or branch for a range review; when provided, to defaults to HEAD."},
+				"to":         map[string]any{"type": "string", "description": "Optional head commit or branch for a range review; requires from."},
 				"background": map[string]any{"type": "string", "description": "Business or requirement context for the review."},
 				"exclude":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to exclude from review."},
 				"resume":     map[string]any{"type": "string", "description": "Previous commit/range review session ID to resume."},
@@ -367,6 +367,16 @@ func (s *ocrMCPServer) handleReview(ctx context.Context, req *mcpsdk.CallToolReq
 	if err := validateOCRReviewInput(input); err != nil {
 		return mcpToolErrorWithDetails(err, nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
 	}
+	prepared, empty, err := prepareMCPRange(s.repoDir, input)
+	if err != nil {
+		return mcpToolErrorWithDetails(err, nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
+	}
+	if empty {
+		return &mcpsdk.CallToolResult{
+			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: string(emptyRangeReviewResult())}},
+		}, nil
+	}
+	input = prepared
 	execution, ok := s.beginReview()
 	if !ok {
 		return mcpToolErrorWithDetails(errors.New("ocr_review is already running for this worktree; call ocr_review_wait to await its result"), nil, mcpErrorIntegration, reviewDiagnosticSnapshot{}, nil), nil
@@ -404,6 +414,13 @@ func (s *ocrMCPServer) handleReview(ctx context.Context, req *mcpsdk.CallToolReq
 	raw, err := singleJSONObject(output.Bytes())
 	if err != nil {
 		return mcpToolErrorWithDetails(fmt.Errorf("ocr review returned invalid JSON: %w", err), output.Bytes(), mcpErrorInvalidResult, diagnostics.Snapshot(), diagnosticOutput.Bytes()), nil
+	}
+	if resultObject, ok := resultObject(raw); ok && input.From != "" && isCompleteOCRResult(resultObject) {
+		annotated, annotateErr := annotateAndRecordFindings(s.repoDir, input.From, raw)
+		if annotateErr != nil {
+			return mcpToolErrorWithDetails(fmt.Errorf("record finding state: %w", annotateErr), raw, mcpErrorPersistence, diagnostics.Snapshot(), diagnosticOutput.Bytes()), nil
+		}
+		raw = annotated
 	}
 	return &mcpsdk.CallToolResult{
 		Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: string(raw)}},
@@ -509,8 +526,8 @@ func validateOCRReviewInput(input ocrReviewInput) error {
 	if input.Commit != "" && (input.From != "" || input.To != "") {
 		return errors.New("ocr_review input cannot combine commit with from/to")
 	}
-	if (input.From == "") != (input.To == "") {
-		return errors.New("ocr_review input requires both from and to for a range review")
+	if input.From == "" && input.To != "" {
+		return errors.New("ocr_review input requires from when to is specified")
 	}
 	if input.Resume != "" && input.Commit == "" && input.From == "" {
 		return errors.New("ocr_review resume requires commit or from/to; workspace resume is unsupported")
@@ -524,13 +541,21 @@ func validateOCRReviewInput(input ocrReviewInput) error {
 }
 
 func (input ocrReviewInput) reviewOptions(repoDir string) reviewOptions {
+	excludes := make([]string, 0, len(input.Exclude)+1)
+	excludes = append(excludes, mcpScratchExclude)
+	for _, pattern := range input.Exclude {
+		if pattern == mcpScratchExclude {
+			continue
+		}
+		excludes = append(excludes, pattern)
+	}
 	return reviewOptions{
 		repoDir:      repoDir,
 		from:         input.From,
 		to:           input.To,
 		commit:       input.Commit,
 		resume:       input.Resume,
-		excludes:     strings.Join(input.Exclude, ","),
+		excludes:     strings.Join(excludes, ","),
 		background:   input.Background,
 		outputFormat: "json",
 		audience:     "agent",

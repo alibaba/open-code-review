@@ -508,9 +508,13 @@ func TestLLMRequestPreservesPerRequestTimeout(t *testing.T) {
 }
 
 func connectTestOCRServer(t *testing.T, run mcpReviewRunner) (*mcpsdk.ClientSession, func()) {
+	return connectTestOCRServerAt(t, "/repo", run)
+}
+
+func connectTestOCRServerAt(t *testing.T, repoDir string, run mcpReviewRunner) (*mcpsdk.ClientSession, func()) {
 	t.Helper()
 	clientTransport, serverTransport := mcpsdk.NewInMemoryTransports()
-	server := newOCRMCPProtocolServer("/repo", run)
+	server := newOCRMCPProtocolServer(repoDir, run)
 	serverDone := make(chan error, 1)
 	go func() { serverDone <- server.Run(context.Background(), serverTransport) }()
 

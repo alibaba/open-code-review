@@ -1,0 +1,5 @@
+interface:
+  display_name: "Base"
+  short_description: "Pin a baseline and task source"
+policy:
+  allow_implicit_invocation: false

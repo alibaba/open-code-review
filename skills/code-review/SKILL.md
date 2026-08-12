@@ -1,76 +1,64 @@
 ---
 name: code-review
-description: Review changes since a fixed point with the synchronous OpenCodeReview (OCR) MCP tool. Use when the user wants to review a branch, PR, commit, or work-in-progress changes.
+description: "Review the range from the fixed /base baseline to the current HEAD with synchronous OCR MCP."
 ---
 
-Review the diff between `HEAD` and a fixed point supplied by the user with one blocking `ocr_review` MCP call from `ocr-mcp-server`. The MCP server has no fixed whole-review maximum duration; active progress can continue after caller transport interruption, while the idle watchdog still stops a review with no OCR activity. Use `ocr_review_cancel` for explicit cancellation and `ocr_review_wait` to retrieve a detached review's terminal result. Keep the fixed point and any available task, repository, or business context as inputs, then return OCR's native review output without imposing an additional report structure or claiming coverage beyond OCR's result.
+Review only a Git range. The fixed point comes from `.scratch/base`; do not ask
+for a moving `HEAD~N` ref and do not use workspace or single-commit review for
+this skill.
 
-The MCP review uses an unlimited aggregate token budget by default. Per-file tool-request rounds, per-file timeouts, provider request limits, and the idle watchdog still bound execution.
+## Preconditions
 
-Do not run `ocr review`, spawn review sub-agents, inspect progress events, or poll for completion. Do not terminate a running MCP call because it has produced no intermediate output; wait for the terminal result. If the host interrupts the call while the MCP server remains alive, use `ocr_review_wait` once to retrieve the existing execution's terminal result. If the server process ended, `ocr_review_wait` cannot attach: for a commit or ref-range review, use `ocr session list` only to locate the persisted session ID, then make one explicit `ocr_review` call with the same target and `resume`; workspace reviews are not resumable. Use `ocr_review_cancel` for explicit cancellation, then call `ocr_review_wait` once for the cancellation terminal result. If the MCP tool itself is unavailable, report the integration error instead of starting a separate CLI review.
+1. Require `.scratch/base` to exist and be non-empty. Do not create it or call
+   `/base` automatically. `/base` owns manifest creation; the MCP adapter owns
+   strict format validation.
+2. Read the fixed `base_sha`, `source`, and source value needed for this review.
+3. Read the complete task source once at the start of the review. External
+   `source/ref` values are read through the host integration; `source: user`
+   uses `summary`. Do not use a cache or substitute a summary when an external
+   source fails. Keep the payload in memory only; do not write it to repository
+   state, commits, or extra logs.
+4. If the task source cannot be read, is not serialisable, or exceeds the
+   available context, stop and return `needs_human` without calling OCR.
 
-The issue tracker should have been provided to you — run `/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing.
+## Range review
 
-## Process
+1. Resolve `from` from `.scratch/base:base_sha` and resolve `to` to the current
+   `HEAD` unless the caller explicitly supplies a commit ref for the current
+   head. Convert both to full commit SHAs before calling MCP.
+2. Require `from` to be an ancestor of `to`. A bad range stops the review.
+3. Exclude `.scratch/**` from the review input automatically.
+4. If the range is empty after that exclusion, return OCR's native empty-review
+   JSON and do not call OCR.
+5. Call `ocr_review` exactly once with the range and the raw task source in the
+   deterministic `background` wrapper below. Keep the call blocking until it
+   returns a terminal result.
 
-### 1. Pin the fixed point
+```text
+<task-source>
+source: github
+ref: https://github.com/org/repo/issues/123
 
-Whatever the user said is the fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. If they did not specify one, ask for it.
-
-Confirm the ref and diff before running OCR:
-
-```bash
-git rev-parse <fixed-point>
-if git diff --quiet <fixed-point>...HEAD; then
-  echo "empty review"
-  exit 1
-fi
-git log <fixed-point>..HEAD --oneline
+content:
+<complete provider payload>
+</task-source>
 ```
 
-The fixed point must resolve and the diff must be non-empty. The `git diff --quiet` check returns success only for an empty diff; a non-zero result is expected when there is work to review. Fail only for a bad ref or an empty review.
+Do not spawn review sub-agents, run the OCR CLI, inspect progress events, or
+poll for completion. If the host transport is interrupted, call
+`ocr_review_wait` once. If the MCP process ended, resume the same persisted
+range session once with the same target. An unavailable session returns
+`needs_human`.
 
-### 2. Identify the task source
+## Result contract
 
-Look for the originating task requirements, in this order:
+Return OCR's native JSON, including its existing top-level `status`, `summary`,
+`comments`, `warnings`, coverage, and session fields. Do not add a second report
+format, `review_handoff`, or `recommended_disposition`.
 
-1. Issue references in the commit messages (`#123`, `Closes #45`, GitLab `!67`, etc.) — fetch via the workflow in `docs/agents/issue-tracker.md`.
-2. A path the user passed as an argument.
-3. A spec file under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
-4. Context supplied by the user or still available in the current conversation.
-5. If nothing is found, ask the user where the task requirements are. If they say there is none, omit the background options and continue without inventing requirements.
-
-If a task source is found, summarize its requirements and only the repository or business context relevant to the changed code, then pass that context to OCR in step 3. Use `--background-file` for a suitable Markdown document when that is shorter and more accurate.
-
-### 3. Call the synchronous MCP tool
-
-Call the `ocr_review` tool exposed by `ocr-mcp-server` exactly once for the validated range. MCP input is typed JSON; use `from` and `to` for the range, and include `background` or `exclude` only when they are available:
-
-```json
-{
-  "from": "<fixed-point>",
-  "to": "HEAD",
-  "background": "<concise task requirements, repository, and business context>",
-  "exclude": ["<optional glob>"]
-}
-```
-
-When reviewing a single commit rather than a range, use `commit` instead of `from`/`to`. The MCP server resolves the current Git worktree; do not pass a `repo` or `worktree` argument.
-
-The MCP call is synchronous: keep the same turn open until it returns a terminal result. While it is pending, emit no interim waiting commentary, yield no follow-up turn, and issue no other tool call. A host interruption while the server remains alive gets one blocking `ocr_review_wait` handoff, not polling. An explicit cancellation gets one `ocr_review_cancel` call followed by one blocking `ocr_review_wait`. If the server ended, use the persisted-session recovery rule above; do not start a fresh review without `resume`. If `ocr_review` reports that a review is already running, call `ocr_review_wait` exactly once for that existing call. The server returns terminal failures with `error_type`, `stage`, `last_progress_at`, `path`, `partial_result`, `coverage`, `session_id`, and `resumable` fields. If a failed commit/range review returns `resumable: true` and the user explicitly requests resume, make one explicit follow-up `ocr_review` call with the same target and `resume` value.
-
-### 4. Return the OCR result
-
-Return OCR's native result with its own `status`, `summary`, `comments`, `warnings`, and optional session or manifest fields. On failure, preserve the terminal error wrapper and its partial result, coverage, diagnostics, and resumability metadata. Preserve each finding's path, line range, category, severity, content, and suggestion when present.
-
-When handing findings back to `/implement`, carry the original task source path or task-context summary alongside the OCR result. The OCR result alone is not a substitute for the original task requirements.
-
-Do not add a second report structure or assert coverage beyond OCR's result. If the user requests fixes, apply only the requested or explicitly approved fixes, then verify them with a fresh review or the relevant tests.
-
-## Validation
-
-After OCR finishes, verify:
-
-1. The MCP call returned a terminal result rather than an intermediate progress event.
-2. A successful result contains comments, or explicitly reports that no comments were generated.
-3. A failure contains its stable `error_type` and preserves warnings, partial coverage, failure reason, and resumability metadata.
+For a completed range result, the forked MCP adapter adds `finding_id`,
+`consecutive_review_count`, and `automation_status` to each comment and updates
+`.scratch/finding-counts.json`. A finding appearing in three consecutive
+completed reviews is returned as `deferred_for_human`; `implement` skips it and
+continues with other findings. Partial, failed, cancelled, or incomplete OCR
+results do not update the counter.
