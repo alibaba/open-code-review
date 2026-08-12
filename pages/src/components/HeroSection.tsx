@@ -206,7 +206,7 @@ const HeroSection: React.FC = () => {
       style={{
         width: '100vw',
         marginLeft: 'calc(-50vw + 50%)',
-        minHeight: isMobile ? 'auto' : isTablet ? 700 : 680,
+        minHeight: isMobile ? 600 : isTablet ? 700 : 680,
         paddingBottom: isMobile ? 60 : 80,
         position: 'relative',
         overflow: 'hidden',
@@ -267,7 +267,7 @@ const HeroSection: React.FC = () => {
           zIndex: 2,
           display: 'flex',
           flexDirection: twoCol ? 'row' : 'column',
-          alignItems: twoCol ? 'center' : 'center',
+          alignItems: 'center',
           justifyContent: 'center',
           paddingTop: isMobile ? 72 : isTablet ? 120 : 140,
           paddingLeft: isMobile ? 20 : 40,
@@ -330,12 +330,13 @@ const HeroSection: React.FC = () => {
               {INSTALL_CHANNELS.map((ch, idx) => (
                 <button
                   key={ch.key}
+                  type="button"
                   onClick={() => setActiveChannel(idx)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: 6,
-                    padding: '6px 14px',
+                    padding: '6px 9px',
                     background: activeChannel === idx ? 'rgba(255,255,255,0.1)' : 'transparent',
                     border: 'none',
                     borderBottom: activeChannel === idx ? '2px solid rgba(255,255,255,0.8)' : '2px solid transparent',
@@ -346,7 +347,7 @@ const HeroSection: React.FC = () => {
                   {ch.icons.map((icon, i) => (
                     <img key={i} src={icon} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: activeChannel === idx ? 1 : 0.5 }} />
                   ))}
-                  <span style={{ fontSize: 13, fontWeight: 500, color: activeChannel === idx ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.45)' }}>
+                  <span style={{ fontSize: 13, fontWeight: activeChannel === idx ? 600 : 500, color: activeChannel === idx ? '#fff' : 'rgba(255,255,255,0.45)' }}>
                     {t(ch.labelKey)}
                   </span>
                 </button>
