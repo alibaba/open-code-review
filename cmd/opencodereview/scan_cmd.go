@@ -231,7 +231,7 @@ func executeScan(opts scanOptions) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity)
+	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, nil)
 }
 
 func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (*session.ResumeState, error) {

@@ -157,13 +157,27 @@ type llmRuntime struct {
 	PlanToolDefs []llm.ToolDef
 	MainToolDefs []llm.ToolDef
 	Collector    *tool.CommentCollector
-	AppCfg       *Config
+	// RetryCollector observes every LLM HTTP attempt this run makes. It is
+	// created here rather than on the session or the agent because the client is
+	// built before either exists, and it is per-run rather than package-level so
+	// two runs in one process cannot share data. scan gets one too; its requests
+	// carry no RequestMeta, so every attempt is dropped and the frozen report is
+	// nil.
+	RetryCollector *llm.RetryCollector
+	AppCfg         *Config
 	// RuntimeConfig holds the allowlisted, non-secret runtime settings (protocol,
 	// sanitized endpoint host, language, timeout) derived from the resolved
 	// endpoint and app config, for the run manifest's runtime_config_sha256. It
 	// never carries the token or full URL.
 	RuntimeConfig agent.RuntimeConfig
 }
+
+// newRetryCollector builds the per-run retry collector. It is a variable so a
+// test can hand back a collector whose invariants are already violated, which is
+// the only way to exercise the Freeze construction-error branch from the
+// outside: every production path finalizes every logical request on every exit,
+// so a well-behaved run can never produce one.
+var newRetryCollector = llm.NewRetryCollector
 
 // loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
 // from the user's default config path (applying the configured language to
@@ -199,14 +213,17 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 		return nil, fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
 
+	retryCollector := newRetryCollector()
+
 	return &llmRuntime{
-		Client:       llm.NewLLMClient(ep),
-		Model:        ep.Model,
-		Provider:     ep.Provider,
-		PlanToolDefs: planToolDefs,
-		MainToolDefs: mainToolDefs,
-		Collector:    tool.NewCommentCollector(),
-		AppCfg:       appCfg,
+		Client:         llm.NewLLMClient(ep, retryCollector),
+		Model:          ep.Model,
+		Provider:       ep.Provider,
+		PlanToolDefs:   planToolDefs,
+		MainToolDefs:   mainToolDefs,
+		Collector:      tool.NewCommentCollector(),
+		RetryCollector: retryCollector,
+		AppCfg:         appCfg,
 		RuntimeConfig: agent.RuntimeConfig{
 			Protocol:     ep.Protocol,
 			EndpointHost: sanitizeEndpointHost(ep.URL),
@@ -340,6 +357,13 @@ type resumeInfoProvider interface {
 //
 // q is the silencing handle returned by newQuietHandle; pass nil if no
 // silencing was set up (in which case the early restore is a no-op).
+//
+// retryReport is the frozen LLM retry report, or nil when there is nothing to
+// report (a clean run, or a caller that produces no report at all — `ocr scan`
+// never freezes one). It is passed as a parameter rather than added to
+// ResultProvider because the collector belongs to llmRuntime, not to the
+// agent; putting it on the interface would force internal/scan.Agent to
+// implement a method that is always nil.
 func emitRunResult(
 	ctx context.Context,
 	ag ResultProvider,
@@ -348,6 +372,7 @@ func emitRunResult(
 	outputFormat, audience string,
 	q *quietHandle,
 	llmIdentity *jsonLLMIdentity,
+	retryReport *llm.RetryReport,
 ) error {
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
@@ -391,12 +416,16 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity)
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, retryReport)
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest)
+	// Between the comments/warnings block and the project summary: the report is
+	// run-level diagnostics about how the comments were obtained, so it reads
+	// after them but must not separate the summary from the end of output.
+	outputRetryReportText(os.Stdout, retryReport)
 	if summary := ag.ProjectSummary(); summary != "" {
 		fmt.Printf("\n\n──────── Project Summary ────────\n\n%s\n", summary)
 	}

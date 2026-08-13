@@ -1757,7 +1757,7 @@ func TestNewLLMClient_TimeoutForwarded(t *testing.T) {
 		Timeout: 2 * time.Minute,
 	}
 
-	client := NewLLMClient(ep)
+	client := NewLLMClient(ep, nil)
 	if client == nil {
 		t.Fatal("NewLLMClient returned nil")
 	}
@@ -1781,7 +1781,7 @@ func TestNewLLMClient_DefaultTimeout(t *testing.T) {
 		// Timeout not set — should default to 5 minutes
 	}
 
-	client := NewLLMClient(ep)
+	client := NewLLMClient(ep, nil)
 	if oc, ok := client.(*OpenAIClient); ok {
 		if oc.cfg.Timeout != 5*time.Minute {
 			t.Errorf("OpenAIClient cfg.Timeout = %v, want default %v", oc.cfg.Timeout, 5*time.Minute)
