@@ -12,15 +12,15 @@ import type { Language } from '../i18n/types';
 
 const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
-  { value: 'zh', label: '中文' },
-  { value: 'ja', label: '日本語' },
-  { value: 'ru', label: 'Русский' },
+  { value: 'zh', label: '中文' }, // allow-non-english: language options are labelled in their own language
+  { value: 'ja', label: '日本語' }, // allow-non-english: language options are labelled in their own language
+  { value: 'ru', label: 'Русский' }, // allow-non-english: language options are labelled in their own language
 ];
 
 const LANG_BADGE: Record<Language, string> = {
   en: 'En',
-  zh: '中',
-  ja: 'あ',
+  zh: '中', // allow-non-english: single-glyph locale badge
+  ja: 'あ', // allow-non-english: single-glyph locale badge
   ru: 'Ru',
 };
 
