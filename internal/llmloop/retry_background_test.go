@@ -57,7 +57,7 @@ func (c *blockingCompressionClient) CompletionsWithCtx(ctx context.Context, _ ll
 	return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summary}}}}, nil
 }
 
-// #368 P5 决策 1: the run boundary joins background memory compression before
+// The run boundary joins background memory compression before
 // the report is frozen. Without that join, Freeze can see a request that
 // recorded attempts but was never finalized, which is an invariant violation and
 // drops the whole run's report — so the barrier is what makes the report

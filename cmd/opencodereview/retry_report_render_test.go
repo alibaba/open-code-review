@@ -56,8 +56,8 @@ func retryReportFixture() *llm.RetryReport {
 	}
 }
 
-// The expected rendering is fixed by docs/368/LLM请求重试实施细节.md §5, so the
-// text contract is asserted whole rather than by substring.
+// The expected rendering is fixed, so the text contract is asserted whole
+// rather than by substring.
 const wantRetryReportText = `
 LLM retry report: 1/12 requests retried, 2 retries, 1 recovered, 1 failed, 0 cancelled
 - payment.go / main_task #2: rate_limited(429) -> overloaded(529) -> success

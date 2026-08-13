@@ -3,8 +3,7 @@
 
 //go:build manual_e2e
 
-// Manual end-to-end verification harness for #368 P5 (see
-// docs/368/LLM请求重试实施路线图.md, P5 开工决策 8). It is excluded from the
+// Manual end-to-end verification harness for #368 P5. It is excluded from the
 // default build: run it explicitly with
 //
 //	go test -tags manual_e2e -run TestManualE2ERetryReport -v ./cmd/opencodereview/
@@ -89,7 +88,7 @@ func runManualReview(t *testing.T, srv *fakeLLM) manualResult {
 	comments, runErr := ag.Run(context.Background())
 	manifest := ag.RunManifest()
 
-	// P5 决策 7: the frozen run ID is the session's in-memory UUID, not the
+	// The frozen run ID is the session's in-memory UUID, not the
 	// persistence-gated ag.SessionID().
 	runID := ag.Session().SessionID
 	report, freezeErr := rt.RetryCollector.Freeze(runID)
@@ -174,7 +173,7 @@ func TestManualE2ERetryReport(t *testing.T) {
 		if res.report == nil {
 			t.Fatal("expected a report when every file failed")
 		}
-		// P5 决策 3: this is the exit where emitRunResult and emitFailureUsage
+		// This is the exit where emitRunResult and emitFailureUsage
 		// can both run, so record which one the report must travel through.
 		t.Logf("manifest==nil? %v ; runErr!=nil? %v -> emitRunResult runs: %v",
 			res.manifest == nil, res.runErr != nil, res.manifest != nil || res.runErr == nil)

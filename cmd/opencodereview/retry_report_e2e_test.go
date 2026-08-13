@@ -17,7 +17,7 @@ import (
 // End-to-end coverage of the #368 P5 wiring: a real review run against the fake
 // Anthropic server, driven through runReview so review_cmd.go's own Freeze /
 // publish decisions are the thing under test rather than a re-implementation of
-// them. See docs/368/LLM请求重试实施路线图.md, P5 开工决策 3/4/7/8.
+// them.
 
 // runReviewCapturingBoth runs a review and returns (stdout, stderr, error).
 // Both streams are needed because the report has two possible exits and the
@@ -165,7 +165,7 @@ func TestReviewE2E_RetryReportReachesTextExit(t *testing.T) {
 
 // Every file failing still produces a manifest (terminal_state=failed), so the
 // normal exit runs and the failure-usage record must not repeat the report.
-// This is the dedup rule of 决策 3, and the only case where both exits execute.
+// This is the dedup rule, and the only case where both exits execute.
 func TestReviewE2E_AllFilesFailPublishesReportOnce(t *testing.T) {
 	repoDir := retryTestRepo(t)
 	srv := newFakeLLM()
@@ -220,7 +220,7 @@ func TestReviewE2E_AllFilesFailTextPublishesReportOnce(t *testing.T) {
 	}
 }
 
-// 决策 4: a report-construction error is an observability warning. It must not
+// A report-construction error is an observability warning. It must not
 // change a successful review's exit status, print a --resume hint, emit a
 // failure-usage record, or publish a partial report — while the review's own
 // result is still published.
@@ -259,7 +259,7 @@ func TestReviewE2E_FreezeErrorIsAWarning(t *testing.T) {
 	}
 }
 
-// 决策 7: run_id is the session's in-memory UUID rather than the
+// The run_id is the session's in-memory UUID rather than the
 // persistence-gated ag.SessionID(), so a session whose JSONL file could not be
 // created still yields a report with usable logical_request_ids — while
 // session_id stays empty and no --resume hint is printed, because there is
