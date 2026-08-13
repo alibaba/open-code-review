@@ -70,7 +70,7 @@ var delegateRuleCmd = &cobra.Command{
 	Use:   "rule [flags] <path...>",
 	Short: "Output resolved review rules grouped by content",
 	Long:  "Outputs resolved review rules grouped by content. Accepts multiple paths.",
-	Args:  cobra.MinimumNArgs(1),
+	Args:  minimumArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateDelegateOptions(&delegateRuleOpts); err != nil {
 			return err
