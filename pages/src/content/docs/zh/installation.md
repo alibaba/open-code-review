@@ -77,7 +77,7 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/insta
 
 __在部分网络访问 GitHub 较慢的地区，可以设置一个 GitHub 镜像域名，通过镜像下载资源。__
 ```bash
-export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
+export GITHUB_MIRROR_DOMAIN='YOUR_GITHUB_MIRROR_DOMAIN'
 ```
 
 > **安全提示：** 镜像是第三方服务——二进制及其 `sha256sum.txt` 都来自镜像，因此被攻破的镜像可能同时提供被篡改的二进制与匹配的校验和，仅靠校验和校验并不能保证安全。对安全性要求较高的安装，请直接从 GitHub 下载，或对照 [releases 页面](https://github.com/alibaba/open-code-review/releases) 上的上游 `sha256sum.txt` 进行核对。
@@ -88,7 +88,7 @@ export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | 放置 `ocr` 二进制的位置。 |
 | `OCR_VERSION` | 最新 release | 固定到某个 release tag（如 `v1.2.3`）。 |
-| `GITHUB_MIRROR_DOMAIN_PREFIX` | （未设置） | 通过 GitHub 镜像域名下载 release 资源（如 `gh-proxy.com`）。 |
+| `GITHUB_MIRROR_DOMAIN` | （未设置） | 通过 GitHub 镜像域名下载 release 资源（如 `gh-proxy.com`）。 |
 
 该脚本支持 `darwin` 与 `linux` 的 `amd64` / `arm64`。
 
@@ -100,12 +100,12 @@ irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 
 
 __访问 GitHub 较慢时，同样可以将镜像域名设为 PowerShell 环境变量，通过镜像下载：__
 ```powershell
-$env:GITHUB_MIRROR_DOMAIN_PREFIX = 'gh-proxy.com'
+$env:GITHUB_MIRROR_DOMAIN = 'YOUR_GITHUB_MIRROR_DOMAIN'
 ```
 
-它同样识别 `OCR_INSTALL_DIR`、`OCR_VERSION` 与 `GITHUB_MIRROR_DOMAIN_PREFIX`
+它同样识别 `OCR_INSTALL_DIR`、`OCR_VERSION` 与 `GITHUB_MIRROR_DOMAIN`
 （通过 `$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION` /
-`$env:GITHUB_MIRROR_DOMAIN_PREFIX` 设置）。默认安装位置为 `%LOCALAPPDATA%\Programs\ocr`。
+`$env:GITHUB_MIRROR_DOMAIN` 设置）。默认安装位置为 `%LOCALAPPDATA%\Programs\ocr`。
 
 ## GitHub Release 二进制
 

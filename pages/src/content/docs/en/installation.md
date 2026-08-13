@@ -81,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/insta
 
 __In some regions where network access to GitHub is slow, set a GitHub mirror domain to download assets through a mirror.__
 ```bash
-export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
+export GITHUB_MIRROR_DOMAIN='YOUR_GITHUB_MIRROR_DOMAIN'
 ```
 
 > **Security note:** The mirror is a third-party service — both the binary and its `sha256sum.txt` are downloaded from the mirror, so a compromised mirror could serve a tampered binary with a matching checksum; the checksum check alone is not a guarantee. For security-critical installs, download directly from GitHub or verify against the upstream `sha256sum.txt` on the [releases page](https://github.com/alibaba/open-code-review/releases).
@@ -92,7 +92,7 @@ It honours three environment variables:
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | Where to place the `ocr` binary. |
 | `OCR_VERSION` | latest release | Pin a specific release tag (e.g. `v1.2.3`). |
-| `GITHUB_MIRROR_DOMAIN_PREFIX` | *(unset)* | Download release assets through a GitHub mirror domain (e.g. `gh-proxy.com`). |
+| `GITHUB_MIRROR_DOMAIN` | *(unset)* | Download release assets through a GitHub mirror domain (e.g. `gh-proxy.com`). |
 
 The script supports `darwin` and `linux` on `amd64` / `arm64`.
 
@@ -104,12 +104,12 @@ irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 
 
 __To download through a mirror when GitHub access is slow, set the same mirror domain as a PowerShell environment variable:__
 ```powershell
-$env:GITHUB_MIRROR_DOMAIN_PREFIX = 'gh-proxy.com'
+$env:GITHUB_MIRROR_DOMAIN = 'YOUR_GITHUB_MIRROR_DOMAIN'
 ```
 
 It honours the same `OCR_INSTALL_DIR`, `OCR_VERSION`, and
-`GITHUB_MIRROR_DOMAIN_PREFIX` variables (set via `$env:OCR_INSTALL_DIR` /
-`$env:OCR_VERSION` / `$env:GITHUB_MIRROR_DOMAIN_PREFIX`). The default
+`GITHUB_MIRROR_DOMAIN` variables (set via `$env:OCR_INSTALL_DIR` /
+`$env:OCR_VERSION` / `$env:GITHUB_MIRROR_DOMAIN`). The default
 install location is `%LOCALAPPDATA%\Programs\ocr`.
 
 ## GitHub Release binary

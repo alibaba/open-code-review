@@ -79,7 +79,7 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/insta
 
 __В некоторых регионах доступ к GitHub может быть медленным. В этом случае задайте домен зеркала GitHub, чтобы загружать артефакты через него.__
 ```bash
-export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
+export GITHUB_MIRROR_DOMAIN='YOUR_GITHUB_MIRROR_DOMAIN'
 ```
 
 > **Примечание по безопасности:** Зеркало — это сторонний сервис. Поскольку и бинарник, и `sha256sum.txt` загружаются с зеркала, скомпрометированное зеркало может отдать подменённый бинарник вместе с подходящей контрольной суммой — проверка контрольной суммы сама по себе не является гарантией безопасности. Для установок с высокими требованиями к безопасности скачивайте напрямую с GitHub или сверяйтесь с оригинальным `sha256sum.txt` на [странице релизов](https://github.com/alibaba/open-code-review/releases).
@@ -90,7 +90,7 @@ export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | Куда положить бинарник `ocr`. |
 | `OCR_VERSION` | последний релиз | Закрепить конкретный тег релиза (например `v1.2.3`). |
-| `GITHUB_MIRROR_DOMAIN_PREFIX` | не задана | Скачивать артефакты релиза через зеркало GitHub (например `gh-proxy.com`). |
+| `GITHUB_MIRROR_DOMAIN` | не задана | Скачивать артефакты релиза через зеркало GitHub (например `gh-proxy.com`). |
 
 Скрипт поддерживает `darwin` и `linux` на `amd64` / `arm64`.
 
@@ -102,12 +102,12 @@ irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 
 
 __Если доступ к GitHub медленный, задайте тот же домен зеркала как переменную окружения PowerShell, чтобы загружать файлы через него:__
 ```powershell
-$env:GITHUB_MIRROR_DOMAIN_PREFIX = 'gh-proxy.com'
+$env:GITHUB_MIRROR_DOMAIN = 'YOUR_GITHUB_MIRROR_DOMAIN'
 ```
 
 Установщик учитывает те же переменные `OCR_INSTALL_DIR`, `OCR_VERSION` и
-`GITHUB_MIRROR_DOMAIN_PREFIX` (через `$env:OCR_INSTALL_DIR` /
-`$env:OCR_VERSION` / `$env:GITHUB_MIRROR_DOMAIN_PREFIX`). По умолчанию файлы
+`GITHUB_MIRROR_DOMAIN` (через `$env:OCR_INSTALL_DIR` /
+`$env:OCR_VERSION` / `$env:GITHUB_MIRROR_DOMAIN`). По умолчанию файлы
 устанавливаются в `%LOCALAPPDATA%\Programs\ocr`.
 
 ## Бинарник из GitHub Release

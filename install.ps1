@@ -4,7 +4,7 @@
 #   irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 -OutFile install.ps1
 #   notepad install.ps1   # review, then: .\install.ps1
 # Env: OCR_INSTALL_DIR (default $env:LOCALAPPDATA\Programs\ocr), OCR_VERSION (default latest),
-# Set a GITHUB_MIRROR_DOMAIN_PREFIX to download assets through a mirror domain.
+# Set a GITHUB_MIRROR_DOMAIN to download assets through a mirror domain.
 # Requires PowerShell 5.1+ or PowerShell 7+.
 
 $ErrorActionPreference = 'Stop'
@@ -104,9 +104,9 @@ $arch = Get-OcrArch
 $os = 'windows'
 $Version = Resolve-OcrVersion $Repo
 $asset = "$AssetPrefix-$os-$arch.exe"
-if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_MIRROR_DOMAIN_PREFIX)) {
+if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_MIRROR_DOMAIN)) {
     Write-Host "WARNING: Using an unofficial mirror domain, which may lead to SHA256 checksum mismatches and security risks."
-    $base = "https://$($env:GITHUB_MIRROR_DOMAIN_PREFIX.Trim())/github.com/$Repo/releases/download/$Version"
+    $base = "https://$($env:GITHUB_MIRROR_DOMAIN.Trim())/github.com/$Repo/releases/download/$Version"
 } else {
     $base = "https://github.com/$Repo/releases/download/$Version"
 }
