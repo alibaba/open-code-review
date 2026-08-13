@@ -97,6 +97,11 @@ export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
 irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
 ```
 
+__Если доступ к GitHub медленный, задайте тот же домен зеркала как переменную окружения PowerShell, чтобы загружать файлы через него:__
+```powershell
+$env:GITHUB_MIRROR_DOMAIN_PREFIX = 'gh-proxy.com'
+```
+
 Установщик учитывает те же переменные `OCR_INSTALL_DIR` и `OCR_VERSION` (через
 `$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION`). По умолчанию файлы устанавливаются
 в `%LOCALAPPDATA%\Programs\ocr`.

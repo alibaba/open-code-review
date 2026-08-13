@@ -99,6 +99,11 @@ On Windows (PowerShell 5.1+), use the PowerShell installer instead:
 irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
 ```
 
+__To download through a mirror when GitHub access is slow, set the same mirror domain as a PowerShell environment variable:__
+```powershell
+$env:GITHUB_MIRROR_DOMAIN_PREFIX = 'gh-proxy.com'
+```
+
 It honours the same `OCR_INSTALL_DIR` and `OCR_VERSION` variables (set via
 `$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION`). The default install location is
 `%LOCALAPPDATA%\Programs\ocr`.

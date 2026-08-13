@@ -97,6 +97,11 @@ Windows（PowerShell 5.1+）では、代わりに PowerShell インストーラ�
 irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
 ```
 
+__GitHub へのアクセスが遅い場合は、同じミラードメインを PowerShell の環境変数として設定すると、ミラー経由でダウンロードできます：__
+```powershell
+$env:GITHUB_MIRROR_DOMAIN_PREFIX = 'gh-proxy.com'
+```
+
 同じ `OCR_INSTALL_DIR` と `OCR_VERSION` を認識します（`$env:OCR_INSTALL_DIR` /
 `$env:OCR_VERSION` で設定）。デフォルトのインストール先は
 `%LOCALAPPDATA%\Programs\ocr` です。

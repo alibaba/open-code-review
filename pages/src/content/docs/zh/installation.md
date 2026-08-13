@@ -95,6 +95,11 @@ export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
 irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
 ```
 
+__访问 GitHub 较慢时，同样可以将镜像域名设为 PowerShell 环境变量，通过镜像下载：__
+```powershell
+$env:GITHUB_MIRROR_DOMAIN_PREFIX = 'gh-proxy.com'
+```
+
 它同样识别 `OCR_INSTALL_DIR` 与 `OCR_VERSION`（通过 `$env:OCR_INSTALL_DIR` /
 `$env:OCR_VERSION` 设置）。默认安装位置为 `%LOCALAPPDATA%\Programs\ocr`。
 
