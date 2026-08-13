@@ -6,6 +6,7 @@ package diff
 import (
 	"strings"
 
+	"github.com/alibaba/open-code-review/internal/hashline"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -45,6 +46,11 @@ func ResolveLineNumbers(comments []model.LlmComment, diffs []model.Diff) []model
 			continue
 		}
 
+		// Fast path: verified hashline anchor (O(1), unambiguous).
+		if resolveFromAnchor(d, cm) {
+			continue
+		}
+
 		// Primary: try matching from deleted/context lines in diff hunks
 		if resolveFromHunk(d, cm) {
 			continue
@@ -63,6 +69,9 @@ func ResolveComment(cm *model.LlmComment, d *model.Diff) bool {
 	if cm.StartLine > 0 || cm.EndLine > 0 {
 		return true
 	}
+	if resolveFromAnchor(d, cm) {
+		return true
+	}
 	if cm.ExistingCode == "" {
 		return false
 	}
@@ -70,6 +79,57 @@ func ResolveComment(cm *model.LlmComment, d *model.Diff) bool {
 		return true
 	}
 	return resolveFromFileContent(d, cm)
+}
+
+// resolveFromAnchor resolves the comment position from a hashline anchor
+// ("12#KT" or "12#KT-18#MQ") verified against the new file content.
+//
+// Two-factor validation, following the hashline protocol:
+//   - The hash is the checksum: both endpoint anchors must verify against the
+//     current 3-line context window in NewFileContent.
+//   - ExistingCode, when present, acts as a text hint that can veto a
+//     hash collision: the first non-blank line of existing_code must appear
+//     somewhere within the anchored range (normalized comparison).
+func resolveFromAnchor(d *model.Diff, cm *model.LlmComment) bool {
+	if cm.Anchor == "" || d.NewFileContent == "" {
+		return false
+	}
+	start, end, ok := hashline.ResolveSpec(cm.Anchor, d.NewFileContent)
+	if !ok {
+		return false
+	}
+
+	// textHint veto: if existing_code is present, its first significant line
+	// must be found inside the anchored range.
+	if hint := firstSignificantLine(cm.ExistingCode); hint != "" {
+		fileLines := strings.Split(d.NewFileContent, "\n")
+		found := false
+		for ln := start; ln <= end && ln <= len(fileLines); ln++ {
+			if normalizeLine(fileLines[ln-1]) == hint {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cm.LocMethod = "anchor_hint_veto"
+			return false
+		}
+	}
+
+	cm.StartLine = start
+	cm.EndLine = end
+	cm.LocMethod = "anchor"
+	return true
+}
+
+// firstSignificantLine returns the first normalized non-blank line of code.
+func firstSignificantLine(code string) string {
+	for _, line := range strings.Split(code, "\n") {
+		if n := normalizeLine(line); n != "" {
+			return n
+		}
+	}
+	return ""
 }
 
 // indexedLine pairs a normalized line with its absolute file line number.
@@ -98,6 +158,7 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 		if start, end, ok := matchConsecutive(newSide, targetLines); ok {
 			cm.StartLine = start
 			cm.EndLine = end
+			cm.LocMethod = "hunk"
 			return true
 		}
 	}
@@ -107,6 +168,7 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 		if start, end, ok := matchConsecutive(oldSide, targetLines); ok {
 			cm.StartLine = start
 			cm.EndLine = end
+			cm.LocMethod = "hunk"
 			return true
 		}
 	}
@@ -209,6 +271,7 @@ func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
 		if matched {
 			cm.StartLine = fileLineNums[i]
 			cm.EndLine = fileLineNums[i+len(targetLines)-1]
+			cm.LocMethod = "file"
 			return true
 		}
 	}

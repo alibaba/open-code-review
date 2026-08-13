@@ -9,9 +9,16 @@ type LlmComment struct {
 	Content        string `json:"content"`
 	SuggestionCode string `json:"suggestion_code,omitempty"`
 	ExistingCode   string `json:"existing_code,omitempty"`
-	StartLine      int    `json:"start_line"`
-	EndLine        int    `json:"end_line"`
-	Thinking       string `json:"thinking,omitempty"`
+	// Anchor is an optional hashline anchor ("12#KT" or "12#KT-18#MQ")
+	// copied by the model from an anchor-annotated diff. When present and
+	// verified, it resolves the comment position in O(1) without text matching.
+	Anchor    string `json:"anchor,omitempty"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+	// LocMethod records how StartLine/EndLine were resolved:
+	// "anchor", "anchor_hint_veto", "hunk", "file", "relocation", or "" (unresolved).
+	LocMethod string `json:"loc_method,omitempty"`
+	Thinking  string `json:"thinking,omitempty"`
 	// Category classifies the finding. One of:
 	// bug, security, performance, maintainability, test, style, documentation, other.
 	Category string `json:"category,omitempty"`

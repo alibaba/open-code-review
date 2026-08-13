@@ -103,6 +103,9 @@ func ParseComments(args map[string]any) ([]model.LlmComment, string) {
 		if existing, ok := obj["existing_code"].(string); ok {
 			cm.ExistingCode = existing
 		}
+		if anchor, ok := obj["anchor"].(string); ok {
+			cm.Anchor = strings.TrimSpace(anchor)
+		}
 		if thinking, ok := obj["thinking"].(string); ok {
 			cm.Thinking = thinking
 		}
