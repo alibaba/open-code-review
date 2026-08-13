@@ -110,7 +110,9 @@ const exemptMarker = "allow-non-english:"
 //
 // Punctuation is checked separately, and matters as much as letters: a
 // fullwidth colon (U+FF1A) or comma (U+FF0C) left in an English sentence is a
-// typo that reads as correct and is invisible in review.
+// typo that reads as correct and is invisible in review. Vertical forms
+// (U+FE10–U+FE19), CJK compatibility forms (U+FE30–U+FE4F) and small form
+// variants (U+FE50–U+FE6F) are covered alongside the fullwidth block.
 func isNonEnglish(r rune) bool {
 	switch {
 	case r < 0x80: // ASCII, the overwhelming majority of every scanned line
@@ -127,6 +129,10 @@ func isNonEnglish(r rune) bool {
 		// combining marks as well, but sit outside this block and pass.
 		return true
 	case r >= 0x3000 && r <= 0x303F: // CJK Symbols and Punctuation
+		return true
+	case r >= 0xFE10 && r <= 0xFE19: // Vertical Forms
+		return true
+	case r >= 0xFE30 && r <= 0xFE6F: // CJK Compatibility Forms + Small Form Variants
 		return true
 	case r >= 0xFF00 && r <= 0xFFEF: // Halfwidth and Fullwidth Forms
 		return true
