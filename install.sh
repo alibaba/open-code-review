@@ -45,7 +45,7 @@ main() {
   asset="${ASSET_PREFIX}-${os}-${arch}"
   prefix="$(printf '%s' "${GITHUB_MIRROR_DOMAIN_PREFIX:-}" | tr -d '[:space:]')"
   if [ -n "$prefix" ]; then
-    echo "WARNING: Using an official mirror domain, which may lead to SHA256 checksum mismatches and security risks."
+    echo "WARNING: Using an unofficial mirror domain, which may lead to SHA256 checksum mismatches and security risks."
     base="https://${prefix}/github.com/$REPO/releases/download/$VERSION"
   else
     base="https://github.com/$REPO/releases/download/$VERSION"
