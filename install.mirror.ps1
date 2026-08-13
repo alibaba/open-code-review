@@ -104,8 +104,8 @@ $arch = Get-OcrArch
 $os = 'windows'
 $Version = Resolve-OcrVersion $Repo
 $asset = "$AssetPrefix-$os-$arch.exe"
-if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_MIRROR_DOMAIN)) {
-    $base = "https://$($env:GITHUB_MIRROR_DOMAIN.Trim())/github.com/$Repo/releases/download/$Version"
+if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_MIRROR_DOMAIN_PREFIX)) {
+    $base = "https://$($env:GITHUB_MIRROR_DOMAIN_PREFIX.Trim())/github.com/$Repo/releases/download/$Version"
 } else {
     $base = "https://github.com/$Repo/releases/download/$Version"
 }

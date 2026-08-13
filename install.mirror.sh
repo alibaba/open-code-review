@@ -44,7 +44,7 @@ main() {
 
   asset="${ASSET_PREFIX}-${os}-${arch}"
   if [ -n "${GITHUB_MIRROR_DOMAIN_PREFIX:-}" ]; then
-    base="https://${GITHUB_MIRROR_DOMAIN_PREFIX}github.com/$REPO/releases/download/$VERSION"
+    base="https://${GITHUB_MIRROR_DOMAIN_PREFIX}/github.com/$REPO/releases/download/$VERSION"
   else
     base="https://github.com/$REPO/releases/download/$VERSION"
   fi
