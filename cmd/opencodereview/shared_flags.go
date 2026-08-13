@@ -65,6 +65,10 @@ func addPreviewFlag(cmd *cobra.Command, target *bool) {
 	cmd.Flags().BoolVarP(target, "preview", "p", false, "preview which files will be reviewed without running the LLM")
 }
 
+func addShowThinkingFlag(cmd *cobra.Command, target *bool) {
+	cmd.Flags().BoolVar(target, "show-thinking", false, "render each comment's LLM reasoning (Thinking) in terminal and SARIF output")
+}
+
 func completeEnum(values ...string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return values, cobra.ShellCompDirectiveNoFileComp
@@ -180,6 +184,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addModelFlag(cmd, &opts.model)
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
 	addPreviewFlag(cmd, &opts.preview)
+	addShowThinkingFlag(cmd, &opts.showThinking)
 }
 
 // registerScanFlags registers all scan command flags on cmd, binding to opts.
@@ -198,6 +203,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage; dispatch stops once exceeded (0 = unlimited)")
 	cmd.Flags().StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the scan")
 	cmd.Flags().BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be scanned without running the LLM")
+	addShowThinkingFlag(cmd, &opts.showThinking)
 	cmd.Flags().BoolVar(&opts.noPlan, "no-plan", false, "skip the per-file PLAN_TASK pre-pass")
 	cmd.Flags().BoolVar(&opts.noDedup, "no-dedup", false, "skip the per-batch DEDUP_TASK")
 	cmd.Flags().BoolVar(&opts.noSummary, "no-summary", false, "skip the post-run PROJECT_SUMMARY_TASK")

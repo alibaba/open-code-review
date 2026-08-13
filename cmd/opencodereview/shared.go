@@ -370,6 +370,7 @@ func emitRunResult(
 	comments []model.LlmComment,
 	startTime time.Time,
 	outputFormat, audience string,
+	showThinking bool,
 	q *quietHandle,
 	llmIdentity *jsonLLMIdentity,
 	retryReport *llm.RetryReport,
@@ -393,7 +394,7 @@ func emitRunResult(
 		if outputFormat == "json" {
 			return outputJSONNoFiles(traceID, llmIdentity)
 		}
-		return outputSARIF(nil, Version, ag.Warnings(), manifest)
+		return outputSARIF(nil, Version, ag.Warnings(), manifest, false)
 	}
 
 	// Agent-text audiences need stdout back before PrintTraceSummary so the
@@ -419,9 +420,9 @@ func emitRunResult(
 			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, retryReport)
 	}
 	if outputFormat == "sarif" {
-		return outputSARIF(comments, Version, ag.Warnings(), manifest)
+		return outputSARIF(comments, Version, ag.Warnings(), manifest, showThinking)
 	}
-	outputTextWithWarnings(comments, ag.Warnings(), manifest)
+	outputTextWithWarnings(comments, ag.Warnings(), manifest, showThinking)
 	// Between the comments/warnings block and the project summary: the report is
 	// run-level diagnostics about how the comments were obtained, so it reads
 	// after them but must not separate the summary from the end of output.

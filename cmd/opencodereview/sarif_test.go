@@ -51,7 +51,7 @@ func TestOutputSARIF_BasicStructure(t *testing.T) {
 		{Path: "a.go", Content: "fix", StartLine: 1, EndLine: 1, Category: "bug", Severity: "high"},
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF(comments, "test-version", nil, nil); err != nil {
+		if err := outputSARIF(comments, "test-version", nil, nil, false); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -92,7 +92,7 @@ func TestOutputSARIF_BasicStructure(t *testing.T) {
 
 func TestOutputSARIF_EmptyComments(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := outputSARIF(nil, "test-version", nil, nil); err != nil {
+		if err := outputSARIF(nil, "test-version", nil, nil, false); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -117,7 +117,7 @@ func TestOutputSARIF_EmptyComments(t *testing.T) {
 func TestEmitRunResult_SarifNoFiles(t *testing.T) {
 	ag := &mockResultProvider{filesReviewed: 0}
 	out := captureStdout(t, func() {
-		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "sarif", "developer", nil, nil, nil); err != nil {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "sarif", "developer", false, nil, nil, nil); err != nil {
 			t.Fatalf("emitRunResult: %v", err)
 		}
 	})
@@ -144,7 +144,7 @@ func TestOutputSARIF_FullFieldMapping(t *testing.T) {
 		Severity:       "high",
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil); err != nil {
+		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, false); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -240,7 +240,7 @@ func TestOutputSARIF_EmptyCategory(t *testing.T) {
 		Severity:  "medium",
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil); err != nil {
+		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, false); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -265,7 +265,7 @@ func TestOutputSARIF_ZeroLineNumbers(t *testing.T) {
 		Severity:       "high",
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil); err != nil {
+		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, false); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -313,7 +313,7 @@ func TestOutputSARIF_NoFixes(t *testing.T) {
 				Severity:       "high",
 			}
 			out := captureStdout(t, func() {
-				if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil); err != nil {
+				if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, false); err != nil {
 					t.Fatalf("outputSARIF: %v", err)
 				}
 			})
@@ -381,7 +381,7 @@ func TestEmitRunResult_Sarif(t *testing.T) {
 		{Path: "main.go", Content: "nil deref", StartLine: 10, EndLine: 10, Category: "bug", Severity: "critical"},
 	}
 	out := captureStdout(t, func() {
-		if err := emitRunResult(context.Background(), ag, comments, time.Now(), "sarif", "developer", nil, nil, nil); err != nil {
+		if err := emitRunResult(context.Background(), ag, comments, time.Now(), "sarif", "developer", false, nil, nil, nil); err != nil {
 			t.Fatalf("emitRunResult: %v", err)
 		}
 	})
@@ -404,7 +404,7 @@ func TestOutputSARIF_SchemaCompliance(t *testing.T) {
 		{Path: "a.go", Content: "test", StartLine: 5, EndLine: 10, Category: "security", Severity: "medium"},
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF(comments, "v1", nil, nil); err != nil {
+		if err := outputSARIF(comments, "v1", nil, nil, false); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -459,7 +459,7 @@ func TestOutputSARIF_SchemaCompliance(t *testing.T) {
 
 func TestOutputSARIF_JSONFormatting(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := outputSARIF(nil, "v1", nil, nil); err != nil {
+		if err := outputSARIF(nil, "v1", nil, nil, false); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -481,7 +481,7 @@ func TestOutputSARIF_MultipleComments(t *testing.T) {
 		{Path: "c.go", Content: "bad naming", StartLine: 5, EndLine: 5, Category: "style", Severity: "low"},
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF(comments, "v1", nil, nil); err != nil {
+		if err := outputSARIF(comments, "v1", nil, nil, false); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -523,7 +523,7 @@ func TestNewQuietHandle_Sarif(t *testing.T) {
 
 func TestSarifResultFromComment_EmptyPath(t *testing.T) {
 	c := model.LlmComment{Content: "test", Category: "bug", Severity: "high"}
-	result := sarifResultFromComment(c)
+	result := sarifResultFromComment(c, false)
 	if result.Locations != nil {
 		t.Errorf("Locations should be nil when Path is empty, got %+v", result.Locations)
 	}
@@ -545,7 +545,7 @@ func TestSarifResultFromComment_InvertedLineNumbers(t *testing.T) {
 		Category:       "bug",
 		Severity:       "high",
 	}
-	result := sarifResultFromComment(c)
+	result := sarifResultFromComment(c, false)
 
 	// Locations should exist (Path is non-empty) but region must be omitted.
 	if result.Locations == nil {
@@ -576,7 +576,7 @@ func TestSarifResultFromComment_FixesWithEmptyPath(t *testing.T) {
 		Category:       "bug",
 		Severity:       "high",
 	}
-	result := sarifResultFromComment(c)
+	result := sarifResultFromComment(c, false)
 	if result.Locations != nil {
 		t.Errorf("Locations should be nil when Path is empty")
 	}
@@ -723,7 +723,7 @@ func TestSarifResults_DuplicateFingerprints(t *testing.T) {
 		{Path: "a.go", Content: "SQL injection 2", Category: "security", ExistingCode: "query('SELECT * FROM users WHERE id=' + id)", StartLine: 20, EndLine: 20},
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF(comments, "v1", nil, nil); err != nil {
+		if err := outputSARIF(comments, "v1", nil, nil, false); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -751,5 +751,85 @@ func TestOutputPreview_SarifRejects(t *testing.T) {
 	err := outputPreview(p, "sarif")
 	if err == nil {
 		t.Error("outputPreview should return an error for sarif format")
+	}
+}
+
+// TestOutputSARIF_ThinkingHiddenByDefault verifies Thinking is NOT appended to
+// message.text unless showThinking is true (backward-compatible SARIF output).
+func TestOutputSARIF_ThinkingHiddenByDefault(t *testing.T) {
+	comment := model.LlmComment{
+		Path:      "a.go",
+		Content:   "test",
+		Thinking:  "internal reasoning",
+		StartLine: 1,
+		EndLine:   1,
+		Category:  "bug",
+		Severity:  "high",
+	}
+	out := captureStdout(t, func() {
+		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, false); err != nil {
+			t.Fatalf("outputSARIF: %v", err)
+		}
+	})
+	doc := mustUnmarshal(t, out)
+	result := mustGetResult(t, doc)
+	msg := result["message"].(map[string]any)
+	if msg["text"] != "test" {
+		t.Errorf("message.text = %v, want %q", msg["text"], "test")
+	}
+}
+
+// TestOutputSARIF_ThinkingRendered verifies Thinking is appended after Content
+// when showThinking is true, preserving all other fields.
+func TestOutputSARIF_ThinkingRendered(t *testing.T) {
+	comment := model.LlmComment{
+		Path:      "a.go",
+		Content:   "test",
+		Thinking:  "internal reasoning",
+		StartLine: 1,
+		EndLine:   1,
+		Category:  "bug",
+		Severity:  "high",
+	}
+	out := captureStdout(t, func() {
+		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, true); err != nil {
+			t.Fatalf("outputSARIF: %v", err)
+		}
+	})
+	doc := mustUnmarshal(t, out)
+	result := mustGetResult(t, doc)
+	msg := result["message"].(map[string]any)
+	want := "test\n\n" + "Thinking: " + "internal reasoning"
+	if msg["text"] != want {
+		t.Errorf("message.text = %v, want %q", msg["text"], want)
+	}
+	// Other fields must be unchanged.
+	if result["ruleId"] != "bug" || result["level"] != "error" {
+		t.Errorf("ruleId/level changed: ruleId=%v level=%v", result["ruleId"], result["level"])
+	}
+}
+
+// TestOutputSARIF_ThinkingEmptySkipped verifies an empty Thinking field does not
+// append a "Thinking: " prefix even when showThinking is true.
+func TestOutputSARIF_ThinkingEmptySkipped(t *testing.T) {
+	comment := model.LlmComment{
+		Path:      "a.go",
+		Content:   "test",
+		Thinking:  "",
+		StartLine: 1,
+		EndLine:   1,
+		Category:  "bug",
+		Severity:  "high",
+	}
+	out := captureStdout(t, func() {
+		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, true); err != nil {
+			t.Fatalf("outputSARIF: %v", err)
+		}
+	})
+	doc := mustUnmarshal(t, out)
+	result := mustGetResult(t, doc)
+	msg := result["message"].(map[string]any)
+	if msg["text"] != "test" {
+		t.Errorf("message.text = %v, want %q", msg["text"], "test")
 	}
 }

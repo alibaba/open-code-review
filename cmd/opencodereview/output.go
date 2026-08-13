@@ -19,13 +19,13 @@ import (
 	"github.com/alibaba/open-code-review/internal/suggestdiff"
 )
 
-func outputText(comments []model.LlmComment) {
+func outputText(comments []model.LlmComment, showThinking bool) {
 	if len(comments) == 0 {
 		fmt.Println("No comments generated. Looks good to me.")
 		return
 	}
 	for _, c := range comments {
-		renderComment(c)
+		renderComment(c, showThinking)
 	}
 }
 
@@ -63,11 +63,11 @@ func isSubtaskErrorType(warningType string) bool {
 	return warningType == "subtask_error" || warningType == "scan_subtask_error"
 }
 
-func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning, manifest *session.RunManifest) {
+func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning, manifest *session.RunManifest, showThinking bool) {
 	if manifest != nil {
 		fmt.Println(manifestMessage(manifest, len(comments)))
 		for _, c := range comments {
-			renderComment(c)
+			renderComment(c, showThinking)
 		}
 	} else if len(comments) == 0 {
 		if hasSubtaskErrors(warnings) {
@@ -77,7 +77,7 @@ func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		}
 	} else {
 		for _, c := range comments {
-			renderComment(c)
+			renderComment(c, showThinking)
 		}
 	}
 	for _, w := range warnings {
@@ -88,7 +88,7 @@ func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	}
 }
 
-func renderComment(comment model.LlmComment) {
+func renderComment(comment model.LlmComment, showThinking bool) {
 	lines := buildDiffLines(comment)
 	if len(lines) == 0 && comment.Content == "" {
 		return
@@ -111,6 +111,23 @@ func renderComment(comment model.LlmComment) {
 				ln = color + badge + "\033[0m" + ln[len(badge):]
 			}
 			fmt.Printf("%s\n", ln)
+		}
+		fmt.Println()
+	}
+
+	// Render the LLM's reasoning after the content block and before the diff
+	// block, only when explicitly requested. Thinking stays hidden by default so
+	// the human-readable terminal stays compact; machine-readable JSON already
+	// carries it via omitempty (see #773).
+	if showThinking && comment.Thinking != "" {
+		// Account for prefix width to maintain consistent total line width
+		wrapped := wrapByRunes(sanitizeTerminal(comment.Thinking), 88)
+		for i, ln := range wrapped {
+			if i == 0 {
+				fmt.Printf("\033[2m> Thinking: %s\033[0m\n", ln)
+			} else {
+				fmt.Printf("\033[2m> %s\033[0m\n", ln)
+			}
 		}
 		fmt.Println()
 	}

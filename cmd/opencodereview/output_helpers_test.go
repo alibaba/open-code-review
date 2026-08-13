@@ -416,7 +416,7 @@ func captureStderr(t *testing.T, fn func()) string {
 
 func TestOutputText_NoComments(t *testing.T) {
 	got := captureStdout(t, func() {
-		outputText(nil)
+		outputText(nil, false)
 	})
 	if !strings.Contains(got, "Looks good to me") {
 		t.Errorf("expected 'Looks good to me', got %q", got)
@@ -428,7 +428,7 @@ func TestOutputText_WithComments(t *testing.T) {
 		{Path: "main.go", StartLine: 10, EndLine: 15, Content: "potential nil dereference"},
 	}
 	got := captureStdout(t, func() {
-		outputText(comments)
+		outputText(comments, false)
 	})
 	if !strings.Contains(got, "main.go") {
 		t.Errorf("expected path in output, got %q", got)
@@ -441,7 +441,7 @@ func TestOutputText_WithComments(t *testing.T) {
 func TestOutputTextWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	warnings := []agent.AgentWarning{{Type: "warning", File: "x.go", Message: "slow"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(nil, warnings, nil)
+		outputTextWithWarnings(nil, warnings, nil, false)
 	})
 	if !strings.Contains(got, "Looks good to me") {
 		t.Errorf("expected 'Looks good to me', got %q", got)
@@ -451,7 +451,7 @@ func TestOutputTextWithWarnings_NoCommentsNoErrors(t *testing.T) {
 func TestOutputTextWithWarnings_NoCommentsWithSubtaskError(t *testing.T) {
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "y.go", Message: "failed"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(nil, warnings, nil)
+		outputTextWithWarnings(nil, warnings, nil, false)
 	})
 	if !strings.Contains(got, "could not be reviewed") {
 		t.Errorf("expected subtask error message, got %q", got)
@@ -464,7 +464,7 @@ func TestOutputTextWithWarnings_WithComments(t *testing.T) {
 	}
 	warnings := []agent.AgentWarning{{Type: "info", File: "b.go", Message: "note"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(comments, warnings, nil)
+		outputTextWithWarnings(comments, warnings, nil, false)
 	})
 	if !strings.Contains(got, "a.go") {
 		t.Errorf("expected comment path, got %q", got)
@@ -476,7 +476,7 @@ func TestOutputTextWithWarnings_WithComments(t *testing.T) {
 
 func TestRenderComment_EmptyContentNoDiff(t *testing.T) {
 	got := captureStdout(t, func() {
-		renderComment(model.LlmComment{Path: "skip.go", StartLine: 1, EndLine: 1, Content: "", ExistingCode: "", SuggestionCode: ""})
+		renderComment(model.LlmComment{Path: "skip.go", StartLine: 1, EndLine: 1, Content: "", ExistingCode: "", SuggestionCode: ""}, false)
 	})
 	if got != "" {
 		t.Errorf("expected empty output for empty comment, got %q", got)
@@ -485,7 +485,7 @@ func TestRenderComment_EmptyContentNoDiff(t *testing.T) {
 
 func TestRenderComment_ContentOnly(t *testing.T) {
 	got := captureStdout(t, func() {
-		renderComment(model.LlmComment{Path: "file.go", StartLine: 5, EndLine: 10, Content: "consider renaming"})
+		renderComment(model.LlmComment{Path: "file.go", StartLine: 5, EndLine: 10, Content: "consider renaming"}, false)
 	})
 	if !strings.Contains(got, "file.go:5-10") {
 		t.Errorf("expected path:line range, got %q", got)
@@ -504,7 +504,7 @@ func TestRenderComment_WithDiff(t *testing.T) {
 			Content:        "rename var",
 			ExistingCode:   "old := 1\n",
 			SuggestionCode: "new := 1\n",
-		})
+		}, false)
 	})
 	if !strings.Contains(got, "diff.go:1-2") {
 		t.Errorf("expected path:line range, got %q", got)

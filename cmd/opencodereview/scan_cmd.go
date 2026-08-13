@@ -36,6 +36,7 @@ type scanOptions struct {
 	maxTools        int
 	maxGitProcs     int
 	preview         bool
+	showThinking    bool
 	noPlan          bool
 	noDedup         bool
 	noSummary       bool
@@ -231,7 +232,7 @@ func executeScan(opts scanOptions) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, nil)
+	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, opts.showThinking, q, llmIdentity, nil)
 }
 
 func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (*session.ResumeState, error) {

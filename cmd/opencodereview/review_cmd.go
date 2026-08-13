@@ -47,6 +47,7 @@ type reviewOptions struct {
 	maxTokensBudget int
 	noFilter        bool
 	preview         bool
+	showThinking    bool
 }
 
 var reviewOpts reviewOptions
@@ -262,7 +263,7 @@ func executeReview(opts reviewOptions) error {
 	var emitErr error
 	emitted := manifest != nil || runErr == nil
 	if emitted {
-		emitErr = emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, retryReport)
+		emitErr = emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, opts.showThinking, q, llmIdentity, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		}

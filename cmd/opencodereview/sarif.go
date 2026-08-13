@@ -128,7 +128,7 @@ type sarifNotification struct {
 // warnings as tool execution notifications. When comments is empty or nil,
 // results is an empty array (not null), so the document remains structurally
 // valid for SARIF consumers.
-func outputSARIF(comments []model.LlmComment, version string, warnings []agent.AgentWarning, manifest *session.RunManifest) error {
+func outputSARIF(comments []model.LlmComment, version string, warnings []agent.AgentWarning, manifest *session.RunManifest, showThinking bool) error {
 	report := sarifReport{
 		Schema:  sarifSchema,
 		Version: sarifVersion,
@@ -141,7 +141,7 @@ func outputSARIF(comments []model.LlmComment, version string, warnings []agent.A
 					Rules:          sarifRules(),
 				},
 			},
-			Results:     sarifResults(comments),
+			Results:     sarifResults(comments, showThinking),
 			Invocations: []sarifInvocation{sarifInvocationFromRun(warnings, manifest, len(comments))},
 		}},
 	}
@@ -192,12 +192,12 @@ func sarifSeverityLevel(severity string) string {
 // SQL injection patterns in the same file), an occurrence index is appended to
 // each duplicate so GitHub Code Scanning tracks them as separate alerts rather
 // than folding them into one.
-func sarifResults(comments []model.LlmComment) []sarifResult {
+func sarifResults(comments []model.LlmComment, showThinking bool) []sarifResult {
 	results := make([]sarifResult, 0, len(comments))
 	// Track occurrence counts per base fingerprint to disambiguate duplicates.
 	seen := make(map[string]int, len(comments))
 	for _, c := range comments {
-		r := sarifResultFromComment(c)
+		r := sarifResultFromComment(c, showThinking)
 		// Disambiguate duplicate fingerprints by appending an occurrence index.
 		baseFP := r.PartialFingerprints[sarifFingerprintKey]
 		count := seen[baseFP]
@@ -225,16 +225,20 @@ func sarifResults(comments []model.LlmComment) []sarifResult {
 // the SARIF schema and cannot be omitted. When the region is invalid (zero
 // or inverted), the suggestion is still conveyed in message.text but no
 // machine-readable fix is emitted.
-func sarifResultFromComment(c model.LlmComment) sarifResult {
+func sarifResultFromComment(c model.LlmComment, showThinking bool) sarifResult {
 	category := c.Category
 	if category == "" {
 		category = "other"
 	}
 
+	message := c.Content
+	if showThinking && c.Thinking != "" {
+		message = c.Content + "\n\n" + "Thinking: " + c.Thinking
+	}
 	result := sarifResult{
 		RuleID:              category,
 		Level:               sarifSeverityLevel(c.Severity),
-		Message:             sarifMessage{Text: c.Content},
+		Message:             sarifMessage{Text: message},
 		PartialFingerprints: sarifFingerprints(c, category),
 	}
 
