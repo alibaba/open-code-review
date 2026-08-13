@@ -16,7 +16,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildGitHubBadge, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks } = require(path.join(__dirname, "post-review-comments.js"));
 
 // REVIEW_TAG as the production code builds it for this test's hardcoded run
 // identity (context.runId=undefined -> 0, runAttempt=undefined -> 1). Used as
@@ -1714,6 +1714,52 @@ function testBuildBadgeMatchesCliDegeneration() {
   assert.strictEqual(buildBadge({ category: "\n\r\t", severity: "\n" }), "");
 }
 
+// #882: the GitHub surface upgrades complete, known metadata to one flat
+// two-segment Shields badge. Category remains neutral; severity supplies the
+// accessible, fixed color mapping. buildBadge itself stays unchanged above.
+function testBuildGitHubBadgeUsesFlatShieldsRendering() {
+  const colors = {
+    critical: "82071e",
+    high: "b60205",
+    medium: "a45a00",
+    low: "1a7f37",
+  };
+  // Cover every category/severity combination. This pins the complete schema
+  // allowlist and proves that only predetermined labels/messages/colors enter
+  // a Shields URL, never arbitrary model-provided metadata.
+  for (const category of CATEGORIES) {
+    for (const severity of SEVERITIES) {
+      assert.ok(colors[severity], `missing graphical badge color for ${severity}`);
+      assert.strictEqual(
+        buildGitHubBadge({ category, severity }),
+        `![${category} · ${severity}](` +
+          `https://img.shields.io/badge/${category.toUpperCase()}-${severity.toUpperCase()}-${colors[severity]}` +
+          "?style=flat&labelColor=24292f)"
+      );
+    }
+  }
+  // Schema values are case-insensitive at the GitHub presentation boundary.
+  assert.strictEqual(
+    buildGitHubBadge({ category: "Bug", severity: "HIGH" }),
+    "![bug · high](https://img.shields.io/badge/BUG-HIGH-b60205?style=flat&labelColor=24292f)"
+  );
+  // The existing sanitizer removes layout-breaking controls before enum
+  // validation, so otherwise valid metadata is still rendered safely.
+  assert.strictEqual(
+    buildGitHubBadge({ category: "bu\ng", severity: "hi\tgh" }),
+    "![bug · high](https://img.shields.io/badge/BUG-HIGH-b60205?style=flat&labelColor=24292f)"
+  );
+}
+
+function testBuildGitHubBadgeFallsBackToCanonicalText() {
+  assert.strictEqual(buildGitHubBadge({ category: "bug" }), "[bug]");
+  assert.strictEqual(buildGitHubBadge({ severity: "high" }), "[high]");
+  assert.strictEqual(buildGitHubBadge({ category: "custom", severity: "high" }), "[custom · high]");
+  assert.strictEqual(buildGitHubBadge({ category: "bug", severity: "urgent" }), "[bug · urgent]");
+  assert.strictEqual(buildGitHubBadge({}), "");
+  assert.strictEqual(buildGitHubBadge(null), "");
+}
+
 function testSanitizeMetadataStripsControlChars() {
   assert.strictEqual(sanitizeMetadata("clean"), "clean");
   assert.strictEqual(sanitizeMetadata("a\nb"), "ab");
@@ -1855,11 +1901,21 @@ function testFormatCommentBadgePlacement() {
   // with id and badge: id HTML comment stays first, badge on the next line
   const withBadge = formatComment({ content: "body", category: "bug", severity: "high" }, "ocr-1-1-abcd");
   assert.ok(withBadge.startsWith("<!-- ocr-1-1-abcd -->\n"), "id HTML comment is the first bytes");
-  assert.ok(withBadge.startsWith("<!-- ocr-1-1-abcd -->\n[bug · high]\n"), "badge follows id line");
+  assert.ok(
+    withBadge.startsWith(
+      "<!-- ocr-1-1-abcd -->\n" +
+        "![bug · high](https://img.shields.io/badge/BUG-HIGH-b60205?style=flat&labelColor=24292f)\n"
+    ),
+    "graphical badge follows id line"
+  );
   assert.ok(withBadge.endsWith("body"), "content preserved at the end");
   // without id: badge is the first line
   const noId = formatComment({ content: "body", category: "style", severity: "low" });
-  assert.ok(noId.startsWith("[style · low]\n"));
+  assert.ok(
+    noId.startsWith(
+      "![style · low](https://img.shields.io/badge/STYLE-LOW-1a7f37?style=flat&labelColor=24292f)\n"
+    )
+  );
   // no metadata -> no badge line at all (byte-identical to pre-change output)
   const noBadge = formatComment({ content: "body" }, "ocr-1-1-abcd");
   assert.strictEqual(noBadge, "<!-- ocr-1-1-abcd -->\nbody");
@@ -1868,7 +1924,7 @@ function testFormatCommentBadgePlacement() {
     { content: "c", category: "bug", severity: "high", existing_code: "old", suggestion_code: "new" },
     "ocr-1-1-abcd"
   );
-  assert.match(withSuggestion, /\[bug · high\]/);
+  assert.match(withSuggestion, /!\[bug · high\]\(https:\/\/img\.shields\.io\/badge\/BUG-HIGH-b60205/);
   assert.match(withSuggestion, /\*\*Suggestion:\*\*/);
   assert.match(withSuggestion, /```suggestion/);
 }
@@ -1878,7 +1934,12 @@ function testFormatCommentBadgePlacement() {
 function testFormatCommentMarkdownBadgePlacement() {
   const md = formatCommentMarkdown({ path: "a.js", content: "body", category: "bug", severity: "high" });
   // badge is the first line, before the heading
-  assert.ok(md.startsWith("[bug · high]\n"), "badge is the leading line");
+  assert.ok(
+    md.startsWith(
+      "![bug · high](https://img.shields.io/badge/BUG-HIGH-b60205?style=flat&labelColor=24292f)\n"
+    ),
+    "graphical badge is the leading line"
+  );
   assert.match(md, /### 📄 `a.js`/);
   assert.match(md, /body/);
   // no metadata -> no badge line, heading is first (byte-identical to pre-change)
@@ -2170,6 +2231,8 @@ async function main() {
   await testBatchTelemetryOutputs();
   // Badge + publication policy (#478)
   testBuildBadgeMatchesCliDegeneration();
+  testBuildGitHubBadgeUsesFlatShieldsRendering();
+  testBuildGitHubBadgeFallsBackToCanonicalText();
   testSanitizeMetadataStripsControlChars();
   testBuildPolicyFailsOpenOnMalformed();
   testRouteCommentUnknownMetadataNeverRouted();

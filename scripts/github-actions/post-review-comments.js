@@ -61,6 +61,22 @@ const SEVERITY_RANK = new Map(
   SEVERITIES.map((s, i) => [s, SEVERITIES.length - i])
 ); // critical=4, high=3, medium=2, low=1
 
+// GitHub review comments support Markdown images but do not expose a native
+// severity-pill field to third-party Actions. Render the two structured
+// metadata dimensions as one compact Shields badge instead: category stays on
+// the neutral left segment and severity controls the right-segment color.
+// Values are fixed enums, not arbitrary model output, so no untrusted text is
+// interpolated into the image URL.
+const GITHUB_BADGE_LABEL_COLOR = "24292f";
+// Keep Shields' white text legible while following #882's requested semantic
+// progression: low=green, medium=orange, high=red, critical=dark red.
+const GITHUB_BADGE_SEVERITY_COLORS = Object.freeze({
+  critical: "82071e",
+  high: "b60205",
+  medium: "a45a00",
+  low: "1a7f37",
+});
+
 // Sentinel policy object: "do not route anything". Returned by buildPolicy on
 // any parse problem so the partition loop falls open to today's behavior (I1).
 // Equivalently produced by an empty policy (no threshold, no categories).
@@ -1380,6 +1396,29 @@ function buildBadge(comment) {
   return "";
 }
 
+// Build the GitHub-only graphical rendering of the category/severity badge.
+// Keep buildBadge as the canonical text representation (and CLI byte-match),
+// then enhance it only when both values normalize to known schema enums. The
+// alt text carries the same metadata for image-disabled and assistive clients;
+// missing or unknown values fall back to the canonical plain-text badge.
+function buildGitHubBadge(comment) {
+  const fallback = buildBadge(comment);
+  const category = sanitizeMetadata(comment && comment.category).trim().toLowerCase();
+  const severity = sanitizeMetadata(comment && comment.severity).trim().toLowerCase();
+  if (!CATEGORIES.includes(category) || !SEVERITY_RANK.has(severity)) {
+    return fallback;
+  }
+
+  const color = GITHUB_BADGE_SEVERITY_COLORS[severity];
+  if (!color) return fallback;
+  const label = category.toUpperCase();
+  const message = severity.toUpperCase();
+  const url =
+    `https://img.shields.io/badge/${label}-${message}-${color}` +
+    `?style=flat&labelColor=${GITHUB_BADGE_LABEL_COLOR}`;
+  return `![${category} · ${severity}](${url})`;
+}
+
 // Parse the publication policy from the raw opt-in inputs. Returns a normalized
 // policy object, or the NO_ROUTING sentinel when no routing is requested or any
 // value is malformed (fail-open for the policy itself, upholding I1).
@@ -1467,7 +1506,7 @@ function routeComment(comment, policy) {
 // as the first visible line. The code suggestion block is appended if present.
 function formatComment(comment, id) {
   let body = id ? `<!-- ${id} -->\n` : "";
-  const badge = buildBadge(comment);
+  const badge = buildGitHubBadge(comment);
   if (badge) body += `${badge}\n`;
   body += comment.content || "";
   if (comment.suggestion_code && comment.existing_code) {
@@ -1483,7 +1522,7 @@ function formatCommentMarkdown(comment, error) {
   // with formatComment), so the heading/reason lines still anchor the comment
   // and existing substring assertions on them are unaffected. The badge is ""
   // for any finding without category/severity metadata.
-  const badge = buildBadge(comment);
+  const badge = buildGitHubBadge(comment);
   if (badge) md += `${badge}\n`;
   md += `### 📄 \`${comment.path}\``;
   if (comment.start_line && comment.end_line) {
@@ -2087,6 +2126,7 @@ module.exports = {
   newCommentId,
   sanitizeMetadata,
   buildBadge,
+  buildGitHubBadge,
   buildPolicy,
   routeComment,
   formatComment,
