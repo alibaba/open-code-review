@@ -1421,7 +1421,7 @@ func TestNewLLMClient_Dispatch(t *testing.T) {
 				Model:    "test-model",
 				Protocol: tt.protocol,
 			}
-			client := NewLLMClient(ep)
+			client := NewLLMClient(ep, nil)
 			got := typeName(client)
 			if got != tt.want {
 				t.Errorf("NewLLMClient(protocol=%q) = %s, want %s", tt.protocol, got, tt.want)
@@ -1440,7 +1440,7 @@ func TestNewLLMClient_OpenAIAliasDispatchesToOpenAIClient(t *testing.T) {
 		Model:    "test-model",
 		Protocol: NormalizeProtocol("openai"),
 	}
-	client := NewLLMClient(ep)
+	client := NewLLMClient(ep, nil)
 	if got := typeName(client); got != "*llm.OpenAIClient" {
 		t.Errorf("NormalizeProtocol(\"openai\") dispatched to %s, want *llm.OpenAIClient", got)
 	}

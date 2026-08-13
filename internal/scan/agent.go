@@ -146,6 +146,9 @@ func NewAgent(args Args) *Agent {
 		// line-number resolver (resolveFromFileContent) can match against
 		// the full file content of the scanned file.
 		DiffLookup: a.lookupDiff,
+		// NewRequestMeta is deliberately left nil. The retry report describes
+		// ocr review; scan shares this Runner, and a nil factory is what keeps
+		// scan's requests out of the report. See llmloop.Deps.NewRequestMeta.
 	})
 	return a
 }

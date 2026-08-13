@@ -1380,6 +1380,73 @@ function buildBadge(comment) {
   return "";
 }
 
+// Shields.io color per severity, following the reviewer-suggested scale in
+// #882 (low -> green, medium -> orange, high -> red). "critical" is not in
+// that three-level scale; it extends it one step hotter (darkred, a standard
+// CSS color name shields.io accepts). Keys match SEVERITIES.
+const SEVERITY_BADGE_COLOR = Object.freeze({
+  critical: "darkred",
+  high: "red",
+  medium: "orange",
+  low: "green",
+});
+// Fallback color when severity is missing or not a known enum member. The
+// reviewer's guidance was to render these rather than fall back to plain text,
+// with any color acceptable; blue reads as informational.
+const CATEGORY_BADGE_COLOR = "blue";
+
+// Escape a value for a shields.io static-badge path segment ("-" separates
+// segments, "_" renders as a space). Our enum values contain neither, but the
+// escape keeps the helper correct if the enums ever grow such a value.
+function shieldsEscape(value) {
+  return encodeURIComponent(value.replace(/-/g, "--").replace(/_/g, "__"));
+}
+
+// Escape Markdown image alt text. The alt is derived from the plain-text badge
+// whose metadata has had control chars stripped but may still carry
+// Markdown-special characters (e.g. a stray "]" from high-temperature model
+// output), which would prematurely close the image's [...] alt span. Escaping
+// "\", "[", and "]" keeps the image intact and the alt rendering to the literal
+// text. "[" is escaped defensively; "]" and "\" are the structural ones.
+function escapeMarkdownAlt(value) {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]");
+}
+
+// Build the category/severity badge as a single shields.io static badge
+// (#882) for surfaces that render Markdown (GitHub review/summary comments),
+// in the format img.shields.io/badge/<label>-<color>. flat is shields.io's
+// default style, so the URL carries no style parameter. The image's alt text
+// is the plain-text badge content from buildBadge (with Markdown-special
+// characters escaped), so screen readers and image-load failures degrade to
+// the previous text form.
+//
+//   both fields -> ![category · severity](…/badge/category-severity-<color>)
+//   one field   -> ![field](…/badge/field-<color>)
+//   neither     -> "" (no badge line)
+//
+// The color comes from the severity when known, otherwise the fixed category
+// color — no lookup can ever yield "undefined". Values are sanitized (control
+// chars stripped) and URL-escaped before interpolation, so rendering an
+// unrecognized value is safe: it is only ever the same text already shown in
+// the plain-text badge. This is a deliberate divergence from strict CLI
+// byte-parity (I6): the CLI keeps the plain-text badge (a terminal cannot
+// render images); the alt text preserves the shared form across surfaces.
+function buildBadgeImage(comment) {
+  const text = buildBadge(comment);
+  if (text === "") return "";
+  const category = sanitizeMetadata(comment && comment.category).trim().toLowerCase();
+  const severity = sanitizeMetadata(comment && comment.severity).trim().toLowerCase();
+  const color = SEVERITY_BADGE_COLOR[severity] || CATEGORY_BADGE_COLOR;
+  const alt = escapeMarkdownAlt(text.slice(1, -1)); // "[bug · high]" -> "bug · high"
+  const label = category && severity
+    ? `${shieldsEscape(category)}-${shieldsEscape(severity)}`
+    : shieldsEscape(category || severity);
+  return `![${alt}](https://img.shields.io/badge/${label}-${color})`;
+}
+
 // Parse the publication policy from the raw opt-in inputs. Returns a normalized
 // policy object, or the NO_ROUTING sentinel when no routing is requested or any
 // value is malformed (fail-open for the policy itself, upholding I1).
@@ -1467,7 +1534,7 @@ function routeComment(comment, policy) {
 // as the first visible line. The code suggestion block is appended if present.
 function formatComment(comment, id) {
   let body = id ? `<!-- ${id} -->\n` : "";
-  const badge = buildBadge(comment);
+  const badge = buildBadgeImage(comment);
   if (badge) body += `${badge}\n`;
   body += comment.content || "";
   if (comment.suggestion_code && comment.existing_code) {
@@ -1483,7 +1550,7 @@ function formatCommentMarkdown(comment, error) {
   // with formatComment), so the heading/reason lines still anchor the comment
   // and existing substring assertions on them are unaffected. The badge is ""
   // for any finding without category/severity metadata.
-  const badge = buildBadge(comment);
+  const badge = buildBadgeImage(comment);
   if (badge) md += `${badge}\n`;
   md += `### 📄 \`${comment.path}\``;
   if (comment.start_line && comment.end_line) {
@@ -2105,6 +2172,8 @@ module.exports = {
   setStatsOutputs,
   DEFAULT_BATCH_SIZE,
   buildRunTags,
+  buildBadgeImage,
+  SEVERITY_BADGE_COLOR,
   NO_ROUTING,
   CATEGORIES,
   SEVERITIES,
