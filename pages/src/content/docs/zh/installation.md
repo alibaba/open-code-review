@@ -75,6 +75,11 @@ sudo port upgrade open-code-review
 curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
 ```
 
+__在部分网络访问 GitHub 较慢的地区，可以设置一个 GitHub 镜像域名，通过镜像下载资源。__
+```bash
+export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
+```
+
 它识别两个环境变量：
 
 | 变量 | 默认值 | 用途 |

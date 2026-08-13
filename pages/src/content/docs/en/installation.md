@@ -79,6 +79,11 @@ machines:
 curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
 ```
 
+__In some regions where network access to GitHub is slow, set a GitHub mirror domain to download assets through a mirror.__
+```bash
+export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
+```
+
 It honours two environment variables:
 
 | Variable | Default | Purpose |

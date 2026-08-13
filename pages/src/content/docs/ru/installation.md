@@ -77,6 +77,11 @@ sudo port upgrade open-code-review
 curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
 ```
 
+__В некоторых регионах доступ к GitHub может быть медленным. В этом случае задайте домен зеркала GitHub, чтобы загружать артефакты через него.__
+```bash
+export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
+```
+
 Скрипт учитывает две переменные окружения:
 
 | Переменная | По умолчанию | Назначение |

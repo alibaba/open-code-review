@@ -77,6 +77,11 @@ GitHub Release バイナリのダウンロード（検証付き）をラップ�
 curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
 ```
 
+__一部の地域では GitHub へのネットワークアクセスが遅いため、GitHub ミラードメインを設定すると、ミラー経由でアセットをダウンロードできます。__
+```bash
+export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
+```
+
 2 つの環境変数を認識します。
 
 | 変数 | デフォルト値 | 用途 |
