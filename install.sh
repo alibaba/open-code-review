@@ -44,6 +44,7 @@ main() {
 
   asset="${ASSET_PREFIX}-${os}-${arch}"
   if [ -n "${GITHUB_MIRROR_DOMAIN_PREFIX:-}" ]; then
+    echo "WARNING: Using an official mirror domain, which may lead to SHA256 checksum mismatches and security risks."
     base="https://${GITHUB_MIRROR_DOMAIN_PREFIX}/github.com/$REPO/releases/download/$VERSION"
   else
     base="https://github.com/$REPO/releases/download/$VERSION"

@@ -84,12 +84,15 @@ __In some regions where network access to GitHub is slow, set a GitHub mirror do
 export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
 ```
 
-It honours two environment variables:
+> **Security note:** The mirror is a third-party service — both the binary and its `sha256sum.txt` are downloaded from the mirror, so a compromised mirror could serve a tampered binary with a matching checksum; the checksum check alone is not a guarantee. For security-critical installs, download directly from GitHub or verify against the upstream `sha256sum.txt` on the [releases page](https://github.com/alibaba/open-code-review/releases).
+
+It honours three environment variables:
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | Where to place the `ocr` binary. |
 | `OCR_VERSION` | latest release | Pin a specific release tag (e.g. `v1.2.3`). |
+| `GITHUB_MIRROR_DOMAIN_PREFIX` | *(unset)* | Download release assets through a GitHub mirror domain (e.g. `gh-proxy.com`). |
 
 The script supports `darwin` and `linux` on `amd64` / `arm64`.
 
@@ -104,9 +107,10 @@ __To download through a mirror when GitHub access is slow, set the same mirror d
 $env:GITHUB_MIRROR_DOMAIN_PREFIX = 'gh-proxy.com'
 ```
 
-It honours the same `OCR_INSTALL_DIR` and `OCR_VERSION` variables (set via
-`$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION`). The default install location is
-`%LOCALAPPDATA%\Programs\ocr`.
+It honours the same `OCR_INSTALL_DIR`, `OCR_VERSION`, and
+`GITHUB_MIRROR_DOMAIN_PREFIX` variables (set via `$env:OCR_INSTALL_DIR` /
+`$env:OCR_VERSION` / `$env:GITHUB_MIRROR_DOMAIN_PREFIX`). The default
+install location is `%LOCALAPPDATA%\Programs\ocr`.
 
 ## GitHub Release binary
 

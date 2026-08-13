@@ -82,12 +82,15 @@ __В некоторых регионах доступ к GitHub может бы�
 export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
 ```
 
-Скрипт учитывает две переменные окружения:
+> **Примечание по безопасности:** Зеркало — это сторонний сервис. Поскольку и бинарник, и `sha256sum.txt` загружаются с зеркала, скомпрометированное зеркало может отдать подменённый бинарник вместе с подходящей контрольной суммой — проверка контрольной суммы сама по себе не является гарантией безопасности. Для установок с высокими требованиями к безопасности скачивайте напрямую с GitHub или сверяйтесь с оригинальным `sha256sum.txt` на [странице релизов](https://github.com/alibaba/open-code-review/releases).
+
+Скрипт учитывает три переменные окружения:
 
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | Куда положить бинарник `ocr`. |
 | `OCR_VERSION` | последний релиз | Закрепить конкретный тег релиза (например `v1.2.3`). |
+| `GITHUB_MIRROR_DOMAIN_PREFIX` | не задана | Скачивать артефакты релиза через зеркало GitHub (например `gh-proxy.com`). |
 
 Скрипт поддерживает `darwin` и `linux` на `amd64` / `arm64`.
 
@@ -102,9 +105,10 @@ __Если доступ к GitHub медленный, задайте тот же
 $env:GITHUB_MIRROR_DOMAIN_PREFIX = 'gh-proxy.com'
 ```
 
-Установщик учитывает те же переменные `OCR_INSTALL_DIR` и `OCR_VERSION` (через
-`$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION`). По умолчанию файлы устанавливаются
-в `%LOCALAPPDATA%\Programs\ocr`.
+Установщик учитывает те же переменные `OCR_INSTALL_DIR`, `OCR_VERSION` и
+`GITHUB_MIRROR_DOMAIN_PREFIX` (через `$env:OCR_INSTALL_DIR` /
+`$env:OCR_VERSION` / `$env:GITHUB_MIRROR_DOMAIN_PREFIX`). По умолчанию файлы
+устанавливаются в `%LOCALAPPDATA%\Programs\ocr`.
 
 ## Бинарник из GitHub Release
 

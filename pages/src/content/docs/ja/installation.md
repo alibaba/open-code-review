@@ -82,12 +82,15 @@ __一部の地域では GitHub へのネットワークアクセスが遅いた�
 export GITHUB_MIRROR_DOMAIN_PREFIX='gh-proxy.com'
 ```
 
-2 つの環境変数を認識します。
+> **セキュリティ上の注意：** ミラーは第三者のサービスです。バイナリと `sha256sum.txt` の両方がミラーから取得されるため、侵害されたミラーは改ざんされたバイナリと一致するチェックサムを配信する可能性があり、チェックサム検証だけでは安全性を保証できません。セキュリティが重要なインストールでは、GitHub から直接ダウンロードするか、[releases ページ](https://github.com/alibaba/open-code-review/releases) のアップストリームの `sha256sum.txt` で検証してください。
+
+3 つの環境変数を認識します。
 
 | 変数 | デフォルト値 | 用途 |
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | `ocr` バイナリを配置する場所。 |
 | `OCR_VERSION` | 最新 release | 特定の release tag に固定します（例：`v1.2.3`）。 |
+| `GITHUB_MIRROR_DOMAIN_PREFIX` | （未設定） | GitHub ミラードメイン経由でリリースアセットをダウンロードします（例：`gh-proxy.com`）。 |
 
 このスクリプトは `darwin` と `linux` の `amd64` / `arm64` をサポートします。
 
@@ -102,8 +105,9 @@ __GitHub へのアクセスが遅い場合は、同じミラードメインを P
 $env:GITHUB_MIRROR_DOMAIN_PREFIX = 'gh-proxy.com'
 ```
 
-同じ `OCR_INSTALL_DIR` と `OCR_VERSION` を認識します（`$env:OCR_INSTALL_DIR` /
-`$env:OCR_VERSION` で設定）。デフォルトのインストール先は
+同じ `OCR_INSTALL_DIR`、`OCR_VERSION`、`GITHUB_MIRROR_DOMAIN_PREFIX` を認識します
+（`$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION` /
+`$env:GITHUB_MIRROR_DOMAIN_PREFIX` で設定）。デフォルトのインストール先は
 `%LOCALAPPDATA%\Programs\ocr` です。
 
 ## GitHub Release バイナリ

@@ -105,6 +105,7 @@ $os = 'windows'
 $Version = Resolve-OcrVersion $Repo
 $asset = "$AssetPrefix-$os-$arch.exe"
 if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_MIRROR_DOMAIN_PREFIX)) {
+    Write-Host "WARNING: Using an official mirror domain, which may lead to SHA256 checksum mismatches and security risks."
     $base = "https://$($env:GITHUB_MIRROR_DOMAIN_PREFIX.Trim())/github.com/$Repo/releases/download/$Version"
 } else {
     $base = "https://github.com/$Repo/releases/download/$Version"
