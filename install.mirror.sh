@@ -9,7 +9,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh -o install.sh
 #   less install.sh && sh install.sh
 # Env: OCR_INSTALL_DIR (default /usr/local/bin), OCR_VERSION (default latest),
-# Set a GITHUB_MIRROR_DOMAIN_PREFIX to download assests through a mirror domain.
+# Set a GITHUB_MIRROR_DOMAIN_PREFIX to download assets through a mirror domain.
 set -eu
 
 main() {
