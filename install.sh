@@ -8,7 +8,8 @@
 # Prefer to inspect first:
 #   curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh -o install.sh
 #   less install.sh && sh install.sh
-# Env: OCR_INSTALL_DIR (default /usr/local/bin), OCR_VERSION (default latest).
+# Env: OCR_INSTALL_DIR (default /usr/local/bin), OCR_VERSION (default latest),
+# Set a GITHUB_MIRROR_DOMAIN_PREFIX to download assets through a mirror domain.
 set -eu
 
 main() {
@@ -42,7 +43,11 @@ main() {
   fi
 
   asset="${ASSET_PREFIX}-${os}-${arch}"
-  base="https://github.com/$REPO/releases/download/$VERSION"
+  if [ -n "${GITHUB_MIRROR_DOMAIN_PREFIX:-}" ]; then
+    base="https://${GITHUB_MIRROR_DOMAIN_PREFIX}/github.com/$REPO/releases/download/$VERSION"
+  else
+    base="https://github.com/$REPO/releases/download/$VERSION"
+  fi
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' INT TERM EXIT
 
