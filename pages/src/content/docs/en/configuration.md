@@ -231,10 +231,10 @@ key — OCR substitutes the conversation's key per request and sends nothing
 otherwise:
 
 ```bash
-# OpenAI: prompt_cache_key request body field
+# By OpenAI-style request body field (e.g. prompt_cache_key)
 ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_key}"}'
 
-# Header-routed gateways (Cloudflare, Fireworks, Mistral commonly use x-session-affinity)
+# By HTTP header (e.g. x-session-affinity)
 ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
 ```
 

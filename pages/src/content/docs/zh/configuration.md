@@ -205,10 +205,10 @@ OCR 为每个 LLM 对话派生一个提示词缓存亲和性密钥，作用域�
 要启用，请在供应商期望的位置——`extra_headers` 或 `extra_body` 的值中——嵌入 `{ocr_session_key}` 模板变量。OCR 会在每个请求中将其替换为该对话的密钥；未配置时不会发送任何内容：
 
 ```bash
-# OpenAI：prompt_cache_key 请求体字段
+# 通过 OpenAI 风格的请求体字段传递（例如 prompt_cache_key）
 ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_key}"}'
 
-# 通过请求头路由的网关（Cloudflare、Fireworks、Mistral 通常使用 x-session-affinity）
+# 通过 HTTP 请求头传递（例如 x-session-affinity）
 ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
 ```
 

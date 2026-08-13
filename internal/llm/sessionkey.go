@@ -15,8 +15,8 @@ import (
 
 // SessionKeyTemplateVar is the placeholder users can embed in extra_headers
 // and extra_body values. Clients replace it with the run's session key, so
-// providers that route prompt-cache traffic by an explicit key (e.g.
-// x-session-affinity headers on Cloudflare/Fireworks/Mistral-style gateways)
+// providers that route prompt-cache traffic by an explicit key:
+// OpenAI-style request body field (e.g. prompt_cache_key) or an HTTP header (e.g. x-session-affinity)
 // can be configured without OCR knowing each provider's convention.
 const SessionKeyTemplateVar = "{ocr_session_key}"
 
