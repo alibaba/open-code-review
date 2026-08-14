@@ -226,6 +226,7 @@ var registry = []Provider{
 		BaseURL:     "https://open.bigmodel.cn/api/coding/paas/v4",
 		EnvVar:      "Z_AI_CODING_API_KEY",
 		Models: []string{
+			"glm-5.3",
 			"glm-5.2",
 			"glm-5.1",
 			"glm-5-turbo",
