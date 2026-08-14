@@ -6,11 +6,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -585,6 +588,60 @@ func TestReviewItemFingerprintIgnoresTrailingLineEndings(t *testing.T) {
 	withContextLine.Diff += "\n "
 	if got := reviewItemFingerprint(session.ReviewModeRange, withContextLine); got == want {
 		t.Error("fingerprint ignored a real trailing context line")
+	}
+}
+
+// TestReviewItemFingerprintStableAcrossPatchPosition pins down the --resume
+// guarantee end to end: the patch splitter leaves position-dependent trailing
+// line endings on each file section, so the fingerprint must be derived from
+// real diff.ParseDiffText output with the target file in different positions.
+func TestReviewItemFingerprintStableAcrossPatchPosition(t *testing.T) {
+	section := func(path, from, to string) string {
+		return "diff --git a/" + path + " b/" + path + "\n" +
+			"--- a/" + path + "\n+++ b/" + path + "\n" +
+			"@@ -1 +1 @@\n-" + from + "\n+" + to + "\n"
+	}
+
+	// Pre-create the files so finalizeDiff's working-tree read succeeds and the
+	// test does not emit spurious "cannot read file" warnings.
+	dir := t.TempDir()
+	for _, name := range []string{"a.go", "z.go"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("new\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	target, other := section("a.go", "old", "new"), section("z.go", "x", "y")
+
+	fingerprintOfA := func(t *testing.T, patch string) string {
+		t.Helper()
+		diffs, err := diff.ParseDiffText(context.Background(), patch, dir, "", nil)
+		if err != nil {
+			t.Fatalf("ParseDiffText: %v", err)
+		}
+		for _, d := range diffs {
+			if d.NewPath == "a.go" {
+				return reviewItemFingerprint(session.ReviewModeRange, d)
+			}
+		}
+		t.Fatal("a.go missing from parsed diffs")
+		return ""
+	}
+
+	for _, tc := range []struct {
+		name, last, first string
+	}{
+		// The splitter leaves a trailing newline on whichever file is last.
+		{"plain patch", other + target, target + other},
+		// Workspace mode joins untracked file diffs with "\n\n", so the trailing
+		// run is longer than a single newline.
+		{"untracked join", other + "\n\n" + target + "\n\n", target + "\n\n" + other + "\n\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, want := fingerprintOfA(t, tc.last), fingerprintOfA(t, tc.first); got != want {
+				t.Errorf("fingerprint depends on position in patch:\n last  = %s\n first = %s", got, want)
+			}
+		})
 	}
 }
 
