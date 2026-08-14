@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llmloop
 
 import (
@@ -134,6 +137,16 @@ func TestStripMarkdownFences(t *testing.T) {
 		{
 			name:  "empty after strip",
 			input: "```json\n```",
+			want:  "",
+		},
+		{
+			name:  "single-line json fence without newline",
+			input: "```json",
+			want:  "",
+		},
+		{
+			name:  "bare fence without newline",
+			input: "```",
 			want:  "",
 		},
 	}

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package session provides a session history mechanism for collecting conversation
 // records during code review task execution. It organizes records by file path
 // and request type (plan_task, main_task, memory_compression_task).

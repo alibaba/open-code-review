@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llm
 
 import (
@@ -264,6 +267,7 @@ func clearAllEnv(t *testing.T) {
 		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_AUTH_HEADER", "OCR_USE_ANTHROPIC", "OCR_LLM_PROTOCOL",
 		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+		"MINIMAX_GLOBAL_API_KEY", "MINIMAX_API_KEY",
 	} {
 		t.Setenv(k, "")
 	}
@@ -759,6 +763,81 @@ func TestResolveEndpoint_ProviderAPIKeyEnvFallback(t *testing.T) {
 	}
 	if ep.Token != "env-api-key" {
 		t.Errorf("Token = %q, want %q (should fall back to env var)", ep.Token, "env-api-key")
+	}
+}
+
+func TestResolveEndpoint_MiniMaxProviderEnvFallback(t *testing.T) {
+	tests := []struct {
+		name, provider, envName, wantToken, wantURL string
+	}{
+		{
+			name:      "global",
+			provider:  "minimax",
+			envName:   "MINIMAX_GLOBAL_API_KEY",
+			wantToken: "global-token",
+			wantURL:   "https://api.minimax.io/v1",
+		},
+		{
+			name:      "china",
+			provider:  "minimax-cn",
+			envName:   "MINIMAX_API_KEY",
+			wantToken: "china-token",
+			wantURL:   "https://api.minimaxi.com/v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllEnv(t)
+			t.Setenv(tt.envName, tt.wantToken)
+			path, _ := writeResolverConfig(t, configFile{
+				Providers: map[string]providerEntryConfig{
+					tt.provider: {Model: "MiniMax-M3"},
+				},
+			})
+
+			ep, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: tt.provider})
+			if err != nil {
+				t.Fatalf("ResolveEndpointWithOptions: %v", err)
+			}
+			if ep.Provider != tt.provider || ep.Token != tt.wantToken || ep.URL != tt.wantURL || ep.Model != "MiniMax-M3" {
+				t.Fatalf("endpoint = %+v", ep)
+			}
+		})
+	}
+}
+
+func TestResolveEndpoint_MiniMaxProviderRejectsOtherRegionEnv(t *testing.T) {
+	tests := []struct {
+		name, provider, wrongEnvName string
+	}{
+		{
+			name:         "global rejects china key",
+			provider:     "minimax",
+			wrongEnvName: "MINIMAX_API_KEY",
+		},
+		{
+			name:         "china rejects global key",
+			provider:     "minimax-cn",
+			wrongEnvName: "MINIMAX_GLOBAL_API_KEY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllEnv(t)
+			t.Setenv(tt.wrongEnvName, "wrong-region-token")
+			path, _ := writeResolverConfig(t, configFile{
+				Providers: map[string]providerEntryConfig{
+					tt.provider: {Model: "MiniMax-M3"},
+				},
+			})
+
+			_, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: tt.provider})
+			if err == nil || !strings.Contains(err.Error(), "has no api_key configured and no environment variable fallback found") {
+				t.Fatalf("error = %v", err)
+			}
+		})
 	}
 }
 
@@ -1678,7 +1757,7 @@ func TestNewLLMClient_TimeoutForwarded(t *testing.T) {
 		Timeout: 2 * time.Minute,
 	}
 
-	client := NewLLMClient(ep)
+	client := NewLLMClient(ep, nil)
 	if client == nil {
 		t.Fatal("NewLLMClient returned nil")
 	}
@@ -1702,7 +1781,7 @@ func TestNewLLMClient_DefaultTimeout(t *testing.T) {
 		// Timeout not set — should default to 5 minutes
 	}
 
-	client := NewLLMClient(ep)
+	client := NewLLMClient(ep, nil)
 	if oc, ok := client.(*OpenAIClient); ok {
 		if oc.cfg.Timeout != 5*time.Minute {
 			t.Errorf("OpenAIClient cfg.Timeout = %v, want default %v", oc.cfg.Timeout, 5*time.Minute)
@@ -2142,5 +2221,170 @@ func TestEnsureMessagesSuffix(t *testing.T) {
 				t.Errorf("ensureMessagesSuffix(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseRetryCodes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		want     []int
+		wantWarn bool
+		wantErr  string
+	}{
+		{name: "empty string", input: "", want: nil},
+		{name: "whitespace only", input: "   ", want: nil},
+		{name: "single code", input: "403", want: []int{403}},
+		{name: "multiple codes", input: "403,400", want: []int{403, 400}},
+		{name: "with spaces", input: " 403 , 400 ", want: []int{403, 400}},
+		{name: "deduplicates", input: "403,403,400", want: []int{403, 400}},
+		{name: "rejects non-integer", input: "abc", wantErr: "invalid retry code"},
+		{name: "rejects 2xx", input: "200", wantErr: "must be a 4xx status code"},
+		{name: "rejects 3xx", input: "301", wantErr: "must be a 4xx status code"},
+		{name: "rejects 5xx", input: "500", wantErr: "must be a 4xx status code"},
+		{name: "rejects 600", input: "600", wantErr: "must be a 4xx status code"},
+		{name: "filters 408 with warning", input: "408", want: nil, wantWarn: true},
+		{name: "filters 409 with warning", input: "409", want: nil, wantWarn: true},
+		{name: "filters 429 with warning", input: "429", want: nil, wantWarn: true},
+		{name: "filters redundant keeps valid", input: "429,403", want: []int{403}, wantWarn: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, warnings, err := ParseRetryCodes(tt.input)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantWarn && len(warnings) == 0 {
+				t.Fatal("expected warnings, got none")
+			}
+			if !tt.wantWarn && len(warnings) > 0 {
+				t.Fatalf("unexpected warnings: %v", warnings)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("got[%d] = %d, want %d", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestResolveEndpoint_ProviderRetryCodes(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.json")
+	cfg := configFile{
+		Provider: "test",
+		Model:    "m",
+		CustomProviders: map[string]providerEntryConfig{
+			"test": {
+				APIKey:     "k",
+				URL:        "http://localhost/v1",
+				Protocol:   "openai",
+				Model:      "m",
+				RetryCodes: []int{403, 400},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	os.WriteFile(cfgFile, data, 0o644)
+
+	ep, err := ResolveEndpoint(cfgFile)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if len(ep.RetryCodes) != 2 || ep.RetryCodes[0] != 403 || ep.RetryCodes[1] != 400 {
+		t.Errorf("RetryCodes = %v, want [403, 400]", ep.RetryCodes)
+	}
+}
+
+func TestResolveEndpoint_LegacyLlmRetryCodes(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.json")
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:        "http://localhost/v1/messages",
+			AuthToken:  "t",
+			Model:      "m",
+			Protocol:   "anthropic",
+			RetryCodes: []int{403},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	os.WriteFile(cfgFile, data, 0o644)
+
+	ep, err := ResolveEndpoint(cfgFile)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if len(ep.RetryCodes) != 1 || ep.RetryCodes[0] != 403 {
+		t.Errorf("RetryCodes = %v, want [403]", ep.RetryCodes)
+	}
+}
+
+func TestResolveEndpoint_InvalidRetryCodes(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.json")
+	cfg := configFile{
+		Provider: "test",
+		Model:    "m",
+		CustomProviders: map[string]providerEntryConfig{
+			"test": {
+				APIKey:     "k",
+				URL:        "http://localhost/v1",
+				Protocol:   "openai",
+				Model:      "m",
+				RetryCodes: []int{500},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	os.WriteFile(cfgFile, data, 0o644)
+
+	_, err := ResolveEndpoint(cfgFile)
+	if err == nil {
+		t.Fatal("expected error for invalid retry code 500")
+	}
+	if !strings.Contains(err.Error(), "must be a 4xx status code") {
+		t.Errorf("error %q does not mention 4xx requirement", err.Error())
+	}
+}
+
+func TestResolveEndpoint_RedundantRetryCodesFiltered(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.json")
+	cfg := configFile{
+		Provider: "test",
+		Model:    "m",
+		CustomProviders: map[string]providerEntryConfig{
+			"test": {
+				APIKey:     "k",
+				URL:        "http://localhost/v1",
+				Protocol:   "openai",
+				Model:      "m",
+				RetryCodes: []int{429, 403},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	os.WriteFile(cfgFile, data, 0o644)
+
+	ep, err := ResolveEndpoint(cfgFile)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if len(ep.RetryCodes) != 1 || ep.RetryCodes[0] != 403 {
+		t.Errorf("RetryCodes = %v, want [403] (429 should be filtered)", ep.RetryCodes)
 	}
 }

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -12,7 +15,7 @@ var completionCmd = &cobra.Command{
 	Short:     "Generate shell completion scripts",
 	Long:      completionLongHelp,
 	ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
-	Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
+	Args:      cobra.MatchAll(exactArgs(1), cobra.OnlyValidArgs),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		switch args[0] {
 		case "bash":

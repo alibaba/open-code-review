@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llmloop
 
 import (
@@ -224,16 +227,24 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 		compressionMsgs = append(compressionMsgs, llm.NewTextMessage(m.Role, content))
 	}
 
+	// The task record is created before the request, not after it, because the
+	// retry report keys request identity on RequestNo and that number only
+	// exists once the record does. The visible consequence is that the
+	// llm_request line reaches the session JSONL before the response: a run
+	// killed mid-request now leaves an llm_request with no response, which
+	// resume ignores (applyResumeLine has no case for it).
+	fs := r.deps.Session.GetOrCreateFileSession(filePath)
+	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, compressionMsgs)
+
 	startTime := time.Now()
-	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	reqCtx := r.requestCtx(ctx, filePath, session.MemoryCompressionTask, rec.RequestNo)
+	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  compressionMsgs,
-		MaxTokens: r.deps.Template.MaxTokens,
+		MaxTokens: r.deps.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 
-	fs := r.deps.Session.GetOrCreateFileSession(filePath)
-	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, compressionMsgs)
 	if err != nil {
 		rec.SetError(err, duration)
 		// Return msgs unchanged: truncating to frozenEnd would discard all
@@ -286,7 +297,11 @@ func (r *Runner) triggerAsyncCompression(ctx context.Context, st *compressionSta
 	st.pendingJob = job
 	st.mu.Unlock()
 
+	// Registered before the goroutine starts so WaitBackground can never miss
+	// a job that was launched but has not run yet.
+	r.bg.Add(1)
 	go func() {
+		defer r.bg.Done()
 		defer cancel()
 		rebuilt, err := r.runCompression(asyncCtx, msgSnapshot, filePath)
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import type { TranslationKeys } from './types';
 
 export const ru: TranslationKeys = {
@@ -10,13 +13,15 @@ export const ru: TranslationKeys = {
   'navbar.getStarted': 'Начать работу',
 
   // Hero
-  'hero.title': 'Код-ревью с ИИ,\nпроверенное на миллионах\nреальных задач',
+  'hero.title': 'Код-ревью с ИИ,\nпроверенное на миллионах реальных задач',
   'hero.description': 'Open Code Review разработали в Alibaba и проверили на реальных проектах компании. Он встраивается в привычный процесс разработки и работает с выбранной вами LLM. Вы сами решаете, куда передаются данные. Замечания агента разработчики действительно учитывают.',
   'hero.quickStart': 'Быстрый старт',
   'hero.learnMore': 'Подробнее',
   'hero.terminal': 'Терминал',
   'hero.copied': 'Скопировано!',
   'hero.copyFailed': 'Не удалось скопировать',
+  'hero.installNpm': 'npm',
+  'hero.installBrew': 'Homebrew',
 
   // Error boundary
   'error.pageLoadFailed': 'Не удалось загрузить страницу.',
@@ -24,14 +29,14 @@ export const ru: TranslationKeys = {
 
   // Highlights
   'highlights.stat1Value': '20K+',
-  'highlights.stat1Label': 'АКТИВНЫХ ПОЛЬЗОВАТЕЛЕЙ',
+  'highlights.stat1Label': 'ВНУТРЕННИЕ АКТИВНЫЕ ПОЛЬЗОВАТЕЛИ',
   'highlights.stat1Caption': 'в Alibaba Group',
-  'highlights.stat2Value': '> 30%',
-  'highlights.stat2Label': 'ЗАМЕЧАНИЙ ПРИНЯТО',
-  'highlights.stat2Caption': 'в Alibaba Group',
-  'highlights.stat3Value': '1M+',
-  'highlights.stat3Label': 'ЗАДАЧ КОД-РЕВЬЮ',
-  'highlights.stat3Caption': 'выполнено в реальных проектах',
+  'highlights.stat2Value': '150K+',
+  'highlights.stat2Label': 'ЗАГРУЗКИ СООБЩЕСТВА NPM',
+  'highlights.stat2Caption': 'реальные загрузки npm · 30 дней',
+  'highlights.stat3Value': '3M+',
+  'highlights.stat3Label': 'РЕАЛЬНЫХ ЗАДАЧ',
+  'highlights.stat3Caption': 'Выполненных задач код-ревью',
   'highlights.stat4Value': '1/9',
   'highlights.stat4Label': 'ОТ РАСХОДА ТОКЕНОВ',
   'highlights.stat4Caption': 'Claude Code · 1 000 PR',

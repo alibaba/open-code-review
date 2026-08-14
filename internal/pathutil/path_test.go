@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package pathutil
 
 import (
@@ -126,6 +129,9 @@ func TestWithinBase_AdditionalCases(t *testing.T) {
 		{name: "dotdot only", base: "/a/b", target: "/a", want: false},
 		{name: "root base with child", base: "/", target: "/anything", want: true},
 		{name: "empty relative after clean", base: "/a/b", target: "/a/b/./c", want: true},
+		// filepath.Rel cannot relate a relative base to an absolute target,
+		// so WithinBase must fall through its error branch and report false.
+		{name: "rel error on mixed abs/rel", base: "relative", target: "/absolute", want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // src/extension/services/__tests__/CliService.test.ts
 process.env.OCR_SKIP_SHELL_RESOLVE = '1';
 import { CliService } from '../CliService';

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { createContext } from 'preact';
 import { useContext } from 'preact/hooks';
 import { t, resolveLocale, SupportedLocale } from '../shared/i18n';

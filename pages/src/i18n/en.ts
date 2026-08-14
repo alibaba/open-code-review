@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 export const en = {
   // Navbar
   'navbar.features': 'Features',
@@ -8,13 +11,15 @@ export const en = {
   'navbar.getStarted': 'Get Started',
 
   // Hero
-  'hero.title': 'AI Code Review\nValidated on Millions of\nReal-World Tasks',
+  'hero.title': 'AI Code Review\nValidated on Millions of Real-World Tasks',
   'hero.description': 'Open Code Review brings Alibaba\'s battle-tested code review Agent into your workflow. Connect any LLM, keep data fully private, and get review comments developers actually adopt.',
   'hero.quickStart': 'Quick Start',
   'hero.learnMore': 'Learn More',
   'hero.terminal': 'Terminal',
   'hero.copied': 'Copied!',
   'hero.copyFailed': 'Copy failed',
+  'hero.installNpm': 'npm',
+  'hero.installBrew': 'Homebrew',
 
   // Error boundary
   'error.pageLoadFailed': 'Failed to load this page.',
@@ -22,14 +27,14 @@ export const en = {
 
   // Highlights
   'highlights.stat1Value': '20K+',
-  'highlights.stat1Label': 'ACTIVE USERS',
+  'highlights.stat1Label': 'INTERNAL ACTIVE USERS',
   'highlights.stat1Caption': 'Battle-tested inside Alibaba Group',
-  'highlights.stat2Value': '> 30%',
-  'highlights.stat2Label': 'ADOPTION RATE',
-  'highlights.stat2Caption': 'Battle-tested inside Alibaba Group',
-  'highlights.stat3Value': '1M+',
+  'highlights.stat2Value': '150K+',
+  'highlights.stat2Label': 'NPM COMMUNITY DOWNLOADS',
+  'highlights.stat2Caption': 'Real npm downloads · last 30 days',
+  'highlights.stat3Value': '3M+',
   'highlights.stat3Label': 'REAL-WORLD TASKS',
-  'highlights.stat3Caption': 'Code review tasks executed',
+  'highlights.stat3Caption': 'Code review tasks executed to date',
   'highlights.stat4Value': '1/9',
   'highlights.stat4Label': 'TOKEN COST',
   'highlights.stat4Caption': 'vs. Claude Code · 1,000 PRs',

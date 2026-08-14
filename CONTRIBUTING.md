@@ -47,7 +47,17 @@ make test
 
 If everything passes, you're ready to contribute.
 
-> **Note:** The `upstream` remote is read-only for contributors — it is used to pull the latest changes from the main repository. You cannot push directly to upstream. All contributions must be pushed to your fork (`origin`) and submitted via Pull Request.
+> **Note:** The `upstream` remote is read-only for contributors — it is used to pull the latest changes from the main repository. You cannot push directly to upstream. All commits must be pushed to your fork (`origin`) and submitted via Pull Request.
+
+### Line Endings
+
+This project enforces LF line endings via `.gitattributes`. Configure Git to normalize line endings automatically:
+
+```bash
+git config core.autocrlf input
+```
+
+This ensures any CRLF is converted to LF on commit, preventing line-ending issues in CI.
 
 ## Development Workflow
 
@@ -90,14 +100,23 @@ fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
 
+### License Headers
+
+Every source file (`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`) must include an SPDX license header. After creating new files, run:
+
+```bash
+make license-add
+```
+
+This automatically adds the required header. CI will reject PRs with missing headers.
+
 ### Code Quality
 
 Before submitting your changes, make sure they pass all checks:
 
 ```bash
-# Format and lint (Go standard tooling)
-go fmt ./...
-go vet ./...
+# Format, lint, and verify license headers
+make check
 
 # Run tests with race detection
 make test

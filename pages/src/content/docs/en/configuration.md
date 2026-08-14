@@ -56,8 +56,12 @@ environment variable.
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
-| `minimax` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
+| `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
+| `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
+| `siliconflow`  | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
+| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
+| `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
 ### Custom providers
 
@@ -126,6 +130,50 @@ The `timeout_sec` keys are not supported by `ocr config set` — edit
   }
 }
 ```
+
+### Additional retry status codes
+
+Some LLM providers use non-standard 4xx status codes for transient errors, such
+as returning `403` or `400` for rate limiting. Use `retry_codes` to make OCR
+retry these requests using the existing SDK retry mechanism.
+
+`retry_codes` is an array of integers. It can be set as `llm.retry_codes` or
+`custom_providers.<name>.retry_codes`. When using `ocr config set`, pass the codes as
+a comma-separated list:
+
+```bash
+ocr config set llm.retry_codes 403,400
+ocr config set custom_providers.my-gateway.retry_codes 403,400
+```
+
+Only 4xx HTTP status codes are accepted. `408`, `409`, and `429` are already
+retried by the SDK. When read from the config file, these redundant codes are
+ignored. When supplied through `ocr config set`, OCR also prints a warning and
+omits them from the saved value. All 5xx responses are already retried by the
+SDK and cannot be added to `retry_codes`.
+
+### Per-file prompt limit
+
+OCR defaults to a 58,888-token prompt ceiling for each file review. Increase
+it for a model with a larger context window by saving `max_tokens`:
+
+```bash
+ocr config set max_tokens 200000
+```
+
+The setting applies to both `ocr review` and `ocr scan`. Use `--max-tokens`
+for a one-off override without changing the saved configuration:
+
+```bash
+ocr review --max-tokens 200000
+ocr scan --max-tokens 200000
+```
+
+The per-run flag takes precedence over `max_tokens`; when neither is set, OCR
+uses the embedded task-template default. This limit is per file and is
+independent of both the model's output-token cap and `--max-tokens-budget`,
+which caps total token use for a run. Restore the embedded default with
+`ocr config unset max_tokens`.
 
 ### Verify connectivity
 

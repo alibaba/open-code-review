@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -40,7 +43,9 @@ type reviewOptions struct {
 	perFileTimeout  int
 	maxTools        int
 	maxGitProcs     int
+	maxTokens       int
 	maxTokensBudget int
+	noFilter        bool
 	preview         bool
 }
 
@@ -146,6 +151,12 @@ func executeReview(opts reviewOptions) error {
 	if err != nil {
 		return err
 	}
+	cc.Template.MaxCompletionTokens = cc.Template.MaxTokens
+	maxTokens, err := resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
+	if err != nil {
+		return err
+	}
+	cc.Template.MaxTokens = maxTokens
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,
@@ -197,6 +208,7 @@ func executeReview(opts reviewOptions) error {
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
+		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
 
@@ -214,7 +226,7 @@ func executeReview(opts reviewOptions) error {
 	var traceID string
 	if telemetry.IsEnabled() {
 		traceID = telemetry.TraceIDFromContext(ctx)
-		if opts.outputFormat != "json" {
+		if !isMachineReadable(opts.outputFormat) {
 			fmt.Fprintf(os.Stderr, "[ocr] TraceID: %s\n", traceID)
 		}
 	}
@@ -222,6 +234,22 @@ func executeReview(opts reviewOptions) error {
 
 	comments, runErr := ag.Run(ctx)
 	manifest := ag.RunManifest()
+
+	// Freeze the retry report at the same boundary as the manifest: ag.Run has
+	// returned and joined its background work, so every request this run made is
+	// finalized and the report can no longer change. run_id is the session's
+	// in-memory UUID (ag.Session().SessionID) rather than ag.SessionID(), which
+	// returns "" when persistence failed — the report's logical_request_id must
+	// stay stable and unique per run even for an unpersisted session.
+	retryReport, freezeErr := rt.RetryCollector.Freeze(ag.Session().SessionID)
+	if freezeErr != nil {
+		// A construction error means the collector's invariants were violated, so
+		// the report is self-contradictory and must not be published at all
+		// (Freeze already returned nil). Retry reporting is observability only, so
+		// its invariant failure must not change the review's exit status.
+		fmt.Fprintf(os.Stderr, "[ocr] warning: freeze retry report: %v (retry report suppressed)\n", freezeErr)
+	}
+
 	resultErr := reviewResultError(runErr, manifest)
 	if resultErr != nil {
 		span.SetStatus(codes.Error, resultErr.Error())
@@ -232,15 +260,24 @@ func executeReview(opts reviewOptions) error {
 	// session delivery failed. Emit it first, then return the independent process
 	// error so JSON consumers retain the complete coverage diagnosis.
 	var emitErr error
-	if manifest != nil || runErr == nil {
-		emitErr = emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity)
+	emitted := manifest != nil || runErr == nil
+	if emitted {
+		emitErr = emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		}
 	}
 	if resultErr != nil {
 		q.Restore()
-		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity)
+		// The report has exactly one exit per run. emitRunResult already published
+		// it whenever it ran (which it does even for a fully failed run, since a
+		// failed manifest is still publishable), so the failure-usage path gets it
+		// only when that call was skipped entirely.
+		failureReport := retryReport
+		if emitted {
+			failureReport = nil
+		}
+		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
@@ -365,7 +402,7 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 }
 
 func runPreview(cc *commonContext, opts reviewOptions) error {
-	ag := agent.New(agent.Args{
+	preview, err := agent.Preview(context.Background(), agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
 		To:         opts.to,
@@ -373,14 +410,11 @@ func runPreview(cc *commonContext, opts reviewOptions) error {
 		FileFilter: cc.FileFilter,
 		GitRunner:  cc.GitRunner,
 	})
-
-	preview, err := ag.Preview(context.Background())
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)
 	}
 
-	outputPreviewText(preview)
-	return nil
+	return outputPreview(preview, opts.outputFormat)
 }
 
 func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {

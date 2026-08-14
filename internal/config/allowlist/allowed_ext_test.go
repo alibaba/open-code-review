@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package allowedext
 
 import (
@@ -54,6 +57,12 @@ func TestIsAllowedExt(t *testing.T) {
 		{".HS", true},
 		{".lhs", true},
 		{".LHS", true},
+		{".nim", true},
+		{".NIM", true},
+		{".nims", true},
+		{".NIMS", true},
+		{".nimble", true},
+		{".NIMBLE", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -147,6 +156,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"lhs spec file", "src/ParserSpec.lhs", true},
 		{"lhs root spec file", "ParserSpec.lhs", true},
 		{"lhs non-test", "src/Tutorial.lhs", false},
+
+		// Nim test files
+		{"nim test directory", "tests/parser_test.nim", true},
+		{"nim nested test directory", "packages/core/tests/unit/parser_test.nim", true},
+		{"nim non-test", "src/parser.nim", false},
+		{"nim tests in filename", "src/tests_helper.nim", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

@@ -18,13 +18,22 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 15
     container:
-      image: golang:1.26.5
+      image: golang:1.26.6
       options: --cpus=2
     steps:
       - uses: actions/checkout@v7
 
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
+
+      - name: Verify license headers
+        run: bash scripts/verify-license.sh
+
+      - name: Verify action pins
+        run: bash scripts/verify-action-pins.sh
+
+      - name: Verify sources contain no unapproved non-English text
+        run: go run scripts/verify-english-only.go
 
       - name: Check formatting
         run: |
@@ -35,7 +44,14 @@ jobs:
             gofmt -s -d .
             exit 1
           fi
-
+      
+      - name: Check line endings
+        run: |
+          if git ls-files --eol | grep -v 'i/lf\|i/none\|i/-text'; then
+            echo 'Line endings must end with LF. Have you normalized line endings?'
+            exit 1
+          fi
+        
       - name: Check go.mod is tidy
         run: |
           go mod tidy
@@ -61,11 +77,11 @@ jobs:
         run: |
           COVERAGE=$(go tool cover -func=coverage.out | grep total: | awk '{print $3}' | sed 's/%//')
           echo "Total coverage: ${COVERAGE}%"
-          if awk "BEGIN {exit !($COVERAGE < 80)}"; then
-            echo "FAIL: Coverage ${COVERAGE}% is below 80% threshold"
+          if awk "BEGIN {exit !($COVERAGE < 90)}"; then
+            echo "FAIL: Coverage ${COVERAGE}% is below 90% threshold"
             exit 1
           fi
-          echo "PASS: Coverage ${COVERAGE}% meets 80% threshold"
+          echo "PASS: Coverage ${COVERAGE}% meets 90% threshold"
 
       - name: Build
         run: go build -o ./opencodereview ./cmd/opencodereview
@@ -90,7 +106,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 10
     container:
-      image: golang:1.26.5
+      image: golang:1.26.6
       options: --cpus=2
     strategy:
       fail-fast: false

@@ -18,7 +18,7 @@
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
-  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
+  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
   <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
@@ -135,7 +135,7 @@ cd your-project
 # Workspace mode — review all staged, unstaged, and untracked changes
 ocr review
 
-# Branch range — compare two refs
+# Branch range — reviews feature-branch's changes since it diverged from main (merge-base mode)
 ocr review --from main --to feature-branch
 
 # Single commit
@@ -144,10 +144,6 @@ ocr review --commit abc123
 # Resume an interrupted range or commit review
 ocr session list
 ocr review --from main --to feature-branch --resume <session-id>
-
-# Print the review comments recorded in a saved session
-ocr session comments <session-id>
-ocr session comments --severity critical,high --json <session-id>
 
 # Full-file scan — review whole files instead of a diff (no git history needed)
 ocr scan                          # scan the entire repository
@@ -175,6 +171,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
   - [Codex](plugins/open-code-review/README.md#codex) — install a plugin with callable review skills
   - [Cursor](plugins/open-code-review/README.md#cursor) — install a plugin with portable review skills
   - [OpenCode](plugins/open-code-review/opencode/README.md) — install native review tools and slash commands
+  - [QCA Forward](plugins/open-code-review/qca/README.md) — run delegation mode with the QCA host model and a ready-to-publish template
   - [Skill-compatible agents](https://open-codereview.ai/docs/agent-skill) — install the portable agent skill
 - Review Execution Modes — after integration, choose which LLM performs the review
   - [Default (OCR-managed)](https://open-codereview.ai/docs/configuration) — OCR runs the review using its configured LLM

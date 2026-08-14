@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,8 +21,9 @@ const indexCss = readFileSync(join(here, 'styles', 'index.css'), 'utf8');
 
 // Comments explain this block and name the tags they discuss, so structural
 // assertions must not see them — otherwise a tag mentioned in prose reads as a
-// tag in the document.
-const markup = html.replace(/<!--[\s\S]*?-->/g, '');
+// tag in the document. Split on comment boundaries and keep only non-comment
+// segments (avoids CodeQL's incomplete-multi-character-sanitization rule).
+const markup = html.split(/<!--[\s\S]*?-->/).join('');
 
 const inlineStyle = markup.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
 

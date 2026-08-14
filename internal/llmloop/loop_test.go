@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llmloop
 
 import (
@@ -14,10 +17,12 @@ import (
 
 type fakeClient struct {
 	responses []*llm.ChatResponse
+	requests  []llm.ChatRequest
 	calls     int
 }
 
-func (f *fakeClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func (f *fakeClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.requests = append(f.requests, req)
 	if f.calls >= len(f.responses) {
 		content := ""
 		return &llm.ChatResponse{
@@ -119,6 +124,26 @@ func TestRunPerFile_TaskDoneImmediately(t *testing.T) {
 	}
 	if runner.TotalOutputTokens() != 5 {
 		t.Errorf("TotalOutputTokens = %d, want 5", runner.TotalOutputTokens())
+	}
+}
+
+func TestRunPerFile_UsesCompletionTokenLimit(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
+	deps := newTestDeps(client)
+	deps.Template.MaxTokens = 200000
+	deps.Template.MaxCompletionTokens = 58888
+	runner := NewRunner(deps)
+
+	_, _, err := runner.RunPerFile(
+		context.Background(),
+		[]llm.Message{llm.NewTextMessage("user", "review")},
+		"main.go",
+	)
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if got := client.requests[0].MaxTokens; got != 58888 {
+		t.Fatalf("request MaxTokens = %d, want 58888", got)
 	}
 }
 
@@ -500,7 +525,7 @@ func TestExecuteToolCall_ArgumentsEdgeCases(t *testing.T) {
 					Name:      tt.toolName,
 					Arguments: tt.arguments,
 				},
-			}, nil)
+			}, nil, "")
 
 			if tt.wantContains != "" && !strings.Contains(cp.Data, tt.wantContains) {
 				t.Errorf("cp.Data = %q, want substring %q", cp.Data, tt.wantContains)
@@ -556,7 +581,7 @@ func TestExecuteToolCall_CodeCommentOverridesHallucinatedPath(t *testing.T) {
 			Name:      "code_comment",
 			Arguments: string(argsJSON),
 		},
-	}, nil)
+	}, nil, "")
 	if cp.Data != tool.CommentSucceed {
 		t.Fatalf("unexpected result: %+v", cp)
 	}
@@ -567,5 +592,177 @@ func TestExecuteToolCall_CodeCommentOverridesHallucinatedPath(t *testing.T) {
 	}
 	if comments[0].Path != "correct.go" {
 		t.Errorf("path override: got %q, want %q", comments[0].Path, "correct.go")
+	}
+}
+
+func graceRoundCommentResponse() *llm.ChatResponse {
+	content := ""
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{
+				Content: &content,
+				ToolCalls: []llm.ToolCall{{
+					ID:   "call_grace",
+					Type: "function",
+					Function: llm.FunctionCall{
+						Name:      "code_comment",
+						Arguments: `{"comments":[{"content":"found a bug","existing_code":"x := 1"}]}`,
+					},
+				}},
+			},
+		}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{PromptTokens: 50, CompletionTokens: 20},
+	}
+}
+
+func TestRunPerFile_GraceRoundSubmitsComment(t *testing.T) {
+	// Round 1: file_read (exhausts budget with MaxToolRequestTimes=1)
+	// Grace round: model calls code_comment
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		graceRoundCommentResponse(),
+	}}
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&fakeFileReadProvider{result: "package main\n"})
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	deps := Deps{
+		LLMClient:        client,
+		Model:            "fake",
+		Template:         template.Template{MaxTokens: 100000, MaxToolRequestTimes: 1},
+		Tools:            reg,
+		CommentCollector: collector,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+		},
+		Session: session.New("/tmp/test-repo", "main", "fake", session.SessionOptions{}),
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if completed {
+		t.Fatal("expected not completed (budget exhausted)")
+	}
+	if stop != StopMaxRounds {
+		t.Fatalf("stop = %v, want StopMaxRounds", stop)
+	}
+	// Grace round should have been called (call 2)
+	if client.calls != 2 {
+		t.Fatalf("LLM calls = %d, want 2 (1 main + 1 grace)", client.calls)
+	}
+	// The grace round should only have code_comment + task_done tools
+	graceReq := client.requests[1]
+	if len(graceReq.Tools) != 2 {
+		t.Fatalf("grace round tools = %d, want 2", len(graceReq.Tools))
+	}
+	// Comment should have been collected
+	comments := collector.Comments()
+	if len(comments) != 1 {
+		t.Fatalf("comments = %d, want 1", len(comments))
+	}
+	if comments[0].Path != "main.go" {
+		t.Errorf("comment path = %q, want main.go", comments[0].Path)
+	}
+	// Token usage should include grace round
+	if runner.TotalInputTokens() != 70 {
+		t.Errorf("TotalInputTokens = %d, want 70 (20+50)", runner.TotalInputTokens())
+	}
+}
+
+func TestRunPerFile_GraceRoundSkippedWhenContextCancelled(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+	}}
+	deps := newTestDeps(client)
+	deps.Template.MaxToolRequestTimes = 1
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+	}
+	runner := NewRunner(deps)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel after the main loop exits but before grace round runs.
+	// We simulate this by using a client that cancels ctx after the first call.
+	origClient := client
+	client.responses = []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+	}
+	_ = origClient
+
+	// Use a wrapper that cancels after first call
+	cancelClient := &cancelAfterNClient{inner: client, cancelAt: 1, cancel: cancel}
+	deps.LLMClient = cancelClient
+	runner = NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	_, stop, _ := runner.RunPerFile(ctx, msgs, "main.go")
+	if stop != StopMaxRounds {
+		t.Fatalf("stop = %v, want StopMaxRounds", stop)
+	}
+	// Grace round should have been skipped (only 1 LLM call total)
+	if cancelClient.calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1 (grace skipped due to ctx cancel)", cancelClient.calls)
+	}
+}
+
+type cancelAfterNClient struct {
+	inner    *fakeClient
+	cancelAt int
+	cancel   context.CancelFunc
+	calls    int
+}
+
+func (c *cancelAfterNClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.calls++
+	resp, err := c.inner.CompletionsWithCtx(ctx, req)
+	if c.calls >= c.cancelAt {
+		c.cancel()
+	}
+	return resp, err
+}
+
+func TestRunPerFile_GraceRoundNotTriggeredOnEmptyRoundsStop(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		fileReadToolCallResponse("call_2", `{"path":"main.go"}`),
+		fileReadToolCallResponse("call_3", `{"path":"main.go"}`),
+	}}
+	reg := tool.NewRegistry()
+	reg.Register(&fakeFileReadProvider{result: ""})
+	deps := Deps{
+		LLMClient:        client,
+		Model:            "fake",
+		Template:         template.Template{MaxTokens: 100000, MaxToolRequestTimes: 10},
+		Tools:            reg,
+		CommentCollector: tool.NewCommentCollector(),
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
+		Session: session.New("/tmp/test-repo", "main", "fake", session.SessionOptions{}),
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	_, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if stop != StopEmptyRounds {
+		t.Fatalf("stop = %v, want StopEmptyRounds", stop)
+	}
+	// Should NOT trigger grace round — only 3 LLM calls (empty rounds)
+	if client.calls != 3 {
+		t.Fatalf("LLM calls = %d, want 3 (no grace round on empty-rounds stop)", client.calls)
 	}
 }

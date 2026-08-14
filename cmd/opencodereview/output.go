@@ -1,14 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/suggestdiff"
@@ -288,6 +293,11 @@ type jsonOutput struct {
 	Resume         *agent.ResumeInfo    `json:"resume,omitempty"`
 	SessionID      string               `json:"session_id,omitempty"`
 	Manifest       *session.RunManifest `json:"manifest,omitempty"`
+	// RetryReport is the frozen LLM retry report (ocr.llm-retry-report/v1).
+	// Reuses llm.RetryReport's own field/tag definitions rather than mirroring
+	// them here, and sits last with omitempty so a first-try-success run emits
+	// byte-identical JSON to before #368.
+	RetryReport *llm.RetryReport `json:"retry_report,omitempty"`
 }
 
 func outputJSON(comments []model.LlmComment) error {
@@ -306,7 +316,8 @@ func outputJSON(comments []model.LlmComment) error {
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
-	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity) error {
+	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity,
+	retryReport *llm.RetryReport) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	out := jsonOutput{
 		Status:   "success",
@@ -328,6 +339,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		Resume:         resumeInfo,
 		SessionID:      sessionID,
 		Manifest:       manifest,
+		RetryReport:    retryReport,
 	}
 	var total int64
 	for _, v := range toolCalls {
@@ -370,6 +382,64 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(out)
+}
+
+// outputRetryReportText renders the frozen retry report as the terminal
+// summary. It is a run result, not a warning, so it goes to the same writer as
+// the review result rather than to stderr; JSON mode never calls this (stdout
+// must stay a single JSON document).
+//
+// Nothing here is free text from a provider: only stable classes, numeric
+// status codes, the file path and the task type — no API keys, headers,
+// bodies, prompts, URLs or raw SDK error strings. Every request in the report
+// is listed; the report already only contains requests that erred or retried,
+// so there is no separate terminal truncation contract to reason about.
+func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
+	if rep == nil {
+		return
+	}
+	retryWord := "retries"
+	if rep.TotalRetries == 1 {
+		retryWord = "retry"
+	}
+	fmt.Fprintf(w, "\nLLM retry report: %d/%d requests retried, %d %s, %d recovered, %d failed, %d cancelled\n",
+		rep.RetriedRequests, rep.TotalRequests, rep.TotalRetries, retryWord,
+		rep.RecoveredRequests, rep.FailedRequests, rep.CancelledRequests)
+	for _, r := range rep.Requests {
+		fmt.Fprintf(w, "- %s / %s #%d: %s\n",
+			sanitizeTerminal(r.FilePath), sanitizeTerminal(r.TaskType),
+			r.RequestNo, retryAttemptChain(r))
+	}
+}
+
+// retryAttemptChain renders one logical request's attempts as
+// "rate_limited(429) -> overloaded(529) -> success".
+//
+// A trailing request-level outcome is appended for failed and, when the last
+// attempt does not already say so, cancelled. A recovered or succeeded request
+// already ends in a "success" attempt, so repeating the outcome there would be
+// noise, whereas a request that never succeeded would otherwise end on its last
+// error with no sign of how it finished. cancelled in particular is a routine
+// outcome (background memory compression is deliberately abandoned at the end
+// of every file), so it must be visibly distinct from a provider failure.
+func retryAttemptChain(r llm.RequestReport) string {
+	parts := make([]string, 0, len(r.Attempts)+1)
+	for _, a := range r.Attempts {
+		switch {
+		case a.Outcome == llm.AttemptSuccess:
+			parts = append(parts, "success")
+		case a.StatusCode > 0:
+			parts = append(parts, fmt.Sprintf("%s(%d)", a.ErrorClass, a.StatusCode))
+		default:
+			parts = append(parts, string(a.ErrorClass))
+		}
+	}
+	if r.Outcome == llm.OutcomeFailed ||
+		(r.Outcome == llm.OutcomeCancelled &&
+			(len(parts) == 0 || parts[len(parts)-1] != string(llm.OutcomeCancelled))) {
+		parts = append(parts, string(r.Outcome))
+	}
+	return strings.Join(parts, " -> ")
 }
 
 func manifestMessage(manifest *session.RunManifest, findings int) string {
@@ -434,7 +504,14 @@ func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity) error {
 // therefore always carries exactly one JSON document); otherwise a single
 // human-readable [ocr] line. It must never return an error that masks the
 // original failure — all writes are best-effort.
-func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string, llmIdentity *jsonLLMIdentity) {
+//
+// retryReport must be nil whenever emitRunResult already ran: a constructed
+// manifest is publishable even on a failed run, so both this record and the
+// normal result exit can execute for the same run, and the report belongs to
+// exactly one of them. Pass the frozen report here only when the normal exit
+// was skipped, so the report is never duplicated and never silently dropped.
+func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string, llmIdentity *jsonLLMIdentity,
+	retryReport *llm.RetryReport) {
 	var toolTotal int64
 	for _, v := range ag.ToolCalls() {
 		toolTotal += v
@@ -458,7 +535,8 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 				Total:  toolTotal,
 				ByTool: ag.ToolCalls(),
 			},
-			SessionID: ag.SessionID(),
+			SessionID:   ag.SessionID(),
+			RetryReport: retryReport,
 		}
 		enc := json.NewEncoder(os.Stderr)
 		enc.SetIndent("", "  ")
@@ -472,6 +550,30 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 		fmt.Fprintf(os.Stderr, ", session %s", id)
 	}
 	fmt.Fprintln(os.Stderr)
+	// Text mode has no structured envelope, so the report follows the usage
+	// line on the same stream.
+	outputRetryReportText(os.Stderr, retryReport)
+}
+
+// outputPreview renders a preview in the requested output format. sarif is
+// rejected with an error because a preview contains file/rule metadata, not
+// review findings — there is no SARIF result to emit, and a differently-shaped
+// document would confuse consumers expecting a SARIF report.
+func outputPreview(p *agent.DiffPreview, outputFormat string) error {
+	if outputFormat == "sarif" {
+		return fmt.Errorf("--format sarif is not supported with --preview: SARIF output requires completed review findings")
+	}
+	if outputFormat == "json" {
+		return outputPreviewJSON(p)
+	}
+	outputPreviewText(p)
+	return nil
+}
+
+func outputPreviewJSON(p *agent.DiffPreview) error {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(p)
 }
 
 func outputPreviewText(p *agent.DiffPreview) {

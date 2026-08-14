@@ -53,8 +53,12 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
-| `minimax` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
+| `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
+| `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
+| `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
+| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
+| `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
 ### 自定义 provider
 
@@ -118,6 +122,47 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
   }
 }
 ```
+
+### 额外的重试状态码
+
+有些 LLM 提供商会用非标准的 4xx 状态码表示临时错误，例如在限流时返回 `403` 或
+`400`。可通过 `retry_codes` 让 OCR 对这类请求使用 SDK 现有的重试机制。
+
+`retry_codes` 是整数数组，可配置为 `llm.retry_codes` 或
+`custom_providers.<name>.retry_codes`。通过 `ocr config set` 设置时，以逗号分隔
+传入状态码：
+
+```bash
+ocr config set llm.retry_codes 403,400
+ocr config set custom_providers.my-gateway.retry_codes 403,400
+```
+
+只接受 4xx HTTP 状态码。`408`、`409` 和 `429` 已由 SDK 重试；直接从配置文件
+读取时，这些冗余状态码会被忽略。通过 `ocr config set` 设置时，OCR 还会输出
+警告，并且不会把这些状态码保存到配置中。所有 5xx 响应也已由 SDK 默认重试，
+因此不能加入 `retry_codes`。
+
+### 每文件提示词上限
+
+OCR 默认为每次文件评审设置 58,888 token 的提示词上限。如果模型上下文窗口更大，
+可以通过保存 `max_tokens` 来提高上限：
+
+```bash
+ocr config set max_tokens 200000
+```
+
+该设置同时作用于 `ocr review` 和 `ocr scan`。使用 `--max-tokens` 可以在不修改
+已保存配置的情况下临时覆盖一次：
+
+```bash
+ocr review --max-tokens 200000
+ocr scan --max-tokens 200000
+```
+
+单次运行的参数优先级高于 `max_tokens`；如果两者都未设置，OCR 会使用内置任务模板
+的默认值。该上限按文件计算，与模型的输出 token 上限、以及限制单次运行总 token
+用量的 `--max-tokens-budget` 都相互独立。可以用 `ocr config unset max_tokens`
+恢复为内置默认值。
 
 ### 验证连通性
 

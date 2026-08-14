@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package agent
 
 import (
@@ -343,6 +346,182 @@ func TestExecuteReviewFilter_LLMError(t *testing.T) {
 	}
 }
 
+func TestExecuteReviewFilter_SkipFilter(t *testing.T) {
+	t.Run("AC-1: SkipFilter disables the filter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			SkipFilter:       true,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+code"}, "a.go")
+
+		if client.calls != 0 {
+			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
+		}
+		comments := collector.CommentsForPath("a.go")
+		if len(comments) != 1 {
+			t.Errorf("comments should be unchanged when filter is skipped, got %d", len(comments))
+		}
+	})
+
+	t.Run("AC-2: All comments preserved when skipped", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment 1"})
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment 2"})
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment 3"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			SkipFilter:       true,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+code"}, "a.go")
+
+		comments := collector.CommentsForPath("a.go")
+		if len(comments) != 3 {
+			t.Fatalf("expected 3 comments when filter is skipped, got %d", len(comments))
+		}
+	})
+
+	t.Run("AC-3: Default (no SkipFilter) still runs filter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+
+		filterResp := `["c-1"]`
+		client := &fakeAgentClient{
+			responses: []*llm.ChatResponse{{
+				Choices: []llm.Choice{{
+					Message: llm.ResponseMessage{Content: &filterResp},
+				}},
+				Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+			}},
+		}
+
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "keep this"})
+		collector.Add(model.LlmComment{Path: "a.go", Content: "remove this"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}} path={{path}} diff={{diff}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+code"}, "a.go")
+
+		if client.calls == 0 {
+			t.Error("LLM client should have been called when SkipFilter is false (default)")
+		}
+		comments := collector.CommentsForPath("a.go")
+		if len(comments) != 1 {
+			t.Errorf("expected 1 comment after filter, got %d", len(comments))
+		}
+	})
+
+	t.Run("AC-4: SkipFilter is reached when ReviewFilterTask is non-nil", func(t *testing.T) {
+		// After the nil-template guard, SkipFilter is the next early-return.
+		// With a non-nil ReviewFilterTask + zero comments, the function would
+		// normally fall through to the LLM call; SkipFilter must short-circuit it.
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			SkipFilter:       true,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x"}, "a.go")
+
+		if client.calls != 0 {
+			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
+		}
+		if len(collector.CommentsForPath("a.go")) != 1 {
+			t.Errorf("comments should be unchanged when filter is skipped")
+		}
+	})
+
+	t.Run("AC-5: Skip takes priority over no comments", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+
+		a := New(Args{
+			LLMClient:  client,
+			Model:      "test",
+			Session:    sess,
+			SkipFilter: true,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x"}, "a.go")
+
+		if client.calls != 0 {
+			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
+		}
+	})
+}
+
 func TestExecutePlanPhase(t *testing.T) {
 	tmpDir := t.TempDir()
 	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
@@ -614,7 +793,6 @@ func TestExecuteReviewFilter_WithTimeout(t *testing.T) {
 		CommentCollector: collector,
 		Template: template.Template{
 			ReviewFilterTask: &template.LlmConversation{
-				Timeout:  30,
 				Messages: []template.ChatMessage{{Role: "user", Content: "{{comments}} {{path}} {{diff}}"}},
 			},
 			MaxTokens:           10000,

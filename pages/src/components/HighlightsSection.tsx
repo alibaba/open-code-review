@@ -1,10 +1,24 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import React, { useRef, useEffect, useState } from 'react';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
+import { useNpmDownloads } from '../hooks/useNpmDownloads';
 
-// 从字符串中解析数字和前后缀
+// npm package name, used to fetch real external download counts
+const NPM_PACKAGE = '@alibaba-group/open-code-review';
+
+// Compress the download count into a compact format consistent with the other stats: 149176 -> "149K+"
+function formatNpmDownloads(n: number): string {
+  if (n >= 1_000_000) return `${Math.floor(n / 1_000_000)}M+`;
+  if (n >= 1_000) return `${Math.floor(n / 1_000)}K+`;
+  return `${n}`;
+}
+
+// Parse the number plus its surrounding prefix and suffix out of a string
 function parseStatValue(value: string): { prefix: string; number: number; suffix: string } {
-  // 匹配 "> 30%" 等格式
+  // Matches formats such as "> 30%"
   const match = value.match(/^([^\d]*?)(\d+)(.*)$/);
   if (match) {
     return { prefix: match[1], number: parseInt(match[2], 10), suffix: match[3] };
@@ -44,7 +58,7 @@ const CountUpValue: React.FC<{ value: string; isVisible: boolean }> = ({ value, 
   const count = useCountUp(number, 2000, isVisible);
 
   if (number === 0) {
-    // 无法解析数字，直接显示原文
+    // No number could be parsed, render the original text as-is
     return <>{value}</>;
   }
 
@@ -54,6 +68,8 @@ const CountUpValue: React.FC<{ value: string; isVisible: boolean }> = ({ value, 
 const HighlightsSection: React.FC = () => {
   const { t } = useTranslation();
   const { isMobile, isTablet } = useResponsive();
+  // Fetch live monthly npm downloads, reflecting real external community usage
+  const npm = useNpmDownloads(NPM_PACKAGE, 'last-month');
   const sectionRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
 
@@ -75,8 +91,13 @@ const HighlightsSection: React.FC = () => {
 
   const stats = [
     { value: t('highlights.stat1Value'), label: t('highlights.stat1Label'), caption: t('highlights.stat1Caption') },
-    { value: t('highlights.stat2Value'), label: t('highlights.stat2Label'), caption: t('highlights.stat2Caption') },
     { value: t('highlights.stat3Value'), label: t('highlights.stat3Label'), caption: t('highlights.stat3Caption') },
+    {
+      // Live monthly npm downloads; fall back to the static i18n value while loading or on failure
+      value: npm.downloads !== null ? formatNpmDownloads(npm.downloads) : t('highlights.stat2Value'),
+      label: t('highlights.stat2Label'),
+      caption: t('highlights.stat2Caption'),
+    },
     { value: t('highlights.stat4Value'), label: t('highlights.stat4Label'), caption: t('highlights.stat4Caption') },
     { value: t('highlights.stat5Value'), label: t('highlights.stat5Label'), caption: t('highlights.stat5Caption') },
   ];

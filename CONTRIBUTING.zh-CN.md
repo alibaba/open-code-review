@@ -90,14 +90,23 @@ fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
 
+### 许可证头
+
+每个源文件（`.go`、`.sh`、`.js`、`.mjs`、`.ts`、`.tsx`）都必须包含 SPDX 许可证头。创建新文件后请运行：
+
+```bash
+make license-add
+```
+
+此命令会自动添加所需的许可证头。CI 会拒绝缺少许可证头的 PR。
+
 ### 代码质量
 
 提交前请确保通过以下检查：
 
 ```bash
-# 格式化和静态检查
-go fmt ./...
-go vet ./...
+# 格式化、静态检查、验证许可证头
+make check
 
 # 带竞态检测运行测试
 make test

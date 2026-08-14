@@ -18,7 +18,7 @@
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
-  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
+  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
   <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
@@ -135,7 +135,7 @@ cd your-project
 # ワークスペースモード — ステージ済み・未ステージ・未追跡のすべての変更をレビュー
 ocr review
 
-# ブランチ範囲 — 2つのrefを比較
+# ブランチ範囲 — main から分岐した後の feature-branch の変更をレビュー（マージベースモード）
 ocr review --from main --to feature-branch
 
 # 単一コミット
@@ -171,6 +171,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Codex](plugins/open-code-review/README.md#codex) — 呼び出し可能なレビュースキルを含むプラグインをインストール
   - [Cursor](plugins/open-code-review/README.md#cursor) — 移植可能なレビュースキルを含むプラグインをインストール
   - [OpenCode](plugins/open-code-review/opencode/README.md) — ネイティブレビュー・ツールとスラッシュコマンドをインストール
+  - [QCA Forward](plugins/open-code-review/qca/README.md) — QCA ホストモデルと公開可能なテンプレートで委任モードを実行
   - [Skill 対応エージェント](https://open-codereview.ai/docs/agent-skill) — 移植可能なエージェントスキルをインストール
 - レビュー実行モード — 連携後、どの LLM がレビューを実行するかを選択
   - [デフォルト（OCR が管理）](https://open-codereview.ai/docs/configuration) — OCR が設定済みの LLM を使用してレビューを実行

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import React, { useMemo, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { Marked, Renderer } from 'marked';

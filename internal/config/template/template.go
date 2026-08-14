@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package template loads and validates task prompt templates for the code review agent.
 package template
 
@@ -15,6 +18,9 @@ type Template struct {
 	PlanTask              *LlmConversation `json:"PLAN_TASK,omitempty"`
 	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	MaxTokens             int              `json:"MAX_TOKENS"`
+	// MaxCompletionTokens is a runtime-only output cap. When zero, callers
+	// retain the template's historical MaxTokens behavior.
+	MaxCompletionTokens   int              `json:"-"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
@@ -30,6 +36,7 @@ type ScanTemplate struct {
 	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	MaxTokens             int              `json:"MAX_TOKENS"`
+	MaxCompletionTokens   int              `json:"-"`
 	ToolRequestWaitTimeMs int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	MaxSubtaskExecMinutes int              `json:"MAX_SUBTASK_EXECUTION_TIME_MINUTES"`
@@ -40,6 +47,23 @@ type ScanTemplate struct {
 	DedupTask             *LlmConversation `json:"DEDUP_TASK,omitempty"`
 	DedupMinComments      int              `json:"DEDUP_MIN_COMMENTS,omitempty"`
 	ProjectSummaryTask    *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
+}
+
+// CompletionTokenLimit returns the output cap for LLM requests. Runtime
+// prompt-limit overrides must not silently expand the model's output budget.
+func (t Template) CompletionTokenLimit() int {
+	if t.MaxCompletionTokens > 0 {
+		return t.MaxCompletionTokens
+	}
+	return t.MaxTokens
+}
+
+// CompletionTokenLimit is the scan-template counterpart of Template's method.
+func (t ScanTemplate) CompletionTokenLimit() int {
+	if t.MaxCompletionTokens > 0 {
+		return t.MaxCompletionTokens
+	}
+	return t.MaxTokens
 }
 
 //go:embed task_template.json prompts/*
@@ -54,7 +78,6 @@ type manifestMessage struct {
 }
 
 type manifestConversation struct {
-	Timeout  int               `json:"timeout"`
 	Messages []manifestMessage `json:"messages"`
 }
 
@@ -70,7 +93,7 @@ type templateManifest struct {
 }
 
 func resolveConversation(m manifestConversation) (LlmConversation, error) {
-	conv := LlmConversation{Timeout: m.Timeout}
+	var conv LlmConversation
 	conv.Messages = make([]ChatMessage, len(m.Messages))
 	for i, mm := range m.Messages {
 		data, err := templateFS.ReadFile("prompts/" + mm.PromptFile)
@@ -214,7 +237,6 @@ func (t *ScanTemplate) Validate() error {
 
 // LlmConversation is a preset prompt with settings.
 type LlmConversation struct {
-	Timeout  int           `json:"timeout"`
 	Messages []ChatMessage `json:"messages"`
 }
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llm
 
 import (
@@ -244,6 +247,20 @@ var registry = []Provider{
 		Name:        "minimax",
 		DisplayName: "MiniMax API",
 		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.minimax.io/v1",
+		EnvVar:      "MINIMAX_GLOBAL_API_KEY",
+		Models: []string{
+			"MiniMax-M3",
+			"MiniMax-M2.7",
+			"MiniMax-M2.7-highspeed",
+			"MiniMax-M2.5",
+			"MiniMax-M2.5-highspeed",
+		},
+	},
+	{
+		Name:        "minimax-cn",
+		DisplayName: "MiniMax CN API",
+		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.minimaxi.com/v1",
 		EnvVar:      "MINIMAX_API_KEY",
 		Models: []string{
@@ -301,6 +318,18 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "novita",
+		DisplayName: "Novita API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.novita.ai/openai",
+		EnvVar:      "NOVITA_API_KEY",
+		Models: []string{
+			"moonshotai/kimi-k3",
+			"zai-org/glm-5.2",
+			"deepseek/deepseek-v4-flash-0731",
+		},
+	},
+	{
 		Name:        "litellm",
 		DisplayName: "LiteLLM AI Gateway",
 		Protocol:    ProtocolOpenAIChatCompletions,
@@ -319,6 +348,50 @@ var registry = []Provider{
 			"groq/llama-4-scout-17b-16e-instruct",
 			"mistral/mistral-large-latest",
 			"deepseek/deepseek-chat",
+		},
+	},
+	{
+		Name:        "siliconflow",
+		DisplayName: "SiliconFlow API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.siliconflow.com/v1",
+		EnvVar:      "SILICONFLOW_GLOBAL_API_KEY",
+		Models: []string{
+			"deepseek-ai/DeepSeek-V4-Pro",
+			"deepseek-ai/DeepSeek-V4-Flash",
+			"Qwen/Qwen3.6-27B",
+			"moonshotai/Kimi-K2.7-Code",
+			"zai-org/GLM-5.2",
+		},
+	},
+	{
+		Name:        "siliconflow-cn",
+		DisplayName: "SiliconFlow CN API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.siliconflow.cn/v1",
+		EnvVar:      "SILICONFLOW_API_KEY",
+		Models: []string{
+			"deepseek-ai/DeepSeek-V4-Pro",
+			"deepseek-ai/DeepSeek-V4-Flash",
+			"Qwen/Qwen3.6-27B",
+			"moonshotai/Kimi-K2.7-Code",
+			"zai-org/GLM-5.2",
+		},
+	},
+	{
+		Name:        "mistral",
+		DisplayName: "Mistral AI",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.mistral.ai/v1",
+		EnvVar:      "MISTRAL_API_KEY",
+		// Deliberately minimal list to keep this preset low-maintenance for
+		// alibaba/open-code-review maintainers. Users can point to any other
+		// Mistral model via `ocr config set model <name>`; the preset only
+		// seeds the picker UI. See https://docs.mistral.ai/getting-started/models/models_overview/
+		Models: []string{
+			"codestral-latest",
+			"mistral-large-latest",
+			"mistral-small-latest",
 		},
 	},
 }

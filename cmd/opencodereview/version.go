@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -16,6 +19,7 @@ var (
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version information",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		printVersion()
 	},
