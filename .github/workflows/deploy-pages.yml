@@ -33,6 +33,7 @@ jobs:
   build:
     if: github.repository == 'alibaba/open-code-review'
     runs-on: self-hosted
+    needs: lint
     timeout-minutes: 10
     container:
       image: node:24
