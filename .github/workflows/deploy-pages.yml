@@ -27,6 +27,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Lint Powershell script
+        shell: pwsh
         run: pwsh -Command "[ScriptBlock]::Create((Get-Content install.ps1 -Raw)) | Out-Null"
 
   build:
