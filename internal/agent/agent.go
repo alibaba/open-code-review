@@ -1481,6 +1481,7 @@ func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
 			CommentIDs []string `json:"comment_ids"`
 		}
 		if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Review filter: failed to parse tool call arguments: %v\n", err)
 			continue
 		}
 		indices := make(map[int]struct{})
