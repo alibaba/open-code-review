@@ -206,6 +206,20 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "kimi-global",
+		DisplayName: "Kimi Moonshot API (Global)",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.moonshot.ai/v1",
+		EnvVar:      "MOONSHOT_GLOBAL_API_KEY",
+		Models: []string{
+			"kimi-k3",
+			"kimi-k2.7-code",
+			"kimi-k2.7-code-highspeed",
+			"kimi-k2.6",
+			"kimi-k2.5",
+		},
+	},
+	{
 		Name:        "z-ai",
 		DisplayName: "Z.AI API",
 		Protocol:    ProtocolOpenAIChatCompletions,
