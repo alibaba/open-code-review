@@ -50,6 +50,8 @@ Open Code Review는 AI 기반 코드 리뷰 CLI 도구입니다. Alibaba Group�
 
 실제 코드 리뷰 기반 벤치마크. **50**개 인기 오픈소스 저장소에서 **200**개 실제 Pull Request를 엄선하고, **10**개 프로그래밍 언어를 커버 — 80명 이상의 시니어 엔지니어가 교차 검증(**1,505**개 어노테이션된 결함).
 
+<a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> Hugging Face에서 AACR-Bench 데이터셋 살펴보기</a>.
+
 | 지표 | 측정 내용 | 중요한 이유 |
 |------|-----------|-------------|
 | **F1** | 정밀도와 재현율의 조화 평균 | 리뷰 품질을 나타내는 최적의 단일 지표 |
