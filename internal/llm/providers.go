@@ -330,6 +330,26 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "xai",
+		DisplayName: "xAI Grok API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.x.ai/v1",
+		EnvVar:      "XAI_API_KEY",
+		// Current-generation text models, verified against the xAI catalog
+		// (https://docs.x.ai/docs/models). Users can point to any other
+		// Grok model via `ocr config set model <name>`; the preset only
+		// seeds the picker UI.
+		Models: []string{
+			"grok-4.6",
+			"grok-4.5",
+			"grok-4.3",
+			"grok-4.20-0309-reasoning",
+			"grok-4.20-0309-non-reasoning",
+			"grok-4.20-multi-agent-0309",
+			"grok-build-0.1",
+		},
+	},
+	{
 		Name:        "litellm",
 		DisplayName: "LiteLLM AI Gateway",
 		Protocol:    ProtocolOpenAIChatCompletions,
