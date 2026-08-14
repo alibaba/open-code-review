@@ -661,6 +661,10 @@ dispatchLoop:
 		case <-ctx.Done():
 			break dispatchLoop
 		}
+		if ctx.Err() != nil {
+			<-sem // release the slot acquired concurrently with cancellation
+			break dispatchLoop
+		}
 		dispatched++
 		wg.Add(1)
 
@@ -768,8 +772,10 @@ func (a *Agent) recordContextFailure(err error) {
 	if b := a.session.Manifest(); b != nil {
 		var setErr error
 		if errors.Is(err, context.DeadlineExceeded) {
+			// A deadline truncates pending coverage without overriding completed items.
 			setErr = b.SetPendingFailureCause(session.FailureTimeout, "review deadline exceeded")
 		} else {
+			// Explicit cancellation stops the run itself, not just its pending items.
 			setErr = b.SetRunFailure(session.RunFailureCancelled, "review was cancelled")
 		}
 		if setErr != nil {

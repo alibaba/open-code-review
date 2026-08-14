@@ -107,10 +107,6 @@ func init() {
 	registerReviewFlags(reviewCmd, &reviewOpts)
 }
 
-func executeReview(opts reviewOptions) error {
-	return executeReviewContext(context.Background(), opts)
-}
-
 func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
@@ -483,10 +479,6 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 		}
 	}
 	return nil
-}
-
-func runPreview(cc *commonContext, opts reviewOptions) error {
-	return runPreviewContext(context.Background(), cc, opts)
 }
 
 func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions) error {
