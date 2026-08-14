@@ -49,8 +49,9 @@ func Quiet() func() {
 //	var buf bytes.Buffer
 //	defer stdout.Swap(&buf)()
 //
-// Like Quiet, Swap is not designed for concurrent use from multiple
-// goroutines; keep swapping and restoring on one goroutine.
+// Like Quiet, Swap acquires the package mutex for memory safety, but concurrent
+// swaps from multiple goroutines produce non-deterministic restore ordering.
+// Keep swapping and restoring on a single goroutine.
 func Swap(replacement io.Writer) func() {
 	mu.Lock()
 	old := w
