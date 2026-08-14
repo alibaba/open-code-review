@@ -74,7 +74,7 @@ sudo port upgrade open-code-review
 сумму. Он удобен для базовых образов CI и систем без графического интерфейса:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
 __В некоторых регионах доступ к GitHub может быть медленным. В этом случае задайте домен зеркала GitHub, чтобы загружать артефакты через него.__
@@ -97,7 +97,7 @@ export GITHUB_MIRROR_DOMAIN='YOUR_GITHUB_MIRROR_DOMAIN'
 В Windows с PowerShell 5.1 или новее запустите PowerShell-установщик:
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
 __Если доступ к GitHub медленный, задайте тот же домен зеркала как переменную окружения PowerShell, чтобы загружать файлы через него:__

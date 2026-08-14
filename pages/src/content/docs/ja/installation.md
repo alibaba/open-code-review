@@ -74,7 +74,7 @@ GitHub Release バイナリのダウンロード（検証付き）をラップ�
 イメージやヘッドレス環境に適しています。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
 __一部の地域では GitHub へのネットワークアクセスが遅いため、GitHub ミラードメインを設定すると、ミラー経由でアセットをダウンロードできます。__
@@ -97,7 +97,7 @@ export GITHUB_MIRROR_DOMAIN='YOUR_GITHUB_MIRROR_DOMAIN'
 Windows（PowerShell 5.1+）では、代わりに PowerShell インストーラーを使用してください：
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
 __GitHub へのアクセスが遅い場合は、同じミラードメインを PowerShell の環境変数として設定すると、ミラー経由でダウンロードできます：__

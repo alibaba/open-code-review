@@ -72,7 +72,7 @@ sudo port upgrade open-code-review
 镜像和无界面环境：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
 __在部分网络访问 GitHub 较慢的地区，可以设置一个 GitHub 镜像域名，通过镜像下载资源。__
@@ -95,7 +95,7 @@ export GITHUB_MIRROR_DOMAIN='YOUR_GITHUB_MIRROR_DOMAIN'
 在 Windows（PowerShell 5.1+）上，请改用 PowerShell 安装脚本：
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
 __访问 GitHub 较慢时，同样可以将镜像域名设为 PowerShell 环境变量，通过镜像下载：__

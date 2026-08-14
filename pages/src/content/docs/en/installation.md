@@ -76,7 +76,7 @@ A convenience installer that wraps the GitHub Release binary download
 machines:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
 __In some regions where network access to GitHub is slow, set a GitHub mirror domain to download assets through a mirror.__
@@ -99,7 +99,7 @@ The script supports `darwin` and `linux` on `amd64` / `arm64`.
 On Windows (PowerShell 5.1+), use the PowerShell installer instead:
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
 __To download through a mirror when GitHub access is slow, set the same mirror domain as a PowerShell environment variable:__

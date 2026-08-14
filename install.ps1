@@ -1,7 +1,7 @@
 # Install the ocr (Open Code Review) CLI from GitHub releases on Windows.
-#   irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+#   irm https://open-codereview.ai/install.ps1 | iex
 # Prefer to inspect first:
-#   irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 -OutFile install.ps1
+#   irm https://open-codereview.ai/install.ps1 -OutFile install.ps1
 #   notepad install.ps1   # review, then: .\install.ps1
 # Env: OCR_INSTALL_DIR (default $env:LOCALAPPDATA\Programs\ocr), OCR_VERSION (default latest),
 # Set a GITHUB_MIRROR_DOMAIN to download assets through a mirror domain.
