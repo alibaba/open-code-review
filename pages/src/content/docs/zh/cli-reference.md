@@ -86,9 +86,9 @@ unstaged + untracked 变更。
 | `--from <ref>` | — | — | diff 起始 ref（如 `main`）。 |
 | `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
 | `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
-| `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`。 |
+| `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
-| `--format <fmt>` | `-f` | `text` | `text`（人类可读）或 `json`（机器可读的评论数组）。 |
+| `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
 | `--audience <who>` | — | `human` | `human` 流式输出进度行；`agent` 静默 stdout，只打印最终摘要 / JSON。 |
 | `--background <text>` | `-b` | — | 注入 plan + main prompt 的可选需求 / 业务上下文。 |
 | `--concurrency <n>` | — | `8` | 并行评审的最大文件数。 |
@@ -171,12 +171,22 @@ ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
 
-恢复逻辑是严格的：
+恢复逻辑是严格的。只有当本次运行评审的对象与父运行完全一致时，checkpoint 才会被复用：
 
 - 工作区评审不能恢复
-- 区间评审必须使用相同的 `--from` 和 `--to`
-- 单 commit 评审必须使用相同的 `--commit`
+- 评审模式必须一致：区间会话不能以单 commit 模式恢复
+- 解析后的输入必须一致。ref 的*写法*不参与比较（`abc1234` 与 `abc1234def`
+  指向同一个 commit），但如果相同的 ref 现在解析到不同的 diff，或规则、过滤器
+  改变了选中的文件集合，整次恢复会被拒绝，而不是部分复用
+- 切换 provider 或 model 必须通过 `--provider` / `--model` 显式声明；经由配置
+  文件或环境变量发生的变化一律拒绝
+- 父运行必须带有 run manifest，输入正是拿它来校验的。被 Ctrl-C 终止的运行没写出
+  manifest，早于 run manifest 的老 session 则从来就没有
+- 只有父 manifest 认领过的文件才会复用。manifest 未认领或已损坏的 checkpoint 只
+  影响它自己那个文件——该文件重新评审一次，其余不受影响
 - `--preview` 和 `--resume` 不能同时使用
+
+被拒绝的恢复不会留下任何产物：不创建 session、不写 manifest、不调用 LLM。
 
 ### 输出
 
@@ -301,7 +311,7 @@ ocr s      [flags]   (alias)
 |---|---|---|---|
 | `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。 |
 | `--exclude <patterns>` | - | - | 逗号分隔的 gitignore 风格排除模式（如 `**/generated/*,*.pb.go`）；与 `rule.json` 的 excludes 合并。 |
-| `--preview` | `-p` | `false` | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。支持 `--format json`。 |
+| `--preview` | `-p` | `false` | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。支持 `--format json`；不支持 `--format sarif`。 |
 
 ```bash
 ocr scan --preview                              # 查看会扫描哪些文件
@@ -342,6 +352,8 @@ ocr session list --json
 | `--limit <n>` | `20` | 限制列出的会话数量。使用 `0` 表示不限制。 |
 
 ### `ocr session show`
+
+恢复的运行还会打印它所继续的父运行，若这次恢复跨了 provider 或 model，也会打印这次切换。
 
 ```bash
 ocr session show <session-id>

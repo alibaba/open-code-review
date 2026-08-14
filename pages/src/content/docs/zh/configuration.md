@@ -56,6 +56,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
 | `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
+| `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
+| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
 ### 覆盖内置 provider 的 Base URL
@@ -210,6 +212,20 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 
 ```bash
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
+```
+
+### 提示词缓存的会话亲和性
+
+OCR 为每个 LLM 对话派生一个提示词缓存亲和性密钥，作用域为评审会话及其中的任务（`<会话 ID>-<任务类型>-<作用域哈希>`）。提示词缓存按前缀匹配，因此按对话划分密钥可让每个不断增长的对话（如某个文件的评审工具循环）稳定路由到同一缓存节点，而不是把整次运行压在一个热点密钥上；密钥中的会话 ID 前缀可将供应商侧缓存日志与 `ocr session` 记录对应。
+
+要启用，请在供应商期望的位置——`extra_headers` 或 `extra_body` 的值中——嵌入 `{ocr_session_key}` 模板变量。OCR 会在每个请求中将其替换为该对话的密钥；未配置时不会发送任何内容：
+
+```bash
+# 通过 OpenAI 风格的请求体字段传递（例如 prompt_cache_key）
+ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_key}"}'
+
+# 通过 HTTP 请求头传递（例如 x-session-affinity）
+ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
 ```
 
 ## 配置评审语言

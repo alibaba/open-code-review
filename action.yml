@@ -36,7 +36,7 @@ inputs:
   language:
     description: >-
       Review output language, written via `ocr config set language`
-      (e.g. English, 中文). No env var exists for this.
+      (e.g. English, Chinese). No env var exists for this.
     required: false
     default: 'English'
   llm_timeout:

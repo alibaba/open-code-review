@@ -146,6 +146,9 @@ func NewAgent(args Args) *Agent {
 		// line-number resolver (resolveFromFileContent) can match against
 		// the full file content of the scanned file.
 		DiffLookup: a.lookupDiff,
+		// NewRequestMeta is deliberately left nil. The retry report describes
+		// ocr review; scan shares this Runner, and a nil factory is what keeps
+		// scan's requests out of the report. See llmloop.Deps.NewRequestMeta.
 	})
 	return a
 }
@@ -300,6 +303,13 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	if len(a.args.Template.MainTask.Messages) == 0 {
 		return nil, fmt.Errorf("scan template MAIN_TASK is missing or empty")
 	}
+
+	// Base prompt-cache affinity key for any LLM request in this run that a
+	// task doesn't re-scope. Each task conversation (plan, per-file main
+	// loop, dedup, summary) refines it with llm.SessionTaskKey where it
+	// starts, so affinity keys stay per-conversation — the granularity
+	// provider prompt caches actually reuse prefixes at.
+	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
 	ctx, scanSpan := telemetry.StartSpan(ctx, "scan.enumerate")
 	provider := NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
@@ -762,6 +772,8 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 
 	fs := a.session.GetOrCreateFileSession(it.Path)
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.PlanTask), it.Path))
 	startTime := time.Now()
 
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
@@ -815,6 +827,8 @@ func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.Llm
 	const pathKey = "__scan_project_summary__"
 	fs := a.session.GetOrCreateFileSession(pathKey)
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, messages) // reuse existing task type
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.MemoryCompressionTask), pathKey))
 	startTime := time.Now()
 
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
@@ -890,6 +904,8 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) {
 	pathKey := fmt.Sprintf("__scan_dedup_batch_%d__", batchIdx)
 	fs := a.session.GetOrCreateFileSession(pathKey)
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, messages) // reuse existing task type; no scan-specific type to invent
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.MemoryCompressionTask), pathKey))
 	startTime := time.Now()
 
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{

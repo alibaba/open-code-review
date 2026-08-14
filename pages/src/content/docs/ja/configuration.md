@@ -57,6 +57,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
 | `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
+| `siliconflow`  | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
+| `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
 ### 組み込み provider の Base URL を上書きする
@@ -228,6 +230,27 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 
 ```bash
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
+```
+
+### プロンプトキャッシュのセッションアフィニティ
+
+OCR はすべての LLM 会話ごとに、レビューセッションとその中のタスクにスコープされた
+プロンプトキャッシュ・アフィニティキー（`<セッションID>-<タスク種別>-<スコープハッシュ>`）を
+導出します。プロンプトキャッシュはプレフィックス単位でマッチするため、会話ごとのキーは、
+成長していく各会話（例：ファイルごとのレビューツールループ）を、実行全体を 1 つの
+ホットキーに固定する代わりに、一貫したキャッシュノードに保ちます。キーのセッション ID
+プレフィックスにより、プロバイダー側のキャッシュログを `ocr session` の記録と照合できます。
+
+オプトインするには、プロバイダーがキーを期待する場所の `extra_headers` または
+`extra_body` の値に `{ocr_session_key}` テンプレート変数を埋め込みます。OCR は
+リクエストごとにその会話のキーに置換し、設定がなければ何も送信しません：
+
+```bash
+# OpenAI 形式のリクエストボディフィールドで渡す場合（例：prompt_cache_key）
+ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_key}"}'
+
+# HTTP ヘッダーで渡す場合（例：x-session-affinity）
+ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
 ```
 
 ## レビュー言語を設定する

@@ -113,8 +113,10 @@ type Args struct {
 	// injected into plan and main_task prompts via {{requirement_background}}.
 	Background string
 
-	// Model is the user-configured model name used as fallback when
-	// template phases (plan/memory_compression) don't specify one.
+	// Model is the resolved model name used by every LLM request this run
+	// makes. The template carries no per-phase model override, so plan,
+	// main_task, memory compression, re-location and review filter all send
+	// this value.
 	Model string
 
 	// Provider is the configured provider name (e.g. "openai", "anthropic", or a
@@ -134,10 +136,22 @@ type Args struct {
 	// Resume is an optional read-only checkpoint index from a previous review session.
 	Resume *session.ResumeState
 
+	// SealedInput pins this run to commit endpoints a pre-flight resolve already
+	// froze, instead of resolving From/To/Commit again. Set only on the resume
+	// path, where admission compared an identity derived from those endpoints:
+	// re-resolving a raw ref here could read a commit the admitted identity never
+	// covered, and the mismatch would surface only after the child session and
+	// manifest existed. Nil means resolve normally, which is every non-resume run.
+	SealedInput *diff.InputResolution
+
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
 	// whole run; dispatch stops once the running total + a per-file look-ahead
 	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
 	MaxTokensBudget int64
+
+	// SkipFilter disables the REVIEW_FILTER_TASK even when the template
+	// defines one. Set via the --no-filter CLI flag.
+	SkipFilter bool
 
 	// RuntimeConfig carries the non-secret, allowlisted runtime settings that
 	// identify how this run was configured, for the manifest's
@@ -227,12 +241,42 @@ func New(args Args) *Agent {
 		CommentWorkerPool: args.CommentWorkerPool,
 		Session:           args.Session,
 		DiffLookup:        a.findDiff,
+		// Non-nil only here: the same Runner serves scan, whose requests must
+		// stay out of the retry report. See newRequestMeta.
+		NewRequestMeta: a.newRequestMeta,
 	})
 	return a
 }
 
+// newRequestMeta builds the retry-report identity for one logical LLM request.
+//
+// It is the single place provider and model are read for that purpose — the
+// llmloop Runner receives it as Deps.NewRequestMeta, and the two agent-local
+// requests (plan, review filter) call it directly — so the two values cannot
+// drift apart between the five review request types.
+//
+// filePath must be the same string passed to GetOrCreateFileSession and
+// requestNo the RequestNo of the record created there, because those three
+// fields plus taskType are how the report joins against the session JSONL.
+// Provider is intentionally passed through as-is: empty is the real value for an
+// unnamed endpoint, and must not be replaced by the protocol.
+func (a *Agent) newRequestMeta(filePath string, taskType session.TaskType, requestNo int) llm.RequestMeta {
+	return llm.RequestMeta{
+		Provider:  a.args.Provider,
+		Model:     a.args.Model,
+		FilePath:  filePath,
+		TaskType:  string(taskType),
+		RequestNo: requestNo,
+	}
+}
+
 // Run executes the full review pipeline: parse diffs -> plan per file -> LLM tool-loop -> collect comments.
 func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
+	// Base prompt-cache affinity key for any LLM request in this run that a task doesn't re-scope.
+	// Each task conversation (plan, per-file main loop, compression, ...) refines it with llm.SessionTaskKey where it starts,
+	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
+	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
+
 	// Step 1: Parse diffs
 	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
 	if err := a.loadDiffs(ctx); err != nil {
@@ -318,11 +362,25 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		}
 	}
 
+	// Record which run this one continued, before any item is dispatched, so the
+	// lineage is on disk even if the review then fails outright. It is written
+	// once per run and only for an accepted resume — admission was already
+	// decided by the command layer, which rejects before a session exists.
+	a.session.RecordResumeLineage(session.NewResumeLineage(
+		a.args.Resume, a.session.SessionID, a.args.Provider, a.args.Model))
+
 	// Step 2: Dispatch per-file subtasks concurrently
 	comments, err := a.dispatchSubtasks(ctx)
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
 	}
+	// Join background memory compression before anything freezes run-level
+	// state. Those jobs are cancelled rather than awaited when a conversation
+	// ends, so their LLM request can still be in flight here; a retry report
+	// frozen at the command boundary would then see an un-finalized request
+	// and be discarded wholesale. Cheap in the normal case — every job has
+	// already been cancelled by now.
+	a.runner.WaitBackground()
 	// Freeze coverage into the immutable manifest before session_end embeds it,
 	// so the CLI and the persisted session serialize the identical object. A
 	// persistence failure is a delivery error in its own right: when the review
@@ -435,11 +493,30 @@ func (a *Agent) recordWarning(warningType, file, message string) {
 func (a *Agent) loadDiffs(ctx context.Context) error {
 	var provider *diff.Provider
 
+	// A sealed input substitutes the commit SHAs a pre-flight resolve already froze
+	// for the refs the user typed. Both loads then read the same immutable objects,
+	// which is what makes this run's input provably the admitted one: a ref moving
+	// after admission can no longer change what gets reviewed. Neither mode's
+	// semantics shift under the substitution — range keeps its merge-base, because
+	// the sealed base already is that merge-base and merge-base(base, head) is base
+	// whenever base is an ancestor of head; commit mode keeps its first-parent
+	// comparison, which is derived from the commit rather than from its spelling.
+	// Workspace mode seals no head and is left alone.
+	from, to, commit := a.args.From, a.args.To, a.args.Commit
+	if s := a.args.SealedInput; s != nil && s.ResolvedHead != "" {
+		switch {
+		case commit != "":
+			commit = s.ResolvedHead
+		case s.ResolvedBase != "":
+			from, to = s.ResolvedBase, s.ResolvedHead
+		}
+	}
+
 	switch {
-	case a.args.Commit != "":
-		provider = diff.NewCommitProvider(a.args.RepoDir, a.args.Commit, a.args.GitRunner)
-	case a.args.From != "" && a.args.To != "":
-		provider = diff.NewProvider(a.args.RepoDir, a.args.From, a.args.To, a.args.GitRunner)
+	case commit != "":
+		provider = diff.NewCommitProvider(a.args.RepoDir, commit, a.args.GitRunner)
+	case from != "" && to != "":
+		provider = diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
 	default:
 		provider = diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
 	}
@@ -694,7 +771,10 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 			continue
 		}
 		fingerprint := reviewItemFingerprint(mode, d)
-		item, ok := resume.Item(fingerprint)
+		// ReusableItem, not Item: coverage lives in the parent manifest, so a
+		// checkpoint line the parent's manifest did not settle as completed or
+		// reused is not evidence of anything and its file is reviewed again.
+		item, ok := resume.ReusableItem(fingerprint)
 		if !ok {
 			toDispatch = append(toDispatch, d)
 			continue
@@ -737,7 +817,11 @@ func (a *Agent) reviewMode() string {
 }
 
 func reviewItemFingerprint(mode string, d model.Diff) string {
-	sum := sha256.Sum256([]byte(mode + "\x00" + d.OldPath + "\x00" + d.NewPath + "\x00" + d.Diff))
+	// The patch splitter can leave extra line endings on the final file in a
+	// multi-file patch. Unified diff content lines always carry a marker, so
+	// trimming CR/LF here removes only that position-dependent delimiter.
+	diffText := strings.TrimRight(d.Diff, "\r\n")
+	sum := sha256.Sum256([]byte(mode + "\x00" + d.OldPath + "\x00" + d.NewPath + "\x00" + diffText))
 	return fmt.Sprintf("%x", sum)
 }
 
@@ -1153,7 +1237,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 		// Always substitute the {{plan_guidance}} token so the literal placeholder
 		// never leaks into the rendered prompt. When the plan phase produced no
 		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
-		// (any language variant) so the LLM does not see a dangling section header.
+		// so the LLM does not see a dangling section header.
 		// Strip MUST run before ReplaceAll: the regex requires the literal
 		// {{plan_guidance}} token to be present; if we replace first, the token
 		// is gone and the wrapper can't be matched.
@@ -1238,6 +1322,12 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 		return
 	}
 
+	if a.args.SkipFilter {
+		telemetry.SetAttr(span, "skipped", true)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for %s (--no-filter)\n", newPath)
+		return
+	}
+
 	comments := a.args.CommentCollector.CommentsForPath(newPath)
 	if len(comments) == 0 {
 		return
@@ -1257,10 +1347,13 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 
 	fs := a.session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.ReviewFilterTask), newPath))
 	startTime := time.Now()
+	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.ReviewFilterTask, rec.RequestNo))
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
-	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
 		MaxTokens: a.args.Template.CompletionTokenLimit(),
@@ -1480,10 +1573,13 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 
 	fs := a.session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.PlanTask), newPath))
 	startTime := time.Now()
+	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.PlanTask, rec.RequestNo))
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
-	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
 		MaxTokens: a.args.Template.CompletionTokenLimit(),

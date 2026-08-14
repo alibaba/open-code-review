@@ -13,13 +13,15 @@ export const ru: TranslationKeys = {
   'navbar.getStarted': 'Начать работу',
 
   // Hero
-  'hero.title': 'Код-ревью с ИИ,\nпроверенное на миллионах\nреальных задач',
+  'hero.title': 'Код-ревью с ИИ,\nпроверенное на миллионах реальных задач',
   'hero.description': 'Open Code Review разработали в Alibaba и проверили на реальных проектах компании. Он встраивается в привычный процесс разработки и работает с выбранной вами LLM. Вы сами решаете, куда передаются данные. Замечания агента разработчики действительно учитывают.',
   'hero.quickStart': 'Быстрый старт',
   'hero.learnMore': 'Подробнее',
   'hero.terminal': 'Терминал',
   'hero.copied': 'Скопировано!',
   'hero.copyFailed': 'Не удалось скопировать',
+  'hero.installNpm': 'npm',
+  'hero.installBrew': 'Homebrew',
 
   // Error boundary
   'error.pageLoadFailed': 'Не удалось загрузить страницу.',
@@ -167,7 +169,7 @@ export const ru: TranslationKeys = {
   'docs.reviewFlag1Desc': 'Хеш коммита для ревью',
   'docs.reviewFlag2Desc': 'Начальный ref (начало diff)',
   'docs.reviewFlag3Desc': 'Целевой ref (конец diff)',
-  'docs.reviewFlag4Desc': 'Формат вывода: text или json',
+  'docs.reviewFlag4Desc': 'Формат вывода: text, json или sarif',
   'docs.reviewFlag5Desc': 'Корень Git-репозитория',
   'docs.reviewFlag5Default': 'Текущая директория',
   'docs.reviewFlag6Desc': 'Путь к JSON-файлу правил ревью',
@@ -223,7 +225,7 @@ export const ru: TranslationKeys = {
   'docs.scanFlag6Desc': 'Пропустить DEDUP_TASK на пакет',
   'docs.scanFlag7Desc': 'Пропустить финальный PROJECT_SUMMARY_TASK',
   'docs.scanFlag8Desc': 'Стратегия группировки: none | by-language | by-directory',
-  'docs.scanFlag9Desc': 'Формат вывода: text или json',
+  'docs.scanFlag9Desc': 'Формат вывода: text, json или sarif',
   'docs.scanFlag10Desc': 'Макс. параллельных проверок файлов',
   'docs.scanFlag11Desc': 'Таймаут параллельных задач в минутах',
   'docs.scanFlag12Desc': 'Аудитория вывода: human (показывать прогресс) или agent (только сводка)',

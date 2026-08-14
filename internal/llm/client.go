@@ -205,6 +205,24 @@ type ClientConfig struct {
 	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
 	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
 	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+	// SessionKey is the fallback prompt-cache affinity key
+	// for requests whose context carries none (see ContextWithSessionKey).
+	//
+	// Review and scan runs tag every request context with the real session's ID,
+	// so this fallback only serves session-less callers such as `ocr llm test`.
+	//
+	// Auto-generated when empty. The effective key replaces `SessionKeyTemplateVar` in Extra* values.
+	SessionKey string
+
+	// retryCollector receives one record per real HTTP attempt. It is
+	// unexported because it is not configuration: it is a handle on the current
+	// run, owned by llmRuntime and set only by NewLLMClient, and the three
+	// exported constructors keep their signatures because of it.
+	//
+	// A nil collector is fully inert: no middleware is mounted and nothing about
+	// the request path changes. That is the state for llm test, and for any
+	// caller that builds a client without one.
+	retryCollector *RetryCollector
 }
 
 // retryCodesMiddleware returns an HTTP middleware that forces the SDK to retry
@@ -243,16 +261,21 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // The defensive default keeps legacy callers that somehow bypass resolver
 // normalization working (they previously got OpenAIClient for any non-anthropic
 // protocol).
-func NewLLMClient(ep ResolvedEndpoint) LLMClient {
+//
+// collector observes every HTTP attempt the returned client makes; pass nil to
+// build a client that is not observed. It is a parameter rather than a field on
+// ResolvedEndpoint because it belongs to the run, not to the endpoint.
+func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 	cfg := ClientConfig{
-		URL:          ep.URL,
-		APIKey:       ep.Token,
-		Model:        ep.Model,
-		AuthHeader:   ep.AuthHeader,
-		Timeout:      ep.Timeout,
-		ExtraBody:    ep.ExtraBody,
-		ExtraHeaders: ep.ExtraHeaders,
-		RetryCodes:   ep.RetryCodes,
+		URL:            ep.URL,
+		APIKey:         ep.Token,
+		Model:          ep.Model,
+		AuthHeader:     ep.AuthHeader,
+		Timeout:        ep.Timeout,
+		ExtraBody:      ep.ExtraBody,
+		ExtraHeaders:   ep.ExtraHeaders,
+		RetryCodes:     ep.RetryCodes,
+		retryCollector: collector,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -339,9 +362,14 @@ type OpenAIClient struct {
 }
 
 // NewOpenAIClient creates a new OpenAI-compatible LLM client.
+// ExtraHeaders are applied per request (not baked into the SDK client) so
+// SessionKeyTemplateVar can expand to the session key each request carries.
 func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
 	}
 	baseURL := strings.TrimRight(cfg.URL, "/")
 	if !strings.HasSuffix(baseURL, "/chat/completions") {
@@ -357,11 +385,11 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 	}
-	for k, v := range cfg.ExtraHeaders {
-		opts = append(opts, openaiopt.WithHeader(k, v))
-	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	return &OpenAIClient{
@@ -381,7 +409,23 @@ type ChatRequest struct {
 }
 
 // CompletionsWithCtx sends a chat completion request with context support for cancellation and timeout.
-func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+//
+// The deferred finalizeRequest is the client boundary for the retry report: it is
+// the only place that knows the logical request is over, and it covers every exit
+// path including the streaming branch, the EOF recovery and a panic. Results are
+// named so the defer can read the error actually returned.
+func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	defer func() {
+		// A panic still has to finalize, or the entry stays unfinalized and Freeze
+		// drops the whole run's report. The panic value itself is re-raised
+		// unchanged so agent.go's per-file recovery behaves exactly as before.
+		if r := recover(); r != nil {
+			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
+			panic(r)
+		}
+		finalizeRequest(ctx, c.cfg.retryCollector, err)
+	}()
+
 	model := req.Model
 	if model == "" {
 		model = c.cfg.Model
@@ -389,8 +433,16 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 
 	params := c.buildOpenAIParams(model, req)
 
+	sessionKey := c.cfg.SessionKey
+	if k := SessionKeyFromContext(ctx); k != "" {
+		sessionKey = k
+	}
+
 	var opts []openaiopt.RequestOption
-	for k, v := range c.cfg.ExtraBody {
+	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
+		opts = append(opts, openaiopt.WithHeader(k, v))
+	}
+	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
 		// Skip the "stream" key here. The streaming decision below uses a
 		// dedicated boolean check, and when streaming is enabled the SDK's
 		// NewStreaming method sets stream=true on the wire itself. When
@@ -408,6 +460,15 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 
 	sdkResp, err := c.sdk.Chat.Completions.New(ctx, params, opts...)
 	if errors.Is(err, io.ErrUnexpectedEOF) {
+		// The truncated response was observed as HTTP 200, so it is corrected here
+		// rather than in the defer: this SDK call ends now, and a second one is
+		// about to append its own attempts under the same logical request.
+		//
+		// Both corrections sit ahead of their ctx early return. Placing them after
+		// would leave a truncated attempt recorded as a success whenever the parent
+		// context was cancelled in between — no invariant would complain, since a
+		// cancelled request needs no error attempt, but the record would be wrong.
+		reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassNetwork, FailurePhaseResponseDecode)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
@@ -416,6 +477,9 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			sdkResp = retryResp
 			err = nil
 		} else {
+			if errors.Is(retryErr, io.ErrUnexpectedEOF) {
+				reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassNetwork, FailurePhaseResponseDecode)
+			}
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, ctxErr
 			}
@@ -431,7 +495,29 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 	return c.mapOpenAIResponse(sdkResp), nil
 }
 
+// completionsStreaming consumes an SSE completion and corrects the retry report
+// when the stream fails after it was already established.
+//
+// The correction lives in this one wrapper instead of at the inner function's
+// four error returns: a mid-stream failure is invisible to the observer, which
+// saw only the HTTP 200 that opened the stream. It must not finalize the logical
+// request — CompletionsWithCtx returns this call directly, so its defer already
+// does, and a second Finalize would be recorded as a violation.
+//
+// A stream that never opened needs nothing here: stream.Err() then carries the
+// non-2xx *apierror.Error, the observer already recorded that attempt as an
+// error, and ReviseLastAttempt's precondition makes this a no-op.
 func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.ChatCompletionNewParams, opts ...openaiopt.RequestOption) (*ChatResponse, error) {
+	resp, err := c.completionsStreamingInner(ctx, params, opts...)
+	if err != nil {
+		class, phase := classifyStreamError(err)
+		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params openai.ChatCompletionNewParams, opts ...openaiopt.RequestOption) (*ChatResponse, error) {
 	stream := c.sdk.Chat.Completions.NewStreaming(ctx, params, opts...)
 	defer stream.Close()
 
@@ -474,18 +560,18 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 			builder.WriteString(reasoningContent)
 		}
 		if !accumulator.AddChunk(chunk) {
-			return nil, fmt.Errorf("OpenAI streaming response contained inconsistent chunks")
+			return nil, &streamIntegrityError{reason: "contained inconsistent chunks"}
 		}
 	}
 	if err := stream.Err(); err != nil {
 		return nil, err
 	}
 	if len(choiceOrder) == 0 {
-		return nil, fmt.Errorf("OpenAI streaming response contained no choices")
+		return nil, &streamIntegrityError{reason: "contained no choices"}
 	}
 	for _, index := range choiceOrder {
 		if !finishedChoices[index] {
-			return nil, fmt.Errorf("OpenAI streaming response ended before choice %d finished", index)
+			return nil, &streamIntegrityError{reason: fmt.Sprintf("ended before choice %d finished", index)}
 		}
 	}
 
@@ -641,9 +727,16 @@ type AnthropicClient struct {
 }
 
 // NewAnthropicClient creates a new Anthropic Messages API client.
+// The Anthropic API manages prompt-cache affinity server-side, so unlike the
+// OpenAI client no session key body field is injected; the key is still
+// available to ExtraHeaders/ExtraBody via SessionKeyTemplateVar, applied per
+// request so it can expand to the session key each request carries.
 func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
 	}
 	if !strings.HasSuffix(cfg.URL, "/v1/messages") && !strings.HasSuffix(cfg.URL, "/v1/messages/") {
 		baseURL := strings.TrimRight(cfg.URL, "/")
@@ -679,11 +772,11 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		)
 	}
 
-	for k, v := range cfg.ExtraHeaders {
-		opts = append(opts, option.WithHeader(k, v))
-	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	return &AnthropicClient{
@@ -693,7 +786,20 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 }
 
 // CompletionsWithCtx sends a chat completion request with context support.
-func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+//
+// The deferred finalizeRequest is this client's boundary for the retry report;
+// see the OpenAI counterpart for why it is deferred and why the results are
+// named. A parameter-building failure returns before any HTTP attempt, so
+// Finalize finds no entry and the request stays out of the report entirely.
+func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
+			panic(r)
+		}
+		finalizeRequest(ctx, c.cfg.retryCollector, err)
+	}()
+
 	model := req.Model
 	if model == "" {
 		model = c.cfg.Model
@@ -704,8 +810,16 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		return nil, err
 	}
 
+	sessionKey := c.cfg.SessionKey
+	if k := SessionKeyFromContext(ctx); k != "" {
+		sessionKey = k
+	}
+
 	var opts []option.RequestOption
-	for k, v := range c.cfg.ExtraBody {
+	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
+		opts = append(opts, option.WithHeader(k, v))
+	}
+	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
 		// This client is non-streaming: it calls Messages.New, which expects a
 		// single JSON body. If a provider config sets extra_body.stream=true,
 		// forwarding it here makes the API answer with SSE and every call fails

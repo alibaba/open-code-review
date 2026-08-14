@@ -11,13 +11,15 @@ export const en = {
   'navbar.getStarted': 'Get Started',
 
   // Hero
-  'hero.title': 'AI Code Review\nValidated on Millions of\nReal-World Tasks',
+  'hero.title': 'AI Code Review\nValidated on Millions of Real-World Tasks',
   'hero.description': 'Open Code Review brings Alibaba\'s battle-tested code review Agent into your workflow. Connect any LLM, keep data fully private, and get review comments developers actually adopt.',
   'hero.quickStart': 'Quick Start',
   'hero.learnMore': 'Learn More',
   'hero.terminal': 'Terminal',
   'hero.copied': 'Copied!',
   'hero.copyFailed': 'Copy failed',
+  'hero.installNpm': 'npm',
+  'hero.installBrew': 'Homebrew',
 
   // Error boundary
   'error.pageLoadFailed': 'Failed to load this page.',
@@ -165,7 +167,7 @@ export const en = {
   'docs.reviewFlag1Desc': 'Specify commit hash to review',
   'docs.reviewFlag2Desc': 'Start ref (diff origin)',
   'docs.reviewFlag3Desc': 'Target ref (diff endpoint)',
-  'docs.reviewFlag4Desc': 'Output format: text or json',
+  'docs.reviewFlag4Desc': 'Output format: text, json, or sarif',
   'docs.reviewFlag5Desc': 'Git repository root',
   'docs.reviewFlag5Default': 'Current dir',
   'docs.reviewFlag6Desc': 'Path to review rules JSON file',
@@ -221,7 +223,7 @@ export const en = {
   'docs.scanFlag6Desc': 'Skip the per-batch DEDUP_TASK',
   'docs.scanFlag7Desc': 'Skip the post-run PROJECT_SUMMARY_TASK',
   'docs.scanFlag8Desc': 'Batching strategy: none | by-language | by-directory',
-  'docs.scanFlag9Desc': 'Output format: text or json',
+  'docs.scanFlag9Desc': 'Output format: text, json, or sarif',
   'docs.scanFlag10Desc': 'Max concurrent file scans',
   'docs.scanFlag11Desc': 'Concurrent task timeout in minutes',
   'docs.scanFlag12Desc': 'Output audience: human (show progress) or agent (summary only)',

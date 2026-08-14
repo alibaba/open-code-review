@@ -20,6 +20,8 @@ export const ja: TranslationKeys = {
   'hero.terminal': 'ターミナル',
   'hero.copied': 'コピーしました',
   'hero.copyFailed': 'コピー失敗',
+  'hero.installNpm': 'npm',
+  'hero.installBrew': 'Homebrew',
 
   // Error boundary
   'error.pageLoadFailed': 'ページの読み込みに失敗しました。',
@@ -169,7 +171,7 @@ export const ja: TranslationKeys = {
   'docs.reviewFlag1Desc': 'レビューするコミットハッシュを指定',
   'docs.reviewFlag2Desc': '開始参照（差分の起点）',
   'docs.reviewFlag3Desc': 'ターゲット参照（差分の終点）',
-  'docs.reviewFlag4Desc': '出力形式：text または json',
+  'docs.reviewFlag4Desc': '出力形式：text、json または sarif',
   'docs.reviewFlag5Desc': 'Git リポジトリルート',
   'docs.reviewFlag5Default': '現在のディレクトリ',
   'docs.reviewFlag6Desc': 'レビュールール JSON ファイルパス',
@@ -225,7 +227,7 @@ export const ja: TranslationKeys = {
   'docs.scanFlag6Desc': 'バッチ単位の DEDUP_TASK をスキップ',
   'docs.scanFlag7Desc': '実行後の PROJECT_SUMMARY_TASK をスキップ',
   'docs.scanFlag8Desc': 'バッチ処理戦略：none | by-language | by-directory',
-  'docs.scanFlag9Desc': '出力形式：text または json',
+  'docs.scanFlag9Desc': '出力形式：text、json または sarif',
   'docs.scanFlag10Desc': '最大並行ファイルスキャン数',
   'docs.scanFlag11Desc': '並行タスクのタイムアウト（分）',
   'docs.scanFlag12Desc': '出力対象：human（進捗表示）または agent（サマリーのみ）',

@@ -257,6 +257,35 @@ if: |
 Теперь ревью будут публиковаться от имени приложения вместо
 `github-actions[bot]`.
 
+#### Загрузка находок в GitHub Code Scanning (SARIF)
+
+`--format sarif` записывает отчёт
+[SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+в stdout. Перенаправьте его в файл и загрузите с помощью action
+`upload-sarif` из CodeQL, чтобы находки появились в разделе
+**Security → Code scanning**:
+
+```yaml
+- name: Run OCR review
+  env:
+    BASE_REF: ${{ github.base_ref }}
+    HEAD_REF: ${{ github.head_ref }}
+  run: |
+    ocr review \
+      --from "origin/$BASE_REF" \
+      --to "origin/$HEAD_REF" \
+      --format sarif --audience agent > results.sarif
+
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+SARIF — машиночитаемый формат, поэтому OCR подавляет строки прогресса в
+stdout, и в `results.sarif` попадает только отчёт. `--preview` не
+поддерживает `--format sarif` — для получения отчёта запустите полное
+review (или `ocr scan`).
+
 ### Устранение неполадок
 
 | Симптом | Причина / исправление |
