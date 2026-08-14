@@ -42,4 +42,7 @@ After confirming that the facts visible in the diff are accurate, determine whet
 
 ### Output
 
-Call the `submit_filter_result` tool with the IDs of all review comments that can be confirmed as incorrect, without any explanation.
+You must call exactly one tool:
+
+- If any comments are provably incorrect: call `report_incorrect_comments` with their IDs.
+- If all comments are correct or cannot be disproved from the diff: call `approve_all_comments`.

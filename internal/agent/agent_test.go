@@ -237,10 +237,10 @@ func TestParseFilterToolCalls(t *testing.T) {
 			wantSet: nil,
 		},
 		{
-			name: "submit_filter_result with IDs",
+			name: "report_incorrect_comments with IDs",
 			calls: []llm.ToolCall{{
 				Function: llm.FunctionCall{
-					Name:      "submit_filter_result",
+					Name:      "report_incorrect_comments",
 					Arguments: `{"comment_ids": ["c-0", "c-2"]}`,
 				},
 			}},
@@ -248,11 +248,11 @@ func TestParseFilterToolCalls(t *testing.T) {
 			wantSet: map[int]struct{}{0: {}, 2: {}},
 		},
 		{
-			name: "submit_filter_result empty array",
+			name: "approve_all_comments returns empty map",
 			calls: []llm.ToolCall{{
 				Function: llm.FunctionCall{
-					Name:      "submit_filter_result",
-					Arguments: `{"comment_ids": []}`,
+					Name:      "approve_all_comments",
+					Arguments: `{}`,
 				},
 			}},
 			total:   5,
@@ -273,7 +273,7 @@ func TestParseFilterToolCalls(t *testing.T) {
 			name: "out-of-range indices ignored",
 			calls: []llm.ToolCall{{
 				Function: llm.FunctionCall{
-					Name:      "submit_filter_result",
+					Name:      "report_incorrect_comments",
 					Arguments: `{"comment_ids": ["c-0", "c-10"]}`,
 				},
 			}},
@@ -281,10 +281,10 @@ func TestParseFilterToolCalls(t *testing.T) {
 			wantSet: map[int]struct{}{0: {}},
 		},
 		{
-			name: "invalid JSON arguments returns nil",
+			name: "invalid JSON arguments falls through",
 			calls: []llm.ToolCall{{
 				Function: llm.FunctionCall{
-					Name:      "submit_filter_result",
+					Name:      "report_incorrect_comments",
 					Arguments: `not json`,
 				},
 			}},

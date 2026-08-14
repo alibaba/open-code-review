@@ -1339,24 +1339,36 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 	return true, nil, nil
 }
 
-// submitFilterTool is the tool definition that constrains the review filter
-var submitFilterTool = llm.ToolDef{
-	Type: "function",
-	Function: llm.FunctionDef{
-		Name:        "submit_filter_result",
-		Description: "Submit the list of review comments that are provably incorrect based on the diff",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"comment_ids": map[string]any{
-					"type":        "array",
-					"description": "IDs of review comments confirmed as incorrect return an empty array when none, e.g. [\"c-0\", \"c-2\"]",
-					"items": map[string]any{
-						"type": "string",
+// filterTools defines the two mutually exclusive tools for the review filter.
+// The model MUST call exactly one: either report incorrect comments, or approve all.
+var filterTools = []llm.ToolDef{
+	{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name:        "report_incorrect_comments",
+			Description: "Report review comments that are provably incorrect based on the diff. Call this when one or more comments can be confirmed as wrong.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"comment_ids": map[string]any{
+						"type":        "array",
+						"description": "IDs of incorrect comments, e.g. [\"c-0\", \"c-2\"]. Must not be empty.",
+						"items":       map[string]any{"type": "string"},
 					},
 				},
+				"required": []any{"comment_ids"},
 			},
-			"required": []any{"comment_ids"},
+		},
+	},
+	{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name:        "approve_all_comments",
+			Description: "Confirm that all review comments are correct or cannot be disproved from the diff alone. Call this when no comment can be confirmed as incorrect.",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
 		},
 	},
 }
@@ -1407,7 +1419,8 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		Tools:     []llm.ToolDef{submitFilterTool},
+		Tools:      filterTools,
+		ToolChoice: "required",
 		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
@@ -1469,31 +1482,37 @@ func buildFilterCommentsJSON(comments []model.LlmComment) string {
 	return string(data)
 }
 
-// parseFilterToolCalls extracts comment indices from the LLM's tool call
-// response to submit_filter_result. Returns nil if no matching tool call
-// is found, allowing fallback to text-based parsing.
+// parseFilterToolCalls extracts comment indices from the filter tool call response.
+// Returns nil if no matching tool call is found, allowing fallback to text-based parsing.
+// Returns an empty map (non-nil) for approve_all_comments or an empty comment_ids list.
 func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
+	var indices map[int]struct{}
 	for _, call := range calls {
-		if call.Function.Name != "submit_filter_result" {
-			continue
-		}
-		var args struct {
-			CommentIDs []string `json:"comment_ids"`
-		}
-		if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
-			fmt.Fprintf(stdout.Writer(), "[ocr] Review filter: failed to parse tool call arguments: %v\n", err)
-			continue
-		}
-		indices := make(map[int]struct{})
-		for _, id := range args.CommentIDs {
-			var idx int
-			if _, err := fmt.Sscanf(id, "c-%d", &idx); err == nil && idx >= 0 && idx < total {
-				indices[idx] = struct{}{}
+		switch call.Function.Name {
+		case "approve_all_comments":
+			if indices == nil {
+				indices = make(map[int]struct{})
+			}
+		case "report_incorrect_comments":
+			var args struct {
+				CommentIDs []string `json:"comment_ids"`
+			}
+			if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+				fmt.Fprintf(stdout.Writer(), "[ocr] Review filter: failed to parse tool call arguments: %v\n", err)
+				continue
+			}
+			if indices == nil {
+				indices = make(map[int]struct{})
+			}
+			for _, id := range args.CommentIDs {
+				var idx int
+				if _, err := fmt.Sscanf(id, "c-%d", &idx); err == nil && idx >= 0 && idx < total {
+					indices[idx] = struct{}{}
+				}
 			}
 		}
-		return indices
 	}
-	return nil
+	return indices
 }
 
 // parseFilterResponse extracts comment indices from the LLM filter response.
