@@ -22,12 +22,13 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    continue-on-error: false
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
 
       - name: Lint Powershell script
         shell: pwsh
+        continue-on-error: false
         run: pwsh -Command "[ScriptBlock]::Create((Get-Content install.ps1 -Raw)) | Out-Null"
 
   build:
