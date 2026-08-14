@@ -479,11 +479,21 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 }
 
 func runPreview(cc *commonContext, opts reviewOptions) error {
+	maxTokens, err := previewMaxTokens(cc.Template.MaxTokens, opts.maxTokens)
+	if err != nil {
+		return err
+	}
+	// A copy, so resolving the preview's limit cannot leak into the caller's
+	// template. Selection reads MaxTokens and nothing else.
+	tpl := *cc.Template
+	tpl.MaxTokens = maxTokens
+
 	preview, err := agent.Preview(context.Background(), agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
 		To:         opts.to,
 		Commit:     opts.commit,
+		Template:   tpl,
 		FileFilter: cc.FileFilter,
 		GitRunner:  cc.GitRunner,
 	})

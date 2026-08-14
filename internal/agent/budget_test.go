@@ -63,8 +63,8 @@ func budgetAgentTestTemplate() template.Template {
 	}
 }
 
-// makeBudgetDiffs returns n small, non-deleted diffs that survive filterDiffs
-// and filterLargeDiffs.
+// makeBudgetDiffs returns n small, non-deleted diffs that survive every
+// selection gate.
 func makeBudgetDiffs(n int) []model.Diff {
 	diffs := make([]model.Diff, n)
 	for i := range diffs {

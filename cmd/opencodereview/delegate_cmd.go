@@ -126,6 +126,10 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 }
 
 // preview runs the agent's file-selection logic and returns the preview result.
+//
+// No Template is passed, which leaves the per-file diff-size ceiling disabled:
+// the host agent reviews with its own context window, so OCR's max_tokens is
+// not the limit that applies to delegated work.
 func (dc *delegateContext) preview(ctx context.Context) (*agent.DiffPreview, error) {
 	return agent.Preview(ctx, agent.Args{
 		RepoDir:    dc.cc.RepoDir,

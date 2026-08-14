@@ -134,6 +134,7 @@ Each span carries useful attributes:
 | `subtask.execute.<file>` | `file.path`, `lines.changed`, `lines.inserted`, `lines.deleted` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
 | `event.plan.skipped` | `file.path`, `lines.changed`, `threshold` |
+| `event.review.skipped` | `reason` (`too_large` / `deleted` / `no_supported_files`), `file.count`, `too_large.count` |
 | `event.plan.failed` | `file.path`, `message` |
 | `event.token.threshold.exceeded` | `file.path`, `tokens`, `max_tokens` |
 | `event.subtask.error` | `file.path`, `error` |
@@ -163,6 +164,7 @@ The full list:
 |---|---|
 | `review.started` | Diffs loaded; we know how many files we'll review. |
 | `no.files.changed` | The diff resolved to zero files. |
+| `review.skipped` | Selection left nothing to review; `reason` is `too_large`, `deleted`, or `no_supported_files`. |
 | `plan.skipped` | A file was below `PLAN_MODE_LINE_THRESHOLD`. |
 | `plan.failed` | The plan phase errored; main loop ran without a plan. |
 | `token.threshold.exceeded` | Initial prompt tokens > 80 % of `MAX_TOKENS`; file skipped. |

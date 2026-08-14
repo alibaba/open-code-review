@@ -137,6 +137,7 @@ review.run
 | `subtask.execute.<file>` | `file.path`, `lines.changed`, `lines.inserted`, `lines.deleted` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
 | `event.plan.skipped` | `file.path`, `lines.changed`, `threshold` |
+| `event.review.skipped` | `reason` (`too_large` / `deleted` / `no_supported_files`), `file.count`, `too_large.count` |
 | `event.plan.failed` | `file.path`, `message` |
 | `event.token.threshold.exceeded` | `file.path`, `tokens`, `max_tokens` |
 | `event.subtask.error` | `file.path`, `error` |
@@ -166,6 +167,7 @@ OCR записывает числовые метрики с помощью из�
 |---|---|
 | `review.started` | Различия загружены; известно количество файлов для ревью. |
 | `no.files.changed` | После разрешения diff не осталось файлов. |
+| `review.skipped` | После отбора не осталось файлов для ревью; `reason` — `too_large`, `deleted` или `no_supported_files`. |
 | `plan.skipped` | Файл содержал меньше изменений, чем `PLAN_MODE_LINE_THRESHOLD`. |
 | `plan.failed` | Этап планирования завершился с ошибкой; основной цикл запущен без плана. |
 | `token.threshold.exceeded` | Число токенов начального промпта превысило 80 % от `MAX_TOKENS`; файл пропущен. |

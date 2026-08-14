@@ -80,7 +80,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 ## Как фильтруются файлы
 
 Фильтр — пятношаговый алгоритм в
-[`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go).
+[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
 Для каждого diff OCR спрашивает:
 
 1. **`binary`** — Файл бинарный? Исключается.
@@ -96,10 +96,12 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
    тестовых файлов (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`,
    `**/*_spec.rb`, …)? Исключается.
 
-Файлы, прошедшие все пять проверок, отправляются в LLM. Причина `deleted`
-(не этап — она вычисляется отдельно в `Preview()`) помечает файлы, чей новый
-путь — `/dev/null`; нового содержимого для ревью нет. Используйте `ocr review
---preview`, чтобы вывести результат этого фильтра, не тратя ни одного токена.
+Файлы, прошедшие все пять проверок, отправляются в LLM, если только сам diff
+не превышает 80% от `max_tokens`: `selectFiles` применяет этот предел после
+проверок и исключает файл как `too_large`. Он же помечает файл, чей новый
+путь — `/dev/null`, причиной `deleted`; нового содержимого для ревью нет.
+Используйте `ocr review --preview`, чтобы вывести результат этого фильтра, не
+тратя ни одного токена.
 
 ### Стандартные исключения путей
 

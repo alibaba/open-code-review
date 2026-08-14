@@ -78,7 +78,7 @@ for matching:
 ## How files are filtered
 
 The filter is a five-gate algorithm in
-[`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go).
+[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
 For each diff, OCR asks:
 
 1. **`binary`** — Is the file binary? Excluded.
@@ -94,11 +94,12 @@ For each diff, OCR asks:
    pattern (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`,
    …)? Excluded.
 
-Files that survive all five gates are sent to the LLM. A `deleted`
-reason (not a gate — it's computed separately in `Preview()`) marks
-files whose new path is `/dev/null`; there's no new content to review.
-Use `ocr review --preview` to print the result of this filter without
-spending a token.
+Files that survive all five gates are sent to the LLM, unless the diff
+alone exceeds 80% of `max_tokens`: `selectFiles` applies that ceiling
+after the gates and excludes the file as `too_large`. It also marks a
+file whose new path is `/dev/null` as `deleted`; there's no new content
+to review. Use `ocr review --preview` to print the result of this filter
+without spending a token.
 
 ### Default path exclusions
 

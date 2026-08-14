@@ -16,7 +16,7 @@ flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (selection.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every diff in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
 
@@ -25,11 +25,12 @@ flowchart TD
 
 Оркестрация реализована в пакете
 [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/).
-В него входят четыре файла:
+В него входят пять файлов:
 
 - `agent.go` — основной цикл и диспетчеризация;
-- `compression.go` — сжатие памяти;
-- `preview.go` — фильтр файлов;
+- `selection.go` — фильтр файлов;
+- `preview.go` — отчёт `--preview`;
+- `estimate.go` — оценка стоимости;
 - `util.go` — вспомогательные функции.
 
 Основные точки входа:
@@ -60,7 +61,7 @@ flowchart TD
 ## Пятиступенчатый фильтр файлов
 
 После загрузки diff каждый файл проходит через функцию
-[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go).
+[`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go).
 Она возвращает одно из следующих значений:
 
 ```
@@ -72,8 +73,10 @@ default_path    — совпадение со встроенным шаблон�
 
 Если файл не исключён, функция возвращает пустое значение.
 
-`deleted` **не** возвращается функцией `whyExcluded`: оно вычисляется позже в
-`Preview()`, когда diff оставленного файла сообщает `IsDeleted`.
+`deleted` и `too_large` **не** возвращаются функцией `whyExcluded`: их применяет
+`selectFiles` уже после проверок — `deleted`, когда diff оставленного файла
+сообщает `IsDeleted`, и `too_large`, когда один только diff превышает 80% от
+`max_tokens`.
 
 Проверки выполняются в таком порядке:
 
@@ -90,8 +93,8 @@ default_path    — совпадение со встроенным шаблон�
 
 Отсев нерелевантных каталогов (`vendor/`, `node_modules/`, `target/` и т. д.)
 происходит раньше, на уровне провайдера diff. Список
-`providerDirIgnoreDirs` в `internal/diff/git.go` определяет такие каталоги, а
-функция `filterDiffs` удаляет их diff до фильтрации отдельных файлов.
+`providerDirIgnoreDirs` в `internal/diff/git.go` определяет такие каталоги, и их
+diff удаляются до фильтрации отдельных файлов.
 
 Чтобы увидеть полный результат фильтрации, не потратив ни одного токена,
 запустите `ocr review --preview`. Полный алгоритм описан в разделе
@@ -264,9 +267,9 @@ if countMessagesTokens(messages) > tokenLimit {
 файл отмечается как некритическое предупреждение в stdout и добавляется в
 массив JSON `warnings`.
 
-Вторая проверка выполняется в `filterLargeDiffs`: если один diff превышает
-80 % от `MAX_TOKENS`, он отбрасывается ещё до запуска диспетчера отдельных
-файлов.
+Вторая проверка выполняется в `selectFiles`: если один diff превышает 80 % от
+`MAX_TOKENS`, он отбрасывается ещё до запуска диспетчера отдельных файлов и
+отмечается как `too_large`.
 
 ## Шаблон и плейсхолдеры
 
@@ -374,7 +377,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | Диспетчеризация команд верхнего уровня | `cmd/opencodereview/main.go` |
 | Разбор флагов `review` | `cmd/opencodereview/flags.go` |
 | Оркестрация агентов и сжатие | `internal/agent/` (agent.go, compression.go, util.go) |
-| Фильтр файлов / предварительный просмотр | `internal/agent/preview.go` |
+| Фильтр файлов / предварительный просмотр | `internal/agent/selection.go`, `internal/agent/preview.go` |
 | Загрузка diff (режимы Git) | `internal/diff/git.go` |
 | Цепочка разрешения правил | `internal/config/rules/system_rules.go` |
 | Реестр и реализации инструментов | `internal/tool/` |

@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 
-	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -27,40 +26,15 @@ const (
 	ExcludeDefaultPath = model.ExcludeDefaultPath
 	ExcludeDeleted     = model.ExcludeDeleted
 	ExcludeBinary      = model.ExcludeBinary
+	ExcludeTooLarge    = model.ExcludeTooLarge
 )
 
-// whyExcluded applies the filter algorithm as shouldReview but
-// returns the specific reason a file is excluded.
-func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
-	if d.IsBinary {
-		return ExcludeBinary
-	}
-
-	path := effectivePath(d)
-	f := a.args.FileFilter
-
-	if f != nil && f.IsUserExcluded(path) {
-		return ExcludeUserRule
-	}
-
-	if f != nil && f.HasInclude() && f.IsUserIncluded(path) {
-		return ExcludeNone
-	}
-
-	ext := a.extFromPath(path)
-	if ext != "" && !allowedext.IsAllowedExt(ext) {
-		return ExcludeExtension
-	}
-
-	if allowedext.IsExcludedPath(path) {
-		return ExcludeDefaultPath
-	}
-
-	return ExcludeNone
-}
-
-// Preview loads diffs and applies the filter algorithm, returning structured
-// preview data without dispatching any LLM calls.
+// Preview loads diffs and applies the same selection the real run applies
+// before dispatch, returning structured preview data without dispatching any
+// LLM calls. Given the run's Args.Template, its will_review set is the set a
+// fresh, non-resumed, unbudgeted run registers as selected coverage; a zero
+// Template.MaxTokens leaves the per-file size ceiling disabled, exactly as it
+// is for a run configured that way.
 //
 // It builds none of the review runtime — no session, manifest, or runner — so
 // previewing cannot open session persistence. Going through New instead would
@@ -82,22 +56,16 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 		Entries: make([]DiffPreviewEntry, 0, len(a.diffs)),
 	}
 
-	for _, d := range a.diffs {
-		path := effectivePath(d)
+	for _, dec := range a.selectFiles(a.diffs) {
+		d := dec.Diff
 		entry := DiffPreviewEntry{
-			Path:       path,
-			Insertions: d.Insertions,
-			Deletions:  d.Deletions,
-			Status:     diffStatus(d),
+			Path:          effectivePath(d),
+			Insertions:    d.Insertions,
+			Deletions:     d.Deletions,
+			Status:        diffStatus(d),
+			WillReview:    dec.selected(),
+			ExcludeReason: dec.Reason,
 		}
-
-		reason := a.whyExcluded(d)
-		if reason == ExcludeNone && d.IsDeleted {
-			reason = ExcludeDeleted
-		}
-
-		entry.WillReview = reason == ExcludeNone
-		entry.ExcludeReason = reason
 
 		if entry.WillReview {
 			result.ReviewableCount++

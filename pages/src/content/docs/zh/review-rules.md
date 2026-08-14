@@ -69,7 +69,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 ## 文件如何被过滤
 
 过滤是一个五重门算法，位于
-[`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go)。
+[`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go)。
 对每个 diff，OCR 依次问：
 
 1. **`binary`**——文件是二进制吗？排除。
@@ -82,9 +82,10 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 5. **`default_path`**——路径匹配某个内置测试文件排除模式
    （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）吗？排除。
 
-通过全部五重门的文件才发给 LLM。`deleted` 原因（不是门——它在 `Preview()` 中
-单独计算）标记新路径为 `/dev/null` 的文件；没有新内容可评审。用
-`ocr review --preview` 可在不花 token 的情况下打印此过滤结果。
+通过全部五重门的文件才发给 LLM，除非仅 diff 本身就超过 `max_tokens` 的 80%：
+`selectFiles` 在各门之后施加该上限，并把文件排除为 `too_large`。它同样把新路径
+为 `/dev/null` 的文件标记为 `deleted`；没有新内容可评审。用 `ocr review
+--preview` 可在不花 token 的情况下打印此过滤结果。
 
 ### 默认路径排除
 

@@ -5,6 +5,10 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -12,6 +16,7 @@ import (
 )
 
 func TestRunPreview(t *testing.T) {
+	freshOCRHome(t)
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "x.go", "package x\n", "add x")
 	cc, err := loadCommonContext(dir, "", 0, 0, true)
@@ -26,6 +31,7 @@ func TestRunPreview(t *testing.T) {
 }
 
 func TestRunPreviewJSONFormat(t *testing.T) {
+	freshOCRHome(t)
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "main.go", "package main\n", "add main")
 	gitCommitFile(t, dir, "notes.md", "# notes\n", "add notes")
@@ -52,6 +58,80 @@ func TestRunPreviewJSONFormat(t *testing.T) {
 	}
 	if got.Entries[0].ExcludeReason != model.ExcludeExtension {
 		t.Errorf("exclude_reason = %q, want %q", got.Entries[0].ExcludeReason, model.ExcludeExtension)
+	}
+}
+
+// TestRunPreviewAppliesResolvedMaxTokens pins that the preview path resolves
+// the per-file token ceiling and hands it to selection: without it the template
+// default reaches the agent as zero, the size gate never runs, and preview
+// reports a file the review would drop before dispatch (#782). It also pins
+// that resolving the limit needs no provider — this test configures no
+// endpoint and no API key.
+func TestRunPreviewAppliesResolvedMaxTokens(t *testing.T) {
+	// A ceiling of 100 max_tokens means 80 usable, well under huge.go's diff,
+	// whichever of the two sources supplies it.
+	tests := []struct {
+		name        string
+		savedTokens int
+		opts        reviewOptions
+	}{
+		{
+			name: "cli override",
+			opts: reviewOptions{commit: "HEAD", outputFormat: "json", maxTokens: 100},
+		},
+		{
+			name:        "saved app config",
+			savedTokens: 100,
+			opts:        reviewOptions{commit: "HEAD", outputFormat: "json"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := freshOCRHome(t)
+			if tt.savedTokens > 0 {
+				writeAppConfigMaxTokens(t, home, tt.savedTokens)
+			}
+
+			dir := initTestGitRepo(t)
+			gitCommitFile(t, dir, "huge.go", strings.Repeat("token ", 500), "add huge")
+			cc, err := loadCommonContext(dir, "", 0, 0, true)
+			if err != nil {
+				t.Fatalf("loadCommonContext: %v", err)
+			}
+
+			out := captureStdout(t, func() {
+				if err := runPreview(cc, tt.opts); err != nil {
+					t.Errorf("runPreview error: %v", err)
+				}
+			})
+
+			got := decodeSinglePreviewJSON(t, out)
+			if len(got.Entries) != 1 {
+				t.Fatalf("entries = %d, want 1", len(got.Entries))
+			}
+			if got.Entries[0].WillReview {
+				t.Error("huge.go exceeds the resolved token ceiling and must not be listed as reviewable")
+			}
+			if got.Entries[0].ExcludeReason != model.ExcludeTooLarge {
+				t.Errorf("exclude_reason = %q, want %q", got.Entries[0].ExcludeReason, model.ExcludeTooLarge)
+			}
+			if got.ReviewableCount != 0 || got.ExcludedCount != 1 {
+				t.Errorf("reviewable=%d excluded=%d, want 0/1", got.ReviewableCount, got.ExcludedCount)
+			}
+		})
+	}
+}
+
+func writeAppConfigMaxTokens(t *testing.T, home string, maxTokens int) {
+	t.Helper()
+	dir := filepath.Join(home, ".opencodereview")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create OCR home: %v", err)
+	}
+	body := fmt.Sprintf(`{"max_tokens":%d}`, maxTokens)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write app config: %v", err)
 	}
 }
 
