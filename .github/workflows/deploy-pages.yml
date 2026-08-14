@@ -1,76 +1,89 @@
-name: Deploy Pages
-
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'pages/**'
-      - 'install.sh'
-      - 'install.ps1'
-      - '.github/workflows/deploy-pages.yml'
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
-
-jobs:
-  build:
-    if: github.repository == 'alibaba/open-code-review'
-    runs-on: self-hosted
-    timeout-minutes: 10
-    container:
-      image: node:24
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Trust workspace
-        run: git config --global --replace-all safe.directory '*'
-
-      - name: Install dependencies
-        working-directory: pages
-        run: npm install
-
-      - name: Build
-        working-directory: pages
-        run: npm run build
-
-      - name: Prepare deployment artifact
-        run: |
-          mkdir -p _site
-          cp -r pages/dist/* _site/
-          cp pages/logo.svg _site/logo.svg
-          cp install.sh _site/install.sh
-          cp install.ps1 _site/install.ps1
-
-      - name: Verify install scripts
-        run: |
-          test -f _site/install.sh
-          test -f _site/install.ps1
-          sh -n _site/install.sh
-          cmp install.sh _site/install.sh
-          cmp install.ps1 _site/install.ps1
-
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: _site
-
-  deploy:
-    if: github.repository == 'alibaba/open-code-review'
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: self-hosted
-    timeout-minutes: 15
-    container:
-      image: node:24
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+  name: Deploy Pages
+  
+  on:
+    push:
+      branches: [main]
+      paths:
+        - 'pages/**'
+        - 'install.sh'
+        - 'install.ps1'
+        - '.github/workflows/deploy-pages.yml'
+    workflow_dispatch:
+  
+  permissions:
+    contents: read
+    pages: write
+    id-token: write
+  
+  concurrency:
+    group: "pages"
+    cancel-in-progress: false
+  
+  jobs:
+    lint:
+      if: github.repository == 'alibaba/open-code-review'
+      runs-on: windows-latest
+      continue-on-error: false
+      steps:
+        - uses: actions/checkout@v7
+  
+        - name: Lint Powershell script
+          shell: pwsh
+          run: |
+            pwsh -NoProfile -NonInteractive -CheckSyntax ./install.ps1       
+    
+    build:
+      if: github.repository == 'alibaba/open-code-review'
+      runs-on: self-hosted
+      timeout-minutes: 10
+      needs: lint
+      container:
+        image: node:24
+      steps:
+        - uses: actions/checkout@v7
+  
+        - name: Trust workspace
+          run: git config --global --replace-all safe.directory '*'
+  
+        - name: Install dependencies
+          working-directory: pages
+          run: npm install
+  
+        - name: Build
+          working-directory: pages
+          run: npm run build
+  
+        - name: Prepare deployment artifact
+          run: |
+            mkdir -p _site
+            cp -r pages/dist/* _site/
+            cp pages/logo.svg _site/logo.svg
+            cp install.sh _site/install.sh
+            cp install.ps1 _site/install.ps1
+  
+        - name: Verify install scripts
+          run: |
+            test -f _site/install.sh
+            test -f _site/install.ps1
+            sh -n _site/install.sh
+            cmp install.sh _site/install.sh
+            cmp install.ps1 _site/install.ps1
+  
+        - uses: actions/upload-pages-artifact@v5
+          with:
+            path: _site
+  
+    deploy:
+      if: github.repository == 'alibaba/open-code-review'
+      environment:
+        name: github-pages
+        url: ${{ steps.deployment.outputs.page_url }}
+      runs-on: self-hosted
+      timeout-minutes: 15
+      container:
+        image: node:24
+      needs: build
+      steps:
+        - name: Deploy to GitHub Pages
+          id: deployment
+          uses: actions/deploy-pages@v5
