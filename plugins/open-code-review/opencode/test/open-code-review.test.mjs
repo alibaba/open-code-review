@@ -406,15 +406,25 @@ test("ocr_review kills the whole process group on cancellation", { skip: process
   )
 })
 
-test("ocr_review has no implicit process-wide timeout", async () => {
+test("ocr_review defaults to 30-minute overall timeout", async () => {
   await withFakeOcr(
     "console.log('{\"status\":\"success\",\"findings\":[]}')",
     async (worktree) => {
       const { hooks } = await loadPlugin(worktree)
-      const overallTimeouts = await withShortOverallTimeout(20, async () => {
+      const originalSetTimeout = globalThis.setTimeout
+      const overallTimeouts = []
+      globalThis.setTimeout = (handler, delay, ...args) => {
+        if (delay >= 60 * 1000) {
+          overallTimeouts.push(delay)
+        }
+        return originalSetTimeout(handler, delay, ...args)
+      }
+      try {
         await hooks.tool.ocr_review.execute({}, toolContext(worktree))
-      })
-      assert.deepEqual(overallTimeouts, [])
+      } finally {
+        globalThis.setTimeout = originalSetTimeout
+      }
+      assert.deepEqual(overallTimeouts, [30 * 60 * 1000])
     },
   )
 })

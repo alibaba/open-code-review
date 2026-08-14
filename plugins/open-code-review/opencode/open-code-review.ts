@@ -336,9 +336,13 @@ export const OpenCodeReviewPlugin: Plugin = async ({ client, worktree }) => {
         async execute(args, context) {
           const input = args as ReviewInput
           const cwd = context.worktree || context.directory || worktree
-          const options: RunOptions = { cwd, signal: context.abort, timeoutMs: null }
-          if (input.overallTimeoutMinutes !== undefined) {
-            options.timeoutMs = input.overallTimeoutMinutes * 60 * 1000
+          const defaultOverallMs = 30 * 60 * 1000
+          const options: RunOptions = {
+            cwd,
+            signal: context.abort,
+            timeoutMs: input.overallTimeoutMinutes !== undefined
+              ? input.overallTimeoutMinutes * 60 * 1000
+              : defaultOverallMs,
           }
           const result = await runOcr(buildReviewArgs(input, cwd), options)
           return formatReviewResult(result, input.preview === true)
