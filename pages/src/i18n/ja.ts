@@ -23,6 +23,9 @@ export const ja: TranslationKeys = {
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
   'hero.installMacPorts': 'MacPorts',
+  'hero.installMacOS': 'MacOS',
+  'hero.installLinux': 'Linux',
+  'hero.installWindows': 'Windows',
   'hero.installMore': 'その他',
   'hero.allInstallOptions': 'すべてのインストール方法',
 

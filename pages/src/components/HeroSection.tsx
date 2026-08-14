@@ -10,6 +10,9 @@ import ErrorBoundary from './ErrorBoundary';
 import npmIcon from '../assets/icons/npm.svg';
 import brewIcon from '../assets/icons/brew.svg';
 import macportsIcon from '../assets/icons/macports.svg';
+import appleIcon from '../assets/icons/apple.svg';
+import linuxIcon from '../assets/icons/linux.svg';
+import windowsIcon from '../assets/icons/windows.svg';
 import copyIcon from '../assets/icons/icon-copy.svg';
 import chevronDownIcon from '../assets/icons/icon-chevron-down.svg';
 
@@ -135,6 +138,9 @@ interface InstallChannel {
 const INSTALL_CHANNELS: InstallChannel[] = [
   { key: 'npm', labelKey: 'hero.installNpm', cmd: 'npm i -g @alibaba-group/open-code-review', icons: [npmIcon], primary: true },
   { key: 'brew', labelKey: 'hero.installBrew', cmd: 'brew install open-code-review', icons: [brewIcon], primary: true },
+  { key: 'macos', labelKey: 'hero.installMacOS', cmd: 'curl -fsSL https://open-codereview.ai/install.sh | sh', icons: [appleIcon], primary: false },
+  { key: 'linux', labelKey: 'hero.installLinux', cmd: 'curl -fsSL https://open-codereview.ai/install.sh | sh', icons: [linuxIcon], primary: false },
+  { key: 'windows', labelKey: 'hero.installWindows', cmd: 'irm https://open-codereview.ai/install.ps1 | iex', icons: [windowsIcon], primary: false },
   { key: 'macports', labelKey: 'hero.installMacPorts', cmd: 'sudo port install open-code-review', icons: [macportsIcon], primary: false },
 ];
 
@@ -246,7 +252,7 @@ const HeroSection: React.FC = () => {
         minHeight: isMobile ? 600 : isTablet ? 700 : 680,
         paddingBottom: isMobile ? 60 : 80,
         position: 'relative',
-        overflow: 'hidden',
+        overflow: 'visible',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -432,13 +438,13 @@ const HeroSection: React.FC = () => {
                     style={{
                       position: 'absolute',
                       top: '100%',
-                      right: 0,
+                      left: 0,
                       marginTop: 8,
                       background: 'rgba(26,26,26,0.92)',
                       backdropFilter: 'blur(12px)',
                       border: '1px solid rgba(255,255,255,0.15)',
                       borderRadius: 8,
-                      padding: 4,
+                      padding: '8px 4px',
                       zIndex: 200,
                       minWidth: 200,
                     }}

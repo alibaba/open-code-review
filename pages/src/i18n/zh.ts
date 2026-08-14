@@ -23,6 +23,9 @@ export const zh: TranslationKeys = {
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
   'hero.installMacPorts': 'MacPorts',
+  'hero.installMacOS': 'MacOS',
+  'hero.installLinux': 'Linux',
+  'hero.installWindows': 'Windows',
   'hero.installMore': '更多',
   'hero.allInstallOptions': '全部安装方式',
 
