@@ -74,7 +74,7 @@ sudo port upgrade open-code-review
 сумму. Он удобен для базовых образов CI и систем без графического интерфейса:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
 Скрипт учитывает две переменные окружения:
@@ -89,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/insta
 В Windows с PowerShell 5.1 или новее запустите PowerShell-установщик:
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
 Установщик учитывает те же переменные `OCR_INSTALL_DIR` и `OCR_VERSION` (через

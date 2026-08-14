@@ -52,6 +52,7 @@ jobs:
         run: |
           test -f _site/install.sh
           test -f _site/install.ps1
+          sh -n _site/install.sh
           cmp install.sh _site/install.sh
           cmp install.ps1 _site/install.ps1
 
