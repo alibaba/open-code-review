@@ -19,7 +19,10 @@ const (
 	llmRetryBaseDelay = time.Second
 )
 
-func withLLMRetry(ctx context.Context, call func(context.Context) (*ChatResponse, error)) (*ChatResponse, error) {
+// withLLMRetry owns the complete retry budget for a provider call when no
+// retry collector is active. The optional status-code list preserves the
+// retry_codes configuration for clients using this legacy boundary.
+func withLLMRetry(ctx context.Context, call func(context.Context) (*ChatResponse, error), configuredCodes ...[]int) (*ChatResponse, error) {
 	var lastErr error
 	for attempt := 1; attempt <= llmMaxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -31,7 +34,7 @@ func withLLMRetry(ctx context.Context, call func(context.Context) (*ChatResponse
 			return response, nil
 		}
 		lastErr = err
-		if attempt == llmMaxAttempts || !retryableLLMError(ctx, err) {
+		if attempt == llmMaxAttempts || !retryableLLMError(ctx, err, configuredCodes...) {
 			return nil, err
 		}
 		if err := waitForLLMRetry(ctx, llmRetryBaseDelay*time.Duration(1<<(attempt-1))); err != nil {
@@ -52,7 +55,7 @@ func waitForLLMRetry(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func retryableLLMError(ctx context.Context, err error) bool {
+func retryableLLMError(ctx context.Context, err error, configuredCodes ...[]int) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
@@ -70,15 +73,26 @@ func retryableLLMError(ctx context.Context, err error) bool {
 
 	var openAIError *openai.Error
 	if errors.As(err, &openAIError) {
-		return retryableHTTPStatus(openAIError.StatusCode)
+		return retryableHTTPStatus(openAIError.StatusCode, configuredCodes...)
 	}
 	var anthropicError *anthropic.Error
 	if errors.As(err, &anthropicError) {
-		return retryableHTTPStatus(anthropicError.StatusCode)
+		return retryableHTTPStatus(anthropicError.StatusCode, configuredCodes...)
 	}
 	return false
 }
 
-func retryableHTTPStatus(status int) bool {
-	return status == 408 || status == 429 || status >= 500
+func retryableHTTPStatus(status int, configuredCodes ...[]int) bool {
+	if status == 408 || status == 409 || status == 429 || status >= 500 {
+		return true
+	}
+	if len(configuredCodes) == 0 {
+		return false
+	}
+	for _, code := range configuredCodes[0] {
+		if code == status {
+			return true
+		}
+	}
+	return false
 }

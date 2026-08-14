@@ -48,7 +48,7 @@ func TestPreview(t *testing.T) {
 	}
 
 	a := New(Args{RepoDir: dir})
-	preview, err := a.Preview(context.Background())
+	preview, err := a.preview(context.Background())
 	if err != nil {
 		t.Fatalf("Preview error: %v", err)
 	}
@@ -60,5 +60,24 @@ func TestPreview(t *testing.T) {
 	}
 	if len(preview.Entries) != preview.TotalFiles {
 		t.Errorf("entries=%d totalFiles=%d, want equal", len(preview.Entries), preview.TotalFiles)
+	}
+}
+
+// TestPreviewEmptyEntriesNotNil pins that a clean workspace still yields a
+// non-nil Entries slice, so JSON output marshals `"files":[]` instead of
+// `"files":null`. Scan preview already guarantees this; review must agree.
+func TestPreviewEmptyEntriesNotNil(t *testing.T) {
+	dir := initPreviewRepo(t)
+
+	a := New(Args{RepoDir: dir})
+	preview, err := a.preview(context.Background())
+	if err != nil {
+		t.Fatalf("Preview error: %v", err)
+	}
+	if preview.TotalFiles != 0 {
+		t.Fatalf("expected a clean workspace, got %d file(s)", preview.TotalFiles)
+	}
+	if preview.Entries == nil {
+		t.Error("Entries is nil; JSON output would emit \"files\":null")
 	}
 }

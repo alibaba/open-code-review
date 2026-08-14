@@ -81,5 +81,8 @@
   ".proto",
   ".nix",
   ".hs",
-  ".lhs"
+  ".lhs",
+  ".nim",
+  ".nims",
+  ".nimble"
 ]

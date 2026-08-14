@@ -150,6 +150,9 @@ func NewAgent(args Args) *Agent {
 		// line-number resolver (resolveFromFileContent) can match against
 		// the full file content of the scanned file.
 		DiffLookup: a.lookupDiff,
+		// NewRequestMeta is deliberately left nil. The retry report describes
+		// ocr review; scan shares this Runner, and a nil factory is what keeps
+		// scan's requests out of the report. See llmloop.Deps.NewRequestMeta.
 	})
 	return a
 }
@@ -164,6 +167,7 @@ func toLoopTemplate(s template.ScanTemplate) template.Template {
 		MemoryCompressionTask: s.MemoryCompressionTask,
 		MaxTokens:             s.MaxTokens,
 		MaxOutputTokens:       s.OutputTokens(),
+		MaxCompletionTokens:   s.CompletionTokenLimit(),
 		MaxToolRequestTimes:   s.MaxToolRequestTimes,
 		ReLocationTask:        s.ReLocationTask,
 	}
@@ -833,7 +837,7 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 	resp, err := a.runner.LLMClient().CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.OutputTokens(),
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	if err != nil {
 		if errors.Is(err, llm.ErrTokenBudgetExceeded) {
@@ -890,7 +894,7 @@ func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.Llm
 	resp, err := a.runner.LLMClient().CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.OutputTokens(),
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	if err != nil {
 		if errors.Is(err, llm.ErrTokenBudgetExceeded) {
@@ -969,7 +973,7 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) {
 	resp, err := a.runner.LLMClient().CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.OutputTokens(),
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	if err != nil {
 		if errors.Is(err, llm.ErrTokenBudgetExceeded) {

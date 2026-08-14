@@ -46,8 +46,10 @@ type reviewOptions struct {
 	perFileTimeoutSet  bool
 	maxTools           int
 	maxGitProcs        int
+	maxTokens          int
 	maxTokensBudget    int
 	maxTokensBudgetSet bool
+	noFilter           bool
 	preview            bool
 }
 
@@ -179,6 +181,12 @@ func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outp
 	}
 	opts.perFileTimeout = applyModelPerFileTimeout(rt.Model, opts.perFileTimeout, opts.perFileTimeoutSet)
 	cc.Template.MaxToolRequestTimes = applyModelMaxToolRequestTimes(rt.Model, cc.Template.MaxToolRequestTimes)
+	cc.Template.MaxCompletionTokens = cc.Template.OutputTokens()
+	maxTokens, err := resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
+	if err != nil {
+		return err
+	}
+	cc.Template.MaxTokens = maxTokens
 	if watchdog != nil {
 		rt.Client = watchdogLLMClient{inner: rt.Client, watchdog: watchdog}
 	}
@@ -237,6 +245,7 @@ func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outp
 		Resume:                  resumeState,
 		MaxTokensBudget:         int64(opts.maxTokensBudget),
 		MaxTokensBudgetExplicit: opts.maxTokensBudgetSet,
+		SkipFilter:              opts.noFilter,
 		RuntimeConfig:           rt.RuntimeConfig,
 		Progress:                progress,
 	})
@@ -255,7 +264,7 @@ func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outp
 	var traceID string
 	if telemetry.IsEnabled() {
 		traceID = telemetry.TraceIDFromContext(ctx)
-		if opts.outputFormat != "json" {
+		if !isMachineReadable(opts.outputFormat) {
 			fmt.Fprintf(diagnosticWriter, "[ocr] TraceID: %s\n", traceID)
 		}
 	}
@@ -264,6 +273,22 @@ func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outp
 	setReviewStage(stage, "agent_run", "")
 	comments, runErr := ag.Run(ctx)
 	manifest := ag.RunManifest()
+
+	// Freeze the retry report at the same boundary as the manifest: ag.Run has
+	// returned and joined its background work, so every request this run made is
+	// finalized and the report can no longer change. run_id is the session's
+	// in-memory UUID (ag.Session().SessionID) rather than ag.SessionID(), which
+	// returns "" when persistence failed — the report's logical_request_id must
+	// stay stable and unique per run even for an unpersisted session.
+	retryReport, freezeErr := rt.RetryCollector.Freeze(ag.Session().SessionID)
+	if freezeErr != nil {
+		// A construction error means the collector's invariants were violated, so
+		// the report is self-contradictory and must not be published at all
+		// (Freeze already returned nil). Retry reporting is observability only, so
+		// its invariant failure must not change the review's exit status.
+		fmt.Fprintf(os.Stderr, "[ocr] warning: freeze retry report: %v (retry report suppressed)\n", freezeErr)
+	}
+
 	resultErr := reviewResultError(runErr, manifest)
 	if resultErr != nil {
 		span.SetStatus(codes.Error, resultErr.Error())
@@ -274,16 +299,25 @@ func executeReviewContextWithStage(ctx context.Context, opts reviewOptions, outp
 	// session delivery failed. Emit it first, then return the independent process
 	// error so JSON consumers retain the complete coverage diagnosis.
 	var emitErr error
-	if manifest != nil || runErr == nil {
+	emitted := manifest != nil || runErr == nil
+	if emitted {
 		setReviewStage(stage, "emit_result", "")
-		emitErr = emitRunResultTo(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, outputWriter)
+		emitErr = emitRunResultTo(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, outputWriter, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		}
 	}
 	if resultErr != nil {
 		q.Restore()
-		emitFailureUsageTo(diagnosticWriter, ag, time.Since(startTime), opts.outputFormat, llmIdentity)
+		// The report has exactly one exit per run. emitRunResult already published
+		// it whenever it ran (which it does even for a fully failed run, since a
+		// failed manifest is still publishable), so the failure-usage path gets it
+		// only when that call was skipped entirely.
+		failureReport := retryReport
+		if emitted {
+			failureReport = nil
+		}
+		emitFailureUsageTo(diagnosticWriter, ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(diagnosticWriter, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
@@ -414,7 +448,7 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 }
 
 func runPreview(cc *commonContext, opts reviewOptions) error {
-	ag := agent.New(agent.Args{
+	preview, err := agent.Preview(context.Background(), agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
 		To:         opts.to,
@@ -422,14 +456,11 @@ func runPreview(cc *commonContext, opts reviewOptions) error {
 		FileFilter: cc.FileFilter,
 		GitRunner:  cc.GitRunner,
 	})
-
-	preview, err := ag.Preview(context.Background())
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)
 	}
 
-	outputPreviewText(preview)
-	return nil
+	return outputPreview(preview, opts.outputFormat)
 }
 
 func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {

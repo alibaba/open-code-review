@@ -89,7 +89,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--from <ref>` | — | — | Source ref to start the diff from (e.g., `main`). |
 | `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
-| `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. |
+| `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable) or `json` (machine-readable comment array). |
 | `--audience <who>` | — | `human` | `human` streams progress lines; `agent` quiets stdout and prints only the final summary / JSON. |
@@ -98,6 +98,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--timeout <minutes>` | — | `20` | Per-file deadline. `0` disables the timeout. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per file. `0` uses the template default (`30`); values 1–9 are clamped up to `10`; any value `≥ 10` overrides the template default (even if smaller than `30`). |
+| `--max-tokens <n>` | — | config or template default | Per-file prompt token ceiling. Overrides the saved `max_tokens` setting for this run. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
@@ -295,6 +296,36 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 Non-fatal warnings (a single sub-agent failed, a file exceeded the token
 threshold, etc.) are printed inline; in JSON mode they're added to the
 `warnings` array.
+
+## `ocr scan`
+
+Full-file review without a Git diff. Each file's current content is read
+from the working tree and sent to the LLM — useful for auditing an
+unfamiliar codebase or a directory with no meaningful diff.
+
+```text
+ocr scan [flags]
+ocr s      [flags]   (alias)
+```
+
+With no `--path`, the whole repository is scanned.
+
+### Flags
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--path <list>` | - | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). |
+| `--exclude <patterns>` | - | - | Comma-separated gitignore-style patterns to skip (e.g., `**/generated/*,*.pb.go`); merged with `rule.json` excludes. |
+| `--preview` | `-p` | `false` | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. Honors `--format json`. |
+
+```bash
+ocr scan --preview                              # see what would be scanned
+ocr scan --path internal/agent                  # scan one directory
+ocr scan --path internal/agent,internal/llm/client.go
+ocr scan --exclude '**/generated/*,*.pb.go'
+```
+
+See `ocr scan -h` for the full flag list.
 
 ## `ocr session`
 

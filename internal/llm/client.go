@@ -11,8 +11,10 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -207,6 +209,14 @@ func (r *ChatResponse) ResponseItems() []json.RawMessage {
 	return append([]json.RawMessage(nil), r.Choices[0].Message.ResponseItems...)
 }
 
+// ReasoningContent extracts the reasoning content of the first choice, if any.
+func (r *ChatResponse) ReasoningContent() string {
+	if len(r.Choices) == 0 {
+		return ""
+	}
+	return r.Choices[0].Message.ReasoningContent
+}
+
 // ToolDef defines a tool/function available to the model.
 type ToolDef struct {
 	Type     string      `json:"type"`
@@ -230,6 +240,42 @@ type ClientConfig struct {
 	Timeout      time.Duration     // Request timeout
 	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
 	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
+	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+
+	// retryCollector receives one record per real HTTP attempt. It is
+	// unexported because it is not configuration: it is a handle on the current
+	// run, owned by llmRuntime and set only by NewLLMClient, and the three
+	// exported constructors keep their signatures because of it.
+	//
+	// A nil collector is fully inert: no middleware is mounted and nothing about
+	// the request path changes. That is the state for llm test, and for any
+	// caller that builds a client without one.
+	retryCollector *RetryCollector
+}
+
+// retryCodesMiddleware returns an HTTP middleware that forces the SDK to retry
+// responses whose status code is in the given set, by injecting the
+// x-should-retry: true response header. Returns nil when codes is empty.
+// The returned function is structurally compatible with both option.Middleware
+// (Anthropic SDK) and openaiopt.Middleware (OpenAI SDK).
+func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+	if len(codes) == 0 {
+		return nil
+	}
+	codeSet := make(map[int]bool, len(codes))
+	for _, c := range codes {
+		codeSet[c] = true
+	}
+	return func(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+		resp, err := next(req)
+		if err != nil {
+			return resp, err
+		}
+		if codeSet[resp.StatusCode] {
+			resp.Header.Set("x-should-retry", "true")
+		}
+		return resp, err
+	}
 }
 
 // --- Factory ---
@@ -243,15 +289,21 @@ type ClientConfig struct {
 // The defensive default keeps legacy callers that somehow bypass resolver
 // normalization working (they previously got OpenAIClient for any non-anthropic
 // protocol).
-func NewLLMClient(ep ResolvedEndpoint) LLMClient {
+//
+// collector observes every HTTP attempt the returned client makes; pass nil to
+// build a client that is not observed. It is a parameter rather than a field on
+// ResolvedEndpoint because it belongs to the run, not to the endpoint.
+func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 	cfg := ClientConfig{
-		URL:          ep.URL,
-		APIKey:       ep.Token,
-		Model:        ep.Model,
-		AuthHeader:   ep.AuthHeader,
-		Timeout:      ep.Timeout,
-		ExtraBody:    ep.ExtraBody,
-		ExtraHeaders: ep.ExtraHeaders,
+		URL:            ep.URL,
+		APIKey:         ep.Token,
+		Model:          ep.Model,
+		AuthHeader:     ep.AuthHeader,
+		Timeout:        ep.Timeout,
+		ExtraBody:      ep.ExtraBody,
+		ExtraHeaders:   ep.ExtraHeaders,
+		RetryCodes:     ep.RetryCodes,
+		retryCollector: collector,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -371,16 +423,28 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	}
 
 	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/chat/completions")
+	maxRetries := 0
+	if cfg.retryCollector != nil {
+		// The retry observer must see every provider attempt. Clients without a
+		// collector retain the legacy three-logical-attempt boundary below.
+		maxRetries = 5
+	}
 
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
 		openaiopt.WithBaseURL(sdkBaseURL),
-		openaiopt.WithMaxRetries(0),
+		openaiopt.WithMaxRetries(maxRetries),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 	}
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, openaiopt.WithHeader(k, v))
+	}
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	return &OpenAIClient{
@@ -400,7 +464,23 @@ type ChatRequest struct {
 }
 
 // CompletionsWithCtx sends a chat completion request with context support for cancellation and timeout.
-func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+//
+// The deferred finalizeRequest is the client boundary for the retry report: it is
+// the only place that knows the logical request is over, and it covers every exit
+// path including the streaming branch, the EOF recovery and a panic. Results are
+// named so the defer can read the error actually returned.
+func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	defer func() {
+		// A panic still has to finalize, or the entry stays unfinalized and Freeze
+		// drops the whole run's report. The panic value itself is re-raised
+		// unchanged so agent.go's per-file recovery behaves exactly as before.
+		if r := recover(); r != nil {
+			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
+			panic(r)
+		}
+		finalizeRequest(ctx, c.cfg.retryCollector, err)
+	}()
+
 	model := req.Model
 	if model == "" {
 		model = c.cfg.Model
@@ -422,21 +502,75 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 	if stream, ok := c.cfg.ExtraBody["stream"].(bool); ok && stream {
-		return withLLMRetry(ctx, func(ctx context.Context) (*ChatResponse, error) {
+		call := func(ctx context.Context) (*ChatResponse, error) {
 			return c.completionsStreaming(ctx, params, opts...)
-		})
+		}
+		if c.cfg.retryCollector != nil {
+			return call(ctx)
+		}
+		return withLLMRetry(ctx, call, c.cfg.RetryCodes)
 	}
 
-	return withLLMRetry(ctx, func(ctx context.Context) (*ChatResponse, error) {
+	call := func(ctx context.Context) (*ChatResponse, error) {
 		sdkResp, err := c.sdk.Chat.Completions.New(ctx, params, opts...)
+		if errors.Is(err, io.ErrUnexpectedEOF) && c.cfg.retryCollector != nil {
+			// The truncated response was observed as HTTP 200, so it is corrected here
+			// rather than in the defer: this SDK call ends now, and a second one is
+			// about to append its own attempts under the same logical request.
+			reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassNetwork, FailurePhaseResponseDecode)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			retryResp, retryErr := c.sdk.Chat.Completions.New(ctx, params, opts...)
+			if retryErr == nil {
+				sdkResp = retryResp
+				err = nil
+			} else {
+				if errors.Is(retryErr, io.ErrUnexpectedEOF) {
+					reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassNetwork, FailurePhaseResponseDecode)
+				}
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return nil, ctxErr
+				}
+				if !errors.Is(retryErr, io.ErrUnexpectedEOF) {
+					err = retryErr
+				}
+			}
+		}
 		if err != nil {
 			return nil, err
 		}
 		return c.mapOpenAIResponse(sdkResp), nil
-	})
+	}
+	if c.cfg.retryCollector != nil {
+		return call(ctx)
+	}
+	return withLLMRetry(ctx, call, c.cfg.RetryCodes)
 }
 
+// completionsStreaming consumes an SSE completion and corrects the retry report
+// when the stream fails after it was already established.
+//
+// The correction lives in this one wrapper instead of at the inner function's
+// four error returns: a mid-stream failure is invisible to the observer, which
+// saw only the HTTP 200 that opened the stream. It must not finalize the logical
+// request — CompletionsWithCtx returns this call directly, so its defer already
+// does, and a second Finalize would be recorded as a violation.
+//
+// A stream that never opened needs nothing here: stream.Err() then carries the
+// non-2xx *apierror.Error, the observer already recorded that attempt as an
+// error, and ReviseLastAttempt's precondition makes this a no-op.
 func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.ChatCompletionNewParams, opts ...openaiopt.RequestOption) (*ChatResponse, error) {
+	resp, err := c.completionsStreamingInner(ctx, params, opts...)
+	if err != nil {
+		class, phase := classifyStreamError(err)
+		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params openai.ChatCompletionNewParams, opts ...openaiopt.RequestOption) (*ChatResponse, error) {
 	stream := c.sdk.Chat.Completions.NewStreaming(ctx, params, opts...)
 	defer stream.Close()
 
@@ -479,18 +613,18 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 			builder.WriteString(reasoningContent)
 		}
 		if !accumulator.AddChunk(chunk) {
-			return nil, fmt.Errorf("OpenAI streaming response contained inconsistent chunks")
+			return nil, &streamIntegrityError{reason: "contained inconsistent chunks"}
 		}
 	}
 	if err := stream.Err(); err != nil {
 		return nil, err
 	}
 	if len(choiceOrder) == 0 {
-		return nil, fmt.Errorf("OpenAI streaming response contained no choices")
+		return nil, &streamIntegrityError{reason: "contained no choices"}
 	}
 	for _, index := range choiceOrder {
 		if !finishedChoices[index] {
-			return nil, fmt.Errorf("%w: OpenAI streaming response ended before choice %d finished", io.ErrUnexpectedEOF, index)
+			return nil, &streamIntegrityError{reason: fmt.Sprintf("ended before choice %d finished", index)}
 		}
 	}
 
@@ -663,10 +797,16 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		authHeader = "authorization"
 	}
 	cfg.AuthHeader = authHeader
+	maxRetries := 0
+	if cfg.retryCollector != nil {
+		// The retry observer must see every provider attempt. Clients without a
+		// collector retain the legacy three-logical-attempt boundary below.
+		maxRetries = 5
+	}
 
 	opts := []option.RequestOption{
 		option.WithBaseURL(sdkBaseURL),
-		option.WithMaxRetries(0),
+		option.WithMaxRetries(maxRetries),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
 	}
@@ -687,6 +827,12 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, option.WithHeader(k, v))
 	}
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, option.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
+	}
 
 	return &AnthropicClient{
 		cfg: cfg,
@@ -695,7 +841,20 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 }
 
 // CompletionsWithCtx sends a chat completion request with context support.
-func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+//
+// The deferred finalizeRequest is this client's boundary for the retry report;
+// see the OpenAI counterpart for why it is deferred and why the results are
+// named. A parameter-building failure returns before any HTTP attempt, so
+// Finalize finds no entry and the request stays out of the report entirely.
+func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
+			panic(r)
+		}
+		finalizeRequest(ctx, c.cfg.retryCollector, err)
+	}()
+
 	model := req.Model
 	if model == "" {
 		model = c.cfg.Model
@@ -718,13 +877,17 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		opts = append(opts, option.WithJSONSet(k, v))
 	}
 
-	return withLLMRetry(ctx, func(ctx context.Context) (*ChatResponse, error) {
+	call := func(ctx context.Context) (*ChatResponse, error) {
 		sdkResp, err := c.sdk.Messages.New(ctx, params, opts...)
 		if err != nil {
 			return nil, err
 		}
 		return c.mapAnthropicResponse(sdkResp), nil
-	})
+	}
+	if c.cfg.retryCollector != nil {
+		return call(ctx)
+	}
+	return withLLMRetry(ctx, call, c.cfg.RetryCodes)
 }
 
 // buildAnthropicParams converts the shared ChatRequest into Anthropic SDK parameters.
@@ -835,6 +998,16 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	if len(tools) > 0 {
 		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
 		params.Tools = tools
+	}
+	// Dynamic breakpoint on the latest message so multi-turn history is
+	// cached incrementally: read the full previous prefix, write only the delta.
+	if len(messages) > 0 {
+		last := &messages[len(messages)-1]
+		if len(last.Content) > 0 {
+			if cc := last.Content[len(last.Content)-1].GetCacheControl(); cc != nil {
+				*cc = anthropic.NewCacheControlEphemeralParam()
+			}
+		}
 	}
 	if req.Temperature != nil {
 		params.Temperature = anthropic.Float(*req.Temperature)

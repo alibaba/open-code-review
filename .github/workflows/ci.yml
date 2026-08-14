@@ -29,6 +29,12 @@ jobs:
       - name: Verify license headers
         run: bash scripts/verify-license.sh
 
+      - name: Verify action pins
+        run: bash scripts/verify-action-pins.sh
+
+      - name: Verify sources contain no unapproved non-English text
+        run: go run scripts/verify-english-only.go
+
       - name: Check formatting
         run: |
           unformatted="$(gofmt -s -l .)"
@@ -38,7 +44,15 @@ jobs:
             gofmt -s -d .
             exit 1
           fi
-
+      
+      - name: Check line endings
+        shell: bash
+        run: |
+          if git ls-files --eol | grep -v 'i/lf\|i/none\|i/-text'; then
+            echo 'Line endings must end with LF. Have you normalized line endings?'
+            exit 1
+          fi
+        
       - name: Check go.mod is tidy
         run: |
           go mod tidy

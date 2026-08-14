@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -304,12 +303,8 @@ func matchGitignorePattern(relPath, pat string) bool {
 // the pattern with any leading "!" already stripped.
 func matchGitignoreBody(relPath, body string) bool {
 	// Directory-only patterns (trailing /)
-	if before, ok := strings.CutSuffix(body, "/"); ok {
-		// Only a real directory component can match, so the final segment (the
-		// file's own name) is excluded from consideration: `vendor/` must not
-		// match a *file* named "vendor", and `*/` must not match every path.
-		segments := strings.Split(relPath, "/")
-		return slices.Contains(segments[:max(len(segments)-1, 0)], before)
+	if pattern, ok := strings.CutSuffix(body, "/"); ok {
+		return matchGitignoreDirectory(relPath, pattern)
 	}
 
 	// A leading "/" anchors the pattern to the repository root rather than
@@ -351,6 +346,34 @@ func matchGitignoreBody(relPath, body string) bool {
 		return true
 	}
 
+	return false
+}
+
+func matchGitignoreDirectory(relPath, pattern string) bool {
+	pattern, anchored := strings.CutPrefix(pattern, "/")
+	if pattern == "" {
+		return false
+	}
+
+	lastSlash := strings.LastIndex(relPath, "/")
+	if lastSlash < 0 {
+		return false
+	}
+
+	components := strings.Split(relPath[:lastSlash], "/")
+	// Slash-containing patterns are relative to the .gitignore location;
+	// slashless patterns match a directory name at any depth.
+	matchFullPath := anchored || strings.Contains(pattern, "/")
+	for i, component := range components {
+		candidate := component
+		if matchFullPath {
+			candidate = strings.Join(components[:i+1], "/")
+		}
+		matched, err := doublestar.Match(pattern, candidate)
+		if err == nil && matched {
+			return true
+		}
+	}
 	return false
 }
 

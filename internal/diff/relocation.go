@@ -16,21 +16,18 @@ import (
 	"github.com/alibaba/open-code-review/internal/telemetry"
 )
 
-// ReLocateComment calls the LLM to regenerate a precise existing_code snippet
-// when text-based matching fails, then retries ResolveComment with the new snippet.
-// Returns (success, response, requestMessages) so the caller can record session
-// history and track token usage. Response and messages are nil on early exits.
-func ReLocateComment(
-	ctx context.Context,
-	cm *model.LlmComment,
-	d *model.Diff,
-	client llm.LLMClient,
-	task *template.LlmConversation,
-	modelName string,
-	maxTokens int,
-) (bool, *llm.ChatResponse, []llm.Message) {
+// BuildReLocationMessages renders the re-location prompt for cm against d.
+// Returns nil when the task template is absent or empty, which the caller
+// treats as "no re-location attempt": no session record, no request.
+//
+// This is split out of ReLocateComment so the caller can create the
+// ReLocationTask session record — and therefore know its RequestNo — before any
+// HTTP call happens. It is pure prompt construction: no client, no session, no
+// request identity. Keeping it that way is what stops observability concerns
+// from sinking into package diff.
+func BuildReLocationMessages(cm *model.LlmComment, d *model.Diff, task *template.LlmConversation) []llm.Message {
 	if task == nil || len(task.Messages) == 0 {
-		return false, nil, nil
+		return nil
 	}
 
 	messages := make([]llm.Message, 0, len(task.Messages))
@@ -40,6 +37,26 @@ func ReLocateComment(
 		content = strings.ReplaceAll(content, "{existing_code}", cm.ExistingCode)
 		content = strings.ReplaceAll(content, "{suggestion_content}", cm.Content)
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
+	}
+	return messages
+}
+
+// ReLocateComment calls the LLM to regenerate a precise existing_code snippet
+// when text-based matching fails, then retries ResolveComment with the new
+// snippet. messages comes from BuildReLocationMessages; the caller has already
+// recorded it in the session, so only (success, response) are returned here.
+// Response is nil when the request failed.
+func ReLocateComment(
+	ctx context.Context,
+	cm *model.LlmComment,
+	d *model.Diff,
+	client llm.LLMClient,
+	messages []llm.Message,
+	modelName string,
+	maxTokens int,
+) (bool, *llm.ChatResponse) {
+	if len(messages) == 0 {
+		return false, nil
 	}
 
 	startTime := time.Now()
@@ -54,7 +71,7 @@ func ReLocateComment(
 		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
 		llmSpan.End()
 		fmt.Fprintf(stdout.Writer(), "[ocr] Re-location LLM call failed for %s: %v\n", cm.Path, err)
-		return false, nil, messages
+		return false, nil
 	}
 	var totalTokens int64
 	if resp.Usage != nil {
@@ -65,16 +82,16 @@ func ReLocateComment(
 
 	code := extractCodeBlock(resp.Content())
 	if code == "" {
-		return false, resp, messages
+		return false, resp
 	}
 
 	original := cm.ExistingCode
 	cm.ExistingCode = code
 	if ResolveComment(cm, d) {
-		return true, resp, messages
+		return true, resp
 	}
 	cm.ExistingCode = original
-	return false, resp, messages
+	return false, resp
 }
 
 // extractCodeBlock extracts the content of the first fenced code block from text.

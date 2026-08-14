@@ -112,6 +112,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"service.proto", "Wire Compatibility"},
 		{"src/Main.hs", "Partial Functions"},
 		{"examples/Tutorial.lhs", "Partial Functions"},
+		{"src/parser.nim", "Memory and Lifetime Safety"},
+		{"scripts/build.nims", "Memory and Lifetime Safety"},
+		{"project.nimble", "Memory and Lifetime Safety"},
 	}
 
 	for _, tt := range tests {
@@ -674,8 +677,8 @@ func TestFileFilter_IsUserIncluded_EmptyInclude(t *testing.T) {
 
 func TestFileFilter_CaseInsensitive(t *testing.T) {
 	f := &FileFilter{
-		Include: []string{"src/**/*.java"},
-		Exclude: []string{"**/generated/**"},
+		Include: []string{"src/**/*.java", "**/CHANGELOG.md"},
+		Exclude: []string{"**/generated/**", "README.md", "**/*.{Go,Java}"},
 	}
 
 	if !f.IsUserIncluded("SRC/Main/Foo.Java") {
@@ -683,6 +686,17 @@ func TestFileFilter_CaseInsensitive(t *testing.T) {
 	}
 	if !f.IsUserExcluded("SRC/Generated/Api.java") {
 		t.Errorf("expected case-insensitive exclude match")
+	}
+
+	// Verify patterns containing uppercase letters also match.
+	if !f.IsUserIncluded("docs/CHANGELOG.md") {
+		t.Errorf("expected uppercase include pattern to match case-insensitively")
+	}
+	if !f.IsUserExcluded("README.md") {
+		t.Errorf("expected uppercase exclude pattern to match case-insensitively")
+	}
+	if !f.IsUserExcluded("pkg/Main.JAVA") {
+		t.Errorf("expected brace-expanded uppercase pattern to match case-insensitively")
 	}
 }
 

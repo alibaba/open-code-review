@@ -40,6 +40,14 @@ Go to your project's **Settings → CI/CD → Variables** and add:
 | `OCR_LLM_AUTH_TOKEN` | Yes | Yes | API authentication token |
 | `OCR_LLM_MODEL` | Yes | No | Model name (e.g., `gpt-4o`) — OCR has no built-in default model and fails when this is unset |
 | `GITLAB_API_TOKEN` | No | Yes | GitLab access token with `api` scope (falls back to `CI_JOB_TOKEN` if not set) |
+| `OCR_VERSION` | No | No | npm version spec for `@alibaba-group/open-code-review` (default: `latest`). Pin it (e.g. `1.8.8` or `~1.8`) for reproducible reviews. |
+| `OCR_LANGUAGE` | No | No | Review output language, written via `ocr config set language` (e.g. `English`, `Chinese`). Defaults to OCR's built-in default. |
+| `OCR_LLM_AUTH_HEADER` | No | No | Custom auth header name, written via `ocr config set llm.auth_header` (e.g. `x-api-key` for some providers). |
+| `OCR_LLM_EXTRA_HEADERS` | No | No | Extra headers `K=V,K=V`, written via `ocr config set llm.extra_headers`. |
+| `OCR_LLM_TIMEOUT` | No | No | LLM request timeout in seconds (read natively by OCR from the env). Unset/empty = OCR's default. |
+| `OCR_REVIEW_CONCURRENCY` | No | No | Max concurrent file reviews, passed via `ocr review --concurrency` (default: 8). |
+| `OCR_BACKGROUND` | No | No | Business/requirement context, passed via `ocr review --background` (e.g. the MR title). |
+| `OCR_RULE` | No | No | Path to a custom rules JSON file, passed via `ocr review --rule`. |
 
 > **Note:** GitLab CI/CD does not support variables with values shorter than 8 characters, so `use_anthropic` cannot be set as a CI variable. The pipeline sets it to `false` by default. If you need to use Anthropic Claude models, you'll need to modify the `.gitlab-ci.yml` script directly.
 >
@@ -61,13 +69,13 @@ You need a token with `api` scope to post discussions on MRs. Options:
 
 When an MR is reviewed, comments appear as:
 
-- **Inline discussions**: Directly on the changed lines in the MR diff view
-- **Summary note**: A final note summarizing the total number of issues found and how they were posted (inline, no line info, routed by policy, or failed)
-- **Fallback notes**: Comments without line info, routed by category/severity policy, or failed inline posts appear as separate MR notes
+- **Inline discussions**: Directly on the changed lines in the MR diff view, each prefixed with a `[category · severity]` badge when the LLM provided that metadata
+- **Summary note**: A single note (updated in place across runs by default) summarizing the total number of issues found, with mutually-exclusive counts (inline / summary / routed / skipped / failed) and a detailed warnings list
+- **Fallback notes**: Findings that could not be posted inline (no line info, routed by policy, or whose position could not be resolved against the diff) are collected into the summary note, each tagged with the reason it ended up there
 
 ### Inline Discussion Example
 
-Comments are posted using GitLab's Discussion API with position data, so they appear directly next to the relevant code in the "Changes" tab.
+Comments are posted using GitLab's Discussion API with position data, so they appear directly next to the relevant code in the "Changes" tab. Each comment carries an HTML-comment id tag (invisible when rendered) that the script uses to avoid duplicate posts on retry.
 
 ## Supported LLM Providers
 
@@ -82,21 +90,15 @@ OCR supports both OpenAI and Anthropic API formats:
 
 ## Customization
 
+Most review behavior is configurable via CI/CD Variables (see the table above) — no YAML edits required. The recipes below cover the remaining cases.
+
 ### Use a specific OCR version
 
-```yaml
-script:
-  - npm install -g @alibaba-group/open-code-review@1.0.0
-```
+Set the `OCR_VERSION` CI/CD variable (e.g. `1.8.8` or `~1.8`). Unset defaults to `latest`.
 
 ### Add custom review rules
 
-Use the `--rule` flag to pass a custom rules JSON file:
-
-```yaml
-script:
-  - ocr review --rule ./my-rules.json --from origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --to $CI_COMMIT_SHA
-```
+Set the `OCR_RULE` CI/CD variable to the path of a custom rules JSON file (passed to `ocr review --rule`). For rules that live inside the repo, commit the file and point `OCR_RULE` at its path.
 
 ### Adjust retry and delay settings
 
@@ -109,28 +111,61 @@ When posting review discussions, the script includes rate-limit handling with ex
 | `OCR_MAX_RETRY_DELAY` | `60000` | Maximum delay (ms) per single retry, caps both `Retry-After` and backoff |
 | `OCR_SUCCESS_DELAY` | `2000` | Delay (ms) after a successful discussion post to pace subsequent requests |
 | `OCR_FAILURE_DELAY` | `1000` | Delay (ms) after a non-rate-limit failure to pace subsequent requests |
-| `OCR_RATE_LIMIT_THRESHOLD` | `10` | Proactively slow down when GitLab `RateLimit-Remaining` is at/below this value (set `0` to disable) |
+| `OCR_RATE_LIMIT_THRESHOLD` | `10` | Proactively slow down when GitLab `RateLimit-Remaining` is at/below this value (set `0` to disable). Applies to both writes (doubles the pacing delay) and reads (switches to the longer read spacing). |
+| `OCR_READ_SUCCESS_DELAY` | `500` | Delay (ms) after a successful read (`list_notes`/`list_discussions`/`get_mr_diffs`) to pace read API calls, mirroring the GitHub Action's `readWithPacing`. |
+| `OCR_READ_LOW_REMAINING_SPACING` | `5000` | Longer delay (ms) used after a read when the remaining quota is at/below `OCR_RATE_LIMIT_THRESHOLD`. |
 | `OCR_ROUTE_SEVERITY_BELOW` | _(empty)_ | Optional severity threshold (`critical`, `high`, `medium`, `low`) that routes findings at-or-below it from inline comments to summary notes (fail-open: never drops a finding). Empty or unknown values disable severity routing. |
 | `OCR_ROUTE_CATEGORIES` | _(empty)_ | Optional comma-separated categories (`bug`, `security`, `performance`, `maintainability`, `test`, `style`, `documentation`, `other`) routed from inline to summary notes. Unknown tokens are ignored. Combine with `OCR_ROUTE_SEVERITY_BELOW` to route on either condition. |
 
 These variables are optional — if not configured, sensible defaults are used. Consider increasing delays for self-hosted GitLab instances with aggressive rate-limit configurations or for large MRs that generate numerous review comments. The `OCR_RATE_LIMIT_THRESHOLD` variable enables proactive throttling: when GitLab reports low remaining quota in the `RateLimit-Remaining` response header, the script automatically doubles the pacing delay to avoid hitting 429 errors.
 
+When the primary rate limit is exhausted (`RateLimit-Remaining: 0`), the script additionally honors GitLab's `RateLimit-Reset` header, sleeping until the limit resets (defensively handling both epoch-seconds and seconds-until-reset formats). This mirrors the GitHub Action's `x-ratelimit-reset` handling.
+
+### Publication behavior (aligned with the GitHub Action)
+
+The posting script implements the same publication behaviors as the GitHub Action (`scripts/github-actions/post-review-comments.js`), exposed as optional CI/CD variables. All default to no-op / current behavior except `OCR_STICKY_SUMMARY`, which defaults to `true` (the summary note is updated in place across runs instead of accumulating one note per run).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OCR_STICKY_SUMMARY` | `true` | Update the summary note in place across runs (find-by-marker then `PUT /notes/:id`). Set `false` to post a fresh note each run. |
+| `OCR_INCREMENTAL` | `false` | Skip comments whose line range overlaps a prior bot discussion on the same path (so re-runs only append new findings). Uses an IoU threshold for multi-line spans. |
+| `OCR_INCREMENTAL_OVERLAP_THRESHOLD` | `0.6` | IoU (0–1) above which two multi-line comments are considered the same. Single-line comments match only on the exact same line; a single-line and multi-line comment never match. |
+| `OCR_ROUTE_SEVERITY_BELOW` | _(empty)_ | Route findings whose severity is at-or-below this level to the summary note instead of posting them inline (e.g. `low` keeps only critical/high/medium inline). Unknown severities never match (fail-open). |
+| `OCR_ROUTE_CATEGORIES` | _(empty)_ | Comma-separated categories to route to the summary (e.g. `style,documentation`). Routed findings never enter the inline write path, so they cannot be double-posted on retry. |
+| `OCR_FAIL_ON_SEVERITY` | _(empty)_ | Fail the CI job (non-zero exit) when any comment's severity is at-or-above this level (e.g. `critical`). The summary note is still posted before the job fails, so visibility is preserved. |
+
+Additional behaviors ported from the GitHub Action (always on, no variable):
+
+- **Category/severity badge**: each inline discussion and fallback entry is prefixed with `[category · severity]` (using a middot, U+00B7) when the LLM provided that metadata, byte-matching the CLI's badge rendering.
+- **Deterministic ordering**: comments are sorted by `path → start_line → end_line → original index` before posting, so identical reruns produce identical post sequences (which is what makes idempotency reconciliation reproducible).
+- **Detailed warnings**: warnings are rendered as a bulleted list (`file (type): message`) rather than a bare count.
+- **Backtick-safe fences**: fallback Before/After code blocks use a fence long enough to enclose any backticks in the code (the inline suggestion keeps the fixed triple-backtick `suggestion:-0+0` form so GitLab's "Apply suggestion" button keeps working).
+- **Idempotent retry**: each inline discussion carries an invisible HTML-comment id tag (`<!-- ocr-<pipeline>-<job>-<hex> -->`). When a `POST /discussions` fails with a 5xx/408/network error (the request may still have landed), the script queries existing discussions for the id before retrying; if found it is treated as success (no duplicate), and if the read API is unavailable it skips the retry rather than risk a duplicate.
+- **400 line-resolution fallback**: when a discussion `POST` returns 400 indicating a position problem, the script fetches the MR diff (`GET /merge_requests/:iid/diffs`), classifies the comment as valid/invalid/unknown, and drops provably-out-of-diff findings to the summary rather than blindly retrying. Unknown cases keep the existing fallback behavior.
+
+### CI outputs and artifacts
+
+The pipeline exposes the following to downstream jobs:
+
+- **dotenv report** (`.ocr/ocr-stats.env`): `OCR_COMMENTS_TOTAL`, `OCR_COMMENTS_INLINE`, `OCR_COMMENTS_SUMMARY`, `OCR_COMMENTS_ROUTED`, `OCR_COMMENTS_SKIPPED`, `OCR_COMMENTS_FAILED`, and `OCR_SUMMARY_URL`. Consume them in later stages via the `dotenv` artifact.
+- **Artifacts** (`when: always`, 1 week retention): `.ocr/ocr-result.json` (raw review JSON) and `.ocr/ocr-stderr.log` (OCR stderr), so you can inspect a failed review even when the job fails. Paths are project-relative (under `.ocr/`) because GitLab Runner refuses to upload artifacts outside the build directory.
+
 ### Limit concurrency
 
-Adjust the `--concurrency` flag for large MRs to control the number of concurrent LLM requests:
+Set the `OCR_REVIEW_CONCURRENCY` CI/CD variable (passed to `ocr review --concurrency`). For large MRs, lowering this caps concurrent LLM requests:
 
 ```yaml
-script:
-  - ocr review --concurrency 5 --from origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --to $CI_COMMIT_SHA
+variables:
+  OCR_REVIEW_CONCURRENCY: "5"
 ```
 
 ### Provide background context
 
-Use the `--background` flag to pass additional context that helps OCR better understand the purpose of the changes:
+Set the `OCR_BACKGROUND` CI/CD variable (passed to `ocr review --background`). A common choice is the MR title:
 
 ```yaml
-script:
-  - ocr review --background "$CI_MERGE_REQUEST_TITLE" --from origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME --to $CI_COMMIT_SHA
+variables:
+  OCR_BACKGROUND: "$CI_MERGE_REQUEST_TITLE"
 ```
 
 This is particularly useful when your MR titles follow semantic conventions (e.g., `feat(auth): add OAuth2 support`) that clearly summarize what the MR implements. The background information helps OCR provide more relevant and context-aware review comments.
@@ -197,16 +232,17 @@ script:
     ], capture_output=True, text=True)
 
     # Save output for the posting script
-    with open("/tmp/ocr-result.json", "w") as f:
+    os.makedirs(".ocr", exist_ok=True)
+    with open(".ocr/ocr-result.json", "w") as f:
         f.write(result.stdout)
-    with open("/tmp/ocr-stderr.log", "w") as f:
+    with open(".ocr/ocr-stderr.log", "w") as f:
         f.write(result.stderr)
 
     print("OCR review completed.")
     WRAPPER_SCRIPT
 
   # Post review comments to MR
-  - python3 post_review.py /tmp/ocr-result.json
+  - python3 post_review.py .ocr/ocr-result.json
 ```
 
 The key logic: the Python wrapper checks for existing OCR comments before running `ocr review`. If found, it exits early with `sys.exit(0)` before consuming any LLM tokens. To re-trigger a review, users can manually delete the previous OCR comments.
@@ -278,13 +314,13 @@ Add verbose output to the review step:
 
 ```yaml
 script:
-  - cat /tmp/ocr-result.json
-  - cat /tmp/ocr-stderr.log
+  - cat .ocr/ocr-result.json
+  - cat .ocr/ocr-stderr.log
 ```
 
 ## Testing
 
-The posting logic (retry, backoff, rate-limit throttling, inline→fallback→summary flow) is unit-tested with no network access and no wall-clock sleep cost. Tests use only the standard-library `unittest`.
+The posting logic is unit-tested with no network access and no wall-clock sleep cost. Tests use only the standard-library `unittest` and cover: comment formatting (badge, suggestion, fallback), the publication policy (severity/category routing), deterministic sort, warning rendering, safe-fence code blocks, the full `publish()` flow (partition → sticky summary → fallback), incremental overlap (IoU, single-vs-multi, bot detection), the GitLab transport (retry/backoff/jitter/`Retry-After`/rate-limit/auth/network errors), idempotent `post_discussion` reconciliation, the 400 line-resolution fallback classification, wait-until-reset, and the dotenv stats / severity-gating helpers.
 
 ```bash
 # From the example directory

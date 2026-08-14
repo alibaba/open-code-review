@@ -117,8 +117,10 @@ type Args struct {
 	// codebase-memory tools.
 	MCPInstructions string
 
-	// Model is the user-configured model name used as fallback when
-	// template phases (plan/memory_compression) don't specify one.
+	// Model is the resolved model name used by every LLM request this run
+	// makes. The template carries no per-phase model override, so plan,
+	// main_task, memory compression, re-location and review filter all send
+	// this value.
 	Model string
 
 	// Provider is the configured provider name (e.g. "openai", "anthropic", or a
@@ -144,6 +146,10 @@ type Args struct {
 	// multiplier; an explicitly supplied 0 remains unlimited.
 	MaxTokensBudget         int64
 	MaxTokensBudgetExplicit bool
+
+	// SkipFilter disables the REVIEW_FILTER_TASK even when the template
+	// defines one. Set via the --no-filter CLI flag.
+	SkipFilter bool
 
 	// RuntimeConfig carries the non-secret, allowlisted runtime settings that
 	// identify how this run was configured, for the manifest's
@@ -240,6 +246,9 @@ func New(args Args) *Agent {
 		ContextBudget:     int64(args.Template.MaxTokens),
 		MaxTokensBudget:   args.MaxTokensBudget,
 		DiffLookup:        a.findDiff,
+		// Non-nil only here: the same Runner serves scan, whose requests must
+		// stay out of the retry report. See newRequestMeta.
+		NewRequestMeta: a.newRequestMeta,
 	})
 	return a
 }
@@ -247,6 +256,28 @@ func New(args Args) *Agent {
 func (a *Agent) emitProgress(phase, path string) {
 	if a.args.Progress != nil {
 		a.args.Progress(llmloop.ProgressEvent{Event: "ocr_progress", Phase: phase, Path: path})
+	}
+}
+
+// newRequestMeta builds the retry-report identity for one logical LLM request.
+//
+// It is the single place provider and model are read for that purpose — the
+// llmloop Runner receives it as Deps.NewRequestMeta, and the two agent-local
+// requests (plan, review filter) call it directly — so the two values cannot
+// drift apart between the five review request types.
+//
+// filePath must be the same string passed to GetOrCreateFileSession and
+// requestNo the RequestNo of the record created there, because those three
+// fields plus taskType are how the report joins against the session JSONL.
+// Provider is intentionally passed through as-is: empty is the real value for an
+// unnamed endpoint, and must not be replaced by the protocol.
+func (a *Agent) newRequestMeta(filePath string, taskType session.TaskType, requestNo int) llm.RequestMeta {
+	return llm.RequestMeta{
+		Provider:  a.args.Provider,
+		Model:     a.args.Model,
+		FilePath:  filePath,
+		TaskType:  string(taskType),
+		RequestNo: requestNo,
 	}
 }
 
@@ -351,6 +382,13 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
 	}
+	// Join background memory compression before anything freezes run-level
+	// state. Those jobs are cancelled rather than awaited when a conversation
+	// ends, so their LLM request can still be in flight here; a retry report
+	// frozen at the command boundary would then see an un-finalized request
+	// and be discarded wholesale. Cheap in the normal case — every job has
+	// already been cancelled by now.
+	a.runner.WaitBackground()
 	// Freeze coverage into the immutable manifest before session_end embeds it,
 	// so the CLI and the persisted session serialize the identical object. A
 	// persistence failure is a delivery error in its own right: when the review
@@ -1223,7 +1261,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 		// Always substitute the {{plan_guidance}} token so the literal placeholder
 		// never leaks into the rendered prompt. When the plan phase produced no
 		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
-		// (any language variant) so the LLM does not see a dangling section header.
+		// so the LLM does not see a dangling section header.
 		// Strip MUST run before ReplaceAll: the regex requires the literal
 		// {{plan_guidance}} token to be present; if we replace first, the token
 		// is gone and the wrapper can't be matched.
@@ -1312,6 +1350,12 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 		return
 	}
 
+	if a.args.SkipFilter {
+		telemetry.SetAttr(span, "skipped", true)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for %s (--no-filter)\n", newPath)
+		return
+	}
+
 	comments := a.args.CommentCollector.CommentsForPath(newPath)
 	if len(comments) == 0 {
 		return
@@ -1332,12 +1376,13 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	fs := a.session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
 	startTime := time.Now()
+	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.ReviewFilterTask, rec.RequestNo))
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
-	resp, err := a.runner.LLMClient().CompletionsWithCtx(ctx, llm.ChatRequest{
+	resp, err := a.runner.LLMClient().CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.OutputTokens(),
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {
@@ -1574,12 +1619,13 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	fs := a.session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
 	startTime := time.Now()
+	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.PlanTask, rec.RequestNo))
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
-	resp, err := a.runner.LLMClient().CompletionsWithCtx(ctx, llm.ChatRequest{
+	resp, err := a.runner.LLMClient().CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     a.args.Model,
 		Messages:  messages,
-		MaxTokens: a.args.Template.OutputTokens(),
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {

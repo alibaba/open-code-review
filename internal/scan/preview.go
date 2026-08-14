@@ -14,11 +14,18 @@ import (
 // without dispatching any LLM calls. Returns a *model.Preview ready for
 // cmd/opencodereview.outputPreviewText to render.
 //
-// Preview is read-only with respect to the Agent: it does not mutate
+// It builds none of the scan runtime — no session or runner — so previewing
+// cannot open session persistence. Going through NewAgent instead would
+// auto-create a session and leave an unfinalized JSONL file under the OCR home.
+func Preview(ctx context.Context, args Args) (*model.Preview, error) {
+	return (&Agent{args: args}).preview(ctx)
+}
+
+// preview is read-only with respect to the Agent: it does not mutate
 // a.items. (Earlier versions did, which made a subsequent Run on the same
 // Agent silently observe the preview's enumeration instead of re-running
 // it.) Callers that want to reuse the enumeration should call Run once.
-func (a *Agent) Preview(ctx context.Context) (*model.Preview, error) {
+func (a *Agent) preview(ctx context.Context) (*model.Preview, error) {
 	provider := NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
 	items, err := provider.Enumerate(ctx)
 	if err != nil {

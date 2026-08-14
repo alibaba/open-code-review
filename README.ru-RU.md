@@ -135,7 +135,7 @@ cd your-project
 # Режим рабочей копии — ревью всех staged, unstaged и untracked изменений
 ocr review
 
-# Диапазон веток — сравнение двух ref'ов
+# Диапазон веток — просматривает изменения feature-branch с момента её отделения от main (режим merge-base)
 ocr review --from main --to feature-branch
 
 # Один коммит
@@ -171,6 +171,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Codex](plugins/open-code-review/README.md#codex) — установка плагина с вызываемыми навыками ревью
   - [Cursor](plugins/open-code-review/README.md#cursor) — установка плагина с переносимыми навыками ревью
   - [OpenCode](plugins/open-code-review/opencode/README.md) — установка нативных инструментов ревью и slash-команд
+  - [QCA Forward](plugins/open-code-review/qca/README.md) — запуск режима делегирования с хост-моделью QCA и готовым к публикации шаблоном
   - [Агенты с поддержкой Skill](https://open-codereview.ai/docs/agent-skill) — установка переносимого навыка агента
 - Режимы выполнения ревью — после интеграции выберите, какая LLM выполняет ревью
   - [По умолчанию (под управлением OCR)](https://open-codereview.ai/docs/configuration) — OCR выполняет ревью с помощью настроенной LLM

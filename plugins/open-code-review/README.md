@@ -1,7 +1,7 @@
 # Coding agent plugins
 
 Open Code Review ships platform-specific integrations for Claude Code, Codex,
-and Cursor. Choose your platform below instead of adapting installation
+Cursor, and QCA Forward. Choose your platform below instead of adapting installation
 instructions written for a different agent.
 
 The plugin root also includes an Agent Plugins Specification v1 manifest at
@@ -80,3 +80,13 @@ portable OCR review skills from the bundled `skills/` directory.
 
 See the [Cursor plugin documentation](https://cursor.com/docs/plugins) for
 plugin loading and management details.
+
+## QCA Forward
+
+QCA Forward uses the host model through OCR delegation mode. Publish the
+`open-code-review-delegate` Skill, preinstall OCR in the referenced QCA
+environment, and create a Forward Template from the bundled example. No OCR
+LLM endpoint is required.
+
+See the [QCA Forward integration guide](qca/README.md) and
+[template example](qca/template.example.json).

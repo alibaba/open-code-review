@@ -565,7 +565,7 @@ func TestBuildResponsesParams_ReplaysReasoningBeforeFunctionCall(t *testing.T) {
 					json.RawMessage(`{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque"}`),
 				},
 				ToolCalls: []ToolCall{{
-					ID: "call_1",
+					ID:       "call_1",
 					Function: FunctionCall{Name: "file_read", Arguments: `{"file_path":"main.go"}`},
 				}},
 			},

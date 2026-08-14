@@ -47,6 +47,12 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
+	}
 
 	return &OpenAIResponsesClient{
 		cfg: cfg,
@@ -75,7 +81,19 @@ func ensureResponsesEndpoint(cfg *ClientConfig) {
 
 // CompletionsWithCtx sends a Responses API request and maps the result back to
 // the shared ChatResponse shape.
-func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+//
+// The deferred finalizeRequest is this client's boundary for the retry report;
+// see the OpenAI Chat Completions counterpart for why it is deferred and why the
+// results are named.
+func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
+			panic(r)
+		}
+		finalizeRequest(ctx, c.cfg.retryCollector, err)
+	}()
+
 	model := req.Model
 	if model == "" {
 		model = c.cfg.Model
@@ -110,9 +128,18 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		// a dead response as success.
 		switch sdkResp.Status {
 		case responses.ResponseStatusFailed, responses.ResponseStatusCancelled:
-			return nil, fmt.Errorf("openai-responses request did not complete: status=%s", sdkResp.Status)
+			err = fmt.Errorf("openai-responses request did not complete: status=%s", sdkResp.Status)
 		case responses.ResponseStatusQueued, responses.ResponseStatusInProgress:
-			return nil, fmt.Errorf("openai-responses returned non-terminal status=%s (background/async mode is not supported)", sdkResp.Status)
+			err = fmt.Errorf("openai-responses returned non-terminal status=%s (background/async mode is not supported)", sdkResp.Status)
+		}
+		if err != nil {
+			// Correct the attempt here, where the status is known. The observer saw
+			// only the HTTP 200 that carried this dead response object, and nothing
+			// downstream would catch the omission: a request whose outcome is failed is
+			// listed with no error attempt at all, producing self-consistent counts
+			// over a record that misstates what happened.
+			reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassProvider, FailurePhaseResponseStatus)
+			return nil, err
 		}
 
 		return c.mapResponsesResponse(sdkResp), nil

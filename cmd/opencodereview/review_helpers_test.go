@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -22,6 +23,58 @@ func TestRunPreview(t *testing.T) {
 			t.Fatalf("runPreview error: %v", err)
 		}
 	})
+}
+
+func TestRunPreviewJSONFormat(t *testing.T) {
+	dir := initTestGitRepo(t)
+	gitCommitFile(t, dir, "main.go", "package main\n", "add main")
+	gitCommitFile(t, dir, "notes.md", "# notes\n", "add notes")
+	cc, err := loadCommonContext(dir, "", 0, 0, true)
+	if err != nil {
+		t.Fatalf("loadCommonContext: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := runPreview(cc, reviewOptions{commit: "HEAD", outputFormat: "json"}); err != nil {
+			t.Errorf("runPreview error: %v", err)
+		}
+	})
+
+	got := decodeSinglePreviewJSON(t, out)
+	if got.TotalFiles != 1 {
+		t.Fatalf("total_files = %d, want 1 (HEAD adds notes.md only)", got.TotalFiles)
+	}
+	if got.Entries[0].Path != "notes.md" {
+		t.Errorf("path = %q, want notes.md", got.Entries[0].Path)
+	}
+	if got.Entries[0].WillReview {
+		t.Error("notes.md should be excluded by the extension allowlist")
+	}
+	if got.Entries[0].ExcludeReason != model.ExcludeExtension {
+		t.Errorf("exclude_reason = %q, want %q", got.Entries[0].ExcludeReason, model.ExcludeExtension)
+	}
+}
+
+// TestRunPreviewCreatesNoSession pins that previewing never opens session
+// persistence. Building the agent with agent.New auto-created a session, which
+// left an unfinalized (and usually empty) JSONL file under the OCR home even
+// though preview never runs or finalizes a review.
+func TestRunPreviewCreatesNoSession(t *testing.T) {
+	home := freshOCRHome(t)
+
+	dir := initTestGitRepo(t)
+	gitCommitFile(t, dir, "x.go", "package x\n", "add x")
+	cc, err := loadCommonContext(dir, "", 0, 0, true)
+	if err != nil {
+		t.Fatalf("loadCommonContext: %v", err)
+	}
+	silenceStdout(t, func() {
+		if err := runPreview(cc, reviewOptions{commit: "HEAD"}); err != nil {
+			t.Fatalf("runPreview error: %v", err)
+		}
+	})
+
+	assertNoSessionStore(t, home)
 }
 
 func TestLoadReviewResumeState(t *testing.T) {

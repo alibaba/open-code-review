@@ -48,7 +48,7 @@ var sessionShowJSON bool
 var sessionShowCmd = &cobra.Command{
 	Use:               "show [flags] <session-id>",
 	Short:             "Show one session's metadata and per-file items",
-	Args:              cobra.ExactArgs(1),
+	Args:              exactArgs(1),
 	ValidArgsFunction: completeSessionIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSessionShow(args[0])
@@ -64,7 +64,7 @@ var sessionCommentsCmd = &cobra.Command{
 	Use:               "comments [flags] <session-id>",
 	Short:             "Show the review comments recorded in one session",
 	Long:              "Print every review comment persisted in a session, formatted like 'ocr review' terminal output.\nUse --json for machine-readable output and --severity/--category to filter findings.",
-	Args:              cobra.ExactArgs(1),
+	Args:              exactArgs(1),
 	ValidArgsFunction: completeSessionIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSessionComments(args[0])
