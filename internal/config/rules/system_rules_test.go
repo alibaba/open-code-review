@@ -115,6 +115,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/parser.nim", "Memory and Lifetime Safety"},
 		{"scripts/build.nims", "Memory and Lifetime Safety"},
 		{"project.nimble", "Memory and Lifetime Safety"},
+		{"Sources/App/ContentView.swift", "Swift Review Principles"},
+		{"MyApp/Models/UserStore.swift", "Swift Review Principles"},
+		{"ChattyFit/ChattyFit/Views/WorkoutSessionView.swift", "SwiftUI State and Lifecycle"},
 	}
 
 	for _, tt := range tests {
@@ -138,8 +141,8 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 		"readme.md",
 		"docs/architecture.txt",
 		"Makefile",
-		"ios/ViewController.swift",
 		"ios/ViewController.m",
+		"ios/ViewController.mm",
 	}
 
 	for _, path := range paths {
