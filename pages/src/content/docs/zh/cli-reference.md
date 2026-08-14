@@ -180,8 +180,9 @@ ocr review --commit abc123 --resume <session-id>
   改变了选中的文件集合，整次恢复会被拒绝，而不是部分复用
 - 切换 provider 或 model 必须通过 `--provider` / `--model` 显式声明；经由配置
   文件或环境变量发生的变化一律拒绝
-- 父运行必须带有 run manifest，输入正是拿它来校验的。被 Ctrl-C 终止的运行没写出
-  manifest，早于 run manifest 的老 session 则从来就没有
+- 父运行必须带有 run manifest，输入正是拿它来校验的。文件派发开始后，Ctrl-C 会
+  优雅取消评审并写出 manifest，因此已完成的 checkpoint 仍可恢复；未能优雅关闭的
+  进程和早于 run manifest 的老 session 则没有 manifest
 - 只有父 manifest 认领过的文件才会复用。manifest 未认领或已损坏的 checkpoint 只
   影响它自己那个文件——该文件重新评审一次，其余不受影响
 - `--preview` 和 `--resume` 不能同时使用

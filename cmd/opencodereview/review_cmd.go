@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -96,7 +97,9 @@ var reviewCmd = &cobra.Command{
 		if err := validateReviewOptions(&reviewOpts); err != nil {
 			return err
 		}
-		return executeReview(reviewOpts)
+		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
+		defer stop()
+		return executeReviewContext(ctx, reviewOpts)
 	},
 }
 
@@ -105,6 +108,10 @@ func init() {
 }
 
 func executeReview(opts reviewOptions) error {
+	return executeReviewContext(context.Background(), opts)
+}
+
+func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
@@ -137,7 +144,7 @@ func executeReview(opts reviewOptions) error {
 	}
 
 	if opts.preview {
-		return runPreview(cc, opts)
+		return runPreviewContext(ctx, cc, opts)
 	}
 
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
@@ -162,7 +169,7 @@ func executeReview(opts reviewOptions) error {
 	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
 	// input it returns pins the run to the very commits this check passed on, so
 	// the decision cannot be undone by a ref moving afterwards.
-	sealed, err := validateResumeIdentity(context.Background(), cc, opts, rt, resumeState)
+	sealed, err := validateResumeIdentity(ctx, cc, opts, rt, resumeState)
 	if err != nil {
 		return err
 	}
@@ -186,7 +193,7 @@ func executeReview(opts reviewOptions) error {
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
-	mcpClients := initMCPClients(context.Background(), rt.AppCfg, tools, cc.RepoDir, Version)
+	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
 	defer func() {
 		for _, mc := range mcpClients {
 			if err := mc.Close(); err != nil {
@@ -232,7 +239,7 @@ func executeReview(opts reviewOptions) error {
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
-	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(context.Background()), "review.run")
+	runCtx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(ctx), "review.run")
 	defer span.End()
 	telemetry.SetAttr(span, "review.repo", cc.RepoDir)
 	telemetry.SetAttr(span, "review.from", opts.from)
@@ -247,7 +254,7 @@ func executeReview(opts reviewOptions) error {
 	}
 	startTime := time.Now()
 
-	comments, runErr := ag.Run(ctx)
+	comments, runErr := ag.Run(runCtx)
 	manifest := ag.RunManifest()
 
 	// Freeze the retry report at the same boundary as the manifest: ag.Run has
@@ -277,7 +284,7 @@ func executeReview(opts reviewOptions) error {
 	var emitErr error
 	emitted := manifest != nil || runErr == nil
 	if emitted {
-		emitErr = emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, retryReport)
+		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		}
@@ -479,7 +486,11 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 }
 
 func runPreview(cc *commonContext, opts reviewOptions) error {
-	preview, err := agent.Preview(context.Background(), agent.Args{
+	return runPreviewContext(context.Background(), cc, opts)
+}
+
+func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions) error {
+	preview, err := agent.Preview(ctx, agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
 		To:         opts.to,

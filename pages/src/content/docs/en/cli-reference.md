@@ -195,8 +195,9 @@ would review the same thing the parent did:
 - a provider or model change must be asked for explicitly with `--provider` /
   `--model`. A change that arrived through config or the environment is rejected
 - the parent must carry a run manifest, which is what its input is verified
-  against. A run killed with Ctrl-C never wrote one, and sessions older than run
-  manifests never had one
+  against. After file dispatch begins, Ctrl-C cancels the review gracefully and
+  records one, so completed checkpoints remain resumable. A process killed
+  before graceful shutdown and sessions older than run manifests do not have one
 - only files the parent's manifest settled are reused. A checkpoint the manifest
   does not account for, or one that is unreadable, costs that file its
   checkpoint and nothing more — it is simply reviewed again

@@ -606,6 +606,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
 
 	var dispatched int64
+dispatchLoop:
 	for i := range toDispatch {
 		if toDispatch[i].IsDeleted {
 			continue
@@ -655,9 +656,13 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 			}
 		}
 
+		select {
+		case sem <- struct{}{}: // acquire semaphore
+		case <-ctx.Done():
+			break dispatchLoop
+		}
 		dispatched++
 		wg.Add(1)
-		sem <- struct{}{} // acquire semaphore
 
 		go func(d model.Diff) {
 			fingerprint := reviewItemFingerprint(a.reviewMode(), d)
@@ -731,14 +736,17 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	wg.Wait()
-
-	if dispatched == 0 {
-		return a.args.CommentCollector.Comments(), nil
-	}
-
 	// All subtasks finished — collect comments from the global collector once.
 	if a.args.CommentWorkerPool != nil {
 		a.args.CommentWorkerPool.Await()
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		a.recordContextFailure(ctxErr)
+		return a.args.CommentCollector.Comments(), ctxErr
+	}
+
+	if dispatched == 0 {
+		return a.args.CommentCollector.Comments(), nil
 	}
 
 	failed := atomic.LoadInt64(&a.subtaskFailed)
@@ -754,6 +762,20 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	return a.args.CommentCollector.Comments(), nil
+}
+
+func (a *Agent) recordContextFailure(err error) {
+	if b := a.session.Manifest(); b != nil {
+		var setErr error
+		if errors.Is(err, context.DeadlineExceeded) {
+			setErr = b.SetPendingFailureCause(session.FailureTimeout, "review deadline exceeded")
+		} else {
+			setErr = b.SetRunFailure(session.RunFailureCancelled, "review was cancelled")
+		}
+		if setErr != nil {
+			a.recordWarning("manifest_error", "", setErr.Error())
+		}
+	}
 }
 
 func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
