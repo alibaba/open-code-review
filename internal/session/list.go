@@ -109,6 +109,7 @@ func ListSessions(repoDir string) ([]Summary, error) {
 		return nil, err
 	}
 	summaries := make([]Summary, 0)
+	seenSessionIDs := make(map[string]struct{})
 	readDir := func(dir string, legacy bool) error {
 		entries, readErr := os.ReadDir(dir)
 		if readErr != nil {
@@ -130,11 +131,15 @@ func ListSessions(repoDir string) ([]Summary, error) {
 				}
 			}
 			sessionID := strings.TrimSuffix(name, ".jsonl")
+			if _, seen := seenSessionIDs[sessionID]; seen {
+				continue
+			}
 			summary, loadErr := loadSummaryFromFile(path, sessionID, repoDir)
 			if loadErr != nil {
 				continue
 			}
 			summaries = append(summaries, *summary)
+			seenSessionIDs[sessionID] = struct{}{}
 		}
 		return nil
 	}

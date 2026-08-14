@@ -137,6 +137,51 @@ func TestListSessions_FiltersCollidingLegacySessionsByRepository(t *testing.T) {
 	}
 }
 
+func TestListSessions_DeduplicatesCurrentAndLegacySessionID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	currentDir, legacyDir, err := sessionDirectories(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{currentDir, legacyDir} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	const sessionID = "duplicate-session"
+	writeStart := func(dir, model string) {
+		t.Helper()
+		data, marshalErr := json.Marshal(map[string]string{
+			"type":      "session_start",
+			"sessionId": sessionID,
+			"timestamp": "2026-08-01T00:00:00Z",
+			"cwd":       repoDir,
+			"model":     model,
+		})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		if err := os.WriteFile(filepath.Join(dir, sessionID+".jsonl"), append(data, '\n'), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeStart(currentDir, "current-model")
+	writeStart(legacyDir, "legacy-model")
+
+	summaries, err := ListSessions(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("sessions = %+v, want one deduplicated session", summaries)
+	}
+	if summaries[0].SessionID != sessionID || summaries[0].Model != "current-model" {
+		t.Fatalf("session = %+v, want current-format version", summaries[0])
+	}
+}
+
 func TestNewSessionsUseDistinctDirectoriesForCollidingPaths(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
