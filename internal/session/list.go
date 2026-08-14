@@ -41,6 +41,10 @@ type Summary struct {
 	Aborted        bool          `json:"aborted"`
 	Legacy         bool          `json:"legacy"`
 	RunManifest    *RunManifest  `json:"run_manifest,omitempty"`
+
+	// ResumeLineage is present only for a run that resumed another, and records
+	// which run it continued and across which provider and model.
+	ResumeLineage *ResumeLineage `json:"resume_lineage,omitempty"`
 }
 
 // ItemDetail describes one file-level record within a session, used by `ocr session show`.
@@ -80,6 +84,13 @@ type summaryRecord struct {
 	DurationSeconds float64         `json:"duration_seconds"`
 	LLMFailures     int64           `json:"llm_failures"`
 	RunManifest     *RunManifest    `json:"run_manifest"`
+	SchemaVersion   string          `json:"schema_version"`
+	RunID           string          `json:"run_id"`
+	ParentRunID     string          `json:"parent_run_id"`
+	SourceProvider  string          `json:"source_provider"`
+	SourceModel     string          `json:"source_model"`
+	TargetProvider  string          `json:"target_provider"`
+	TargetModel     string          `json:"target_model"`
 }
 
 // SessionsDir returns the on-disk directory that holds JSONL session files
@@ -226,6 +237,22 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 		s.ResumedFrom = rec.ResumedFrom
 		if !ts.IsZero() {
 			s.StartTime = ts
+		}
+	case "resume_lineage":
+		// Unknown lineage schemas are ignored rather than half-read: a version
+		// this build does not understand may not mean these fields at all.
+		if rec.SchemaVersion != ResumeLineageSchemaVersion {
+			return
+		}
+		s.ResumeLineage = &ResumeLineage{
+			Type:           rec.Type,
+			SchemaVersion:  rec.SchemaVersion,
+			RunID:          rec.RunID,
+			ParentRunID:    rec.ParentRunID,
+			SourceProvider: rec.SourceProvider,
+			SourceModel:    rec.SourceModel,
+			TargetProvider: rec.TargetProvider,
+			TargetModel:    rec.TargetModel,
 		}
 	case "review_item_done":
 		s.CompletedFiles++

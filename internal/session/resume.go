@@ -29,6 +29,22 @@ type ResumeState struct {
 	ScanPaths        []string
 	HasScanPathScope bool
 	Items            map[string]ResumeItem
+
+	// Manifest is the parent run's coverage snapshot, carried only by the
+	// session_end record. A nil Manifest means the parent's input identity cannot
+	// be verified, not that the parent did no work.
+	Manifest *RunManifest
+
+	// Closed reports whether a session_end record was replayed. A session can
+	// close without a manifest — legacy sessions predate manifests, and a run that
+	// never froze one still writes session_end — so Closed is what tells an
+	// interrupted parent apart from one that closed with nothing to verify.
+	Closed bool
+
+	// reusable caches the parent manifest's completed and reused fingerprints,
+	// built on first use by ReusableItem. Reuse is decided on one goroutine
+	// before any dispatch begins, so this needs no lock.
+	reusable map[string]bool
 }
 
 // ResumeItem is a completed file-level checkpoint, keyed by diff fingerprint.
@@ -58,6 +74,7 @@ type resumeRecord struct {
 	SourceSessionID string             `json:"sourceSessionId"`
 	Error           string             `json:"error"`
 	Comments        []model.LlmComment `json:"comments"`
+	RunManifest     *RunManifest       `json:"run_manifest"`
 }
 
 // SessionFilePath returns the JSONL path for a persisted session.
@@ -72,8 +89,26 @@ func SessionFilePath(repoDir, sessionID string) (string, error) {
 	return filepath.Join(home, ".opencodereview", sessionSubDir, encodeRepoPath(repoDir), sessionID+".jsonl"), nil
 }
 
-// LoadResumeState replays a previous session JSONL into a fingerprint index.
+// LoadResumeState replays a previous session JSONL into a fingerprint index. A
+// record that cannot be parsed fails the load: with nothing to arbitrate coverage,
+// a dropped line is indistinguishable from a checkpoint that was never written,
+// and the pair it may have belonged to — a review_item_failed retracting an
+// earlier done record — cannot be reconstructed from the rest of the file.
 func LoadResumeState(repoDir, sessionID string) (*ResumeState, error) {
+	return loadResumeState(repoDir, sessionID, false)
+}
+
+// LoadReviewResumeState replays a review session, dropping records it cannot
+// parse. Review reuse is gated on the parent manifest rather than on these lines
+// (see ReusableItem), so an unreadable checkpoint just means its file is reviewed
+// again — which is what a corrupted checkpoint is supposed to do. Failing the
+// whole load instead would turn one bad line into the loss of every other file's
+// checkpoint.
+func LoadReviewResumeState(repoDir, sessionID string) (*ResumeState, error) {
+	return loadResumeState(repoDir, sessionID, true)
+}
+
+func loadResumeState(repoDir, sessionID string, skipUnparseable bool) (*ResumeState, error) {
 	path, err := SessionFilePath(repoDir, sessionID)
 	if err != nil {
 		return nil, err
@@ -93,7 +128,7 @@ func LoadResumeState(repoDir, sessionID string) (*ResumeState, error) {
 	for {
 		line, readErr := reader.ReadBytes('\n')
 		if len(line) > 0 {
-			if err := state.applyResumeLine(line); err != nil {
+			if err := state.applyResumeLine(line); err != nil && !skipUnparseable {
 				return nil, err
 			}
 		}
@@ -110,6 +145,8 @@ func LoadResumeState(repoDir, sessionID string) (*ResumeState, error) {
 	return state, nil
 }
 
+// applyResumeLine folds one record into the index. It reports an unparseable
+// line to the caller, which decides whether that is fatal.
 func (s *ResumeState) applyResumeLine(line []byte) error {
 	var rec resumeRecord
 	if err := json.Unmarshal(line, &rec); err != nil {
@@ -138,6 +175,13 @@ func (s *ResumeState) applyResumeLine(line []byte) error {
 		if rec.Fingerprint != "" {
 			delete(s.Items, rec.Fingerprint)
 		}
+	case "session_end":
+		s.Closed = true
+		// Last one wins: a session file holds at most one session_end, but
+		// replaying a truncated write should not clear an earlier good one.
+		if rec.RunManifest != nil {
+			s.Manifest = rec.RunManifest
+		}
 	}
 	return nil
 }
@@ -161,7 +205,9 @@ func (s *ResumeState) applySessionStart(rec resumeRecord) {
 	}
 }
 
-// CompletedCount returns the number of reusable file-level checkpoints.
+// CompletedCount returns the number of file-level checkpoints replay recovered.
+// Review reuse is narrower — see ReusableItem — while scan, having no manifest
+// to consult, reuses exactly these.
 func (s *ResumeState) CompletedCount() int {
 	if s == nil {
 		return 0
@@ -182,7 +228,49 @@ func (s *ResumeState) Item(fingerprint string) (ResumeItem, bool) {
 	return item, true
 }
 
-// ValidateOptions verifies that the requested review range matches the prior session.
+// ReusableItem returns the checkpoint for fingerprint only if the parent
+// manifest also recorded that fingerprint as completed or reused.
+//
+// The manifest is the single source of truth for coverage, so a checkpoint line
+// alone is not enough: the parent froze its verdict per item, and a replayed
+// record that the manifest does not vouch for is a record whose outcome the
+// parent did not stand behind. This is also what makes a dropped
+// review_item_failed line harmless here — the failure is recorded in the
+// manifest too, and coverage never lies about it.
+func (s *ResumeState) ReusableItem(fingerprint string) (ResumeItem, bool) {
+	if s == nil || s.Manifest == nil {
+		return ResumeItem{}, false
+	}
+	if s.reusable == nil {
+		s.reusable = manifestReusableFingerprints(s.Manifest)
+	}
+	if !s.reusable[fingerprint] {
+		return ResumeItem{}, false
+	}
+	return s.Item(fingerprint)
+}
+
+// manifestReusableFingerprints collects the fingerprints the parent manifest
+// settled as completed or reused. Both count: a parent that itself resumed
+// carries forward results it did not compute, and those are no less final.
+func manifestReusableFingerprints(m *RunManifest) map[string]bool {
+	out := make(map[string]bool, len(m.Coverage.Completed)+len(m.Coverage.Reused))
+	for _, group := range [][]CoverageItem{m.Coverage.Completed, m.Coverage.Reused} {
+		for _, item := range group {
+			if item.Fingerprint != "" {
+				out[item.Fingerprint] = true
+			}
+		}
+	}
+	return out
+}
+
+// ValidateOptions verifies that this session can be resumed in the requested
+// review mode at all. It deliberately does not compare the ref text the user
+// typed: `abc1234` and `abc1234def` can name the same commit while a ref whose
+// name did not change can name a new one, so ref spellings are neither
+// sufficient nor necessary evidence about the input. ValidateResume compares the
+// resolved input identity instead.
 func (s *ResumeState) ValidateOptions(opts SessionOptions) error {
 	if s == nil {
 		return nil
@@ -196,16 +284,7 @@ func (s *ResumeState) ValidateOptions(opts SessionOptions) error {
 	if s.ReviewMode != opts.ReviewMode {
 		return fmt.Errorf("resume session review mode %q does not match current mode %q", s.ReviewMode, opts.ReviewMode)
 	}
-	switch opts.ReviewMode {
-	case ReviewModeRange:
-		if s.DiffFrom != opts.DiffFrom || s.DiffTo != opts.DiffTo {
-			return fmt.Errorf("resume session range %q..%q does not match current range %q..%q", s.DiffFrom, s.DiffTo, opts.DiffFrom, opts.DiffTo)
-		}
-	case ReviewModeCommit:
-		if s.DiffCommit != opts.DiffCommit {
-			return fmt.Errorf("resume session commit %q does not match current commit %q", s.DiffCommit, opts.DiffCommit)
-		}
-	default:
+	if opts.ReviewMode != ReviewModeRange && opts.ReviewMode != ReviewModeCommit {
 		return fmt.Errorf("resume mode %q is not supported", opts.ReviewMode)
 	}
 	return nil

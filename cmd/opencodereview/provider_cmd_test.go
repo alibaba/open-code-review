@@ -379,3 +379,55 @@ func TestPrintWizardCancelled(t *testing.T) {
 		})
 	}
 }
+
+// TestApplyOfficialProviderConfig_PreservesURLWhenWizardOmitsURL verifies that
+// the URL configured through `ocr config set` survives a later provider wizard
+// confirmation, whose official flow no longer edits Base URL.
+func TestApplyOfficialProviderConfig_PreservesURLWhenWizardOmitsURL(t *testing.T) {
+	t.Setenv("LITELLM_API_KEY", "sk-litellm")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	wantURL := "https://old-gateway.internal:9000/v1"
+	cfg := &Config{
+		Providers: map[string]ProviderEntry{
+			"litellm": {URL: wantURL},
+		},
+	}
+
+	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
+		provider: "litellm",
+		model:    "openai/gpt-5.4",
+		apiKey:   "sk-litellm",
+	})
+	if err != nil {
+		t.Fatalf("applyOfficialProviderConfig: %v", err)
+	}
+	if got := cfg.Providers["litellm"].URL; got != wantURL {
+		t.Errorf("persisted URL = %q, want existing override %q", got, wantURL)
+	}
+}
+
+func TestApplyOfficialProviderConfig_IgnoresURLFromResult(t *testing.T) {
+	t.Setenv("LITELLM_API_KEY", "sk-litellm")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	wantURL := "https://configured-gateway.internal:9000/v1"
+	cfg := &Config{
+		Providers: map[string]ProviderEntry{
+			"litellm": {URL: wantURL},
+		},
+	}
+
+	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
+		provider: "litellm",
+		model:    "openai/gpt-5.4",
+		apiKey:   "sk-litellm",
+		url:      "https://stale-result.internal:8000/v1",
+	})
+	if err != nil {
+		t.Fatalf("applyOfficialProviderConfig: %v", err)
+	}
+	if got := cfg.Providers["litellm"].URL; got != wantURL {
+		t.Errorf("persisted URL = %q, want existing URL %q", got, wantURL)
+	}
+}

@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -314,6 +315,12 @@ func runConfigModel() error {
 		if entry, ok := cfg.Providers[cfg.Provider]; ok {
 			currentModel = activeModelForProvider(cfg, cfg.Provider, entry)
 			provider.Models = mergeModelLists(provider.Models, entry.Models)
+			// Surface the effective Base URL: a configured override takes
+			// precedence over the preset default so users can confirm their
+			// gateway is in use from the model picker.
+			if entry.URL != "" {
+				provider.BaseURL = entry.URL
+			}
 		}
 	} else {
 		isCustom = true
@@ -411,4 +418,21 @@ func maskKey(key string) string {
 		return "***"
 	}
 	return key[:4] + "***" + key[len(key)-4:]
+}
+
+// validateBaseURL checks that a provider Base URL has an http or https scheme
+// and a non-empty host, giving the user immediate feedback rather than
+// a runtime failure when the LLM client tries to use it.
+func validateBaseURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid Base URL %q: %w", raw, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("Base URL must use http or https scheme, got %q", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("Base URL %q must include a host", raw)
+	}
+	return nil
 }

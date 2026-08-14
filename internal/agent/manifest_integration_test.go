@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,11 @@ func (manifestFlowClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequ
 
 func newManifestFlowAgent(t *testing.T, diffs []model.Diff, resume *session.ResumeState) *Agent {
 	t.Helper()
+	return newManifestFlowAgentWithClient(t, diffs, resume, manifestFlowClient{})
+}
+
+func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *session.ResumeState, client llm.LLMClient) *Agent {
+	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	repoDir := t.TempDir()
 	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
@@ -57,7 +63,7 @@ func newManifestFlowAgent(t *testing.T, diffs []model.Diff, resume *session.Resu
 		From:       "main",
 		To:         "feature",
 		ReviewMode: session.ReviewModeRange,
-		LLMClient:  manifestFlowClient{},
+		LLMClient:  client,
 		Model:      "fake",
 		Session:    sh,
 		Resume:     resume,
@@ -79,6 +85,35 @@ func newManifestFlowAgent(t *testing.T, diffs []model.Diff, resume *session.Resu
 	a.diffs = diffs
 	a.currentDate = "2026-07-26 12:00"
 	return a
+}
+
+// seedParentManifest gives a hand-built ResumeState the parent manifest a real
+// resume always has, matching the identity a already resolved. Without one the
+// agent reuses nothing at all: dispatch re-verifies the input against the parent
+// manifest, and only fingerprints the parent's own coverage settled are eligible.
+//
+// It must be called once a.diffs is final — the identity hashes exactly that set.
+func seedParentManifest(t *testing.T, a *Agent, fingerprints ...string) {
+	t.Helper()
+	resume := a.args.Resume
+	if resume == nil {
+		t.Fatal("seedParentManifest needs an agent built with a resume state")
+	}
+	id := a.runIdentity()
+	items := make([]session.CoverageItem, 0, len(fingerprints))
+	for _, fp := range fingerprints {
+		items = append(items, session.CoverageItem{ItemID: fp, Fingerprint: fp})
+	}
+	resume.Closed = true
+	resume.Manifest = &session.RunManifest{
+		SchemaVersion: session.ManifestSchemaVersion,
+		RunID:         resume.SessionID,
+		Operation:     session.OperationReview,
+		Repository:    session.ManifestRepository{IdentitySHA256: id.RepositorySHA256},
+		Input:         session.ManifestInput{Mode: id.Mode, SourceArtifactSHA256: id.SourceArtifactSHA256},
+		Execution:     session.ManifestExecution{RuleConfigSHA256: id.RuleConfigSHA256},
+		Coverage:      session.Coverage{Selected: items, Completed: items},
+	}
 }
 
 func finishManifestFlow(t *testing.T, a *Agent) *session.RunManifest {
@@ -312,6 +347,7 @@ func TestManifestFlowResumeRecordsParentAndReusedItem(t *testing.T) {
 		},
 	}
 	a := newManifestFlowAgent(t, diffs, resume)
+	seedParentManifest(t, a, fingerprint)
 	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -321,6 +357,157 @@ func TestManifestFlowResumeRecordsParentAndReusedItem(t *testing.T) {
 	}
 	if manifest.Input.RequestedFrom != "main" || manifest.Input.RequestedHead != "feature" || manifest.Input.SourceArtifactSHA256 == "" {
 		t.Fatalf("child input identity = %+v", manifest.Input)
+	}
+}
+
+// promptSpy answers every request the same way and keeps the prompts, so a test
+// can assert what never reached the model.
+type promptSpy struct {
+	mu      sync.Mutex
+	prompts []string
+}
+
+func (p *promptSpy) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	var prompt string
+	for _, message := range req.Messages {
+		if text, ok := message.Content.(string); ok {
+			prompt += text
+		}
+	}
+	p.mu.Lock()
+	p.prompts = append(p.prompts, prompt)
+	p.mu.Unlock()
+	return agentTaskDoneResponse(), nil
+}
+
+// TestManifestFlowReusedCommentsStayOutOfPrompts pins the isolation half of
+// reuse: a reused finding is merged into the output and nothing else. Feeding it
+// back into a prompt would let the parent's conclusions steer the child's review
+// of a different file, and the finding would also be paid for twice.
+func TestManifestFlowReusedCommentsStayOutOfPrompts(t *testing.T) {
+	diffs := []model.Diff{
+		{OldPath: "cached.go", NewPath: "cached.go", Diff: "+cached", Insertions: 1},
+		{OldPath: "fresh.go", NewPath: "fresh.go", Diff: "+fresh", Insertions: 1},
+	}
+	fingerprint := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	const reusedFinding = "PARENT_FINDING_ABOUT_CACHED_GO"
+	resume := &session.ResumeState{
+		SessionID:  "parent-run",
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Items: map[string]session.ResumeItem{
+			fingerprint: {
+				FilePath:    "cached.go",
+				OldPath:     "cached.go",
+				NewPath:     "cached.go",
+				Fingerprint: fingerprint,
+				Comments:    []model.LlmComment{{Path: "cached.go", Content: reusedFinding}},
+			},
+		},
+	}
+	spy := &promptSpy{}
+	a := newManifestFlowAgentWithClient(t, diffs, resume, spy)
+	seedParentManifest(t, a, fingerprint)
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	var merged bool
+	for _, c := range comments {
+		if c.Content == reusedFinding {
+			merged = true
+		}
+	}
+	if !merged {
+		t.Fatalf("reused finding must be merged into the output, got %+v", comments)
+	}
+	// One dispatch, for fresh.go only — cached.go was reused, so it is neither
+	// re-reviewed nor mentioned to the model.
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	if len(spy.prompts) != 1 {
+		t.Fatalf("prompts = %d, want 1 (fresh.go only)", len(spy.prompts))
+	}
+	for _, prompt := range spy.prompts {
+		if strings.Contains(prompt, reusedFinding) {
+			t.Error("a reused finding must not enter a new LLM context")
+		}
+		if strings.Contains(prompt, "cached.go") {
+			t.Error("a reused file must not be sent to the model again")
+		}
+	}
+}
+
+// TestManifestFlowResumeIgnoresCheckpointTheParentManifestDoesNotVouchFor covers
+// a checkpoint line whose fingerprint the parent's coverage never settled. The
+// manifest is the single source of truth for coverage, so the line is not
+// evidence of anything and its file is reviewed again.
+func TestManifestFlowResumeIgnoresCheckpointTheParentManifestDoesNotVouchFor(t *testing.T) {
+	diffs := []model.Diff{{OldPath: "cached.go", NewPath: "cached.go", Diff: "+cached", Insertions: 1}}
+	fingerprint := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	resume := &session.ResumeState{
+		SessionID:  "parent-run",
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Items: map[string]session.ResumeItem{
+			fingerprint: {FilePath: "cached.go", NewPath: "cached.go", Fingerprint: fingerprint},
+		},
+	}
+	a := newManifestFlowAgent(t, diffs, resume)
+	// A manifest that settled some *other* item: identity still matches, so the
+	// resume is admitted, but this fingerprint is not in completed or reused.
+	seedParentManifest(t, a, "fp-some-other-item")
+
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	manifest := finishManifestFlow(t, a)
+	if len(manifest.Coverage.Reused) != 0 || len(manifest.Coverage.Completed) != 1 {
+		t.Fatalf("coverage reused=%d completed=%d, want 0/1 — the unvouched checkpoint must be re-reviewed",
+			len(manifest.Coverage.Reused), len(manifest.Coverage.Completed))
+	}
+}
+
+// TestManifestFlowResumeOfFullyFailedParentRedispatchesEverything pins the case
+// resume exists for. The parent's every item failed, so replay left no
+// checkpoint behind and its coverage vouches for nothing: each selected item is
+// reviewed again, and the child settles them itself.
+func TestManifestFlowResumeOfFullyFailedParentRedispatchesEverything(t *testing.T) {
+	diffs := []model.Diff{
+		{OldPath: "one.go", NewPath: "one.go", Diff: "+one", Insertions: 1},
+		{OldPath: "two.go", NewPath: "two.go", Diff: "+two", Insertions: 1},
+	}
+	// No Items: every review_item_done the parent wrote was retracted by the
+	// review_item_failed that followed it.
+	resume := &session.ResumeState{
+		SessionID:  "parent-run",
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Items:      map[string]session.ResumeItem{},
+	}
+
+	a := newManifestFlowAgent(t, diffs, resume)
+	fingerprints := make([]string, 0, len(diffs))
+	for _, d := range diffs {
+		fingerprints = append(fingerprints, reviewItemFingerprint(session.ReviewModeRange, d))
+	}
+	seedParentManifest(t, a, fingerprints...)
+	// Same selection, but the parent completed none of it.
+	cov := &a.args.Resume.Manifest.Coverage
+	cov.Failed, cov.Completed = cov.Completed, nil
+
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	manifest := finishManifestFlow(t, a)
+	if len(manifest.Coverage.Reused) != 0 || len(manifest.Coverage.Completed) != len(diffs) {
+		t.Fatalf("coverage reused=%d completed=%d, want 0/%d — a fully failed parent must re-dispatch everything",
+			len(manifest.Coverage.Reused), len(manifest.Coverage.Completed), len(diffs))
 	}
 }
 
@@ -346,6 +533,7 @@ func TestManifestFlowResumeWithReusedAndAllRerunsFailedIsPartial(t *testing.T) {
 	}
 
 	a := newManifestFlowAgent(t, diffs, resume)
+	seedParentManifest(t, a, fingerprint)
 	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
 		t.Fatalf("partial resumed dispatch must not return an error: %v", err)
 	}
@@ -382,6 +570,7 @@ func TestManifestFlowResumeWithProviderTransition(t *testing.T) {
 	}
 
 	a := newManifestFlowAgent(t, diffs, resume)
+	seedParentManifest(t, a, fingerprint)
 	// Simulate a provider/model transition on the child run. New() already
 	// called initManifest with the default "fake" model; re-seed execution so
 	// the frozen manifest reflects the child's actual provider/model.

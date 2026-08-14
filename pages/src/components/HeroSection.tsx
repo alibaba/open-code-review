@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-import React, { Suspense, useCallback, useState, useEffect } from 'react';
+import React, { Suspense, useCallback, useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n';
@@ -9,7 +9,9 @@ import { useResponsive } from '../hooks/useResponsive';
 import ErrorBoundary from './ErrorBoundary';
 import npmIcon from '../assets/icons/npm.svg';
 import brewIcon from '../assets/icons/brew.svg';
+import macportsIcon from '../assets/icons/macports.svg';
 import copyIcon from '../assets/icons/icon-copy.svg';
+import chevronDownIcon from '../assets/icons/icon-chevron-down.svg';
 
 const ColorBends = React.lazy(() => import(/* webpackChunkName: "color-bends" */ './ColorBends'));
 
@@ -122,10 +124,22 @@ const terminalLines = [
   { num: 12, content: <span className="terminal-cursor" style={{ color: TC.text }}>｜</span> }, // allow-non-english: fullwidth bar renders the terminal cursor
 ];
 
-const INSTALL_CHANNELS = [
-  { key: 'npm', labelKey: 'hero.installNpm', cmd: 'npm i -g @alibaba-group/open-code-review', icons: [npmIcon] },
-  { key: 'brew', labelKey: 'hero.installBrew', cmd: 'brew install open-code-review', icons: [brewIcon] },
+interface InstallChannel {
+  key: string;
+  labelKey: string;
+  cmd: string;
+  icons: string[];
+  primary: boolean;
+}
+
+const INSTALL_CHANNELS: InstallChannel[] = [
+  { key: 'npm', labelKey: 'hero.installNpm', cmd: 'npm i -g @alibaba-group/open-code-review', icons: [npmIcon], primary: true },
+  { key: 'brew', labelKey: 'hero.installBrew', cmd: 'brew install open-code-review', icons: [brewIcon], primary: true },
+  { key: 'macports', labelKey: 'hero.installMacPorts', cmd: 'sudo port install open-code-review', icons: [macportsIcon], primary: false },
 ];
+
+const PRIMARY_CHANNELS = INSTALL_CHANNELS.filter((ch) => ch.primary);
+const SECONDARY_CHANNELS = INSTALL_CHANNELS.filter((ch) => !ch.primary);
 
 const HeroSection: React.FC = () => {
   const { t } = useTranslation();
@@ -134,7 +148,12 @@ const HeroSection: React.FC = () => {
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [showShaderBackground, setShowShaderBackground] = useState(false);
-  const [activeChannel, setActiveChannel] = useState(0);
+  const [activeChannelKey, setActiveChannelKey] = useState(INSTALL_CHANNELS[0].key);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const activeChannel = INSTALL_CHANNELS.find((ch) => ch.key === activeChannelKey) ?? INSTALL_CHANNELS[0];
+  const activeIsSecondary = !activeChannel.primary;
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -175,6 +194,24 @@ const HeroSection: React.FC = () => {
     const timer = setTimeout(() => setToastVisible(false), 1200);
     return () => clearTimeout(timer);
   }, [toastVisible]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     // Wait until after the first paint before loading the heavy shader chunk.
@@ -325,33 +362,140 @@ const HeroSection: React.FC = () => {
           </div>
 
           {/* Install channels — tab switcher */}
-          <div style={{ width: '100%', maxWidth: 460 }}>
-            <div style={{ display: 'flex', gap: 0, marginBottom: 8 }}>
-              {INSTALL_CHANNELS.map((ch, idx) => (
+          <div style={{ width: '100%', maxWidth: 520 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 8 }}>
+              {PRIMARY_CHANNELS.map((ch) => {
+                const isActive = ch.key === activeChannelKey;
+                return (
+                  <button
+                    key={ch.key}
+                    type="button"
+                    onClick={() => { setActiveChannelKey(ch.key); setMenuOpen(false); }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 9px',
+                      background: isActive ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      border: 'none',
+                      borderBottom: isActive ? '2px solid rgba(255,255,255,0.8)' : '2px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    {ch.icons.map((icon, i) => (
+                      <img key={i} src={icon} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: isActive ? 1 : 0.5 }} />
+                    ))}
+                    <span style={{ fontSize: 13, fontWeight: isActive ? 600 : 500, color: isActive ? '#fff' : 'rgba(255,255,255,0.45)' }}>
+                      {t(ch.labelKey)}
+                    </span>
+                  </button>
+                );
+              })}
+
+              {/* Overflow channels live behind a "More" trigger so the row stops
+                  growing each time a new channel is added. */}
+              <div ref={menuRef} style={{ position: 'relative' }}>
                 <button
-                  key={ch.key}
                   type="button"
-                  onClick={() => setActiveChannel(idx)}
+                  aria-expanded={menuOpen}
+                  aria-controls="install-more-panel"
+                  onClick={() => setMenuOpen((open) => !open)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: 6,
                     padding: '6px 9px',
-                    background: activeChannel === idx ? 'rgba(255,255,255,0.1)' : 'transparent',
+                    background: activeIsSecondary ? 'rgba(255,255,255,0.1)' : 'transparent',
                     border: 'none',
-                    borderBottom: activeChannel === idx ? '2px solid rgba(255,255,255,0.8)' : '2px solid transparent',
+                    borderBottom: activeIsSecondary ? '2px solid rgba(255,255,255,0.8)' : '2px solid transparent',
                     cursor: 'pointer',
                     transition: 'all 0.2s',
                   }}
                 >
-                  {ch.icons.map((icon, i) => (
-                    <img key={i} src={icon} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: activeChannel === idx ? 1 : 0.5 }} />
-                  ))}
-                  <span style={{ fontSize: 13, fontWeight: activeChannel === idx ? 600 : 500, color: activeChannel === idx ? '#fff' : 'rgba(255,255,255,0.45)' }}>
-                    {t(ch.labelKey)}
+                  {activeIsSecondary && (
+                    <img src={activeChannel.icons[0]} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: 1 }} />
+                  )}
+                  <span style={{ fontSize: 13, fontWeight: activeIsSecondary ? 600 : 500, color: activeIsSecondary ? '#fff' : 'rgba(255,255,255,0.45)' }}>
+                    {activeIsSecondary ? t(activeChannel.labelKey) : t('hero.installMore')}
                   </span>
+                  <img
+                    src={chevronDownIcon}
+                    alt=""
+                    style={{ width: 12, height: 12, flexShrink: 0, opacity: activeIsSecondary ? 0.8 : 0.5, transform: menuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
+                  />
                 </button>
-              ))}
+
+                {menuOpen && (
+                  <div
+                    id="install-more-panel"
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      right: 0,
+                      marginTop: 8,
+                      background: 'rgba(26,26,26,0.92)',
+                      backdropFilter: 'blur(12px)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      borderRadius: 8,
+                      padding: 4,
+                      zIndex: 200,
+                      minWidth: 200,
+                    }}
+                  >
+                    {SECONDARY_CHANNELS.map((ch) => {
+                      const isActive = ch.key === activeChannelKey;
+                      return (
+                        <button
+                          key={ch.key}
+                          type="button"
+                          onClick={() => { setActiveChannelKey(ch.key); setMenuOpen(false); }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            width: '100%',
+                            padding: '8px 12px',
+                            background: isActive ? 'rgba(255,255,255,0.08)' : 'transparent',
+                            border: 'none',
+                            borderRadius: 6,
+                            color: isActive ? '#fff' : 'rgba(255,255,255,0.6)',
+                            fontSize: 13,
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {ch.icons.map((icon, i) => (
+                            <img key={i} src={icon} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: isActive ? 1 : 0.5 }} />
+                          ))}
+                          <span style={{ fontWeight: isActive ? 600 : 500 }}>{t(ch.labelKey)}</span>
+                        </button>
+                      );
+                    })}
+                    <div style={{ height: 1, background: 'rgba(255,255,255,0.12)', margin: '4px 8px' }} />
+                    <Link
+                      to="/docs/installation"
+                      onClick={() => setMenuOpen(false)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        padding: '8px 12px',
+                        borderRadius: 6,
+                        color: 'rgba(255,255,255,0.6)',
+                        fontSize: 13,
+                        textDecoration: 'none',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span>{t('hero.allInstallOptions')}</span>
+                      <span aria-hidden="true">→</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
             </div>
             <div
               style={{
@@ -377,13 +521,13 @@ const HeroSection: React.FC = () => {
                   textOverflow: 'ellipsis',
                 }}
               >
-                {INSTALL_CHANNELS[activeChannel].cmd}
+                {activeChannel.cmd}
               </span>
               <img
                 src={copyIcon}
                 alt="Copy"
                 style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0, opacity: 0.7 }}
-                onClick={() => handleCopy(INSTALL_CHANNELS[activeChannel].cmd)}
+                onClick={() => handleCopy(activeChannel.cmd)}
               />
             </div>
           </div>

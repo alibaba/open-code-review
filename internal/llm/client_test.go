@@ -1332,6 +1332,296 @@ func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
 	}
 }
 
+// newOpenAITestServer returns an httptest server that captures each request's headers
+// and JSON body and responds with a minimal valid chat completion.
+func newOpenAITestServer(gotHeaders *http.Header, gotBody *map[string]any) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if gotHeaders != nil {
+			*gotHeaders = r.Header.Clone()
+		}
+		if gotBody != nil {
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, gotBody)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-test",
+			"object":"chat.completion",
+			"model":"gpt-test",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+}
+
+func TestOpenAIClient_SessionKeyExpandedInExtraHeaders(t *testing.T) {
+	var gotHeaders http.Header
+	server := newOpenAITestServer(&gotHeaders, nil)
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:        server.URL + "/v1",
+		APIKey:     "test-key",
+		Model:      "gpt-test",
+		SessionKey: "sess-abc",
+		ExtraHeaders: map[string]string{
+			"x-session-affinity": "{ocr_session_key}",
+		},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotHeaders.Get("X-Session-Affinity"); got != "sess-abc" {
+		t.Errorf("x-session-affinity = %q, want %q", got, "sess-abc")
+	}
+}
+
+func TestOpenAIClient_SessionKeyExpandedInExtraBody(t *testing.T) {
+	var gotBody map[string]any
+	server := newOpenAITestServer(nil, &gotBody)
+	defer server.Close()
+
+	// The documented recipe for OpenAI prompt caching: route the session key into prompt_cache_key via extra_body.
+	client := NewOpenAIClient(ClientConfig{
+		URL:        server.URL + "/v1",
+		APIKey:     "test-key",
+		Model:      "gpt-test",
+		SessionKey: "sess-abc",
+		ExtraBody:  map[string]any{"prompt_cache_key": "{ocr_session_key}"},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotBody["prompt_cache_key"]; got != "sess-abc" {
+		t.Errorf("prompt_cache_key = %v, want %q", got, "sess-abc")
+	}
+}
+
+func TestOpenAIClient_NoInjectionWithoutPlaceholder(t *testing.T) {
+	var gotBody map[string]any
+	server := newOpenAITestServer(nil, &gotBody)
+	defer server.Close()
+
+	// Without an {ocr_session_key} placeholder anywhere,
+	// OCR must not add any session-related field to the request.
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-test",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if _, ok := gotBody["prompt_cache_key"]; ok {
+		t.Errorf("prompt_cache_key = %v, want absent without explicit configuration", gotBody["prompt_cache_key"])
+	}
+}
+
+func TestOpenAIClient_SessionKeyGeneratedWhenEmpty(t *testing.T) {
+	var gotHeaders http.Header
+	server := newOpenAITestServer(&gotHeaders, nil)
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-test",
+		ExtraHeaders: map[string]string{
+			"x-session-affinity": "{ocr_session_key}",
+		},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	got := gotHeaders.Get("X-Session-Affinity")
+	if got == "" || got == "{ocr_session_key}" {
+		t.Errorf("x-session-affinity = %q, want an auto-generated session key", got)
+	}
+}
+
+func TestAnthropicClient_SessionKeyExpandedInExtraHeadersAndBody(t *testing.T) {
+	var gotAffinity string
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAffinity = r.Header.Get("x-session-affinity")
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:        server.URL + "/v1/messages",
+		APIKey:     "test-key",
+		Model:      "claude-test",
+		SessionKey: "sess-xyz",
+		ExtraHeaders: map[string]string{
+			"x-session-affinity": "{ocr_session_key}",
+		},
+		ExtraBody: map[string]any{"cache_key": "{ocr_session_key}"},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotAffinity != "sess-xyz" {
+		t.Errorf("x-session-affinity = %q, want %q", gotAffinity, "sess-xyz")
+	}
+	if got := gotBody["cache_key"]; got != "sess-xyz" {
+		t.Errorf("cache_key = %v, want %q", got, "sess-xyz")
+	}
+}
+
+func TestNewLLMClient_ExpandsSessionKeyInExtraBody(t *testing.T) {
+	var gotBody map[string]any
+	server := newOpenAITestServer(nil, &gotBody)
+	defer server.Close()
+
+	client := NewLLMClient(ResolvedEndpoint{
+		URL:       server.URL + "/v1",
+		Token:     "test-key",
+		Model:     "gpt-test",
+		Protocol:  "openai",
+		ExtraBody: map[string]any{"prompt_cache_key": "{ocr_session_key}"},
+	}, nil)
+
+	ctx := ContextWithSessionKey(context.Background(), "sess-from-run")
+	_, err := client.CompletionsWithCtx(ctx, ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotBody["prompt_cache_key"]; got != "sess-from-run" {
+		t.Errorf("prompt_cache_key = %v, want %q", got, "sess-from-run")
+	}
+}
+
+func TestOpenAIClient_ContextSessionKeyOverridesFallback(t *testing.T) {
+	var gotHeaders http.Header
+	var gotBody map[string]any
+	server := newOpenAITestServer(&gotHeaders, &gotBody)
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:        server.URL + "/v1",
+		APIKey:     "test-key",
+		Model:      "gpt-test",
+		SessionKey: "fallback-key",
+		ExtraBody:  map[string]any{"prompt_cache_key": "{ocr_session_key}"},
+		ExtraHeaders: map[string]string{
+			"x-session-affinity": "{ocr_session_key}",
+		},
+	})
+
+	// A context-carried session key (the real OCR session's ID) must win
+	// over the client's construction-time fallback.
+	ctx := ContextWithSessionKey(context.Background(), "real-session-id")
+	_, err := client.CompletionsWithCtx(ctx, ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotHeaders.Get("X-Session-Affinity"); got != "real-session-id" {
+		t.Errorf("x-session-affinity = %q, want %q", got, "real-session-id")
+	}
+	if got := gotBody["prompt_cache_key"]; got != "real-session-id" {
+		t.Errorf("prompt_cache_key = %v, want %q", got, "real-session-id")
+	}
+
+	// Without a context key the fallback applies.
+	_, err = client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotHeaders.Get("X-Session-Affinity"); got != "fallback-key" {
+		t.Errorf("x-session-affinity = %q, want %q", got, "fallback-key")
+	}
+}
+
+func TestAnthropicClient_ContextSessionKeyOverridesFallback(t *testing.T) {
+	var gotAffinity string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAffinity = r.Header.Get("x-session-affinity")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:        server.URL + "/v1/messages",
+		APIKey:     "test-key",
+		Model:      "claude-test",
+		SessionKey: "fallback-key",
+		ExtraHeaders: map[string]string{
+			"x-session-affinity": "{ocr_session_key}",
+		},
+	})
+
+	ctx := ContextWithSessionKey(context.Background(), "real-session-id")
+	_, err := client.CompletionsWithCtx(ctx, ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotAffinity != "real-session-id" {
+		t.Errorf("x-session-affinity = %q, want %q", gotAffinity, "real-session-id")
+	}
+}
+
 // Verify the SDK constant is accessible (compile-time check).
 var _ anthropic.CacheControlEphemeralParam = anthropic.NewCacheControlEphemeralParam()
 

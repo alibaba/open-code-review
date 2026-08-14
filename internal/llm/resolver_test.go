@@ -1591,6 +1591,38 @@ func TestResolveEndpoint_EnvExtraHeadersMergedWithConfigFile(t *testing.T) {
 	}
 }
 
+func TestResolveEndpoint_SessionKeyPlaceholderPreserved(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:       "sk-test",
+				URL:          "https://gateway.example.com/v1",
+				Protocol:     "openai",
+				Model:        "some-model",
+				ExtraHeaders: map[string]string{"x-session-affinity": "{ocr_session_key}"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The template placeholder must survive resolution untouched.
+	// Expansion happens in the client, per request.
+	if v := ep.ExtraHeaders["x-session-affinity"]; v != "{ocr_session_key}" {
+		t.Errorf("ExtraHeaders[\"x-session-affinity\"] = %q, want raw placeholder", v)
+	}
+}
+
 func TestResolveEndpoint_LegacyLlmExtraHeaders(t *testing.T) {
 	clearAllEnv(t)
 
@@ -2221,6 +2253,64 @@ func TestEnsureMessagesSuffix(t *testing.T) {
 				t.Errorf("ensureMessagesSuffix(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestResolveEndpoint_PresetProviderURLOverride verifies that a configured
+// providers.<name>.url overrides the preset BaseURL for a built-in provider,
+// while the same provider without a url field falls back to preset.BaseURL.
+// litellm is the canonical case: a self-hosted gateway whose URL is rarely the
+// preset default (http://localhost:4000/v1).
+func TestResolveEndpoint_PresetProviderURLOverride(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "litellm",
+		Providers: map[string]providerEntryConfig{
+			"litellm": {APIKey: "sk-litellm-test", Model: "openai/gpt-5.4", URL: "https://gateway.internal:8000/v1"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.URL != "https://gateway.internal:8000/v1" {
+		t.Errorf("URL = %q, want %q (configured url should override preset default)", ep.URL, "https://gateway.internal:8000/v1")
+	}
+	if ep.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, ProtocolOpenAIChatCompletions)
+	}
+}
+
+// TestResolveEndpoint_PresetProviderURLDefaultsToPreset verifies that a
+// built-in provider without a configured url resolves to preset.BaseURL.
+func TestResolveEndpoint_PresetProviderURLDefaultsToPreset(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "litellm",
+		Providers: map[string]providerEntryConfig{
+			"litellm": {APIKey: "sk-litellm-test", Model: "openai/gpt-5.4"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.URL != "http://localhost:4000/v1" {
+		t.Errorf("URL = %q, want %q (preset default should be used when no url configured)", ep.URL, "http://localhost:4000/v1")
 	}
 }
 

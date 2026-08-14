@@ -204,6 +204,35 @@ if: |
 
 レビューは `github-actions[bot]` ではなく、あなたの app の名前で投稿されるようになります。
 
+#### GitHub Code Scanning に指摘をアップロードする（SARIF）
+
+`--format sarif` は
+[SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+レポートを stdout に書き出します。ファイルにリダイレクトし、CodeQL の
+`upload-sarif` アクションでアップロードすると、指摘が
+**Security → Code scanning** に表示されます：
+
+```yaml
+- name: Run OCR review
+  env:
+    BASE_REF: ${{ github.base_ref }}
+    HEAD_REF: ${{ github.head_ref }}
+  run: |
+    ocr review \
+      --from "origin/$BASE_REF" \
+      --to "origin/$HEAD_REF" \
+      --format sarif --audience agent > results.sarif
+
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+SARIF は機械可読な形式なので、OCR は stdout 上の進捗行を抑制し、
+`results.sarif` にはレポートだけが含まれます。`--preview` は
+`--format sarif` に対応していません。レポートを生成するには、完全な
+review（または `ocr scan`）を実行してください。
+
 ### トラブルシューティング
 
 | 症状 | 原因 / 修正 |

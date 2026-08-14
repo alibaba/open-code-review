@@ -63,6 +63,24 @@ environment variable.
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
+### Overriding a built-in provider's Base URL
+
+Every built-in provider has a preset Base URL (shown in the table above).
+To point a built-in provider at a different endpoint — for example a
+self-hosted LiteLLM gateway that is rarely at the preset default
+`http://localhost:4000/v1` — set `providers.<name>.url`:
+
+```bash
+ocr config set provider                   litellm
+ocr config set model                      openai/gpt-5.4
+ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
+ocr config set providers.litellm.url      https://gateway.internal:8000/v1
+```
+
+The configured `url` takes precedence over the preset Base URL. When
+`providers.<name>.url` is unset (or cleared), OCR falls back to the
+preset default — so you only need to set it when your endpoint differs.
+
 ### Custom providers
 
 Any provider name not in the table above is treated as custom and must
@@ -213,6 +231,29 @@ without patching the source:
 
 ```bash
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
+```
+
+### Session affinity for prompt caching
+
+OCR derives a prompt-cache affinity key for every LLM conversation, scoped
+to the review session and the task within it
+(`<session-id>-<task-type>-<scope-hash>`). Prompt caches match on prefixes,
+so per-conversation keys keep each growing conversation (such as a file's
+review tool-loop) on a consistent cache node instead of pinning the whole
+run to one hot key; the session-ID prefix lets provider-side cache logs be
+correlated with `ocr session` records.
+
+To opt in, embed the `{ocr_session_key}` template variable in
+`extra_headers` or `extra_body` values wherever your provider expects the
+key — OCR substitutes the conversation's key per request and sends nothing
+otherwise:
+
+```bash
+# By OpenAI-style request body field (e.g. prompt_cache_key)
+ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_key}"}'
+
+# By HTTP header (e.g. x-session-affinity)
+ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
 ```
 
 ## Configuring the review language

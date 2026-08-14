@@ -45,6 +45,27 @@ func TestSetConfigValueProvider(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueProviderURLTrimsAndValidates(t *testing.T) {
+	t.Run("trims a valid URL before storing", func(t *testing.T) {
+		cfg := &Config{}
+
+		if err := setConfigValue(cfg, "providers.litellm.url", "  https://gateway.internal:8000/v1  "); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+		if got := cfg.Providers["litellm"].URL; got != "https://gateway.internal:8000/v1" {
+			t.Errorf("URL = %q, want trimmed URL", got)
+		}
+	})
+
+	for _, value := range []string{"api.example.com/v1", "ftp://gateway.internal/v1"} {
+		t.Run("rejects "+value, func(t *testing.T) {
+			if err := setConfigValue(&Config{}, "providers.litellm.url", value); err == nil {
+				t.Fatalf("setConfigValue accepted invalid URL %q", value)
+			}
+		})
+	}
+}
+
 func TestSetConfigValueModel(t *testing.T) {
 	cfg := &Config{}
 

@@ -1993,3 +1993,28 @@ func TestProviderTUIView_StepModel_CustomTabDeleteHelp(t *testing.T) {
 		t.Errorf("custom model row should show d Delete hint; got:\n%s", got)
 	}
 }
+
+// TestModelTUI_ShowsEffectiveBaseURL verifies that the model picker displays
+// the effective Base URL when a configured override is set on the provider.
+func TestModelTUI_ShowsEffectiveBaseURL(t *testing.T) {
+	preset, _ := llm.LookupProvider("litellm")
+	preset.BaseURL = "https://gateway.internal:8000/v1"
+	m := newModelTUI(preset, "openai/gpt-5.4")
+
+	got := stripANSI(m.View().Content)
+	if !strings.Contains(got, "Base URL: https://gateway.internal:8000/v1") {
+		t.Errorf("model picker view should show Base URL; got:\n%s", got)
+	}
+}
+
+// TestModelTUI_ShowsPresetBaseURLWhenNoOverride verifies that the model picker
+// shows the preset Base URL when no override is configured.
+func TestModelTUI_ShowsPresetBaseURLWhenNoOverride(t *testing.T) {
+	preset, _ := llm.LookupProvider("litellm")
+	m := newModelTUI(preset, "openai/gpt-5.4")
+
+	got := stripANSI(m.View().Content)
+	if !strings.Contains(got, "Base URL: http://localhost:4000/v1") {
+		t.Errorf("model picker view should show preset Base URL; got:\n%s", got)
+	}
+}

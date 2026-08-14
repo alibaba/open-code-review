@@ -136,6 +136,14 @@ type Args struct {
 	// Resume is an optional read-only checkpoint index from a previous review session.
 	Resume *session.ResumeState
 
+	// SealedInput pins this run to commit endpoints a pre-flight resolve already
+	// froze, instead of resolving From/To/Commit again. Set only on the resume
+	// path, where admission compared an identity derived from those endpoints:
+	// re-resolving a raw ref here could read a commit the admitted identity never
+	// covered, and the mismatch would surface only after the child session and
+	// manifest existed. Nil means resolve normally, which is every non-resume run.
+	SealedInput *diff.InputResolution
+
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
 	// whole run; dispatch stops once the running total + a per-file look-ahead
 	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
@@ -264,6 +272,11 @@ func (a *Agent) newRequestMeta(filePath string, taskType session.TaskType, reque
 
 // Run executes the full review pipeline: parse diffs -> plan per file -> LLM tool-loop -> collect comments.
 func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
+	// Base prompt-cache affinity key for any LLM request in this run that a task doesn't re-scope.
+	// Each task conversation (plan, per-file main loop, compression, ...) refines it with llm.SessionTaskKey where it starts,
+	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
+	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
+
 	// Step 1: Parse diffs
 	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
 	if err := a.loadDiffs(ctx); err != nil {
@@ -348,6 +361,13 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 				humanTokens(est.TotalTokens), humanTokens(a.args.MaxTokensBudget))
 		}
 	}
+
+	// Record which run this one continued, before any item is dispatched, so the
+	// lineage is on disk even if the review then fails outright. It is written
+	// once per run and only for an accepted resume — admission was already
+	// decided by the command layer, which rejects before a session exists.
+	a.session.RecordResumeLineage(session.NewResumeLineage(
+		a.args.Resume, a.session.SessionID, a.args.Provider, a.args.Model))
 
 	// Step 2: Dispatch per-file subtasks concurrently
 	comments, err := a.dispatchSubtasks(ctx)
@@ -473,11 +493,30 @@ func (a *Agent) recordWarning(warningType, file, message string) {
 func (a *Agent) loadDiffs(ctx context.Context) error {
 	var provider *diff.Provider
 
+	// A sealed input substitutes the commit SHAs a pre-flight resolve already froze
+	// for the refs the user typed. Both loads then read the same immutable objects,
+	// which is what makes this run's input provably the admitted one: a ref moving
+	// after admission can no longer change what gets reviewed. Neither mode's
+	// semantics shift under the substitution — range keeps its merge-base, because
+	// the sealed base already is that merge-base and merge-base(base, head) is base
+	// whenever base is an ancestor of head; commit mode keeps its first-parent
+	// comparison, which is derived from the commit rather than from its spelling.
+	// Workspace mode seals no head and is left alone.
+	from, to, commit := a.args.From, a.args.To, a.args.Commit
+	if s := a.args.SealedInput; s != nil && s.ResolvedHead != "" {
+		switch {
+		case commit != "":
+			commit = s.ResolvedHead
+		case s.ResolvedBase != "":
+			from, to = s.ResolvedBase, s.ResolvedHead
+		}
+	}
+
 	switch {
-	case a.args.Commit != "":
-		provider = diff.NewCommitProvider(a.args.RepoDir, a.args.Commit, a.args.GitRunner)
-	case a.args.From != "" && a.args.To != "":
-		provider = diff.NewProvider(a.args.RepoDir, a.args.From, a.args.To, a.args.GitRunner)
+	case commit != "":
+		provider = diff.NewCommitProvider(a.args.RepoDir, commit, a.args.GitRunner)
+	case from != "" && to != "":
+		provider = diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
 	default:
 		provider = diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
 	}
@@ -732,7 +771,10 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 			continue
 		}
 		fingerprint := reviewItemFingerprint(mode, d)
-		item, ok := resume.Item(fingerprint)
+		// ReusableItem, not Item: coverage lives in the parent manifest, so a
+		// checkpoint line the parent's manifest did not settle as completed or
+		// reused is not evidence of anything and its file is reviewed again.
+		item, ok := resume.ReusableItem(fingerprint)
 		if !ok {
 			toDispatch = append(toDispatch, d)
 			continue
@@ -775,7 +817,11 @@ func (a *Agent) reviewMode() string {
 }
 
 func reviewItemFingerprint(mode string, d model.Diff) string {
-	sum := sha256.Sum256([]byte(mode + "\x00" + d.OldPath + "\x00" + d.NewPath + "\x00" + d.Diff))
+	// The patch splitter can leave extra line endings on the final file in a
+	// multi-file patch. Unified diff content lines always carry a marker, so
+	// trimming CR/LF here removes only that position-dependent delimiter.
+	diffText := strings.TrimRight(d.Diff, "\r\n")
+	sum := sha256.Sum256([]byte(mode + "\x00" + d.OldPath + "\x00" + d.NewPath + "\x00" + diffText))
 	return fmt.Sprintf("%x", sum)
 }
 
@@ -1301,6 +1347,8 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 
 	fs := a.session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.ReviewFilterTask), newPath))
 	startTime := time.Now()
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.ReviewFilterTask, rec.RequestNo))
 
@@ -1525,6 +1573,8 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 
 	fs := a.session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.PlanTask), newPath))
 	startTime := time.Now()
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.PlanTask, rec.RequestNo))
 

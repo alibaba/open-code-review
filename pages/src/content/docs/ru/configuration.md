@@ -66,6 +66,26 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 
+### Переопределение Base URL встроенного провайдера
+
+У каждого встроенного провайдера есть предустановленный Base URL
+(см. таблицу выше). Чтобы направить встроенный провайдер на другую конечную
+точку — например, на собственный шлюз LiteLLM, который редко находится по
+предустановленному адресу `http://localhost:4000/v1` — задайте
+`providers.<name>.url`:
+
+```bash
+ocr config set provider                   litellm
+ocr config set model                      openai/gpt-5.4
+ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
+ocr config set providers.litellm.url      https://gateway.internal:8000/v1
+```
+
+Заданный `url` имеет приоритет над предустановленным Base URL. Если
+`providers.<name>.url` не задан (или очищен), OCR возвращается к
+предустановленному значению по умолчанию — поэтому его нужно задавать только
+когда ваша конечная точка отличается.
+
 ### Пользовательские провайдеры
 
 Любое имя провайдера, которого нет в таблице выше, считается
@@ -224,6 +244,30 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 
 ```bash
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
+```
+
+### Аффинити сессии для кеширования промптов
+
+OCR выводит ключ аффинити кеша промптов для каждого диалога с LLM,
+ограниченный областью сессии ревью и задачи внутри неё
+(`<ID сессии>-<тип задачи>-<хеш области>`). Кеши промптов сопоставляются
+по префиксам, поэтому ключи на уровне диалога удерживают каждый растущий
+диалог (например, цикл инструментов при ревью одного файла) на одном и том
+же узле кеша, вместо того чтобы стягивать весь запуск к одному «горячему»
+ключу; префикс с ID сессии позволяет сопоставлять журналы кеша на стороне
+поставщика с записями `ocr session`.
+
+Чтобы включить это, вставьте шаблонную переменную `{ocr_session_key}`
+в значения `extra_headers` или `extra_body` там, где её ожидает ваш
+поставщик — OCR подставляет ключ диалога в каждый запрос, а без такой
+настройки не отправляет ничего:
+
+```bash
+# Через поле в теле запроса в стиле OpenAI (например, prompt_cache_key)
+ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_key}"}'
+
+# Через HTTP-заголовок (например, x-session-affinity)
+ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
 ```
 
 ## Настройка языка ревью

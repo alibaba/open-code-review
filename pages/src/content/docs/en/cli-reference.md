@@ -89,9 +89,9 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--from <ref>` | — | — | Source ref to start the diff from (e.g., `main`). |
 | `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
-| `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`. |
+| `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
-| `--format <fmt>` | `-f` | `text` | `text` (human-readable) or `json` (machine-readable comment array). |
+| `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--audience <who>` | — | `human` | `human` streams progress lines; `agent` quiets stdout and prints only the final summary / JSON. |
 | `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
 | `--concurrency <n>` | — | `8` | Maximum number of files reviewed in parallel. |
@@ -183,12 +183,26 @@ ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
 
-Resume is strict by design:
+Resume is strict by design. Checkpoints are only reused when the resumed run
+would review the same thing the parent did:
 
 - workspace reviews cannot be resumed
-- range reviews must use the same `--from` and `--to`
-- commit reviews must use the same `--commit`
+- the review mode must match: a range session cannot be resumed as a commit one
+- the resolved input must match. Ref *spellings* are not compared — `abc1234`
+  and `abc1234def` name the same commit — but if the same refs now resolve to a
+  different diff, or the rules or filters changed the selected file set, the
+  whole resume is rejected rather than partially reused
+- a provider or model change must be asked for explicitly with `--provider` /
+  `--model`. A change that arrived through config or the environment is rejected
+- the parent must carry a run manifest, which is what its input is verified
+  against. A run killed with Ctrl-C never wrote one, and sessions older than run
+  manifests never had one
+- only files the parent's manifest settled are reused. A checkpoint the manifest
+  does not account for, or one that is unreadable, costs that file its
+  checkpoint and nothing more — it is simply reviewed again
 - `--preview` and `--resume` cannot be used together
+
+A rejected resume writes nothing: no session, no manifest, no LLM call.
 
 ### Output
 
@@ -316,7 +330,7 @@ With no `--path`, the whole repository is scanned.
 |---|---|---|---|
 | `--path <list>` | - | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). |
 | `--exclude <patterns>` | - | - | Comma-separated gitignore-style patterns to skip (e.g., `**/generated/*,*.pb.go`); merged with `rule.json` excludes. |
-| `--preview` | `-p` | `false` | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. Honors `--format json`. |
+| `--preview` | `-p` | `false` | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. Honors `--format json`; `--format sarif` is not supported. |
 
 ```bash
 ocr scan --preview                              # see what would be scanned
@@ -358,6 +372,9 @@ ocr session list --json
 | `--limit <n>` | `20` | Cap the number of listed sessions. Use `0` for unlimited. |
 
 ### `ocr session show`
+
+A resumed run also prints the run it continued, and the provider/model
+transition when the resume crossed one.
 
 ```bash
 ocr session show <session-id>

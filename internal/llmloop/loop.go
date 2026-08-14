@@ -228,6 +228,13 @@ const (
 // MainLoopStop return classifies a non-completed, non-error stop at its trigger
 // point so the caller never has to infer the cause from text or context state.
 func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath string) (bool, MainLoopStop, error) {
+	// Every round of this loop re-sends the growing conversation, so each
+	// request is a prefix extension of the previous one — exactly what
+	// provider prompt caches reuse. Scope the affinity key to this file's
+	// main-task conversation so every round routes to the same cache node.
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.MainTask), newPath))
+
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
@@ -558,7 +565,9 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 							// because the path arg is overridden with it further
 							// up, but reading it from the comment keeps the two
 							// aligned without depending on that.
-							reqCtx := r.requestCtx(rctx, cm.Path, session.ReLocationTask, rlRec.RequestNo)
+							rlCtx := llm.ContextWithSessionKey(rctx,
+								llm.SessionTaskKey(r.deps.Session.SessionID, string(session.ReLocationTask), cm.Path))
+							reqCtx := r.requestCtx(rlCtx, cm.Path, session.ReLocationTask, rlRec.RequestNo)
 							_, resp := diff.ReLocateComment(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
 							if resp != nil {
 								rlRec.SetResponse(resp, time.Since(rlStart))

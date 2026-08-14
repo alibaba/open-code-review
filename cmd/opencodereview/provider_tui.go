@@ -2905,7 +2905,12 @@ func (m modelTUIModel) View() tea.View {
 	var s strings.Builder
 	s.WriteString("\n")
 	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", m.provider.DisplayName)))
-	s.WriteString("\n\n")
+	s.WriteString("\n")
+	if m.provider.BaseURL != "" {
+		s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  Base URL: %s", m.provider.BaseURL)))
+		s.WriteString("\n")
+	}
+	s.WriteString("\n")
 
 	models := m.displayModels()
 	for i, model := range models {

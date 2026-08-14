@@ -29,9 +29,14 @@ type OpenAIResponsesClient struct {
 // URL normalization mirrors NewOpenAIClient: cfg.URL is forced to end in
 // /responses, and that suffix is stripped to derive the SDK base URL (the SDK
 // appends "responses" itself).
+// ExtraHeaders are applied per request (not baked into the SDK client)
+// so SessionKeyTemplateVar can expand to the session key each request carries.
 func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
 	}
 	ensureResponsesEndpoint(&cfg)
 	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/responses")
@@ -42,9 +47,6 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 		openaiopt.WithMaxRetries(5),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
-	}
-	for k, v := range cfg.ExtraHeaders {
-		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
@@ -100,8 +102,16 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 
 	params := c.buildResponsesParams(model, req)
 
+	sessionKey := c.cfg.SessionKey
+	if k := SessionKeyFromContext(ctx); k != "" {
+		sessionKey = k
+	}
+
 	var opts []openaiopt.RequestOption
-	for k, v := range c.cfg.ExtraBody {
+	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
+		opts = append(opts, openaiopt.WithHeader(k, v))
+	}
+	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
 		// This client is non-streaming: it calls Responses.New, which expects a
 		// single JSON body. If a provider config sets extra_body.stream=true
 		// (valid for the Chat Completions client, which switches to a streaming
@@ -157,6 +167,7 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 //   - PromptCacheKey is set from req.SessionID when non-empty. The caller
 //     generates a random UUID per file session so that all turns within one
 //     file's agent loop share a cache bucket. Only set when non-empty.
+//     An explicit extra_body.prompt_cache_key entry is applied afterwards as a JSON patch.
 func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatRequest) responses.ResponseNewParams {
 	var systemParts []string
 	var input []responses.ResponseInputItemUnionParam
