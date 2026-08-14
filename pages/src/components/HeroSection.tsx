@@ -138,8 +138,8 @@ const INSTALL_CHANNELS: InstallChannel[] = [
   { key: 'macports', labelKey: 'hero.installMacPorts', cmd: 'sudo port install open-code-review', icons: [macportsIcon], primary: false },
 ];
 
-const primaryChannels = INSTALL_CHANNELS.filter((ch) => ch.primary);
-const secondaryChannels = INSTALL_CHANNELS.filter((ch) => !ch.primary);
+const PRIMARY_CHANNELS = INSTALL_CHANNELS.filter((ch) => ch.primary);
+const SECONDARY_CHANNELS = INSTALL_CHANNELS.filter((ch) => !ch.primary);
 
 const HeroSection: React.FC = () => {
   const { t } = useTranslation();
@@ -148,7 +148,7 @@ const HeroSection: React.FC = () => {
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [showShaderBackground, setShowShaderBackground] = useState(false);
-  const [activeChannelKey, setActiveChannelKey] = useState('npm');
+  const [activeChannelKey, setActiveChannelKey] = useState(INSTALL_CHANNELS[0].key);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -197,16 +197,18 @@ const HeroSection: React.FC = () => {
 
   useEffect(() => {
     if (!menuOpen) return;
-    const handlePointerDown = (e: MouseEvent) => {
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setMenuOpen(false);
     };
     document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [menuOpen]);
@@ -362,13 +364,13 @@ const HeroSection: React.FC = () => {
           {/* Install channels — tab switcher */}
           <div style={{ width: '100%', maxWidth: 520 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 8 }}>
-              {primaryChannels.map((ch) => {
+              {PRIMARY_CHANNELS.map((ch) => {
                 const isActive = ch.key === activeChannelKey;
                 return (
                   <button
                     key={ch.key}
                     type="button"
-                    onClick={() => setActiveChannelKey(ch.key)}
+                    onClick={() => { setActiveChannelKey(ch.key); setMenuOpen(false); }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -396,8 +398,8 @@ const HeroSection: React.FC = () => {
               <div ref={menuRef} style={{ position: 'relative' }}>
                 <button
                   type="button"
-                  aria-haspopup="menu"
                   aria-expanded={menuOpen}
+                  aria-controls="install-more-panel"
                   onClick={() => setMenuOpen((open) => !open)}
                   style={{
                     display: 'flex',
@@ -411,25 +413,29 @@ const HeroSection: React.FC = () => {
                     transition: 'all 0.2s',
                   }}
                 >
+                  {activeIsSecondary && (
+                    <img src={activeChannel.icons[0]} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: 1 }} />
+                  )}
                   <span style={{ fontSize: 13, fontWeight: activeIsSecondary ? 600 : 500, color: activeIsSecondary ? '#fff' : 'rgba(255,255,255,0.45)' }}>
                     {activeIsSecondary ? t(activeChannel.labelKey) : t('hero.installMore')}
                   </span>
                   <img
                     src={chevronDownIcon}
                     alt=""
-                    style={{ width: 12, height: 12, flexShrink: 0, opacity: activeIsSecondary ? 0.8 : 0.5 }}
+                    style={{ width: 12, height: 12, flexShrink: 0, opacity: activeIsSecondary ? 0.8 : 0.5, transform: menuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
                   />
                 </button>
 
                 {menuOpen && (
                   <div
-                    role="menu"
+                    id="install-more-panel"
                     style={{
                       position: 'absolute',
                       top: '100%',
                       right: 0,
                       marginTop: 8,
-                      background: '#1a1a1a',
+                      background: 'rgba(26,26,26,0.92)',
+                      backdropFilter: 'blur(12px)',
                       border: '1px solid rgba(255,255,255,0.15)',
                       borderRadius: 8,
                       padding: 4,
@@ -437,13 +443,12 @@ const HeroSection: React.FC = () => {
                       minWidth: 200,
                     }}
                   >
-                    {secondaryChannels.map((ch) => {
+                    {SECONDARY_CHANNELS.map((ch) => {
                       const isActive = ch.key === activeChannelKey;
                       return (
                         <button
                           key={ch.key}
                           type="button"
-                          role="menuitem"
                           onClick={() => { setActiveChannelKey(ch.key); setMenuOpen(false); }}
                           style={{
                             display: 'flex',
@@ -471,7 +476,6 @@ const HeroSection: React.FC = () => {
                     <div style={{ height: 1, background: 'rgba(255,255,255,0.12)', margin: '4px 8px' }} />
                     <Link
                       to="/docs/installation"
-                      role="menuitem"
                       onClick={() => setMenuOpen(false)}
                       style={{
                         display: 'flex',
