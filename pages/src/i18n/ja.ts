@@ -23,6 +23,8 @@ export const ja: TranslationKeys = {
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
   'hero.installMacPorts': 'MacPorts',
+  'hero.installMore': 'その他',
+  'hero.allInstallOptions': 'すべてのインストール方法',
 
   // Error boundary
   'error.pageLoadFailed': 'ページの読み込みに失敗しました。',
