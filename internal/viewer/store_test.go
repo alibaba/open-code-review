@@ -4,10 +4,14 @@
 package viewer
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func writeJSONL(t *testing.T, path string, lines ...string) {
@@ -19,6 +23,19 @@ func writeJSONL(t *testing.T, path string, lines ...string) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func sessionStartLine(t *testing.T, timestamp, cwd string) string {
+	t.Helper()
+	b, err := json.Marshal(map[string]string{
+		"type":      "session_start",
+		"timestamp": timestamp,
+		"cwd":       cwd,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func TestDiscoverRepos_Empty(t *testing.T) {
@@ -93,6 +110,88 @@ func TestDiscoverRepos_FindsRepos(t *testing.T) {
 	}
 	if repos[1].SessionCount != 2 {
 		t.Errorf("repo-a session count = %d, want 2", repos[1].SessionCount)
+	}
+}
+
+func TestDiscoverRepos_SplitsCollidingLegacyRepositories(t *testing.T) {
+	root := t.TempDir()
+	legacy := filepath.Join(root, "team-service-api")
+	if err := os.MkdirAll(legacy, 0755); err != nil {
+		t.Fatal(err)
+	}
+	repoA := filepath.Join(t.TempDir(), "team", "service-api")
+	repoB := filepath.Join(t.TempDir(), "team-service", "api")
+	writeJSONL(t, filepath.Join(legacy, "a.jsonl"),
+		sessionStartLine(t, "2026-08-01T00:00:00Z", repoA))
+	writeJSONL(t, filepath.Join(legacy, "b.jsonl"),
+		sessionStartLine(t, "2026-08-02T00:00:00Z", repoB))
+
+	repos, err := DiscoverRepos(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("expected two logical repositories, got %+v", repos)
+	}
+	keys := map[string]int{}
+	for _, repo := range repos {
+		keys[repo.EncodedPath] = repo.SessionCount
+	}
+	if keys[session.RepoSessionKey(repoA)] != 1 || keys[session.RepoSessionKey(repoB)] != 1 {
+		t.Fatalf("legacy repositories were not split by cwd: %+v", keys)
+	}
+
+	sessions, err := ListSessions(root, session.RepoSessionKey(repoA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0].SessionID != "a" {
+		t.Fatalf("repo A sessions = %+v, want only a", sessions)
+	}
+	if _, err := LoadSession(root, session.RepoSessionKey(repoB), "a"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("LoadSession(repo B, a) error = %v, want not found", err)
+	}
+}
+
+func TestViewerMergesCurrentAndLegacySessionsForRepository(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	currentKey := session.RepoSessionKey(repoDir)
+	currentDir := filepath.Join(root, currentKey)
+	legacyDir := filepath.Join(root, "legacy-repo")
+	if err := os.MkdirAll(currentDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(legacyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(currentDir, "current.jsonl"),
+		sessionStartLine(t, "2026-08-02T00:00:00Z", repoDir))
+	writeJSONL(t, filepath.Join(legacyDir, "legacy.jsonl"),
+		sessionStartLine(t, "2026-08-01T00:00:00Z", repoDir))
+
+	repos, err := DiscoverRepos(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 1 || repos[0].EncodedPath != currentKey || repos[0].SessionCount != 2 {
+		t.Fatalf("repositories = %+v, want one merged repository with two sessions", repos)
+	}
+
+	sessions, err := ListSessions(root, currentKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 || sessions[0].SessionID != "current" || sessions[1].SessionID != "legacy" {
+		t.Fatalf("sessions = %+v, want current and legacy in timestamp order", sessions)
+	}
+
+	loaded, err := LoadSession(root, currentKey, "legacy")
+	if err != nil {
+		t.Fatalf("LoadSession legacy fallback: %v", err)
+	}
+	if loaded.Summary.SessionID != "legacy" || loaded.Summary.CWD != repoDir {
+		t.Fatalf("loaded legacy session = %+v", loaded.Summary)
 	}
 }
 

@@ -96,40 +96,55 @@ type summaryRecord struct {
 // SessionsDir returns the on-disk directory that holds JSONL session files
 // for a given repository. It does not create the directory.
 func SessionsDir(repoDir string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
-	}
-	return filepath.Join(home, ".opencodereview", sessionSubDir, encodeRepoPath(repoDir)), nil
+	current, _, err := sessionDirectories(repoDir)
+	return current, err
 }
 
 // ListSessions enumerates all persisted sessions for the given repository
 // directory, sorted by StartTime descending (most recent first). Missing
 // directories return an empty slice with no error.
 func ListSessions(repoDir string) ([]Summary, error) {
-	dir, err := SessionsDir(repoDir)
+	currentDir, legacyDir, err := sessionDirectories(repoDir)
 	if err != nil {
 		return nil, err
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
+	summaries := make([]Summary, 0)
+	readDir := func(dir string, legacy bool) error {
+		entries, readErr := os.ReadDir(dir)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				return nil
+			}
+			return fmt.Errorf("read sessions dir %q: %w", dir, readErr)
 		}
-		return nil, fmt.Errorf("read sessions dir %q: %w", dir, err)
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || !strings.HasSuffix(name, ".jsonl") {
+				continue
+			}
+			path := filepath.Join(dir, name)
+			if legacy {
+				matches, matchErr := sessionFileBelongsToRepo(path, repoDir)
+				if matchErr != nil || !matches {
+					continue
+				}
+			}
+			sessionID := strings.TrimSuffix(name, ".jsonl")
+			summary, loadErr := loadSummaryFromFile(path, sessionID, repoDir)
+			if loadErr != nil {
+				continue
+			}
+			summaries = append(summaries, *summary)
+		}
+		return nil
 	}
-	summaries := make([]Summary, 0, len(entries))
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".jsonl") {
-			continue
+	if err := readDir(currentDir, false); err != nil {
+		return nil, err
+	}
+	if legacyDir != currentDir {
+		if err := readDir(legacyDir, true); err != nil {
+			return nil, err
 		}
-		sessionID := strings.TrimSuffix(name, ".jsonl")
-		summary, err := loadSummaryFromFile(filepath.Join(dir, name), sessionID, repoDir)
-		if err != nil {
-			continue
-		}
-		summaries = append(summaries, *summary)
 	}
 	sort.Slice(summaries, func(i, j int) bool {
 		return summaries[i].StartTime.After(summaries[j].StartTime)
@@ -140,7 +155,7 @@ func ListSessions(repoDir string) ([]Summary, error) {
 // LoadSummary loads a single session's Summary. Errors when the session
 // file is missing or unreadable.
 func LoadSummary(repoDir, sessionID string) (*Summary, error) {
-	path, err := SessionFilePath(repoDir, sessionID)
+	path, err := findSessionFile(repoDir, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +164,7 @@ func LoadSummary(repoDir, sessionID string) (*Summary, error) {
 
 // LoadDetail returns the summary plus per-file item records for one session.
 func LoadDetail(repoDir, sessionID string) (*Summary, []ItemDetail, error) {
-	path, err := SessionFilePath(repoDir, sessionID)
+	path, err := findSessionFile(repoDir, sessionID)
 	if err != nil {
 		return nil, nil, err
 	}

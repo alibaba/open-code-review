@@ -110,6 +110,30 @@ func TestEncodeRepoPath(t *testing.T) {
 	}
 }
 
+func TestRepoSessionKey_DistinguishesCollidingLegacyPaths(t *testing.T) {
+	base := t.TempDir()
+	pathA := filepath.Join(base, "team", "service-api")
+	pathB := filepath.Join(base, "team-service", "api")
+
+	if encodeRepoPath(pathA) != encodeRepoPath(pathB) {
+		t.Fatalf("test paths no longer collide under the legacy encoder: %q vs %q", encodeRepoPath(pathA), encodeRepoPath(pathB))
+	}
+	if RepoSessionKey(pathA) == RepoSessionKey(pathB) {
+		t.Fatalf("RepoSessionKey(%q) and RepoSessionKey(%q) collided", pathA, pathB)
+	}
+	if !strings.HasPrefix(RepoSessionKey(pathA), "v2-") {
+		t.Fatalf("RepoSessionKey(%q) = %q, want versioned key", pathA, RepoSessionKey(pathA))
+	}
+	if !IsRepoSessionKey(RepoSessionKey(pathA)) {
+		t.Fatalf("IsRepoSessionKey rejected generated key %q", RepoSessionKey(pathA))
+	}
+	for _, legacy := range []string{"repo", "v2-repo", "v2-repo-not-a-digest"} {
+		if IsRepoSessionKey(legacy) {
+			t.Errorf("IsRepoSessionKey(%q) = true for legacy-shaped key", legacy)
+		}
+	}
+}
+
 func readJSONLRecords(t *testing.T, path string) []map[string]any {
 	t.Helper()
 	f, err := os.Open(path)
@@ -136,7 +160,7 @@ func sessionJSONLPath(t *testing.T, repoDir, sessionID string) string {
 	if err != nil {
 		t.Fatalf("home dir: %v", err)
 	}
-	return filepath.Join(home, ".opencodereview", "test-sessions", encodeRepoPath(repoDir), sessionID+".jsonl")
+	return filepath.Join(home, ".opencodereview", "test-sessions", RepoSessionKey(repoDir), sessionID+".jsonl")
 }
 
 func TestSetErrorIncrementsCounter(t *testing.T) {
@@ -221,7 +245,7 @@ func TestSessionFilePermissions(t *testing.T) {
 	jw.WriteSessionStart(time.Now())
 	defer jw.flushAndClose()
 
-	sessionDir := filepath.Join(tmpHome, ".opencodereview", "test-sessions", encodeRepoPath(repoDir))
+	sessionDir := filepath.Join(tmpHome, ".opencodereview", "test-sessions", RepoSessionKey(repoDir))
 	sessionFile := filepath.Join(sessionDir, sessionID+".jsonl")
 
 	dirInfo, err := os.Stat(sessionDir)

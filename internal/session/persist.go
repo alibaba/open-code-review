@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -21,7 +20,7 @@ import (
 var sessionSubDir = "sessions"
 
 // jsonlWriter streams session records to a JSONL file under
-// $HOME/.opencodereview/sessions/<encoded-repo-path>/<session-id>.jsonl.
+// $HOME/.opencodereview/sessions/<repo-key>/<session-id>.jsonl.
 // It is safe for concurrent use by multiple goroutines.
 type jsonlWriter struct {
 	mu          sync.Mutex
@@ -73,40 +72,13 @@ func generateUUID() string {
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
-func encodeRepoPath(p string) string {
-	// Handle empty or invalid input
-	if p == "" {
-		return "empty"
-	}
-
-	vol := filepath.VolumeName(p)
-	p = p[len(vol):]
-
-	// Trim leading path separators
-	p = strings.TrimLeft(p, "/\\")
-
-	// Replace separators with -
-	p = strings.ReplaceAll(p, "/", "-")
-	p = strings.ReplaceAll(p, "\\", "-")
-
-	// Replace colons (from Windows drive letters)
-	vol = strings.ReplaceAll(vol, ":", "_")
-
-	// Handle edge case where path was only separators or volume name
-	result := vol + p
-	if result == "" {
-		return "empty"
-	}
-	return result
-}
-
 func (jw *jsonlWriter) open() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home dir: %w", err)
 	}
 
-	sessionDir := filepath.Join(home, ".opencodereview", sessionSubDir, encodeRepoPath(jw.repoDir))
+	sessionDir := filepath.Join(home, ".opencodereview", sessionSubDir, RepoSessionKey(jw.repoDir))
 	if err := os.MkdirAll(sessionDir, 0700); err != nil {
 		return fmt.Errorf("create session dir: %w", err)
 	}

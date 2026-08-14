@@ -15,7 +15,7 @@ import (
 // earlier one, and a subsequent review_item_failed drops it. Comments that
 // were persisted without a path inherit the record's file path.
 func LoadComments(repoDir, sessionID string) ([]model.LlmComment, error) {
-	path, err := SessionFilePath(repoDir, sessionID)
+	path, err := findSessionFile(repoDir, sessionID)
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,8 @@
 package session
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -21,6 +23,158 @@ func TestListSessions_EmptyRepoReturnsNil(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty result, got %d entries", len(got))
+	}
+}
+
+func TestListSessions_FiltersCollidingLegacySessionsByRepository(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	base := t.TempDir()
+	repoA := filepath.Join(base, "team", "service-api")
+	repoB := filepath.Join(base, "team-service", "api")
+	if err := os.MkdirAll(repoA, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(repoB, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	legacyDir := filepath.Join(tmpHome, ".opencodereview", "test-sessions", encodeRepoPath(repoA))
+	if err := os.MkdirAll(legacyDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL := func(sessionID, cwd string) {
+		t.Helper()
+		path := filepath.Join(legacyDir, sessionID+".jsonl")
+		data, err := json.Marshal(map[string]string{
+			"type":      "session_start",
+			"sessionId": sessionID,
+			"timestamp": "2026-08-01T00:00:00Z",
+			"cwd":       cwd,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		data = append(data, '\n')
+		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeJSONL("repo-a-session", repoA)
+	writeJSONL("repo-b-session", repoB)
+	commentRecord, err := json.Marshal(map[string]any{
+		"type":        "review_item_done",
+		"filePath":    "legacy.go",
+		"fingerprint": "fp-legacy",
+		"comments":    []model.LlmComment{{Content: "legacy comment"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commentFile, err := os.OpenFile(filepath.Join(legacyDir, "repo-a-session.jsonl"), os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := commentFile.Write(append(commentRecord, '\n')); err != nil {
+		commentFile.Close()
+		t.Fatal(err)
+	}
+	if err := commentFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	gotA, err := ListSessions(repoA)
+	if err != nil {
+		t.Fatalf("ListSessions(repoA): %v", err)
+	}
+	if len(gotA) != 1 || gotA[0].SessionID != "repo-a-session" {
+		t.Fatalf("repo A sessions = %+v, want only repo-a-session", gotA)
+	}
+
+	gotB, err := ListSessions(repoB)
+	if err != nil {
+		t.Fatalf("ListSessions(repoB): %v", err)
+	}
+	if len(gotB) != 1 || gotB[0].SessionID != "repo-b-session" {
+		t.Fatalf("repo B sessions = %+v, want only repo-b-session", gotB)
+	}
+
+	if _, err := LoadSummary(repoA, "repo-b-session"); !os.IsNotExist(err) {
+		t.Fatalf("LoadSummary(repoA, repo-b-session) error = %v, want not found", err)
+	}
+
+	detail, items, err := LoadDetail(repoA, "repo-a-session")
+	if err != nil {
+		t.Fatalf("LoadDetail(repoA, repo-a-session): %v", err)
+	}
+	if detail.RepoDir != repoA || len(items) != 1 || items[0].FilePath != "legacy.go" {
+		t.Fatalf("legacy detail = (%+v, %+v), want repo A legacy item", detail, items)
+	}
+	if _, _, err := LoadDetail(repoB, "repo-a-session"); !os.IsNotExist(err) {
+		t.Fatalf("LoadDetail(repoB, repo-a-session) error = %v, want not found", err)
+	}
+
+	state, err := LoadResumeState(repoA, "repo-a-session")
+	if err != nil {
+		t.Fatalf("LoadResumeState(repoA, repo-a-session): %v", err)
+	}
+	if state.RepoDir != repoA {
+		t.Fatalf("legacy resume RepoDir = %q, want %q", state.RepoDir, repoA)
+	}
+	if _, err := LoadResumeState(repoB, "repo-a-session"); !os.IsNotExist(err) {
+		t.Fatalf("LoadResumeState(repoB, repo-a-session) error = %v, want not found", err)
+	}
+
+	comments, err := LoadComments(repoA, "repo-a-session")
+	if err != nil {
+		t.Fatalf("LoadComments(repoA, repo-a-session): %v", err)
+	}
+	if len(comments) != 1 || comments[0].Content != "legacy comment" || comments[0].Path != "legacy.go" {
+		t.Fatalf("legacy comments = %+v, want one inherited-path comment", comments)
+	}
+	if _, err := LoadComments(repoB, "repo-a-session"); !os.IsNotExist(err) {
+		t.Fatalf("LoadComments(repoB, repo-a-session) error = %v, want not found", err)
+	}
+}
+
+func TestNewSessionsUseDistinctDirectoriesForCollidingPaths(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	base := t.TempDir()
+	repoA := filepath.Join(base, "team", "service-api")
+	repoB := filepath.Join(base, "team-service", "api")
+	if err := os.MkdirAll(repoA, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(repoB, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	first := New(repoA, "main", "mock", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	if err := first.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	second := New(repoB, "main", "mock", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	if err := second.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+
+	dirA, err := SessionsDir(repoA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirB, err := SessionsDir(repoB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirA == dirB {
+		t.Fatalf("session directories collided: %q", dirA)
+	}
+	if _, err := os.Stat(filepath.Join(dirA, first.SessionID+".jsonl")); err != nil {
+		t.Fatalf("repo A session missing from its directory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dirB, second.SessionID+".jsonl")); err != nil {
+		t.Fatalf("repo B session missing from its directory: %v", err)
 	}
 }
 

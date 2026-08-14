@@ -31,7 +31,7 @@ func TestSessionFilePath_ValidID(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expectedSuffix := filepath.Join("test-sessions", encodeRepoPath("/some/repo"), "abc-123.jsonl")
+	expectedSuffix := filepath.Join("test-sessions", RepoSessionKey("/some/repo"), "abc-123.jsonl")
 	if !strings.Contains(path, expectedSuffix) {
 		t.Errorf("path %q does not contain expected suffix %q", path, expectedSuffix)
 	}
