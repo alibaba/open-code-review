@@ -28,6 +28,7 @@ Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
   ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
+  ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
