@@ -95,7 +95,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--audience <who>` | — | `human` | `human` streams progress lines; `agent` quiets stdout and prints only the final summary / JSON. |
 | `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
 | `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Combined with `--background` when both are set. |
-| `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with `rule.json` excludes. |
+| `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
 | `--concurrency <n>` | — | `8` | Maximum number of files reviewed in parallel. |
 | `--timeout <minutes>` | — | `10` | Per-file deadline. `0` disables the timeout. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
