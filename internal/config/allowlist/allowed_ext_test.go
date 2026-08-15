@@ -149,6 +149,9 @@ func TestIsExcludedPath(t *testing.T) {
 		{"swift Tests suffix", "MyAppTests/UserTests.swift", true},
 		{"swift Tests suffix nested", "Tests/AppTests/UserTests.swift", true},
 		{"swift UITests suffix", "MyAppUITests/LaunchTests.swift", true},
+		{"swift Test suffix", "MyAppTests/UserTest.swift", true},
+		{"swift Test dir helper", "Tests/AppTests/Mocks/MockService.swift", true},
+		{"swift tests dir lowercase", "tests/AppTests/Helpers/Helper.swift", true},
 		{"swift non-test", "Sources/App/User.swift", false},
 		{"swift helper with test in name", "Sources/App/TestSupport.swift", false},
 

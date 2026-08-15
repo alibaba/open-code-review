@@ -30,5 +30,7 @@
   "**/*.pb.go",
   "**/*.pb.cc",
   "**/*.pb.h",
-  "**/*Tests.swift"
+  "**/*Test.swift",
+  "**/*Tests.swift",
+  "**/Tests/**/*.swift"
 ]
