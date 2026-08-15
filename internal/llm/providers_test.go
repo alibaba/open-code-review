@@ -338,10 +338,6 @@ func TestLookupProvider_XAIDetails(t *testing.T) {
 		"grok-4.6",
 		"grok-4.5",
 		"grok-4.3",
-		"grok-4.20-0309-reasoning",
-		"grok-4.20-0309-non-reasoning",
-		"grok-4.20-multi-agent-0309",
-		"grok-build-0.1",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
