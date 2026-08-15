@@ -91,6 +91,9 @@ ocr r      [flags]   (alias)
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
 | `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します。`agent` は stdout を静音化し、最終サマリー / JSON のみを出力します。 |
 | `--background <text>` | `-b` | — | plan + main prompt に注入する、任意の要件 / 業務コンテキスト。 |
+| `--background-file <path>` | `-B` | — | レビューの背景コンテキストとして使用する Markdown ファイルのパス。`--background` と組み合わせることで、インラインのテキストとファイルの両方を使用できます。 |
+| `--exclude <patterns>` | — | — | レビューから除外する gitignore 形式のコンマ区切りパターン。`rule.json` の excludes とマージされます（`ocr scan` の項にも記載があります）。 |
+| `--max-tokens-budget <n>` | — | `0`（無制限） | このレビュー実行全体のトークン使用量（入力 + 出力）の上限。上限を超えるとディスパッチが停止し、残りのファイルは `failed(budget)` として報告されます。部分的な結果は公開され、プロセスは `0` で終了します。選択されたすべての項目が失敗した場合のみ非ゼロで終了します。 |
 | `--concurrency <n>` | — | `8` | 並行してレビューするファイルの最大数。 |
 | `--timeout <minutes>` | — | `10` | ファイルごとの締め切り時間。`0` でタイムアウトを無効化します。 |
 | `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |

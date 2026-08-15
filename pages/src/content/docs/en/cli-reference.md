@@ -95,6 +95,9 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--audience <who>` | — | `human` | `human` streams progress lines; `agent` quiets stdout and prints only the final summary / JSON. |
 | `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
+| `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background context. Can be combined with `--background` to use inline text and a file together. |
+| `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude from the review; merged with `rule.json` excludes (also documented under `ocr scan`). |
+| `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total token usage (input + output) for the entire review run. Once exceeded, dispatch stops and remaining files are reported as `failed(budget)`. Partial results are still published and the process exits `0`; it exits non-zero only if every selected item failed. |
 | `--concurrency <n>` | — | `8` | Maximum number of files reviewed in parallel. |
 | `--timeout <minutes>` | — | `10` | Per-file deadline. `0` disables the timeout. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |

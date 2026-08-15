@@ -92,6 +92,9 @@ unstaged + untracked 变更。
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
 | `--audience <who>` | — | `human` | `human` 流式输出进度行；`agent` 静默 stdout，只打印最终摘要 / JSON。 |
 | `--background <text>` | `-b` | — | 注入 plan + main prompt 的可选需求 / 业务上下文。 |
+| `--background-file <path>` | `-B` | — | 用作评审背景上下文的 Markdown 文件路径。可与 `--background` 组合使用，同时传入内联文本和文件。 |
+| `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式，从评审中排除；会与 `rule.json` 的 excludes 合并（`ocr scan` 下也有说明）。 |
+| `--max-tokens-budget <n>` | — | `0`（无限制） | 限制整个评审运行的总 token 用量（输入 + 输出）。超出后调度停止，剩余文件报告为 `failed(budget)`。仍会发布部分结果并以 `0` 退出；仅当所有选定项都失败时才非零退出。 |
 | `--concurrency <n>` | — | `8` | 并行评审的最大文件数。 |
 | `--timeout <minutes>` | — | `10` | 每文件截止时间。`0` 关闭超时。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
