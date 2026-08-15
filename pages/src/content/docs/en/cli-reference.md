@@ -27,6 +27,7 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
@@ -95,11 +96,14 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--audience <who>` | — | `human` | `human` streams progress lines; `agent` quiets stdout and prints only the final summary / JSON. |
 | `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
+| `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background context. Can be combined with `--background` for inline text plus a file. |
 | `--concurrency <n>` | — | `8` | Maximum number of files reviewed in parallel. |
+| `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude from the review; merged with `rule.json` excludes. |
 | `--timeout <minutes>` | — | `10` | Per-file deadline. `0` disables the timeout. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per file. `0` uses the template default (`30`); values 1–9 are clamped up to `10`; any value `≥ 10` overrides the template default (even if smaller than `30`). |
 | `--max-tokens <n>` | — | config or template default | Per-file prompt token ceiling. Overrides the saved `max_tokens` setting for this run. |
+| `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total token usage (input + output) for the entire review run. Once exceeded, dispatch stops and remaining files are reported as `failed(budget)`. Partial results are still published and the process exits `0`; it exits non-zero only if every selected file failed. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
