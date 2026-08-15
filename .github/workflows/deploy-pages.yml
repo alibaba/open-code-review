@@ -5,8 +5,6 @@ on:
     branches: [main]
     paths:
       - 'pages/**'
-      - 'install.sh'
-      - 'install.ps1'
       - '.github/workflows/deploy-pages.yml'
   workflow_dispatch:
 
@@ -45,16 +43,16 @@ jobs:
           mkdir -p _site
           cp -r pages/dist/* _site/
           cp pages/logo.svg _site/logo.svg
-          cp install.sh _site/install.sh
-          cp install.ps1 _site/install.ps1
+          cp pages/install.sh _site/install.sh
+          cp pages/install.ps1 _site/install.ps1
 
       - name: Verify install scripts
         run: |
           test -f _site/install.sh
           test -f _site/install.ps1
           sh -n _site/install.sh
-          cmp install.sh _site/install.sh
-          cmp install.ps1 _site/install.ps1
+          cmp pages/install.sh _site/install.sh
+          cmp pages/install.ps1 _site/install.ps1
 
       - uses: actions/upload-pages-artifact@v5
         with:
