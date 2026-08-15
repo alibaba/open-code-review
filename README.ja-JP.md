@@ -129,6 +129,18 @@ ocr config model             # アクティブなプロバイダーのモデル�
 
 CLIセットアップ、環境変数、カスタムプロバイダーなどの高度な設定については、[設定ガイド](https://open-codereview.ai/docs/configuration)を参照してください。
 
+**1.1 任意のコマンドエイリアス**
+
+よく使うコマンドを短くできます。
+
+```bash
+ocr alias set cp 'config provider'
+ocr alias set rq 'review --audience agent'
+```
+
+その後は `ocr cp` や `ocr rq` を完全なコマンドと同様に使えます。`ocr alias list`
+で一覧を表示し、`ocr alias rm <name>` で削除できます。
+
 **2. レビュー**
 
 ```bash

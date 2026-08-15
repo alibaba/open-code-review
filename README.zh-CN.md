@@ -129,6 +129,18 @@ ocr config model             # 为当前供应商选择模型
 
 命令行设置、环境变量、自定义供应商等高级配置，详见[配置指南](https://open-codereview.ai/docs/configuration)。
 
+**1.1 可选命令别名**
+
+为常用命令设置更短的别名：
+
+```bash
+ocr alias set cp 'config provider'
+ocr alias set rq 'review --audience agent'
+```
+
+之后可以直接使用 `ocr cp` 或 `ocr rq`。使用 `ocr alias list` 查看别名，使用
+`ocr alias rm <name>` 删除别名。
+
 **2. 开始审查**
 
 ```bash

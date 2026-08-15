@@ -129,6 +129,18 @@ ocr config model             # 활성 provider의 model 선택
 
 CLI 설정, 환경 변수, 커스텀 provider 등 고급 설정은 [설정 가이드](https://open-codereview.ai/docs/configuration)를 참조하세요.
 
+**1.1 선택적 명령 alias**
+
+자주 사용하는 명령을 짧게 만들 수 있습니다.
+
+```bash
+ocr alias set cp 'config provider'
+ocr alias set rq 'review --audience agent'
+```
+
+이후에는 `ocr cp` 또는 `ocr rq`를 전체 명령처럼 사용하면 됩니다. `ocr alias list`로
+목록을 확인하고 `ocr alias rm <name>`으로 삭제할 수 있습니다.
+
 **2. 리뷰 실행**
 
 ```bash

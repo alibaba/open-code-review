@@ -129,6 +129,18 @@ The interactive UI guides you through provider selection, API key entry, and mod
 
 For CLI setup, environment variables, custom providers, and other advanced configuration, see [Configuration](https://open-codereview.ai/docs/configuration).
 
+**1.1 Optional command aliases**
+
+Shorten commands you use often:
+
+```bash
+ocr alias set cp 'config provider'
+ocr alias set rq 'review --audience agent'
+```
+
+Then use `ocr cp` or `ocr rq` like the full command. List and remove aliases with
+`ocr alias list` and `ocr alias rm <name>`.
+
 **2. Review**
 
 ```bash
