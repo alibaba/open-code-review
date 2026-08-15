@@ -100,7 +100,6 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Combined with `--background` when both are set. |
 | `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
 | `--concurrency <n>` | — | `8` | Maximum number of files reviewed in parallel. |
-| `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude from the review; merged with `rule.json` excludes. |
 | `--timeout <minutes>` | — | `10` | Per-file deadline. `0` disables the timeout. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per file. `0` uses the template default (`30`); values 1–9 are clamped up to `10`; any value `≥ 10` overrides the template default (even if smaller than `30`). |

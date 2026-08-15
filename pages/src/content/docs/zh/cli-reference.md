@@ -97,7 +97,6 @@ unstaged + untracked 变更。
 | `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
 | `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式；与 `rule.json` 的 excludes 合并。 |
 | `--concurrency <n>` | — | `8` | 并行评审的最大文件数。 |
-| `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式，用于从评审中排除文件；与 `rule.json` 的 excludes 合并。 |
 | `--timeout <minutes>` | — | `10` | 每文件截止时间。`0` 关闭超时。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
 | `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`30`）；1–9 会被上调到 `10`；任何 `≥ 10` 的值都覆盖模板默认（即使小于 `30`）。 |
