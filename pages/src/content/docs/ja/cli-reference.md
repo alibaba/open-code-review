@@ -45,6 +45,27 @@ Use "ocr session -h" for more information about session inspection.
 GitHub: https://github.com/alibaba/open-code-review
 ```
 
+## グローバルフラグ
+
+すべてのコマンドで利用でき、サブコマンドの前後どちらでも指定できます
+(`ocr --no-color review` と `ocr review --no-color` は同じ意味です)。
+
+| フラグ | デフォルト | 説明 |
+|---|---|---|
+| `--color <auto\|always\|never>` | `auto` | ANSI カラーを出力する条件。`auto` は stdout が端末のときだけ着色するため、パイプやリダイレクトではプレーンテキストになります。`always` はパイプ越しでも着色を維持します (`\| less -R` などに便利)。 |
+| `--no-color` | 無効 | `--color=never` の短縮形です。 |
+
+stdout が端末でない場合、テキスト出力は常にプレーンになるため、安全にパイプできます:
+
+```bash
+ocr review --commit HEAD | gh issue comment 123 --body-file -
+```
+
+`NO_COLOR` (空でない任意の値、[no-color.org](https://no-color.org) に準拠) と
+`TERM=dumb` でもカラーは無効になります。フラグは 1 回の実行に対する指定であり、
+環境変数は恒常的な設定であるため、`--color` / `--no-color` を明示した場合は
+そちらが優先されます。
+
 ## コマンド一覧
 
 | コマンド | エイリアス | 役割 |

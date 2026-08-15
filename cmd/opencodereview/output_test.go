@@ -55,6 +55,7 @@ func TestSeverityColor(t *testing.T) {
 // TestRenderComment_BadgeInline verifies the badge is colorized and rendered inline
 // with the first line of the comment content.
 func TestRenderComment_BadgeInline(t *testing.T) {
+	setColor(t, true)
 	out := captureStdout(t, func() {
 		renderComment(model.LlmComment{
 			Path:      "internal/mcp/client.go",

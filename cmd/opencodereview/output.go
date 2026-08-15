@@ -94,7 +94,7 @@ func renderComment(comment model.LlmComment) {
 		return
 	}
 
-	fmt.Printf("\n\033[2m─── %s:%d-%d ───\033[0m\n", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine)
+	fmt.Printf("\n%s\n", colorf("\033[2m", "─── %s:%d-%d ───", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine))
 
 	if comment.Content != "" {
 		badge := buildBadge(comment)
@@ -107,8 +107,7 @@ func renderComment(comment model.LlmComment) {
 		lines := wrapByRunes(content, 100)
 		for i, ln := range lines {
 			if i == 0 && badge != "" && strings.HasPrefix(ln, badge) {
-				color := severityColor(comment.Severity)
-				ln = color + badge + "\033[0m" + ln[len(badge):]
+				ln = colorize(severityColor(comment.Severity), badge) + ln[len(badge):]
 			}
 			fmt.Printf("%s\n", ln)
 		}
@@ -166,9 +165,15 @@ func severityColor(severity string) string {
 	}
 }
 
-// printDiffLine renders a single diff line with colored prefix and background on content.
+// printDiffLine renders a single diff line with colored prefix and background on
+// content. With color disabled it emits "<prefix> <content>", which keeps the
+// +/-/space gutter that carries the added/deleted/context meaning in plain text.
 func printDiffLine(prefix, content, fgColor, bgColor string) {
-	fmt.Printf("%s%s%s %s%s\033[0m\n", fgColor+bgColor, prefix, "\033[0m"+bgColor, content, "\033[0m")
+	if !colorOn() {
+		fmt.Printf("%s %s\n", prefix, content)
+		return
+	}
+	fmt.Printf("%s%s%s %s%s\n", fgColor+bgColor, prefix, ansiReset+bgColor, content, ansiReset)
 }
 
 // wrapByRunes splits text into lines that fit within maxWidth **rune** columns.
@@ -593,48 +598,56 @@ func outputPreviewText(p *agent.DiffPreview) {
 	}
 	pathFmt := fmt.Sprintf("%%-%ds", maxPathLen)
 
-	fmt.Printf("\nPreview: %d file(s) changed  |  \033[32m+%d\033[0m  \033[31m-%d\033[0m\n",
-		p.TotalFiles, p.TotalInsertions, p.TotalDeletions)
+	fmt.Printf("\nPreview: %d file(s) changed  |  %s  %s\n", p.TotalFiles,
+		colorf("\033[32m", "+%d", p.TotalInsertions),
+		colorf("\033[31m", "-%d", p.TotalDeletions))
 
 	if p.ReviewableCount > 0 {
-		fmt.Printf("\n\033[1mWill review (%d):\033[0m\n", p.ReviewableCount)
+		fmt.Printf("\n%s\n", colorf("\033[1m", "Will review (%d):", p.ReviewableCount))
 		for _, e := range p.Entries {
 			if !e.WillReview {
 				continue
 			}
-			fmt.Printf("  %s  "+pathFmt+" \033[32m+%-4d\033[0m \033[31m-%-4d\033[0m\n",
-				statusBadge(e.Status), sanitizeTerminal(e.Path), e.Insertions, e.Deletions)
+			// The counts are padded before colorizing so the columns stay aligned
+			// whether or not the escape sequences are present.
+			fmt.Printf("  %s  "+pathFmt+" %s %s\n",
+				statusBadge(e.Status), sanitizeTerminal(e.Path),
+				colorf("\033[32m", "+%-4d", e.Insertions),
+				colorf("\033[31m", "-%-4d", e.Deletions))
 		}
 	}
 
 	if p.ExcludedCount > 0 {
-		fmt.Printf("\n\033[1mExcluded from review (%d):\033[0m\n", p.ExcludedCount)
+		fmt.Printf("\n%s\n", colorf("\033[1m", "Excluded from review (%d):", p.ExcludedCount))
 		for _, e := range p.Entries {
 			if e.WillReview {
 				continue
 			}
-			fmt.Printf("  %s  "+pathFmt+" \033[2m(%s)\033[0m\n",
-				statusBadge(e.Status), sanitizeTerminal(e.Path), sanitizeTerminal(string(e.ExcludeReason)))
+			fmt.Printf("  %s  "+pathFmt+" %s\n",
+				statusBadge(e.Status), sanitizeTerminal(e.Path),
+				colorf("\033[2m", "(%s)", sanitizeTerminal(string(e.ExcludeReason))))
 		}
 	}
 
 	fmt.Println()
 }
 
+// statusBadge renders the per-file status tag. The letter carries the meaning,
+// so with color disabled the bare "[A]"/"[M]"/... form is still unambiguous.
 func statusBadge(status string) string {
 	switch status {
 	case "added":
-		return "\033[32m[A]\033[0m"
+		return colorize("\033[32m", "[A]")
 	case "modified":
-		return "\033[33m[M]\033[0m"
+		return colorize("\033[33m", "[M]")
 	case "deleted":
-		return "\033[31m[D]\033[0m"
+		return colorize("\033[31m", "[D]")
 	case "renamed":
-		return "\033[36m[R]\033[0m"
+		return colorize("\033[36m", "[R]")
 	case "binary":
-		return "\033[35m[B]\033[0m"
+		return colorize("\033[35m", "[B]")
 	case "scan":
-		return "\033[34m[S]\033[0m"
+		return colorize("\033[34m", "[S]")
 	default:
 		return "[?]"
 	}
