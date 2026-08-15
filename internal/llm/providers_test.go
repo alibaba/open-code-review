@@ -75,7 +75,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "iflytek", "kimi", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "iflytek", "kimi", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -303,6 +303,41 @@ func TestLookupProvider_MistralDetails(t *testing.T) {
 		"codestral-latest",
 		"mistral-large-latest",
 		"mistral-small-latest",
+	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
+}
+
+func TestLookupProvider_XAIDetails(t *testing.T) {
+	p, ok := LookupProvider("xai")
+	if !ok {
+		t.Fatal("xai not found")
+	}
+	if p.DisplayName != "xAI Grok API" {
+		t.Errorf("DisplayName = %q, want %q", p.DisplayName, "xAI Grok API")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://api.x.ai/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://api.x.ai/v1")
+	}
+	if p.EnvVar != "XAI_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "XAI_API_KEY")
+	}
+	if p.AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
+	}
+	expectedModels := []string{
+		"grok-4.6",
+		"grok-4.5",
+		"grok-4.3",
 	}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
