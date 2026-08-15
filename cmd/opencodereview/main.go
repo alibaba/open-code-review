@@ -22,22 +22,12 @@ func main() {
 		defer telemetry.ShutdownWithTimeout(ctx, 5*time.Second)
 	}
 
-func expandConfiguredAliases(args []string) ([]string, error) {
-	configPath, err := defaultConfigPath()
+	args, err := expandConfiguredAliases(os.Args[1:])
 	if err != nil {
-		return args, nil
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
-	cfg, err := LoadAppConfig(configPath)
-	if err != nil {
-		// Log the error so users know their config is broken
-		fmt.Fprintf(os.Stderr, "Warning: failed to load config: %v\n", err)
-		return args, nil
-	}
-	if cfg == nil {
-		return args, nil
-	}
-	return expandAliases(args, cfg.Aliases)
-}
+	rootCmd.SetArgs(args)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
