@@ -216,9 +216,6 @@ func validateAliasTarget(command string) error {
 	return nil
 }
 
-// aliasCommandPath returns the non-flag prefix of an alias command. It is used
-// to validate that the alias points to a registered command before the
-// command's flags and positional arguments are considered.
 func aliasCommandPath(tokens []string) []string {
 	for i, token := range tokens {
 		if strings.HasPrefix(token, "-") {
@@ -228,11 +225,6 @@ func aliasCommandPath(tokens []string) []string {
 	return tokens
 }
 
-// parseAliasTarget splits a stored alias command into argv tokens using simple
-// shell-like rules: whitespace separates tokens, single quotes preserve
-// everything until the next single quote, double quotes preserve everything
-// except escaped double quotes, and backslash escapes the next character
-// outside single quotes.
 func parseAliasTarget(command string) ([]string, error) {
 	tokens := make([]string, 0, strings.Count(command, " ")+1)
 	var current strings.Builder
