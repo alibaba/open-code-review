@@ -19,6 +19,7 @@ Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
   config       Manage configuration settings
+  alias        Manage command aliases
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
@@ -30,6 +31,7 @@ Examples:
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
+  ocr alias set cp 'config provider'       Set a command alias
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
   ocr session list                         List saved review sessions
@@ -38,6 +40,7 @@ Examples:
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.
+Use "ocr alias" for more information about command aliases.
 Use "ocr llm" for more information about LLM utilities.
 Use "ocr session -h" for more information about session inspection.
 
@@ -54,6 +57,9 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr config unset custom_providers.<name>` | — | Удаляет пользовательского провайдера (если он был активен, сбрасывает активные `provider`/`model`). |
 | `ocr config provider` | — | Интерактивный TUI для настройки провайдера. |
 | `ocr config model` | — | Интерактивный TUI для выбора модели. |
+| `ocr alias set <name> <command>` | — | Определяет псевдоним команды, сохраняемый в пользовательской конфигурации. |
+| `ocr alias rm <name>` | — | Удаляет псевдоним команды. |
+| `ocr alias list` | — | Выводит настроенные псевдонимы команд. |
 | `ocr llm test` | — | Отправляет небольшой запрос в чат для проверки настроенного эндпоинта. |
 | `ocr llm providers` | — | Выводит список всех встроенных LLM-провайдеров. |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | Выводит список сохранённых сессий ревью. |
@@ -446,6 +452,31 @@ ocr config model                           Interactive model selection
 
 Полный справочник по ключам, схемы и примеры приведены в разделе
 [Конфигурация](../configuration/).
+
+## `ocr alias`
+
+Управляет пользовательскими псевдонимами команд, которые хранятся в
+`~/.opencodereview/config.json`.
+
+```text
+ocr alias set <name> <command>
+ocr alias rm <name>
+ocr alias list
+```
+
+Примеры:
+
+```bash
+ocr alias set cp 'config provider'
+ocr alias set rq 'review --audience agent'
+
+ocr cp
+ocr rq --format json
+```
+
+Аргумент команды должен быть одной строкой в кавычках и не должен начинаться с
+`ocr`. Псевдонимы не могут затенять встроенные команды или их псевдонимы.
+Посмотреть настроенные псевдонимы можно с помощью `ocr alias list`.
 
 ## `ocr llm`
 

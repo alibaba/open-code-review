@@ -18,6 +18,7 @@ Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
   config       Manage configuration settings
+  alias        Manage command aliases
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
@@ -29,6 +30,7 @@ Examples:
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
+  ocr alias set cp 'config provider'       Set a command alias
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
   ocr session list                         List saved review sessions
@@ -37,6 +39,7 @@ Examples:
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.
+Use "ocr alias" for more information about command aliases.
 Use "ocr llm" for more information about LLM utilities.
 Use "ocr session -h" for more information about session inspection.
 
@@ -54,6 +57,9 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr config unset custom_providers.<name>` | — | 删除一个自定义 provider（若它是当前启用的，则清空启用的 `provider`/`model`）。 |
 | `ocr config provider` | — | 交互式 provider 配置 TUI。 |
 | `ocr config model` | — | 交互式 model 选择 TUI。 |
+| `ocr alias set <name> <command>` | — | 定义一个保存到用户配置中的命令别名。 |
+| `ocr alias rm <name>` | — | 删除一个命令别名。 |
+| `ocr alias list` | — | 列出已配置的命令别名。 |
 | `ocr llm test` | — | 发送一条简短 chat 请求以验证配置的端点。 |
 | `ocr llm providers` | — | 列出所有内置 LLM provider。 |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话。 |
@@ -441,6 +447,29 @@ ocr config model                           Interactive model selection
   `ocr config set model <name>`）。
 
 完整的 key 参考、schema 与示例见[配置](../configuration/)。
+
+## `ocr alias`
+
+管理保存在 `~/.opencodereview/config.json` 中的用户自定义命令别名。
+
+```text
+ocr alias set <name> <command>
+ocr alias rm <name>
+ocr alias list
+```
+
+示例：
+
+```bash
+ocr alias set cp 'config provider'
+ocr alias set rq 'review --audience agent'
+
+ocr cp
+ocr rq --format json
+```
+
+命令参数必须是一个带引号的字符串，并且不能包含开头的 `ocr`。别名不能遮蔽内置
+命令或其别名。使用 `ocr alias list` 查看已配置的别名。
 
 ## `ocr llm`
 

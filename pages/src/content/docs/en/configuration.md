@@ -11,6 +11,43 @@ to edit it:
 - **Command line** — `ocr config set <key> <value>`, ideal for scripts and CI.
 - **Manual edit (not recommended)** — the JSON file directly (it gets reformatted on the next `ocr config set` write).
 
+## Command aliases
+
+You can shorten frequently used commands with `ocr alias`. Aliases are stored in
+the same user-level config file and expand before normal command routing.
+
+```bash
+ocr alias set cp 'config provider'
+ocr alias set rq 'review --audience agent'
+
+ocr cp
+ocr rq --format json
+```
+
+The alias command text is one quoted argument and must not include the leading
+`ocr`. Extra arguments after the alias are appended to the stored command.
+Manage aliases with:
+
+```bash
+ocr alias list
+ocr alias rm cp
+```
+
+Alias names must start with a letter or digit and may contain letters, digits,
+`-`, and `_`. They cannot shadow built-in commands such as `review` or
+`config`.
+
+The equivalent JSON entry is:
+
+```json
+{
+  "aliases": {
+    "cp": "config provider",
+    "rq": "review --audience agent"
+  }
+}
+```
+
 ## Configuring a model
 
 ### Recommended: interactive setup

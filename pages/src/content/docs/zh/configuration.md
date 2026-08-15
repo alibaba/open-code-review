@@ -10,6 +10,41 @@ sidebar:
 - **命令行** —— `ocr config set <key> <value>`，适合脚本与 CI。
 - **手动编辑（不推荐）** —— 该 JSON 文件（下次 `ocr config set` 写入时会重新格式化）。
 
+## 命令别名
+
+可以用 `ocr alias` 为常用命令设置简短的别名。别名保存在同一份用户配置文件中，
+并在正常命令路由前展开。
+
+```bash
+ocr alias set cp 'config provider'
+ocr alias set rq 'review --audience agent'
+
+ocr cp
+ocr rq --format json
+```
+
+别名命令文本是一个带引号的参数，不能包含开头的 `ocr`。别名后面的额外参数会追加到
+保存的命令之后。使用以下命令管理别名：
+
+```bash
+ocr alias list
+ocr alias rm cp
+```
+
+别名名称必须以字母或数字开头，且只能包含字母、数字、`-` 和 `_`。它们不能遮蔽
+`review`、`config` 等内置命令。
+
+对应的 JSON 条目如下：
+
+```json
+{
+  "aliases": {
+    "cp": "config provider",
+    "rq": "review --audience agent"
+  }
+}
+```
+
 ## 配置模型
 
 ### 推荐：交互式设置

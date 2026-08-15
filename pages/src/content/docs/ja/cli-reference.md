@@ -18,6 +18,7 @@ Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
   config       Manage configuration settings
+  alias        Manage command aliases
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
@@ -29,6 +30,7 @@ Examples:
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
+  ocr alias set cp 'config provider'       Set a command alias
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
   ocr session list                         List saved review sessions
@@ -37,6 +39,7 @@ Examples:
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.
+Use "ocr alias" for more information about command aliases.
 Use "ocr llm" for more information about LLM utilities.
 Use "ocr session -h" for more information about session inspection.
 
@@ -54,6 +57,9 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr config unset custom_providers.<name>` | — | カスタムプロバイダーを削除します（現在有効なものであれば、有効な `provider`/`model` もクリアされます）。 |
 | `ocr config provider` | — | 対話的なプロバイダー設定 TUI。 |
 | `ocr config model` | — | 対話的な model 選択 TUI。 |
+| `ocr alias set <name> <command>` | — | ユーザー設定に保存されるコマンドエイリアスを定義します。 |
+| `ocr alias rm <name>` | — | コマンドエイリアスを削除します。 |
+| `ocr alias list` | — | 設定済みのコマンドエイリアスを一覧表示します。 |
 | `ocr llm test` | — | 短い chat リクエストを送信し、設定されたエンドポイントを検証します。 |
 | `ocr llm providers` | — | 組み込みの LLM プロバイダーをすべて一覧表示します。 |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 保存されたレビューセッションを一覧表示します。 |
@@ -434,6 +440,31 @@ ocr config model                           Interactive model selection
 - **`model`**: 対話的な model 選択 TUI を起動します（追加の引数なし。非対話的には `ocr config set model <name>` を使用してください）。
 
 key の完全なリファレンス、schema、例は[設定](../configuration/)を参照してください。
+
+## `ocr alias`
+
+`~/.opencodereview/config.json` に保存されるユーザー定義コマンドエイリアスを
+管理します。
+
+```text
+ocr alias set <name> <command>
+ocr alias rm <name>
+ocr alias list
+```
+
+例：
+
+```bash
+ocr alias set cp 'config provider'
+ocr alias set rq 'review --audience agent'
+
+ocr cp
+ocr rq --format json
+```
+
+command 引数は 1 つの引用符付き文字列で、先頭の `ocr` を含めてはいけません。
+エイリアス名は組み込みコマンドやそのエイリアスを上書きできません。設定済みの
+エイリアスは `ocr alias list` で確認できます。
 
 ## `ocr llm`
 

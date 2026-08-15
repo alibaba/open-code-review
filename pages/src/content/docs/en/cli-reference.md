@@ -19,6 +19,7 @@ Commands:
   review, r    Start a code review
   rules        Inspect and debug review rules
   config       Manage configuration settings
+  alias        Manage command aliases
   llm          LLM utility commands
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
@@ -30,6 +31,7 @@ Examples:
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
+  ocr alias set cp 'config provider'       Set a command alias
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
   ocr session list                         List saved review sessions
@@ -38,6 +40,7 @@ Examples:
 Use "ocr review -h" for more information about review.
 Use "ocr rules -h" for more information about rules.
 Use "ocr config" for more information about config.
+Use "ocr alias" for more information about command aliases.
 Use "ocr llm" for more information about LLM utilities.
 Use "ocr session -h" for more information about session inspection.
 
@@ -55,6 +58,9 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr config unset custom_providers.<name>` | — | Delete a custom provider (clears active `provider`/`model` if it was active). |
 | `ocr config provider` | — | Interactive provider-setup TUI. |
 | `ocr config model` | — | Interactive model-selection TUI. |
+| `ocr alias set <name> <command>` | — | Define a command alias stored in the user config. |
+| `ocr alias rm <name>` | — | Remove a command alias. |
+| `ocr alias list` | — | List configured command aliases. |
 | `ocr llm test` | — | Send a small chat request to verify the configured endpoint. |
 | `ocr llm providers` | — | List all built-in LLM providers. |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions. |
@@ -468,6 +474,31 @@ ocr config model                           Interactive model selection
 
 See [Configuration](../configuration/) for the full key reference,
 schemas, and examples.
+
+## `ocr alias`
+
+Manage user-defined command aliases stored in
+`~/.opencodereview/config.json`.
+
+```text
+ocr alias set <name> <command>
+ocr alias rm <name>
+ocr alias list
+```
+
+Examples:
+
+```bash
+ocr alias set cp 'config provider'
+ocr alias set rq 'review --audience agent'
+
+ocr cp
+ocr rq --format json
+```
+
+The command argument must be one quoted string and must not include the
+leading `ocr`. Alias names cannot shadow built-in commands or their aliases.
+Use `ocr alias list` to inspect the configured aliases.
 
 ## `ocr llm`
 

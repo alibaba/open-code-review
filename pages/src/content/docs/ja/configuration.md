@@ -10,6 +10,42 @@ sidebar:
 - **コマンドライン** —— `ocr config set <key> <value>`。スクリプトや CI に適しています。
 - **手動編集（非推奨）** —— この JSON ファイルを直接編集（次回の `ocr config set` 書き込み時に再フォーマットされます）。
 
+## コマンドエイリアス
+
+`ocr alias` を使うと、よく使うコマンドを短くできます。エイリアスは同じユーザー
+設定ファイルに保存され、通常のコマンドルーティングの前に展開されます。
+
+```bash
+ocr alias set cp 'config provider'
+ocr alias set rq 'review --audience agent'
+
+ocr cp
+ocr rq --format json
+```
+
+エイリアスのコマンド文字列は 1 つの引用符付き引数で、先頭の `ocr` を含めない
+でください。エイリアスの後にある追加引数は、保存したコマンドの末尾に追加され
+ます。エイリアスは次のコマンドで管理できます。
+
+```bash
+ocr alias list
+ocr alias rm cp
+```
+
+エイリアス名は英字または数字で始まり、英字、数字、`-`、`_` のみを含めます。
+`review` や `config` などの組み込みコマンドを上書きすることはできません。
+
+対応する JSON エントリは次のとおりです。
+
+```json
+{
+  "aliases": {
+    "cp": "config provider",
+    "rq": "review --audience agent"
+  }
+}
+```
+
 ## モデルを設定する
 
 ### 推奨：インタラクティブ設定
