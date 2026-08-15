@@ -241,6 +241,7 @@ func New(args Args) *Agent {
 		CommentWorkerPool: args.CommentWorkerPool,
 		Session:           args.Session,
 		DiffLookup:        a.findDiff,
+		AllDiffs:          a.allDiffs,
 		// Non-nil only here: the same Runner serves scan, whose requests must
 		// stay out of the retry report. See newRequestMeta.
 		NewRequestMeta: a.newRequestMeta,
@@ -1748,6 +1749,14 @@ func orderedToolParameters(raw json.RawMessage) ([]orderedToolParameter, bool) {
 		return nil, false
 	}
 	return params, true
+}
+
+// allDiffs exposes the reviewed diff set for cross-file comment re-filing.
+// It is read-only and safe to call from the per-file subtask goroutines: every
+// mutation of a.diffs (filterDiffs, filterLargeDiffs) completes before dispatch
+// begins, so the slice is stable for the rest of the run.
+func (a *Agent) allDiffs() []model.Diff {
+	return a.diffs
 }
 
 // findDiff returns the Diff for the given file path, or nil if not found.
