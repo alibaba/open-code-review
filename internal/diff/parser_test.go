@@ -272,3 +272,36 @@ index 1234567..89abcde 100644
 		t.Errorf("Insertions = %d, want 1", d.Insertions)
 	}
 }
+
+// TestParseDiffText_CRLFLineEndings guards against CRLF (\r\n) line endings in diffs:
+// trailing carriage returns must be stripped so NewPath is not polluted with '\r',
+// metadata markers like "--- /dev/null" match correctly, and file reading succeeds.
+func TestParseDiffText_CRLFLineEndings(t *testing.T) {
+	diffText := "diff --git a/fresh.go b/fresh.go\r\n" +
+		"new file mode 100644\r\n" +
+		"index 0000000..1234567\r\n" +
+		"--- /dev/null\r\n" +
+		"+++ b/fresh.go\r\n" +
+		"@@ -0,0 +1,2 @@\r\n" +
+		"+line1\r\n" +
+		"+line2\r\n"
+
+	dir := t.TempDir()
+	diffs, err := ParseDiffText(context.Background(), diffText, dir, "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	d := diffs[0]
+	if d.NewPath != "fresh.go" {
+		t.Errorf("NewPath = %q, want %q", d.NewPath, "fresh.go")
+	}
+	if !d.IsNew {
+		t.Errorf("IsNew = false, want true")
+	}
+	if d.Insertions != 2 {
+		t.Errorf("Insertions = %d, want 2", d.Insertions)
+	}
+}

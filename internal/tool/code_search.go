@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -99,7 +100,7 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 }
 
 func hasTraversalPathComponent(pathspec string) bool {
-	for _, part := range strings.Split(pathspec, "/") {
+	for _, part := range strings.Split(filepath.ToSlash(pathspec), "/") {
 		if part == ".." {
 			return true
 		}

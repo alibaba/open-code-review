@@ -599,3 +599,17 @@ func TestBuildGrepArgs_NoIndex(t *testing.T) {
 	assertContains(t, args, "--exclude-standard")
 	assertNotContains(t, args, "--untracked")
 }
+
+func TestCodeSearch_RejectsBackslashPathTraversal(t *testing.T) {
+	p := NewCodeSearch(&FileReader{RepoDir: "/tmp", Ref: ""})
+	result, err := p.Execute(context.Background(), map[string]any{
+		"search_text":   "foo",
+		"file_patterns": []any{"..\\secret", "foo\\..\\bar"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Error: file_patterns must not contain ..") {
+		t.Errorf("expected traversal error, got: %s", result)
+	}
+}
