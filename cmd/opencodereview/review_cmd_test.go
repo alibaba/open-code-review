@@ -10,8 +10,32 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/session"
 )
+
+func TestApplyReviewMaxToolsOverride(t *testing.T) {
+	tests := []struct {
+		name     string
+		maxTools int
+		want     int
+	}{
+		{name: "template default", maxTools: 0, want: 30},
+		{name: "lower override", maxTools: 10, want: 10},
+		{name: "middle override", maxTools: 20, want: 20},
+		{name: "higher override", maxTools: 40, want: 40},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tpl := &template.Template{MaxToolRequestTimes: 30}
+			applyReviewMaxToolsOverride(tpl, tt.maxTools)
+			if tpl.MaxToolRequestTimes != tt.want {
+				t.Errorf("MaxToolRequestTimes = %d, want %d", tpl.MaxToolRequestTimes, tt.want)
+			}
+		})
+	}
+}
 
 func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
 	err := validateReviewRefs(t.TempDir(), reviewOptions{commit: "-O./pwn.sh"})
