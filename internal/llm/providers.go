@@ -335,10 +335,6 @@ var registry = []Provider{
 		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.x.ai/v1",
 		EnvVar:      "XAI_API_KEY",
-		// Current-generation text models, verified against the xAI catalog
-		// (https://docs.x.ai/developers/models). Users can point to any other
-		// Grok model via `ocr config set model <name>`; the preset only
-		// seeds the picker UI.
 		Models: []string{
 			"grok-4.6",
 			"grok-4.5",
