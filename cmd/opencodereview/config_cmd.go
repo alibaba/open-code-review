@@ -319,6 +319,7 @@ type Config struct {
 	Llm             LlmConfig                  `json:"llm,omitempty"`
 	Language        string                     `json:"language,omitempty"`
 	Telemetry       *TelemetryConfig           `json:"telemetry,omitempty"`
+	Aliases         map[string]string          `json:"aliases,omitempty"`
 	MCPServers      map[string]MCPServerConfig `json:"mcp_servers,omitempty"`
 }
 

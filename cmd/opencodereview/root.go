@@ -41,6 +41,7 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(llmCmd)
 	rootCmd.AddCommand(rulesCmd)
+	rootCmd.AddCommand(aliasCmd)
 	rootCmd.AddCommand(viewerCmd)
 	rootCmd.AddCommand(completionCmd)
 }

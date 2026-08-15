@@ -22,6 +22,13 @@ func main() {
 		defer telemetry.ShutdownWithTimeout(ctx, 5*time.Second)
 	}
 
+	args, err := expandConfiguredAliases(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	rootCmd.SetArgs(args)
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
