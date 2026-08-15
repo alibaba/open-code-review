@@ -1345,26 +1345,46 @@ var filterTools = []llm.ToolDef{
 	{
 		Type: "function",
 		Function: llm.FunctionDef{
-			Name:        "report_incorrect_comments",
-			Description: "Report review comments that are provably incorrect based on the diff. Call this when one or more comments can be confirmed as wrong.",
+			Name: "report_incorrect_comments",
+			Description: "Report review comments that this diff proves to be factually wrong: either the code they target is absent from the diff, " +
+				"or one diff line literally contradicts their central claim. For every id listed you must be able to name that line. " +
+				"Do not use this for comments you merely find unconvincing, unverifiable, or low-value, nor for comments about memory safety, " +
+				"concurrency, linkage consistency, unused parameters, or behavioral changes.",
+			// Field order matters and is load-bearing. Go serializes these
+			// properties alphabetically, so "analysis" is emitted before
+			// "comment_ids" and the model reasons before it commits. With the
+			// order reversed it picks ids first and cannot retract them: replaying
+			// recorded sessions showed it writing "this is a protected subject, I
+			// should not remove it" in the later field while the id stayed in the
+			// earlier one. Do not rename these fields into a different relative
+			// order.
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"analysis": map[string]any{
+						"type": "array",
+						"description": "Work through every candidate comment BEFORE deciding. One entry per candidate: its id, " +
+							"whether its subject hits the protected-subject veto (Step 1) or the value veto (Step 2), " +
+							"the exact diff line that refutes it if any, and your final call. " +
+							"Only ids you conclude here as removable may appear in comment_ids.",
+						"items": map[string]any{"type": "string"},
+					},
 					"comment_ids": map[string]any{
 						"type":        "array",
-						"description": "IDs of incorrect comments, e.g. [\"c-0\", \"c-2\"]. Must not be empty.",
+						"description": "IDs concluded removable in analysis, e.g. [\"c-0\", \"c-2\"]. Must not be empty.",
 						"items":       map[string]any{"type": "string"},
 					},
 				},
-				"required": []any{"comment_ids"},
+				"required": []any{"analysis", "comment_ids"},
 			},
 		},
 	},
 	{
 		Type: "function",
 		Function: llm.FunctionDef{
-			Name:        "approve_all_comments",
-			Description: "Confirm that all review comments are correct or cannot be disproved from the diff alone. Call this when no comment can be confirmed as incorrect.",
+			Name: "approve_all_comments",
+			Description: "Keep every review comment. Call this whenever no comment clears the removal bar — including when comments look doubtful, " +
+				"cannot be verified from the diff alone, or seem minor. This is the expected outcome for most files.",
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -1417,11 +1437,11 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-		Model:     a.args.Model,
-		Messages:  messages,
+		Model:      a.args.Model,
+		Messages:   messages,
 		Tools:      filterTools,
 		ToolChoice: "required",
-		MaxTokens: a.args.Template.CompletionTokenLimit(),
+		MaxTokens:  a.args.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {
