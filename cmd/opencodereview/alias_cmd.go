@@ -190,6 +190,10 @@ func validateAliasTarget(command string) error {
 	if err != nil {
 		return err
 	}
+	return validateAliasTokens(tokens, command)
+}
+
+func validateAliasTokens(tokens []string, command string) error {
 	if len(tokens) == 0 {
 		return fmt.Errorf("alias command cannot be empty")
 	}
@@ -324,7 +328,7 @@ func expandAliases(args []string, aliases map[string]string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("expand alias %q: %w", args[0], err)
 	}
-	if err := validateAliasTarget(target); err != nil {
+	if err := validateAliasTokens(tokens, target); err != nil {
 		return nil, fmt.Errorf("invalid alias %q: %w", args[0], err)
 	}
 
