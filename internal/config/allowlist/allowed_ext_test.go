@@ -145,6 +145,16 @@ func TestIsExcludedPath(t *testing.T) {
 		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
 		{"julia non-test", "src/model.jl", false},
 
+		// Swift test files
+		{"swift Tests suffix", "MyAppTests/UserTests.swift", true},
+		{"swift Tests suffix nested", "Tests/AppTests/UserTests.swift", true},
+		{"swift UITests suffix", "MyAppUITests/LaunchTests.swift", true},
+		{"swift Test suffix", "MyAppTests/UserTest.swift", true},
+		{"swift Test dir helper", "Tests/AppTests/Mocks/MockService.swift", true},
+		{"swift tests dir lowercase", "tests/AppTests/Helpers/Helper.swift", true},
+		{"swift non-test", "Sources/App/User.swift", false},
+		{"swift helper with test in name", "Sources/App/TestSupport.swift", false},
+
 		// Haskell test files
 		{"haskell test directory", "test/Parser.hs", true},
 		{"haskell nested test directory", "packages/core/test/unit/Parser.hs", true},

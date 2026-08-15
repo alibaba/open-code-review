@@ -26,6 +26,8 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
+  ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
@@ -92,11 +94,14 @@ unstaged + untracked 变更。
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
 | `--audience <who>` | — | `human` | `human` 流式输出进度行；`agent` 静默 stdout，只打印最终摘要 / JSON。 |
 | `--background <text>` | `-b` | — | 注入 plan + main prompt 的可选需求 / 业务上下文。 |
+| `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
+| `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式；与 `rule.json` 的 excludes 合并。 |
 | `--concurrency <n>` | — | `8` | 并行评审的最大文件数。 |
 | `--timeout <minutes>` | — | `10` | 每文件截止时间。`0` 关闭超时。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
 | `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`30`）；1–9 会被上调到 `10`；任何 `≥ 10` 的值都覆盖模板默认（即使小于 `30`）。 |
 | `--max-tokens <n>` | — | 配置或模板默认 | 每文件提示词 token 上限。覆盖本次运行已保存的 `max_tokens` 设置。 |
+| `--max-tokens-budget <n>` | — | `0`（无限制） | 限制本次评审的输入 + 输出 token 总量。超出预算后停止分发，并仍会发布部分结果。 |
 | `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
 | `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |

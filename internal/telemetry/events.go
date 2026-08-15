@@ -68,23 +68,36 @@ func FormatDuration(dur time.Duration) string {
 	return dur.Round(time.Millisecond).String()
 }
 
+// TraceSummary carries the metrics printed by PrintTraceSummary.
+type TraceSummary struct {
+	FilesReviewed     int64
+	CommentsGenerated int64
+	InputTokens       int64
+	OutputTokens      int64
+	TotalTokens       int64
+	CacheReadTokens   int64
+	CacheWriteTokens  int64
+	Duration          time.Duration
+	SessionID         string
+}
+
 // PrintTraceSummary prints a one-line summary of the review to stdout.
-// If sessionID is non-empty, an "[ocr] Session: <id>" line follows the summary.
-func PrintTraceSummary(filesReviewed, commentsGenerated int64, inputTokens, outputTokens, totalTokens int64, cacheReadTokens, cacheWriteTokens int64, duration time.Duration, sessionID string) {
-	elapsed := duration.Round(time.Second).String()
-	if inputTokens > 0 || outputTokens > 0 {
+// If SessionID is non-empty, an "[ocr] Session: <id>" line follows the summary.
+func PrintTraceSummary(s TraceSummary) {
+	elapsed := s.Duration.Round(time.Second).String()
+	if s.InputTokens > 0 || s.OutputTokens > 0 {
 		base := fmt.Sprintf("[ocr] Summary: %d file(s) reviewed, %d comment(s), ~%d token(s) used (input: ~%d, output: ~%d)",
-			filesReviewed, commentsGenerated, totalTokens, inputTokens, outputTokens)
-		if cacheReadTokens > 0 || cacheWriteTokens > 0 {
-			base += fmt.Sprintf(", cache(read: ~%d, write: ~%d)", cacheReadTokens, cacheWriteTokens)
+			s.FilesReviewed, s.CommentsGenerated, s.TotalTokens, s.InputTokens, s.OutputTokens)
+		if s.CacheReadTokens > 0 || s.CacheWriteTokens > 0 {
+			base += fmt.Sprintf(", cache(read: ~%d, write: ~%d)", s.CacheReadTokens, s.CacheWriteTokens)
 		}
 		fmt.Fprintf(stdout.Writer(), "%s, %s elapsed\n", base, elapsed)
 	} else {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Summary: %d file(s) reviewed, %d comment(s), ~%d token(s) used, %s elapsed\n",
-			filesReviewed, commentsGenerated, totalTokens, elapsed)
+			s.FilesReviewed, s.CommentsGenerated, s.TotalTokens, elapsed)
 	}
-	if sessionID != "" {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Session: %s\n", sessionID)
+	if s.SessionID != "" {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Session: %s\n", s.SessionID)
 	}
 }
 

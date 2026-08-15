@@ -29,5 +29,8 @@
   "**/*.gen.go",
   "**/*.pb.go",
   "**/*.pb.cc",
-  "**/*.pb.h"
+  "**/*.pb.h",
+  "**/*Test.swift",
+  "**/*Tests.swift",
+  "**/Tests/**/*.swift"
 ]

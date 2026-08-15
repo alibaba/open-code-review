@@ -61,6 +61,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `siliconflow`  | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
+| `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
 ### 組み込み provider の Base URL を上書きする
 
