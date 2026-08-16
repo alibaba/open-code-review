@@ -914,6 +914,90 @@ func TestOpenAIClient_NonStreamingRequestDropsStreamField(t *testing.T) {
 	}
 }
 
+func TestOpenAIClient_PreservesToolCallExtraFieldsAcrossTurns(t *testing.T) {
+	var requestNumber atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		current := requestNumber.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if current == 1 {
+			_, _ = fmt.Fprint(w, `{
+				"id":"chatcmpl-tools",
+				"object":"chat.completion",
+				"model":"gemini-compatible",
+				"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{
+					"id":"call_read",
+					"type":"function",
+					"function":{"name":"file_read","arguments":"{\"path\":\"main.go\"}"},
+					"extra_content":{"google":{"thought_signature":"opaque-signature"}}
+				}]},"finish_reason":"tool_calls"}]
+			}`)
+			return
+		}
+
+		var body struct {
+			Messages []struct {
+				Role      string           `json:"role"`
+				ToolCalls []map[string]any `json:"tool_calls"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode second request: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		if len(body.Messages) < 2 || len(body.Messages[1].ToolCalls) != 1 {
+			t.Errorf("second request messages = %#v, want assistant tool call", body.Messages)
+			http.Error(w, "missing tool call", http.StatusBadRequest)
+			return
+		}
+		extraContent, ok := body.Messages[1].ToolCalls[0]["extra_content"].(map[string]any)
+		if !ok {
+			t.Errorf("extra_content = %#v, want object", body.Messages[1].ToolCalls[0]["extra_content"])
+			http.Error(w, "missing extra_content", http.StatusBadRequest)
+			return
+		}
+		google, ok := extraContent["google"].(map[string]any)
+		if !ok || google["thought_signature"] != "opaque-signature" {
+			t.Errorf("extra_content.google = %#v, want opaque thought signature", extraContent["google"])
+			http.Error(w, "missing thought signature", http.StatusBadRequest)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{
+			"id":"chatcmpl-done",
+			"object":"chat.completion",
+			"model":"gemini-compatible",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]
+		}`)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gemini-compatible",
+	})
+	first, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "read main.go"}},
+	})
+	if err != nil {
+		t.Fatalf("first completion: %v", err)
+	}
+
+	second, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{
+			{Role: "user", Content: "read main.go"},
+			NewToolCallMessage(first.Content(), first.ToolCalls()),
+			NewToolResultMessage("call_read", "package main"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("second completion: %v", err)
+	}
+	if got := second.Content(); got != "done" {
+		t.Fatalf("second completion content = %q, want done", got)
+	}
+}
+
 func TestOpenAIClient_StreamingToolCall(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeOpenAISSE(t, w,
