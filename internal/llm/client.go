@@ -218,9 +218,10 @@ type Choice struct {
 
 // ToolCall represents a function call requested by the model.
 type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"`
-	Function FunctionCall `json:"function"`
+	ID          string                     `json:"id"`
+	Type        string                     `json:"type"`
+	Function    FunctionCall               `json:"function"`
+	ExtraFields map[string]json.RawMessage `json:"-"`
 }
 
 // FunctionCall holds the name and arguments of a tool call.
@@ -738,14 +739,25 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 				asst.Content.OfString = openai.String(content)
 			}
 			for _, tc := range msg.ToolCalls {
-				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-						ID: tc.ID,
-						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-							Name:      tc.Function.Name,
-							Arguments: tc.Function.Arguments,
-						},
+				functionCall := openai.ChatCompletionMessageFunctionToolCallParam{
+					ID: tc.ID,
+					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
 					},
+				}
+				if len(tc.ExtraFields) > 0 {
+					extraFields := make(map[string]any, len(tc.ExtraFields))
+					for name, raw := range tc.ExtraFields {
+						if name == "id" || name == "type" || name == "function" || !json.Valid(raw) {
+							continue
+						}
+						extraFields[name] = raw
+					}
+					functionCall.SetExtraFields(extraFields)
+				}
+				asst.ToolCalls = append(asst.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+					OfFunction: &functionCall,
 				})
 			}
 			// reasoning_content: gateway extension not modeled by the SDK (#805).
@@ -810,9 +822,19 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 	for _, ch := range sdkResp.Choices {
 		var toolCalls []ToolCall
 		for _, tc := range ch.Message.ToolCalls {
+			var extraFields map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(tc.RawJSON()), &extraFields); err == nil {
+				delete(extraFields, "id")
+				delete(extraFields, "type")
+				delete(extraFields, "function")
+				if len(extraFields) == 0 {
+					extraFields = nil
+				}
+			}
 			toolCalls = append(toolCalls, ToolCall{
-				ID:   tc.ID,
-				Type: tc.Type,
+				ID:          tc.ID,
+				Type:        tc.Type,
+				ExtraFields: extraFields,
 				Function: FunctionCall{
 					Name:      tc.Function.Name,
 					Arguments: tc.Function.Arguments,
