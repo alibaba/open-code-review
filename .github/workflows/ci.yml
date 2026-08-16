@@ -55,8 +55,10 @@ jobs:
       
       - name: Check line endings
         run: |
-          if git ls-files --eol | grep -v 'i/lf\|i/none\|i/-text'; then
+          git add --renormalize .
+          if ! git diff --cached --quiet; then
             echo 'Line endings must end with LF. Have you normalized line endings?'
+            git diff --cached --stat
             exit 1
           fi
         
