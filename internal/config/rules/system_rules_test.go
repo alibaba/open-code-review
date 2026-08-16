@@ -118,6 +118,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"Sources/App/ContentView.swift", "Swift Review Principles"},
 		{"MyApp/Models/UserStore.swift", "Swift Review Principles"},
 		{"ChattyFit/ChattyFit/Views/WorkoutSessionView.swift", "SwiftUI State and Lifecycle"},
+		{"scripts/setup.nu", "Nushell Script Review Checklist"},
+		{"modules/user/init.nu", "Nushell Script Review Checklist"},
 	}
 
 	for _, tt := range tests {
