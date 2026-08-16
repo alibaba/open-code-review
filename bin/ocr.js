@@ -21,12 +21,21 @@ const { resolveNativeBinary } = require("../scripts/platform");
 // Exported for testing.
 function computeExit(result) {
   if (result.signal) {
+    // os.constants.signals has no entry for signal names Node doesn't
+    // recognize on this platform; fall back to SIGHUP's number (1) so we
+    // still report a signal-related failure instead of throwing.
     return {
       code: 128 + (os.constants.signals[result.signal] || 1),
       message: `[ERROR] OpenCodeReview binary was terminated by signal ${result.signal}`,
     };
   }
-  return { code: result.status ?? (result.error ? 1 : 0), message: null };
+  if (result.error) {
+    return {
+      code: result.status ?? 1,
+      message: `[ERROR] Failed to run OpenCodeReview binary: ${result.error.message}`,
+    };
+  }
+  return { code: result.status ?? 0, message: null };
 }
 
 function main() {

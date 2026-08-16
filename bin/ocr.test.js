@@ -26,10 +26,11 @@ const { computeExit } = require("./ocr.js");
 }
 
 // spawnSync itself failed (e.g. ENOENT) -- no status, no signal, has error.
+// The error's message should be surfaced, not silently discarded.
 {
   const { code, message } = computeExit({ status: null, signal: null, error: new Error("ENOENT") });
   assert.strictEqual(code, 1);
-  assert.strictEqual(message, null);
+  assert.match(message, /Failed to run OpenCodeReview binary: ENOENT/);
 }
 
 // Terminated by a signal: status is null and error is unset (this is the
