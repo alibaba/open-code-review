@@ -71,6 +71,11 @@ pages/
 │   ├── i18n/           # Localization resources and i18n context
 │   ├── styles/         # Global styles (Tailwind entry, custom CSS)
 │   └── index.tsx       # Frontend entry point
+├── public/             # Static files copied verbatim into dist/
+│   ├── CNAME           # Custom domain for GitHub Pages
+│   ├── og-image.png    # Open Graph / social share image
+│   ├── robots.txt      # Crawler directives and sitemap URL
+│   └── sitemap.xml     # Site URL inventory for search engines
 ├── dist/               # Production build artifacts (generated)
 ├── index.html          # HTML template used by HtmlWebpackPlugin
 ├── webpack.config.js   # Bundling + dev server config
@@ -79,6 +84,8 @@ pages/
 ├── tsconfig.json       # TypeScript compiler options
 └── package.json        # Dependencies and scripts
 ```
+
+The `public/` directory is copied as-is into the production build and deployed at the site root. It hosts the `CNAME` for the custom domain, the Open Graph share image, and the search-engine files (`robots.txt` and `sitemap.xml`).
 
 ## Development Guidelines
 

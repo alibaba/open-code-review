@@ -182,6 +182,7 @@ Full documentation lives at **[open-codereview.ai/docs](https://open-codereview.
 - [Session Viewer](https://open-codereview.ai/docs/viewer) — browse and replay review sessions in browser
 - [Telemetry](https://open-codereview.ai/docs/telemetry) — OpenTelemetry integration for observability
 - [FAQ](https://open-codereview.ai/docs/faq) — common questions and troubleshooting
+- [Website crawler files](https://open-codereview.ai/robots.txt) — robots.txt directives and the [sitemap.xml](https://open-codereview.ai/sitemap.xml)
 
 ## Contributing
 
