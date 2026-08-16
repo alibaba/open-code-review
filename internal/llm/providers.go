@@ -87,12 +87,26 @@ var registry = []Provider{
 		BaseURL:     "https://api.openai.com/v1",
 		EnvVar:      "OPENAI_API_KEY",
 		Models: []string{
-			"gpt-5.6-sol",
-			"gpt-5.6-terra",
-			"gpt-5.6-luna",
 			"gpt-5.5",
 			"gpt-5.4",
 			"gpt-5.4-mini",
+		},
+	},
+	{
+		// GPT-5.6 models require the OpenAI Responses API (/v1/responses):
+		// their tool-calling-with-reasoning workflow is rejected by
+		// /v1/chat/completions with a 400 (issue #559). They are served here
+		// under ProtocolOpenAIResponses instead of the "openai" preset so a
+		// user can select them without knowing which API protocol is required.
+		Name:        "openai-responses",
+		DisplayName: "OpenAI Responses API",
+		Protocol:    ProtocolOpenAIResponses,
+		BaseURL:     "https://api.openai.com/v1",
+		EnvVar:      "OPENAI_API_KEY",
+		Models: []string{
+			"gpt-5.6-sol",
+			"gpt-5.6-terra",
+			"gpt-5.6-luna",
 		},
 	},
 	{
