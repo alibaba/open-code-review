@@ -32,7 +32,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: pages
-        run: npm install
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          npm install
+          apt-get update
+          apt-get install -y --no-install-recommends libxml2-utils
 
       - name: Build
         working-directory: pages
@@ -41,6 +46,8 @@ jobs:
       - name: Prepare deployment artifact
         run: |
           mkdir -p _site
+          cp pages/public/robots.txt _site/robots.txt
+          cp pages/public/sitemap.xml _site/sitemap.xml
           cp -r pages/dist/* _site/
           cp pages/logo.svg _site/logo.svg
           cp pages/install.sh _site/install.sh
@@ -53,6 +60,12 @@ jobs:
           sh -n _site/install.sh
           cmp pages/install.sh _site/install.sh
           cmp pages/install.ps1 _site/install.ps1
+
+      - name: Lint crawler files
+        run: |
+          test -f _site/robots.txt && cmp pages/public/robots.txt _site/robots.txt
+          test -f _site/sitemap.xml && cmp pages/public/sitemap.xml _site/sitemap.xml
+          xmllint --noout _site/sitemap.xml
 
       - uses: actions/upload-pages-artifact@v5
         with:
