@@ -135,6 +135,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
+		{"src/Counter.sol", "Checks-Effects-Interactions"},
+		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
+		{"contracts/token.vy", "Language Restrictions"},
+		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
 	}
 
 	for _, tt := range tests {
