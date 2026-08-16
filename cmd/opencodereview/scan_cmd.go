@@ -23,28 +23,29 @@ import (
 )
 
 type scanOptions struct {
-	toolConfigPath  string
-	rulePath        string
-	repoDir         string
-	paths           string
-	excludes        string
-	outputFormat    string
-	audience        string
-	background      string
-	concurrency     int
-	perFileTimeout  int
-	maxTools        int
-	maxGitProcs     int
-	preview         bool
-	noPlan          bool
-	noDedup         bool
-	noSummary       bool
-	batch           string
-	maxTokens       int
-	maxTokensBudget int
-	provider        string
-	model           string
-	resume          string
+	toolConfigPath      string
+	rulePath            string
+	repoDir             string
+	paths               string
+	excludes            string
+	outputFormat        string
+	audience            string
+	background          string
+	concurrency         int
+	perFileTimeout      int
+	maxTools            int
+	maxGitProcs         int
+	preview             bool
+	noPlan              bool
+	noDedup             bool
+	noSummary           bool
+	batch               string
+	maxTokens           int
+	maxCompletionTokens int
+	maxTokensBudget     int
+	provider            string
+	model               string
+	resume              string
 }
 
 var scanOpts scanOptions
@@ -154,12 +155,19 @@ func executeScan(opts scanOptions) error {
 	if err != nil {
 		return err
 	}
-	scanTpl.MaxCompletionTokens = scanTpl.MaxTokens
+	embeddedCompletionTokens := scanTpl.MaxTokens
 	maxTokens, err := resolveMaxTokens(scanTpl.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
 	}
 	scanTpl.MaxTokens = maxTokens
+	maxCompletionTokens, err := resolveMaxCompletionTokens(
+		embeddedCompletionTokens, rt.AppCfg, opts.maxCompletionTokens,
+	)
+	if err != nil {
+		return err
+	}
+	scanTpl.MaxCompletionTokens = maxCompletionTokens
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,

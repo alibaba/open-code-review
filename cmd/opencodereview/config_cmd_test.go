@@ -114,6 +114,43 @@ func TestMaxTokensConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueMaxCompletionTokens(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "max_completion_tokens", "16384"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.MaxCompletionTokens != 16384 {
+		t.Errorf("MaxCompletionTokens = %d, want 16384", cfg.MaxCompletionTokens)
+	}
+}
+
+func TestSetConfigValueMaxCompletionTokensRejectsInvalidValues(t *testing.T) {
+	for _, value := range []string{"0", "-1", "not-a-number"} {
+		t.Run(value, func(t *testing.T) {
+			if err := setConfigValue(&Config{}, "max_completion_tokens", value); err == nil {
+				t.Fatalf("expected max_completion_tokens=%q to be rejected", value)
+			}
+		})
+	}
+}
+
+func TestMaxCompletionTokensConfigRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{MaxCompletionTokens: 16384}
+
+	if err := saveConfig(path, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+	loaded, err := LoadAppConfig(path)
+	if err != nil {
+		t.Fatalf("LoadAppConfig: %v", err)
+	}
+	if loaded.MaxCompletionTokens != 16384 {
+		t.Errorf("MaxCompletionTokens = %d, want 16384", loaded.MaxCompletionTokens)
+	}
+}
+
 func TestSetConfigValueModelWithProvider(t *testing.T) {
 	cfg := &Config{
 		Provider: "anthropic",
@@ -448,6 +485,33 @@ func TestUnsetMaxTokens(t *testing.T) {
 	}
 	if strings.Contains(string(data), "max_tokens") {
 		t.Errorf("max_tokens should be omitted after unset: %s", data)
+	}
+	loaded, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if loaded.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want anthropic", loaded.Provider)
+	}
+}
+
+func TestUnsetMaxCompletionTokens(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{Provider: "anthropic", MaxCompletionTokens: 16384}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	if err := unsetMaxCompletionTokens(configPath); err != nil {
+		t.Fatalf("unsetMaxCompletionTokens: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(data), "max_completion_tokens") {
+		t.Errorf("max_completion_tokens should be omitted after unset: %s", data)
 	}
 	loaded, err := loadOrCreateConfig(configPath)
 	if err != nil {
@@ -1018,7 +1082,7 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, max_tokens, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Supported keys: provider, model, max_tokens, max_completion_tokens, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
 		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\n" +
 		"Protocol values: anthropic, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"

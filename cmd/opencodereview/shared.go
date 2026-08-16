@@ -60,6 +60,24 @@ func resolveMaxTokens(templateDefault int, cfg *Config, cliOverride int) (int, e
 	return cfg.MaxTokens, nil
 }
 
+// resolveMaxCompletionTokens applies the independent per-request output cap.
+// It intentionally does not affect prompt compression or preflight thresholds.
+func resolveMaxCompletionTokens(templateDefault int, cfg *Config, cliOverride int) (int, error) {
+	if cliOverride < 0 {
+		return 0, fmt.Errorf("--max-completion-tokens must be a non-negative integer")
+	}
+	if cliOverride > 0 {
+		return cliOverride, nil
+	}
+	if cfg == nil || cfg.MaxCompletionTokens == 0 {
+		return templateDefault, nil
+	}
+	if cfg.MaxCompletionTokens < 0 {
+		return 0, fmt.Errorf("invalid max_completion_tokens in app config: must be a positive integer")
+	}
+	return cfg.MaxCompletionTokens, nil
+}
+
 // loadCommonContext validates the working directory, loads the embedded
 // template, raises MaxToolRequestTimes when maxTools exceeds the default,
 // resolves the absolute repo path, loads system review rules, and creates

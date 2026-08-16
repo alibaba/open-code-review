@@ -120,6 +120,23 @@ func TestParseReviewFlags_MaxTokensParsed(t *testing.T) {
 	}
 }
 
+func TestParseReviewFlags_NegativeMaxCompletionTokens(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--max-completion-tokens", "-1"})
+	if err == nil {
+		t.Fatal("expected error for negative max-completion-tokens")
+	}
+}
+
+func TestParseReviewFlags_MaxCompletionTokensParsed(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--max-completion-tokens", "16384"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.maxCompletionTokens != 16384 {
+		t.Errorf("maxCompletionTokens = %d, want 16384", opts.maxCompletionTokens)
+	}
+}
+
 func TestParseReviewFlags_BudgetFlagsDefaultZero(t *testing.T) {
 	opts, err := parseReviewFlags([]string{"--from", "main", "--to", "dev"})
 	if err != nil {

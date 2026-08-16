@@ -40,12 +40,16 @@ func addExcludeFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "exclude", "", "comma-separated gitignore-style patterns to exclude; merged with rule.json excludes")
 }
 
-func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, maxGitProcs, maxTokens, maxTokensBudget *int) {
+func addConcurrencyFlags(
+	cmd *cobra.Command,
+	concurrency, timeout, maxTools, maxGitProcs, maxTokens, maxCompletionTokens, maxTokensBudget *int,
+) {
 	cmd.Flags().IntVar(concurrency, "concurrency", 8, "max concurrent file reviews")
 	cmd.Flags().IntVar(timeout, "timeout", 10, "concurrent task timeout in minutes")
 	cmd.Flags().IntVar(maxTools, "max-tools", 0, "max tool call rounds per file (0 = template default; min 10)")
 	cmd.Flags().IntVar(maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")
+	cmd.Flags().IntVar(maxCompletionTokens, "max-completion-tokens", 0, "per-request completion token ceiling (0 = configured or template default)")
 	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; dispatch stops once exceeded and skipped files are reported as failed(budget). Partial results are published and review exits 0; it exits non-zero only if every selected item failed (0 = unlimited)")
 }
 
@@ -126,6 +130,9 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if opts.maxTokens < 0 {
 		return fmt.Errorf("--max-tokens must be a non-negative integer (0 means use configured or template default)")
 	}
+	if opts.maxCompletionTokens < 0 {
+		return fmt.Errorf("--max-completion-tokens must be a non-negative integer (0 means use configured or template default)")
+	}
 	if opts.maxTokensBudget < 0 {
 		return fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
 	}
@@ -144,6 +151,9 @@ func validateScanOptions(opts *scanOptions) error {
 	}
 	if opts.maxTokens < 0 {
 		return fmt.Errorf("--max-tokens must be a non-negative integer (0 means use configured or template default)")
+	}
+	if opts.maxCompletionTokens < 0 {
+		return fmt.Errorf("--max-completion-tokens must be a non-negative integer (0 means use configured or template default)")
 	}
 	if opts.preview && opts.resume != "" {
 		return fmt.Errorf("--preview and --resume cannot be used together")
@@ -174,7 +184,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	cmd.RegisterFlagCompletionFunc("resume", completeSessionIDs)
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
-	addConcurrencyFlags(cmd, &opts.concurrency, &opts.perFileTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokens, &opts.maxTokensBudget)
+	addConcurrencyFlags(cmd, &opts.concurrency, &opts.perFileTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokens, &opts.maxCompletionTokens, &opts.maxTokensBudget)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
@@ -195,6 +205,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
 	cmd.Flags().IntVar(&opts.maxTokens, "max-tokens", 0, "per-file prompt token ceiling (0 = configured or template default)")
+	cmd.Flags().IntVar(&opts.maxCompletionTokens, "max-completion-tokens", 0, "per-request completion token ceiling (0 = configured or template default)")
 	cmd.Flags().IntVar(&opts.maxTokensBudget, "max-tokens-budget", 0, "cap total token usage; dispatch stops once exceeded (0 = unlimited)")
 	cmd.Flags().StringVarP(&opts.background, "background", "b", "", "optional requirement/business context for the scan")
 	cmd.Flags().BoolVarP(&opts.preview, "preview", "p", false, "preview which files will be scanned without running the LLM")

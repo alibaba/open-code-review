@@ -58,6 +58,32 @@ func TestRunConfigSetPersists(t *testing.T) {
 
 // TestRunConfigUnsetPaths drives runConfigUnset across its dispatch branches.
 func TestRunConfigUnsetPaths(t *testing.T) {
+	t.Run("unset max completion tokens", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		configPath, err := defaultConfigPath()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := saveConfig(configPath, &Config{MaxCompletionTokens: 16384}); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+		out := captureStdout(t, func() {
+			if err := runConfigUnset("max_completion_tokens"); err != nil {
+				t.Fatalf("runConfigUnset: %v", err)
+			}
+		})
+		if !strings.Contains(out, "Cleared max_completion_tokens") {
+			t.Errorf("stdout = %q", out)
+		}
+		cfg, err := loadOrCreateConfig(configPath)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		if cfg.MaxCompletionTokens != 0 {
+			t.Errorf("MaxCompletionTokens = %d, want 0", cfg.MaxCompletionTokens)
+		}
+	})
+
 	t.Run("unset active provider clears provider and model", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		configPath, err := defaultConfigPath()

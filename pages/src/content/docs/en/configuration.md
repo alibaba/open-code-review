@@ -195,6 +195,30 @@ independent of both the model's output-token cap and `--max-tokens-budget`,
 which caps total token use for a run. Restore the embedded default with
 `ocr config unset max_tokens`.
 
+### Completion output limit
+
+Some providers expose models whose maximum completion is smaller than OCR's
+embedded task-template default. Set `max_completion_tokens` to cap each LLM
+response independently of the per-file prompt ceiling:
+
+```bash
+ocr config set max_completion_tokens 16384
+```
+
+The setting applies to both `ocr review` and `ocr scan`. Use
+`--max-completion-tokens` for a one-off override:
+
+```bash
+ocr review --max-completion-tokens 16384
+ocr scan --max-completion-tokens 16384
+```
+
+The per-run flag takes precedence over `max_completion_tokens`; when neither is
+set, OCR uses the embedded task-template default. This limit controls only the
+maximum output requested from the provider. It does not change prompt
+compression, preflight context checks, or `--max-tokens-budget`. Restore the
+embedded default with `ocr config unset max_completion_tokens`.
+
 ### Verify connectivity
 
 ```bash

@@ -27,28 +27,29 @@ import (
 )
 
 type reviewOptions struct {
-	toolConfigPath  string
-	rulePath        string
-	repoDir         string
-	from            string
-	to              string
-	commit          string
-	resume          string
-	excludes        string
-	outputFormat    string
-	audience        string
-	background      string
-	backgroundFile  string
-	provider        string
-	model           string
-	concurrency     int
-	perFileTimeout  int
-	maxTools        int
-	maxGitProcs     int
-	maxTokens       int
-	maxTokensBudget int
-	noFilter        bool
-	preview         bool
+	toolConfigPath      string
+	rulePath            string
+	repoDir             string
+	from                string
+	to                  string
+	commit              string
+	resume              string
+	excludes            string
+	outputFormat        string
+	audience            string
+	background          string
+	backgroundFile      string
+	provider            string
+	model               string
+	concurrency         int
+	perFileTimeout      int
+	maxTools            int
+	maxGitProcs         int
+	maxTokens           int
+	maxCompletionTokens int
+	maxTokensBudget     int
+	noFilter            bool
+	preview             bool
 }
 
 var reviewOpts reviewOptions
@@ -155,12 +156,19 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	if err != nil {
 		return err
 	}
-	cc.Template.MaxCompletionTokens = cc.Template.MaxTokens
+	embeddedCompletionTokens := cc.Template.MaxTokens
 	maxTokens, err := resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
 	}
 	cc.Template.MaxTokens = maxTokens
+	maxCompletionTokens, err := resolveMaxCompletionTokens(
+		embeddedCompletionTokens, rt.AppCfg, opts.maxCompletionTokens,
+	)
+	if err != nil {
+		return err
+	}
+	cc.Template.MaxCompletionTokens = maxCompletionTokens
 
 	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
 	// input it returns pins the run to the very commits this check passed on, so

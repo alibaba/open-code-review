@@ -42,6 +42,36 @@ func TestResolveMaxTokensPrecedence(t *testing.T) {
 	}
 }
 
+func TestResolveMaxCompletionTokensPrecedence(t *testing.T) {
+	tests := []struct {
+		name        string
+		cfg         *Config
+		cliOverride int
+		template    int
+		want        int
+		wantErr     bool
+	}{
+		{name: "template default", template: 58888, want: 58888},
+		{name: "zero config is unset", cfg: &Config{}, template: 58888, want: 58888},
+		{name: "saved config", cfg: &Config{MaxCompletionTokens: 16384}, template: 58888, want: 16384},
+		{name: "cli overrides config", cfg: &Config{MaxCompletionTokens: 16384}, cliOverride: 8192, template: 58888, want: 8192},
+		{name: "negative config", cfg: &Config{MaxCompletionTokens: -1}, template: 58888, wantErr: true},
+		{name: "negative cli", cliOverride: -1, template: 58888, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveMaxCompletionTokens(tt.template, tt.cfg, tt.cliOverride)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("resolveMaxCompletionTokens() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("resolveMaxCompletionTokens() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestApplyCLIExcludes_Empty(t *testing.T) {
 	cc := &commonContext{FileFilter: &rules.FileFilter{Exclude: []string{"a"}}}
 	applyCLIExcludes(cc, nil)
