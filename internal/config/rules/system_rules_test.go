@@ -135,6 +135,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
+		{"src/parser.ml", "Pattern Matching"},
+		{"lib/parser.mli", "Pattern Matching"},
+		{"src/Component.re", "Pattern Matching"},
+		{"lib/Component.rei", "Pattern Matching"},
 	}
 
 	for _, tt := range tests {

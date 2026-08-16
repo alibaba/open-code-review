@@ -44,5 +44,6 @@
   "**/*.capnp.go",
   "**/*.capnp.ts",
   "**/*_capnp.rs",
-  "**/*_capnp.py"
+  "**/*_capnp.py",
+  "**/test/**/*.ml"
 ]

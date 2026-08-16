@@ -41,6 +41,8 @@
     "**/*.{jsonnet,libsonnet}": "jsonnet.md",
     "**/*.zig": "zig.md",
     "**/*.thrift": "thrift.md",
-    "**/*.capnp": "capnp.md"
+    "**/*.capnp": "capnp.md",
+    "**/*.{ml,mli}": "ocaml.md",
+    "**/*.{re,rei}": "ocaml.md"
   }
 }

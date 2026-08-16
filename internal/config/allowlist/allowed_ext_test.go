@@ -85,6 +85,14 @@ func TestIsAllowedExt(t *testing.T) {
 		{".THRIFT", true},
 		{".capnp", true},
 		{".CAPNP", true},
+		{".ml", true},
+		{".ML", true},
+		{".mli", true},
+		{".MLI", true},
+		{".re", true},
+		{".RE", true},
+		{".rei", true},
+		{".REI", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -166,6 +174,11 @@ func TestIsExcludedPath(t *testing.T) {
 		{"julia test file", "test/runtests.jl", true},
 		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
 		{"julia non-test", "src/model.jl", false},
+
+		// OCaml test files
+		{"ocaml test file", "test/foo_test.ml", true},
+		{"ocaml test nested", "lib/test/unit/parser.ml", true},
+		{"ocaml non-test", "src/parser.ml", false},
 
 		// Swift test files
 		{"swift Tests suffix", "MyAppTests/UserTests.swift", true},
