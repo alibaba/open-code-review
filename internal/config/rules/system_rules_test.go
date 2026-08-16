@@ -184,6 +184,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"scripts/deploy.ps1", "PowerShell Review Principles"},
 		{"modules/Build/Build.psm1", "PowerShell Review Principles"},
 		{"modules/Build/Build.psd1", "PowerShell Review Principles"},
+		{"src/myapp/core.clj", "Laziness, Sequences, and Resource Scope"},
+		{"src/myapp/views.cljs", "Laziness, Sequences, and Resource Scope"},
+		{"src/myapp/shared.cljc", "Laziness, Sequences, and Resource Scope"},
+		{"deps.edn", "EDN Data, Configuration, and Untrusted Input"},
 	}
 
 	for _, tt := range tests {

@@ -121,5 +121,9 @@
   ".glsl",
   ".hlsl",
   ".wgsl",
-  ".metal"
+  ".metal",
+  ".clj",
+  ".cljs",
+  ".cljc",
+  ".edn"
 ]
