@@ -184,6 +184,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet. |
 | `**/*.thrift` | `thrift.md` — совместимость Apache Thrift IDL на уровне wire. |
 | `**/*.capnp` | `capnp.md` — совместимость схем Cap'n Proto на уровне wire. |
+| `**/*.{clj,cljs,cljc,edn}` | `clojure.md` — исходный код Clojure / ClojureScript и данные EDN. |
 | *(fallback)* | `default.md` |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

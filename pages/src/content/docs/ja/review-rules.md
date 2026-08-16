@@ -144,6 +144,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。 |
 | `**/*.thrift` | `thrift.md`: Apache Thrift IDL のワイヤ互換性。 |
 | `**/*.capnp` | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。 |
+| `**/*.{clj,cljs,cljc,edn}` | `clojure.md`: Clojure / ClojureScript ソースコードと EDN データ。 |
 | *(fallback)* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。

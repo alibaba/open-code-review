@@ -94,5 +94,9 @@
   ".libsonnet",
   ".zig",
   ".thrift",
-  ".capnp"
+  ".capnp",
+  ".clj",
+  ".cljs",
+  ".cljc",
+  ".edn"
 ]

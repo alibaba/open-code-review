@@ -182,6 +182,7 @@ matching order:
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
+| `**/*.{clj,cljs,cljc,edn}` | `clojure.md` — Clojure / ClojureScript source and EDN data. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
