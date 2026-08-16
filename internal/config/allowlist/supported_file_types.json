@@ -94,5 +94,6 @@
   ".libsonnet",
   ".zig",
   ".thrift",
-  ".capnp"
+  ".capnp",
+  ".dhall"
 ]

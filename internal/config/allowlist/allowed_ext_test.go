@@ -85,6 +85,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".THRIFT", true},
 		{".capnp", true},
 		{".CAPNP", true},
+		{".dhall", true},
+		{".DHALL", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
