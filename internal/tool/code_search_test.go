@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -22,6 +23,7 @@ func TestBuildGrepArgs_WorkspaceMode(t *testing.T) {
 
 	assertContainsInOrder(t, args, "-e", "myFunc", "--")
 	assertContains(t, args, "-i")
+	assertContains(t, args, "-z")
 	assertContains(t, args, "--untracked")
 	if idx := slices.Index(args, "--"); idx >= 0 {
 		for i := 0; i < idx; i++ {
@@ -149,6 +151,52 @@ func TestGitGrep_WorkspaceMode_Found(t *testing.T) {
 	}
 	if !strings.Contains(result, "hello.go") {
 		t.Errorf("expected hello.go in result, got: %s", result)
+	}
+}
+
+func TestGitGrep_PathContainingColon(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows filenames cannot contain colons")
+	}
+
+	dir := setupTestRepo(t)
+	for _, name := range []string{"foo:bar.go", "plain.go"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("package main\n// needle\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "add search fixtures")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	want := "File: foo:bar.go\nMatch lines: 1\n2|// needle\n\n" +
+		"File: plain.go\nMatch lines: 1\n2|// needle\n\n"
+	tests := []struct {
+		name string
+		ref  string
+		mode ReviewMode
+	}{
+		{name: "workspace", mode: ModeWorkspace},
+		{name: "commit", ref: getHeadCommit(t, dir), mode: ModeCommit},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: test.ref, Mode: test.mode})
+			got, err := p.gitGrep(context.Background(), "needle", false, false, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Errorf("gitGrep() = %q, want %q", got, want)
+			}
+		})
 	}
 }
 
