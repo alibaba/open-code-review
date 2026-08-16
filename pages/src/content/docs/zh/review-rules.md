@@ -135,6 +135,8 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/build.gradle` | `build_gradle.md`——Gradle 依赖。 |
 | `**/package.json` | `package_json.md`——NPM 依赖 / 脚本。 |
 | `**/Cargo.toml` | `cargo_toml.md`——Rust manifest。 |
+| `**/Move.toml` | `move_toml.md`——Move package manifest。 |
+| `**/*.move` | `move.md`——Move 源代码。 |
 | `**/composer.json` | `composer_json.md`——Composer 依赖、自动加载、脚本、插件和包配置。 |
 | `**/*.{json,json5}` | `json.md`——通用 JSON（也匹配 `.json5`）。 |
 | `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md`——GitHub Actions 工作流 YAML。 |
