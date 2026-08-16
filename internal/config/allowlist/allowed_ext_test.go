@@ -79,6 +79,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".LIBSONNET", true},
 		{".zig", true},
 		{".ZIG", true},
+		{".thrift", true},
+		{".THRIFT", true},
+		{".capnp", true},
+		{".CAPNP", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -200,6 +204,24 @@ func TestIsExcludedPath(t *testing.T) {
 		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
 		{"elm non-test", "src/Parser.elm", false},
 		{"elm tests in filename", "src/TestsHelper.elm", false},
+		// Thrift generated output directories
+		{"kitex_gen at root", "kitex_gen/api/service.go", true},
+		{"kitex_gen nested", "app/rpc/kitex_gen/user/user.go", true},
+		{"thrift idl is reviewed", "idl/service.thrift", false},
+		{"hand-written generated-ish dir name", "services/generated_client/client.go", false},
+		{"gen in package name only", "internal/generator/main.go", false},
+		// The kitex_gen pattern is extension-anchored: a colliding directory name
+		// must not drop files Thrift never emits (IsExcludedPath has no language dispatch).
+		{"kitex_gen holding non-Go file", "kitex_gen/api/schema.json", false},
+
+		// Cap'n Proto generated output files
+		{"capnp generated header", "src/schema.capnp.h", true},
+		{"capnp generated go", "tunnelrpc/proto/tunnelrpc.capnp.go", true},
+		{"capnp generated rust", "src/element_capnp.rs", true},
+		{"capnp generated typescript", "src/rpc.capnp.ts", true},
+		{"capnp generated python", "schema/addressbook_capnp.py", true},
+		{"capnp schema is reviewed", "schema/addressbook.capnp", false},
+		{"capnp in filename only", "src/capnp_helpers.go", false},
 
 		// Jsonnet vendored dependencies (written by `jb install`, wiped by `rm -rf vendor`).
 		// The pattern is extension-scoped: IsExcludedPath applies every pattern to every

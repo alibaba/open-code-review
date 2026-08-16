@@ -91,5 +91,7 @@
   ".pot",
   ".jsonnet",
   ".libsonnet",
-  ".zig"
+  ".zig",
+  ".thrift",
+  ".capnp"
 ]

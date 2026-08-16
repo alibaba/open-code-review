@@ -129,6 +129,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"analysis/plots.r", "R Code Review Principles"},
 		{"src/main.zig", "Illegal Behavior"},
 		{"build.zig", "Illegal Behavior"},
+		{"idl/service.thrift", "Field IDs and Wire Compatibility"},
+		{"if/common.thrift", "Field IDs and Wire Compatibility"},
+		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
+		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
 	}
 
 	for _, tt := range tests {

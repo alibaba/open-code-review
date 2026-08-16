@@ -39,6 +39,8 @@
     "**/*.swift": "swift.md",
     "**/*.elm": "elm.md",
     "**/*.{jsonnet,libsonnet}": "jsonnet.md",
-    "**/*.zig": "zig.md"
+    "**/*.zig": "zig.md",
+    "**/*.thrift": "thrift.md",
+    "**/*.capnp": "capnp.md"
   }
 }

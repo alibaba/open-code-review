@@ -37,5 +37,11 @@
   "**/tests/**/*.elm",
   "**/vendor/**/*.{jsonnet,libsonnet}",
   "**/test/**/*.zig",
-  "**/*_test.zig"
+  "**/*_test.zig",
+  "**/kitex_gen/**/*.go",
+  "**/*.capnp.h",
+  "**/*.capnp.go",
+  "**/*.capnp.ts",
+  "**/*_capnp.rs",
+  "**/*_capnp.py"
 ]

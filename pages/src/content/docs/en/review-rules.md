@@ -180,6 +180,8 @@ matching order:
 | `**/*.bicep` | `bicep.md` — Bicep (Azure) templates. |
 | `**/*.elm` | `elm.md` - Elm source. |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
+| `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
+| `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

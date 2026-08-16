@@ -182,6 +182,8 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.bicep` | `bicep.md` — шаблоны Bicep (Azure). |
 | `**/*.elm` | `elm.md` - исходный код Elm. |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet. |
+| `**/*.thrift` | `thrift.md` — совместимость Apache Thrift IDL на уровне wire. |
+| `**/*.capnp` | `capnp.md` — совместимость схем Cap'n Proto на уровне wire. |
 | *(fallback)* | `default.md` |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`
