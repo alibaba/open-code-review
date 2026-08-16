@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -156,6 +157,88 @@ func TestFileFind_GitRepo_CommitMode(t *testing.T) {
 	}
 	if !strings.Contains(got, "main.go") {
 		t.Errorf("expected main.go in commit mode, got: %s", got)
+	}
+}
+
+func TestFileFind_GitRepo_PreservesSpecialPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test paths contain characters unsupported by Windows")
+	}
+
+	dir := setupFileFindRepo(t)
+	specialPaths := []string{
+		"unicode-测试.go",
+		"tab\tquote\"file.go",
+		"line\nbreak.go",
+	}
+	for _, path := range specialPaths {
+		if err := os.WriteFile(filepath.Join(dir, path), []byte("package special\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("add", ".")
+	git("commit", "-m", "add special paths")
+	commit := git("rev-parse", "HEAD")
+
+	tests := []struct {
+		name string
+		mode ReviewMode
+		ref  string
+	}{
+		{name: "workspace", mode: ModeWorkspace},
+		{name: "commit", mode: ModeCommit, ref: commit},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := NewFileFind(&FileReader{RepoDir: dir, Mode: tt.mode, Ref: tt.ref})
+
+			files, err := p.listGitFiles(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Newline paths are asserted only at the enumeration layer because
+			// Execute intentionally joins multiple results with newlines.
+			for _, want := range append([]string{"main.go"}, specialPaths...) {
+				found := false
+				for _, got := range files {
+					if got == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("listGitFiles() missing original path %q; got %q", want, files)
+				}
+			}
+
+			for _, query := range []struct {
+				name string
+				want string
+			}{
+				{name: "main.go", want: "main.go"},
+				{name: "unicode-", want: "unicode-测试.go"},
+				{name: "quote", want: "tab\tquote\"file.go"},
+			} {
+				got, err := p.Execute(context.Background(), map[string]any{"query_name": query.name})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got != query.want {
+					t.Errorf("Execute(query_name=%q) = %q, want %q", query.name, got, query.want)
+				}
+			}
+		})
 	}
 }
 
