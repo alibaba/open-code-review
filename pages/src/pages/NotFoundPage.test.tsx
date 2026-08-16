@@ -7,7 +7,13 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import NotFoundPage from './NotFoundPage';
 import { LanguageProvider } from '../i18n';
-import type { Language } from '../i18n/types';
+import { en } from '../i18n/en';
+import { zh } from '../i18n/zh';
+import { ja } from '../i18n/ja';
+import { ru } from '../i18n/ru';
+import type { Language, TranslationKeys } from '../i18n/types';
+
+const translations: Record<Language, TranslationKeys> = { en, zh, ja, ru };
 
 function installLocalStorageMock() {
   let store: Record<string, string> = {};
@@ -72,13 +78,10 @@ describe('NotFoundPage', () => {
     expect(screen.getByText('home page')).toBeTruthy();
   });
 
-  it.each([
-    ['en', 'Page not found'],
-    ['zh', '页面未找到'], // allow-non-english: translation assertion
-    ['ja', 'ページが見つかりません'], // allow-non-english: translation assertion
-    ['ru', 'Страница не найдена'], // allow-non-english: translation assertion
-  ] as [Language, string][])('renders the %s translation', (language, expectedTitle) => {
+  it.each(
+    (Object.keys(translations) as Language[]).map((language) => [language, translations[language]] as const),
+  )('renders the %s translation', (language, table) => {
     renderNotFound(language);
-    expect(screen.getByRole('heading', { name: expectedTitle })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: table['notFound.title'] })).toBeTruthy();
   });
 });
