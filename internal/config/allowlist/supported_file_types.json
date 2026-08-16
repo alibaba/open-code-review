@@ -98,5 +98,6 @@
   ".thrift",
   ".capnp",
   ".sol",
-  ".vy"
+  ".vy",
+  ".cr"
 ]

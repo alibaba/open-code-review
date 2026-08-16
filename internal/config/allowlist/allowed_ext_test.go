@@ -94,6 +94,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".SOL", true},
 		{".vy", true},
 		{".VY", true},
+		{".cr", true},
+		{".CR", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -277,6 +279,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"solidity deploy script", "script/Deploy.s.sol", false},
 		{"vyper non-test", "src/token.vy", false},
 		{"vyper test in filename only", "src/test_helpers.vy", false},
+
+		// Crystal spec files
+		{"crystal spec file", "spec/parser_spec.cr", true},
+		{"crystal spec nested", "shard/spec/unit/parser_spec.cr", true},
+		{"crystal non-spec", "src/parser.cr", false},
+		{"crystal spec-like name outside spec dir", "src/parser_spec.cr", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},
