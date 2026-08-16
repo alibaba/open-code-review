@@ -63,6 +63,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".NIMS", true},
 		{".nimble", true},
 		{".NIMBLE", true},
+		{".elm", true},
+		{".ELM", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -172,6 +174,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"nim nested test directory", "packages/core/tests/unit/parser_test.nim", true},
 		{"nim non-test", "src/parser.nim", false},
 		{"nim tests in filename", "src/tests_helper.nim", false},
+
+		// Elm test files
+		{"elm test directory", "tests/ParserTest.elm", true},
+		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
+		{"elm non-test", "src/Parser.elm", false},
+		{"elm tests in filename", "src/TestsHelper.elm", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

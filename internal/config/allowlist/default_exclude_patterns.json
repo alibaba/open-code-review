@@ -32,5 +32,6 @@
   "**/*.pb.h",
   "**/*Test.swift",
   "**/*Tests.swift",
-  "**/Tests/**/*.swift"
+  "**/Tests/**/*.swift",
+  "**/tests/**/*.elm"
 ]

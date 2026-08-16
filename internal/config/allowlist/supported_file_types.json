@@ -84,5 +84,6 @@
   ".lhs",
   ".nim",
   ".nims",
-  ".nimble"
+  ".nimble",
+  ".elm"
 ]

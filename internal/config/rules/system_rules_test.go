@@ -118,6 +118,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"Sources/App/ContentView.swift", "Swift Review Principles"},
 		{"MyApp/Models/UserStore.swift", "Swift Review Principles"},
 		{"ChattyFit/ChattyFit/Views/WorkoutSessionView.swift", "SwiftUI State and Lifecycle"},
+		{"src/Main.elm", "Elm Architecture"},
+		{"app/Page/Home.elm", "Elm Architecture"},
 	}
 
 	for _, tt := range tests {
