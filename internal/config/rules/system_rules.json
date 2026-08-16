@@ -37,6 +37,7 @@
     "**/*.{nim,nims,nimble}": "nim.md",
     "**/*.swift": "swift.md",
     "**/*.elm": "elm.md",
-    "**/*.{jsonnet,libsonnet}": "jsonnet.md"
+    "**/*.{jsonnet,libsonnet}": "jsonnet.md",
+    "**/*.zig": "zig.md"
   }
 }

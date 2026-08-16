@@ -90,5 +90,6 @@
   ".po",
   ".pot",
   ".jsonnet",
-  ".libsonnet"
+  ".libsonnet",
+  ".zig"
 ]
