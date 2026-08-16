@@ -79,6 +79,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | Выводит список сохранённых сессий ревью. |
 | `ocr session show <id>` | `ocr sessions show <id>` | Показывает одну сессию и контрольные точки по каждому файлу. |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | Выводит комментарии ревью, записанные в одной сессии. |
+| `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | Сравнивает находки двух сессий: новые, сохранившиеся, устранённые, не проверенные. |
 | `ocr viewer` | — | Запускает локальный веб-интерфейс для просмотра прошлых сессий ревью (`localhost:5483`). |
 | `ocr version` | — | Выводит версию, коммит, платформу, дату сборки и URL GitHub. |
 
@@ -423,6 +424,32 @@ ocr session comments --severity critical,high --category bug,security <session-i
 | `--json` | `false` | Вывести комментарии как массив JSON. |
 | `--severity <list>` | все | Включить перечисленные через запятую уровни серьёзности (`critical`, `high`, `medium`, `low`). |
 | `--category <list>` | все | Включить перечисленные через запятую категории (например, `bug`, `security`). |
+
+### `ocr session compare`
+
+Распределяет находки двух сессий по четырём группам: **new** (только в сессии
+after), **persisting** (в обеих), **resolved** (только в сессии before) и
+**not reviewed** (есть в сессии before, но сессия after не просматривала эти
+файлы, поэтому они не считаются устранёнными).
+
+Находки сопоставляются по пути, категории и фрагменту кода, а не по номерам
+строк, поэтому находка, которая просто сместилась по файлу, остаётся
+в persisting.
+
+```bash
+ocr session compare <before-session-id> <after-session-id>
+ocr session diff <before-session-id> <after-session-id>
+ocr session compare --json <before-session-id> <after-session-id>
+```
+
+Обе сессии должны принадлежать одному репозиторию, иначе команда завершается
+с ошибкой. Разные режимы ревью выводят только предупреждение в stderr, поэтому
+вывод `--json` остаётся пригодным для конвейера.
+
+| Флаг | По умолчанию | Описание |
+|---|---|---|
+| `--repo <path>` | текущий каталог | Репозиторий, сессии которого сравниваются. |
+| `--json` | `false` | Выводит результат сравнения в JSON (`new`, `persisting`, `resolved`, `not_reviewed`). |
 
 ## `ocr rules`
 
