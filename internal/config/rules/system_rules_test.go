@@ -122,6 +122,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"ChattyFit/ChattyFit/Views/WorkoutSessionView.swift", "SwiftUI State and Lifecycle"},
 		{"src/Main.elm", "Elm Architecture"},
 		{"app/Page/Home.elm", "Elm Architecture"},
+		{"lib/config.libsonnet", "Late Binding"},
+		{"environments/prod/main.jsonnet", "Late Binding"},
+		{"jsonnet/kube-prometheus/components/grafana.libsonnet", "Late Binding"},
 	}
 
 	for _, tt := range tests {

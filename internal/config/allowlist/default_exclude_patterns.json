@@ -33,5 +33,6 @@
   "**/*Test.swift",
   "**/*Tests.swift",
   "**/Tests/**/*.swift",
-  "**/tests/**/*.elm"
+  "**/tests/**/*.elm",
+  "**/vendor/**/*.{jsonnet,libsonnet}"
 ]
