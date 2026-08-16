@@ -366,3 +366,4 @@ and per-user rules.
 - [Review Rules](../review-rules/) — the file filter and rule resolution chain.
 - [Session Viewer](../viewer/) — inspect past review sessions.
 - [Telemetry](../telemetry/) — token usage and LLM metrics.
+- [Website crawler files](https://open-codereview.ai/robots.txt) — robots.txt directives and the [sitemap.xml](https://open-codereview.ai/sitemap.xml)

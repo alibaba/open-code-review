@@ -380,3 +380,4 @@ OCR не записывает данные за пределами `~/.opencoder
 - [Правила ревью](../review-rules/) — фильтрация файлов и цепочка разрешения правил.
 - [Просмотр сессий](../viewer/) — изучение прошлых сеансов ревью.
 - [Телеметрия](../telemetry/) — использование токенов и метрики LLM.
+- [Файлы для поисковых роботов](https://open-codereview.ai/robots.txt) — директивы robots.txt и [sitemap.xml](https://open-codereview.ai/sitemap.xml)
