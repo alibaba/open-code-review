@@ -63,6 +63,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".NIMS", true},
 		{".nimble", true},
 		{".NIMBLE", true},
+		{".ipynb", true},
+		{".IPYNB", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
