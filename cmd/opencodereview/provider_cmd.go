@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -239,13 +240,19 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 
 	preset, isPreset := llm.LookupProvider(result.provider)
 
-	if result.apiKey == "" {
+	// Mirror the resolver's precedence (static api_key -> api_key_cmd -> env var):
+	// an already-configured api_key_cmd satisfies the requirement, so picking a
+	// model for such a provider must not fail and abandon the save. Trimmed
+	// because the resolver treats a whitespace-only command as unset, so without
+	// this a command of "   " would satisfy the check here and then fail
+	// resolution with "no api_key or api_key_cmd configured".
+	if result.apiKey == "" && strings.TrimSpace(cfg.Providers[result.provider].APIKeyCmd) == "" {
 		if isPreset && preset.EnvVar != "" {
 			if os.Getenv(preset.EnvVar) == "" {
-				return fmt.Errorf("API key is required for provider %s (configure it or set $%s)", result.provider, preset.EnvVar)
+				return fmt.Errorf("API key is required for provider %s (configure it, set providers.%s.api_key_cmd, or set $%s)", result.provider, result.provider, preset.EnvVar)
 			}
 		} else {
-			return fmt.Errorf("API key is required for provider %s", result.provider)
+			return fmt.Errorf("API key is required for provider %s (configure it or set providers.%s.api_key_cmd)", result.provider, result.provider)
 		}
 	}
 
@@ -261,7 +268,8 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	if result.apiKey != "" {
 		entry.APIKey = result.apiKey
 	} else {
-		// Confirmed empty key: clear saved api_key so resolver falls back to $ENV_VAR.
+		// Confirmed empty key: clear saved api_key so the resolver falls back to
+		// api_key_cmd (when set) or $ENV_VAR.
 		entry.APIKey = ""
 	}
 	cfg.Providers[result.provider] = entry

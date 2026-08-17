@@ -85,5 +85,9 @@
   ".lhs",
   ".nim",
   ".nims",
-  ".nimble"
+  ".nimble",
+  ".elm",
+  ".properties",
+  ".po",
+  ".pot"
 ]
