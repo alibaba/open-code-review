@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func TestHandleRepos_Success(t *testing.T) {
@@ -116,6 +118,41 @@ func TestHandleSessions_Success(t *testing.T) {
 	body := rr.Body.String()
 	if !strings.Contains(body, "project") {
 		t.Errorf("response does not contain repo display name derived from CWD")
+	}
+}
+
+func TestHandleSessionsAndSession_RunningStatus(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeWorkspace})
+	defer sh.Finalize()
+
+	path, err := session.SessionFilePath(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	root := filepath.Dir(filepath.Dir(path))
+	encodedRepo := filepath.Base(filepath.Dir(path))
+
+	listReq := httptest.NewRequest("GET", "/r/"+encodedRepo, nil)
+	listRR := httptest.NewRecorder()
+	handleSessions(listRR, listReq, root, encodedRepo)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("session list status = %d, want 200", listRR.Code)
+	}
+	if !strings.Contains(listRR.Body.String(), ">running<") {
+		t.Fatalf("session list did not render running status: %s", listRR.Body.String())
+	}
+
+	detailReq := httptest.NewRequest("GET", "/r/"+encodedRepo+"/"+sh.SessionID, nil)
+	detailRR := httptest.NewRecorder()
+	handleSession(detailRR, detailReq, root, encodedRepo, sh.SessionID)
+	if detailRR.Code != http.StatusOK {
+		t.Fatalf("session detail status = %d, want 200", detailRR.Code)
+	}
+	if !strings.Contains(detailRR.Body.String(), "Status:</strong> running") {
+		t.Fatalf("session detail did not render running status: %s", detailRR.Body.String())
 	}
 }
 

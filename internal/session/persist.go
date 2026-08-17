@@ -37,6 +37,7 @@ type jsonlWriter struct {
 	resumedFrom string
 	file        *os.File
 	writer      *bufio.Writer
+	lock        *sessionLock
 	lastUUID    string // tracks chain of records via parentUuid
 }
 
@@ -112,13 +113,19 @@ func (jw *jsonlWriter) open() error {
 	}
 
 	filename := filepath.Join(sessionDir, jw.sessionID+".jsonl")
+	lock, err := acquireSessionLock(filename)
+	if err != nil {
+		return err
+	}
 	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
+		_ = lock.close()
 		return fmt.Errorf("open session file: %w", err)
 	}
 
 	jw.file = f
 	jw.writer = bufio.NewWriter(f)
+	jw.lock = lock
 	return nil
 }
 
@@ -167,6 +174,9 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
 	jw.writeRecordLocked(rec)
+	if jw.writer != nil {
+		_ = jw.writer.Flush()
+	}
 	jw.lastUUID = uuid
 	return uuid
 }
@@ -360,11 +370,16 @@ func (jw *jsonlWriter) WriteResumeLineage(l *ResumeLineage) string {
 // is appended. The record is flushed before the file is closed. Any marshal,
 // flush or close error is returned so the caller can surface it as a delivery
 // error rather than silently losing the manifest.
-func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest) error {
+func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []string, llmFailures int64, manifest *RunManifest) (writeErr error) {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
+	defer func() {
+		if err := jw.releaseLockLocked(); err != nil && writeErr == nil {
+			writeErr = fmt.Errorf("release session lock: %w", err)
+		}
+	}()
 	rec := map[string]any{
 		"uuid":             uuid,
 		"parentUuid":       jw.lastUUID,
@@ -393,7 +408,6 @@ func (jw *jsonlWriter) WriteSessionEnd(duration time.Duration, filesReviewed []s
 		return fmt.Errorf("marshal session_end: %w", err)
 	}
 
-	var writeErr error
 	if jw.writer != nil {
 		if _, err := jw.writer.Write(data); err != nil {
 			writeErr = fmt.Errorf("write session_end: %w", err)
@@ -420,4 +434,14 @@ func (jw *jsonlWriter) flushAndClose() {
 	if jw.file != nil {
 		jw.file.Close()
 	}
+	_ = jw.releaseLockLocked()
+}
+
+func (jw *jsonlWriter) releaseLockLocked() error {
+	if jw.lock == nil {
+		return nil
+	}
+	err := jw.lock.close()
+	jw.lock = nil
+	return err
 }

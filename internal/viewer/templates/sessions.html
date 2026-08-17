@@ -22,7 +22,7 @@
             <td>{{if .ReviewMode}}{{.ReviewMode}}{{else}}-{{end}}</td>
             <td><code>{{.Model}}</code></td>
             <td>{{.FileCount}}</td>
-            <td>{{if .Aborted}}aborted{{else if .Legacy}}legacy{{else}}{{.TerminalState}}{{end}}</td>
+            <td>{{if .Running}}running{{else if .Aborted}}aborted{{else if .Legacy}}legacy{{else}}{{.TerminalState}}{{end}}</td>
             <td>{{if .CommentCount}}{{.CommentCount}}{{else}}-{{end}}</td>
             <td>{{formatDuration .DurationSec}}</td>
             <td>{{formatTime .Timestamp}}</td>

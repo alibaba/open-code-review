@@ -38,6 +38,7 @@ type Summary struct {
 	WaivedFiles    int           `json:"waived_files"`
 	TotalComments  int           `json:"total_comments"`
 	LLMFailures    int64         `json:"llm_failures"`
+	Running        bool          `json:"running"`
 	Aborted        bool          `json:"aborted"`
 	Legacy         bool          `json:"legacy"`
 	RunManifest    *RunManifest  `json:"run_manifest,omitempty"`
@@ -169,6 +170,7 @@ func LoadDetail(repoDir, sessionID string) (*Summary, []ItemDetail, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	updateSummaryActivity(summary)
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
 	}
@@ -187,6 +189,7 @@ func loadSummaryFromFile(path, sessionID, repoDir string) (*Summary, error) {
 	}); err != nil {
 		return nil, err
 	}
+	updateSummaryActivity(summary)
 	if summary.SessionID == "" {
 		summary.SessionID = sessionID
 	}
@@ -263,6 +266,7 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 	case "review_item_failed":
 		s.FailedFiles++
 	case "session_end":
+		s.Running = false
 		s.Aborted = false
 		if rec.RunManifest != nil && rec.RunManifest.SchemaVersion == ManifestSchemaVersion {
 			m := rec.RunManifest.cloned()
@@ -291,6 +295,20 @@ func applyRecordToSummary(s *Summary, rec summaryRecord) {
 		}
 		s.LLMFailures = rec.LLMFailures
 	}
+}
+
+func updateSummaryActivity(summary *Summary) {
+	if summary == nil || !summary.Aborted {
+		return
+	}
+
+	running, err := IsSessionActive(summary.FilePath)
+	if err != nil {
+		// Activity detection is advisory; probe failures must not hide readable data.
+		return
+	}
+	summary.Running = running
+	summary.Aborted = !running
 }
 
 func recordToItem(rec summaryRecord) (ItemDetail, bool) {

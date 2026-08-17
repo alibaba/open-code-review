@@ -6,8 +6,11 @@ package viewer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func writeJSONL(t *testing.T, path string, lines ...string) {
@@ -247,8 +250,54 @@ func TestPeekSession_NoSessionEnd(t *testing.T) {
 	if s.FileCount != 0 {
 		t.Errorf("FileCount should be 0 without session_end, got %d", s.FileCount)
 	}
-	if !s.Aborted || s.Legacy {
-		t.Fatalf("unfinished session flags = aborted:%v legacy:%v", s.Aborted, s.Legacy)
+	if !s.Aborted || s.Running || s.Legacy {
+		t.Fatalf("unfinished session flags = running:%v aborted:%v legacy:%v", s.Running, s.Aborted, s.Legacy)
+	}
+}
+
+func TestPeekSession_ActivityProbeFailureKeepsSummary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "probe-error.jsonl")
+	writeJSONL(t, path,
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`)
+
+	lockPath := strings.TrimSuffix(path, ".jsonl") + ".lock"
+	if err := os.Mkdir(lockPath, 0700); err != nil {
+		t.Fatalf("create invalid session lock: %v", err)
+	}
+
+	summary, err := peekSession(path)
+	if err != nil {
+		t.Fatalf("peekSession: %v", err)
+	}
+	if summary.CWD != "/x" || summary.Model != "m" {
+		t.Fatalf("summary = %+v", summary)
+	}
+	if summary.Running || !summary.Aborted {
+		t.Fatalf("flags = running:%v aborted:%v", summary.Running, summary.Aborted)
+	}
+}
+
+func TestPeekSession_Running(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeWorkspace})
+	if sh == nil {
+		t.Fatal("session.New returned nil")
+	}
+	defer sh.Finalize()
+
+	path, err := session.SessionFilePath(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	summary, err := peekSession(path)
+	if err != nil {
+		t.Fatalf("peekSession: %v", err)
+	}
+	if !summary.Running || summary.Aborted {
+		t.Fatalf("running session flags = running:%v aborted:%v", summary.Running, summary.Aborted)
 	}
 }
 

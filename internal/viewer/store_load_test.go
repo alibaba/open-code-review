@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/session"
@@ -200,6 +201,63 @@ func TestLoadSession_FullParse(t *testing.T) {
 	// Sorted by total tokens (descending), util.go (200+80=280) > main.go (100+50=150)
 	if vs.TokenUsage.FileTokenBreakdown[0].FilePath != "util.go" {
 		t.Errorf("top token file = %q, want util.go", vs.TokenUsage.FileTokenBreakdown[0].FilePath)
+	}
+}
+
+func TestLoadSession_Running(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	repoDir := t.TempDir()
+	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{ReviewMode: session.ReviewModeWorkspace})
+	defer sh.Finalize()
+
+	path, err := session.SessionFilePath(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	root := filepath.Dir(filepath.Dir(path))
+	encodedRepo := filepath.Base(filepath.Dir(path))
+	vs, err := LoadSession(root, encodedRepo, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if !vs.Summary.Running || vs.Summary.Aborted {
+		t.Fatalf("running session flags = running:%v aborted:%v", vs.Summary.Running, vs.Summary.Aborted)
+	}
+}
+
+func TestLoadSession_ActivityProbeFailureKeepsData(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repoDir, "probe-error.jsonl")
+	writeJSONL(t, path,
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`)
+
+	lockPath := strings.TrimSuffix(path, ".jsonl") + ".lock"
+	if err := os.Mkdir(lockPath, 0700); err != nil {
+		t.Fatalf("create invalid session lock: %v", err)
+	}
+
+	summaries, err := ListSessions(root, "repo")
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("summaries = %d, want 1", len(summaries))
+	}
+
+	vs, err := LoadSession(root, "repo", "probe-error")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if vs.Summary.CWD != "/x" || vs.Summary.Model != "m" {
+		t.Fatalf("summary = %+v", vs.Summary)
+	}
+	if vs.Summary.Running || !vs.Summary.Aborted {
+		t.Fatalf("flags = running:%v aborted:%v", vs.Summary.Running, vs.Summary.Aborted)
 	}
 }
 
