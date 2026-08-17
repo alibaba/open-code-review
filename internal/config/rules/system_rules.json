@@ -30,6 +30,7 @@
     "**/*.{graphql,gql}": "graphql.md",
     "**/*.prisma": "prisma.md",
     "**/*.jl": "julia.md",
+    "**/.R": "r.md",
     "**/*.{tf,hcl,tfvars}": "terraform.md",
     "**/*.bicep": "bicep.md",
     "**/*.nix": "nix.md",

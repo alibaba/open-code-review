@@ -25,6 +25,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".phtml", true},
 		{".PHTML", true},
 		{".rs", true},
+		{".R", true},
+		{".r", true},
 		{".ets", true},
 		{".ETS", true},
 		{".json5", true},
@@ -178,6 +180,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"lhs spec file", "src/ParserSpec.lhs", true},
 		{"lhs root spec file", "ParserSpec.lhs", true},
 		{"lhs non-test", "src/Tutorial.lhs", false},
+
+		// R test files
+		{"r test directory", "tests/parser_test.R", true},
+		{"r nested test directory", "packages/core/tests/unit/parser_test.R", true},
+		{"r non-test", "src/parser.R", false},
+		{"r tests in filename", "src/tests_helper.R", false},
 
 		// Nim test files
 		{"nim test directory", "tests/parser_test.nim", true},
