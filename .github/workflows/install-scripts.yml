@@ -1,0 +1,39 @@
+name: install-scripts
+
+# Tests the npm installer's post-install PATH checks (scripts/install.js):
+# shadowed or stale-hash-prone `ocr` resolutions must be detected and
+# reported at install time. Kept out of ci.yml (Go-only container),
+# mirroring the scoped translation-sync.yml workflow.
+
+on:
+  pull_request:
+    paths:
+      - "scripts/install.js"
+      - "scripts/install.test.js"
+      - "scripts/platform.js"
+      - "package.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install-scripts:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    container:
+      # Pinned to an exact 24.x for reproducible builds, matching the
+      # translation-sync.yml pin (avoids the mutable node:24 tag).
+      image: node:24.18.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
+      # Plain Node, no deps; runs on node >= 14 (engines field).
+      - name: Test installer PATH-resolution checks
+        run: node scripts/install.test.js

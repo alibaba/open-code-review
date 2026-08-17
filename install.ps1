@@ -76,8 +76,27 @@ function Show-PostInstallPathNotice([string]$BinName, [string]$InstallDir) {
         Write-Host "note: $InstallDir is not on your PATH; add it or run $InstallDir\$BinName directly"
         return
     }
-    if (-not (Get-Command $BinName -ErrorAction SilentlyContinue)) {
-        Write-Host "note: open a new shell so $BinName resolves on PATH"
+    # Resolve the bare name so lookalikes (ocr.cmd, ocr.bat, ...) are caught,
+    # matching what the user's shell would actually execute.
+    $bareName = [System.IO.Path]::GetFileNameWithoutExtension($BinName)
+    $expected = Join-Path $InstallDir $BinName
+    $resolved = @(Get-Command $bareName -All -ErrorAction SilentlyContinue)
+    if ($resolved.Count -eq 0) {
+        Write-Host "note: open a new shell so $bareName resolves on PATH"
+        return
+    }
+    $first = $resolved[0]
+    if (-not [string]::Equals($first.Source, $expected, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-Warning "$bareName resolves to $($first.Source), which takes precedence over $expected. Remove/rename $($first.Source) or move $InstallDir earlier in your PATH; verify with: $bareName version"
+        return
+    }
+    # The new binary wins on PATH, but terminals opened earlier may have
+    # cached a different `ocr` location and keep running that stale program;
+    # only new shells re-resolve the command.
+    $others = @($resolved | Where-Object { -not [string]::Equals($_.Source, $expected, [System.StringComparison]::OrdinalIgnoreCase) })
+    if ($others.Count -gt 0) {
+        Write-Host "note: another $bareName exists at $($others[0].Source). Terminals opened before this install may have"
+        Write-Host "note: cached that location; if $bareName misbehaves in your current terminal, open a new one"
     }
 }
 

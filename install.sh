@@ -80,12 +80,52 @@ install_binary() {
 
 post_install_path_notice() {
   bin="$1"
-  install_dir="$2"
+  install_dir="${2%/}"
   case ":$PATH:" in
     *":$install_dir:"*) ;;
     *) printf 'note: %s is not on your PATH; add it or run %s/%s directly\n' "$install_dir" "$install_dir" "$bin"; return ;;
   esac
-  command -v "$bin" >/dev/null 2>&1 || printf 'note: open a new shell so %s resolves on PATH\n' "$bin"
+  resolved="$(command -v "$bin" 2>/dev/null || true)"
+  if [ -z "$resolved" ]; then
+    printf 'note: open a new shell so %s resolves on PATH\n' "$bin"
+    return
+  fi
+  if [ "$resolved" != "$install_dir/$bin" ]; then
+    printf 'warning: %s resolves to %s, which takes precedence over %s/%s.\n' "$bin" "$resolved" "$install_dir" "$bin" >&2
+    printf 'warning: remove/rename %s or move %s earlier in your PATH; verify with: %s version\n' "$resolved" "$install_dir" "$bin" >&2
+    return
+  fi
+  # The new binary wins on PATH, but shells that were open earlier may have
+  # cached a different `ocr` location (bash/zsh hash table) and keep running
+  # that stale program in the current terminal; only new shells re-resolve.
+  other="$(find_other_binary_on_path "$install_dir" "$bin")"
+  if [ -n "$other" ]; then
+    printf 'note: another %s exists at %s. Terminals opened before this install may have\n' "$bin" "$other"
+    printf 'note: cached that location; if %s misbehaves in your current terminal, run\n' "$bin"
+    printf 'note:   bash/zsh: hash -r    (zsh also: rehash)    or open a new terminal\n'
+  fi
+}
+
+# Print the first executable named <bin> found on PATH outside <install_dir>.
+find_other_binary_on_path() {
+  install_dir="$1"
+  bin="$2"
+  saved_ifs="$IFS"
+  IFS=':'
+  set -f
+  set -- $PATH
+  set +f
+  IFS="$saved_ifs"
+  for dir in "$@"; do
+    [ -n "$dir" ] || continue
+    dir="${dir%/}" # PATH entries may carry a trailing slash
+    [ "$dir" = "$install_dir" ] && continue
+    if [ -x "$dir/$bin" ] && [ ! -d "$dir/$bin" ]; then
+      printf '%s' "$dir/$bin"
+      return 0
+    fi
+  done
+  return 0
 }
 
 # Print the SHA-256 of a file, preferring shasum (macOS) over sha256sum (Linux).
