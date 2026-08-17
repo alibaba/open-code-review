@@ -57,7 +57,7 @@ jobs:
         run: |
           git add --renormalize .
           if ! git diff --cached --quiet; then
-            echo 'Line endings must end with LF. Have you normalized line endings?'
+            echo "::error::Line endings must be LF. Run 'git add --renormalize .' and commit the diff below."
             git diff --cached --stat
             exit 1
           fi
