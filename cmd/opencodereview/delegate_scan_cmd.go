@@ -51,7 +51,7 @@ start scanning.`,
 	Example: `  # Plan a scan of the whole repository
   ocr delegate scan
 
-  # Plan a scan of one directory, grouped by first-level directory
+  # Plan a scan of one directory, grouped by the directory each file lives in
   ocr delegate scan --path internal/agent --batch by-directory
 
   # Machine-readable plan for a scripted host agent

@@ -24,8 +24,8 @@ type PlanBatch struct {
 	// ID is the 1-based batch number, stable for a given plan.
 	ID int
 	// Key is the grouping key that produced this batch (an extension for
-	// by-language, a first-level directory for by-directory). Empty under
-	// the "none" strategy, where the key is just the file's own path and
+	// by-language, the parent directory for by-directory). Empty under the
+	// "none" strategy, where the key is just the file's own path and
 	// carries no information.
 	Key        string
 	Files      []PlanFile

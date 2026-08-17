@@ -18,8 +18,14 @@ const (
 	BatchNone BatchStrategy = "none"
 	// BatchByLanguage groups files by extension (case-insensitive).
 	BatchByLanguage BatchStrategy = "by-language"
-	// BatchByDirectory groups files by their first-level directory under
-	// the repo root. Files directly in the root form their own batch.
+	// BatchByDirectory groups files by the directory they live in. Files
+	// directly in the repo root form their own batch.
+	//
+	// This keys on the file's full parent directory rather than its
+	// first-level path segment. Keying on the first segment collapsed every
+	// file under a single top-level directory into one batch, which is the
+	// common repository layout (internal/, src/, pkg/, lib/) — the strategy
+	// then did no grouping at all on exactly the repos it was meant to serve.
 	BatchByDirectory BatchStrategy = "by-directory"
 )
 
@@ -87,7 +93,7 @@ func batchKeyFunc(strategy BatchStrategy) func(model.ScanItem) string {
 	case BatchByLanguage:
 		return languageKey
 	case BatchByDirectory:
-		return firstLevelDirKey
+		return parentDirKey
 	default:
 		// BatchNone: each file is its own batch.
 		return func(it model.ScanItem) string { return it.Path }
@@ -108,10 +114,13 @@ func languageKey(it model.ScanItem) string {
 	return strings.ToLower(base[dot:])
 }
 
-// firstLevelDirKey returns the first path segment of a repo-relative path,
-// or "<root>" for files directly in the repo root.
-func firstLevelDirKey(it model.ScanItem) string {
-	idx := strings.IndexByte(it.Path, '/')
+// parentDirKey returns the directory portion of a repo-relative path, or
+// "<root>" for files directly in the repo root. Paths are always
+// slash-separated and repo-relative here, so this does not go through
+// filepath: on Windows filepath.Dir would rewrite the separators and split
+// the same tree into two keys.
+func parentDirKey(it model.ScanItem) string {
+	idx := strings.LastIndexByte(it.Path, '/')
 	if idx < 0 {
 		return "<root>"
 	}
