@@ -47,6 +47,28 @@ a {
   background: rgba(255,255,255,0.3);
 }
 
+.command-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.command-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.command-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.command-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+.command-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
 /* Terminal cursor blink */
 @keyframes cursor-blink {
   0%, 100% { opacity: 1; }

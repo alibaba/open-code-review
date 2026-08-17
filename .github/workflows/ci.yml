@@ -110,6 +110,55 @@ jobs:
           echo "$HELP" | grep -q "rules"
           rm -f ./opencodereview
 
+  # Runs the suite natively on Windows, which the cross-compile job below cannot
+  # do: it only proves the windows arms of the build-tag splits compile. GitHub
+  # does not support `container:` on Windows runners
+  # (actions/runner#904), so this job installs Go directly instead of reusing the
+  # golang:1.26.5 image the other jobs share.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.5'
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      # No -race here: the race detector needs a working C toolchain on Windows,
+      # and races are OS-independent, so the Linux job above already covers them.
+      # This job is here for the OS-specific behavior instead. No coverage gate
+      # either -- the //go:build !windows test files legitimately drop the total
+      # below the 80% the Linux job enforces.
+      - name: Test
+        run: go test -count=1 ./...
+
+      - name: Build
+        run: go build -o opencodereview.exe ./cmd/opencodereview
+
+      # Same assertions as the Linux smoke test, under git-bash so the script is
+      # shared verbatim rather than reimplemented in PowerShell.
+      - name: Smoke test
+        shell: bash
+        run: |
+          ./opencodereview.exe --version
+          ./opencodereview.exe --version | grep -q "open-code-review"
+          HELP=$(./opencodereview.exe --help)
+          echo "$HELP" | grep -q "Commands:"
+          echo "$HELP" | grep -q "review"
+          echo "$HELP" | grep -q "scan"
+          echo "$HELP" | grep -q "delegate"
+          echo "$HELP" | grep -q "config"
+          echo "$HELP" | grep -q "llm"
+          echo "$HELP" | grep -q "viewer"
+          echo "$HELP" | grep -q "session"
+          echo "$HELP" | grep -q "rules"
+          rm -f ./opencodereview.exe
+
   cross-compile:
     runs-on: self-hosted
     timeout-minutes: 10

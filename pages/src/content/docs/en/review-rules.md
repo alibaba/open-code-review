@@ -178,6 +178,7 @@ matching order:
 | `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
 | `**/*.bicep` | `bicep.md` — Bicep (Azure) templates. |
 | `**/*.elm` | `elm.md` - Elm source. |
+| `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

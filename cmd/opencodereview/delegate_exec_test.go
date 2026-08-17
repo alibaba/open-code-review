@@ -25,13 +25,23 @@ func captureDelegateStdout(t *testing.T, fn func()) []byte {
 	os.Stdout = w
 	defer func() { os.Stdout = orig }()
 
+	// Drain while fn runs. Reading only after fn returns caps the capture at
+	// whatever the pipe buffer holds: 64 KiB on Linux, far less on a Windows
+	// anonymous pipe, and a payload past that blocks the writer forever.
+	var out []byte
+	var readErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		out, readErr = io.ReadAll(r)
+	}()
 	fn()
 	if err := w.Close(); err != nil {
 		t.Fatalf("close stdout writer: %v", err)
 	}
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read stdout: %v", err)
+	<-done
+	if readErr != nil {
+		t.Fatalf("read stdout: %v", readErr)
 	}
 	_ = r.Close()
 	return out

@@ -151,6 +151,54 @@ The `timeout_sec` keys are not supported by `ocr config set` — edit
 }
 ```
 
+### API key from a command
+
+Instead of storing a key in the config file, `api_key_cmd` fetches it at
+runtime from a secret manager (1Password, `pass`, `gopass`, …). Its trimmed,
+single-line stdout becomes the key. The same option is available for the
+legacy `llm` block as `auth_token_cmd`.
+
+```bash
+ocr config set providers.anthropic.api_key_cmd "op read op://dev/anthropic/api-key"
+```
+
+Your OS keyring works the same way, through the tool it already ships with, so
+the key lives in the Keychain or Secret Service rather than in `config.json`:
+
+```bash
+# macOS Keychain
+ocr config set providers.anthropic.api_key_cmd \
+  "security find-generic-password -s ocr-anthropic -w"
+
+# Linux (Secret Service: GNOME Keyring, KWallet, …)
+ocr config set providers.anthropic.api_key_cmd \
+  "secret-tool lookup service ocr-anthropic"
+```
+
+Precedence: a static `api_key` always wins (if both are set, the command is
+ignored and a warning is printed); otherwise `api_key_cmd` runs; only if
+neither is set does OCR fall back to the provider's environment variable.
+
+The command runs once per `ocr` invocation and must succeed: a non-zero exit,
+empty output, multi-line output, or more than 64KiB of output is a hard error
+(OCR never silently falls back). It must complete within 60 seconds, which
+includes any time you spend answering a prompt. The command inherits your
+terminal's stdin and stderr, so interactive prompts (pinentry, Touch ID) both
+appear and can be answered. If the command leaves a background daemon holding
+its stdout pipe (`gpg-agent`, a first-use `op` daemon), the credential still
+arrives but every `ocr` run pauses an extra 5 seconds waiting for that pipe to
+close — redirect the daemon's output (`>/dev/null 2>&1`) to get rid of the wait.
+
+On Windows the command runs through `cmd.exe`, not `sh`, so a command written
+for one is generally not portable to the other: `%VAR%` and `^` are `cmd.exe`
+metacharacters, while `$VAR` expansion and `\` escaping do not apply there.
+Quoted arguments are passed through verbatim, so
+`op read "op://Private/My Vault/api-key"` works as written.
+
+Since the value is executed as a shell command, `config.json` is trusted
+input — keep it owned by you and not writable by anyone else (OCR writes it
+with `0600` permissions).
+
 ### Additional retry status codes
 
 Some LLM providers use non-standard 4xx status codes for transient errors, such

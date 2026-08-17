@@ -31,6 +31,11 @@ export const en = {
   'error.pageLoadFailed': 'Failed to load this page.',
   'error.reload': 'Reload',
 
+  // Not found
+  'notFound.title': 'Page not found',
+  'notFound.description': 'The page you are looking for does not exist or has moved.',
+  'notFound.backHome': 'Back to Home',
+
   // Highlights
   'highlights.stat1Value': '20K+',
   'highlights.stat1Label': 'INTERNAL ACTIVE USERS',

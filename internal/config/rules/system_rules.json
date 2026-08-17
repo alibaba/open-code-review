@@ -35,6 +35,8 @@
     "**/*.nix": "nix.md",
     "**/*.{hs,lhs}": "haskell.md",
     "**/*.{nim,nims,nimble}": "nim.md",
-    "**/*.swift": "swift.md"
+    "**/*.swift": "swift.md",
+    "**/*.elm": "elm.md",
+    "**/*.{jsonnet,libsonnet}": "jsonnet.md"
   }
 }
