@@ -34,7 +34,7 @@ export const zh: TranslationKeys = {
   'error.reload': '重新加载',
 
   // Not found
-  'notFound.title': '喵呜，页面找不到了',
+  'notFound.title': '页面找不到了',
   'notFound.description': '您访问的页面不存在或已被移动。',
   'notFound.backHome': '返回首页',
 
