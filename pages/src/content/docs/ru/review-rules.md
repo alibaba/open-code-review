@@ -180,6 +180,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
 | `**/*.bicep` | `bicep.md` — шаблоны Bicep (Azure). |
 | `**/*.nu` | `nushell.md` — скрипты Nushell. |
+| `**/*.elm` | `elm.md` - исходный код Elm. |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet. |
 | *(fallback)* | `default.md` |
 
