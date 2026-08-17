@@ -71,6 +71,14 @@ func TestIsAllowedExt(t *testing.T) {
 		{".PO", true},
 		{".pot", true},
 		{".POT", true},
+		{".glsl", true},
+		{".GLSL", true},
+		{".hlsl", true},
+		{".HLSL", true},
+		{".wgsl", true},
+		{".WGSL", true},
+		{".metal", true},
+		{".METAL", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -186,6 +194,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
 		{"elm non-test", "src/Parser.elm", false},
 		{"elm tests in filename", "src/TestsHelper.elm", false},
+
+		// Shader languages have no conventional default test-file exclusion.
+		{"glsl shader", "shaders/fragment.glsl", false},
+		{"hlsl shader", "shaders/lighting.hlsl", false},
+		{"wgsl shader", "shaders/compute.wgsl", false},
+		{"metal shader", "shaders/blur.metal", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

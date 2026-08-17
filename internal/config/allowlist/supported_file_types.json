@@ -88,5 +88,9 @@
   ".elm",
   ".properties",
   ".po",
-  ".pot"
+  ".pot",
+  ".glsl",
+  ".hlsl",
+  ".wgsl",
+  ".metal"
 ]

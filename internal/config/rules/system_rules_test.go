@@ -122,6 +122,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"ChattyFit/ChattyFit/Views/WorkoutSessionView.swift", "SwiftUI State and Lifecycle"},
 		{"src/Main.elm", "Elm Architecture"},
 		{"app/Page/Home.elm", "Elm Architecture"},
+		{"shaders/fragment.glsl", "Texture and Buffer Access Safety"},
+		{"Shaders/Lighting.hlsl", "Texture and Buffer Access Safety"},
+		{"shaders/compute.wgsl", "Texture and Buffer Access Safety"},
+		{"Shaders/Blur.metal", "Texture and Buffer Access Safety"},
 	}
 
 	for _, tt := range tests {
