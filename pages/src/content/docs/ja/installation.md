@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-`ocr` CLI をインストールするには、サポートされた 4 つの方法があります。
+`ocr` CLI をインストールするには、サポートされた 6 つの方法があります。
 
 ## NPM（推奨）
 
@@ -40,13 +40,41 @@ export OCR_NO_UPDATE=1
 npm uninstall -g @alibaba-group/open-code-review
 ```
 
+## Homebrew（macOS / Linux）
+
+```bash
+brew install open-code-review
+```
+
+この formula はソースからビルドして `ocr` バイナリをインストールします。
+
+後でアップグレードするには：
+
+```bash
+brew upgrade open-code-review
+```
+
+## MacPorts（macOS）
+
+```bash
+sudo port install open-code-review
+```
+
+この port はソースからビルドして `ocr` バイナリをインストールします。
+
+後でアップグレードするには：
+
+```bash
+sudo port upgrade open-code-review
+```
+
 ## インストールスクリプト（curl | sh）
 
 GitHub Release バイナリのダウンロード（検証付き）をラップした便利なインストーラーです——CI のベース
 イメージやヘッドレス環境に適しています。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
 2 つの環境変数を認識します。
@@ -61,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/insta
 Windows（PowerShell 5.1+）では、代わりに PowerShell インストーラーを使用してください：
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
 同じ `OCR_INSTALL_DIR` と `OCR_VERSION` を認識します（`$env:OCR_INSTALL_DIR` /
@@ -162,6 +190,21 @@ ocr review --help       # review コマンドの完全な引数リスト
 which ocr
 echo $PATH
 ```
+
+## シェル補完を有効にする（任意）
+
+`ocr` は bash、zsh、fish、PowerShell の Tab 補完に対応しています。
+
+```bash
+# bash
+source <(ocr completion bash)
+
+# zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+fish、PowerShell、および永続化の詳しい設定方法は [CLI リファレンス](./cli-reference.md#ocr-completion) を参照してください。
+
 
 ## OCR が状態を保存する場所
 

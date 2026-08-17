@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -5,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -40,7 +45,9 @@ type reviewOptions struct {
 	perFileTimeout  int
 	maxTools        int
 	maxGitProcs     int
+	maxTokens       int
 	maxTokensBudget int
+	noFilter        bool
 	preview         bool
 }
 
@@ -90,7 +97,9 @@ var reviewCmd = &cobra.Command{
 		if err := validateReviewOptions(&reviewOpts); err != nil {
 			return err
 		}
-		return executeReview(reviewOpts)
+		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
+		defer stop()
+		return executeReviewContext(ctx, reviewOpts)
 	},
 }
 
@@ -98,7 +107,7 @@ func init() {
 	registerReviewFlags(reviewCmd, &reviewOpts)
 }
 
-func executeReview(opts reviewOptions) error {
+func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
@@ -131,7 +140,7 @@ func executeReview(opts reviewOptions) error {
 	}
 
 	if opts.preview {
-		return runPreview(cc, opts)
+		return runPreviewContext(ctx, cc, opts)
 	}
 
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
@@ -146,22 +155,41 @@ func executeReview(opts reviewOptions) error {
 	if err != nil {
 		return err
 	}
+	cc.Template.MaxCompletionTokens = cc.Template.MaxTokens
+	maxTokens, err := resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
+	if err != nil {
+		return err
+	}
+	cc.Template.MaxTokens = maxTokens
+
+	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
+	// input it returns pins the run to the very commits this check passed on, so
+	// the decision cannot be undone by a ref moving afterwards.
+	sealed, err := validateResumeIdentity(ctx, cc, opts, rt, resumeState)
+	if err != nil {
+		return err
+	}
+
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,
 	}
 
+	var sealedInput *diff.InputResolution
+	if sealed != nil {
+		sealedInput = &sealed.Resolution
+	}
+
 	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
-	ref, _ := mode.RefValue(opts.to, opts.commit)
 	fileReader := &tool.FileReader{
 		RepoDir: cc.RepoDir,
 		Mode:    mode,
-		Ref:     ref,
+		Ref:     fileReadRef(mode, opts, sealedInput),
 		Runner:  cc.GitRunner,
 	}
 	tools := buildToolRegistry(rt.Collector, fileReader)
 
-	mcpClients := initMCPClients(context.Background(), rt.AppCfg, tools, cc.RepoDir, Version)
+	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
 	defer func() {
 		for _, mc := range mcpClients {
 			if err := mc.Close(); err != nil {
@@ -196,7 +224,9 @@ func executeReview(opts reviewOptions) error {
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
+		SealedInput:           sealedInput,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
+		SkipFilter:            opts.noFilter,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
 
@@ -205,7 +235,7 @@ func executeReview(opts reviewOptions) error {
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
-	ctx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(context.Background()), "review.run")
+	runCtx, span := telemetry.StartSpan(telemetry.ContextWithTraceParentFromEnv(ctx), "review.run")
 	defer span.End()
 	telemetry.SetAttr(span, "review.repo", cc.RepoDir)
 	telemetry.SetAttr(span, "review.from", opts.from)
@@ -214,14 +244,30 @@ func executeReview(opts reviewOptions) error {
 	var traceID string
 	if telemetry.IsEnabled() {
 		traceID = telemetry.TraceIDFromContext(ctx)
-		if opts.outputFormat != "json" {
+		if !isMachineReadable(opts.outputFormat) {
 			fmt.Fprintf(os.Stderr, "[ocr] TraceID: %s\n", traceID)
 		}
 	}
 	startTime := time.Now()
 
-	comments, runErr := ag.Run(ctx)
+	comments, runErr := ag.Run(runCtx)
 	manifest := ag.RunManifest()
+
+	// Freeze the retry report at the same boundary as the manifest: ag.Run has
+	// returned and joined its background work, so every request this run made is
+	// finalized and the report can no longer change. run_id is the session's
+	// in-memory UUID (ag.Session().SessionID) rather than ag.SessionID(), which
+	// returns "" when persistence failed — the report's logical_request_id must
+	// stay stable and unique per run even for an unpersisted session.
+	retryReport, freezeErr := rt.RetryCollector.Freeze(ag.Session().SessionID)
+	if freezeErr != nil {
+		// A construction error means the collector's invariants were violated, so
+		// the report is self-contradictory and must not be published at all
+		// (Freeze already returned nil). Retry reporting is observability only, so
+		// its invariant failure must not change the review's exit status.
+		fmt.Fprintf(os.Stderr, "[ocr] warning: freeze retry report: %v (retry report suppressed)\n", freezeErr)
+	}
+
 	resultErr := reviewResultError(runErr, manifest)
 	if resultErr != nil {
 		span.SetStatus(codes.Error, resultErr.Error())
@@ -232,15 +278,24 @@ func executeReview(opts reviewOptions) error {
 	// session delivery failed. Emit it first, then return the independent process
 	// error so JSON consumers retain the complete coverage diagnosis.
 	var emitErr error
-	if manifest != nil || runErr == nil {
-		emitErr = emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity)
+	emitted := manifest != nil || runErr == nil
+	if emitted {
+		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		}
 	}
 	if resultErr != nil {
 		q.Restore()
-		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity)
+		// The report has exactly one exit per run. emitRunResult already published
+		// it whenever it ran (which it does even for a fully failed run, since a
+		// failed manifest is still publishable), so the failure-usage path gets it
+		// only when that call was skipped entirely.
+		failureReport := retryReport
+		if emitted {
+			failureReport = nil
+		}
+		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
@@ -290,17 +345,79 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 	if current.ReviewMode == session.ReviewModeWorkspace {
 		return nil, fmt.Errorf("resume requires --from/--to or --commit; workspace resume is not supported")
 	}
-	state, err := session.LoadResumeState(repoDir, opts.resume)
+	state, err := session.LoadReviewResumeState(repoDir, opts.resume)
 	if err != nil {
 		return nil, fmt.Errorf("load resume session: %w (run 'ocr session list' to see available sessions)", err)
 	}
 	if err := state.ValidateOptions(current); err != nil {
 		return nil, fmt.Errorf("%w (run 'ocr session list' to see available sessions)", err)
 	}
-	if state.CompletedCount() == 0 {
-		return nil, fmt.Errorf("resume session %q has no completed review items (run 'ocr session list' to see available sessions)", opts.resume)
-	}
+	// A parent whose every item failed is deliberately allowed through: it has a
+	// verifiable manifest, so its whole selected set can simply be re-dispatched.
+	// Whether the checkpoints may be reused at all is decided later, by
+	// validateResumeIdentity, once the input identity is known.
 	return state, nil
+}
+
+// validateResumeIdentity rejects a resume whose input, rules, provider or model
+// no longer match the parent run.
+//
+// It must run before agent.New: agent.New creates the session, and session.New
+// writes session_start immediately, so validating any later would leave an orphan
+// session on disk behind every rejection. It must also run after max-tokens is
+// resolved, because the per-file token ceiling decides which large diffs are
+// dropped and therefore which files the input identity covers.
+//
+// provider and model are explicit exactly when their flag was passed on this
+// command line: both default to the empty string and nothing else can set them,
+// so a provider that changed via config file or environment stays implicit —
+// which is the transition this check exists to reject.
+func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState) (*agent.SealedInput, error) {
+	if state == nil {
+		return nil, nil
+	}
+	sealed, err := agent.ResolveIdentity(ctx, agent.Args{
+		RepoDir:    cc.RepoDir,
+		From:       opts.from,
+		To:         opts.to,
+		Commit:     opts.commit,
+		ReviewMode: reviewModeFromOptions(opts),
+		Template:   *cc.Template,
+		SystemRule: cc.Resolver,
+		FileFilter: cc.FileFilter,
+		GitRunner:  cc.GitRunner,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve current input identity: %w", err)
+	}
+	if err := state.ValidateResume(session.ResumeRequest{
+		Identity:         sealed.Identity,
+		Provider:         rt.Provider,
+		Model:            rt.Model,
+		ProviderExplicit: opts.provider != "",
+		ModelExplicit:    opts.model != "",
+	}); err != nil {
+		return nil, err
+	}
+	return sealed, nil
+}
+
+// fileReadRef picks the ref file_read resolves paths against.
+//
+// A sealed input replaces the ref the user typed with the commit that ref
+// resolved to at admission. The diff under review is pinned to that same commit,
+// so leaving the reader on a moving ref would let the model read one version of a
+// file while reviewing the diff of another. Workspace mode has no ref at all, and
+// keeps none: its content is the working tree, which is what the diff describes.
+func fileReadRef(mode tool.ReviewMode, opts reviewOptions, sealed *diff.InputResolution) string {
+	ref, ok := mode.RefValue(opts.to, opts.commit)
+	if !ok {
+		return ""
+	}
+	if sealed != nil && sealed.ResolvedHead != "" {
+		return sealed.ResolvedHead
+	}
+	return ref
 }
 
 func reviewModeFromOptions(opts reviewOptions) string {
@@ -364,8 +481,8 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 	return nil
 }
 
-func runPreview(cc *commonContext, opts reviewOptions) error {
-	ag := agent.New(agent.Args{
+func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions) error {
+	preview, err := agent.Preview(ctx, agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
 		To:         opts.to,
@@ -373,14 +490,11 @@ func runPreview(cc *commonContext, opts reviewOptions) error {
 		FileFilter: cc.FileFilter,
 		GitRunner:  cc.GitRunner,
 	})
-
-	preview, err := ag.Preview(context.Background())
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)
 	}
 
-	outputPreviewText(preview)
-	return nil
+	return outputPreview(preview, opts.outputFormat)
 }
 
 func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -37,6 +40,7 @@ type scanOptions struct {
 	noDedup         bool
 	noSummary       bool
 	batch           string
+	maxTokens       int
 	maxTokensBudget int
 	provider        string
 	model           string
@@ -135,7 +139,7 @@ func executeScan(opts scanOptions) error {
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
-		return runScanPreview(cc, scanTpl, scanPaths)
+		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat)
 	}
 
 	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)
@@ -150,6 +154,12 @@ func executeScan(opts scanOptions) error {
 	if err != nil {
 		return err
 	}
+	scanTpl.MaxCompletionTokens = scanTpl.MaxTokens
+	maxTokens, err := resolveMaxTokens(scanTpl.MaxTokens, rt.AppCfg, opts.maxTokens)
+	if err != nil {
+		return err
+	}
+	scanTpl.MaxTokens = maxTokens
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,
@@ -205,7 +215,7 @@ func executeScan(opts scanOptions) error {
 	var traceID string
 	if telemetry.IsEnabled() {
 		traceID = telemetry.TraceIDFromContext(ctx)
-		if opts.outputFormat != "json" {
+		if !isMachineReadable(opts.outputFormat) {
 			fmt.Fprintf(os.Stderr, "[ocr] TraceID: %s\n", traceID)
 		}
 	}
@@ -221,7 +231,7 @@ func executeScan(opts scanOptions) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity)
+	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, nil)
 }
 
 func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (*session.ResumeState, error) {
@@ -241,8 +251,8 @@ func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (
 	return state, nil
 }
 
-func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string) error {
-	ag := scan.NewAgent(scan.Args{
+func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string) error {
+	preview, err := scan.Preview(context.Background(), scan.Args{
 		RepoDir:          cc.RepoDir,
 		Paths:            scanPaths,
 		FileFilter:       cc.FileFilter,
@@ -252,11 +262,8 @@ func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths
 		// value so MaxFileSizeBytes is consistent.
 		Template: *scanTpl,
 	})
-
-	preview, err := ag.Preview(context.Background())
 	if err != nil {
 		return fmt.Errorf("scan preview failed: %w", err)
 	}
-	outputPreviewText(preview)
-	return nil
+	return outputPreview(preview, outputFormat)
 }

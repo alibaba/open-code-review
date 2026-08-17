@@ -18,7 +18,7 @@
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
-  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
+  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
   <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
@@ -49,6 +49,8 @@ Open Code Review 是一款 AI 驱动的代码审查 CLI 工具。它的前身是
 > 相比通用 Agent（Claude Code），Open Code Review 在相同底层模型下取得了显著更高的 **准确率（Precision）** 与 **F1 综合得分**，同时仅消耗 **约 1/9 的 token**、审查更快。但召回率（Recall）低于通用 Agent——这是以精准度换取低噪声的设计取舍。
 
 基于真实场景的代码审查基准测试，从 **50** 个热门开源仓库中精选 **200** 个真实的 Pull Request，覆盖 **10** 种编程语言——由 80+ 位资深工程师交叉标注验证（共 **1,505** 个标注缺陷）。
+
+<a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> 在 Hugging Face 上探索 AACR-Bench 数据集</a>。
 
 | 指标 | 含义 | 为什么重要 |
 |------|------|-----------|
@@ -135,7 +137,7 @@ cd your-project
 # 工作区模式 —— 审查所有暂存、未暂存和未跟踪的变更
 ocr review
 
-# 分支范围 —— 比较两个引用
+# 分支范围 —— 评审 feature-branch 自与 main 分叉以来的变更（合并基准模式）
 ocr review --from main --to feature-branch
 
 # 单个提交
@@ -171,6 +173,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Codex](plugins/open-code-review/README.md#codex) —— 安装包含可调用评审 Skill 的插件
   - [Cursor](plugins/open-code-review/README.md#cursor) —— 安装包含可移植评审 Skill 的插件
   - [OpenCode](plugins/open-code-review/opencode/README.md) —— 安装原生评审工具和斜杠命令
+  - [QCA Forward](plugins/open-code-review/qca/README.md) —— 使用 QCA 宿主模型运行委托模式，并提供可发布的模板
   - [兼容 Skill 的 Agent](https://open-codereview.ai/docs/agent-skill) —— 安装可移植的 Agent Skill
 - 评审执行模式 —— 完成集成后，选择由哪个 LLM 执行评审
   - [默认模式（OCR 驱动）](https://open-codereview.ai/docs/configuration) —— OCR 使用其已配置的 LLM 执行评审

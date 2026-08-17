@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package viewer
 
 import (
@@ -17,8 +20,8 @@ func TestTruncateText(t *testing.T) {
 		{"truncated with ellipsis", 3, "hello", "hel…"},
 		{"empty string", 5, "", ""},
 		{"n=0 always truncates non-empty", 0, "hi", "…"},
-		{"unicode shorter than n bytes", 20, "你好世界", "你好世界"},
-		{"unicode truncated at byte boundary", 6, "你好世界", "你好…"},
+		{"unicode shorter than n bytes", 20, "你好世界", "你好世界"},     // allow-non-english: fixture exercises rune-boundary truncation
+		{"unicode truncated at byte boundary", 6, "你好世界", "你好…"}, // allow-non-english: fixture exercises rune-boundary truncation
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

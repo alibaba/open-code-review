@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -149,6 +152,16 @@ func TestParseScanFlags_RejectsNegativeMaxTokensBudget(t *testing.T) {
 	}
 }
 
+func TestParseScanFlags_RejectsNegativeMaxTokens(t *testing.T) {
+	_, err := parseScanFlags([]string{"--max-tokens", "-100"})
+	if err == nil {
+		t.Fatal("expected error for negative --max-tokens")
+	}
+	if !strings.Contains(err.Error(), "--max-tokens") {
+		t.Errorf("error message = %q; want it to mention --max-tokens", err.Error())
+	}
+}
+
 func TestParseScanFlags_BooleanFlags(t *testing.T) {
 	opts, err := parseScanFlags([]string{"--no-plan", "--no-dedup", "--no-summary", "--preview"})
 	if err != nil {
@@ -254,6 +267,7 @@ func TestParseScanFlags_IntFlags(t *testing.T) {
 		"--timeout", "20",
 		"--max-tools", "50",
 		"--max-git-procs", "32",
+		"--max-tokens", "200000",
 		"--max-tokens-budget", "100000",
 	})
 	if err != nil {
@@ -270,6 +284,9 @@ func TestParseScanFlags_IntFlags(t *testing.T) {
 	}
 	if opts.maxGitProcs != 32 {
 		t.Errorf("maxGitProcs = %d", opts.maxGitProcs)
+	}
+	if opts.maxTokens != 200000 {
+		t.Errorf("maxTokens = %d", opts.maxTokens)
 	}
 	if opts.maxTokensBudget != 100000 {
 		t.Errorf("maxTokensBudget = %d", opts.maxTokensBudget)

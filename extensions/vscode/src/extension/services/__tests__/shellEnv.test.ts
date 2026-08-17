@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // src/extension/services/__tests__/shellEnv.test.ts
 process.env.OCR_SKIP_SHELL_RESOLVE = '1';
 import { parseEnvBlock, getShellEnv } from '../shellEnv';

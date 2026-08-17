@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package suggestdiff provides line-level diff computation between code snippets,
 // used for CLI rendering of review suggestions with ANSI color codes.
 package suggestdiff

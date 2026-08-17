@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package viewer
 
 import (
@@ -5,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -67,6 +71,12 @@ func TestHandleRepos_UnreadableRoot(t *testing.T) {
 }
 
 func TestHandleRepos_PermissionDenied(t *testing.T) {
+	// Chmod(0000) on Windows only sets the read-only bit, so ReadDir still
+	// succeeds and the handler returns 200. (The Getuid guard below cannot cover
+	// this: Getuid returns -1 on Windows, never 0.)
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permissions not enforced on Windows")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("permission checks are bypassed for root")
 	}

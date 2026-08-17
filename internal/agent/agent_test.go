@@ -1,13 +1,19 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package agent
 
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -217,6 +223,96 @@ func TestParseFilterResponse(t *testing.T) {
 	}
 }
 
+func TestParseFilterToolCalls(t *testing.T) {
+	tests := []struct {
+		name    string
+		calls   []llm.ToolCall
+		total   int
+		wantSet map[int]struct{}
+	}{
+		{
+			name:    "no tool calls",
+			calls:   nil,
+			total:   5,
+			wantSet: nil,
+		},
+		{
+			name: "report_incorrect_comments with IDs",
+			calls: []llm.ToolCall{{
+				Function: llm.FunctionCall{
+					Name:      "report_incorrect_comments",
+					Arguments: `{"comment_ids": ["c-0", "c-2"]}`,
+				},
+			}},
+			total:   5,
+			wantSet: map[int]struct{}{0: {}, 2: {}},
+		},
+		{
+			name: "approve_all_comments returns empty map",
+			calls: []llm.ToolCall{{
+				Function: llm.FunctionCall{
+					Name:      "approve_all_comments",
+					Arguments: `{}`,
+				},
+			}},
+			total:   5,
+			wantSet: map[int]struct{}{},
+		},
+		{
+			name: "ignores non-matching tool names",
+			calls: []llm.ToolCall{{
+				Function: llm.FunctionCall{
+					Name:      "other_tool",
+					Arguments: `{"comment_ids": ["c-0"]}`,
+				},
+			}},
+			total:   5,
+			wantSet: nil,
+		},
+		{
+			name: "out-of-range indices ignored",
+			calls: []llm.ToolCall{{
+				Function: llm.FunctionCall{
+					Name:      "report_incorrect_comments",
+					Arguments: `{"comment_ids": ["c-0", "c-10"]}`,
+				},
+			}},
+			total:   5,
+			wantSet: map[int]struct{}{0: {}},
+		},
+		{
+			name: "invalid JSON arguments falls through",
+			calls: []llm.ToolCall{{
+				Function: llm.FunctionCall{
+					Name:      "report_incorrect_comments",
+					Arguments: `not json`,
+				},
+			}},
+			total:   5,
+			wantSet: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseFilterToolCalls(tt.calls, tt.total)
+			if tt.wantSet == nil {
+				if got != nil {
+					t.Errorf("expected nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != len(tt.wantSet) {
+				t.Fatalf("len = %d, want %d; got %v", len(got), len(tt.wantSet), got)
+			}
+			for idx := range tt.wantSet {
+				if _, ok := got[idx]; !ok {
+					t.Errorf("missing index %d in result", idx)
+				}
+			}
+		})
+	}
+}
+
 func TestExtFromPath(t *testing.T) {
 	a := New(Args{})
 
@@ -292,6 +388,119 @@ func TestFormatToolDefs(t *testing.T) {
 		}
 		if !strings.Contains(got, "(required)") {
 			t.Error("missing required marker")
+		}
+	})
+
+	t.Run("parameters preserve raw JSON order", func(t *testing.T) {
+		raw := json.RawMessage(`{
+			"name":"code_search",
+			"description":"Search code",
+			"parameters":{
+				"type":"object",
+				"properties":{
+					"query":{"description":"Query string"},
+					"path_glob":{"description":"Path glob"},
+					"case_sensitive":{"description":"Match case"},
+					"max_results":{"description":"Maximum results"}
+				},
+				"required":["query"]
+			}
+		}`)
+		defs := []llm.ToolDef{
+			{
+				Type: "function",
+				Function: llm.FunctionDef{
+					Name:          "code_search",
+					Description:   "Search code",
+					RawDefinition: raw,
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"query": map[string]any{
+								"description": "Query string",
+							},
+							"path_glob": map[string]any{
+								"description": "Path glob",
+							},
+							"case_sensitive": map[string]any{
+								"description": "Match case",
+							},
+							"max_results": map[string]any{
+								"description": "Maximum results",
+							},
+						},
+						"required": []any{"query"},
+					},
+				},
+			},
+		}
+
+		got := formatToolDefs(defs)
+		wantLines := []string{
+			"  - query: Query string (required)",
+			"  - path_glob: Path glob",
+			"  - case_sensitive: Match case",
+			"  - max_results: Maximum results",
+		}
+		last := -1
+		for _, line := range wantLines {
+			idx := strings.Index(got, line)
+			if idx == -1 {
+				t.Fatalf("missing parameter line %q in:\n%s", line, got)
+			}
+			if idx <= last {
+				t.Fatalf("parameter line %q is out of order in:\n%s", line, got)
+			}
+			last = idx
+		}
+	})
+
+	t.Run("fallback parameters are sorted when raw order is unavailable", func(t *testing.T) {
+		defs := []llm.ToolDef{
+			{
+				Type: "function",
+				Function: llm.FunctionDef{
+					Name:        "code_search",
+					Description: "Search code",
+					Parameters: map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"query": map[string]any{
+								"description": "Query string",
+							},
+							"case_sensitive": map[string]any{
+								"description": "Match case",
+							},
+							"path_glob": map[string]any{
+								"description": "Path glob",
+							},
+							"max_results": map[string]any{
+								"description": "Maximum results",
+							},
+						},
+						"required": []any{"query"},
+					},
+				},
+			},
+		}
+
+		got := formatToolDefs(defs)
+		wantLines := []string{
+			"  - case_sensitive: Match case",
+			"  - max_results: Maximum results",
+			"  - path_glob: Path glob",
+			"  - query: Query string (required)",
+		}
+		last := -1
+		for _, line := range wantLines {
+			idx := strings.Index(got, line)
+			if idx == -1 {
+				t.Fatalf("missing parameter line %q in:\n%s", line, got)
+			}
+			if idx <= last {
+				t.Fatalf("parameter line %q is out of order in:\n%s", line, got)
+			}
+			last = idx
 		}
 	})
 
@@ -443,6 +652,89 @@ func TestFilterLargeDiffs_ZeroMaxTokens(t *testing.T) {
 	}
 }
 
+func TestReviewItemFingerprintIgnoresTrailingLineEndings(t *testing.T) {
+	base := model.Diff{
+		OldPath: "main.go",
+		NewPath: "main.go",
+		Diff:    "@@ -1 +1 @@\n-old\n+new",
+	}
+	want := reviewItemFingerprint(session.ReviewModeRange, base)
+
+	for name, suffix := range map[string]string{
+		"lf":               "\n",
+		"crlf":             "\r\n",
+		"extra blank line": "\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := base
+			d.Diff += suffix
+			if got := reviewItemFingerprint(session.ReviewModeRange, d); got != want {
+				t.Errorf("fingerprint = %q, want %q", got, want)
+			}
+		})
+	}
+
+	withContextLine := base
+	withContextLine.Diff += "\n "
+	if got := reviewItemFingerprint(session.ReviewModeRange, withContextLine); got == want {
+		t.Error("fingerprint ignored a real trailing context line")
+	}
+}
+
+// TestReviewItemFingerprintStableAcrossPatchPosition pins down the --resume
+// guarantee end to end: the patch splitter leaves position-dependent trailing
+// line endings on each file section, so the fingerprint must be derived from
+// real diff.ParseDiffText output with the target file in different positions.
+func TestReviewItemFingerprintStableAcrossPatchPosition(t *testing.T) {
+	section := func(path, from, to string) string {
+		return "diff --git a/" + path + " b/" + path + "\n" +
+			"--- a/" + path + "\n+++ b/" + path + "\n" +
+			"@@ -1 +1 @@\n-" + from + "\n+" + to + "\n"
+	}
+
+	// Pre-create the files so finalizeDiff's working-tree read succeeds and the
+	// test does not emit spurious "cannot read file" warnings.
+	dir := t.TempDir()
+	for _, name := range []string{"a.go", "z.go"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("new\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	target, other := section("a.go", "old", "new"), section("z.go", "x", "y")
+
+	fingerprintOfA := func(t *testing.T, patch string) string {
+		t.Helper()
+		diffs, err := diff.ParseDiffText(context.Background(), patch, dir, "", nil)
+		if err != nil {
+			t.Fatalf("ParseDiffText: %v", err)
+		}
+		for _, d := range diffs {
+			if d.NewPath == "a.go" {
+				return reviewItemFingerprint(session.ReviewModeRange, d)
+			}
+		}
+		t.Fatal("a.go missing from parsed diffs")
+		return ""
+	}
+
+	for _, tc := range []struct {
+		name, last, first string
+	}{
+		// The splitter leaves a trailing newline on whichever file is last.
+		{"plain patch", other + target, target + other},
+		// Workspace mode joins untracked file diffs with "\n\n", so the trailing
+		// run is longer than a single newline.
+		{"untracked join", other + "\n\n" + target + "\n\n", target + "\n\n" + other + "\n\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, want := fingerprintOfA(t, tc.last), fingerprintOfA(t, tc.first); got != want {
+				t.Errorf("fingerprint depends on position in patch:\n last  = %s\n first = %s", got, want)
+			}
+		})
+	}
+}
+
 func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
 	diffs := []model.Diff{
 		{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
@@ -466,6 +758,12 @@ func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
 					Content: "cached comment",
 				}},
 			},
+		},
+		// The checkpoint line alone earns no reuse: coverage is the parent
+		// manifest's to state, so a.go is only eligible because the parent settled
+		// it as completed.
+		Manifest: &session.RunManifest{
+			Coverage: session.Coverage{Completed: []session.CoverageItem{{ItemID: fp, Fingerprint: fp}}},
 		},
 	}
 	collector := tool.NewCommentCollector()
@@ -496,6 +794,31 @@ func TestApplyResumeReusesCompletedItemsAcrossModels(t *testing.T) {
 	info := a.ResumeInfo()
 	if info == nil || info.ReusedFiles != 1 || info.RerunFiles != 1 || info.PreviousModel != "anthropic-model" || info.CurrentModel != "openai-model" {
 		t.Fatalf("ResumeInfo = %+v", info)
+	}
+}
+
+// TestAgentGettersNil covers the defensive early returns in the accessor
+// methods when the agent (or its session) was never fully constructed, so
+// callers never advertise a resume target that does not exist.
+func TestAgentGettersNil(t *testing.T) {
+	var nilAgent *Agent
+	if got := nilAgent.SessionID(); got != "" {
+		t.Errorf("nil agent SessionID = %q, want empty", got)
+	}
+	if got := nilAgent.RunManifest(); got != nil {
+		t.Errorf("nil agent RunManifest = %v, want nil", got)
+	}
+
+	// An agent with no session must also return the empty/nil sentinels.
+	empty := &Agent{}
+	if got := empty.SessionID(); got != "" {
+		t.Errorf("sessionless SessionID = %q, want empty", got)
+	}
+	if got := empty.RunManifest(); got != nil {
+		t.Errorf("sessionless RunManifest = %v, want nil", got)
+	}
+	if got := empty.ResumeInfo(); got != nil {
+		t.Errorf("resumeless ResumeInfo = %v, want nil", got)
 	}
 }
 

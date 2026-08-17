@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package telemetry
 
 import (
@@ -16,6 +19,8 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+
+	"github.com/alibaba/open-code-review/internal/stdout"
 )
 
 func setupEnabledTelemetry(t *testing.T) {
@@ -121,16 +126,88 @@ func TestPhaseEvent_WithError(t *testing.T) {
 	PhaseEvent(ctx, "scan", "main.go", 500*time.Millisecond, errors.New("parse error"))
 }
 
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	defer restore()
+	fn()
+	return buf.String()
+}
+
 func TestPrintTraceSummary_WithTokenDetails(t *testing.T) {
-	PrintTraceSummary(5, 10, 1000, 200, 1200, 0, 0, 3*time.Second)
+	out := captureStdout(t, func() {
+		PrintTraceSummary(TraceSummary{
+			FilesReviewed: 5, CommentsGenerated: 10,
+			InputTokens: 1000, OutputTokens: 200, TotalTokens: 1200,
+			Duration: 3 * time.Second,
+		})
+	})
+	want := "[ocr] Summary: 5 file(s) reviewed, 10 comment(s), ~1200 token(s) used (input: ~1000, output: ~200), 3s elapsed\n"
+	if out != want {
+		t.Errorf("PrintTraceSummary output = %q, want %q", out, want)
+	}
 }
 
 func TestPrintTraceSummary_WithCacheTokens(t *testing.T) {
-	PrintTraceSummary(3, 2, 500, 100, 600, 200, 50, 2*time.Second)
+	out := captureStdout(t, func() {
+		PrintTraceSummary(TraceSummary{
+			FilesReviewed: 3, CommentsGenerated: 2,
+			InputTokens: 500, OutputTokens: 100, TotalTokens: 600,
+			CacheReadTokens: 200, CacheWriteTokens: 50,
+			Duration: 2 * time.Second,
+		})
+	})
+	want := "[ocr] Summary: 3 file(s) reviewed, 2 comment(s), ~600 token(s) used (input: ~500, output: ~100), cache(read: ~200, write: ~50), 2s elapsed\n"
+	if out != want {
+		t.Errorf("PrintTraceSummary output = %q, want %q", out, want)
+	}
 }
 
 func TestPrintTraceSummary_NoTokenDetails(t *testing.T) {
-	PrintTraceSummary(2, 1, 0, 0, 500, 0, 0, 1*time.Second)
+	out := captureStdout(t, func() {
+		PrintTraceSummary(TraceSummary{
+			FilesReviewed: 2, CommentsGenerated: 1,
+			TotalTokens: 500,
+			Duration:    1 * time.Second,
+		})
+	})
+	want := "[ocr] Summary: 2 file(s) reviewed, 1 comment(s), ~500 token(s) used, 1s elapsed\n"
+	if out != want {
+		t.Errorf("PrintTraceSummary output = %q, want %q", out, want)
+	}
+}
+
+func TestPrintTraceSummary_WithSessionID(t *testing.T) {
+	out := captureStdout(t, func() {
+		PrintTraceSummary(TraceSummary{
+			FilesReviewed: 5, CommentsGenerated: 10,
+			InputTokens: 1000, OutputTokens: 200, TotalTokens: 1200,
+			Duration:  3 * time.Second,
+			SessionID: "3a7f2b1c-9d4e-4f8a-b2c1-6e7f8a9b0c1d",
+		})
+	})
+	want := "[ocr] Summary: 5 file(s) reviewed, 10 comment(s), ~1200 token(s) used (input: ~1000, output: ~200), 3s elapsed\n" +
+		"[ocr] Session: 3a7f2b1c-9d4e-4f8a-b2c1-6e7f8a9b0c1d\n"
+	if out != want {
+		t.Errorf("PrintTraceSummary output = %q, want %q", out, want)
+	}
+}
+
+func TestPrintTraceSummary_WithoutSessionID(t *testing.T) {
+	// An empty session ID exercises the omit path: no session line is printed.
+	// The empty case arises when session persistence is unavailable, not from
+	// preview mode (preview does not reach PrintTraceSummary).
+	out := captureStdout(t, func() {
+		PrintTraceSummary(TraceSummary{
+			FilesReviewed: 2, CommentsGenerated: 1,
+			TotalTokens: 500,
+			Duration:    1 * time.Second,
+		})
+	})
+	if strings.Contains(out, "Session:") {
+		t.Errorf("expected no session line for empty session ID, got %q", out)
+	}
 }
 
 func TestPrintToolCallStarted_WithArgs(t *testing.T) {

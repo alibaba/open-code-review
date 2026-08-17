@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { t, resolveLocale, SupportedLocale } from '../../shared/i18n';
 import * as vscode from 'vscode';
 import { ReviewComment, CommentStatus, CommentSyncState, ReviewContext, ReviewMode } from '../../shared/types';

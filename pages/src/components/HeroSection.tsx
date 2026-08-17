@@ -1,11 +1,20 @@
-import React, { Suspense, useCallback, useState, useEffect } from 'react';
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
+import React, { Suspense, useCallback, useState, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useTranslation } from '../i18n';
 import { useResponsive } from '../hooks/useResponsive';
 import ErrorBoundary from './ErrorBoundary';
-import docDownloadIcon from '../assets/icons/doc-download-green.svg';
+import npmIcon from '../assets/icons/npm.svg';
+import brewIcon from '../assets/icons/brew.svg';
+import macportsIcon from '../assets/icons/macports.svg';
+import appleIcon from '../assets/icons/apple.svg';
+import linuxIcon from '../assets/icons/linux.svg';
+import windowsIcon from '../assets/icons/windows.svg';
 import copyIcon from '../assets/icons/icon-copy.svg';
+import chevronDownIcon from '../assets/icons/icon-chevron-down.svg';
 
 const ColorBends = React.lazy(() => import(/* webpackChunkName: "color-bends" */ './ColorBends'));
 
@@ -115,17 +124,42 @@ const terminalLines = [
   { num: 9, content: <span>&nbsp;</span> },
   { num: 10, content: <span style={{ color: TC.dim }}>─── internal/auth/login.go:42-45 ───</span> },
   { num: 11, content: <span style={{ color: TC.text }}>Consider using bcrypt cost factor ≥ 12 for password hashing.</span> },
-  { num: 12, content: <span className="terminal-cursor" style={{ color: TC.text }}>｜</span> },
+  { num: 12, content: <span className="terminal-cursor" style={{ color: TC.text }}>｜</span> }, // allow-non-english: fullwidth bar renders the terminal cursor
 ];
 
-const INSTALL_CMD = 'npm i -g @alibaba-group/open-code-review';
+interface InstallChannel {
+  key: string;
+  labelKey: string;
+  cmd: string;
+  icons: string[];
+  primary: boolean;
+}
+
+const INSTALL_CHANNELS: InstallChannel[] = [
+  { key: 'npm', labelKey: 'hero.installNpm', cmd: 'npm i -g @alibaba-group/open-code-review', icons: [npmIcon], primary: true },
+  { key: 'brew', labelKey: 'hero.installBrew', cmd: 'brew install open-code-review', icons: [brewIcon], primary: true },
+  { key: 'macos', labelKey: 'hero.installMacOS', cmd: 'curl -fsSL https://open-codereview.ai/install.sh | sh', icons: [appleIcon], primary: false },
+  { key: 'linux', labelKey: 'hero.installLinux', cmd: 'curl -fsSL https://open-codereview.ai/install.sh | sh', icons: [linuxIcon], primary: false },
+  { key: 'windows', labelKey: 'hero.installWindows', cmd: 'irm https://open-codereview.ai/install.ps1 | iex', icons: [windowsIcon], primary: false },
+  { key: 'macports', labelKey: 'hero.installMacPorts', cmd: 'sudo port install open-code-review', icons: [macportsIcon], primary: false },
+];
+
+const PRIMARY_CHANNELS = INSTALL_CHANNELS.filter((ch) => ch.primary);
+const SECONDARY_CHANNELS = INSTALL_CHANNELS.filter((ch) => !ch.primary);
 
 const HeroSection: React.FC = () => {
   const { t } = useTranslation();
-  const { isMobile, isTablet } = useResponsive();
+  const { isMobile, isTablet, isDesktop } = useResponsive();
+  const twoCol = isDesktop;
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [showShaderBackground, setShowShaderBackground] = useState(false);
+  const [activeChannelKey, setActiveChannelKey] = useState(INSTALL_CHANNELS[0].key);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const activeChannel = INSTALL_CHANNELS.find((ch) => ch.key === activeChannelKey) ?? INSTALL_CHANNELS[0];
+  const activeIsSecondary = !activeChannel.primary;
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -168,6 +202,24 @@ const HeroSection: React.FC = () => {
   }, [toastVisible]);
 
   useEffect(() => {
+    if (!menuOpen) return;
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
     // Wait until after the first paint before loading the heavy shader chunk.
     let secondFrame: number | undefined;
     const firstFrame = requestAnimationFrame(() => {
@@ -197,9 +249,10 @@ const HeroSection: React.FC = () => {
       style={{
         width: '100vw',
         marginLeft: 'calc(-50vw + 50%)',
-        height: isMobile ? 850 : isTablet ? 830 : 990,
+        minHeight: isMobile ? 600 : isTablet ? 700 : 680,
+        paddingBottom: isMobile ? 60 : 80,
         position: 'relative',
-        overflow: 'hidden',
+        overflow: 'visible',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -244,7 +297,7 @@ const HeroSection: React.FC = () => {
           left: 0,
           bottom: 0,
           width: '100%',
-          height: 276,
+          height: 200,
           background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, #000000 100%)',
           zIndex: 1,
         }}
@@ -256,123 +309,292 @@ const HeroSection: React.FC = () => {
           position: 'relative',
           zIndex: 2,
           display: 'flex',
-          flexDirection: 'column',
+          flexDirection: twoCol ? 'row' : 'column',
           alignItems: 'center',
-          paddingTop: isMobile ? 100 : 180,
-          paddingLeft: isMobile ? 20 : 0,
-          paddingRight: isMobile ? 20 : 0,
-          gap: isMobile ? 24 : 32,
-          maxWidth: isMobile ? '100%' : 742,
+          justifyContent: 'center',
+          paddingTop: isMobile ? 72 : isTablet ? 120 : 140,
+          paddingLeft: isMobile ? 20 : 40,
+          paddingRight: isMobile ? 20 : 40,
+          gap: twoCol ? 48 : isMobile ? 28 : 36,
+          maxWidth: twoCol ? 1140 : isMobile ? '100%' : 742,
+          width: '100%',
         }}
       >
-        {/* Install Badge */}
+        {/* Left column */}
         <div
           style={{
-            width: 'auto',
-            height: 32,
-            background: 'rgba(0,0,0,0.8)',
-            borderRadius: 500,
-            border: '1px solid rgba(255,255,255,0.16)',
             display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '0 12px',
-            marginBottom: isMobile ? 8 : 0,
+            flexDirection: 'column',
+            alignItems: twoCol ? 'flex-start' : 'center',
+            gap: isMobile ? 20 : 24,
+            flex: twoCol ? '1 1 0' : undefined,
+            minWidth: 0,
+            maxWidth: twoCol ? 520 : '100%',
+            width: '100%',
           }}
         >
-          <img src={docDownloadIcon} alt="" style={{ width: 16, height: 16, flexShrink: 0 }} />
-          <p className="install-text-shimmer" style={{ fontSize: 12, fontWeight: 400, margin: 0, letterSpacing: '0.2px', whiteSpace: 'nowrap' }}>
-            {INSTALL_CMD}
-          </p>
-          <img
-            src={copyIcon}
-            alt="Copy"
-            style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0 }}
-            onClick={() => handleCopy(INSTALL_CMD)}
-          />
-        </div>
+          {/* Title */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: twoCol ? 'flex-start' : 'center', width: '100%' }}>
+            <h1
+              style={{
+                color: '#FFFFFF',
+                fontSize: isMobile ? 28 : isTablet ? 36 : 48,
+                fontWeight: 500,
+                textAlign: twoCol ? 'left' : 'center',
+                lineHeight: isMobile ? '34px' : isTablet ? '42px' : '52px',
+                letterSpacing: '0.96px',
+                margin: 0,
+              }}
+            >
+              {t('hero.title').split('\n').map((line, i, arr) => (
+                <React.Fragment key={i}>
+                  {line}
+                  {i < arr.length - 1 && <br />}
+                </React.Fragment>
+              ))}
+            </h1>
+            <p
+              style={{
+                color: 'rgba(255,255,255,0.6)',
+                fontSize: isMobile ? 14 : 16,
+                textAlign: twoCol ? 'left' : 'center',
+                lineHeight: '24px',
+                marginTop: 16,
+                maxWidth: isMobile ? '100%' : 520,
+              }}
+            >
+              {t('hero.description')}
+            </p>
+          </div>
 
-        {/* Title */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <h1
-            style={{
-              color: '#FFFFFF',
-              fontSize: isMobile ? 28 : isTablet ? 36 : 48,
-              fontWeight: 500,
-              textAlign: 'center',
-              lineHeight: isMobile ? '34px' : isTablet ? '42px' : '52px',
-              letterSpacing: '0.96px',
-              margin: 0,
-            }}
-          >
-            {t('hero.title').split('\n').map((line, i, arr) => (
-              <React.Fragment key={i}>
-                {line}
-                {i < arr.length - 1 && <br />}
-              </React.Fragment>
-            ))}
-          </h1>
-          <p
-            style={{
-              color: 'rgba(255,255,255,0.6)',
-              fontSize: isMobile ? 14 : 16,
-              textAlign: 'center',
-              lineHeight: '24px',
-              marginTop: 16,
-              maxWidth: isMobile ? '100%' : 742,
-            }}
-          >
-            {t('hero.description')}
-          </p>
-        </div>
+          {/* Install channels — tab switcher */}
+          <div style={{ width: '100%', maxWidth: 520 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 8 }}>
+              {PRIMARY_CHANNELS.map((ch) => {
+                const isActive = ch.key === activeChannelKey;
+                return (
+                  <button
+                    key={ch.key}
+                    type="button"
+                    onClick={() => { setActiveChannelKey(ch.key); setMenuOpen(false); }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 9px',
+                      background: isActive ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      border: 'none',
+                      borderBottom: isActive ? '2px solid rgba(255,255,255,0.8)' : '2px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    {ch.icons.map((icon, i) => (
+                      <img key={i} src={icon} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: isActive ? 1 : 0.5 }} />
+                    ))}
+                    <span style={{ fontSize: 13, fontWeight: isActive ? 600 : 500, color: isActive ? '#fff' : 'rgba(255,255,255,0.45)' }}>
+                      {t(ch.labelKey)}
+                    </span>
+                  </button>
+                );
+              })}
 
-        {/* Buttons */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <a
-            href="#quickstart"
-            style={{
-              height: 32,
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 12px',
-              background: '#ffffff',
-              border: '1px solid #EBEBEB',
-              borderRadius: 6,
-              color: 'rgba(0,0,0,0.77)',
-              fontSize: 14,
-              fontWeight: 500,
-              textDecoration: 'none',
-            }}
-          >
-            {t('hero.quickStart')}
-          </a>
-          <Link
-            to="/docs"
-            style={{
-              height: 32,
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              padding: '4px 12px',
-              background: 'rgba(0,0,0,0.9)',
-              borderRadius: 6,
-              color: '#fff',
-              fontSize: 14,
-              border: '1px solid rgba(255,255,255,0.16)',
-              textDecoration: 'none',
-            }}
-          >
-            {t('hero.learnMore')}
-          </Link>
+              {/* Overflow channels live behind a "More" trigger so the row stops
+                  growing each time a new channel is added. */}
+              <div ref={menuRef} style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  aria-expanded={menuOpen}
+                  aria-controls="install-more-panel"
+                  onClick={() => setMenuOpen((open) => !open)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 9px',
+                    background: activeIsSecondary ? 'rgba(255,255,255,0.1)' : 'transparent',
+                    border: 'none',
+                    borderBottom: activeIsSecondary ? '2px solid rgba(255,255,255,0.8)' : '2px solid transparent',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {activeIsSecondary && (
+                    <img src={activeChannel.icons[0]} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: 1 }} />
+                  )}
+                  <span style={{ fontSize: 13, fontWeight: activeIsSecondary ? 600 : 500, color: activeIsSecondary ? '#fff' : 'rgba(255,255,255,0.45)' }}>
+                    {activeIsSecondary ? t(activeChannel.labelKey) : t('hero.installMore')}
+                  </span>
+                  <img
+                    src={chevronDownIcon}
+                    alt=""
+                    style={{ width: 12, height: 12, flexShrink: 0, opacity: activeIsSecondary ? 0.8 : 0.5, transform: menuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}
+                  />
+                </button>
+
+                {menuOpen && (
+                  <div
+                    id="install-more-panel"
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      marginTop: 8,
+                      background: 'rgba(26,26,26,0.92)',
+                      backdropFilter: 'blur(12px)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      borderRadius: 8,
+                      padding: '8px 4px',
+                      zIndex: 200,
+                      minWidth: 200,
+                    }}
+                  >
+                    {SECONDARY_CHANNELS.map((ch) => {
+                      const isActive = ch.key === activeChannelKey;
+                      return (
+                        <button
+                          key={ch.key}
+                          type="button"
+                          onClick={() => { setActiveChannelKey(ch.key); setMenuOpen(false); }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            width: '100%',
+                            padding: '8px 12px',
+                            background: isActive ? 'rgba(255,255,255,0.08)' : 'transparent',
+                            border: 'none',
+                            borderRadius: 6,
+                            color: isActive ? '#fff' : 'rgba(255,255,255,0.6)',
+                            fontSize: 13,
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {ch.icons.map((icon, i) => (
+                            <img key={i} src={icon} alt="" style={{ width: 14, height: 14, flexShrink: 0, opacity: isActive ? 1 : 0.5 }} />
+                          ))}
+                          <span style={{ fontWeight: isActive ? 600 : 500 }}>{t(ch.labelKey)}</span>
+                        </button>
+                      );
+                    })}
+                    <div style={{ height: 1, background: 'rgba(255,255,255,0.12)', margin: '4px 8px' }} />
+                    <Link
+                      to="/docs/installation"
+                      onClick={() => setMenuOpen(false)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        padding: '8px 12px',
+                        borderRadius: 6,
+                        color: 'rgba(255,255,255,0.6)',
+                        fontSize: 13,
+                        textDecoration: 'none',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span>{t('hero.allInstallOptions')}</span>
+                      <span aria-hidden="true">→</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                height: 36,
+                padding: '0 14px',
+                background: 'rgba(0,0,0,0.75)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 8,
+                width: '100%',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 13,
+                  fontFamily: 'Menlo, monospace',
+                  color: 'rgba(255,255,255,0.85)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {activeChannel.cmd}
+              </span>
+              <img
+                src={copyIcon}
+                alt="Copy"
+                style={{ width: 16, height: 16, cursor: 'pointer', flexShrink: 0, opacity: 0.7 }}
+                onClick={() => handleCopy(activeChannel.cmd)}
+              />
+            </div>
+          </div>
+
+          {/* Buttons */}
+          <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+            <a
+              href="#quickstart"
+              style={{
+                height: 40,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: 6,
+                padding: '0 20px',
+                background: '#ffffff',
+                border: 'none',
+                borderRadius: 8,
+                color: '#111',
+                fontSize: 15,
+                fontWeight: 600,
+                textDecoration: 'none',
+                boxShadow: '0 2px 12px rgba(255,255,255,0.15)',
+                transition: 'transform 0.15s, box-shadow 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.03)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(255,255,255,0.25)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 2px 12px rgba(255,255,255,0.15)'; }}
+            >
+              {t('hero.quickStart')}
+            </a>
+            <Link
+              to="/docs"
+              style={{
+                height: 40,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                padding: '0 20px',
+                background: 'rgba(255,255,255,0.06)',
+                borderRadius: 8,
+                color: 'rgba(255,255,255,0.9)',
+                fontSize: 15,
+                fontWeight: 500,
+                border: '1px solid rgba(255,255,255,0.18)',
+                textDecoration: 'none',
+                transition: 'background 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)'; }}
+            >
+              {t('hero.learnMore')}
+            </Link>
+          </div>
         </div>
 
         {/* Terminal */}
         <div
           style={{
             width: '100%',
-            maxWidth: isMobile ? '100%' : isTablet ? 560 : 692,
+            maxWidth: isMobile ? '100%' : twoCol ? 600 : isTablet ? 560 : 692,
+            flexShrink: twoCol ? 0 : undefined,
             borderRadius: 8,
             overflow: 'hidden',
             border: '1px solid rgba(255,255,255,0.08)',

@@ -28,23 +28,7 @@
     {{end}}
     </tbody>
 </table>
-<script>
-(() => {
-    const input = document.getElementById("repository-search-input");
-    const table = document.getElementById("repositories-table");
-    if (!input || !table) return;
-
-    const rows = table.querySelectorAll("tbody tr");
-    input.addEventListener("input", () => {
-        const query = input.value.trim().toLowerCase();
-        rows.forEach((row) => {
-            const nameCell = row.querySelector("[data-repository-name]");
-            const name = nameCell ? nameCell.textContent.trim().toLowerCase() : "";
-            row.hidden = !name.includes(query);
-        });
-    });
-})();
-</script>
+<script src="/static/repos.js"></script>
 {{else}}
 <p>No session data found. Run a code review first.</p>
 {{end}}

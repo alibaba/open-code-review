@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import { TranslationKeys } from './types';
 
 export const ja: TranslationKeys = {
@@ -17,21 +20,34 @@ export const ja: TranslationKeys = {
   'hero.terminal': 'ターミナル',
   'hero.copied': 'コピーしました',
   'hero.copyFailed': 'コピー失敗',
+  'hero.installNpm': 'npm',
+  'hero.installBrew': 'Homebrew',
+  'hero.installMacPorts': 'MacPorts',
+  'hero.installMacOS': 'MacOS',
+  'hero.installLinux': 'Linux',
+  'hero.installWindows': 'Windows',
+  'hero.installMore': 'その他',
+  'hero.allInstallOptions': 'すべてのインストール方法',
 
   // Error boundary
   'error.pageLoadFailed': 'ページの読み込みに失敗しました。',
   'error.reload': '再読み込み',
 
+  // Not found
+  'notFound.title': 'ページが見つかりません',
+  'notFound.description': 'お探しのページは存在しないか、移動した可能性があります。',
+  'notFound.backHome': 'ホームに戻る',
+
   // Highlights
   'highlights.stat1Value': '20K+',
-  'highlights.stat1Label': 'アクティブユーザー',
+  'highlights.stat1Label': '社内アクティブユーザー',
   'highlights.stat1Caption': 'Alibabaグループ内で実戦検証済み',
-  'highlights.stat2Value': '> 30%',
-  'highlights.stat2Label': '採用率',
-  'highlights.stat2Caption': 'Alibabaグループ内で実戦検証済み',
-  'highlights.stat3Value': '1M+',
+  'highlights.stat2Value': '150K+',
+  'highlights.stat2Label': 'NPM コミュニティダウンロード',
+  'highlights.stat2Caption': 'npm 過去30日の実ダウンロード数',
+  'highlights.stat3Value': '3M+',
   'highlights.stat3Label': '実タスク',
-  'highlights.stat3Caption': '実行されたコードレビュータスク',
+  'highlights.stat3Caption': '実行済みのコードレビュータスク',
   'highlights.stat4Value': '1/9',
   'highlights.stat4Label': 'トークンコスト',
   'highlights.stat4Caption': 'Claude Code との比較 · 1,000 PR',
@@ -159,6 +175,8 @@ export const ja: TranslationKeys = {
   'docs.reviewAgentDesc': '実行プロセスを表示せず最終サマリーのみ出力。自動化パイプラインに適しています。',
   'docs.reviewPreviewLabel': 'Dry-Run プレビュー',
   'docs.reviewPreviewDesc': 'レビュー対象のファイル一覧と統計情報（ファイル数、変更行数）を表示します。LLM 呼び出しなし、コストなし —— 本番レビュー前にスコープを確認するのに役立ちます。',
+  'docs.reviewToggles': 'レビューステージの切り替え：--no-filter',
+  'docs.reviewTogglesFilterDesc': 'すべてのレビューコメントを保持し、ファイルごとの REVIEW_FILTER_TASK LLM 後処理呼び出しをスキップします。',
   'docs.reviewFlags': 'フラグリファレンス',
   'docs.reviewFlagCol1': 'フラグ',
   'docs.reviewFlagCol2': '説明',
@@ -166,7 +184,7 @@ export const ja: TranslationKeys = {
   'docs.reviewFlag1Desc': 'レビューするコミットハッシュを指定',
   'docs.reviewFlag2Desc': '開始参照（差分の起点）',
   'docs.reviewFlag3Desc': 'ターゲット参照（差分の終点）',
-  'docs.reviewFlag4Desc': '出力形式：text または json',
+  'docs.reviewFlag4Desc': '出力形式：text、json または sarif',
   'docs.reviewFlag5Desc': 'Git リポジトリルート',
   'docs.reviewFlag5Default': '現在のディレクトリ',
   'docs.reviewFlag6Desc': 'レビュールール JSON ファイルパス',
@@ -222,7 +240,7 @@ export const ja: TranslationKeys = {
   'docs.scanFlag6Desc': 'バッチ単位の DEDUP_TASK をスキップ',
   'docs.scanFlag7Desc': '実行後の PROJECT_SUMMARY_TASK をスキップ',
   'docs.scanFlag8Desc': 'バッチ処理戦略：none | by-language | by-directory',
-  'docs.scanFlag9Desc': '出力形式：text または json',
+  'docs.scanFlag9Desc': '出力形式：text、json または sarif',
   'docs.scanFlag10Desc': '最大並行ファイルスキャン数',
   'docs.scanFlag11Desc': '並行タスクのタイムアウト（分）',
   'docs.scanFlag12Desc': '出力対象：human（進捗表示）または agent（サマリーのみ）',

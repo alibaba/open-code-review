@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -27,7 +30,7 @@ var rulesCheckCmd = &cobra.Command{
 	Long:  "Show which review rule applies to the given file path, including its source layer and matched pattern.",
 	Example: `  ocr rules check src/main/java/com/example/Foo.java
   ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml`,
-	Args: cobra.ExactArgs(1),
+	Args: exactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runRulesCheck(args[0])
 	},

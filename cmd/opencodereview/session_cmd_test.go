@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -284,12 +287,36 @@ func TestRunSessionShow_MissingID(t *testing.T) {
 }
 
 func TestTruncateUnicode(t *testing.T) {
-	got := truncate("错误原因：超过限制", 6)
+	got := truncate("错误原因：超过限制", 6) // allow-non-english: fixture exercises rune-boundary truncation
 	if !strings.HasSuffix(got, "…") {
 		t.Fatalf("expected ellipsis suffix, got %q", got)
 	}
-	if !strings.Contains(got, "错误") {
+	if !strings.Contains(got, "错误") { // allow-non-english: fixture exercises rune-boundary truncation
 		t.Fatalf("expected valid truncated unicode text, got %q", got)
+	}
+}
+
+// TestTruncate covers the remaining branches of truncate: newline/tab
+// normalization, the short-enough pass-through, and the n<=1 ellipsis-only case.
+func TestTruncate(t *testing.T) {
+	cases := []struct {
+		name string
+		s    string
+		n    int
+		want string
+	}{
+		{"shorter than limit is unchanged", "abc", 10, "abc"},
+		{"newlines and tabs become spaces", "a\nb\tc", 10, "a b c"},
+		{"n of one collapses to ellipsis", "abcdef", 1, "…"},
+		{"n of zero collapses to ellipsis", "abcdef", 0, "…"},
+		{"exact length is unchanged", "abcd", 4, "abcd"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := truncate(tc.s, tc.n); got != tc.want {
+				t.Errorf("truncate(%q, %d) = %q, want %q", tc.s, tc.n, got, tc.want)
+			}
+		})
 	}
 }
 

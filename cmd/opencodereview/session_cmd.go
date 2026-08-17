@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -33,6 +36,7 @@ var sessionListCmd = &cobra.Command{
 	Aliases: []string{"ls"},
 	Short:   "List recent review sessions for the current repo",
 	Long:    "List review sessions previously persisted to ~/.opencodereview/sessions/.\nThe session id printed here can be passed to 'ocr review --resume <id>'.",
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSessionList()
 	},
@@ -44,7 +48,7 @@ var sessionShowJSON bool
 var sessionShowCmd = &cobra.Command{
 	Use:               "show [flags] <session-id>",
 	Short:             "Show one session's metadata and per-file items",
-	Args:              cobra.ExactArgs(1),
+	Args:              exactArgs(1),
 	ValidArgsFunction: completeSessionIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSessionShow(args[0])
@@ -60,7 +64,7 @@ var sessionCommentsCmd = &cobra.Command{
 	Use:               "comments [flags] <session-id>",
 	Short:             "Show the review comments recorded in one session",
 	Long:              "Print every review comment persisted in a session, formatted like 'ocr review' terminal output.\nUse --json for machine-readable output and --severity/--category to filter findings.",
-	Args:              cobra.ExactArgs(1),
+	Args:              exactArgs(1),
 	ValidArgsFunction: completeSessionIDs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runSessionComments(args[0])
@@ -280,6 +284,14 @@ func printSessionDetail(w io.Writer, s *session.Summary, items []session.ItemDet
 	if s.ResumedFrom != "" {
 		fmt.Fprintf(w, "  Resumed:   from session %s\n", s.ResumedFrom)
 	}
+	if l := s.ResumeLineage; l != nil {
+		fmt.Fprintf(w, "  Parent:    run %s\n", l.ParentRunID)
+		if l.IsTransition() {
+			fmt.Fprintf(w, "  Transition: %s → %s\n",
+				describeTarget(l.SourceProvider, l.SourceModel),
+				describeTarget(l.TargetProvider, l.TargetModel))
+		}
+	}
 	fmt.Fprintf(w, "  Started:   %s\n", describeStart(*s))
 	if !s.EndTime.IsZero() {
 		fmt.Fprintf(w, "  Ended:     %s\n", s.EndTime.Local().Format("2006-01-02 15:04:05"))
@@ -318,6 +330,20 @@ func printSessionDetail(w io.Writer, s *session.Summary, items []session.ItemDet
 		fmt.Fprintf(tw, "  %s\t%s\t%d\t%s\n", it.Type, it.FilePath, it.Comments, note)
 	}
 	tw.Flush()
+}
+
+// describeTarget renders a provider/model pair for the transition line. Either
+// side may be empty (a non-provider endpoint records no provider name).
+func describeTarget(provider, model string) string {
+	switch {
+	case provider == "" && model == "":
+		return "-"
+	case provider == "":
+		return model
+	case model == "":
+		return provider
+	}
+	return provider + "/" + model
 }
 
 func displayMode(m string) string {

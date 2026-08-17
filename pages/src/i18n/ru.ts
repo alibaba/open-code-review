@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import type { TranslationKeys } from './types';
 
 export const ru: TranslationKeys = {
@@ -10,28 +13,41 @@ export const ru: TranslationKeys = {
   'navbar.getStarted': 'Начать работу',
 
   // Hero
-  'hero.title': 'Код-ревью с ИИ,\nпроверенное на миллионах\nреальных задач',
+  'hero.title': 'Код-ревью с ИИ,\nпроверенное на миллионах реальных задач',
   'hero.description': 'Open Code Review разработали в Alibaba и проверили на реальных проектах компании. Он встраивается в привычный процесс разработки и работает с выбранной вами LLM. Вы сами решаете, куда передаются данные. Замечания агента разработчики действительно учитывают.',
   'hero.quickStart': 'Быстрый старт',
   'hero.learnMore': 'Подробнее',
   'hero.terminal': 'Терминал',
   'hero.copied': 'Скопировано!',
   'hero.copyFailed': 'Не удалось скопировать',
+  'hero.installNpm': 'npm',
+  'hero.installBrew': 'Homebrew',
+  'hero.installMacPorts': 'MacPorts',
+  'hero.installMacOS': 'MacOS',
+  'hero.installLinux': 'Linux',
+  'hero.installWindows': 'Windows',
+  'hero.installMore': 'Ещё',
+  'hero.allInstallOptions': 'Все способы установки',
 
   // Error boundary
   'error.pageLoadFailed': 'Не удалось загрузить страницу.',
   'error.reload': 'Обновить',
 
+  // Not found
+  'notFound.title': 'Страница не найдена',
+  'notFound.description': 'Запрошенная страница не существует или была перемещена.',
+  'notFound.backHome': 'На главную',
+
   // Highlights
   'highlights.stat1Value': '20K+',
-  'highlights.stat1Label': 'АКТИВНЫХ ПОЛЬЗОВАТЕЛЕЙ',
+  'highlights.stat1Label': 'ВНУТРЕННИЕ АКТИВНЫЕ ПОЛЬЗОВАТЕЛИ',
   'highlights.stat1Caption': 'в Alibaba Group',
-  'highlights.stat2Value': '> 30%',
-  'highlights.stat2Label': 'ЗАМЕЧАНИЙ ПРИНЯТО',
-  'highlights.stat2Caption': 'в Alibaba Group',
-  'highlights.stat3Value': '1M+',
-  'highlights.stat3Label': 'ЗАДАЧ КОД-РЕВЬЮ',
-  'highlights.stat3Caption': 'выполнено в реальных проектах',
+  'highlights.stat2Value': '150K+',
+  'highlights.stat2Label': 'ЗАГРУЗКИ СООБЩЕСТВА NPM',
+  'highlights.stat2Caption': 'реальные загрузки npm · 30 дней',
+  'highlights.stat3Value': '3M+',
+  'highlights.stat3Label': 'РЕАЛЬНЫХ ЗАДАЧ',
+  'highlights.stat3Caption': 'Выполненных задач код-ревью',
   'highlights.stat4Value': '1/9',
   'highlights.stat4Label': 'ОТ РАСХОДА ТОКЕНОВ',
   'highlights.stat4Caption': 'Claude Code · 1 000 PR',
@@ -157,6 +173,8 @@ export const ru: TranslationKeys = {
   'docs.reviewAgentDesc': 'Показывает только итоговую сводку без хода выполнения. Такой режим удобен для автоматизации.',
   'docs.reviewPreviewLabel': 'Предпросмотр без выполнения',
   'docs.reviewPreviewDesc': 'Показывает файлы, которые попадут в ревью, их количество и число изменённых строк. LLM не вызывается, токены не расходуются.',
+  'docs.reviewToggles': 'Переключатель этапа ревью: --no-filter',
+  'docs.reviewTogglesFilterDesc': 'Сохраняет все комментарии ревью и пропускает вызов LLM постобработки REVIEW_FILTER_TASK для каждого файла.',
   'docs.reviewFlags': 'Справочник флагов',
   'docs.reviewFlagCol1': 'Флаг',
   'docs.reviewFlagCol2': 'Описание',
@@ -164,7 +182,7 @@ export const ru: TranslationKeys = {
   'docs.reviewFlag1Desc': 'Хеш коммита для ревью',
   'docs.reviewFlag2Desc': 'Начальный ref (начало diff)',
   'docs.reviewFlag3Desc': 'Целевой ref (конец diff)',
-  'docs.reviewFlag4Desc': 'Формат вывода: text или json',
+  'docs.reviewFlag4Desc': 'Формат вывода: text, json или sarif',
   'docs.reviewFlag5Desc': 'Корень Git-репозитория',
   'docs.reviewFlag5Default': 'Текущая директория',
   'docs.reviewFlag6Desc': 'Путь к JSON-файлу правил ревью',
@@ -220,7 +238,7 @@ export const ru: TranslationKeys = {
   'docs.scanFlag6Desc': 'Пропустить DEDUP_TASK на пакет',
   'docs.scanFlag7Desc': 'Пропустить финальный PROJECT_SUMMARY_TASK',
   'docs.scanFlag8Desc': 'Стратегия группировки: none | by-language | by-directory',
-  'docs.scanFlag9Desc': 'Формат вывода: text или json',
+  'docs.scanFlag9Desc': 'Формат вывода: text, json или sarif',
   'docs.scanFlag10Desc': 'Макс. параллельных проверок файлов',
   'docs.scanFlag11Desc': 'Таймаут параллельных задач в минутах',
   'docs.scanFlag12Desc': 'Аудитория вывода: human (показывать прогресс) или agent (только сводка)',

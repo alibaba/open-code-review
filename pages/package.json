@@ -55,6 +55,7 @@
     "jsdom": "^30.0.0",
     "postcss": "^8.5.15",
     "postcss-loader": "^7.3.3",
+    "serve": "^14.2.6",
     "size-limit": "^13.0.1",
     "style-loader": "^3.3.3",
     "tailwindcss": "^3.3.5",

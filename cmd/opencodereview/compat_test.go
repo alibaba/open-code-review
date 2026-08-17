@@ -1,6 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
-import "github.com/spf13/cobra"
+import (
+	"context"
+
+	"github.com/spf13/cobra"
+)
+
+func executeReview(opts reviewOptions) error {
+	return executeReviewContext(context.Background(), opts)
+}
 
 // parseReviewFlags provides test compatibility: parses args through a fresh
 // cobra command instance and returns the resulting reviewOptions.

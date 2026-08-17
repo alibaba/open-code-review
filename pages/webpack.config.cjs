@@ -88,7 +88,10 @@ module.exports = {
     ],
     historyApiFallback: {
       index: '/index.html',
-      rewrites: [{ from: /^\/\_p\/\d+\//, to: '/index.html' }]
+      rewrites: [
+        { from: /^\/\_p\/\d+\//, to: '/index.html' },
+        { from: /\.html$/, to: '/index.html' }
+      ]
     }
   },
   plugins: [

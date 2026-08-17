@@ -22,8 +22,8 @@ discussions, chat, and events.
 
 ## Reporting
 
-Report incidents via [GitHub Issues](https://github.com/anthropic-yikun/open-code-review/issues)
-or [GitHub Discussions](https://github.com/anthropic-yikun/open-code-review/discussions).
+Report incidents via [GitHub Issues](https://github.com/alibaba/open-code-review/issues)
+or [GitHub Discussions](https://github.com/alibaba/open-code-review/discussions).
 Include as much detail as possible (what happened, when/where, links, screenshots
 if applicable).
 

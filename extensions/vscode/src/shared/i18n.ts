@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 /**
  * Supported display locales for the extension UI.
  * Add new entries here and in the `messages` dictionary below to extend.

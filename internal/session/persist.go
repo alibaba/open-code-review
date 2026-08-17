@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package session
 
 import (
@@ -313,6 +316,40 @@ func (jw *jsonlWriter) WriteToolCall(filePath string, taskType TaskType, toolNam
 		"duration_ms": duration.Milliseconds(),
 	}
 	jw.writeRecordLocked(rec)
+	jw.lastUUID = uuid
+	return uuid
+}
+
+// WriteResumeLineage writes the one resume_lineage record of a resumed run.
+// Readers that do not know this event type ignore it, so it costs older tooling
+// nothing.
+func (jw *jsonlWriter) WriteResumeLineage(l *ResumeLineage) string {
+	uuid := generateUUID()
+
+	jw.mu.Lock()
+	defer jw.mu.Unlock()
+	rec := map[string]any{
+		"uuid":            uuid,
+		"parentUuid":      jw.lastUUID,
+		"type":            l.Type,
+		"sessionId":       jw.sessionID,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+		"schema_version":  l.SchemaVersion,
+		"run_id":          l.RunID,
+		"parent_run_id":   l.ParentRunID,
+		"source_provider": l.SourceProvider,
+		"source_model":    l.SourceModel,
+		"target_provider": l.TargetProvider,
+		"target_model":    l.TargetModel,
+	}
+	jw.writeRecordLocked(rec)
+	// Flushed like the checkpoint records are, and for the same reason: the point
+	// of lineage is to survive a run that dies. Left buffered it would only reach
+	// disk when the first item completes, which is exactly the window where a run
+	// is most likely to die instead.
+	if jw.writer != nil {
+		jw.writer.Flush()
+	}
 	jw.lastUUID = uuid
 	return uuid
 }

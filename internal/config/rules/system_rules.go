@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package rules loads system review rules and matches file paths against glob patterns.
 package rules
 
@@ -216,12 +219,13 @@ func (f *FileFilter) HasInclude() bool {
 }
 
 // IsUserExcluded reports whether the given path matches any user exclude pattern.
+// The check is case-insensitive: both path and pattern are lowercased.
 func (f *FileFilter) IsUserExcluded(path string) bool {
 	lowerPath := strings.ToLower(path)
 	for _, pattern := range f.Exclude {
 		expanded := expandBraces(pattern)
 		for _, p := range expanded {
-			if matched, _ := doublestar.Match(p, lowerPath); matched {
+			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {
 				return true
 			}
 		}
@@ -230,6 +234,7 @@ func (f *FileFilter) IsUserExcluded(path string) bool {
 }
 
 // IsUserIncluded reports whether the given path matches any user include pattern.
+// The check is case-insensitive: both path and pattern are lowercased.
 // Returns false when Include is empty (no user include restriction defined).
 func (f *FileFilter) IsUserIncluded(path string) bool {
 	if !f.HasInclude() {
@@ -239,7 +244,7 @@ func (f *FileFilter) IsUserIncluded(path string) bool {
 	for _, pattern := range f.Include {
 		expanded := expandBraces(pattern)
 		for _, p := range expanded {
-			if matched, _ := doublestar.Match(p, lowerPath); matched {
+			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {
 				return true
 			}
 		}

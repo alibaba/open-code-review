@@ -1,8 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -41,6 +45,27 @@ func TestSetConfigValueProvider(t *testing.T) {
 	}
 }
 
+func TestSetConfigValueProviderURLTrimsAndValidates(t *testing.T) {
+	t.Run("trims a valid URL before storing", func(t *testing.T) {
+		cfg := &Config{}
+
+		if err := setConfigValue(cfg, "providers.litellm.url", "  https://gateway.internal:8000/v1  "); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+		if got := cfg.Providers["litellm"].URL; got != "https://gateway.internal:8000/v1" {
+			t.Errorf("URL = %q, want trimmed URL", got)
+		}
+	})
+
+	for _, value := range []string{"api.example.com/v1", "ftp://gateway.internal/v1"} {
+		t.Run("rejects "+value, func(t *testing.T) {
+			if err := setConfigValue(&Config{}, "providers.litellm.url", value); err == nil {
+				t.Fatalf("setConfigValue accepted invalid URL %q", value)
+			}
+		})
+	}
+}
+
 func TestSetConfigValueModel(t *testing.T) {
 	cfg := &Config{}
 
@@ -49,6 +74,43 @@ func TestSetConfigValueModel(t *testing.T) {
 	}
 	if cfg.Model != "claude-opus-4-6" {
 		t.Errorf("Model = %q, want %q", cfg.Model, "claude-opus-4-6")
+	}
+}
+
+func TestSetConfigValueMaxTokens(t *testing.T) {
+	cfg := &Config{}
+
+	if err := setConfigValue(cfg, "max_tokens", "200000"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+	if cfg.MaxTokens != 200000 {
+		t.Errorf("MaxTokens = %d, want 200000", cfg.MaxTokens)
+	}
+}
+
+func TestSetConfigValueMaxTokensRejectsInvalidValues(t *testing.T) {
+	for _, value := range []string{"0", "-1", "not-a-number"} {
+		t.Run(value, func(t *testing.T) {
+			if err := setConfigValue(&Config{}, "max_tokens", value); err == nil {
+				t.Fatalf("expected max_tokens=%q to be rejected", value)
+			}
+		})
+	}
+}
+
+func TestMaxTokensConfigRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{MaxTokens: 200000}
+
+	if err := saveConfig(path, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+	loaded, err := LoadAppConfig(path)
+	if err != nil {
+		t.Fatalf("LoadAppConfig: %v", err)
+	}
+	if loaded.MaxTokens != 200000 {
+		t.Errorf("MaxTokens = %d, want 200000", loaded.MaxTokens)
 	}
 }
 
@@ -86,6 +148,56 @@ func TestSetConfigValueProviderEntry(t *testing.T) {
 	}
 	if cfg.Providers["anthropic"].Model != "claude-opus-4-6" {
 		t.Errorf("model = %q, want %q", cfg.Providers["anthropic"].Model, "claude-opus-4-6")
+	}
+}
+
+func TestSetConfigValueKeyCmdFields(t *testing.T) {
+	// A typo in any of these case labels would silently degrade to "unknown
+	// provider field" / "unknown config key", so assert the field each key writes.
+	const value = "op read op://dev/anthropic/api-key"
+	tests := []struct {
+		name string
+		key  string
+		got  func(cfg *Config) string
+	}{
+		{"preset provider api_key_cmd", "providers.anthropic.api_key_cmd", func(cfg *Config) string { return cfg.Providers["anthropic"].APIKeyCmd }},
+		{"custom provider api_key_cmd", "custom_providers.my-gateway.api_key_cmd", func(cfg *Config) string { return cfg.CustomProviders["my-gateway"].APIKeyCmd }},
+		{"llm auth_token_cmd", "llm.auth_token_cmd", func(cfg *Config) string { return cfg.Llm.AuthTokenCmd }},
+		{"llm AuthTokenCmd alias", "llm.AuthTokenCmd", func(cfg *Config) string { return cfg.Llm.AuthTokenCmd }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{}
+			if err := setConfigValue(cfg, tt.key, value); err != nil {
+				t.Fatalf("setConfigValue %s: %v", tt.key, err)
+			}
+			if got := tt.got(cfg); got != value {
+				t.Errorf("%s = %q, want %q", tt.key, got, value)
+			}
+		})
+	}
+}
+
+func TestShouldMaskConfigValue(t *testing.T) {
+	// api_key/auth_token values are secrets; the *_cmd variants are command
+	// lines, so they print unmasked.
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{"llm.auth_token", true},
+		{"llm.auth_token_cmd", false},
+		{"providers.x.api_key", true},
+		{"providers.x.api_key_cmd", false},
+		{"providers.x.APIKeyCmd", false},
+		{"llm.AuthToken", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			if got := shouldMaskConfigValue(tt.key); got != tt.want {
+				t.Errorf("shouldMaskConfigValue(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -368,6 +480,33 @@ func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 }
 
 // --- unset tests ---
+
+func TestUnsetMaxTokens(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{Provider: "anthropic", MaxTokens: 200000}
+	if err := saveConfig(configPath, cfg); err != nil {
+		t.Fatalf("saveConfig: %v", err)
+	}
+
+	if err := unsetMaxTokens(configPath); err != nil {
+		t.Fatalf("unsetMaxTokens: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(data), "max_tokens") {
+		t.Errorf("max_tokens should be omitted after unset: %s", data)
+	}
+	loaded, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if loaded.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want anthropic", loaded.Provider)
+	}
+}
 
 func TestUnsetCustomProvider(t *testing.T) {
 	dir := t.TempDir()
@@ -929,8 +1068,8 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers\n" +
+		"Supported keys: provider, model, max_tokens, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\n" +
 		"Protocol values: anthropic, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
@@ -1047,13 +1186,23 @@ func captureConfigStderr(t *testing.T, fn func()) string {
 	os.Stderr = w
 	defer func() { os.Stderr = old }()
 
+	// Drained concurrently: reading only after fn returns caps the capture at the
+	// OS pipe buffer (64 KiB on Linux, far less on a Windows anonymous pipe) and
+	// a payload past that blocks the writer forever.
+	var data []byte
+	var readErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		data, readErr = io.ReadAll(r)
+	}()
 	fn()
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	data, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
+	<-done
+	if readErr != nil {
+		t.Fatal(readErr)
 	}
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
@@ -1377,6 +1526,21 @@ func TestSetMCPServerValue_URLNoHost(t *testing.T) {
 	}
 }
 
+func TestSetMCPServerValue_URLParseError(t *testing.T) {
+	cfg := &Config{}
+	// "://bad" has no scheme, so url.Parse itself fails before the scheme check.
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.url", "://bad"); err == nil {
+		t.Fatal("expected error for unparseable URL, got nil")
+	}
+}
+
+func TestSetMCPServerValue_HeadersEmptyName(t *testing.T) {
+	cfg := &Config{}
+	if err := setMCPServerValue(cfg, "mcp_servers.gh.headers", `{"":"val"}`); err == nil {
+		t.Fatal("expected error for empty header name, got nil")
+	}
+}
+
 func TestSetMCPServerValue_HeadersInvalidJSON(t *testing.T) {
 	cfg := &Config{}
 	if err := setMCPServerValue(cfg, "mcp_servers.gh.headers", "not-json"); err == nil {
@@ -1388,5 +1552,51 @@ func TestSetMCPServerValue_HeadersEmptyValue(t *testing.T) {
 	cfg := &Config{}
 	if err := setMCPServerValue(cfg, "mcp_servers.gh.headers", `{"Authorization":""}`); err == nil {
 		t.Fatal("expected error for empty header value, got nil")
+	}
+}
+
+func TestSetConfigValueLlmRetryCodesRedundantWarning(t *testing.T) {
+	cfg := &Config{}
+	stderr := captureConfigStderr(t, func() {
+		if err := setConfigValue(cfg, "llm.retry_codes", "429,403"); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "WARNING") || !strings.Contains(stderr, "429") {
+		t.Errorf("expected warning about 429 on stderr, got %q", stderr)
+	}
+	if len(cfg.Llm.RetryCodes) != 1 || cfg.Llm.RetryCodes[0] != 403 {
+		t.Errorf("RetryCodes = %v, want [403]", cfg.Llm.RetryCodes)
+	}
+}
+
+func TestSetConfigValueProviderRetryCodesRedundantWarning(t *testing.T) {
+	cfg := &Config{}
+	stderr := captureConfigStderr(t, func() {
+		if err := setConfigValue(cfg, "custom_providers.test.retry_codes", "408,400"); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "WARNING") || !strings.Contains(stderr, "408") {
+		t.Errorf("expected warning about 408 on stderr, got %q", stderr)
+	}
+	entry := cfg.CustomProviders["test"]
+	if len(entry.RetryCodes) != 1 || entry.RetryCodes[0] != 400 {
+		t.Errorf("RetryCodes = %v, want [400]", entry.RetryCodes)
+	}
+}
+
+func TestSetConfigValueLlmRetryCodesNoWarningForValidCodes(t *testing.T) {
+	cfg := &Config{}
+	stderr := captureConfigStderr(t, func() {
+		if err := setConfigValue(cfg, "llm.retry_codes", "403,400"); err != nil {
+			t.Fatalf("setConfigValue: %v", err)
+		}
+	})
+	if stderr != "" {
+		t.Errorf("expected no stderr output, got %q", stderr)
+	}
+	if len(cfg.Llm.RetryCodes) != 2 {
+		t.Errorf("RetryCodes = %v, want [403 400]", cfg.Llm.RetryCodes)
 	}
 }

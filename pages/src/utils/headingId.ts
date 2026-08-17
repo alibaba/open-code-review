@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 import DOMPurify from 'dompurify';
 
 const explicitHeadingIdPattern = /\s+\{#([a-zA-Z0-9][a-zA-Z0-9_.:-]*)\}\s*$/;

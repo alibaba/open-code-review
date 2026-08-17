@@ -90,14 +90,23 @@ fix(llm): handle timeout errors in Anthropic API calls
 docs(README): update configuration examples
 ```
 
+### License Headers
+
+모든 소스 파일(`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`)에는 SPDX 라이선스 헤더가 필요합니다. 새 파일을 생성한 후 다음을 실행하세요:
+
+```bash
+make license-add
+```
+
+이 명령은 필요한 헤더를 자동으로 추가합니다. CI는 헤더가 누락된 PR을 거부합니다.
+
 ### Code Quality
 
 변경을 제출하기 전에 모든 check가 통과하는지 확인하세요.
 
 ```bash
-# Format and lint (Go standard tooling)
-go fmt ./...
-go vet ./...
+# Format, lint, license 헤더 검증
+make check
 
 # race detection과 함께 test 실행
 make test

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llm
 
 import (
@@ -8,6 +11,7 @@ import (
 
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 )
 
@@ -26,9 +30,14 @@ type OpenAIResponsesClient struct {
 // URL normalization mirrors NewOpenAIClient: cfg.URL is forced to end in
 // /responses, and that suffix is stripped to derive the SDK base URL (the SDK
 // appends "responses" itself).
+// ExtraHeaders are applied per request (not baked into the SDK client)
+// so SessionKeyTemplateVar can expand to the session key each request carries.
 func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
 	}
 	ensureResponsesEndpoint(&cfg)
 	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/responses")
@@ -40,8 +49,11 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 	}
-	for k, v := range cfg.ExtraHeaders {
-		opts = append(opts, openaiopt.WithHeader(k, v))
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	return &OpenAIResponsesClient{
@@ -71,7 +83,19 @@ func ensureResponsesEndpoint(cfg *ClientConfig) {
 
 // CompletionsWithCtx sends a Responses API request and maps the result back to
 // the shared ChatResponse shape.
-func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+//
+// The deferred finalizeRequest is this client's boundary for the retry report;
+// see the OpenAI Chat Completions counterpart for why it is deferred and why the
+// results are named.
+func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
+			panic(r)
+		}
+		finalizeRequest(ctx, c.cfg.retryCollector, err)
+	}()
+
 	model := req.Model
 	if model == "" {
 		model = c.cfg.Model
@@ -79,8 +103,16 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 
 	params := c.buildResponsesParams(model, req)
 
+	sessionKey := c.cfg.SessionKey
+	if k := SessionKeyFromContext(ctx); k != "" {
+		sessionKey = k
+	}
+
 	var opts []openaiopt.RequestOption
-	for k, v := range c.cfg.ExtraBody {
+	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
+		opts = append(opts, openaiopt.WithHeader(k, v))
+	}
+	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
 		// This client is non-streaming: it calls Responses.New, which expects a
 		// single JSON body. If a provider config sets extra_body.stream=true
 		// (valid for the Chat Completions client, which switches to a streaming
@@ -105,9 +137,18 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 	// a dead response as success.
 	switch sdkResp.Status {
 	case responses.ResponseStatusFailed, responses.ResponseStatusCancelled:
-		return nil, fmt.Errorf("openai-responses request did not complete: status=%s", sdkResp.Status)
+		err = fmt.Errorf("openai-responses request did not complete: status=%s", sdkResp.Status)
 	case responses.ResponseStatusQueued, responses.ResponseStatusInProgress:
-		return nil, fmt.Errorf("openai-responses returned non-terminal status=%s (background/async mode is not supported)", sdkResp.Status)
+		err = fmt.Errorf("openai-responses returned non-terminal status=%s (background/async mode is not supported)", sdkResp.Status)
+	}
+	if err != nil {
+		// Correct the attempt here, where the status is known. The observer saw
+		// only the HTTP 200 that carried this dead response object, and nothing
+		// downstream would catch the omission: a request whose outcome is failed is
+		// listed with no error attempt at all, producing self-consistent counts
+		// over a record that misstates what happened.
+		reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassProvider, FailurePhaseResponseStatus)
+		return nil, err
 	}
 
 	return c.mapResponsesResponse(sdkResp), nil
@@ -127,6 +168,7 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 //   - PromptCacheKey is set from req.SessionID when non-empty. The caller
 //     generates a random UUID per file session so that all turns within one
 //     file's agent loop share a cache bucket. Only set when non-empty.
+//     An explicit extra_body.prompt_cache_key entry is applied afterwards as a JSON patch.
 func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatRequest) responses.ResponseNewParams {
 	var systemParts []string
 	var input []responses.ResponseInputItemUnionParam
@@ -183,6 +225,11 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 	}
 	if len(tools) > 0 {
 		params.Tools = tools
+		if req.ToolChoice == "required" {
+			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
+				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsRequired),
+			}
+		}
 	}
 	if req.MaxTokens > 0 {
 		params.MaxOutputTokens = openai.Int(int64(req.MaxTokens))

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package allowedext
 
 import (
@@ -54,6 +57,20 @@ func TestIsAllowedExt(t *testing.T) {
 		{".HS", true},
 		{".lhs", true},
 		{".LHS", true},
+		{".nim", true},
+		{".NIM", true},
+		{".nims", true},
+		{".NIMS", true},
+		{".nimble", true},
+		{".NIMBLE", true},
+		{".elm", true},
+		{".ELM", true},
+		{".properties", true},
+		{".PROPERTIES", true},
+		{".po", true},
+		{".PO", true},
+		{".pot", true},
+		{".POT", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -136,6 +153,16 @@ func TestIsExcludedPath(t *testing.T) {
 		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
 		{"julia non-test", "src/model.jl", false},
 
+		// Swift test files
+		{"swift Tests suffix", "MyAppTests/UserTests.swift", true},
+		{"swift Tests suffix nested", "Tests/AppTests/UserTests.swift", true},
+		{"swift UITests suffix", "MyAppUITests/LaunchTests.swift", true},
+		{"swift Test suffix", "MyAppTests/UserTest.swift", true},
+		{"swift Test dir helper", "Tests/AppTests/Mocks/MockService.swift", true},
+		{"swift tests dir lowercase", "tests/AppTests/Helpers/Helper.swift", true},
+		{"swift non-test", "Sources/App/User.swift", false},
+		{"swift helper with test in name", "Sources/App/TestSupport.swift", false},
+
 		// Haskell test files
 		{"haskell test directory", "test/Parser.hs", true},
 		{"haskell nested test directory", "packages/core/test/unit/Parser.hs", true},
@@ -147,6 +174,18 @@ func TestIsExcludedPath(t *testing.T) {
 		{"lhs spec file", "src/ParserSpec.lhs", true},
 		{"lhs root spec file", "ParserSpec.lhs", true},
 		{"lhs non-test", "src/Tutorial.lhs", false},
+
+		// Nim test files
+		{"nim test directory", "tests/parser_test.nim", true},
+		{"nim nested test directory", "packages/core/tests/unit/parser_test.nim", true},
+		{"nim non-test", "src/parser.nim", false},
+		{"nim tests in filename", "src/tests_helper.nim", false},
+
+		// Elm test files
+		{"elm test directory", "tests/ParserTest.elm", true},
+		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
+		{"elm non-test", "src/Parser.elm", false},
+		{"elm tests in filename", "src/TestsHelper.elm", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

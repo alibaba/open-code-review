@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 module.exports = {
   env: { language: 'en' },
   Uri: { file: (p) => ({ fsPath: p, scheme: 'file' }), joinPath: (...args) => args.join('/') },

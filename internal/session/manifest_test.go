@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package session
 
 import (
@@ -689,7 +692,7 @@ func TestSanitizeReasonTruncatesAndSingleLine(t *testing.T) {
 		t.Fatal("newlines not collapsed")
 	}
 	// Multibyte input must not be cut mid-rune.
-	multibyte := strings.Repeat("世", maxReasonLen+50)
+	multibyte := strings.Repeat("世", maxReasonLen+50) // allow-non-english: fixture exercises multibyte truncation
 	if !utf8.ValidString(sanitizeReason(multibyte)) {
 		t.Fatal("truncation produced invalid UTF-8")
 	}

@@ -33,6 +33,9 @@
     "**/*.{tf,hcl,tfvars}": "terraform.md",
     "**/*.bicep": "bicep.md",
     "**/*.nix": "nix.md",
-    "**/*.{hs,lhs}": "haskell.md"
+    "**/*.{hs,lhs}": "haskell.md",
+    "**/*.{nim,nims,nimble}": "nim.md",
+    "**/*.swift": "swift.md",
+    "**/*.elm": "elm.md"
   }
 }

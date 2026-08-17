@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package main
 
 import (
@@ -5,8 +8,36 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+// isolateLLMConnectionTest keeps the "Testing connection..." step that ends
+// every apply*Config call away from the developer's own machine. Without it
+// resolveConfigPath() falls back to ~/.opencodereview/config.json and `go test`
+// resolves a real endpoint: with providers.<name>.api_key_cmd configured that
+// runs the credential helper and blocks on a pinentry/Touch ID prompt for up to
+// the 60s credential timeout, and with a static key it fires a real request.
+//
+// The path points at a file that does not exist, so resolution fails fast the
+// way it already does on a machine with no config. HOME is redirected into an
+// empty temp dir as well, so the shell-rc strategy has nothing to read either.
+func isolateLLMConnectionTest(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("OCR_CONFIG_PATH", filepath.Join(dir, "no-such-config.json"))
+	// Both, because os.UserHomeDir reads USERPROFILE on Windows and never falls
+	// back to HOME -- setting HOME alone would leave the shell-rc strategy reading
+	// the real profile.
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	for _, k := range []string{
+		"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL",
+		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
+	} {
+		t.Setenv(k, "")
+	}
+}
 
 func TestMaskKey(t *testing.T) {
 	tests := []struct {
@@ -47,8 +78,12 @@ func TestSaveConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("perm = %o, want 600", perm)
+	// Windows reports 0666 regardless of the mode passed to OpenFile, so only the
+	// unix arms can assert the 0600 the config file is written with.
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("perm = %o, want 600", perm)
+		}
 	}
 
 	data, err := os.ReadFile(path)
@@ -206,6 +241,7 @@ func TestApplyOfficialProviderConfig_MissingFields(t *testing.T) {
 }
 
 func TestApplyOfficialProviderConfig_EmptyKeyClearsSavedAPIKey(t *testing.T) {
+	isolateLLMConnectionTest(t)
 	t.Setenv("DEEPSEEK_API_KEY", "sk-from-env")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
@@ -240,7 +276,41 @@ func TestApplyOfficialProviderConfig_EmptyKeyClearsSavedAPIKey(t *testing.T) {
 	}
 }
 
+// A provider configured with only api_key_cmd must survive a trip through the
+// TUI: picking a model returns an empty apiKey, which must not be mistaken for
+// "no credential" and abandon the save.
+func TestApplyOfficialProviderConfig_APIKeyCmdSatisfiesRequirement(t *testing.T) {
+	isolateLLMConnectionTest(t)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := &Config{
+		Providers: map[string]ProviderEntry{
+			"deepseek": {APIKeyCmd: "op read op://dev/deepseek/api-key"},
+		},
+	}
+
+	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
+		provider: "deepseek",
+		model:    "deepseek-v4-flash",
+		apiKey:   "",
+	})
+	if err != nil {
+		t.Fatalf("api_key_cmd should satisfy the API key requirement: %v", err)
+	}
+	diskCfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if diskCfg.Provider != "deepseek" || diskCfg.Model != "deepseek-v4-flash" {
+		t.Errorf("save was abandoned: provider=%q model=%q", diskCfg.Provider, diskCfg.Model)
+	}
+	if got := diskCfg.Providers["deepseek"].APIKeyCmd; got != "op read op://dev/deepseek/api-key" {
+		t.Errorf("persisted api_key_cmd = %q, want it preserved", got)
+	}
+}
+
 func TestApplyCustomProviderConfig_EmptyKeyClearsSavedAPIKey(t *testing.T) {
+	isolateLLMConnectionTest(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	cfg := &Config{
@@ -300,6 +370,7 @@ func TestProviderTUIResult_ResolvedModel(t *testing.T) {
 }
 
 func TestApplyOfficialProviderConfig_UsesSessionModelPick(t *testing.T) {
+	isolateLLMConnectionTest(t)
 	t.Setenv("QIANFAN_API_KEY", "sk-from-env")
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
@@ -374,5 +445,57 @@ func TestPrintWizardCancelled(t *testing.T) {
 				t.Errorf("output = %q, want %q", string(got), tc.want)
 			}
 		})
+	}
+}
+
+// TestApplyOfficialProviderConfig_PreservesURLWhenWizardOmitsURL verifies that
+// the URL configured through `ocr config set` survives a later provider wizard
+// confirmation, whose official flow no longer edits Base URL.
+func TestApplyOfficialProviderConfig_PreservesURLWhenWizardOmitsURL(t *testing.T) {
+	t.Setenv("LITELLM_API_KEY", "sk-litellm")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	wantURL := "https://old-gateway.internal:9000/v1"
+	cfg := &Config{
+		Providers: map[string]ProviderEntry{
+			"litellm": {URL: wantURL},
+		},
+	}
+
+	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
+		provider: "litellm",
+		model:    "openai/gpt-5.4",
+		apiKey:   "sk-litellm",
+	})
+	if err != nil {
+		t.Fatalf("applyOfficialProviderConfig: %v", err)
+	}
+	if got := cfg.Providers["litellm"].URL; got != wantURL {
+		t.Errorf("persisted URL = %q, want existing override %q", got, wantURL)
+	}
+}
+
+func TestApplyOfficialProviderConfig_IgnoresURLFromResult(t *testing.T) {
+	t.Setenv("LITELLM_API_KEY", "sk-litellm")
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	wantURL := "https://configured-gateway.internal:9000/v1"
+	cfg := &Config{
+		Providers: map[string]ProviderEntry{
+			"litellm": {URL: wantURL},
+		},
+	}
+
+	err := applyOfficialProviderConfig(configPath, cfg, providerTUIResult{
+		provider: "litellm",
+		model:    "openai/gpt-5.4",
+		apiKey:   "sk-litellm",
+		url:      "https://stale-result.internal:8000/v1",
+	})
+	if err != nil {
+		t.Fatalf("applyOfficialProviderConfig: %v", err)
+	}
+	if got := cfg.Providers["litellm"].URL; got != wantURL {
+		t.Errorf("persisted URL = %q, want existing URL %q", got, wantURL)
 	}
 }

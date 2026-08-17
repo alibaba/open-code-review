@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package diff
 
 import (
@@ -76,6 +79,34 @@ func TestIsPathExcluded(t *testing.T) {
 			got := IsPathExcluded(".", tt.relPath, tt.patterns)
 			if got != tt.want {
 				t.Errorf("IsPathExcluded(%q, %v) = %v, want %v", tt.relPath, tt.patterns, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsPathExcluded_DirectoryPatterns(t *testing.T) {
+	tests := []struct {
+		name    string
+		relPath string
+		pattern string
+		want    bool
+	}{
+		{"path pattern", "docs/generated/file.go", "docs/generated/", true},
+		{"path pattern is root relative", "nested/docs/generated/file.go", "docs/generated/", false},
+		{"globstar at root", "generated/file.go", "**/generated/", true},
+		{"globstar nested", "src/generated/file.go", "**/generated/", true},
+		{"component glob", "src/build-cache/file.go", "build*/", true},
+		{"root anchored", "generated/file.go", "/generated/", true},
+		{"root anchored does not match nested", "src/generated/file.go", "/generated/", false},
+		{"file name is not a directory", "src/generated", "generated/", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsPathExcluded(".", tt.relPath, []string{tt.pattern})
+			if got != tt.want {
+				t.Errorf("IsPathExcluded(%q, %q) = %v, want %v",
+					tt.relPath, tt.pattern, got, tt.want)
 			}
 		})
 	}

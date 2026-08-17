@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llm
 
 import (
@@ -222,6 +225,91 @@ func TestBuildAnthropicParams_CacheControl_NoSystem(t *testing.T) {
 	if params.Tools[0].OfTool.CacheControl.Type != "ephemeral" {
 		t.Errorf("tool CacheControl.Type = %q, want %q", params.Tools[0].OfTool.CacheControl.Type, "ephemeral")
 	}
+}
+
+func TestBuildAnthropicParams_DynamicCacheBreakpoint(t *testing.T) {
+	client := NewAnthropicClient(ClientConfig{URL: "https://api.anthropic.com"})
+
+	t.Run("conversation ending in tool result", func(t *testing.T) {
+		req := ChatRequest{
+			Messages: []Message{
+				{Role: "system", Content: "You are a code reviewer."},
+				{Role: "user", Content: "Review this code."},
+				{
+					Role:    "assistant",
+					Content: "Let me check.",
+					ToolCalls: []ToolCall{{
+						ID:   "call_1",
+						Type: "function",
+						Function: FunctionCall{
+							Name:      "code_comment",
+							Arguments: `{}`,
+						},
+					}},
+				},
+				{Role: "tool", ToolCallID: "call_1", Content: "Successfully commented."},
+			},
+			Tools: []ToolDef{
+				{Type: "function", Function: FunctionDef{Name: "code_comment", Description: "comment", Parameters: map[string]any{"type": "object"}}},
+			},
+		}
+
+		params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+		if err != nil {
+			t.Fatalf("buildAnthropicParams: %v", err)
+		}
+
+		last := params.Messages[len(params.Messages)-1]
+		if len(last.Content) == 0 {
+			t.Fatal("last message has no content blocks")
+		}
+		lastBlock := last.Content[len(last.Content)-1]
+		if lastBlock.OfToolResult == nil {
+			t.Fatal("last block is not a tool_result block")
+		}
+		if lastBlock.OfToolResult.CacheControl.Type != "ephemeral" {
+			t.Errorf("last tool_result CacheControl.Type = %q, want %q", lastBlock.OfToolResult.CacheControl.Type, "ephemeral")
+		}
+
+		// Earlier user message stays unmarked.
+		earlier := params.Messages[0]
+		if len(earlier.Content) == 0 {
+			t.Fatal("earlier user message has no content blocks")
+		}
+		earlierBlock := earlier.Content[0]
+		if earlierBlock.OfText == nil {
+			t.Fatal("earlier block is not a text block")
+		}
+		if earlierBlock.OfText.CacheControl.Type != "" {
+			t.Errorf("earlier user text CacheControl.Type = %q, want empty", earlierBlock.OfText.CacheControl.Type)
+		}
+	})
+
+	t.Run("conversation ending in user text", func(t *testing.T) {
+		req := ChatRequest{
+			Messages: []Message{
+				{Role: "system", Content: "You are a planner."},
+				{Role: "user", Content: "Plan the review."},
+			},
+		}
+
+		params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+		if err != nil {
+			t.Fatalf("buildAnthropicParams: %v", err)
+		}
+
+		last := params.Messages[len(params.Messages)-1]
+		if len(last.Content) == 0 {
+			t.Fatal("last message has no content blocks")
+		}
+		lastBlock := last.Content[len(last.Content)-1]
+		if lastBlock.OfText == nil {
+			t.Fatal("last block is not a text block")
+		}
+		if lastBlock.OfText.CacheControl.Type != "ephemeral" {
+			t.Errorf("last user text CacheControl.Type = %q, want %q", lastBlock.OfText.CacheControl.Type, "ephemeral")
+		}
+	})
 }
 
 func TestBuildAnthropicParams_NullToolCallArguments(t *testing.T) {
@@ -1244,6 +1332,296 @@ func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
 	}
 }
 
+// newOpenAITestServer returns an httptest server that captures each request's headers
+// and JSON body and responds with a minimal valid chat completion.
+func newOpenAITestServer(gotHeaders *http.Header, gotBody *map[string]any) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if gotHeaders != nil {
+			*gotHeaders = r.Header.Clone()
+		}
+		if gotBody != nil {
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, gotBody)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-test",
+			"object":"chat.completion",
+			"model":"gpt-test",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+		}`))
+	}))
+}
+
+func TestOpenAIClient_SessionKeyExpandedInExtraHeaders(t *testing.T) {
+	var gotHeaders http.Header
+	server := newOpenAITestServer(&gotHeaders, nil)
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:        server.URL + "/v1",
+		APIKey:     "test-key",
+		Model:      "gpt-test",
+		SessionKey: "sess-abc",
+		ExtraHeaders: map[string]string{
+			"x-session-affinity": "{ocr_session_key}",
+		},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotHeaders.Get("X-Session-Affinity"); got != "sess-abc" {
+		t.Errorf("x-session-affinity = %q, want %q", got, "sess-abc")
+	}
+}
+
+func TestOpenAIClient_SessionKeyExpandedInExtraBody(t *testing.T) {
+	var gotBody map[string]any
+	server := newOpenAITestServer(nil, &gotBody)
+	defer server.Close()
+
+	// The documented recipe for OpenAI prompt caching: route the session key into prompt_cache_key via extra_body.
+	client := NewOpenAIClient(ClientConfig{
+		URL:        server.URL + "/v1",
+		APIKey:     "test-key",
+		Model:      "gpt-test",
+		SessionKey: "sess-abc",
+		ExtraBody:  map[string]any{"prompt_cache_key": "{ocr_session_key}"},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotBody["prompt_cache_key"]; got != "sess-abc" {
+		t.Errorf("prompt_cache_key = %v, want %q", got, "sess-abc")
+	}
+}
+
+func TestOpenAIClient_NoInjectionWithoutPlaceholder(t *testing.T) {
+	var gotBody map[string]any
+	server := newOpenAITestServer(nil, &gotBody)
+	defer server.Close()
+
+	// Without an {ocr_session_key} placeholder anywhere,
+	// OCR must not add any session-related field to the request.
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-test",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if _, ok := gotBody["prompt_cache_key"]; ok {
+		t.Errorf("prompt_cache_key = %v, want absent without explicit configuration", gotBody["prompt_cache_key"])
+	}
+}
+
+func TestOpenAIClient_SessionKeyGeneratedWhenEmpty(t *testing.T) {
+	var gotHeaders http.Header
+	server := newOpenAITestServer(&gotHeaders, nil)
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1",
+		APIKey: "test-key",
+		Model:  "gpt-test",
+		ExtraHeaders: map[string]string{
+			"x-session-affinity": "{ocr_session_key}",
+		},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	got := gotHeaders.Get("X-Session-Affinity")
+	if got == "" || got == "{ocr_session_key}" {
+		t.Errorf("x-session-affinity = %q, want an auto-generated session key", got)
+	}
+}
+
+func TestAnthropicClient_SessionKeyExpandedInExtraHeadersAndBody(t *testing.T) {
+	var gotAffinity string
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAffinity = r.Header.Get("x-session-affinity")
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:        server.URL + "/v1/messages",
+		APIKey:     "test-key",
+		Model:      "claude-test",
+		SessionKey: "sess-xyz",
+		ExtraHeaders: map[string]string{
+			"x-session-affinity": "{ocr_session_key}",
+		},
+		ExtraBody: map[string]any{"cache_key": "{ocr_session_key}"},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotAffinity != "sess-xyz" {
+		t.Errorf("x-session-affinity = %q, want %q", gotAffinity, "sess-xyz")
+	}
+	if got := gotBody["cache_key"]; got != "sess-xyz" {
+		t.Errorf("cache_key = %v, want %q", got, "sess-xyz")
+	}
+}
+
+func TestNewLLMClient_ExpandsSessionKeyInExtraBody(t *testing.T) {
+	var gotBody map[string]any
+	server := newOpenAITestServer(nil, &gotBody)
+	defer server.Close()
+
+	client := NewLLMClient(ResolvedEndpoint{
+		URL:       server.URL + "/v1",
+		Token:     "test-key",
+		Model:     "gpt-test",
+		Protocol:  "openai",
+		ExtraBody: map[string]any{"prompt_cache_key": "{ocr_session_key}"},
+	}, nil)
+
+	ctx := ContextWithSessionKey(context.Background(), "sess-from-run")
+	_, err := client.CompletionsWithCtx(ctx, ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotBody["prompt_cache_key"]; got != "sess-from-run" {
+		t.Errorf("prompt_cache_key = %v, want %q", got, "sess-from-run")
+	}
+}
+
+func TestOpenAIClient_ContextSessionKeyOverridesFallback(t *testing.T) {
+	var gotHeaders http.Header
+	var gotBody map[string]any
+	server := newOpenAITestServer(&gotHeaders, &gotBody)
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:        server.URL + "/v1",
+		APIKey:     "test-key",
+		Model:      "gpt-test",
+		SessionKey: "fallback-key",
+		ExtraBody:  map[string]any{"prompt_cache_key": "{ocr_session_key}"},
+		ExtraHeaders: map[string]string{
+			"x-session-affinity": "{ocr_session_key}",
+		},
+	})
+
+	// A context-carried session key (the real OCR session's ID) must win
+	// over the client's construction-time fallback.
+	ctx := ContextWithSessionKey(context.Background(), "real-session-id")
+	_, err := client.CompletionsWithCtx(ctx, ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotHeaders.Get("X-Session-Affinity"); got != "real-session-id" {
+		t.Errorf("x-session-affinity = %q, want %q", got, "real-session-id")
+	}
+	if got := gotBody["prompt_cache_key"]; got != "real-session-id" {
+		t.Errorf("prompt_cache_key = %v, want %q", got, "real-session-id")
+	}
+
+	// Without a context key the fallback applies.
+	_, err = client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotHeaders.Get("X-Session-Affinity"); got != "fallback-key" {
+		t.Errorf("x-session-affinity = %q, want %q", got, "fallback-key")
+	}
+}
+
+func TestAnthropicClient_ContextSessionKeyOverridesFallback(t *testing.T) {
+	var gotAffinity string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAffinity = r.Header.Get("x-session-affinity")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:        server.URL + "/v1/messages",
+		APIKey:     "test-key",
+		Model:      "claude-test",
+		SessionKey: "fallback-key",
+		ExtraHeaders: map[string]string{
+			"x-session-affinity": "{ocr_session_key}",
+		},
+	})
+
+	ctx := ContextWithSessionKey(context.Background(), "real-session-id")
+	_, err := client.CompletionsWithCtx(ctx, ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotAffinity != "real-session-id" {
+		t.Errorf("x-session-affinity = %q, want %q", gotAffinity, "real-session-id")
+	}
+}
+
 // Verify the SDK constant is accessible (compile-time check).
 var _ anthropic.CacheControlEphemeralParam = anthropic.NewCacheControlEphemeralParam()
 
@@ -1333,7 +1711,7 @@ func TestNewLLMClient_Dispatch(t *testing.T) {
 				Model:    "test-model",
 				Protocol: tt.protocol,
 			}
-			client := NewLLMClient(ep)
+			client := NewLLMClient(ep, nil)
 			got := typeName(client)
 			if got != tt.want {
 				t.Errorf("NewLLMClient(protocol=%q) = %s, want %s", tt.protocol, got, tt.want)
@@ -1352,7 +1730,7 @@ func TestNewLLMClient_OpenAIAliasDispatchesToOpenAIClient(t *testing.T) {
 		Model:    "test-model",
 		Protocol: NormalizeProtocol("openai"),
 	}
-	client := NewLLMClient(ep)
+	client := NewLLMClient(ep, nil)
 	if got := typeName(client); got != "*llm.OpenAIClient" {
 		t.Errorf("NormalizeProtocol(\"openai\") dispatched to %s, want *llm.OpenAIClient", got)
 	}
@@ -1383,5 +1761,164 @@ func TestStripThinkTags(t *testing.T) {
 				t.Errorf("stripThinkTags(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRetryCodesMiddleware_Nil(t *testing.T) {
+	mw := retryCodesMiddleware(nil)
+	if mw != nil {
+		t.Fatal("expected nil middleware for empty codes")
+	}
+	mw = retryCodesMiddleware([]int{})
+	if mw != nil {
+		t.Fatal("expected nil middleware for zero-length codes")
+	}
+}
+
+func TestRetryCodesMiddleware_SetsHeader(t *testing.T) {
+	mw := retryCodesMiddleware([]int{403, 400})
+
+	resp := &http.Response{
+		StatusCode: 403,
+		Header:     http.Header{},
+	}
+	next := func(req *http.Request) (*http.Response, error) {
+		return resp, nil
+	}
+
+	got, err := mw(nil, next)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Header.Get("x-should-retry") != "true" {
+		t.Error("expected x-should-retry: true for status 403")
+	}
+}
+
+func TestRetryCodesMiddleware_NoHeaderForNonMatchingCode(t *testing.T) {
+	mw := retryCodesMiddleware([]int{403})
+
+	resp := &http.Response{
+		StatusCode: 401,
+		Header:     http.Header{},
+	}
+	next := func(req *http.Request) (*http.Response, error) {
+		return resp, nil
+	}
+
+	got, err := mw(nil, next)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Header.Get("x-should-retry") != "" {
+		t.Errorf("unexpected x-should-retry header for status 401: %q", got.Header.Get("x-should-retry"))
+	}
+}
+
+func TestRetryCodesMiddleware_PassthroughError(t *testing.T) {
+	mw := retryCodesMiddleware([]int{403})
+
+	wantErr := errors.New("connection refused")
+	next := func(req *http.Request) (*http.Response, error) {
+		return nil, wantErr
+	}
+
+	resp, err := mw(nil, next)
+	if err != wantErr {
+		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+	if resp != nil {
+		t.Fatal("expected nil response on error")
+	}
+}
+
+func TestOpenAIClient_RetryCodesTriggersRetry(t *testing.T) {
+	const responseBody = `{
+		"id":"chatcmpl-retry",
+		"object":"chat.completion",
+		"model":"gpt-test",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"success"},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+	}`
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if n <= 2 {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"message":"rate limited","type":"rate_limit"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:        server.URL + "/v1",
+		APIKey:     "test-key",
+		Model:      "gpt-test",
+		RetryCodes: []int{403},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := requests.Load(); got < 3 {
+		t.Fatalf("requests = %d, want >= 3 (should retry on 403)", got)
+	}
+	if got := resp.Content(); got != "success" {
+		t.Errorf("Content() = %q, want %q", got, "success")
+	}
+}
+
+func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if n <= 2 {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"rate limited"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id":"msg-test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"success"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:        server.URL + "/v1/messages",
+		APIKey:     "test-key",
+		Model:      "claude-test",
+		AuthHeader: "x-api-key",
+		RetryCodes: []int{403},
+	})
+
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := requests.Load(); got < 3 {
+		t.Fatalf("requests = %d, want >= 3 (should retry on 403)", got)
+	}
+	if got := resp.Content(); got != "success" {
+		t.Errorf("Content() = %q, want %q", got, "success")
 	}
 }

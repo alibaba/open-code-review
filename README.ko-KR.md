@@ -18,7 +18,7 @@
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
-  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
+  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
   <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
@@ -49,6 +49,8 @@ Open Code Review는 AI 기반 코드 리뷰 CLI 도구입니다. Alibaba Group�
 > 범용 Agent(Claude Code)와 비교할 때, Open Code Review는 동일한 기반 모델에서 유의미하게 높은 **정밀도(Precision)**와 **F1 점수**를 달성하며, 토큰 소비량은 **약 1/9** 수준이고 리뷰 속도도 더 빠릅니다. 다만 재현율(Recall)은 범용 Agent보다 낮습니다 — 이는 노이즈를 줄이고 정밀도를 우선하는 설계적 트레이드오프입니다.
 
 실제 코드 리뷰 기반 벤치마크. **50**개 인기 오픈소스 저장소에서 **200**개 실제 Pull Request를 엄선하고, **10**개 프로그래밍 언어를 커버 — 80명 이상의 시니어 엔지니어가 교차 검증(**1,505**개 어노테이션된 결함).
+
+<a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> Hugging Face에서 AACR-Bench 데이터셋 살펴보기</a>.
 
 | 지표 | 측정 내용 | 중요한 이유 |
 |------|-----------|-------------|
@@ -135,7 +137,7 @@ cd your-project
 # Workspace mode: staged, unstaged, untracked 변경을 모두 리뷰
 ocr review
 
-# Branch range: 두 ref 비교
+# 브랜치 범위 — main에서 분기된 이후 feature-branch의 변경 사항을 리뷰합니다 (머지베이스 모드)
 ocr review --from main --to feature-branch
 
 # 단일 commit
@@ -171,6 +173,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Codex](plugins/open-code-review/README.md#codex) — 호출 가능한 리뷰 스킬이 포함된 플러그인 설치
   - [Cursor](plugins/open-code-review/README.md#cursor) — 이식 가능한 리뷰 스킬이 포함된 플러그인 설치
   - [OpenCode](plugins/open-code-review/opencode/README.md) — 네이티브 리뷰 도구와 슬래시 명령 설치
+  - [QCA Forward](plugins/open-code-review/qca/README.md) — QCA 호스트 모델과 게시 가능한 템플릿으로 위임 모드 실행
   - [Skill 호환 에이전트](https://open-codereview.ai/docs/agent-skill) — 이식 가능한 에이전트 스킬 설치
 - 리뷰 실행 모드 — 연동 후 리뷰를 수행할 LLM 선택
   - [기본 모드(OCR 관리)](https://open-codereview.ai/docs/configuration) — OCR이 설정된 LLM을 사용해 리뷰 수행

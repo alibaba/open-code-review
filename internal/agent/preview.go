@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package agent
 
 import (
@@ -58,7 +61,15 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 
 // Preview loads diffs and applies the filter algorithm, returning structured
 // preview data without dispatching any LLM calls.
-func (a *Agent) Preview(ctx context.Context) (*DiffPreview, error) {
+//
+// It builds none of the review runtime — no session, manifest, or runner — so
+// previewing cannot open session persistence. Going through New instead would
+// auto-create a session and leave an unfinalized JSONL file under the OCR home.
+func Preview(ctx context.Context, args Args) (*DiffPreview, error) {
+	return (&Agent{args: args}).preview(ctx)
+}
+
+func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 	if err := a.loadDiffs(ctx); err != nil {
 		return nil, fmt.Errorf("load diffs: %w", err)
 	}
@@ -67,6 +78,8 @@ func (a *Agent) Preview(ctx context.Context) (*DiffPreview, error) {
 		TotalInsertions: a.totalInsertions,
 		TotalDeletions:  a.totalDeletions,
 		TotalFiles:      len(a.diffs),
+		// Non-nil so an empty diff marshals as `"files":[]`, not `"files":null`.
+		Entries: make([]DiffPreviewEntry, 0, len(a.diffs)),
 	}
 
 	for _, d := range a.diffs {

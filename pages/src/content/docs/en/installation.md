@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-There are four supported ways to install the `ocr` CLI.
+There are six supported ways to install the `ocr` CLI.
 
 ## NPM (recommended)
 
@@ -41,6 +41,34 @@ export OCR_NO_UPDATE=1
 npm uninstall -g @alibaba-group/open-code-review
 ```
 
+## Homebrew (macOS / Linux)
+
+```bash
+brew install open-code-review
+```
+
+The formula installs the `ocr` binary built from source.
+
+To upgrade later:
+
+```bash
+brew upgrade open-code-review
+```
+
+## MacPorts (macOS)
+
+```bash
+sudo port install open-code-review
+```
+
+The port installs the `ocr` binary built from source.
+
+To upgrade later:
+
+```bash
+sudo port upgrade open-code-review
+```
+
 ## Install script (curl | sh)
 
 A convenience installer that wraps the GitHub Release binary download
@@ -48,7 +76,7 @@ A convenience installer that wraps the GitHub Release binary download
 machines:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
 It honours two environment variables:
@@ -63,7 +91,7 @@ The script supports `darwin` and `linux` on `amd64` / `arm64`.
 On Windows (PowerShell 5.1+), use the PowerShell installer instead:
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
 It honours the same `OCR_INSTALL_DIR` and `OCR_VERSION` variables (set via
@@ -167,6 +195,22 @@ location is on your `$PATH`:
 which ocr
 echo $PATH
 ```
+
+## Enable Shell Completion (optional)
+
+`ocr` supports tab-completion for bash, zsh, fish, and PowerShell.
+
+```bash
+# bash
+source <(ocr completion bash)
+
+# zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+See the [CLI Reference](./cli-reference.md#ocr-completion) for fish,
+PowerShell, and persistent setup instructions.
+
 
 ## Where OCR stores state
 

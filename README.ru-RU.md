@@ -18,7 +18,7 @@
   <a href="https://github.com/alibaba/open-code-review/actions/workflows/release.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/alibaba/open-code-review/release.yml?style=flat-square" /></a>
   <a href="https://github.com/alibaba/open-code-review/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/alibaba/open-code-review?style=flat-square" /></a>
   <a href="https://deepwiki.com/alibaba/open-code-review"><img alt="Ask DeepWiki" src="https://deepwiki.com/badge.svg" /></a>
-  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Silver-4C566A?style=flat-square" /></a>
+  <a href="https://www.bestpractices.dev/projects/13328"><img alt="OpenSSF Best Practices" src="https://img.shields.io/badge/OpenSSF-Gold-D4AF37?style=flat-square" /></a>
 </p>
 <p align="center">
   <a href="#supported-platforms"><img alt="Windows" src="https://img.shields.io/badge/Windows-supported-blue.svg" /></a>
@@ -49,6 +49,8 @@ Open Code Review — это CLI-инструмент для код-ревью н
 > По сравнению с агентами общего назначения (Claude Code), Open Code Review при той же базовой модели достигает значительно более высоких показателей **Precision** и **F1**, потребляя лишь **~1/9 токенов** и выполняя ревью быстрее. При этом показатель Recall ниже, чем у агентов общего назначения — это осознанный компромисс в пользу точности и минимального шума.
 
 Бенчмарк собран на основе реальных код-ревью и включает **50** популярных open-source-репозиториев, **200** реальных пул-реквестов и **10** языков программирования. Разметку из **1 505** дефектов перекрёстно проверили более 80 ведущих инженеров.
+
+<a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> Открыть датасет AACR-Bench на Hugging Face</a>.
 
 | Метрика | Что измеряет | Почему важна |
 |---------|-------------|--------------|
@@ -135,7 +137,7 @@ cd your-project
 # Режим рабочей копии — ревью всех staged, unstaged и untracked изменений
 ocr review
 
-# Диапазон веток — сравнение двух ref'ов
+# Диапазон веток — просматривает изменения feature-branch с момента её отделения от main (режим merge-base)
 ocr review --from main --to feature-branch
 
 # Один коммит
@@ -171,6 +173,7 @@ ocr delegate rule src/main.go src/handler.go
   - [Codex](plugins/open-code-review/README.md#codex) — установка плагина с вызываемыми навыками ревью
   - [Cursor](plugins/open-code-review/README.md#cursor) — установка плагина с переносимыми навыками ревью
   - [OpenCode](plugins/open-code-review/opencode/README.md) — установка нативных инструментов ревью и slash-команд
+  - [QCA Forward](plugins/open-code-review/qca/README.md) — запуск режима делегирования с хост-моделью QCA и готовым к публикации шаблоном
   - [Агенты с поддержкой Skill](https://open-codereview.ai/docs/agent-skill) — установка переносимого навыка агента
 - Режимы выполнения ревью — после интеграции выберите, какая LLM выполняет ревью
   - [По умолчанию (под управлением OCR)](https://open-codereview.ai/docs/configuration) — OCR выполняет ревью с помощью настроенной LLM

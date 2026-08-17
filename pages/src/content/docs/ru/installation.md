@@ -4,7 +4,7 @@ sidebar:
   order: 4
 ---
 
-Установить CLI `ocr` можно четырьмя способами.
+Установить CLI `ocr` можно шестью способами.
 
 ## npm (рекомендуется)
 
@@ -40,13 +40,41 @@ export OCR_NO_UPDATE=1
 npm uninstall -g @alibaba-group/open-code-review
 ```
 
+## Homebrew (macOS / Linux)
+
+```bash
+brew install open-code-review
+```
+
+Формула собирает `ocr` из исходников и устанавливает бинарник.
+
+Для обновления:
+
+```bash
+brew upgrade open-code-review
+```
+
+## MacPorts (macOS)
+
+```bash
+sudo port install open-code-review
+```
+
+Порт собирает `ocr` из исходников и устанавливает бинарник.
+
+Для обновления:
+
+```bash
+sudo port upgrade open-code-review
+```
+
 ## Скрипт установки (curl | sh)
 
 Установщик загружает бинарник из GitHub Release и проверяет его контрольную
 сумму. Он удобен для базовых образов CI и систем без графического интерфейса:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
 Скрипт учитывает две переменные окружения:
@@ -61,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/insta
 В Windows с PowerShell 5.1 или новее запустите PowerShell-установщик:
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
 Установщик учитывает те же переменные `OCR_INSTALL_DIR` и `OCR_VERSION` (через
@@ -164,6 +192,22 @@ ocr review --help       # полный список флагов команды 
 which ocr
 echo $PATH
 ```
+
+## Включение автодополнения оболочки (опционально)
+
+`ocr` поддерживает автодополнение по Tab для bash, zsh, fish и PowerShell.
+
+```bash
+# bash
+source <(ocr completion bash)
+
+# zsh
+ocr completion zsh > "${fpath[1]}/_ocr"
+```
+
+Подробности по fish, PowerShell и постоянной настройке см. в
+[CLI Reference](./cli-reference.md#ocr-completion).
+
 
 ## Где OCR хранит состояние
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package llm
 
 import (
@@ -674,3 +677,118 @@ func unmarshalResponsesBody(t *testing.T, body string) *responses.Response {
 
 // Compile-time check that the client satisfies LLMClient.
 var _ LLMClient = (*OpenAIResponsesClient)(nil)
+
+// newResponsesSessionTestServer returns an httptest server that captures each
+// request's headers and JSON body and responds with a minimal completed response object.
+func newResponsesSessionTestServer(gotHeaders *http.Header, gotBody *map[string]any) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if gotHeaders != nil {
+			*gotHeaders = r.Header.Clone()
+		}
+		if gotBody != nil {
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, gotBody)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"resp_session",
+			"object":"response",
+			"model":"gpt-5.4",
+			"status":"completed",
+			"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+		}`))
+	}))
+}
+
+// Regression for the gap where OpenAIResponsesClient sent {ocr_session_key}
+// literally: the placeholder in extra_headers/extra_body must expand to the
+// context-carried key, exactly like the other two protocol clients.
+// Routed through NewLLMClient so the ProtocolOpenAIResponses dispatch path is covered.
+func TestOpenAIResponsesClient_SessionKeyExpandedInHeadersAndBody(t *testing.T) {
+	var gotHeaders http.Header
+	var gotBody map[string]any
+	server := newResponsesSessionTestServer(&gotHeaders, &gotBody)
+	defer server.Close()
+
+	client := NewLLMClient(ResolvedEndpoint{
+		URL:      server.URL + "/v1",
+		Token:    "test-key",
+		Model:    "gpt-5.4",
+		Protocol: ProtocolOpenAIResponses,
+		ExtraHeaders: map[string]string{
+			"x-session-affinity": "{ocr_session_key}",
+		},
+		ExtraBody: map[string]any{"prompt_cache_key": "{ocr_session_key}"},
+	}, nil)
+
+	ctx := ContextWithSessionKey(context.Background(), "real-task-key")
+	if _, err := client.CompletionsWithCtx(ctx, ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotHeaders.Get("X-Session-Affinity"); got != "real-task-key" {
+		t.Errorf("x-session-affinity = %q, want %q", got, "real-task-key")
+	}
+	if got := gotBody["prompt_cache_key"]; got != "real-task-key" {
+		t.Errorf("prompt_cache_key = %v, want %q", got, "real-task-key")
+	}
+
+	// Without a context key the client falls back to its generated key: still expanded, never the literal placeholder.
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	got := gotHeaders.Get("X-Session-Affinity")
+	if got == "" || got == "{ocr_session_key}" {
+		t.Errorf("x-session-affinity = %q, want an auto-generated fallback key", got)
+	}
+}
+
+// The Responses client also maps the typed ChatRequest.SessionID to the
+// PromptCacheKey param. An explicit extra_body.prompt_cache_key (expanded) is
+// applied as a later JSON patch and must win on the wire; without it the typed
+// field flows through untouched.
+func TestOpenAIResponsesClient_ExtraBodyPromptCacheKeyOverridesSessionID(t *testing.T) {
+	var gotBody map[string]any
+	server := newResponsesSessionTestServer(nil, &gotBody)
+	defer server.Close()
+
+	withOverride := NewLLMClient(ResolvedEndpoint{
+		URL:       server.URL + "/v1",
+		Token:     "test-key",
+		Model:     "gpt-5.4",
+		Protocol:  ProtocolOpenAIResponses,
+		ExtraBody: map[string]any{"prompt_cache_key": "{ocr_session_key}"},
+	}, nil)
+
+	ctx := ContextWithSessionKey(context.Background(), "task-scoped-key")
+	if _, err := withOverride.CompletionsWithCtx(ctx, ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		SessionID: "file-session-uuid",
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotBody["prompt_cache_key"]; got != "task-scoped-key" {
+		t.Errorf("prompt_cache_key = %v, want extra_body override %q", got, "task-scoped-key")
+	}
+
+	// Without the extra_body entry, the typed SessionID mapping is untouched.
+	plain := NewLLMClient(ResolvedEndpoint{
+		URL:      server.URL + "/v1",
+		Token:    "test-key",
+		Model:    "gpt-5.4",
+		Protocol: ProtocolOpenAIResponses,
+	}, nil)
+	if _, err := plain.CompletionsWithCtx(ctx, ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		SessionID: "file-session-uuid",
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if got := gotBody["prompt_cache_key"]; got != "file-session-uuid" {
+		t.Errorf("prompt_cache_key = %v, want typed SessionID %q", got, "file-session-uuid")
+	}
+}

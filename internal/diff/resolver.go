@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 package diff
 
 import (
@@ -67,6 +70,72 @@ func ResolveComment(cm *model.LlmComment, d *model.Diff) bool {
 		return true
 	}
 	return resolveFromFileContent(d, cm)
+}
+
+// RelocateAcrossFiles handles the comment whose ExistingCode belongs to a
+// different file than the one it was filed against.
+//
+// The reviewing Agent reads related files through file_read_diff, so it can
+// describe code from a file other than the one under review and still file the
+// comment against the file under review — typically a declaration/implementation
+// split, where the comment lands on the header and its code lives in the source
+// file. ResolveComment then fails, and the LLM re-location that follows is given
+// only the wrong file's diff and a prompt that demands a code block back, so it
+// answers with whatever token in that diff looks closest. That overwrites the
+// one piece of evidence pointing at the real code, and the comment ends up
+// looking located while pointing at an unrelated line.
+//
+// So this runs first, and without a model: ExistingCode is a verbatim excerpt,
+// which makes finding its true home plain string matching over the diffs that
+// are already in memory. On a unique hit the comment is re-filed — Path,
+// StartLine and EndLine all move together — and it returns that path.
+//
+// Zero hits and multiple hits both decline, leaving cm untouched: the same
+// boilerplate can legitimately appear in several files, and guessing between
+// them would trade one wrong location for another. Callers should treat a
+// false return as "still unlocated" rather than as an error.
+//
+// cm.Path is skipped because its own file has already been tried, and probing
+// happens on a copy so a failed candidate cannot leave line numbers behind.
+func RelocateAcrossFiles(cm *model.LlmComment, diffs []model.Diff) (string, bool) {
+	if cm == nil || cm.ExistingCode == "" || len(diffs) == 0 {
+		return "", false
+	}
+
+	type hit struct {
+		path       string
+		start, end int
+	}
+	var hits []hit
+
+	for i := range diffs {
+		d := &diffs[i]
+		if d.NewPath == cm.Path || d.OldPath == cm.Path {
+			continue
+		}
+		probe := *cm
+		probe.StartLine, probe.EndLine = 0, 0
+		if !ResolveComment(&probe, d) {
+			continue
+		}
+		path := d.NewPath
+		if path == "" {
+			path = d.OldPath
+		}
+		hits = append(hits, hit{path: path, start: probe.StartLine, end: probe.EndLine})
+		if len(hits) > 1 {
+			// Ambiguous already; no verdict can come from looking further.
+			return "", false
+		}
+	}
+
+	if len(hits) != 1 {
+		return "", false
+	}
+	cm.Path = hits[0].path
+	cm.StartLine = hits[0].start
+	cm.EndLine = hits[0].end
+	return hits[0].path, true
 }
 
 // indexedLine pairs a normalized line with its absolute file line number.

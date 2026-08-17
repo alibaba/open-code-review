@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package session provides a session history mechanism for collecting conversation
 // records during code review task execution. It organizes records by file path
 // and request type (plan_task, main_task, memory_compression_task).
@@ -274,6 +277,17 @@ func (sh *SessionHistory) RecordReviewItemReused(filePath, oldPath, newPath, fin
 	}
 	if p := sh.persist; p != nil {
 		p.WriteReviewItemReused(filePath, oldPath, newPath, fingerprint, sourceSessionID, comments)
+	}
+}
+
+// RecordResumeLineage persists the run's single resume_lineage event. A nil
+// lineage is a non-resumed run and writes nothing.
+func (sh *SessionHistory) RecordResumeLineage(l *ResumeLineage) {
+	if sh == nil || l == nil {
+		return
+	}
+	if p := sh.persist; p != nil {
+		p.WriteResumeLineage(l)
 	}
 }
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 /* Docs content index — imports all markdown files and provides a lookup by slug + language */
 
 import type { Language } from '../../i18n/types';

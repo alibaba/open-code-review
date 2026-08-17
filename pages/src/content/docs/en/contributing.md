@@ -148,13 +148,22 @@ Most contributions touch `internal/agent/`, `internal/tool/`, or
 `internal/llm/`. The CLI surface in `cmd/opencodereview/` is
 intentionally thin — flag parsing then dispatch to the agent package.
 
+## License headers
+
+Every source file (`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`) must include an SPDX license header. After creating new files, run:
+
+```bash
+make license-add
+```
+
+This automatically adds the required header. CI will reject PRs with missing headers.
+
 ## Code quality checks
 
 Before opening a PR:
 
 ```bash
-go fmt ./...
-go vet ./...
+make check      # format, lint, and verify license headers
 make test       # race-enabled, runs in CI on every push
 make build      # smoke test the binary builds
 ```

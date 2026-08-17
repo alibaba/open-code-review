@@ -1,27 +1,30 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
 // Package allowedext provides file-level filtering for code review:
 // an extension allowlist (which file types to review) and a path-based
 // exclude list (which files to skip regardless of extension).
 //
-// # default_exclude_patterns.json 配置说明
+// # The default_exclude_patterns.json format
 //
-// 文件包含一个 JSON 字符串数组，每个元素是一个 glob 排除模式。
-// 支持的通配符语法（基于 doublestar 库）:
+// The file holds a JSON array of strings, each one a glob exclude pattern.
+// Supported wildcard syntax (as implemented by the doublestar library):
 //
-//   - 匹配单层路径内的任意字符（不跨越 /）
-//     例: "*_test.go" 匹配 "foo_test.go"，不匹配 "pkg/foo_test.go"
+//	"*"        matches any character within a single path segment (never crosses /)
+//	           e.g. "*_test.go" matches "foo_test.go" but not "pkg/foo_test.go"
 //
-//     **       匹配零个或多个路径段（可跨越 /）
-//     例: "**/*_test.go" 匹配 "foo_test.go" 和 "a/b/c_test.go"
+//	"**"       matches zero or more path segments (may cross /)
+//	           e.g. "**/*_test.go" matches both "foo_test.go" and "a/b/c_test.go"
 //
-//     {a,b,c}  花括号展开，匹配其中任意一项
-//     例: "**/*.{js,ts}" 匹配所有层级的 .js 和 .ts 文件
+//	"{a,b,c}"  brace expansion, matches any one of the alternatives
+//	           e.g. "**/*.{js,ts}" matches .js and .ts files at any depth
 //
-// 组合示例:
+// Combined examples:
 //
-//	"**/*_test.go"                 — 任意层级的 Go 测试文件
-//	"**/src/test/java/**/*.java"   — Java 标准测试目录下所有文件
-//	"**/*.spec.{js,jsx,ts,tsx}"    — 任意层级的前端 spec 测试文件
-//	"*_test.go"                    — 仅匹配根目录下的 Go 测试文件（不跨目录）
+//	"**/*_test.go"                 — Go test files at any depth
+//	"**/src/test/java/**/*.java"   — everything under the standard Java test directory
+//	"**/*.spec.{js,jsx,ts,tsx}"    — frontend spec test files at any depth
+//	"*_test.go"                    — Go test files in the root directory only (does not cross directories)
 package allowedext
 
 import (
