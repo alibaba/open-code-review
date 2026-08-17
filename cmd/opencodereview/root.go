@@ -43,6 +43,7 @@ func init() {
 	rootCmd.AddCommand(rulesCmd)
 	rootCmd.AddCommand(viewerCmd)
 	rootCmd.AddCommand(completionCmd)
+	rootCmd.AddCommand(loginCmd)
 }
 
 func versionString() string {

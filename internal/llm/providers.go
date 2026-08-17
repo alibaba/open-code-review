@@ -24,8 +24,16 @@ type Provider struct {
 	BaseURL     string
 	AuthHeader  string // Anthropic-only; empty for OpenAI-compatible
 	EnvVar      string // environment variable name for API key fallback
+	AuthMode    string // AuthModeAPIKey or AuthModeOAuth
 	Models      []string
 }
+
+const (
+	// AuthModeAPIKey identifies providers authenticated with an API key or token.
+	AuthModeAPIKey = "api-key"
+	// AuthModeOAuth identifies providers authenticated with an OAuth account.
+	AuthModeOAuth = "oauth"
+)
 
 var registry = []Provider{
 	{
@@ -58,6 +66,14 @@ var registry = []Provider{
 			"gpt-5.4",
 			"gpt-5.4-mini",
 		},
+	},
+	{
+		Name:        OpenAIAccountProviderName,
+		DisplayName: "OpenAI account",
+		Protocol:    ProtocolOpenAIResponses,
+		BaseURL:     OpenAIAccountResponsesURL,
+		AuthMode:    AuthModeOAuth,
+		Models:      []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.5", "gpt-5.3-codex"},
 	},
 	{
 		Name:        "edenai",
@@ -429,6 +445,9 @@ func ListProviders() []Provider {
 }
 
 func copyProvider(p Provider) Provider {
+	if p.Name == OpenAIAccountProviderName {
+		p.Models = OpenAIAccountModels()
+	}
 	if p.Models != nil {
 		models := make([]string, len(p.Models))
 		copy(models, p.Models)

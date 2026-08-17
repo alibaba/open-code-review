@@ -284,16 +284,18 @@ func deleteCustomProvider(cfg *Config, name string) (bool, error) {
 
 // ProviderEntry holds per-provider configuration in the providers map.
 type ProviderEntry struct {
-	APIKey       string            `json:"api_key,omitempty"`
-	URL          string            `json:"url,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Models       []string          `json:"models,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	TimeoutSec   int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	APIKey          string            `json:"api_key,omitempty"`
+	URL             string            `json:"url,omitempty"`
+	Protocol        string            `json:"protocol,omitempty"`
+	Model           string            `json:"model,omitempty"`
+	Models          []string          `json:"models,omitempty"`
+	AuthHeader      string            `json:"auth_header,omitempty"`
+	TimeoutSec      int               `json:"timeout_sec,omitempty"` // per-request HTTP timeout in seconds
+	ExtraBody       map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders    map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes      []int             `json:"retry_codes,omitempty"`
+	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+	ServiceTier     string            `json:"service_tier,omitempty"`
 }
 
 // MCPServerConfig holds configuration for a single MCP server.
@@ -323,16 +325,18 @@ type Config struct {
 }
 
 type LlmConfig struct {
-	URL          string            `json:"url,omitempty"`
-	AuthToken    string            `json:"auth_token,omitempty"`
-	AuthHeader   string            `json:"auth_header,omitempty"`
-	Model        string            `json:"model,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
-	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
-	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
-	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
-	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
-	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	URL             string            `json:"url,omitempty"`
+	AuthToken       string            `json:"auth_token,omitempty"`
+	AuthHeader      string            `json:"auth_header,omitempty"`
+	Model           string            `json:"model,omitempty"`
+	Protocol        string            `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
+	UseAnthropic    *bool             `json:"use_anthropic,omitempty"` // nil = default true; false = OpenAI protocol (legacy fallback)
+	TimeoutSec      int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
+	ExtraBody       map[string]any    `json:"extra_body,omitempty"`
+	ExtraHeaders    map[string]string `json:"extra_headers,omitempty"`
+	RetryCodes      []int             `json:"retry_codes,omitempty"`
+	ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+	ServiceTier     string            `json:"service_tier,omitempty"`
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -393,6 +397,8 @@ var supportedConfigKeys = []string{
 	"llm.extra_body",
 	"llm.extra_headers",
 	"llm.retry_codes",
+	"llm.reasoning_effort",
+	"llm.service_tier",
 	"language",
 	"telemetry.enabled",
 	"telemetry.exporter",
@@ -545,8 +551,20 @@ func setConfigValue(cfg *Config, key, value string) error {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		cfg.Llm.RetryCodes = codes
+	case "llm.reasoning_effort", "llm.ReasoningEffort":
+		normalized, err := llm.NormalizeOpenAIReasoningEffort(value)
+		if err != nil {
+			return err
+		}
+		cfg.Llm.ReasoningEffort = normalized
+	case "llm.service_tier", "llm.ServiceTier":
+		normalized, err := llm.NormalizeOpenAIServiceTier(value)
+		if err != nil {
+			return err
+		}
+		cfg.Llm.ServiceTier = normalized
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, auth_header, reasoning_effort, service_tier, extra_body, extra_headers, retry_codes\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -598,8 +616,20 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		entry.RetryCodes = codes
+	case "reasoning_effort":
+		normalized, err := llm.NormalizeOpenAIReasoningEffort(value)
+		if err != nil {
+			return fmt.Errorf("invalid reasoning effort for %s: %w", key, err)
+		}
+		entry.ReasoningEffort = normalized
+	case "service_tier":
+		normalized, err := llm.NormalizeOpenAIServiceTier(value)
+		if err != nil {
+			return fmt.Errorf("invalid service tier for %s: %w", key, err)
+		}
+		entry.ServiceTier = normalized
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, reasoning_effort, service_tier, extra_body, extra_headers, retry_codes", field)
 	}
 	return nil
 }

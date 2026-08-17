@@ -10,7 +10,7 @@ Get your first code review running in a few minutes.
 
 - **Git ≥ 2.41**
 - **Node.js ≥ 18**
-- **LLM API key** (not needed if using [Delegation Mode](../integrations/delegate/))
+- **LLM API key or an OpenAI account** (not needed if using [Delegation Mode](../integrations/delegate/))
 
 ## Step 1 — Install the CLI
 
@@ -32,7 +32,7 @@ ocr version
 ocr config provider
 ```
 
-It lets you pick a built-in or custom provider, enter an API key, choose a model, saves everything to the config file, and then runs `ocr llm test` once to verify the endpoint. To switch models later:
+It lets you pick a built-in or custom provider, authenticate when required, choose a model, saves everything to the config file, and then runs `ocr llm test` once to verify the endpoint. To use an OpenAI account, run `ocr login --provider openai` first, then select `OpenAI account` in the provider setup.
 
 ```bash
 ocr config model

@@ -20,6 +20,7 @@ Commands:
   rules        Inspect and debug review rules
   config       Manage configuration settings
   llm          LLM utility commands
+  login        Sign in to an LLM account
   viewer       Start the WebUI session viewer
   session, sessions  List and inspect saved review sessions
   version      Show version information
@@ -32,6 +33,8 @@ Examples:
   ocr config set llm.model opus-4-6        Set a config value
   ocr llm test                             Test LLM connectivity
   ocr llm providers                        List built-in providers
+  ocr llm models --refresh                  Refresh account model catalog
+  ocr login --provider openai               Sign in with OpenAI OAuth
   ocr session list                         List saved review sessions
   ocr version                              Show version info
 
@@ -57,6 +60,8 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr config model` | — | Interactive model-selection TUI. |
 | `ocr llm test` | — | Send a small chat request to verify the configured endpoint. |
 | `ocr llm providers` | — | List all built-in LLM providers. |
+| `ocr llm models` | — | List the cached or refreshed models visible to an account provider. |
+| `ocr login --provider openai` | — | Sign in with the official OpenAI OAuth flow. |
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions. |
 | `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints. |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | Print the review comments recorded in one session. |
@@ -452,7 +457,7 @@ schemas, and examples.
 
 ## `ocr llm`
 
-LLM utility commands. Two subcommands:
+LLM utility commands. Three subcommands:
 
 ```text
 ocr llm <sub-command>
@@ -460,6 +465,7 @@ ocr llm <sub-command>
 Sub-commands:
   test         Send a test conversation to the configured LLM model
   providers    List all built-in LLM providers
+  models       List or refresh account-visible models
 ```
 
 ### `ocr llm test`
@@ -503,6 +509,25 @@ Built-in providers:
 
 Followed by a hint to configure one interactively with `ocr config
 provider` or non-interactively with `ocr config set provider <name>`.
+
+### `ocr llm models`
+
+```text
+ocr llm models [--refresh] [--provider openai-account]
+```
+
+Lists the account model catalog and any published reasoning effort values. Use
+`--refresh` after `ocr login` or when the provider model list changes.
+
+## `ocr login`
+
+```text
+ocr login --provider openai [--no-browser]
+```
+
+Starts the official OpenAI OAuth authorization-code flow with a local PKCE
+callback. The command opens the browser by default and prints the URL when
+`--no-browser` is used. After login, OCR refreshes the account model catalog.
 
 ## `ocr viewer`
 

@@ -167,6 +167,20 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 
 	entry := cfg.CustomProviders[result.provider]
 	entry.Model = model
+	if result.reasoningEffort != "" {
+		reasoningEffort, err := llm.NormalizeOpenAIReasoningEffort(result.reasoningEffort)
+		if err != nil {
+			return err
+		}
+		entry.ReasoningEffort = reasoningEffort
+	}
+	if result.serviceTier != "" {
+		serviceTier, err := llm.NormalizeOpenAIServiceTier(result.serviceTier)
+		if err != nil {
+			return err
+		}
+		entry.ServiceTier = serviceTier
+	}
 	if len(result.models) > 0 {
 		entry.Models = append([]string(nil), result.models...)
 	}
@@ -238,7 +252,8 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 
 	preset, isPreset := llm.LookupProvider(result.provider)
 
-	if result.apiKey == "" {
+	isOAuthProvider := isPreset && preset.AuthMode == llm.AuthModeOAuth
+	if result.apiKey == "" && !isOAuthProvider {
 		if isPreset && preset.EnvVar != "" {
 			if os.Getenv(preset.EnvVar) == "" {
 				return fmt.Errorf("API key is required for provider %s (configure it or set $%s)", result.provider, preset.EnvVar)
@@ -257,10 +272,18 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	if len(result.models) > 0 {
 		entry.Models = mergeModelLists(entry.Models, result.models)
 	}
+	if isOAuthProvider {
+		if err := applyOpenAIAccountOptions(&entry, result); err != nil {
+			return err
+		}
+	}
 	if result.apiKey != "" {
 		entry.APIKey = result.apiKey
-	} else {
+	} else if !isOAuthProvider {
 		// Confirmed empty key: clear saved api_key so resolver falls back to $ENV_VAR.
+		entry.APIKey = ""
+	}
+	if isOAuthProvider {
 		entry.APIKey = ""
 	}
 	cfg.Providers[result.provider] = entry
@@ -286,6 +309,20 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	}
 
 	fmt.Println("\nTip: run 'ocr config model' to switch model later.")
+	return nil
+}
+
+func applyOpenAIAccountOptions(entry *ProviderEntry, result providerTUIResult) error {
+	reasoningEffort, err := llm.NormalizeOpenAIReasoningEffort(result.reasoningEffort)
+	if err != nil {
+		return fmt.Errorf("invalid reasoning effort: %w", err)
+	}
+	serviceTier, err := llm.NormalizeOpenAIServiceTier(result.serviceTier)
+	if err != nil {
+		return fmt.Errorf("invalid service tier: %w", err)
+	}
+	entry.ReasoningEffort = reasoningEffort
+	entry.ServiceTier = serviceTier
 	return nil
 }
 

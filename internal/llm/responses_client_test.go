@@ -658,6 +658,60 @@ func TestOpenAIResponsesClient_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesClient_OpenAIAccountStreaming(t *testing.T) {
+	var gotBody map[string]any
+	var gotAuthorization string
+	var gotOriginator string
+	var gotAccountID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthorization = r.Header.Get("Authorization")
+		gotOriginator = r.Header.Get("originator")
+		gotAccountID = r.Header.Get("chatgpt-account-id")
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_account\",\"object\":\"response\",\"model\":\"gpt-account\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"account pong\"}]}]}}\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL:             server.URL + "/backend-api/codex/responses",
+		APIKey:          "account-token",
+		Model:           "gpt-account",
+		ReasoningEffort: "high",
+		ServiceTier:     "priority",
+		OpenAIAccount:   &OpenAIAccountCredentials{AccessToken: "account-token", AccountID: "account-id"},
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "ping"}},
+		MaxTokens: 2048,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if resp.Content() != "account pong" {
+		t.Errorf("Content() = %q, want account pong", resp.Content())
+	}
+	if gotAuthorization != "Bearer account-token" {
+		t.Errorf("Authorization = %q", gotAuthorization)
+	}
+	if gotOriginator != OpenAIAccountOriginator || gotAccountID != "account-id" {
+		t.Errorf("account headers = originator %q, account %q", gotOriginator, gotAccountID)
+	}
+	if stream, ok := gotBody["stream"].(bool); !ok || !stream {
+		t.Errorf("stream = %v, want true", gotBody["stream"])
+	}
+	if gotBody["max_output_tokens"] != nil {
+		t.Errorf("OAuth request unexpectedly sent max_output_tokens: %v", gotBody["max_output_tokens"])
+	}
+	if reasoning, ok := gotBody["reasoning"].(map[string]any); !ok || reasoning["effort"] != "high" {
+		t.Errorf("reasoning = %v", gotBody["reasoning"])
+	}
+	if gotBody["service_tier"] != "priority" {
+		t.Errorf("service_tier = %v", gotBody["service_tier"])
+	}
+}
+
 func TestOpenAIResponsesClient_RetriesTransientServerError(t *testing.T) {
 	const responseBody = `{
 		"id":"resp_retry",

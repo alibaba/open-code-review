@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -20,7 +21,8 @@ var llmCmd = &cobra.Command{
 	Short: "LLM utility commands",
 	Long:  "LLM utility commands.",
 	Example: `  ocr llm test                   Verify LLM connectivity and configuration
-  ocr llm providers              List available built-in providers`,
+  ocr llm providers              List available built-in providers
+  ocr llm models --refresh       Refresh models for an OpenAI account`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
@@ -45,9 +47,29 @@ var llmProvidersCmd = &cobra.Command{
 	},
 }
 
+var (
+	llmModelsProvider string
+	llmModelsRefresh  bool
+)
+
+var llmModelsCmd = &cobra.Command{
+	Use:   "models",
+	Short: "List models available to an account provider",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if llmModelsProvider != "" && llmModelsProvider != "openai" && llmModelsProvider != llm.OpenAIAccountProviderName {
+			return fmt.Errorf("unsupported model provider %q; supported provider: openai", llmModelsProvider)
+		}
+		return runLLMModels()
+	},
+}
+
 func init() {
 	llmCmd.AddCommand(llmTestCmd)
 	llmCmd.AddCommand(llmProvidersCmd)
+	llmModelsCmd.Flags().StringVar(&llmModelsProvider, "provider", llm.OpenAIAccountProviderName, "account provider")
+	llmModelsCmd.Flags().BoolVar(&llmModelsRefresh, "refresh", false, "refresh the remote model catalog")
+	llmCmd.AddCommand(llmModelsCmd)
 }
 
 func runLLMTest() error {
@@ -134,4 +156,38 @@ func runLLMProviders() {
 	}
 	fmt.Println("\nUse 'ocr config provider' to configure a provider interactively.")
 	fmt.Println("Use 'ocr config set provider <name>' to switch providers non-interactively.")
+}
+
+func runLLMModels() error {
+	var catalog llm.OpenAIModelCatalog
+	if llmModelsRefresh {
+		_, refreshed, err := llm.RefreshOpenAIAccountModelCatalog(context.Background())
+		if err != nil {
+			return err
+		}
+		catalog = refreshed
+	} else {
+		cached, err := llm.LoadOpenAIModelCatalog()
+		if err != nil {
+			return err
+		}
+		catalog = cached
+	}
+	if len(catalog.Models) == 0 {
+		return fmt.Errorf("no cached OpenAI account models; run 'ocr login --provider openai' or 'ocr llm models --refresh'")
+	}
+
+	fmt.Printf("OpenAI account models (%d):\n", len(catalog.Models))
+	for _, model := range catalog.Models {
+		efforts := catalog.ReasoningEfforts[model]
+		if len(efforts) == 0 {
+			efforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+		}
+		if contextWindow := catalog.ContextWindows[model]; contextWindow > 0 {
+			fmt.Printf("  %-32s context=%d effort=%s\n", model, contextWindow, strings.Join(efforts, ","))
+		} else {
+			fmt.Printf("  %-32s effort=%s\n", model, strings.Join(efforts, ","))
+		}
+	}
+	return nil
 }

@@ -19,7 +19,7 @@ to edit it:
 ocr config provider
 ```
 
-It lets you pick a built-in or custom provider, enter an API key, choose a model, saves everything to the config file, and then runs `ocr llm test` once to verify the endpoint. To switch models later:
+It lets you pick a built-in or custom provider, authenticate when required, choose a model, save everything to the config file, and then runs `ocr llm test` once to verify the endpoint. To switch models later:
 
 ```bash
 ocr config model
@@ -37,8 +37,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 ### Built-in providers
 
-The following providers ship with OCR, with the Base URL and protocol
-preset — once selected, you only need to fill in the API key. If
+The following API-key providers ship with OCR, with the Base URL and protocol
+preset. Once selected, fill in the API key. If
 `providers.<name>.api_key` is unset, OCR falls back to the corresponding
 environment variable.
 
@@ -62,6 +62,35 @@ environment variable.
 | `siliconflow`  | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
+
+### OpenAI account OAuth
+
+Use the official OpenAI OAuth flow when you want OCR to use your OpenAI/Codex
+account instead of an API key:
+
+```bash
+ocr login --provider openai
+ocr llm models --refresh
+ocr config provider
+```
+
+The login stores OCR-owned credentials locally. It does not modify the official
+Codex CLI credential file. `ocr config provider` shows `OpenAI account` as a
+separate provider, lets you choose an account-visible model, reasoning effort,
+and service tier. The `fast` option selects the provider's priority service
+tier.
+
+For scripts or CI, configure the account provider directly after login:
+
+```bash
+ocr config set provider openai-account
+ocr config set providers.openai-account.model gpt-5.4
+ocr config set providers.openai-account.reasoning_effort high
+ocr config set providers.openai-account.service_tier fast
+```
+
+Refresh the account model catalog with `ocr llm models --refresh`. Without
+`--refresh`, `ocr llm models` prints the last cached catalog.
 
 ### Custom providers
 

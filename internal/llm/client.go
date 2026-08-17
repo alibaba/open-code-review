@@ -233,14 +233,17 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	URL          string            // Full API endpoint URL
-	APIKey       string            // Bearer token / API key
-	Model        string            // Default model override
-	AuthHeader   string            // Auth header name: "x-api-key", "authorization", or empty for protocol default
-	Timeout      time.Duration     // Request timeout
-	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
-	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
-	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+	URL             string // Full API endpoint URL
+	APIKey          string // Bearer token / API key
+	Model           string // Default model override
+	AuthHeader      string // Auth header name: "x-api-key", "authorization", or empty for protocol default
+	OpenAIAccount   *OpenAIAccountCredentials
+	ReasoningEffort string
+	ServiceTier     string
+	Timeout         time.Duration     // Request timeout
+	ExtraBody       map[string]any    // Vendor-specific fields merged into every request body
+	ExtraHeaders    map[string]string // Extra HTTP headers sent with every request
+	RetryCodes      []int             // Additional HTTP status codes that trigger retry
 
 	// retryCollector receives one record per real HTTP attempt. It is
 	// unexported because it is not configuration: it is a handle on the current
@@ -295,15 +298,18 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // ResolvedEndpoint because it belongs to the run, not to the endpoint.
 func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 	cfg := ClientConfig{
-		URL:            ep.URL,
-		APIKey:         ep.Token,
-		Model:          ep.Model,
-		AuthHeader:     ep.AuthHeader,
-		Timeout:        ep.Timeout,
-		ExtraBody:      ep.ExtraBody,
-		ExtraHeaders:   ep.ExtraHeaders,
-		RetryCodes:     ep.RetryCodes,
-		retryCollector: collector,
+		URL:             ep.URL,
+		APIKey:          ep.Token,
+		Model:           ep.Model,
+		AuthHeader:      ep.AuthHeader,
+		OpenAIAccount:   ep.OpenAIAccount,
+		ReasoningEffort: ep.ReasoningEffort,
+		ServiceTier:     ep.ServiceTier,
+		Timeout:         ep.Timeout,
+		ExtraBody:       ep.ExtraBody,
+		ExtraHeaders:    ep.ExtraHeaders,
+		RetryCodes:      ep.RetryCodes,
+		retryCollector:  collector,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:

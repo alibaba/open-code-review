@@ -208,6 +208,26 @@ func TestApplyOfficialProviderConfig_MissingFields(t *testing.T) {
 	}
 }
 
+func TestApplyOpenAIAccountOptions(t *testing.T) {
+	entry := ProviderEntry{ReasoningEffort: "low", ServiceTier: "auto"}
+	if err := applyOpenAIAccountOptions(&entry, providerTUIResult{
+		reasoningEffort: " HIGH ",
+		serviceTier:     "fast",
+	}); err != nil {
+		t.Fatalf("applyOpenAIAccountOptions: %v", err)
+	}
+	if entry.ReasoningEffort != "high" || entry.ServiceTier != "priority" {
+		t.Fatalf("options = %q/%q, want high/priority", entry.ReasoningEffort, entry.ServiceTier)
+	}
+
+	if err := applyOpenAIAccountOptions(&entry, providerTUIResult{reasoningEffort: "turbo"}); err == nil {
+		t.Fatal("expected invalid reasoning effort error")
+	}
+	if err := applyOpenAIAccountOptions(&entry, providerTUIResult{serviceTier: "turbo"}); err == nil {
+		t.Fatal("expected invalid service tier error")
+	}
+}
+
 func TestApplyOfficialProviderConfig_EmptyKeyClearsSavedAPIKey(t *testing.T) {
 	t.Setenv("DEEPSEEK_API_KEY", "sk-from-env")
 	dir := t.TempDir()

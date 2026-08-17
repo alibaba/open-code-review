@@ -154,3 +154,23 @@ _Avoid_: silently presenting a text-search approximation as a complete relations
 **Review search distinction**:
 The built-in `code_search` provides direct repository text search; codebase-memory `search_code` provides text search enriched with structural context. Both can be available because they answer different evidence questions.
 _Avoid_: assuming either search surface replaces the other for every query.
+
+**Account provider**:
+An LLM provider authenticated through an interactive user account rather than a static API key. The account provider has its own model availability and runtime settings.
+_Avoid_: treating an account provider as an API-key provider with a different display name.
+
+**Account credentials**:
+The access and refresh credentials associated with an Account provider, together with the account identity needed by the provider service.
+_Avoid_: treating a model catalog or provider configuration as a credential.
+
+**Model catalog**:
+The provider-published set of models visible to the current account, including capability metadata such as context limits and supported reasoning effort.
+_Avoid_: treating a stale cached catalog as proof that a model is currently available.
+
+**Reasoning effort**:
+The user-selected quality and computation target for a model response. It is part of the provider runtime configuration and can vary by model.
+_Avoid_: treating reasoning effort as the review's aggregate token budget or per-request timeout.
+
+**Service tier**:
+The processing tier selected for an account request. The user-facing fast mode is a service-tier choice, not a second model or a separate provider.
+_Avoid_: treating fast mode as permission to reduce reasoning effort automatically.

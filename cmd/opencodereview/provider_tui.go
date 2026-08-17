@@ -21,6 +21,7 @@ type tuiStep int
 const (
 	stepProvider tuiStep = iota
 	stepModel
+	stepOptions
 	stepAPIKey
 )
 
@@ -73,6 +74,8 @@ type providerTUIResult struct {
 	model            string
 	models           []string
 	apiKey           string
+	reasoningEffort  string
+	serviceTier      string
 	isCustom         bool
 	isEdit           bool
 	editTargetName   string
@@ -157,6 +160,10 @@ type providerTUIModel struct {
 	apiKeyInput    textinput.Model
 	apiKeyMasked   bool
 	apiKeyOriginal string
+
+	optionIdx       int
+	reasoningEffort string
+	serviceTier     string
 
 	existingCfg    *Config
 	configPath     string
@@ -539,6 +546,52 @@ func (m *providerTUIModel) prepareModelSelection(providerName, configModel strin
 	m.modelInput.SetValue(currentModel)
 }
 
+func (m *providerTUIModel) prepareOpenAIAccountOptions() {
+	m.optionIdx = 0
+	m.reasoningEffort = "none"
+	m.serviceTier = "auto"
+	if m.existingCfg != nil && m.currentProvider().Name != "" {
+		if entry, ok := m.existingCfg.Providers[m.currentProvider().Name]; ok {
+			if entry.ReasoningEffort != "" {
+				m.reasoningEffort = entry.ReasoningEffort
+			}
+			if entry.ServiceTier != "" {
+				m.serviceTier = entry.ServiceTier
+			}
+		}
+	}
+}
+
+func (m providerTUIModel) openAIAccountReasoningOptions() []string {
+	model := m.selectedModelFromState()
+	efforts := llm.OpenAIAccountReasoningEfforts(model)
+	if len(efforts) == 0 {
+		efforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+	} else if !llm.ModelListContains(efforts, "none") {
+		efforts = append([]string{"none"}, efforts...)
+	}
+	return efforts
+}
+
+func (m providerTUIModel) openAIAccountServiceTierOptions() []string {
+	return []string{"auto", "fast", "flex", "scale", "priority"}
+}
+
+func cycleOption(options []string, current string, delta int) string {
+	if len(options) == 0 {
+		return current
+	}
+	index := 0
+	for i, option := range options {
+		if option == current {
+			index = i
+			break
+		}
+	}
+	index = (index + delta + len(options)) % len(options)
+	return options[index]
+}
+
 func (m providerTUIModel) providerNameForModelStep() string {
 	switch m.activeTab {
 	case tabOfficial:
@@ -618,6 +671,10 @@ func (m providerTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.step == stepAPIKey {
 			return m.updateAPIKeyInput(key, msg)
+		}
+
+		if m.step == stepOptions {
+			return m.updateOpenAIAccountOptions(key)
 		}
 
 		if m.step == stepProvider && (m.creatingCustom || m.editingCustom) {
@@ -717,6 +774,9 @@ func (m providerTUIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.step == stepAPIKey {
 			if m.apiKeyMasked && isUserEditMsg(msg) {
 				m.beginAPIKeyReplace()
+			}
+			if m.step == stepOptions {
+				return m, nil
 			}
 			var cmd tea.Cmd
 			m.apiKeyInput, cmd = m.apiKeyInput.Update(msg)
@@ -960,6 +1020,47 @@ func (m providerTUIModel) updateAPIKeyInput(key string, msg tea.KeyPressMsg) (te
 	}
 }
 
+func (m providerTUIModel) updateOpenAIAccountOptions(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "ctrl+c":
+		m.cancelled = true
+		return m, tea.Quit
+	case "esc":
+		m.step = stepModel
+		m.formError = ""
+		return m, nil
+	case "up", "k":
+		if m.optionIdx > 0 {
+			m.optionIdx--
+		}
+	case "down", "j":
+		if m.optionIdx < 1 {
+			m.optionIdx++
+		}
+	case "left", "h":
+		if m.optionIdx == 0 {
+			m.reasoningEffort = cycleOption(m.openAIAccountReasoningOptions(), m.reasoningEffort, -1)
+		} else {
+			m.serviceTier = cycleOption(m.openAIAccountServiceTierOptions(), m.serviceTier, -1)
+		}
+	case "right", "l":
+		if m.optionIdx == 0 {
+			m.reasoningEffort = cycleOption(m.openAIAccountReasoningOptions(), m.reasoningEffort, 1)
+		} else {
+			m.serviceTier = cycleOption(m.openAIAccountServiceTierOptions(), m.serviceTier, 1)
+		}
+	case "enter":
+		if m.optionIdx == 0 {
+			m.optionIdx = 1
+			return m, nil
+		}
+		m.formError = ""
+		m.confirmed = true
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
 func (m providerTUIModel) updateCustomProviderForm(key string, msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c":
@@ -1183,14 +1284,16 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 // original's slice or map fields.
 func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 	out := ProviderEntry{
-		APIKey:     v.APIKey,
-		URL:        v.URL,
-		Protocol:   v.Protocol,
-		Model:      v.Model,
-		Models:     append([]string(nil), v.Models...),
-		AuthHeader: v.AuthHeader,
-		TimeoutSec: v.TimeoutSec,
-		RetryCodes: append([]int(nil), v.RetryCodes...),
+		APIKey:          v.APIKey,
+		URL:             v.URL,
+		Protocol:        v.Protocol,
+		Model:           v.Model,
+		Models:          append([]string(nil), v.Models...),
+		AuthHeader:      v.AuthHeader,
+		TimeoutSec:      v.TimeoutSec,
+		RetryCodes:      append([]int(nil), v.RetryCodes...),
+		ReasoningEffort: v.ReasoningEffort,
+		ServiceTier:     v.ServiceTier,
 	}
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
@@ -1741,6 +1844,11 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.formError = err.Error()
 			return m, nil
 		}
+		if m.activeTab == tabOfficial && m.currentProvider().AuthMode == llm.AuthModeOAuth {
+			m.step = stepOptions
+			m.prepareOpenAIAccountOptions()
+			return m, nil
+		}
 		m.step = stepAPIKey
 		m.formError = ""
 		m.loadExistingAPIKey()
@@ -1847,16 +1955,20 @@ func (m providerTUIModel) result() providerTUIResult {
 		}
 
 		apiKey := ""
-		if m.apiKeyMasked {
-			apiKey = m.apiKeyOriginal
-		} else {
-			apiKey = strings.TrimSpace(m.apiKeyInput.Value())
+		if p.AuthMode != llm.AuthModeOAuth {
+			if m.apiKeyMasked {
+				apiKey = m.apiKeyOriginal
+			} else {
+				apiKey = strings.TrimSpace(m.apiKeyInput.Value())
+			}
 		}
 
 		return providerTUIResult{
 			provider:         p.Name,
 			model:            model,
 			apiKey:           apiKey,
+			reasoningEffort:  m.reasoningEffort,
+			serviceTier:      m.serviceTier,
 			sessionModelPick: m.sessionModelPickSnapshot(),
 		}
 
@@ -1978,6 +2090,8 @@ func (m providerTUIModel) View() tea.View {
 		m.viewProvider(&s)
 	case stepModel:
 		m.viewModel(&s)
+	case stepOptions:
+		m.viewOpenAIAccountOptions(&s)
 	case stepAPIKey:
 		m.viewAPIKey(&s)
 	}
@@ -2347,6 +2461,48 @@ func (m providerTUIModel) viewAPIKey(s *strings.Builder) {
 
 	s.WriteString("\n")
 	s.WriteString(tuiHelpStyle.Render("  Enter Confirm  Esc Back"))
+	s.WriteString("\n")
+}
+
+func (m providerTUIModel) viewOpenAIAccountOptions(s *strings.Builder) {
+	provider := m.currentProvider()
+	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  OpenAI account options (%s)", provider.DisplayName)))
+	s.WriteString("\n\n")
+
+	reasoningOptions := m.openAIAccountReasoningOptions()
+	serviceTierOptions := m.openAIAccountServiceTierOptions()
+	rows := []struct {
+		label   string
+		value   string
+		options []string
+	}{
+		{"Reasoning effort", m.reasoningEffort, reasoningOptions},
+		{"Fast mode / service tier", m.serviceTier, serviceTierOptions},
+	}
+	for index, row := range rows {
+		cursor := "  "
+		if m.optionIdx == index {
+			cursor = tuiCursor + " "
+		}
+		value := row.value
+		if value == "" {
+			value = "auto"
+		}
+		line := fmt.Sprintf("%s%s: %s", cursor, row.label, value)
+		if m.optionIdx == index {
+			s.WriteString(tuiSelectedItemStyle.Render(line))
+		} else {
+			s.WriteString(tuiItemStyle.Render(line))
+		}
+		s.WriteString("\n")
+	}
+
+	s.WriteString("\n")
+	if m.formError != "" {
+		s.WriteString(tuiErrorStyle.Render("  " + m.formError))
+		s.WriteString("\n\n")
+	}
+	s.WriteString(tuiHelpStyle.Render("  ↑/↓ Select  ←/→ Change  Enter Next/Confirm  Esc Back"))
 	s.WriteString("\n")
 }
 

@@ -6,13 +6,17 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared"
 )
 
 // --- OpenAIResponsesClient ---
@@ -22,8 +26,14 @@ import (
 // history (no previous_response_id), so the agent loop does not need to track
 // server-side response IDs. See DESIGN_STATE_CACHE_PHASE.md for the rationale.
 type OpenAIResponsesClient struct {
-	cfg ClientConfig
-	sdk openai.Client
+	cfg   ClientConfig
+	sdk   openai.Client
+	oauth *openAIAccountSession
+}
+
+type openAIAccountSession struct {
+	mu          sync.Mutex
+	credentials OpenAIAccountCredentials
 }
 
 // NewOpenAIResponsesClient creates a client for the OpenAI Responses API.
@@ -35,14 +45,44 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 		cfg.Timeout = 5 * time.Minute
 	}
 	ensureResponsesEndpoint(&cfg)
-	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/responses")
 
+	oauth := newOpenAIAccountSession(cfg.OpenAIAccount)
+
+	return &OpenAIResponsesClient{
+		cfg:   cfg,
+		sdk:   newOpenAIResponsesSDK(cfg, cfg.APIKey, accountID(cfg.OpenAIAccount)),
+		oauth: oauth,
+	}
+}
+
+func newOpenAIAccountSession(credentials *OpenAIAccountCredentials) *openAIAccountSession {
+	if credentials == nil {
+		return nil
+	}
+	return &openAIAccountSession{credentials: *credentials}
+}
+
+func accountID(credentials *OpenAIAccountCredentials) string {
+	if credentials == nil {
+		return ""
+	}
+	return credentials.AccountID
+}
+
+func newOpenAIResponsesSDK(cfg ClientConfig, token, accountID string) openai.Client {
+	sdkBaseURL := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/responses")
 	opts := []openaiopt.RequestOption{
-		openaiopt.WithAPIKey(cfg.APIKey),
+		openaiopt.WithAPIKey(token),
 		openaiopt.WithBaseURL(sdkBaseURL),
 		openaiopt.WithMaxRetries(0),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
+	}
+	if cfg.OpenAIAccount != nil {
+		opts = append(opts, openaiopt.WithHeader("originator", OpenAIAccountOriginator))
+		if accountID != "" {
+			opts = append(opts, openaiopt.WithHeader("chatgpt-account-id", accountID))
+		}
 	}
 	for k, v := range cfg.ExtraHeaders {
 		opts = append(opts, openaiopt.WithHeader(k, v))
@@ -53,11 +93,29 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if cfg.retryCollector != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
+	return openai.NewClient(opts...)
+}
 
-	return &OpenAIResponsesClient{
-		cfg: cfg,
-		sdk: openai.NewClient(opts...),
+func (s *openAIAccountSession) credentialsForRequest(ctx context.Context) (OpenAIAccountCredentials, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	credentials, err := EnsureOpenAIAccountCredentials(ctx, s.credentials)
+	if err != nil {
+		return OpenAIAccountCredentials{}, err
 	}
+	s.credentials = credentials
+	return credentials, nil
+}
+
+func (s *openAIAccountSession) forceRefresh(ctx context.Context) (OpenAIAccountCredentials, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	credentials, err := RefreshOpenAIAccountCredentials(ctx, s.credentials)
+	if err != nil {
+		return OpenAIAccountCredentials{}, err
+	}
+	s.credentials = credentials
+	return credentials, nil
 }
 
 // ensureResponsesEndpoint normalizes cfg.URL to end with /responses. The
@@ -113,6 +171,9 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
+	if c.oauth != nil {
+		return c.completionsWithOpenAIAccount(ctx, params, opts)
+	}
 
 	return withLLMRetry(ctx, func(ctx context.Context) (*ChatResponse, error) {
 		sdkResp, err := c.sdk.Responses.New(ctx, params, opts...)
@@ -144,6 +205,76 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 
 		return c.mapResponsesResponse(sdkResp), nil
 	})
+}
+
+func (c *OpenAIResponsesClient) completionsWithOpenAIAccount(ctx context.Context, params responses.ResponseNewParams, opts []openaiopt.RequestOption) (*ChatResponse, error) {
+	return withLLMRetry(ctx, func(ctx context.Context) (*ChatResponse, error) {
+		credentials, err := c.oauth.credentialsForRequest(ctx)
+		if err != nil {
+			return nil, err
+		}
+		response, err := c.streamOpenAIAccountResponse(ctx, credentials, params, opts)
+		if err == nil {
+			return response, nil
+		}
+		if !isOpenAIAccountAuthError(err) || credentials.RefreshToken == "" {
+			return nil, err
+		}
+		refreshed, refreshErr := c.oauth.forceRefresh(ctx)
+		if refreshErr != nil {
+			return nil, fmt.Errorf("refresh OpenAI account credentials after HTTP authorization failure: %w", refreshErr)
+		}
+		return c.streamOpenAIAccountResponse(ctx, refreshed, params, opts)
+	})
+}
+
+func (c *OpenAIResponsesClient) streamOpenAIAccountResponse(ctx context.Context, credentials OpenAIAccountCredentials, params responses.ResponseNewParams, opts []openaiopt.RequestOption) (*ChatResponse, error) {
+	cfg := c.cfg
+	sdk := newOpenAIResponsesSDK(cfg, credentials.AccessToken, credentials.AccountID)
+	stream := sdk.Responses.NewStreaming(ctx, params, opts...)
+	defer stream.Close()
+
+	var completed *responses.Response
+	for stream.Next() {
+		event := stream.Current()
+		switch event.Type {
+		case "error":
+			return nil, fmt.Errorf("OpenAI account stream failed: %s", event.Message)
+		case "response.failed", "response.cancelled":
+			response := event.Response
+			return nil, fmt.Errorf("OpenAI account response did not complete: status=%s", response.Status)
+		case "response.queued", "response.in_progress":
+			return nil, fmt.Errorf("OpenAI account returned non-terminal status=%s", event.Type)
+		case "response.completed", "response.incomplete":
+			response := event.Response
+			completed = &response
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return nil, err
+	}
+	if completed == nil {
+		return nil, errors.New("OpenAI account stream ended without response.completed")
+	}
+	if completed.Status == responses.ResponseStatusFailed || completed.Status == responses.ResponseStatusCancelled {
+		return nil, fmt.Errorf("OpenAI account response did not complete: status=%s", completed.Status)
+	}
+	if completed.Status == responses.ResponseStatusQueued || completed.Status == responses.ResponseStatusInProgress {
+		return nil, fmt.Errorf("OpenAI account returned non-terminal status=%s", completed.Status)
+	}
+	return c.mapResponsesResponse(completed), nil
+}
+
+func isOpenAIAccountAuthError(err error) bool {
+	var accountErr *OpenAIAccountHTTPError
+	if errors.As(err, &accountErr) {
+		return accountErr.StatusCode == http.StatusUnauthorized || accountErr.StatusCode == http.StatusForbidden
+	}
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden
+	}
+	return false
 }
 
 // buildResponsesParams converts the shared ChatRequest into Responses API
@@ -228,10 +359,22 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 		params.Tools = tools
 	}
 	if req.MaxTokens > 0 {
-		params.MaxOutputTokens = openai.Int(int64(req.MaxTokens))
+		if c.oauth == nil {
+			params.MaxOutputTokens = openai.Int(int64(req.MaxTokens))
+		}
 	}
 	if req.Temperature != nil {
 		params.Temperature = openai.Float(*req.Temperature)
+	}
+	if c.cfg.ReasoningEffort != "" && c.cfg.ReasoningEffort != "none" {
+		params.Reasoning.Effort = shared.ReasoningEffort(c.cfg.ReasoningEffort)
+	}
+	if c.cfg.ServiceTier != "" {
+		params.ServiceTier = responses.ResponseNewParamsServiceTier(c.cfg.ServiceTier)
+	}
+	if c.oauth != nil {
+		params.ParallelToolCalls = openai.Bool(false)
+		params.Include = []responses.ResponseIncludable{"reasoning.encrypted_content"}
 	}
 
 	return params
