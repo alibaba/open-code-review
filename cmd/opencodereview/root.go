@@ -63,10 +63,11 @@ func commandNeedsGit(cmd *cobra.Command) bool {
 		return false
 	}
 	switch cmd.Name() {
-	case "version", "completion", "help":
+	case "review", "scan", "delegate", "rules":
+		return true
+	default:
 		return false
 	}
-	return true
 }
 
 func versionString() string {
