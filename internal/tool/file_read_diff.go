@@ -5,8 +5,11 @@ package tool
 
 import (
 	"context"
+	"fmt"
 	"strings"
 )
+
+const fileReadDiffMaxLines = 500
 
 // DiffMap is a read-only snapshot of parsed diffs, keyed by file path.
 // Safe for concurrent reads after construction via NewDiffMap.
@@ -51,24 +54,53 @@ func (p *FileReadDiffProvider) Execute(_ context.Context, args map[string]any) (
 		return "Error: no files found", nil
 	}
 
-	var sb strings.Builder
+	var content strings.Builder
+	totalDiffLines := 0
+	truncated := false
+	hasFoundDiff := false
+
+outer:
 	for _, item := range pathArray {
 		path, ok := item.(string)
 		if !ok {
 			continue
 		}
 		if d, exists := p.diffMap.Get(path); exists {
-			sb.WriteString("==== FILE: ")
-			sb.WriteString(path)
-			sb.WriteString(" ====\n")
-			sb.WriteString(d)
-			sb.WriteString("\n")
+			hasFoundDiff = true
+			if d == "" {
+				continue
+			}
+			if totalDiffLines >= fileReadDiffMaxLines {
+				truncated = true
+				break outer
+			}
+			content.WriteString("==== FILE: ")
+			content.WriteString(path)
+			content.WriteString(" ====\n")
+
+			lines := strings.Split(strings.TrimRight(d, "\n"), "\n")
+			for _, line := range lines {
+				if totalDiffLines >= fileReadDiffMaxLines {
+					truncated = true
+					break outer
+				}
+				content.WriteString(line)
+				content.WriteString("\n")
+				totalDiffLines++
+			}
 		}
 	}
 
-	result := sb.String()
-	if result == "" {
+	if !hasFoundDiff || content.Len() == 0 {
 		return "Error: diff not found for the requested paths", nil
 	}
-	return result, nil
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "IS_TRUNCATED: %t\n", truncated)
+	sb.WriteString(content.String())
+	if truncated {
+		sb.WriteString("\nNote: Results truncated to 500 lines. Please request specific files or narrow scope.\n")
+	}
+
+	return sb.String(), nil
 }
