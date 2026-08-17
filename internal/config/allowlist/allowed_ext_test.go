@@ -65,6 +65,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".NIMBLE", true},
 		{".nu", true},
 		{".NU", true},
+		{".elm", true},
+		{".ELM", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -183,6 +185,11 @@ func TestIsExcludedPath(t *testing.T) {
 		{"nushell test hyphen prefix", "src/test-parser.nu", true},
 		{"nushell test suffix", "src/parser_test.nu", true},
 		{"nushell non-test", "src/parser.nu", false},
+		// Elm test files
+		{"elm test directory", "tests/ParserTest.elm", true},
+		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
+		{"elm non-test", "src/Parser.elm", false},
+		{"elm tests in filename", "src/TestsHelper.elm", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

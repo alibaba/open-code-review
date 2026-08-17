@@ -37,5 +37,6 @@
     "**/*.{nim,nims,nimble}": "nim.md",
     "**/*.swift": "swift.md",
     "**/*.nu": "nushell.md"
+    "**/*.elm": "elm.md"
   }
 }
