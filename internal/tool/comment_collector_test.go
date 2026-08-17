@@ -127,7 +127,10 @@ func TestCommentCollector_RemoveByPathAndIndices(t *testing.T) {
 	c.Add(cm("a.go", "a2"))
 	c.Add(cm("b.go", "b1"))
 
-	c.RemoveByPathAndIndices("a.go", map[int]struct{}{0: {}, 2: {}})
+	removed := c.RemoveByPathAndIndices("a.go", map[int]struct{}{0: {}, 2: {}})
+	if removed[0].Content != "a0" || removed[2].Content != "a2" {
+		t.Errorf("removed = %v, want per-path indices 0=a0 and 2=a2", removed)
+	}
 
 	got := c.Comments()
 	if len(got) != 3 {

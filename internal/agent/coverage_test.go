@@ -278,7 +278,7 @@ func TestExecuteReviewFilter_RemovesComments(t *testing.T) {
 						Type: "function",
 						Function: llm.FunctionCall{
 							Name:      "report_incorrect_comments",
-							Arguments: `{"comment_ids":["c-1"]}`,
+							Arguments: `{"analysis":["c-0: real, keep it","c-1: the field it flags is not in this diff"],"comment_ids":["c-1"]}`,
 						},
 					}},
 				},
@@ -317,6 +317,17 @@ func TestExecuteReviewFilter_RemovesComments(t *testing.T) {
 		if c.Content == "remove this" {
 			t.Error("filtered comment should have been removed")
 		}
+	}
+
+	filtered := a.FilteredComments()
+	if len(filtered) != 1 {
+		t.Fatalf("FilteredComments len = %d, want 1: %v", len(filtered), filtered)
+	}
+	if filtered[0].Content != "remove this" {
+		t.Errorf("filtered content = %q, want %q", filtered[0].Content, "remove this")
+	}
+	if filtered[0].Reason != "c-1: the field it flags is not in this diff" {
+		t.Errorf("filtered reason = %q, want the c-1 analysis entry", filtered[0].Reason)
 	}
 }
 

@@ -259,6 +259,16 @@ ocr review --format json --audience agent
       "suggestion_code": "mu.Lock(); defer mu.Unlock(); m[k] = v",
       "thinking": "Looking at line 42, the map …"
     }
+  ],
+  "filtered_comments": [
+    {
+      "path": "src/foo.go",
+      "content": "validate() never checks the nil case.",
+      "start_line": 88,
+      "end_line": 88,
+      "existing_code": "return validate(cfg)",
+      "reason": "c-1: validate() is not part of this diff, so the claim cannot be checked against it"
+    }
   ]
 }
 ```
@@ -271,6 +281,7 @@ ocr review --format json --audience agent
 | `message` | Необязательно. Сводка для чтения человеком, например, `"No comments generated. Looks good to me."`. |
 | `summary` | Необязательно. Сводные показатели запуска: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (omitempty), `cache_write_tokens` (omitempty), `elapsed`. Отсутствует у запусков со статусом `skipped`. |
 | `comments` | Присутствует всегда, но может быть пустым. Поля комментария показаны в примере выше. |
+| `filtered_comments` | Необязательно. Комментарии, удалённые `REVIEW_FILTER_TASK` как доказуемо неверные, — чтобы отброшенную находку всё же можно было проверить. Поля те же, что и у `comments`, плюс `reason` — объяснение самого фильтра, извлечённое из его свободного текста analysis. `reason` заполняется по возможности и может отсутствовать (у провайдеров без поддержки вызова инструментов — всегда). Поле отсутствует, когда ничего не было удалено, включая запуски, где фильтр не выполнялся (`--no-filter` или ошибка LLM во время фильтрации). Присутствует только в этом JSON-выводе и не записывается в запись сессии, поэтому `ocr session comments` и просмотрщик его не показывают. |
 | `warnings` | Необязательно. Присутствует, если один или несколько субагентов завершились с ошибкой; каждая запись описывает затронутый файл и ошибку. |
 | `session_id` | Необязательно. Присутствует у сохранённых запусков ревью; передайте его в `ocr review --resume <session-id>`, чтобы повторить совместимое ревью диапазона или коммита. |
 | `resume` | Необязательно. Присутствует у возобновлённых запусков и содержит `resumed_from`, `reused_files`, `rerun_files`, `previous_model` и `current_model`. |

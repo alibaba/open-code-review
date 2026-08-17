@@ -294,7 +294,7 @@ func TestParseFilterToolCalls(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseFilterToolCalls(tt.calls, tt.total)
+			got, _ := parseFilterToolCalls(tt.calls, tt.total)
 			if tt.wantSet == nil {
 				if got != nil {
 					t.Errorf("expected nil, got %v", got)
@@ -307,6 +307,43 @@ func TestParseFilterToolCalls(t *testing.T) {
 			for idx := range tt.wantSet {
 				if _, ok := got[idx]; !ok {
 					t.Errorf("missing index %d in result", idx)
+				}
+			}
+		})
+	}
+}
+
+func TestFilterReasonsByIndex(t *testing.T) {
+	removed := map[int]model.LlmComment{1: {Content: "one"}, 10: {Content: "ten"}}
+
+	tests := []struct {
+		name     string
+		analysis []string
+		want     map[int]string
+	}{
+		{
+			// The digit boundary is the whole reason for the regex: a plain "c-1"
+			// prefix match would also claim the entry written about c-10.
+			name:     "matches on a digit boundary, colon optional",
+			analysis: []string{"- c-10 is refuted by line 4", "c-1: one's reason"},
+			want:     map[int]string{1: "c-1: one's reason", 10: "- c-10 is refuted by line 4"},
+		},
+		{
+			name:     "skips kept ids and unreadable entries",
+			analysis: []string{"c-2: kept, so not a removal reason", "no id here", "c-1: real"},
+			want:     map[int]string{1: "c-1: real"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterReasonsByIndex(tt.analysis, removed)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for idx, want := range tt.want {
+				if got[idx] != want {
+					t.Errorf("index %d: got %q, want %q", idx, got[idx], want)
 				}
 			}
 		})

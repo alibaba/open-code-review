@@ -258,6 +258,16 @@ ocr review --format json --audience agent
       "suggestion_code": "mu.Lock(); defer mu.Unlock(); m[k] = v",
       "thinking": "Looking at line 42, the map …"
     }
+  ],
+  "filtered_comments": [
+    {
+      "path": "src/foo.go",
+      "content": "validate() never checks the nil case.",
+      "start_line": 88,
+      "end_line": 88,
+      "existing_code": "return validate(cfg)",
+      "reason": "c-1: validate() is not part of this diff, so the claim cannot be checked against it"
+    }
   ]
 }
 ```
@@ -271,6 +281,7 @@ ocr review --format json --audience agent
 | `message` | 可选。人类可读摘要，如 `"No comments generated. Looks good to me."`。 |
 | `summary` | 可选。运行聚合：`files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` 运行时省略。 |
 | `comments` | 总是存在，可能为空。每条评论的字段如上例。 |
+| `filtered_comments` | 可选。被 `REVIEW_FILTER_TASK` 判定为确凿错误而移除的评论，使被丢弃的结论仍可复核。字段与 `comments` 相同，另加 `reason` —— 过滤器自身的说明，从其自由文本分析中提取。`reason` 为尽力而为，可能缺失（在不支持 tool 调用的 provider 上必然缺失）。未移除任何评论时省略该字段，过滤器未运行（`--no-filter`，或过滤期间 LLM 报错）的情况同样如此。仅存在于本次 JSON 输出，不写入 session 记录，因此 `ocr session comments` 与 viewer 不会显示。 |
 | `warnings` | 可选。当一个或多个子 agent 失败时存在；每条描述受影响文件与错误。 |
 | `session_id` | 可选。持久化的评审运行会包含该字段；重试兼容的区间或单 commit 评审时可传给 `ocr review --resume <session-id>`。 |
 | `resume` | 可选。恢复运行时存在，包含 `resumed_from`、`reused_files`、`rerun_files`、`previous_model` 和 `current_model`。 |

@@ -173,7 +173,7 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "fail"}}
-	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", nil, false, nil, nil)
+	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", nil, false, nil, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -279,6 +279,68 @@ func TestOutputJSON_NoComments(t *testing.T) {
 	}
 }
 
+// TestOutputJSONWithWarnings_FilteredComments pins the published contract: a
+// removed comment reaches filtered_comments with its reason and resolved line
+// numbers, and the field disappears entirely when nothing was removed.
+func TestOutputJSONWithWarnings_FilteredComments(t *testing.T) {
+	const rawDiff = `diff --git a/b.go b/b.go
+--- a/b.go
++++ b/b.go
+@@ -10,7 +10,7 @@ func handle() {
+     ctx := context.Background()
+-    log.Print("old")
++    log.Printf("new")
+     err := process(ctx)`
+
+	// Line numbers deliberately left at 0, the way the model usually reports them:
+	// the output path must resolve them from existing_code before publishing.
+	filtered := resolveFilteredLines(
+		[]agent.FilteredComment{{
+			LlmComment: model.LlmComment{Path: "b.go", Content: "dropped", ExistingCode: `log.Print("old")`},
+			Reason:     "c-1: the method it flags is not in this diff",
+		}},
+		[]model.Diff{{NewPath: "b.go", Diff: rawDiff}},
+	)
+
+	emit := func(f []agent.FilteredComment) (jsonOutput, string) {
+		old := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+		err := outputJSONWithWarnings(nil, nil, 1, 0, 0, 0, 0, 0, time.Second, "", nil, "", nil, "", nil, false, nil, nil, f)
+		_ = w.Close()
+		os.Stdout = old
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		var out jsonOutput
+		if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return out, buf.String()
+	}
+
+	out, _ := emit(filtered)
+	if len(out.FilteredComments) != 1 {
+		t.Fatalf("filtered_comments len = %d, want 1", len(out.FilteredComments))
+	}
+	got := out.FilteredComments[0]
+	if got.Content != "dropped" {
+		t.Errorf("content = %q, want dropped", got.Content)
+	}
+	if got.Reason != "c-1: the method it flags is not in this diff" {
+		t.Errorf("reason = %q, want the c-1 analysis entry", got.Reason)
+	}
+	if got.StartLine != 11 || got.EndLine != 11 {
+		t.Errorf("lines = %d..%d, want 11..11 resolved from existing_code", got.StartLine, got.EndLine)
+	}
+
+	if _, raw := emit(nil); strings.Contains(raw, "filtered_comments") {
+		t.Errorf("filtered_comments should be omitted when nothing was removed, got:\n%s", raw)
+	}
+}
+
 func TestOutputJSONWithWarnings(t *testing.T) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
@@ -286,7 +348,7 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	comments := []model.LlmComment{{Path: "b.go", Content: "test"}}
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "c.go", Message: "failed"}}
-	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", nil, false, nil, nil)
+	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", nil, false, nil, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -324,7 +386,7 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "warning", Message: "something"}}
-	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", nil, false, nil, nil)
+	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", nil, false, nil, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 

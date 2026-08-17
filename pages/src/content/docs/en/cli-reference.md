@@ -275,6 +275,16 @@ ocr review --format json --audience agent
       "suggestion_code": "mu.Lock(); defer mu.Unlock(); m[k] = v",
       "thinking": "Looking at line 42, the map …"
     }
+  ],
+  "filtered_comments": [
+    {
+      "path": "src/foo.go",
+      "content": "validate() never checks the nil case.",
+      "start_line": 88,
+      "end_line": 88,
+      "existing_code": "return validate(cfg)",
+      "reason": "c-1: validate() is not part of this diff, so the claim cannot be checked against it"
+    }
   ]
 }
 ```
@@ -288,6 +298,7 @@ Top-level fields:
 | `message` | Optional. Human-readable summary, e.g. `"No comments generated. Looks good to me."`. |
 | `summary` | Optional. Run aggregates: `files_reviewed`, `comments`, `total_tokens`, `input_tokens`, `output_tokens`, `cache_read_tokens` (omitempty), `cache_write_tokens` (omitempty), `elapsed`. Omitted for `skipped` runs. |
 | `comments` | Always present, possibly empty. Per-comment fields are the ones in the example above. |
+| `filtered_comments` | Optional. The comments `REVIEW_FILTER_TASK` removed as provably incorrect, so a dropped finding stays reviewable. Same per-comment fields as `comments`, plus `reason` — the filter's own explanation, recovered from its free-text analysis. `reason` is best-effort and may be absent (always so on providers without tool support). Omitted when nothing was removed, which also covers runs where the filter never ran (`--no-filter`, or an LLM error during filtering). Present only in this JSON output; it is not written to the session record, so `ocr session comments` and the viewer do not show it. |
 | `warnings` | Optional. Present when one or more sub-agents failed; each entry describes the affected file and the error. |
 | `session_id` | Optional. Present on persisted review runs; pass this to `ocr review --resume <session-id>` when retrying compatible range or commit reviews. |
 | `resume` | Optional. Present on resumed runs with `resumed_from`, `reused_files`, `rerun_files`, `previous_model`, and `current_model`. |
