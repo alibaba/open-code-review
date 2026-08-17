@@ -243,7 +243,12 @@ func TestSessionFilePermissions(t *testing.T) {
 
 func TestFinalizeSurfacesWriterCreationErrorWithoutStdout(t *testing.T) {
 	tmpHome := t.TempDir()
+	// The writer resolves the home dir with os.UserHomeDir, which reads
+	// USERPROFILE on Windows and never falls back to HOME. With HOME alone the
+	// blocking file below landed in the temp dir while the writer kept using the
+	// real profile, so creation succeeded and there was no failure to surface.
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
 
 	// A regular file at this path makes creation of the sessions directory fail
 	// deterministically on every platform.
@@ -445,16 +450,19 @@ func TestReviewItemResumeRoundTrip(t *testing.T) {
 	}
 }
 
-func TestResumeStateValidateOptionsRejectsMismatchedRange(t *testing.T) {
+func TestResumeStateValidateOptionsRejectsMismatchedMode(t *testing.T) {
 	state := &ResumeState{
 		SessionID:  "s1",
 		ReviewMode: ReviewModeRange,
 		DiffFrom:   "main",
 		DiffTo:     "feature",
 	}
-	err := state.ValidateOptions(SessionOptions{ReviewMode: ReviewModeRange, DiffFrom: "main", DiffTo: "other"})
-	if err == nil {
-		t.Fatal("expected mismatch error")
+	if err := state.ValidateOptions(SessionOptions{ReviewMode: ReviewModeCommit, DiffCommit: "abc123"}); err == nil {
+		t.Fatal("expected mode mismatch error")
+	}
+	// Differing ref text under the same mode is not a rejection reason.
+	if err := state.ValidateOptions(SessionOptions{ReviewMode: ReviewModeRange, DiffFrom: "main", DiffTo: "other"}); err != nil {
+		t.Errorf("ref text must not decide admission, got: %v", err)
 	}
 }
 

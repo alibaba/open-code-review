@@ -271,6 +271,14 @@ func clearAllEnv(t *testing.T) {
 	} {
 		t.Setenv(k, "")
 	}
+	// Point os.UserHomeDir at an empty dir so the tryShellRC strategy cannot read
+	// the developer's (or a self-hosted CI runner's) real ~/.zshrc: one exporting
+	// the ANTHROPIC_* trio would resolve a live endpoint and break every test that
+	// asserts resolution fails. HOME covers Unix, USERPROFILE Windows; setting the
+	// one that does not apply is harmless.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 }
 
 func writeResolverConfig(t *testing.T, cfg configFile) (string, []byte) {
@@ -834,7 +842,7 @@ func TestResolveEndpoint_MiniMaxProviderRejectsOtherRegionEnv(t *testing.T) {
 			})
 
 			_, err := ResolveEndpointWithOptions(path, ResolveOptions{Provider: tt.provider})
-			if err == nil || !strings.Contains(err.Error(), "has no api_key configured and no environment variable fallback found") {
+			if err == nil || !strings.Contains(err.Error(), "has no api_key or api_key_cmd configured and no environment variable fallback found") {
 				t.Fatalf("error = %v", err)
 			}
 		})
@@ -967,6 +975,38 @@ func TestResolveEndpoint_CustomProviderMissingFields(t *testing.T) {
 	_, err := ResolveEndpoint(cfgPath)
 	if err == nil {
 		t.Fatal("expected error for custom provider missing required fields")
+	}
+}
+
+func TestResolveEndpoint_CustomProviderNoEnvFallback(t *testing.T) {
+	clearAllEnv(t)
+	// A preset provider would pick this up; a custom provider must not, since it
+	// has no associated env var. The api_key/api_key_cmd precedence relies on it.
+	t.Setenv("ANTHROPIC_API_KEY", "env-api-key")
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				URL:      "https://gateway.internal.com/v1",
+				Protocol: "openai",
+				Model:    "llama-3-70b",
+				// No api_key and no api_key_cmd.
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := ResolveEndpoint(cfgPath)
+	if err == nil {
+		t.Fatal("expected error: custom providers have no environment variable fallback")
+	}
+	if !strings.Contains(err.Error(), "no api_key or api_key_cmd configured") {
+		t.Errorf("error = %v, want the missing-credential error", err)
 	}
 }
 
@@ -1130,6 +1170,110 @@ func TestResolveEndpointWithModelOverride_InvalidModelInPresetList(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "available models:") {
 		t.Errorf("error message should list available models, got: %v", err)
+	}
+}
+
+func TestResolveEndpointWithModelOverride_InvalidModelDoesNotRunAPIKeyCmd(t *testing.T) {
+	clearAllEnv(t)
+
+	// The command is guaranteed to fail, so the error it would produce doubles as
+	// a witness that it ran: a bad --model must fail on validation instead, with
+	// no secret-manager prompt.
+	cfg := configFile{
+		Provider: "anthropic",
+		Providers: map[string]providerEntryConfig{
+			"anthropic": {APIKeyCmd: "ocr-no-such-secret-command", Model: "claude-sonnet-4-6"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := ResolveEndpointWithModelOverride(cfgPath, "claude-opsu-4-6")
+	if err == nil {
+		t.Fatal("expected error for invalid model override")
+	}
+	if !strings.Contains(err.Error(), "not available for provider") {
+		t.Errorf("error message should mention model unavailability, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "api_key_cmd") {
+		t.Errorf("api_key_cmd ran before model validation, got: %v", err)
+	}
+}
+
+// A bad global env override must be rejected before any strategy runs, for the
+// same reason as the model check above: OCR_LLM_TIMEOUT="30s" (the field wants a
+// bare integer) used to be parsed only after an endpoint resolved, so the user
+// authenticated to 1Password/Touch ID and then got a config error. Same witness
+// trick: the command cannot succeed, so its error proves it ran.
+func TestResolveEndpointWithModelOverride_BadEnvOverrideDoesNotRunAPIKeyCmd(t *testing.T) {
+	tests := []struct {
+		name     string
+		env      string
+		value    string
+		wantErr  string
+		wantErr2 string
+	}{
+		{
+			name:    "non-integer timeout",
+			env:     "OCR_LLM_TIMEOUT",
+			value:   "30s",
+			wantErr: "OCR_LLM_TIMEOUT must be an integer (seconds)",
+		},
+		{
+			name:    "negative timeout",
+			env:     "OCR_LLM_TIMEOUT",
+			value:   "-30",
+			wantErr: "OCR_LLM_TIMEOUT",
+		},
+		{
+			name:     "reserved extra header",
+			env:      "OCR_LLM_EXTRA_HEADERS",
+			value:    "authorization=leak",
+			wantErr:  "OCR_LLM_EXTRA_HEADERS",
+			wantErr2: "reserved header",
+		},
+		{
+			name:     "malformed extra header",
+			env:      "OCR_LLM_EXTRA_HEADERS",
+			value:    "no-equals-sign",
+			wantErr:  "OCR_LLM_EXTRA_HEADERS",
+			wantErr2: "expected key=value",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllEnv(t)
+			t.Setenv(tt.env, tt.value)
+
+			cfg := configFile{
+				Provider: "anthropic",
+				Providers: map[string]providerEntryConfig{
+					"anthropic": {APIKeyCmd: "ocr-no-such-secret-command", Model: "claude-sonnet-4-6"},
+				},
+			}
+			data, _ := json.Marshal(cfg)
+			cfgPath := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+
+			_, err := ResolveEndpoint(cfgPath)
+			if err == nil {
+				t.Fatalf("expected error for %s=%q", tt.env, tt.value)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr)
+			}
+			if tt.wantErr2 != "" && !strings.Contains(err.Error(), tt.wantErr2) {
+				t.Errorf("error %q does not contain %q", err.Error(), tt.wantErr2)
+			}
+			if strings.Contains(err.Error(), "api_key_cmd") {
+				t.Errorf("api_key_cmd ran before %s was validated, got: %v", tt.env, err)
+			}
+		})
 	}
 }
 
@@ -1588,6 +1732,38 @@ func TestResolveEndpoint_EnvExtraHeadersMergedWithConfigFile(t *testing.T) {
 	}
 	if v, ok := ep.ExtraHeaders["X-New"]; !ok || v != "from-env" {
 		t.Errorf("env header merged: ExtraHeaders[\"X-New\"] = %q, want %q", v, "from-env")
+	}
+}
+
+func TestResolveEndpoint_SessionKeyPlaceholderPreserved(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "my-gateway",
+		CustomProviders: map[string]providerEntryConfig{
+			"my-gateway": {
+				APIKey:       "sk-test",
+				URL:          "https://gateway.example.com/v1",
+				Protocol:     "openai",
+				Model:        "some-model",
+				ExtraHeaders: map[string]string{"x-session-affinity": "{ocr_session_key}"},
+			},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The template placeholder must survive resolution untouched.
+	// Expansion happens in the client, per request.
+	if v := ep.ExtraHeaders["x-session-affinity"]; v != "{ocr_session_key}" {
+		t.Errorf("ExtraHeaders[\"x-session-affinity\"] = %q, want raw placeholder", v)
 	}
 }
 
@@ -2221,6 +2397,64 @@ func TestEnsureMessagesSuffix(t *testing.T) {
 				t.Errorf("ensureMessagesSuffix(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestResolveEndpoint_PresetProviderURLOverride verifies that a configured
+// providers.<name>.url overrides the preset BaseURL for a built-in provider,
+// while the same provider without a url field falls back to preset.BaseURL.
+// litellm is the canonical case: a self-hosted gateway whose URL is rarely the
+// preset default (http://localhost:4000/v1).
+func TestResolveEndpoint_PresetProviderURLOverride(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "litellm",
+		Providers: map[string]providerEntryConfig{
+			"litellm": {APIKey: "sk-litellm-test", Model: "openai/gpt-5.4", URL: "https://gateway.internal:8000/v1"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.URL != "https://gateway.internal:8000/v1" {
+		t.Errorf("URL = %q, want %q (configured url should override preset default)", ep.URL, "https://gateway.internal:8000/v1")
+	}
+	if ep.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", ep.Protocol, ProtocolOpenAIChatCompletions)
+	}
+}
+
+// TestResolveEndpoint_PresetProviderURLDefaultsToPreset verifies that a
+// built-in provider without a configured url resolves to preset.BaseURL.
+func TestResolveEndpoint_PresetProviderURLDefaultsToPreset(t *testing.T) {
+	clearAllEnv(t)
+
+	cfg := configFile{
+		Provider: "litellm",
+		Providers: map[string]providerEntryConfig{
+			"litellm": {APIKey: "sk-litellm-test", Model: "openai/gpt-5.4"},
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpoint(cfgPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ep.URL != "http://localhost:4000/v1" {
+		t.Errorf("URL = %q, want %q (preset default should be used when no url configured)", ep.URL, "http://localhost:4000/v1")
 	}
 }
 

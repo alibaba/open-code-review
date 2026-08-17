@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/session"
@@ -572,6 +573,11 @@ func TestLoadSession_ToolCallWithoutRequest(t *testing.T) {
 }
 
 func TestDiscoverRepos_SkipsUnreadableSubdir(t *testing.T) {
+	// Chmod(0000) is only the read-only bit on Windows, so ReadDir still succeeds
+	// and the repo is discovered rather than skipped.
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permissions not enforced on Windows")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("permission checks are bypassed for root")
 	}
@@ -598,6 +604,11 @@ func TestDiscoverRepos_SkipsUnreadableSubdir(t *testing.T) {
 }
 
 func TestListSessions_SkipsUnreadableFiles(t *testing.T) {
+	// Chmod(0000) is only the read-only bit on Windows, so the "bad" file is still
+	// readable and gets counted as a second session.
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permissions not enforced on Windows")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("permission checks are bypassed for root")
 	}

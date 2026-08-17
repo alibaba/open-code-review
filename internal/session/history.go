@@ -280,6 +280,17 @@ func (sh *SessionHistory) RecordReviewItemReused(filePath, oldPath, newPath, fin
 	}
 }
 
+// RecordResumeLineage persists the run's single resume_lineage event. A nil
+// lineage is a non-resumed run and writes nothing.
+func (sh *SessionHistory) RecordResumeLineage(l *ResumeLineage) {
+	if sh == nil || l == nil {
+		return
+	}
+	if p := sh.persist; p != nil {
+		p.WriteResumeLineage(l)
+	}
+}
+
 // RecordReviewItemFailed persists an incomplete file-level checkpoint.
 func (sh *SessionHistory) RecordReviewItemFailed(filePath, oldPath, newPath, fingerprint, errorMsg string) {
 	if sh == nil {

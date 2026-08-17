@@ -35,6 +35,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )
 
@@ -136,6 +137,14 @@ type Args struct {
 	// Resume is an optional read-only checkpoint index from a previous review session.
 	Resume *session.ResumeState
 
+	// SealedInput pins this run to commit endpoints a pre-flight resolve already
+	// froze, instead of resolving From/To/Commit again. Set only on the resume
+	// path, where admission compared an identity derived from those endpoints:
+	// re-resolving a raw ref here could read a commit the admitted identity never
+	// covered, and the mismatch would surface only after the child session and
+	// manifest existed. Nil means resolve normally, which is every non-resume run.
+	SealedInput *diff.InputResolution
+
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
 	// whole run; dispatch stops once the running total + a per-file look-ahead
 	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
@@ -233,6 +242,7 @@ func New(args Args) *Agent {
 		CommentWorkerPool: args.CommentWorkerPool,
 		Session:           args.Session,
 		DiffLookup:        a.findDiff,
+		AllDiffs:          a.allDiffs,
 		// Non-nil only here: the same Runner serves scan, whose requests must
 		// stay out of the retry report. See newRequestMeta.
 		NewRequestMeta: a.newRequestMeta,
@@ -264,6 +274,11 @@ func (a *Agent) newRequestMeta(filePath string, taskType session.TaskType, reque
 
 // Run executes the full review pipeline: parse diffs -> plan per file -> LLM tool-loop -> collect comments.
 func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
+	// Base prompt-cache affinity key for any LLM request in this run that a task doesn't re-scope.
+	// Each task conversation (plan, per-file main loop, compression, ...) refines it with llm.SessionTaskKey where it starts,
+	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
+	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
+
 	// Step 1: Parse diffs
 	ctx, diffSpan := telemetry.StartSpan(ctx, "diff.parse")
 	if err := a.loadDiffs(ctx); err != nil {
@@ -348,6 +363,13 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 				humanTokens(est.TotalTokens), humanTokens(a.args.MaxTokensBudget))
 		}
 	}
+
+	// Record which run this one continued, before any item is dispatched, so the
+	// lineage is on disk even if the review then fails outright. It is written
+	// once per run and only for an accepted resume — admission was already
+	// decided by the command layer, which rejects before a session exists.
+	a.session.RecordResumeLineage(session.NewResumeLineage(
+		a.args.Resume, a.session.SessionID, a.args.Provider, a.args.Model))
 
 	// Step 2: Dispatch per-file subtasks concurrently
 	comments, err := a.dispatchSubtasks(ctx)
@@ -473,11 +495,30 @@ func (a *Agent) recordWarning(warningType, file, message string) {
 func (a *Agent) loadDiffs(ctx context.Context) error {
 	var provider *diff.Provider
 
+	// A sealed input substitutes the commit SHAs a pre-flight resolve already froze
+	// for the refs the user typed. Both loads then read the same immutable objects,
+	// which is what makes this run's input provably the admitted one: a ref moving
+	// after admission can no longer change what gets reviewed. Neither mode's
+	// semantics shift under the substitution — range keeps its merge-base, because
+	// the sealed base already is that merge-base and merge-base(base, head) is base
+	// whenever base is an ancestor of head; commit mode keeps its first-parent
+	// comparison, which is derived from the commit rather than from its spelling.
+	// Workspace mode seals no head and is left alone.
+	from, to, commit := a.args.From, a.args.To, a.args.Commit
+	if s := a.args.SealedInput; s != nil && s.ResolvedHead != "" {
+		switch {
+		case commit != "":
+			commit = s.ResolvedHead
+		case s.ResolvedBase != "":
+			from, to = s.ResolvedBase, s.ResolvedHead
+		}
+	}
+
 	switch {
-	case a.args.Commit != "":
-		provider = diff.NewCommitProvider(a.args.RepoDir, a.args.Commit, a.args.GitRunner)
-	case a.args.From != "" && a.args.To != "":
-		provider = diff.NewProvider(a.args.RepoDir, a.args.From, a.args.To, a.args.GitRunner)
+	case commit != "":
+		provider = diff.NewCommitProvider(a.args.RepoDir, commit, a.args.GitRunner)
+	case from != "" && to != "":
+		provider = diff.NewProvider(a.args.RepoDir, from, to, a.args.GitRunner)
 	default:
 		provider = diff.NewWorkspaceProvider(a.args.RepoDir, a.args.GitRunner)
 	}
@@ -567,6 +608,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
 
 	var dispatched int64
+dispatchLoop:
 	for i := range toDispatch {
 		if toDispatch[i].IsDeleted {
 			continue
@@ -616,9 +658,17 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 			}
 		}
 
+		select {
+		case sem <- struct{}{}: // acquire semaphore
+		case <-ctx.Done():
+			break dispatchLoop
+		}
+		if ctx.Err() != nil {
+			<-sem // release the slot acquired concurrently with cancellation
+			break dispatchLoop
+		}
 		dispatched++
 		wg.Add(1)
-		sem <- struct{}{} // acquire semaphore
 
 		go func(d model.Diff) {
 			fingerprint := reviewItemFingerprint(a.reviewMode(), d)
@@ -692,14 +742,17 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	wg.Wait()
-
-	if dispatched == 0 {
-		return a.args.CommentCollector.Comments(), nil
-	}
-
 	// All subtasks finished — collect comments from the global collector once.
 	if a.args.CommentWorkerPool != nil {
 		a.args.CommentWorkerPool.Await()
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		a.recordContextFailure(ctxErr)
+		return a.args.CommentCollector.Comments(), ctxErr
+	}
+
+	if dispatched == 0 {
+		return a.args.CommentCollector.Comments(), nil
 	}
 
 	failed := atomic.LoadInt64(&a.subtaskFailed)
@@ -717,6 +770,22 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	return a.args.CommentCollector.Comments(), nil
 }
 
+func (a *Agent) recordContextFailure(err error) {
+	if b := a.session.Manifest(); b != nil {
+		var setErr error
+		if errors.Is(err, context.DeadlineExceeded) {
+			// A deadline truncates pending coverage without overriding completed items.
+			setErr = b.SetPendingFailureCause(session.FailureTimeout, "review deadline exceeded")
+		} else {
+			// Explicit cancellation stops the run itself, not just its pending items.
+			setErr = b.SetRunFailure(session.RunFailureCancelled, "review was cancelled")
+		}
+		if setErr != nil {
+			a.recordWarning("manifest_error", "", setErr.Error())
+		}
+	}
+}
+
 func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 	resume := a.args.Resume
 	if resume == nil {
@@ -732,7 +801,10 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 			continue
 		}
 		fingerprint := reviewItemFingerprint(mode, d)
-		item, ok := resume.Item(fingerprint)
+		// ReusableItem, not Item: coverage lives in the parent manifest, so a
+		// checkpoint line the parent's manifest did not settle as completed or
+		// reused is not evidence of anything and its file is reviewed again.
+		item, ok := resume.ReusableItem(fingerprint)
 		if !ok {
 			toDispatch = append(toDispatch, d)
 			continue
@@ -775,7 +847,11 @@ func (a *Agent) reviewMode() string {
 }
 
 func reviewItemFingerprint(mode string, d model.Diff) string {
-	sum := sha256.Sum256([]byte(mode + "\x00" + d.OldPath + "\x00" + d.NewPath + "\x00" + d.Diff))
+	// The patch splitter can leave extra line endings on the final file in a
+	// multi-file patch. Unified diff content lines always carry a marker, so
+	// trimming CR/LF here removes only that position-dependent delimiter.
+	diffText := strings.TrimRight(d.Diff, "\r\n")
+	sum := sha256.Sum256([]byte(mode + "\x00" + d.OldPath + "\x00" + d.NewPath + "\x00" + diffText))
 	return fmt.Sprintf("%x", sum)
 }
 
@@ -1264,6 +1340,60 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 	return true, nil, nil
 }
 
+// filterTools defines the two mutually exclusive tools for the review filter.
+// The model MUST call exactly one: either report incorrect comments, or approve all.
+var filterTools = []llm.ToolDef{
+	{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name: "report_incorrect_comments",
+			Description: "Report review comments that this diff proves to be factually wrong: either the code they target is absent from the diff, " +
+				"or one diff line literally contradicts their central claim. For every id listed you must be able to name that line. " +
+				"Do not use this for comments you merely find unconvincing, unverifiable, or low-value, nor for comments about memory safety, " +
+				"concurrency, linkage consistency, unused parameters, or behavioral changes.",
+			// Field order matters and is load-bearing. Go serializes these
+			// properties alphabetically, so "analysis" is emitted before
+			// "comment_ids" and the model reasons before it commits. With the
+			// order reversed it picks ids first and cannot retract them: replaying
+			// recorded sessions showed it writing "this is a protected subject, I
+			// should not remove it" in the later field while the id stayed in the
+			// earlier one. Do not rename these fields into a different relative
+			// order.
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"analysis": map[string]any{
+						"type": "array",
+						"description": "Work through every candidate comment BEFORE deciding. One entry per candidate: its id, " +
+							"whether its subject hits the protected-subject veto (Step 1) or the value veto (Step 2), " +
+							"the exact diff line that refutes it if any, and your final call. " +
+							"Only ids you conclude here as removable may appear in comment_ids.",
+						"items": map[string]any{"type": "string"},
+					},
+					"comment_ids": map[string]any{
+						"type":        "array",
+						"description": "IDs concluded removable in analysis, e.g. [\"c-0\", \"c-2\"]. Must not be empty.",
+						"items":       map[string]any{"type": "string"},
+					},
+				},
+				"required": []any{"analysis", "comment_ids"},
+			},
+		},
+	},
+	{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name: "approve_all_comments",
+			Description: "Keep every review comment. Call this whenever no comment clears the removal bar — including when comments look doubtful, " +
+				"cannot be verified from the diff alone, or seem minor. This is the expected outcome for most files.",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+	},
+}
+
 // executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are
 // provably incorrect based solely on the diff. Errors are logged and silently ignored.
 func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath string) {
@@ -1301,14 +1431,18 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 
 	fs := a.session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.ReviewFilterTask), newPath))
 	startTime := time.Now()
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.ReviewFilterTask, rec.RequestNo))
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-		Model:     a.args.Model,
-		Messages:  messages,
-		MaxTokens: a.args.Template.CompletionTokenLimit(),
+		Model:      a.args.Model,
+		Messages:   messages,
+		Tools:      filterTools,
+		ToolChoice: "required",
+		MaxTokens:  a.args.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {
@@ -1329,13 +1463,24 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
 
-	indices := parseFilterResponse(resp.Content(), len(comments))
+	indices := parseFilterToolCalls(resp.ToolCalls(), len(comments))
+	if indices == nil {
+		indices = parseFilterResponse(resp.Content(), len(comments))
+	}
 	telemetry.SetAttr(span, "comments.filtered", len(indices))
 	if len(indices) == 0 {
+		telemetry.Event(ctx, "review_filter.completed",
+			attribute.String("file.path", newPath),
+			attribute.Int("total_comments", len(comments)),
+			attribute.Int("removed", 0))
 		return
 	}
 
 	a.args.CommentCollector.RemoveByPathAndIndices(newPath, indices)
+	telemetry.Event(ctx, "review_filter.completed",
+		attribute.String("file.path", newPath),
+		attribute.Int("total_comments", len(comments)),
+		attribute.Int("removed", len(indices)))
 	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for %s\n", len(indices), newPath)
 }
 
@@ -1356,6 +1501,39 @@ func buildFilterCommentsJSON(comments []model.LlmComment) string {
 	}
 	data, _ := json.Marshal(items)
 	return string(data)
+}
+
+// parseFilterToolCalls extracts comment indices from the filter tool call response.
+// Returns nil if no matching tool call is found, allowing fallback to text-based parsing.
+// Returns an empty map (non-nil) for approve_all_comments or an empty comment_ids list.
+func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
+	var indices map[int]struct{}
+	for _, call := range calls {
+		switch call.Function.Name {
+		case "approve_all_comments":
+			if indices == nil {
+				indices = make(map[int]struct{})
+			}
+		case "report_incorrect_comments":
+			var args struct {
+				CommentIDs []string `json:"comment_ids"`
+			}
+			if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+				fmt.Fprintf(stdout.Writer(), "[ocr] Review filter: failed to parse tool call arguments: %v\n", err)
+				continue
+			}
+			if indices == nil {
+				indices = make(map[int]struct{})
+			}
+			for _, id := range args.CommentIDs {
+				var idx int
+				if _, err := fmt.Sscanf(id, "c-%d", &idx); err == nil && idx >= 0 && idx < total {
+					indices[idx] = struct{}{}
+				}
+			}
+		}
+	}
+	return indices
 }
 
 // parseFilterResponse extracts comment indices from the LLM filter response.
@@ -1525,6 +1703,8 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 
 	fs := a.session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.PlanTask), newPath))
 	startTime := time.Now()
 	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.PlanTask, rec.RequestNo))
 
@@ -1670,6 +1850,14 @@ func orderedToolParameters(raw json.RawMessage) ([]orderedToolParameter, bool) {
 		return nil, false
 	}
 	return params, true
+}
+
+// allDiffs exposes the reviewed diff set for cross-file comment re-filing.
+// It is read-only and safe to call from the per-file subtask goroutines: every
+// mutation of a.diffs (filterDiffs, filterLargeDiffs) completes before dispatch
+// begins, so the slice is stable for the rest of the run.
+func (a *Agent) allDiffs() []model.Diff {
+	return a.diffs
 }
 
 // findDiff returns the Diff for the given file path, or nil if not found.

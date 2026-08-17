@@ -106,6 +106,7 @@ type Agent struct {
 	resumeInfo       *session.ResumeInfo
 	scanFingerprints map[string]string
 	projectSummary   string // populated post-run by maybeRunProjectSummary
+	budgetExceeded   bool   // set when the token budget gate stopped dispatch; written only by dispatchBatch's loop
 }
 
 // ProjectSummary returns the markdown project-level summary produced after
@@ -223,13 +224,12 @@ func (a *Agent) Warnings() []llmloop.AgentWarning { return a.runner.Warnings() }
 // ToolCalls returns per-tool call counts accumulated during scan.
 func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 
-// BudgetExceeded always returns false for scan. Scan self-limits via its own
-// token budget gate and MaxToolRequestTimes; the typed budget_exceeded status
-// and tool-call-budget plumbing are diff-review-path features (see
-// internal/agent). This method exists only so *scan.Agent satisfies the
-// cmd/opencodereview.ResultProvider interface, keeping scan's JSON output
-// unchanged (status stays success / completed_with_*).
-func (a *Agent) BudgetExceeded() bool { return false }
+// BudgetExceeded reports whether the aggregate token budget gate stopped
+// dispatch before every file was reviewed. Diagnostic only: scan still returns
+// its partial comments and a nil error, and the value reaches output solely as
+// summary.budget_exceeded. Per-file MaxToolRequestTimes exhaustion does NOT set
+// it — that is an item-level outcome, not a run-level budget stop.
+func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded }
 
 func (a *Agent) recordWarning(warningType, file, message string) {
 	a.runner.RecordWarning(warningType, file, message)
@@ -303,6 +303,13 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	if len(a.args.Template.MainTask.Messages) == 0 {
 		return nil, fmt.Errorf("scan template MAIN_TASK is missing or empty")
 	}
+
+	// Base prompt-cache affinity key for any LLM request in this run that a
+	// task doesn't re-scope. Each task conversation (plan, per-file main
+	// loop, dedup, summary) refines it with llm.SessionTaskKey where it
+	// starts, so affinity keys stay per-conversation — the granularity
+	// provider prompt caches actually reuse prefixes at.
+	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
 	ctx, scanSpan := telemetry.StartSpan(ctx, "scan.enumerate")
 	provider := NewProvider(a.args.RepoDir, a.args.Paths, a.args.GitRunner, a.args.MaxFileSizeBytes)
@@ -629,6 +636,9 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 				a.recordWarning("token_budget_reached", it.Path,
 					fmt.Sprintf("stopped in batch #%d: used %d tokens + next-file estimate exceeds budget %d", batchIdx, used, a.args.MaxTokensBudget))
 				budgetHit = true
+				// budgetHit is per-batch and dies with this call; the field is
+				// the run-level signal emitRunResult reads after Run returns.
+				a.budgetExceeded = true
 				break
 			}
 		}
@@ -765,6 +775,8 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 
 	fs := a.session.GetOrCreateFileSession(it.Path)
 	rec := fs.AppendTaskRecord(session.PlanTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.PlanTask), it.Path))
 	startTime := time.Now()
 
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
@@ -818,6 +830,8 @@ func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.Llm
 	const pathKey = "__scan_project_summary__"
 	fs := a.session.GetOrCreateFileSession(pathKey)
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, messages) // reuse existing task type
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.MemoryCompressionTask), pathKey))
 	startTime := time.Now()
 
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
@@ -893,6 +907,8 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) {
 	pathKey := fmt.Sprintf("__scan_dedup_batch_%d__", batchIdx)
 	fs := a.session.GetOrCreateFileSession(pathKey)
 	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, messages) // reuse existing task type; no scan-specific type to invent
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.MemoryCompressionTask), pathKey))
 	startTime := time.Now()
 
 	resp, err := a.args.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{

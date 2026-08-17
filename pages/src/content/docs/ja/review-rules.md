@@ -139,6 +139,8 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.jl` | `julia.md`: Julia ソースコード。 |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md`: Terraform / HCL。 |
 | `**/*.bicep` | `bicep.md`: Bicep（Azure）テンプレート。 |
+| `**/*.elm` | `elm.md` - Elm ソースコード。 |
+| `**/*.{jsonnet,libsonnet}` | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。 |
 | *(fallback)* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。

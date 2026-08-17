@@ -63,6 +63,18 @@ func TestIsAllowedExt(t *testing.T) {
 		{".NIMS", true},
 		{".nimble", true},
 		{".NIMBLE", true},
+		{".elm", true},
+		{".ELM", true},
+		{".properties", true},
+		{".PROPERTIES", true},
+		{".po", true},
+		{".PO", true},
+		{".pot", true},
+		{".POT", true},
+		{".jsonnet", true},
+		{".JSONNET", true},
+		{".libsonnet", true},
+		{".LIBSONNET", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -145,6 +157,16 @@ func TestIsExcludedPath(t *testing.T) {
 		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
 		{"julia non-test", "src/model.jl", false},
 
+		// Swift test files
+		{"swift Tests suffix", "MyAppTests/UserTests.swift", true},
+		{"swift Tests suffix nested", "Tests/AppTests/UserTests.swift", true},
+		{"swift UITests suffix", "MyAppUITests/LaunchTests.swift", true},
+		{"swift Test suffix", "MyAppTests/UserTest.swift", true},
+		{"swift Test dir helper", "Tests/AppTests/Mocks/MockService.swift", true},
+		{"swift tests dir lowercase", "tests/AppTests/Helpers/Helper.swift", true},
+		{"swift non-test", "Sources/App/User.swift", false},
+		{"swift helper with test in name", "Sources/App/TestSupport.swift", false},
+
 		// Haskell test files
 		{"haskell test directory", "test/Parser.hs", true},
 		{"haskell nested test directory", "packages/core/test/unit/Parser.hs", true},
@@ -162,6 +184,22 @@ func TestIsExcludedPath(t *testing.T) {
 		{"nim nested test directory", "packages/core/tests/unit/parser_test.nim", true},
 		{"nim non-test", "src/parser.nim", false},
 		{"nim tests in filename", "src/tests_helper.nim", false},
+
+		// Elm test files
+		{"elm test directory", "tests/ParserTest.elm", true},
+		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
+		{"elm non-test", "src/Parser.elm", false},
+		{"elm tests in filename", "src/TestsHelper.elm", false},
+
+		// Jsonnet vendored dependencies (written by `jb install`, wiped by `rm -rf vendor`).
+		// The pattern is extension-scoped: IsExcludedPath applies every pattern to every
+		// path, so a bare **/vendor/** would also drop vendored Go and PHP sources.
+		{"jsonnet vendor root", "vendor/github.com/grafana/jsonnet-libs/ksonnet-util/kausal.libsonnet", true},
+		{"jsonnet vendor nested dir", "jsonnet/vendor/foo/main.jsonnet", true},
+		{"jsonnet non-vendor lib", "lib/config.libsonnet", false},
+		{"jsonnet non-vendor env", "environments/prod/main.jsonnet", false},
+		{"go under vendor still reviewed", "vendor/github.com/pkg/errors/errors.go", false},
+		{"php under vendor still reviewed", "vendor/monolog/monolog/src/Logger.php", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

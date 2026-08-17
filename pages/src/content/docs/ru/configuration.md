@@ -57,6 +57,7 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
 | `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
+| `kimi-global` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_GLOBAL_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
 | `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
@@ -65,6 +66,27 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 | `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
+| `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+### Переопределение Base URL встроенного провайдера
+
+У каждого встроенного провайдера есть предустановленный Base URL
+(см. таблицу выше). Чтобы направить встроенный провайдер на другую конечную
+точку — например, на собственный шлюз LiteLLM, который редко находится по
+предустановленному адресу `http://localhost:4000/v1` — задайте
+`providers.<name>.url`:
+
+```bash
+ocr config set provider                   litellm
+ocr config set model                      openai/gpt-5.4
+ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
+ocr config set providers.litellm.url      https://gateway.internal:8000/v1
+```
+
+Заданный `url` имеет приоритет над предустановленным Base URL. Если
+`providers.<name>.url` не задан (или очищен), OCR возвращается к
+предустановленному значению по умолчанию — поэтому его нужно задавать только
+когда ваша конечная точка отличается.
 
 ### Пользовательские провайдеры
 
@@ -135,6 +157,60 @@ Ollama игнорирует API-ключ, однако для пользоват
   }
 }
 ```
+
+### Получение API-ключа из команды
+
+Вместо того чтобы хранить ключ в файле конфигурации, параметр `api_key_cmd`
+получает его во время выполнения из менеджера секретов (1Password, `pass`,
+`gopass`, …). Ключом становится однострочный вывод команды в stdout с
+отброшенными пробелами по краям. Тот же параметр доступен и для устаревшего
+раздела `llm` — под именем `auth_token_cmd`.
+
+```bash
+ocr config set providers.anthropic.api_key_cmd "op read op://dev/anthropic/api-key"
+```
+
+Точно так же работает связка ключей вашей ОС — через команду, которая уже
+входит в её состав, поэтому ключ хранится в Keychain или Secret Service, а не
+в `config.json`:
+
+```bash
+# macOS Keychain
+ocr config set providers.anthropic.api_key_cmd \
+  "security find-generic-password -s ocr-anthropic -w"
+
+# Linux (Secret Service: GNOME Keyring, KWallet, …)
+ocr config set providers.anthropic.api_key_cmd \
+  "secret-tool lookup service ocr-anthropic"
+```
+
+Приоритет: заданный `api_key` всегда имеет приоритет над командой (если заданы
+оба, команда игнорируется и выводится предупреждение); иначе выполняется
+`api_key_cmd`; и только если не задано ни то, ни другое, OCR возвращается к
+переменной окружения провайдера.
+
+Команда выполняется один раз за запуск `ocr` и должна завершиться успешно:
+ненулевой код возврата, пустой вывод, многострочный вывод или вывод объёмом
+больше 64 КиБ считаются ошибкой и прерывают работу (OCR никогда не переключается
+на резервный вариант молча). Команда должна уложиться в 60 секунд, включая
+время, которое вы тратите на ответ на запрос. Команда наследует stdin и stderr
+вашего терминала, поэтому интерактивные запросы (pinentry, Touch ID) и
+отображаются, и допускают ответ. Если команда оставляет после себя фоновую
+службу, удерживающую её канал stdout (`gpg-agent`, запускаемая при первом
+использовании служба `op`), учётные данные всё равно будут получены, но каждый
+запуск `ocr` дополнительно ждёт 5 секунд, пока этот канал не закроется, —
+перенаправьте вывод службы (`>/dev/null 2>&1`), чтобы избавиться от ожидания.
+
+В Windows команда выполняется через `cmd.exe`, а не через `sh`, поэтому
+команда, написанная для одной из этих оболочек, как правило, не переносится в
+другую: `%VAR%` и `^` — метасимволы `cmd.exe`, а раскрытие `$VAR` и
+экранирование через `\` там не действуют. Аргументы в кавычках передаются без
+изменений, поэтому `op read "op://Private/My Vault/api-key"` работает как
+написано.
+
+Поскольку это значение выполняется как команда оболочки, `config.json`
+считается доверенным вводом — он должен принадлежать вам и быть недоступен для
+записи другим пользователям (OCR записывает его с правами `0600`).
 
 ### Дополнительные HTTP-коды для повторных попыток
 
@@ -224,6 +300,30 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 
 ```bash
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
+```
+
+### Аффинити сессии для кеширования промптов
+
+OCR выводит ключ аффинити кеша промптов для каждого диалога с LLM,
+ограниченный областью сессии ревью и задачи внутри неё
+(`<ID сессии>-<тип задачи>-<хеш области>`). Кеши промптов сопоставляются
+по префиксам, поэтому ключи на уровне диалога удерживают каждый растущий
+диалог (например, цикл инструментов при ревью одного файла) на одном и том
+же узле кеша, вместо того чтобы стягивать весь запуск к одному «горячему»
+ключу; префикс с ID сессии позволяет сопоставлять журналы кеша на стороне
+поставщика с записями `ocr session`.
+
+Чтобы включить это, вставьте шаблонную переменную `{ocr_session_key}`
+в значения `extra_headers` или `extra_body` там, где её ожидает ваш
+поставщик — OCR подставляет ключ диалога в каждый запрос, а без такой
+настройки не отправляет ничего:
+
+```bash
+# Через поле в теле запроса в стиле OpenAI (например, prompt_cache_key)
+ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_key}"}'
+
+# Через HTTP-заголовок (например, x-session-affinity)
+ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
 ```
 
 ## Настройка языка ревью

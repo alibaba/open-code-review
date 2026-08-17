@@ -51,6 +51,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
 | `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
+| `kimi-global` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_GLOBAL_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
 | `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
@@ -59,6 +60,23 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `siliconflow` | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
+| `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+### 覆盖内置 provider 的 Base URL
+
+每个内置 provider 都有一个预设 Base URL（见上表）。要将内置 provider
+指向不同的端点——例如自建的 LiteLLM 网关，其地址很少是预设默认值
+`http://localhost:4000/v1`——设置 `providers.<name>.url`：
+
+```bash
+ocr config set provider                   litellm
+ocr config set model                      openai/gpt-5.4
+ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
+ocr config set providers.litellm.url      https://gateway.internal:8000/v1
+```
+
+配置的 `url` 优先于预设 Base URL。当 `providers.<name>.url` 未设置（或
+被清除）时，OCR 回退到预设默认值——因此只需在端点不同时才设置。
 
 ### 自定义 provider
 
@@ -122,6 +140,48 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
   }
 }
 ```
+
+### 通过命令获取 API key
+
+除了把 key 直接写进配置文件，还可以用 `api_key_cmd` 在运行时从密钥管理器
+（1Password、`pass`、`gopass` 等）获取。命令去除首尾空白后的单行 stdout 即为
+key。旧版 `llm` 配置块也有对应的 `auth_token_cmd`。
+
+```bash
+ocr config set providers.anthropic.api_key_cmd "op read op://dev/anthropic/api-key"
+```
+
+操作系统自带的密钥环同理，直接用系统已有的命令即可，key 保存在 Keychain 或
+Secret Service 中，而不是 `config.json` 里：
+
+```bash
+# macOS Keychain
+ocr config set providers.anthropic.api_key_cmd \
+  "security find-generic-password -s ocr-anthropic -w"
+
+# Linux（Secret Service：GNOME Keyring、KWallet 等）
+ocr config set providers.anthropic.api_key_cmd \
+  "secret-tool lookup service ocr-anthropic"
+```
+
+优先级：静态 `api_key` 始终优先（两者都设置时忽略命令并打印警告）；否则运行
+`api_key_cmd`；只有两者都未设置时，OCR 才回退到 provider 对应的环境变量。
+
+命令在每次 `ocr` 调用时运行一次，且必须成功：非零退出、空输出、多行输出或超过
+64KiB 的输出都会被视为硬错误（OCR 绝不会静默回退）。命令须在 60 秒内完成，这也
+包括你回应提示所花的时间。命令会继承你终端的 stdin 和 stderr，因此交互式提示
+（pinentry、Touch ID）既能显示也能作答。如果命令留下了仍持有其 stdout 管道的后台
+守护进程（`gpg-agent`、首次使用时启动的 `op` 守护进程），凭据依然能取到，但每次
+`ocr` 调用都会额外等待 5 秒直到该管道关闭——把守护进程的输出重定向掉
+（`>/dev/null 2>&1`）即可消除这段等待。
+
+在 Windows 上命令通过 `cmd.exe` 而非 `sh` 执行，因此为其中一方编写的命令通常
+无法直接移植到另一方：`%VAR%` 和 `^` 是 `cmd.exe` 的元字符，而 `$VAR` 展开和 `\`
+转义在那里并不适用。带引号的参数会原样传递，因此
+`op read "op://Private/My Vault/api-key"` 可以按原样使用。
+
+由于这个值会作为 shell 命令执行，`config.json` 属于可信输入——请确保它归你所有、
+其他用户不可写（OCR 写入时使用 `0600` 权限）。
 
 ### 额外的重试状态码
 
@@ -196,6 +256,20 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 
 ```bash
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
+```
+
+### 提示词缓存的会话亲和性
+
+OCR 为每个 LLM 对话派生一个提示词缓存亲和性密钥，作用域为评审会话及其中的任务（`<会话 ID>-<任务类型>-<作用域哈希>`）。提示词缓存按前缀匹配，因此按对话划分密钥可让每个不断增长的对话（如某个文件的评审工具循环）稳定路由到同一缓存节点，而不是把整次运行压在一个热点密钥上；密钥中的会话 ID 前缀可将供应商侧缓存日志与 `ocr session` 记录对应。
+
+要启用，请在供应商期望的位置——`extra_headers` 或 `extra_body` 的值中——嵌入 `{ocr_session_key}` 模板变量。OCR 会在每个请求中将其替换为该对话的密钥；未配置时不会发送任何内容：
+
+```bash
+# 通过 OpenAI 风格的请求体字段传递（例如 prompt_cache_key）
+ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_key}"}'
+
+# 通过 HTTP 请求头传递（例如 x-session-affinity）
+ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
 ```
 
 ## 配置评审语言

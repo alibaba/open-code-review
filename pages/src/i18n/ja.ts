@@ -22,10 +22,21 @@ export const ja: TranslationKeys = {
   'hero.copyFailed': 'コピー失敗',
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
+  'hero.installMacPorts': 'MacPorts',
+  'hero.installMacOS': 'MacOS',
+  'hero.installLinux': 'Linux',
+  'hero.installWindows': 'Windows',
+  'hero.installMore': 'その他',
+  'hero.allInstallOptions': 'すべてのインストール方法',
 
   // Error boundary
   'error.pageLoadFailed': 'ページの読み込みに失敗しました。',
   'error.reload': '再読み込み',
+
+  // Not found
+  'notFound.title': 'ページが見つかりません',
+  'notFound.description': 'お探しのページは存在しないか、移動した可能性があります。',
+  'notFound.backHome': 'ホームに戻る',
 
   // Highlights
   'highlights.stat1Value': '20K+',
@@ -164,6 +175,8 @@ export const ja: TranslationKeys = {
   'docs.reviewAgentDesc': '実行プロセスを表示せず最終サマリーのみ出力。自動化パイプラインに適しています。',
   'docs.reviewPreviewLabel': 'Dry-Run プレビュー',
   'docs.reviewPreviewDesc': 'レビュー対象のファイル一覧と統計情報（ファイル数、変更行数）を表示します。LLM 呼び出しなし、コストなし —— 本番レビュー前にスコープを確認するのに役立ちます。',
+  'docs.reviewToggles': 'レビューステージの切り替え：--no-filter',
+  'docs.reviewTogglesFilterDesc': 'すべてのレビューコメントを保持し、ファイルごとの REVIEW_FILTER_TASK LLM 後処理呼び出しをスキップします。',
   'docs.reviewFlags': 'フラグリファレンス',
   'docs.reviewFlagCol1': 'フラグ',
   'docs.reviewFlagCol2': '説明',
@@ -171,7 +184,7 @@ export const ja: TranslationKeys = {
   'docs.reviewFlag1Desc': 'レビューするコミットハッシュを指定',
   'docs.reviewFlag2Desc': '開始参照（差分の起点）',
   'docs.reviewFlag3Desc': 'ターゲット参照（差分の終点）',
-  'docs.reviewFlag4Desc': '出力形式：text または json',
+  'docs.reviewFlag4Desc': '出力形式：text、json または sarif',
   'docs.reviewFlag5Desc': 'Git リポジトリルート',
   'docs.reviewFlag5Default': '現在のディレクトリ',
   'docs.reviewFlag6Desc': 'レビュールール JSON ファイルパス',
@@ -227,7 +240,7 @@ export const ja: TranslationKeys = {
   'docs.scanFlag6Desc': 'バッチ単位の DEDUP_TASK をスキップ',
   'docs.scanFlag7Desc': '実行後の PROJECT_SUMMARY_TASK をスキップ',
   'docs.scanFlag8Desc': 'バッチ処理戦略：none | by-language | by-directory',
-  'docs.scanFlag9Desc': '出力形式：text または json',
+  'docs.scanFlag9Desc': '出力形式：text、json または sarif',
   'docs.scanFlag10Desc': '最大並行ファイルスキャン数',
   'docs.scanFlag11Desc': '並行タスクのタイムアウト（分）',
   'docs.scanFlag12Desc': '出力対象：human（進捗表示）または agent（サマリーのみ）',

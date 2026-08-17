@@ -11,6 +11,10 @@ import (
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
+func runPreview(cc *commonContext, opts reviewOptions) error {
+	return runPreviewContext(context.Background(), cc, opts)
+}
+
 func TestRunPreview(t *testing.T) {
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "x.go", "package x\n", "add x")
