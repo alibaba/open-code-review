@@ -169,7 +169,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.rs` | `rust.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.py` | `python.md` — исходный код Python. |
+| `**/*.{py,ipynb}` | `python.md` — исходный код Python. |
 | `**/*.{php,phtml}` | `php.md` — исходный код PHP и шаблоны PHP. |
 | `**/*.proto` | `protobuf.md` — совместимость Protocol Buffers на уровне wire. |
 | `**/*.po` | `po.md` — исходные каталоги переводов gettext. |
