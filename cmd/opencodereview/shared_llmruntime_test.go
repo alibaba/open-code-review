@@ -88,6 +88,11 @@ func TestLoadLLMRuntime_UnresolvableEndpoint(t *testing.T) {
 func TestLoadLLMRuntime_BadAppConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// defaultConfigPath resolves through os.UserHomeDir, which reads USERPROFILE
+	// on Windows and never falls back to HOME, so redirecting HOME alone left
+	// the invalid config below in a directory nobody reads. Set both; the one
+	// that does not apply is harmless.
+	t.Setenv("USERPROFILE", home)
 	cfgDir := filepath.Join(home, ".opencodereview")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)

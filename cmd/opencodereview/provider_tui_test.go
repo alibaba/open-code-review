@@ -2350,8 +2350,10 @@ func TestProviderTUI_OfficialApiKeyEmptyWithoutEnvBlocksEnter(t *testing.T) {
 	if m2.step != stepAPIKey {
 		t.Errorf("step = %d, want stepAPIKey", m2.step)
 	}
-	if m2.formError != "API key is required (or set $DASHSCOPE_API_KEY)" {
-		t.Errorf("formError = %q", m2.formError)
+	// The exact prose is pinned by TestApiKeyStepCanConfirm; this test covers the
+	// Enter-key wiring, so compare against the helper and never drift again.
+	if want := officialAPIKeyRequiredError(m2.currentProvider()); m2.formError != want {
+		t.Errorf("formError = %q, want %q", m2.formError, want)
 	}
 	if cmd != nil {
 		t.Error("Enter without key or env should not quit")
@@ -2413,8 +2415,10 @@ func TestProviderTUI_CustomExistingApiKeyEmptyBlocksEnter(t *testing.T) {
 	if m2.step != stepAPIKey {
 		t.Errorf("step = %d, want stepAPIKey", m2.step)
 	}
-	if m2.formError != "API key is required" {
-		t.Errorf("formError = %q, want %q", m2.formError, "API key is required")
+	// Prefix, not the full string: this test covers Enter-key gating, and the
+	// exact wording is pinned by TestApiKeyStepCanConfirm.
+	if !strings.HasPrefix(m2.formError, "API key is required") {
+		t.Errorf("formError = %q, want it to start with %q", m2.formError, "API key is required")
 	}
 	if cmd != nil {
 		t.Error("Enter with cleared key should not quit")
@@ -2659,6 +2663,7 @@ func TestProviderTUI_DeleteModelPreservesActiveModel(t *testing.T) {
 }
 
 func TestApplyCustomProviderConfigPreservesModelOrder(t *testing.T) {
+	isolateLLMConnectionTest(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	models := []string{"test-model", "test-model-2", "bbb", "aaa", "test-model-3"}
@@ -2702,6 +2707,7 @@ func TestApplyCustomProviderConfigPreservesModelOrder(t *testing.T) {
 }
 
 func TestApplyManualConfigNormalizesAuthHeader(t *testing.T) {
+	isolateLLMConnectionTest(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	cfg := &Config{}
@@ -2727,6 +2733,7 @@ func TestApplyManualConfigNormalizesAuthHeader(t *testing.T) {
 }
 
 func TestApplyCustomProviderConfigNormalizesAuthHeader(t *testing.T) {
+	isolateLLMConnectionTest(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 	cfg := &Config{
@@ -2875,6 +2882,7 @@ func TestEnterEditCustomProvider_ProtocolIndex(t *testing.T) {
 // mirrored for the two protocols that have a boolean equivalent so older
 // binaries can still read the config.
 func TestApplyManualConfig_DoubleWritesProtocolAndUseAnthropic(t *testing.T) {
+	isolateLLMConnectionTest(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
 
@@ -2977,5 +2985,71 @@ func TestProviderTUIResult_ManualProtocolIsCanonical(t *testing.T) {
 		if r.protocol != want {
 			t.Errorf("manualProtocolIdx=%d: result.protocol = %q, want %q", i, r.protocol, want)
 		}
+	}
+}
+
+func TestKeyCmdConfiguredHint(t *testing.T) {
+	got := keyCmdConfiguredHint("api_key_cmd")
+	want := "api_key_cmd is set; leave empty to keep using it."
+	if got != want {
+		t.Errorf("hint = %q, want %q", got, want)
+	}
+}
+
+// A provider configured only by command renders a blank API-key field, so
+// without this hint there is nothing on screen distinguishing "credential
+// already wired up" from "nothing configured".
+func TestProviderTUI_ViewAPIKey_ShowsAPIKeyCmdHint(t *testing.T) {
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {APIKeyCmd: "op read op://dev/deepseek/key", Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "deepseek" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepAPIKey
+	m.loadExistingAPIKey()
+	m.apiKeyInput.Focus()
+
+	got := stripANSI(m.View().Content)
+	want := "api_key_cmd is set; leave empty to keep using it."
+	if !strings.Contains(got, want) {
+		t.Errorf("view missing api_key_cmd hint; want %q; got:\n%s", want, got)
+	}
+	// The command can carry an inlined secret, so it must not reach the screen.
+	if strings.Contains(got, "op read op://dev/deepseek/key") {
+		t.Errorf("view renders the api_key_cmd verbatim; got:\n%s", got)
+	}
+}
+
+func TestProviderTUI_ViewAPIKey_NoCmdHintWhenUnset(t *testing.T) {
+	cfg := &Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-flash",
+		Providers: map[string]ProviderEntry{
+			"deepseek": {Model: "deepseek-v4-flash"},
+		},
+	}
+	m := newProviderTUI(cfg, "")
+	m.activeTab = tabOfficial
+	for i, p := range m.providers {
+		if p.Name == "deepseek" {
+			m.officialIdx = i
+			break
+		}
+	}
+	m.step = stepAPIKey
+	m.loadExistingAPIKey()
+
+	if got := stripANSI(m.View().Content); strings.Contains(got, "api_key_cmd is set") {
+		t.Errorf("view should not claim api_key_cmd is set when it is not; got:\n%s", got)
 	}
 }
