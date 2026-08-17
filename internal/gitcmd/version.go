@@ -4,28 +4,26 @@
 package gitcmd
 
 import (
-	"errors"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"strings"
 )
 
+// GitVersion holds a parsed MAJOR.MINOR.PATCH git version.
 type GitVersion struct {
 	Major int
 	Minor int
 	Patch int
 }
 
+// gitVersionMin is the minimum git version open-code-review supports.
 var gitVersionMin = GitVersion{Major: 2, Minor: 41, Patch: 0}
-
-var ErrGitVersionTooOld = errors.New("git version below minimum supported")
 
 func (v GitVersion) String() string {
 	return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
 }
 
+// AtLeast reports whether v is greater than or equal to o.
 func (v GitVersion) AtLeast(o GitVersion) bool {
 	switch {
 	case v.Major != o.Major:
@@ -37,7 +35,18 @@ func (v GitVersion) AtLeast(o GitVersion) bool {
 	}
 }
 
-// ParseGitVersion extracts a MAJOR.MINOR.PATCH version from a git --version
+type VersionTooOldError struct {
+	Current GitVersion
+	Minimum GitVersion
+}
+
+func (e *VersionTooOldError) Error() string {
+	return fmt.Sprintf(
+		"git %s is older than the minimum supported version %s; consider upgrading git",
+		e.Current, e.Minimum,
+	)
+}
+
 func ParseGitVersion(s string) (GitVersion, error) {
 	i := 0
 	for i < len(s) && (s[i] < '0' || s[i] > '9') {
@@ -54,35 +63,23 @@ func ParseGitVersion(s string) (GitVersion, error) {
 	return v, nil
 }
 
-func versionWarning(current GitVersion) (string, bool) {
-	if current.AtLeast(gitVersionMin) {
-		return "", false
-	}
-	return fmt.Sprintf(
-		"warning: git %s is older than the minimum supported version %s. "+
-			"Some commands may not work correctly; consider upgrading git.\n",
-		current, gitVersionMin,
-	), true
-}
-
-func CheckGitVersion() (string, error) {
-	return checkGitVersion(os.Stderr, func() ([]byte, error) {
+func CheckGitVersion() error {
+	return checkGitVersion(func() ([]byte, error) {
 		return exec.Command("git", "--version").Output()
 	})
 }
 
-func checkGitVersion(w io.Writer, getVersion func() ([]byte, error)) (string, error) {
+func checkGitVersion(getVersion func() ([]byte, error)) error {
 	out, err := getVersion()
 	if err != nil {
-		return "", fmt.Errorf("running git --version: %w", err)
+		return fmt.Errorf("running git --version: %w", err)
 	}
 	v, err := ParseGitVersion(string(out))
 	if err != nil {
-		return "", err
+		return err
 	}
-	if msg, ok := versionWarning(v); ok {
-		fmt.Fprint(w, msg)
-		return v.String(), fmt.Errorf("%w: %s", ErrGitVersionTooOld, v.String())
+	if !v.AtLeast(gitVersionMin) {
+		return &VersionTooOldError{Current: v, Minimum: gitVersionMin}
 	}
-	return v.String(), nil
+	return nil
 }

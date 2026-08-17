@@ -5,8 +5,10 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/spf13/cobra"
 )
 
@@ -33,6 +35,16 @@ func init() {
 	rootCmd.SetFlagErrorFunc(flagErrorWithSuggestion)
 	rootCmd.Flags().BoolP("version", "V", false, "version for ocr")
 
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if !commandNeedsGit(cmd) {
+			return nil
+		}
+		if err := gitcmd.CheckGitVersion(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		}
+		return nil
+	}
+
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(reviewCmd)
 	rootCmd.AddCommand(scanCmd)
@@ -43,6 +55,18 @@ func init() {
 	rootCmd.AddCommand(rulesCmd)
 	rootCmd.AddCommand(viewerCmd)
 	rootCmd.AddCommand(completionCmd)
+}
+
+func commandNeedsGit(cmd *cobra.Command) bool {
+	// `ocr --version` / `-V` is handled by the root command's RunE.
+	if v, _ := cmd.Flags().GetBool("version"); v {
+		return false
+	}
+	switch cmd.Name() {
+	case "version", "completion", "help":
+		return false
+	}
+	return true
 }
 
 func versionString() string {

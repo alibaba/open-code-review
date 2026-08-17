@@ -5,12 +5,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"time"
 
-	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 )
@@ -22,12 +20,6 @@ func main() {
 	ctx := context.Background()
 	if telemetry.Init(ctx) {
 		defer telemetry.ShutdownWithTimeout(ctx, 5*time.Second)
-	}
-
-	if _, err := gitcmd.CheckGitVersion(); err != nil {
-		if !errors.Is(err, gitcmd.ErrGitVersionTooOld) {
-			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
-		}
 	}
 
 	if err := rootCmd.Execute(); err != nil {

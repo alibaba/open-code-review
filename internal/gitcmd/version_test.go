@@ -4,7 +4,6 @@
 package gitcmd
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -76,101 +75,58 @@ func TestGitVersion_AtLeast(t *testing.T) {
 	}
 }
 
-func TestVersionWarning(t *testing.T) {
-	tests := []struct {
-		v       GitVersion
-		wantOk  bool
-		contain []string
-	}{
-		{GitVersion{2, 30, 0}, true, []string{"warning:", "2.30.0", "2.41.0", "upgrading git"}},
-		{GitVersion{2, 41, 0}, false, nil},
-		{GitVersion{2, 41, 1}, false, nil},
-		{GitVersion{3, 0, 0}, false, nil},
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("v=%s", tt.v), func(t *testing.T) {
-			msg, ok := versionWarning(tt.v)
-			if ok != tt.wantOk {
-				t.Errorf("versionWarning(%s) ok=%v, want %v", tt.v, ok, tt.wantOk)
-			}
-			if tt.wantOk {
-				for _, want := range tt.contain {
-					if !strings.Contains(msg, want) {
-						t.Errorf("message %q does not contain %q", msg, want)
-					}
-				}
-			} else if msg != "" {
-				t.Errorf("expected empty message, got %q", msg)
-			}
-		})
+func TestVersionTooOldError_Error(t *testing.T) {
+	err := &VersionTooOldError{Current: GitVersion{2, 30, 0}, Minimum: GitVersion{2, 41, 0}}
+	msg := err.Error()
+	for _, want := range []string{"2.30.0", "2.41.0", "upgrading git"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("Error() = %q, want it to contain %q", msg, want)
+		}
 	}
 }
 
 func TestCheckGitVersion(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		var buf bytes.Buffer
 		getVersion := func() ([]byte, error) {
 			return []byte("git version 2.45.2\n"), nil
 		}
-		ver, err := checkGitVersion(&buf, getVersion)
-		if err != nil {
+		if err := checkGitVersion(getVersion); err != nil {
 			t.Fatalf("unexpected error: %v", err)
-		}
-		if ver != "2.45.2" {
-			t.Errorf("version = %q, want %q", ver, "2.45.2")
-		}
-		if buf.Len() != 0 {
-			t.Errorf("expected no warning, got %q", buf.String())
 		}
 	})
 
-	t.Run("old git warns", func(t *testing.T) {
-		var buf bytes.Buffer
+	t.Run("old git returns typed error", func(t *testing.T) {
 		getVersion := func() ([]byte, error) {
 			return []byte("git version 2.30.0\n"), nil
 		}
-		ver, err := checkGitVersion(&buf, getVersion)
-		if err == nil {
-			t.Fatal("expected ErrGitVersionTooOld, got nil")
+		err := checkGitVersion(getVersion)
+		var tooOld *VersionTooOldError
+		if !errors.As(err, &tooOld) {
+			t.Fatalf("expected *VersionTooOldError, got %v", err)
 		}
-		if !errors.Is(err, ErrGitVersionTooOld) {
-			t.Errorf("expected ErrGitVersionTooOld, got %v", err)
+		if tooOld.Current != (GitVersion{2, 30, 0}) {
+			t.Errorf("Current = %v, want 2.30.0", tooOld.Current)
 		}
-		if ver != "2.30.0" {
-			t.Errorf("version = %q, want %q", ver, "2.30.0")
-		}
-		msg := buf.String()
-		if !strings.Contains(msg, "warning:") || !strings.Contains(msg, "2.41.0") {
-			t.Errorf("expected warning with version, got %q", msg)
+		if tooOld.Minimum != gitVersionMin {
+			t.Errorf("Minimum = %v, want %v", tooOld.Minimum, gitVersionMin)
 		}
 	})
 
 	t.Run("getVersion error", func(t *testing.T) {
-		var buf bytes.Buffer
 		getVersion := func() ([]byte, error) {
 			return nil, errors.New("git not found")
 		}
-		_, err := checkGitVersion(&buf, getVersion)
-		if err == nil {
+		if err := checkGitVersion(getVersion); err == nil {
 			t.Fatal("expected error, got nil")
-		}
-		if buf.Len() != 0 {
-			t.Errorf("expected no warning, got %q", buf.String())
 		}
 	})
 
 	t.Run("garbage output", func(t *testing.T) {
-		var buf bytes.Buffer
 		getVersion := func() ([]byte, error) {
 			return []byte("banana\n"), nil
 		}
-		_, err := checkGitVersion(&buf, getVersion)
-		if err == nil {
+		if err := checkGitVersion(getVersion); err == nil {
 			t.Fatal("expected parse error, got nil")
-		}
-		if buf.Len() != 0 {
-			t.Errorf("expected no warning, got %q", buf.String())
 		}
 	})
 }
@@ -179,22 +135,15 @@ func TestCheckGitVersion_Real(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not found in PATH")
 	}
-	ver, err := CheckGitVersion()
-	if errors.Is(err, ErrGitVersionTooOld) {
-		// Allowed: installed git is older than minimum. Version string must
-		// still be populated so the caller can inspect it.
-		if ver == "" {
-			t.Error("expected non-empty version string even when too old")
-		}
+	err := CheckGitVersion()
+	if err == nil {
 		return
 	}
-	if err != nil {
-		t.Fatalf("CheckGitVersion() error: %v", err)
+	var tooOld *VersionTooOldError
+	if !errors.As(err, &tooOld) {
+		t.Fatalf("CheckGitVersion() returned non-version error: %v", err)
 	}
-	if ver == "" {
-		t.Error("expected non-empty version string")
-	}
-	if !strings.Contains(ver, ".") {
-		t.Errorf("version %q does not look like a semver", ver)
+	if tooOld.Current == (GitVersion{}) || tooOld.Minimum == (GitVersion{}) {
+		t.Errorf("VersionTooOldError has zero values: %+v", tooOld)
 	}
 }
