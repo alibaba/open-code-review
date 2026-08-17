@@ -73,12 +73,23 @@ func TestComputeLineDiff(t *testing.T) {
 			wantDels: 1,
 		},
 		{
-			name:     "case insensitive match with whitespace",
-			old:      []string{"  Hello  "},
+			// Indentation is tolerated: ExistingCode is a model-quoted excerpt
+			// whose leading whitespace cannot be trusted.
+			name:     "whitespace-only difference matches",
+			old:      []string{"  hello  "},
 			new:      []string{"hello"},
 			wantLen:  1,
 			wantAdds: 0,
 			wantDels: 0,
+		},
+		{
+			// Case is a real change — in Go it is the export boundary.
+			name:     "case-only difference is a change",
+			old:      []string{"Hello"},
+			new:      []string{"hello"},
+			wantLen:  2,
+			wantAdds: 1,
+			wantDels: 1,
 		},
 		{
 			name:     "multi-line edit",
@@ -112,6 +123,44 @@ func TestComputeLineDiff(t *testing.T) {
 				t.Errorf("dels = %d, want %d", dels, tt.wantDels)
 			}
 		})
+	}
+}
+
+// Unexporting/exporting a Go identifier is one of the most common review
+// suggestions there is. Case folding used to collapse it into a single context
+// line rendering the OLD name, so the CLI showed the suggestion as a no-op.
+func TestComputeLineDiff_CaseOnlyRenameIsVisible(t *testing.T) {
+	got := ComputeLineDiff([]string{"func foo() {}"}, []string{"func Foo() {}"})
+
+	var added, deleted []string
+	for _, l := range got {
+		switch l.Type {
+		case DiffAdded:
+			added = append(added, l.Content)
+		case DiffDeleted:
+			deleted = append(deleted, l.Content)
+		case DiffContext:
+			t.Errorf("a case-only rename must not render as context: %q", l.Content)
+		}
+	}
+	if len(deleted) != 1 || deleted[0] != "func foo() {}" {
+		t.Errorf("deleted = %q, want the old name", deleted)
+	}
+	if len(added) != 1 || added[0] != "func Foo() {}" {
+		t.Errorf("added = %q, want the new name", added)
+	}
+}
+
+// The counterpart guarantee: a re-indented quote must still align, or every
+// line of a block the model re-indented would render as rewritten.
+func TestComputeLineDiff_ReindentedQuoteStillAligns(t *testing.T) {
+	old := []string{"if x {", "y()", "}"}
+	new := []string{"if x {", "\ty()", "}"}
+
+	for _, l := range ComputeLineDiff(old, new) {
+		if l.Type != DiffContext {
+			t.Errorf("indentation-only difference should stay context, got type=%d %q", l.Type, l.Content)
+		}
 	}
 }
 
