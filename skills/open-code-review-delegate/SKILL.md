@@ -3,9 +3,10 @@ name: open-code-review-delegate
 description: >
   Delegation mode for open-code-review (OCR). Instead of OCR calling an LLM
   endpoint, this skill instructs the host agent to perform the code review
-  itself, using OCR only for deterministic engineering: file selection and
-  rule resolution. Use when the host agent should drive the review with its
-  own LLM capabilities.
+  itself, using OCR only for deterministic engineering: file selection,
+  batching and rule resolution. Covers both diff review and full-file scan
+  (`ocr delegate scan`). Use when the host agent should drive the review with
+  its own LLM capabilities.
 license: Apache-2.0
 compatibility: >
   Requires the `ocr` CLI installed (via `npm install -g
@@ -133,12 +134,57 @@ If the user requested "review and fix":
 - Describe Medium fixes that require manual intervention
 - Skip Low-priority items unless trivial
 
+## Full-File Scan (no diff)
+
+When there is no meaningful diff — auditing an unfamiliar codebase, a
+directory, or a set of files — use `ocr delegate scan` instead of Steps 1–3
+above. It replaces preview + rule with a single call:
+
+```bash
+ocr delegate scan --format json [--path <dirs-or-files>] [--exclude <patterns>] [--batch <strategy>]
+```
+
+This outputs:
+- **batches** — files grouped exactly as `ocr scan` would dispatch them, each
+  with `batch_id`, grouping `key`, and per-file `line_count`
+- **excluded_files** — with exclusion reason
+- **rule_groups** — the resolved review rules (pass `--no-rules` to omit)
+
+Then:
+
+1. **Review one batch per sub-agent.** A batch is the unit OCR sized for a
+   single isolated context; dispatch batches in parallel where practical.
+2. **Read every file in the batch in full** — there is no diff, the whole
+   file is the subject.
+3. Use the matching Rule Group as the checklist, exploring callers,
+   definitions and tests as needed to confirm a finding is real.
+4. Report using the same comment structure and severity classification as
+   Steps 5–6 above, closing with a coverage summary.
+
+Scanning whole files surfaces far more candidates than diff review, and
+long-standing code is usually intentional. Favor precision: report a finding
+only when you can name its concrete consequence. Consistently-applied
+existing style is not a finding.
+
+Check the scale before proceeding — if `scannable_count` is large (more than
+~40 files), confirm the scope with the user or narrow it with `--path`.
+
 ## Sub-commands Reference
 
 | Command | Purpose |
 |---------|---------|
 | `ocr delegate preview` | Which files to review + mode/ref metadata |
 | `ocr delegate rule <path...>` | Review rules grouped by content |
+| `ocr delegate scan` | Full-file scan plan: batches + rules, no diff needed |
+
+## Scan-only Flags
+
+| Flag | Description |
+|------|-------------|
+| `--path <paths>` | Comma-separated directories or files to scan (default: whole repo) |
+| `--batch <strategy>` | Override grouping: `none`, `by-language`, `by-directory` |
+| `--batch-size <n>` | Max files per batch (0 = template default) |
+| `--no-rules` | Omit resolved rules from the plan |
 
 ## Shared Flags
 
@@ -162,3 +208,6 @@ If the user requested "review and fix":
 - **Untracked files in workspace mode** — `preview` includes untracked files. For these, read the file directly instead of using `git diff`.
 - **Background context** — pass `--background` to `preview` when you have requirement context; it appears in the output for your reference during review.
 - **Coverage is mandatory** — every `reviewable_files` entry must end as reviewed or explicitly skipped; do not silently omit files.
+- **Scan is not diff review** — `ocr delegate scan` needs no refs and produces no diff. Do not try to `git diff` a scan plan's files; read them in full.
+- **Scan works outside git** — unlike `preview`, `scan` accepts a plain directory that is not a Git repository.
+- **Batches are the dispatch unit** — review one batch per sub-agent rather than one file, and rely on `batch_id` (1-based) to track coverage.

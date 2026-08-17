@@ -156,6 +156,9 @@ ocr scan --resume <session-id>   # 中断したフルファイルスキャンを
 # OCR はファイル選択とルール解決を担当。LLM 設定不要
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
+
+# デリゲートモードの全ファイルスキャン — 計画（ファイル + バッチ + ルール）を出力し、エージェントがスキャン
+ocr delegate scan --path src
 ```
 
 ## ドキュメント

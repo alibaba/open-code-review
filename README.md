@@ -156,6 +156,9 @@ ocr scan --resume <session-id>   # resume an interrupted full-file scan
 # OCR handles file selection and rule resolution; no LLM configuration needed
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
+
+# Full-file scan in delegation mode — plan (files + batches + rules), agent scans
+ocr delegate scan --path src
 ```
 
 ## Documentation

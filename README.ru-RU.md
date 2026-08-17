@@ -156,6 +156,9 @@ ocr scan --resume <session-id>   # возобновить прерванное �
 # OCR отвечает за выбор файлов и разрешение правил; настройка LLM не требуется
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
+
+# Полное сканирование файлов в режиме делегирования — план (файлы + батчи + правила), агент сканирует
+ocr delegate scan --path src
 ```
 
 ## Документация

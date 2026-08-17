@@ -164,6 +164,19 @@ func validateDelegateOptions(opts *delegateOptions) error {
 	return nil
 }
 
+func validateDelegateScanOptions(opts *delegateScanOptions) error {
+	if opts.format != "text" && opts.format != "json" {
+		return fmt.Errorf("invalid --format value %q: must be 'text' or 'json'", opts.format)
+	}
+	if opts.maxGitProcs < 0 {
+		return fmt.Errorf("--max-git-procs must be a non-negative integer (0 means use default 16)")
+	}
+	if opts.batchSize < 0 {
+		return fmt.Errorf("--batch-size must be a non-negative integer (0 means use template default)")
+	}
+	return nil
+}
+
 // registerReviewFlags registers all review command flags on cmd, binding to opts.
 func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addToolsFlag(cmd, &opts.toolConfigPath)
@@ -216,6 +229,25 @@ func registerDelegateFlags(cmd *cobra.Command, opts *delegateOptions) {
 	addRuleFlag(cmd, &opts.rulePath)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
+	cmd.Flags().StringVarP(&opts.format, "format", "f", "text", "output format: text or json (sarif is not supported by delegate mode)")
+	cmd.RegisterFlagCompletionFunc("format", completeEnum("text", "json"))
+}
+
+// registerDelegateScanFlags registers the delegate scan flags on cmd, binding
+// to opts. It shares the repo/exclude/rule/background/format flags with
+// registerDelegateFlags but takes scan's --path and --batch* instead of the
+// diff ref flags, which a full-file scan has no use for.
+func registerDelegateScanFlags(cmd *cobra.Command, opts *delegateScanOptions) {
+	addRepoFlag(cmd, &opts.repoDir)
+	cmd.Flags().StringVar(&opts.paths, "path", "", "comma-separated repo-relative directories or files to scan (default: whole repo)")
+	addExcludeFlag(cmd, &opts.excludes)
+	addRuleFlag(cmd, &opts.rulePath)
+	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
+	cmd.Flags().IntVar(&opts.maxGitProcs, "max-git-procs", 16, "max concurrent git subprocesses")
+	cmd.Flags().StringVar(&opts.batch, "batch", "", "override BATCH_STRATEGY: none | by-language | by-directory")
+	cmd.RegisterFlagCompletionFunc("batch", completeEnum("none", "by-language", "by-directory"))
+	cmd.Flags().IntVar(&opts.batchSize, "batch-size", 0, "override BATCH_SIZE: max files per batch (0 = template default)")
+	cmd.Flags().BoolVar(&opts.noRules, "no-rules", false, "omit resolved review rules from the plan")
 	cmd.Flags().StringVarP(&opts.format, "format", "f", "text", "output format: text or json (sarif is not supported by delegate mode)")
 	cmd.RegisterFlagCompletionFunc("format", completeEnum("text", "json"))
 }

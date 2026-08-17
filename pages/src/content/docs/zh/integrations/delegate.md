@@ -36,6 +36,13 @@ curl -o .claude/commands/delegate-review.md \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/delegate-review.md
 ```
 
+如需全文件扫描，再安装 scan 命令：
+
+```bash
+curl -o .claude/commands/delegate-scan.md \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/delegate-scan.md
+```
+
 ### 任意 Agent — Skill
 
 ```bash
@@ -115,12 +122,48 @@ cat <path>                     # 新的未跟踪文件
 - **Medium** — 性能问题、错误处理缺失。附带上下文报告。
 - **Low** — 风格建议、细微改进。静默丢弃，除非确有价值。
 
+## 全文件扫描（无需 diff）
+
+上述第 1–5 步针对 diff 进行审查。当没有有意义的 diff 时 — 例如审计陌生代码库、某个目录或一组文件 — 请改用 `ocr delegate scan`。它是 `ocr scan` 的委托模式对应命令，用一次调用取代 preview + rule 两步：
+
+```bash
+ocr delegate scan [--path <目录或文件>] [--exclude <patterns>] [--batch <strategy>]
+```
+
+输出内容：
+
+- **batches（批次）** — 按 `ocr scan` 实际派发的方式对文件分组，每个批次包含批次编号、分组键以及每个文件的行数
+- **已排除文件** — 及排除原因
+- **规则组** — 已解析的审查规则（可用 `--no-rules` 省略）
+
+与 `delegate preview` 不同，本命令可在非 Git 仓库的普通目录下使用：全文件扫描不需要任何 ref。
+
+### 工作流程
+
+1. **生成扫描计划。** 先查看 `scannable_count`；若扫描范围超出预期，用 `--path` 收窄。
+2. **每个批次交给一个子 Agent 审查。** 批次是 OCR 为「单个隔离上下文」设计的调度单元；在条件允许时并行派发。
+3. **完整读取每个文件。** 这里没有 diff — 整个文件就是审查对象。
+4. **以匹配的规则组作为审查清单**，并按需查看调用方、定义和测试，以确认每条发现是否成立。
+5. **报告结果**，严重程度分类与上文第 5 步一致，并在最后给出覆盖率汇总。
+
+全文件扫描产生的候选问题远多于 diff 审查，而长期存在的代码通常是有意为之。请优先保证精确率：只有当你能指出具体后果时才报告该问题。
+
+### 扫描专用标志
+
+| 标志 | 描述 |
+|------|------|
+| `--path <paths>` | 逗号分隔的待扫描目录或文件（默认：整个仓库） |
+| `--batch <strategy>` | 覆盖分组策略：`none`、`by-language`、`by-directory` |
+| `--batch-size <n>` | 每个批次的最大文件数（0 = 使用模板默认值） |
+| `--no-rules` | 计划中不包含已解析的规则 |
+
 ## 子命令参考
 
 | 命令 | 用途 |
 |------|------|
 | `ocr delegate preview` | 列出可审查文件 + mode/ref 元数据 |
 | `ocr delegate rule <path...>` | 按内容分组解析审查规则 |
+| `ocr delegate scan` | 全文件扫描计划：批次 + 规则，无需 diff |
 
 ## 通用标志
 
