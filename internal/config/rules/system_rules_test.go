@@ -122,6 +122,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"ChattyFit/ChattyFit/Views/WorkoutSessionView.swift", "SwiftUI State and Lifecycle"},
 		{"src/Main.elm", "Elm Architecture"},
 		{"app/Page/Home.elm", "Elm Architecture"},
+		{"src/matmul.mojo", "Ownership, Borrowing, and Lifetimes"},
+		{"src/matmul.🔥", "Ownership, Borrowing, and Lifetimes"},
 	}
 
 	for _, tt := range tests {

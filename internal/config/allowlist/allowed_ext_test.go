@@ -71,6 +71,9 @@ func TestIsAllowedExt(t *testing.T) {
 		{".PO", true},
 		{".pot", true},
 		{".POT", true},
+		{".mojo", true},
+		{".MOJO", true},
+		{".🔥", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -186,6 +189,10 @@ func TestIsExcludedPath(t *testing.T) {
 		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
 		{"elm non-test", "src/Parser.elm", false},
 		{"elm tests in filename", "src/TestsHelper.elm", false},
+
+		// Mojo has no conventional default test-file exclusion.
+		{"mojo module", "src/matmul.mojo", false},
+		{"mojo fire extension", "src/matmul.🔥", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},
