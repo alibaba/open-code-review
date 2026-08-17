@@ -179,6 +179,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.jl` | `julia.md` — исходный код Julia. |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
 | `**/*.bicep` | `bicep.md` — шаблоны Bicep (Azure). |
+| `**/*.nu` | `nushell.md` — скрипты Nushell. |
 | *(fallback)* | `default.md` |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

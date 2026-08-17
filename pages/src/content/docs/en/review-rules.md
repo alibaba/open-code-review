@@ -177,6 +177,7 @@ matching order:
 | `**/*.jl` | `julia.md` — Julia source. |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
 | `**/*.bicep` | `bicep.md` — Bicep (Azure) templates. |
+| `**/*.nu` | `nushell.md` — Nushell scripts. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
