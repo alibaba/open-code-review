@@ -67,6 +67,16 @@ func TestIsAllowedExt(t *testing.T) {
 		{".NU", true},
 		{".elm", true},
 		{".ELM", true},
+		{".properties", true},
+		{".PROPERTIES", true},
+		{".po", true},
+		{".PO", true},
+		{".pot", true},
+		{".POT", true},
+		{".jsonnet", true},
+		{".JSONNET", true},
+		{".libsonnet", true},
+		{".LIBSONNET", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -190,6 +200,16 @@ func TestIsExcludedPath(t *testing.T) {
 		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
 		{"elm non-test", "src/Parser.elm", false},
 		{"elm tests in filename", "src/TestsHelper.elm", false},
+
+		// Jsonnet vendored dependencies (written by `jb install`, wiped by `rm -rf vendor`).
+		// The pattern is extension-scoped: IsExcludedPath applies every pattern to every
+		// path, so a bare **/vendor/** would also drop vendored Go and PHP sources.
+		{"jsonnet vendor root", "vendor/github.com/grafana/jsonnet-libs/ksonnet-util/kausal.libsonnet", true},
+		{"jsonnet vendor nested dir", "jsonnet/vendor/foo/main.jsonnet", true},
+		{"jsonnet non-vendor lib", "lib/config.libsonnet", false},
+		{"jsonnet non-vendor env", "environments/prod/main.jsonnet", false},
+		{"go under vendor still reviewed", "vendor/github.com/pkg/errors/errors.go", false},
+		{"php under vendor still reviewed", "vendor/monolog/monolog/src/Logger.php", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

@@ -87,4 +87,10 @@
   ".nimble",
   ".nu",
   ".elm"
+  ".elm",
+  ".properties",
+  ".po",
+  ".pot",
+  ".jsonnet",
+  ".libsonnet"
 ]

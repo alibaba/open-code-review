@@ -33,6 +33,11 @@ export const ru: TranslationKeys = {
   'error.pageLoadFailed': 'Не удалось загрузить страницу.',
   'error.reload': 'Обновить',
 
+  // Not found
+  'notFound.title': 'Страница не найдена',
+  'notFound.description': 'Запрошенная страница не существует или была перемещена.',
+  'notFound.backHome': 'На главную',
+
   // Highlights
   'highlights.stat1Value': '20K+',
   'highlights.stat1Label': 'ВНУТРЕННИЕ АКТИВНЫЕ ПОЛЬЗОВАТЕЛИ',
