@@ -11,6 +11,8 @@ const fs = require("fs");
 const os = require("os");
 
 const { resolveNativeBinary } = require("../scripts/platform");
+const { version: packageVersion } = require("../package.json");
+const { shouldShowUpdateHint } = require("../scripts/version");
 
 const resolved = resolveNativeBinary();
 if (!resolved) {
@@ -24,11 +26,13 @@ const binaryPath = resolved.path;
 const hintFile = path.join(os.homedir(), ".opencodereview", "update-available");
 try {
   const hint = JSON.parse(fs.readFileSync(hintFile, "utf8"));
-  if (hint.version && hint.pkg) {
+  if (hint.pkg && shouldShowUpdateHint(hint.version, packageVersion)) {
     console.error(
       `\x1b[33m[ocr] A new version (v${hint.version}) is available. Run to update:\x1b[0m\n` +
       `\x1b[33m  npm i -g ${hint.pkg}@${hint.version}\x1b[0m\n`
     );
+  } else {
+    fs.unlinkSync(hintFile);
   }
 } catch (_) {}
 

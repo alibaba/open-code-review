@@ -21,12 +21,20 @@ export const en = {
   'hero.installNpm': 'npm',
   'hero.installBrew': 'Homebrew',
   'hero.installMacPorts': 'MacPorts',
+  'hero.installMacOS': 'MacOS',
+  'hero.installLinux': 'Linux',
+  'hero.installWindows': 'Windows',
   'hero.installMore': 'More',
   'hero.allInstallOptions': 'All install options',
 
   // Error boundary
   'error.pageLoadFailed': 'Failed to load this page.',
   'error.reload': 'Reload',
+
+  // Not found
+  'notFound.title': 'Page not found',
+  'notFound.description': 'The page you are looking for does not exist or has moved.',
+  'notFound.backHome': 'Back to Home',
 
   // Highlights
   'highlights.stat1Value': '20K+',
@@ -163,6 +171,8 @@ export const en = {
   'docs.reviewAgentDesc': 'Output only the final summary without execution process, suitable for automation pipelines.',
   'docs.reviewPreviewLabel': 'Dry-Run Preview',
   'docs.reviewPreviewDesc': 'Lists the files that would be reviewed along with stats (file count, changed lines) — no LLM calls, no cost. Useful for checking scope before a full review.',
+  'docs.reviewToggles': 'Review Stage Toggle: --no-filter',
+  'docs.reviewTogglesFilterDesc': 'Keeps all review comments and skips the per-file REVIEW_FILTER_TASK LLM post-processing call.',
   'docs.reviewFlags': 'Flag Reference',
   'docs.reviewFlagCol1': 'Flag',
   'docs.reviewFlagCol2': 'Description',

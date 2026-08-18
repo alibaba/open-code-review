@@ -41,3 +41,25 @@ func Quiet() func() {
 		mu.Unlock()
 	}
 }
+
+// Swap replaces the stdout writer with replacement and returns a restore
+// function. It lets tests capture output written through Writer().
+// Usage:
+//
+//	var buf bytes.Buffer
+//	defer stdout.Swap(&buf)()
+//
+// Like Quiet, Swap acquires the package mutex for memory safety, but concurrent
+// swaps from multiple goroutines produce non-deterministic restore ordering.
+// Keep swapping and restoring on a single goroutine.
+func Swap(replacement io.Writer) func() {
+	mu.Lock()
+	old := w
+	w = replacement
+	mu.Unlock()
+	return func() {
+		mu.Lock()
+		w = old
+		mu.Unlock()
+	}
+}

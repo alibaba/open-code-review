@@ -6,6 +6,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -201,17 +202,25 @@ func TestRenderListName_Inactive(t *testing.T) {
 func TestCloneProviderEntry_WithExtraBody(t *testing.T) {
 	orig := ProviderEntry{
 		APIKey:     "key",
+		APIKeyCmd:  "op read op://dev/anthropic/api-key",
 		URL:        "http://localhost",
 		Protocol:   "openai",
 		Model:      "gpt-4",
 		Models:     []string{"gpt-4", "gpt-3.5"},
 		AuthHeader: "Authorization",
+		TimeoutSec: 45,
 		ExtraBody:  map[string]any{"temperature": 0.7, "stream": true},
+		ExtraHeaders: map[string]string{
+			"X-Trace": "on",
+		},
 	}
 	clone := cloneProviderEntry(orig)
 
 	if clone.APIKey != orig.APIKey || clone.URL != orig.URL || clone.Protocol != orig.Protocol {
 		t.Error("basic fields not copied")
+	}
+	if clone.APIKeyCmd != orig.APIKeyCmd {
+		t.Errorf("APIKeyCmd not copied: got %q, want %q", clone.APIKeyCmd, orig.APIKeyCmd)
 	}
 	if len(clone.Models) != 2 || clone.Models[0] != "gpt-4" {
 		t.Errorf("Models not cloned: %v", clone.Models)
@@ -232,6 +241,22 @@ func TestCloneProviderEntry_WithExtraBody(t *testing.T) {
 	if len(orig.Models) != 2 {
 		t.Error("modifying clone should not affect original Models")
 	}
+
+	if clone.TimeoutSec != orig.TimeoutSec {
+		t.Errorf("TimeoutSec not copied: got %d, want %d", clone.TimeoutSec, orig.TimeoutSec)
+	}
+	if clone.ExtraHeaders == nil {
+		// Fatal, not Error: writing to the nil map below would panic instead of
+		// reporting which field was dropped.
+		t.Fatal("ExtraHeaders should not be nil")
+	}
+	if clone.ExtraHeaders["X-Trace"] != "on" {
+		t.Errorf("ExtraHeaders not copied: %v", clone.ExtraHeaders)
+	}
+	clone.ExtraHeaders["X-New"] = "1"
+	if _, ok := orig.ExtraHeaders["X-New"]; ok {
+		t.Error("modifying clone should not affect original ExtraHeaders")
+	}
 }
 
 func TestCloneProviderEntry_NilExtraBody(t *testing.T) {
@@ -242,6 +267,43 @@ func TestCloneProviderEntry_NilExtraBody(t *testing.T) {
 	clone := cloneProviderEntry(orig)
 	if clone.ExtraBody != nil {
 		t.Error("ExtraBody should remain nil")
+	}
+	if clone.ExtraHeaders != nil {
+		t.Error("ExtraHeaders should remain nil")
+	}
+}
+
+// cloneProviderEntry lists fields by hand, which is how timeout_sec and
+// extra_headers came to be silently dropped on the save-rollback paths. This
+// fails when a field is added to ProviderEntry but not to the clone: the
+// non-zero check forces the fixture to grow, and DeepEqual then catches the
+// omission. It catches a dropped field, not an aliased one -- DeepEqual
+// compares values, not identity; the sibling tests above cover aliasing.
+func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
+	orig := ProviderEntry{
+		APIKey:       "key",
+		APIKeyCmd:    "op read op://dev/x/api-key",
+		URL:          "http://localhost",
+		Protocol:     "openai",
+		Model:        "gpt-4",
+		Models:       []string{"gpt-4"},
+		AuthHeader:   "Authorization",
+		TimeoutSec:   45,
+		RetryCodes:   []int{403},
+		ExtraBody:    map[string]any{"temperature": 0.7},
+		ExtraHeaders: map[string]string{"X-Trace": "on"},
+	}
+
+	rv := reflect.ValueOf(orig)
+	for i := range rv.NumField() {
+		if rv.Field(i).IsZero() {
+			t.Fatalf("fixture leaves %s zero-valued; set it so the clone is actually checked",
+				rv.Type().Field(i).Name)
+		}
+	}
+
+	if clone := cloneProviderEntry(orig); !reflect.DeepEqual(clone, orig) {
+		t.Errorf("clone dropped a field:\n got %+v\nwant %+v", clone, orig)
 	}
 }
 
@@ -1824,83 +1886,226 @@ func TestProviderTUI_ResultUsesSessionModelPickWhenSelectionEmpty(t *testing.T) 
 	}
 }
 
-func TestApiKeyStepCanConfirm_OfficialEmptyWithoutEnv(t *testing.T) {
-	t.Setenv("DEEPSEEK_API_KEY", "")
-	cfg := &Config{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-flash",
-		Providers: map[string]ProviderEntry{
-			"deepseek": {Model: "deepseek-v4-flash"},
+// apiKeyStepCanConfirm gates the final Enter of `ocr config provider`. It has to
+// mirror the resolver's precedence (static api_key -> api_key_cmd -> env var):
+// a provider configured with only api_key_cmd renders a blank key field, and
+// blocking it there made the feature unreachable from the documented wizard.
+func TestApiKeyStepCanConfirm(t *testing.T) {
+	tests := []struct {
+		name       string
+		env        string
+		cfg        *Config
+		customTab  bool
+		typedKey   string
+		wantOK     bool
+		wantErrMsg string
+	}{
+		{
+			name: "official saved api_key",
+			cfg: &Config{
+				Provider:  "deepseek",
+				Providers: map[string]ProviderEntry{"deepseek": {APIKey: "keep-me"}},
+			},
+			wantOK: true,
+		},
+		{
+			name:     "official typed key",
+			cfg:      &Config{Provider: "deepseek", Providers: map[string]ProviderEntry{"deepseek": {}}},
+			typedKey: "sk-typed",
+			wantOK:   true,
+		},
+		{
+			name: "official api_key_cmd only",
+			cfg: &Config{
+				Provider:  "deepseek",
+				Providers: map[string]ProviderEntry{"deepseek": {APIKeyCmd: "op read op://dev/deepseek/api-key"}},
+			},
+			wantOK: true,
+		},
+		{
+			name:       "official nothing configured",
+			cfg:        &Config{Provider: "deepseek", Providers: map[string]ProviderEntry{"deepseek": {}}},
+			wantOK:     false,
+			wantErrMsg: "API key is required (configure it, set providers.deepseek.api_key_cmd, or set $DEEPSEEK_API_KEY)",
+		},
+		{
+			// The resolver treats a whitespace-only command as unset, so opening the
+			// gate on one would save a config it then refuses to resolve.
+			name: "official whitespace-only api_key_cmd",
+			cfg: &Config{
+				Provider:  "deepseek",
+				Providers: map[string]ProviderEntry{"deepseek": {APIKeyCmd: "   "}},
+			},
+			wantOK:     false,
+			wantErrMsg: "API key is required (configure it, set providers.deepseek.api_key_cmd, or set $DEEPSEEK_API_KEY)",
+		},
+		{
+			name:   "official env var set",
+			env:    "sk-from-env",
+			cfg:    &Config{Provider: "deepseek", Providers: map[string]ProviderEntry{"deepseek": {}}},
+			wantOK: true,
+		},
+		{
+			name:      "custom saved api_key",
+			customTab: true,
+			cfg: &Config{
+				Provider:        "stepfun",
+				CustomProviders: map[string]ProviderEntry{"stepfun": {APIKey: "sk-custom"}},
+			},
+			wantOK: true,
+		},
+		{
+			name:      "custom api_key_cmd only",
+			customTab: true,
+			cfg: &Config{
+				Provider:        "stepfun",
+				CustomProviders: map[string]ProviderEntry{"stepfun": {APIKeyCmd: "op read op://dev/stepfun/api-key"}},
+			},
+			wantOK: true,
+		},
+		{
+			name:       "custom nothing configured",
+			customTab:  true,
+			cfg:        &Config{Provider: "stepfun", CustomProviders: map[string]ProviderEntry{"stepfun": {}}},
+			wantOK:     false,
+			wantErrMsg: "API key is required (configure it or set custom_providers.stepfun.api_key_cmd)",
+		},
+		{
+			name:      "custom whitespace-only api_key_cmd",
+			customTab: true,
+			cfg: &Config{
+				Provider:        "stepfun",
+				CustomProviders: map[string]ProviderEntry{"stepfun": {APIKeyCmd: "  \t "}},
+			},
+			wantOK:     false,
+			wantErrMsg: "API key is required (configure it or set custom_providers.stepfun.api_key_cmd)",
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	m.step = stepAPIKey
 
-	ok, errMsg := m.apiKeyStepCanConfirm()
-	if ok {
-		t.Fatal("expected confirmation to be blocked")
-	}
-	if errMsg != "API key is required (or set $DEEPSEEK_API_KEY)" {
-		t.Errorf("errMsg = %q", errMsg)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DEEPSEEK_API_KEY", tc.env)
+			m := newProviderTUI(tc.cfg, "")
+			if tc.customTab {
+				m.activeTab = tabCustom
+				m.customIdx = 0
+			} else {
+				m.activeTab = tabOfficial
+			}
+			m.step = stepAPIKey
+			// loadExistingAPIKey is what the wizard runs on entering the step, and
+			// is the only thing that populates apiKeyOriginal / the mask.
+			m.loadExistingAPIKey()
+			if tc.typedKey != "" {
+				m.apiKeyInput.SetValue(tc.typedKey)
+			}
+
+			ok, errMsg := m.apiKeyStepCanConfirm()
+			if ok != tc.wantOK {
+				t.Fatalf("apiKeyStepCanConfirm() ok = %v, want %v (errMsg = %q)", ok, tc.wantOK, errMsg)
+			}
+			if errMsg != tc.wantErrMsg {
+				t.Errorf("errMsg = %q, want %q", errMsg, tc.wantErrMsg)
+			}
+		})
 	}
 }
 
-func TestApiKeyStepCanConfirm_OfficialEmptyWithEnv(t *testing.T) {
-	t.Setenv("DEEPSEEK_API_KEY", "sk-from-env")
-	cfg := &Config{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-flash",
-		Providers: map[string]ProviderEntry{
-			"deepseek": {Model: "deepseek-v4-flash"},
+// The Manual tab's auth-token gate is the legacy twin of apiKeyStepCanConfirm:
+// llm.auth_token_cmd has to stand in for an empty field the same way.
+func TestHandleManualFormEnter_AuthTokenGate(t *testing.T) {
+	tests := []struct {
+		name        string
+		llmCfg      LlmConfig
+		typedToken  string
+		wantAdvance bool
+		// wantAPIKey is the token result() must persist once the step confirms.
+		wantAPIKey string
+	}{
+		{
+			name:        "saved auth_token",
+			llmCfg:      LlmConfig{URL: "http://existing", Model: "m", AuthToken: "tok-saved"},
+			wantAdvance: true,
+			wantAPIKey:  "tok-saved",
+		},
+		{
+			name:        "typed token",
+			llmCfg:      LlmConfig{URL: "http://existing", Model: "m"},
+			typedToken:  "tok-typed",
+			wantAdvance: true,
+			wantAPIKey:  "tok-typed",
+		},
+		{
+			name:        "auth_token_cmd only",
+			llmCfg:      LlmConfig{URL: "http://existing", Model: "m", AuthTokenCmd: "op read op://dev/gw/token"},
+			wantAdvance: true,
+		},
+		{
+			// auth_token_cmd opens the gate, so whitespace typed at this step
+			// confirms. It must not be saved as auth_token: a non-empty token
+			// wins precedence and would silently shadow the working command.
+			name:        "auth_token_cmd with whitespace-only token",
+			llmCfg:      LlmConfig{URL: "http://existing", Model: "m", AuthTokenCmd: "op read op://dev/gw/token"},
+			typedToken:  " ",
+			wantAdvance: true,
+		},
+		{
+			name:        "nothing configured",
+			llmCfg:      LlmConfig{URL: "http://existing", Model: "m"},
+			wantAdvance: false,
+		},
+		{
+			// Same rule as the api_key_cmd gate: the resolver reads a
+			// whitespace-only command as unset, so it must not open the gate here.
+			name:        "whitespace-only auth_token_cmd",
+			llmCfg:      LlmConfig{URL: "http://existing", Model: "m", AuthTokenCmd: "   "},
+			wantAdvance: false,
+		},
+		{
+			name:        "whitespace-only token",
+			llmCfg:      LlmConfig{URL: "http://existing", Model: "m"},
+			typedToken:  "   ",
+			wantAdvance: false,
 		},
 	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	m.step = stepAPIKey
 
-	ok, errMsg := m.apiKeyStepCanConfirm()
-	if !ok {
-		t.Fatalf("expected confirmation allowed, errMsg = %q", errMsg)
-	}
-}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newProviderTUI(&Config{Llm: tc.llmCfg}, "")
+			m.activeTab = tabManual
+			m.inManualForm = true
+			m.manualStep = manualStepAuthToken
+			if tc.typedToken != "" {
+				m.manualTokenInput.SetValue(tc.typedToken)
+			}
 
-func TestApiKeyStepCanConfirm_CustomEmpty(t *testing.T) {
-	cfg := &Config{
-		Provider: "stepfun",
-		CustomProviders: map[string]ProviderEntry{
-			"stepfun": {APIKey: ""},
-		},
-	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabCustom
-	m.customIdx = 0
-	m.step = stepAPIKey
+			result, _ := m.handleManualFormEnter()
+			m2 := result.(providerTUIModel)
 
-	ok, errMsg := m.apiKeyStepCanConfirm()
-	if ok {
-		t.Fatal("expected confirmation to be blocked")
-	}
-	if errMsg != "API key is required" {
-		t.Errorf("errMsg = %q", errMsg)
-	}
-}
-
-func TestApiKeyStepCanConfirm_MaskedSavedKey(t *testing.T) {
-	cfg := &Config{
-		Provider: "deepseek",
-		Providers: map[string]ProviderEntry{
-			"deepseek": {APIKey: "keep-me"},
-		},
-	}
-	m := newProviderTUI(cfg, "")
-	m.activeTab = tabOfficial
-	m.step = stepAPIKey
-	m.loadExistingAPIKey()
-
-	ok, errMsg := m.apiKeyStepCanConfirm()
-	if !ok {
-		t.Fatalf("expected confirmation allowed, errMsg = %q", errMsg)
+			if tc.wantAdvance {
+				if m2.manualStep != manualStepAuthHeader {
+					t.Fatalf("manualStep = %d, want manualStepAuthHeader (%d); formError = %q",
+						m2.manualStep, manualStepAuthHeader, m2.formError)
+				}
+				if m2.formError != "" {
+					t.Errorf("formError = %q, want empty", m2.formError)
+				}
+				if got := m2.result().apiKey; got != tc.wantAPIKey {
+					t.Errorf("result().apiKey = %q, want %q", got, tc.wantAPIKey)
+				}
+				return
+			}
+			if m2.manualStep != manualStepAuthToken {
+				t.Fatalf("manualStep = %d, want to stay on manualStepAuthToken (%d)",
+					m2.manualStep, manualStepAuthToken)
+			}
+			if m2.formError != manualAuthTokenRequiredError {
+				t.Errorf("formError = %q, want %q", m2.formError, manualAuthTokenRequiredError)
+			}
+			if !strings.Contains(m2.formError, "llm.auth_token_cmd") {
+				t.Errorf("formError should name llm.auth_token_cmd, got %q", m2.formError)
+			}
+		})
 	}
 }
 

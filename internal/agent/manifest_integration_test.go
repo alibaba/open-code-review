@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +41,26 @@ func (manifestFlowClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequ
 	default:
 		return agentTaskDoneResponse(), nil
 	}
+}
+
+type cancellationFlowClient struct {
+	blocked chan struct{}
+	once    sync.Once
+}
+
+func (c *cancellationFlowClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	var prompt string
+	for _, message := range req.Messages {
+		if text, ok := message.Content.(string); ok {
+			prompt += text
+		}
+	}
+	if strings.Contains(prompt, "blocked.go") {
+		c.once.Do(func() { close(c.blocked) })
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return agentTaskDoneResponse(), nil
 }
 
 func newManifestFlowAgent(t *testing.T, diffs []model.Diff, resume *session.ResumeState) *Agent {
@@ -166,6 +187,101 @@ func TestManifestFlowCompleteAndPartial(t *testing.T) {
 			t.Fatalf("manifest exposed raw provider error: %+v", manifest.Coverage.Failed[0])
 		}
 	})
+}
+
+func TestManifestFlowCancellationPersistsResumableSession(t *testing.T) {
+	done := model.Diff{OldPath: "done.go", NewPath: "done.go", Diff: "+done", Insertions: 1}
+	blocked := model.Diff{OldPath: "blocked.go", NewPath: "blocked.go", Diff: "+blocked", Insertions: 1}
+	pending := model.Diff{OldPath: "pending.go", NewPath: "pending.go", Diff: "+pending", Insertions: 1}
+	client := &cancellationFlowClient{blocked: make(chan struct{})}
+	a := newManifestFlowAgentWithClient(t, []model.Diff{done, blocked, pending}, nil, client)
+	a.args.MaxConcurrency = 1
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dispatchErr := make(chan error, 1)
+	go func() {
+		_, err := a.dispatchSubtasks(ctx)
+		dispatchErr <- err
+	}()
+
+	select {
+	case <-client.blocked:
+		cancel()
+	case <-time.After(5 * time.Second):
+		t.Fatal("blocked review did not start")
+	}
+	if err := <-dispatchErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("dispatch error = %v, want context.Canceled", err)
+	}
+
+	manifest := finishManifestFlow(t, a)
+	if manifest.RunFailure == nil || manifest.RunFailure.Classification != session.RunFailureCancelled {
+		t.Fatalf("run failure = %+v, want cancelled", manifest.RunFailure)
+	}
+	if len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 2 {
+		t.Fatalf("coverage = %+v, want one completed and two failed", manifest.Coverage)
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureCancelled {
+			t.Fatalf("failed item = %+v, want cancelled", item)
+		}
+	}
+
+	state, err := session.LoadReviewResumeState(a.args.RepoDir, a.session.SessionID)
+	if err != nil {
+		t.Fatalf("load cancelled session: %v", err)
+	}
+	identity := session.RunIdentity{
+		Mode:                 manifest.Input.Mode,
+		SourceArtifactSHA256: manifest.Input.SourceArtifactSHA256,
+		RuleConfigSHA256:     manifest.Execution.RuleConfigSHA256,
+		RepositorySHA256:     manifest.Repository.IdentitySHA256,
+	}
+	if err := state.ValidateResume(session.ResumeRequest{
+		Identity: identity,
+		Provider: manifest.Execution.Provider,
+		Model:    manifest.Execution.Model,
+	}); err != nil {
+		t.Fatalf("cancelled session should remain resumable: %v", err)
+	}
+	if _, ok := state.ReusableItem(reviewItemFingerprint(a.reviewMode(), done)); !ok {
+		t.Fatal("completed item is not reusable after cancellation")
+	}
+	if _, ok := state.ReusableItem(reviewItemFingerprint(a.reviewMode(), blocked)); ok {
+		t.Fatal("cancelled item must be reviewed again")
+	}
+}
+
+func TestManifestFlowCancellationBeforeDispatchStartsNoSubtask(t *testing.T) {
+	pending := model.Diff{OldPath: "blocked.go", NewPath: "blocked.go", Diff: "+blocked", Insertions: 1}
+	client := &cancellationFlowClient{blocked: make(chan struct{})}
+	a := newManifestFlowAgentWithClient(t, []model.Diff{pending}, nil, client)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := a.dispatchSubtasks(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("dispatch error = %v, want context.Canceled", err)
+	}
+	if got := atomic.LoadInt64(&a.subtaskFailed); got != 0 {
+		t.Fatalf("subtask failures = %d, want 0 because no subtask should start", got)
+	}
+	select {
+	case <-client.blocked:
+		t.Fatal("LLM client was called after cancellation")
+	default:
+	}
+
+	manifest := finishManifestFlow(t, a)
+	if manifest.RunFailure == nil || manifest.RunFailure.Classification != session.RunFailureCancelled {
+		t.Fatalf("run failure = %+v, want cancelled", manifest.RunFailure)
+	}
+	if len(manifest.Coverage.Completed) != 0 || len(manifest.Coverage.Failed) != 1 {
+		t.Fatalf("coverage = %+v, want one cancelled item and no completed items", manifest.Coverage)
+	}
+	if got := manifest.Coverage.Failed[0].Classification; got != session.FailureCancelled {
+		t.Fatalf("failure classification = %q, want %q", got, session.FailureCancelled)
+	}
 }
 
 func TestManifestFlowRunInputFailureIsPersisted(t *testing.T) {

@@ -50,6 +50,8 @@ Gitのdiffを読み取り、変更されたファイルをツール利用機能�
 
 実際のコードレビューに基づくベンチマーク。**50**の人気オープンソースリポジトリから**200**の実際のPull Requestを厳選し、**10**のプログラミング言語をカバー——80人以上のシニアエンジニアによるクロスバリデーション（**1,505**件のアノテーション済み欠陥）。
 
+<a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> Hugging FaceでAACR-Benchデータセットを見る</a>。
+
 | 指標 | 測定内容 | 重要性 |
 |------|----------|--------|
 | **F1** | 精度とリコールの調和平均 | レビュー品質を示す最良の単一指標 |

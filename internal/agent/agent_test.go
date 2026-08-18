@@ -223,6 +223,96 @@ func TestParseFilterResponse(t *testing.T) {
 	}
 }
 
+func TestParseFilterToolCalls(t *testing.T) {
+	tests := []struct {
+		name    string
+		calls   []llm.ToolCall
+		total   int
+		wantSet map[int]struct{}
+	}{
+		{
+			name:    "no tool calls",
+			calls:   nil,
+			total:   5,
+			wantSet: nil,
+		},
+		{
+			name: "report_incorrect_comments with IDs",
+			calls: []llm.ToolCall{{
+				Function: llm.FunctionCall{
+					Name:      "report_incorrect_comments",
+					Arguments: `{"comment_ids": ["c-0", "c-2"]}`,
+				},
+			}},
+			total:   5,
+			wantSet: map[int]struct{}{0: {}, 2: {}},
+		},
+		{
+			name: "approve_all_comments returns empty map",
+			calls: []llm.ToolCall{{
+				Function: llm.FunctionCall{
+					Name:      "approve_all_comments",
+					Arguments: `{}`,
+				},
+			}},
+			total:   5,
+			wantSet: map[int]struct{}{},
+		},
+		{
+			name: "ignores non-matching tool names",
+			calls: []llm.ToolCall{{
+				Function: llm.FunctionCall{
+					Name:      "other_tool",
+					Arguments: `{"comment_ids": ["c-0"]}`,
+				},
+			}},
+			total:   5,
+			wantSet: nil,
+		},
+		{
+			name: "out-of-range indices ignored",
+			calls: []llm.ToolCall{{
+				Function: llm.FunctionCall{
+					Name:      "report_incorrect_comments",
+					Arguments: `{"comment_ids": ["c-0", "c-10"]}`,
+				},
+			}},
+			total:   5,
+			wantSet: map[int]struct{}{0: {}},
+		},
+		{
+			name: "invalid JSON arguments falls through",
+			calls: []llm.ToolCall{{
+				Function: llm.FunctionCall{
+					Name:      "report_incorrect_comments",
+					Arguments: `not json`,
+				},
+			}},
+			total:   5,
+			wantSet: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseFilterToolCalls(tt.calls, tt.total)
+			if tt.wantSet == nil {
+				if got != nil {
+					t.Errorf("expected nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != len(tt.wantSet) {
+				t.Fatalf("len = %d, want %d; got %v", len(got), len(tt.wantSet), got)
+			}
+			for idx := range tt.wantSet {
+				if _, ok := got[idx]; !ok {
+					t.Errorf("missing index %d in result", idx)
+				}
+			}
+		})
+	}
+}
+
 func TestExtFromPath(t *testing.T) {
 	a := New(Args{})
 

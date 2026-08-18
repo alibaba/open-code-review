@@ -9,6 +9,7 @@ import { useTransitionedLocation } from './hooks/useTransitionedLocation';
 import { useTranslation } from './i18n';
 import FeaturesPage from './pages/FeaturesPage';
 import FeaturesRoutePage from './pages/FeaturesRoutePage';
+import NotFoundPage from './pages/NotFoundPage';
 
 const BenchmarkPage = React.lazy(() => import(/* webpackChunkName: "benchmark-page" */ './pages/BenchmarkPage'));
 const QuickStartPage = React.lazy(() => import(/* webpackChunkName: "quickstart-page" */ './pages/QuickStartPage'));
@@ -92,6 +93,7 @@ const App: React.FC = () => {
             <Route path="/docs/:slug" element={<DocsPage />} />
             <Route path="/blog" element={<BlogPage />} />
             <Route path="/blog/:slug" element={<BlogPage />} />
+            <Route path="*" element={<LandingPage><NotFoundPage /></LandingPage>} />
           </Routes>
         </Suspense>
       </ErrorBoundary>

@@ -403,9 +403,17 @@ func emitRunResult(
 	}
 
 	if !machineReadable {
-		telemetry.PrintTraceSummary(ag.FilesReviewed(), int64(len(comments)),
-			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
-			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration)
+		telemetry.PrintTraceSummary(telemetry.TraceSummary{
+			FilesReviewed:     ag.FilesReviewed(),
+			CommentsGenerated: int64(len(comments)),
+			InputTokens:       ag.TotalInputTokens(),
+			OutputTokens:      ag.TotalOutputTokens(),
+			TotalTokens:       ag.TotalTokensUsed(),
+			CacheReadTokens:   ag.TotalCacheReadTokens(),
+			CacheWriteTokens:  ag.TotalCacheWriteTokens(),
+			Duration:          duration,
+			SessionID:         ag.SessionID(),
+		})
 	}
 
 	if outputFormat == "json" {
