@@ -39,5 +39,7 @@
   "**/*Tests.swift",
   "**/Tests/**/*.swift",
   "**/tests/**/*.elm",
-  "**/vendor/**/*.{jsonnet,libsonnet}"
+  "**/vendor/**/*.{jsonnet,libsonnet}",
+  "**/test/**/*.zig",
+  "**/*_test.zig"
 ]

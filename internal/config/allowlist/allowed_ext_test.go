@@ -77,6 +77,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".JSONNET", true},
 		{".libsonnet", true},
 		{".LIBSONNET", true},
+		{".zig", true},
+		{".ZIG", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -210,6 +212,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"jsonnet non-vendor env", "environments/prod/main.jsonnet", false},
 		{"go under vendor still reviewed", "vendor/github.com/pkg/errors/errors.go", false},
 		{"php under vendor still reviewed", "vendor/monolog/monolog/src/Logger.php", false},
+		// Zig test files
+		{"zig test directory", "test/parser.zig", true},
+		{"zig nested test directory", "src/test/unit/parser.zig", true},
+		{"zig _test suffix", "src/parser_test.zig", true},
+		{"zig non-test", "src/parser.zig", false},
+		{"zig test in filename", "src/testutil.zig", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

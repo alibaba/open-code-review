@@ -38,6 +38,7 @@
     "**/*.swift": "swift.md",
     "**/*.nu": "nushell.md",
     "**/*.elm": "elm.md",
-    "**/*.{jsonnet,libsonnet}": "jsonnet.md"
+    "**/*.{jsonnet,libsonnet}": "jsonnet.md",
+    "**/*.zig": "zig.md"
   }
 }
