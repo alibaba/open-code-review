@@ -1193,7 +1193,6 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     routed = []
     for comment in comments:
         path = comment.get("path", "")
-        path_sha1 = hashlib.sha1(path.encode("utf-8")).hexdigest()
         start_line = comment.get("start_line", 0)
         end_line = comment.get("end_line", 0)
         # Inline posting needs a valid end_line (it becomes the GitLab position's
@@ -1253,6 +1252,8 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     for it in inline_items:
         comment = it["comment"]
         path = comment.get("path", "")
+        path_sha1 = hashlib.sha1(path.encode("utf-8")).hexdigest()
+        start_line = comment.get("start_line", 0)
         end_line = comment.get("end_line", 0)
         if not path or not end_line:
             failed_comments.append({"comment": comment, "reason": NO_LINE_REASON})
