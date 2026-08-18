@@ -271,8 +271,10 @@ def format_comment(comment, comment_id=None):
     suggestion = comment.get("suggestion_code", "")
     existing = comment.get("existing_code", "")
     if suggestion and existing:
+        span = comment_span(comment)
+        suggestion_offset = span["end"] - span["start"] if span is not None else 0
         body += "\n\n**Suggestion:**\n"
-        body += "```suggestion:-0+0\n%s\n```" % suggestion
+        body += "```suggestion:-%d+0\n%s\n```" % (suggestion_offset, suggestion)
     return body
 
 

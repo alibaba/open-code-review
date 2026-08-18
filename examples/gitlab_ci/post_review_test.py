@@ -231,6 +231,24 @@ class FormatCommentTest(unittest.TestCase):
         self.assertIn("```suggestion:-0+0\nx = 2\n```", body)
         self.assertIn("**Suggestion:**", body)
 
+    def test_with_multiline_suggestion(self):
+        body = pr.format_comment(comment(content="fix this", existing_code="x = 1\ny = 2", suggestion_code="x = 2\ny = 3", start_line=5, end_line=6))
+        self.assertIn("fix this", body)
+        self.assertIn("```suggestion:-1+0\nx = 2\ny = 3\n```", body)
+        self.assertIn("**Suggestion:**", body)
+
+    def test_with_multiline_suggestion_no_start_line(self):
+        body = pr.format_comment(comment(content="fix this", existing_code="x = 1\ny = 2", suggestion_code="x = 2\ny = 3", start_line=None, end_line=5))
+        self.assertIn("fix this", body)
+        self.assertIn("```suggestion:-0+0\nx = 2\ny = 3\n```", body)
+        self.assertIn("**Suggestion:**", body)
+
+    def test_with_multiline_suggestion_no_end_line(self):
+        body = pr.format_comment(comment(content="fix this", existing_code="x = 1\ny = 2", suggestion_code="x = 2\ny = 3", start_line=5, end_line=None))
+        self.assertIn("fix this", body)
+        self.assertIn("```suggestion:-0+0\nx = 2\ny = 3\n```", body)
+        self.assertIn("**Suggestion:**", body)
+
     def test_suggestion_without_existing(self):
         body = pr.format_comment(comment(content="fix this", suggestion_code="x = 2"))
         self.assertNotIn("```suggestion", body)
