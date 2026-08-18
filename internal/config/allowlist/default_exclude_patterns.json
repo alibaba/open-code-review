@@ -26,10 +26,12 @@
   "**/*_test.nu",
   "**/test_*.nu",
   "**/test-*.nu",
+  "**/tests/**/*.R",
   "**/__snapshots__/**",
   "**/*.snap",
   "**/testdata/**",
   "**/fixtures/**",
+  "**/.ipynb_checkpoints/**",
   "**/*.generated.*",
   "**/*.gen.go",
   "**/*.pb.go",
@@ -41,5 +43,11 @@
   "**/tests/**/*.elm",
   "**/vendor/**/*.{jsonnet,libsonnet}",
   "**/test/**/*.zig",
-  "**/*_test.zig"
+  "**/*_test.zig",
+  "**/kitex_gen/**/*.go",
+  "**/*.capnp.h",
+  "**/*.capnp.go",
+  "**/*.capnp.ts",
+  "**/*_capnp.rs",
+  "**/*_capnp.py"
 ]

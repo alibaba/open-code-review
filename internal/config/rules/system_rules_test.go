@@ -96,6 +96,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
 		{"scripts/deploy.py", "Mutable Default Arguments"},
 		{"src/app/main.py", "Mutable Default Arguments"},
+		{"notebook.ipynb", "Mutable Default Arguments"},
+		{"src/notebooks/data.ipynb", "Mutable Default Arguments"},
 		{"public/index.php", "PHP Review Principles"},
 		{"templates/account/profile.phtml", "Web and Template Security Boundaries"},
 		{"locale/zh_CN/LC_MESSAGES/messages.po", "Placeholder Mismatch"},
@@ -127,8 +129,14 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"lib/config.libsonnet", "Late Binding"},
 		{"environments/prod/main.jsonnet", "Late Binding"},
 		{"jsonnet/kube-prometheus/components/grafana.libsonnet", "Late Binding"},
+		{"src/foo.R", "R Code Review Principles"},
+		{"analysis/plots.r", "R Code Review Principles"},
 		{"src/main.zig", "Illegal Behavior"},
 		{"build.zig", "Illegal Behavior"},
+		{"idl/service.thrift", "Field IDs and Wire Compatibility"},
+		{"if/common.thrift", "Field IDs and Wire Compatibility"},
+		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
+		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
 	}
 
 	for _, tt := range tests {
