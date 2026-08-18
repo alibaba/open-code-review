@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const openAIResponsesAPIKeyEnv = "OPENAI_RESPONSES_API_KEY"
+
 // Provider holds the preset configuration for a known LLM provider.
 //
 // Protocol uses the canonical names defined in protocol.go:
@@ -102,7 +104,7 @@ var registry = []Provider{
 		DisplayName: "OpenAI Responses API",
 		Protocol:    ProtocolOpenAIResponses,
 		BaseURL:     "https://api.openai.com/v1",
-		EnvVar:      "OPENAI_API_KEY",
+		EnvVar:      openAIResponsesAPIKeyEnv,
 		Models: []string{
 			"gpt-5.6-sol",
 			"gpt-5.6-terra",

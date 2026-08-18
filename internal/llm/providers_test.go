@@ -186,6 +186,8 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 }
 
 func TestLookupProvider_OpenAIResponsesDetails(t *testing.T) {
+	const expectedEnvVar = "OPENAI_RESPONSES_API_KEY"
+
 	p, ok := LookupProvider("openai-responses")
 	if !ok {
 		t.Fatal("openai-responses not found")
@@ -196,8 +198,8 @@ func TestLookupProvider_OpenAIResponsesDetails(t *testing.T) {
 	if p.BaseURL != "https://api.openai.com/v1" {
 		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://api.openai.com/v1")
 	}
-	if p.EnvVar != "OPENAI_API_KEY" {
-		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "OPENAI_API_KEY")
+	if p.EnvVar != expectedEnvVar {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, expectedEnvVar)
 	}
 	if p.AuthHeader != "" {
 		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
