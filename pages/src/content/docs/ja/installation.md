@@ -77,22 +77,35 @@ GitHub Release バイナリのダウンロード（検証付き）をラップ�
 curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
-__一部の地域では GitHub へのネットワークアクセスが遅いため、GitHub ミラードメインを設定すると、ミラー経由でアセットをダウンロードできます。__
-```bash
-export GITHUB_MIRROR_DOMAIN='YOUR_GITHUB_MIRROR_DOMAIN'
-```
-
-> **セキュリティ上の注意：** ミラーは第三者のサービスです。バイナリと `sha256sum.txt` の両方がミラーから取得されるため、侵害されたミラーは改ざんされたバイナリと一致するチェックサムを配信する可能性があり、チェックサム検証だけでは安全性を保証できません。セキュリティが重要なインストールでは、GitHub から直接ダウンロードするか、[releases ページ](https://github.com/alibaba/open-code-review/releases) のアップストリームの `sha256sum.txt` で検証してください。
-
 3 つの環境変数を認識します。
 
 | 変数 | デフォルト値 | 用途 |
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | `ocr` バイナリを配置する場所。 |
 | `OCR_VERSION` | 最新 release | 特定の release tag に固定します（例：`v1.2.3`）。 |
-| `GITHUB_MIRROR_DOMAIN` | （未設定） | GitHub ミラードメイン経由でリリースアセットをダウンロードします（例：`gh-proxy.com`）。 |
+| `OCR_GITHUB_MIRROR` | （未設定） | GitHub ミラードメイン経由でリリースバイナリをダウンロードします（例：`gh-proxy.com`）。 |
 
 このスクリプトは `darwin` と `linux` の `amd64` / `arm64` をサポートします。
+
+#### GitHub ミラーを使用する
+
+一部の地域では GitHub へのネットワークアクセスが遅いため、`OCR_GITHUB_MIRROR` にミラードメインを設定すると、バイナリをミラー経由でダウンロードできます：
+
+```bash
+export OCR_GITHUB_MIRROR='YOUR_MIRROR_DOMAIN'
+```
+
+値はスキームや末尾スラッシュを含まないベアドメインである必要があります（`https://gh-proxy.com/` ではなく `gh-proxy.com`）。これは*パスプレフィックス*ミラーとして使用されます。バイナリは
+`https://<ミラー>/github.com/alibaba/open-code-review/releases/download/<バージョン>/…`
+から取得されます。ドメイン置換型ミラー（例：`github.com` を `hub.example.org` に書き換えるもの）はこの形式に一致しません——パスプレフィックス型のミラーを使用してください。
+
+ミラーがカバーするのはバイナリのダウンロードのみです。バージョン解決（`OCR_VERSION` が未設定の場合）は引き続き GitHub API を直接呼び出し、`sha256sum.txt` のチェックサムは常にミラーではなく GitHub から取得されます。バージョン解決を完全にスキップするには、バージョンを固定してください：
+
+```bash
+export OCR_VERSION='v1.2.3'
+```
+
+> **セキュリティ上の注意：** ミラーは第三者のサービスであるため、バイナリはそこからダウンロードされます。完全性の保証を保つため、`sha256sum.txt` は常に GitHub から直接取得されます——改ざんされたバイナリはチェックサム検証に失敗します。GitHub に到達できない場合、インストーラーはチェックサムファイルをミラーから取得するようフォールバックし、警告を表示します。その場合は [releases ページ](https://github.com/alibaba/open-code-review/releases) のアップストリームの `sha256sum.txt` で検証してください。
 
 Windows（PowerShell 5.1+）では、代わりに PowerShell インストーラーを使用してください：
 
@@ -100,14 +113,9 @@ Windows（PowerShell 5.1+）では、代わりに PowerShell インストーラ�
 irm https://open-codereview.ai/install.ps1 | iex
 ```
 
-__GitHub へのアクセスが遅い場合は、同じミラードメインを PowerShell の環境変数として設定すると、ミラー経由でダウンロードできます：__
-```powershell
-$env:GITHUB_MIRROR_DOMAIN = 'YOUR_GITHUB_MIRROR_DOMAIN'
-```
-
-同じ `OCR_INSTALL_DIR`、`OCR_VERSION`、`GITHUB_MIRROR_DOMAIN` を認識します
+同じ `OCR_INSTALL_DIR`、`OCR_VERSION`、`OCR_GITHUB_MIRROR` を認識します
 （`$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION` /
-`$env:GITHUB_MIRROR_DOMAIN` で設定）。デフォルトのインストール先は
+`$env:OCR_GITHUB_MIRROR` で設定）。デフォルトのインストール先は
 `%LOCALAPPDATA%\Programs\ocr` です。
 
 ## GitHub Release バイナリ

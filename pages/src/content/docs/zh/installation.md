@@ -75,22 +75,35 @@ sudo port upgrade open-code-review
 curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
-__在部分网络访问 GitHub 较慢的地区，可以设置一个 GitHub 镜像域名，通过镜像下载资源。__
-```bash
-export GITHUB_MIRROR_DOMAIN='YOUR_GITHUB_MIRROR_DOMAIN'
-```
-
-> **安全提示：** 镜像是第三方服务——二进制及其 `sha256sum.txt` 都来自镜像，因此被攻破的镜像可能同时提供被篡改的二进制与匹配的校验和，仅靠校验和校验并不能保证安全。对安全性要求较高的安装，请直接从 GitHub 下载，或对照 [releases 页面](https://github.com/alibaba/open-code-review/releases) 上的上游 `sha256sum.txt` 进行核对。
-
 它识别三个环境变量：
 
 | 变量 | 默认值 | 用途 |
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | 放置 `ocr` 二进制的位置。 |
 | `OCR_VERSION` | 最新 release | 固定到某个 release tag（如 `v1.2.3`）。 |
-| `GITHUB_MIRROR_DOMAIN` | （未设置） | 通过 GitHub 镜像域名下载 release 资源（如 `gh-proxy.com`）。 |
+| `OCR_GITHUB_MIRROR` | （未设置） | 通过 GitHub 镜像域名下载 release 二进制（如 `gh-proxy.com`）。 |
 
 该脚本支持 `darwin` 与 `linux` 的 `amd64` / `arm64`。
+
+#### 使用 GitHub 镜像
+
+在部分网络访问 GitHub 较慢的地区，可设置 `OCR_GITHUB_MIRROR` 为某个镜像域名，通过它下载二进制：
+
+```bash
+export OCR_GITHUB_MIRROR='YOUR_MIRROR_DOMAIN'
+```
+
+该值必须是裸域名——不带 `https://` 前缀，也不带结尾斜杠（如 `gh-proxy.com`，而不是 `https://gh-proxy.com/`）。它作为*路径前缀*镜像使用：二进制从
+`https://<镜像>/github.com/alibaba/open-code-review/releases/download/<版本>/…`
+下载。域名替换型镜像（例如把 `github.com` 重写为 `hub.example.org`）不匹配这种形式——请改用路径前缀型镜像。
+
+镜像仅覆盖二进制下载。版本解析（当未设置 `OCR_VERSION` 时）仍会直接调用 GitHub API，而 `sha256sum.txt` 校验和始终从 GitHub 获取，而非镜像。要完全跳过版本解析，请固定版本：
+
+```bash
+export OCR_VERSION='v1.2.3'
+```
+
+> **安全提示：** 镜像是第三方服务，二进制会从它下载。为保留完整性保证，`sha256sum.txt` 始终直接从 GitHub 获取——被篡改的二进制将无法通过校验和检查。如果 GitHub 不可达，安装脚本会回退到从镜像获取校验和文件并打印警告；此时请对照 [releases 页面](https://github.com/alibaba/open-code-review/releases) 上的上游 `sha256sum.txt` 进行核对。
 
 在 Windows（PowerShell 5.1+）上，请改用 PowerShell 安装脚本：
 
@@ -98,14 +111,9 @@ export GITHUB_MIRROR_DOMAIN='YOUR_GITHUB_MIRROR_DOMAIN'
 irm https://open-codereview.ai/install.ps1 | iex
 ```
 
-__访问 GitHub 较慢时，同样可以将镜像域名设为 PowerShell 环境变量，通过镜像下载：__
-```powershell
-$env:GITHUB_MIRROR_DOMAIN = 'YOUR_GITHUB_MIRROR_DOMAIN'
-```
-
-它同样识别 `OCR_INSTALL_DIR`、`OCR_VERSION` 与 `GITHUB_MIRROR_DOMAIN`
+它同样识别 `OCR_INSTALL_DIR`、`OCR_VERSION` 与 `OCR_GITHUB_MIRROR`
 （通过 `$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION` /
-`$env:GITHUB_MIRROR_DOMAIN` 设置）。默认安装位置为 `%LOCALAPPDATA%\Programs\ocr`。
+`$env:OCR_GITHUB_MIRROR` 设置）。默认安装位置为 `%LOCALAPPDATA%\Programs\ocr`。
 
 ## GitHub Release 二进制
 

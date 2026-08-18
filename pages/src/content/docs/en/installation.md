@@ -79,22 +79,48 @@ machines:
 curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
-__In some regions where network access to GitHub is slow, set a GitHub mirror domain to download assets through a mirror.__
-```bash
-export GITHUB_MIRROR_DOMAIN='YOUR_GITHUB_MIRROR_DOMAIN'
-```
-
-> **Security note:** The mirror is a third-party service — both the binary and its `sha256sum.txt` are downloaded from the mirror, so a compromised mirror could serve a tampered binary with a matching checksum; the checksum check alone is not a guarantee. For security-critical installs, download directly from GitHub or verify against the upstream `sha256sum.txt` on the [releases page](https://github.com/alibaba/open-code-review/releases).
-
 It honours three environment variables:
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | Where to place the `ocr` binary. |
 | `OCR_VERSION` | latest release | Pin a specific release tag (e.g. `v1.2.3`). |
-| `GITHUB_MIRROR_DOMAIN` | *(unset)* | Download release assets through a GitHub mirror domain (e.g. `gh-proxy.com`). |
+| `OCR_GITHUB_MIRROR` | *(unset)* | Download the release binary through a GitHub mirror domain (e.g. `gh-proxy.com`). |
 
 The script supports `darwin` and `linux` on `amd64` / `arm64`.
+
+#### Using a GitHub mirror
+
+In regions where network access to GitHub is slow, set `OCR_GITHUB_MIRROR`
+to a mirror domain to download the binary through it:
+
+```bash
+export OCR_GITHUB_MIRROR='YOUR_MIRROR_DOMAIN'
+```
+
+The value must be a bare domain name — no `https://` scheme and no trailing
+slash (`gh-proxy.com`, not `https://gh-proxy.com/`). It is used as a *path
+prefix* mirror: the binary is fetched from
+`https://<mirror>/github.com/alibaba/open-code-review/releases/download/<version>/…`.
+Domain-substitution mirrors (e.g. one that rewrites `github.com` to
+`hub.example.org`) won't match this shape — use a path-prefix mirror instead.
+
+The mirror only covers the binary download. Version resolution (when
+`OCR_VERSION` is unset) still calls the GitHub API directly, and the
+`sha256sum.txt` checksum is always fetched from GitHub, not the mirror. To
+skip version resolution entirely, pin a version:
+
+```bash
+export OCR_VERSION='v1.2.3'
+```
+
+> **Security note:** The mirror is a third-party service, so the binary is
+> downloaded from it. To keep the integrity guarantee, `sha256sum.txt` is
+> fetched directly from GitHub — a tampered binary will fail the checksum
+> check. If GitHub is unreachable, the installer falls back to the mirror for
+> the checksum file and prints a warning; in that case verify against the
+> upstream `sha256sum.txt` on the
+> [releases page](https://github.com/alibaba/open-code-review/releases).
 
 On Windows (PowerShell 5.1+), use the PowerShell installer instead:
 
@@ -102,14 +128,9 @@ On Windows (PowerShell 5.1+), use the PowerShell installer instead:
 irm https://open-codereview.ai/install.ps1 | iex
 ```
 
-__To download through a mirror when GitHub access is slow, set the same mirror domain as a PowerShell environment variable:__
-```powershell
-$env:GITHUB_MIRROR_DOMAIN = 'YOUR_GITHUB_MIRROR_DOMAIN'
-```
-
 It honours the same `OCR_INSTALL_DIR`, `OCR_VERSION`, and
-`GITHUB_MIRROR_DOMAIN` variables (set via `$env:OCR_INSTALL_DIR` /
-`$env:OCR_VERSION` / `$env:GITHUB_MIRROR_DOMAIN`). The default
+`OCR_GITHUB_MIRROR` variables (set via `$env:OCR_INSTALL_DIR` /
+`$env:OCR_VERSION` / `$env:OCR_GITHUB_MIRROR`). The default
 install location is `%LOCALAPPDATA%\Programs\ocr`.
 
 ## GitHub Release binary
