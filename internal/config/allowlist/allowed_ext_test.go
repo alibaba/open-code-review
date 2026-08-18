@@ -200,6 +200,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"fixtures dir", "test/fixtures/sample.json", true},
 		{"fixtures nested", "spec/fixtures/users.yml", true},
 
+		// Jupyter autosave checkpoints (duplicate copies of the real notebook)
+		{"ipynb checkpoint at root", ".ipynb_checkpoints/analysis-checkpoint.ipynb", true},
+		{"ipynb checkpoint nested", "notebooks/eda/.ipynb_checkpoints/eda-checkpoint.ipynb", true},
+		{"ipynb outside checkpoints", "notebooks/eda/eda.ipynb", false},
+		{"ipynb checkpoints without dot", "notebooks/ipynb_checkpoints/eda.ipynb", false},
+
 		// Generated code
 		{"generated go", "api/types.generated.go", true},
 		{"generated ts", "src/graphql/schema.generated.ts", true},
