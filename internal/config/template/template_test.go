@@ -93,6 +93,9 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	if tpl.ReLocationTask == nil {
 		t.Fatal("ReLocationTask is nil, expected non-nil")
 	}
+	if tpl.CandidateReLocationTask == nil {
+		t.Fatal("CandidateReLocationTask is nil, expected non-nil")
+	}
 	if tpl.ReviewFilterTask == nil {
 		t.Fatal("ReviewFilterTask is nil, expected non-nil")
 	}
@@ -124,6 +127,11 @@ func TestLoadDefault_PlaceholdersPresent(t *testing.T) {
 		{"MemoryCompression user has context", tpl.MemoryCompressionTask.Messages[1].Content, "{{context}}"},
 		{"ReviewFilter user has comments", tpl.ReviewFilterTask.Messages[1].Content, "{{comments}}"},
 		{"ReLocation user has diff (single brace)", tpl.ReLocationTask.Messages[1].Content, "{diff}"},
+		{"CandidateReLocation user has suggestion content", tpl.CandidateReLocationTask.Messages[1].Content, "{suggestion_content}"},
+		{"CandidateReLocation user has candidates", tpl.CandidateReLocationTask.Messages[1].Content, "{candidates}"},
+		{"CandidateReLocation user has existing_code", tpl.CandidateReLocationTask.Messages[1].Content, "{existing_code}"},
+		{"CandidateReLocation user has suggestion_code", tpl.CandidateReLocationTask.Messages[1].Content, "{suggestion_code}"},
+		{"CandidateReLocation user has thinking", tpl.CandidateReLocationTask.Messages[1].Content, "{thinking}"},
 	}
 
 	for _, tt := range tests {

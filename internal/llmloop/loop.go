@@ -6,6 +6,7 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -40,13 +41,11 @@ type Deps struct {
 	// NewFileContent is the whole file and Diff is empty).
 	DiffLookup func(path string) *model.Diff
 
-	// AllDiffs returns every diff this run reviews, for re-filing a comment
-	// whose ExistingCode belongs to a different file than the one it was filed
-	// against (diff.RelocateAcrossFiles). It is the reviewed set rather than
-	// every parsed diff on purpose: re-filing a comment onto a path the run
-	// excluded would point the reader at a file this review never covered.
-	// When nil, cross-file re-filing is skipped and only same-file resolution
-	// applies.
+	// AllDiffs returns every diff this run reviews, so duplicate anchors can be
+	// collected across files when the comment's current file has no match. It is
+	// the reviewed set rather than every parsed diff on purpose: re-filing a
+	// comment onto a path the run excluded would point the reader at a file this
+	// review never covered. When nil, only same-file resolution applies.
 	AllDiffs func() []model.Diff
 
 	// NewRequestMeta builds the retry-report identity for one logical LLM
@@ -193,6 +192,57 @@ func (r *Runner) RecordUsage(u *llm.UsageInfo) {
 	atomic.AddInt64(&r.totalOutputTokens, u.CompletionTokens)
 	atomic.AddInt64(&r.totalCacheReadTokens, u.CacheReadTokens)
 	atomic.AddInt64(&r.totalCacheWriteTokens, u.CacheWriteTokens)
+}
+
+func (r *Runner) runReLocationTask(
+	ctx context.Context,
+	filePath string,
+	messages []llm.Message,
+	call func(context.Context) (bool, *llm.ChatResponse),
+	errorMessage string,
+) (bool, *llm.ChatResponse) {
+	if len(messages) == 0 {
+		return false, nil
+	}
+
+	startTime := time.Now()
+	fs := r.deps.Session.GetOrCreateFileSession(filePath)
+	rec := fs.AppendTaskRecord(session.ReLocationTask, messages)
+	taskCtx := llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.ReLocationTask), filePath))
+	reqCtx := r.requestCtx(taskCtx, filePath, session.ReLocationTask, rec.RequestNo)
+
+	ok, resp := call(reqCtx)
+	if resp != nil {
+		rec.SetResponse(resp, time.Since(startTime))
+		r.RecordUsage(resp.Usage)
+		return ok, resp
+	}
+	rec.SetError(errors.New(errorMessage), time.Since(startTime))
+	return ok, nil
+}
+
+func needsCandidateReLocationRetry(content string, candidates []diff.CommentLocationCandidate) bool {
+	id, parsed := diff.ParseCandidateID(content)
+	if !parsed {
+		return true
+	}
+	if id == "" {
+		return false
+	}
+	for _, c := range candidates {
+		if c.ID == id {
+			return false
+		}
+	}
+	return true
+}
+
+func candidateReLocationMessagesForRetry(messages []llm.Message, resp *llm.ChatResponse) []llm.Message {
+	if resp == nil {
+		return messages
+	}
+	return diff.BuildCandidateReLocationRetryMessages(messages, resp.Content())
 }
 
 // CollectPendingComments awaits any async comment-processing workers and
@@ -557,54 +607,60 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 				if r.deps.DiffLookup != nil {
 					d = r.deps.DiffLookup(cm.Path)
 				}
-				// Resolution order: the comment's own file, then a cross-file
-				// search, then the LLM. The cross-file search precedes the LLM
-				// because it needs the Agent's original ExistingCode, which the
-				// LLM step overwrites; and it runs even when d is nil, since a
-				// comment filed against a path this run holds no diff for is
-				// exactly the case that search can still place.
-				located := d != nil && diff.ResolveComment(cm, d)
-				if !located && r.deps.AllDiffs != nil {
+				var candidates []diff.CommentLocationCandidate
+				if d != nil {
+					candidates = diff.ResolveCommentCandidates(cm, d)
+				}
+				// Keep the current file authoritative: a local match must not
+				// become ambiguous just because another reviewed file contains
+				// the same snippet.
+				if len(candidates) == 0 && r.deps.AllDiffs != nil {
+					candidates = diff.RelocationCandidates(cm, r.deps.AllDiffs())
+				}
+				located := false
+				if len(candidates) == 1 {
 					from := cm.Path
-					if to, ok := diff.RelocateAcrossFiles(cm, r.deps.AllDiffs()); ok {
-						located = true
-						r.RecordWarning("comment_refiled", to, fmt.Sprintf(
-							"comment filed against %s describes code in %s; re-filed", from, to))
+					diff.ApplyCandidate(cm, candidates[0])
+					located = true
+					if cm.Path != from {
+						r.RecordWarning("comment_refiled", cm.Path, fmt.Sprintf(
+							"comment filed against %s describes code in %s; re-filed", from, cm.Path))
+					}
+				}
+				if !located && len(candidates) > 1 && r.deps.Template.CandidateReLocationTask != nil {
+					from := cm.Path
+					msgs := diff.BuildCandidateReLocationMessages(cm, candidates, r.deps.Template.CandidateReLocationTask)
+					ok := false
+					// Use the same prompt budget gate as addNextMessage before
+					// issuing this extra re-location call.
+					if CountMessagesTokens(msgs) <= PromptTokenLimit(r.deps.Template.MaxTokens) {
+						var resp *llm.ChatResponse
+						ok, resp = r.runReLocationTask(rctx, cm.Path, msgs, func(reqCtx context.Context) (bool, *llm.ChatResponse) {
+							return diff.ReLocateCommentCandidate(reqCtx, cm, candidates, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
+						}, "re-location candidate selection failed")
+						for retry := 0; !ok && resp != nil && retry < 2 && needsCandidateReLocationRetry(resp.Content(), candidates); retry++ {
+							nextMsgs := candidateReLocationMessagesForRetry(msgs, resp)
+							if CountMessagesTokens(nextMsgs) > PromptTokenLimit(r.deps.Template.MaxTokens) {
+								break
+							}
+							msgs = nextMsgs
+							ok, resp = r.runReLocationTask(rctx, cm.Path, msgs, func(reqCtx context.Context) (bool, *llm.ChatResponse) {
+								return diff.ReLocateCommentCandidate(reqCtx, cm, candidates, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
+							}, "re-location candidate selection retry failed")
+						}
+						located = ok
+					}
+					if ok && cm.Path != from {
+						r.RecordWarning("comment_refiled", cm.Path, fmt.Sprintf(
+							"comment filed against %s describes code in %s; re-filed", from, cm.Path))
 					}
 				}
 				if d != nil {
-					if !located && r.deps.Template.ReLocationTask != nil {
-						// rlStart stays ahead of prompt construction, which is
-						// where it sat when ReLocateComment built the messages
-						// itself — moving it would silently change what
-						// TaskRecord.Duration measures.
-						rlStart := time.Now()
+					if !located && len(candidates) == 0 && r.deps.Template.ReLocationTask != nil {
 						msgs := diff.BuildReLocationMessages(cm, d, r.deps.Template.ReLocationTask)
-						if len(msgs) > 0 {
-							fs := r.deps.Session.GetOrCreateFileSession(cm.Path)
-							rlRec := fs.AppendTaskRecord(session.ReLocationTask, msgs)
-							// FilePath is cm.Path so it cannot drift from the file
-							// session opened above — that join is what the report
-							// needs. It equals newPath whenever newPath is set,
-							// because the path arg is overridden with it further
-							// up, but reading it from the comment keeps the two
-							// aligned without depending on that.
-							rlCtx := llm.ContextWithSessionKey(rctx,
-								llm.SessionTaskKey(r.deps.Session.SessionID, string(session.ReLocationTask), cm.Path))
-							reqCtx := r.requestCtx(rlCtx, cm.Path, session.ReLocationTask, rlRec.RequestNo)
-							_, resp := diff.ReLocateComment(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
-							if resp != nil {
-								rlRec.SetResponse(resp, time.Since(rlStart))
-								if resp.Usage != nil {
-									atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
-									atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
-									atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
-									atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
-								}
-							} else {
-								rlRec.SetError(fmt.Errorf("re-location LLM call failed"), time.Since(rlStart))
-							}
-						}
+						r.runReLocationTask(rctx, cm.Path, msgs, func(reqCtx context.Context) (bool, *llm.ChatResponse) {
+							return diff.ReLocateComment(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
+						}, "re-location LLM call failed")
 					}
 				}
 				r.deps.CommentCollector.Add(*cm)

@@ -4,6 +4,7 @@
 package diff
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -193,7 +194,7 @@ func TestResolveLineNumbers_FallbackToFileContent_CRLF(t *testing.T) {
 	}
 }
 
-func TestResolveLineNumbers_FallbackToFileContent_FirstMatchWins(t *testing.T) {
+func TestResolveLineNumbers_FallbackToFileContent_DuplicateMatchStaysUnresolved(t *testing.T) {
 	diffs := []model.Diff{{
 		NewPath:        "main.go",
 		NewFileContent: "x\ny\nx\ny\n",
@@ -206,8 +207,66 @@ func TestResolveLineNumbers_FallbackToFileContent_FirstMatchWins(t *testing.T) {
 
 	result := ResolveLineNumbers(comments, diffs)
 	cm := result[0]
-	if cm.StartLine != 1 || cm.EndLine != 2 {
-		t.Errorf("first match wins: expected 1..2, got %d..%d", cm.StartLine, cm.EndLine)
+	if cm.StartLine != 0 || cm.EndLine != 0 {
+		t.Errorf("duplicate match should stay unresolved, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveCommentCandidates_ReturnsAllHunkMatchesWithContext(t *testing.T) {
+	d := &model.Diff{
+		NewPath: "main.go",
+		Diff: `@@ -10,6 +10,10 @@
+ func first() {
++	beforeFirst()
++	target()
++	afterFirst()
+ }
+@@ -40,6 +44,10 @@
+ func second() {
++	beforeSecond()
++	target()
++	afterSecond()
+ }
+`,
+	}
+	cm := &model.LlmComment{Path: "main.go", ExistingCode: "target()"}
+
+	got := ResolveCommentCandidates(cm, d)
+	if len(got) != 2 {
+		t.Fatalf("got %d candidates, want 2", len(got))
+	}
+	if got[0].ID != "1" || got[1].ID != "2" {
+		t.Fatalf("candidate ids = %q/%q, want 1/2", got[0].ID, got[1].ID)
+	}
+	if got[0].StartLine != 12 || got[1].StartLine != 46 {
+		t.Fatalf("candidate lines = %d/%d, want 12/46", got[0].StartLine, got[1].StartLine)
+	}
+	if !strings.Contains(got[1].Context, "beforeSecond()") || !strings.Contains(got[1].Context, "afterSecond()") {
+		t.Fatalf("second context = %q, want surrounding second function lines", got[1].Context)
+	}
+}
+
+func TestResolveLineNumbers_DuplicateHunkMatchStaysUnresolved(t *testing.T) {
+	diffs := []model.Diff{{
+		NewPath: "main.go",
+		Diff: `@@ -1,6 +1,8 @@
+ func first() {
++	target()
+ }
+ func second() {
++	target()
+ }
+`,
+	}}
+	comments := []model.LlmComment{{
+		Path:         "main.go",
+		Content:      "ambiguous",
+		ExistingCode: "target()",
+	}}
+
+	result := ResolveLineNumbers(comments, diffs)
+	if result[0].StartLine != 0 || result[0].EndLine != 0 {
+		t.Fatalf("duplicate hunk match was resolved to %d-%d; want 0-0", result[0].StartLine, result[0].EndLine)
 	}
 }
 
