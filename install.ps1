@@ -4,7 +4,7 @@
 #   irm https://open-codereview.ai/install.ps1 -OutFile install.ps1
 #   notepad install.ps1   # review, then: .\install.ps1
 # Env: OCR_INSTALL_DIR (default $env:LOCALAPPDATA\Programs\ocr), OCR_VERSION (default latest),
-# Set a GITHUB_MIRROR_DOMAIN to download assets through a mirror domain.
+# OCR_GITHUB_MIRROR (default unset; download the binary through a mirror domain).
 # Requires PowerShell 5.1+ or PowerShell 7+.
 
 $ErrorActionPreference = 'Stop'
@@ -104,9 +104,14 @@ $arch = Get-OcrArch
 $os = 'windows'
 $Version = Resolve-OcrVersion $Repo
 $asset = "$AssetPrefix-$os-$arch.exe"
-if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_MIRROR_DOMAIN)) {
-    Write-Host "WARNING: Using an unofficial mirror domain, which may lead to SHA256 checksum mismatches and security risks."
-    $base = "https://$($env:GITHUB_MIRROR_DOMAIN.Trim())/github.com/$Repo/releases/download/$Version"
+$Mirror = if (-not [string]::IsNullOrWhiteSpace($env:OCR_GITHUB_MIRROR)) {
+    $env:OCR_GITHUB_MIRROR.Trim()
+} else {
+    $null
+}
+if ($Mirror) {
+    Write-Host "WARNING: downloading the binary from unofficial GitHub mirror `"$Mirror`""
+    $base = "https://$Mirror/github.com/$Repo/releases/download/$Version"
 } else {
     $base = "https://github.com/$Repo/releases/download/$Version"
 }
@@ -124,10 +129,21 @@ try {
     } catch {
         Err "download failed: $base/$asset"
     }
+
+    $checksumUrl = "https://github.com/$Repo/releases/download/$Version/sha256sum.txt"
     try {
-        Invoke-WebRequest -Uri "$base/sha256sum.txt" -OutFile $sumPath -UseBasicParsing
+        Invoke-WebRequest -Uri $checksumUrl -OutFile $sumPath -UseBasicParsing
     } catch {
-        Err 'sha256sum.txt download failed'
+        if ($Mirror) {
+            Write-Host "WARNING: fetching sha256sum.txt from GitHub failed; falling back to mirror `"$Mirror`" (checksum integrity is no longer guaranteed)"
+            try {
+                Invoke-WebRequest -Uri "$base/sha256sum.txt" -OutFile $sumPath -UseBasicParsing
+            } catch {
+                Err 'sha256sum.txt download failed (tried GitHub and mirror)'
+            }
+        } else {
+            Err 'sha256sum.txt download failed'
+        }
     }
 
     $want = Get-ChecksumFromFile $sumPath $asset

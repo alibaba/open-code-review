@@ -9,7 +9,7 @@
 #   curl -fsSL https://open-codereview.ai/install.sh -o install.sh
 #   less install.sh && sh install.sh
 # Env: OCR_INSTALL_DIR (default /usr/local/bin), OCR_VERSION (default latest),
-# Set a GITHUB_MIRROR_DOMAIN to download assets through a mirror domain.
+# OCR_GITHUB_MIRROR (default unset; download the binary through a mirror domain).
 set -eu
 
 main() {
@@ -43,9 +43,9 @@ main() {
   fi
 
   asset="${ASSET_PREFIX}-${os}-${arch}"
-  prefix="$(printf '%s' "${GITHUB_MIRROR_DOMAIN:-}" | tr -d '[:space:]')"
+  prefix="$(printf '%s' "${OCR_GITHUB_MIRROR:-}" | tr -d '[:space:]')"
   if [ -n "$prefix" ]; then
-    echo "WARNING: Using an unofficial mirror domain, which may lead to SHA256 checksum mismatches and security risks."
+    printf 'warning: downloading the binary from unofficial GitHub mirror "%s"\n' "$prefix" >&2
     base="https://${prefix}/github.com/$REPO/releases/download/$VERSION"
   else
     base="https://github.com/$REPO/releases/download/$VERSION"
@@ -55,7 +55,20 @@ main() {
 
   printf 'downloading %s %s (%s/%s)...\n' "$BIN" "$VERSION" "$os" "$arch"
   curl -fsSL -o "$tmp/$asset" "$base/$asset" || err "download failed: $base/$asset"
-  curl -fsSL -o "$tmp/sha256sum.txt" "$base/sha256sum.txt" || err "sha256sum.txt download failed"
+
+  # Fetch the checksum from GitHub directly rather than the mirror: it's a few
+  # hundred bytes, so even a slow direct connection works, and it preserves the
+  # integrity guarantee a third-party mirror cannot provide.
+  checksum_url="https://github.com/$REPO/releases/download/$VERSION/sha256sum.txt"
+  if ! curl -fsSL -o "$tmp/sha256sum.txt" "$checksum_url"; then
+    if [ -n "$prefix" ]; then
+      printf 'warning: fetching sha256sum.txt from GitHub failed; falling back to mirror "%s" (checksum integrity is no longer guaranteed)\n' "$prefix" >&2
+      curl -fsSL -o "$tmp/sha256sum.txt" "$base/sha256sum.txt" ||
+        err "sha256sum.txt download failed (tried GitHub and mirror)"
+    else
+      err "sha256sum.txt download failed"
+    fi
+  fi
 
   want="$(awk -v a="$asset" '$2 == a {print tolower($1)}' "$tmp/sha256sum.txt")"
   [ -n "$want" ] || err "no checksum entry for $asset in sha256sum.txt"
