@@ -15,6 +15,10 @@ open-code-review (`ocr`) is an AI-powered code review CLI tool written in Go (mo
 - Commit messages must be written in English.
 - Verify line endings. Line endings must be LF, not CRLF. Run `git add --renormalize .` to correct line endings and commit them. New binary files must have their extensions added to .gitattributes. 
 
+## CI Invariants
+
+- **GitHub Actions refs must be pinned to full commit SHAs.** Every external `uses:` in `.github/workflows/*.yml` and in `action.yml` must be a full 40-hex commit SHA (e.g. `uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`), never a floating tag. The repository's "Require actions to be pinned to a full-length commit SHA" setting (Settings → Actions → General) enforces this at the runner level, including for nested references in composite actions. Keep it enabled: it is a repo setting, invisible in the tree and easy to flip off silently, so it is a required invariant rather than something CI proves. The trailing `# vX.Y.Z` comment is a convention for update tooling (Dependabot, Renovate) and is optional.
+
 ## License Headers
 
 - Every source file (`.go`, `.sh`, `.js`, `.mjs`, `.ts`, `.tsx`) must have an SPDX license header.

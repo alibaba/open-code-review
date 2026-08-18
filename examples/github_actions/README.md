@@ -38,7 +38,7 @@ The Action is an orchestrator: it installs the OCR CLI from npm at run time (`oc
     llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
 ```
 
-Take the commit SHA from the [releases page](https://github.com/alibaba/open-code-review/releases) and keep the `# vX.Y.Z` comment next to it so update tooling (Dependabot, Renovate) can track it. Every action referenced *inside* [`action.yml`](../../action.yml) is itself pinned to a full commit SHA (enforced by `scripts/verify-action-pins.sh` in CI), so the outer SHA transitively freezes the whole workflow — only the two coordinates above are yours to choose.
+Take the commit SHA from the [releases page](https://github.com/alibaba/open-code-review/releases) and keep the `# vX.Y.Z` comment next to it so update tooling (Dependabot, Renovate) can track it. The nested `uses:` references *inside* [`action.yml`](../../action.yml) are pinned to full commit SHAs, and this repository requires the GitHub "Require actions to be pinned to a full-length commit SHA" setting to stay enabled (see [`AGENTS.md`](../../AGENTS.md)) — the runner rejects any unpinned reference, including nested ones. So the outer SHA transitively freezes the whole workflow — only the two coordinates above are yours to choose.
 
 ## Running on a self-hosted runner
 
