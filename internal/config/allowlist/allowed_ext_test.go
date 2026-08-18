@@ -25,6 +25,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".phtml", true},
 		{".PHTML", true},
 		{".rs", true},
+		{".R", true},
+		{".r", true},
 		{".ets", true},
 		{".ETS", true},
 		{".json5", true},
@@ -63,6 +65,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".NIMS", true},
 		{".nimble", true},
 		{".NIMBLE", true},
+		{".ipynb", true},
+		{".IPYNB", true},
 		{".elm", true},
 		{".ELM", true},
 		{".properties", true},
@@ -77,6 +81,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".LIBSONNET", true},
 		{".zig", true},
 		{".ZIG", true},
+		{".thrift", true},
+		{".THRIFT", true},
+		{".capnp", true},
+		{".CAPNP", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -181,6 +189,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"lhs root spec file", "ParserSpec.lhs", true},
 		{"lhs non-test", "src/Tutorial.lhs", false},
 
+		// R test files
+		{"r test directory", "tests/parser_test.R", true},
+		{"r nested test directory", "packages/core/tests/unit/parser_test.R", true},
+		{"r non-test", "src/parser.R", false},
+		{"r tests in filename", "src/tests_helper.R", false},
+
 		// Nim test files
 		{"nim test directory", "tests/parser_test.nim", true},
 		{"nim nested test directory", "packages/core/tests/unit/parser_test.nim", true},
@@ -192,6 +206,24 @@ func TestIsExcludedPath(t *testing.T) {
 		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
 		{"elm non-test", "src/Parser.elm", false},
 		{"elm tests in filename", "src/TestsHelper.elm", false},
+		// Thrift generated output directories
+		{"kitex_gen at root", "kitex_gen/api/service.go", true},
+		{"kitex_gen nested", "app/rpc/kitex_gen/user/user.go", true},
+		{"thrift idl is reviewed", "idl/service.thrift", false},
+		{"hand-written generated-ish dir name", "services/generated_client/client.go", false},
+		{"gen in package name only", "internal/generator/main.go", false},
+		// The kitex_gen pattern is extension-anchored: a colliding directory name
+		// must not drop files Thrift never emits (IsExcludedPath has no language dispatch).
+		{"kitex_gen holding non-Go file", "kitex_gen/api/schema.json", false},
+
+		// Cap'n Proto generated output files
+		{"capnp generated header", "src/schema.capnp.h", true},
+		{"capnp generated go", "tunnelrpc/proto/tunnelrpc.capnp.go", true},
+		{"capnp generated rust", "src/element_capnp.rs", true},
+		{"capnp generated typescript", "src/rpc.capnp.ts", true},
+		{"capnp generated python", "schema/addressbook_capnp.py", true},
+		{"capnp schema is reviewed", "schema/addressbook.capnp", false},
+		{"capnp in filename only", "src/capnp_helpers.go", false},
 
 		// Jsonnet vendored dependencies (written by `jb install`, wiped by `rm -rf vendor`).
 		// The pattern is extension-scoped: IsExcludedPath applies every pattern to every
@@ -219,6 +251,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"testdata nested", "pkg/a/b/testdata/golden.txt", true},
 		{"fixtures dir", "test/fixtures/sample.json", true},
 		{"fixtures nested", "spec/fixtures/users.yml", true},
+
+		// Jupyter autosave checkpoints (duplicate copies of the real notebook)
+		{"ipynb checkpoint at root", ".ipynb_checkpoints/analysis-checkpoint.ipynb", true},
+		{"ipynb checkpoint nested", "notebooks/eda/.ipynb_checkpoints/eda-checkpoint.ipynb", true},
+		{"ipynb outside checkpoints", "notebooks/eda/eda.ipynb", false},
+		{"ipynb checkpoints without dot", "notebooks/ipynb_checkpoints/eda.ipynb", false},
 
 		// Generated code
 		{"generated go", "api/types.generated.go", true},

@@ -22,7 +22,7 @@
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,hpp}": "cpp.md",
     "**/*.c": "c.md",
-    "**/*.py": "python.md",
+    "**/*.{py,ipynb}": "python.md",
     "**/*.{php,phtml}": "php.md",
     "**/*.proto": "protobuf.md",
     "**/*.po": "po.md",
@@ -30,6 +30,7 @@
     "**/*.{graphql,gql}": "graphql.md",
     "**/*.prisma": "prisma.md",
     "**/*.jl": "julia.md",
+    "**/*.R": "r.md",
     "**/*.{tf,hcl,tfvars}": "terraform.md",
     "**/*.bicep": "bicep.md",
     "**/*.nix": "nix.md",
@@ -38,6 +39,8 @@
     "**/*.swift": "swift.md",
     "**/*.elm": "elm.md",
     "**/*.{jsonnet,libsonnet}": "jsonnet.md",
-    "**/*.zig": "zig.md"
+    "**/*.zig": "zig.md",
+    "**/*.thrift": "thrift.md",
+    "**/*.capnp": "capnp.md"
   }
 }

@@ -49,6 +49,7 @@
   ".ftlx",
   ".astro",
   ".vue",
+  ".ipynb",
   ".svelte",
   ".xml",
   ".yaml",
@@ -91,5 +92,7 @@
   ".pot",
   ".jsonnet",
   ".libsonnet",
-  ".zig"
+  ".zig",
+  ".thrift",
+  ".capnp"
 ]
