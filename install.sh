@@ -60,7 +60,7 @@ main() {
   # hundred bytes, so even a slow direct connection works, and it preserves the
   # integrity guarantee a third-party mirror cannot provide.
   checksum_url="https://github.com/$REPO/releases/download/$VERSION/sha256sum.txt"
-  if ! curl -fsSL -o "$tmp/sha256sum.txt" "$checksum_url"; then
+  if ! curl -fsSL --connect-timeout 5 --max-time 15 -o "$tmp/sha256sum.txt" "$checksum_url"; then
     if [ -n "$prefix" ]; then
       printf 'warning: fetching sha256sum.txt from GitHub failed; falling back to mirror "%s" (checksum integrity is no longer guaranteed)\n' "$prefix" >&2
       curl -fsSL -o "$tmp/sha256sum.txt" "$base/sha256sum.txt" ||
