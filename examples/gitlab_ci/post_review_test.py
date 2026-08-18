@@ -16,6 +16,7 @@ Test seams:
      canned ``HTTPError`` sequences.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -381,7 +382,7 @@ class SafeFenceTest(unittest.TestCase):
 
 class PublishTest(unittest.TestCase):
     def test_inline_success_and_summary(self):
-        stats, rec = run_publish({"comments": [comment()]})
+        stats, rec = run_publish({"comments": [comment(start_line=5, end_line=10)]})
         self.assertEqual(stats["inline"], 1)
         self.assertEqual(stats["failed"], 0)
         self.assertEqual(len(rec.disc_calls), 1)
@@ -390,6 +391,13 @@ class PublishTest(unittest.TestCase):
         inline = rec.disc_calls[0]
         self.assertEqual(inline["position"]["new_path"], "main.py")
         self.assertEqual(inline["position"]["new_line"], 10)
+        line_range = inline["position"]["line_range"]
+        expected_path_sha1 = hashlib.sha1(b"main.py").hexdigest()
+        self.assertEqual(line_range["start"]["line_code"], f"{expected_path_sha1}_0_5")
+        self.assertEqual(line_range["start"]["new_line"], 5)
+        self.assertEqual(line_range["end"]["line_code"], f"{expected_path_sha1}_0_10")
+        self.assertEqual(line_range["end"]["new_line"], 10)
+
         self.assertIn("possible issue", inline["body"])
         self.assertIn("**1** issue(s)", rec.final_summary_body)
         self.assertIn("Successfully posted inline: 1 comment(s)", rec.final_summary_body)

@@ -36,6 +36,7 @@ Standard library only (json, urllib) so it runs on any stock python3 image.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -1190,6 +1191,7 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     routed = []
     for comment in comments:
         path = comment.get("path", "")
+        path_sha1 = hashlib.sha1(path.encode("utf-8")).hexdigest()
         start_line = comment.get("start_line", 0)
         end_line = comment.get("end_line", 0)
         # Inline posting needs a valid end_line (it becomes the GitLab position's
@@ -1266,6 +1268,18 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
                 "base_sha": diff_refs["base_sha"],
                 "start_sha": diff_refs["start_sha"],
                 "head_sha": diff_refs["head_sha"],
+                "line_range": {
+                    "start": {
+                        "line_code": f"{path_sha1}_0_{start_line}",
+                        "type": "new",
+                        "new_line": start_line,
+                    },
+                    "end": {
+                        "line_code": f"{path_sha1}_0_{end_line}",
+                        "type": "new",
+                        "new_line": end_line,
+                    },
+                },
             },
         }
         resp = poster.post_discussion(discussion, comment_id=it["id"])
