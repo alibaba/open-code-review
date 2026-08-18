@@ -189,6 +189,32 @@ func TestAWSSettingsRejectedWhenEntryOverridesProtocol(t *testing.T) {
 	}
 }
 
+// TestSetLlmProtocolRejectsBedrock pins the other half of the contract enforced
+// in the resolver: the llm block is one url plus one token, with nowhere to put
+// a region or a profile, so the value is refused where it is typed rather than
+// stored and ignored until the next review run.
+func TestSetLlmProtocolRejectsBedrock(t *testing.T) {
+	cfg := &Config{}
+	err := setConfigValue(cfg, "llm.protocol", llm.ProtocolAnthropicBedrock)
+	if err == nil {
+		t.Fatal("llm.protocol accepted anthropic-bedrock; want an error")
+	}
+	for _, want := range []string{"aws_region", "provider bedrock"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+	if cfg.Llm.Protocol != "" {
+		t.Errorf("Llm.Protocol = %q, want it left unset after the rejection", cfg.Llm.Protocol)
+	}
+
+	// The neighbouring values still work — the rejection is one protocol, not
+	// the whole key.
+	if err := setConfigValue(cfg, "llm.protocol", llm.ProtocolOpenAIResponses); err != nil {
+		t.Fatalf("set llm.protocol=openai-responses: %v", err)
+	}
+}
+
 func TestCheckAPIKeyRequirement(t *testing.T) {
 	bedrock, ok := llm.LookupProvider("bedrock")
 	if !ok {

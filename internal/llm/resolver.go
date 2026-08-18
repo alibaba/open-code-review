@@ -233,6 +233,16 @@ func validateTimeoutSec(sec int) (time.Duration, error) {
 	return time.Duration(sec) * time.Second, nil
 }
 
+// errBedrockNotConfigurable explains why the two url+token strategies reject the
+// bedrock protocol. Both describe a single HTTP endpoint and carry no place for
+// a region or a profile, and bedrock uses neither the url nor the token they do
+// carry. Accepting the value would switch transports and silently ignore the
+// rest of the block, so it is refused at the point it is read.
+func errBedrockNotConfigurable(key string) error {
+	return fmt.Errorf("%s cannot be %q: bedrock derives its host from aws_region and signs with the AWS credential chain, so it has no use for a url or a token; configure it as a provider instead (\"provider\": \"bedrock\")",
+		key, ProtocolAnthropicBedrock)
+}
+
 // tryOCREnv reads OCR-specific environment variables.
 func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	url := os.Getenv(envOCRLLMURL)
@@ -251,6 +261,9 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 		protocol = NormalizeProtocol(raw)
 		if err := ValidateProtocol(protocol); err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", err)
+		}
+		if protocol == ProtocolAnthropicBedrock {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", errBedrockNotConfigurable(envOCRLLMProtocol))
 		}
 	}
 	if protocol == "" {
@@ -431,13 +444,20 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 			protocol = normalized
 		}
 	} else {
-		// Custom provider: url and protocol are required; model can come from cfg.Model.
-		if entry.URL == "" || entry.Protocol == "" {
-			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires url and protocol fields", cfg.Provider)
+		// Custom provider: protocol is always required; model can come from
+		// cfg.Model. url is required for every protocol that names an HTTP
+		// endpoint, which is all of them except bedrock — there the region
+		// decides the host, so demanding a url would mean storing a value the
+		// client never reads.
+		if entry.Protocol == "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires a protocol field", cfg.Provider)
 		}
 		normalized := NormalizeProtocol(entry.Protocol)
 		if err := ValidateProtocol(normalized); err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q: %w", cfg.Provider, err)
+		}
+		if normalized != ProtocolAnthropicBedrock && entry.URL == "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires a url field for protocol %q", cfg.Provider, normalized)
 		}
 		url = entry.URL
 		protocol = normalized
@@ -542,10 +562,11 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 
 	// Single api_key_cmd resolution site for both preset and custom providers,
 	// as late as possible: everything above can fail without running the
-	// command. Both are empty only for an ambient-auth provider, which the
-	// emptiness check above lets through and which has no command to run; for
-	// everyone else a failing command is a hard error.
-	if apiKey == "" && apiKeyCmd != "" {
+	// command. An ambient-auth provider skips it entirely — the request is
+	// signed, so the command's output would be discarded, and running it anyway
+	// means a real 1Password / Touch ID prompt for a value nothing consumes.
+	// For everyone else a failing command is a hard error.
+	if apiKey == "" && apiKeyCmd != "" && !ambientAuth {
 		resolved, err := resolveKeyCmd(apiKeyCmd, fmt.Sprintf("api_key_cmd for provider %q", cfg.Provider))
 		if err != nil {
 			return ResolvedEndpoint{}, false, err
@@ -608,6 +629,9 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		protocol = NormalizeProtocol(raw)
 		if err := ValidateProtocol(protocol); err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
+		}
+		if protocol == ProtocolAnthropicBedrock {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", errBedrockNotConfigurable("llm.protocol"))
 		}
 	}
 	if protocol == "" {

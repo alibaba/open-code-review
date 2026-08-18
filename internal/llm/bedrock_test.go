@@ -94,6 +94,33 @@ func TestResolveBedrockWithoutAPIKey(t *testing.T) {
 	}
 }
 
+// TestBedrockDoesNotRunAPIKeyCmd pins that an ambient-auth provider never
+// executes api_key_cmd. A signed request has no use for the output, and the
+// command is typically a secret-manager read — running it means a real
+// 1Password / Touch ID prompt for a value that is immediately discarded. The
+// sentinel file proves non-execution; a nil error would not.
+func TestBedrockDoesNotRunAPIKeyCmd(t *testing.T) {
+	sentinel := filepath.Join(t.TempDir(), "ran")
+	path := writeConfig(t, map[string]any{
+		"provider": "bedrock",
+		"model":    "us.anthropic.claude-sonnet-4-6",
+		"providers": map[string]any{
+			"bedrock": map[string]any{"api_key_cmd": "touch '" + sentinel + "'; echo sk-should-never-be-used"},
+		},
+	})
+
+	ep, err := ResolveEndpoint(path)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Error("api_key_cmd ran for an ambient-auth provider")
+	}
+	if ep.Token != "" {
+		t.Errorf("Token = %q, want empty", ep.Token)
+	}
+}
+
 // TestResolveBedrockPassesAWSSettings covers aws_profile / aws_region reaching
 // the client, so a review run is reproducible without exporting AWS_PROFILE.
 func TestResolveBedrockPassesAWSSettings(t *testing.T) {
@@ -170,6 +197,104 @@ func TestAmbientAuthFollowsTheEffectiveProtocol(t *testing.T) {
 	})
 }
 
+// TestBedrockIsRejectedOnTheURLAndTokenPaths covers the two strategies that
+// describe a single HTTP endpoint. Both validated anthropic-bedrock as a
+// protocol name and then ignored it — the request would have been signed and
+// re-hosted while the url and token the block declares went unused, with no
+// region or profile anywhere to state where it went instead.
+func TestBedrockIsRejectedOnTheURLAndTokenPaths(t *testing.T) {
+	t.Run("OCR_LLM_PROTOCOL", func(t *testing.T) {
+		t.Setenv("OCR_LLM_URL", "https://example.invalid/v1")
+		t.Setenv("OCR_LLM_TOKEN", "sk-test")
+		t.Setenv("OCR_LLM_MODEL", "us.anthropic.claude-sonnet-4-6")
+		t.Setenv("OCR_LLM_PROTOCOL", ProtocolAnthropicBedrock)
+
+		_, err := ResolveEndpoint(writeConfig(t, map[string]any{}))
+		if err == nil {
+			t.Fatal("resolved with OCR_LLM_PROTOCOL=anthropic-bedrock; want an error naming the variable")
+		}
+		for _, want := range []string{"OCR_LLM_PROTOCOL", "aws_region", `"provider": "bedrock"`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not mention %q", err, want)
+			}
+		}
+	})
+
+	t.Run("llm.protocol", func(t *testing.T) {
+		for _, k := range []string{"OCR_LLM_URL", "OCR_LLM_TOKEN", "OCR_LLM_MODEL", "OCR_LLM_PROTOCOL"} {
+			t.Setenv(k, "")
+		}
+		path := writeConfig(t, map[string]any{
+			"llm": map[string]any{
+				"url":        "https://example.invalid/v1",
+				"auth_token": "sk-test",
+				"model":      "us.anthropic.claude-sonnet-4-6",
+				"protocol":   ProtocolAnthropicBedrock,
+			},
+		})
+
+		_, err := ResolveEndpoint(path)
+		if err == nil {
+			t.Fatal("resolved with llm.protocol=anthropic-bedrock; want an error naming the key")
+		}
+		if !strings.Contains(err.Error(), "llm.protocol") {
+			t.Errorf("error %q does not mention llm.protocol", err)
+		}
+	})
+}
+
+// TestCustomProviderCanSelectBedrock is the other half of that contract: where
+// a provider entry exists there is somewhere to put aws_region and aws_profile,
+// so bedrock is configurable — and the url every other protocol requires is not
+// demanded, because the region decides the host and the client never reads it.
+func TestCustomProviderCanSelectBedrock(t *testing.T) {
+	t.Run("no url required", func(t *testing.T) {
+		path := writeConfig(t, map[string]any{
+			"provider": "mine",
+			"model":    "us.anthropic.claude-sonnet-4-6",
+			"custom_providers": map[string]any{
+				"mine": map[string]any{
+					"protocol":    ProtocolAnthropicBedrock,
+					"aws_region":  "eu-west-1",
+					"aws_profile": "example-profile",
+				},
+			},
+		})
+
+		ep, err := ResolveEndpoint(path)
+		if err != nil {
+			t.Fatalf("ResolveEndpoint: %v", err)
+		}
+		if !ep.AmbientAuth {
+			t.Error("AmbientAuth = false for a custom provider on the bedrock protocol")
+		}
+		if ep.AWSRegion != "eu-west-1" || ep.AWSProfile != "example-profile" {
+			t.Errorf("AWSRegion/AWSProfile = %q/%q, want eu-west-1/example-profile", ep.AWSRegion, ep.AWSProfile)
+		}
+		if ep.Token != "" {
+			t.Errorf("Token = %q, want empty", ep.Token)
+		}
+	})
+
+	t.Run("url still required for every other protocol", func(t *testing.T) {
+		path := writeConfig(t, map[string]any{
+			"provider": "mine",
+			"model":    "gpt-5.5",
+			"custom_providers": map[string]any{
+				"mine": map[string]any{"protocol": "openai", "api_key": "sk-test"},
+			},
+		})
+
+		_, err := ResolveEndpoint(path)
+		if err == nil {
+			t.Fatal("resolved a custom openai provider with no url; want an error")
+		}
+		if !strings.Contains(err.Error(), "url") {
+			t.Errorf("error %q does not mention the missing url", err)
+		}
+	})
+}
+
 // TestBedrockModelOverrideIsNotGatedByThePresetList covers what the preset's
 // own documentation promises: any identifier Bedrock will route. A preset's
 // Models list otherwise acts as an allowlist for --model, which cannot work for
@@ -232,6 +357,11 @@ func TestNonAmbientProviderStillRequiresAPIKey(t *testing.T) {
 // complaint names a credential the user cannot configure, and a model absent
 // from the region reads as a malformed identifier.
 func TestExplainErrorClassifiesBedrockFailures(t *testing.T) {
+	// The bearer-token branch consults this variable, so a value in the ambient
+	// environment flips the expected message on a developer machine that has one
+	// exported. Pin it empty rather than depending on whoever runs the suite.
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+
 	client := &AnthropicClient{bedrock: true, awsRegion: "us-west-2", awsProfile: "example-profile"}
 
 	tests := []struct {
@@ -264,6 +394,15 @@ func TestExplainErrorClassifiesBedrockFailures(t *testing.T) {
 			err:      errors.New("operation error Bedrock Runtime: AccessDeniedException: User: arn:aws:sts::x:assumed-role/y is not authorized to perform: bedrock:InvokeModel"),
 			wantAll:  []string{"bedrock:InvokeModel", "authorization gap"},
 			wantNone: []string{"sso login"},
+		},
+		{
+			// The same IAM fix reached by different wording, and deliberately
+			// without "AccessDenied" in the text: this pins the phrase itself to
+			// the authorization branch rather than the exception name.
+			name:     "IAM gap phrased as an unauthorized API operation",
+			err:      errors.New(`operation error Bedrock Runtime: InvokeModel, https response error StatusCode: 403, Your account is not authorized to invoke this API operation.`),
+			wantAll:  []string{"bedrock:InvokeModel", "authorization gap"},
+			wantNone: []string{"console"},
 		},
 		{
 			name:    "model absent from the region",

@@ -913,7 +913,11 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	// a static provider from it; unset, the SigV4 path runs.
 	awsCfg.BearerAuthTokenProvider = nil
 
-	// Appended after the options above so its base URL and middleware win.
+	// Appended last on purpose, and the order depends on the SDK wrapping
+	// direction: each option wraps the ones before it, so the last appended
+	// middleware ends up innermost — signing runs closest to the wire, after any
+	// header the earlier options set, and a retry re-signs rather than replaying
+	// a stale signature. Moving this call earlier silently breaks both.
 	opts = append(opts, bedrock.WithConfig(awsCfg))
 
 	return &AnthropicClient{
@@ -980,8 +984,7 @@ func (c *AnthropicClient) explainError(model string, err error) error {
 		}
 		return fmt.Errorf("bedrock rejected an API-key header rather than a signature (%s): %w\n"+
 			"  no api_key applies to bedrock; this means a bearer token reached the request, not that a key is missing", where, err)
-	case strings.Contains(msg, "don't have access to the model"),
-		strings.Contains(msg, "not authorized to invoke this API operation"):
+	case strings.Contains(msg, "don't have access to the model"):
 		return fmt.Errorf("bedrock has no access enabled for model %q (%s): %w\n"+
 			"  model access is granted per account and per region in the Bedrock console; an IAM policy alone does not enable it", model, where, err)
 	case strings.Contains(msg, "model identifier is invalid"),
@@ -996,7 +999,11 @@ func (c *AnthropicClient) explainError(model string, err error) error {
 		strings.Contains(msg, "NoCredentialProviders"), strings.Contains(msg, "failed to refresh cached credentials"):
 		return fmt.Errorf("bedrock could not authenticate: AWS credentials are expired or unavailable (%s): %w\n"+
 			"  run `aws sso login%s`, or refresh whichever credential source this profile uses", where, err, ssoLoginProfileArg(c.awsProfile))
-	case strings.Contains(msg, "AccessDenied"):
+	// "not authorized to invoke this API operation" is IAM's own wording, so it
+	// belongs here rather than in the model-access branch above: the fix is a
+	// policy change, not a console toggle.
+	case strings.Contains(msg, "AccessDenied"),
+		strings.Contains(msg, "not authorized to invoke this API operation"):
 		return fmt.Errorf("bedrock denied access to model %q (%s): %w\n"+
 			"  credentials resolved, so this is an authorization gap: the identity needs bedrock:InvokeModel on this model in this region, and the account needs model access enabled for it", model, where, err)
 	}
