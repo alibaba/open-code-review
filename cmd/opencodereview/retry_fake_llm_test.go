@@ -166,10 +166,15 @@ func retryTestRepo(t *testing.T) string {
 // startFakeLLM starts srv and points the OCR_LLM_* endpoint resolution at it,
 // with HOME/XDG_CONFIG_HOME redirected so the developer's real config and
 // session directory (both under $HOME/.opencodereview) are never touched.
+// Those paths resolve through os.UserHomeDir, which reads USERPROFILE on
+// Windows and never falls back to HOME, so redirecting HOME alone left these
+// runs writing to the real profile. Set both; the one that does not apply is
+// harmless.
 func startFakeLLM(t *testing.T, srv *fakeLLM) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 
 	server := httptest.NewServer(srv)

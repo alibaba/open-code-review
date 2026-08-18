@@ -26,6 +26,8 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
+  ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
@@ -86,15 +88,19 @@ ocr r      [flags]   (alias)
 | `--to <ref>` | — | — | diff の終了 ref（例: `feature-branch`）。設定すると OCR は `merge-base(from, to)..to` を計算します。 |
 | `--commit <sha>` | `-c` | — | 単一の commit をレビューします（その親との差分）。 |
 | `--preview` | `-p` | `false` | フィルタリングのパイプラインを実行しますが LLM はスキップします。ファイル一覧と除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません（プレビューには出力する完了した指摘がありません）。 |
+| `--no-filter` | — | `false` | すべてのレビューコメントを保持し、ファイルごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
 | `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します。`agent` は stdout を静音化し、最終サマリー / JSON のみを出力します。 |
 | `--background <text>` | `-b` | — | plan + main prompt に注入する、任意の要件 / 業務コンテキスト。 |
+| `--background-file <path>` | `-B` | — | レビューの背景として使用する Markdown ファイルのパス。`--background` も指定した場合は両方を結合します。 |
+| `--exclude <patterns>` | — | — | 除外する gitignore 形式のパターン（カンマ区切り）。`rule.json` の excludes とマージされます。 |
 | `--concurrency <n>` | — | `8` | 並行してレビューするファイルの最大数。 |
 | `--timeout <minutes>` | — | `10` | ファイルごとの締め切り時間。`0` でタイムアウトを無効化します。 |
 | `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |
 | `--max-tools <n>` | — | テンプレートのデフォルト | ファイルごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`30`）を使用します。1〜9 は `10` に引き上げられます。`≥ 10` の値はすべてテンプレートのデフォルトを上書きします（`30` より小さくても）。 |
 | `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | ファイルごとのプロンプトトークン上限。この実行で保存済みの `max_tokens` 設定を上書きします。 |
+| `--max-tokens-budget <n>` | — | `0`（無制限） | レビュー全体の入力 + 出力トークン使用量を制限します。予算を超えると処理の割り当てを停止し、部分的な結果は引き続き公開されます。 |
 | `--provider <name>` | — | — | 今回の実行で設定済み provider を選択します。`providers` と `custom_providers` の両方の名前を使用できます。 |
 | `--model <name>` | — | — | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
@@ -182,8 +188,10 @@ ocr review --commit abc123 --resume <session-id>
 - provider や model の変更は `--provider` / `--model` で明示的に指定する必要が
   あります。設定ファイルや環境変数経由の変更は拒否されます
 - 親の実行が run manifest を持っている必要があります。入力はこれと照合して
-  検証されます。Ctrl-C で中断された実行は書き出しておらず、run manifest より
-  古いセッションはそもそも持っていません
+  検証されます。ファイルの dispatch 開始後は、Ctrl-C によってレビューが正常に
+  キャンセルされて manifest が書き出されるため、完了済みの checkpoint は再開時に
+  再利用できます。正常に終了できなかったプロセスと run manifest より古い
+  セッションには manifest がありません
 - 再利用されるのは、親の manifest が結果を確定したファイルだけです。manifest が
   裏付けないチェックポイントや読み取れないチェックポイントは、そのファイルが
   もう一度レビューされるだけで、他のファイルには影響しません

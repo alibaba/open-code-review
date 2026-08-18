@@ -84,5 +84,12 @@
   ".lhs",
   ".nim",
   ".nims",
-  ".nimble"
+  ".nimble",
+  ".elm",
+  ".properties",
+  ".po",
+  ".pot",
+  ".jsonnet",
+  ".libsonnet",
+  ".zig"
 ]

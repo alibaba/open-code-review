@@ -29,5 +29,12 @@
   "**/*.gen.go",
   "**/*.pb.go",
   "**/*.pb.cc",
-  "**/*.pb.h"
+  "**/*.pb.h",
+  "**/*Test.swift",
+  "**/*Tests.swift",
+  "**/Tests/**/*.swift",
+  "**/tests/**/*.elm",
+  "**/vendor/**/*.{jsonnet,libsonnet}",
+  "**/test/**/*.zig",
+  "**/*_test.zig"
 ]

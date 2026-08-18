@@ -40,6 +40,15 @@ type Deps struct {
 	// NewFileContent is the whole file and Diff is empty).
 	DiffLookup func(path string) *model.Diff
 
+	// AllDiffs returns every diff this run reviews, for re-filing a comment
+	// whose ExistingCode belongs to a different file than the one it was filed
+	// against (diff.RelocateAcrossFiles). It is the reviewed set rather than
+	// every parsed diff on purpose: re-filing a comment onto a path the run
+	// excluded would point the reader at a file this review never covered.
+	// When nil, cross-file re-filing is skipped and only same-file resolution
+	// applies.
+	AllDiffs func() []model.Diff
+
 	// NewRequestMeta builds the retry-report identity for one logical LLM
 	// request. Non-nil only for review: the retry report describes ocr review,
 	// and this Runner is shared with scan (internal/scan.Agent calls RunPerFile),
@@ -548,8 +557,23 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 				if r.deps.DiffLookup != nil {
 					d = r.deps.DiffLookup(cm.Path)
 				}
+				// Resolution order: the comment's own file, then a cross-file
+				// search, then the LLM. The cross-file search precedes the LLM
+				// because it needs the Agent's original ExistingCode, which the
+				// LLM step overwrites; and it runs even when d is nil, since a
+				// comment filed against a path this run holds no diff for is
+				// exactly the case that search can still place.
+				located := d != nil && diff.ResolveComment(cm, d)
+				if !located && r.deps.AllDiffs != nil {
+					from := cm.Path
+					if to, ok := diff.RelocateAcrossFiles(cm, r.deps.AllDiffs()); ok {
+						located = true
+						r.RecordWarning("comment_refiled", to, fmt.Sprintf(
+							"comment filed against %s describes code in %s; re-filed", from, to))
+					}
+				}
 				if d != nil {
-					if !diff.ResolveComment(cm, d) && r.deps.Template.ReLocationTask != nil {
+					if !located && r.deps.Template.ReLocationTask != nil {
 						// rlStart stays ahead of prompt construction, which is
 						// where it sat when ReLocateComment built the messages
 						// itself — moving it would silently change what

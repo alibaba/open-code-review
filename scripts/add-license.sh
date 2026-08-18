@@ -40,7 +40,10 @@ is_ignored() {
 has_header() {
   local header
   header="$(head -20 "$1")"
-  echo "$header" | grep -qF "$SPDX_REGEX" && echo "$header" | grep -qE "$COPYRIGHT_REGEX"
+  # Here-string, not `echo |`: grep -q exits on the first match, so echo can die of
+  # SIGPIPE (141) and pipefail turns that into a false "no header", which makes
+  # add_header prepend a second copyright block to a file that already has one.
+  grep -qF "$SPDX_REGEX" <<<"$header" && grep -qE "$COPYRIGHT_REGEX" <<<"$header"
 }
 
 add_header() {

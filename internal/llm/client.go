@@ -403,6 +403,7 @@ type ChatRequest struct {
 	Model       string    `json:"model"`
 	Messages    []Message `json:"messages"`
 	Tools       []ToolDef `json:"tools,omitempty"`
+	ToolChoice  string    `json:"tool_choice,omitempty"` // "auto", "required", or "none"; empty means provider default
 	Temperature *float64  `json:"temperature,omitempty"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
 	SessionID   string    `json:"-"` // per-file agent loop session ID; used as prompt_cache_key by the Responses API client
@@ -645,6 +646,11 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 
 	if len(tools) > 0 {
 		params.Tools = tools
+	}
+	if req.ToolChoice != "" && len(tools) > 0 {
+		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
+			OfAuto: openai.String(req.ToolChoice),
+		}
 	}
 	if req.MaxTokens > 0 {
 		params.MaxCompletionTokens = openai.Int(int64(req.MaxTokens))
@@ -946,6 +952,11 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	if len(tools) > 0 {
 		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
 		params.Tools = tools
+		if req.ToolChoice == "required" {
+			params.ToolChoice = anthropic.ToolChoiceUnionParam{
+				OfAny: &anthropic.ToolChoiceAnyParam{},
+			}
+		}
 	}
 	// Dynamic breakpoint on the latest message so multi-turn history is
 	// cached incrementally: read the full previous prefix, write only the delta.
