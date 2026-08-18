@@ -110,7 +110,7 @@ $Mirror = if (-not [string]::IsNullOrWhiteSpace($env:OCR_GITHUB_MIRROR)) {
     $null
 }
 if ($Mirror) {
-    [Console]::Error.WriteLine("warning: downloading the binary from unofficial GitHub mirror `"$Mirror`"")
+    [Console]::Error.WriteLine("warning: downloading from unofficial GitHub mirror `"$Mirror`" (checksum integrity is not guaranteed)")
     $base = "https://$Mirror/github.com/$Repo/releases/download/$Version"
 } else {
     $base = "https://github.com/$Repo/releases/download/$Version"
@@ -130,20 +130,10 @@ try {
         Err "download failed: $base/$asset"
     }
 
-    $checksumUrl = "https://github.com/$Repo/releases/download/$Version/sha256sum.txt"
     try {
-        Invoke-WebRequest -Uri $checksumUrl -OutFile $sumPath -UseBasicParsing -TimeoutSec 15
+        Invoke-WebRequest -Uri "$base/sha256sum.txt" -OutFile $sumPath -UseBasicParsing -TimeoutSec 15
     } catch {
-        if ($Mirror) {
-            [Console]::Error.WriteLine("warning: fetching sha256sum.txt from GitHub failed; falling back to mirror `"$Mirror`" (checksum integrity is no longer guaranteed)")
-            try {
-                Invoke-WebRequest -Uri "$base/sha256sum.txt" -OutFile $sumPath -UseBasicParsing
-            } catch {
-                Err 'sha256sum.txt download failed (tried GitHub and mirror)'
-            }
-        } else {
-            Err 'sha256sum.txt download failed'
-        }
+        Err 'sha256sum.txt download failed'
     }
 
     $want = Get-ChecksumFromFile $sumPath $asset
