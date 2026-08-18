@@ -6,6 +6,7 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -248,6 +249,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
 	sessionID := uuid.NewString()
+	pathRecovery := newInvalidPathRecovery()
 
 	// Async compression is owned by this conversation alone; the deferred
 	// cancel aborts any job still in flight when the conversation ends.
@@ -319,6 +321,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		var results []tool.ToolCallResult
 		taskCompleted := false
 		hasValidResult := false
+		rejectedCalls := 0
+		roundOnlyRejected := true
+		lastRejectedResult := -1
 
 		// Capture the model's native reasoning content for this turn. Models
 		// without a reasoning channel leave it empty.
@@ -326,6 +331,15 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		thinking := resp.ReasoningContent()
 		for _, call := range calls {
 			cp := r.executeToolCall(ctx, newPath, call, rec, thinking)
+			if cp.RejectedPath != "" {
+				pathRecovery.observe(cp.RejectedPath)
+				rejectedCalls++
+			} else {
+				roundOnlyRejected = false
+				if cp.ReadSucceeded {
+					pathRecovery.resetPending()
+				}
+			}
 			if cp.Failed {
 				return false, StopNone, fmt.Errorf("task failed: %s", cp.Data)
 			} else if cp.Completed {
@@ -341,6 +355,9 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 					Name:       call.Function.Name,
 					Result:     cp.Data,
 				})
+				if cp.RejectedPath != "" {
+					lastRejectedResult = len(results) - 1
+				}
 				hasValidResult = true
 			} else {
 				results = append(results, tool.ToolCallResult{
@@ -353,6 +370,14 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 		if taskCompleted {
 			return true, StopNone, nil
+		}
+		if pathRecovery.ready() && lastRejectedResult >= 0 {
+			recoveryResult := r.recoverInvalidPaths(ctx, pathRecovery)
+			results[lastRejectedResult].Result += "\n\n" + recoveryResult
+			pathRecovery.finishBatch()
+		}
+		if roundOnlyRejected && rejectedCalls > 0 && pathRecovery.refundRound() {
+			toolReqCount++
 		}
 		if !hasValidResult {
 			consecutiveEmptyRounds++
@@ -656,13 +681,25 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 
 	if err != nil {
 		telemetry.PrintToolCallError(t.Name(), err)
-		return tool.Of(fmt.Sprintf("Error executing tool %s: %v", t.Name(), err))
+		return checkpointForToolError(t.Name(), err)
 	}
 	telemetry.PrintToolCallFinished(t.Name(), dur)
 	if rec != nil {
 		rec.AddToolResult(t.Name(), call.Function.Arguments, result)
 	}
+	if t == tool.FileRead {
+		return tool.ReadSuccess(result)
+	}
 	return tool.Of(result)
+}
+
+func checkpointForToolError(name string, err error) tool.TaskCheckpoint {
+	data := fmt.Sprintf("Error executing tool %s: %v", name, err)
+	var pathErr *tool.PathNotAtRefError
+	if name == tool.FileRead.Name() && errors.As(err, &pathErr) {
+		return tool.RejectPath(data, pathErr.Path)
+	}
+	return tool.Of(data)
 }
 
 // addNextMessage extends the conversation with the assistant message and

@@ -12,9 +12,11 @@ type ToolCallResult struct {
 
 // TaskCheckpoint signals terminal completion or failure, or carries data back to the LLM.
 type TaskCheckpoint struct {
-	Data      string
-	Completed bool
-	Failed    bool
+	Data          string
+	Completed     bool
+	Failed        bool
+	ReadSucceeded bool
+	RejectedPath  string
 }
 
 // Complete returns a checkpoint signaling task completion.
@@ -25,6 +27,14 @@ func Fail(data string) TaskCheckpoint { return TaskCheckpoint{Data: data, Failed
 
 // Of returns a checkpoint with data.
 func Of(data string) TaskCheckpoint { return TaskCheckpoint{Data: data, Completed: false} }
+
+// ReadSuccess returns a checkpoint containing a successful file_read result.
+func ReadSuccess(data string) TaskCheckpoint { return TaskCheckpoint{Data: data, ReadSucceeded: true} }
+
+// RejectPath returns a checkpoint for a deterministic file path rejection.
+func RejectPath(data, path string) TaskCheckpoint {
+	return TaskCheckpoint{Data: data, RejectedPath: path}
+}
 
 const CommentSucceed = "Successfully commented."
 const ToolNotFoundMsg = "Error: Tool not found. The tool you attempted to call does not exist or is not available. Please check the tool name and try again with a valid tool."
