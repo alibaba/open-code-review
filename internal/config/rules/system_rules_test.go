@@ -127,6 +127,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"jsonnet/kube-prometheus/components/grafana.libsonnet", "Late Binding"},
 		{"src/foo.R", "R Code Review Principles"},
 		{"analysis/plots.r", "R Code Review Principles"},
+		{"src/main.zig", "Illegal Behavior"},
+		{"build.zig", "Illegal Behavior"},
 	}
 
 	for _, tt := range tests {
