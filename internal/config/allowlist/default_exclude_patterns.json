@@ -21,7 +21,7 @@
   "**/test/**/*.lhs",
   "**/*Spec.lhs",
   "**/tests/**/*.nim",
-  "**/tests/**/*.r",
+  "**/tests/**/*.R",
   "**/__snapshots__/**",
   "**/*.snap",
   "**/testdata/**",
