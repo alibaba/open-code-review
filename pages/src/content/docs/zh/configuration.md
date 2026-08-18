@@ -42,6 +42,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | 名称 | 协议 | Base URL | API key 环境变量 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
+| `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
@@ -79,10 +80,53 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 配置的 `url` 优先于预设 Base URL。当 `providers.<name>.url` 未设置（或
 被清除）时，OCR 回退到预设默认值——因此只需在端点不同时才设置。
 
+### AWS Bedrock
+
+`bedrock` 使用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
+用标准 AWS 凭证链做 SigV4 签名，主机由区域决定。没有 `api_key` 需要设置，也不
+接受用它替代签名：
+
+```bash
+ocr config set provider                      bedrock
+ocr config set model                         us.anthropic.claude-sonnet-4-6
+ocr config set providers.bedrock.aws_region  us-west-2
+ocr config set providers.bedrock.aws_profile example-profile
+```
+
+| 字段 | 含义 |
+|---|---|
+| `providers.bedrock.aws_region` | 处理请求的 `bedrock-runtime` 主机所在区域。未设置时回退到 `AWS_REGION` 或当前 profile。 |
+| `providers.bedrock.aws_profile` | 解析凭证所用的具名 profile。未设置时回退到 `AWS_PROFILE` 或环境中的凭证链。 |
+
+两者都是可选的：不设置时由标准凭证链决定，与其他 AWS 工具一致。显式固定可以
+让运行结果可复现，无需先导出 `AWS_PROFILE`——在默认值不同的 CI runner 上尤为
+重要。
+
+模型标识符同时受账号**和**区域限制，因此 OCR 内置的列表只是起点，而非封闭集合：
+只要在你的账号中有效，推理配置文件 ID 或应用推理配置文件 ARN 即使不在列表中也
+会被接受。运行 `aws bedrock list-inference-profiles --region <region>` 可以查看
+账号提供了哪些；注意新系列不接受 `-v1:0` 这类版本后缀。
+
+bedrock 没有配置的 URL——主机由区域决定——所以 `ocr llm test` 显示区域和 profile
+而不是 URL：
+
+```
+Source: provider:bedrock
+Region: us-east-1
+Profile: example-profile
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+`llm.protocol` 和 `OCR_LLM_PROTOCOL` **不支持** bedrock。该配置块描述的是一个
+URL 加一个 token，没有地方放区域或 profile，而 bedrock 这两个值都不使用，因此
+会被明确拒绝，而不是接受后悄悄忽略。
+
 ### 自定义 provider
 
 任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`
-（`protocol` 取 `anthropic`、`openai` 或 `openai-responses`）：
+（`protocol` 取 `anthropic`、`openai`、`openai-responses` 或
+`anthropic-bedrock`）：
 
 ```bash
 ocr config set provider                             my-gateway
@@ -101,6 +145,18 @@ ocr config set custom_providers.openai-responses-gateway.url          https://ap
 ocr config set custom_providers.openai-responses-gateway.protocol     openai-responses
 ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
+```
+
+使用 `anthropic-bedrock` 协议的自定义 provider 不需要 `url`——主机由区域决定——
+并且可以使用与内置 provider 相同的 AWS 字段。第二个区域或 profile 就是这样拥有
+自己的条目的：
+
+```bash
+ocr config set provider                                bedrock-eu
+ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
+ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
+ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
+ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
 ```
 
 `url` 既可以填 API 的 Base URL，也可以填完整的 `/responses` 端点，OCR 会自动归一化处理。

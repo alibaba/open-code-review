@@ -45,6 +45,7 @@ environment variable.
 | Name | Protocol | Base URL | API key env var |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
+| `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
@@ -84,11 +85,58 @@ The configured `url` takes precedence over the preset Base URL. When
 `providers.<name>.url` is unset (or cleared), OCR falls back to the
 preset default — so you only need to set it when your endpoint differs.
 
+### AWS Bedrock
+
+`bedrock` speaks the same Messages API as `anthropic`, but requests are
+SigV4-signed from the standard AWS credential chain instead of carrying an API
+key, and the region decides the host. There is no `api_key` to set, and none is
+accepted as a substitute for a signature:
+
+```bash
+ocr config set provider                      bedrock
+ocr config set model                         us.anthropic.claude-sonnet-4-6
+ocr config set providers.bedrock.aws_region  us-west-2
+ocr config set providers.bedrock.aws_profile example-profile
+```
+
+| Field | Meaning |
+|---|---|
+| `providers.bedrock.aws_region` | Region whose `bedrock-runtime` host serves the request. Falls back to `AWS_REGION` or the active profile. |
+| `providers.bedrock.aws_profile` | Named profile to resolve credentials from. Falls back to `AWS_PROFILE` or the ambient chain. |
+
+Both fields are optional: left unset, the standard chain decides, as with any
+other AWS tool. Pinning them makes a run reproducible without exporting
+`AWS_PROFILE` first, which matters most on CI runners carrying a different
+default.
+
+Model identifiers are scoped to an account **and** a region, so the list OCR
+ships is a starting point rather than a closed set — an inference profile ID or
+an application inference profile ARN valid for your account is accepted even
+when absent from it. Run `aws bedrock list-inference-profiles --region <region>`
+to see what an account offers; a version suffix such as `-v1:0` is invalid for
+the newer families.
+
+`ocr llm test` reports the region and profile in place of a URL, because bedrock
+has no configured URL — the region decides the host:
+
+```
+Source: provider:bedrock
+Region: us-east-1
+Profile: example-profile
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+Bedrock is **not** available through `llm.protocol` or `OCR_LLM_PROTOCOL`. That
+block describes one URL and one token, has nowhere to put a region or a profile,
+and bedrock uses neither value it does carry, so the combination is rejected
+rather than accepted and ignored.
+
 ### Custom providers
 
 Any provider name not in the table above is treated as custom and must
 supply at least `url` and `protocol` (`protocol` is `anthropic`,
-`openai`, or `openai-responses`):
+`openai`, `openai-responses`, or `anthropic-bedrock`):
 
 ```bash
 ocr config set provider                             my-gateway
@@ -107,6 +155,18 @@ ocr config set custom_providers.openai-responses-gateway.url          https://ap
 ocr config set custom_providers.openai-responses-gateway.protocol     openai-responses
 ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
+```
+
+A custom provider on the `anthropic-bedrock` protocol needs no `url` — the
+region decides the host — and takes the same AWS fields as the built-in. This is
+how a second region or profile gets its own entry:
+
+```bash
+ocr config set provider                                bedrock-eu
+ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
+ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
+ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
+ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
 ```
 
 The `url` can be either the API base URL or the full `/responses` endpoint — OCR normalizes it either way.

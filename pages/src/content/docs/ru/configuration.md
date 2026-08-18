@@ -48,6 +48,7 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 | Имя | Протокол | Базовый URL | Переменная окружения для API-ключа |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
+| `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
@@ -89,12 +90,59 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 предустановленному значению по умолчанию — поэтому его нужно задавать только
 когда ваша конечная точка отличается.
 
+### AWS Bedrock
+
+`bedrock` использует тот же Messages API, что и `anthropic`, но запросы
+подписываются по SigV4 из стандартной цепочки учётных данных AWS вместо
+передачи API-ключа, а хост определяется регионом. Задавать `api_key` не нужно,
+и он не принимается как замена подписи:
+
+```bash
+ocr config set provider                      bedrock
+ocr config set model                         us.anthropic.claude-sonnet-4-6
+ocr config set providers.bedrock.aws_region  us-west-2
+ocr config set providers.bedrock.aws_profile example-profile
+```
+
+| Поле | Значение |
+|---|---|
+| `providers.bedrock.aws_region` | Регион, чей хост `bedrock-runtime` обслуживает запрос. По умолчанию — `AWS_REGION` или активный профиль. |
+| `providers.bedrock.aws_profile` | Именованный профиль для получения учётных данных. По умолчанию — `AWS_PROFILE` или окружающая цепочка. |
+
+Оба поля необязательны: если они не заданы, выбор делает стандартная цепочка,
+как и для любого другого инструмента AWS. Явная фиксация делает запуск
+воспроизводимым без предварительного экспорта `AWS_PROFILE` — это особенно
+важно на CI-раннерах с другим значением по умолчанию.
+
+Идентификаторы моделей привязаны к аккаунту **и** к региону, поэтому список,
+который поставляется с OCR, — отправная точка, а не закрытый набор: подходящий
+для вашего аккаунта ID inference-профиля или ARN прикладного inference-профиля
+принимается, даже если его нет в списке. Выполните
+`aws bedrock list-inference-profiles --region <region>`, чтобы увидеть, что
+доступно в аккаунте; суффикс версии вроде `-v1:0` недопустим для новых семейств.
+
+`ocr llm test` показывает регион и профиль вместо URL, потому что у bedrock нет
+настроенного URL — хост определяется регионом:
+
+```
+Source: provider:bedrock
+Region: us-east-1
+Profile: example-profile
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+Через `llm.protocol` и `OCR_LLM_PROTOCOL` bedrock **недоступен**. Этот блок
+описывает один URL и один токен, в нём негде указать регион или профиль, а сами
+эти значения bedrock не использует, поэтому такая комбинация отклоняется, а не
+принимается и молча игнорируется.
+
 ### Пользовательские провайдеры
 
 Любое имя провайдера, которого нет в таблице выше, считается
 пользовательским. Для него необходимо задать как минимум `url` и `protocol`
-(`protocol` может принимать значения `anthropic`, `openai` или
-`openai-responses`):
+(`protocol` может принимать значения `anthropic`, `openai`,
+`openai-responses` или `anthropic-bedrock`):
 
 ```bash
 ocr config set provider                             my-gateway
@@ -113,6 +161,18 @@ ocr config set custom_providers.openai-responses-gateway.url          https://ap
 ocr config set custom_providers.openai-responses-gateway.protocol     openai-responses
 ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
+```
+
+Пользовательскому провайдеру на протоколе `anthropic-bedrock` не нужен `url` —
+хост определяется регионом, — и он принимает те же поля AWS, что и встроенный.
+Так второй регион или профиль получает собственную запись:
+
+```bash
+ocr config set provider                                bedrock-eu
+ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
+ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
+ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
+ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
 ```
 
 В качестве `url` можно указать как базовый URL API, так и полный эндпоинт
