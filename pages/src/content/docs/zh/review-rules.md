@@ -160,6 +160,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.jl` | `julia.md`——Julia 源代码。 |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md`——Terraform / HCL。 |
 | `**/*.bicep` | `bicep.md`——Bicep（Azure）模板。 |
+| `**/*.{mojo,🔥}` | `mojo.md` - Mojo 源代码。 |
 | *(fallback)* | `default.md` |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。
