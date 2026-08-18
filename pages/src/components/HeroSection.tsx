@@ -518,13 +518,16 @@ const HeroSection: React.FC = () => {
               }}
             >
               <span
+                className="command-scroll"
                 style={{
+                  flex: 1,
+                  minWidth: 0,
                   fontSize: 13,
                   fontFamily: 'Menlo, monospace',
                   color: 'rgba(255,255,255,0.85)',
                   whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
+                  overflowX: 'auto',
+                  overflowY: 'hidden',
                 }}
               >
                 {activeChannel.cmd}

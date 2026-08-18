@@ -167,9 +167,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
+| `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.py` | `python.md` — исходный код Python. |
+| `**/*.{py,ipynb}` | `python.md` — исходный код Python. |
 | `**/*.{php,phtml}` | `php.md` — исходный код PHP и шаблоны PHP. |
 | `**/*.proto` | `protobuf.md` — совместимость Protocol Buffers на уровне wire. |
 | `**/*.po` | `po.md` — исходные каталоги переводов gettext. |
@@ -179,6 +180,10 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.jl` | `julia.md` — исходный код Julia. |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
 | `**/*.bicep` | `bicep.md` — шаблоны Bicep (Azure). |
+| `**/*.elm` | `elm.md` - исходный код Elm. |
+| `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet. |
+| `**/*.thrift` | `thrift.md` — совместимость Apache Thrift IDL на уровне wire. |
+| `**/*.capnp` | `capnp.md` — совместимость схем Cap'n Proto на уровне wire. |
 | `**/*.{mojo,🔥}` | `mojo.md` - исходный код Mojo. |
 | *(fallback)* | `default.md` |
 

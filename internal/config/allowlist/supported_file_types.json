@@ -49,6 +49,7 @@
   ".ftlx",
   ".astro",
   ".vue",
+  ".ipynb",
   ".svelte",
   ".xml",
   ".yaml",
@@ -89,6 +90,11 @@
   ".properties",
   ".po",
   ".pot",
+  ".jsonnet",
+  ".libsonnet",
+  ".zig",
+  ".thrift",
+  ".capnp",
   ".mojo",
   ".🔥"
 ]
