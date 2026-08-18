@@ -81,13 +81,13 @@ curl -fsSL https://open-codereview.ai/install.sh | sh
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | 放置 `ocr` 二进制的位置。 |
 | `OCR_VERSION` | 最新 release | 固定到某个 release tag（如 `v1.2.3`）。 |
-| `OCR_GITHUB_MIRROR` | （未设置） | 通过 GitHub 镜像域名下载 release 二进制（如 `gh-proxy.com`）。 |
+| `OCR_GITHUB_MIRROR` | （未设置） | 通过 GitHub 镜像域名下载 release 二进制及其校验和（如 `gh-proxy.com`）。 |
 
 该脚本支持 `darwin` 与 `linux` 的 `amd64` / `arm64`。
 
 #### 使用 GitHub 镜像
 
-在部分网络访问 GitHub 较慢的地区，可设置 `OCR_GITHUB_MIRROR` 为某个镜像域名，通过它下载二进制：
+在部分网络访问 GitHub 较慢的地区，可设置 `OCR_GITHUB_MIRROR` 为某个镜像域名，通过它下载 release 二进制及其校验和：
 
 ```bash
 export OCR_GITHUB_MIRROR='YOUR_MIRROR_DOMAIN'
@@ -97,13 +97,13 @@ export OCR_GITHUB_MIRROR='YOUR_MIRROR_DOMAIN'
 `https://<镜像>/github.com/alibaba/open-code-review/releases/download/<版本>/…`
 下载。域名替换型镜像（例如把 `github.com` 重写为 `hub.example.org`）不匹配这种形式——请改用路径前缀型镜像。
 
-镜像仅覆盖二进制下载。版本解析（当未设置 `OCR_VERSION` 时）仍会直接调用 GitHub API，而 `sha256sum.txt` 校验和始终从 GitHub 获取，而非镜像。要完全跳过版本解析，请固定版本：
+镜像同时覆盖 release 二进制及其 `sha256sum.txt` 校验和。版本解析（当未设置 `OCR_VERSION` 时）仍会直接调用 GitHub API，而非镜像。要完全跳过版本解析，请固定版本：
 
 ```bash
 export OCR_VERSION='v1.2.3'
 ```
 
-> **安全提示：** 镜像是第三方服务，二进制会从它下载。为保留完整性保证，`sha256sum.txt` 始终直接从 GitHub 获取——被篡改的二进制将无法通过校验和检查。如果 GitHub 不可达，安装脚本会回退到从镜像获取校验和文件并打印警告；此时请对照 [releases 页面](https://github.com/alibaba/open-code-review/releases) 上的上游 `sha256sum.txt` 进行核对。
+> **安全提示：** 镜像是第三方服务，设置 `OCR_GITHUB_MIRROR` 后，二进制及其 `sha256sum.txt` 都会从该镜像下载。这意味着恶意镜像可以同时提供被篡改的二进制和与之匹配的校验和，因此镜像模式下完整性保证不再成立。如果无法信任该镜像，请对照 [releases 页面](https://github.com/alibaba/open-code-review/releases) 上的上游 `sha256sum.txt` 验证下载文件。
 
 在 Windows（PowerShell 5.1+）上，请改用 PowerShell 安装脚本：
 

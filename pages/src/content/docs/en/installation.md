@@ -85,14 +85,14 @@ It honours three environment variables:
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | Where to place the `ocr` binary. |
 | `OCR_VERSION` | latest release | Pin a specific release tag (e.g. `v1.2.3`). |
-| `OCR_GITHUB_MIRROR` | *(unset)* | Download the release binary through a GitHub mirror domain (e.g. `gh-proxy.com`). |
+| `OCR_GITHUB_MIRROR` | *(unset)* | Download the release binary and its checksum through a GitHub mirror domain (e.g. `gh-proxy.com`). |
 
 The script supports `darwin` and `linux` on `amd64` / `arm64`.
 
 #### Using a GitHub mirror
 
 In regions where network access to GitHub is slow, set `OCR_GITHUB_MIRROR`
-to a mirror domain to download the binary through it:
+to a mirror domain to download the release binary and its checksum through it:
 
 ```bash
 export OCR_GITHUB_MIRROR='YOUR_MIRROR_DOMAIN'
@@ -105,22 +105,22 @@ prefix* mirror: the binary is fetched from
 Domain-substitution mirrors (e.g. one that rewrites `github.com` to
 `hub.example.org`) won't match this shape — use a path-prefix mirror instead.
 
-The mirror only covers the binary download. Version resolution (when
-`OCR_VERSION` is unset) still calls the GitHub API directly, and the
-`sha256sum.txt` checksum is always fetched from GitHub, not the mirror. To
-skip version resolution entirely, pin a version:
+The mirror covers both the release binary and its `sha256sum.txt` checksum.
+Version resolution (when `OCR_VERSION` is unset) still calls the GitHub API
+directly, not the mirror. To skip version resolution entirely, pin a version:
 
 ```bash
 export OCR_VERSION='v1.2.3'
 ```
 
-> **Security note:** The mirror is a third-party service, so the binary is
-> downloaded from it. To keep the integrity guarantee, `sha256sum.txt` is
-> fetched directly from GitHub — a tampered binary will fail the checksum
-> check. If GitHub is unreachable, the installer falls back to the mirror for
-> the checksum file and prints a warning; in that case verify against the
-> upstream `sha256sum.txt` on the
-> [releases page](https://github.com/alibaba/open-code-review/releases).
+> **Security note:** The mirror is a third-party service, so when
+> `OCR_GITHUB_MIRROR` is set both the binary and its `sha256sum.txt` are
+> downloaded from it. A malicious mirror can therefore serve a tampered
+> binary together with a matching checksum; the integrity guarantee does not
+> apply in mirror mode. Verify the downloaded file against the upstream
+> `sha256sum.txt` on the
+> [releases page](https://github.com/alibaba/open-code-review/releases)
+> if you cannot trust the mirror.
 
 On Windows (PowerShell 5.1+), use the PowerShell installer instead:
 

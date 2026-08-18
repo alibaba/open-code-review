@@ -83,13 +83,13 @@ curl -fsSL https://open-codereview.ai/install.sh | sh
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | `ocr` バイナリを配置する場所。 |
 | `OCR_VERSION` | 最新 release | 特定の release tag に固定します（例：`v1.2.3`）。 |
-| `OCR_GITHUB_MIRROR` | （未設定） | GitHub ミラードメイン経由でリリースバイナリをダウンロードします（例：`gh-proxy.com`）。 |
+| `OCR_GITHUB_MIRROR` | （未設定） | GitHub ミラードメイン経由でリリースバイナリとそのチェックサムをダウンロードします（例：`gh-proxy.com`）。 |
 
 このスクリプトは `darwin` と `linux` の `amd64` / `arm64` をサポートします。
 
 #### GitHub ミラーを使用する
 
-一部の地域では GitHub へのネットワークアクセスが遅いため、`OCR_GITHUB_MIRROR` にミラードメインを設定すると、バイナリをミラー経由でダウンロードできます：
+一部の地域では GitHub へのネットワークアクセスが遅いため、`OCR_GITHUB_MIRROR` にミラードメインを設定すると、リリースバイナリとそのチェックサムをミラー経由でダウンロードできます：
 
 ```bash
 export OCR_GITHUB_MIRROR='YOUR_MIRROR_DOMAIN'
@@ -99,13 +99,13 @@ export OCR_GITHUB_MIRROR='YOUR_MIRROR_DOMAIN'
 `https://<ミラー>/github.com/alibaba/open-code-review/releases/download/<バージョン>/…`
 から取得されます。ドメイン置換型ミラー（例：`github.com` を `hub.example.org` に書き換えるもの）はこの形式に一致しません——パスプレフィックス型のミラーを使用してください。
 
-ミラーがカバーするのはバイナリのダウンロードのみです。バージョン解決（`OCR_VERSION` が未設定の場合）は引き続き GitHub API を直接呼び出し、`sha256sum.txt` のチェックサムは常にミラーではなく GitHub から取得されます。バージョン解決を完全にスキップするには、バージョンを固定してください：
+ミラーはリリースバイナリとその `sha256sum.txt` チェックサムの両方をカバーします。バージョン解決（`OCR_VERSION` が未設定の場合）は引き続きミラーではなく GitHub API を直接呼び出します。バージョン解決を完全にスキップするには、バージョンを固定してください：
 
 ```bash
 export OCR_VERSION='v1.2.3'
 ```
 
-> **セキュリティ上の注意：** ミラーは第三者のサービスであるため、バイナリはそこからダウンロードされます。完全性の保証を保つため、`sha256sum.txt` は常に GitHub から直接取得されます——改ざんされたバイナリはチェックサム検証に失敗します。GitHub に到達できない場合、インストーラーはチェックサムファイルをミラーから取得するようフォールバックし、警告を表示します。その場合は [releases ページ](https://github.com/alibaba/open-code-review/releases) のアップストリームの `sha256sum.txt` で検証してください。
+> **セキュリティ上の注意：** ミラーは第三者のサービスであるため、`OCR_GITHUB_MIRROR` を設定するとバイナリとその `sha256sum.txt` の両方がミラーからダウンロードされます。つまり、悪意のあるミラーは改ざんされたバイナリと一致するチェックサムを同時に配布できます。そのため、ミラーモードでは完全性の保証はありません。ミラーを信頼できない場合は、[releases ページ](https://github.com/alibaba/open-code-review/releases) のアップストリームの `sha256sum.txt` と照合して検証してください。
 
 Windows（PowerShell 5.1+）では、代わりに PowerShell インストーラーを使用してください：
 
