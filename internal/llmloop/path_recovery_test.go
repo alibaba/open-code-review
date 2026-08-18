@@ -6,10 +6,10 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -18,6 +18,20 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
+
+type flakyFileFindProvider struct {
+	calls int
+}
+
+func (p *flakyFileFindProvider) Tool() tool.Tool { return tool.FileFind }
+
+func (p *flakyFileFindProvider) Execute(_ context.Context, _ map[string]any) (string, error) {
+	p.calls++
+	if p.calls == 1 {
+		return "", errors.New("temporary file_find failure")
+	}
+	return "config/project.yaml", nil
+}
 
 func setupPathRecoveryRepo(t *testing.T) (string, string) {
 	t.Helper()
@@ -95,13 +109,15 @@ func mustJSONQuote(value string) string {
 	return string(data)
 }
 
-func newPathRecoveryRunner(t *testing.T, client *fakeClient, maxRounds int) *Runner {
+func newPathRecoveryRunner(t *testing.T, client *fakeClient, maxRounds int) (*Runner, *tool.CommentCollector) {
 	t.Helper()
 	dir, commit := setupPathRecoveryRepo(t)
 	fr := &tool.FileReader{RepoDir: dir, Mode: tool.ModeCommit, Ref: commit}
+	collector := tool.NewCommentCollector()
 	reg := tool.NewRegistry()
 	reg.Register(tool.NewFileRead(fr))
 	reg.Register(tool.NewFileFind(fr))
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	reg.Freeze()
 	return NewRunner(Deps{
 		LLMClient:        client,
@@ -109,47 +125,31 @@ func newPathRecoveryRunner(t *testing.T, client *fakeClient, maxRounds int) *Run
 		Template:         template.Template{MaxTokens: 100000, MaxToolRequestTimes: maxRounds},
 		Tools:            reg,
 		MainToolDefs:     pathRecoveryToolDefs(),
-		CommentCollector: tool.NewCommentCollector(),
+		CommentCollector: collector,
 		Session:          session.New(dir, commit, "fake", session.SessionOptions{}),
-	})
+	}), collector
 }
 
 func pathRecoveryToolDefs() []llm.ToolDef {
 	return []llm.ToolDef{
 		{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
 		{Type: "function", Function: llm.FunctionDef{Name: "file_find"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
 		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
 	}
 }
 
 func TestRunPerFile_RecoversCandidatesAfterRepeatedMissingPath(t *testing.T) {
-	dir, commit := setupPathRecoveryRepo(t)
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		fileReadToolCallResponse("call_1", `{"file_path":"DOC/cloud/project.yct"}`),
 		fileReadToolCallResponse("call_2", `{"file_path":"DOC/cloud/project.yct"}`),
 		fileReadToolCallResponse("call_3", `{"file_path":"DOC/cloud/project.yct"}`),
+		fileReadToolCallResponse("call_4", `{"file_path":"config/project.yaml"}`),
+		codeCommentResponse("", ""),
 		taskDoneResponse(),
 	}}
-
-	fr := &tool.FileReader{RepoDir: dir, Mode: tool.ModeCommit, Ref: commit}
-	reg := tool.NewRegistry()
-	reg.Register(tool.NewFileRead(fr))
-	reg.Register(tool.NewFileFind(fr))
-	reg.Freeze()
-	defs := []llm.ToolDef{
-		{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
-		{Type: "function", Function: llm.FunctionDef{Name: "file_find"}},
-		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
-	}
-	runner := NewRunner(Deps{
-		LLMClient:        client,
-		Model:            "fake",
-		Template:         template.Template{MaxTokens: 100000, MaxToolRequestTimes: 3},
-		Tools:            reg,
-		MainToolDefs:     defs,
-		CommentCollector: tool.NewCommentCollector(),
-		Session:          session.New(dir, commit, "fake", session.SessionOptions{}),
-	})
+	defs := pathRecoveryToolDefs()
+	runner, collector := newPathRecoveryRunner(t, client, 3)
 
 	completed, stop, err := runner.RunPerFile(
 		context.Background(),
@@ -162,18 +162,22 @@ func TestRunPerFile_RecoversCandidatesAfterRepeatedMissingPath(t *testing.T) {
 	if !completed || stop != StopNone {
 		t.Fatalf("RunPerFile completed=%t stop=%v, want completed with StopNone", completed, stop)
 	}
-	if client.calls != 4 {
-		t.Fatalf("LLM calls = %d, want 4", client.calls)
+	if client.calls != 6 {
+		t.Fatalf("LLM calls = %d, want 3 rejected reads, a valid read, a comment, and task_done", client.calls)
 	}
 
-	lastRequest := client.requests[3]
+	validReadRequest := client.requests[3]
 	var history strings.Builder
-	for i := range lastRequest.Messages {
-		history.WriteString(lastRequest.Messages[i].ExtractText())
+	for i := range validReadRequest.Messages {
+		history.WriteString(validReadRequest.Messages[i].ExtractText())
 		history.WriteByte('\n')
 	}
 	if !strings.Contains(history.String(), "config/project.yaml") {
 		t.Fatalf("recovery history does not contain candidate path:\n%s", history.String())
+	}
+	comments := collector.Comments()
+	if len(comments) != 1 || comments[0].Path != "config/project.yaml" {
+		t.Fatalf("comments = %+v, want one finding on the reviewed file", comments)
 	}
 	for i, req := range client.requests {
 		if len(req.Tools) != len(defs) {
@@ -196,7 +200,7 @@ func TestRunPerFile_RecoversInventedDeletedAndRenamedPaths(t *testing.T) {
 		),
 		taskDoneResponse(),
 	}}
-	runner := newPathRecoveryRunner(t, client, 1)
+	runner, _ := newPathRecoveryRunner(t, client, 1)
 
 	completed, stop, err := runner.RunPerFile(
 		context.Background(),
@@ -242,7 +246,7 @@ func TestRunPerFile_SuccessfulReadResetsMissingPathBatch(t *testing.T) {
 		fileReadToolCallResponse("call_4", `{"file_path":"missing/three.go"}`),
 		taskDoneResponse(),
 	}}
-	runner := newPathRecoveryRunner(t, client, 5)
+	runner, _ := newPathRecoveryRunner(t, client, 5)
 
 	completed, stop, err := runner.RunPerFile(
 		context.Background(),
@@ -274,7 +278,7 @@ func TestRunPerFile_MissingPathRefundIsBounded(t *testing.T) {
 	}
 	responses = append(responses, taskDoneResponse())
 	client := &fakeClient{responses: responses}
-	runner := newPathRecoveryRunner(t, client, 2)
+	runner, _ := newPathRecoveryRunner(t, client, 2)
 
 	completed, stop, err := runner.RunPerFile(
 		context.Background(),
@@ -295,22 +299,30 @@ func TestRunPerFile_MissingPathRefundIsBounded(t *testing.T) {
 	}
 }
 
-func TestPathRecoveryQueries(t *testing.T) {
-	tests := []struct {
-		path string
-		want []string
-	}{
-		{path: `DOC\cloud\project.yct`, want: []string{"project.yct", "project"}},
-		{path: "old/settings.go", want: []string{"settings.go", "settings"}},
-		{path: "Dockerfile", want: []string{"Dockerfile"}},
-		{path: ".github/.env", want: []string{".env"}},
+func TestRecoverInvalidPathsDoesNotCacheFinderErrors(t *testing.T) {
+	finder := &flakyFileFindProvider{}
+	reg := tool.NewRegistry()
+	reg.Register(finder)
+	runner := NewRunner(Deps{Tools: reg})
+	state := newInvalidPathRecovery()
+
+	for range invalidPathRecoveryThreshold {
+		state.observe("missing/project.yaml")
 	}
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			got := pathRecoveryQueries(tt.path)
-			if !slices.Equal(got, tt.want) {
-				t.Fatalf("pathRecoveryQueries(%q) = %q, want %q", tt.path, got, tt.want)
-			}
-		})
+	first := runner.recoverInvalidPaths(context.Background(), state)
+	if !strings.Contains(first, "Candidate search failed") {
+		t.Fatalf("first recovery = %q, want search failure guidance", first)
+	}
+	if _, cached := state.candidateCache["missing/project.yaml"]; cached {
+		t.Fatal("failed candidate search must not be cached")
+	}
+
+	state.finishBatch()
+	for range invalidPathRecoveryThreshold {
+		state.observe("missing/project.yaml")
+	}
+	second := runner.recoverInvalidPaths(context.Background(), state)
+	if !strings.Contains(second, "config/project.yaml") || finder.calls != 2 {
+		t.Fatalf("second recovery = %q, calls = %d; want a fresh successful search", second, finder.calls)
 	}
 }

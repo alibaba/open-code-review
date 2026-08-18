@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -130,11 +131,12 @@ func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
 func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
-	if err := fr.ensurePathAtRef(ctx, path); err != nil {
+	gitPath := normalizeGitTreePath(path)
+	if err := fr.ensurePathAtRef(ctx, gitPath); err != nil {
 		return "", err
 	}
 
-	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
+	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + gitPath}
 	if fr.Runner != nil {
 		output, err := fr.Runner.Output(ctx, fr.RepoDir, args...)
 		if err != nil {
@@ -220,11 +222,12 @@ func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([
 }
 
 func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
-	if err := fr.ensurePathAtRef(ctx, path); err != nil {
+	gitPath := normalizeGitTreePath(path)
+	if err := fr.ensurePathAtRef(ctx, gitPath); err != nil {
 		return nil, 0, err
 	}
 
-	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
+	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + gitPath}
 
 	var collected []string
 	var totalLines int
@@ -264,6 +267,11 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, waitErr)
 	}
 	return collected, totalLines, nil
+}
+
+func normalizeGitTreePath(path string) string {
+	normalized := strings.ReplaceAll(path, `\`, "/")
+	return strings.TrimPrefix(pathpkg.Clean(normalized), "./")
 }
 
 // ensurePathAtRef checks the object before git show so an absent path is a

@@ -181,6 +181,24 @@ func TestReadLines_GitShow_MissingPathIsStructuralError(t *testing.T) {
 	}
 }
 
+func TestRead_GitShow_NormalizesEquivalentPaths(t *testing.T) {
+	dir := setupTestRepo(t)
+	commit := getHeadCommit(t, dir)
+	fr := &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit}
+
+	for _, path := range []string{"./hello.go", "pkg/../hello.go", `pkg\util.go`, "pkg//util.go"} {
+		t.Run(path, func(t *testing.T) {
+			content, err := fr.Read(context.Background(), path)
+			if err != nil {
+				t.Fatalf("Read(%q): %v", path, err)
+			}
+			if !strings.Contains(content, "package ") {
+				t.Fatalf("Read(%q) = %q, want Go source", path, content)
+			}
+		})
+	}
+}
+
 func TestReadLines_GitShow_InvalidRefIsNotMissingPath(t *testing.T) {
 	dir := setupTestRepo(t)
 	fr := &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: "not-a-real-ref"}

@@ -103,7 +103,12 @@ func (r *Runner) recoverInvalidPaths(ctx context.Context, state *invalidPathReco
 
 		candidates, cached := state.candidateCache[rejectedPath]
 		if !cached {
-			candidates = findPathCandidates(ctx, finder, rejectedPath)
+			var err error
+			candidates, err = findPathCandidates(ctx, finder, rejectedPath)
+			if err != nil {
+				out.WriteString("  Candidate search failed; continue reviewing the current diff.\n")
+				continue
+			}
 			state.candidateCache[rejectedPath] = candidates
 		}
 		if len(candidates) == 0 {
@@ -119,9 +124,9 @@ func (r *Runner) recoverInvalidPaths(ctx context.Context, state *invalidPathReco
 	return out.String()
 }
 
-func findPathCandidates(ctx context.Context, finder tool.Provider, rejectedPath string) []string {
+func findPathCandidates(ctx context.Context, finder tool.Provider, rejectedPath string) ([]string, error) {
 	if finder == nil {
-		return nil
+		return nil, nil
 	}
 	seen := make(map[string]struct{})
 	var candidates []string
@@ -131,7 +136,7 @@ func findPathCandidates(ctx context.Context, finder tool.Provider, rejectedPath 
 			"case_sensitive": false,
 		})
 		if err != nil {
-			return candidates
+			return nil, err
 		}
 		for _, line := range strings.Split(result, "\n") {
 			candidate := strings.TrimSpace(line)
@@ -152,5 +157,5 @@ func findPathCandidates(ctx context.Context, finder tool.Provider, rejectedPath 
 		}
 	}
 	sort.Strings(candidates)
-	return candidates
+	return candidates, nil
 }
