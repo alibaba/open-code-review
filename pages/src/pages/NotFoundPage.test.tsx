@@ -10,10 +10,11 @@ import { LanguageProvider } from '../i18n';
 import { en } from '../i18n/en';
 import { zh } from '../i18n/zh';
 import { ja } from '../i18n/ja';
+import { ko } from '../i18n/ko';
 import { ru } from '../i18n/ru';
 import type { Language, TranslationKeys } from '../i18n/types';
 
-const translations: Record<Language, TranslationKeys> = { en, zh, ja, ru };
+const translations: Record<Language, TranslationKeys> = { en, zh, ja, ko, ru };
 
 function installLocalStorageMock() {
   let store: Record<string, string> = {};

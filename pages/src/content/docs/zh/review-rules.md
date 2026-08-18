@@ -148,9 +148,10 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
+| `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.py` | `python.md`——Python 源代码。 |
+| `**/*.{py,ipynb}` | `python.md`——Python 源代码。 |
 | `**/*.{php,phtml}` | `php.md`——PHP 源代码和 PHP 模板。 |
 | `**/*.proto` | `protobuf.md`——Protocol Buffers 线协议兼容性。 |
 | `**/*.po` | `po.md`——gettext 翻译源目录。 |
@@ -160,6 +161,10 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.jl` | `julia.md`——Julia 源代码。 |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md`——Terraform / HCL。 |
 | `**/*.bicep` | `bicep.md`——Bicep（Azure）模板。 |
+| `**/*.elm` | `elm.md` - Elm 源代码。 |
+| `**/*.{jsonnet,libsonnet}` | `jsonnet.md`——Jsonnet 配置模板与库。 |
+| `**/*.thrift` | `thrift.md`——Apache Thrift IDL 线协议兼容性。 |
+| `**/*.capnp` | `capnp.md`——Cap'n Proto schema 线协议兼容性。 |
 | `**/*.{glsl,hlsl,wgsl,metal}` | `shader.md` - GLSL、HLSL、WGSL、Metal 着色器。 |
 | *(fallback)* | `default.md` |
 
