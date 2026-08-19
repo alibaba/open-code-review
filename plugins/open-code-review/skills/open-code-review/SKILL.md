@@ -28,46 +28,6 @@ materialize the plugin subtree.
 
 A skill for invoking [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`) — an open-source AI code review CLI that reads Git diffs and generates structured, line-level review comments.
 
-## Prerequisites check
-
-Before starting a review, verify the environment:
-
-```bash
-# 1. Check the CLI is installed
-which ocr || echo "NOT INSTALLED"
-
-# 2. Verify LLM connectivity
-ocr llm test
-```
-
-If `ocr` is not installed, install it first:
-
-```bash
-npm install -g @alibaba-group/open-code-review
-```
-
-If `ocr llm test` fails, the user must configure an LLM. Guide them with one of these options:
-
-**Option A — Environment variables (highest priority, recommended for CI):**
-
-```bash
-export OCR_LLM_URL=https://api.anthropic.com/v1/messages
-export OCR_LLM_TOKEN=<api-key>
-export OCR_LLM_MODEL=claude-opus-4-6
-export OCR_USE_ANTHROPIC=true
-```
-
-**Option B — Persistent config:**
-
-```bash
-ocr config set llm.url https://api.anthropic.com/v1/messages
-ocr config set llm.auth_token <api-key>
-ocr config set llm.model claude-opus-4-6
-ocr config set llm.use_anthropic true
-```
-
-Stop here and ask the user to provide credentials — never invent or hardcode API keys.
-
 ## Workflow
 
 ### Step 1: Gather Business Context
@@ -214,7 +174,7 @@ ocr rules check src/main/java/com/example/Foo.java
 
 ## Gotchas
 
-- **LLM must be configured first** — `ocr review` will fail loudly if no LLM is reachable. Always run `ocr llm test` before the first review.
+- **LLM must be configured first** — `ocr review` will fail loudly if no LLM is reachable. See the Troubleshooting section below if this happens.
 - **Working directory matters** — `ocr review` operates on the Git repo at the current directory. Use `--repo /path/to/repo` to run from elsewhere.
 - **Untracked files are reviewed in workspace mode** — running bare `ocr review` includes staged, unstaged, *and* untracked changes. Stage selectively if you want narrower scope.
 - **Large diffs may hit token limits** — files with very large diffs may be truncated. The default `MAX_TOKENS` is 58888 per request.
@@ -231,6 +191,40 @@ After the review completes, verify success by checking:
 3. Warnings (if any) are displayed in stderr
 
 If errors occurred, check the stderr warnings for details about which files failed and why.
+
+## Troubleshooting
+
+**`ocr: command not found`**
+
+Install the CLI:
+
+```bash
+npm install -g @alibaba-group/open-code-review
+```
+
+**`ocr review` fails with LLM connection error**
+
+The user must configure an LLM. Guide them with one of these options:
+
+**Option A — Environment variables (highest priority, recommended for CI):**
+
+```bash
+export OCR_LLM_URL=https://api.anthropic.com/v1/messages
+export OCR_LLM_TOKEN=<api-key>
+export OCR_LLM_MODEL=claude-opus-4-6
+export OCR_USE_ANTHROPIC=true
+```
+
+**Option B — Persistent config:**
+
+```bash
+ocr config set llm.url https://api.anthropic.com/v1/messages
+ocr config set llm.auth_token <api-key>
+ocr config set llm.model claude-opus-4-6
+ocr config set llm.use_anthropic true
+```
+
+Verify connectivity with `ocr llm test`. Stop here and ask the user to provide credentials — never invent or hardcode API keys.
 
 ## References
 
