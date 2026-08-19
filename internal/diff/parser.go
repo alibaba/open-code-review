@@ -35,6 +35,14 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	var diffs []model.Diff
 	var current *model.Diff
 	var buf strings.Builder
+	// Diff text may use CRLF line endings (core.autocrlf=true, or diffs
+	// captured on Windows). Strip a trailing "\r" left behind by splitting
+	// on "\n" alone so headers like "diff --git a/x b/y\r" and markers like
+	// "--- /dev/null\r" match cleanly instead of being treated as content
+	// or losing their file path / metadata significance.
+	for i, line := range lines {
+		lines[i] = strings.TrimSuffix(line, "\r")
+	}
 	// inHunk tracks whether the current line sits inside a "@@" hunk of the
 	// current file's section. Only hunk content lines carry a leading
 	// "+"/"-"/" " marker, so insertion/deletion counting and the binary

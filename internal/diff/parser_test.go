@@ -5,6 +5,8 @@ package diff
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -270,5 +272,47 @@ index 1234567..89abcde 100644
 	}
 	if d.Insertions != 1 {
 		t.Errorf("Insertions = %d, want 1", d.Insertions)
+	}
+}
+
+// TestParseDiffText_CRLFLineEndings guards against issue #933: when the diff
+// text uses CRLF ("\r\n") line endings (e.g. core.autocrlf=true, or diffs
+// captured on Windows), splitting on "\n" alone leaves a trailing "\r" on
+// every line. That stray "\r" was polluting NewPath (breaking the on-disk
+// read in finalizeDiff), and defeating the "--- /dev/null" / "+++ /dev/null"
+// exact-string checks used to detect new/deleted files.
+func TestParseDiffText_CRLFLineEndings(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoDir, "fresh.go"), []byte("line1\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	diffText := "diff --git a/fresh.go b/fresh.go\r\n" +
+		"new file mode 100644\r\n" +
+		"index 0000000..1234567\r\n" +
+		"--- /dev/null\r\n" +
+		"+++ b/fresh.go\r\n" +
+		"@@ -0,0 +1,1 @@\r\n" +
+		"+line1\r\n"
+
+	diffs, err := ParseDiffText(context.Background(), diffText, repoDir, "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	d := diffs[0]
+	if d.NewPath != "fresh.go" {
+		t.Errorf("NewPath = %q, want %q (trailing \r must be stripped)", d.NewPath, "fresh.go")
+	}
+	if !d.IsNew {
+		t.Error("IsNew = false, want true (\"--- /dev/null\r\" must still match)")
+	}
+	if d.NewFileContent != "line1\n" {
+		t.Errorf("NewFileContent = %q, want %q (read must succeed against the clean path)", d.NewFileContent, "line1\n")
+	}
+	if strings.Contains(d.Diff, "\r") {
+		t.Errorf("stored diff text still contains \r:\n%q", d.Diff)
 	}
 }

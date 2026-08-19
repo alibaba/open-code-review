@@ -42,6 +42,13 @@ func ParseHunks(rawDiffText string) []Hunk {
 	var hunks []Hunk
 	var current *Hunk
 
+	// Strip a trailing "\r" left behind when the raw text uses CRLF line
+	// endings, so hunk headers and content lines match cleanly and
+	// HunkLine.Content does not retain a stray "\r".
+	for i, line := range lines {
+		lines[i] = strings.TrimSuffix(line, "\r")
+	}
+
 	for _, line := range lines {
 		if m := hunkHeaderRe.FindStringSubmatch(line); m != nil {
 			// Flush previous hunk

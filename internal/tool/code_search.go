@@ -99,7 +99,11 @@ func (p *CodeSearchProvider) buildGrepArgs(searchText string, caseSensitive bool
 }
 
 func hasTraversalPathComponent(pathspec string) bool {
-	for _, part := range strings.Split(pathspec, "/") {
+	// Check both separators: a pathspec may use Windows-style backslashes
+	// (e.g. "..\\secret") even on a non-Windows host, and splitting only on
+	// "/" would let such a component through unchecked.
+	normalized := strings.ReplaceAll(pathspec, "\\", "/")
+	for _, part := range strings.Split(normalized, "/") {
 		if part == ".." {
 			return true
 		}

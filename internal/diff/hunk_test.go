@@ -4,6 +4,7 @@
 package diff
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -119,5 +120,36 @@ new file mode 100644
 		if l.Type != HunkAdded {
 			t.Errorf("expected all lines to be HunkAdded, got %d", l.Type)
 		}
+	}
+}
+
+// TestParseHunks_CRLFLineEndings guards against issue #933: CRLF-terminated
+// diff text left a trailing "\r" on every split line, corrupting
+// HunkLine.Content and (via the header regex not matching a line ending in
+// "\r") potentially dropping hunk boundaries.
+func TestParseHunks_CRLFLineEndings(t *testing.T) {
+	raw := "diff --git a/handler.go b/handler.go\r\n" +
+		"--- a/handler.go\r\n" +
+		"+++ b/handler.go\r\n" +
+		"@@ -10,3 +10,3 @@\r\n" +
+		" ctx := r.Context()\r\n" +
+		"-log.Print(\"old\")\r\n" +
+		"+log.Printf(\"new\")"
+
+	hunks := ParseHunks(raw)
+	if len(hunks) != 1 {
+		t.Fatalf("expected 1 hunk, got %d", len(hunks))
+	}
+	h := hunks[0]
+	if len(h.Lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d", len(h.Lines))
+	}
+	for i, l := range h.Lines {
+		if strings.Contains(l.Content, "\r") {
+			t.Errorf("line[%d].Content = %q, must not retain a trailing \r", i, l.Content)
+		}
+	}
+	if h.Lines[2].Content != `log.Printf("new")` {
+		t.Errorf("line[2].Content = %q, want %q", h.Lines[2].Content, `log.Printf("new")`)
 	}
 }
