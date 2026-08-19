@@ -67,6 +67,8 @@ ocr review --audience agent --background "business context here" [user-args]
 - Always use `--audience agent` to suppress progress UI and emit only the final summary
 - **Prevent output truncation**: For large reviews or restricted tool environments, redirect output to a temporary file (`ocr review --audience agent ... > /tmp/ocr_out.txt 2>&1`) and inspect it in full via a file reading tool instead of piping through `tail` or `head`, which drops earlier review comments.
 
+**On failure:** If `ocr review` exits non-zero (e.g. an LLM connection error), do not retry blindly — consult the Troubleshooting section below for the matching fix before re-running.
+
 ### Step 3: Report
 
 OCR output includes structured `severity` (critical / high / medium / low) and `category` (bug / security / performance / maintainability / test / style / documentation / other) on each comment. Present results grouped by severity, discarding `low` severity items that are likely false positives or nitpicks.
