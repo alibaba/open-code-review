@@ -48,12 +48,11 @@ GitHub: https://github.com/alibaba/open-code-review
 ## 全局参数
 
 所有命令均可使用，且放在子命令前后皆可
-（`ocr --no-color review` 与 `ocr review --no-color` 等价）。
+（`ocr --color=never review` 与 `ocr review --color=never` 等价）。
 
 | 参数 | 默认值 | 说明 |
 |---|---|---|
 | `--color <auto\|always\|never>` | `auto` | 何时输出 ANSI 颜色。`auto` 仅在 stdout 是终端时着色，因此管道或重定向得到的是纯文本。`always` 会在管道中保留颜色（便于配合 `\| less -R`）。 |
-| `--no-color` | 关闭 | `--color=never` 的简写。 |
 
 当 stdout 不是终端时，文本输出始终为纯文本，因此可以安全地通过管道传递：
 
@@ -61,9 +60,7 @@ GitHub: https://github.com/alibaba/open-code-review
 ocr review --commit HEAD | gh issue comment 123 --body-file -
 ```
 
-`NO_COLOR`（任意非空值，遵循 [no-color.org](https://no-color.org)）和 `TERM=dumb`
-同样会关闭颜色。显式指定 `--color` 或 `--no-color` 时以参数为准：参数是针对单次
-调用的决定，而环境变量是长期偏好。
+`TERM=dumb` 同样会关闭颜色。
 
 ## 命令总览
 

@@ -20,12 +20,12 @@ func setColor(t *testing.T, on bool) {
 	t.Cleanup(func() { colorEnabled = prev })
 }
 
-// setColorFlags sets the flag-backed variables for one test and restores them.
-func setColorFlags(t *testing.T, mode string, never bool) {
+// setColorFlags sets the flag-backed variable for one test and restores it.
+func setColorFlags(t *testing.T, mode string) {
 	t.Helper()
-	prevMode, prevNever := colorMode, colorNeverFl
-	colorMode, colorNeverFl = mode, never
-	t.Cleanup(func() { colorMode, colorNeverFl = prevMode, prevNever })
+	prevMode := colorMode
+	colorMode = mode
+	t.Cleanup(func() { colorMode = prevMode })
 }
 
 func TestValidateColorMode(t *testing.T) {
@@ -56,23 +56,14 @@ func TestValidateColorMode(t *testing.T) {
 // regression from issue #682.
 func TestResolveColor(t *testing.T) {
 	tests := []struct {
-		name    string
-		mode    string
-		never   bool
-		noColor string // NO_COLOR value; "" means unset
-		term    string // TERM value; "" means unset
-		want    bool
+		name string
+		mode string
+		term string // TERM value; "" means unset
+		want bool
 	}{
 		{name: "auto into a pipe stays plain", mode: colorModeAuto, want: false},
 		{name: "never", mode: colorModeNever, want: false},
-		{name: "no-color flag", mode: colorModeAuto, never: true, want: false},
 		{name: "always overrides pipe", mode: colorModeAlways, want: true},
-		{name: "NO_COLOR disables auto", mode: colorModeAuto, noColor: "1", want: false},
-		{name: "NO_COLOR any value disables", mode: colorModeAuto, noColor: "0", want: false},
-		// A flag is a per-invocation decision, so it outranks the standing
-		// NO_COLOR preference.
-		{name: "always beats NO_COLOR", mode: colorModeAlways, noColor: "1", want: true},
-		{name: "no-color beats always", mode: colorModeAlways, never: true, want: false},
 		{name: "TERM=dumb disables auto", mode: colorModeAuto, term: "dumb", want: false},
 		{name: "TERM=dumb case-insensitive", mode: colorModeAuto, term: "DUMB", want: false},
 		{name: "always beats TERM=dumb", mode: colorModeAlways, term: "dumb", want: true},
@@ -80,8 +71,7 @@ func TestResolveColor(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setColorFlags(t, tt.mode, tt.never)
-			t.Setenv("NO_COLOR", tt.noColor)
+			setColorFlags(t, tt.mode)
 			t.Setenv("TERM", tt.term)
 			if got := resolveColor(); got != tt.want {
 				t.Errorf("resolveColor() = %v, want %v", got, tt.want)
@@ -115,9 +105,8 @@ func TestColorFlagsThroughRootCmd(t *testing.T) {
 		wantOn  bool // expected colorOn() after the run; stdout is not a TTY here
 	}{
 		{name: "default auto stays plain off a TTY", args: []string{"version"}, wantOn: false},
-		{name: "no-color before the subcommand", args: []string{"--no-color", "version"}, wantOn: false},
-		{name: "no-color after the subcommand", args: []string{"version", "--no-color"}, wantOn: false},
-		{name: "color=never", args: []string{"version", "--color=never"}, wantOn: false},
+		{name: "color=never before the subcommand", args: []string{"--color=never", "version"}, wantOn: false},
+		{name: "color=never after the subcommand", args: []string{"version", "--color=never"}, wantOn: false},
 		{name: "color=always forces color into a pipe", args: []string{"version", "--color=always"}, wantOn: true},
 		{
 			name:    "invalid value is rejected",
@@ -127,9 +116,8 @@ func TestColorFlagsThroughRootCmd(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setColorFlags(t, colorModeAuto, false)
+			setColorFlags(t, colorModeAuto)
 			setColor(t, false)
-			t.Setenv("NO_COLOR", "")
 			rootCmd.SetArgs(tt.args)
 			t.Cleanup(func() { rootCmd.SetArgs(nil) })
 
@@ -160,17 +148,15 @@ func TestColorFlagsThroughRootCmd(t *testing.T) {
 }
 
 func TestAddColorFlags(t *testing.T) {
-	// addColorFlags binds the shared flag variables and resets them to their
-	// defaults, so restore them for the rest of the package.
-	setColorFlags(t, colorMode, colorNeverFl)
+	// addColorFlags binds the shared flag variable and resets it to its
+	// default, so restore it for the rest of the package.
+	setColorFlags(t, colorMode)
 	cmd := &cobra.Command{Use: "test"}
 	addColorFlags(cmd)
-	for _, name := range []string{"color", "no-color"} {
-		if cmd.PersistentFlags().Lookup(name) == nil {
-			// Persistent so `ocr --no-color review` and `ocr review --no-color`
-			// behave identically.
-			t.Errorf("--%s is not registered as a persistent flag", name)
-		}
+	// Persistent so `ocr --color=never review` and `ocr review --color=never`
+	// behave identically.
+	if cmd.PersistentFlags().Lookup("color") == nil {
+		t.Error("--color is not registered as a persistent flag")
 	}
 	if def := cmd.PersistentFlags().Lookup("color").DefValue; def != colorModeAuto {
 		t.Errorf("--color default = %q, want %q", def, colorModeAuto)

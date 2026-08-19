@@ -49,12 +49,11 @@ GitHub: https://github.com/alibaba/open-code-review
 ## Global flags
 
 Available on every command, and accepted either before or after the subcommand
-(`ocr --no-color review` and `ocr review --no-color` are equivalent).
+(`ocr --color=never review` and `ocr review --color=never` are equivalent).
 
 | Flag | Default | What it does |
 |---|---|---|
 | `--color <auto\|always\|never>` | `auto` | When to emit ANSI color. `auto` colorizes only when stdout is a terminal, so piping or redirecting yields plain text. `always` keeps color through a pipe (useful for `\| less -R`). |
-| `--no-color` | off | Shorthand for `--color=never`. |
 
 Text output is plain whenever stdout is not a terminal, so it can be piped
 safely:
@@ -63,10 +62,7 @@ safely:
 ocr review --commit HEAD | gh issue comment 123 --body-file -
 ```
 
-`NO_COLOR` (any non-empty value, per [no-color.org](https://no-color.org)) and
-`TERM=dumb` also disable color. An explicit `--color` or `--no-color` flag
-overrides both, since a flag is a per-invocation decision while the environment
-variable is a standing preference.
+`TERM=dumb` also disables color.
 
 ## Command summary
 

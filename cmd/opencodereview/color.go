@@ -20,9 +20,8 @@ const (
 )
 
 var (
-	// colorMode holds the raw --color value; --no-color is a shorthand for never.
-	colorMode    = colorModeAuto
-	colorNeverFl bool
+	// colorMode holds the raw --color value.
+	colorMode = colorModeAuto
 
 	// colorEnabled is the resolved decision, assigned once flags are parsed.
 	// Its zero value is false, so any path that renders without going through a
@@ -30,13 +29,12 @@ var (
 	colorEnabled bool
 )
 
-// addColorFlags registers the color controls. They are persistent on the root
+// addColorFlags registers the color control. It is persistent on the root
 // command so every subcommand inherits identical behavior, and so
-// `ocr --no-color review` and `ocr review --no-color` are equivalent.
+// `ocr --color=never review` and `ocr review --color=never` are equivalent.
 func addColorFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(&colorMode, "color", colorModeAuto,
 		"when to emit ANSI color: auto (only when stdout is a terminal), always, or never")
-	cmd.PersistentFlags().BoolVar(&colorNeverFl, "no-color", false, "disable ANSI color output (same as --color=never)")
 	cmd.RegisterFlagCompletionFunc("color", completeEnum(colorModeAuto, colorModeAlways, colorModeNever))
 }
 
@@ -54,23 +52,16 @@ func validateColorMode(mode string) error {
 // resolveColor decides whether ANSI sequences may be written to stdout.
 //
 // Precedence, highest first:
-//  1. --no-color / --color=never  → off
-//  2. --color=always              → on, even into a pipe (for `| less -R`)
-//  3. NO_COLOR (any non-empty)    → off, per https://no-color.org
-//  4. TERM=dumb                   → off
-//  5. stdout is a terminal        → on, otherwise off
-//
-// Explicit flags outrank NO_COLOR because a flag is a per-invocation decision
-// while the environment variable is a standing preference.
+//  1. --color=never         → off
+//  2. --color=always        → on, even into a pipe (for `| less -R`)
+//  3. TERM=dumb              → off
+//  4. stdout is a terminal  → on, otherwise off
 func resolveColor() bool {
-	if colorNeverFl || colorMode == colorModeNever {
+	if colorMode == colorModeNever {
 		return false
 	}
 	if colorMode == colorModeAlways {
 		return true
-	}
-	if os.Getenv("NO_COLOR") != "" {
-		return false
 	}
 	if strings.EqualFold(os.Getenv("TERM"), "dumb") {
 		return false
