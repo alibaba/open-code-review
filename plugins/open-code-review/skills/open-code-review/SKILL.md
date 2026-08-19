@@ -65,6 +65,7 @@ ocr review --audience agent --background "business context here" [user-args]
 **Output mode:**
 
 - Always use `--audience agent` to suppress progress UI and emit only the final summary
+- **Prevent output truncation**: For large reviews or restricted tool environments, redirect output to a temporary file (`ocr review --audience agent ... > /tmp/ocr_out.txt 2>&1`) and inspect it in full via a file reading tool instead of piping through `tail` or `head`, which drops earlier review comments.
 
 ### Step 3: Report
 
@@ -176,6 +177,7 @@ ocr rules check src/main/java/com/example/Foo.java
 - **Plan phase triggers at 50 lines** — diffs exceeding 50 changed lines run an extra risk-analysis phase before main review. This adds latency but improves quality.
 - **Don't pass `--audience human`** — it streams progress UI that pollutes output. Always use `--audience agent`.
 - **Comment language follows config** — set `language` config to `English` or `Chinese` (default: Chinese) to control review comment language.
+- **Avoid output truncation** — Large review runs produce verbose output. Never pipe command output to `tail` or `head` as it drops review comments from earlier sections. Redirect output to a file and read it in full.
 
 ## Validation
 
