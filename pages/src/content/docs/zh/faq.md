@@ -315,4 +315,3 @@ OCR 不在 `~/.opencodereview` 之外写入（NPM 下载二进制除外），因
 - [评审规则](../review-rules/)——文件过滤器与规则解析链。
 - [会话查看器](../viewer/)——查看历史评审会话。
 - [遥测](../telemetry/)——token 用量与 LLM 指标。
-- [网站爬虫文件](https://open-codereview.ai/robots.txt) —— robots.txt 指令与 [sitemap.xml](https://open-codereview.ai/sitemap.xml)

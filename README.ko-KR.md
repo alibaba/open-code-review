@@ -182,7 +182,6 @@ ocr delegate rule src/main.go src/handler.go
 - [세션 뷰어](https://open-codereview.ai/docs/viewer) — 브라우저에서 리뷰 세션 탐색 및 재생
 - [텔레메트리](https://open-codereview.ai/docs/telemetry) — 관측성을 위한 OpenTelemetry 통합
 - [FAQ](https://open-codereview.ai/docs/faq) — 자주 묻는 질문과 문제 해결
-- [웹사이트 크롤러 파일](https://open-codereview.ai/robots.txt) — robots.txt 지시 사항 및 [sitemap.xml](https://open-codereview.ai/sitemap.xml)
 
 ## Contributing
 

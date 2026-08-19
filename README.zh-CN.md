@@ -182,7 +182,6 @@ ocr delegate rule src/main.go src/handler.go
 - [会话查看器](https://open-codereview.ai/docs/viewer) —— 在浏览器中浏览和回放评审会话
 - [遥测](https://open-codereview.ai/docs/telemetry) —— OpenTelemetry 集成，用于可观测性
 - [FAQ](https://open-codereview.ai/docs/faq) —— 常见问题与故障排查
-- [网站爬虫文件](https://open-codereview.ai/robots.txt) —— robots.txt 指令与 [sitemap.xml](https://open-codereview.ai/sitemap.xml)
 
 ## 贡献
 

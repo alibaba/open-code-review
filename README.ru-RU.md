@@ -182,7 +182,6 @@ ocr delegate rule src/main.go src/handler.go
 - [Просмотр сессий](https://open-codereview.ai/docs/viewer) — просмотр и воспроизведение сессий ревью в браузере
 - [Телеметрия](https://open-codereview.ai/docs/telemetry) — интеграция с OpenTelemetry для наблюдаемости
 - [FAQ](https://open-codereview.ai/docs/faq) — частые вопросы и устранение неполадок
-- [Файлы для поисковых роботов](https://open-codereview.ai/robots.txt) — директивы robots.txt и [sitemap.xml](https://open-codereview.ai/sitemap.xml)
 
 ## Участие в разработке
 

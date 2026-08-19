@@ -338,4 +338,3 @@ OCR は `~/.opencodereview` の外には書き込みません（NPM がダウン
 - [レビュールール](../review-rules/)——ファイルフィルターとルール解決チェーン。
 - [セッションビューア](../viewer/)——過去のレビューセッションを表示する。
 - [テレメトリ](../telemetry/)——token 使用量と LLM メトリクス。
-- [ウェブサイトのクローラーファイル](https://open-codereview.ai/robots.txt) — robots.txt の指示と [sitemap.xml](https://open-codereview.ai/sitemap.xml)
