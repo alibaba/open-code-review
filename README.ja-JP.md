@@ -181,7 +181,7 @@ ocr delegate rule src/main.go src/handler.go
 - [CI/CD 連携](https://open-codereview.ai/docs/cicd) — GitHub Actions、GitLab CI、GitFlic CI、Gerrit との統合
 - [セッションビューアー](https://open-codereview.ai/docs/viewer) — ブラウザでレビューセッションを閲覧・再生
 - [テレメトリー](https://open-codereview.ai/docs/telemetry) — 可観測性のためのOpenTelemetry統合
-- [FAQ](https://open-codereview.ai/docs/faq) — よくある質問とトラブルシューティング\
+- [FAQ](https://open-codereview.ai/docs/faq) — よくある質問とトラブルシューティング
 
 ## コントリビューション
 
