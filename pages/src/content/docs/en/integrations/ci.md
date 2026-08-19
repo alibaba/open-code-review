@@ -75,6 +75,13 @@ The upstream workflow lives at
   line info are folded into the summary body. If batch submission
   fails, it falls back to posting comments one-by-one and surfaces
   statistics in a summary comment.
+- When a run finds no issues and every selected item was reviewed
+  successfully, the posting step submits a formal **approve** review
+  (a GitHub Pull Request Review with state `APPROVE`) instead of a
+  summary comment. It never approves runs where nothing was selected,
+  coverage was partial, or the run failed, those still get the
+  summary comment. Disable with the `approve_on_clean: 'false'`
+  action input (enabled by default).
 
 ### Install
 

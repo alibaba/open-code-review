@@ -164,6 +164,7 @@ The action posts a summary issue comment plus inline review comments. Two inputs
 | `sticky_summary` | `'true'` | Update an existing summary comment in place instead of posting a new one each run. |
 | `incremental` | `'false'` | Only append inline comments whose `(path, line range)` does not overlap an existing bot review comment. History is never deleted (non-destructive). |
 | `incremental_overlap_threshold` | `'0.6'` | IoU threshold `incremental` uses to decide whether a multi-line comment overlaps an existing one. Two single-line comments match on the same line; single- vs multi-line never match. Ignored unless `incremental` is `'true'`. |
+| `approve_on_clean` | `'true'` | When a run finds no issues and every selected item was reviewed successfully, submit a formal GitHub `APPROVE` review instead of a summary comment. Never approves when nothing was selected, coverage was partial, or the run failed. Set `'false'` to always post the summary comment. |
 
 ```yaml
 - uses: alibaba/open-code-review@main
@@ -172,6 +173,8 @@ The action posts a summary issue comment plus inline review comments. Two inputs
     incremental: 'true'
     incremental_overlap_threshold: '0.75'
 ```
+
+> `approve_on_clean` replaces the `✅ Review complete` summary comment with a formal approval review on clean runs. For a review to count toward branch protection, the approving identity (by default `github-actions[bot]` with `GITHUB_TOKEN`) must be permitted by your branch protection rules.
 
 > `sticky_summary` and `incremental` must be quoted strings (`'true'`/`'false'`); the action compares them as strings, so an unquoted YAML boolean will not match.
 

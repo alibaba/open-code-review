@@ -44,6 +44,7 @@ sidebar:
   `/open-code-review` または `@open-code-review` で始まるもの）でトリガーします。後者はレビュアーが PR にコメントすることで OCR をオンデマンドで再実行できるようにします。（`pull_request` ではなく `pull_request_target` を使うことで、fork から提出された PR でも secret を利用できます。OCR は diff を読むだけで、PR 内のコードは実行しません。）
 - `npm install -g @alibaba-group/open-code-review` で OCR をインストールし、`ocr config set` で設定を書き込み、ブランチ区間モードで中核コマンドを実行します。
 - JSON の外殻を解析し、GitHub Pull Request Review API を通じて各発見をインラインのレビューコメントとして貼り付けます。行情報を持たないコメントはサマリー本文にまとめられます。一括送信が失敗した場合は 1 件ずつの貼り付けにフォールバックし、統計をサマリーコメントに表示します。
+- 問題が見つからず、選択されたすべての項目が正常にレビューされた場合、投稿ステップはサマリーコメントの代わりに正式な **approve** レビュー（状態 `APPROVE` の GitHub Pull Request Review）を提出します。何も選択されていない、カバレッジが部分的、または実行が失敗した場合は決して承認されず、代わりにサマリーコメントが投稿されます。`approve_on_clean: 'false'` アクション入力で無効にできます（デフォルトは有効）。
 
 ### インストール
 
