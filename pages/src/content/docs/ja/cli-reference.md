@@ -91,7 +91,7 @@ ocr r      [flags]   (alias)
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、ファイルごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
-| `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します。`agent` は stdout を静音化し、最終サマリー / JSON のみを出力します。 |
+| `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します（`--format` が `json`/`sarif` の場合は stderr に出力し、stdout は解析可能な単一ドキュメントのままになります）。`agent` は進捗行を完全に抑制し、最終サマリー / JSON のみを出力します。 |
 | `--background <text>` | `-b` | — | plan + main prompt に注入する、任意の要件 / 業務コンテキスト。 |
 | `--background-file <path>` | `-B` | — | レビューの背景として使用する Markdown ファイルのパス。`--background` も指定した場合は両方を結合します。 |
 | `--exclude <patterns>` | — | — | 除外する gitignore 形式のパターン（カンマ区切り）。`rule.json` の excludes とマージされます。 |
@@ -232,6 +232,18 @@ Concurrent map access without a lock — wrap with sync.RWMutex.
 ```bash
 ocr review --format json --audience agent
 ```
+
+JSON ドキュメントは常に stdout を単独で使用します。デフォルトの `--audience human`
+では、`[ocr]` 進捗行はレビュー実行中に **stderr** へストリーム出力されるため、長時間
+の実行を確認しながら stdout をそのままパーサーへパイプできます:
+
+```bash
+ocr review --format json > result.json   # 進捗は端末に表示されたままです
+ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメントです
+```
+
+進捗行を完全に取り除くには `--audience agent` を、シェル側で破棄するには
+`2>/dev/null` を使用してください。
 
 ```json
 {

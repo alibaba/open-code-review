@@ -26,7 +26,7 @@ class RunOcrReviewTests(unittest.TestCase):
         self.assertEqual(result, {"comments": []})
         run_mock.assert_called_once()
         cmd = run_mock.call_args[0][0]
-        self.assertEqual(cmd, ["ocr", "review", "--format", "json"])
+        self.assertEqual(cmd, ["ocr", "review", "--audience", "agent", "--format", "json"])
 
     def test_from_to_ref_are_passed_through(self):
         fake_proc = mock.Mock(returncode=0, stdout='{"comments": []}', stderr="")
