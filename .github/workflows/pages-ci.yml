@@ -45,6 +45,10 @@ jobs:
         working-directory: pages
         run: npm run build
 
+      - name: Validate sitemap
+        working-directory: pages
+        run: node scripts/validate-sitemap.cjs public/sitemap.xml
+
       - name: Smoke test
         working-directory: pages
         run: |
