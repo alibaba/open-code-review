@@ -43,7 +43,11 @@ main() {
   fi
 
   asset="${ASSET_PREFIX}-${os}-${arch}"
-  prefix="$(printf '%s' "${OCR_GITHUB_MIRROR:-}" | tr -d '[:space:]')"
+  prefix="$(printf '%s' "${OCR_GITHUB_MIRROR:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  prefix="${prefix#https://}"
+  prefix="${prefix#http://}"
+  prefix="${prefix%/}"
+  case "$prefix" in *[[:space:]]*) err "OCR_GITHUB_MIRROR contains spaces: '$prefix'" ;; esac
   if [ -n "$prefix" ]; then
     printf 'warning: downloading from unofficial GitHub mirror "%s" (checksum integrity is not guaranteed)\n' "$prefix" >&2
     base="https://${prefix}/github.com/$REPO/releases/download/$VERSION"

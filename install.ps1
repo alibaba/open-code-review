@@ -105,9 +105,12 @@ $os = 'windows'
 $Version = Resolve-OcrVersion $Repo
 $asset = "$AssetPrefix-$os-$arch.exe"
 $Mirror = if (-not [string]::IsNullOrWhiteSpace($env:OCR_GITHUB_MIRROR)) {
-    $env:OCR_GITHUB_MIRROR.Trim()
+    $env:OCR_GITHUB_MIRROR.Trim() -replace '^https?://' -replace '/$'
 } else {
     $null
+}
+if ($Mirror -and $Mirror -match '\s') {
+    Err "OCR_GITHUB_MIRROR contains spaces: '$Mirror'"
 }
 if ($Mirror) {
     [Console]::Error.WriteLine("warning: downloading from unofficial GitHub mirror `"$Mirror`" (checksum integrity is not guaranteed)")
