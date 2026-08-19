@@ -105,8 +105,6 @@ post_install_path_notice() {
 sha256() {
   if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1"
-  elif command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1"
   else
     err "shasum or sha256sum is required for checksum verification"
   fi
