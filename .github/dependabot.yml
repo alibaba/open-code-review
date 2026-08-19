@@ -3,7 +3,7 @@ updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     groups:
       go-dependencies:
         patterns:
@@ -12,7 +12,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     groups:
       actions:
         patterns:
@@ -21,7 +21,7 @@ updates:
   - package-ecosystem: npm
     directory: /extensions/vscode
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
     ignore:
       # yarn.lock already resolves @types/vscode far above the declared
