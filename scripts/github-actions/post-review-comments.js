@@ -148,7 +148,7 @@ async function runPostReviewComments({
         message: result.message || "No comments generated. Looks good to me.",
         log,
       });
-      if (approved) stats.summaryUrl = approved.url;
+      if (approved) stats.summaryUrl = approved.html_url;
       setStatsOutputs(out, stats);
       return;
     }

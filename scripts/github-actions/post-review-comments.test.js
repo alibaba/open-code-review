@@ -180,7 +180,7 @@ function makeGithub(opts = {}) {
           createReviewCalls.push(params);
           ops.push({ type: "createReview", params });
           const callIdx = createReviewCalls.length - 1;
-          const successRes = () => ({ data: {}, headers: { "x-ratelimit-remaining": successRemaining() } });
+          const successRes = () => ({ data: opts.reviewData || {}, headers: { "x-ratelimit-remaining": successRemaining() } });
           // Discriminate batch vs per-comment by body, NOT callIdx. Under
           // multi-batch (N < toSend.length) several batch calls precede the
           // per-comment fallbacks, so callIdx === 0 is unsound. Batch calls
@@ -582,7 +582,10 @@ async function testCleanRunApproves() {
     message: "Review complete: 0 finding(s) across 2 selected item(s).",
   };
 
-  const { github } = await run({ result });
+  const { github, outputs } = await run({
+    result,
+    githubOpts: { reviewData: { html_url: "http://ex/approval" } },
+  });
 
   assert.strictEqual(github.createReviewCalls.length, 1, "formal APPROVE review submitted");
   const sent = github.createReviewCalls[0];
@@ -591,6 +594,7 @@ async function testCleanRunApproves() {
   assert.match(sent.body, /Review complete: 0 finding\(s\) across 2 selected item\(s\)\./);
   assert.strictEqual(github.issueComments.length, 0, "no summary comment posted");
   assert.strictEqual(github.updatedComments.length, 0, "no existing comment updated");
+  assert.strictEqual(outputs.summary_comment_url, "http://ex/approval", "summary URL is the review's web (html_url) link, not the API url");
 }
 
 // Same clean run with approval disabled: falls back to the summary comment.
