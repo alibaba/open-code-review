@@ -124,7 +124,7 @@ Present results grouped by severity using this template:
   > Recommendation: How to fix (if applicable)
 ```
 
-If no issues found, simply state: "Review complete — no issues found in N files."
+If no critical, high, or medium severity issues remain after filtering, state: "Review complete — no critical, high, or medium issues found in N files."
 
 **Handling mispositioned comments:**
 
@@ -203,18 +203,15 @@ npm install -g @alibaba-group/open-code-review
 
 **`ocr review` fails with LLM connection error**
 
-The user must configure an LLM. Guide them with one of these options:
+Prompt the user to configure an LLM provider.
 
-**Option A — Environment variables (highest priority, recommended for CI):**
+Interactive setup (recommended):
 
 ```bash
-export OCR_LLM_URL=https://api.anthropic.com/v1/messages
-export OCR_LLM_TOKEN=<api-key>
-export OCR_LLM_MODEL=claude-opus-4-6
-export OCR_USE_ANTHROPIC=true
+ocr config provider
 ```
 
-**Option B — Persistent config:**
+Manual setup (alternative):
 
 ```bash
 ocr config set llm.url https://api.anthropic.com/v1/messages
