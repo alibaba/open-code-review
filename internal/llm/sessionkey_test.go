@@ -11,6 +11,7 @@ import (
 )
 
 var uuidV4Re = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+var sha256HexRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func TestNewSessionKey(t *testing.T) {
 	k1 := NewSessionKey()
@@ -69,6 +70,54 @@ func TestSessionTaskKey(t *testing.T) {
 		if r <= ' ' || r > '~' {
 			t.Errorf("SessionTaskKey produced non header-safe rune %q", r)
 		}
+	}
+}
+
+func TestSessionTaskKeyProviderSafeLength(t *testing.T) {
+	sessionKey := "00000000-0000-4000-8000-000000000000"
+	taskTypes := []string{
+		"plan_task",
+		"main_task",
+		"memory_compression_task",
+		"re_location_task",
+		"review_filter_task",
+	}
+
+	seen := make(map[string]string, len(taskTypes))
+	for _, taskType := range taskTypes {
+		got := SessionTaskKey(sessionKey, taskType, "src/example.go")
+		if len(got) > maxSessionTaskKeyLength {
+			t.Errorf("SessionTaskKey(%s) length = %d, want <= %d", taskType, len(got), maxSessionTaskKeyLength)
+		}
+		if previous, ok := seen[got]; ok {
+			t.Errorf("SessionTaskKey collision for %s and %s: %q", previous, taskType, got)
+		}
+		seen[got] = taskType
+		if got != SessionTaskKey(sessionKey, taskType, "src/example.go") {
+			t.Errorf("SessionTaskKey(%s) is not deterministic", taskType)
+		}
+	}
+
+	planKey := SessionTaskKey(sessionKey, "plan_task", "src/example.go")
+	if !strings.HasPrefix(planKey, sessionKey+"-plan_task-") {
+		t.Errorf("short derived key lost readable prefix: %q", planKey)
+	}
+	for _, taskType := range []string{"memory_compression_task", "re_location_task", "review_filter_task"} {
+		got := SessionTaskKey(sessionKey, taskType, "src/example.go")
+		if !sha256HexRe.MatchString(got) {
+			t.Errorf("long SessionTaskKey(%s) = %q, want SHA-256 hex digest", taskType, got)
+		}
+	}
+}
+
+func TestSessionTaskKeyBoundsLongBaseKey(t *testing.T) {
+	baseKey := strings.Repeat("x", maxSessionTaskKeyLength+1)
+	got := SessionTaskKey(baseKey, "", "")
+	if !sha256HexRe.MatchString(got) {
+		t.Fatalf("SessionTaskKey(long base key) = %q, want SHA-256 hex digest", got)
+	}
+	if got == baseKey {
+		t.Error("SessionTaskKey returned an overlong base key unchanged")
 	}
 }
 

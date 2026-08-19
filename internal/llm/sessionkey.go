@@ -20,6 +20,11 @@ import (
 // can be configured without OCR knowing each provider's convention.
 const SessionKeyTemplateVar = "{ocr_session_key}"
 
+// maxSessionTaskKeyLength keeps generated affinity keys compatible with
+// OpenAI's prompt_cache_key limit. Short keys remain readable; longer derived
+// keys are replaced with a deterministic SHA-256 digest.
+const maxSessionTaskKeyLength = 64
+
 // sessionKeyCtxKey is the context key carrying the run's session key.
 type sessionKeyCtxKey struct{}
 
@@ -45,18 +50,26 @@ func ContextWithSessionKey(ctx context.Context, key string) context.Context {
 // — (session, task type, file or batch) — keeps each conversation's growing
 // prefix on a consistent node instead.
 //
-// The scope (usually a file path) is hashed so the key stays header-safe;
-// the session key and task type stay readable so provider-side logs can be
-// correlated with OCR session records.
+// The scope (usually a file path) is hashed so the key stays header-safe. The
+// session key and task type remain readable while the complete key fits the
+// provider-safe limit; longer keys become a SHA-256 digest of the full derived
+// value.
 func SessionTaskKey(sessionKey, taskType, scope string) string {
+	var key string
 	if taskType == "" && scope == "" {
-		return sessionKey
+		key = sessionKey
+	} else if scope == "" {
+		key = sessionKey + "-" + taskType
+	} else {
+		sum := sha256.Sum256([]byte(scope))
+		key = fmt.Sprintf("%s-%s-%x", sessionKey, taskType, sum[:8])
 	}
-	if scope == "" {
-		return sessionKey + "-" + taskType
+
+	if len(key) <= maxSessionTaskKeyLength {
+		return key
 	}
-	sum := sha256.Sum256([]byte(scope))
-	return fmt.Sprintf("%s-%s-%x", sessionKey, taskType, sum[:8])
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%x", sum[:])
 }
 
 // SessionKeyFromContext returns the session key carried by ctx, or "" when
