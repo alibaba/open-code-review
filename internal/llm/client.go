@@ -33,6 +33,15 @@ import (
 
 var AppVersion = "dev"
 
+// bedrockConfigLoadTimeout bounds how long NewAnthropicBedrockClient may spend
+// in awsconfig.LoadDefaultConfig. Credential resolution itself (SSO refresh,
+// AssumeRole, credential_process) is lazy — deferred to the first signed
+// request, where cfg.Timeout already applies — but region auto-detection can
+// still reach the network, and this keeps that bounded rather than relying
+// solely on the AWS SDK's own defaults. Package var, not const, so tests can
+// shrink it, same as keyCmdTimeout.
+var bedrockConfigLoadTimeout = 60 * time.Second
+
 func userAgent(provider string) string {
 	ua := "open-code-review/" + AppVersion
 	if provider != "" {
@@ -873,7 +882,9 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	if cfg.AWSRegion != "" {
 		loadOpts = append(loadOpts, awsconfig.WithRegion(cfg.AWSRegion))
 	}
-	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), loadOpts...)
+	loadCtx, cancel := context.WithTimeout(context.Background(), bedrockConfigLoadTimeout)
+	defer cancel()
+	awsCfg, err := awsconfig.LoadDefaultConfig(loadCtx, loadOpts...)
 	if err != nil {
 		return &AnthropicClient{
 			cfg:        cfg,

@@ -600,6 +600,15 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			return err
 		}
 		entry.Protocol = normalized
+		// Switching away from bedrock leaves aws_region/aws_profile as dead
+		// config that reads as applied but nothing reads it — clear both, the
+		// same way the TUI drops url/api_key/auth_header when switching onto
+		// bedrock (see cpAmbientProtocol in provider_tui.go).
+		if normalized != llm.ProtocolAnthropicBedrock && (entry.AWSRegion != "" || entry.AWSProfile != "") {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: clearing aws_region/aws_profile on %q: protocol %q does not use the AWS credential chain\n", providerName, normalized)
+			entry.AWSRegion = ""
+			entry.AWSProfile = ""
+		}
 	case "model":
 		entry.Model = value
 	case "models":

@@ -189,6 +189,63 @@ func TestAWSSettingsRejectedWhenEntryOverridesProtocol(t *testing.T) {
 	}
 }
 
+// TestSetProtocolClearsStaleAWSSettings covers the reverse order from
+// TestAWSSettingsRejectedWhenEntryOverridesProtocol: aws_region/aws_profile set
+// first while the entry is still ambient, then the entry switched to a protocol
+// that does not read them. Without this, the fields survive the switch as dead
+// config that reads as applied but has no effect — exactly what
+// providerAcceptsAWSSettings exists to prevent on the other ordering.
+func TestSetProtocolClearsStaleAWSSettings(t *testing.T) {
+	cfg := &Config{}
+	if err := setProviderValue(cfg, "providers.bedrock.aws_region", "us-west-2"); err != nil {
+		t.Fatalf("set aws_region: %v", err)
+	}
+	if err := setProviderValue(cfg, "providers.bedrock.aws_profile", "example-profile"); err != nil {
+		t.Fatalf("set aws_profile: %v", err)
+	}
+
+	stderr := captureStderr(t, func() {
+		if err := setProviderValue(cfg, "providers.bedrock.protocol", "openai"); err != nil {
+			t.Fatalf("set protocol: %v", err)
+		}
+	})
+
+	entry := cfg.Providers["bedrock"]
+	if entry.AWSRegion != "" || entry.AWSProfile != "" {
+		t.Errorf("AWSRegion/AWSProfile = %q/%q after switching to openai, want both cleared", entry.AWSRegion, entry.AWSProfile)
+	}
+	if !strings.Contains(stderr, "WARNING") || !strings.Contains(stderr, "aws_region") {
+		t.Errorf("stderr = %q, want a WARNING naming aws_region", stderr)
+	}
+
+	// Switching back to bedrock does not resurrect the cleared values, and
+	// setting them again still works.
+	if err := setProviderValue(cfg, "providers.bedrock.protocol", llm.ProtocolAnthropicBedrock); err != nil {
+		t.Fatalf("set protocol back: %v", err)
+	}
+	if entry := cfg.Providers["bedrock"]; entry.AWSRegion != "" {
+		t.Errorf("AWSRegion = %q after switching back to bedrock, want it to stay cleared", entry.AWSRegion)
+	}
+	if err := setProviderValue(cfg, "providers.bedrock.aws_region", "eu-west-1"); err != nil {
+		t.Errorf("aws_region rejected after switching back to bedrock: %v", err)
+	}
+}
+
+// TestSetProtocolLeavesAWSSettingsWhenNoneSet is the no-op guard: switching
+// protocol on an entry with no aws_region/aws_profile must not print a WARNING
+// about clearing a value that was never there.
+func TestSetProtocolLeavesAWSSettingsWhenNoneSet(t *testing.T) {
+	cfg := &Config{}
+	stderr := captureStderr(t, func() {
+		if err := setProviderValue(cfg, "providers.bedrock.protocol", "openai"); err != nil {
+			t.Fatalf("set protocol: %v", err)
+		}
+	})
+	if strings.Contains(stderr, "WARNING") {
+		t.Errorf("stderr = %q, want no WARNING when nothing was cleared", stderr)
+	}
+}
+
 // TestSetLlmProtocolRejectsBedrock pins the other half of the contract enforced
 // in the resolver: the llm block is one url plus one token, with nowhere to put
 // a region or a profile, so the value is refused where it is typed rather than
