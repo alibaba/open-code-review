@@ -66,15 +66,9 @@ ocr review --audience agent --background "business context here" [user-args]
 
 - Always use `--audience agent` to suppress progress UI and emit only the final summary
 
-### Step 3: Classify and Report
+### Step 3: Report
 
-For each comment from the review output, classify by priority and report all issues to the user:
-
-- **High**: Obvious bugs, security issues, clear mistakes, or well-founded suggestions with precise fix proposals
-- **Medium**: Reasonable concerns but context-dependent, style/performance suggestions, or fixes that require manual implementation
-- **Low**: Likely false positives, lacking sufficient context, nitpicks, or meaningless suggestions
-
-Report all comments grouped by priority level.
+OCR output includes structured `severity` (critical / high / medium / low) and `category` (bug / security / performance / maintainability / test / style / documentation / other) on each comment. Present results grouped by severity, discarding `low` severity items that are likely false positives or nitpicks.
 
 ### Step 4: Fix
 
@@ -85,48 +79,49 @@ Before applying fixes, check whether the user requested automatic fixes:
 
 When fixing issues and suggestions:
 
-- Focus on High and Medium priority items
+- Focus on critical, high, and medium severity items
 - Apply fixes directly to the code when safe and well-defined
 - For complex fixes requiring manual intervention, clearly describe what needs to be done
 - Always verify fixes with the user before committing
 
 ## Output Format
 
-Each comment contains:
+Each comment in OCR's output contains:
 
 - `path`: File path
 - `content`: Review comment text
 - `start_line` / `end_line`: Line range (both 0 means positioning failed)
+- `category`: Issue category (bug, security, performance, maintainability, test, style, documentation, other)
+- `severity`: Issue severity (critical, high, medium, low)
 - `suggestion_code`: Optional fix suggestion
 - `existing_code`: Optional original code snippet
 - `thinking`: Optional LLM reasoning process
 
-After filtering comments by priority, present results using this template:
+Present results grouped by severity using this template:
 
 ```markdown
 ## Code Review Results
 
 **Files reviewed**: N
-**Issues found**: X high priority / Y medium priority
+**Issues found**: X critical, Y high, Z medium
 
-### High Priority
+### Critical
 
-- **`path/to/file.java:42`** — Brief description
+- **`path/to/file.java:42`** [bug] — Brief description
   > Recommendation: How to fix
 
-### Medium Priority
+### High
 
-- **`path/to/file.ts:88`** — Brief description
+- **`path/to/file.java:26`** [bug] — Brief description
+  > Recommendation: How to fix
+
+### Medium
+
+- **`path/to/file.ts:88`** [performance] — Brief description
   > Recommendation: How to fix (if applicable)
 ```
 
-If the review found no issues after filtering, simply state: "Review complete — no issues found in N files."
-
-**Priority classification:**
-
-- **High**: Obvious bugs, security issues, clear mistakes, or well-founded suggestions with precise fix proposals
-- **Medium**: Reasonable concerns but context-dependent, style/performance suggestions, or fixes that require manual implementation
-- **Low**: Discarded silently (likely false positives, lacking context, nitpicks, or meaningless suggestions)
+If no issues found, simply state: "Review complete — no issues found in N files."
 
 **Handling mispositioned comments:**
 
