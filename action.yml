@@ -79,6 +79,13 @@ inputs:
       never deleted (non-destructive).
     required: false
     default: 'false'
+  approve_on_clean:
+    description: >-
+      When the review finds no issues and all selected items (at least 1) were reviewed
+      successfully (JSON status 'complete'), submit a formal GitHub APPROVE
+      review instead of a summary comment.
+    required: false
+    default: 'true'
   incremental_overlap_threshold:
     description: >-
       IoU (intersection-over-union) threshold used by incremental mode to decide
@@ -316,6 +323,7 @@ runs:
         OCR_REVIEW_COMMENT_BATCH_SIZE: ${{ inputs.review_comment_batch_size }}
         OCR_ROUTE_SEVERITY_BELOW: ${{ inputs.route_severity_below }}
         OCR_ROUTE_CATEGORIES: ${{ inputs.route_categories }}
+        OCR_APPROVE_ON_CLEAN: ${{ inputs.approve_on_clean }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |
@@ -342,6 +350,7 @@ runs:
             stderrPath: '/tmp/ocr-stderr.log',
             stickySummary: ${{ inputs.sticky_summary == 'true' }},
             incremental: ${{ inputs.incremental == 'true' }},
+            approveOnClean: ${{ inputs.approve_on_clean == 'true' }},
             incrementalOverlapThreshold: parseFloat(process.env.OCR_INCREMENTAL_OVERLAP_THRESHOLD),
             reviewCommentBatchSize: parseInt(process.env.OCR_REVIEW_COMMENT_BATCH_SIZE, 10),
             routeSeverityBelow: process.env.OCR_ROUTE_SEVERITY_BELOW,
