@@ -1252,9 +1252,8 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
     for it in inline_items:
         comment = it["comment"]
         path = comment.get("path", "")
-        path_sha1 = hashlib.sha1(path.encode("utf-8")).hexdigest()
-        start_line = comment.get("start_line", 0)
         end_line = comment.get("end_line", 0)
+        span = comment_span(comment)
         if not path or not end_line:
             failed_comments.append({"comment": comment, "reason": NO_LINE_REASON})
             continue
@@ -1271,20 +1270,24 @@ def publish(result, diff_refs, poster, config, sleep=_sleep):
                 "base_sha": diff_refs["base_sha"],
                 "start_sha": diff_refs["start_sha"],
                 "head_sha": diff_refs["head_sha"],
-                "line_range": {
-                    "start": {
-                        "line_code": f"{path_sha1}_0_{start_line}",
-                        "type": "new",
-                        "new_line": start_line,
-                    },
-                    "end": {
-                        "line_code": f"{path_sha1}_0_{end_line}",
-                        "type": "new",
-                        "new_line": end_line,
-                    },
-                },
             },
         }
+        if span is not None and span["multiline"]:
+            path_sha1 = hashlib.sha1(path.encode("utf-8")).hexdigest()
+            discussion["position"]["line_range"] = {
+                "start": {
+                    "line_code": f"{path_sha1}_0_{span['start']}",
+                    "type": "new",
+                    "old_line": None,
+                    "new_line": span["start"],
+                },
+                "end": {
+                    "line_code": f"{path_sha1}_0_{span['end']}",
+                    "type": "new",
+                    "old_line": None,
+                    "new_line": span["end"],
+                },
+            }
         resp = poster.post_discussion(discussion, comment_id=it["id"])
         if resp.get("success"):
             stats["inline"] += 1
