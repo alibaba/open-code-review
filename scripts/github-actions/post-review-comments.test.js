@@ -612,6 +612,27 @@ async function testCleanRunApprovalDisabledComments() {
   assert.match(github.issueComments[0].body, /Review complete: 0 finding\(s\) across 2 selected item\(s\)\./);
 }
 
+// Clean run where the APPROVE submit fails (e.g. API error): the run must not
+// go silent — it falls back to the regular summary comment as an artifact.
+async function testCleanRunApprovalFailureFallsBackToComment() {
+  const result = {
+    comments: [],
+    status: "complete",
+    message: "Review complete: 0 finding(s) across 2 selected item(s).",
+  };
+
+  const { github, outputs } = await run({
+    result,
+    githubOpts: { individualError: "approval API unavailable" },
+  });
+
+  assert.strictEqual(github.createReviewCalls.length, 1, "approval attempted once");
+  assert.strictEqual(github.createReviewCalls[0].event, "APPROVE");
+  assert.strictEqual(github.issueComments.length, 1, "fallback summary comment posted");
+  assert.match(github.issueComments[0].body, /Review complete: 0 finding\(s\) across 2 selected item\(s\)\./);
+  assert.ok(outputs.summary_comment_url, "summary URL populated from the fallback comment");
+}
+
 // Nothing selected (status "skipped"): never approve, comment only.
 async function testNoItemsSelectedCommentsOnly() {
   const result = { comments: [], status: "skipped", message: "No supported files changed." };
@@ -2307,6 +2328,7 @@ async function main() {
   await testNoCommentsStickyUpdate();
   await testCleanRunApproves();
   await testCleanRunApprovalDisabledComments();
+  await testCleanRunApprovalFailureFallsBackToComment();
   await testNoItemsSelectedCommentsOnly();
   await testPartialStatusCommentsOnly();
   await testAlreadyApprovedSkips();

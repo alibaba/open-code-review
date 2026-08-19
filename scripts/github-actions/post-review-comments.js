@@ -139,18 +139,22 @@ async function runPostReviewComments({
 
   if (comments.length === 0) {
     if (approveOnClean && result.status === "complete") {
-      const approved = await submitCleanApproval({
-        github,
-        context,
-        owner,
-        repo,
-        prNumber,
-        message: result.message || "No comments generated. Looks good to me.",
-        log,
-      });
-      if (approved) stats.summaryUrl = approved.html_url;
-      setStatsOutputs(out, stats);
-      return;
+      try {
+        const approved = await submitCleanApproval({
+          github,
+          context,
+          owner,
+          repo,
+          prNumber,
+          message: result.message || "No comments generated. Looks good to me.",
+          log,
+        });
+        if (approved) stats.summaryUrl = approved.html_url;
+        setStatsOutputs(out, stats);
+        return;
+      } catch (e) {
+        log(`[approve] could not submit approval (${e.message}); posting summary comment instead.`);
+      }
     }
     const message = result.message || "No comments generated. Looks good to me.";
     const body = `${SUMMARY_MARKER}\n✅ **OpenCodeReview**: ${message}`;
@@ -824,16 +828,16 @@ async function submitCleanApproval({ github, context, owner, repo, prNumber, mes
       });
       commitSha = pullRequest.head.sha;
     } catch (e) {
-      log(`[approve] could not resolve head commit (${e.message}); skipping approval.`);
-      return null;
+      throw new Error(`could not resolve head commit: ${e.message}`);
     }
   }
   if (!commitSha) {
-    log("[approve] no head commit sha available; skipping approval.");
-    return null;
+    throw new Error("no head commit sha available");
   }
 
-  // Idempotency: do not re-approve a commit this bot already approved.
+  // Idempotency: do not re-approve a commit this bot already approved. This is
+  // the one case where approval is intentionally skipped (not a failure), so
+  // the caller posts nothing.
   try {
     const botLogin = await getAuthenticatedLogin(github, log);
     const reviews = await readAllPages("listReviews", (page, per_page) =>
@@ -867,8 +871,7 @@ async function submitCleanApproval({ github, context, owner, repo, prNumber, mes
     log("Submitted formal APPROVE review for the clean run.");
     return review;
   } catch (e) {
-    log(`[approve] failed to submit APPROVE review (${e.message}); continuing without approval.`);
-    return null;
+    throw new Error(`failed to submit APPROVE review: ${e.message}`);
   }
 }
 
