@@ -48,27 +48,43 @@ jobs:
       - name: Smoke test
         working-directory: pages
         run: |
-          npx serve dist -s -l tcp://127.0.0.1:3999 &
+          FAILED=0
+          LOCS=$(grep -oE '<loc>[^<]+</loc>' public/sitemap.xml | sed -E 's#<loc>https://open-codereview\.ai##; s#</loc>##')
+          for loc in $LOCS; do
+            file="dist/index.html"
+            [ "$loc" != "/" ] && file="dist${loc}/index.html"
+            if [ ! -f "$file" ]; then
+              echo "FAIL: ${loc} — missing $file"
+              FAILED=1
+            else
+              echo "OK: ${loc} -> $file"
+            fi
+          done
+
+          npx serve dist -l tcp://127.0.0.1:3999 &
           SERVER_PID=$!
           trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
           sleep 2
 
-          FAILED=0
-          # `serve -s` rewrites SPA routes to index.html, so this verifies
-          # the built shell is reachable and includes bundle references.
-          for path in "/" "/docs/contributing" "/docs/quickstart" "/features"; do
-            if ! BODY=$(curl -sf "http://127.0.0.1:3999${path}"); then
-              echo "FAIL: ${path} — not reachable"
+          for loc in $LOCS; do
+            if ! BODY=$(curl -sf "http://127.0.0.1:3999${loc}"); then
+              echo "FAIL: ${loc} — not served with 200"
               FAILED=1
             elif ! echo "$BODY" | grep -q '\.bundle\.js'; then
-              echo "FAIL: ${path} — missing bundle reference"
+              echo "FAIL: ${loc} — missing bundle reference"
               FAILED=1
             else
-              echo "OK: ${path}"
+              echo "OK: ${loc}"
             fi
           done
 
-          # Also check a real static file to ensure dist assets are served.
+          if curl -sf "http://127.0.0.1:3999/docs/does-not-exist" >/dev/null; then
+            echo "FAIL: /docs/does-not-exist — expected 404"
+            FAILED=1
+          else
+            echo "OK: /docs/does-not-exist -> 404"
+          fi
+
           if ! curl -sf "http://127.0.0.1:3999/404.html" >/dev/null; then
             echo "FAIL: /404.html — static file not reachable"
             FAILED=1

@@ -1,7 +1,12 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
+const { extractDocSlugs, extractBlogSlugs } = require('./scripts/extract-slugs.cjs');
 const isProduction = process.env.NODE_ENV === 'production';
+
+const STATIC_ROUTES = ['features', 'benchmark', 'quickstart', 'docs', 'blog'];
+const DOC_SLUGS = extractDocSlugs(__dirname);
+const BLOG_SLUGS = extractBlogSlugs(__dirname);
 
 module.exports = {
   mode: isProduction ? 'production' : 'development',
@@ -106,6 +111,16 @@ module.exports = {
       inject: 'body',
       filename: '404.html'
     }),
+
+    ...STATIC_ROUTES.map(route =>
+      new HtmlWebpackPlugin({ template: './index.html', inject: 'body', filename: `${route}/index.html` })
+    ),
+    ...DOC_SLUGS.map(slug =>
+      new HtmlWebpackPlugin({ template: './index.html', inject: 'body', filename: `docs/${slug}/index.html` })
+    ),
+    ...BLOG_SLUGS.map(slug =>
+      new HtmlWebpackPlugin({ template: './index.html', inject: 'body', filename: `blog/${slug}/index.html` })
+    ),
     new CopyPlugin({
       patterns: [
         { from: 'public', to: '.', noErrorOnMissing: true }
