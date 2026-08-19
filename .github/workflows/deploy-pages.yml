@@ -65,8 +65,8 @@ jobs:
 
       - name: Lint crawler files
         run: |
-          test -f _site/robots.txt && cmp pages/public/robots.txt _site/robots.txt
-          test -f _site/sitemap.xml && cmp pages/public/sitemap.xml _site/sitemap.xml
+          test -f _site/robots.txt ; cmp pages/public/robots.txt _site/robots.txt
+          test -f _site/sitemap.xml ; cmp pages/public/sitemap.xml _site/sitemap.xml
           xmllint --noout _site/sitemap.xml
 
       - uses: actions/upload-pages-artifact@v5
