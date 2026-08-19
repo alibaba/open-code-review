@@ -9,12 +9,14 @@
     "bin/ocr.js",
     "scripts/install.js",
     "scripts/update.js",
+    "scripts/version.js",
     "scripts/platform.js",
     "imgs/"
   ],
   "scripts": {
     "postinstall": "node scripts/install.js",
-    "test:github-actions": "node scripts/github-actions/post-review-comments.test.js && node scripts/github-actions/check-translation-sync.test.js"
+    "test:github-actions": "node scripts/github-actions/post-review-comments.test.js && node scripts/github-actions/check-translation-sync.test.js",
+    "test:update": "node scripts/version.test.js"
   },
   "repository": {
     "type": "git",

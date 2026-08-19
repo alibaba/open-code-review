@@ -31,7 +31,7 @@ func addBackgroundFlags(cmd *cobra.Command, background, backgroundFile *string) 
 
 func addOutputFlags(cmd *cobra.Command, format, audience *string) {
 	cmd.Flags().StringVarP(format, "format", "f", "text", "output format: text, json, or sarif")
-	cmd.Flags().StringVar(audience, "audience", "human", "output audience: human (show progress) or agent (summary only)")
+	cmd.Flags().StringVar(audience, "audience", "human", "output audience: human (show progress; on stderr for json/sarif) or agent (summary only)")
 	cmd.RegisterFlagCompletionFunc("format", completeEnum("text", "json", "sarif"))
 	cmd.RegisterFlagCompletionFunc("audience", completeEnum("human", "agent"))
 }

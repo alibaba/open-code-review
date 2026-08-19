@@ -7,6 +7,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"testing"
 
@@ -60,6 +61,12 @@ func TestProvider_Enumerate_NonRegularSkip(t *testing.T) {
 // TestProvider_Enumerate_SniffError covers the binary-sniff error branch: a file
 // that cannot be opened for sniffing is skipped with a warning.
 func TestProvider_Enumerate_SniffError(t *testing.T) {
+	// Chmod(0000) on Windows only sets the read-only bit, so os.Open still
+	// succeeds and locked.go is enumerated instead of skipped. (The Geteuid
+	// guard below cannot cover this: Geteuid returns -1 on Windows, never 0.)
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permissions not enforced on Windows")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses file permission checks")
 	}

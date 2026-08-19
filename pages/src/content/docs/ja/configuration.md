@@ -44,6 +44,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
@@ -52,6 +53,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
 | `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
+| `kimi-global` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_GLOBAL_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
 | `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
@@ -60,6 +62,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `siliconflow`  | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
+| `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
 ### 組み込み provider の Base URL を上書きする
 
@@ -146,6 +149,54 @@ Ollama は API key を無視しますが、カスタム provider は空でない
   }
 }
 ```
+
+### API key をコマンドで取得する
+
+key を設定ファイルに保存する代わりに、`api_key_cmd` で実行時にシークレット
+マネージャー（1Password、`pass`、`gopass` など）から取得できます。前後の空白を
+除いた 1 行の stdout が key になります。レガシーの `llm` ブロックにも同等の
+`auth_token_cmd` があります。
+
+```bash
+ocr config set providers.anthropic.api_key_cmd "op read op://dev/anthropic/api-key"
+```
+
+OS 標準のキーリングも同じ方法で使えます。OS に付属するコマンドをそのまま指定
+すれば、key は `config.json` ではなく Keychain や Secret Service に保存されます。
+
+```bash
+# macOS Keychain
+ocr config set providers.anthropic.api_key_cmd \
+  "security find-generic-password -s ocr-anthropic -w"
+
+# Linux（Secret Service: GNOME Keyring、KWallet など）
+ocr config set providers.anthropic.api_key_cmd \
+  "secret-tool lookup service ocr-anthropic"
+```
+
+優先順位：静的な `api_key` が常に優先されます（両方設定されている場合はコマンドを
+無視し、警告を表示します）。それ以外の場合は `api_key_cmd` を実行します。どちらも
+設定されていない場合のみ、OCR は provider の環境変数にフォールバックします。
+
+コマンドは `ocr` 実行ごとに 1 回実行され、成功する必要があります。非ゼロ終了、
+空の出力、複数行の出力、64KiB を超える出力はいずれもハードエラーです（OCR が黙って
+フォールバックすることはありません）。コマンドはプロンプトへの応答時間も含めて
+60 秒以内に完了する必要があります。コマンドは端末の stdin と stderr を引き継ぐため、
+対話的なプロンプト（pinentry、Touch ID）は表示も応答も可能です。コマンドが stdout
+パイプを保持したままバックグラウンドのデーモン（`gpg-agent`、初回起動時の `op`
+デーモン）を残すと、認証情報は取得できるものの `ocr` の実行ごとにパイプが閉じるのを
+5 秒余分に待つことになるため、デーモンの出力をリダイレクト（`>/dev/null 2>&1`）
+してください。
+
+Windows ではコマンドは `sh` ではなく `cmd.exe` 経由で実行されるため、一方向けに
+書いたコマンドは通常そのままでは移植できません。`%VAR%` と `^` は `cmd.exe` の
+メタ文字であり、`$VAR` の展開や `\` によるエスケープは適用されません。引用符付きの
+引数はそのまま渡されるため、`op read "op://Private/My Vault/api-key"` は記述どおりに
+動作します。
+
+この値は shell コマンドとして実行されるため、`config.json` は信頼された入力です。
+自分の所有のまま、他のユーザーが書き込めない状態に保ってください（OCR は `0600`
+で書き込みます）。
 
 ### 追加のリトライ対象ステータスコード
 

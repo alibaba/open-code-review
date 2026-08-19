@@ -27,6 +27,8 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
+  ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
@@ -93,13 +95,16 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--no-filter` | — | `false` | Keep all review comments and skip the per-file `REVIEW_FILTER_TASK` LLM post-processing call. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
-| `--audience <who>` | — | `human` | `human` streams progress lines; `agent` quiets stdout and prints only the final summary / JSON. |
+| `--audience <who>` | — | `human` | `human` streams progress lines (to stderr when `--format` is `json`/`sarif`, so stdout stays a single parseable document); `agent` suppresses progress entirely and prints only the final summary / JSON. |
 | `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
+| `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Combined with `--background` when both are set. |
+| `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
 | `--concurrency <n>` | — | `8` | Maximum number of files reviewed in parallel. |
 | `--timeout <minutes>` | — | `10` | Per-file deadline. `0` disables the timeout. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per file. `0` uses the template default (`30`); values 1–9 are clamped up to `10`; any value `≥ 10` overrides the template default (even if smaller than `30`). |
 | `--max-tokens <n>` | — | config or template default | Per-file prompt token ceiling. Overrides the saved `max_tokens` setting for this run. |
+| `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Dispatch stops once the budget is exceeded and partial results are still published. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
@@ -244,6 +249,18 @@ Use this in CI / when piping into another agent.
 ```bash
 ocr review --format json --audience agent
 ```
+
+The document is always written to stdout on its own. With the default
+`--audience human` the `[ocr]` progress lines stream to **stderr** as the review
+runs, so you can watch a long run and still pipe stdout straight into a parser:
+
+```bash
+ocr review --format json > result.json   # progress still visible on the terminal
+ocr review --format json | jq .summary   # stdout is a single JSON document
+```
+
+Pass `--audience agent` to drop the progress lines altogether, or `2>/dev/null`
+to discard them at the shell.
 
 ```json
 {
@@ -628,9 +645,10 @@ Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
 
 ## Tips & gotchas
 
-- `--audience agent` does **not** imply `--format json`. They control
-  different things — quiet UI vs structured payload. Combine them when you
-  want both.
+- `--audience agent` does **not** imply `--format json`, and `--format json`
+  does not imply a quiet terminal. They control different things — quiet UI vs
+  structured payload. `--format json` alone keeps progress visible on stderr;
+  add `--audience agent` when you want it gone.
 - `--background` is one of the highest-leverage flags for review quality —
   always pass the requirement / PR description when invoking from another
   agent.

@@ -27,6 +27,8 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
+  ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
@@ -93,13 +95,17 @@ ocr r      [flags]   (alias)
 | `--no-filter` | — | `false` | Сохраняет все комментарии ревью и пропускает вызов LLM постобработки `REVIEW_FILTER_TASK` для каждого файла. |
 | `--resume <session-id>` | — | — | Возобновляет предыдущую совместимую сессию ревью диапазона или коммита. |
 | `--format <fmt>` | `-f` | `text` | `text` (для чтения человеком), `json` (машиночитаемый массив комментариев) или `sarif` (отчёт SARIF 2.1.0 для GitHub Code Scanning). |
-| `--audience <who>` | — | `human` | `human` выводит ход выполнения; `agent` отключает этот вывод в stdout и печатает только итоговую сводку / JSON. |
+| `--audience <who>` | — | `human` | `human` выводит ход выполнения (в stderr, когда `--format` равен `json`/`sarif`, чтобы stdout оставался единым разбираемым документом); `agent` полностью подавляет вывод хода выполнения и печатает только итоговую сводку / JSON. |
 | `--background <text>` | `-b` | — | Необязательные требования / бизнес-контекст, добавляемые в промпты планирования и основной задачи. |
+| `--background-file <path>` | `-B` | — | Путь к Markdown-файлу с контекстом ревью. Если также задан `--background`, используются оба источника. |
+| `--exclude <patterns>` | — | — | Разделённые запятыми шаблоны исключения в стиле gitignore; объединяются с excludes из `rule.json`. |
 | `--concurrency <n>` | — | `8` | Максимальное число файлов, проверяемых параллельно. |
 | `--timeout <minutes>` | — | `10` | Срок выполнения для каждого файла. `0` отключает тайм-аут. |
 | `--rule <path>` | — | — | Путь к пользовательскому JSON-файлу правил ревью. Переопределяет проектный и глобальный `rule.json`. |
 | `--max-tools <n>` | — | значение шаблона | Максимальное число раундов вызова инструментов для каждого файла. `0` использует значение шаблона (`30`); значения 1–9 повышаются до `10`; любое значение `≥ 10` переопределяет значение шаблона (даже если оно меньше `30`). |
 | `--max-tokens <n>` | — | значение конфигурации или шаблона | Предел токенов запроса для каждого файла. Переопределяет сохранённое значение `max_tokens` для этого запуска. |
+| `--max-tokens-budget <n>` | — | `0` (без ограничения) | Ограничивает общее число входных + выходных токенов ревью. После превышения бюджета новые задачи не запускаются, а частичные результаты всё равно публикуются. |
+| `--provider <name>` | — | — | Выбирает настроенного провайдера для этого запуска. Поддерживаются имена из `providers` и `custom_providers`. |
 | `--model <name>` | — | — | Переопределяет выбранную LLM-модель для этого ревью (например, `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Максимальное число одновременно выполняемых подпроцессов Git. |
 | `--tools <path>` | — | встроенные | Путь к пользовательскому JSON-файлу конфигурации инструментов. Переопределяет встроенные определения инструментов. |
@@ -231,6 +237,19 @@ Concurrent map access without a lock — wrap with sync.RWMutex.
 ```bash
 ocr review --format json --audience agent
 ```
+
+Документ всегда занимает stdout целиком. При значении по умолчанию
+`--audience human` строки хода выполнения `[ocr]` выводятся в **stderr** по мере
+проверки, поэтому можно наблюдать за длительным запуском и одновременно
+передавать stdout напрямую в парсер:
+
+```bash
+ocr review --format json > result.json   # ход выполнения по-прежнему виден в терминале
+ocr review --format json | jq .summary   # stdout — единый JSON-документ
+```
+
+Передайте `--audience agent`, чтобы полностью убрать строки хода выполнения, или
+`2>/dev/null`, чтобы отбросить их на уровне оболочки.
 
 ```json
 {

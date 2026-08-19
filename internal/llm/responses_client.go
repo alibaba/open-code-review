@@ -11,6 +11,7 @@ import (
 
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 )
 
@@ -224,6 +225,11 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 	}
 	if len(tools) > 0 {
 		params.Tools = tools
+		if req.ToolChoice == "required" {
+			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
+				OfToolChoiceMode: param.NewOpt(responses.ToolChoiceOptionsRequired),
+			}
+		}
 	}
 	if req.MaxTokens > 0 {
 		params.MaxOutputTokens = openai.Int(int64(req.MaxTokens))

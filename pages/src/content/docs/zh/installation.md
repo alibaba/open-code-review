@@ -75,14 +75,35 @@ sudo port upgrade open-code-review
 curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
-它识别两个环境变量：
+它识别三个环境变量：
 
 | 变量 | 默认值 | 用途 |
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | 放置 `ocr` 二进制的位置。 |
 | `OCR_VERSION` | 最新 release | 固定到某个 release tag（如 `v1.2.3`）。 |
+| `OCR_GITHUB_MIRROR` | （未设置） | 通过 GitHub 镜像域名下载 release 二进制及其校验和（如 `gh-proxy.com`）。 |
 
 该脚本支持 `darwin` 与 `linux` 的 `amd64` / `arm64`。
+
+#### 使用 GitHub 镜像
+
+在部分网络访问 GitHub 较慢的地区，可设置 `OCR_GITHUB_MIRROR` 为某个镜像域名，通过它下载 release 二进制及其校验和：
+
+```bash
+export OCR_GITHUB_MIRROR='YOUR_MIRROR_DOMAIN'
+```
+
+该值必须是裸域名——不带 `https://` 前缀，也不带结尾斜杠（如 `gh-proxy.com`，而不是 `https://gh-proxy.com/`）。它作为*路径前缀*镜像使用：二进制从
+`https://<镜像>/github.com/alibaba/open-code-review/releases/download/<版本>/…`
+下载。域名替换型镜像（例如把 `github.com` 重写为 `hub.example.org`）不匹配这种形式——请改用路径前缀型镜像。
+
+镜像同时覆盖 release 二进制及其 `sha256sum.txt` 校验和。版本解析（当未设置 `OCR_VERSION` 时）仍会直接调用 GitHub API，而非镜像。要完全跳过版本解析，请固定版本：
+
+```bash
+export OCR_VERSION='v1.2.3'
+```
+
+> **安全提示：** 镜像是第三方服务，设置 `OCR_GITHUB_MIRROR` 后，二进制及其 `sha256sum.txt` 都会从该镜像下载。这意味着恶意镜像可以同时提供被篡改的二进制和与之匹配的校验和，因此镜像模式下完整性保证不再成立。如果无法信任该镜像，请对照 [releases 页面](https://github.com/alibaba/open-code-review/releases) 上的上游 `sha256sum.txt` 验证下载文件。
 
 在 Windows（PowerShell 5.1+）上，请改用 PowerShell 安装脚本：
 
@@ -90,8 +111,9 @@ curl -fsSL https://open-codereview.ai/install.sh | sh
 irm https://open-codereview.ai/install.ps1 | iex
 ```
 
-它同样识别 `OCR_INSTALL_DIR` 与 `OCR_VERSION`（通过 `$env:OCR_INSTALL_DIR` /
-`$env:OCR_VERSION` 设置）。默认安装位置为 `%LOCALAPPDATA%\Programs\ocr`。
+它同样识别 `OCR_INSTALL_DIR`、`OCR_VERSION` 与 `OCR_GITHUB_MIRROR`
+（通过 `$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION` /
+`$env:OCR_GITHUB_MIRROR` 设置）。默认安装位置为 `%LOCALAPPDATA%\Programs\ocr`。
 
 ## GitHub Release 二进制
 

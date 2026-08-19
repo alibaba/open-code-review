@@ -79,6 +79,21 @@ var registry = []Provider{
 		},
 	},
 	{
+		Name:        "gemini",
+		DisplayName: "Google Gemini API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://generativelanguage.googleapis.com/v1beta/openai",
+		EnvVar:      "GEMINI_API_KEY",
+		Models: []string{
+			"gemini-3-flash-preview",
+			"gemini-3.1-flash-lite",
+			"gemini-3.1-pro",
+			"gemini-3.5-flash-lite",
+			"gemini-3.5-flash",
+			"gemini-3.6-flash",
+		},
+	},
+	{
 		Name:        "dashscope",
 		DisplayName: "Alibaba DashScope API",
 		Protocol:    ProtocolOpenAIChatCompletions,
@@ -197,6 +212,20 @@ var registry = []Provider{
 		Protocol:    ProtocolOpenAIChatCompletions,
 		BaseURL:     "https://api.moonshot.cn/v1",
 		EnvVar:      "MOONSHOT_API_KEY",
+		Models: []string{
+			"kimi-k3",
+			"kimi-k2.7-code",
+			"kimi-k2.7-code-highspeed",
+			"kimi-k2.6",
+			"kimi-k2.5",
+		},
+	},
+	{
+		Name:        "kimi-global",
+		DisplayName: "Kimi Moonshot API (Global)",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.moonshot.ai/v1",
+		EnvVar:      "MOONSHOT_GLOBAL_API_KEY",
 		Models: []string{
 			"kimi-k3",
 			"kimi-k2.7-code",
@@ -329,6 +358,18 @@ var registry = []Provider{
 			"moonshotai/kimi-k3",
 			"zai-org/glm-5.2",
 			"deepseek/deepseek-v4-flash-0731",
+		},
+	},
+	{
+		Name:        "xai",
+		DisplayName: "xAI Grok API",
+		Protocol:    ProtocolOpenAIChatCompletions,
+		BaseURL:     "https://api.x.ai/v1",
+		EnvVar:      "XAI_API_KEY",
+		Models: []string{
+			"grok-4.6",
+			"grok-4.5",
+			"grok-4.3",
 		},
 	},
 	{

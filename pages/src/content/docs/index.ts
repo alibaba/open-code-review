@@ -177,6 +177,8 @@ const docsMap: Record<Language, LocalizedDocs> = {
   en: enDocs,
   zh: zhDocs,
   ja: jaDocs,
+  // Korean UI strings ship first; doc pages fall back to English until ko/ exists.
+  ko: {},
   ru: ruDocs,
 };
 

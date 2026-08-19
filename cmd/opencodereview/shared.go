@@ -276,29 +276,41 @@ func excludeToolDef(defs []llm.ToolDef, name string) []llm.ToolDef {
 	return out
 }
 
-// quietHandle wraps a stdout.Quiet() restorer so callers can `defer
-// q.Restore()` for safety while emitRunResult restores it early when the
-// agent-text audience needs the trace summary on the user's terminal.
-// Restore is idempotent.
+// quietHandle wraps the restorer returned by whichever stdout redirection
+// newQuietHandle chose, so callers can `defer q.Restore()` for safety while
+// emitRunResult restores it early when the agent-text audience needs the trace
+// summary on the user's terminal. Restore is idempotent.
 type quietHandle struct {
 	fn func()
 }
 
 // isMachineReadable reports whether the output format writes a structured
-// document to stdout that must not be interleaved with progress text.
-// Both json and sarif suppress [ocr] progress lines and trace summaries.
+// document to stdout that must not be interleaved with progress text. Both
+// json and sarif move [ocr] progress lines off stdout and suppress the trace
+// summary, which is already carried inside the document.
 func isMachineReadable(outputFormat string) bool {
 	return outputFormat == "json" || outputFormat == "sarif"
 }
 
-// newQuietHandle silences stdout for machine-readable formats (json, sarif)
-// or when audience=="agent"; otherwise the returned handle is a no-op
-// restorer. This prevents [ocr] progress lines from corrupting the structured
-// output document on stdout.
+// newQuietHandle routes [ocr] progress lines away from stdout so they cannot
+// corrupt a structured output document. What it does depends on why stdout
+// needs protecting:
+//
+//   - audience=="agent": the caller wants no progress at all, so progress is
+//     discarded regardless of format.
+//   - machine-readable format with a human audience: the human still asked to
+//     watch the run, so progress is redirected to stderr rather than dropped.
+//     Every result document (json, sarif, text) is written straight to
+//     os.Stdout and never through stdout.Writer(), so stdout stays a single
+//     parseable document while stderr carries the live progress.
+//   - otherwise: no-op, progress stays on stdout.
 func newQuietHandle(outputFormat, audience string) *quietHandle {
 	h := &quietHandle{}
-	if isMachineReadable(outputFormat) || audience == "agent" {
+	switch {
+	case audience == "agent":
 		h.fn = stdout.Quiet()
+	case isMachineReadable(outputFormat):
+		h.fn = stdout.Swap(os.Stderr)
 	}
 	return h
 }
@@ -403,9 +415,17 @@ func emitRunResult(
 	}
 
 	if !machineReadable {
-		telemetry.PrintTraceSummary(ag.FilesReviewed(), int64(len(comments)),
-			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
-			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration, ag.SessionID())
+		telemetry.PrintTraceSummary(telemetry.TraceSummary{
+			FilesReviewed:     ag.FilesReviewed(),
+			CommentsGenerated: int64(len(comments)),
+			InputTokens:       ag.TotalInputTokens(),
+			OutputTokens:      ag.TotalOutputTokens(),
+			TotalTokens:       ag.TotalTokensUsed(),
+			CacheReadTokens:   ag.TotalCacheReadTokens(),
+			CacheWriteTokens:  ag.TotalCacheWriteTokens(),
+			Duration:          duration,
+			SessionID:         ag.SessionID(),
+		})
 	}
 
 	if outputFormat == "json" {

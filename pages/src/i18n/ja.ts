@@ -33,6 +33,11 @@ export const ja: TranslationKeys = {
   'error.pageLoadFailed': 'ページの読み込みに失敗しました。',
   'error.reload': '再読み込み',
 
+  // Not found
+  'notFound.title': 'ページが見つかりません',
+  'notFound.description': 'お探しのページは存在しないか、移動した可能性があります。',
+  'notFound.backHome': 'ホームに戻る',
+
   // Highlights
   'highlights.stat1Value': '20K+',
   'highlights.stat1Label': '社内アクティブユーザー',

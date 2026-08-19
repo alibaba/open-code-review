@@ -6,6 +6,7 @@ package session
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -13,6 +14,13 @@ import (
 // error): when the computed sessions dir path is occupied by a regular file,
 // os.ReadDir fails with ENOTDIR and ListSessions must surface it.
 func TestListSessions_DirIsFile(t *testing.T) {
+	// There is no ENOTDIR to observe on Windows: os.Open of the blocking file
+	// succeeds, and the directory query against that handle comes back in a form
+	// os.(*File).readdir reports as an empty listing rather than an error, so
+	// ListSessions returns no sessions and no error and this branch is unreachable.
+	if runtime.GOOS == "windows" {
+		t.Skip("os.ReadDir does not report ENOTDIR for a regular file on Windows")
+	}
 	t.Setenv("HOME", t.TempDir())
 	repoDir := t.TempDir()
 

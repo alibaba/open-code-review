@@ -46,6 +46,7 @@ environment variable.
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
@@ -54,6 +55,7 @@ environment variable.
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
 | `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
+| `kimi-global` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_GLOBAL_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
 | `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
@@ -62,6 +64,7 @@ environment variable.
 | `siliconflow`  | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
+| `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
 ### Overriding a built-in provider's Base URL
 
@@ -148,6 +151,54 @@ The `timeout_sec` keys are not supported by `ocr config set` — edit
   }
 }
 ```
+
+### API key from a command
+
+Instead of storing a key in the config file, `api_key_cmd` fetches it at
+runtime from a secret manager (1Password, `pass`, `gopass`, …). Its trimmed,
+single-line stdout becomes the key. The same option is available for the
+legacy `llm` block as `auth_token_cmd`.
+
+```bash
+ocr config set providers.anthropic.api_key_cmd "op read op://dev/anthropic/api-key"
+```
+
+Your OS keyring works the same way, through the tool it already ships with, so
+the key lives in the Keychain or Secret Service rather than in `config.json`:
+
+```bash
+# macOS Keychain
+ocr config set providers.anthropic.api_key_cmd \
+  "security find-generic-password -s ocr-anthropic -w"
+
+# Linux (Secret Service: GNOME Keyring, KWallet, …)
+ocr config set providers.anthropic.api_key_cmd \
+  "secret-tool lookup service ocr-anthropic"
+```
+
+Precedence: a static `api_key` always wins (if both are set, the command is
+ignored and a warning is printed); otherwise `api_key_cmd` runs; only if
+neither is set does OCR fall back to the provider's environment variable.
+
+The command runs once per `ocr` invocation and must succeed: a non-zero exit,
+empty output, multi-line output, or more than 64KiB of output is a hard error
+(OCR never silently falls back). It must complete within 60 seconds, which
+includes any time you spend answering a prompt. The command inherits your
+terminal's stdin and stderr, so interactive prompts (pinentry, Touch ID) both
+appear and can be answered. If the command leaves a background daemon holding
+its stdout pipe (`gpg-agent`, a first-use `op` daemon), the credential still
+arrives but every `ocr` run pauses an extra 5 seconds waiting for that pipe to
+close — redirect the daemon's output (`>/dev/null 2>&1`) to get rid of the wait.
+
+On Windows the command runs through `cmd.exe`, not `sh`, so a command written
+for one is generally not portable to the other: `%VAR%` and `^` are `cmd.exe`
+metacharacters, while `$VAR` expansion and `\` escaping do not apply there.
+Quoted arguments are passed through verbatim, so
+`op read "op://Private/My Vault/api-key"` works as written.
+
+Since the value is executed as a shell command, `config.json` is trusted
+input — keep it owned by you and not writable by anyone else (OCR writes it
+with `0600` permissions).
 
 ### Additional retry status codes
 
