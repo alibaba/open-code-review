@@ -165,9 +165,10 @@ matching order:
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
+| `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.py` | `python.md` — Python source. |
+| `**/*.{py,ipynb}` | `python.md` — Python source. |
 | `**/*.{php,phtml}` | `php.md` — PHP source and PHP templates. |
 | `**/*.proto` | `protobuf.md` — Protocol Buffers wire compatibility. |
 | `**/*.po` | `po.md` — gettext translation source catalogs. |
@@ -179,6 +180,8 @@ matching order:
 | `**/*.bicep` | `bicep.md` — Bicep (Azure) templates. |
 | `**/*.elm` | `elm.md` - Elm source. |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
+| `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
+| `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

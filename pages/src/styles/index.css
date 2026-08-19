@@ -25,6 +25,17 @@ p {
   margin: 0;
 }
 
+/* Korean separates words with spaces, so the browser default (which may break
+   between Hangul syllables) splits a word mid-token, leaving its tail alone on
+   the next line. Scoped to ko via the lang attribute set in i18n/context.tsx;
+   zh/ja rely on any-character line breaking and must keep the default.
+   overflow-wrap still lets an unbroken token (a long URL or identifier) wrap
+   instead of overflow. */
+:lang(ko) {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
 a {
   text-decoration: none;
   color: inherit;
