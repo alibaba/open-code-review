@@ -91,7 +91,12 @@ func TestOutputRetryReportText_PluralAgreement(t *testing.T) {
 	var buf bytes.Buffer
 	outputRetryReportText(&buf, retryReportFixture())
 	got := buf.String()
-	for _, want := range []string{"2 of 12 requests affected", "(1 request)"} {
+	for _, want := range []string{
+		"2 of 12 requests affected",
+		"1 request failed",
+		"1 request recovered after retry",
+		"Core review (2 requests)",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}
@@ -111,8 +116,11 @@ func TestOutputRetryReportText_PluralAgreement(t *testing.T) {
 	})
 	buf.Reset()
 	outputRetryReportText(&buf, rep)
-	if got := buf.String(); !strings.Contains(got, "(2 requests)") {
-		t.Errorf("two failures must read %q, got:\n%s", "(2 requests)", got)
+	got = buf.String()
+	for _, want := range []string{"2 requests failed", "Core review (3 requests)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
 	}
 }
 
