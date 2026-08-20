@@ -889,6 +889,49 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 	if strings.Contains(got, "bin.dat") {
 		t.Error("binary files should be skipped")
 	}
+
+	// The separator is emitted before each entry, so a skipped final diff cannot
+	// leave a trailing newline behind. Excluding an entire group (plus binaries)
+	// makes "the last diff is skipped" the common case, so assert the exact string
+	// for both orderings rather than only the substrings above.
+	t.Run("no trailing newline when the last diff is skipped", func(t *testing.T) {
+		a := New(Args{})
+		a.diffs = []model.Diff{
+			{NewPath: "kept.go", OldPath: "kept.go"},
+			{NewPath: "bin.dat", OldPath: "bin.dat", IsBinary: true},
+			{NewPath: "member.go", OldPath: "member.go"},
+		}
+		group := []model.Diff{{NewPath: "member.go", OldPath: "member.go"}}
+		if got, want := a.buildChangeFilesExceptGroup(group), "MODIFIED   kept.go"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("entries are newline separated with a skip between them", func(t *testing.T) {
+		a := New(Args{})
+		a.diffs = []model.Diff{
+			{NewPath: "a.go", OldPath: "a.go"},
+			{NewPath: "member.go", OldPath: "member.go"},
+			{NewPath: "b.go", OldPath: "b.go", IsNew: true},
+		}
+		group := []model.Diff{{NewPath: "member.go", OldPath: "member.go"}}
+		want := "MODIFIED   a.go\nADDED   b.go"
+		if got := a.buildChangeFilesExceptGroup(group); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("everything excluded yields an empty string", func(t *testing.T) {
+		a := New(Args{})
+		a.diffs = []model.Diff{
+			{NewPath: "member.go", OldPath: "member.go"},
+			{NewPath: "bin.dat", OldPath: "bin.dat", IsBinary: true},
+		}
+		group := []model.Diff{{NewPath: "member.go", OldPath: "member.go"}}
+		if got := a.buildChangeFilesExceptGroup(group); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
 }
 
 func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {

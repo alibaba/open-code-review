@@ -1458,7 +1458,7 @@ func (a *Agent) buildChangeFilesExceptGroup(groupDiffs []model.Diff) string {
 		exclude[d.OldPath] = true
 	}
 	var sb strings.Builder
-	for i, d := range a.diffs {
+	for _, d := range a.diffs {
 		if d.IsBinary || exclude[d.NewPath] || exclude[d.OldPath] {
 			continue
 		}
@@ -1471,10 +1471,15 @@ func (a *Agent) buildChangeFilesExceptGroup(groupDiffs []model.Diff) string {
 		case d.OldPath != d.NewPath:
 			status = "RENAMED"
 		}
-		sb.WriteString(status + "   " + d.NewPath)
-		if i < len(a.diffs)-1 {
+		// Separator before the entry, conditional on something already being
+		// written, rather than after it conditional on the a.diffs index: the loop
+		// skips binaries and group members, so an index-based test emits a trailing
+		// newline whenever the final diff is one of the skipped ones. Excluding a
+		// whole group makes that the common case rather than the rare one.
+		if sb.Len() > 0 {
 			sb.WriteString("\n")
 		}
+		sb.WriteString(status + "   " + d.NewPath)
 	}
 	return sb.String()
 }
