@@ -14,4 +14,4 @@ Current time in the real world: {{current_system_date_time}}
 {{system_rule}}
 
 ### Task
-Please analyze the code changes above and output a Review Directive.
+Please analyze the code changes above and output a structured review plan.
