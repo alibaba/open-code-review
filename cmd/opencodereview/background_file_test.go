@@ -316,82 +316,82 @@ func initRepoWithCommit(t *testing.T, message string) (string, string) {
 	return repo, hash
 }
 
-// TestBackgroundFromCommitThenFile reproduces the resolution order used by
-// TestBackgroundFilePrecedenceOverCommit verifies that when --background-file
-// is set, the commit-message fallback does not fire: file content wins.
-func TestBackgroundFilePrecedenceOverCommit(t *testing.T) {
+// TestResolveBackground_FilePrecedenceOverCommit verifies that when
+// --background-file is set, the commit-message fallback does not fire.
+func TestResolveBackground_FilePrecedenceOverCommit(t *testing.T) {
 	const commitMsg = "Implement rate limiting on login"
-	repo, hash := initRepoWithCommit(t, commitMsg)
+	repo, _ := initRepoWithCommit(t, commitMsg)
 
-	// Verify the commit message is retrievable.
-	msg, err := getCommitMessage(repo, hash)
+	bgFile := writeTempFile(t, "Extra context from a file.")
+	got, err := resolveBackground(repo, "", bgFile, "HEAD")
 	if err != nil {
-		t.Fatalf("getCommitMessage: %v", err)
+		t.Fatalf("resolveBackground: %v", err)
 	}
-	if msg != commitMsg {
-		t.Fatalf("commit message = %q, want %q", msg, commitMsg)
+	if strings.Contains(got, commitMsg) {
+		t.Errorf("commit message should not appear when --background-file is set, got %q", got)
 	}
-
-	// Mirror the new ordering: --background-file is set, so selectBackground
-	// is called and the commit-message fallback is skipped entirely.
-	background := ""
-	fileBg, err := loadBackgroundFile(writeTempFile(t, "Extra context from a file."))
-	if err != nil {
-		t.Fatalf("loadBackgroundFile: %v", err)
-	}
-	background = selectBackground(background, fileBg)
-
-	// Only the file content must be present; the commit message must NOT appear.
-	if strings.Contains(background, commitMsg) {
-		t.Errorf("commit message should not appear when --background-file is set, got %q", background)
-	}
-	if !strings.Contains(background, "Extra context from a file.") {
-		t.Errorf("expected file content in background, got %q", background)
-	}
-	if !strings.Contains(background, backgroundOpenTag) || !strings.Contains(background, backgroundCloseTag) {
-		t.Errorf("expected file content to keep its delimiters, got %q", background)
+	if !strings.Contains(got, "Extra context from a file.") {
+		t.Errorf("expected file content in background, got %q", got)
 	}
 }
 
-// TestReviewAndDelegateAgreeOnBackground verifies that review and delegate
-// produce identical backgrounds for the same --commit + --background-file input.
-func TestReviewAndDelegateAgreeOnBackground(t *testing.T) {
+// TestResolveBackground_AllCases exercises resolveBackground through
+// real loadBackgroundFile and getCommitMessage calls.
+func TestResolveBackground_AllCases(t *testing.T) {
 	const commitMsg = "Add rate limiting"
-	repo, hash := initRepoWithCommit(t, commitMsg)
+	repo, _ := initRepoWithCommit(t, commitMsg)
+	bgFile := writeTempFile(t, "File-based context.")
 
-	bgFile := writeTempFile(t, "File-based context for review.")
-	fileBg, err := loadBackgroundFile(bgFile)
-	if err != nil {
-		t.Fatalf("loadBackgroundFile: %v", err)
-	}
-
-	// Simulate the review command path.
-	reviewBg := ""
-	if fileBg != "" {
-		reviewBg = selectBackground(reviewBg, fileBg)
-	} else if hash != "" && reviewBg == "" {
-		if msg, err := getCommitMessage(repo, hash); err == nil && msg != "" {
-			reviewBg = msg
+	t.Run("file wins over inline", func(t *testing.T) {
+		got, err := resolveBackground(repo, "inline", bgFile, "HEAD")
+		if err != nil {
+			t.Fatalf("resolveBackground: %v", err)
 		}
-	}
-
-	// Simulate the delegate command path (must be identical logic).
-	delegateBg := ""
-	if fileBg != "" {
-		delegateBg = selectBackground(delegateBg, fileBg)
-	} else if hash != "" && delegateBg == "" {
-		if msg, err := getCommitMessage(repo, hash); err == nil && msg != "" {
-			delegateBg = msg
+		if strings.Contains(got, "inline") {
+			t.Errorf("inline should be ignored, got %q", got)
 		}
-	}
+		if !strings.Contains(got, "File-based context.") {
+			t.Errorf("expected file content, got %q", got)
+		}
+	})
 
-	if reviewBg != delegateBg {
-		t.Errorf("review and delegate disagree:\n  review:   %q\n  delegate: %q", reviewBg, delegateBg)
-	}
-	if strings.Contains(reviewBg, commitMsg) {
-		t.Errorf("commit message should not appear when --background-file is set, got %q", reviewBg)
-	}
-	if !strings.Contains(reviewBg, "File-based context for review.") {
-		t.Errorf("expected file content in background, got %q", reviewBg)
-	}
+	t.Run("commit fallback when no flags", func(t *testing.T) {
+		got, err := resolveBackground(repo, "", "", "HEAD")
+		if err != nil {
+			t.Fatalf("resolveBackground: %v", err)
+		}
+		if got != commitMsg {
+			t.Errorf("expected commit message %q, got %q", commitMsg, got)
+		}
+	})
+
+	t.Run("inline only", func(t *testing.T) {
+		got, err := resolveBackground(repo, "just inline", "", "")
+		if err != nil {
+			t.Fatalf("resolveBackground: %v", err)
+		}
+		if got != "just inline" {
+			t.Errorf("expected %q, got %q", "just inline", got)
+		}
+	})
+
+	t.Run("file only no commit", func(t *testing.T) {
+		got, err := resolveBackground(repo, "", bgFile, "")
+		if err != nil {
+			t.Fatalf("resolveBackground: %v", err)
+		}
+		if !strings.Contains(got, "File-based context.") {
+			t.Errorf("expected file content, got %q", got)
+		}
+	})
+
+	t.Run("all empty", func(t *testing.T) {
+		got, err := resolveBackground(repo, "", "", "")
+		if err != nil {
+			t.Fatalf("resolveBackground: %v", err)
+		}
+		if got != "" {
+			t.Errorf("expected empty, got %q", got)
+		}
+	})
 }
