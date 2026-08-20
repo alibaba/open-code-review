@@ -615,7 +615,7 @@ func TestEmitRunResult_TextReportOrder(t *testing.T) {
 			t.Fatalf("emitRunResult: %v", err)
 		}
 	})
-	report := strings.Index(got, "LLM retry report:")
+	report := strings.Index(got, "LLM retry report summary:")
 	summary := strings.Index(got, "PROJECT-SUMMARY-MARKER")
 	if report < 0 {
 		t.Fatalf("report missing from text output: %s", got)
@@ -623,7 +623,7 @@ func TestEmitRunResult_TextReportOrder(t *testing.T) {
 	if summary < 0 || report > summary {
 		t.Errorf("report must precede the project summary\n%s", got)
 	}
-	if !strings.Contains(got, "- config.go / main_task #1: provider(402) -> failed") {
+	if !strings.Contains(got, "rejected by provider (HTTP 402) → failed") {
 		t.Errorf("per-request lines missing: %s", got)
 	}
 }
@@ -635,7 +635,7 @@ func TestEmitRunResult_TextOmitsReportWhenNil(t *testing.T) {
 			t.Fatalf("emitRunResult: %v", err)
 		}
 	})
-	if strings.Contains(got, "LLM retry report") {
+	if strings.Contains(got, "LLM retry report summary") {
 		t.Errorf("nil report must print nothing, got %s", got)
 	}
 }
@@ -649,7 +649,7 @@ func TestEmitRunResult_JSONHasNoReportText(t *testing.T) {
 			t.Fatalf("emitRunResult: %v", err)
 		}
 	})
-	if strings.Contains(got, "LLM retry report:") {
+	if strings.Contains(got, "LLM retry report summary:") {
 		t.Errorf("JSON mode must not emit the terminal summary: %s", got)
 	}
 	dec := json.NewDecoder(strings.NewReader(got))
@@ -685,7 +685,7 @@ func TestEmitFailureUsage_TextCarriesRetryReport(t *testing.T) {
 		emitFailureUsage(ag, time.Second, "text", nil, retryReportFixture())
 	})
 	usage := strings.Index(got, "[ocr] usage on failure:")
-	report := strings.Index(got, "LLM retry report:")
+	report := strings.Index(got, "LLM retry report summary:")
 	if usage < 0 || report < 0 || usage > report {
 		t.Errorf("report must follow the usage line on stderr:\n%s", got)
 	}
@@ -696,7 +696,7 @@ func TestEmitFailureUsage_NilReportUnchanged(t *testing.T) {
 	got := captureStderr(t, func() {
 		emitFailureUsage(ag, time.Second, "text", nil, nil)
 	})
-	if strings.Contains(got, "LLM retry report") {
+	if strings.Contains(got, "LLM retry report summary") {
 		t.Errorf("nil report must print nothing, got %q", got)
 	}
 }
@@ -714,10 +714,10 @@ func TestEmitRunResult_TextReportWithWarnings(t *testing.T) {
 			t.Fatalf("emitRunResult: %v", err)
 		}
 	})
-	if !strings.Contains(got, "LLM retry report:") {
+	if !strings.Contains(got, "LLM retry report summary:") {
 		t.Errorf("report missing: %s", got)
 	}
-	if strings.Count(got, "LLM retry report:") != 1 {
+	if strings.Count(got, "LLM retry report summary:") != 1 {
 		t.Errorf("report emitted more than once: %s", got)
 	}
 }

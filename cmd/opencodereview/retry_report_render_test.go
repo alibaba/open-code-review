@@ -57,11 +57,17 @@ func retryReportFixture() *llm.RetryReport {
 }
 
 // The expected rendering is fixed, so the text contract is asserted whole
-// rather than by substring.
+// rather than by substring. Failures list before recoveries, and the internal
+// task_type/request_no identity the JSON report carries stays out of the
+// terminal.
 const wantRetryReportText = `
-LLM retry report: 1/12 requests retried, 2 retries, 1 recovered, 1 failed, 0 cancelled
-- payment.go / main_task #2: rate_limited(429) -> overloaded(529) -> success
-- config.go / main_task #1: provider(402) -> failed
+LLM retry report summary: 2 of 12 requests affected — 1 request failed, 1 request recovered after retry
+
+Core review (2 requests):
+- config.go — rejected by provider (HTTP 402) → failed
+- payment.go — rate limited (HTTP 429) → provider overloaded (HTTP 529) → succeeded
+
+Per-attempt detail: --format json (retry_report).
 `
 
 func TestOutputRetryReportText_RecoveredAndFailed(t *testing.T) {
@@ -80,13 +86,33 @@ func TestOutputRetryReportText_NilWritesNothing(t *testing.T) {
 	}
 }
 
-func TestOutputRetryReportText_SingularRetry(t *testing.T) {
-	rep := retryReportFixture()
-	rep.TotalRetries = 1
+// Counted nouns are singular at one and plural above it.
+func TestOutputRetryReportText_PluralAgreement(t *testing.T) {
 	var buf bytes.Buffer
+	outputRetryReportText(&buf, retryReportFixture())
+	got := buf.String()
+	for _, want := range []string{"2 of 12 requests affected", "(1 request)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+
+	rep := retryReportFixture()
+	rep.Requests = append(rep.Requests, llm.RequestReport{
+		LogicalRequestID: "ccc",
+		Model:            "claude-test",
+		FilePath:         "billing.go",
+		TaskType:         "main_task",
+		RequestNo:        1,
+		Outcome:          llm.OutcomeFailed,
+		Attempts: []llm.AttemptRecord{
+			{Number: 1, Outcome: llm.AttemptError, ErrorClass: llm.ErrorClassProvider, FailurePhase: llm.FailurePhaseHTTP, StatusCode: 402},
+		},
+	})
+	buf.Reset()
 	outputRetryReportText(&buf, rep)
-	if !strings.Contains(buf.String(), "1 retry,") {
-		t.Errorf("total_retries=1 must read %q, got %q", "1 retry,", buf.String())
+	if got := buf.String(); !strings.Contains(got, "(2 requests)") {
+		t.Errorf("two failures must read %q, got:\n%s", "(2 requests)", got)
 	}
 }
 
@@ -113,8 +139,12 @@ func TestOutputRetryReportText_SucceededAfterRetry(t *testing.T) {
 			},
 		}},
 	}
-	want := "\nLLM retry report: 1/1 requests retried, 1 retry, 0 recovered, 0 failed, 0 cancelled\n" +
-		"- payment.go / main_task #2: success -> success\n"
+	// "retried", not "recovered": no attempt failed, so nothing was recovered
+	// from — the same distinction the JSON report's recovered_requests keeps.
+	want := "\nLLM retry report summary: 1 of 1 request affected — 1 request retried at provider request\n" +
+		"\nCore review (1 request):\n" +
+		"- payment.go — succeeded (provider asked to retry) → succeeded\n" +
+		"\nPer-attempt detail: --format json (retry_report).\n"
 	var buf bytes.Buffer
 	outputRetryReportText(&buf, rep)
 	if got := buf.String(); got != want {
@@ -122,9 +152,7 @@ func TestOutputRetryReportText_SucceededAfterRetry(t *testing.T) {
 	}
 }
 
-// A cancelled request keeps its clean attempt and is told apart from a provider
-// failure only by the trailing outcome, so that suffix is part of the contract.
-func TestOutputRetryReportText_CancelledSuffix(t *testing.T) {
+func TestOutputRetryReportText_CancelledIsShown(t *testing.T) {
 	rep := &llm.RetryReport{
 		SchemaVersion:     llm.RetryReportSchemaVersion,
 		TotalRequests:     1,
@@ -139,8 +167,10 @@ func TestOutputRetryReportText_CancelledSuffix(t *testing.T) {
 			Attempts:         []llm.AttemptRecord{{Number: 1, Outcome: llm.AttemptSuccess}},
 		}},
 	}
-	want := "\nLLM retry report: 0/1 requests retried, 0 retries, 0 recovered, 0 failed, 1 cancelled\n" +
-		"- payment.go / memory_compression_task #1: success -> cancelled\n"
+	want := "\nLLM retry report summary: 1 of 1 request affected — 1 request cancelled\n" +
+		"\nContext compaction (1 request):\n" +
+		"- payment.go — succeeded → cancelled\n" +
+		"\nPer-attempt detail: --format json (retry_report).\n"
 	var buf bytes.Buffer
 	outputRetryReportText(&buf, rep)
 	if got := buf.String(); got != want {
@@ -170,7 +200,7 @@ func TestRetryAttemptChain_NoStatusCode(t *testing.T) {
 			{Number: 1, Outcome: llm.AttemptError, ErrorClass: llm.ErrorClassNetwork, FailurePhase: llm.FailurePhaseTransport},
 		},
 	}
-	if got, want := retryAttemptChain(r), "network -> failed"; got != want {
+	if got, want := retryAttemptChain(r), "network error → failed"; got != want {
 		t.Errorf("chain = %q, want %q", got, want)
 	}
 }
@@ -304,7 +334,7 @@ func TestRetryReport_TerminalAndJSONReadSameFrozenResult(t *testing.T) {
 		t.Fatal("retry_report missing")
 	}
 
-	wantHeader := "LLM retry report: 1/2 requests retried, 1 retry, 1 recovered, 1 failed, 0 cancelled"
+	wantHeader := "LLM retry report summary: 2 of 2 requests affected — 1 request failed, 1 request recovered after retry"
 	if !strings.Contains(text.String(), wantHeader) {
 		t.Errorf("terminal header = %q, want it to contain %q", text.String(), wantHeader)
 	}

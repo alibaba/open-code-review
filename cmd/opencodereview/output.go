@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -389,62 +390,187 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	return enc.Encode(out)
 }
 
-// outputRetryReportText renders the frozen retry report as the terminal
-// summary. It is a run result, not a warning, so it goes to the same writer as
-// the review result rather than to stderr; JSON mode never calls this (stdout
-// must stay a single JSON document).
-//
-// Nothing here is free text from a provider: only stable classes, numeric
-// status codes, the file path and the task type — no API keys, headers,
-// bodies, prompts, URLs or raw SDK error strings. Every request in the report
-// is listed; the report already only contains requests that erred or retried,
-// so there is no separate terminal truncation contract to reason about.
+// retryStages maps internal task types to concise terminal labels. The slice
+// order is also the display order.
+var retryStages = []struct {
+	taskType session.TaskType
+	title    string
+}{
+	{session.PlanTask, "Review planning"},
+	{session.MainTask, "Core review"},
+	{session.MemoryCompressionTask, "Context compaction"},
+	{session.ReLocationTask, "Comment re-location"},
+	{session.ReviewFilterTask, "Comment filtering"},
+}
+
+// Keep the terminal concise; JSON retains every request.
+const retryGroupListLimit = 5
+
+// retryGroup is one review-stage bucket of listed requests.
+type retryGroup struct {
+	rank     int
+	title    string
+	requests []llm.RequestReport
+}
+
+func retryOutcomeInfo(o llm.Outcome) (summary string, rank int) {
+	switch o {
+	case llm.OutcomeFailed:
+		return "failed", 0
+	case llm.OutcomeCancelled:
+		return "cancelled", 1
+	case llm.OutcomeRecovered:
+		return "recovered after retry", 2
+	default:
+		return "retried at provider request", 3
+	}
+}
+
+// outputRetryReportText groups noteworthy requests by review stage. It
+// renders only stable classes and status codes; raw provider errors stay out.
 func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
 	if rep == nil {
 		return
 	}
-	retryWord := "retries"
-	if rep.TotalRetries == 1 {
-		retryWord = "retry"
-	}
-	fmt.Fprintf(w, "\nLLM retry report: %d/%d requests retried, %d %s, %d recovered, %d failed, %d cancelled\n",
-		rep.RetriedRequests, rep.TotalRequests, rep.TotalRetries, retryWord,
-		rep.RecoveredRequests, rep.FailedRequests, rep.CancelledRequests)
-	for _, r := range rep.Requests {
-		fmt.Fprintf(w, "- %s / %s #%d: %s\n",
-			sanitizeTerminal(r.FilePath), sanitizeTerminal(r.TaskType),
-			r.RequestNo, retryAttemptChain(r))
-	}
-}
+	groups := groupRetryRequests(rep.Requests)
 
-// retryAttemptChain renders one logical request's attempts as
-// "rate_limited(429) -> overloaded(529) -> success".
-//
-// A trailing request-level outcome is appended for failed and, when the last
-// attempt does not already say so, cancelled. A recovered or succeeded request
-// already ends in a "success" attempt, so repeating the outcome there would be
-// noise, whereas a request that never succeeded would otherwise end on its last
-// error with no sign of how it finished. cancelled in particular is a routine
-// outcome (background memory compression is deliberately abandoned at the end
-// of every file), so it must be visibly distinct from a provider failure.
-func retryAttemptChain(r llm.RequestReport) string {
-	parts := make([]string, 0, len(r.Attempts)+1)
-	for _, a := range r.Attempts {
-		switch {
-		case a.Outcome == llm.AttemptSuccess:
-			parts = append(parts, "success")
-		case a.StatusCode > 0:
-			parts = append(parts, fmt.Sprintf("%s(%d)", a.ErrorClass, a.StatusCode))
-		default:
-			parts = append(parts, string(a.ErrorClass))
+	// The counts come from the listed requests, not from the report aggregates, so the
+	// summary line can never disagree with the entries printed under it.
+	byOutcome := make(map[llm.Outcome]int, 3)
+	for _, r := range rep.Requests {
+		byOutcome[r.Outcome]++
+	}
+	parts := make([]string, 0, 4)
+	for _, o := range []llm.Outcome{llm.OutcomeFailed, llm.OutcomeCancelled, llm.OutcomeRecovered, llm.OutcomeSucceeded} {
+		if n := byOutcome[o]; n > 0 {
+			summary, _ := retryOutcomeInfo(o)
+			parts = append(parts, fmt.Sprintf("%d %s %s", n, plural(n, "request"), summary))
 		}
 	}
+
+	fmt.Fprintf(w, "\nLLM retry report summary: %d of %d %s affected — %s\n",
+		len(rep.Requests), rep.TotalRequests, plural(rep.TotalRequests, "request"),
+		strings.Join(parts, ", "))
+
+	for _, g := range groups {
+		header := fmt.Sprintf("%s (%d %s", g.title,
+			len(g.requests), plural(len(g.requests), "request"))
+		fmt.Fprintf(w, "\n%s):\n", header)
+		for i, r := range g.requests {
+			if i == retryGroupListLimit {
+				fmt.Fprintf(w, "  ... and %d more\n", len(g.requests)-i)
+				break
+			}
+			fmt.Fprintf(w, "- %s — %s\n", sanitizeTerminal(r.FilePath), retryAttemptChain(r))
+		}
+	}
+
+	fmt.Fprintf(w, "\nPer-attempt detail: --format json (retry_report).\n")
+}
+
+// groupRetryRequests buckets by review stage, then sorts for stable output.
+func groupRetryRequests(requests []llm.RequestReport) []*retryGroup {
+	byStage := make(map[string]*retryGroup)
+	for _, r := range requests {
+		g := byStage[r.TaskType]
+		if g == nil {
+			title, rank := retryStageInfo(r.TaskType)
+			g = &retryGroup{rank: rank, title: title}
+			byStage[r.TaskType] = g
+		}
+		g.requests = append(g.requests, r)
+	}
+
+	groups := make([]*retryGroup, 0, len(byStage))
+	for _, g := range byStage {
+		sort.Slice(g.requests, func(i, j int) bool {
+			_, ri := retryOutcomeInfo(g.requests[i].Outcome)
+			_, rj := retryOutcomeInfo(g.requests[j].Outcome)
+			if ri != rj {
+				return ri < rj
+			}
+			if g.requests[i].FilePath != g.requests[j].FilePath {
+				return g.requests[i].FilePath < g.requests[j].FilePath
+			}
+			return g.requests[i].RequestNo < g.requests[j].RequestNo
+		})
+		groups = append(groups, g)
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		if groups[i].rank != groups[j].rank {
+			return groups[i].rank < groups[j].rank
+		}
+		return groups[i].title < groups[j].title
+	})
+	return groups
+}
+
+func retryStageInfo(taskType string) (title string, rank int) {
+	for i, stage := range retryStages {
+		if string(stage.taskType) == taskType {
+			return stage.title, i
+		}
+	}
+	return sanitizeTerminal(taskType), len(retryStages)
+}
+
+// retryAttemptChain renders one logical request as a short human-readable chain.
+func retryAttemptChain(r llm.RequestReport) string {
+	parts := make([]string, 0, len(r.Attempts)+1)
+	for i, a := range r.Attempts {
+		if a.Outcome == llm.AttemptSuccess {
+			if i < len(r.Attempts)-1 {
+				parts = append(parts, "succeeded (provider asked to retry)")
+				continue
+			}
+			parts = append(parts, "succeeded")
+			continue
+		}
+		parts = append(parts, retryErrorPhrase(a))
+	}
+	lastCancelled := len(r.Attempts) > 0 &&
+		r.Attempts[len(r.Attempts)-1].ErrorClass == llm.ErrorClassCancelled
 	if r.Outcome == llm.OutcomeFailed ||
-		(r.Outcome == llm.OutcomeCancelled &&
-			(len(parts) == 0 || parts[len(parts)-1] != string(llm.OutcomeCancelled))) {
+		(r.Outcome == llm.OutcomeCancelled && !lastCancelled) {
 		parts = append(parts, string(r.Outcome))
 	}
-	return strings.Join(parts, " -> ")
+	return strings.Join(parts, " → ")
+}
+
+func retryErrorPhrase(a llm.AttemptRecord) string {
+	var phrase string
+	switch a.ErrorClass {
+	case llm.ErrorClassRateLimited:
+		phrase = "rate limited"
+	case llm.ErrorClassOverloaded:
+		phrase = "provider overloaded"
+	case llm.ErrorClassAuthentication:
+		phrase = "authentication rejected"
+	case llm.ErrorClassTimeout:
+		phrase = "timed out"
+	case llm.ErrorClassNetwork:
+		phrase = "network error"
+	case llm.ErrorClassProvider:
+		phrase = "provider error"
+		if a.StatusCode > 0 && a.StatusCode < 500 {
+			phrase = "rejected by provider"
+		}
+	case llm.ErrorClassCancelled:
+		phrase = "cancelled"
+	default:
+		phrase = "unclassified error"
+	}
+	if a.StatusCode > 0 {
+		phrase = fmt.Sprintf("%s (HTTP %d)", phrase, a.StatusCode)
+	}
+	return phrase
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }
 
 func manifestMessage(manifest *session.RunManifest, findings int) string {
