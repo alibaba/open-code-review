@@ -1479,21 +1479,72 @@ func (a *Agent) buildChangeFilesExceptGroup(groupDiffs []model.Diff) string {
 	return sb.String()
 }
 
-// resolveGroupSystemRule merges rules for all files in a group.
+// resolveGroupSystemRule merges the rules for every file in a group. Files that
+// resolve to identical rule text share one block.
+//
+// When the group spans more than one distinct rule set, each block is tagged with
+// the files it was resolved for. Bare concatenation cannot express that mapping:
+// the model would receive, say, the Go checklist immediately followed by the XML
+// one with nothing saying which file each governs — and a group holding exactly
+// that mix is what the grouping prompt asks for (interface plus implementation,
+// i18n/config variants of one resource). The <rules for="..."> framing matches
+// the <review_files>/<file path="..."> convention already used for the diffs.
+//
+// A group covered by a single rule set — every single-file group, and every group
+// whose files share a language — returns that rule text bare, so the rendered
+// prompt stays byte-identical to the untagged form.
 func (a *Agent) resolveGroupSystemRule(diffs []model.Diff) string {
 	if a.args.SystemRule == nil {
 		return ""
 	}
-	seen := make(map[string]bool)
-	var parts []string
-	for _, d := range diffs {
-		r := a.args.SystemRule.Resolve(strings.ToLower(d.NewPath))
-		if r != "" && !seen[r] {
-			seen[r] = true
-			parts = append(parts, r)
-		}
+
+	// Sorted by path so both block order and the paths inside a block are
+	// deterministic. diffs arrives in the grouping LLM's response order, which
+	// varies between runs and would otherwise churn the prompt prefix that
+	// provider caches reuse. Clone first: the caller's slice is shared state.
+	sorted := slices.Clone(diffs)
+	slices.SortStableFunc(sorted, func(x, y model.Diff) int {
+		return strings.Compare(x.NewPath, y.NewPath)
+	})
+
+	type ruleBlock struct {
+		rule  string
+		paths []string
 	}
-	return strings.Join(parts, "\n")
+	var blocks []ruleBlock
+	index := make(map[string]int, len(sorted))
+	for _, d := range sorted {
+		r := a.args.SystemRule.Resolve(strings.ToLower(d.NewPath))
+		if r == "" {
+			continue
+		}
+		if i, ok := index[r]; ok {
+			blocks[i].paths = append(blocks[i].paths, d.NewPath)
+			continue
+		}
+		index[r] = len(blocks)
+		blocks = append(blocks, ruleBlock{rule: r, paths: []string{d.NewPath}})
+	}
+
+	if len(blocks) == 0 {
+		return ""
+	}
+	if len(blocks) == 1 {
+		return blocks[0].rule
+	}
+
+	var sb strings.Builder
+	for i, b := range blocks {
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("<rules for=\"")
+		sb.WriteString(strings.Join(b.paths, ", "))
+		sb.WriteString("\">\n")
+		sb.WriteString(b.rule)
+		sb.WriteString("\n</rules>")
+	}
+	return sb.String()
 }
 
 // executeGroupPlanPhase runs the plan phase for a file group.
@@ -1683,25 +1734,6 @@ func buildGroupFilterCommentsJSON(comments []model.LlmComment) string {
 	return string(data)
 }
 
-// buildFilterCommentsJSON serializes comments into a JSON array with generated IDs.
-func buildFilterCommentsJSON(comments []model.LlmComment) string {
-	type filterComment struct {
-		ID           string `json:"id"`
-		Content      string `json:"content"`
-		ExistingCode string `json:"existing_code,omitempty"`
-	}
-	items := make([]filterComment, len(comments))
-	for i, cm := range comments {
-		items[i] = filterComment{
-			ID:           fmt.Sprintf("c-%d", i),
-			Content:      cm.Content,
-			ExistingCode: cm.ExistingCode,
-		}
-	}
-	data, _ := json.Marshal(items)
-	return string(data)
-}
-
 // parseFilterToolCalls extracts comment indices from the filter tool call response.
 // Returns nil if no matching tool call is found, allowing fallback to text-based parsing.
 // Returns an empty map (non-nil) for approve_all_comments or an empty comment_ids list.
@@ -1756,42 +1788,6 @@ func parseFilterResponse(raw string, total int) map[int]struct{} {
 		}
 	}
 	return indices
-}
-
-// buildChangeFilesExcept returns a formatted list of changed files except the given path.
-func (a *Agent) buildChangeFilesExcept(excludePath string) string {
-	var sb strings.Builder
-	for i, d := range a.diffs {
-		if d.IsBinary {
-			continue
-		}
-		if d.NewPath == excludePath || d.OldPath == excludePath {
-			continue
-		}
-		status := "MODIFIED"
-		switch {
-		case d.IsNew:
-			status = "ADDED"
-		case d.IsDeleted:
-			status = "DELETED"
-		case d.OldPath != d.NewPath:
-			status = "RENAMED"
-		}
-		sb.WriteString(status + "   " + d.NewPath)
-		if i < len(a.diffs)-1 {
-			sb.WriteString("\n")
-		}
-	}
-	return sb.String()
-}
-
-// resolveSystemRule returns the rule text for a given file path,
-// matching against PathRuleMap glob patterns, falling back to DefaultRule.
-func (a *Agent) resolveSystemRule(path string) string {
-	if a.args.SystemRule == nil {
-		return ""
-	}
-	return a.args.SystemRule.Resolve(path)
 }
 
 // filterLargeDiffs drops diffs whose diff content alone consumes more than 80% of MaxTokens.
@@ -1877,61 +1873,6 @@ func (a *Agent) extFromPath(path string) string {
 		return ""
 	}
 	return strings.ToLower(basename[dot:])
-}
-
-// executePlanPhase runs the plan task for a single file, sending template messages
-// with resolved placeholders and collecting the LLM response as plan guidance.
-func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFiles, rule string) (string, error) {
-	ctx, span := telemetry.StartSpan(ctx, "plan.execute")
-	defer span.End()
-	telemetry.SetAttr(span, "file.path", newPath)
-
-	pt := a.args.Template.PlanTask
-	messages := make([]llm.Message, 0, len(pt.Messages))
-	for _, m := range pt.Messages {
-		content := m.Content
-		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
-		content = strings.ReplaceAll(content, "{{current_file_path}}", newPath)
-		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
-		content = strings.ReplaceAll(content, "{{change_files}}", changeFiles)
-		content = strings.ReplaceAll(content, "{{diff}}", rawDiff)
-		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
-		content = strings.ReplaceAll(content, "{{plan_tools}}", formatToolDefs(a.args.PlanToolDefs))
-		messages = append(messages, llm.NewTextMessage(m.Role, content))
-	}
-
-	fs := a.session.GetOrCreateFileSession(newPath)
-	rec := fs.AppendTaskRecord(session.PlanTask, messages)
-	ctx = llm.ContextWithSessionKey(ctx,
-		llm.SessionTaskKey(a.session.SessionID, string(session.PlanTask), newPath))
-	startTime := time.Now()
-	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.PlanTask, rec.RequestNo))
-
-	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
-	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-		Model:     a.args.Model,
-		Messages:  messages,
-		MaxTokens: a.args.Template.CompletionTokenLimit(),
-	})
-	duration := time.Since(startTime)
-	if err != nil {
-		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
-		llmSpan.End()
-		rec.SetError(err, duration)
-		span.SetStatus(codes.Error, err.Error())
-		span.RecordError(err)
-		return "", fmt.Errorf("plan request: %w", err)
-	}
-	var totalTokens int64
-	if resp.Usage != nil {
-		totalTokens = resp.Usage.TotalTokens
-	}
-	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
-	llmSpan.End()
-	rec.SetResponse(resp, duration)
-	a.runner.RecordUsage(resp.Usage)
-	fmt.Fprintf(stdout.Writer(), "[ocr] Plan completed for %s\n", newPath)
-	return resp.Content(), nil
 }
 
 // formatToolDefs renders tool definitions as human-readable text for embedding in prompts.

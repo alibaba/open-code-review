@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
@@ -291,6 +292,103 @@ func TestBuildFileMetadataTable(t *testing.T) {
 	if !contains(table, "a.go") || !contains(table, "b.go") {
 		t.Errorf("table missing paths:\n%s", table)
 	}
+}
+
+func TestResolveGroupSystemRule(t *testing.T) {
+	const (
+		goRule  = "GO CHECKLIST"
+		xmlRule = "XML CHECKLIST"
+	)
+	// DefaultRule is deliberately empty so a path matching neither pattern
+	// resolves to no rule at all, which is the skip case below.
+	resolver := &rules.SystemRule{
+		PathRules: []rules.PathRule{
+			{Pattern: "*.go", Rule: goRule},
+			{Pattern: "*.xml", Rule: xmlRule},
+		},
+	}
+	diff := func(path string) model.Diff { return model.Diff{NewPath: path} }
+
+	t.Run("nil resolver returns empty", func(t *testing.T) {
+		a := New(Args{})
+		if got := a.resolveGroupSystemRule([]model.Diff{diff("a.go")}); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+
+	t.Run("single file returns the bare rule", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		if got := a.resolveGroupSystemRule([]model.Diff{diff("a.go")}); got != goRule {
+			t.Errorf("got %q, want %q", got, goRule)
+		}
+	})
+
+	// The untagged form is what every same-language group renders, so it must stay
+	// byte-identical to the pre-tagging output — no wrapper, no duplicated rule.
+	t.Run("one rule set across many files stays untagged", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		got := a.resolveGroupSystemRule([]model.Diff{diff("b.go"), diff("a.go")})
+		if got != goRule {
+			t.Errorf("got %q, want the bare rule %q", got, goRule)
+		}
+	})
+
+	t.Run("mixed rule sets are tagged with their files", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		got := a.resolveGroupSystemRule([]model.Diff{diff("b.go"), diff("m.xml"), diff("a.go")})
+		want := "<rules for=\"a.go, b.go\">\n" + goRule + "\n</rules>\n" +
+			"<rules for=\"m.xml\">\n" + xmlRule + "\n</rules>"
+		if got != want {
+			t.Errorf("got:\n%s\n\nwant:\n%s", got, want)
+		}
+	})
+
+	t.Run("output does not depend on input order", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		forward := a.resolveGroupSystemRule([]model.Diff{diff("a.go"), diff("m.xml")})
+		reverse := a.resolveGroupSystemRule([]model.Diff{diff("m.xml"), diff("a.go")})
+		if forward != reverse {
+			t.Errorf("input order changed the output:\n%s\n---\n%s", forward, reverse)
+		}
+	})
+
+	t.Run("caller slice is not reordered", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		in := []model.Diff{diff("z.go"), diff("a.go")}
+		a.resolveGroupSystemRule(in)
+		if in[0].NewPath != "z.go" || in[1].NewPath != "a.go" {
+			t.Errorf("input slice was reordered: %q, %q", in[0].NewPath, in[1].NewPath)
+		}
+	})
+
+	t.Run("files resolving to no rule are skipped", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		got := a.resolveGroupSystemRule([]model.Diff{diff("a.go"), diff("README.md")})
+		if got != goRule {
+			t.Errorf("got %q, want the bare Go rule %q", got, goRule)
+		}
+	})
+
+	t.Run("no file resolves to a rule", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		if got := a.resolveGroupSystemRule([]model.Diff{diff("README.md")}); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+
+	// Smoke test against the real shipped rule set rather than a hand-built one:
+	// the glob patterns in system_rules.json must actually resolve for a plain
+	// source path, which a synthetic resolver cannot show.
+	t.Run("default rule set resolves a real path", func(t *testing.T) {
+		real, err := rules.LoadDefault()
+		if err != nil {
+			t.Skipf("cannot load default rules: %v", err)
+		}
+		a := New(Args{SystemRule: real})
+		if got := a.resolveGroupSystemRule([]model.Diff{diff("main.go")}); got == "" {
+			t.Error("expected a non-empty rule for a .go file")
+		}
+	})
 }
 
 func contains(s, sub string) bool {

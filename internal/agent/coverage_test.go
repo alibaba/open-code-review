@@ -181,27 +181,6 @@ func TestFilterDiffs(t *testing.T) {
 	}
 }
 
-func TestResolveSystemRule(t *testing.T) {
-	t.Run("nil SystemRule returns empty", func(t *testing.T) {
-		a := New(Args{SystemRule: nil})
-		if got := a.resolveSystemRule("main.go"); got != "" {
-			t.Errorf("expected empty, got %q", got)
-		}
-	})
-
-	t.Run("with resolver", func(t *testing.T) {
-		rule, err := rules.LoadDefault()
-		if err != nil {
-			t.Skipf("cannot load default rules: %v", err)
-		}
-		a := New(Args{SystemRule: rule})
-		got := a.resolveSystemRule("main.go")
-		if got == "" {
-			t.Error("expected non-empty rule for .go file")
-		}
-	})
-}
-
 func TestFindDiff(t *testing.T) {
 	a := New(Args{})
 	a.diffs = []model.Diff{
@@ -539,7 +518,7 @@ func TestExecuteReviewFilter_SkipFilter(t *testing.T) {
 	})
 }
 
-func TestExecutePlanPhase(t *testing.T) {
+func TestExecuteGroupPlanPhase(t *testing.T) {
 	tmpDir := t.TempDir()
 	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
 
@@ -562,7 +541,10 @@ func TestExecutePlanPhase(t *testing.T) {
 			PlanTask: &template.LlmConversation{
 				Messages: []template.ChatMessage{
 					{Role: "system", Content: "You are a planner. Date: {{current_system_date_time}}"},
-					{Role: "user", Content: "Plan review for {{current_file_path}}. Rule: {{system_rule}}. Changes: {{change_files}}. Diff: {{diff}}. Background: {{requirement_background}}. Tools: {{plan_tools}}"},
+					// {{diffs}} (plural), not {{diff}}: the group plan phase renders every
+					// member's diff into one block and no longer substitutes the
+					// single-file {{current_file_path}}/{{diff}} pair.
+					{Role: "user", Content: "Plan review. Rule: {{system_rule}}. Changes: {{change_files}}. Diffs: {{diffs}}. Background: {{requirement_background}}. Tools: {{plan_tools}}"},
 				},
 			},
 			MaxTokens:           10000,
@@ -572,9 +554,17 @@ func TestExecutePlanPhase(t *testing.T) {
 	})
 	a.currentDate = "2025-06-26 10:00"
 
-	result, err := a.executePlanPhase(context.Background(), "main.go", "+new code", "helper.go", "check for bugs")
+	g := FileGroup{
+		Label: "core",
+		Diffs: []model.Diff{
+			{NewPath: "main.go", Diff: "+new code"},
+			{NewPath: "helper.go", Diff: "+helper code"},
+		},
+	}
+	result, err := a.executeGroupPlanPhase(context.Background(), g,
+		buildConcatenatedDiffs(g.Diffs), "other.go", "check for bugs")
 	if err != nil {
-		t.Fatalf("executePlanPhase: %v", err)
+		t.Fatalf("executeGroupPlanPhase: %v", err)
 	}
 	if result != "review plan output" {
 		t.Errorf("result = %q", result)
@@ -582,9 +572,14 @@ func TestExecutePlanPhase(t *testing.T) {
 	if a.TotalInputTokens() != 20 {
 		t.Errorf("TotalInputTokens = %d, want 20", a.TotalInputTokens())
 	}
+	// The plan record is filed under the group key, not any single member, so the
+	// retry report and the resume checkpoint join on the same string.
+	if recs := sess.GetOrCreateFileSession("helper.go,main.go").TaskRecords[session.PlanTask]; len(recs) != 1 {
+		t.Errorf("group file session holds %d plan records, want 1", len(recs))
+	}
 }
 
-func TestExecutePlanPhase_LLMError(t *testing.T) {
+func TestExecuteGroupPlanPhase_LLMError(t *testing.T) {
 	tmpDir := t.TempDir()
 	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
 
@@ -596,7 +591,7 @@ func TestExecutePlanPhase_LLMError(t *testing.T) {
 		Session:   sess,
 		Template: template.Template{
 			PlanTask: &template.LlmConversation{
-				Messages: []template.ChatMessage{{Role: "user", Content: "{{diff}}"}},
+				Messages: []template.ChatMessage{{Role: "user", Content: "{{diffs}}"}},
 			},
 			MaxTokens:           10000,
 			MaxToolRequestTimes: 5,
@@ -604,7 +599,8 @@ func TestExecutePlanPhase_LLMError(t *testing.T) {
 		},
 	})
 
-	_, err := a.executePlanPhase(context.Background(), "a.go", "+x", "", "")
+	g := FileGroup{Label: "single", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}
+	_, err := a.executeGroupPlanPhase(context.Background(), g, buildConcatenatedDiffs(g.Diffs), "", "")
 	if err != nil {
 		t.Logf("expected no-error from empty response, got: %v", err)
 	}

@@ -49,11 +49,13 @@ func (c *metaCaptureClient) only(t *testing.T) (llm.RequestMeta, bool) {
 	return c.metas[0], c.haveMeta[0]
 }
 
-// TestExecutePlanPhase_Identity checks the plan request carries the identity of
-// the record executePlanPhase created for it. The empty-provider case is covered
-// too: an unnamed endpoint legitimately has no provider label, and that must not
-// suppress identity.
-func TestExecutePlanPhase_Identity(t *testing.T) {
+// TestExecuteGroupPlanPhase_Identity checks the plan request carries the identity
+// of the record executeGroupPlanPhase created for it. The empty-provider case is
+// covered too: an unnamed endpoint legitimately has no provider label, and that
+// must not suppress identity. A two-file group is used deliberately — FilePath
+// must be the group key, because that is the string the file session was opened
+// under and the retry report joins the session JSONL on all three fields.
+func TestExecuteGroupPlanPhase_Identity(t *testing.T) {
 	for _, provider := range []string{"openai", ""} {
 		name := provider
 		if name == "" {
@@ -69,7 +71,7 @@ func TestExecutePlanPhase_Identity(t *testing.T) {
 				Session:   sess,
 				Template: template.Template{
 					PlanTask: &template.LlmConversation{
-						Messages: []template.ChatMessage{{Role: "user", Content: "plan {{diff}}"}},
+						Messages: []template.ChatMessage{{Role: "user", Content: "plan {{diffs}}"}},
 					},
 					MaxTokens:           10000,
 					MaxToolRequestTimes: 5,
@@ -78,8 +80,13 @@ func TestExecutePlanPhase_Identity(t *testing.T) {
 			})
 			a.currentDate = "2026-08-07 10:00"
 
-			if _, err := a.executePlanPhase(context.Background(), "main.go", "+x", "", ""); err != nil {
-				t.Fatalf("executePlanPhase: %v", err)
+			g := FileGroup{Label: "core", Diffs: []model.Diff{
+				{NewPath: "main.go", Diff: "+x"},
+				{NewPath: "helper.go", Diff: "+y"},
+			}}
+			groupKey := fileGroupKey(g.Diffs)
+			if _, err := a.executeGroupPlanPhase(context.Background(), g, buildConcatenatedDiffs(g.Diffs), "", ""); err != nil {
+				t.Fatalf("executeGroupPlanPhase: %v", err)
 			}
 
 			meta, ok := client.only(t)
@@ -89,7 +96,7 @@ func TestExecutePlanPhase_Identity(t *testing.T) {
 			want := llm.RequestMeta{
 				Provider:  provider,
 				Model:     "test",
-				FilePath:  "main.go",
+				FilePath:  groupKey,
 				TaskType:  string(session.PlanTask),
 				RequestNo: 1,
 			}
@@ -99,7 +106,7 @@ func TestExecutePlanPhase_Identity(t *testing.T) {
 
 			// The report joins against the session JSONL, so the meta must match
 			// the record that was actually written, not merely look plausible.
-			recs := sess.GetOrCreateFileSession("main.go").TaskRecords[session.PlanTask]
+			recs := sess.GetOrCreateFileSession(groupKey).TaskRecords[session.PlanTask]
 			if len(recs) != 1 {
 				t.Fatalf("session holds %d plan records, want 1", len(recs))
 			}
