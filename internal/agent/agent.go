@@ -1123,22 +1123,21 @@ func classifyItemError(err error) (session.FailureClass, string) {
 
 // classifyMainLoopStop maps a non-error, non-completed main-loop stop to an item
 // failure class and a safe reason. Only the configured max-tool-request budget is
-// a declared budget stop, so only it may use the budget classification. The
-// empty-round and compression exits keep the unknown class — the FailureClass
-// taxonomy has no fitting category — but the reason names the trigger: in
-// --format json runs the progress lines that would say why an item stopped are
-// discarded, so this string is the only thing that leaves a CI runner.
+// a declared budget stop, so only it may use the budget classification; every
+// other stop keeps the unknown class, because the FailureClass taxonomy has no
+// category that fits an empty-round or compression exit. Stating that as "not
+// max-rounds" rather than case-by-case is deliberate: a stop added to the enum
+// later must default to the honest catch-all class, never inherit "budget".
+//
+// The reason text comes from stop.Reason(), shared with the scan path so the
+// same stop cannot read differently in the two commands' output. In --format
+// json runs the progress lines that would say why an item stopped are discarded,
+// so that string is the only stop diagnostic that leaves a CI runner.
 func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, string) {
-	switch stop {
-	case llmloop.StopMaxRounds:
-		return session.FailureBudget, "reached the maximum tool-request rounds without finishing"
-	case llmloop.StopEmptyRounds:
-		return session.FailureUnknown, "stopped after repeated rounds without a usable tool result"
-	case llmloop.StopCompression:
-		return session.FailureUnknown, "stopped because context compression exceeded its threshold"
-	default: // StopNone
-		return session.FailureUnknown, "main task stopped before completing"
+	if stop == llmloop.StopMaxRounds {
+		return session.FailureBudget, stop.Reason()
 	}
+	return session.FailureUnknown, stop.Reason()
 }
 
 // subtaskStop is the structured, non-error reason a single-file review stopped
