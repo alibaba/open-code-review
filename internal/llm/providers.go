@@ -95,11 +95,6 @@ var registry = []Provider{
 		},
 	},
 	{
-		// GPT-5.6 models require the OpenAI Responses API (/v1/responses):
-		// their tool-calling-with-reasoning workflow is rejected by
-		// /v1/chat/completions with a 400 (issue #559). They are served here
-		// under ProtocolOpenAIResponses instead of the "openai" preset so a
-		// user can select them without knowing which API protocol is required.
 		Name:        "openai-responses",
 		DisplayName: "OpenAI Responses API",
 		Protocol:    ProtocolOpenAIResponses,
