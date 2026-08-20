@@ -279,7 +279,7 @@ per-file:
 | `{{current_file_path}}` | The new path of this file. |
 | `{{plan_guidance}}` | Output of the plan phase, or removed when plan is skipped. |
 | `{{plan_tools}}` | Plan-phase tool definitions as plain text (rendered by `formatToolDefs`), used in the `PLAN_TASK` system prompt. |
-| `{{requirement_background}}` | The `--background` flag content. |
+| `{{requirement_background}}` | The effective background from `--background` or `--background-file` (file takes precedence). |
 | `{{current_system_date_time}}` | Local timestamp for the run, formatted `YYYY-MM-DD HH:MM` (no seconds or timezone). |
 | `{{context}}` | (compression only) the XML-rendered messages to summarise. |
 | `{{path}}` | File path, used in `REVIEW_FILTER_TASK`. |

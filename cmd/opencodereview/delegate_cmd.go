@@ -105,18 +105,16 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 		return nil, err
 	}
 
-	// Resolve background from --background-file if set.
+	// --background-file takes precedence over --background; only one wins.
+	// The commit-message fallback fires only when neither entry point was used.
 	if opts.backgroundFile != "" {
 		bgPath := resolveBackgroundFilePath(cc.RepoDir, opts.backgroundFile)
 		fileBackground, err := loadBackgroundFile(bgPath)
 		if err != nil {
 			return nil, err
 		}
-		opts.background = mergeBackground(opts.background, fileBackground)
-	}
-
-	// Auto-fill background from commit message when reviewing a single commit.
-	if opts.commit != "" && opts.background == "" {
+		opts.background = selectBackground(opts.background, fileBackground)
+	} else if opts.commit != "" && opts.background == "" {
 		if msg, err := getCommitMessage(cc.RepoDir, opts.commit); err == nil && msg != "" {
 			opts.background = msg
 		}

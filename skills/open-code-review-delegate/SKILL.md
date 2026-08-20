@@ -151,7 +151,7 @@ If the user requested "review and fix":
 | `--rule <path>` | Custom rule.json path |
 | `--exclude <patterns>` | Comma-separated exclude patterns |
 | `-b, --background <text>` | Business context |
-| `-B, --background-file <path>` | Business context from Markdown file |
+| `-B, --background-file <path>` | Business context from Markdown file (takes precedence over `-b`) |
 | `-f, --format <text\|json>` | Output format; use `json` for agent integrations |
 
 ## Gotchas

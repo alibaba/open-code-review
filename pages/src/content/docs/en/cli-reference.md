@@ -27,7 +27,7 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
-  ocr review --background "Focus on auth" --background-file ./docs/requirements.md  Review with context
+  ocr review --background "Focus on auth"                                           Review with inline context
   ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
@@ -115,7 +115,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
 | `--audience <who>` | — | `human` | `human` streams progress lines (to stderr when `--format` is `json`/`sarif`, so stdout stays a single parseable document); `agent` suppresses progress entirely and prints only the final summary / JSON. |
 | `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
-| `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Combined with `--background` when both are set. |
+| `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Takes precedence over `--background` when both are set. |
 | `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
 | `--concurrency <n>` | — | `8` | Maximum number of files reviewed in parallel. |
 | `--timeout <minutes>` | — | `10` | Per-file deadline. `0` disables the timeout. |

@@ -29,21 +29,19 @@ func resolveBackgroundFilePath(repoDir, path string) string {
 	return filepath.Join(repoDir, path)
 }
 
-// mergeBackground combines the inline --background value (or an auto-populated
-// commit message) with the content read from --background-file, separated by a
-// blank line. The inline value is sanitised the same way as the file content so
-// both portions are cleaned consistently. The file content is already wrapped
-// and sanitised by loadBackgroundFile.
-func mergeBackground(inline, fromFile string) string {
-	inline = sanitizeMarkdown(inline)
-	switch {
-	case inline == "":
-		return fromFile
-	case fromFile == "":
+// selectBackground returns the effective background. --background and
+// --background-file are two entry points for the same capability, so only one
+// takes effect: the file wins when both are provided.
+func selectBackground(inline, fromFile string) string {
+	if fromFile == "" {
 		return inline
-	default:
-		return inline + "\n\n" + fromFile
 	}
+	if inline != "" {
+		fmt.Fprintln(os.Stderr,
+			"[ocr] both --background and --background-file were provided; "+
+				"--background-file takes precedence and --background is ignored")
+	}
+	return fromFile
 }
 
 func loadBackgroundFile(path string) (string, error) {
