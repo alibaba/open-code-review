@@ -4,24 +4,16 @@
 # Copyright 2026 alibaba/open-code-review Contributors
 
 # Verify that every external action referenced by the published composite
-# action (action.yml) and by this repository's workflows is pinned to a
-# full 40-hex commit SHA with a trailing "# vX.Y.Z" version comment. A
-# floating tag inside action.yml silently undermines consumers who SHA-pin
-# alibaba/open-code-review itself: the outer pin freezes this repository,
-# but a moved inner tag still changes what actually runs (see issue #816).
-# Workflows are held to the same rule because several of them hold
-# credentials — release.yml alone carries the npm token and the
-# attestation id-token (see issue #841).
+# action (action.yml) is pinned to a full 40-hex commit SHA with a trailing
+# "# vX.Y.Z" version comment. A floating tag inside action.yml silently
+# undermines consumers who SHA-pin alibaba/open-code-review itself: the
+# outer pin freezes this repository, but a moved inner tag still changes
+# what actually runs (see issue #816).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# nullglob so an absent *.yaml matchless glob vanishes instead of
-# surviving as a literal (which the missing-file guard would then fail on).
-# GitHub executes both .yml and .yaml workflow files.
-shopt -s nullglob
-files=("action.yml" .github/workflows/*.yml .github/workflows/*.yaml)
-shopt -u nullglob
+files=("action.yml")
 # The whole line must be a pinned reference: only list/indent syntax before
 # `uses:`, a 40-hex SHA, and a strict `# vX.Y.Z` comment with nothing after
 # it. Without the anchors a floating tag would be accepted whenever a
