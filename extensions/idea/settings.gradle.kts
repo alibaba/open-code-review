@@ -1,0 +1,1 @@
+rootProject.name = "open-code-review-idea"

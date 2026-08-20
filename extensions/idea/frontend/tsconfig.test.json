@@ -1,0 +1,9 @@
+{
+  "//": "只给 jest 用：主 tsconfig 的 types 是空的（bundle 里不该有 node/jest 的类型），测试需要 jest 的全局。",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["jest", "node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}

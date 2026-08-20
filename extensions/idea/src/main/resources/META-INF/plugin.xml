@@ -1,0 +1,50 @@
+<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<idea-plugin>
+    <!-- Unique identifier of the plugin. It should be FQN. It cannot be changed between the plugin versions. -->
+    <id>com.alibaba.open-code-review-idea</id>
+
+    <!-- Public plugin name should be written in Title Case.
+         Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name -->
+    <name>Open Code Review</name>
+
+    <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
+    <vendor url="https://github.com/alibaba/open-code-review">Alibaba</vendor>
+
+    <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
+         Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
+    <description><![CDATA[
+        Run Open Code Review from IntelliJ IDEA and inspect review comments in the IDE.
+    ]]></description>
+
+    <!-- Product and plugin compatibility requirements.
+         Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
+    <depends>com.intellij.modules.platform</depends>
+    <depends optional="true" config-file="jcef.xml">com.intellij.modules.jcef</depends>
+
+    <!-- 清单文件里声明式 UI 的文案表，对应上游的 package.nls.json / package.nls.zh-cn.json。
+         运行时代码的文案不走这里，走 model/HostStrings.kt（对应上游 src/shared/i18n.ts）。
+         注意：action 一旦声明了 text= 属性，属性值会盖掉 bundle 里的 key，所以下面的 action
+         刻意不写 text/description——文案全部由 OcrBundle 提供。 -->
+    <resource-bundle>messages.OcrBundle</resource-bundle>
+
+    <!-- Extension points defined by the plugin.
+         Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Open Code Review"
+                    anchor="right"
+                    icon="/icons/ocrToolWindow.svg"
+                    factoryClass="com.alibaba.opencodereview.idea.toolwindow.OcrToolWindowFactory"/>
+
+        <!-- 宿主侧提示用（例如配置面板还没接入时的降级提示）。
+             displayType=BALLOON 对应 VS Code 的 showInformationMessage 那种一次性气泡。 -->
+        <notificationGroup id="Open Code Review"
+                           displayType="BALLOON"/>
+    </extensions>
+
+    <actions>
+        <action id="OpenCodeReview.OpenToolWindow"
+                class="com.alibaba.opencodereview.idea.actions.OpenOcrToolWindowAction">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

@@ -1,0 +1,28 @@
+{
+  "name": "open-code-review-idea-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Preact frontend for the Open Code Review IntelliJ plugin, copied from extensions/vscode.",
+  "scripts": {
+    "build": "webpack --mode production",
+    "dev": "webpack --mode development",
+    "watch": "webpack --mode development --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "jest"
+  },
+  "dependencies": {
+    "preact": "^10.29.7"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "css-loader": "^7.1.4",
+    "jest": "^30.4.2",
+    "style-loader": "^4.0.0",
+    "ts-jest": "^29.4.12",
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.3.0",
+    "webpack": "^5.109.2",
+    "webpack-cli": "^6.0.1"
+  }
+}
