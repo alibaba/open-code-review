@@ -13,8 +13,8 @@ sidebar:
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range<br/>Per file: detect charset, decode non-UTF-8 to UTF-8 (decode.go)</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every diff in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
 
@@ -43,7 +43,13 @@ flowchart TD
 
 untracked 文件从磁盘读取并作为整文件新增处理，以便 commit 前评审。
 
-## 五重门文件过滤
+每个文件的新文件字节在读取时由 `finalizeDiff` 交给 `decodeDiffFile`：合法的
+UTF-8 按字节原样通过，检测器根本不会运行。被判定为 GB18030、Big5、Shift-JIS、
+EUC-JP 或 EUC-KR 且超过置信度门槛的文件，其 hunk 载荷与新文件内容都会在内存中
+解码为 UTF-8，而 `diff --git`、`index`、`---`、`+++`、`@@` 等框架行按字节保持
+不变，且不向磁盘写入任何内容。
+
+## 六重门文件过滤
 
 diff 加载后，每个文件经过
 [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go)。
@@ -54,17 +60,20 @@ binary          — file is binary
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
+undecodable_encoding — 字节在任何受支持的字符集下都不是可解码的文本
 ```
 
 ……或文件被保留时返回空。`deleted` **不**由 `whyExcluded` 返回；它在 `Preview()`
 中随后计算——当一个被保留文件的 diff 报告 `IsDeleted` 时。各门按以下顺序执行：
 
 1. `binary`——二进制文件先被丢弃。
-2. `user_exclude`——你项目的 `exclude` 总是优先。
-3. `user_include`——若配置了 include 模式**且**文件匹配其一，立即保留
+2. `undecodable_encoding`——字节在任何受支持的字符集下都不是文本的文件，
+   在扩展名门之前被丢弃。
+3. `user_exclude`——你项目的 `exclude` 总是优先。
+4. `user_include`——若配置了 include 模式**且**文件匹配其一，立即保留
    （返回空），绕过下面的 `unsupported_ext` 和 `default_path` 门。
-4. `unsupported_ext` 按扩展名白名单过滤。
-5. `default_path` 是最后一道门：匹配内置**测试文件**排除模式
+5. `unsupported_ext` 按扩展名白名单过滤。
+6. `default_path` 是最后一道门：匹配内置**测试文件**排除模式
    （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、
    `**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）。每个模式都以
    `**/` 作为根前缀。

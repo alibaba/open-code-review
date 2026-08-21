@@ -94,7 +94,7 @@ node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
 ```
 
-五种排除原因对应[文件过滤](../review-rules/#how-files-are-filtered)中的门：
+其中五种原因对应[文件过滤](../review-rules/#how-files-are-filtered)中的门，`deleted` 则是随后附加的 preview 状态：
 
 | 原因 | 修复 |
 |---|---|
@@ -102,6 +102,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | 从你的 `exclude` 列表移除该模式。 |
 | `unsupported_ext` | 把扩展名加入你的 `include` 列表以绕过白名单门。 |
 | `default_path` | 把文件加入 `include`——那会覆盖内置测试文件排除模式。 |
+| `undecodable_encoding` | 该文件的字节在任何受支持的字符集下都不是有效文本。请将其转换为 UTF-8；如果它是生成的文件，请加入 `exclude`。 |
 | `deleted` | 无需处理——没有新内容可评审。 |
 
 ### 我的自定义规则没触发

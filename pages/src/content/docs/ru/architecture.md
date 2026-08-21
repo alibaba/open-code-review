@@ -15,8 +15,8 @@ sidebar:
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range<br/>Per file: detect charset, decode non-UTF-8 to UTF-8 (decode.go)</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every diff in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
 
@@ -57,7 +57,14 @@ flowchart TD
 Неотслеживаемые файлы читаются с диска и считаются целиком добавленными, чтобы
 их можно было проверить до коммита.
 
-## Пятиступенчатый фильтр файлов
+Байты нового файла на чтении передаются из `finalizeDiff` в `decodeDiffFile`:
+корректный UTF-8 проходит байт в байт, детектор при этом не запускается. Файл,
+определённый как GB18030, Big5, Shift-JIS, EUC-JP или EUC-KR выше порога
+уверенности, декодируется в UTF-8 в памяти — и payload фрагментов, и
+содержимое нового файла, — тогда как строки каркаса `diff --git`, `index`,
+`---`, `+++` и `@@` остаются сырыми, и на диск ничего не пишется.
+
+## Шестиступенчатый фильтр файлов
 
 После загрузки diff каждый файл проходит через функцию
 [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go).
@@ -68,6 +75,7 @@ binary          — файл является бинарным
 user_exclude    — совпадение с шаблоном из списка `exclude`
 unsupported_ext — расширение отсутствует в supported_file_types.json
 default_path    — совпадение со встроенным шаблоном исключения тестовых файлов
+undecodable_encoding — байты не являются текстом ни в одной поддерживаемой кодировке
 ```
 
 Если файл не исключён, функция возвращает пустое значение.
@@ -78,12 +86,14 @@ default_path    — совпадение со встроенным шаблон�
 Проверки выполняются в таком порядке:
 
 1. `binary` — бинарные файлы отбрасываются первыми.
-2. `user_exclude` — значение `exclude` вашего проекта всегда имеет приоритет.
-3. `user_include` — если у фильтра есть шаблоны включения **и** файл совпадает
+2. `undecodable_encoding` — файлы, байты которых не являются текстом ни в
+   одной поддерживаемой кодировке, отбрасываются до проверки расширения.
+3. `user_exclude` — значение `exclude` вашего проекта всегда имеет приоритет.
+4. `user_include` — если у фильтра есть шаблоны включения **и** файл совпадает
    с одним из них, он сразу сохраняется (возвращается пустое значение), минуя
    расположенные ниже проверки `unsupported_ext` и `default_path`.
-4. `unsupported_ext` фильтрует по списку допустимых расширений.
-5. `default_path` — последняя проверка: она сопоставляет встроенные шаблоны
+5. `unsupported_ext` фильтрует по списку допустимых расширений.
+6. `default_path` — последняя проверка: она сопоставляет встроенные шаблоны
    исключения **тестовых файлов** (`**/*_test.go`,
    `**/*.test.{js,jsx,ts,tsx}`, `**/__tests__/**`, `**/*_test.py`,
    `**/*_spec.rb`, `**/*.test.ets`, …). Каждый шаблон начинается с `**/`.

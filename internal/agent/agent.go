@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"runtime/debug"
 	"slices"
 	"sort"
@@ -1654,16 +1655,29 @@ func (a *Agent) filterDiffs(diffs []model.Diff) []model.Diff {
 
 	for _, d := range diffs {
 		path := effectivePath(d)
-		if !a.shouldReview(d) {
-			if d.IsBinary {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", path)
-			} else {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", path)
+		switch reason := a.whyExcluded(d); reason {
+		case ExcludeNone:
+			// The file IS reviewed. This is the first point in the run that
+			// knows that, which is why the undecoded warning lives here and
+			// not at the decode site: warning earlier would fire for every
+			// .png and vendored file that was going to be dropped anyway.
+			if d.UndecodedCharset != "" {
+				fmt.Fprintf(os.Stderr,
+					"[ocr] WARNING: %s left undecoded (detected %s); review text may contain replacement characters\n",
+					path, d.UndecodedCharset)
 			}
+			kept = append(kept, d)
+		case ExcludeBinary:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", path)
 			skipped++
-			continue
+		case ExcludeUndecodable:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — undecodable encoding (detected %s)\n",
+				path, d.UndecodedCharset)
+			skipped++
+		default:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", path)
+			skipped++
 		}
-		kept = append(kept, d)
 	}
 
 	if skipped > 0 {

@@ -93,6 +93,7 @@ func TestExcludeReasonConstants(t *testing.T) {
 		ExcludeDefaultPath: "default_path",
 		ExcludeDeleted:     "deleted",
 		ExcludeBinary:      "binary",
+		ExcludeUndecodable: "undecodable_encoding",
 	}
 	for k, v := range constants {
 		if string(k) != v {

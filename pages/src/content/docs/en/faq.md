@@ -103,8 +103,9 @@ node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
 ```
 
-The five exclusion reasons map to gates in the
-[file filter](../review-rules/#how-files-are-filtered):
+Five of these reasons come from gates in the
+[file filter](../review-rules/#how-files-are-filtered); `deleted` is a
+preview status added afterwards:
 
 | Reason | Fix |
 |---|---|
@@ -112,6 +113,7 @@ The five exclusion reasons map to gates in the
 | `user_exclude` | Remove the pattern from your `exclude` list. |
 | `unsupported_ext` | Add the extension to your `include` list to bypass the allowlist gate. |
 | `default_path` | Add the file to `include` — that overrides built-in test-file exclude patterns. |
+| `undecodable_encoding` | The file's bytes are not valid text in any supported charset. Convert it to UTF-8, or add it to `exclude` if it is generated. |
 | `deleted` | Nothing to do — there's no new content to review. |
 
 ### My custom rule isn't firing

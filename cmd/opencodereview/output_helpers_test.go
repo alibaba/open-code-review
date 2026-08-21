@@ -639,3 +639,34 @@ func decodeSinglePreviewJSON(t *testing.T, s string) model.Preview {
 	}
 	return got
 }
+
+// N5: the text renderer printed only the exclude reason, so the detected
+// charset never surfaced outside JSON — "undecodable_encoding" with no charset
+// gives a user nothing to act on.
+func TestOutputPreviewText_ShowsDetectedCharset(t *testing.T) {
+	p := &agent.DiffPreview{
+		Entries: []agent.DiffPreviewEntry{
+			{Path: "src.go", Status: "modified", Insertions: 5, WillReview: true},
+			{
+				Path: "legacy.go", Status: "added", Insertions: 40,
+				WillReview:      false,
+				ExcludeReason:   model.ExcludeUndecodable,
+				DetectedCharset: "GB-18030",
+			},
+			{Path: "vendor/lib.go", Status: "added", WillReview: false, ExcludeReason: model.ExcludeDefaultPath},
+		},
+		TotalFiles:      3,
+		ReviewableCount: 1,
+		ExcludedCount:   2,
+	}
+	got := captureStdout(t, func() {
+		outputPreviewText(p)
+	})
+	if !strings.Contains(got, "undecodable_encoding: GB-18030") {
+		t.Errorf("expected the charset beside the reason, got %q", got)
+	}
+	// An entry with no charset must render exactly as it did before.
+	if !strings.Contains(got, "(default_path)") {
+		t.Errorf("an entry without a charset gained a stray separator, got %q", got)
+	}
+}

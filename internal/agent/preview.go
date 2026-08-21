@@ -27,6 +27,7 @@ const (
 	ExcludeDefaultPath = model.ExcludeDefaultPath
 	ExcludeDeleted     = model.ExcludeDeleted
 	ExcludeBinary      = model.ExcludeBinary
+	ExcludeUndecodable = model.ExcludeUndecodable
 )
 
 // whyExcluded applies the filter algorithm as shouldReview but
@@ -34,6 +35,12 @@ const (
 func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 	if d.IsBinary {
 		return ExcludeBinary
+	}
+	// Immediately after IsBinary and before the extension allowlist: an
+	// unreviewable file with an unusual extension must report the encoding as
+	// the reason, not "unsupported_ext".
+	if d.Unreviewable {
+		return ExcludeUndecodable
 	}
 
 	path := effectivePath(d)
@@ -98,6 +105,10 @@ func (a *Agent) preview(ctx context.Context) (*DiffPreview, error) {
 
 		entry.WillReview = reason == ExcludeNone
 		entry.ExcludeReason = reason
+		// Reported whenever detection marked the file, not only when that
+		// marking excluded it: a file that is marked and still reviewed is the
+		// commoner case, and the review path already warns about it on stderr.
+		entry.DetectedCharset = d.UndecodedCharset
 
 		if entry.WillReview {
 			result.ReviewableCount++

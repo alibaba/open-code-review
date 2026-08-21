@@ -139,6 +139,12 @@ func executeScan(opts scanOptions) error {
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
+		// Enumeration itself writes to stdout (the per-file charset-decode
+		// notice), so the machine-readable formats must be silenced around the
+		// whole preview, not just around a final emit. Without this the JSON
+		// document is preceded by human-readable lines and no longer parses.
+		q := newQuietHandle(opts.outputFormat, opts.audience)
+		defer q.Restore()
 		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat)
 	}
 
