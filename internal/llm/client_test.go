@@ -17,6 +17,7 @@ import (
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
+	openai "github.com/openai/openai-go/v3"
 )
 
 func TestNewOpenAIClient_URLNormalization(t *testing.T) {
@@ -1920,5 +1921,138 @@ func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
 	}
 	if got := resp.Content(); got != "success" {
 		t.Errorf("Content() = %q, want %q", got, "success")
+	}
+}
+
+func TestFormatOpenAIError_Gemini400BadRequest(t *testing.T) {
+	geminiErrBody := `{"error":{"code":400,"message":"Invalid argument in tool call","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"FIELD_VIOLATION","metadata":{"field":"messages.tool_calls"}}]}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(geminiErrBody))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		Provider: "gemini",
+		URL:      server.URL + "/v1/chat/completions",
+		APIKey:   "test-key",
+		Model:    "gemini-3.6-flash",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Model:     "gemini-3.6-flash",
+		Messages:  []Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 64,
+	})
+	if err == nil {
+		t.Fatal("CompletionsWithCtx succeeded, want HTTP 400 error")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "Google Gemini API error") {
+		t.Errorf("expected provider name in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "HTTP 400 Bad Request") {
+		t.Errorf("expected HTTP 400 Bad Request in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "gemini-3.6-flash") {
+		t.Errorf("expected model in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "Invalid argument in tool call") {
+		t.Errorf("expected error message in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "FIELD_VIOLATION") {
+		t.Errorf("expected raw JSON response body details in error, got: %s", errMsg)
+	}
+
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) {
+		t.Errorf("expected wrapped error to be unpackable as *openai.Error, got: %T", err)
+	}
+}
+
+func TestFormatOpenAIError_Streaming400BadRequest(t *testing.T) {
+	errBody := `{"error":{"message":"streaming rejected","type":"invalid_request_error","code":"param_invalid"}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(errBody))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		Provider:  "openai",
+		URL:       server.URL + "/v1/chat/completions",
+		APIKey:    "test-key",
+		Model:     "gpt-4o",
+		ExtraBody: map[string]any{"stream": true},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Model:     "gpt-4o",
+		Messages:  []Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 64,
+	})
+	if err == nil {
+		t.Fatal("CompletionsWithCtx streaming succeeded, want HTTP 400 error")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "OpenAI API error") {
+		t.Errorf("expected provider name in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "streaming rejected") {
+		t.Errorf("expected error message in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "param_invalid") {
+		t.Errorf("expected error code in error, got: %s", errMsg)
+	}
+}
+
+func TestFormatOpenAIError_PlainTextBody(t *testing.T) {
+	plainText := "Bad Request: upstream gateway rejected request syntax"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(plainText))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1/chat/completions",
+		APIKey: "test-key",
+		Model:  "custom-model",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Model:     "custom-model",
+		Messages:  []Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 64,
+	})
+	if err == nil {
+		t.Fatal("CompletionsWithCtx succeeded, want HTTP 400 error")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "HTTP 400 Bad Request") {
+		t.Errorf("expected HTTP 400 Bad Request, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, plainText) {
+		t.Errorf("expected plain text response body, got: %s", errMsg)
+	}
+}
+
+func TestFormatOpenAIError_NilAndNonAPIError(t *testing.T) {
+	if got := formatOpenAIError("openai", "m", nil); got != nil {
+		t.Errorf("formatOpenAIError(nil) = %v, want nil", got)
+	}
+
+	customErr := errors.New("context deadline exceeded")
+	if got := formatOpenAIError("openai", "m", customErr); got != customErr {
+		t.Errorf("formatOpenAIError(customErr) = %v, want %v", got, customErr)
 	}
 }

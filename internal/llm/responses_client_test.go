@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3/responses"
@@ -828,5 +829,42 @@ func TestOpenAIResponsesClient_ExtraBodyPromptCacheKeyOverridesSessionID(t *test
 	}
 	if got := gotBody["prompt_cache_key"]; got != "file-session-uuid" {
 		t.Errorf("prompt_cache_key = %v, want typed SessionID %q", got, "file-session-uuid")
+	}
+}
+
+func TestOpenAIResponsesClient_FormatError400(t *testing.T) {
+	errBody := `{"error":{"message":"responses parameter invalid","type":"invalid_request_error","code":"invalid_param"}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(errBody))
+	}))
+	defer server.Close()
+
+	client := NewLLMClient(ResolvedEndpoint{
+		Provider: "openai",
+		URL:      server.URL + "/v1",
+		Token:    "test-key",
+		Model:    "gpt-5.4",
+		Protocol: ProtocolOpenAIResponses,
+	}, nil)
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}},
+	})
+	if err == nil {
+		t.Fatal("CompletionsWithCtx succeeded, want HTTP 400 error")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "OpenAI API error") {
+		t.Errorf("expected provider name in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "HTTP 400 Bad Request") {
+		t.Errorf("expected HTTP 400 Bad Request in error, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "responses parameter invalid") {
+		t.Errorf("expected error message in error, got: %s", errMsg)
 	}
 }

@@ -10,6 +10,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -210,6 +211,7 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
+	Provider     string            // Known provider name (e.g. "gemini", "openai") or empty
 	URL          string            // Full API endpoint URL
 	APIKey       string            // Bearer token / API key
 	Model        string            // Default model override
@@ -285,6 +287,7 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // ResolvedEndpoint because it belongs to the run, not to the endpoint.
 func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 	cfg := ClientConfig{
+		Provider:       ep.Provider,
 		URL:            ep.URL,
 		APIKey:         ep.Token,
 		Model:          ep.Model,
@@ -512,7 +515,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, formatOpenAIError(c.cfg.Provider, model, err)
 	}
 
 	return c.mapOpenAIResponse(sdkResp), nil
@@ -535,7 +538,7 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 	if err != nil {
 		class, phase := classifyStreamError(err)
 		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
-		return nil, err
+		return nil, formatOpenAIError(c.cfg.Provider, string(params.Model), err)
 	}
 	return resp, nil
 }
@@ -610,6 +613,74 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 	}
 
 	return resp, nil
+}
+
+// formatOpenAIError extracts structured error details from an OpenAI SDK error
+// (*openai.Error, which embeds *apierror.Error), including HTTP status, code,
+// message, and the raw JSON response payload (crucial for providers like
+// Google Gemini whose 400 Bad Request details live in custom nested JSON fields).
+func formatOpenAIError(provider, model string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		var rawBody string
+		if raw := apiErr.RawJSON(); raw != "" {
+			rawBody = strings.TrimSpace(raw)
+		} else if apiErr.Response != nil && apiErr.Response.Body != nil {
+			bodyBytes, _ := io.ReadAll(apiErr.Response.Body)
+			apiErr.Response.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			rawBody = strings.TrimSpace(string(bodyBytes))
+		}
+
+		status := apiErr.StatusCode
+		if status == 0 && apiErr.Response != nil {
+			status = apiErr.Response.StatusCode
+		}
+		statusText := http.StatusText(status)
+
+		pName := providerDisplayName(provider)
+
+		var parts []string
+		if status > 0 {
+			if statusText != "" {
+				parts = append(parts, fmt.Sprintf("%s error (HTTP %d %s, model: %s)", pName, status, statusText, model))
+			} else {
+				parts = append(parts, fmt.Sprintf("%s error (HTTP %d, model: %s)", pName, status, model))
+			}
+		} else {
+			parts = append(parts, fmt.Sprintf("%s error (model: %s)", pName, model))
+		}
+
+		if apiErr.Message != "" {
+			parts = append(parts, fmt.Sprintf("message: %s", apiErr.Message))
+		}
+		if apiErr.Code != "" {
+			parts = append(parts, fmt.Sprintf("code: %s", apiErr.Code))
+		}
+		if apiErr.Type != "" {
+			parts = append(parts, fmt.Sprintf("type: %s", apiErr.Type))
+		}
+		if rawBody != "" && rawBody != apiErr.Message {
+			parts = append(parts, fmt.Sprintf("response body: %s", rawBody))
+		}
+
+		if len(parts) > 1 || rawBody != "" {
+			return fmt.Errorf("%s: %w", strings.Join(parts, ", "), err)
+		}
+	}
+	return err
+}
+
+func providerDisplayName(provider string) string {
+	if p, ok := LookupProvider(provider); ok && p.DisplayName != "" {
+		return p.DisplayName
+	}
+	if provider != "" {
+		return provider
+	}
+	return "LLM"
 }
 
 // buildOpenAIParams converts the shared ChatRequest into OpenAI SDK parameters.
