@@ -17,9 +17,9 @@
 
 #### Unchecked External Calls and Error Handling
 - A low-level call, staticcall, or delegatecall whose boolean return value is ignored, so a silently failing transfer or call goes unnoticed
-- Use of send or transfer for value movement without checking the return value, or assuming it always succeeds (send forwards only 2300 gas and can fail)
+- Ignoring the boolean result of `send`, or relying on `send` or `transfer` succeeding under the fixed 2300-gas stipend; `transfer` reverts on failure and has no return value to check
 - delegatecall into an untrusted or user-controlled address, which executes code in the caller's storage context
-- selfdestruct (or the post-0.8.24 replacement) reachable by an unauthorized account
+- `selfdestruct` reachable by an unauthorized account, or logic that assumes it will delete code and storage on post-Cancun EVMs outside the contract's creation transaction
 
 #### Economic and Oracle Safety
 - A hardcoded price or a single on-chain spot price used as an oracle, which is manipulable by flash loans or sandwich attacks

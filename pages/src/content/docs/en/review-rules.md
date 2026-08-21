@@ -182,6 +182,8 @@ matching order:
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
+| `**/*.sol` | `solidity.md` — Solidity smart contracts. |
+| `**/*.vy` | `vyper.md` — Vyper smart contracts. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
