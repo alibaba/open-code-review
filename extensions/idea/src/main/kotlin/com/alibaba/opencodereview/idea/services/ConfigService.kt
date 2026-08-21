@@ -5,9 +5,13 @@ import com.alibaba.opencodereview.idea.model.HostStrings
 import com.alibaba.opencodereview.idea.model.OcrConfig
 import com.alibaba.opencodereview.idea.model.currentIdeLocale
 import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.util.SystemInfo
 import kotlinx.serialization.json.JsonObject
+import kotlin.jvm.Synchronized
+import java.io.IOException
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermissions
 
 /**
@@ -33,14 +37,20 @@ class ConfigService(
         }
     }
 
-    /** 读取原始 snake_case JSON，保留所有未知字段。 */
+    /** 读取原始 snake_case JSON，保留所有未知字段。解析失败记日志（与 [read] 一致），返回空配置。 */
     private fun readRaw(): RawConfig {
         val path = configPath()
         if (!path.isFile) return emptyRawConfig()
-        return runCatching { parseRawConfig(path.readText()) }.getOrElse { emptyRawConfig() }
+        return runCatching { parseRawConfig(path.readText()) }.getOrElse {
+            // 记日志便于排查；返回空配置，下游 writeRaw/deleteCustomProvider 在 bucket 取不到时会 bail，不会覆盖这份坏文件。
+            thisLogger().warn("[ocr] Failed to parse raw config (treated as empty; writes will bail): ${path.absolutePath}", it)
+            emptyRawConfig()
+        }
     }
 
-    /** 写回原始配置。整份配置为空时删文件而非写 `{}`——保留空文件会让 CLI 认为"已配置过"。 */
+    /** 写回原始配置。整份配置为空时删文件而非写 `{}`——保留空文件会让 CLI 认为"已配置过"。
+     *  @Synchronized 串行化写盘：避免并发写（删除 provider vs setMany 回滚）的固定 tmp 文件名碰撞与交错。 */
+    @Synchronized
     private fun writeRaw(raw: RawConfig): OcrConfig? {
         val path = configPath()
         if (!raw.hasContent()) {
@@ -53,10 +63,31 @@ class ConfigService(
         runCatching {
             if (!dir.isDirectory) {
                 Files.createDirectories(dir.toPath())
-                trySetPosixPermissions(dir, "rwxr-xr-x")
             }
-            path.writeText(raw.toPrettyJson())
-            // 配置含 api_key，权限须收紧为仅本人可读。
+            // 已存在的目录也收紧（CLI 或旧版可能留 755，目录含 api_key 须 700）。
+            trySetPosixPermissions(dir, "rwx------")
+            // 原子写 + 先收紧权限：唯一名临时文件避免跨实例/跨 IDE 窗口碰撞；空文件先收紧 rw------- 再写 api_key，全程不暴露在可读文件里。
+            val tmpPath = Files.createTempFile(dir.toPath(), "config-", ".tmp")
+            val tmp = tmpPath.toFile()
+            trySetPosixPermissions(tmp, "rw-------")
+            try {
+                tmp.writeText(raw.toPrettyJson())
+            } catch (e: IOException) {
+                // writeText 失败（如盘满）时 tmp 可能已含部分 api_key；600 权限已收紧，但须删掉避免残留泄漏。
+                runCatching { Files.deleteIfExists(tmpPath) }
+                throw e
+            }
+            try {
+                // 优先原子 move；不支持原子 move 的 FS（部分 Windows/网络盘）退化为 REPLACE_EXISTING。
+                try {
+                    Files.move(tmpPath, path.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+                } catch (e: java.nio.file.AtomicMoveNotSupportedException) {
+                    Files.move(tmpPath, path.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
+            } catch (e: IOException) {
+                runCatching { Files.deleteIfExists(tmpPath) }.onFailure { thisLogger().warn("[ocr] Failed to clean tmp config after move failure", it) }
+                throw e
+            }
             trySetPosixPermissions(path, "rw-------")
         }.onFailure {
             thisLogger().warn("[ocr] Failed to write config file: ${path.absolutePath}", it)
@@ -85,7 +116,9 @@ class ConfigService(
     /**
      * 删除一个自定义 provider。连带清理：容器为空则删除 `custom_providers` 键；所删 provider 正是当前选中项时
      * 一并清除 `provider`/`model`，避免配置指向不存在的 provider。
+     * 整段 read-modify-write 加锁：并发删除（用户连点）会互相覆盖、丢一个删除。
      */
+    @Synchronized
     fun deleteCustomProvider(name: String): OcrConfig? {
         val raw = readRaw()
         val bucket = (raw["custom_providers"] as? JsonObject)?.toMutableMap() ?: return read()
@@ -143,19 +176,32 @@ class ConfigService(
 
     /**
      * 按顺序写多个配置项。顺序有意义：`provider` 须在 `model` 前生效，否则 model 写到顶层而非 provider 条目
-     * （见 [applyConfigEntries] 的 model 分支）。中途失败直接抛出、已写入部分保留。
+     * （见 [applyConfigEntries] 的 model 分支）。中途失败回滚到 setMany 前的快照，避免半应用（如 provider 改了但 api_key 没写）。
      */
     fun setMany(entries: List<ConfigEntry>): OcrConfig? {
-        for (entry in entries) {
-            cli.runRaw(toConfigSetArgs(entry.key, entry.value), cwd, {})
+        val snapshot = readRaw()
+        val applied = mutableListOf<ConfigEntry>()
+        try {
+            for (entry in entries) {
+                cli.runRaw(toConfigSetArgs(entry.key, entry.value), cwd, {})
+                applied += entry
+            }
+            return read()
+        } catch (e: Exception) {
+            // applied 只含已成功的条目，失败的是下一条 entries[applied.size]；用它的 key 记日志才准确。
+            thisLogger().warn("[ocr] setMany failed at '${entries.getOrNull(applied.size)?.key ?: "?"}', rolling back", e)
+            // 只在快照有内容时回滚写回；snapshot 为空（原配置缺失/损坏）时 writeRaw 会删文件，反而丢用户数据。
+            if (snapshot.hasContent()) writeRaw(snapshot)
+            throw e
         }
-        return read()
     }
 
     /** Windows 无 POSIX 权限视图，静默跳过；失败仅权限未收紧，不应导致写配置失败。 */
     private fun trySetPosixPermissions(target: File, spec: String) {
+        // Windows 上 setPosixFilePermissions 必抛 UnsupportedOperationException，每次写都记日志会刷屏——直接跳过。
+        if (SystemInfo.isWindows) return
         runCatching {
             Files.setPosixFilePermissions(target.toPath(), PosixFilePermissions.fromString(spec))
-        }
+        }.onFailure { thisLogger().warn("[ocr] Failed to set permissions $spec on ${target.absolutePath}", it) }
     }
 }

@@ -13,7 +13,7 @@ fun mapStatusCode(code: Char): FileStatus = when (code) {
     'D' -> FileStatus.DELETED
     'R' -> FileStatus.RENAMED
     'M' -> FileStatus.MODIFIED
-    else -> FileStatus.MODIFIED
+    else -> FileStatus.MODIFIED // C（copied）/T（typechange）/U（unmerged）等一律降级为修改，见 GitMapTest
 }
 
 /**
@@ -32,8 +32,9 @@ fun parsePorcelain(output: String): List<FileChange> {
         val code: Char
         if (x == '?' && y == '?') {
             code = '?'
-        } else if (x == 'R' || y == 'R') {
-            code = 'R'
+        } else if (x == 'R' || y == 'R' || x == 'C' || y == 'C') {
+            // 重命名(R)与复制(C)都是 `old -> new` 格式，取 new。
+            code = if (x == 'R' || y == 'R') 'R' else 'C'
             val arrow = path.indexOf(" -> ")
             if (arrow >= 0) path = path.substring(arrow + 4)
         } else {

@@ -11,6 +11,7 @@ import com.alibaba.opencodereview.idea.model.currentIdeLocale
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.util.concurrency.AppExecutorUtil
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
@@ -31,6 +32,9 @@ class CliService(private val cliPath: String = "ocr") {
     }
 
     private val current = AtomicReference<Process?>(null)
+
+    /** npm install 独立追踪，与 [current]（ocr review）分开：cancel() 只杀 review，不殃及 install；反之亦然。 */
+    private val installProcess = AtomicReference<Process?>(null)
 
     @Volatile
     private var envCache: Pair<EnvCheckResult, Long>? = null
@@ -72,15 +76,24 @@ class CliService(private val cliPath: String = "ocr") {
         // waitFor(PROBE_TIMEOUT_MS) 无法执行——探测卡住的 node 会永久挂住整个环境检查。写法与 ShellEnv.capture 一致。
         val out = StringBuilder()
         val reader = Thread({
-            runCatching { process.inputStream.bufferedReader().forEachLine { out.appendLine(it) } }
+            runCatching { process.inputStream.bufferedReader().forEachLine { synchronized(out) { out.appendLine(it) } } }
         }, "ocr-probe-$bin").apply { isDaemon = true; start() }
         if (!process.waitFor(PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
             process.destroyForcibly()
+            // 进程被强杀后 stdout 管道关闭、reader 将很快 EOF 退出；短 join 避免 daemon 线程在反复环境检查中堆积。
+            reader.join(500)
+            // 关流与 runRaw/install 的清理一致，避免高频环境检查下 fd 累积到 GC。
+            process.closeStreamsQuietly()
             return EnvToolStatus()
         }
-        reader.join(500)
+        // 有界等待 reader 收完：--version 探测毫秒级结束；极端情况（子进程继承 stdout 管道不 EOF）2s 上限也避免主线程永久挂。
+        // 读写 out 均 synchronized，即便超时 reader 仍在写，读 out 也不踩 StringBuilder 跨线程脏读。
+        reader.join(2_000)
+        // 关流（超时分支已自行关流并返回；此处覆盖正常退出/非零退出路径），避免高频环境检查下 fd 累积到 GC。
+        process.closeStreamsQuietly()
         if (process.exitValue() != 0) return EnvToolStatus()
-        EnvToolStatus(ok = true, version = out.lineSequence().firstOrNull()?.trim()?.takeIf(String::isNotEmpty))
+        val version = synchronized(out) { out.lineSequence().firstOrNull()?.trim()?.takeIf(String::isNotEmpty) }
+        EnvToolStatus(ok = true, version = version)
     }.getOrElse { EnvToolStatus() }
 
     /** 全局安装 ocr CLI，逐行回显 npm 日志，按 exit code 返回是否成功。 */
@@ -89,33 +102,45 @@ class CliService(private val cliPath: String = "ocr") {
         onLog(LogLine("$ npm ${args.joinToString(" ")}"))
         return runCatching {
             // 参数均为固定值，同 probeCommand，可套 shell 以便 Windows 上执行 npm.cmd。
+            // 先收尾上一个 install（若有）再 start 新的，避免两个 npm install 同时跑争全局 npm 缓存/lockfile。
+            installProcess.getAndSet(null)?.let(::killStaleInstall)
             val process = ProcessBuilder(ShellEnv.forShell(listOf(ShellEnv.resolveBin("npm")) + args))
                 // 非 TTY 下 npm 仍可能画进度条，强制关闭并去色，否则日志中充斥转义序列。
                 .withShellEnv("npm_config_progress" to "false", "npm_config_color" to "false")
                 .redirectErrorStream(true)
                 .start()
-            process.outputStream.close()
-            // npm 用 \r 覆盖行，此处归一为 \n 再逐行输出。
-            process.inputStream.bufferedReader().forEachLine { raw ->
-                raw.replace('\r', '\n').lineSequence().forEach { line ->
-                    if (line.isNotBlank()) onLog(LogLine(line))
+            // 注册紧贴 start（start 到注册是并发盲区，越短越好）；独立槽 installProcess 不碰 current（否则误杀 review）。
+            // 正常刚清空过应为 null；并发 install 罕见，若有同样收尾。
+            installProcess.getAndSet(process)?.let(::killStaleInstall)
+            try {
+                process.outputStream.close()
+                // npm 用 \r 覆盖行，此处归一为 \n 再逐行输出。
+                process.inputStream.bufferedReader().forEachLine { raw ->
+                    raw.replace('\r', '\n').lineSequence().forEach { line ->
+                        if (line.isNotBlank()) onLog(LogLine(line))
+                    }
                 }
+                val exit = process.waitFor()
+                if (exit == 0) {
+                    onLog(LogLine(HostStrings.t(currentIdeLocale(), "ext.cli.installOk")))
+                    invalidateEnvironmentCache()
+                    // 新装的全局 bin 可能不在已缓存的 PATH 中，须让 shell 环境重新解析一次。
+                    ShellEnv.invalidate()
+                } else {
+                    onLog(
+                        LogLine(
+                            HostStrings.t(currentIdeLocale(), "ext.cli.installFail", "code" to exit.toString()),
+                            LogLevel.ERROR,
+                        ),
+                    )
+                }
+                exit == 0
+            } finally {
+                // 与 runRaw 对齐：异常路径（forEachLine 抛 IOException 等）下进程可能仍存活，强杀 + 关流兜底，避免僵尸与 fd 泄漏。
+                if (process.isAlive) process.destroyForcibly()
+                process.closeStreamsQuietly()
+                installProcess.compareAndSet(process, null)
             }
-            val exit = process.waitFor()
-            if (exit == 0) {
-                onLog(LogLine(HostStrings.t(currentIdeLocale(), "ext.cli.installOk")))
-                invalidateEnvironmentCache()
-                // 新装的全局 bin 可能不在已缓存的 PATH 中，须让 shell 环境重新解析一次。
-                ShellEnv.invalidate()
-            } else {
-                onLog(
-                    LogLine(
-                        HostStrings.t(currentIdeLocale(), "ext.cli.installFail", "code" to exit.toString()),
-                        LogLevel.ERROR,
-                    ),
-                )
-            }
-            exit == 0
         }.getOrElse {
             onLog(LogLine(it.message ?: it.javaClass.simpleName, LogLevel.ERROR))
             false
@@ -136,12 +161,16 @@ class CliService(private val cliPath: String = "ocr") {
             .directory(cwd)
             .withShellEnv(*envExtra.toList().toTypedArray())
             .start()
-        process.outputStream.close()
-        // 先接管 current 再清理上一个：直接覆盖会遗漏前一个进程。
+        // 先注册到 current（紧贴 start，盲区最短），再关 stdin：若 close 抛异常，进程已登记、cancel 仍可杀，不致脱管。
         current.getAndSet(process)?.let { stale ->
             if (stale.isAlive) {
                 thisLogger().warn("[ocr] 上一个 CLI 进程仍在运行，已终止")
                 stale.destroy()
+                // 等 SIGTERM 生效，避免新旧 CLI 进程并行读写同一仓库/配置；超时则强杀。
+                if (!stale.waitFor(FORCE_KILL_DELAY_MS, TimeUnit.MILLISECONDS)) {
+                    thisLogger().warn("[ocr] 上一个 CLI 进程 ${FORCE_KILL_DELAY_MS}ms 未退出，强制终止")
+                    stale.destroyForcibly()
+                }
             }
         }
         val stderr = StringBuilder()
@@ -154,6 +183,7 @@ class CliService(private val cliPath: String = "ocr") {
             }
         }, "ocr-cli-stderr").apply { isDaemon = true; start() }
         try {
+            process.outputStream.close() // 在 try 内：close 抛 IOException 时 finally 仍会清理已注册的进程，不致脱管。
             val stdout = process.inputStream.bufferedReader().readText()
             val exit = process.waitFor()
             stderrThread.join(2_000)
@@ -163,6 +193,11 @@ class CliService(private val cliPath: String = "ocr") {
             }
             return stdout
         } finally {
+            // 先强杀、再关流、最后释放 current：杀在前使并发 cancel 看到的是已死进程，且不让新 runRaw 在旧进程仍活时抢占槽位。
+            if (process.isAlive) process.destroyForcibly()
+            // 异常路径下 stderrThread 可能仍在读 errorStream；先等它收尾再关流，避免打断它丢日志行（成功路径上面已 join，此处幂等）。
+            stderrThread.join(2_000)
+            process.closeStreamsQuietly()
             current.compareAndSet(process, null)
         }
     }
@@ -189,9 +224,12 @@ class CliService(private val cliPath: String = "ocr") {
         }.getOrElse { false to (it.message ?: it.javaClass.simpleName) }
     }
 
-    /** 先 SIGTERM，3 秒后仍存活则 SIGKILL。 */
+    /** 先 SIGTERM，3 秒后仍存活则 SIGKILL。只取消 review（current 槽）；install 有独立生命周期，不在此处殃及。 */
     fun cancel() {
-        val process = current.get() ?: return
+        // 取走 current 槽里此刻 tracked 的 review 进程并终止。getAndSet 取的是"此刻槽里的那个"——若期间有新 runRaw
+        // 接管了 current，被取走的就是新进程。CliService 这层无 session 身份，无法保证杀的恰是"用户想取消的那轮"；
+        // 正常流程下 startReview 先 cancel 旧 session 再建新 session，使 current 始终对应当前轮，误杀仅多轮极端竞态下理论存在。
+        val process = current.getAndSet(null) ?: return
         if (!process.isAlive) return
         process.destroy()
         AppExecutorUtil.getAppScheduledExecutorService().schedule(
@@ -199,6 +237,26 @@ class CliService(private val cliPath: String = "ocr") {
             FORCE_KILL_DELAY_MS,
             TimeUnit.MILLISECONDS,
         )
+    }
+
+    /** 关掉进程的三路流，吞掉 close() 声明的 IOException，不吞 InterruptedException 等运行期信号。 */
+    private fun Process.closeStreamsQuietly() {
+        try { inputStream.close() } catch (_: IOException) {}
+        try { outputStream.close() } catch (_: IOException) {}
+        try { errorStream.close() } catch (_: IOException) {}
+    }
+
+    /** 终止并清理上一个 npm install：先 SIGTERM+宽限（与 runRaw 的 stale 处理一致，给 npm 清理机会），再关流。 */
+    private fun killStaleInstall(stale: Process) {
+        if (stale.isAlive) {
+            thisLogger().warn("[ocr] 上一个 npm install 仍在运行，已终止")
+            stale.destroy()
+            if (!stale.waitFor(FORCE_KILL_DELAY_MS, TimeUnit.MILLISECONDS)) {
+                thisLogger().warn("[ocr] 上一个 npm install ${FORCE_KILL_DELAY_MS}ms 内未退出，强制终止")
+                stale.destroyForcibly()
+            }
+        }
+        stale.closeStreamsQuietly()
     }
 
     private fun ProcessBuilder.withShellEnv(vararg extra: Pair<String, String>): ProcessBuilder = apply {

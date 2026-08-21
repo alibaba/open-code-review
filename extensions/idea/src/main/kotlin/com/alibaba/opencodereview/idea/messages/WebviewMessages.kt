@@ -9,6 +9,7 @@ import com.alibaba.opencodereview.idea.model.ReviewMode
 import com.alibaba.opencodereview.idea.model.SupportedLocale
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
@@ -139,7 +140,12 @@ fun parseWebviewMessage(raw: String, locale: SupportedLocale): WebviewToHost {
         "checkEnvironment" -> WebviewToHost.CheckEnvironment
         "installCli" -> WebviewToHost.InstallCli
 
-        "openConfigPanel" -> WebviewToHost.OpenConfigPanel(msg["focus"])
+        "openConfigPanel" -> {
+            // "focus": null（JSON null 字面量）时 msg["focus"] 返回 JsonNull 而非 Kotlin null；
+            // 过滤掉，使"字段缺省"与"显式 null"在下游语义一致。
+            val focus = msg["focus"]?.takeIf { it !is JsonNull }
+            WebviewToHost.OpenConfigPanel(focus)
+        }
 
         "getGitState" -> WebviewToHost.GetGitState(parseMode(msg.str("mode")))
 
@@ -197,7 +203,7 @@ fun parseWebviewMessage(raw: String, locale: SupportedLocale): WebviewToHost {
             WebviewToHost.ActivateCustomProvider(name)
         }
 
-        // text 可为空串（复制空字段属合法操作），故仅校验字段是否存在。
+        // text 可为空串（复制空字段属合法操作）；字段缺省时亦视为空串。
         "copyToClipboard" -> WebviewToHost.CopyToClipboard(msg.str("text") ?: "")
 
         "jumpToComment" -> {

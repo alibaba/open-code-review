@@ -130,16 +130,22 @@ object IdeaTheme {
      * 前景本身可能已半透明，直接覆盖会比主题原意更实）。
      */
     private fun rgba(color: Color, extraAlpha: Double): String {
-        val alpha = (color.alpha / 255.0) * extraAlpha
+        // 夹到 [0,1]：extraAlpha 或前景色 alpha 异常时不让 rgba 通道值越界导致 CSS 声明失效。
+        val alpha = ((color.alpha / 255.0) * extraAlpha).coerceIn(0.0, 1.0)
         // 必须使用 Locale.ROOT：德语等 locale 小数点为逗号，`0,086` 会导致 CSS 声明失效。
         val formatted = String.format(Locale.ROOT, "%.3f", alpha)
         return "rgba(${color.red}, ${color.green}, ${color.blue}, $formatted)"
     }
 
+    /** 字体名里要剥掉的字符：会破坏 `:root{}` 结构（`} ; \ 换行）或提前闭合外层 `<style>` 块（`<`，防 `</style` 注入）。 */
+    private val FONT_NAME_INVALID = Regex("[\"\\\\};\\n\\r<]")
+
     /** 字体名可能含空格（如 "JetBrains Mono"），必须加引号，否则整条声明会被浏览器丢弃。 */
     private fun cssFontStack(family: String?, generic: String): String {
         val name = family?.takeIf { it.isNotBlank() } ?: return generic
-        return "\"${name.replace("\"", "")}\", $generic"
+        // 字体名来自 UIManager，取值不可控，统一过这一层再拼进 CSS。
+        val sanitized = name.replace(FONT_NAME_INVALID, "")
+        return "\"$sanitized\", $generic"
     }
 
     // 兜底色（Darcula 近似）。仅在 LaF 完全未装配时使用，保证页面不会因单个 null 值而整块透明。

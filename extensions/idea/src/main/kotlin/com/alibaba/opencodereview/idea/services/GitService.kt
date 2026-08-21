@@ -10,6 +10,7 @@ import com.alibaba.opencodereview.idea.model.ReviewMode
 import com.alibaba.opencodereview.idea.model.SupportedLocale
 import com.alibaba.opencodereview.idea.model.currentIdeLocale
 import com.intellij.diff.DiffContentFactory
+
 import com.intellij.diff.DiffManager
 import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.diff.util.DiffUserDataKeys
@@ -54,6 +55,11 @@ class GitService(private val project: Project) {
     @Volatile
     private var cachedRoot: File? = null
 
+    /** Windows / macOS 默认大小写不敏感 FS；VFS 事件路径大小写可能与 root 不同，匹配前缀时须忽略大小写。OS 运行期不变，构造时算一次。 */
+    private val caseInsensitiveFs: Boolean = System.getProperty("os.name").orEmpty().let {
+        it.startsWith("Win", true) || it.startsWith("Mac", true)
+    }
+
     /** 本次审查涉及的文件状态，供评论挂载判断"文件是否已删除 / 是否二进制"。 */
     private val reviewFileStatus = mutableMapOf<String, FileStatus>()
 
@@ -77,8 +83,8 @@ class GitService(private val project: Project) {
      * 按审查模式刷新并返回 git 状态。
      * 只查询当前模式所需数据：workspace 模式不需要分支列表，branch 模式不需要提交列表。
      */
-    fun getState(mode: ReviewMode): GitState {
-        val root = repoRoot() ?: return GitState()
+    fun getState(mode: ReviewMode): GitState = synchronized(this) {
+        val root = repoRoot() ?: return@synchronized GitState()
         var state = cache
         when (mode) {
             ReviewMode.WORKSPACE -> state = state.copy(
@@ -97,7 +103,7 @@ class GitService(private val project: Project) {
             )
         }
         cache = state
-        return state
+        state
     }
 
     /** 最近一次 [getState] 的结果，不触发任何 git 调用。 */
@@ -168,9 +174,9 @@ class GitService(private val project: Project) {
 
     /** 单个提交引入的变更文件。 */
     fun getCommitFiles(sha: String): List<FileChange> {
-        if (sha.isBlank()) return emptyList()
         val root = repoRoot() ?: return emptyList()
-        val out = runGitOrNull(root, "show", "--name-status", "--format=", sha) ?: return emptyList()
+        val safeSha = safeRef(sha) ?: return emptyList() // safeRef 已拒空/空白
+        val out = runGitOrNull(root, "show", "--name-status", "--format=", safeSha) ?: return emptyList()
         return parseNameStatus(out)
     }
 
@@ -180,8 +186,8 @@ class GitService(private val project: Project) {
      * 全部不存在则返回 null。
      */
     fun resolveGitRef(root: File, ref: String): String? {
-        if (ref.isBlank()) return null
-        for (candidate in branchRefCandidates(ref.trim())) {
+        val safe = safeRef(ref) ?: return null
+        for (candidate in branchRefCandidates(safe)) {
             val ok = runGitOrNull(root, "rev-parse", "--verify", "--quiet", candidate)
             if (!ok.isNullOrBlank()) return candidate
         }
@@ -191,7 +197,9 @@ class GitService(private val project: Project) {
     /** 两个引用的 merge-base；失败返回 null。 */
     fun mergeBase(from: String, to: String): String? {
         val root = repoRoot() ?: return null
-        return runGitOrNull(root, "merge-base", from, to)?.trim()?.takeIf { it.isNotEmpty() }
+        val fromRef = safeRef(from) ?: return null
+        val toRef = safeRef(to) ?: return null
+        return runGitOrNull(root, "merge-base", fromRef, toRef)?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     // ---------------------------------------------------------------- 文件内容
@@ -199,10 +207,11 @@ class GitService(private val project: Project) {
     /** 读取某个引用下的文件内容；路径不存在于该引用返回 null。 */
     fun readFileAtRef(ref: String, relPath: String): String? {
         val root = repoRoot() ?: return null
-        return runGitOrNull(root, "show", "$ref:$relPath")
+        val safe = safeRef(ref) ?: return null
+        return runGitOrNull(root, "show", "$safe:$relPath")
     }
 
-    /** 读取工作区当前文件内容；文件不存在返回 null。 */
+    /** 读取工作区当前文件内容；文件不存在返回 null。基准用 repoRoot：CLI 输出的评论路径是仓库根相对（git diff 默认），子目录打开项目时也须按仓库根拼。 */
     fun readWorkspaceFile(relPath: String): String? {
         val root = repoRoot() ?: return null
         val file = File(root, relPath)
@@ -213,8 +222,9 @@ class GitService(private val project: Project) {
     /** 某路径是否存在于给定引用。用 `cat-file -e`，不读内容。 */
     fun pathExistsAtRef(ref: String, relPath: String): Boolean {
         val root = repoRoot() ?: return false
+        val safe = safeRef(ref) ?: return false
         // cat-file -e 存在时无输出且退出码 0，须区分"null=失败"和"空串=成功"。
-        return runGitOrNull(root, "cat-file", "-e", "$ref:$relPath") != null
+        return runGitOrNull(root, "cat-file", "-e", "$safe:$relPath") != null
     }
 
     /**
@@ -450,8 +460,9 @@ class GitService(private val project: Project) {
     private fun VFileEvent.isRelevantTo(root: File): Boolean {
         val path = path.replace(File.separatorChar, '/')
         val rootPath = root.absolutePath.replace(File.separatorChar, '/')
-        if (!path.startsWith("$rootPath/")) return false
-        val relative = path.removePrefix("$rootPath/")
+        if (!path.startsWith("$rootPath/", ignoreCase = caseInsensitiveFs)) return false
+        // 大小写不敏感 FS 上 path 大小写可能与 rootPath 不同，removePrefix 是精确匹配会失败；用索引截断保证一致。
+        val relative = path.substring(rootPath.length + 1)
         if (!relative.startsWith(".git/") && relative != ".git") return true
         val inner = relative.removePrefix(".git/")
         return inner == "index" || inner == "HEAD"
@@ -467,6 +478,13 @@ class GitService(private val project: Project) {
     }
 
     // ---------------------------------------------------------------- 进程
+
+    /** 校验用户填写的 ref/sha：trim 后非空、不以 `-` 开头、不含空白/控制符，否则返回 null（防被 git 当选项或断行注入）。 */
+    private fun safeRef(ref: String): String? {
+        val t = ref.trim()
+        if (t.isEmpty() || t.startsWith("-") || t.any { it.isWhitespace() || it.code < 0x20 }) return null
+        return t
+    }
 
     /**
      * 执行一条 git 命令，返回 stdout。任何失败（非零退出、超时、git 不存在）均返回 null，
@@ -488,11 +506,12 @@ class GitService(private val project: Project) {
             // stdout 必须在独立线程读取：当前线程 readText() 读到 EOF 才会 waitFor，进程挂住不关闭 stdout 时会永久阻塞，后续超时判定形同虚设。
             val stdout = StringBuilder()
             val reader = Thread({
-                runCatching { process.inputStream.bufferedReader().use { stdout.append(it.readText()) } }
+                runCatching { process.inputStream.bufferedReader(Charsets.UTF_8).use { stdout.append(it.readText()) } }
                     .onFailure { thisLogger().warn("[ocr] Failed to read git stdout: ${args.joinToString(" ")}", it) }
             }, "ocr-git-stdout").apply { isDaemon = true; start() }
             if (!process.waitFor(GIT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
                 process.destroyForcibly()
+                reader.join(1_000) // 强杀后等 reader 收尾，避免 daemon 在反复超时中堆积
                 thisLogger().warn("[ocr] git timed out: ${args.joinToString(" ")}")
                 return null
             }

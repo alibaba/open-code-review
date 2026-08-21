@@ -104,7 +104,7 @@ internal fun resolveLinesInContent(
     endLine: Int,
     existingCode: String?,
 ): ResolvedLines? {
-    val lineCount = content.split("\n").size
+    val lineCount = content.split("\n").size // 与本文件 splitAndNormalize 的 split("\n") 分行方式保持一致
     val start = if (startLine > 0) startLine else 0
     val end = if (endLine > 0) endLine else start
 
@@ -208,7 +208,7 @@ internal fun selectDiffMarks(relPath: String, side: AnchorSide, all: List<DiffMa
 /**
  * 把 1-based 闭区间夹进文档实际范围，返回 0-based 闭区间。
  * 行号在审查后可能因文件被修改、diff 两侧内容不同等原因超出范围，不夹会导致 IndexOutOfBounds。
- * startLine > endLine 也在此收敛为 start<=end。空文档返回 0..0。
+ * startLine > endLine 也在此收敛为 start<=end。空文档返回 0..0（调用方在进入前已对 lineCount==0 做守卫，不会据此访问不存在的行）。
  */
 internal fun clampLineRange(startLine: Int, endLine: Int, lineCount: Int): IntRange {
     if (lineCount <= 0) return 0..0

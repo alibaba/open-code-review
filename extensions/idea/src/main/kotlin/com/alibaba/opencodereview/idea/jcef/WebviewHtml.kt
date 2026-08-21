@@ -65,12 +65,21 @@ object WebviewHtml {
     /**
      * 内联脚本中出现 `</script` 会被 HTML 解析器当作脚本结束标记，bundle 的后半段会被当作正文渲染。
      * minifier 输出不稳定，无条件转义；`<\/script` 在 JS 字符串与正则中与原文等价。
+     *
+     * **注意**：仅处理 `</script>` 序列，不做 HTML 实体转义；调用方须确保传入的是可信 JS（来自插件打包产物）。
      */
     internal fun escapeForInlineScript(js: String): String =
         js.replace("</script", "<\\/script", ignoreCase = true)
 
-    private fun readResource(path: String): String? =
-        javaClass.getResourceAsStream(path)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+    private fun readResource(path: String): String? {
+        // 必须是绝对 classpath 路径（以 / 开头）：相对路径会按本类包名解析，静默落空后只剩 fallback 页面，难以排查。
+        require(path.startsWith("/")) { "Resource path must be absolute: $path" }
+        // runCatching：readText 抛 IOException（IO 故障）时返回 null，触发 page() 的 missingBundle 兜底，而非让异常上抛崩 JCEF 装配。
+        // 剥掉开头的 UTF-8 BOM（U+FEFF），否则内联 JS 以 BOM 起头，部分引擎解析异常。
+        return runCatching {
+            javaClass.getResourceAsStream(path)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+        }.getOrNull()?.removePrefix("\uFEFF")
+    }
 
     /**
      * bundle 不在 jar 内（几乎仅因前端未构建一种原因）。文案走 [HostStrings]，不能写死中文：

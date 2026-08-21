@@ -2,11 +2,13 @@ package com.alibaba.opencodereview.idea.services
 
 import com.alibaba.opencodereview.idea.model.ConfigEntry
 import com.alibaba.opencodereview.idea.model.OcrJson
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
+import java.util.Locale
 
 /**
  * 在内存中将 config set 条目合并进原始配置 JSON，不落盘。
@@ -29,6 +31,7 @@ fun parseRawConfig(text: String): RawConfig {
 /** 序列化为写盘用的两空格缩进 JSON。 */
 fun RawConfig.toPrettyJson(): String = PrettyJson.encodeToString(JsonObject.serializer(), JsonObject(this))
 
+@OptIn(ExperimentalSerializationApi::class)
 private val PrettyJson = kotlinx.serialization.json.Json {
     prettyPrint = true
     prettyPrintIndent = "  "
@@ -108,7 +111,8 @@ private fun RawConfig.setProviderValue(key: String, value: String) {
     val name = parts[1]
     val field = parts[2]
     if (isPresetProvider(name)) {
-        setProviderEntryField("providers", name, field, value)
+        // 与 isPresetProvider / ConfigUtils 一致：预置键按规范小写存储，避免 "OpenAI" 被判为预置却写进大写键、后续查不到。
+        setProviderEntryField("providers", name.trim().lowercase(Locale.ROOT), field, value)
     } else {
         setCustomProviderField(name, field, value)
     }
@@ -116,7 +120,8 @@ private fun RawConfig.setProviderValue(key: String, value: String) {
 
 private fun RawConfig.ensureProviderBucketEntry(value: String) {
     if (isPresetProvider(value)) {
-        mutateObj("providers") { m -> if (m[value] !is JsonObject) m[value] = JsonObject(emptyMap()) }
+        val key = value.trim().lowercase(Locale.ROOT)
+        mutateObj("providers") { m -> if (m[key] !is JsonObject) m[key] = JsonObject(emptyMap()) }
     } else if (value.isNotEmpty()) {
         mutateObj("custom_providers") { m -> if (m[value] !is JsonObject) m[value] = JsonObject(emptyMap()) }
     }
@@ -139,9 +144,11 @@ private fun RawConfig.setConfigValue(key: String, value: String) {
 
     when (key) {
         "provider" -> {
-            // 切换 provider 时清空顶层 model：旧 model 通常不属于新 provider。
-            if (strAt("provider") != value) this["model"] = JsonPrimitive("")
-            this["provider"] = JsonPrimitive(value)
+            // 预置 provider 按规范小写存储，与 providers bucket 键一致；自定义 provider 保留用户原名。
+            val providerName = if (isPresetProvider(value)) value.trim().lowercase(Locale.ROOT) else value
+            // 切换 provider 时清空顶层 model：旧 model 通常不属于新 provider（用归一化名比较，避免大小写差异误判为切换）。
+            if (strAt("provider") != providerName) this["model"] = JsonPrimitive("")
+            this["provider"] = JsonPrimitive(providerName)
             ensureProviderBucketEntry(value)
         }
 
@@ -150,7 +157,7 @@ private fun RawConfig.setConfigValue(key: String, value: String) {
             val provider = strAt("provider")
             if (provider.isNotEmpty()) {
                 if (isPresetProvider(provider)) {
-                    setProviderEntryField("providers", provider, "model", value)
+                    setProviderEntryField("providers", provider.trim().lowercase(Locale.ROOT), "model", value)
                 } else {
                     setCustomProviderField(provider, "model", value)
                 }

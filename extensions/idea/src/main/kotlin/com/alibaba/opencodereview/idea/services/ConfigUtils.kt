@@ -1,6 +1,7 @@
 package com.alibaba.opencodereview.idea.services
 
 import com.alibaba.opencodereview.idea.model.OcrConfig
+import java.util.Locale
 
 /**
  * 仅提供 [isConfigReady] 一个函数。
@@ -15,16 +16,19 @@ import com.alibaba.opencodereview.idea.model.OcrConfig
 fun isConfigReady(config: OcrConfig?): Boolean {
     if (config == null) return false
 
-    if (config.provider.isNotEmpty()) {
+    if (config.provider.isNotBlank()) {
         val preset = isPresetProvider(config.provider)
+        // isPresetProvider 按 trim+lowercase(Locale.ROOT) 比对，预置 providers 也按规范小写键存储；
+        // 故预置查找须用同一归一化键，否则 config.provider 为 "OpenAI" 时会被判为预置却在小写键 map 里查不到。
+        val key = if (preset) config.provider.trim().lowercase(Locale.ROOT) else config.provider
         val entry =
-            if (preset) config.providers[config.provider] else config.customProviders[config.provider]
-        if (entry == null || entry.model.isEmpty()) return false
+            if (preset) config.providers[key] else config.customProviders[key]
+        if (entry == null || entry.model.isBlank()) return false
         if (preset) return true
-        return entry.url.isNotEmpty() && entry.protocol.isNotEmpty() && entry.apiKey.isNotEmpty()
+        return entry.url.isNotBlank() && entry.protocol.isNotBlank() && entry.apiKey.isNotBlank()
     }
 
-    return config.llm.url.isNotEmpty() &&
-        config.llm.model.isNotEmpty() &&
-        config.llm.authToken.isNotEmpty()
+    return config.llm.url.isNotBlank() &&
+        config.llm.model.isNotBlank() &&
+        config.llm.authToken.isNotBlank()
 }

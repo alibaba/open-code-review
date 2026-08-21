@@ -7,6 +7,9 @@ package com.alibaba.opencodereview.idea.model
  */
 object HostStrings {
 
+    /** `{param}` 占位符，单遍替换用（避免顺序依赖注入）。 */
+    private val PARAM_REGEX = Regex("""\{(\w+)\}""")
+
     private val EN: Map<String, String> = mapOf(
         // ---------------------------------------------------------------- 评论
         "ext.comment.threadLabel" to "Code Review",
@@ -138,9 +141,9 @@ object HostStrings {
     /** 取文案并执行 `{param}` 替换。未找到词条时回退至英文，两者皆无则原样返回 key——与前端的兜底策略一致。 */
     fun t(locale: SupportedLocale, key: String, vararg params: Pair<String, String>): String {
         val template = (if (locale == SupportedLocale.ZH_CN) ZH_CN[key] else null) ?: EN[key] ?: key
-        var result = template
-        for ((name, value) in params) result = result.replace("{$name}", value)
-        return result
+        // 单遍替换：避免某参数值含 `{otherParam}` 时被后续参数再次替换（顺序依赖注入）。
+        val map = params.toMap()
+        return PARAM_REGEX.replace(template) { m -> map[m.groupValues[1]] ?: m.value }
     }
 
     /** 返回两张表的原始内容，仅供单元测试——确保「两种语言 key 齐全且占位符一致」。 */

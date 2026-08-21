@@ -76,7 +76,20 @@ class JcefConfigPanelHost(
     }
 
     override fun dispose() {
-        close()
+        // 取局部后清空，避免与对话框关闭回调的二次 dispose 竞态。
+        val w = webview
+        val d = dialog
+        webview = null
+        dialog = null
+        // 关闭仍可见的对话框（项目关闭时若面板开着，避免留孤儿原生窗口）+ 释放 JCEF browser 都须在 EDT
+        // （Swing/CEF 契约）。不用 onEdt——其 isDisposed 守卫会在项目关闭路径跳过、browser 永不释放；
+        // 此处 invokeLater 不带守卫，关闭时 EDT 仍会派发；派发不到也无妨（JVM 退出由 OS 回收）。OcrWebview/dialog.close 幂等。
+        val app = ApplicationManager.getApplication()
+        val cleanup: () -> Unit = {
+            d?.let { runCatching { it.close(DialogWrapper.OK_EXIT_CODE) } }
+            w?.let { runCatching { it.dispose() } }
+        }
+        if (app.isDispatchThread) cleanup() else app.invokeLater(cleanup)
     }
 
     private fun onEdt(block: () -> Unit) {

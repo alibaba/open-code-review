@@ -1,5 +1,7 @@
 package com.alibaba.opencodereview.idea.services
 
+import java.util.Locale
+
 /**
  * 内置 provider 名字集合。
  * 仅复制名字不复制 baseUrl/models/protocol 表：宿主侧只需 [isPresetProvider]（决定写入 `providers` 还是 `custom_providers`），
@@ -24,9 +26,9 @@ private val PRESET_PROVIDER_NAMES: Set<String> = setOf(
     "baidu-qianfan",
 )
 
-/** 按 trim + 小写比对。 */
+/** 按 trim + 小写比对；用 Locale.ROOT 避免 Turkish 等 locale 下 'I'→'ı' 之类意外。 */
 fun isPresetProvider(name: String): Boolean =
-    PRESET_PROVIDER_NAMES.contains(name.trim().lowercase())
+    PRESET_PROVIDER_NAMES.contains(name.trim().lowercase(Locale.ROOT))
 
-/** 供单测/诊断用的只读视图。 */
-fun presetProviderNames(): Set<String> = PRESET_PROVIDER_NAMES
+/** 供单测/诊断用的只读视图。返回防御性拷贝，避免外部 mutate 内部集合。 */
+fun presetProviderNames(): Set<String> = PRESET_PROVIDER_NAMES.toSet()

@@ -86,8 +86,7 @@ class ReviewProjectService(private val project: Project) : Disposable {
         // branch/commit 模式评论要挂 diff 两侧的临时文档上，只有 GitService 造文档那一刻能拿到句柄。
         // GitService 不认识评论，这里接起来。见 CommentService.decorateDiff。
         git.diffDecorator = { path, side, document -> comments.decorateDiff(path, side, document) }
-        // DiffDecorator 在 showDiff 之前挂行高亮和装订线图标，diffViewerReady 在之后挂内嵌面板——两个时机相反，故两个钩子。
-        // 两个时机相反，故两个钩子。见 GitService.diffViewerReady。
+        // DiffDecorator 在 showDiff 之前挂行高亮和装订线图标，diffViewerReady 在之后挂内嵌面板——两个时机相反，故两个钩子。见 GitService.diffViewerReady。
         git.diffViewerReady = { path, side, document, clickedIndex -> comments.mountDiffPanels(path, side, document, clickedIndex) }
     }
 
@@ -197,6 +196,9 @@ class ReviewProjectService(private val project: Project) : Disposable {
         sidebar.cancelActiveSession()
         sidebarChannels.clear()
         comments.onSync = null
+        // 清空 git 回调：openDiff 里可能有未执行的 invokeLater，服务已释放后再触发会调到已 dispose 的 comments。
+        git.diffDecorator = null
+        git.diffViewerReady = null
         // panelHost 是 by lazy，这里不应访问——未打开过配置面板的会话不应因 dispose 去初始化 JCEF browser。
     }
 }

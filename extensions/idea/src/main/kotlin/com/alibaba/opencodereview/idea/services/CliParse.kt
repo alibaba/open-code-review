@@ -66,9 +66,9 @@ fun buildReviewArgs(opts: CliRunOptions): List<String> = buildList {
 private fun CliCommentDto.toComment(): ReviewComment = ReviewComment(
     path = path,
     content = content,
-    // 将空串归一为缺失：若直接透传空串，调用方会把空串当作"存在建议"。
-    suggestionCode = suggestionCode?.takeIf(String::isNotEmpty),
-    existingCode = existingCode?.takeIf(String::isNotEmpty),
+    // 将空白串归一为缺失：若直接透传空/空白串，调用方会把其当作"存在建议/原码"。
+    suggestionCode = suggestionCode?.takeIf(String::isNotBlank),
+    existingCode = existingCode?.takeIf(String::isNotBlank),
     startLine = startLine,
     endLine = endLine,
     thinking = thinking?.takeIf(String::isNotEmpty),
@@ -111,11 +111,14 @@ fun parseCliResult(stdout: String): CliResult {
     )
 }
 
+/** `error:` 前缀正则，提取报错文本时剥离用。 */
+private val ERROR_PREFIX_REGEX = Regex("^error:\\s*", RegexOption.IGNORE_CASE)
+
 /** 从 CLI stderr 中提取最有用的报错文本：优先最后一条 `error:` 行，否则取最后一行非空内容。 */
 fun extractCliError(stderr: String): String {
     val lines = stderr.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
     val errLine = lines.lastOrNull { it.startsWith("error:", ignoreCase = true) }
-    if (errLine != null) return errLine.replaceFirst(Regex("^error:\\s*", RegexOption.IGNORE_CASE), "")
+    if (errLine != null) return errLine.replaceFirst(ERROR_PREFIX_REGEX, "")
     return lines.lastOrNull().orEmpty()
 }
 

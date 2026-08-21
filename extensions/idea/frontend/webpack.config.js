@@ -9,6 +9,7 @@ const OUT_DIR = path.resolve(__dirname, '../src/main/resources/webview');
 function webConfig(name, entry, mode) {
   return {
     name,
+    mode,
     target: 'web',
     entry: { [name]: entry },
     output: {

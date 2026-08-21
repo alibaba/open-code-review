@@ -65,8 +65,17 @@ class SidebarRouter(
 
             is WebviewToHost.StartReview -> background { startReview(msg) }
 
-            WebviewToHost.CancelReview ->
-                session.get()?.cancel { state -> post(HostToWebview.StateChange(state)) }
+            WebviewToHost.CancelReview -> {
+                // 在调用线程捕获目标 session：background(executeOnPooledThread) 与 StartReview 无序，
+                // 若先进 background 再 StartReview 抢跑，session.get() 会取到新 session 误杀；捕获 target 即锁定旧目标。
+                val target = session.get() ?: return
+                background {
+                    target.cancel { state ->
+                        // 已被新一轮接管则不投递旧轮状态，避免 RUNNING(new)→CANCELLED(old) 乱序。
+                        if (session.get() === target) post(HostToWebview.StateChange(state))
+                    }
+                }
+            }
 
             WebviewToHost.GetConfig -> background { post(HostToWebview.Config(config.read())) }
 
@@ -128,21 +137,28 @@ class SidebarRouter(
 
         val options = msg.options
         val context = options.toReviewContext()
+        // 先终止可能仍在运行的上一轮：否则其 onState/onLog/onDone 回调会继续投递过时消息，与新一轮结果交错。
+        session.getAndSet(null)?.cancel { }
         val current = ReviewSession(cli, cwd)
         session.set(current)
-        // 先清除上一轮的行标记，避免新旧两轮的高亮在同一文件上叠加。
+        // 再清除上一轮的行标记，避免新旧两轮的高亮在同一文件上叠加。
         comments.clear()
 
         current.run(options, object : SessionCallbacks {
+            // 身份校验：cancel() 只杀进程不摘回调，旧 run 仍可能在别的线程回调 onState 等；
+            // 若本 session 已被新一轮替换（session.get() !== current），丢弃过时回调，避免 RUNNING(new)→CANCELLED(old) 乱序。
             override fun onState(state: ReviewState, error: String?) {
+                if (session.get() !== current) return
                 post(HostToWebview.StateChange(state, error))
             }
 
             override fun onLog(line: LogLine) {
+                if (session.get() !== current) return
                 post(HostToWebview.Log(line))
             }
 
             override fun onDone(result: CliResult) {
+                if (session.get() !== current) return
                 if (result.comments.isNotEmpty()) {
                     // 预先计算本次审查涉及的文件状态，供评论定位时区分"文件已删除"与"行号无法匹配"两种情况。
                     git.prepareReviewFileStatus(context)

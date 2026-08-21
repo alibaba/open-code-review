@@ -99,8 +99,12 @@ class ConfigPanelRouter(
                 post(ConfigPanelHostToWebview.EnvironmentResult(cli.checkEnvironment(force = true)))
 
             is WebviewToHost.CopyToClipboard -> {
-                invokeOnEdt { CopyPasteManager.getInstance().setContents(StringSelection(msg.text)) }
-                post(ConfigPanelHostToWebview.CopyDone)
+                // 写剪贴板与回执都在 EDT 内完成：否则 post(CopyDone) 在写盘前就到前端，
+                // 用户看到"已复制"立即切走应用去粘贴时，剪贴板里可能还没有内容。
+                invokeOnEdt {
+                    CopyPasteManager.getInstance().setContents(StringSelection(msg.text))
+                    post(ConfigPanelHostToWebview.CopyDone)
+                }
             }
 
             WebviewToHost.InstallCli -> {
@@ -142,9 +146,12 @@ class ConfigPanelRouter(
     }
 
     private fun confirmDelete(name: String): Boolean {
+        // 在 pooled 线程上走到这里时项目可能已被关闭：对已释放 project 调 invokeAndWait 弹模态框可能死锁。
+        if (project.isDisposed) return false
         var confirmed = false
         val loc = locale()
         ApplicationManager.getApplication().invokeAndWait {
+            if (project.isDisposed) return@invokeAndWait
             confirmed = MessageDialogBuilder
                 .yesNo(
                     HostStrings.t(loc, "ext.deleteProviderTitle"),

@@ -160,18 +160,25 @@ internal class OcrWebview(
 
     /** 把一条已序列化好的宿主消息推进页面。 */
     fun post(json: String) {
+        // post 由消息处理线程调用、dispose 在 EDT 触发，二者并发：browser 可能已释放。
+        // 与 forceFullRepaint/applyTheme 一致，先看 disposed 守卫；executeJavaScript 失败（browser 已销毁）也不让通道崩溃。
+        if (disposed) return
         val literal = Json.encodeToString(String.serializer(), json)
-        browser.cefBrowser.executeJavaScript(
-            "window.__ocrReceive && window.__ocrReceive(JSON.parse($literal));",
-            browser.cefBrowser.url,
-            0,
-        )
+        runCatching {
+            browser.cefBrowser.executeJavaScript(
+                "window.__ocrReceive && window.__ocrReceive(JSON.parse($literal));",
+                browser.cefBrowser.url,
+                0,
+            )
+        }.onFailure { thisLogger().warn("[ocr] Failed to post message to page", it) }
     }
 
     override fun dispose() {
+        // 幂等：JcefConfigPanelHost 在项目关闭路径与对话框关闭回调都可能各调一次。
+        if (disposed) return
         disposed = true
         repaintTimers.forEach { it.stop() }
-        query.dispose()
-        Disposer.dispose(browser)
+        runCatching { query.dispose() }
+        runCatching { Disposer.dispose(browser) }
     }
 }

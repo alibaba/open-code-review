@@ -9,10 +9,11 @@ group = "com.alibaba"
 version = providers.gradleProperty("pluginVersion").get()
 
 repositories {
-//    mavenCentral()
-    maven{
+    maven {
         url = uri("https://maven.aliyun.com/repository/public")
     }
+    // 阿里云镜像 unreachable 时（境外开发者 / CI）回落到 Maven Central，保证全球可构建。
+    mavenCentral()
     intellijPlatform {
         defaultRepositories()
     }
