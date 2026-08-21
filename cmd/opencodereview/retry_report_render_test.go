@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -83,6 +84,17 @@ func TestOutputRetryReportText_NilWritesNothing(t *testing.T) {
 	outputRetryReportText(&buf, nil)
 	if buf.Len() != 0 {
 		t.Errorf("nil report must write nothing, got %q", buf.String())
+	}
+}
+
+func TestOutputRetryReportText_EmptyRequestsHasNoDanglingSummary(t *testing.T) {
+	rep := &llm.RetryReport{TotalRequests: 12}
+	var buf bytes.Buffer
+	outputRetryReportText(&buf, rep)
+	want := "\nLLM retry report summary: 0 of 12 requests affected\n" +
+		"\nPer-attempt detail: --format json (retry_report).\n"
+	if got := buf.String(); got != want {
+		t.Errorf("text report mismatch\n got: %q\nwant: %q", got, want)
 	}
 }
 
@@ -221,6 +233,32 @@ func TestOutputRetryReportText_SanitizesControlChars(t *testing.T) {
 	outputRetryReportText(&buf, rep)
 	if strings.ContainsAny(buf.String(), "\x1b\x07") {
 		t.Errorf("control characters must be stripped, got %q", buf.String())
+	}
+}
+
+func TestOutputRetryReportText_TruncatesStageList(t *testing.T) {
+	rep := &llm.RetryReport{TotalRequests: retryGroupListLimit + 2}
+	for i := 0; i < retryGroupListLimit+2; i++ {
+		rep.Requests = append(rep.Requests, llm.RequestReport{
+			FilePath:  fmt.Sprintf("file-%d.go", i),
+			TaskType:  string(session.MainTask),
+			RequestNo: i + 1,
+			Outcome:   llm.OutcomeFailed,
+			Attempts: []llm.AttemptRecord{{
+				Number: 1, Outcome: llm.AttemptError,
+				ErrorClass: llm.ErrorClassProvider, FailurePhase: llm.FailurePhaseHTTP,
+			}},
+		})
+	}
+
+	var buf bytes.Buffer
+	outputRetryReportText(&buf, rep)
+	got := buf.String()
+	if n := strings.Count(got, "\n- file-"); n != retryGroupListLimit {
+		t.Errorf("listed %d requests, want %d:\n%s", n, retryGroupListLimit, got)
+	}
+	if want := "\n- ... and 2 more\n"; !strings.Contains(got, want) {
+		t.Errorf("missing aligned truncation line %q:\n%s", want, got)
 	}
 }
 

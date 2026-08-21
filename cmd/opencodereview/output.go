@@ -448,9 +448,12 @@ func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
 		}
 	}
 
-	fmt.Fprintf(w, "\nLLM retry report summary: %d of %d %s affected — %s\n",
-		len(rep.Requests), rep.TotalRequests, plural(rep.TotalRequests, "request"),
-		strings.Join(parts, ", "))
+	fmt.Fprintf(w, "\nLLM retry report summary: %d of %d %s affected",
+		len(rep.Requests), rep.TotalRequests, plural(rep.TotalRequests, "request"))
+	if len(parts) > 0 {
+		fmt.Fprintf(w, " — %s", strings.Join(parts, ", "))
+	}
+	fmt.Fprintln(w)
 
 	for _, g := range groups {
 		header := fmt.Sprintf("%s (%d %s", g.title,
@@ -458,7 +461,7 @@ func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
 		fmt.Fprintf(w, "\n%s):\n", header)
 		for i, r := range g.requests {
 			if i == retryGroupListLimit {
-				fmt.Fprintf(w, "  ... and %d more\n", len(g.requests)-i)
+				fmt.Fprintf(w, "- ... and %d more\n", len(g.requests)-i)
 				break
 			}
 			fmt.Fprintf(w, "- %s — %s\n", sanitizeTerminal(r.FilePath), retryAttemptChain(r))
