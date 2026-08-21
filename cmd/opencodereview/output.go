@@ -451,7 +451,7 @@ func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
 	fmt.Fprintf(w, "\nLLM retry report summary: %d of %d %s affected",
 		len(rep.Requests), rep.TotalRequests, plural(rep.TotalRequests, "request"))
 	if len(parts) > 0 {
-		fmt.Fprintf(w, " — %s", strings.Join(parts, ", "))
+		fmt.Fprintf(w, " -- %s", strings.Join(parts, ", "))
 	}
 	fmt.Fprintln(w)
 
@@ -464,7 +464,7 @@ func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
 				fmt.Fprintf(w, "- ... and %d more\n", len(g.requests)-i)
 				break
 			}
-			fmt.Fprintf(w, "- %s — %s\n", sanitizeTerminal(r.FilePath), retryAttemptChain(r))
+			fmt.Fprintf(w, "- %s: %s\n", sanitizeTerminal(r.FilePath), retryAttemptChain(r))
 		}
 	}
 
@@ -537,7 +537,7 @@ func retryAttemptChain(r llm.RequestReport) string {
 		(r.Outcome == llm.OutcomeCancelled && !lastCancelled) {
 		parts = append(parts, string(r.Outcome))
 	}
-	return strings.Join(parts, " → ")
+	return strings.Join(parts, " -> ")
 }
 
 func retryErrorPhrase(a llm.AttemptRecord) string {

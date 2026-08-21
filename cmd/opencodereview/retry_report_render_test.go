@@ -62,11 +62,11 @@ func retryReportFixture() *llm.RetryReport {
 // task_type/request_no identity the JSON report carries stays out of the
 // terminal.
 const wantRetryReportText = `
-LLM retry report summary: 2 of 12 requests affected — 1 request failed, 1 request recovered after retry
+LLM retry report summary: 2 of 12 requests affected -- 1 request failed, 1 request recovered after retry
 
 Core review (2 requests):
-- config.go — rejected by provider (HTTP 402) → failed
-- payment.go — rate limited (HTTP 429) → provider overloaded (HTTP 529) → succeeded
+- config.go: rejected by provider (HTTP 402) -> failed
+- payment.go: rate limited (HTTP 429) -> provider overloaded (HTTP 529) -> succeeded
 
 Per-attempt detail: --format json (retry_report).
 `
@@ -161,9 +161,9 @@ func TestOutputRetryReportText_SucceededAfterRetry(t *testing.T) {
 	}
 	// "retried", not "recovered": no attempt failed, so nothing was recovered
 	// from — the same distinction the JSON report's recovered_requests keeps.
-	want := "\nLLM retry report summary: 1 of 1 request affected — 1 request retried at provider request\n" +
+	want := "\nLLM retry report summary: 1 of 1 request affected -- 1 request retried at provider request\n" +
 		"\nCore review (1 request):\n" +
-		"- payment.go — succeeded (provider asked to retry) → succeeded\n" +
+		"- payment.go: succeeded (provider asked to retry) -> succeeded\n" +
 		"\nPer-attempt detail: --format json (retry_report).\n"
 	var buf bytes.Buffer
 	outputRetryReportText(&buf, rep)
@@ -187,9 +187,9 @@ func TestOutputRetryReportText_CancelledIsShown(t *testing.T) {
 			Attempts:         []llm.AttemptRecord{{Number: 1, Outcome: llm.AttemptSuccess}},
 		}},
 	}
-	want := "\nLLM retry report summary: 1 of 1 request affected — 1 request cancelled\n" +
+	want := "\nLLM retry report summary: 1 of 1 request affected -- 1 request cancelled\n" +
 		"\nContext compaction (1 request):\n" +
-		"- payment.go — succeeded → cancelled\n" +
+		"- payment.go: succeeded -> cancelled\n" +
 		"\nPer-attempt detail: --format json (retry_report).\n"
 	var buf bytes.Buffer
 	outputRetryReportText(&buf, rep)
@@ -220,7 +220,7 @@ func TestRetryAttemptChain_NoStatusCode(t *testing.T) {
 			{Number: 1, Outcome: llm.AttemptError, ErrorClass: llm.ErrorClassNetwork, FailurePhase: llm.FailurePhaseTransport},
 		},
 	}
-	if got, want := retryAttemptChain(r), "network error → failed"; got != want {
+	if got, want := retryAttemptChain(r), "network error -> failed"; got != want {
 		t.Errorf("chain = %q, want %q", got, want)
 	}
 }
@@ -380,7 +380,7 @@ func TestRetryReport_TerminalAndJSONReadSameFrozenResult(t *testing.T) {
 		t.Fatal("retry_report missing")
 	}
 
-	wantHeader := "LLM retry report summary: 2 of 2 requests affected — 1 request failed, 1 request recovered after retry"
+	wantHeader := "LLM retry report summary: 2 of 2 requests affected -- 1 request failed, 1 request recovered after retry"
 	if !strings.Contains(text.String(), wantHeader) {
 		t.Errorf("terminal header = %q, want it to contain %q", text.String(), wantHeader)
 	}

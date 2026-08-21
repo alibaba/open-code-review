@@ -144,10 +144,10 @@ func TestReviewE2E_RetryReportReachesTextExit(t *testing.T) {
 	if !strings.Contains(out, "LLM retry report summary:") {
 		t.Fatalf("terminal summary missing from stdout:\n%s", out)
 	}
-	if !strings.Contains(out, "rate limited (HTTP 429) → succeeded") {
+	if !strings.Contains(out, "rate limited (HTTP 429) -> succeeded") {
 		t.Errorf("attempt chain missing from the terminal summary:\n%s", out)
 	}
-	if !strings.Contains(out, "rejected by provider (HTTP 402) → failed") {
+	if !strings.Contains(out, "rejected by provider (HTTP 402) -> failed") {
 		t.Errorf("failed request missing from the terminal summary:\n%s", out)
 	}
 	// The summary is a run result, so it must not be duplicated onto stderr.

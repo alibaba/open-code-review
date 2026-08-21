@@ -623,7 +623,7 @@ func TestEmitRunResult_TextReportOrder(t *testing.T) {
 	if summary < 0 || report > summary {
 		t.Errorf("report must precede the project summary\n%s", got)
 	}
-	if !strings.Contains(got, "rejected by provider (HTTP 402) → failed") {
+	if !strings.Contains(got, "rejected by provider (HTTP 402) -> failed") {
 		t.Errorf("per-request lines missing: %s", got)
 	}
 }
