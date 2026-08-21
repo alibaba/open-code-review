@@ -179,6 +179,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
+	cmd.Flags().BoolVar(&opts.summary, "summary", false, "generate a project-level summary consolidating all review comments")
 	addPreviewFlag(cmd, &opts.preview)
 }
 

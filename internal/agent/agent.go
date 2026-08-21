@@ -154,6 +154,10 @@ type Args struct {
 	// defines one. Set via the --no-filter CLI flag.
 	SkipFilter bool
 
+	// SummaryEnabled enables the post-run PROJECT_SUMMARY_TASK that consolidates
+	// all per-file comments into a project-level summary. Set via --summary.
+	SummaryEnabled bool
+
 	// RuntimeConfig carries the non-secret, allowlisted runtime settings that
 	// identify how this run was configured, for the manifest's
 	// runtime_config_sha256. It is populated by the cmd layer from the resolved
@@ -189,6 +193,7 @@ type Agent struct {
 	runner          *llmloop.Runner
 	resumeInfo      *ResumeInfo
 	budgetExceeded  bool // set when a token/tool-call budget gate stopped dispatch
+	projectSummary  string
 
 	// inputResolution holds this run's frozen commit endpoints (resolved_base/
 	// head/exact_range), and repoRemoteIdentity the credential-free repository
@@ -376,6 +381,17 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
 	}
+
+	// Step 3: Generate project-level summary if enabled. Skipped when dispatch
+	// returned a hard error: a summary is a read of results the run failed to
+	// produce, so spending another request on it buys nothing. Both of today's
+	// error paths (cancellation, every file failed) would also be caught by the
+	// ctx / empty-comments guards inside, but gating here keeps the rule where
+	// the error is actually visible.
+	if err == nil {
+		a.maybeRunProjectSummary(ctx, comments)
+	}
+
 	// Join background memory compression before anything freezes run-level
 	// state. Those jobs are cancelled rather than awaited when a conversation
 	// ends, so their LLM request can still be in flight here; a retry report
@@ -462,10 +478,9 @@ func (a *Agent) TotalCacheReadTokens() int64 { return a.runner.TotalCacheReadTok
 // TotalCacheWriteTokens returns the accumulated cache write tokens from all LLM calls.
 func (a *Agent) TotalCacheWriteTokens() int64 { return a.runner.TotalCacheWriteTokens() }
 
-// ProjectSummary returns the markdown project-level summary. Always empty
-// for the diff-review path; defined so *Agent satisfies the
-// cmd/opencodereview.ResultProvider interface that scan.Agent also implements.
-func (a *Agent) ProjectSummary() string { return "" }
+// ProjectSummary returns the markdown project-level summary generated when
+// --summary is enabled. Empty when summary is disabled or no comments were produced.
+func (a *Agent) ProjectSummary() string { return a.projectSummary }
 
 // Warnings returns a copy of non-fatal warnings recorded during review.
 func (a *Agent) Warnings() []AgentWarning { return a.runner.Warnings() }
@@ -1896,4 +1911,125 @@ func BuildToolDefs(entries []toolsconfig.ToolConfigEntry, planOnly bool) []llm.T
 		})
 	}
 	return defs
+}
+
+// maybeRunProjectSummary runs the PROJECT_SUMMARY_TASK over the collected
+// comments when --summary is enabled. Best-effort: any error or empty input
+// leaves projectSummary unset. A failure is recorded as a warning rather than
+// only printed, because the machine-readable paths this run may be feeding
+// (--format json, --audience agent) have stdout replaced by io.Discard, and a
+// summary the user paid for and did not get must not vanish silently.
+func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.LlmComment) {
+	if !a.args.SummaryEnabled {
+		return
+	}
+	pt := a.args.Template.ProjectSummaryTask
+	if pt == nil || len(pt.Messages) == 0 {
+		return
+	}
+	if len(comments) == 0 {
+		return
+	}
+	if ctx.Err() != nil || a.budgetExceeded {
+		return
+	}
+
+	// Span starts after the gates, not before them like review_filter's: the
+	// filter is on by default and its skip is worth seeing in a trace, whereas
+	// --summary is off by default, so an earlier span would add an empty
+	// project_summary.execute to every ordinary review.
+	ctx, span := telemetry.StartSpan(ctx, "project_summary.execute")
+	defer span.End()
+	telemetry.SetAttr(span, "comments.total", len(comments))
+
+	fileSet := make(map[string]struct{}, len(comments))
+	for _, c := range comments {
+		fileSet[c.Path] = struct{}{}
+	}
+	telemetry.SetAttr(span, "files.total", len(fileSet))
+	payload := buildSummaryCommentsList(comments)
+
+	messages := make([]llm.Message, 0, len(pt.Messages))
+	for _, m := range pt.Messages {
+		content := m.Content
+		content = strings.ReplaceAll(content, "{{comment_count}}", fmt.Sprintf("%d", len(comments)))
+		content = strings.ReplaceAll(content, "{{file_count}}", fmt.Sprintf("%d", len(fileSet)))
+		content = strings.ReplaceAll(content, "{{all_comments}}", payload)
+		messages = append(messages, llm.NewTextMessage(m.Role, content))
+	}
+
+	const pathKey = "__review_project_summary__"
+	// MemoryCompressionTask is borrowed as the record's task type: the summary is
+	// a run-level task with no TaskType of its own, and pathKey already keeps its
+	// records and cache key out of every real file's namespace.
+	fs := a.session.GetOrCreateFileSession(pathKey)
+	rec := fs.AppendTaskRecord(session.MemoryCompressionTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.MemoryCompressionTask), pathKey))
+	startTime := time.Now()
+	// Request identity, same as every other LLM call on this path: without it the
+	// retry observer drops the request and this call's retries and failures never
+	// reach the run's retry report.
+	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(pathKey, session.MemoryCompressionTask, rec.RequestNo))
+
+	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
+	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
+		Model:     a.args.Model,
+		Messages:  messages,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
+	})
+	duration := time.Since(startTime)
+	if err != nil {
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		rec.SetError(err, duration)
+		fmt.Fprintf(stdout.Writer(), "[ocr] project summary failed: %v\n", err)
+		a.recordWarning("project_summary_error", "", err.Error())
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return
+	}
+	var totalTokens int64
+	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
+	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	rec.SetResponse(resp, duration)
+	a.runner.RecordUsage(resp.Usage)
+
+	body := strings.TrimSpace(llmloop.StripMarkdownFences(resp.Content()))
+	if body == "" {
+		// An empty body is a silent hole in machine-readable output just as a
+		// transport error is, so it is reported the same way.
+		a.recordWarning("project_summary_error", "", "model returned an empty summary")
+		telemetry.SetAttr(span, "summary.empty", true)
+		return
+	}
+	a.projectSummary = body
+}
+
+// buildSummaryCommentsList renders comments as a compact path-anchored
+// markdown list for embedding in the PROJECT_SUMMARY_TASK prompt.
+//
+// The cap counts runes, not bytes: slicing a byte at a time would cut a
+// multibyte character in half, putting invalid UTF-8 into the prompt, and
+// would spend the budget three times too fast on CJK content — 280 bytes
+// holds only 93 characters of it. internal/scan has its own copy of this
+// function; keep the two in step.
+func buildSummaryCommentsList(comments []model.LlmComment) string {
+	const maxRunes = 280
+	var sb strings.Builder
+	for _, c := range comments {
+		sb.WriteString("- `")
+		sb.WriteString(c.Path)
+		sb.WriteString("`: ")
+		oneLine := strings.ReplaceAll(c.Content, "\n", " ")
+		if r := []rune(oneLine); len(r) > maxRunes {
+			oneLine = string(r[:maxRunes]) + "..."
+		}
+		sb.WriteString(oneLine)
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }

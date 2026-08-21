@@ -864,17 +864,22 @@ func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.Llm
 // buildSummaryCommentsList renders comments as a compact path-anchored
 // markdown list suitable for embedding in the PROJECT_SUMMARY_TASK prompt.
 // Format: "- `path/to/file.go`: <one-line content (truncated)>".
-// Content is truncated to ~280 chars to bound prompt growth on large scans.
+// Content is truncated to ~280 runes to bound prompt growth on large scans.
+//
+// The cap counts runes, not bytes: slicing a byte at a time would cut a
+// multibyte character in half, putting invalid UTF-8 into the prompt, and
+// would spend the budget three times too fast on CJK content — 280 bytes
+// holds only 93 characters of it.
 func buildSummaryCommentsList(comments []model.LlmComment) string {
-	const maxLine = 280
+	const maxRunes = 280
 	var sb strings.Builder
 	for _, c := range comments {
 		sb.WriteString("- `")
 		sb.WriteString(c.Path)
 		sb.WriteString("`: ")
 		oneLine := strings.ReplaceAll(c.Content, "\n", " ")
-		if len(oneLine) > maxLine {
-			oneLine = oneLine[:maxLine] + "..."
+		if r := []rune(oneLine); len(r) > maxRunes {
+			oneLine = string(r[:maxRunes]) + "..."
 		}
 		sb.WriteString(oneLine)
 		sb.WriteString("\n")

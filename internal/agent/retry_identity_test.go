@@ -160,6 +160,55 @@ func TestExecuteReviewFilter_Identity(t *testing.T) {
 	}
 }
 
+// TestMaybeRunProjectSummary_Identity is the project-summary counterpart. The
+// summary is a run-level task, so its identity is anchored to the synthetic
+// path key its session records live under rather than to a reviewed file.
+func TestMaybeRunProjectSummary_Identity(t *testing.T) {
+	sess := session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: "diff"})
+	client := &metaCaptureClient{reply: "## Top Issues\n- something"}
+	a := New(Args{
+		LLMClient:        client,
+		Provider:         "openai",
+		Model:            "test",
+		Session:          sess,
+		SummaryEnabled:   true,
+		CommentCollector: tool.NewCommentCollector(),
+		Template: template.Template{
+			ProjectSummaryTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "summarize {{all_comments}}"}},
+			},
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+		},
+	})
+
+	a.maybeRunProjectSummary(context.Background(), []model.LlmComment{{Path: "a.go", Content: "missing nil check"}})
+
+	meta, ok := client.only(t)
+	if !ok {
+		t.Fatal("project summary request carried no identity")
+	}
+	want := llm.RequestMeta{
+		Provider:  "openai",
+		Model:     "test",
+		FilePath:  "__review_project_summary__",
+		TaskType:  string(session.MemoryCompressionTask),
+		RequestNo: 1,
+	}
+	if meta != want {
+		t.Errorf("meta = %+v, want %+v", meta, want)
+	}
+
+	recs := sess.GetOrCreateFileSession("__review_project_summary__").TaskRecords[session.MemoryCompressionTask]
+	if len(recs) != 1 {
+		t.Fatalf("session holds %d project summary records, want 1", len(recs))
+	}
+	if meta.RequestNo != recs[0].RequestNo {
+		t.Errorf("meta RequestNo = %d, record = %d", meta.RequestNo, recs[0].RequestNo)
+	}
+}
+
 // TestNewRequestMeta_IsSingleSourceOfProviderAndModel guards the reason the
 // helper exists: five request types read provider and model through it, so a
 // change to Args must not leave some of them behind.

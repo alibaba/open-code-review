@@ -954,3 +954,296 @@ func TestClassifyMainLoopStop(t *testing.T) {
 		})
 	}
 }
+
+func TestMaybeRunProjectSummary_Success(t *testing.T) {
+	summaryText := "The codebase has consistent error handling but lacks input validation."
+	client := &fakeAgentClient{
+		responses: []*llm.ChatResponse{{
+			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &summaryText}}},
+			Usage:   &llm.UsageInfo{PromptTokens: 200, CompletionTokens: 80},
+		}},
+	}
+
+	sess := session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: "diff"})
+	a := New(Args{
+		LLMClient:        client,
+		Model:            "test",
+		SummaryEnabled:   true,
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		Session:          sess,
+		Template: template.Template{
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			ProjectSummaryTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{
+					{Role: "user", Content: "Summarize {{comment_count}} comments across {{file_count}} files:\n{{all_comments}}"},
+				},
+			},
+		},
+	})
+
+	comments := []model.LlmComment{
+		{Path: "a.go", Content: "missing error check"},
+		{Path: "b.go", Content: "no input validation"},
+	}
+
+	a.maybeRunProjectSummary(context.Background(), comments)
+
+	if a.ProjectSummary() != summaryText {
+		t.Errorf("ProjectSummary() = %q, want %q", a.ProjectSummary(), summaryText)
+	}
+	if client.calls != 1 {
+		t.Errorf("expected 1 LLM call, got %d", client.calls)
+	}
+}
+
+func TestMaybeRunProjectSummary_SkipWhenDisabled(t *testing.T) {
+	client := &fakeAgentClient{}
+	sess := session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: "diff"})
+	a := New(Args{
+		LLMClient:        client,
+		Model:            "test",
+		SummaryEnabled:   false,
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		Session:          sess,
+		Template: template.Template{
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			ProjectSummaryTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "{{all_comments}}"}},
+			},
+		},
+	})
+
+	a.maybeRunProjectSummary(context.Background(), []model.LlmComment{
+		{Path: "a.go", Content: "something"},
+	})
+
+	if a.ProjectSummary() != "" {
+		t.Errorf("ProjectSummary() = %q, want empty when SummaryEnabled is false", a.ProjectSummary())
+	}
+	if client.calls != 0 {
+		t.Errorf("expected 0 LLM calls when disabled, got %d", client.calls)
+	}
+}
+
+func TestMaybeRunProjectSummary_SkipWhenNoComments(t *testing.T) {
+	client := &fakeAgentClient{}
+	sess := session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: "diff"})
+	a := New(Args{
+		LLMClient:        client,
+		Model:            "test",
+		SummaryEnabled:   true,
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		Session:          sess,
+		Template: template.Template{
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			ProjectSummaryTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "{{all_comments}}"}},
+			},
+		},
+	})
+
+	a.maybeRunProjectSummary(context.Background(), nil)
+
+	if a.ProjectSummary() != "" {
+		t.Errorf("ProjectSummary() = %q, want empty when no comments", a.ProjectSummary())
+	}
+	if client.calls != 0 {
+		t.Errorf("expected 0 LLM calls with no comments, got %d", client.calls)
+	}
+}
+
+// summaryTestAgent builds an agent whose only configured optional task is the
+// project summary, so a test can drive maybeRunProjectSummary directly.
+func summaryTestAgent(t *testing.T, client llm.LLMClient, enabled bool) *Agent {
+	t.Helper()
+	return New(Args{
+		LLMClient:        client,
+		Model:            "test",
+		SummaryEnabled:   enabled,
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		Session:          session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: "diff"}),
+		Template: template.Template{
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			ProjectSummaryTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "{{all_comments}}"}},
+			},
+		},
+	})
+}
+
+// summaryWarnings returns the project-summary warnings recorded on a.
+func summaryWarnings(a *Agent) []AgentWarning {
+	var out []AgentWarning
+	for _, w := range a.Warnings() {
+		if w.Type == "project_summary_error" {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// failingSummaryClient fails every request, standing in for a provider outage
+// on the summary call.
+type failingSummaryClient struct {
+	calls int
+	err   error
+}
+
+func (c *failingSummaryClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.calls++
+	return nil, c.err
+}
+
+// TestMaybeRunProjectSummary_FailureRecordsWarning pins the failure to a
+// warning, not just a stdout line: --format json and --audience agent replace
+// stdout with io.Discard, so printing alone loses the fact that a summary the
+// user asked for never arrived.
+func TestMaybeRunProjectSummary_FailureRecordsWarning(t *testing.T) {
+	client := &failingSummaryClient{err: errors.New("provider unavailable")}
+	a := summaryTestAgent(t, client, true)
+
+	a.maybeRunProjectSummary(context.Background(), []model.LlmComment{{Path: "a.go", Content: "boom"}})
+
+	if client.calls != 1 {
+		t.Fatalf("expected 1 LLM call, got %d", client.calls)
+	}
+	if a.ProjectSummary() != "" {
+		t.Errorf("ProjectSummary() = %q, want empty after a failed call", a.ProjectSummary())
+	}
+	warnings := summaryWarnings(a)
+	if len(warnings) != 1 {
+		t.Fatalf("got %d project_summary_error warnings, want 1 (all: %+v)", len(warnings), a.Warnings())
+	}
+	if !strings.Contains(warnings[0].Message, "provider unavailable") {
+		t.Errorf("warning message = %q, want it to carry the provider error", warnings[0].Message)
+	}
+}
+
+// TestMaybeRunProjectSummary_EmptyBodyRecordsWarning covers the other silent
+// hole: the call succeeds but the model returns nothing usable.
+func TestMaybeRunProjectSummary_EmptyBodyRecordsWarning(t *testing.T) {
+	blank := "   \n"
+	client := &fakeAgentClient{responses: []*llm.ChatResponse{{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &blank}}},
+		Usage:   &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 1},
+	}}}
+	a := summaryTestAgent(t, client, true)
+
+	a.maybeRunProjectSummary(context.Background(), []model.LlmComment{{Path: "a.go", Content: "boom"}})
+
+	if a.ProjectSummary() != "" {
+		t.Errorf("ProjectSummary() = %q, want empty for a blank response", a.ProjectSummary())
+	}
+	if got := len(summaryWarnings(a)); got != 1 {
+		t.Fatalf("got %d project_summary_error warnings, want 1 (all: %+v)", got, a.Warnings())
+	}
+}
+
+// TestMaybeRunProjectSummary_SkipWhenBudgetExceeded and its cancellation
+// counterpart guard the two gates that exist so a run stopped by a budget cap
+// or a Ctrl-C does not spend one more request on a summary of partial results.
+func TestMaybeRunProjectSummary_SkipWhenBudgetExceeded(t *testing.T) {
+	client := &fakeAgentClient{}
+	a := summaryTestAgent(t, client, true)
+	a.budgetExceeded = true
+
+	a.maybeRunProjectSummary(context.Background(), []model.LlmComment{{Path: "a.go", Content: "boom"}})
+
+	if client.calls != 0 {
+		t.Errorf("expected 0 LLM calls once the budget is exceeded, got %d", client.calls)
+	}
+	if a.ProjectSummary() != "" {
+		t.Errorf("ProjectSummary() = %q, want empty", a.ProjectSummary())
+	}
+}
+
+func TestMaybeRunProjectSummary_SkipWhenContextCancelled(t *testing.T) {
+	client := &fakeAgentClient{}
+	a := summaryTestAgent(t, client, true)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	a.maybeRunProjectSummary(ctx, []model.LlmComment{{Path: "a.go", Content: "boom"}})
+
+	if client.calls != 0 {
+		t.Errorf("expected 0 LLM calls on a cancelled context, got %d", client.calls)
+	}
+	if a.ProjectSummary() != "" {
+		t.Errorf("ProjectSummary() = %q, want empty", a.ProjectSummary())
+	}
+}
+
+// TestMaybeRunProjectSummary_SkipWhenTemplateMissing mirrors the scan-side case:
+// a template without the task must be a no-op, never a nil dereference.
+func TestMaybeRunProjectSummary_SkipWhenTemplateMissing(t *testing.T) {
+	client := &fakeAgentClient{}
+	a := summaryTestAgent(t, client, true)
+	a.args.Template.ProjectSummaryTask = nil
+
+	a.maybeRunProjectSummary(context.Background(), []model.LlmComment{{Path: "a.go", Content: "boom"}})
+
+	if client.calls != 0 {
+		t.Errorf("expected 0 LLM calls without a summary template, got %d", client.calls)
+	}
+	if a.ProjectSummary() != "" {
+		t.Errorf("ProjectSummary() = %q, want empty", a.ProjectSummary())
+	}
+}
+
+func TestBuildSummaryCommentsList(t *testing.T) {
+	t.Run("basic format", func(t *testing.T) {
+		comments := []model.LlmComment{
+			{Path: "main.go", Content: "missing nil check"},
+			{Path: "handler.go", Content: "unused import"},
+		}
+		got := buildSummaryCommentsList(comments)
+		if !strings.Contains(got, "- `main.go`: missing nil check") {
+			t.Errorf("expected path-anchored entry for main.go, got:\n%s", got)
+		}
+		if !strings.Contains(got, "- `handler.go`: unused import") {
+			t.Errorf("expected path-anchored entry for handler.go, got:\n%s", got)
+		}
+	})
+
+	t.Run("newlines flattened", func(t *testing.T) {
+		comments := []model.LlmComment{
+			{Path: "a.go", Content: "line1\nline2\nline3"},
+		}
+		got := buildSummaryCommentsList(comments)
+		if strings.Contains(got, "\n- ") && strings.Count(got, "\n") > 1 {
+			t.Errorf("multi-line comment should be flattened to one line, got:\n%s", got)
+		}
+		if !strings.Contains(got, "line1 line2 line3") {
+			t.Errorf("newlines should become spaces, got:\n%s", got)
+		}
+	})
+
+	t.Run("truncation at 280 runes", func(t *testing.T) {
+		long := strings.Repeat("あ", 300) // allow-non-english: fixture exercises multibyte truncation
+		comments := []model.LlmComment{
+			{Path: "x.go", Content: long},
+		}
+		got := buildSummaryCommentsList(comments)
+		if !strings.Contains(got, "...") {
+			t.Error("long content should be truncated with ellipsis")
+		}
+		line := strings.TrimPrefix(got, "- `x.go`: ")
+		line = strings.TrimSuffix(line, "\n")
+		runes := []rune(line)
+		if len(runes) > 284 { // 280 + "..."
+			t.Errorf("truncated line too long: %d runes", len(runes))
+		}
+	})
+}

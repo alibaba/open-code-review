@@ -337,8 +337,8 @@ type ResultProvider interface {
 	TotalCacheWriteTokens() int64
 	Warnings() []agent.AgentWarning
 	// ProjectSummary is the markdown project-level summary produced by
-	// scan's PROJECT_SUMMARY_TASK. Empty for review mode and for scans
-	// that skipped / failed the summary phase.
+	// scan's PROJECT_SUMMARY_TASK or review's --summary flag. Empty when
+	// the summary phase was skipped, disabled, or failed.
 	ProjectSummary() string
 	ToolCalls() map[string]int64
 	// SessionID returns the persisted session identifier so callers can show it

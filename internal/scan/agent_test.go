@@ -6,6 +6,7 @@ package scan
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -160,6 +161,30 @@ func TestBuildSummaryCommentsList_TruncatesAndOneLines(t *testing.T) {
 		if len(line) > 320 { // 280 content + small path/prefix overhead
 			t.Errorf("line not capped: len=%d %q", len(line), line)
 		}
+	}
+}
+
+// TestBuildSummaryCommentsList_TruncatesOnRuneBoundary pins the cap to runes
+// rather than bytes. Truncating by byte cut a multibyte character in half, so
+// the prompt received invalid UTF-8 and CJK content got 93 characters where
+// 280 were budgeted. An ASCII fixture cannot catch that: at one byte per
+// character both spellings agree.
+func TestBuildSummaryCommentsList_TruncatesOnRuneBoundary(t *testing.T) {
+	long := strings.Repeat("あ", 300) // allow-non-english: fixture exercises multibyte truncation
+	cs := []model.LlmComment{{Path: "x.go", Content: long}}
+	got := buildSummaryCommentsList(cs)
+
+	if !utf8.ValidString(got) {
+		t.Errorf("output must stay valid UTF-8, got %q", got)
+	}
+	if !strings.Contains(got, "...") {
+		t.Errorf("expected truncation marker on long content, got:\n%s", got)
+	}
+
+	content := strings.TrimSuffix(strings.TrimPrefix(got, "- `x.go`: "), "\n")
+	// 280 content runes plus the three dots of the marker.
+	if n := utf8.RuneCountInString(content); n != 283 {
+		t.Errorf("content should be capped at 280 runes + \"...\", got %d runes", n)
 	}
 }
 

@@ -25,6 +25,7 @@ type Template struct {
 	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask      *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	ProjectSummaryTask    *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
 }
 
 // ScanTemplate holds the full-file scan task template configuration loaded
@@ -90,6 +91,7 @@ type templateManifest struct {
 	PlanModeLineThreshold int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
 	ReLocationTask        *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask      *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	ProjectSummaryTask    *manifestConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
 }
 
 func resolveConversation(m manifestConversation) (LlmConversation, error) {
@@ -150,6 +152,9 @@ func LoadDefault() (*Template, error) {
 	if tpl.ReviewFilterTask, err = resolveOptionalConversation(m.ReviewFilterTask, "REVIEW_FILTER_TASK"); err != nil {
 		return nil, err
 	}
+	if tpl.ProjectSummaryTask, err = resolveOptionalConversation(m.ProjectSummaryTask, "PROJECT_SUMMARY_TASK"); err != nil {
+		return nil, err
+	}
 	return &tpl, nil
 }
 
@@ -188,6 +193,9 @@ func (t *Template) ApplyLanguage(lang string) {
 		applyLanguage(t.PlanTask, instruction)
 	}
 	applyLanguage(&t.MemoryCompressionTask, instruction)
+	if t.ProjectSummaryTask != nil {
+		applyLanguage(t.ProjectSummaryTask, instruction)
+	}
 }
 
 // ApplyLanguage injects a language directive into all system-role messages
