@@ -533,16 +533,17 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		// batch and feed them into the per-batch dedup hook.
 		batchStart := a.args.CommentCollector.Snapshot()
 
-		n, budgetHit, err := a.dispatchBatch(ctx, bi, batch)
+		n, budgetHit, err, checkpoints := a.dispatchBatch(ctx, bi, batch)
 		dispatched += n
 		if err != nil {
 			// ctx cancelled mid-batch: stop scheduling further batches but
 			// still return whatever we've collected so far.
+			a.recordBatchCheckpoints(checkpoints)
 			return a.args.CommentCollector.Comments(), err
 		}
 
 		// Drain async comment workers BEFORE dedup so all of this batch's
-		// comments are visible. recordCompleted has its own Await for
+		// comments are visible. recordBatchCheckpoints has its own Await for
 		// checkpoint correctness; this one keeps the dedup input complete.
 		// CommentWorkerPool.Await is cumulative across batches - that is fine
 		// since batches are sequential here.
@@ -551,6 +552,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		}
 
 		a.maybeRunDedup(ctx, bi, batchStart)
+		a.recordBatchCheckpoints(checkpoints)
 
 		// The per-file budget gate inside dispatchBatch tripped — stop
 		// scheduling any remaining batches.
@@ -566,6 +568,37 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	return a.args.CommentCollector.Comments(), nil
 }
 
+type batchCheckpoint struct {
+	item   model.ScanItem
+	reused bool
+}
+
+// recordBatchCheckpoints persists the final comments for a batch. It runs
+// after batch dedup so resume replays the same canonical result that the scan
+// returned to the caller.
+func (a *Agent) recordBatchCheckpoints(checkpoints []batchCheckpoint) {
+	if len(checkpoints) == 0 {
+		return
+	}
+	if a.args.CommentWorkerPool != nil {
+		a.args.CommentWorkerPool.Await()
+	}
+	for _, checkpoint := range checkpoints {
+		fingerprint := a.scanItemFingerprint(checkpoint.item)
+		comments := a.args.CommentCollector.CommentsForPath(checkpoint.item.Path)
+		if checkpoint.reused {
+			sourceSessionID := ""
+			if a.args.Resume != nil {
+				sourceSessionID = a.args.Resume.SessionID
+			}
+			a.session.RecordReviewItemReused(checkpoint.item.Path, checkpoint.item.Path, checkpoint.item.Path,
+				fingerprint, sourceSessionID, comments)
+			continue
+		}
+		a.session.RecordReviewItemDone(checkpoint.item.Path, checkpoint.item.Path, checkpoint.item.Path, fingerprint, comments)
+	}
+}
+
 // resolveBatchStrategy reads the strategy from the scan template, defaulting
 // to BatchNone for unrecognized / empty values.
 func (a *Agent) resolveBatchStrategy() BatchStrategy {
@@ -574,8 +607,8 @@ func (a *Agent) resolveBatchStrategy() BatchStrategy {
 
 // dispatchBatch fans out the files of a single batch concurrently and
 // blocks until they all finish (or ctx is cancelled). Returns the number
-// of files dispatched, whether the token budget was hit mid-batch, and
-// ctx.Err() if cancelled.
+// of files dispatched, whether the token budget was hit mid-batch, ctx.Err()
+// if cancelled, and the completed/reused files whose checkpoints need recording.
 //
 // The budget gate is checked per file, right after acquiring the
 // concurrency slot and before launching the subtask: if the tokens already
@@ -583,7 +616,7 @@ func (a *Agent) resolveBatchStrategy() BatchStrategy {
 // budget, the file (and all remaining files in the batch) are skipped.
 // This keeps overrun bounded by roughly one in-flight file per worker,
 // instead of a whole batch as the coarse batch-level gate did.
-func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.ScanItem) (int64, bool, error) {
+func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.ScanItem) (int64, bool, error, []batchCheckpoint) {
 	concurrency := a.args.MaxConcurrency
 	if concurrency <= 0 {
 		concurrency = 8
@@ -592,27 +625,12 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
 
 	var (
-		wg          sync.WaitGroup
-		dispatched  int64
-		budgetHit   bool
-		completedMu sync.Mutex
-		completed   []model.ScanItem
+		wg            sync.WaitGroup
+		dispatched    int64
+		budgetHit     bool
+		checkpointsMu sync.Mutex
+		checkpoints   []batchCheckpoint
 	)
-
-	recordCompleted := func() {
-		// Drain async comment writes before checkpointing completed files.
-		if a.args.CommentWorkerPool != nil {
-			a.args.CommentWorkerPool.Await()
-		}
-		completedMu.Lock()
-		items := append([]model.ScanItem(nil), completed...)
-		completedMu.Unlock()
-		for _, it := range items {
-			fingerprint := a.scanItemFingerprint(it)
-			comments := a.args.CommentCollector.CommentsForPath(it.Path)
-			a.session.RecordReviewItemDone(it.Path, it.Path, it.Path, fingerprint, comments)
-		}
-	}
 
 	for i := range batch {
 		it := batch[i]
@@ -621,7 +639,9 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 			for _, cm := range item.Comments {
 				a.args.CommentCollector.Add(cm)
 			}
-			a.session.RecordReviewItemReused(it.Path, it.Path, it.Path, fingerprint, a.args.Resume.SessionID, item.Comments)
+			checkpointsMu.Lock()
+			checkpoints = append(checkpoints, batchCheckpoint{item: it, reused: true})
+			checkpointsMu.Unlock()
 			continue
 		}
 
@@ -647,8 +667,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 		case sem <- struct{}{}:
 		case <-ctx.Done():
 			wg.Wait()
-			recordCompleted()
-			return dispatched, budgetHit, ctx.Err()
+			return dispatched, budgetHit, ctx.Err(), checkpoints
 		}
 
 		dispatched++
@@ -685,15 +704,14 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 				}
 				return
 			}
-			completedMu.Lock()
-			completed = append(completed, it)
-			completedMu.Unlock()
+			checkpointsMu.Lock()
+			checkpoints = append(checkpoints, batchCheckpoint{item: it})
+			checkpointsMu.Unlock()
 		}(it, fingerprint)
 	}
 
 	wg.Wait()
-	recordCompleted()
-	return dispatched, budgetHit, nil
+	return dispatched, budgetHit, nil, checkpoints
 }
 
 // executeSubtask runs the scan pipeline for one file:
