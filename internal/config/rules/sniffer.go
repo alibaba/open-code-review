@@ -60,13 +60,14 @@ func (s *sniffer) Resolve(path string) string {
 }
 
 // resolveDetail mirrors Resolve while preserving the wrapped layer's matched
-// pattern, annotating it so `ocr rules check` shows why matlab.md was
-// overridden rather than silently reporting a different rule.
+// Pattern verbatim (it stays a plain glob) and recording the override in
+// SniffedAs instead, so callers that need to know can check it without a
+// serialized field silently changing shape.
 func (s *sniffer) resolveDetail(path string) RuleDetail {
 	detail := s.inner.resolveDetail(path)
 	if s.sniffsAsObjC(path) {
 		detail.Rule = s.objcRule
-		detail.Pattern += " (sniffed: objc)"
+		detail.SniffedAs = "objc"
 	}
 	return detail
 }
@@ -141,11 +142,16 @@ func (s *sniffer) showAtRef(path string) string {
 	return stdout.String()
 }
 
-// objcSniffPrefixes are first-line signals unique to Objective-C (import /
-// interface declarations); MATLAB files begin with "function"/"classdef"/"%"
-// and never produce any of these, so a false positive requires a MATLAB file
-// to open with an actual Objective-C directive.
-var objcSniffPrefixes = []string{"#import", "#include", "@interface", "@implementation", "@class", "@protocol"}
+// objcSniffPrefixes are first-line signals for Objective-C. MATLAB comments
+// start with "%" and a MATLAB file cannot legally begin with "/" at all, so a
+// C-style comment opener is itself a reliable ObjC signal — which matters
+// because the Xcode file template and most license headers put a comment, not
+// a directive, on line 1.
+var objcSniffPrefixes = []string{
+	"#import", "#include", "#pragma", "#ifdef", "#ifndef",
+	"@import", "@interface", "@implementation", "@class", "@protocol",
+	"//", "/*",
+}
 
 // looksLikeObjC reports whether the first non-blank line of content looks
 // like Objective-C rather than MATLAB. It returns false (keeping the default

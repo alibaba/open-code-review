@@ -67,8 +67,11 @@ func TestRunRulesCheck_ObjCSniffOverridesMatlab(t *testing.T) {
 		}
 	})
 
-	if !strings.Contains(got, "Pattern: **/*.m (sniffed: objc)") {
-		t.Errorf("expected the sniffed-objc pattern label, got:\n%s", got)
+	if !strings.Contains(got, "Pattern: **/*.m\n") {
+		t.Errorf("expected Pattern to stay a plain glob, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Note:    rule selected by file content (objc)") {
+		t.Errorf("expected the objc sniff note, got:\n%s", got)
 	}
 	if strings.Contains(got, "MATLAB") {
 		t.Errorf("expected MATLAB-specific guidance to be replaced by the objc rule, got:\n%s", got)

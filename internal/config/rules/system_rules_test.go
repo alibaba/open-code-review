@@ -159,8 +159,8 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 		"readme.md",
 		"docs/architecture.txt",
 		"Makefile",
-		// Note: .m now matches matlab.md and .swift now matches swift.md, so
-		// neither is a "no rule matches" example any more; .mm remains one.
+		// Note: .m now matches matlab.md, so it's no longer a "no rule
+		// matches" example; .mm remains one.
 		"ios/ViewController.mm",
 	}
 
@@ -1551,8 +1551,8 @@ func TestResolveRuleEntries_GlobalRuleFileResolution(t *testing.T) {
 // than referenced from system_rules.json's path_rule_map, so the orphan-file
 // check in TestSystemRulesIntegrity must not flag them.
 var specialCaseRuleDocs = map[string]bool{
-	// Backs the MATLAB/Objective-C ".m" content sniff in ResolveWithContent;
-	// loaded via a dedicated ReadFile("rule_docs/objc.md") in LoadDefault.
+	// Backs the MATLAB/Objective-C ".m" content sniff in sniffer.Resolve;
+	// loaded via loadObjCRule, called from NewResolver.
 	"objc.md": true,
 }
 

@@ -128,7 +128,13 @@ func loadObjCRule() (string, error) {
 type RuleDetail struct {
 	Rule    string // rule text
 	Source  string // "custom" | "project" | "global" | "system"
-	Pattern string // glob pattern that matched, or "default" for fallback
+	Pattern string // glob pattern that matched, or "default" for fallback — always a plain glob, never annotated
+	// SniffedAs is "" for a plain path match, or the sniffed language (e.g.
+	// "objc") when content sniffing overrode the path-based rule. Internal
+	// only: callers that serialize RuleDetail (e.g. delegateRuleGroupJSON)
+	// must not surface this, since Pattern is a versioned "the glob that
+	// matched" contract that a sniff annotation would silently break.
+	SniffedAs string
 }
 
 // DetailResolver extends Resolver with source metadata.

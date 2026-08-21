@@ -85,8 +85,9 @@ func resolveEffort(cfg *Config, cliOverride string) (template.Effort, error) {
 // directories (scan path: provider falls back to filepath.Walk).
 //
 // contentRef is the git ref whose file content the rule resolver should
-// inspect when disambiguating ambiguous extensions (see reviewContentRef).
-// Pass "" to read the working tree, which is what scan wants.
+// inspect when disambiguating ambiguous extensions — derive it via
+// tool.ParseReviewMode(from, to, commit).RefValue(to, commit). Pass "" to
+// read the working tree, which is what scan wants.
 func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
 	tpl, err := template.LoadDefault()
 	if err != nil {
@@ -124,21 +125,6 @@ func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxG
 		GitRunner:  gitRunner,
 		IsGitRepo:  isGit,
 	}, nil
-}
-
-// reviewContentRef returns the ref whose content the rule resolver should read,
-// mirroring how diff.Provider picks the ref it passes to finalizeDiff: the head
-// of the range in range mode, the commit in commit mode, and "" for workspace
-// mode (where the working tree is the thing under review).
-func reviewContentRef(from, to, commit string) string {
-	switch {
-	case commit != "":
-		return commit
-	case from != "" && to != "":
-		return to
-	default:
-		return ""
-	}
 }
 
 // resolveWorkingDir returns (absPath, isGitRepo, err). When requireGit is

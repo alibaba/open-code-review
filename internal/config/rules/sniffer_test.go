@@ -199,7 +199,11 @@ func TestSniffer_MergeSystemRuleUsesSniffedRule(t *testing.T) {
 	}
 }
 
-func TestSniffer_ResolveDetailAnnotatesPattern(t *testing.T) {
+// TestSniffer_ResolveDetailKeepsPatternPlain guards the JSON-contract concern:
+// Pattern must always stay a plain glob (it flows into delegateRuleGroupJSON's
+// "pattern" field alongside a schema_version), so the sniff is recorded in the
+// internal-only SniffedAs field instead of an annotated Pattern string.
+func TestSniffer_ResolveDetailKeepsPatternPlain(t *testing.T) {
 	dir, _ := initRepo(t, map[string]string{
 		"ios/ViewController.m": objcSource,
 		"Models/main.m":        matlabSource,
@@ -216,8 +220,11 @@ func TestSniffer_ResolveDetailAnnotatesPattern(t *testing.T) {
 	}
 
 	sniffed := dr.ResolveDetail("ios/ViewController.m")
-	if sniffed.Pattern != "**/*.m (sniffed: objc)" {
-		t.Errorf("Pattern = %q, want %q", sniffed.Pattern, "**/*.m (sniffed: objc)")
+	if sniffed.Pattern != "**/*.m" {
+		t.Errorf("Pattern = %q, want plain glob %q (must not carry a sniff annotation)", sniffed.Pattern, "**/*.m")
+	}
+	if sniffed.SniffedAs != "objc" {
+		t.Errorf("SniffedAs = %q, want %q", sniffed.SniffedAs, "objc")
 	}
 	if sniffed.Source != "system" {
 		t.Errorf("Source = %q, want system", sniffed.Source)
@@ -226,6 +233,9 @@ func TestSniffer_ResolveDetailAnnotatesPattern(t *testing.T) {
 	plain := dr.ResolveDetail("Models/main.m")
 	if plain.Pattern != "**/*.m" {
 		t.Errorf("unsniffed Pattern = %q, want %q", plain.Pattern, "**/*.m")
+	}
+	if plain.SniffedAs != "" {
+		t.Errorf("unsniffed SniffedAs = %q, want empty", plain.SniffedAs)
 	}
 }
 
@@ -260,7 +270,11 @@ func TestSniffer_CanonicalConfigIncludesObjCRule(t *testing.T) {
 }
 
 func TestLooksLikeObjC(t *testing.T) {
-	objc := []string{"#import \"a.h\"", "#include <stdio.h>", "@interface Foo", "@implementation Foo", "@class Foo;", "@protocol Foo"}
+	objc := []string{
+		"#import \"a.h\"", "#include <stdio.h>", "#pragma once", "#ifdef DEBUG", "#ifndef FOO_H",
+		"@import Foundation;", "@interface Foo", "@implementation Foo", "@class Foo;", "@protocol Foo",
+		"//", "/* Copyright 2026. */",
+	}
 	for _, line := range objc {
 		if !looksLikeObjC(line) {
 			t.Errorf("looksLikeObjC(%q) = false, want true", line)
@@ -271,6 +285,30 @@ func TestLooksLikeObjC(t *testing.T) {
 		if looksLikeObjC(line) {
 			t.Errorf("looksLikeObjC(%q) = true, want false", line)
 		}
+	}
+}
+
+// TestSniffer_RealisticObjCHeaders guards the case the sniff used to miss: real
+// Objective-C files almost never open with #import — Xcode's file template opens
+// with a "//" banner, and most projects put a license header first. Both must
+// still sniff as ObjC via the "//"/"/*" signal rather than falling through to
+// matlab.md (or, worse, silently landing on it as if it were a real match).
+func TestSniffer_RealisticObjCHeaders(t *testing.T) {
+	xcodeTemplateHeader := "//\n//  ViewController.m\n//  MyApp\n//\n//  Created by x on 1/1/25.\n//\n\n#import \"ViewController.h\"\n"
+	licenseHeaderThenImport := "/* Copyright 2026. */\n#import <Foundation/Foundation.h>\n"
+
+	dir, _ := initRepo(t, map[string]string{
+		"MyApp/ViewController.m": xcodeTemplateHeader,
+		"Sources/AppDelegate.m":  licenseHeaderThenImport,
+	})
+
+	for _, path := range []string{"MyApp/ViewController.m", "Sources/AppDelegate.m"} {
+		t.Run(path, func(t *testing.T) {
+			got := resolveIn(t, dir, "", path, nil)
+			if got != objcRuleText(t) {
+				t.Errorf("Resolve(%q): want the objc rule, got %q", path, truncate(got, 80))
+			}
+		})
 	}
 }
 
