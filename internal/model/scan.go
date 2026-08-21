@@ -12,6 +12,13 @@ type ScanItem struct {
 	Content   string `json:"content"`
 	IsBinary  bool   `json:"is_binary,omitempty"`
 	LineCount int    `json:"line_count,omitempty"`
+
+	// UndecodedCharset and Unreviewable mirror the same fields on Diff; see
+	// their documentation there. Scan detects at its own seam (the whole-file
+	// read in internal/scan/provider.go) and reaches the shared filter and
+	// preview code through the same two flags.
+	UndecodedCharset string `json:"undecoded_charset,omitempty"`
+	Unreviewable     bool   `json:"unreviewable,omitempty"`
 }
 
 // AsDiff returns a Diff suitable for handing to code that expects the
@@ -29,5 +36,8 @@ func (s *ScanItem) AsDiff() *Diff {
 		NewFileContent: s.Content,
 		IsBinary:       s.IsBinary,
 		Insertions:     int64(s.LineCount),
+
+		UndecodedCharset: s.UndecodedCharset,
+		Unreviewable:     s.Unreviewable,
 	}
 }

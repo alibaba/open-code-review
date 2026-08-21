@@ -47,7 +47,8 @@ OCR 用一条**四层优先级链**解析规则。对每个文件路径，按序
 
 - `include`——可选。glob 模式，用于*绕过*内置的默认排除模式（测试文件排除——见
   下文）。它不是白名单：不匹配任何 `include` 模式的文件仍会经过
-  `unsupported_ext` 和 `default_path` 检查，可能仍被评审。
+  `unsupported_ext` 和 `default_path` 检查，可能仍被评审。它也救不回被 `binary`
+  或 `undecodable_encoding` 丢弃的文件——那两道门在它之前运行。
 - `exclude`——可选。OCR 不予评审的文件 glob 模式。在用户配置的过滤规则中优先级最高。
 - `rules`——`{path, rule}` 条目数组，按**声明顺序**求值。第一个 `path` glob
   匹配该文件的条目，决定 OCR 发给模型的 prompt。
@@ -68,29 +69,31 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 ## 文件如何被过滤
 
-过滤是一个六重门算法，位于
+过滤是一个七重门算法，位于
 [`internal/agent/selection.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/selection.go)。
 对每个 diff，OCR 依次问：
 
 1. **`binary`**——文件是二进制吗？排除。
-2. **`secret_exclude`**——旧路径或新路径是否命中内置敏感路径保护？无条件匹配的 glob 模式列在 [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json) 中。若是，排除。
+2. **`undecodable_encoding`**——字节在任何受支持的字符集下都能解码为文本吗？不能则排除。
+3. **`secret_exclude`**——旧路径或新路径是否命中内置敏感路径保护？无条件匹配的 glob 模式列在 [`default_secret_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_secret_patterns.json) 中。若是，排除。
    此保护在用户规则之前执行，不能被 `include` 模式覆盖。
 
    环境特定的 `.env.*` 路径会作为敏感路径处理，但 `.env.example`、`.env.sample` 和 `.env.template` 仍按普通审查规则处理。
 
-3. **`user_exclude`**——路径匹配任何用户 `exclude` 模式吗？排除。
-4. **`user_include`**——若用户定义了 `include`，路径匹配吗？若是，**立即保留**
+4. **`user_exclude`**——路径匹配任何用户 `exclude` 模式吗？排除。
+5. **`user_include`**——若用户定义了 `include`，路径匹配吗？若是，**立即保留**
    （绕过下面的 `unsupported_ext` 和 `default_path` 门）。
-5. **`unsupported_ext`**——文件扩展名在
+6. **`unsupported_ext`**——文件扩展名在
    [白名单](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)
    里吗？不在则排除。
-6. **`default_path`**——路径匹配某个内置测试文件排除模式
+7. **`default_path`**——路径匹配某个内置测试文件排除模式
    （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）吗？排除。
 
-通过全部六重门的文件才发给 LLM，除非仅 diff 本身就超过 `max_tokens` 的 80%：
-`selectFiles` 在各门之后施加该上限，并把文件排除为 `too_large`。它同样把新路径
-为 `/dev/null` 的文件标记为 `deleted`；没有新内容可评审。用 `ocr review
---preview` 可在不花 token 的情况下打印此过滤结果。
+通过全部七重门的文件才发给 LLM——发出的是解码后的 UTF-8 文本，而非原始字节——
+除非仅 diff 本身就超过 `max_tokens` 的 80%：`selectFiles` 在各门之后施加该上限，
+并把文件排除为 `too_large`。它同样把新路径为 `/dev/null` 的文件标记为
+`deleted`；没有新内容可评审。用 `ocr review --preview` 可在不花 token 的情况下
+打印此过滤结果。
 
 ### 默认路径排除
 
