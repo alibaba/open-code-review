@@ -71,6 +71,12 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 	if d.IsBinary {
 		return ExcludeBinary
 	}
+	// Immediately after IsBinary and before the extension allowlist: an
+	// unreviewable file with an unusual extension must report the encoding as
+	// the reason, not "unsupported_ext".
+	if d.Unreviewable {
+		return ExcludeUndecodable
+	}
 
 	path := effectivePath(d)
 	f := a.args.FileFilter
