@@ -21,7 +21,7 @@ OCR は**4 層の優先順位チェーン**でルールを解決します。各�
 
 システム層は**常に**存在するため（バイナリに同梱）、必ず*何らかの*ルールが解決されます。
 
-## ルールファイル形式（層 1〜3）
+## ルールファイル形式（層 1〜3） {#rule-file-format-layers-1-3}
 
 ```json
 {
@@ -144,9 +144,39 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。 |
 | `**/*.thrift` | `thrift.md`: Apache Thrift IDL のワイヤ互換性。 |
 | `**/*.capnp` | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。 |
+| `**/*.m` | デフォルトでは `matlab.md`——詳細は下記の[`.m` ファイルのコンテンツスニッフィング](#content-sniffing-for-m-files)を参照。 |
 | *(fallback)* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。
+
+### `.m` ファイルのコンテンツスニッフィング {#content-sniffing-for-m-files}
+
+`.m` は MATLAB と Objective-C という無関係な 2 つの言語で共有されている拡張子であり、パスマッチングだけでは区別できません。`**/*.m` にマッチした際に `matlab.md` へフォールバックする前に、OCR はファイルの**先頭の空でない行**を覗き見します:
+
+| 先頭行の内容 | 使用されるルールドキュメント |
+|---|---|
+| `#import`、`#include`、`#pragma`、`#ifdef`、`#ifndef`、`@import`、`@interface`、`@implementation`、`@class`、`@protocol`、`//`、または `/*` | `objc.md` |
+| それ以外(スニッフィング対象のコンテンツがない場合、例えばファイルが削除されている場合も含む) | `matlab.md` |
+
+C スタイルのコメント開始記号(`//` または `/*`)はそれ単独で信頼できる ObjC のシグナルになります。MATLAB のコメントは `%` で始まり、MATLAB では `.m` ファイルが `/` で始まることは文法上あり得ないため、両者は明確に区別できます。これが重要な理由は、Xcode のファイルテンプレートが `//` のバナーコメントで始まり、実際の多くのプロジェクトでは先頭にライセンスヘッダーが置かれるため、本当の `#import` が 1 行目に来ることは稀だからです。
+
+コンテンツは作業ツリーからではなく、**レビュー対象の ref 上**で読み取られます: `ocr review --from/--to` は `git show <to>:<path>` 経由で、`--commit` は `git show <commit>:<path>` 経由で読み取るため、その ref がチェックアウトされていなくてもスニッフィングは正しく行われます。ワークスペースレビュー、`ocr scan`、`ocr rules check` には ref がなく、それらが対象とする作業ツリーをそのまま読み取ります。ファイルがまったく読み取れない場合は、`matlab.md` にフォールバックします。
+
+`objc.md` は現時点では汎用の `default.md` チェックリストのコピーとして提供されています——これは OCR のソースコード内(`internal/config/rules/rule_docs/objc.md`)にあるプレースホルダーであり、いずれ誰かが実際の Objective-C 固有のガイダンスで埋めることを想定しています。`go:embed` によってバイナリに組み込まれているため、変更するにはディスク上のファイルを編集するだけでなく、ソースからの再ビルドが必要です。再ビルドせずに今すぐ Objective-C 固有のガイダンスが必要な場合は、プロジェクトレベルの [`.opencodereview/rule.json`](#rule-file-format-layers-1-3) に `.m` パスにマッチするエントリ(例: `ios/**/*.m`)を追加してください——プロジェクトルールはシステム層より先にチェックされるため、スニッフィングの結果に関わらず優先されます。
+
+`ocr rules check` は、このスニッフィングが発動したかどうかを独立した `Note:` 行で報告します——`Pattern` は常にマッチした素の glob のままです:
+
+```bash
+$ ocr rules check ios/ViewController.m
+File: ios/ViewController.m
+Source: System built-in
+Pattern: **/*.m
+Note:    rule selected by file content (objc), not by path alone
+Rule:
+────────────────────────────────────────
+…contents of objc.md…
+────────────────────────────────────────
+```
 
 ## どのルールが有効かを確認する: `ocr rules check`
 

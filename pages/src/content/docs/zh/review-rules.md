@@ -165,9 +165,39 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`——Jsonnet 配置模板与库。 |
 | `**/*.thrift` | `thrift.md`——Apache Thrift IDL 线协议兼容性。 |
 | `**/*.capnp` | `capnp.md`——Cap'n Proto schema 线协议兼容性。 |
+| `**/*.m` | 默认使用 `matlab.md`——见下方[针对 `.m` 文件的内容嗅探](#针对-m-文件的内容嗅探)。 |
 | *(fallback)* | `default.md` |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。
+
+### 针对 `.m` 文件的内容嗅探
+
+`.m` 被两种互不相关的语言共用——MATLAB 和 Objective-C——仅凭路径匹配无法区分。在回退到 `**/*.m` 匹配的 `matlab.md` 之前，OCR 会窥探文件的**首个非空行**：
+
+| 首行内容 | 使用的规则文档 |
+|---|---|
+| `#import`、`#include`、`#pragma`、`#ifdef`、`#ifndef`、`@import`、`@interface`、`@implementation`、`@class`、`@protocol`、`//` 或 `/*` | `objc.md` |
+| 其他任何情况（包括没有内容可嗅探，例如文件已被删除） | `matlab.md` |
+
+C 风格的注释起始符（`//` 或 `/*`）本身就是可靠的 ObjC 信号：MATLAB 的注释以 `%` 开头，而 `.m` 文件在 MATLAB 中不能以 `/` 合法开头，因此两者不会混淆。这一点很重要，因为 Xcode 的文件模板首行是 `//` 横幅注释，而大多数实际项目会先放置许可证头——真正的 `#import` 很少出现在第一行。
+
+内容是**在被审查的 ref 上**读取的，而不是从你的工作区读取：`ocr review --from/--to` 通过 `git show <to>:<path>` 读取，`--commit` 通过 `git show <commit>:<path>` 读取，因此即使该 ref 未被检出，嗅探结果依然正确。工作区审查、`ocr scan` 以及 `ocr rules check` 没有 ref，直接读取工作区——这正是它们所审查的对象。如果文件完全无法读取，解析将回退到 `matlab.md`。
+
+`objc.md` 目前是通用 `default.md` 检查清单的副本——它是 OCR 源码中的占位文件（`internal/config/rules/rule_docs/objc.md`），留给日后有人补充真正的 Objective-C 专属指南；由于它通过 `go:embed` 编译进二进制文件，修改它需要从源码重新构建 OCR，而不是直接编辑磁盘上的文件。如果你现在就需要 Objective-C 专属指南而不想重新构建，可以使用项目级的 [`.opencodereview/rule.json`](#规则文件格式-层-1-3) 条目匹配你的 `.m` 路径（例如 `ios/**/*.m`）——项目规则的检查优先于系统层，因此无论嗅探结果如何都会优先生效。
+
+`ocr rules check` 会通过单独的 `Note:` 行报告嗅探是否生效——`Pattern` 始终保持为匹配到的原始 glob：
+
+```bash
+$ ocr rules check ios/ViewController.m
+File: ios/ViewController.m
+Source: System built-in
+Pattern: **/*.m
+Note:    rule selected by file content (objc), not by path alone
+Rule:
+────────────────────────────────────────
+…contents of objc.md…
+────────────────────────────────────────
+```
 
 ## 查看哪条规则生效：`ocr rules check`
 

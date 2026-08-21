@@ -196,8 +196,14 @@ a `**/*.m` match, OCR peeks at the file's **first non-blank line**:
 
 | First line looks like | Rule doc used |
 |---|---|
-| `#import`, `#include`, `@interface`, `@implementation`, `@class`, or `@protocol` | `objc.md` |
+| `#import`, `#include`, `#pragma`, `#ifdef`, `#ifndef`, `@import`, `@interface`, `@implementation`, `@class`, `@protocol`, `//`, or `/*` | `objc.md` |
 | anything else (including no content available to sniff, e.g. a deleted file) | `matlab.md` |
+
+A C-style comment opener (`//` or `/*`) counts as an ObjC signal on its own:
+MATLAB comments start with `%` and a `.m` file can't legally begin with `/` in
+MATLAB, so the two are unambiguous. This matters because the Xcode file
+template opens with a `//` banner, and most real projects put a license
+header first — the actual `#import` is rarely on line one.
 
 The content is read **at the ref under review**, not from your working tree:
 `ocr review --from/--to` reads via `git show <to>:<path>` and `--commit` via
@@ -217,9 +223,20 @@ today without rebuilding, use a project-level
 your `.m` paths (e.g. `ios/**/*.m`) — project rules are checked before the
 system layer, so they take priority regardless of the sniff.
 
-`ocr rules check` reports when this sniff fired: the `Pattern` line reads
-`**/*.m (sniffed: objc)` instead of the plain `**/*.m`, so you can tell at a
-glance whether a given `.m` file resolved via the sniff or the default match.
+`ocr rules check` reports when this sniff fired via a separate `Note:` line —
+`Pattern` always stays the plain glob that matched:
+
+```bash
+$ ocr rules check ios/ViewController.m
+File: ios/ViewController.m
+Source: System built-in
+Pattern: **/*.m
+Note:    rule selected by file content (objc), not by path alone
+Rule:
+────────────────────────────────────────
+…contents of objc.md…
+────────────────────────────────────────
+```
 
 ## Inspecting which rule wins: `ocr rules check`
 
