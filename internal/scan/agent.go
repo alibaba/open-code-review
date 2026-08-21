@@ -738,12 +738,19 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		return false, "", nil
 	}
 
-	completed, _, err := a.runner.RunPerFile(ctx, messages, it.Path)
+	completed, stop, err := a.runner.RunPerFile(ctx, messages, it.Path)
 	if err != nil {
 		return false, "", err
 	}
 	if !completed {
-		return false, "main_task did not complete before stopping", nil
+		// Scan sessions opt out of the run manifest, so this one string is the
+		// whole diagnostic: it feeds both RecordReviewItemFailed and the
+		// scan_subtask_error warning, and under --format json the [ocr] progress
+		// lines that would say which exit fired are discarded. Name the trigger
+		// via the shared Reason() instead of a second hardcoded sentence, so
+		// scan and review never describe the same stop differently. The prefix
+		// stays for the resume records and warnings that already match on it.
+		return false, "main_task did not complete before stopping: " + stop.Reason(), nil
 	}
 	return true, "", nil
 }

@@ -1123,16 +1123,21 @@ func classifyItemError(err error) (session.FailureClass, string) {
 
 // classifyMainLoopStop maps a non-error, non-completed main-loop stop to an item
 // failure class and a safe reason. Only the configured max-tool-request budget is
-// a declared budget stop; the empty-round and compression exits are genuine but
-// unclassifiable, so they map to the honest unknown catch-all. Only an explicit
-// budget trigger may use the budget classification.
+// a declared budget stop, so only it may use the budget classification; every
+// other stop keeps the unknown class, because the FailureClass taxonomy has no
+// category that fits an empty-round or compression exit. Stating that as "not
+// max-rounds" rather than case-by-case is deliberate: a stop added to the enum
+// later must default to the honest catch-all class, never inherit "budget".
+//
+// The reason text comes from stop.Reason(), shared with the scan path so the
+// same stop cannot read differently in the two commands' output. In --format
+// json runs the progress lines that would say why an item stopped are discarded,
+// so that string is the only stop diagnostic that leaves a CI runner.
 func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, string) {
-	switch stop {
-	case llmloop.StopMaxRounds:
-		return session.FailureBudget, "reached the maximum tool-request rounds without finishing"
-	default: // StopEmptyRounds, StopCompression, StopNone
-		return session.FailureUnknown, "main task stopped before completing"
+	if stop == llmloop.StopMaxRounds {
+		return session.FailureBudget, stop.Reason()
 	}
+	return session.FailureUnknown, stop.Reason()
 }
 
 // subtaskStop is the structured, non-error reason a single-file review stopped

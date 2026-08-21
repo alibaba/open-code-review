@@ -11,6 +11,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -768,6 +769,13 @@ func TestDispatchSubtasks_WithoutTaskDoneIsAllFailed(t *testing.T) {
 	if len(warnings) != 1 || warnings[0].Type != "scan_subtask_error" ||
 		!strings.Contains(warnings[0].Message, "main_task did not complete") {
 		t.Fatalf("warnings = %+v, want one incomplete scan subtask error", warnings)
+	}
+	// Scan opts out of the run manifest and --format json discards the progress
+	// lines, so this warning is the whole diagnostic: it must name the trigger
+	// (here the exhausted MaxToolRequestTimes budget), not just report that the
+	// task did not finish.
+	if want := llmloop.StopMaxRounds.Reason(); !strings.Contains(warnings[0].Message, want) {
+		t.Errorf("warning %q does not name the stop trigger %q", warnings[0].Message, want)
 	}
 }
 

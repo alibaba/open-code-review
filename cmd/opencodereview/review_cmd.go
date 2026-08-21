@@ -89,10 +89,9 @@ var reviewCmd = &cobra.Command{
   # Exclude generated files / fixtures
   ocr review --exclude '**/generated/*,**/testdata/*'
 
-  # Provide requirement/business context inline, from a Markdown file, or both
+  # Provide requirement/business context inline or from a Markdown file
   ocr review --background "Adding rate limiting to the login API"
-  ocr review --background-file ./docs/requirements.md
-  ocr review --background "Focus on auth" --background-file ./docs/requirements.md`,
+  ocr review --background-file ./docs/requirements.md`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateReviewOptions(&reviewOpts); err != nil {
 			return err
@@ -119,25 +118,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 		return err
 	}
 
-	if opts.commit != "" && opts.background == "" {
-		if msg, err := getCommitMessage(cc.RepoDir, opts.commit); err == nil && msg != "" {
-			opts.background = msg
-		}
+	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
+	if err != nil {
+		return err
 	}
-
-	// Only touch the background when --background-file is set, so the existing
-	// --background behaviour (raw, unsanitised) is preserved for users who do
-	// not opt into the file-based context.
-	if opts.backgroundFile != "" {
-		// Resolve relative paths against the git top-level (cc.RepoDir), matching
-		// file_read semantics, so `-B ./docs/context.md` works from any directory.
-		bgPath := resolveBackgroundFilePath(cc.RepoDir, opts.backgroundFile)
-		fileBackground, err := loadBackgroundFile(bgPath)
-		if err != nil {
-			return err
-		}
-		opts.background = mergeBackground(opts.background, fileBackground)
-	}
+	opts.background = bg
 
 	if opts.preview {
 		return runPreviewContext(ctx, cc, opts)

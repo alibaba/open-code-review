@@ -13,6 +13,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -917,6 +918,39 @@ func TestClassifyItemError(t *testing.T) {
 			if strings.Contains(reason, "sk-LEAKED-SECRET") || strings.Contains(reason, "/home/alice") {
 				t.Errorf("reason leaked raw error text: %q", reason)
 			}
+		})
+	}
+}
+
+// classifyMainLoopStop keeps the unknown class for the empty-round and
+// compression exits, but each reason must name its trigger: in --format json
+// runs the manifest reason is the only stop diagnostic that leaves the runner,
+// so the three non-budget stops must not collapse into one string.
+func TestClassifyMainLoopStop(t *testing.T) {
+	reasons := make(map[string]llmloop.MainLoopStop)
+	for _, tc := range []struct {
+		name       string
+		stop       llmloop.MainLoopStop
+		wantClass  session.FailureClass
+		wantReason string
+	}{
+		{"max_rounds", llmloop.StopMaxRounds, session.FailureBudget, "reached the maximum tool-request rounds without finishing"},
+		{"empty_rounds", llmloop.StopEmptyRounds, session.FailureUnknown, "stopped after repeated rounds without a usable tool result"},
+		{"compression", llmloop.StopCompression, session.FailureUnknown, "stopped because context compression exceeded its threshold"},
+		{"none", llmloop.StopNone, session.FailureUnknown, "main task stopped before completing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			class, reason := classifyMainLoopStop(tc.stop)
+			if class != tc.wantClass {
+				t.Errorf("class = %q, want %q", class, tc.wantClass)
+			}
+			if reason != tc.wantReason {
+				t.Errorf("reason = %q, want %q", reason, tc.wantReason)
+			}
+			if prev, dup := reasons[reason]; dup {
+				t.Errorf("reason %q is shared by %v and %v; stops must stay distinguishable", reason, prev, tc.stop)
+			}
+			reasons[reason] = tc.stop
 		})
 	}
 }

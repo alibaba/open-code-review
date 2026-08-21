@@ -26,7 +26,7 @@ func addDiffFlags(cmd *cobra.Command, from, to, commit *string) {
 
 func addBackgroundFlags(cmd *cobra.Command, background, backgroundFile *string) {
 	cmd.Flags().StringVarP(background, "background", "b", "", "optional requirement/business context for the review")
-	cmd.Flags().StringVarP(backgroundFile, "background-file", "B", "", "path to a Markdown file used as review background")
+	cmd.Flags().StringVarP(backgroundFile, "background-file", "B", "", "path to a Markdown file used as review background (takes precedence over --background)")
 }
 
 func addOutputFlags(cmd *cobra.Command, format, audience *string) {

@@ -294,7 +294,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | `{{current_file_path}}` | Новый путь этого файла. |
 | `{{plan_guidance}}` | Результат этапа планирования; удаляется, если планирование пропущено. |
 | `{{plan_tools}}` | Определения инструментов этапа планирования как обычный текст (формируются функцией `formatToolDefs`), используются в системном промпте `PLAN_TASK`. |
-| `{{requirement_background}}` | Содержимое флага `--background`. |
+| `{{requirement_background}}` | Эффективное содержимое `--background` или `--background-file` (файл имеет приоритет). |
 | `{{current_system_date_time}}` | Локальная метка времени запуска в формате `YYYY-MM-DD HH:MM` (без секунд и часового пояса). |
 | `{{context}}` | Только при сжатии: сообщения, преобразованные в XML для создания сводки. |
 | `{{path}}` | Путь файла, используемый в `REVIEW_FILTER_TASK`. |

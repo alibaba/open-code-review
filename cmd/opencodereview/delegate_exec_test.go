@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/delegate"
@@ -242,8 +243,11 @@ func TestLoadDelegateContext_BackgroundFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadDelegateContext error: %v", err)
 	}
-	if dc.opts.background == "" {
-		t.Error("expected merged background, got empty")
+	if !strings.Contains(dc.opts.background, "extra background") {
+		t.Errorf("expected file content to win, got %q", dc.opts.background)
+	}
+	if strings.Contains(dc.opts.background, "base") {
+		t.Errorf("inline --background should be ignored when --background-file is set, got %q", dc.opts.background)
 	}
 }
 
