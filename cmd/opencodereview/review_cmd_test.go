@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
@@ -86,6 +88,32 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	}
 }
 
+func TestValidateGitHubPostingManifestMatchesSealedRange(t *testing.T) {
+	sealed := &agent.SealedInput{Resolution: diff.InputResolution{
+		ResolvedBase: "base-sha",
+		ResolvedHead: "head-sha",
+		ExactRange:   "base-sha..head-sha",
+	}}
+	manifest := &session.RunManifest{Input: session.ManifestInput{
+		Mode:         session.InputModeRange,
+		ResolvedBase: "base-sha",
+		ResolvedHead: "head-sha",
+		ExactRange:   "base-sha..head-sha",
+	}}
+
+	if err := validateGitHubPostingManifest(sealed, manifest); err != nil {
+		t.Fatalf("matching manifest rejected: %v", err)
+	}
+
+	manifest.Input.ResolvedHead = "moved-head"
+	if err := validateGitHubPostingManifest(sealed, manifest); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("mismatched manifest accepted: %v", err)
+	}
+	if err := validateGitHubPostingManifest(sealed, nil); err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("missing manifest accepted: %v", err)
+	}
+}
+
 func TestValidateReviewRefsRejectsOptionLikeRangeRef(t *testing.T) {
 	err := validateReviewRefs(t.TempDir(), reviewOptions{to: "-O./pwn.sh"})
 	if err == nil {
@@ -140,5 +168,21 @@ func TestParseReviewFlagsAllowsFromAndTo(t *testing.T) {
 	}
 	if opts.from != "main" || opts.to != "HEAD" {
 		t.Fatalf("unexpected opts: from=%q to=%q", opts.from, opts.to)
+	}
+}
+
+func TestValidateReviewOptionsRejectsPostToPRWithoutRange(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	opts := reviewOptions{postToPR: true, audience: "human"}
+	if err := validateReviewOptions(&opts); err == nil || !strings.Contains(err.Error(), "requires --from and --to") {
+		t.Fatalf("error = %v, want range-mode requirement", err)
+	}
+}
+
+func TestValidateReviewOptionsRejectsPostToPRWithoutToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	opts := reviewOptions{from: "master", to: "main", postToPR: true, audience: "human"}
+	if err := validateReviewOptions(&opts); err == nil || !strings.Contains(err.Error(), "GitHub token") {
+		t.Fatalf("error = %v, want missing-token rejection", err)
 	}
 }

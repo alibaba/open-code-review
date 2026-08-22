@@ -44,6 +44,9 @@ func TestResolveLineNumbers_SingleLineHunkMatch(t *testing.T) {
 	if cm.StartLine != 11 || cm.EndLine != 11 {
 		t.Errorf("expected 11..11, got %d..%d", cm.StartLine, cm.EndLine)
 	}
+	if cm.Side != model.CommentSideLeft {
+		t.Errorf("deleted-line side = %q, want LEFT", cm.Side)
+	}
 }
 
 func TestResolveLineNumbers_WhitespaceTolerant(t *testing.T) {
@@ -117,6 +120,9 @@ import "fmt"`},
 	// Fallback should find these consecutive lines starting at line 1
 	if cm.StartLine != 1 || cm.EndLine != 2 {
 		t.Errorf("fallback: expected 1..2, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+	if cm.Side != model.CommentSideRight {
+		t.Errorf("new-file fallback side = %q, want RIGHT", cm.Side)
 	}
 }
 
@@ -664,6 +670,9 @@ func TestResolveFromHunk_NewSidePriority(t *testing.T) {
 	// new-side wins → line 9
 	if cm.StartLine != 9 {
 		t.Errorf("new-side priority: expected 9, got %d", cm.StartLine)
+	}
+	if cm.Side != model.CommentSideRight {
+		t.Errorf("new-side priority side = %q, want RIGHT", cm.Side)
 	}
 }
 
