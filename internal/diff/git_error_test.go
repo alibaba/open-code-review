@@ -6,7 +6,9 @@ package diff
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -88,6 +90,46 @@ func TestGitFailure(t *testing.T) {
 			t.Errorf("error %q does not end on the original tail", got[len(got)-40:])
 		}
 	})
+}
+
+// TestGetDiff_WorkspaceFailureSurfacesFallbackMessage pins which of the two
+// commands in workspaceTrackedDiff gets to speak when both fail.
+//
+// Reaching the `git diff --staged` fallback means `git diff HEAD` already
+// failed, and in the case the fallback exists for — a repository with no
+// commits — it failed with "bad revision 'HEAD'", which is expected rather
+// than diagnostic. Surfacing both would put that benign message ahead of the
+// one describing what actually blocked the review.
+func TestGetDiff_WorkspaceFailureSurfacesFallbackMessage(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+
+	file := filepath.Join(repo, "sample.txt")
+	if err := os.WriteFile(file, []byte("line1\n"), 0o644); err != nil {
+		t.Fatalf("write sample.txt: %v", err)
+	}
+	runGitTest(t, repo, "add", "sample.txt")
+
+	// No commits yet, so `git diff HEAD` fails; corrupting the index makes the
+	// `--staged` fallback fail too, which is the only way both commands error.
+	if err := os.WriteFile(filepath.Join(repo, ".git", "index"), []byte("garbage"), 0o644); err != nil {
+		t.Fatalf("corrupt index: %v", err)
+	}
+
+	_, err := NewWorkspaceProvider(repo, gitcmd.New(2)).GetDiff(context.Background())
+	if err == nil {
+		t.Fatal("expected GetDiff to fail when both tracked-diff commands fail")
+	}
+
+	got := err.Error()
+	if !strings.Contains(got, "index") {
+		t.Errorf("error %q does not mention the index failure that actually blocked the review", got)
+	}
+	if strings.Contains(got, "bad revision") {
+		t.Errorf("error %q leads with the expected no-HEAD message instead of the real cause", got)
+	}
 }
 
 // TestGetDiff_CommitFailureSurfacesGitMessage is the regression test for #972:

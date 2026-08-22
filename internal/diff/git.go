@@ -198,9 +198,15 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 		combined.WriteString(out)
 
 	case ModeWorkspace:
-		// On the error path workspaceTrackedDiff returns the failing command's
-		// combined output, so tracked carries git's message here rather than a
-		// usable diff.
+		// On the error path workspaceTrackedDiff returns the combined output of
+		// its fallback (`git diff --staged`), so tracked carries git's message
+		// here rather than a usable diff.
+		//
+		// That fallback's message is the one worth surfacing. Reaching it at
+		// all means `git diff HEAD` already failed, and in the case the
+		// fallback exists for — a repository with no commits — it failed with
+		// "bad revision 'HEAD'", which is expected rather than diagnostic.
+		// Only the second failure describes what actually blocked the review.
 		tracked, err := p.workspaceTrackedDiff(ctx)
 		if err != nil {
 			return nil, gitFailure("workspace tracked diff", tracked, err)
