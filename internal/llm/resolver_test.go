@@ -268,6 +268,12 @@ func clearAllEnv(t *testing.T) {
 		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 		"MINIMAX_GLOBAL_API_KEY", "MINIMAX_API_KEY",
+		// The three globals parseEnvOverrides validates. These matter more
+		// than the rest of the list: the others merely contribute a value, but
+		// an unparseable one of these aborts resolution before any strategy
+		// runs, so a stray export on a developer machine or a self-hosted
+		// runner fails ~100 tests that never meant to involve it.
+		envOCRLLMTimeout, envOCRLLMExtraHeaders, envOCRLLMPromptCache,
 	} {
 		t.Setenv(k, "")
 	}
