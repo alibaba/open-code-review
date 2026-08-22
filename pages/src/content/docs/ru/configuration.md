@@ -363,6 +363,37 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
 ```
 
+### Отключение кеширования промптов
+
+OCR расставляет в запросах к Anthropic контрольные точки `cache_control`, чтобы
+системный промпт, список инструментов и префикс диалога тарифицировались по
+кеш-ставке. Некоторые Anthropic-совместимые шлюзы строго валидируют тело запроса
+и отклоняют это поле вместо того, чтобы его игнорировать, — тогда падает каждая
+проверка:
+
+```
+400 Bad Request {"errorCode":"INVALID_ARGUMENT", ...
+  "unsafeParams":"{unrecognizedProperty=cache_control}",
+  "message":"Request contained an unrecognized field"}
+```
+
+Установите `prompt_cache` в `false`, чтобы OCR перестал отправлять эти маркеры:
+
+```bash
+ocr config set providers.anthropic.prompt_cache false
+ocr config set custom_providers.my-gateway.prompt_cache false
+ocr config set llm.prompt_cache false
+```
+
+`OCR_LLM_PROMPT_CACHE=false` делает то же самое для любой конфигурации, которую
+разрешит OCR, — это более короткий путь в CI, где эндпоинт задаётся переменными
+окружения. Переменная перекрывает файл конфигурации в обе стороны.
+
+Если ключ не задан, кеширование включено. Его отключение стоит денег, а не
+корректности: проверки продолжают работать, просто каждый запрос оплачивается по
+полной цене входных токенов. Не трогайте этот ключ, пока ваш эндпоинт
+действительно не отклоняет это поле.
+
 ### Аффинити сессии для кеширования промптов
 
 OCR выводит ключ аффинити кеша промптов для каждого диалога с LLM,

@@ -227,6 +227,88 @@ func TestBuildAnthropicParams_CacheControl_NoSystem(t *testing.T) {
 	}
 }
 
+// promptCacheRequest exercises all three breakpoints at once: the system
+// prompt, the tool list, and the trailing message.
+func promptCacheRequest() ChatRequest {
+	return ChatRequest{
+		Messages: []Message{
+			{Role: "system", Content: "You are a code reviewer."},
+			{Role: "user", Content: "Review this code."},
+			{Role: "assistant", Content: "", ToolCalls: []ToolCall{
+				{ID: "call_1", Type: "function", Function: FunctionCall{Name: "tool_a", Arguments: `{}`}},
+			}},
+			{Role: "tool", ToolCallID: "call_1", Content: "tool output"},
+		},
+		Tools: []ToolDef{
+			{Type: "function", Function: FunctionDef{Name: "tool_a", Description: "first tool", Parameters: map[string]any{"type": "object"}}},
+			{Type: "function", Function: FunctionDef{Name: "tool_b", Description: "second tool", Parameters: map[string]any{"type": "object"}}},
+		},
+	}
+}
+
+// TestBuildAnthropicParams_PromptCacheDisabled asserts on the marshalled body
+// rather than the individual params, because the failure this guards against is
+// a gateway rejecting the wire format: "unrecognized field cache_control" (#700).
+// A single leftover breakpoint anywhere in the request is enough to reproduce it.
+func TestBuildAnthropicParams_PromptCacheDisabled(t *testing.T) {
+	req := promptCacheRequest()
+
+	marshal := func(t *testing.T, disable bool) string {
+		t.Helper()
+		client := NewAnthropicClient(ClientConfig{
+			URL:                "https://api.anthropic.com",
+			DisablePromptCache: disable,
+		})
+		params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+		if err != nil {
+			t.Fatalf("buildAnthropicParams: %v", err)
+		}
+		body, err := json.Marshal(params)
+		if err != nil {
+			t.Fatalf("marshal params: %v", err)
+		}
+		return string(body)
+	}
+
+	// Guards the negative assertion below from passing vacuously: if the SDK
+	// ever stopped serializing cache_control, the disabled case would look
+	// correct while the default one silently lost its caching.
+	t.Run("enabled by default", func(t *testing.T) {
+		if !strings.Contains(marshal(t, false), "cache_control") {
+			t.Error("default request has no cache_control; prompt caching is expected to stay on unless disabled")
+		}
+	})
+
+	t.Run("no cache_control anywhere when disabled", func(t *testing.T) {
+		if body := marshal(t, true); strings.Contains(body, "cache_control") {
+			t.Errorf("request still carries cache_control when disabled:\n%s", body)
+		}
+	})
+
+	t.Run("request is otherwise unchanged", func(t *testing.T) {
+		client := NewAnthropicClient(ClientConfig{
+			URL:                "https://api.anthropic.com",
+			DisablePromptCache: true,
+		})
+		params, err := client.buildAnthropicParams("claude-sonnet-4-20250514", req)
+		if err != nil {
+			t.Fatalf("buildAnthropicParams: %v", err)
+		}
+		// Disabling the cache must drop the breakpoints only. Dropping the
+		// system prompt or the tools along with them would turn a billing
+		// optimization into a review that cannot call any tool.
+		if len(params.System) != 1 {
+			t.Errorf("got %d system blocks, want 1", len(params.System))
+		}
+		if len(params.Tools) != 2 {
+			t.Errorf("got %d tools, want 2", len(params.Tools))
+		}
+		if len(params.Messages) == 0 {
+			t.Error("got no messages, want the conversation preserved")
+		}
+	})
+}
+
 func TestBuildAnthropicParams_DynamicCacheBreakpoint(t *testing.T) {
 	client := NewAnthropicClient(ClientConfig{URL: "https://api.anthropic.com"})
 

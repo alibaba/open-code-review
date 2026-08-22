@@ -280,6 +280,7 @@ func TestCloneProviderEntry_NilExtraBody(t *testing.T) {
 // omission. It catches a dropped field, not an aliased one -- DeepEqual
 // compares values, not identity; the sibling tests above cover aliasing.
 func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
+	promptCache := false
 	orig := ProviderEntry{
 		APIKey:       "key",
 		APIKeyCmd:    "op read op://dev/x/api-key",
@@ -292,6 +293,7 @@ func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
 		RetryCodes:   []int{403},
 		ExtraBody:    map[string]any{"temperature": 0.7},
 		ExtraHeaders: map[string]string{"X-Trace": "on"},
+		PromptCache:  &promptCache,
 		AWSRegion:    "us-west-2",
 		AWSProfile:   "example-profile",
 	}
@@ -306,6 +308,32 @@ func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
 
 	if clone := cloneProviderEntry(orig); !reflect.DeepEqual(clone, orig) {
 		t.Errorf("clone dropped a field:\n got %+v\nwant %+v", clone, orig)
+	}
+}
+
+// TestCloneProviderEntry_PromptCacheNotAliased covers the pointer field the
+// DeepEqual check above cannot see through: DeepEqual compares pointees, so a
+// clone that shared the original's *bool would still pass it, and a rollback
+// path would then edit the entry it is restoring.
+func TestCloneProviderEntry_PromptCacheNotAliased(t *testing.T) {
+	promptCache := false
+	orig := ProviderEntry{APIKey: "key", URL: "http://localhost", PromptCache: &promptCache}
+
+	clone := cloneProviderEntry(orig)
+	if clone.PromptCache == nil {
+		t.Fatal("clone dropped PromptCache")
+	}
+	if clone.PromptCache == orig.PromptCache {
+		t.Fatal("clone shares the original's PromptCache pointer")
+	}
+
+	*clone.PromptCache = true
+	if *orig.PromptCache {
+		t.Error("modifying clone should not affect original PromptCache")
+	}
+
+	if nilClone := cloneProviderEntry(ProviderEntry{}); nilClone.PromptCache != nil {
+		t.Error("an unset PromptCache should stay nil, not become an explicit value")
 	}
 }
 

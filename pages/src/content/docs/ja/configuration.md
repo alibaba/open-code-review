@@ -342,6 +342,35 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
 ```
 
+### プロンプトキャッシュを無効にする
+
+OCR は Anthropic へのリクエストに `cache_control` のブレークポイントを付与し、
+システムプロンプト・ツール一覧・会話のプレフィックスがキャッシュ単価で課金される
+ようにします。Anthropic 互換のゲートウェイの中には、リクエストボディを厳格に検証し、
+このフィールドを無視せず拒否するものがあり、すべてのレビューが失敗します。
+
+```
+400 Bad Request {"errorCode":"INVALID_ARGUMENT", ...
+  "unsafeParams":"{unrecognizedProperty=cache_control}",
+  "message":"Request contained an unrecognized field"}
+```
+
+`prompt_cache` を `false` にすると、OCR はこのマーカーを送信しなくなります。
+
+```bash
+ocr config set providers.anthropic.prompt_cache false
+ocr config set custom_providers.my-gateway.prompt_cache false
+ocr config set llm.prompt_cache false
+```
+
+`OCR_LLM_PROMPT_CACHE=false` は、OCR が解決したどの設定に対しても同じ効果を持ちます。
+エンドポイントを環境変数から与える CI ではこちらのほうが手軽です。設定ファイルの値は
+どちらの方向にも上書きされます。
+
+キーが未設定ならキャッシュは有効です。無効にして失われるのは正しさではなくコストで、
+レビューは変わらず動作し、リクエストごとに入力トークンの全額を支払うだけです。
+エンドポイントが実際にこのフィールドを拒否する場合を除き、変更しないでください。
+
 ### プロンプトキャッシュのセッションアフィニティ
 
 OCR はすべての LLM 会話ごとに、レビューセッションとその中のタスクにスコープされた
