@@ -10,7 +10,7 @@
 - Interface or external call declarations whose ABI, argument types, or return types are inconsistent with the target contract
 
 #### Integer and Value Safety
-- Use of explicit `unsafe_add`, `unsafe_sub`, `unsafe_mul`, or `unsafe_div` where unchecked arithmetic can corrupt accounting, or a narrowing conversion whose bounds are not validated
+- Use of explicit `unsafe_add`, `unsafe_sub`, `unsafe_mul`, or `unsafe_div` where unchecked arithmetic can corrupt accounting, or a precision-affecting decimal-to-integer conversion whose behavior is not accounted for
 - Division or modulo by a value that can be zero at runtime
 - A payable function that lets the contract receive ether with no accounting or withdrawal path
 
@@ -21,7 +21,7 @@
 
 #### Assertions and Control Flow
 - Use of `assert ..., UNREACHABLE` for a condition that can fail during normal execution, because this form emits `INVALID` and consumes the remaining gas; ordinary `assert` and `raise` both revert and return unused gas
-- Unbounded loops over user-controlled arrays that can exceed the block gas limit
+- Loops or array iteration whose declared upper bound or maximum array length can make worst-case execution exceed the block gas limit
 
 #### Block and Randomness
 - Use of `block.timestamp` or `blockhash` for randomness, or for any value that must be unpredictable
