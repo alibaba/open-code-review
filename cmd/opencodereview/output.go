@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/suggestdiff"
@@ -93,7 +95,7 @@ func renderComment(comment model.LlmComment, out io.Writer) {
 		return
 	}
 
-	fmt.Fprintf(out, "\n\033[2m─── %s:%d-%d ───\033[0m\n", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine)
+	fmt.Fprintf(out, "\n%s\n", colorf("\033[2m", "─── %s:%d-%d ───", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine))
 
 	if comment.Content != "" {
 		badge := buildBadge(comment)
@@ -106,8 +108,7 @@ func renderComment(comment model.LlmComment, out io.Writer) {
 		lines := wrapByRunes(content, 100)
 		for i, ln := range lines {
 			if i == 0 && badge != "" && strings.HasPrefix(ln, badge) {
-				color := severityColor(comment.Severity)
-				ln = color + badge + "\033[0m" + ln[len(badge):]
+				ln = colorize(severityColor(comment.Severity), badge) + ln[len(badge):]
 			}
 			fmt.Fprintf(out, "%s\n", ln)
 		}
@@ -165,9 +166,15 @@ func severityColor(severity string) string {
 	}
 }
 
-// printDiffLine renders a single diff line with colored prefix and background on content.
+// printDiffLine renders a single diff line with colored prefix and background on
+// content. With color disabled it emits "<prefix> <content>", which keeps the
+// +/-/space gutter that carries the added/deleted/context meaning in plain text.
 func printDiffLine(out io.Writer, prefix, content, fgColor, bgColor string) {
-	fmt.Fprintf(out, "%s%s%s %s%s\033[0m\n", fgColor+bgColor, prefix, "\033[0m"+bgColor, content, "\033[0m")
+	if !colorOn() {
+		fmt.Fprintf(out, "%s %s\n", prefix, content)
+		return
+	}
+	fmt.Fprintf(out, "%s%s%s %s%s\n", fgColor+bgColor, prefix, ansiReset+bgColor, content, ansiReset)
 }
 
 // wrapByRunes splits text into lines that fit within maxWidth **rune** columns.
@@ -292,6 +299,11 @@ type jsonOutput struct {
 	Resume         *agent.ResumeInfo    `json:"resume,omitempty"`
 	SessionID      string               `json:"session_id,omitempty"`
 	Manifest       *session.RunManifest `json:"manifest,omitempty"`
+	// RetryReport is the frozen LLM retry report (ocr.llm-retry-report/v1).
+	// Reuses llm.RetryReport's own field/tag definitions rather than mirroring
+	// them here, and sits last with omitempty so a first-try-success run emits
+	// byte-identical JSON to before #368.
+	RetryReport *llm.RetryReport `json:"retry_report,omitempty"`
 }
 
 func outputJSON(comments []model.LlmComment) error {
@@ -310,7 +322,8 @@ func outputJSON(comments []model.LlmComment) error {
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
-	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer) error {
+	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
+	retryReport *llm.RetryReport) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	payload := jsonOutput{
 		Status:   "success",
@@ -332,6 +345,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		Resume:         resumeInfo,
 		SessionID:      sessionID,
 		Manifest:       manifest,
+		RetryReport:    retryReport,
 	}
 	var total int64
 	for _, v := range toolCalls {
@@ -374,6 +388,192 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(payload)
+}
+
+// retryStages maps internal task types to concise terminal labels. The slice
+// order is also the display order.
+var retryStages = []struct {
+	taskType session.TaskType
+	title    string
+}{
+	{session.PlanTask, "Review planning"},
+	{session.MainTask, "Core review"},
+	{session.MemoryCompressionTask, "Context compaction"},
+	{session.ReLocationTask, "Comment re-location"},
+	{session.ReviewFilterTask, "Comment filtering"},
+}
+
+// Keep the terminal concise; JSON retains every request.
+const retryGroupListLimit = 5
+
+// retryGroup is one review-stage bucket of listed requests.
+type retryGroup struct {
+	rank     int
+	title    string
+	requests []llm.RequestReport
+}
+
+func retryOutcomeInfo(o llm.Outcome) (summary string, rank int) {
+	switch o {
+	case llm.OutcomeFailed:
+		return "failed", 0
+	case llm.OutcomeCancelled:
+		return "cancelled", 1
+	case llm.OutcomeRecovered:
+		return "recovered after retry", 2
+	default:
+		return "retried at provider request", 3
+	}
+}
+
+// outputRetryReportText groups noteworthy requests by review stage. It
+// renders only stable classes and status codes; raw provider errors stay out.
+func outputRetryReportText(w io.Writer, rep *llm.RetryReport) {
+	if rep == nil {
+		return
+	}
+	groups := groupRetryRequests(rep.Requests)
+
+	// The counts come from the listed requests, not from the report aggregates, so the
+	// summary line can never disagree with the entries printed under it.
+	byOutcome := make(map[llm.Outcome]int, 3)
+	for _, r := range rep.Requests {
+		byOutcome[r.Outcome]++
+	}
+	parts := make([]string, 0, 4)
+	for _, o := range []llm.Outcome{llm.OutcomeFailed, llm.OutcomeCancelled, llm.OutcomeRecovered, llm.OutcomeSucceeded} {
+		if n := byOutcome[o]; n > 0 {
+			summary, _ := retryOutcomeInfo(o)
+			parts = append(parts, fmt.Sprintf("%d %s %s", n, plural(n, "request"), summary))
+		}
+	}
+
+	fmt.Fprintf(w, "\nLLM retry report summary: %d of %d %s affected",
+		len(rep.Requests), rep.TotalRequests, plural(rep.TotalRequests, "request"))
+	if len(parts) > 0 {
+		fmt.Fprintf(w, " -- %s", strings.Join(parts, ", "))
+	}
+	fmt.Fprintln(w)
+
+	for _, g := range groups {
+		header := fmt.Sprintf("%s (%d %s", g.title,
+			len(g.requests), plural(len(g.requests), "request"))
+		fmt.Fprintf(w, "\n%s):\n", header)
+		for i, r := range g.requests {
+			if i == retryGroupListLimit {
+				fmt.Fprintf(w, "- ... and %d more\n", len(g.requests)-i)
+				break
+			}
+			fmt.Fprintf(w, "- %s: %s\n", sanitizeTerminal(r.FilePath), retryAttemptChain(r))
+		}
+	}
+
+	fmt.Fprintf(w, "\nPer-attempt detail: --format json (retry_report).\n")
+}
+
+// groupRetryRequests buckets by review stage, then sorts for stable output.
+func groupRetryRequests(requests []llm.RequestReport) []*retryGroup {
+	byStage := make(map[string]*retryGroup)
+	for _, r := range requests {
+		g := byStage[r.TaskType]
+		if g == nil {
+			title, rank := retryStageInfo(r.TaskType)
+			g = &retryGroup{rank: rank, title: title}
+			byStage[r.TaskType] = g
+		}
+		g.requests = append(g.requests, r)
+	}
+
+	groups := make([]*retryGroup, 0, len(byStage))
+	for _, g := range byStage {
+		sort.Slice(g.requests, func(i, j int) bool {
+			_, ri := retryOutcomeInfo(g.requests[i].Outcome)
+			_, rj := retryOutcomeInfo(g.requests[j].Outcome)
+			if ri != rj {
+				return ri < rj
+			}
+			if g.requests[i].FilePath != g.requests[j].FilePath {
+				return g.requests[i].FilePath < g.requests[j].FilePath
+			}
+			return g.requests[i].RequestNo < g.requests[j].RequestNo
+		})
+		groups = append(groups, g)
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		if groups[i].rank != groups[j].rank {
+			return groups[i].rank < groups[j].rank
+		}
+		return groups[i].title < groups[j].title
+	})
+	return groups
+}
+
+func retryStageInfo(taskType string) (title string, rank int) {
+	for i, stage := range retryStages {
+		if string(stage.taskType) == taskType {
+			return stage.title, i
+		}
+	}
+	return sanitizeTerminal(taskType), len(retryStages)
+}
+
+// retryAttemptChain renders one logical request as a short human-readable chain.
+func retryAttemptChain(r llm.RequestReport) string {
+	parts := make([]string, 0, len(r.Attempts)+1)
+	for i, a := range r.Attempts {
+		if a.Outcome == llm.AttemptSuccess {
+			if i < len(r.Attempts)-1 {
+				parts = append(parts, "succeeded (provider asked to retry)")
+				continue
+			}
+			parts = append(parts, "succeeded")
+			continue
+		}
+		parts = append(parts, retryErrorPhrase(a))
+	}
+	lastCancelled := len(r.Attempts) > 0 &&
+		r.Attempts[len(r.Attempts)-1].ErrorClass == llm.ErrorClassCancelled
+	if r.Outcome == llm.OutcomeFailed ||
+		(r.Outcome == llm.OutcomeCancelled && !lastCancelled) {
+		parts = append(parts, string(r.Outcome))
+	}
+	return strings.Join(parts, " -> ")
+}
+
+func retryErrorPhrase(a llm.AttemptRecord) string {
+	var phrase string
+	switch a.ErrorClass {
+	case llm.ErrorClassRateLimited:
+		phrase = "rate limited"
+	case llm.ErrorClassOverloaded:
+		phrase = "provider overloaded"
+	case llm.ErrorClassAuthentication:
+		phrase = "authentication rejected"
+	case llm.ErrorClassTimeout:
+		phrase = "timed out"
+	case llm.ErrorClassNetwork:
+		phrase = "network error"
+	case llm.ErrorClassProvider:
+		phrase = "provider error"
+		if a.StatusCode > 0 && a.StatusCode < 500 {
+			phrase = "rejected by provider"
+		}
+	case llm.ErrorClassCancelled:
+		phrase = "cancelled"
+	default:
+		phrase = "unclassified error"
+	}
+	if a.StatusCode > 0 {
+		phrase = fmt.Sprintf("%s (HTTP %d)", phrase, a.StatusCode)
+	}
+	return phrase
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }
 
 func manifestMessage(manifest *session.RunManifest, findings int) string {
@@ -438,7 +638,14 @@ func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity, out io.Writ
 // therefore always carries exactly one JSON document); otherwise a single
 // human-readable [ocr] line. It must never return an error that masks the
 // original failure — all writes are best-effort.
-func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string, llmIdentity *jsonLLMIdentity) {
+//
+// retryReport must be nil whenever emitRunResult already ran: a constructed
+// manifest is publishable even on a failed run, so both this record and the
+// normal result exit can execute for the same run, and the report belongs to
+// exactly one of them. Pass the frozen report here only when the normal exit
+// was skipped, so the report is never duplicated and never silently dropped.
+func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string, llmIdentity *jsonLLMIdentity,
+	retryReport *llm.RetryReport) {
 	var toolTotal int64
 	for _, v := range ag.ToolCalls() {
 		toolTotal += v
@@ -462,7 +669,8 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 				Total:  toolTotal,
 				ByTool: ag.ToolCalls(),
 			},
-			SessionID: ag.SessionID(),
+			SessionID:   ag.SessionID(),
+			RetryReport: retryReport,
 		}
 		enc := json.NewEncoder(os.Stderr)
 		enc.SetIndent("", "  ")
@@ -476,12 +684,19 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 		fmt.Fprintf(os.Stderr, ", session %s", id)
 	}
 	fmt.Fprintln(os.Stderr)
+	// Text mode has no structured envelope, so the report follows the usage
+	// line on the same stream.
+	outputRetryReportText(os.Stderr, retryReport)
 }
 
-// outputPreview renders a preview in the requested output format. Any format
-// other than "json" falls back to the human view, matching how the rest of the
-// CLI treats --format.
+// outputPreview renders a preview in the requested output format. sarif is
+// rejected with an error because a preview contains file/rule metadata, not
+// review findings — there is no SARIF result to emit, and a differently-shaped
+// document would confuse consumers expecting a SARIF report.
 func outputPreview(p *agent.DiffPreview, outputFormat string, out io.Writer) error {
+	if outputFormat == "sarif" {
+		return fmt.Errorf("--format sarif is not supported with --preview: SARIF output requires completed review findings")
+	}
 	if outputFormat == "json" {
 		return outputPreviewJSON(p, out)
 	}
@@ -514,48 +729,56 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 	}
 	pathFmt := fmt.Sprintf("%%-%ds", maxPathLen)
 
-	fmt.Fprintf(out, "\nPreview: %d file(s) changed  |  \033[32m+%d\033[0m  \033[31m-%d\033[0m\n",
-		p.TotalFiles, p.TotalInsertions, p.TotalDeletions)
+	fmt.Fprintf(out, "\nPreview: %d file(s) changed  |  %s  %s\n", p.TotalFiles,
+		colorf("\033[32m", "+%d", p.TotalInsertions),
+		colorf("\033[31m", "-%d", p.TotalDeletions))
 
 	if p.ReviewableCount > 0 {
-		fmt.Fprintf(out, "\n\033[1mWill review (%d):\033[0m\n", p.ReviewableCount)
+		fmt.Fprintf(out, "\n%s\n", colorf("\033[1m", "Will review (%d):", p.ReviewableCount))
 		for _, e := range p.Entries {
 			if !e.WillReview {
 				continue
 			}
-			fmt.Fprintf(out, "  %s  "+pathFmt+" \033[32m+%-4d\033[0m \033[31m-%-4d\033[0m\n",
-				statusBadge(e.Status), sanitizeTerminal(e.Path), e.Insertions, e.Deletions)
+			// The counts are padded before colorizing so the columns stay aligned
+			// whether or not the escape sequences are present.
+			fmt.Fprintf(out, "  %s  "+pathFmt+" %s %s\n",
+				statusBadge(e.Status), sanitizeTerminal(e.Path),
+				colorf("\033[32m", "+%-4d", e.Insertions),
+				colorf("\033[31m", "-%-4d", e.Deletions))
 		}
 	}
 
 	if p.ExcludedCount > 0 {
-		fmt.Fprintf(out, "\n\033[1mExcluded from review (%d):\033[0m\n", p.ExcludedCount)
+		fmt.Fprintf(out, "\n%s\n", colorf("\033[1m", "Excluded from review (%d):", p.ExcludedCount))
 		for _, e := range p.Entries {
 			if e.WillReview {
 				continue
 			}
-			fmt.Fprintf(out, "  %s  "+pathFmt+" \033[2m(%s)\033[0m\n",
-				statusBadge(e.Status), sanitizeTerminal(e.Path), sanitizeTerminal(string(e.ExcludeReason)))
+			fmt.Fprintf(out, "  %s  "+pathFmt+" %s\n",
+				statusBadge(e.Status), sanitizeTerminal(e.Path),
+				colorf("\033[2m", "(%s)", sanitizeTerminal(string(e.ExcludeReason))))
 		}
 	}
 
 	fmt.Fprintln(out)
 }
 
+// statusBadge renders the per-file status tag. The letter carries the meaning,
+// so with color disabled the bare "[A]"/"[M]"/... form is still unambiguous.
 func statusBadge(status string) string {
 	switch status {
 	case "added":
-		return "\033[32m[A]\033[0m"
+		return colorize("\033[32m", "[A]")
 	case "modified":
-		return "\033[33m[M]\033[0m"
+		return colorize("\033[33m", "[M]")
 	case "deleted":
-		return "\033[31m[D]\033[0m"
+		return colorize("\033[31m", "[D]")
 	case "renamed":
-		return "\033[36m[R]\033[0m"
+		return colorize("\033[36m", "[R]")
 	case "binary":
-		return "\033[35m[B]\033[0m"
+		return colorize("\033[35m", "[B]")
 	case "scan":
-		return "\033[34m[S]\033[0m"
+		return colorize("\033[34m", "[S]")
 	default:
 		return "[?]"
 	}

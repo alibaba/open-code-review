@@ -5,12 +5,17 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
+
+func runPreview(cc *commonContext, opts reviewOptions, out io.Writer) error {
+	return runPreviewContext(context.Background(), cc, opts, out)
+}
 
 func TestRunPreview(t *testing.T) {
 	dir := initTestGitRepo(t)

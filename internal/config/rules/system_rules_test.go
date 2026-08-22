@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/bmatcuk/doublestar/v4"
+
+	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
 )
 
 func TestExpandBraces_NoBraces(t *testing.T) {
@@ -94,6 +96,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"crates/service/Cargo.toml", "Cargo Manifest Hygiene"},
 		{"scripts/deploy.py", "Mutable Default Arguments"},
 		{"src/app/main.py", "Mutable Default Arguments"},
+		{"notebook.ipynb", "Mutable Default Arguments"},
+		{"src/notebooks/data.ipynb", "Mutable Default Arguments"},
 		{"public/index.php", "PHP Review Principles"},
 		{"templates/account/profile.phtml", "Web and Template Security Boundaries"},
 		{"locale/zh_CN/LC_MESSAGES/messages.po", "Placeholder Mismatch"},
@@ -115,6 +119,22 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/parser.nim", "Memory and Lifetime Safety"},
 		{"scripts/build.nims", "Memory and Lifetime Safety"},
 		{"project.nimble", "Memory and Lifetime Safety"},
+		{"Sources/App/ContentView.swift", "Swift Review Principles"},
+		{"MyApp/Models/UserStore.swift", "Swift Review Principles"},
+		{"ChattyFit/ChattyFit/Views/WorkoutSessionView.swift", "SwiftUI State and Lifecycle"},
+		{"src/Main.elm", "Elm Architecture"},
+		{"app/Page/Home.elm", "Elm Architecture"},
+		{"lib/config.libsonnet", "Late Binding"},
+		{"environments/prod/main.jsonnet", "Late Binding"},
+		{"jsonnet/kube-prometheus/components/grafana.libsonnet", "Late Binding"},
+		{"src/foo.R", "R Code Review Principles"},
+		{"analysis/plots.r", "R Code Review Principles"},
+		{"src/main.zig", "Illegal Behavior"},
+		{"build.zig", "Illegal Behavior"},
+		{"idl/service.thrift", "Field IDs and Wire Compatibility"},
+		{"if/common.thrift", "Field IDs and Wire Compatibility"},
+		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
+		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
 	}
 
 	for _, tt := range tests {
@@ -138,8 +158,8 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 		"readme.md",
 		"docs/architecture.txt",
 		"Makefile",
-		"ios/ViewController.swift",
 		"ios/ViewController.m",
+		"ios/ViewController.mm",
 	}
 
 	for _, path := range paths {
@@ -677,8 +697,8 @@ func TestFileFilter_IsUserIncluded_EmptyInclude(t *testing.T) {
 
 func TestFileFilter_CaseInsensitive(t *testing.T) {
 	f := &FileFilter{
-		Include: []string{"src/**/*.java"},
-		Exclude: []string{"**/generated/**"},
+		Include: []string{"src/**/*.java", "**/CHANGELOG.md"},
+		Exclude: []string{"**/generated/**", "README.md", "**/*.{Go,Java}"},
 	}
 
 	if !f.IsUserIncluded("SRC/Main/Foo.Java") {
@@ -686,6 +706,17 @@ func TestFileFilter_CaseInsensitive(t *testing.T) {
 	}
 	if !f.IsUserExcluded("SRC/Generated/Api.java") {
 		t.Errorf("expected case-insensitive exclude match")
+	}
+
+	// Verify patterns containing uppercase letters also match.
+	if !f.IsUserIncluded("docs/CHANGELOG.md") {
+		t.Errorf("expected uppercase include pattern to match case-insensitively")
+	}
+	if !f.IsUserExcluded("README.md") {
+		t.Errorf("expected uppercase exclude pattern to match case-insensitively")
+	}
+	if !f.IsUserExcluded("pkg/Main.JAVA") {
+		t.Errorf("expected brace-expanded uppercase pattern to match case-insensitively")
 	}
 }
 
@@ -1248,7 +1279,10 @@ func TestResolveRuleEntries_SymlinkSafety(t *testing.T) {
 	// The extension check on the resolved path should reject .json.
 	symlinkPath := filepath.Join(dir, "evil.md")
 	if err := os.Symlink(sensitiveFile, symlinkPath); err != nil {
-		t.Fatal(err)
+		// Creating a symlink on Windows needs SeCreateSymbolicLinkPrivilege, which
+		// an unelevated CI account does not have. Same skip the other symlink tests
+		// in this repo already use.
+		t.Skipf("cannot create symlink: %v", err)
 	}
 
 	entries := []ProjectRuleEntry{
@@ -1537,6 +1571,18 @@ func referencedRuleFiles(t *testing.T) map[string]bool {
 	return refs
 }
 
+// globExt reports the extension a brace-expanded glob selects on, and whether
+// the glob is extension-based at all. Only a trailing "*.<ext>" segment with no
+// further wildcard qualifies, so filename globs ("**/pom.xml") and infix globs
+// ("**/*mapper*.xml") are skipped rather than misread as extension claims.
+func globExt(pattern string) (string, bool) {
+	base := pattern[strings.LastIndex(pattern, "/")+1:]
+	if !strings.HasPrefix(base, "*.") || strings.ContainsAny(base[2:], "*?[{") {
+		return "", false
+	}
+	return base[1:], true
+}
+
 func TestSystemRulesIntegrity(t *testing.T) {
 	rule, err := LoadDefault()
 	if err != nil {
@@ -1576,6 +1622,28 @@ func TestSystemRulesIntegrity(t *testing.T) {
 			}
 			if !refs[e.Name()] {
 				t.Errorf("rule_docs/%s is not referenced by system_rules.json (orphan file)", e.Name())
+			}
+		}
+	})
+
+	t.Run("extensions_are_allowlisted", func(t *testing.T) {
+		// A rule doc is dead unless its extension also passes the allowlist:
+		// scan/agent.go and agent/preview.go drop a file on its extension
+		// before any rule is resolved. Only extension globs are checked;
+		// filename globs like "**/pom.xml" carry no extension claim.
+		for _, pr := range rule.PathRules {
+			for _, p := range expandBraces(pr.Pattern) {
+				ext, ok := globExt(p)
+				if !ok {
+					continue
+				}
+				t.Run(p, func(t *testing.T) {
+					if !allowedext.IsAllowedExt(ext) {
+						t.Errorf("path_rule_map glob %q targets extension %q, which is missing from "+
+							"internal/config/allowlist/supported_file_types.json, so its rule can never run",
+							pr.Pattern, ext)
+					}
+				})
 			}
 		}
 	})

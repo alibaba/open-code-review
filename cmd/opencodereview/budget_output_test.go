@@ -46,7 +46,7 @@ func TestEmitRunResult_JSONBudgetStopIsPartial(t *testing.T) {
 		},
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -97,7 +97,7 @@ func TestEmitRunResult_JSONBudgetDoesNotOverrideLegacyStatus(t *testing.T) {
 		budgetExceeded: true,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -125,7 +125,7 @@ func TestEmitRunResult_JSONNoBudgetIsSuccess(t *testing.T) {
 		totalTokens:   15,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -155,7 +155,7 @@ func TestEmitFailureUsage_TextEmitsStructuredRecord(t *testing.T) {
 		sessionID:     "sess-fail-1",
 	}
 	got := captureStderr(t, func() {
-		emitFailureUsage(ag, 42*time.Second, "text", nil)
+		emitFailureUsage(ag, 42*time.Second, "text", nil, nil)
 	})
 	for _, want := range []string{"usage on failure", "1500 total tokens", "5 tool calls", "budget_exceeded=false", "sess-fail-1"} {
 		if !strings.Contains(got, want) {
@@ -176,7 +176,7 @@ func TestEmitFailureUsage_JSONEmitsStructuredRecord(t *testing.T) {
 	}
 	identity := &jsonLLMIdentity{Provider: "openai", Model: "gpt-5.4"}
 	got := captureStderr(t, func() {
-		emitFailureUsage(ag, 5*time.Second, "json", identity)
+		emitFailureUsage(ag, 5*time.Second, "json", identity, nil)
 	})
 	var out jsonOutput
 	if err := json.Unmarshal([]byte(got), &out); err != nil {
@@ -216,7 +216,7 @@ func TestEmitFailureUsage_BudgetExceededPropagated(t *testing.T) {
 		budgetExceeded: true,
 	}
 	got := captureStderr(t, func() {
-		emitFailureUsage(ag, 3*time.Second, "text", nil)
+		emitFailureUsage(ag, 3*time.Second, "text", nil, nil)
 	})
 	if !strings.Contains(got, "budget_exceeded=true") {
 		t.Errorf("text failure record must reflect budget_exceeded=true; got %q", got)
@@ -229,7 +229,7 @@ func TestEmitFailureUsage_BudgetExceededPropagated(t *testing.T) {
 		budgetExceeded: true,
 	}
 	gotJSON := captureStderr(t, func() {
-		emitFailureUsage(ag2, 3*time.Second, "json", nil)
+		emitFailureUsage(ag2, 3*time.Second, "json", nil, nil)
 	})
 	var out jsonOutput
 	if err := json.Unmarshal([]byte(gotJSON), &out); err != nil {
@@ -250,7 +250,7 @@ func TestEmitRunResult_BudgetExceededFalseOmittedFromJSON(t *testing.T) {
 		totalTokens:   10,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, []model.LlmComment{}, time.Now(), "json", "developer", nil, nil, os.Stdout)
+		err := emitRunResult(context.Background(), ag, []model.LlmComment{}, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

@@ -196,7 +196,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | `{{current_file_path}}` | このファイルの新しいパス。 |
 | `{{plan_guidance}}` | plan 段階の出力。plan がスキップされた場合は削除されます。 |
 | `{{plan_tools}}` | plan 段階のツール定義のプレーンテキスト（`formatToolDefs` でレンダリング）。`PLAN_TASK` の system prompt に使用されます。 |
-| `{{requirement_background}}` | `--background` 引数の内容。 |
+| `{{requirement_background}}` | `--background` または `--background-file` の有効な内容（ファイルが優先）。 |
 | `{{current_system_date_time}}` | 実行時のローカルタイムスタンプ。形式は `YYYY-MM-DD HH:MM`（秒やタイムゾーンなし）。 |
 | `{{context}}` | （圧縮時のみ）要約対象の XML レンダリング済みメッセージ。 |
 | `{{path}}` | ファイルパス。`REVIEW_FILTER_TASK` に使用されます。 |

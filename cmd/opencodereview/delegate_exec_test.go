@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/delegate"
@@ -25,13 +26,23 @@ func captureDelegateStdout(t *testing.T, fn func()) []byte {
 	os.Stdout = w
 	defer func() { os.Stdout = orig }()
 
+	// Drain while fn runs. Reading only after fn returns caps the capture at
+	// whatever the pipe buffer holds: 64 KiB on Linux, far less on a Windows
+	// anonymous pipe, and a payload past that blocks the writer forever.
+	var out []byte
+	var readErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		out, readErr = io.ReadAll(r)
+	}()
 	fn()
 	if err := w.Close(); err != nil {
 		t.Fatalf("close stdout writer: %v", err)
 	}
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read stdout: %v", err)
+	<-done
+	if readErr != nil {
+		t.Fatalf("read stdout: %v", readErr)
 	}
 	_ = r.Close()
 	return out
@@ -243,8 +254,11 @@ func TestLoadDelegateContext_BackgroundFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadDelegateContext error: %v", err)
 	}
-	if dc.opts.background == "" {
-		t.Error("expected merged background, got empty")
+	if !strings.Contains(dc.opts.background, "extra background") {
+		t.Errorf("expected file content to win, got %q", dc.opts.background)
+	}
+	if strings.Contains(dc.opts.background, "base") {
+		t.Errorf("inline --background should be ignored when --background-file is set, got %q", dc.opts.background)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -269,11 +270,19 @@ func TestExecuteReviewFilter_RemovesComments(t *testing.T) {
 	tmpDir := t.TempDir()
 	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
 
-	filterResp := `["c-1"]`
 	client := &fakeAgentClient{
 		responses: []*llm.ChatResponse{{
 			Choices: []llm.Choice{{
-				Message: llm.ResponseMessage{Content: &filterResp},
+				Message: llm.ResponseMessage{
+					ToolCalls: []llm.ToolCall{{
+						ID:   "call_1",
+						Type: "function",
+						Function: llm.FunctionCall{
+							Name:      "report_incorrect_comments",
+							Arguments: `{"comment_ids":["c-1"]}`,
+						},
+					}},
+				},
 			}},
 			Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
 		}},
@@ -344,6 +353,190 @@ func TestExecuteReviewFilter_LLMError(t *testing.T) {
 	if len(comments) != 1 {
 		t.Errorf("comments should be unchanged on LLM error, got %d", len(comments))
 	}
+}
+
+func TestExecuteReviewFilter_SkipFilter(t *testing.T) {
+	t.Run("AC-1: SkipFilter disables the filter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			SkipFilter:       true,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+code"}, "a.go")
+
+		if client.calls != 0 {
+			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
+		}
+		comments := collector.CommentsForPath("a.go")
+		if len(comments) != 1 {
+			t.Errorf("comments should be unchanged when filter is skipped, got %d", len(comments))
+		}
+	})
+
+	t.Run("AC-2: All comments preserved when skipped", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment 1"})
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment 2"})
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment 3"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			SkipFilter:       true,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+code"}, "a.go")
+
+		comments := collector.CommentsForPath("a.go")
+		if len(comments) != 3 {
+			t.Fatalf("expected 3 comments when filter is skipped, got %d", len(comments))
+		}
+	})
+
+	t.Run("AC-3: Default (no SkipFilter) still runs filter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+
+		client := &fakeAgentClient{
+			responses: []*llm.ChatResponse{{
+				Choices: []llm.Choice{{
+					Message: llm.ResponseMessage{
+						ToolCalls: []llm.ToolCall{{
+							ID:   "call_1",
+							Type: "function",
+							Function: llm.FunctionCall{
+								Name:      "report_incorrect_comments",
+								Arguments: `{"comment_ids":["c-1"]}`,
+							},
+						}},
+					},
+				}},
+				Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+			}},
+		}
+
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "keep this"})
+		collector.Add(model.LlmComment{Path: "a.go", Content: "remove this"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}} path={{path}} diff={{diff}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+code"}, "a.go")
+
+		if client.calls == 0 {
+			t.Error("LLM client should have been called when SkipFilter is false (default)")
+		}
+		comments := collector.CommentsForPath("a.go")
+		if len(comments) != 1 {
+			t.Errorf("expected 1 comment after filter, got %d", len(comments))
+		}
+	})
+
+	t.Run("AC-4: SkipFilter is reached when ReviewFilterTask is non-nil", func(t *testing.T) {
+		// After the nil-template guard, SkipFilter is the next early-return.
+		// With a non-nil ReviewFilterTask + zero comments, the function would
+		// normally fall through to the LLM call; SkipFilter must short-circuit it.
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			SkipFilter:       true,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x"}, "a.go")
+
+		if client.calls != 0 {
+			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
+		}
+		if len(collector.CommentsForPath("a.go")) != 1 {
+			t.Errorf("comments should be unchanged when filter is skipped")
+		}
+	})
+
+	t.Run("AC-5: Skip takes priority over no comments", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+
+		a := New(Args{
+			LLMClient:  client,
+			Model:      "test",
+			Session:    sess,
+			SkipFilter: true,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x"}, "a.go")
+
+		if client.calls != 0 {
+			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
+		}
+	})
 }
 
 func TestExecutePlanPhase(t *testing.T) {
@@ -599,11 +792,21 @@ func TestExecuteReviewFilter_WithTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
 	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
 
-	filterResp := `[]`
 	client := &fakeAgentClient{
 		responses: []*llm.ChatResponse{{
-			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &filterResp}}},
-			Usage:   &llm.UsageInfo{PromptTokens: 5, CompletionTokens: 2},
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{
+					ToolCalls: []llm.ToolCall{{
+						ID:   "call_1",
+						Type: "function",
+						Function: llm.FunctionCall{
+							Name:      "approve_all_comments",
+							Arguments: `{}`,
+						},
+					}},
+				},
+			}},
+			Usage: &llm.UsageInfo{PromptTokens: 5, CompletionTokens: 2},
 		}},
 	}
 
@@ -715,6 +918,39 @@ func TestClassifyItemError(t *testing.T) {
 			if strings.Contains(reason, "sk-LEAKED-SECRET") || strings.Contains(reason, "/home/alice") {
 				t.Errorf("reason leaked raw error text: %q", reason)
 			}
+		})
+	}
+}
+
+// classifyMainLoopStop keeps the unknown class for the empty-round and
+// compression exits, but each reason must name its trigger: in --format json
+// runs the manifest reason is the only stop diagnostic that leaves the runner,
+// so the three non-budget stops must not collapse into one string.
+func TestClassifyMainLoopStop(t *testing.T) {
+	reasons := make(map[string]llmloop.MainLoopStop)
+	for _, tc := range []struct {
+		name       string
+		stop       llmloop.MainLoopStop
+		wantClass  session.FailureClass
+		wantReason string
+	}{
+		{"max_rounds", llmloop.StopMaxRounds, session.FailureBudget, "reached the maximum tool-request rounds without finishing"},
+		{"empty_rounds", llmloop.StopEmptyRounds, session.FailureUnknown, "stopped after repeated rounds without a usable tool result"},
+		{"compression", llmloop.StopCompression, session.FailureUnknown, "stopped because context compression exceeded its threshold"},
+		{"none", llmloop.StopNone, session.FailureUnknown, "main task stopped before completing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			class, reason := classifyMainLoopStop(tc.stop)
+			if class != tc.wantClass {
+				t.Errorf("class = %q, want %q", class, tc.wantClass)
+			}
+			if reason != tc.wantReason {
+				t.Errorf("reason = %q, want %q", reason, tc.wantReason)
+			}
+			if prev, dup := reasons[reason]; dup {
+				t.Errorf("reason %q is shared by %v and %v; stops must stay distinguishable", reason, prev, tc.stop)
+			}
+			reasons[reason] = tc.stop
 		})
 	}
 }

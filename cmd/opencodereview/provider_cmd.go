@@ -6,8 +6,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -227,6 +229,34 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	return nil
 }
 
+// checkAPIKeyRequirement decides whether a provider selection may be saved with
+// no api_key. It mirrors the resolver's precedence (static api_key ->
+// api_key_cmd -> env var), so an already-configured command satisfies the
+// requirement and picking a model for such a provider does not fail and abandon
+// the save. apiKeyCmd is trimmed because the resolver treats a whitespace-only
+// command as unset, so without this a command of "   " would satisfy the check
+// here and then fail resolution with "no api_key or api_key_cmd configured".
+//
+// An ambient-auth provider has no credential to save at all: demanding one would
+// make it impossible to configure, since the credentials live in the AWS chain
+// rather than the config file.
+func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.Provider, isPreset bool) error {
+	if apiKey != "" || strings.TrimSpace(apiKeyCmd) != "" {
+		return nil
+	}
+	switch {
+	case isPreset && preset.AmbientAuth:
+		return nil
+	case isPreset && preset.EnvVar != "":
+		if os.Getenv(preset.EnvVar) == "" {
+			return fmt.Errorf("API key is required for provider %s (configure it, set providers.%s.api_key_cmd, or set $%s)", providerName, providerName, preset.EnvVar)
+		}
+		return nil
+	default:
+		return fmt.Errorf("API key is required for provider %s (configure it or set providers.%s.api_key_cmd)", providerName, providerName)
+	}
+}
+
 func applyOfficialProviderConfig(configPath string, cfg *Config, result providerTUIResult) error {
 	if result.provider == "" {
 		return fmt.Errorf("provider and model are required")
@@ -238,14 +268,8 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 
 	preset, isPreset := llm.LookupProvider(result.provider)
 
-	if result.apiKey == "" {
-		if isPreset && preset.EnvVar != "" {
-			if os.Getenv(preset.EnvVar) == "" {
-				return fmt.Errorf("API key is required for provider %s (configure it or set $%s)", result.provider, preset.EnvVar)
-			}
-		} else {
-			return fmt.Errorf("API key is required for provider %s", result.provider)
-		}
+	if err := checkAPIKeyRequirement(result.provider, result.apiKey, cfg.Providers[result.provider].APIKeyCmd, preset, isPreset); err != nil {
+		return err
 	}
 
 	if cfg.Providers == nil {
@@ -260,7 +284,8 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 	if result.apiKey != "" {
 		entry.APIKey = result.apiKey
 	} else {
-		// Confirmed empty key: clear saved api_key so resolver falls back to $ENV_VAR.
+		// Confirmed empty key: clear saved api_key so the resolver falls back to
+		// api_key_cmd (when set) or $ENV_VAR.
 		entry.APIKey = ""
 	}
 	cfg.Providers[result.provider] = entry
@@ -314,6 +339,12 @@ func runConfigModel() error {
 		if entry, ok := cfg.Providers[cfg.Provider]; ok {
 			currentModel = activeModelForProvider(cfg, cfg.Provider, entry)
 			provider.Models = mergeModelLists(provider.Models, entry.Models)
+			// Surface the effective Base URL: a configured override takes
+			// precedence over the preset default so users can confirm their
+			// gateway is in use from the model picker.
+			if entry.URL != "" {
+				provider.BaseURL = entry.URL
+			}
 		}
 	} else {
 		isCustom = true
@@ -411,4 +442,21 @@ func maskKey(key string) string {
 		return "***"
 	}
 	return key[:4] + "***" + key[len(key)-4:]
+}
+
+// validateBaseURL checks that a provider Base URL has an http or https scheme
+// and a non-empty host, giving the user immediate feedback rather than
+// a runtime failure when the LLM client tries to use it.
+func validateBaseURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid Base URL %q: %w", raw, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("Base URL must use http or https scheme, got %q", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("Base URL %q must include a host", raw)
+	}
+	return nil
 }

@@ -127,9 +127,10 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
+| `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.py` | `python.md`: Python ソースコード。 |
+| `**/*.{py,ipynb}` | `python.md`: Python ソースコード。 |
 | `**/*.{php,phtml}` | `php.md`: PHP ソースと PHP テンプレート。 |
 | `**/*.proto` | `protobuf.md`: Protocol Buffers のワイヤ互換性。 |
 | `**/*.po` | `po.md`: gettext 翻訳ソースカタログ。 |
@@ -139,6 +140,10 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.jl` | `julia.md`: Julia ソースコード。 |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md`: Terraform / HCL。 |
 | `**/*.bicep` | `bicep.md`: Bicep（Azure）テンプレート。 |
+| `**/*.elm` | `elm.md` - Elm ソースコード。 |
+| `**/*.{jsonnet,libsonnet}` | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。 |
+| `**/*.thrift` | `thrift.md`: Apache Thrift IDL のワイヤ互換性。 |
+| `**/*.capnp` | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。 |
 | *(fallback)* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。

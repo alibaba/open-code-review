@@ -445,16 +445,19 @@ func TestReviewItemResumeRoundTrip(t *testing.T) {
 	}
 }
 
-func TestResumeStateValidateOptionsRejectsMismatchedRange(t *testing.T) {
+func TestResumeStateValidateOptionsRejectsMismatchedMode(t *testing.T) {
 	state := &ResumeState{
 		SessionID:  "s1",
 		ReviewMode: ReviewModeRange,
 		DiffFrom:   "main",
 		DiffTo:     "feature",
 	}
-	err := state.ValidateOptions(SessionOptions{ReviewMode: ReviewModeRange, DiffFrom: "main", DiffTo: "other"})
-	if err == nil {
-		t.Fatal("expected mismatch error")
+	if err := state.ValidateOptions(SessionOptions{ReviewMode: ReviewModeCommit, DiffCommit: "abc123"}); err == nil {
+		t.Fatal("expected mode mismatch error")
+	}
+	// Differing ref text under the same mode is not a rejection reason.
+	if err := state.ValidateOptions(SessionOptions{ReviewMode: ReviewModeRange, DiffFrom: "main", DiffTo: "other"}); err != nil {
+		t.Errorf("ref text must not decide admission, got: %v", err)
 	}
 }
 

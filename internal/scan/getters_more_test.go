@@ -17,6 +17,7 @@ func TestScanAgent_SessionID_Persistent(t *testing.T) {
 	sess := session.New(t.TempDir(), "", "model-x", session.SessionOptions{
 		ReviewMode: session.ReviewModeFullScan,
 	})
+	defer func() { _ = sess.Finalize() }()
 	if !sess.HasPersistence() {
 		t.Skip("session persistence unavailable in this environment")
 	}

@@ -16,9 +16,9 @@ function formatNpmDownloads(n: number): string {
   return `${n}`;
 }
 
-// 从字符串中解析数字和前后缀
+// Parse the number plus its surrounding prefix and suffix out of a string
 function parseStatValue(value: string): { prefix: string; number: number; suffix: string } {
-  // 匹配 "> 30%" 等格式
+  // Matches formats such as "> 30%"
   const match = value.match(/^([^\d]*?)(\d+)(.*)$/);
   if (match) {
     return { prefix: match[1], number: parseInt(match[2], 10), suffix: match[3] };
@@ -58,7 +58,7 @@ const CountUpValue: React.FC<{ value: string; isVisible: boolean }> = ({ value, 
   const count = useCountUp(number, 2000, isVisible);
 
   if (number === 0) {
-    // 无法解析数字，直接显示原文
+    // No number could be parsed, render the original text as-is
     return <>{value}</>;
   }
 

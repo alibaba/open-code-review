@@ -100,6 +100,7 @@ func TestDispatchSubtasks_TokenBudgetStopsDispatch(t *testing.T) {
 			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
 		},
 	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
 	a.diffs = makeBudgetDiffs(10)
 	a.currentDate = "2025-06-26 10:00"
 	a.args.Tools.Freeze()
@@ -193,6 +194,7 @@ func TestDispatchSubtasks_TokenBudgetBeforeFirstFileIsFailed(t *testing.T) {
 			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
 		},
 	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
 	a.diffs = makeBudgetDiffs(3)
 	a.currentDate = "2025-06-26 10:00"
 	a.args.Tools.Freeze()
@@ -257,6 +259,7 @@ func TestDispatchSubtasks_UnlimitedBudget(t *testing.T) {
 			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
 		},
 	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
 	a.diffs = makeBudgetDiffs(5)
 	a.currentDate = "2025-06-26 10:00"
 	a.args.Tools.Freeze()

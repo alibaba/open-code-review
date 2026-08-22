@@ -362,7 +362,7 @@ func TestWriteOutError_NilAfterSuccessfulWrite(t *testing.T) {
 func TestEmitRunResult_TextWriteFailurePropagates(t *testing.T) {
 	ag := &mockResultProvider{filesReviewed: 2}
 	w := &lazyFileWriter{path: filepath.Join(t.TempDir(), "no", "such", "out.txt")}
-	if err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil, nil, w); err == nil {
+	if err := emitRunResult(context.Background(), ag, nil, time.Now(), "text", "developer", nil, nil, w, nil); err == nil {
 		t.Fatal("emitRunResult must propagate the output write failure")
 	}
 }

@@ -76,27 +76,62 @@ A convenience installer that wraps the GitHub Release binary download
 machines:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alibaba/open-code-review/main/install.sh | sh
+curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
-It honours two environment variables:
+It honours three environment variables:
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | Where to place the `ocr` binary. |
 | `OCR_VERSION` | latest release | Pin a specific release tag (e.g. `v1.2.3`). |
+| `OCR_GITHUB_MIRROR` | *(unset)* | Download the release binary and its checksum through a GitHub mirror domain (e.g. `gh-proxy.com`). |
 
 The script supports `darwin` and `linux` on `amd64` / `arm64`.
+
+#### Using a GitHub mirror
+
+In regions where network access to GitHub is slow, set `OCR_GITHUB_MIRROR`
+to a mirror domain to download the release binary and its checksum through it:
+
+```bash
+export OCR_GITHUB_MIRROR='YOUR_MIRROR_DOMAIN'
+```
+
+The value must be a bare domain name — no `https://` scheme and no trailing
+slash (`gh-proxy.com`, not `https://gh-proxy.com/`). It is used as a *path
+prefix* mirror: the binary is fetched from
+`https://<mirror>/github.com/alibaba/open-code-review/releases/download/<version>/…`.
+Domain-substitution mirrors (e.g. one that rewrites `github.com` to
+`hub.example.org`) won't match this shape — use a path-prefix mirror instead.
+
+The mirror covers both the release binary and its `sha256sum.txt` checksum.
+Version resolution (when `OCR_VERSION` is unset) still calls the GitHub API
+directly, not the mirror. To skip version resolution entirely, pin a version:
+
+```bash
+export OCR_VERSION='v1.2.3'
+```
+
+> **Security note:** The mirror is a third-party service, so when
+> `OCR_GITHUB_MIRROR` is set both the binary and its `sha256sum.txt` are
+> downloaded from it. A malicious mirror can therefore serve a tampered
+> binary together with a matching checksum; the integrity guarantee does not
+> apply in mirror mode. Verify the downloaded file against the upstream
+> `sha256sum.txt` on the
+> [releases page](https://github.com/alibaba/open-code-review/releases)
+> if you cannot trust the mirror.
 
 On Windows (PowerShell 5.1+), use the PowerShell installer instead:
 
 ```powershell
-irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+irm https://open-codereview.ai/install.ps1 | iex
 ```
 
-It honours the same `OCR_INSTALL_DIR` and `OCR_VERSION` variables (set via
-`$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION`). The default install location is
-`%LOCALAPPDATA%\Programs\ocr`.
+It honours the same `OCR_INSTALL_DIR`, `OCR_VERSION`, and
+`OCR_GITHUB_MIRROR` variables (set via `$env:OCR_INSTALL_DIR` /
+`$env:OCR_VERSION` / `$env:OCR_GITHUB_MIRROR`). The default
+install location is `%LOCALAPPDATA%\Programs\ocr`.
 
 ## GitHub Release binary
 

@@ -39,6 +39,42 @@ type Deps struct {
 	// in scan mode — scan adapters return a synthetic Diff whose
 	// NewFileContent is the whole file and Diff is empty).
 	DiffLookup func(path string) *model.Diff
+
+	// AllDiffs returns every diff this run reviews, for re-filing a comment
+	// whose ExistingCode belongs to a different file than the one it was filed
+	// against (diff.RelocateAcrossFiles). It is the reviewed set rather than
+	// every parsed diff on purpose: re-filing a comment onto a path the run
+	// excluded would point the reader at a file this review never covered.
+	// When nil, cross-file re-filing is skipped and only same-file resolution
+	// applies.
+	AllDiffs func() []model.Diff
+
+	// NewRequestMeta builds the retry-report identity for one logical LLM
+	// request. Non-nil only for review: the retry report describes ocr review,
+	// and this Runner is shared with scan (internal/scan.Agent calls RunPerFile),
+	// so main_task, memory compression and re-location all run under both modes.
+	//
+	// The gate has to be this field rather than a Provider string, because an
+	// empty provider is a legitimate value for an unnamed endpoint — it cannot
+	// double as "identity disabled". Leaving it nil (what scan does) keeps every
+	// request exactly as it was before request identity existed.
+	//
+	// requestNo must be the RequestNo of the session.TaskRecord already created
+	// for this request, so the report joins against the session JSONL.
+	NewRequestMeta func(filePath string, taskType session.TaskType, requestNo int) llm.RequestMeta
+}
+
+// requestCtx returns ctx carrying the identity of one logical LLM request, or
+// ctx unchanged when identity is disabled (scan) or the meta is unusable.
+//
+// Callers must invoke it after AppendTaskRecord and pass that record's
+// RequestNo — the fixed order is AppendTaskRecord -> requestCtx ->
+// CompletionsWithCtx -> SetResponse/SetError.
+func (r *Runner) requestCtx(ctx context.Context, filePath string, taskType session.TaskType, requestNo int) context.Context {
+	if r.deps.NewRequestMeta == nil {
+		return ctx
+	}
+	return llm.WithRequestMeta(ctx, r.deps.NewRequestMeta(filePath, taskType, requestNo))
 }
 
 // Runner is a per-session (across files) executor of the LLM tool-use
@@ -55,11 +91,37 @@ type Runner struct {
 	warnings              []AgentWarning
 	toolCallsMu           sync.Mutex
 	toolCalls             map[string]int64
+	// bg tracks every background goroutine that can still issue an LLM
+	// request after RunPerFile returned. WaitBackground joins them so a
+	// retry-report Freeze at the run boundary cannot observe an
+	// un-finalized request. See WaitBackground.
+	bg sync.WaitGroup
 }
 
 // NewRunner returns a Runner bound to the given dependencies.
 func NewRunner(deps Deps) *Runner {
 	return &Runner{deps: deps}
+}
+
+// WaitBackground blocks until every background job started by this Runner has
+// returned. Background memory compression is the only such job, and
+// cancelPendingCompression cancels it without waiting — its goroutine can
+// therefore still be inside an LLM request after RunPerFile returned. Callers
+// that freeze a retry report at the run boundary must join here first:
+// RetryCollector.Freeze rejects any request that has not been finalized and
+// discards the whole report, which would otherwise be an intermittent race.
+//
+// Every pending job has already been cancelled by the time the last
+// RunPerFile returns (cancelPendingCompression runs as a deferred call on
+// every exit, and triggerAsyncCompression refuses to start a second job while
+// one is pending), so this normally returns quickly — but the wait length
+// ultimately depends on the LLM client honouring context cancellation, and no
+// additional deadline is imposed here: the job already carries its own
+// timeout.
+// Both diff-review and scan modes call this prior to session finalization so
+// background compression goroutines are joined before session_end is written.
+func (r *Runner) WaitBackground() {
+	r.bg.Wait()
 }
 
 // TotalInputTokens returns the accumulated input/prompt tokens from all LLM calls.
@@ -166,6 +228,53 @@ const (
 	StopCompression
 )
 
+// String names the stop for diagnostics — telemetry attributes, log lines and
+// test failure messages. Without it a MainLoopStop formats as a bare integer,
+// which tells the reader nothing about which exit fired.
+func (s MainLoopStop) String() string {
+	switch s {
+	case StopNone:
+		return "none"
+	case StopMaxRounds:
+		return "max_rounds"
+	case StopEmptyRounds:
+		return "empty_rounds"
+	case StopCompression:
+		return "compression"
+	default:
+		return fmt.Sprintf("MainLoopStop(%d)", int(s))
+	}
+}
+
+// Reason is the safe, human-facing sentence for a stop, and the single source of
+// truth for it: the diff-review manifest reason and the scan subtask warning
+// both render this string, so the same stop can never read differently in the
+// two commands' output. Each return is a static literal — never error text, a
+// path or a provider payload — because callers persist it into machine-readable
+// output.
+//
+// Under --format json the [ocr] progress lines that would say which exit fired
+// are discarded by stdout.Quiet(), so this is the only stop diagnostic that
+// survives an ephemeral CI runner. Every stop must therefore read distinctly,
+// including one added to the enum after this was written: the default names the
+// unrecognized value instead of silently reusing the StopNone catch-all, so a
+// new constant announces itself in the artifact rather than hiding behind a
+// message that says nothing.
+func (s MainLoopStop) Reason() string {
+	switch s {
+	case StopNone:
+		return "main task stopped before completing"
+	case StopMaxRounds:
+		return "reached the maximum tool-request rounds without finishing"
+	case StopEmptyRounds:
+		return "stopped after repeated rounds without a usable tool result"
+	case StopCompression:
+		return "stopped because context compression exceeded its threshold"
+	default:
+		return fmt.Sprintf("main task stopped for an unrecognized reason (stop=%d)", int(s))
+	}
+}
+
 // RunPerFile drives the main LLM conversation loop for a single file.
 // It sends messages with the configured tool definitions, executes any
 // tool calls returned by the model, and collects review comments until
@@ -175,6 +284,13 @@ const (
 // MainLoopStop return classifies a non-completed, non-error stop at its trigger
 // point so the caller never has to infer the cause from text or context state.
 func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath string) (bool, MainLoopStop, error) {
+	// Every round of this loop re-sends the growing conversation, so each
+	// request is a prefix extension of the previous one — exactly what
+	// provider prompt caches reuse. Scope the affinity key to this file's
+	// main-task conversation so every round routes to the same cache node.
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.MainTask), newPath))
+
 	toolReqCount := r.deps.Template.MaxToolRequestTimes
 	const maxConsecutiveEmptyRounds = 3
 	consecutiveEmptyRounds := 0
@@ -202,8 +318,12 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
 		startTime := time.Now()
 
+		// Scoped to this round: ctx itself must stay identity-free so each
+		// iteration's meta replaces the previous one instead of nesting.
+		reqCtx := r.requestCtx(ctx, newPath, session.MainTask, rec.RequestNo)
+
 		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
-		resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+		resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 			Model:     r.deps.Model,
 			Messages:  messages,
 			Tools:     r.deps.MainToolDefs,
@@ -303,8 +423,74 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 	if stop == StopMaxRounds {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", newPath)
+		r.runGraceRound(ctx, messages, newPath, sessionID)
 	}
 	return false, stop, nil
+}
+
+// runGraceRound performs one final LLM call after the tool-request budget is
+// exhausted, giving the model a chance to submit any findings it identified
+// but did not yet report via code_comment.
+func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newPath string, sessionID string) {
+	graceDefs := graceRoundToolDefs(r.deps.MainToolDefs)
+	if len(graceDefs) == 0 {
+		return
+	}
+
+	messages = append(messages, llm.NewTextMessage("user",
+		"Your tool-call budget is exhausted. This is your FINAL round. You may ONLY:\n"+
+			"- Call code_comment to submit any findings you have identified but not yet reported.\n"+
+			"- Call task_done if you have nothing more to report.\n"+
+			"No other tools are available. Do not attempt further analysis."))
+
+	if ctx.Err() != nil {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round skipped for %s: context cancelled\n", newPath)
+		return
+	}
+
+	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+		Model:     r.deps.Model,
+		Messages:  messages,
+		Tools:     graceDefs,
+		MaxTokens: r.deps.Template.CompletionTokenLimit(),
+		SessionID: sessionID,
+	})
+	if err != nil {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", newPath, err)
+		return
+	}
+
+	if resp.Usage != nil {
+		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
+		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
+		atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
+		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
+	}
+
+	calls := resp.ToolCalls()
+	if len(calls) == 0 {
+		return
+	}
+
+	fs := r.deps.Session.GetOrCreateFileSession(newPath)
+	rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
+	rec.SetResponse(resp, 0)
+	thinking := resp.ReasoningContent()
+	for _, call := range calls {
+		r.executeToolCall(ctx, newPath, call, rec, thinking)
+	}
+}
+
+// graceRoundToolDefs returns the subset of tool definitions containing only
+// code_comment and task_done.
+func graceRoundToolDefs(defs []llm.ToolDef) []llm.ToolDef {
+	out := make([]llm.ToolDef, 0, 2)
+	for _, d := range defs {
+		if d.Function.Name == "code_comment" || d.Function.Name == "task_done" {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // executeToolCall dispatches a single tool call from the LLM response and
@@ -418,13 +604,42 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 				if r.deps.DiffLookup != nil {
 					d = r.deps.DiffLookup(cm.Path)
 				}
+				// Resolution order: the comment's own file, then a cross-file
+				// search, then the LLM. The cross-file search precedes the LLM
+				// because it needs the Agent's original ExistingCode, which the
+				// LLM step overwrites; and it runs even when d is nil, since a
+				// comment filed against a path this run holds no diff for is
+				// exactly the case that search can still place.
+				located := d != nil && diff.ResolveComment(cm, d)
+				if !located && r.deps.AllDiffs != nil {
+					from := cm.Path
+					if to, ok := diff.RelocateAcrossFiles(cm, r.deps.AllDiffs()); ok {
+						located = true
+						r.RecordWarning("comment_refiled", to, fmt.Sprintf(
+							"comment filed against %s describes code in %s; re-filed", from, to))
+					}
+				}
 				if d != nil {
-					if !diff.ResolveComment(cm, d) && r.deps.Template.ReLocationTask != nil {
+					if !located && r.deps.Template.ReLocationTask != nil {
+						// rlStart stays ahead of prompt construction, which is
+						// where it sat when ReLocateComment built the messages
+						// itself — moving it would silently change what
+						// TaskRecord.Duration measures.
 						rlStart := time.Now()
-						_, resp, msgs := diff.ReLocateComment(rctx, cm, d, r.deps.LLMClient, r.deps.Template.ReLocationTask, r.deps.Model, r.deps.Template.CompletionTokenLimit())
-						if msgs != nil {
+						msgs := diff.BuildReLocationMessages(cm, d, r.deps.Template.ReLocationTask)
+						if len(msgs) > 0 {
 							fs := r.deps.Session.GetOrCreateFileSession(cm.Path)
 							rlRec := fs.AppendTaskRecord(session.ReLocationTask, msgs)
+							// FilePath is cm.Path so it cannot drift from the file
+							// session opened above — that join is what the report
+							// needs. It equals newPath whenever newPath is set,
+							// because the path arg is overridden with it further
+							// up, but reading it from the comment keeps the two
+							// aligned without depending on that.
+							rlCtx := llm.ContextWithSessionKey(rctx,
+								llm.SessionTaskKey(r.deps.Session.SessionID, string(session.ReLocationTask), cm.Path))
+							reqCtx := r.requestCtx(rlCtx, cm.Path, session.ReLocationTask, rlRec.RequestNo)
+							_, resp := diff.ReLocateComment(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
 							if resp != nil {
 								rlRec.SetResponse(resp, time.Since(rlStart))
 								if resp.Usage != nil {

@@ -43,7 +43,9 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | 名称 | プロトコル | Base URL | API key 環境変数 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
+| `bedrock` | anthropic-bedrock | `aws_region` から決定 | —（AWS 認証情報チェーン） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
@@ -52,19 +54,86 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `hy-tokenplan` | openai | `https://api.lkeap.cloud.tencent.com/plan/v3` | `TENCENT_HUNYUAN_TOKENPLAN_KEY` |
 | `iflytek` | openai | `https://spark-api-open.xf-yun.com/v1` | `SPARK_API_KEY` |
 | `kimi` | openai | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` |
+| `kimi-global` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_GLOBAL_API_KEY` |
 | `z-ai` | openai | `https://open.bigmodel.cn/api/paas/v4` | `Z_AI_API_KEY` |
 | `mimo` | openai | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` |
 | `minimax` | openai | `https://api.minimax.io/v1` | `MINIMAX_GLOBAL_API_KEY` |
 | `minimax-cn` | openai | `https://api.minimaxi.com/v1` | `MINIMAX_API_KEY` |
 | `baidu-qianfan` | openai | `https://qianfan.baidubce.com/v2` | `QIANFAN_API_KEY` |
+| `siliconflow`  | openai | `https://api.siliconflow.com/v1` | `SILICONFLOW_GLOBAL_API_KEY` |
 | `siliconflow-cn`  | openai | `https://api.siliconflow.cn/v1` | `SILICONFLOW_API_KEY` |
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
+| `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
+
+### 組み込み provider の Base URL を上書きする
+
+各組み込み provider にはプリセット Base URL があります（上表を参照）。
+組み込み provider を別のエンドポイントに向けるには——例えば、プリセット
+デフォルト `http://localhost:4000/v1` とは異なることが多い自前 LiteLLM
+ゲートウェイなど——`providers.<name>.url` を設定します：
+
+```bash
+ocr config set provider                   litellm
+ocr config set model                      openai/gpt-5.4
+ocr config set providers.litellm.api_key  "$LITELLM_API_KEY"
+ocr config set providers.litellm.url      https://gateway.internal:8000/v1
+```
+
+設定した `url` はプリセット Base URL より優先されます。
+`providers.<name>.url` が未設定（または削除）の場合、OCR はプリセット
+デフォルトにフォールバックします——エンドポイントが異なる場合のみ設定すればよいです。
+
+### AWS Bedrock
+
+`bedrock` は `anthropic` と同じ Messages API を話しますが、API key を持たせる
+代わりに標準の AWS 認証情報チェーンから SigV4 署名を行い、ホストはリージョンが
+決めます。設定すべき `api_key` はなく、署名の代わりとして受け付けることも
+ありません。
+
+```bash
+ocr config set provider                      bedrock
+ocr config set model                         us.anthropic.claude-sonnet-4-6
+ocr config set providers.bedrock.aws_region  us-west-2
+ocr config set providers.bedrock.aws_profile example-profile
+```
+
+| フィールド | 意味 |
+|---|---|
+| `providers.bedrock.aws_region` | リクエストを処理する `bedrock-runtime` ホストのリージョン。未設定なら `AWS_REGION` または有効なプロファイルにフォールバックします。 |
+| `providers.bedrock.aws_profile` | 認証情報を解決する名前付きプロファイル。未設定なら `AWS_PROFILE` または周囲のチェーンにフォールバックします。 |
+
+どちらも任意です。未設定なら他の AWS ツールと同様に標準チェーンが決めます。
+明示的に固定しておくと、先に `AWS_PROFILE` をエクスポートしなくても実行を
+再現でき、既定値が異なる CI ランナーで特に効きます。
+
+モデル識別子はアカウント**および**リージョンにスコープされるため、OCR が同梱
+する一覧は出発点であって閉じた集合ではありません。アカウントで有効な推論
+プロファイル ID やアプリケーション推論プロファイル ARN は、一覧になくても
+受け付けられます。`aws bedrock list-inference-profiles --region <region>` で
+そのアカウントが提供するものを確認できます。なお新しいファミリーでは
+`-v1:0` のようなバージョンサフィックスは無効です。
+
+bedrock には設定された URL がなく、ホストはリージョンが決めるため、
+`ocr llm test` は URL の代わりにリージョンとプロファイルを表示します。
+
+```
+Source: provider:bedrock
+Region: us-east-1
+Profile: example-profile
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+`llm.protocol` および `OCR_LLM_PROTOCOL` では bedrock を選べ**ません**。この
+ブロックは URL とトークンを 1 つずつ記述するもので、リージョンやプロファイルを
+置く場所がなく、bedrock はそこにある値をどちらも使いません。そのため黙って
+無視するのではなく、明示的に拒否されます。
 
 ### カスタム provider
 
 上記の表にない provider 名はすべてカスタムとみなされ、少なくとも `url` と
 `protocol` を指定する必要があります（`protocol` は `anthropic`、`openai`、
-または `openai-responses`）。
+`openai-responses`、または `anthropic-bedrock`）。
 
 ```bash
 ocr config set provider                             my-gateway
@@ -83,6 +152,18 @@ ocr config set custom_providers.openai-responses-gateway.url          https://ap
 ocr config set custom_providers.openai-responses-gateway.protocol     openai-responses
 ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
+```
+
+`anthropic-bedrock` プロトコルのカスタム provider に `url` は不要です（ホストは
+リージョンが決めます）。組み込みと同じ AWS フィールドを取れるので、2 つめの
+リージョンやプロファイルを別エントリとして持たせられます。
+
+```bash
+ocr config set provider                                bedrock-eu
+ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
+ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
+ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
+ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
 ```
 
 `url` には API の Base URL または完全な `/responses` エンドポイントのどちらを指定してもよく、OCR がどちらの形式も正規化します。
@@ -127,6 +208,54 @@ Ollama は API key を無視しますが、カスタム provider は空でない
   }
 }
 ```
+
+### API key をコマンドで取得する
+
+key を設定ファイルに保存する代わりに、`api_key_cmd` で実行時にシークレット
+マネージャー（1Password、`pass`、`gopass` など）から取得できます。前後の空白を
+除いた 1 行の stdout が key になります。レガシーの `llm` ブロックにも同等の
+`auth_token_cmd` があります。
+
+```bash
+ocr config set providers.anthropic.api_key_cmd "op read op://dev/anthropic/api-key"
+```
+
+OS 標準のキーリングも同じ方法で使えます。OS に付属するコマンドをそのまま指定
+すれば、key は `config.json` ではなく Keychain や Secret Service に保存されます。
+
+```bash
+# macOS Keychain
+ocr config set providers.anthropic.api_key_cmd \
+  "security find-generic-password -s ocr-anthropic -w"
+
+# Linux（Secret Service: GNOME Keyring、KWallet など）
+ocr config set providers.anthropic.api_key_cmd \
+  "secret-tool lookup service ocr-anthropic"
+```
+
+優先順位：静的な `api_key` が常に優先されます（両方設定されている場合はコマンドを
+無視し、警告を表示します）。それ以外の場合は `api_key_cmd` を実行します。どちらも
+設定されていない場合のみ、OCR は provider の環境変数にフォールバックします。
+
+コマンドは `ocr` 実行ごとに 1 回実行され、成功する必要があります。非ゼロ終了、
+空の出力、複数行の出力、64KiB を超える出力はいずれもハードエラーです（OCR が黙って
+フォールバックすることはありません）。コマンドはプロンプトへの応答時間も含めて
+60 秒以内に完了する必要があります。コマンドは端末の stdin と stderr を引き継ぐため、
+対話的なプロンプト（pinentry、Touch ID）は表示も応答も可能です。コマンドが stdout
+パイプを保持したままバックグラウンドのデーモン（`gpg-agent`、初回起動時の `op`
+デーモン）を残すと、認証情報は取得できるものの `ocr` の実行ごとにパイプが閉じるのを
+5 秒余分に待つことになるため、デーモンの出力をリダイレクト（`>/dev/null 2>&1`）
+してください。
+
+Windows ではコマンドは `sh` ではなく `cmd.exe` 経由で実行されるため、一方向けに
+書いたコマンドは通常そのままでは移植できません。`%VAR%` と `^` は `cmd.exe` の
+メタ文字であり、`$VAR` の展開や `\` によるエスケープは適用されません。引用符付きの
+引数はそのまま渡されるため、`op read "op://Private/My Vault/api-key"` は記述どおりに
+動作します。
+
+この値は shell コマンドとして実行されるため、`config.json` は信頼された入力です。
+自分の所有のまま、他のユーザーが書き込めない状態に保ってください（OCR は `0600`
+で書き込みます）。
 
 ### 追加のリトライ対象ステータスコード
 
@@ -211,6 +340,27 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 
 ```bash
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
+```
+
+### プロンプトキャッシュのセッションアフィニティ
+
+OCR はすべての LLM 会話ごとに、レビューセッションとその中のタスクにスコープされた
+プロンプトキャッシュ・アフィニティキー（`<セッションID>-<タスク種別>-<スコープハッシュ>`）を
+導出します。プロンプトキャッシュはプレフィックス単位でマッチするため、会話ごとのキーは、
+成長していく各会話（例：ファイルごとのレビューツールループ）を、実行全体を 1 つの
+ホットキーに固定する代わりに、一貫したキャッシュノードに保ちます。キーのセッション ID
+プレフィックスにより、プロバイダー側のキャッシュログを `ocr session` の記録と照合できます。
+
+オプトインするには、プロバイダーがキーを期待する場所の `extra_headers` または
+`extra_body` の値に `{ocr_session_key}` テンプレート変数を埋め込みます。OCR は
+リクエストごとにその会話のキーに置換し、設定がなければ何も送信しません：
+
+```bash
+# OpenAI 形式のリクエストボディフィールドで渡す場合（例：prompt_cache_key）
+ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_key}"}'
+
+# HTTP ヘッダーで渡す場合（例：x-session-affinity）
+ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
 ```
 
 ## レビュー言語を設定する

@@ -36,7 +36,7 @@ inputs:
   language:
     description: >-
       Review output language, written via `ocr config set language`
-      (e.g. English, 中文). No env var exists for this.
+      (e.g. English, Chinese). No env var exists for this.
     required: false
     default: 'English'
   llm_timeout:
@@ -276,7 +276,7 @@ runs:
         OCR_RULE: ${{ inputs.rule }}
       shell: bash
       run: |
-        ARGS=(--from "${MERGE_BASE}" --to "${HEAD_SHA}" --format json)
+        ARGS=(--from "${MERGE_BASE}" --to "${HEAD_SHA}" --audience agent --format json)
         [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
         [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")

@@ -173,7 +173,7 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "fail"}}
-	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", nil, false, nil, os.Stdout)
+	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", nil, false, nil, os.Stdout, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -286,7 +286,7 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	comments := []model.LlmComment{{Path: "b.go", Content: "test"}}
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "c.go", Message: "failed"}}
-	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", nil, false, nil, os.Stdout)
+	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", nil, false, nil, os.Stdout, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -324,7 +324,7 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "warning", Message: "something"}}
-	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", nil, false, nil, os.Stdout)
+	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", nil, false, nil, os.Stdout, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -388,11 +388,20 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stdout = w
+	// Drain while fn runs. Reading only after fn returns caps the capture at
+	// whatever the pipe buffer holds: 64 KiB on Linux, far less on a Windows
+	// anonymous pipe, and a payload past that blocks the writer forever.
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = buf.ReadFrom(r)
+	}()
 	fn()
 	_ = w.Close()
 	os.Stdout = old
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
+	<-done
+	_ = r.Close()
 	return buf.String()
 }
 
@@ -406,11 +415,19 @@ func captureStderr(t *testing.T, fn func()) string {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stderr = w
+	// Drained concurrently for the same reason as captureStdout: an undrained
+	// pipe deadlocks fn once its output exceeds the OS pipe buffer.
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = buf.ReadFrom(r)
+	}()
 	fn()
 	_ = w.Close()
 	os.Stderr = old
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
+	<-done
+	_ = r.Close()
 	return buf.String()
 }
 

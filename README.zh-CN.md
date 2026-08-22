@@ -50,6 +50,8 @@ Open Code Review 是一款 AI 驱动的代码审查 CLI 工具。它的前身是
 
 基于真实场景的代码审查基准测试，从 **50** 个热门开源仓库中精选 **200** 个真实的 Pull Request，覆盖 **10** 种编程语言——由 80+ 位资深工程师交叉标注验证（共 **1,505** 个标注缺陷）。
 
+<a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> 在 Hugging Face 上探索 AACR-Bench 数据集</a>。
+
 | 指标 | 含义 | 为什么重要 |
 |------|------|-----------|
 | **F1** | 准确率与召回率的调和均值 | 综合衡量审查质量的最佳单一指标 |

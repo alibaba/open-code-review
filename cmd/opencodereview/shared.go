@@ -159,13 +159,27 @@ type llmRuntime struct {
 	PlanToolDefs []llm.ToolDef
 	MainToolDefs []llm.ToolDef
 	Collector    *tool.CommentCollector
-	AppCfg       *Config
+	// RetryCollector observes every LLM HTTP attempt this run makes. It is
+	// created here rather than on the session or the agent because the client is
+	// built before either exists, and it is per-run rather than package-level so
+	// two runs in one process cannot share data. scan gets one too; its requests
+	// carry no RequestMeta, so every attempt is dropped and the frozen report is
+	// nil.
+	RetryCollector *llm.RetryCollector
+	AppCfg         *Config
 	// RuntimeConfig holds the allowlisted, non-secret runtime settings (protocol,
 	// sanitized endpoint host, language, timeout) derived from the resolved
 	// endpoint and app config, for the run manifest's runtime_config_sha256. It
 	// never carries the token or full URL.
 	RuntimeConfig agent.RuntimeConfig
 }
+
+// newRetryCollector builds the per-run retry collector. It is a variable so a
+// test can hand back a collector whose invariants are already violated, which is
+// the only way to exercise the Freeze construction-error branch from the
+// outside: every production path finalizes every logical request on every exit,
+// so a well-behaved run can never produce one.
+var newRetryCollector = llm.NewRetryCollector
 
 // loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
 // from the user's default config path (applying the configured language to
@@ -201,14 +215,17 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 		return nil, fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
 
+	retryCollector := newRetryCollector()
+
 	return &llmRuntime{
-		Client:       llm.NewLLMClient(ep),
-		Model:        ep.Model,
-		Provider:     ep.Provider,
-		PlanToolDefs: planToolDefs,
-		MainToolDefs: mainToolDefs,
-		Collector:    tool.NewCommentCollector(),
-		AppCfg:       appCfg,
+		Client:         llm.NewLLMClient(ep, retryCollector),
+		Model:          ep.Model,
+		Provider:       ep.Provider,
+		PlanToolDefs:   planToolDefs,
+		MainToolDefs:   mainToolDefs,
+		Collector:      tool.NewCommentCollector(),
+		RetryCollector: retryCollector,
+		AppCfg:         appCfg,
 		RuntimeConfig: agent.RuntimeConfig{
 			Protocol:     ep.Protocol,
 			EndpointHost: sanitizeEndpointHost(ep.URL),
@@ -261,20 +278,41 @@ func excludeToolDef(defs []llm.ToolDef, name string) []llm.ToolDef {
 	return out
 }
 
-// quietHandle wraps a stdout.Quiet() restorer so callers can `defer
-// q.Restore()` for safety while emitRunResult restores it early when the
-// agent-text audience needs the trace summary on the user's terminal.
-// Restore is idempotent.
+// quietHandle wraps the restorer returned by whichever stdout redirection
+// newQuietHandle chose, so callers can `defer q.Restore()` for safety while
+// emitRunResult restores it early when the agent-text audience needs the trace
+// summary on the user's terminal. Restore is idempotent.
 type quietHandle struct {
 	fn func()
 }
 
-// newQuietHandle silences stdout when outputFormat=="json" or
-// audience=="agent"; otherwise the returned handle is a no-op restorer.
+// isMachineReadable reports whether the output format writes a structured
+// document to stdout that must not be interleaved with progress text. Both
+// json and sarif move [ocr] progress lines off stdout and suppress the trace
+// summary, which is already carried inside the document.
+func isMachineReadable(outputFormat string) bool {
+	return outputFormat == "json" || outputFormat == "sarif"
+}
+
+// newQuietHandle routes [ocr] progress lines away from stdout so they cannot
+// corrupt a structured output document. What it does depends on why stdout
+// needs protecting:
+//
+//   - audience=="agent": the caller wants no progress at all, so progress is
+//     discarded regardless of format.
+//   - machine-readable format with a human audience: the human still asked to
+//     watch the run, so progress is redirected to stderr rather than dropped.
+//     Every result document (json, sarif, text) is written straight to
+//     os.Stdout and never through stdout.Writer(), so stdout stays a single
+//     parseable document while stderr carries the live progress.
+//   - otherwise: no-op, progress stays on stdout.
 func newQuietHandle(outputFormat, audience string) *quietHandle {
 	h := &quietHandle{}
-	if outputFormat == "json" || audience == "agent" {
+	switch {
+	case audience == "agent":
 		h.fn = stdout.Quiet()
+	case isMachineReadable(outputFormat):
+		h.fn = stdout.Swap(os.Stderr)
 	}
 	return h
 }
@@ -545,6 +583,13 @@ type resumeInfoProvider interface {
 //
 // q is the silencing handle returned by newQuietHandle; pass nil if no
 // silencing was set up (in which case the early restore is a no-op).
+//
+// retryReport is the frozen LLM retry report, or nil when there is nothing to
+// report (a clean run, or a caller that produces no report at all — `ocr scan`
+// never freezes one). It is passed as a parameter rather than added to
+// ResultProvider because the collector belongs to llmRuntime, not to the
+// agent; putting it on the interface would force internal/scan.Agent to
+// implement a method that is always nil.
 func emitRunResult(
 	ctx context.Context,
 	ag ResultProvider,
@@ -554,6 +599,7 @@ func emitRunResult(
 	q *quietHandle,
 	llmIdentity *jsonLLMIdentity,
 	out io.Writer,
+	retryReport *llm.RetryReport,
 ) error {
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
@@ -566,20 +612,35 @@ func emitRunResult(
 	traceID := telemetry.TraceIDFromContext(ctx)
 	manifest := ag.RunManifest()
 
-	if outputFormat == "json" && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
-		return outputJSONNoFiles(traceID, llmIdentity, out)
+	// JSON and SARIF are machine-readable formats written to stdout; they
+	// share the same suppression of trace summaries and early stdout restore.
+	machineReadable := isMachineReadable(outputFormat)
+
+	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
+		if outputFormat == "json" {
+			return outputJSONNoFiles(traceID, llmIdentity, out)
+		}
+		return outputSARIF(nil, Version, ag.Warnings(), manifest, out)
 	}
 
 	// Agent-text audiences need stdout back before PrintTraceSummary so the
 	// summary line lands on their terminal.
-	if audience == "agent" && outputFormat != "json" {
+	if audience == "agent" && !machineReadable {
 		q.Restore()
 	}
 
-	if outputFormat != "json" {
-		telemetry.PrintTraceSummary(ag.FilesReviewed(), int64(len(comments)),
-			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
-			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration)
+	if !machineReadable {
+		telemetry.PrintTraceSummary(telemetry.TraceSummary{
+			FilesReviewed:     ag.FilesReviewed(),
+			CommentsGenerated: int64(len(comments)),
+			InputTokens:       ag.TotalInputTokens(),
+			OutputTokens:      ag.TotalOutputTokens(),
+			TotalTokens:       ag.TotalTokensUsed(),
+			CacheReadTokens:   ag.TotalCacheReadTokens(),
+			CacheWriteTokens:  ag.TotalCacheWriteTokens(),
+			Duration:          duration,
+			SessionID:         ag.SessionID(),
+		})
 	}
 
 	if outputFormat == "json" {
@@ -590,9 +651,16 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out)
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport)
+	}
+	if outputFormat == "sarif" {
+		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
 	}
 	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
+	// Between the comments/warnings block and the project summary: the report is
+	// run-level diagnostics about how the comments were obtained, so it reads
+	// after them but must not separate the summary from the end of output.
+	outputRetryReportText(out, retryReport)
 	if summary := ag.ProjectSummary(); summary != "" {
 		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", summary)
 	}

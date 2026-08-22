@@ -70,7 +70,7 @@ var delegateRuleCmd = &cobra.Command{
 	Use:   "rule [flags] <path...>",
 	Short: "Output resolved review rules grouped by content",
 	Long:  "Outputs resolved review rules grouped by content. Accepts multiple paths.",
-	Args:  cobra.MinimumNArgs(1),
+	Args:  minimumArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateDelegateOptions(&delegateRuleOpts); err != nil {
 			return err
@@ -105,22 +105,11 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 		return nil, err
 	}
 
-	// Resolve background from --background-file if set.
-	if opts.backgroundFile != "" {
-		bgPath := resolveBackgroundFilePath(cc.RepoDir, opts.backgroundFile)
-		fileBackground, err := loadBackgroundFile(bgPath)
-		if err != nil {
-			return nil, err
-		}
-		opts.background = mergeBackground(opts.background, fileBackground)
+	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
+	if err != nil {
+		return nil, err
 	}
-
-	// Auto-fill background from commit message when reviewing a single commit.
-	if opts.commit != "" && opts.background == "" {
-		if msg, err := getCommitMessage(cc.RepoDir, opts.commit); err == nil && msg != "" {
-			opts.background = msg
-		}
-	}
+	opts.background = bg
 
 	return &delegateContext{cc: cc, opts: opts}, nil
 }

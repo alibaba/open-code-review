@@ -45,7 +45,7 @@ var configSetCmd = &cobra.Command{
 	Use:     "set <key> <value>",
 	Short:   "Set a configuration value",
 	Example: "  ocr config set llm.model claude-opus-4-6\n  ocr config set provider anthropic",
-	Args:    cobra.ExactArgs(2),
+	Args:    exactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runConfigSet(args[0], args[1])
 	},
@@ -56,7 +56,7 @@ var configUnsetCmd = &cobra.Command{
 	Short:   "Remove a configuration value",
 	Long:    "Remove a provider, custom_providers.<name>, or mcp_servers.<name>.",
 	Example: "  ocr config unset provider\n  ocr config unset custom_providers.my-provider\n  ocr config unset mcp_servers.github",
-	Args:    cobra.ExactArgs(1),
+	Args:    exactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runConfigUnset(args[0])
 	},
@@ -126,8 +126,7 @@ func runConfigSet(key, value string) error {
 	}
 
 	displayValue := value
-	normalizedKey := strings.ToLower(strings.ReplaceAll(key, "_", ""))
-	if strings.HasSuffix(normalizedKey, "apikey") || strings.HasSuffix(normalizedKey, "authtoken") {
+	if shouldMaskConfigValue(key) {
 		displayValue = maskKey(value)
 	}
 	fmt.Printf("Set %s = %s\n", key, displayValue)
@@ -135,6 +134,15 @@ func runConfigSet(key, value string) error {
 		fmt.Fprint(os.Stderr, warning)
 	}
 	return nil
+}
+
+// shouldMaskConfigValue reports whether the echoed value of a config key holds a
+// secret and must be masked. Matching on the normalized suffix covers both
+// snake_case and Go field spellings of api_key/auth_token at any path depth,
+// while the *_cmd variants stay unmasked: a command line is not a secret.
+func shouldMaskConfigValue(key string) bool {
+	normalizedKey := strings.ToLower(strings.ReplaceAll(key, "_", ""))
+	return strings.HasSuffix(normalizedKey, "apikey") || strings.HasSuffix(normalizedKey, "authtoken")
 }
 
 func runConfigUnset(key string) error {
@@ -285,6 +293,7 @@ func deleteCustomProvider(cfg *Config, name string) (bool, error) {
 // ProviderEntry holds per-provider configuration in the providers map.
 type ProviderEntry struct {
 	APIKey       string            `json:"api_key,omitempty"`
+	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
 	URL          string            `json:"url,omitempty"`
 	Protocol     string            `json:"protocol,omitempty"`
 	Model        string            `json:"model,omitempty"`
@@ -294,6 +303,16 @@ type ProviderEntry struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+
+	// AWSProfile and AWSRegion pin the credentials and region for providers that
+	// authenticate from the AWS chain (bedrock). Both are optional — without
+	// them the standard chain decides, as with any other AWS tool. They must
+	// exist here as well as in the resolver's own view of the file: config is
+	// unmarshalled into this struct and marshalled back on every write, so a
+	// field missing from it is silently dropped from a hand-written config the
+	// first time any config command runs.
+	AWSProfile string `json:"aws_profile,omitempty"`
+	AWSRegion  string `json:"aws_region,omitempty"`
 }
 
 // MCPServerConfig holds configuration for a single MCP server.
@@ -325,6 +344,7 @@ type Config struct {
 type LlmConfig struct {
 	URL          string            `json:"url,omitempty"`
 	AuthToken    string            `json:"auth_token,omitempty"`
+	AuthTokenCmd string            `json:"auth_token_cmd,omitempty"` // shell command whose stdout is the auth token; used when auth_token is empty
 	AuthHeader   string            `json:"auth_header,omitempty"`
 	Model        string            `json:"model,omitempty"`
 	Protocol     string            `json:"protocol,omitempty"`      // canonical protocol name; takes priority over UseAnthropic
@@ -386,6 +406,7 @@ var supportedConfigKeys = []string{
 	"mcp_servers.<name>.<field>",
 	"llm.url",
 	"llm.auth_token",
+	"llm.auth_token_cmd",
 	"llm.auth_header",
 	"llm.model",
 	"llm.protocol",
@@ -463,6 +484,8 @@ func setConfigValue(cfg *Config, key, value string) error {
 		cfg.Llm.URL = value
 	case "llm.auth_token", "llm.AuthToken":
 		cfg.Llm.AuthToken = value
+	case "llm.auth_token_cmd", "llm.AuthTokenCmd":
+		cfg.Llm.AuthTokenCmd = value
 	case "llm.auth_header", "llm.AuthHeader":
 		normalized, err := llm.NormalizeAuthHeader(value)
 		if err != nil {
@@ -481,6 +504,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		normalized := llm.NormalizeProtocol(value)
 		if err := llm.ValidateProtocol(normalized); err != nil {
 			return err
+		}
+		// The llm block is a single url + token endpoint. Bedrock needs neither
+		// and has nowhere here to put a region or a profile, so it is refused at
+		// the point of setting rather than accepted and ignored at resolve time.
+		if normalized == llm.ProtocolAnthropicBedrock {
+			return fmt.Errorf("llm.protocol cannot be %q: bedrock derives its host from aws_region and signs with the AWS credential chain, so it has no use for llm.url or llm.auth_token; run `ocr config set provider bedrock` instead", normalized)
 		}
 		cfg.Llm.Protocol = normalized
 		// Mirror use_anthropic so older binaries that predate llm.protocol
@@ -546,23 +575,40 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\nProtocol values: anthropic, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
 
-func applyProviderField(entry *ProviderEntry, field, key, value string) error {
+func applyProviderField(providerName string, entry *ProviderEntry, field, key, value string) error {
 	switch field {
 	case "api_key":
 		entry.APIKey = value
+	case "api_key_cmd":
+		entry.APIKeyCmd = value
 	case "url":
-		entry.URL = value
+		trimmedURL := strings.TrimSpace(value)
+		if trimmedURL != "" {
+			if err := validateBaseURL(trimmedURL); err != nil {
+				return fmt.Errorf("invalid URL for %s: %w", key, err)
+			}
+		}
+		entry.URL = trimmedURL
 	case "protocol":
 		normalized := llm.NormalizeProtocol(value)
 		if err := llm.ValidateProtocol(normalized); err != nil {
 			return err
 		}
 		entry.Protocol = normalized
+		// Switching away from bedrock leaves aws_region/aws_profile as dead
+		// config that reads as applied but nothing reads it — clear both, the
+		// same way the TUI drops url/api_key/auth_header when switching onto
+		// bedrock (see cpAmbientProtocol in provider_tui.go).
+		if normalized != llm.ProtocolAnthropicBedrock && (entry.AWSRegion != "" || entry.AWSProfile != "") {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: clearing aws_region/aws_profile on %q: protocol %q does not use the AWS credential chain\n", providerName, normalized)
+			entry.AWSRegion = ""
+			entry.AWSProfile = ""
+		}
 	case "model":
 		entry.Model = value
 	case "models":
@@ -598,10 +644,54 @@ func applyProviderField(entry *ProviderEntry, field, key, value string) error {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		entry.RetryCodes = codes
+	case "aws_region", "aws_profile":
+		normalized, err := normalizeAWSSetting(field, key, value)
+		if err != nil {
+			return err
+		}
+		if !providerAcceptsAWSSettings(providerName, entry) {
+			return fmt.Errorf("%s does not apply to provider %q: aws_region and aws_profile are only used by providers that authenticate from the AWS credential chain (protocol %s)", field, providerName, llm.ProtocolAnthropicBedrock)
+		}
+		if field == "aws_region" {
+			entry.AWSRegion = normalized
+		} else {
+			entry.AWSProfile = normalized
+		}
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
 	}
 	return nil
+}
+
+// providerAcceptsAWSSettings reports whether aws_region / aws_profile mean
+// anything for this provider. Storing them anywhere else would be dead config
+// that reads as applied, so it is rejected instead.
+//
+// The entry's own protocol decides whenever it sets one: a preset's protocol can
+// be overridden per entry (see tryProviderConfig), so `protocol: openai` on the
+// bedrock preset would otherwise still accept AWS settings that nothing reads.
+// Only when the entry is silent does the preset's own AmbientAuth flag answer.
+func providerAcceptsAWSSettings(providerName string, entry *ProviderEntry) bool {
+	if entry.Protocol != "" {
+		return llm.NormalizeProtocol(entry.Protocol) == llm.ProtocolAnthropicBedrock
+	}
+	preset, isPreset := llm.LookupProvider(providerName)
+	return isPreset && preset.AmbientAuth
+}
+
+// normalizeAWSSetting trims the value and rejects the shapes AWS itself will
+// not accept. Region names are deliberately not checked against a fixed list:
+// AWS adds regions faster than any embedded list stays correct, and a wrong one
+// already surfaces at request time.
+func normalizeAWSSetting(field, key, value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil // clearing the field hands the decision back to the AWS chain
+	}
+	if strings.ContainsAny(trimmed, " \t\n") {
+		return "", fmt.Errorf("invalid %s for %s: %q contains whitespace", field, key, value)
+	}
+	return trimmed, nil
 }
 
 func parseModelListValue(value string) ([]string, error) {
@@ -681,7 +771,7 @@ func setProviderValue(cfg *Config, key, value string) error {
 		cfg.Providers = make(map[string]ProviderEntry)
 	}
 	entry := cfg.Providers[parts[1]]
-	if err := applyProviderField(&entry, parts[2], key, value); err != nil {
+	if err := applyProviderField(parts[1], &entry, parts[2], key, value); err != nil {
 		return err
 	}
 	cfg.Providers[parts[1]] = entry
@@ -701,7 +791,7 @@ func setCustomProviderField(cfg *Config, name, field, key, value string) error {
 		cfg.CustomProviders = make(map[string]ProviderEntry)
 	}
 	entry := cfg.CustomProviders[name]
-	if err := applyProviderField(&entry, field, key, value); err != nil {
+	if err := applyProviderField(name, &entry, field, key, value); err != nil {
 		return err
 	}
 	cfg.CustomProviders[name] = entry

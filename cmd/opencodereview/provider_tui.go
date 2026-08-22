@@ -53,11 +53,22 @@ const (
 	manualStepAuthHeader
 )
 
-// cpProtocols lists the protocol options offered in the Custom and Manual
-// provider forms. Using the canonical names from protocol.go means whatever the
-// user picks flows through resolver normalization unchanged and is written to
-// config verbatim.
+// cpProtocols lists the protocol options offered in the Custom provider form.
+// Using the canonical names from protocol.go means whatever the user picks
+// flows through resolver normalization unchanged and is written to config
+// verbatim.
 var cpProtocols = []string{
+	llm.ProtocolAnthropic,
+	llm.ProtocolOpenAIChatCompletions,
+	llm.ProtocolOpenAIResponses,
+	llm.ProtocolAnthropicBedrock,
+}
+
+// manualProtocols lists the protocol options offered in the Manual form, which
+// writes llm.url and llm.auth_token. Bedrock is deliberately absent: that block
+// holds no region or profile, and bedrock uses neither the url nor the token it
+// does hold, so the resolver rejects the combination outright.
+var manualProtocols = []string{
 	llm.ProtocolAnthropic,
 	llm.ProtocolOpenAIChatCompletions,
 	llm.ProtocolOpenAIResponses,
@@ -181,9 +192,29 @@ type providerTUIModel struct {
 // its index in cpProtocols. Unknown / empty values default to the OpenAI Chat
 // Completions entry (index 1) to preserve legacy behavior where any non-anthropic
 // protocol was treated as OpenAI.
+// cpAmbientProtocol reports whether the protocol selected in the Custom form
+// authenticates from the environment rather than from a stored credential. Such
+// a provider has no url, no api key and no auth header to collect, so the form
+// ends at the protocol step instead of walking three fields that would be
+// written as dead config.
+func (m providerTUIModel) cpAmbientProtocol() bool {
+	return cpProtocols[m.cpProtocolIdx] == llm.ProtocolAnthropicBedrock
+}
+
 func cpProtocolIndex(protocol string) int {
+	return protocolIndexIn(cpProtocols, protocol)
+}
+
+// manualProtocolIndex is cpProtocolIndex for the Manual form's shorter list. A
+// config that names bedrock in llm.protocol is unusable there and lands on the
+// default rather than an out-of-range index; the resolver reports why.
+func manualProtocolIndex(protocol string) int {
+	return protocolIndexIn(manualProtocols, protocol)
+}
+
+func protocolIndexIn(list []string, protocol string) int {
 	normalized := llm.NormalizeProtocol(protocol)
-	for i, p := range cpProtocols {
+	for i, p := range list {
 		if p == normalized {
 			return i
 		}
@@ -365,7 +396,7 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 		// protocols including openai-responses); fall back to use_anthropic for
 		// configs written before llm.protocol existed.
 		if cfg.Llm.Protocol != "" {
-			m.manualProtocolIdx = cpProtocolIndex(cfg.Llm.Protocol)
+			m.manualProtocolIdx = manualProtocolIndex(cfg.Llm.Protocol)
 		} else if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic {
 			m.manualProtocolIdx = 0 // anthropic
 		} else {
@@ -907,11 +938,48 @@ func officialProviderEnvKeySet(p llm.Provider) bool {
 	return p.EnvVar != "" && os.Getenv(p.EnvVar) != ""
 }
 
+// officialAPIKeyRequiredError mirrors the wording applyOfficialProviderConfig
+// uses for the same failure, so the interactive and non-interactive paths name
+// the same options in the same order (static key -> api_key_cmd -> env var).
 func officialAPIKeyRequiredError(p llm.Provider) string {
-	if p.EnvVar != "" {
-		return fmt.Sprintf("API key is required (or set $%s)", p.EnvVar)
+	// Each alternative is independently gated: a provider with no Name still gets
+	// the env-var hint, and vice versa. Naming api_key_cmd here is the point --
+	// the step used to reject a provider that resolves fine through a command.
+	var alternatives []string
+	if p.Name != "" {
+		alternatives = append(alternatives, fmt.Sprintf("set providers.%s.api_key_cmd", p.Name))
 	}
-	return "API key is required"
+	if p.EnvVar != "" {
+		alternatives = append(alternatives, fmt.Sprintf("set $%s", p.EnvVar))
+	}
+	if len(alternatives) == 0 {
+		return "API key is required"
+	}
+	return fmt.Sprintf("API key is required (configure it, %s)", strings.Join(alternatives, ", or "))
+}
+
+// apiKeyCmdForStep returns the api_key_cmd already configured for the provider
+// the API-key step is editing, reading the same config entry loadExistingAPIKey
+// reads the static key from. The step serves the Official and Custom tabs; the
+// Manual tab has its own form and uses llm.auth_token_cmd instead.
+//
+// Trimmed because the resolver treats a whitespace-only command as unset (see
+// tryOCRConfig). Returning it verbatim would let this step accept an empty API
+// key on the strength of an `api_key_cmd` of "   ", saving a config the resolver
+// then rejects with "no api_key or api_key_cmd configured".
+func (m providerTUIModel) apiKeyCmdForStep() string {
+	switch m.activeTab {
+	case tabOfficial:
+		if m.existingCfg == nil {
+			return ""
+		}
+		return strings.TrimSpace(m.existingCfg.Providers[m.currentProvider().Name].APIKeyCmd)
+	case tabCustom:
+		if cp, ok := m.selectedCustomProvider(); ok {
+			return strings.TrimSpace(m.customProviderEntry(cp.name, cp.entry).APIKeyCmd)
+		}
+	}
+	return ""
 }
 
 func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
@@ -921,12 +989,26 @@ func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	if !m.apiKeyMasked && strings.TrimSpace(m.apiKeyInput.Value()) != "" {
 		return true, ""
 	}
+	// Resolver precedence is static key -> api_key_cmd -> env var, so an already
+	// configured command satisfies the requirement: the field renders blank for
+	// such a provider and must still be confirmable.
+	if m.apiKeyCmdForStep() != "" {
+		return true, ""
+	}
 	if m.activeTab == tabOfficial {
 		p := m.currentProvider()
+		if p.AmbientAuth {
+			// Reachable when an existing config is edited: an empty key is the
+			// correct state for a provider that signs from the AWS chain.
+			return true, ""
+		}
 		if officialProviderEnvKeySet(p) {
 			return true, ""
 		}
 		return false, officialAPIKeyRequiredError(p)
+	}
+	if cp, ok := m.selectedCustomProvider(); ok && cp.name != "" {
+		return false, fmt.Sprintf("API key is required (configure it or set custom_providers.%s.api_key_cmd)", cp.name)
 	}
 	return false, "API key is required"
 }
@@ -1046,7 +1128,17 @@ func authHeaderFormError(raw string) string {
 	)
 }
 
-const manualAuthTokenRequiredError = "Auth token is required (whitespace-only input is not accepted)"
+const manualAuthTokenRequiredError = "Auth token is required (configure it or set llm.auth_token_cmd; whitespace-only input is not accepted)"
+
+// manualAuthTokenCmd returns the configured llm.auth_token_cmd, which the
+// resolver runs when llm.auth_token is empty. Trimmed for the same reason as
+// apiKeyCmdForStep: the resolver treats a whitespace-only command as unset.
+func (m providerTUIModel) manualAuthTokenCmd() string {
+	if m.existingCfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.existingCfg.Llm.AuthTokenCmd)
+}
 
 func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 	switch m.cpStep {
@@ -1068,6 +1160,9 @@ func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 		m.cpStep = cpStepProtocol
 		return m, nil
 	case cpStepProtocol:
+		if m.cpAmbientProtocol() {
+			return m.finishCustomForm()
+		}
 		m.cpStep = cpStepBaseURL
 		return m, m.cpURLInput.Focus()
 	case cpStepBaseURL:
@@ -1092,31 +1187,38 @@ func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cpAuthInput.Blur()
-		if m.editingCustom {
-			r := m.result()
-			if err := m.applyEditCustomProviderSave(); err != nil {
-				return m, nil
-			}
-			// Edit succeeded — drop the user into the model list for this provider.
-			m.editingCustom = false
-			m.editTargetName = ""
-			m.apiKeyInput.SetValue("")
-			m.apiKeyMasked = false
-			m.apiKeyOriginal = ""
-			if idx := m.findCustomIdx(r.provider); idx >= 0 {
-				m.customIdx = idx
-			}
-			m.step = stepModel
-			m.prepareModelSelection(r.provider, m.customProviderEntry(r.provider, ProviderEntry{}).Model)
-			return m, nil
-		}
-		if m.creatingCustom {
-			return m.applyCreateCustomProvider()
-		}
-		m.confirmed = true
-		return m, tea.Quit
+		return m.finishCustomForm()
 	}
 	return m, nil
+}
+
+// finishCustomForm saves the Custom provider form. It runs from the auth-header
+// step for a token-based protocol and from the protocol step for an ambient one,
+// which has nothing further to collect.
+func (m providerTUIModel) finishCustomForm() (tea.Model, tea.Cmd) {
+	if m.editingCustom {
+		r := m.result()
+		if err := m.applyEditCustomProviderSave(); err != nil {
+			return m, nil
+		}
+		// Edit succeeded — drop the user into the model list for this provider.
+		m.editingCustom = false
+		m.editTargetName = ""
+		m.apiKeyInput.SetValue("")
+		m.apiKeyMasked = false
+		m.apiKeyOriginal = ""
+		if idx := m.findCustomIdx(r.provider); idx >= 0 {
+			m.customIdx = idx
+		}
+		m.step = stepModel
+		m.prepareModelSelection(r.provider, m.customProviderEntry(r.provider, ProviderEntry{}).Model)
+		return m, nil
+	}
+	if m.creatingCustom {
+		return m.applyCreateCustomProvider()
+	}
+	m.confirmed = true
+	return m, tea.Quit
 }
 
 func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
@@ -1149,6 +1251,9 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 		Protocol:   r.protocol,
 		AuthHeader: r.authHeader,
 		APIKey:     strings.TrimSpace(m.apiKeyInput.Value()),
+	}
+	if r.protocol == llm.ProtocolAnthropicBedrock {
+		entry.APIKey = ""
 	}
 	m.existingCfg.CustomProviders[r.provider] = entry
 
@@ -1184,6 +1289,7 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 	out := ProviderEntry{
 		APIKey:     v.APIKey,
+		APIKeyCmd:  v.APIKeyCmd,
 		URL:        v.URL,
 		Protocol:   v.Protocol,
 		Model:      v.Model,
@@ -1191,6 +1297,8 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		AuthHeader: v.AuthHeader,
 		TimeoutSec: v.TimeoutSec,
 		RetryCodes: append([]int(nil), v.RetryCodes...),
+		AWSProfile: v.AWSProfile,
+		AWSRegion:  v.AWSRegion,
 	}
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
@@ -1260,6 +1368,11 @@ func (m *providerTUIModel) applyEditCustomProviderSave() error {
 	entry.AuthHeader = r.authHeader
 	if key, edited := m.customAPIKeyForSave(); edited {
 		entry.APIKey = key
+	}
+	// Switching an entry to an ambient protocol drops the key it no longer uses,
+	// rather than leaving a live credential in a file nothing reads it from.
+	if entry.Protocol == llm.ProtocolAnthropicBedrock {
+		entry.APIKey = ""
 	}
 	// If name changed, delete old key
 	if r.editTargetName != "" && r.editTargetName != r.provider {
@@ -1401,7 +1514,7 @@ func (m providerTUIModel) updateManualForm(key string, msg tea.KeyPressMsg) (tea
 				}
 				return m, nil
 			case "down", "j":
-				if m.manualProtocolIdx < len(cpProtocols)-1 {
+				if m.manualProtocolIdx < len(manualProtocols)-1 {
 					m.manualProtocolIdx++
 				}
 				return m, nil
@@ -1616,7 +1729,9 @@ func (m providerTUIModel) handleManualFormEnter() (tea.Model, tea.Cmd) {
 		m.manualStep = manualStepAuthToken
 		return m, m.manualTokenInput.Focus()
 	case manualStepAuthToken:
-		if strings.TrimSpace(m.manualTokenInput.Value()) == "" && m.manualTokenOriginal == "" {
+		// Same precedence as the provider tabs: an already configured
+		// llm.auth_token_cmd stands in for a typed or saved token.
+		if strings.TrimSpace(m.manualTokenInput.Value()) == "" && m.manualTokenOriginal == "" && m.manualAuthTokenCmd() == "" {
 			m.formError = manualAuthTokenRequiredError
 			return m, nil
 		}
@@ -1740,6 +1855,14 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 		if err := m.syncSessionModelSelection(); err != nil {
 			m.formError = err.Error()
 			return m, nil
+		}
+		if m.activeTab == tabOfficial && m.currentProvider().AmbientAuth {
+			// An ambient-auth provider has no key to collect, so the model step
+			// is the last one. Showing an API-key prompt that must be left blank
+			// would read as a step the user failed to complete.
+			m.formError = ""
+			m.confirmed = true
+			return m, tea.Quit
 		}
 		m.step = stepAPIKey
 		m.formError = ""
@@ -1868,13 +1991,21 @@ func (m providerTUIModel) result() providerTUIResult {
 				apiKey = m.apiKeyOriginal
 			}
 			authHeader, _ := llm.NormalizeAuthHeader(m.cpAuthInput.Value())
+			url := m.cpURLInput.Value()
+			// An ambient protocol collects none of these. Clearing them also
+			// covers switching an existing entry over to one: the url the
+			// previous protocol needed is dead config under bedrock, and leaving
+			// it behind is how a stale host outlives the change that removed it.
+			if m.cpAmbientProtocol() {
+				url, apiKey, authHeader = "", "", ""
+			}
 			r := providerTUIResult{
 				provider:       m.cpNameInput.Value(),
 				apiKey:         apiKey,
 				isCustom:       true,
 				isEdit:         m.editingCustom,
 				editTargetName: m.editTargetName,
-				url:            m.cpURLInput.Value(),
+				url:            url,
 				protocol:       protocol,
 				authHeader:     authHeader,
 			}
@@ -1918,7 +2049,10 @@ func (m providerTUIModel) result() providerTUIResult {
 		return providerTUIResult{}
 
 	case tabManual:
-		apiKey := m.manualTokenInput.Value()
+		// Trim like the Official and Custom tabs: a whitespace-only token must
+		// never persist, or it wins precedence over a working auth_token_cmd
+		// and sends "Authorization: Bearer  ".
+		apiKey := strings.TrimSpace(m.manualTokenInput.Value())
 		if m.manualTokenMasked || (apiKey == "" && m.manualTokenOriginal != "") {
 			apiKey = m.manualTokenOriginal
 		}
@@ -1928,7 +2062,7 @@ func (m providerTUIModel) result() providerTUIResult {
 			url:        m.manualURLInput.Value(),
 			model:      m.manualModelInput.Value(),
 			apiKey:     apiKey,
-			protocol:   cpProtocols[m.manualProtocolIdx],
+			protocol:   manualProtocols[m.manualProtocolIdx],
 			authHeader: authHeader,
 		}
 	}
@@ -2115,9 +2249,13 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 	fields := []field{
 		{"Provider name", m.cpNameInput.Value(), m.cpStep == cpStepName},
 		{"Protocol", cpProtocols[m.cpProtocolIdx], m.cpStep == cpStepProtocol},
-		{"Base URL", m.cpURLInput.Value(), m.cpStep == cpStepBaseURL},
-		{"API Key", strings.Repeat("*", len(m.apiKeyInput.Value())), m.cpStep == cpStepAPIKey},
-		{"Auth Header", m.cpAuthInput.Value(), m.cpStep == cpStepAuthHeader},
+	}
+	if !m.cpAmbientProtocol() {
+		fields = append(fields,
+			field{"Base URL", m.cpURLInput.Value(), m.cpStep == cpStepBaseURL},
+			field{"API Key", strings.Repeat("*", len(m.apiKeyInput.Value())), m.cpStep == cpStepAPIKey},
+			field{"Auth Header", m.cpAuthInput.Value(), m.cpStep == cpStepAuthHeader},
+		)
 	}
 
 	for _, f := range fields {
@@ -2135,6 +2273,9 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 						cur := "      "
 						s.WriteString(cur + tuiItemStyle.Render(proto) + "\n")
 					}
+				}
+				if m.cpAmbientProtocol() {
+					s.WriteString(tuiDimStyle.Render("    credentials come from the AWS chain; pin a region or profile with `ocr config set custom_providers."+m.cpNameInput.Value()+".aws_region <r>`") + "\n")
 				}
 			case cpStepBaseURL:
 				s.WriteString("    " + m.cpURLInput.View() + "\n")
@@ -2194,7 +2335,7 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 
 	fields := []field{
 		{"URL", m.manualURLInput.Value(), m.manualStep == manualStepURL},
-		{"Protocol", cpProtocols[m.manualProtocolIdx], m.manualStep == manualStepProtocol},
+		{"Protocol", manualProtocols[m.manualProtocolIdx], m.manualStep == manualStepProtocol},
 		{"Model", m.manualModelInput.Value(), m.manualStep == manualStepModel},
 		{"Auth Token", strings.Repeat("*", len(m.manualTokenInput.Value())), m.manualStep == manualStepAuthToken},
 		{"Auth Header", m.manualAuthHeaderInput.Value(), m.manualStep == manualStepAuthHeader},
@@ -2207,7 +2348,7 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 			case manualStepURL:
 				s.WriteString("    " + m.manualURLInput.View() + "\n")
 			case manualStepProtocol:
-				for i, proto := range cpProtocols {
+				for i, proto := range manualProtocols {
 					if i == m.manualProtocolIdx {
 						cur := "    " + tuiCursorStyle.Render(tuiCursor) + " "
 						s.WriteString(cur + tuiSelectedItemStyle.Render(proto) + "\n")
@@ -2222,6 +2363,9 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 				s.WriteString("    " + m.manualTokenInput.View() + "\n")
 				if m.manualTokenMasked && m.manualTokenOriginal != "" {
 					s.WriteString(tuiDimStyle.Render("    "+savedSecretReplaceHint(m.manualTokenOriginal)) + "\n")
+				}
+				if m.manualAuthTokenCmd() != "" {
+					s.WriteString(tuiDimStyle.Render(keyCmdConfiguredHintLine("    ", "llm.auth_token_cmd")) + "\n")
 				}
 			case manualStepAuthHeader:
 				s.WriteString("    " + m.manualAuthHeaderInput.View() + "\n")
@@ -2325,6 +2469,14 @@ func (m providerTUIModel) viewAPIKey(s *strings.Builder) {
 		s.WriteString("\n")
 	}
 
+	// Mirrors the env-var hint below: the step is already satisfied, so say so
+	// rather than leaving an empty field that looks unconfigured.
+	if m.apiKeyCmdForStep() != "" {
+		s.WriteString("\n")
+		s.WriteString(tuiDimStyle.Render(keyCmdConfiguredHintLine("  ", "api_key_cmd")))
+		s.WriteString("\n")
+	}
+
 	if m.activeTab == tabOfficial {
 		provider := m.currentProvider()
 		if envKey := os.Getenv(provider.EnvVar); envKey != "" {
@@ -2401,6 +2553,28 @@ func officialAPIKeyEnvSetHint(envVar string, hasSavedKey bool) string {
 
 func officialAPIKeyEnvSetHintLine(envVar string, hasSavedKey bool) string {
 	return "  " + officialAPIKeyEnvSetHint(envVar, hasSavedKey)
+}
+
+// keyCmdConfiguredHint explains why this step accepts an empty field. A
+// provider configured only by command renders a blank input -- the command line
+// is not the secret, but it is also not the value being edited here -- so
+// without this the user has no way to tell a credential is already wired up,
+// and no way to know that leaving the field empty is the correct action.
+// keyLabel names the config key so the hint points at what to edit instead.
+//
+// The command itself is deliberately not echoed. It is usually a bare reference
+// (`op read op://...`), but nothing stops a user from inlining a secret into it
+// (`VAULT_TOKEN=hvs.xxx vault kv get ...`), and this wizard masks every other
+// credential it displays -- printing one user-authored string verbatim into
+// screenshots and terminal recordings is the one hole in that. Naming the config
+// key is what the hint is for and is enough to identify the command: there is
+// exactly one per provider, so the user knows which value to go read or edit.
+func keyCmdConfiguredHint(keyLabel string) string {
+	return fmt.Sprintf("%s is set; leave empty to keep using it.", keyLabel)
+}
+
+func keyCmdConfiguredHintLine(indent, keyLabel string) string {
+	return indent + keyCmdConfiguredHint(keyLabel)
 }
 
 // --- Styles ---
@@ -2905,7 +3079,12 @@ func (m modelTUIModel) View() tea.View {
 	var s strings.Builder
 	s.WriteString("\n")
 	s.WriteString(tuiTitleStyle.Render(fmt.Sprintf("  Select a model (%s)", m.provider.DisplayName)))
-	s.WriteString("\n\n")
+	s.WriteString("\n")
+	if m.provider.BaseURL != "" {
+		s.WriteString(tuiDimStyle.Render(fmt.Sprintf("  Base URL: %s", m.provider.BaseURL)))
+		s.WriteString("\n")
+	}
+	s.WriteString("\n")
 
 	models := m.displayModels()
 	for i, model := range models {
