@@ -237,7 +237,7 @@ func TestRenderMessages(t *testing.T) {
 	}
 }
 
-func TestFilterLargeScans(t *testing.T) {
+func TestSelectScanItems_Large(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	tpl.MaxTokens = 40 // threshold = 32
 	a := newAgentForTest(t, tpl)
@@ -249,7 +249,7 @@ func TestFilterLargeScans(t *testing.T) {
 		{Path: "huge.go", Content: huge},
 		{Path: "b.go", Content: short},
 	}
-	out := a.filterLargeScans(in)
+	out := selectScanItemsForTest(t, a, in)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 kept, got %d", len(out))
 	}
@@ -272,11 +272,11 @@ func exactNTokens(t *testing.T, n int) string {
 	return s
 }
 
-// TestFilterLargeScans_Boundary pins the 80% threshold exactly: with
+// TestSelectScanItems_LargeBoundary pins the 80% threshold exactly: with
 // MaxTokens=100 the limit is 80, so an 80-token item is kept and an 81-token
-// one is dropped. TestFilterLargeScans above uses margins wide enough to pass
+// one is dropped. TestSelectScanItems_Large above uses margins wide enough to pass
 // at any threshold, so it does not pin the value.
-func TestFilterLargeScans_Boundary(t *testing.T) {
+func TestSelectScanItems_LargeBoundary(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	tpl.MaxTokens = 100 // threshold = 80
 	a := newAgentForTest(t, tpl)
@@ -285,7 +285,7 @@ func TestFilterLargeScans_Boundary(t *testing.T) {
 		{Path: "at-limit.go", Content: exactNTokens(t, 80)},
 		{Path: "over-limit.go", Content: exactNTokens(t, 81)},
 	}
-	out := a.filterLargeScans(in)
+	out := selectScanItemsForTest(t, a, in)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 kept, got %d", len(out))
 	}
@@ -294,7 +294,7 @@ func TestFilterLargeScans_Boundary(t *testing.T) {
 	}
 }
 
-func TestFilterLargeScans_NoLimit(t *testing.T) {
+func TestSelectScanItems_NoLimit(t *testing.T) {
 	tpl := makeTemplateWithFullScan()
 	tpl.MaxTokens = 0
 	a := newAgentForTest(t, tpl)
@@ -302,10 +302,15 @@ func TestFilterLargeScans_NoLimit(t *testing.T) {
 		{Path: "a.go", Content: "anything"},
 		{Path: "b.go", Content: strings.Repeat("x ", 1000)},
 	}
-	out := a.filterLargeScans(in)
+	out := selectScanItemsForTest(t, a, in)
 	if len(out) != 2 {
 		t.Errorf("with MaxTokens=0 nothing should be filtered, got %d", len(out))
 	}
+}
+
+func selectScanItemsForTest(t *testing.T, a *Agent, items []model.ScanItem) []model.ScanItem {
+	t.Helper()
+	return selectedScanItems(a.selectScanItems(items))
 }
 
 func TestInjectScanContentMap(t *testing.T) {
