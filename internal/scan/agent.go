@@ -533,11 +533,12 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		// batch and feed them into the per-batch dedup hook.
 		batchStart := a.args.CommentCollector.Snapshot()
 
-		n, budgetHit, err, checkpoints := a.dispatchBatch(ctx, bi, batch)
+		n, budgetHit, checkpoints, err := a.dispatchBatch(ctx, bi, batch)
 		dispatched += n
 		if err != nil {
 			// ctx cancelled mid-batch: stop scheduling further batches but
 			// still return whatever we've collected so far.
+			// Persist completed items so the next resume does not scan them again.
 			a.recordBatchCheckpoints(checkpoints, batchStart, nil)
 			return a.args.CommentCollector.Comments(), err
 		}
@@ -626,8 +627,9 @@ func (a *Agent) resolveBatchStrategy() BatchStrategy {
 
 // dispatchBatch fans out the files of a single batch concurrently and
 // blocks until they all finish (or ctx is cancelled). Returns the number
-// of files dispatched, whether the token budget was hit mid-batch, ctx.Err()
-// if cancelled, and the completed/reused files whose checkpoints need recording.
+// of files dispatched, whether the token budget was hit mid-batch, the
+// completed/reused files whose checkpoints need recording, and ctx.Err()
+// if cancelled.
 //
 // The budget gate is checked per file, right after acquiring the
 // concurrency slot and before launching the subtask: if the tokens already
@@ -635,7 +637,7 @@ func (a *Agent) resolveBatchStrategy() BatchStrategy {
 // budget, the file (and all remaining files in the batch) are skipped.
 // This keeps overrun bounded by roughly one in-flight file per worker,
 // instead of a whole batch as the coarse batch-level gate did.
-func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.ScanItem) (int64, bool, error, []batchCheckpoint) {
+func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.ScanItem) (int64, bool, []batchCheckpoint, error) {
 	concurrency := a.args.MaxConcurrency
 	if concurrency <= 0 {
 		concurrency = 8
@@ -690,7 +692,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 		case sem <- struct{}{}:
 		case <-ctx.Done():
 			wg.Wait()
-			return dispatched, budgetHit, ctx.Err(), checkpoints
+			return dispatched, budgetHit, checkpoints, ctx.Err()
 		}
 
 		dispatched++
@@ -734,7 +736,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 	}
 
 	wg.Wait()
-	return dispatched, budgetHit, nil, checkpoints
+	return dispatched, budgetHit, checkpoints, nil
 }
 
 // executeSubtask runs the scan pipeline for one file:
