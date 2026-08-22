@@ -131,6 +131,8 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
 | `--tools <path>` | — | embedded | Path to a custom JSON tool-config file. Overrides the embedded tool definitions. |
+| `--post-to-pr` | — | `false` | Post review findings to the matching GitHub pull request. Requires range mode (`--from` and `--to`) and a GitHub token. |
+| `--github-token <token>` | — | — | GitHub token for posting pull-request comments. Falls back to the `GITHUB_TOKEN` environment variable when omitted. |
 
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
@@ -183,6 +185,23 @@ ocr review --from main --to feature-branch
 OCR computes `merge-base(main, feature-branch)..feature-branch` so you only
 see the diff *introduced by* the feature branch — not unrelated changes
 that landed on `main` since branching.
+
+##### Posting findings to a GitHub pull request
+
+Use `--post-to-pr` to opt in to posting review findings to GitHub. Posting
+requires range mode with both `--from` and `--to`; provide the token with
+`--github-token`, or let the CLI read it from `GITHUB_TOKEN`.
+
+The CLI discovers the unique open pull request whose base branch and reviewed
+head commit match the range. You do not provide a pull-request number. Only
+findings with verified locations on the right side of the pull-request diff
+become inline comments; other findings are preserved in the pull-request
+summary. Inline comments are sent in safe batches, and the pull-request head
+is checked during posting so stale reviews are not attached to a changed head.
+
+```bash
+GITHUB_TOKEN="$TOKEN" ocr review --from main --to feature-branch --post-to-pr
+```
 
 #### Commit mode
 
