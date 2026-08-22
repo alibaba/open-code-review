@@ -95,6 +95,17 @@ body:
       description: Paste any relevant error messages or logs. Please redact any API keys or sensitive information.
       render: shell
 
+  - type: checkboxes
+    id: ai-disclosure
+    attributes:
+      label: AI/LLM Disclosure
+      description: Transparency about AI usage keeps review collaborative.
+      options:
+        - label: "I didn't use AI/LLM to assist or generate the content above."
+          required: false
+        - label: " I was able to reproduce the issue locally."
+          required: false
+
   - type: textarea
     id: additional
     attributes:
