@@ -34,6 +34,24 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("GitHub API returned status %d: %s", e.StatusCode, e.Body)
 }
 
+// Configuration binds the GitHub remote host, API endpoint, and HTTP transport.
+// Production configurations are validated from GitHub's environment variables;
+// tests can inject an endpoint and transport explicitly.
+type Configuration struct {
+	githubHost string
+	apiBaseURL string
+	httpClient *http.Client
+}
+
+// Repository is a parsed GitHub repository bound to its validated API
+// configuration.
+type Repository struct {
+	Owner string
+	Name  string
+
+	configuration Configuration
+}
+
 // Client represents a GitHub API client scoped to one repository and PR.
 type Client struct {
 	token      string
@@ -44,24 +62,102 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient creates a new GitHub API client.
-func NewClient(token, repoOwner, repoName string, prNumber int) *Client {
-	baseURL := strings.TrimRight(os.Getenv("GITHUB_API_URL"), "/")
-	if baseURL == "" {
-		serverURL := strings.TrimRight(strings.TrimSpace(os.Getenv("GITHUB_SERVER_URL")), "/")
-		if serverURL == "" || strings.EqualFold(serverURL, "https://github.com") {
-			baseURL = "https://api.github.com"
+// NewConfigurationFromEnvironment validates the production GitHub server and
+// API endpoint as one credential boundary.
+func NewConfigurationFromEnvironment() (Configuration, error) {
+	serverURL := strings.TrimSpace(os.Getenv("GITHUB_SERVER_URL"))
+	if serverURL == "" {
+		serverURL = "https://github.com"
+	}
+	apiURL := strings.TrimSpace(os.Getenv("GITHUB_API_URL"))
+	return newConfiguration(serverURL, apiURL, &http.Client{Timeout: 30 * time.Second}, false)
+}
+
+// NewTestConfiguration creates an explicitly injected test configuration.
+// It is the only constructor that permits HTTP or an API host different from
+// the logical GitHub remote host.
+func NewTestConfiguration(githubHost, apiURL string, httpClient *http.Client) (Configuration, error) {
+	githubHost = strings.TrimSpace(githubHost)
+	if githubHost == "" {
+		return Configuration{}, fmt.Errorf("test GitHub host is empty")
+	}
+	parsedAPI, err := parseAbsoluteURL("test GitHub API URL", apiURL, true)
+	if err != nil {
+		return Configuration{}, err
+	}
+	if httpClient == nil {
+		return Configuration{}, fmt.Errorf("test GitHub HTTP client is nil")
+	}
+	return Configuration{
+		githubHost: strings.ToLower(githubHost),
+		apiBaseURL: strings.TrimRight(parsedAPI.String(), "/"),
+		httpClient: httpClient,
+	}, nil
+}
+
+func newConfiguration(serverURL, apiURL string, httpClient *http.Client, allowHTTP bool) (Configuration, error) {
+	server, err := parseAbsoluteURL("GITHUB_SERVER_URL", serverURL, allowHTTP)
+	if err != nil {
+		return Configuration{}, err
+	}
+	if server.Path != "" && server.Path != "/" {
+		return Configuration{}, fmt.Errorf("GITHUB_SERVER_URL must not include a path")
+	}
+	if server.RawQuery != "" || server.Fragment != "" || server.User != nil {
+		return Configuration{}, fmt.Errorf("GITHUB_SERVER_URL must contain only a scheme and host")
+	}
+
+	if apiURL == "" {
+		if strings.EqualFold(server.Hostname(), "github.com") {
+			apiURL = "https://api.github.com"
 		} else {
-			baseURL = serverURL + "/api/v3"
+			apiURL = strings.TrimRight(server.String(), "/") + "/api/v3"
 		}
 	}
+	apiEndpoint, err := parseAbsoluteURL("GITHUB_API_URL", apiURL, allowHTTP)
+	if err != nil {
+		return Configuration{}, err
+	}
+	if apiEndpoint.RawQuery != "" || apiEndpoint.Fragment != "" || apiEndpoint.User != nil {
+		return Configuration{}, fmt.Errorf("GITHUB_API_URL must not include credentials, a query, or a fragment")
+	}
+
+	if strings.EqualFold(server.Hostname(), "github.com") {
+		if !strings.EqualFold(apiEndpoint.Host, "api.github.com") {
+			return Configuration{}, fmt.Errorf("GITHUB_API_URL host %q does not match api.github.com for GitHub.com", apiEndpoint.Host)
+		}
+	} else if !strings.EqualFold(apiEndpoint.Host, server.Host) {
+		return Configuration{}, fmt.Errorf("GITHUB_API_URL host %q does not match GITHUB_SERVER_URL host %q", apiEndpoint.Host, server.Host)
+	}
+
+	return Configuration{
+		githubHost: strings.ToLower(server.Hostname()),
+		apiBaseURL: strings.TrimRight(apiEndpoint.String(), "/"),
+		httpClient: httpClient,
+	}, nil
+}
+
+func parseAbsoluteURL(name, raw string, allowHTTP bool) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Hostname() == "" || u.Scheme == "" {
+		return nil, fmt.Errorf("invalid %s %q", name, raw)
+	}
+	if u.Scheme != "https" && !(allowHTTP && u.Scheme == "http") {
+		return nil, fmt.Errorf("%s must use HTTPS", name)
+	}
+	return u, nil
+}
+
+// NewClient creates a GitHub API client from a repository whose remote and API
+// endpoint were validated together.
+func NewClient(token string, repository Repository, prNumber int) *Client {
 	return &Client{
 		token:      token,
-		repoOwner:  repoOwner,
-		repoName:   repoName,
+		repoOwner:  repository.Owner,
+		repoName:   repository.Name,
 		prNumber:   prNumber,
-		baseURL:    baseURL,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL:    repository.configuration.apiBaseURL,
+		httpClient: repository.configuration.httpClient,
 	}
 }
 
@@ -90,9 +186,18 @@ type ReviewResponse struct {
 	CommitID string `json:"commit_id"`
 }
 
+// IssueComment represents a pull-request issue comment used for write
+// reconciliation.
+type IssueComment struct {
+	ID      int64  `json:"id"`
+	HTMLURL string `json:"html_url"`
+	Body    string `json:"body"`
+}
+
 // PullRequest is the PR metadata needed to verify a posting target.
 type PullRequest struct {
-	Number int `json:"number"`
+	Number int    `json:"number"`
+	State  string `json:"state"`
 	Head   struct {
 		SHA string `json:"sha"`
 	} `json:"head"`
@@ -168,13 +273,37 @@ func (c *Client) ListReviews(ctx context.Context) ([]ReviewResponse, error) {
 // CreateIssueComment creates a non-inline comment on the PR.
 func (c *Client) CreateIssueComment(ctx context.Context, body string) (string, error) {
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments", c.baseURL, c.repoOwner, c.repoName, c.prNumber)
-	var response struct {
-		HTMLURL string `json:"html_url"`
-	}
+	var response IssueComment
 	if err := c.doJSON(ctx, http.MethodPost, endpoint, map[string]string{"body": body}, &response, http.StatusCreated); err != nil {
 		return "", err
 	}
 	return response.HTMLURL, nil
+}
+
+// ListIssueComments returns all issue comments attached to the pull request.
+func (c *Client) ListIssueComments(ctx context.Context) ([]IssueComment, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments", c.baseURL, c.repoOwner, c.repoName, c.prNumber)
+	var comments []IssueComment
+	for page := 1; page <= maxResultPages; page++ {
+		u, err := url.Parse(endpoint)
+		if err != nil {
+			return nil, fmt.Errorf("build issue comments URL: %w", err)
+		}
+		query := u.Query()
+		query.Set("per_page", fmt.Sprint(pageSize))
+		query.Set("page", fmt.Sprint(page))
+		u.RawQuery = query.Encode()
+
+		var batch []IssueComment
+		if err := c.doJSON(ctx, http.MethodGet, u.String(), nil, &batch, http.StatusOK); err != nil {
+			return nil, err
+		}
+		comments = append(comments, batch...)
+		if len(batch) < pageSize {
+			return comments, nil
+		}
+	}
+	return nil, fmt.Errorf("pull request issue comment list exceeds %d entries", pageSize*maxResultPages)
 }
 
 // GetPRInfo gets the current pull request head and base metadata.
@@ -183,8 +312,8 @@ func (c *Client) GetPRInfo(ctx context.Context) (*PullRequest, error) {
 	if err := c.doJSON(ctx, http.MethodGet, c.pullURL(""), nil, &response, http.StatusOK); err != nil {
 		return nil, err
 	}
-	if response.Head.SHA == "" {
-		return nil, fmt.Errorf("GitHub pull request response omitted head SHA")
+	if response.Head.SHA == "" || response.Base.Ref == "" || response.State == "" {
+		return nil, fmt.Errorf("GitHub pull request response omitted required target metadata")
 	}
 	return &response, nil
 }
@@ -217,14 +346,14 @@ func (c *Client) ListChangedFiles(ctx context.Context) ([]ChangedFile, error) {
 // FindPRByHead finds the unique open PR whose base branch and head SHA match
 // the exact input reviewed by the CLI. Matching by SHA works for fork PRs and
 // avoids guessing a PR number from a branch name.
-func FindPRByHead(ctx context.Context, token, repoOwner, repoName, baseBranch, headSHA string) (int, error) {
+func FindPRByHead(ctx context.Context, token string, repository Repository, baseBranch, headSHA string) (int, error) {
 	if headSHA == "" {
 		return 0, fmt.Errorf("reviewed head SHA is empty")
 	}
-	client := NewClient(token, repoOwner, repoName, 0)
+	client := NewClient(token, repository, 0)
 	var matches []int
 	for page := 1; page <= maxResultPages; page++ {
-		u, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/pulls", client.baseURL, repoOwner, repoName))
+		u, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/pulls", client.baseURL, repository.Owner, repository.Name))
 		if err != nil {
 			return 0, fmt.Errorf("build pull request discovery URL: %w", err)
 		}
@@ -318,18 +447,28 @@ func (c *Client) doJSON(ctx context.Context, method, endpoint string, requestBod
 	return &APIError{StatusCode: resp.StatusCode, Body: errorText}
 }
 
-// ParseRepoInfo parses repository owner and name from a Git remote URL.
-func ParseRepoInfo(remoteURL string) (owner, repo string, err error) {
+// ResolveRepository parses a Git remote and binds it to the validated
+// production GitHub configuration.
+func ResolveRepository(remoteURL string) (Repository, error) {
+	configuration, err := NewConfigurationFromEnvironment()
+	if err != nil {
+		return Repository{}, err
+	}
+	return configuration.ResolveRepository(remoteURL)
+}
+
+// ResolveRepository parses a Git remote against this configuration.
+func (c Configuration) ResolveRepository(remoteURL string) (Repository, error) {
 	remoteURL = strings.TrimSpace(remoteURL)
 	if remoteURL == "" {
-		return "", "", fmt.Errorf("repository remote URL is empty")
+		return Repository{}, fmt.Errorf("repository remote URL is empty")
 	}
 
 	var remoteHost, repoPath string
 	if !strings.Contains(remoteURL, "://") {
 		hostPart, pathPart, found := strings.Cut(remoteURL, ":")
 		if !found || pathPart == "" {
-			return "", "", fmt.Errorf("unable to parse repository info from URL: %s", remoteURL)
+			return Repository{}, fmt.Errorf("unable to parse repository info from URL: %s", remoteURL)
 		}
 		if at := strings.LastIndex(hostPart, "@"); at >= 0 {
 			hostPart = hostPart[at+1:]
@@ -339,37 +478,30 @@ func ParseRepoInfo(remoteURL string) (owner, repo string, err error) {
 	} else {
 		u, parseErr := url.Parse(remoteURL)
 		if parseErr != nil || u.Hostname() == "" {
-			return "", "", fmt.Errorf("unable to parse repository info from URL: %s", remoteURL)
+			return Repository{}, fmt.Errorf("unable to parse repository info from URL: %s", remoteURL)
 		}
 		remoteHost = u.Hostname()
 		repoPath = strings.TrimPrefix(u.Path, "/")
 	}
 
-	githubHost, hostErr := configuredGitHubHost()
-	if hostErr != nil {
-		return "", "", hostErr
-	}
-	if !strings.EqualFold(remoteHost, githubHost) {
-		return "", "", fmt.Errorf("remote host %q does not match configured GitHub host %q", remoteHost, githubHost)
+	if !strings.EqualFold(remoteHost, c.githubHost) {
+		return Repository{}, fmt.Errorf("remote host %q does not match configured GitHub host %q", remoteHost, c.githubHost)
 	}
 
 	repoPath = strings.TrimSuffix(strings.TrimSpace(repoPath), ".git")
 
 	parts := strings.Split(repoPath, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("unable to parse repository info from URL: %s", remoteURL)
+		return Repository{}, fmt.Errorf("unable to parse repository info from URL: %s", remoteURL)
 	}
-	return parts[0], parts[1], nil
+	return Repository{Owner: parts[0], Name: parts[1], configuration: c}, nil
 }
 
-func configuredGitHubHost() (string, error) {
-	serverURL := strings.TrimSpace(os.Getenv("GITHUB_SERVER_URL"))
-	if serverURL == "" {
-		return "github.com", nil
+// ParseRepoInfo parses repository owner and name from a Git remote URL.
+func ParseRepoInfo(remoteURL string) (owner, repo string, err error) {
+	repository, err := ResolveRepository(remoteURL)
+	if err != nil {
+		return "", "", err
 	}
-	u, err := url.Parse(serverURL)
-	if err != nil || u.Hostname() == "" {
-		return "", fmt.Errorf("invalid GITHUB_SERVER_URL %q", serverURL)
-	}
-	return u.Hostname(), nil
+	return repository.Owner, repository.Name, nil
 }

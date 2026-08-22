@@ -287,6 +287,20 @@ func TestLlmComment_JSONCategorySeverity(t *testing.T) {
 			t.Errorf("expected severity in output, got %s", out)
 		}
 	})
+
+	t.Run("posting provenance remains internal", func(t *testing.T) {
+		b, err := json.Marshal(model.LlmComment{
+			Path:    "main.go",
+			Content: "finding",
+			Side:    model.CommentSideRight,
+		})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if strings.Contains(string(b), `"side"`) {
+			t.Fatalf("legacy comment JSON leaked posting provenance: %s", b)
+		}
+	})
 }
 
 func TestCodeCommentProvider_Execute(t *testing.T) {

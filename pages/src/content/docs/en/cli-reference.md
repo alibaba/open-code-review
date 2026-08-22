@@ -196,8 +196,25 @@ The CLI discovers the unique open pull request whose base branch and reviewed
 head commit match the range. You do not provide a pull-request number. Only
 findings with verified locations on the right side of the pull-request diff
 become inline comments; other findings are preserved in the pull-request
-summary. Inline comments are sent in safe batches, and the pull-request head
-is checked during posting so stale reviews are not attached to a changed head.
+summary. Inline comments and summaries are sent in safe batches, and the
+pull-request head, base, and open state are checked during posting so stale
+reviews are not attached to a changed target.
+
+The token must have access to the target repository and permission to read and
+write pull requests. For a fine-grained personal access token or GitHub App,
+grant the repository's **Pull requests: Read and write** permission. For a
+classic personal access token, grant the appropriate `repo` or `public_repo`
+scope. In GitHub Actions, set `pull-requests: write`; repository and fork
+policies can still restrict write access. This permission also covers the issue
+comments used when a finding cannot be posted inline.
+
+For GitHub.com, leave `GITHUB_SERVER_URL` and `GITHUB_API_URL` unset (or use
+`https://github.com` and `https://api.github.com`). For GitHub Enterprise
+Server, set `GITHUB_SERVER_URL` to the HTTPS server URL. The CLI derives
+`https://HOST/api/v3` by default; if `GITHUB_API_URL` is set explicitly, it must
+also use HTTPS and the same host as `GITHUB_SERVER_URL`. The Git remote must use
+that configured server host. Posting stops before sending the token when these
+hosts do not match.
 
 ```bash
 GITHUB_TOKEN="$TOKEN" ocr review --from main --to feature-branch --post-to-pr

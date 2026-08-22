@@ -16,7 +16,7 @@ type LlmComment struct {
 	ExistingCode   string `json:"existing_code,omitempty"`
 	StartLine      int    `json:"start_line"`
 	EndLine        int    `json:"end_line"`
-	Side           string `json:"side,omitempty"`
+	Side           string `json:"-"`
 	Thinking       string `json:"thinking,omitempty"`
 	// Category classifies the finding. One of:
 	// bug, security, performance, maintainability, test, style, documentation, other.
