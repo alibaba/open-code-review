@@ -135,7 +135,7 @@ func validateReviewOptions(opts *reviewOptions) error {
 		return err
 	}
 	opts.outputFormat = normalizedFormat
-	const minMaxTools = 10
+	const minMaxTools = 50
 	if opts.maxTools < 0 {
 		return fmt.Errorf("--max-tools must be a non-negative integer (0 means use template default)")
 	}

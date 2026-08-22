@@ -35,7 +35,7 @@
       { "role": "user", "prompt_file": "grouping_task_user.md" }
     ]
   },
-  "MAX_TOOL_REQUEST_TIMES": 30,
+  "MAX_TOOL_REQUEST_TIMES": 100,
   "PLAN_MODE_LINE_THRESHOLD": 50,
   "MAX_REVIEW_ROUNDS": 2,
   "MAX_TOKENS": 58888

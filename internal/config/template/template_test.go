@@ -99,8 +99,8 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	if tpl.MaxTokens != 58888 {
 		t.Errorf("MaxTokens = %d, want 58888", tpl.MaxTokens)
 	}
-	if tpl.MaxToolRequestTimes != 30 {
-		t.Errorf("MaxToolRequestTimes = %d, want 30", tpl.MaxToolRequestTimes)
+	if tpl.MaxToolRequestTimes != 100 {
+		t.Errorf("MaxToolRequestTimes = %d, want 100", tpl.MaxToolRequestTimes)
 	}
 	if tpl.PlanModeLineThreshold != 50 {
 		t.Errorf("PlanModeLineThreshold = %d, want 50", tpl.PlanModeLineThreshold)

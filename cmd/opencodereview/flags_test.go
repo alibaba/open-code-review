@@ -80,12 +80,12 @@ func TestParseReviewFlags_NegativeMaxTools(t *testing.T) {
 }
 
 func TestParseReviewFlags_MaxToolsBelowMin(t *testing.T) {
-	opts, err := parseReviewFlags([]string{"--max-tools", "5"})
+	opts, err := parseReviewFlags([]string{"--max-tools", "30"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if opts.maxTools != 10 {
-		t.Errorf("maxTools = %d, want 10 (clamped to min)", opts.maxTools)
+	if opts.maxTools != 50 {
+		t.Errorf("maxTools = %d, want 50 (clamped to min)", opts.maxTools)
 	}
 }
 
