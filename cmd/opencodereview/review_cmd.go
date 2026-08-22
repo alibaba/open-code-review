@@ -5,9 +5,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -17,8 +20,10 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/github"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -52,6 +57,12 @@ type reviewOptions struct {
 	effort          string
 	noFilter        bool
 	preview         bool
+	// GitHub integration flags
+	githubToken string
+	postToPR    bool
+	// reviewedHeadSHA comes from the fully sealed range passed to the agent, so
+	// PR posting cannot drift to a commit pushed while the review is in progress.
+	reviewedHeadSHA string
 }
 
 var reviewOpts reviewOptions
@@ -173,6 +184,12 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err != nil {
 		return err
 	}
+	if opts.postToPR {
+		if sealed == nil || sealed.Resolution.ResolvedBase == "" || sealed.Resolution.ResolvedHead == "" {
+			return fmt.Errorf("resolve immutable range for GitHub posting")
+		}
+		opts.reviewedHeadSHA = sealed.Resolution.ResolvedHead
+	}
 
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
@@ -255,6 +272,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	startTime := time.Now()
 
 	comments, runErr := ag.Run(runCtx)
+	// Resolve once into the slice shared by every delivery path. emitRunResult
+	// also resolves defensively for its other callers, but GitHub posting happens
+	// after it returns and must receive the same line and side provenance.
+	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 	manifest := ag.RunManifest()
 
 	// Freeze the retry report at the same boundary as the manifest: ag.Run has
@@ -289,6 +310,17 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		}
 	}
+
+	var postErr error
+	if opts.postToPR && resultErr == nil && len(comments) > 0 {
+		if err := validateGitHubPostingManifest(sealed, manifest); err != nil {
+			postErr = fmt.Errorf("post review to GitHub: %w", err)
+			fmt.Fprintf(os.Stderr, "[ocr] ERROR: %v\n", postErr)
+		} else if err := postCommentsToGitHub(runCtx, cc.RepoDir, opts, comments, getGitHubToken(opts.githubToken)); err != nil {
+			postErr = fmt.Errorf("post review to GitHub: %w", err)
+			fmt.Fprintf(os.Stderr, "[ocr] ERROR: %v\n", postErr)
+		}
+	}
 	if resultErr != nil {
 		q.Restore()
 		// The report has exactly one exit per run. emitRunResult already published
@@ -303,9 +335,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
-		return errors.Join(resultErr, emitErr)
+		return errors.Join(resultErr, emitErr, postErr)
 	}
-	return emitErr
+	return errors.Join(emitErr, postErr)
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {
@@ -377,7 +409,7 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // so a provider that changed via config file or environment stays implicit —
 // which is the transition this check exists to reject.
 func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState) (*agent.SealedInput, error) {
-	if state == nil {
+	if state == nil && !opts.postToPR {
 		return nil, nil
 	}
 	sealed, err := agent.ResolveIdentity(ctx, agent.Args{
@@ -394,6 +426,9 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)
 	}
+	if state == nil {
+		return sealed, nil
+	}
 	if err := state.ValidateResume(session.ResumeRequest{
 		Identity:         sealed.Identity,
 		Provider:         rt.Provider,
@@ -404,6 +439,24 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 		return nil, err
 	}
 	return sealed, nil
+}
+
+func validateGitHubPostingManifest(sealed *agent.SealedInput, manifest *session.RunManifest) error {
+	if sealed == nil {
+		return fmt.Errorf("sealed review input is missing")
+	}
+	if manifest == nil {
+		return fmt.Errorf("run manifest is missing")
+	}
+	expected := sealed.Resolution
+	actual := manifest.Input
+	if actual.Mode != session.InputModeRange ||
+		actual.ResolvedBase != expected.ResolvedBase ||
+		actual.ResolvedHead != expected.ResolvedHead ||
+		actual.ExactRange != expected.ExactRange {
+		return fmt.Errorf("run manifest input does not match the sealed range; refusing to post")
+	}
+	return nil
 }
 
 // fileReadRef picks the ref file_read resolves paths against.
@@ -581,4 +634,372 @@ func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *t
 	reg.Register(tool.NewCodeSearch(fr))
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	return reg
+}
+
+const githubReviewBatchSize = 50
+
+type githubRepository struct {
+	remote string
+	owner  string
+	name   string
+}
+
+type githubPostingTarget struct {
+	githubRepository
+	prNumber int
+}
+
+type githubSummaryFinding struct {
+	comment model.LlmComment
+	reason  string
+}
+
+// postCommentsToGitHub posts review comments to the unique PR whose base and
+// head SHA match the immutable range reviewed by this run.
+func postCommentsToGitHub(ctx context.Context, repoDir string, opts reviewOptions, comments []model.LlmComment, ghToken string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	reviewedHead := opts.reviewedHeadSHA
+	if reviewedHead == "" {
+		resolved, err := runGitCmdStdout(repoDir, "rev-parse", "--verify", "--end-of-options", opts.to+"^{commit}")
+		if err != nil {
+			return fmt.Errorf("resolve reviewed head %q: %w", opts.to, err)
+		}
+		reviewedHead = strings.TrimSpace(string(resolved))
+	}
+	if reviewedHead == "" {
+		return fmt.Errorf("reviewed head SHA is empty")
+	}
+
+	repositories, remoteNames, err := getGitHubRepositories(repoDir)
+	if err != nil {
+		return err
+	}
+	baseBranch := normalizeGitHubBranch(opts.from, remoteNames)
+	if baseBranch == "" {
+		return fmt.Errorf("cannot derive GitHub base branch from %q", opts.from)
+	}
+
+	var target *githubPostingTarget
+	for _, repository := range repositories {
+		prNumber, findErr := github.FindPRByHead(ctx, ghToken, repository.owner, repository.name, baseBranch, reviewedHead)
+		if errors.Is(findErr, github.ErrNoMatchingPullRequest) {
+			continue
+		}
+		if findErr != nil {
+			return fmt.Errorf("discover PR in %s/%s: %w", repository.owner, repository.name, findErr)
+		}
+		if target != nil {
+			return fmt.Errorf(
+				"multiple configured GitHub remotes have open PRs for base=%s and reviewed commit %s",
+				baseBranch,
+				reviewedHead,
+			)
+		}
+		target = &githubPostingTarget{githubRepository: repository, prNumber: prNumber}
+	}
+	if target == nil {
+		return fmt.Errorf(
+			"no open PR found for base=%s and reviewed commit %s in configured GitHub remotes",
+			baseBranch,
+			reviewedHead,
+		)
+	}
+
+	ghClient := github.NewClient(ghToken, target.owner, target.name, target.prNumber)
+	if err := verifyGitHubPRHead(ctx, ghClient, reviewedHead); err != nil {
+		return err
+	}
+	changedFiles, err := ghClient.ListChangedFiles(ctx)
+	if err != nil {
+		return fmt.Errorf("read PR diff: %w", err)
+	}
+	if err := verifyGitHubPRHead(ctx, ghClient, reviewedHead); err != nil {
+		return err
+	}
+	inventory := buildGitHubDiffInventory(changedFiles)
+
+	ghComments := make([]github.Comment, 0, len(comments))
+	inlineSources := make([]model.LlmComment, 0, len(comments))
+	summaryFindings := make([]githubSummaryFinding, 0)
+	for _, comment := range comments {
+		startLine, endLine, hasLocation := githubCommentLocation(comment)
+		switch {
+		case comment.Side != model.CommentSideRight:
+			reason := "line side provenance is not RIGHT"
+			if comment.Side == model.CommentSideLeft {
+				reason = "resolved on the old side of the diff"
+			}
+			summaryFindings = append(summaryFindings, githubSummaryFinding{comment: comment, reason: reason})
+		case !hasLocation:
+			summaryFindings = append(summaryFindings, githubSummaryFinding{comment: comment, reason: "no valid line information"})
+		case !inventory.contains(comment.Path, startLine, endLine):
+			summaryFindings = append(summaryFindings, githubSummaryFinding{comment: comment, reason: "line range could not be verified in a complete right-side PR diff hunk"})
+		default:
+			ghComment := github.Comment{Path: comment.Path, Body: formatCommentBody(comment), Line: endLine, Side: model.CommentSideRight}
+			if startLine != endLine {
+				ghComment.StartLine = startLine
+				ghComment.StartSide = model.CommentSideRight
+			}
+			ghComments = append(ghComments, ghComment)
+			inlineSources = append(inlineSources, comment)
+		}
+	}
+
+	summaryBody := buildSummaryBody(comments, len(ghComments), summaryFindings)
+	if len(ghComments) == 0 {
+		if err := verifyGitHubPRHead(ctx, ghClient, reviewedHead); err != nil {
+			return err
+		}
+		commentURL, err := ghClient.CreateIssueComment(ctx, summaryBody)
+		if err != nil {
+			return fmt.Errorf("post review summary: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "[ocr] No findings had a verified inline location; summary posted: %s\n", commentURL)
+		return nil
+	}
+
+	reviewRunID, err := newGitHubReviewRunID()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "[ocr] Posting %d verified inline comments to PR #%d in batches of at most %d\n", len(ghComments), target.prNumber, githubReviewBatchSize)
+	for start := 0; start < len(ghComments); start += githubReviewBatchSize {
+		end := min(start+githubReviewBatchSize, len(ghComments))
+		if err := verifyGitHubPRHead(ctx, ghClient, reviewedHead); err != nil {
+			return err
+		}
+		body := "OpenCodeReview inline findings (continued)."
+		if start == 0 {
+			body = summaryBody
+		}
+		marker := fmt.Sprintf("<!-- ocr-review-%s-batch-%d -->", reviewRunID, start/githubReviewBatchSize)
+		body = marker + "\n" + body
+		reviewResp, createErr := ghClient.CreateReview(ctx, reviewedHead, github.ReviewRequest{
+			Body:     body,
+			Event:    "COMMENT",
+			Comments: ghComments[start:end],
+		})
+		if createErr != nil {
+			if githubReviewWriteIsAmbiguous(createErr) {
+				landed, reconcileErr := githubReviewExists(ctx, ghClient, reviewedHead, marker)
+				if reconcileErr != nil {
+					return errors.Join(
+						fmt.Errorf("create inline review: %w", createErr),
+						fmt.Errorf("reconcile ambiguous inline review write: %w", reconcileErr),
+					)
+				}
+				if landed {
+					fmt.Fprintln(os.Stderr, "[ocr] Review batch was accepted by GitHub despite an ambiguous response")
+					continue
+				}
+			}
+
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to create inline review batch, posting remaining findings as a summary instead: %v\n", createErr)
+			fallbackComments := make([]model.LlmComment, 0, len(inlineSources)-start+len(summaryFindings))
+			fallback := make([]githubSummaryFinding, 0, len(inlineSources)-start+len(summaryFindings))
+			if start == 0 {
+				for _, finding := range summaryFindings {
+					fallbackComments = append(fallbackComments, finding.comment)
+					fallback = append(fallback, finding)
+				}
+			}
+			for _, comment := range inlineSources[start:] {
+				fallbackComments = append(fallbackComments, comment)
+				fallback = append(fallback, githubSummaryFinding{comment: comment, reason: "inline review could not be created"})
+			}
+			if err := verifyGitHubPRHead(ctx, ghClient, reviewedHead); err != nil {
+				return errors.Join(fmt.Errorf("create inline review: %w", createErr), err)
+			}
+			commentURL, summaryErr := ghClient.CreateIssueComment(ctx, buildSummaryBody(fallbackComments, 0, fallback))
+			if summaryErr != nil {
+				return errors.Join(fmt.Errorf("create inline review: %w", createErr), fmt.Errorf("post fallback summary: %w", summaryErr))
+			}
+			fmt.Fprintf(os.Stderr, "[ocr] Summary comment posted: %s\n", commentURL)
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "[ocr] Review batch posted successfully: %s\n", reviewResp.HTMLURL)
+	}
+	return nil
+}
+
+func newGitHubReviewRunID() (string, error) {
+	var id [12]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", fmt.Errorf("generate GitHub review reconciliation marker: %w", err)
+	}
+	return hex.EncodeToString(id[:]), nil
+}
+
+func githubReviewWriteIsAmbiguous(err error) bool {
+	var apiErr *github.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == http.StatusRequestTimeout || apiErr.StatusCode >= http.StatusInternalServerError
+	}
+	return true
+}
+
+func githubReviewExists(ctx context.Context, client *github.Client, commitSHA, marker string) (bool, error) {
+	reviews, err := client.ListReviews(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, review := range reviews {
+		if review.CommitID == commitSHA && strings.Contains(review.Body, marker) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func getGitHubRepositories(repoDir string) ([]githubRepository, []string, error) {
+	output, err := runGitCmdStdout(repoDir, "remote")
+	if err != nil {
+		return nil, nil, fmt.Errorf("list git remotes: %w", err)
+	}
+	remoteNames := strings.Fields(string(output))
+	if len(remoteNames) == 0 {
+		return nil, nil, fmt.Errorf("repository has no Git remotes")
+	}
+
+	repositories := make([]githubRepository, 0, len(remoteNames))
+	seen := make(map[string]struct{})
+	for _, remote := range remoteNames {
+		remoteURL, remoteErr := runGitCmdStdout(repoDir, "remote", "get-url", remote)
+		if remoteErr != nil {
+			return nil, nil, fmt.Errorf("read URL for git remote %q: %w", remote, remoteErr)
+		}
+		owner, name, parseErr := github.ParseRepoInfo(strings.TrimSpace(string(remoteURL)))
+		if parseErr != nil {
+			continue
+		}
+		key := strings.ToLower(owner + "/" + name)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		repositories = append(repositories, githubRepository{remote: remote, owner: owner, name: name})
+	}
+	if len(repositories) == 0 {
+		return nil, nil, fmt.Errorf("no parseable GitHub repository found in configured remotes")
+	}
+	return repositories, remoteNames, nil
+}
+
+func normalizeGitHubBranch(ref string, remoteNames []string) string {
+	ref = strings.TrimPrefix(ref, "refs/heads/")
+	ref = strings.TrimPrefix(ref, "refs/remotes/")
+	for _, remote := range remoteNames {
+		if strings.HasPrefix(ref, remote+"/") {
+			return strings.TrimPrefix(ref, remote+"/")
+		}
+	}
+	return ref
+}
+
+func verifyGitHubPRHead(ctx context.Context, client *github.Client, reviewedHead string) error {
+	pull, err := client.GetPRInfo(ctx)
+	if err != nil {
+		return fmt.Errorf("read PR head: %w", err)
+	}
+	if pull.Head.SHA != reviewedHead {
+		return fmt.Errorf("PR head changed from reviewed commit %s to %s; rerun the review before posting", reviewedHead, pull.Head.SHA)
+	}
+	return nil
+}
+
+func githubCommentLocation(comment model.LlmComment) (startLine, endLine int, ok bool) {
+	endLine = comment.EndLine
+	if endLine <= 0 {
+		endLine = comment.StartLine
+	}
+	if endLine <= 0 {
+		return 0, 0, false
+	}
+	startLine = endLine
+	if comment.StartLine > 0 {
+		startLine = comment.StartLine
+	}
+	if startLine > endLine {
+		return 0, 0, false
+	}
+	return startLine, endLine, true
+}
+
+// formatCommentBody formats a finding as a structured GitHub review comment.
+func formatCommentBody(comment model.LlmComment) string {
+	var body strings.Builder
+	if badge := buildBadge(comment); badge != "" {
+		body.WriteString("**")
+		body.WriteString(badge)
+		body.WriteString("**\n\n")
+	}
+	body.WriteString(comment.Content)
+	if comment.SuggestionCode != "" {
+		body.WriteString("\n\n**Suggestion:**\n```suggestion\n")
+		body.WriteString(comment.SuggestionCode)
+		if !strings.HasSuffix(comment.SuggestionCode, "\n") {
+			body.WriteByte('\n')
+		}
+		body.WriteString("```")
+	}
+
+	return body.String()
+}
+
+// buildSummaryBody builds the review body. Inline findings are represented by
+// their attached comments; only findings that could not be anchored are
+// expanded here, which avoids duplicating every finding in the summary.
+func buildSummaryBody(comments []model.LlmComment, inlineCount int, summaryFindings []githubSummaryFinding) string {
+	var body strings.Builder
+
+	body.WriteString("## OpenCodeReview Summary\n\n")
+	body.WriteString(fmt.Sprintf("%d comment(s) generated.\n\n", len(comments)))
+	body.WriteString(fmt.Sprintf("- Inline findings: %d\n", inlineCount))
+	body.WriteString(fmt.Sprintf("- Summary-only findings: %d\n\n", len(summaryFindings)))
+
+	if len(summaryFindings) > 0 {
+		body.WriteString("### Findings without a verified inline location\n\n")
+		for _, finding := range summaryFindings {
+			location := finding.comment.Path
+			if startLine, endLine, ok := githubCommentLocation(finding.comment); ok {
+				if startLine == endLine {
+					location = fmt.Sprintf("%s (line %d)", location, endLine)
+				} else {
+					location = fmt.Sprintf("%s (lines %d-%d)", location, startLine, endLine)
+				}
+			}
+			body.WriteString(fmt.Sprintf("#### `%s`\n\n", location))
+			body.WriteString(fmt.Sprintf("_Summary reason: %s._\n\n", finding.reason))
+			body.WriteString(formatCommentBody(finding.comment))
+			body.WriteString("\n\n---\n\n")
+		}
+	}
+
+	severityCount := make(map[string]int)
+	for _, comment := range comments {
+		if comment.Severity != "" {
+			severityCount[comment.Severity]++
+		}
+	}
+
+	if len(severityCount) > 0 {
+		body.WriteString("### Severity breakdown:\n\n")
+		severities := make([]string, 0, len(severityCount))
+		for severity := range severityCount {
+			severities = append(severities, severity)
+		}
+		sort.Strings(severities)
+		for _, severity := range severities {
+			count := severityCount[severity]
+			body.WriteString(fmt.Sprintf("- **%s**: %d\n", severity, count))
+		}
+		body.WriteString("\n")
+	}
+
+	body.WriteString("---\n")
+	body.WriteString("*Generated by OpenCodeReview*")
+
+	return body.String()
 }

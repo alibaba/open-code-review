@@ -238,6 +238,19 @@ func TestValidateResumeIdentity(t *testing.T) {
 		}
 	})
 
+	t.Run("GitHub posting seals a non-resume range", func(t *testing.T) {
+		rt := &llmRuntime{Provider: "anthropic", Model: "claude"}
+		postingOpts := opts
+		postingOpts.postToPR = true
+		sealed, err := validateResumeIdentity(context.Background(), cc, postingOpts, rt, nil)
+		if err != nil {
+			t.Fatalf("seal posting range: %v", err)
+		}
+		if sealed == nil || sealed.Resolution.ResolvedBase == "" || sealed.Resolution.ResolvedHead == "" {
+			t.Fatalf("posting range was not fully sealed: %+v", sealed)
+		}
+	})
+
 	t.Run("differently spelled but equivalent refs are accepted", func(t *testing.T) {
 		// The false-rejection half of the contract. The parent was reviewed as
 		// HEAD~1..HEAD; naming the very same two commits by full SHA is the same

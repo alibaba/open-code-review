@@ -59,6 +59,9 @@ func TestRelocateAcrossFiles_RefilesToImplementation(t *testing.T) {
 	if cm.StartLine <= 0 || cm.EndLine < cm.StartLine {
 		t.Fatalf("StartLine/EndLine = %d/%d; want a resolved range", cm.StartLine, cm.EndLine)
 	}
+	if cm.Side != model.CommentSideRight {
+		t.Fatalf("relocated side = %q, want RIGHT", cm.Side)
+	}
 }
 
 func TestRelocateAcrossFiles_DeclinesWhenAmbiguous(t *testing.T) {
