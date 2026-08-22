@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/bmatcuk/doublestar/v4"
 
@@ -181,7 +182,7 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 		}
 		out, err := p.runGit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, p.to, "--")
 		if err != nil {
-			return nil, fmt.Errorf("git diff failed: %w", err)
+			return nil, gitFailure("git diff", out, err)
 		}
 		combined.WriteString(out)
 
@@ -192,14 +193,17 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 		// Diffs against the first parent instead, in regular unified format.
 		out, err := p.runGit(ctx, "-c", "core.quotepath=false", "show", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "--diff-merges=first-parent", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", p.commit)
 		if err != nil {
-			return nil, fmt.Errorf("git show failed: %w", err)
+			return nil, gitFailure("git show", out, err)
 		}
 		combined.WriteString(out)
 
 	case ModeWorkspace:
+		// On the error path workspaceTrackedDiff returns the failing command's
+		// combined output, so tracked carries git's message here rather than a
+		// usable diff.
 		tracked, err := p.workspaceTrackedDiff(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("workspace tracked diff failed: %w", err)
+			return nil, gitFailure("workspace tracked diff", tracked, err)
 		}
 		combined.WriteString(tracked)
 
@@ -636,4 +640,39 @@ func (p *Provider) runGit(ctx context.Context, args ...string) (string, error) {
 	cmd.Dir = p.repoDir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// gitDiagLimit bounds how much of git's output is quoted back in an error.
+// Git's own diagnosis is a line or two; the ceiling matters only because
+// runGit returns stdout and stderr combined, so a command that failed partway
+// through can carry a prefix of real diff along with it.
+const gitDiagLimit = 2000
+
+// gitFailure builds an error that carries git's own message.
+//
+// runGit captures stdout and stderr together and every diff-producing caller
+// used to drop that output on the floor, so a failure surfaced as a bare
+// "git show failed: exit status 129" — true, and useless. Diagnosing one then
+// meant asking the reporter to re-run the command by hand to see what git
+// actually said (#972). The exit status alone cannot distinguish an
+// unsupported option from a bad revision or a permission error.
+func gitFailure(op, out string, err error) error {
+	diag := strings.TrimSpace(out)
+	if diag == "" {
+		return fmt.Errorf("%s failed: %w", op, err)
+	}
+	if len(diag) > gitDiagLimit {
+		// Keep the tail: git writes its diagnosis last, after whatever
+		// reached stdout before the failure.
+		diag = diag[len(diag)-gitDiagLimit:]
+		// Cutting by bytes can land mid-rune. Git speaks the user's locale,
+		// so this is not hypothetical — #972 came from a Japanese-language
+		// Windows install. Drop the partial leading rune rather than emit
+		// invalid UTF-8.
+		for len(diag) > 0 && !utf8.RuneStart(diag[0]) {
+			diag = diag[1:]
+		}
+		diag = "..." + diag
+	}
+	return fmt.Errorf("%s failed: %w: %s", op, err, diag)
 }
