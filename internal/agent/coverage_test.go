@@ -215,7 +215,7 @@ func TestExecuteReviewFilter_NoFilterTask(t *testing.T) {
 		},
 	})
 
-	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go"}}})
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go"}}}, nil)
 	if client.calls != 0 {
 		t.Errorf("no LLM calls expected when ReviewFilterTask is nil, got %d", client.calls)
 	}
@@ -239,7 +239,7 @@ func TestExecuteReviewFilter_NoComments(t *testing.T) {
 		},
 	})
 
-	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}})
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
 	if client.calls != 0 {
 		t.Errorf("no LLM calls expected when no comments exist, got %d", client.calls)
 	}
@@ -287,7 +287,7 @@ func TestExecuteReviewFilter_RemovesComments(t *testing.T) {
 		},
 	})
 
-	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}})
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}}, nil)
 
 	comments := collector.CommentsForPath("a.go")
 	if len(comments) != 2 {
@@ -326,7 +326,7 @@ func TestExecuteReviewFilter_LLMError(t *testing.T) {
 		},
 	})
 
-	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}})
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
 
 	comments := collector.CommentsForPath("a.go")
 	if len(comments) != 1 {
@@ -358,7 +358,7 @@ func TestExecuteReviewFilter_SkipFilter(t *testing.T) {
 			},
 		})
 
-		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}})
+		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}}, nil)
 
 		if client.calls != 0 {
 			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
@@ -394,7 +394,7 @@ func TestExecuteReviewFilter_SkipFilter(t *testing.T) {
 			},
 		})
 
-		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}})
+		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}}, nil)
 
 		comments := collector.CommentsForPath("a.go")
 		if len(comments) != 3 {
@@ -443,7 +443,7 @@ func TestExecuteReviewFilter_SkipFilter(t *testing.T) {
 			},
 		})
 
-		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}})
+		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}}, nil)
 
 		if client.calls == 0 {
 			t.Error("LLM client should have been called when SkipFilter is false (default)")
@@ -480,7 +480,7 @@ func TestExecuteReviewFilter_SkipFilter(t *testing.T) {
 			},
 		})
 
-		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}})
+		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
 
 		if client.calls != 0 {
 			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
@@ -510,7 +510,7 @@ func TestExecuteReviewFilter_SkipFilter(t *testing.T) {
 			},
 		})
 
-		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}})
+		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
 
 		if client.calls != 0 {
 			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
@@ -824,7 +824,7 @@ func TestExecuteReviewFilter_WithTimeout(t *testing.T) {
 		},
 	})
 
-	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}})
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
 
 	comments := collector.CommentsForPath("a.go")
 	if len(comments) != 1 {

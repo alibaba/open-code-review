@@ -23,6 +23,7 @@ type Template struct {
 	MaxCompletionTokens   int              `json:"-"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD"`
+	MaxReviewRounds       int              `json:"MAX_REVIEW_ROUNDS"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask      *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 	GroupingTask          *LlmConversation `json:"GROUPING_TASK,omitempty"`
@@ -48,6 +49,14 @@ type ScanTemplate struct {
 	DedupTask             *LlmConversation `json:"DEDUP_TASK,omitempty"`
 	DedupMinComments      int              `json:"DEDUP_MIN_COMMENTS,omitempty"`
 	ProjectSummaryTask    *LlmConversation `json:"PROJECT_SUMMARY_TASK,omitempty"`
+}
+
+// ReviewRounds returns the effective per-group round count, never below 1.
+func (t Template) ReviewRounds() int {
+	if t.MaxReviewRounds < 1 {
+		return 1
+	}
+	return t.MaxReviewRounds
 }
 
 // CompletionTokenLimit returns the output cap for LLM requests. Runtime
@@ -89,6 +98,7 @@ type templateManifest struct {
 	MaxTokens             int                   `json:"MAX_TOKENS"`
 	MaxToolRequestTimes   int                   `json:"MAX_TOOL_REQUEST_TIMES"`
 	PlanModeLineThreshold int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
+	MaxReviewRounds       int                   `json:"MAX_REVIEW_ROUNDS"`
 	ReLocationTask        *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
 	ReviewFilterTask      *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 	GroupingTask          *manifestConversation `json:"GROUPING_TASK,omitempty"`
@@ -136,6 +146,7 @@ func LoadDefault() (*Template, error) {
 	tpl.MaxTokens = m.MaxTokens
 	tpl.MaxToolRequestTimes = m.MaxToolRequestTimes
 	tpl.PlanModeLineThreshold = m.PlanModeLineThreshold
+	tpl.MaxReviewRounds = m.MaxReviewRounds
 
 	if tpl.MainTask, err = resolveConversation(m.MainTask); err != nil {
 		return nil, fmt.Errorf("MAIN_TASK: %w", err)
@@ -219,6 +230,9 @@ func (t *Template) Validate() error {
 	}
 	if t.MaxToolRequestTimes <= 0 {
 		return fmt.Errorf("max_tool_request_times must be positive")
+	}
+	if t.MaxReviewRounds < 0 {
+		return fmt.Errorf("max_review_rounds must not be negative")
 	}
 	if len(t.MainTask.Messages) == 0 {
 		return fmt.Errorf("main_task.messages must not be empty")

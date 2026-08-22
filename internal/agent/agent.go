@@ -188,7 +188,7 @@ type Agent struct {
 	subtaskFailed   int64 // count of failed subtasks, accessed atomically
 	runner          *llmloop.Runner
 	resumeInfo      *ResumeInfo
-	budgetExceeded  bool // set when a token/tool-call budget gate stopped dispatch
+	budgetExceeded  atomic.Bool // set when a token/tool-call budget gate stopped dispatch
 
 	// inputResolution holds this run's frozen commit endpoints (resolved_base/
 	// head/exact_range), and repoRemoteIdentity the credential-free repository
@@ -484,7 +484,7 @@ func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 // and exit code: partial/0 whenever anything was covered, failed/non-zero only
 // when the cap left nothing covered. Per-file token/tool-round exhaustion
 // does NOT set this flag — it is an item-level failed(budget) outcome instead.
-func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded }
+func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded.Load() }
 
 // recordWarning adds a non-fatal warning to the agent's warning list.
 func (a *Agent) recordWarning(warningType, file, message string) {
@@ -622,6 +622,9 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 	sem := make(chan struct{}, concurrency)
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
+	if timeout > 0 && a.args.Template.ReviewRounds() > 1 {
+		timeout = timeout + timeout/2
+	}
 
 	var dispatched int64
 dispatchLoop:
@@ -646,7 +649,7 @@ dispatchLoop:
 					humanTokens(used), humanTokens(groupEst), humanTokens(projected), humanTokens(a.args.MaxTokensBudget), group.Label)
 				a.recordWarning("token_budget_reached", firstPath,
 					fmt.Sprintf("stopped dispatch: used %d tokens + group estimate %d = projected %d exceeds budget %d", used, groupEst, projected, a.args.MaxTokensBudget))
-				a.budgetExceeded = true
+				a.budgetExceeded.Store(true)
 				// Deliberately NOT SetRunFailure: budget exhaustion is a controlled
 				// coverage truncation, not a run-level failure. SetRunFailure would
 				// force terminal_state=failed regardless of coverage, and claim the
@@ -1240,6 +1243,66 @@ func resumedFromSession(resume *session.ResumeState) string {
 	return resume.SessionID
 }
 
+// buildMainTaskMessages renders the MAIN_TASK messages for one review round.
+// planResult is "" for round 2+ (stripped via stripEmptyPlanBlock).
+// confirmed is "" on round 1 (stripped via stripEmptyConfirmedBlock).
+func (a *Agent) buildMainTaskMessages(rule, changeFiles, diffs, planResult, confirmed string) []llm.Message {
+	rawMsgs := a.args.Template.MainTask.Messages
+	messages := make([]llm.Message, 0, len(rawMsgs))
+	for _, m := range rawMsgs {
+		content := m.Content
+		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
+		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
+		content = strings.ReplaceAll(content, "{{change_files}}", changeFiles)
+		content = strings.ReplaceAll(content, "{{diffs}}", diffs)
+		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
+		if planResult == "" {
+			content = stripEmptyPlanBlock(content)
+		}
+		content = strings.ReplaceAll(content, "{{plan_guidance}}", planResult)
+		if confirmed == "" {
+			content = stripEmptyConfirmedBlock(content)
+		}
+		content = strings.ReplaceAll(content, "{{confirmed_comments}}", confirmed)
+		messages = append(messages, llm.NewTextMessage(m.Role, content))
+	}
+	return messages
+}
+
+// checkPromptBudget validates that the rendered messages fit within the token
+// limit. Returns a *subtaskStop when they do not, nil otherwise.
+func (a *Agent) checkPromptBudget(ctx context.Context, messages []llm.Message, groupKey string, round int) *subtaskStop {
+	tokenCount := llmloop.CountMessagesTokens(messages)
+	maxAllowed := a.args.Template.MaxTokens
+	tokenLimit := llmloop.PromptTokenLimit(maxAllowed)
+	if tokenCount <= tokenLimit {
+		return nil
+	}
+	msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d) [round %d]", tokenCount, 80, maxAllowed, round)
+	fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: %s for group %q\n", msg, groupKey)
+	a.recordWarning("token_threshold_exceeded", groupKey, msg)
+	telemetry.Event(ctx, "token.threshold.exceeded",
+		telemetry.AnyToAttr("group.label", groupKey),
+		telemetry.AnyToAttr("tokens", tokenCount),
+		telemetry.AnyToAttr("max_tokens", maxAllowed),
+		telemetry.AnyToAttr("round", round))
+	return &subtaskStop{
+		class:      session.FailureBudget,
+		reason:     "prompt exceeded the configured token budget",
+		checkpoint: msg,
+	}
+}
+
+// groupHasComments reports whether any file in the group has comments.
+func (a *Agent) groupHasComments(g FileGroup) bool {
+	for _, d := range g.Diffs {
+		if len(a.args.CommentCollector.CommentsForPath(d.NewPath)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // executeGroupSubtask performs the Plan Phase + Main Loop for a file group. It
 // returns (completed, stop, err): a hard Go error (err) for provider/config/ctx
 // failures the caller classifies via classifyItemError, or a structured *stop
@@ -1308,95 +1371,118 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		}
 	}
 
-	// Phase 2: Main task loop
+	// Phase 2: Main task loop (multi-round)
 	if len(a.args.Template.MainTask.Messages) == 0 {
 		return false, nil, errMainTaskEmpty
 	}
 
-	rawMsgs := a.args.Template.MainTask.Messages
-	messages := make([]llm.Message, 0, len(rawMsgs))
-	for _, m := range rawMsgs {
-		content := m.Content
-		content = strings.ReplaceAll(content, "{{current_system_date_time}}", a.currentDate)
-		content = strings.ReplaceAll(content, "{{system_rule}}", rule)
-		content = strings.ReplaceAll(content, "{{change_files}}", changeFilesExcludingGroup)
-		content = strings.ReplaceAll(content, "{{diffs}}", concatenatedDiffs)
-		content = strings.ReplaceAll(content, "{{requirement_background}}", a.args.Background)
-		// Always substitute the {{plan_guidance}} token so the literal placeholder
-		// never leaks into the rendered prompt. When the plan phase produced no
-		// output, strip the surrounding "### Review Plan (Optional)\n…\n\n" wrapper
-		// so the LLM does not see a dangling section header.
-		// Strip MUST run before ReplaceAll: the regex requires the literal
-		// {{plan_guidance}} token to be present; if we replace first, the token
-		// is gone and the wrapper can't be matched.
-		if planResult == "" {
-			content = stripEmptyPlanBlock(content)
+	maxRounds := a.args.Template.ReviewRounds()
+
+	// Per-path baselines for concurrency-safe round-delta computation.
+	baseline := make(map[string]int, len(g.Diffs))
+	for _, d := range g.Diffs {
+		baseline[d.NewPath] = len(a.args.CommentCollector.CommentsForPath(d.NewPath))
+	}
+
+	var (
+		confirmed []model.LlmComment
+		lastStop  *subtaskStop
+		completed bool
+	)
+
+	for round := 1; round <= maxRounds; round++ {
+		if ctx.Err() != nil {
+			return false, nil, ctx.Err()
 		}
-		content = strings.ReplaceAll(content, "{{plan_guidance}}", planResult)
-		messages = append(messages, llm.NewTextMessage(m.Role, content))
-	}
 
-	tokenCount := llmloop.CountMessagesTokens(messages)
-	maxAllowed := a.args.Template.MaxTokens
-	tokenLimit := llmloop.PromptTokenLimit(maxAllowed)
-	if tokenCount > tokenLimit {
-		msg := fmt.Sprintf("prompt tokens (%d) exceed %d%% of max_tokens(%d)", tokenCount, 80, maxAllowed)
-		fmt.Fprintf(stdout.Writer(), "[ocr] WARNING: %s for group %q\n", msg, groupKey)
-		a.recordWarning("token_threshold_exceeded", groupKey, msg)
-		telemetry.Event(ctx, "token.threshold.exceeded",
-			telemetry.AnyToAttr("group.label", groupKey),
-			telemetry.AnyToAttr("tokens", tokenCount),
-			telemetry.AnyToAttr("max_tokens", maxAllowed))
-		return false, &subtaskStop{
-			class:      session.FailureBudget,
-			reason:     "prompt exceeded the configured token budget",
-			checkpoint: msg,
-		}, nil
-	}
+		if round > 1 && a.args.MaxTokensBudget > 0 && a.budgetExceeded.Load() {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Aggregate budget exceeded, skipping round %d for group %q\n", round, groupKey)
+			break
+		}
 
-	mainCompleted, mainStop, err := func() (bool, llmloop.MainLoopStop, error) {
-		ctx, mainSpan := telemetry.StartSpan(ctx, "main.loop")
-		defer mainSpan.End()
-		telemetry.SetAttr(mainSpan, "group.label", groupKey)
-		completed, stop, err := a.runner.RunPerFile(ctx, messages, groupKey)
+		// Round 2+ strips the plan to avoid it acting as a coverage ceiling.
+		roundPlan := planResult
+		if round > 1 {
+			roundPlan = ""
+		}
+
+		confirmedText := buildConfirmedCommentsBlock(confirmed)
+		messages := a.buildMainTaskMessages(rule, changeFilesExcludingGroup, concatenatedDiffs, roundPlan, confirmedText)
+
+		if stop := a.checkPromptBudget(ctx, messages, groupKey, round); stop != nil {
+			if round == 1 {
+				return false, stop, nil
+			}
+			break
+		}
+
+		mainCompleted, mainStop, err := func() (bool, llmloop.MainLoopStop, error) {
+			ctx, mainSpan := telemetry.StartSpan(ctx, "main.loop")
+			defer mainSpan.End()
+			telemetry.SetAttr(mainSpan, "group.label", groupKey)
+			telemetry.SetAttr(mainSpan, "round", round)
+			completed, stop, err := a.runner.RunPerFile(ctx, messages, groupKey)
+			if err != nil {
+				mainSpan.SetStatus(codes.Error, err.Error())
+				mainSpan.RecordError(err)
+				return false, stop, err
+			}
+			return completed, stop, nil
+		}()
+
 		if err != nil {
-			mainSpan.SetStatus(codes.Error, err.Error())
-			mainSpan.RecordError(err)
-			return false, stop, err
+			if round == 1 {
+				return false, nil, err
+			}
+			a.recordWarning("review_round_failed", groupKey, fmt.Sprintf("round %d: %v", round, err))
+			fmt.Fprintf(stdout.Writer(), "[ocr] Round %d failed for group %q: %v (keeping earlier findings)\n", round, groupKey, err)
+			break
 		}
-		return completed, stop, nil
-	}()
-	if err == nil {
-		// REVIEW_FILTER_TASK needs to see all comments produced by this group's
-		// async pool workers, so drain the pool for this key first.
+
+		// Drain async comment workers before computing deltas.
 		if a.args.CommentWorkerPool != nil {
 			a.args.CommentWorkerPool.AwaitKey(groupKey)
 		}
-		a.executeGroupReviewFilter(ctx, g)
-	}
-	if err != nil {
-		return false, nil, err
-	}
-	if !mainCompleted {
-		class, reason := classifyMainLoopStop(mainStop)
-		// If the model already produced comments before exhausting rounds,
-		// treat it as partial success rather than a hard error. This prevents
-		// discarding useful work when the round budget was simply too small.
-		hasComments := false
+		a.executeGroupReviewFilter(ctx, g, baseline)
+
+		// Compute newly confirmed comments from this round.
+		var newlyConfirmed []model.LlmComment
 		for _, d := range g.Diffs {
-			if len(a.args.CommentCollector.CommentsForPath(d.NewPath)) > 0 {
-				hasComments = true
-				break
+			all := a.args.CommentCollector.CommentsForPath(d.NewPath)
+			if b := baseline[d.NewPath]; len(all) > b {
+				newlyConfirmed = append(newlyConfirmed, all[b:]...)
 			}
+			baseline[d.NewPath] = len(all)
 		}
-		return false, &subtaskStop{
-			class:         class,
-			reason:        reason,
-			checkpoint:    "main_task did not complete before stopping",
-			reportAsError: !hasComments,
-		}, nil
+		confirmed = append(confirmed, newlyConfirmed...)
+
+		if !mainCompleted {
+			class, reason := classifyMainLoopStop(mainStop)
+			lastStop = &subtaskStop{
+				class:         class,
+				reason:        reason,
+				checkpoint:    fmt.Sprintf("main_task did not complete before stopping (round %d/%d)", round, maxRounds),
+				reportAsError: !a.groupHasComments(g),
+			}
+			break
+		}
+		completed = true
+
+		if len(newlyConfirmed) == 0 {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Round %d/%d added no new findings for group %q; stopping early\n", round, maxRounds, groupKey)
+			break
+		}
+
+		if len(confirmed) >= confirmedCap {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Group %q reached %d confirmed findings; skipping further rounds\n", groupKey, len(confirmed))
+			break
+		}
 	}
-	return true, nil, nil
+
+	if lastStop != nil {
+		return false, lastStop, nil
+	}
+	return completed, nil, nil
 }
 
 // filterTools defines the two mutually exclusive tools for the review filter.
@@ -1625,9 +1711,11 @@ func (a *Agent) executeGroupPlanPhase(ctx context.Context, g FileGroup, concaten
 	return resp.Content(), nil
 }
 
-// executeGroupReviewFilter runs the REVIEW_FILTER_TASK for an entire file group,
-// passing all diffs and all comments together so cross-file comments can be validated.
-func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup) {
+// executeGroupReviewFilter runs the REVIEW_FILTER_TASK for a file group.
+// When from is non-nil, only comments at indices >= from[path] for each path
+// are candidates for filtering (per-round isolation). When from is nil, all
+// comments for the group's paths are filtered (legacy full-group behavior).
+func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from map[string]int) {
 	groupKey := fileGroupKey(g.Diffs)
 	ctx, span := telemetry.StartSpan(ctx, "review_filter.execute")
 	defer span.End()
@@ -1644,17 +1732,36 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup) {
 		return
 	}
 
-	// Collect all comments for this group
-	var allComments []model.LlmComment
-	for _, d := range g.Diffs {
-		allComments = append(allComments, a.args.CommentCollector.CommentsForPath(d.NewPath)...)
+	// Collect candidate comments with their true per-path indices.
+	type filterCandidate struct {
+		cm      model.LlmComment
+		pathIdx int
 	}
-	if len(allComments) == 0 {
+	var candidates []filterCandidate
+	for _, d := range g.Diffs {
+		all := a.args.CommentCollector.CommentsForPath(d.NewPath)
+		start := 0
+		if from != nil {
+			start = from[d.NewPath]
+			if start > len(all) {
+				start = len(all)
+			}
+		}
+		for i := start; i < len(all); i++ {
+			candidates = append(candidates, filterCandidate{cm: all[i], pathIdx: i})
+		}
+	}
+	if len(candidates) == 0 {
 		return
 	}
-	telemetry.SetAttr(span, "comments.before", len(allComments))
+	telemetry.SetAttr(span, "comments.before", len(candidates))
 
-	commentsJSON := buildGroupFilterCommentsJSON(allComments)
+	// Build the comment list for the filter prompt.
+	candidateComments := make([]model.LlmComment, len(candidates))
+	for i, c := range candidates {
+		candidateComments[i] = c.cm
+	}
+	commentsJSON := buildGroupFilterCommentsJSON(candidateComments)
 	concatenatedDiffs := buildConcatenatedDiffs(g.Diffs)
 
 	messages := make([]llm.Message, 0, len(ft.Messages))
@@ -1700,30 +1807,29 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup) {
 	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
 
-	indices := parseFilterToolCalls(resp.ToolCalls(), len(allComments))
+	indices := parseFilterToolCalls(resp.ToolCalls(), len(candidates))
 	if indices == nil {
-		indices = parseFilterResponse(resp.Content(), len(allComments))
+		indices = parseFilterResponse(resp.Content(), len(candidates))
 	}
 	telemetry.SetAttr(span, "comments.filtered", len(indices))
 	if len(indices) == 0 {
 		telemetry.Event(ctx, "review_filter.completed",
 			attribute.String("group.label", groupKey),
-			attribute.Int("total_comments", len(allComments)),
+			attribute.Int("total_comments", len(candidates)),
 			attribute.Int("removed", 0))
 		return
 	}
 
-	// Map global indices back to per-path removals
+	// Map candidate indices to per-path removals using the true pathIdx.
 	perPath := make(map[string]map[int]struct{})
-	pathIdx := make(map[string]int)
-	for i, cm := range allComments {
-		if _, remove := indices[i]; remove {
-			if perPath[cm.Path] == nil {
-				perPath[cm.Path] = make(map[int]struct{})
-			}
-			perPath[cm.Path][pathIdx[cm.Path]] = struct{}{}
+	for i, c := range candidates {
+		if _, remove := indices[i]; !remove {
+			continue
 		}
-		pathIdx[cm.Path]++
+		if perPath[c.cm.Path] == nil {
+			perPath[c.cm.Path] = make(map[int]struct{})
+		}
+		perPath[c.cm.Path][c.pathIdx] = struct{}{}
 	}
 	var totalRemoved int
 	for path, idxSet := range perPath {
@@ -1732,7 +1838,7 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup) {
 	}
 	telemetry.Event(ctx, "review_filter.completed",
 		attribute.String("group.label", groupKey),
-		attribute.Int("total_comments", len(allComments)),
+		attribute.Int("total_comments", len(candidates)),
 		attribute.Int("removed", totalRemoved))
 	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for group %q\n", totalRemoved, groupKey)
 }
