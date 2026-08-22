@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -18,6 +19,13 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
+
+type contextBlockingClient struct{}
+
+func (contextBlockingClient) CompletionsWithCtx(ctx context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
 
 func TestAgent_Getters(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -607,6 +615,31 @@ func TestExecutePlanPhase_LLMError(t *testing.T) {
 	_, err := a.executePlanPhase(context.Background(), "a.go", "+x", "", "")
 	if err != nil {
 		t.Logf("expected no-error from empty response, got: %v", err)
+	}
+}
+
+func TestExecutePlanPhase_Timeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+
+	a := New(Args{
+		LLMClient:       contextBlockingClient{},
+		Model:           "test",
+		Session:         sess,
+		PlanTaskTimeout: 20 * time.Millisecond,
+		Template: template.Template{
+			PlanTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "{{diff}}"}},
+			},
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+		},
+	})
+
+	_, err := a.executePlanPhase(context.Background(), "a.go", "+x", "", "")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("executePlanPhase error = %v, want context deadline exceeded", err)
 	}
 }
 
