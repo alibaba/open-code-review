@@ -16,8 +16,11 @@ type LlmComment struct {
 	ExistingCode   string `json:"existing_code,omitempty"`
 	StartLine      int    `json:"start_line"`
 	EndLine        int    `json:"end_line"`
-	Side           string `json:"-"`
-	Thinking       string `json:"thinking,omitempty"`
+	// Side records whether the resolved location belongs to the new (RIGHT) or
+	// old (LEFT) side of the diff. It is internal posting provenance and is not
+	// part of the public review JSON schema.
+	Side     string `json:"-"`
+	Thinking string `json:"thinking,omitempty"`
 	// Category classifies the finding. One of:
 	// bug, security, performance, maintainability, test, style, documentation, other.
 	Category string `json:"category,omitempty"`
