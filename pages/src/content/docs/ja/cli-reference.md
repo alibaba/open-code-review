@@ -287,6 +287,16 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
       "suggestion_code": "mu.Lock(); defer mu.Unlock(); m[k] = v",
       "thinking": "Looking at line 42, the map …"
     }
+  ],
+  "filtered_comments": [
+    {
+      "path": "src/foo.go",
+      "content": "validate() never checks the nil case.",
+      "start_line": 88,
+      "end_line": 88,
+      "existing_code": "return validate(cfg)",
+      "reason": "c-1: validate() is not part of this diff, so the claim cannot be checked against it"
+    }
   ]
 }
 ```
@@ -300,6 +310,7 @@ ocr review --format json | jq .summary   # stdout は単一の JSON ドキュメ
 | `message` | 任意。人間が読みやすいサマリー（例: `"No comments generated. Looks good to me."`）。 |
 | `summary` | 任意。実行の集計: `files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` の実行時は省略されます。 |
 | `comments` | 常に存在しますが、空の場合があります。各コメントのフィールドは上記の例のとおりです。 |
+| `filtered_comments` | 任意。`REVIEW_FILTER_TASK` が明らかに誤りと判断して削除したコメントで、破棄された指摘も確認できるようにするためのものです。各フィールドは `comments` と同じで、加えて `reason`（フィルター自身の説明。自由記述の analysis から抽出したもの）が付きます。`reason` はベストエフォートのため欠ける場合があります（tool 呼び出しに対応していない provider では常に欠けます）。何も削除されなかった場合は省略され、フィルターが実行されなかった場合（`--no-filter`、またはフィルター中の LLM エラー）も同様です。この JSON 出力にのみ存在し、session レコードには書き込まれないため、`ocr session comments` とビューアーには表示されません。 |
 | `warnings` | 任意。1 つ以上のサブエージェントが失敗した場合に存在します。各項目は影響を受けたファイルとエラーを記述します。 |
 | `session_id` | 任意。永続化されたレビュー実行に含まれます。互換性のある範囲または単一 commit レビューを再試行する際に `ocr review --resume <session-id>` へ渡せます。 |
 | `resume` | 任意。再開した実行で存在し、`resumed_from`、`reused_files`、`rerun_files`、`previous_model`、`current_model` を含みます。 |

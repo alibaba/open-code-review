@@ -362,6 +362,35 @@ type resumeInfoProvider interface {
 	ResumeInfo() *agent.ResumeInfo
 }
 
+// filteredCommentsProvider is implemented by the review agent only. Scan runs no
+// comment-level filter, so it has nothing to report and stays off this interface.
+type filteredCommentsProvider interface {
+	FilteredComments() []agent.FilteredComment
+}
+
+// resolveFilteredLines applies to removed comments the same line-number
+// resolution emitRunResult applies to the surviving ones. It is not optional
+// polish: the model usually omits start_line/end_line — that is why the resolver
+// exists at all — so without this a filtered comment is published with line 0 and
+// the reader cannot locate the finding that was dropped.
+func resolveFilteredLines(filtered []agent.FilteredComment, diffs []model.Diff) []agent.FilteredComment {
+	if len(filtered) == 0 {
+		return nil
+	}
+	inner := make([]model.LlmComment, len(filtered))
+	for i, fc := range filtered {
+		inner[i] = fc.LlmComment
+	}
+	// ResolveLineNumbers preserves length and order, so index i still identifies
+	// the comment whose Reason sits at filtered[i].
+	inner = diff.ResolveLineNumbers(inner, diffs)
+	out := make([]agent.FilteredComment, len(filtered))
+	for i := range filtered {
+		out[i] = agent.FilteredComment{LlmComment: inner[i], Reason: filtered[i].Reason}
+	}
+	return out
+}
+
 // emitRunResult is the post-LLM-run finalization shared by `ocr review` and
 // `ocr scan`: resolves comment line numbers, records telemetry, restores
 // stdout early for agent-text audiences so the summary is visible, prints
@@ -433,10 +462,14 @@ func emitRunResult(
 		if p, ok := ag.(resumeInfoProvider); ok {
 			resumeInfo = p.ResumeInfo()
 		}
+		var filtered []agent.FilteredComment
+		if p, ok := ag.(filteredCommentsProvider); ok {
+			filtered = resolveFilteredLines(p.FilteredComments(), ag.Diffs())
+		}
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, retryReport)
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, retryReport, filtered)
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest)

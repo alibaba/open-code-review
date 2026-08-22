@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"runtime/debug"
 	"slices"
 	"sort"
@@ -196,10 +197,29 @@ type Agent struct {
 	// and consumed by finalizeManifest to fill the manifest input/repository.
 	inputResolution    diff.InputResolution
 	repoRemoteIdentity string
+
+	// filteredComments accumulates the comments the review filter removed, so a
+	// dropped finding is reported rather than vanishing. executeReviewFilter
+	// appends from concurrent file subtasks, so every access takes filteredMu.
+	filteredMu       sync.Mutex
+	filteredComments []FilteredComment
 }
 
 // ResumeInfo summarizes file-level reuse for a resumed review.
 type ResumeInfo = session.ResumeInfo
+
+// FilteredComment is one comment the review filter removed, carrying the
+// original finding plus the filter's own reasoning for dropping it.
+//
+// Reason is best-effort and often absent: it is recovered from the filter tool
+// call's free-text "analysis" entries, which are the model's reasoning scratchpad
+// rather than a structured field. It stays empty when no entry could be matched to
+// this comment, and always when the provider has no tool support and the run fell
+// back to text parsing.
+type FilteredComment struct {
+	model.LlmComment
+	Reason string `json:"reason,omitempty"`
+}
 
 // New creates a new Agent from the given arguments.
 func New(args Args) *Agent {
@@ -434,6 +454,19 @@ func (a *Agent) ResumeInfo() *ResumeInfo {
 	}
 	info := *a.resumeInfo
 	return &info
+}
+
+// FilteredComments returns a copy of the comments the review filter removed.
+// Nil when the filter removed nothing, was disabled, or never ran.
+func (a *Agent) FilteredComments() []FilteredComment {
+	a.filteredMu.Lock()
+	defer a.filteredMu.Unlock()
+	if len(a.filteredComments) == 0 {
+		return nil
+	}
+	out := make([]FilteredComment, len(a.filteredComments))
+	copy(out, a.filteredComments)
+	return out
 }
 
 // FilesReviewed returns the number of dispatchable files included in this review.
@@ -1468,8 +1501,10 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	rec.SetResponse(resp, duration)
 	a.runner.RecordUsage(resp.Usage)
 
-	indices := parseFilterToolCalls(resp.ToolCalls(), len(comments))
+	indices, analysis := parseFilterToolCalls(resp.ToolCalls(), len(comments))
 	if indices == nil {
+		// Text fallback for providers without tool support: it carries ids only, so
+		// the removed comments end up with no reason attached.
 		indices = parseFilterResponse(resp.Content(), len(comments))
 	}
 	telemetry.SetAttr(span, "comments.filtered", len(indices))
@@ -1481,7 +1516,7 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 		return
 	}
 
-	a.args.CommentCollector.RemoveByPathAndIndices(newPath, indices)
+	a.recordFilteredComments(a.args.CommentCollector.RemoveByPathAndIndices(newPath, indices), analysis)
 	telemetry.Event(ctx, "review_filter.completed",
 		attribute.String("file.path", newPath),
 		attribute.Int("total_comments", len(comments)),
@@ -1509,10 +1544,17 @@ func buildFilterCommentsJSON(comments []model.LlmComment) string {
 }
 
 // parseFilterToolCalls extracts comment indices from the filter tool call response.
-// Returns nil if no matching tool call is found, allowing fallback to text-based parsing.
-// Returns an empty map (non-nil) for approve_all_comments or an empty comment_ids list.
-func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
+// Returns nil indices if no matching tool call is found, allowing fallback to
+// text-based parsing. Returns an empty map (non-nil) for approve_all_comments or an
+// empty comment_ids list.
+//
+// The second return value is the raw "analysis" entries the model wrote before
+// committing to comment_ids. They are its reasoning scratchpad, not a structured
+// field: callers may mine them for a per-comment reason but must tolerate any shape.
+// It is nil for approve_all_comments, which removes nothing and so needs no reason.
+func parseFilterToolCalls(calls []llm.ToolCall, total int) (map[int]struct{}, []string) {
 	var indices map[int]struct{}
+	var analysis []string
 	for _, call := range calls {
 		switch call.Function.Name {
 		case "approve_all_comments":
@@ -1521,6 +1563,7 @@ func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
 			}
 		case "report_incorrect_comments":
 			var args struct {
+				Analysis   []string `json:"analysis"`
 				CommentIDs []string `json:"comment_ids"`
 			}
 			if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
@@ -1530,6 +1573,7 @@ func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
 			if indices == nil {
 				indices = make(map[int]struct{})
 			}
+			analysis = append(analysis, args.Analysis...)
 			for _, id := range args.CommentIDs {
 				var idx int
 				if _, err := fmt.Sscanf(id, "c-%d", &idx); err == nil && idx >= 0 && idx < total {
@@ -1538,7 +1582,65 @@ func parseFilterToolCalls(calls []llm.ToolCall, total int) map[int]struct{} {
 			}
 		}
 	}
-	return indices
+	return indices, analysis
+}
+
+// filterAnalysisIDRe pulls the leading comment id out of one free-text analysis
+// entry, tolerating list markers or quotes before it. The trailing (?:\D|$) is a
+// digit boundary: without it "c-1" would also claim an entry written about c-10.
+var filterAnalysisIDRe = regexp.MustCompile(`(?i)^[^a-z0-9]*c-(\d+)(?:\D|$)`)
+
+// filterReasonsByIndex maps each removed comment's per-path index to the analysis
+// entry that discusses it. Entries whose id cannot be read, or that belong to a
+// comment the filter kept, are skipped; the first entry for an index wins. The
+// result is best-effort and may cover only some — or none — of removed.
+func filterReasonsByIndex(analysis []string, removed map[int]model.LlmComment) map[int]string {
+	var out map[int]string
+	for _, entry := range analysis {
+		m := filterAnalysisIDRe.FindStringSubmatch(entry)
+		if m == nil {
+			continue
+		}
+		idx, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		if _, ok := removed[idx]; !ok {
+			continue
+		}
+		if _, dup := out[idx]; dup {
+			continue
+		}
+		if out == nil {
+			out = make(map[int]string, len(removed))
+		}
+		out[idx] = strings.TrimSpace(entry)
+	}
+	return out
+}
+
+// recordFilteredComments stores the comments the filter removed alongside its
+// reasoning, so a dropped finding is still reported. Entries are appended in
+// per-path index order to keep output stable across runs.
+func (a *Agent) recordFilteredComments(removed map[int]model.LlmComment, analysis []string) {
+	if len(removed) == 0 {
+		return
+	}
+	reasons := filterReasonsByIndex(analysis, removed)
+	idxs := make([]int, 0, len(removed))
+	for idx := range removed {
+		idxs = append(idxs, idx)
+	}
+	sort.Ints(idxs)
+
+	a.filteredMu.Lock()
+	defer a.filteredMu.Unlock()
+	for _, idx := range idxs {
+		a.filteredComments = append(a.filteredComments, FilteredComment{
+			LlmComment: removed[idx],
+			Reason:     reasons[idx],
+		})
+	}
 }
 
 // parseFilterResponse extracts comment indices from the LLM filter response.

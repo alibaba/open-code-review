@@ -93,14 +93,22 @@ func (c *CommentCollector) ReplaceSince(start int, replacements []model.LlmComme
 
 // RemoveByPathAndIndices removes comments for a given path whose per-path index
 // (0-based position among all comments with that path) is in the indices set.
-func (c *CommentCollector) RemoveByPathAndIndices(path string, indices map[int]struct{}) {
+// It returns the removed comments, keyed by that same per-path index, so a caller
+// can report what was dropped instead of losing it silently. The returned map is
+// nil when nothing matched.
+func (c *CommentCollector) RemoveByPathAndIndices(path string, indices map[int]struct{}) map[int]model.LlmComment {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	var removed map[int]model.LlmComment
 	kept := c.comments[:0]
 	pathIdx := 0
 	for _, cm := range c.comments {
 		if cm.Path == path {
 			if _, remove := indices[pathIdx]; remove {
+				if removed == nil {
+					removed = make(map[int]model.LlmComment, len(indices))
+				}
+				removed[pathIdx] = cm
 				pathIdx++
 				continue
 			}
@@ -113,4 +121,5 @@ func (c *CommentCollector) RemoveByPathAndIndices(path string, indices map[int]s
 		tail[i] = model.LlmComment{}
 	}
 	c.comments = kept
+	return removed
 }
