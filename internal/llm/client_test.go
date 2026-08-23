@@ -1992,7 +1992,7 @@ func TestIsGemini(t *testing.T) {
 }
 
 func TestFormatGeminiError_Gemini400BadRequest(t *testing.T) {
-	geminiErrBody := `{"error":{"code":400,"message":"Invalid argument in tool call","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"FIELD_VIOLATION","metadata":{"field":"messages.tool_calls"}}]}}`
+	geminiErrBody := `[{"error":{"code":400,"message":"Invalid argument in tool call","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"FIELD_VIOLATION","metadata":{"field":"messages.tool_calls"}}]}}]`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
