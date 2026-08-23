@@ -2209,27 +2209,16 @@ func TestFormatGeminiError_ClosesReplacedResponseBody(t *testing.T) {
 	}
 }
 
-func TestLimitErrorResponseBody(t *testing.T) {
-	body := &trackingReadCloser{Reader: strings.NewReader(strings.Repeat("x", maxErrorBodyBytes+1))}
-	resp, err := limitErrorResponseBody(httptest.NewRequest(http.MethodGet, "https://api.example.com", nil), func(*http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusBadGateway, Body: body}, nil
-	})
-	if err != nil {
-		t.Fatalf("limitErrorResponseBody: %v", err)
+func TestLimitErrorBodyForLog(t *testing.T) {
+	withinLimit := strings.Repeat("x", maxErrorBodyBytes)
+	if got := limitErrorBodyForLog(withinLimit); got != withinLimit {
+		t.Errorf("limitErrorBodyForLog within limit = %q, want unmodified input", got)
 	}
 
-	contents, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read limited response body: %v", err)
-	}
-	if got, want := len(contents), maxErrorBodyBytes; got != want {
-		t.Errorf("limited response body length = %d, want %d", got, want)
-	}
-	if err := resp.Body.Close(); err != nil {
-		t.Fatalf("close limited response body: %v", err)
-	}
-	if !body.closed {
-		t.Error("limited response body did not close the transport body")
+	overLimit := strings.Repeat("x", maxErrorBodyBytes+1)
+	want := strings.Repeat("x", maxErrorBodyBytes) + "... (truncated)"
+	if got := limitErrorBodyForLog(overLimit); got != want {
+		t.Errorf("limitErrorBodyForLog over limit = %q, want %q", got, want)
 	}
 }
 
