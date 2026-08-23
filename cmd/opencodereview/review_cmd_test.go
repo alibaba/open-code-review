@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alibaba/open-code-review/internal/agent"
-	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
@@ -88,29 +86,30 @@ func TestReviewResultErrorUsesManifestTerminalState(t *testing.T) {
 	}
 }
 
-func TestValidateGitHubPostingManifestMatchesSealedRange(t *testing.T) {
-	sealed := &agent.SealedInput{Resolution: diff.InputResolution{
-		ResolvedBase: "base-sha",
-		ResolvedHead: "head-sha",
-		ExactRange:   "base-sha..head-sha",
-	}}
+func TestGitHubPostingTargetUsesManifestIdentity(t *testing.T) {
 	manifest := &session.RunManifest{Input: session.ManifestInput{
-		Mode:         session.InputModeRange,
-		ResolvedBase: "base-sha",
-		ResolvedHead: "head-sha",
-		ExactRange:   "base-sha..head-sha",
+		Mode:          session.InputModeRange,
+		RequestedFrom: "origin/main",
+		ResolvedBase:  "base-sha",
+		ResolvedHead:  "head-sha",
+		ExactRange:    "base-sha..head-sha",
 	}}
-
-	if err := validateGitHubPostingManifest(sealed, manifest); err != nil {
-		t.Fatalf("matching manifest rejected: %v", err)
+	target, err := githubPostingTargetFromManifest("/repo", manifest)
+	if err != nil {
+		t.Fatalf("githubPostingTargetFromManifest: %v", err)
+	}
+	if target.RepoDir != "/repo" || target.BaseRef != "origin/main" || target.ResolvedBase != "base-sha" || target.ResolvedHead != "head-sha" {
+		t.Fatalf("target = %+v", target)
 	}
 
-	manifest.Input.ResolvedHead = "moved-head"
-	if err := validateGitHubPostingManifest(sealed, manifest); err == nil || !strings.Contains(err.Error(), "does not match") {
-		t.Fatalf("mismatched manifest accepted: %v", err)
-	}
-	if err := validateGitHubPostingManifest(sealed, nil); err == nil || !strings.Contains(err.Error(), "missing") {
-		t.Fatalf("missing manifest accepted: %v", err)
+	for name, broken := range map[string]*session.RunManifest{
+		"missing":      nil,
+		"workspace":    {Input: session.ManifestInput{Mode: session.InputModeWorkspace}},
+		"missing base": {Input: session.ManifestInput{Mode: session.InputModeRange, RequestedFrom: "main", ResolvedHead: "head"}},
+	} {
+		if _, err := githubPostingTargetFromManifest("/repo", broken); err == nil {
+			t.Errorf("%s manifest was accepted", name)
+		}
 	}
 }
 

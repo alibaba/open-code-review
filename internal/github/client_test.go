@@ -6,6 +6,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,37 +23,54 @@ func writeJSON(t *testing.T, w http.ResponseWriter, status int, value any) {
 	}
 }
 
-func TestParseRepoInfoValidatesConfiguredGitHubHost(t *testing.T) {
+func testConfiguration(t *testing.T, server *httptest.Server) Configuration {
+	t.Helper()
+	configuration, err := newConfiguration(server.URL, server.URL, server.Client(), true)
+	if err != nil {
+		t.Fatalf("newConfiguration: %v", err)
+	}
+	configuration.githubHost = "github.com"
+	return configuration
+}
+
+func TestResolveRepositoryValidatesConfiguredGitHubHost(t *testing.T) {
 	t.Setenv("GITHUB_SERVER_URL", "")
+	configuration, err := NewConfigurationFromEnvironment()
+	if err != nil {
+		t.Fatalf("NewConfigurationFromEnvironment: %v", err)
+	}
 	for _, remote := range []string{
 		"https://github.com/acme/widget.git",
 		"git@github.com:acme/widget.git",
 		"ssh://git@github.com/acme/widget.git",
 	} {
-		owner, repo, err := ParseRepoInfo(remote)
+		repository, err := configuration.ResolveRepository(remote)
 		if err != nil {
-			t.Errorf("ParseRepoInfo(%q): %v", remote, err)
+			t.Errorf("ResolveRepository(%q): %v", remote, err)
 			continue
 		}
-		if owner != "acme" || repo != "widget" {
-			t.Errorf("ParseRepoInfo(%q) = %s/%s, want acme/widget", remote, owner, repo)
+		if repository.Owner() != "acme" || repository.Name() != "widget" {
+			t.Errorf("ResolveRepository(%q) = %s/%s, want acme/widget", remote, repository.Owner(), repository.Name())
 		}
 	}
-	if _, _, err := ParseRepoInfo("https://gitlab.com/acme/widget.git"); err == nil || !strings.Contains(err.Error(), "does not match") {
+	if _, err := configuration.ResolveRepository("https://gitlab.com/acme/widget.git"); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("GitLab remote accepted as GitHub: %v", err)
 	}
 
 	t.Setenv("GITHUB_SERVER_URL", "https://github.enterprise.example")
-	owner, repo, err := ParseRepoInfo("git@github.enterprise.example:platform/service.git")
-	if err != nil || owner != "platform" || repo != "service" {
-		t.Fatalf("enterprise remote = %s/%s, %v", owner, repo, err)
-	}
 	t.Setenv("GITHUB_API_URL", "")
 	repository, err := ResolveRepository("git@github.enterprise.example:platform/service.git")
 	if err != nil {
 		t.Fatalf("ResolveRepository: %v", err)
 	}
-	if got := NewClient("token", repository, 3).baseURL; got != "https://github.enterprise.example/api/v3" {
+	if repository.Owner() != "platform" || repository.Name() != "service" {
+		t.Fatalf("enterprise remote = %s/%s", repository.Owner(), repository.Name())
+	}
+	client, err := NewClient("token", repository, 3)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if got := client.baseURL; got != "https://github.enterprise.example/api/v3" {
 		t.Fatalf("enterprise API URL = %q", got)
 	}
 }
@@ -73,7 +91,11 @@ func TestClientRejectsMismatchedAPIHostBeforeSendingToken(t *testing.T) {
 
 	repository, err := ResolveRepository("https://github.com/acme/widget.git")
 	if err == nil {
-		_, err = NewClient(token, repository, 14).CreateIssueComment(context.Background(), "finding")
+		var client *Client
+		client, err = NewClient(token, repository, 14)
+		if err == nil {
+			_, err = client.CreateIssueComment(context.Background(), "finding")
+		}
 	}
 	if err == nil {
 		t.Fatal("mismatched API host was accepted")
@@ -87,8 +109,8 @@ func TestClientRejectsHTTPProductionEndpoints(t *testing.T) {
 	t.Setenv("GITHUB_SERVER_URL", "http://github.enterprise.example")
 	t.Setenv("GITHUB_API_URL", "http://github.enterprise.example/api/v3")
 
-	if _, _, err := ParseRepoInfo("git@github.enterprise.example:acme/widget.git"); err == nil || !strings.Contains(err.Error(), "HTTPS") {
-		t.Fatalf("ParseRepoInfo error = %v, want HTTPS requirement", err)
+	if _, err := ResolveRepository("git@github.enterprise.example:acme/widget.git"); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("ResolveRepository error = %v, want HTTPS requirement", err)
 	}
 }
 
@@ -122,14 +144,22 @@ func TestConfigurationRejectsMalformedCredentialBoundaries(t *testing.T) {
 		})
 	}
 
-	if _, err := NewTestConfiguration("", "http://127.0.0.1", http.DefaultClient); err == nil || !strings.Contains(err.Error(), "host is empty") {
-		t.Fatalf("empty test host error = %v", err)
-	}
-	if _, err := NewTestConfiguration("github.com", "not-a-url", http.DefaultClient); err == nil || !strings.Contains(err.Error(), "invalid") {
-		t.Fatalf("invalid test API error = %v", err)
-	}
-	if _, err := NewTestConfiguration("github.com", "http://127.0.0.1", nil); err == nil || !strings.Contains(err.Error(), "client is nil") {
-		t.Fatalf("nil test client error = %v", err)
+	for _, tc := range []struct {
+		name       string
+		repository Repository
+		prNumber   int
+		want       string
+	}{
+		{name: "zero repository", repository: Repository{}, prNumber: 14, want: "repository"},
+		{name: "incomplete configuration", repository: Repository{owner: "acme", name: "widget"}, prNumber: 14, want: "configuration"},
+		{name: "negative pull request", repository: Repository{owner: "acme", name: "widget", configuration: Configuration{githubHost: "github.com", apiBaseURL: "https://api.github.com", httpClient: http.DefaultClient}}, prNumber: -1, want: "pull request number"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, err := NewClient("token", tc.repository, tc.prNumber)
+			if client != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("NewClient = (%v, %v), want nil and %q", client, err, tc.want)
+			}
+		})
 	}
 }
 
@@ -143,10 +173,12 @@ func TestClientPullRequestOperations(t *testing.T) {
 		switch r.URL.Path {
 		case "/repos/acme/widget/pulls":
 			writeJSON(t, w, http.StatusOK, []any{
-				map[string]any{"number": 14, "head": map[string]any{"sha": headSHA}, "base": map[string]any{"ref": "main"}},
+				map[string]any{"number": 14, "head": map[string]any{"sha": headSHA}, "base": map[string]any{"ref": "main", "sha": "base-tip"}},
 			})
 		case "/repos/acme/widget/pulls/14":
-			writeJSON(t, w, http.StatusOK, map[string]any{"number": 14, "state": "open", "head": map[string]any{"sha": headSHA}, "base": map[string]any{"ref": "main"}})
+			writeJSON(t, w, http.StatusOK, map[string]any{"number": 14, "state": "open", "head": map[string]any{"sha": headSHA}, "base": map[string]any{"ref": "main", "sha": "base-tip"}})
+		case "/repos/acme/widget/compare/base-tip...abc123":
+			writeJSON(t, w, http.StatusOK, map[string]any{"merge_base_commit": map[string]any{"sha": "reviewed-base"}})
 		case "/repos/acme/widget/pulls/14/files":
 			writeJSON(t, w, http.StatusOK, []any{map[string]any{"filename": "main.go", "patch": "@@ -1 +1 @@\n line"}})
 		case "/repos/acme/widget/pulls/14/reviews":
@@ -173,10 +205,7 @@ func TestClientPullRequestOperations(t *testing.T) {
 		}
 	}))
 	t.Cleanup(server.Close)
-	configuration, err := NewTestConfiguration("github.com", server.URL, server.Client())
-	if err != nil {
-		t.Fatalf("NewTestConfiguration: %v", err)
-	}
+	configuration := testConfiguration(t, server)
 	repository, err := configuration.ResolveRepository("https://github.com/acme/widget.git")
 	if err != nil {
 		t.Fatalf("ResolveRepository: %v", err)
@@ -187,10 +216,17 @@ func TestClientPullRequestOperations(t *testing.T) {
 	if err != nil || prNumber != 14 {
 		t.Fatalf("FindPRByHead = %d, %v", prNumber, err)
 	}
-	client := NewClient("test-token", repository, prNumber)
+	client, err := NewClient("test-token", repository, prNumber)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
 	pull, err := client.GetPRInfo(ctx)
-	if err != nil || pull.Head.SHA != headSHA {
+	if err != nil || pull.Head.SHA != headSHA || pull.Base.SHA != "base-tip" {
 		t.Fatalf("GetPRInfo = %+v, %v", pull, err)
+	}
+	mergeBase, err := client.MergeBase(ctx, pull.Base.SHA, pull.Head.SHA)
+	if err != nil || mergeBase != "reviewed-base" {
+		t.Fatalf("MergeBase = %q, %v", mergeBase, err)
 	}
 	files, err := client.ListChangedFiles(ctx)
 	if err != nil || len(files) != 1 || files[0].Filename != "main.go" {
@@ -226,16 +262,18 @@ func TestClientReturnsTypedAPIError(t *testing.T) {
 		writeJSON(t, w, http.StatusUnprocessableEntity, map[string]string{"message": "invalid line for " + token})
 	}))
 	t.Cleanup(server.Close)
-	configuration, err := NewTestConfiguration("github.com", server.URL, server.Client())
-	if err != nil {
-		t.Fatalf("NewTestConfiguration: %v", err)
-	}
+	configuration := testConfiguration(t, server)
+	var err error
 	repository, err := configuration.ResolveRepository("https://github.com/acme/widget.git")
 	if err != nil {
 		t.Fatalf("ResolveRepository: %v", err)
 	}
 
-	_, err = NewClient(token, repository, 14).CreateReview(context.Background(), "head", ReviewRequest{})
+	client, err := NewClient(token, repository, 14)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	_, err = client.CreateReview(context.Background(), "head", ReviewRequest{})
 	apiErr, ok := err.(*APIError)
 	if !ok || apiErr.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(apiErr.Body, "invalid line") {
 		t.Fatalf("error = %#v, want typed 422 APIError", err)
@@ -243,4 +281,70 @@ func TestClientReturnsTypedAPIError(t *testing.T) {
 	if strings.Contains(apiErr.Error(), token) || !strings.Contains(apiErr.Error(), "[REDACTED]") {
 		t.Fatalf("error = %q, want token redacted", apiErr)
 	}
+}
+
+func TestFindPRByHeadFailsClosedAtPaginationLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		pulls := make([]map[string]any, pageSize)
+		for i := range pulls {
+			pulls[i] = map[string]any{
+				"number": (mustAtoi(t, page)-1)*pageSize + i + 1,
+				"head":   map[string]any{"sha": fmt.Sprintf("other-%s-%d", page, i)},
+				"base":   map[string]any{"ref": "main", "sha": "base-tip"},
+			}
+		}
+		if page == "1" {
+			pulls[0]["head"] = map[string]any{"sha": "reviewed-head"}
+		}
+		writeJSON(t, w, http.StatusOK, pulls)
+	}))
+	t.Cleanup(server.Close)
+	repository, err := testConfiguration(t, server).ResolveRepository("https://github.com/acme/widget.git")
+	if err != nil {
+		t.Fatalf("ResolveRepository: %v", err)
+	}
+	_, err = FindPRByHead(context.Background(), "token", repository, "main", "reviewed-head")
+	if err == nil || !strings.Contains(err.Error(), "open pull request discovery reached the 3000-entry pagination limit; cannot prove a unique match") {
+		t.Fatalf("FindPRByHead error = %v", err)
+	}
+}
+
+func TestClientListsFailClosedAtPaginationLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		batch := make([]map[string]any, pageSize)
+		for i := range batch {
+			batch[i] = map[string]any{"id": i + 1, "filename": fmt.Sprintf("file-%d.go", i), "body": "marker"}
+		}
+		writeJSON(t, w, http.StatusOK, batch)
+	}))
+	t.Cleanup(server.Close)
+	repository, err := testConfiguration(t, server).ResolveRepository("https://github.com/acme/widget.git")
+	if err != nil {
+		t.Fatalf("ResolveRepository: %v", err)
+	}
+	client, err := NewClient("token", repository, 14)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	for name, run := range map[string]func() error{
+		"reviews":        func() error { _, err := client.ListReviews(context.Background()); return err },
+		"issue comments": func() error { _, err := client.ListIssueComments(context.Background()); return err },
+		"changed files":  func() error { _, err := client.ListChangedFiles(context.Background()); return err },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := run(); err == nil || !strings.Contains(err.Error(), "pagination limit") || !strings.Contains(err.Error(), "cannot prove completeness") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func mustAtoi(t *testing.T, value string) int {
+	t.Helper()
+	var result int
+	if _, err := fmt.Sscan(value, &result); err != nil {
+		t.Fatalf("parse integer %q: %v", value, err)
+	}
+	return result
 }

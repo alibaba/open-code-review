@@ -105,7 +105,6 @@ func RelocateAcrossFiles(cm *model.LlmComment, diffs []model.Diff) (string, bool
 	type hit struct {
 		path       string
 		start, end int
-		side       string
 	}
 	var hits []hit
 
@@ -123,7 +122,7 @@ func RelocateAcrossFiles(cm *model.LlmComment, diffs []model.Diff) (string, bool
 		if path == "" {
 			path = d.OldPath
 		}
-		hits = append(hits, hit{path: path, start: probe.StartLine, end: probe.EndLine, side: probe.Side})
+		hits = append(hits, hit{path: path, start: probe.StartLine, end: probe.EndLine})
 		if len(hits) > 1 {
 			// Ambiguous already; no verdict can come from looking further.
 			return "", false
@@ -136,7 +135,6 @@ func RelocateAcrossFiles(cm *model.LlmComment, diffs []model.Diff) (string, bool
 	cm.Path = hits[0].path
 	cm.StartLine = hits[0].start
 	cm.EndLine = hits[0].end
-	cm.Side = hits[0].side
 	return hits[0].path, true
 }
 
@@ -166,7 +164,6 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 		if start, end, ok := matchConsecutive(newSide, targetLines); ok {
 			cm.StartLine = start
 			cm.EndLine = end
-			cm.Side = model.CommentSideRight
 			return true
 		}
 	}
@@ -176,7 +173,6 @@ func resolveFromHunk(d *model.Diff, cm *model.LlmComment) bool {
 		if start, end, ok := matchConsecutive(oldSide, targetLines); ok {
 			cm.StartLine = start
 			cm.EndLine = end
-			cm.Side = model.CommentSideLeft
 			return true
 		}
 	}
@@ -279,7 +275,6 @@ func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
 		if matched {
 			cm.StartLine = fileLineNums[i]
 			cm.EndLine = fileLineNums[i+len(targetLines)-1]
-			cm.Side = model.CommentSideRight
 			return true
 		}
 	}

@@ -5,27 +5,21 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/diff"
-	"github.com/alibaba/open-code-review/internal/github"
+	"github.com/alibaba/open-code-review/internal/ghpost"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
-	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -62,9 +56,6 @@ type reviewOptions struct {
 	// GitHub integration flags
 	githubToken string
 	postToPR    bool
-	// reviewedHeadSHA comes from the fully sealed range passed to the agent, so
-	// PR posting cannot drift to a commit pushed while the review is in progress.
-	reviewedHeadSHA string
 }
 
 var reviewOpts reviewOptions
@@ -186,13 +177,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err != nil {
 		return err
 	}
-	if opts.postToPR {
-		if sealed == nil || sealed.Resolution.ResolvedBase == "" || sealed.Resolution.ResolvedHead == "" {
-			return fmt.Errorf("resolve immutable range for GitHub posting")
-		}
-		opts.reviewedHeadSHA = sealed.Resolution.ResolvedHead
-	}
-
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,
@@ -274,10 +258,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	startTime := time.Now()
 
 	comments, runErr := ag.Run(runCtx)
-	// Resolve once into the slice shared by every delivery path. emitRunResult
-	// also resolves defensively for its other callers, but GitHub posting happens
-	// after it returns and must receive the same line and side provenance.
-	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 	manifest := ag.RunManifest()
 
 	// Freeze the retry report at the same boundary as the manifest: ag.Run has
@@ -315,10 +295,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 
 	var postErr error
 	if opts.postToPR && resultErr == nil && len(comments) > 0 {
-		if err := validateGitHubPostingManifest(sealed, manifest); err != nil {
+		target, err := githubPostingTargetFromManifest(cc.RepoDir, manifest)
+		if err != nil {
 			postErr = fmt.Errorf("post review to GitHub: %w", err)
 			fmt.Fprintf(os.Stderr, "[ocr] ERROR: %v\n", postErr)
-		} else if err := postCommentsToGitHub(runCtx, cc.RepoDir, opts, comments, getGitHubToken(opts.githubToken)); err != nil {
+		} else if _, err := ghpost.Post(runCtx, target, comments, ghpost.Options{Token: getGitHubToken(opts.githubToken)}); err != nil {
 			postErr = fmt.Errorf("post review to GitHub: %w", err)
 			fmt.Fprintf(os.Stderr, "[ocr] ERROR: %v\n", postErr)
 		}
@@ -411,7 +392,7 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // so a provider that changed via config file or environment stays implicit —
 // which is the transition this check exists to reject.
 func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState) (*agent.SealedInput, error) {
-	if state == nil && !opts.postToPR {
+	if state == nil {
 		return nil, nil
 	}
 	sealed, err := agent.ResolveIdentity(ctx, agent.Args{
@@ -443,22 +424,21 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 	return sealed, nil
 }
 
-func validateGitHubPostingManifest(sealed *agent.SealedInput, manifest *session.RunManifest) error {
-	if sealed == nil {
-		return fmt.Errorf("sealed review input is missing")
-	}
+func githubPostingTargetFromManifest(repoDir string, manifest *session.RunManifest) (ghpost.Target, error) {
 	if manifest == nil {
-		return fmt.Errorf("run manifest is missing")
+		return ghpost.Target{}, fmt.Errorf("run manifest is missing")
 	}
-	expected := sealed.Resolution
-	actual := manifest.Input
-	if actual.Mode != session.InputModeRange ||
-		actual.ResolvedBase != expected.ResolvedBase ||
-		actual.ResolvedHead != expected.ResolvedHead ||
-		actual.ExactRange != expected.ExactRange {
-		return fmt.Errorf("run manifest input does not match the sealed range; refusing to post")
+	input := manifest.Input
+	if input.Mode != session.InputModeRange || input.RequestedFrom == "" || input.ResolvedBase == "" || input.ResolvedHead == "" ||
+		input.ExactRange != input.ResolvedBase+".."+input.ResolvedHead {
+		return ghpost.Target{}, fmt.Errorf("run manifest does not contain a complete immutable range; refusing to post")
 	}
-	return nil
+	return ghpost.Target{
+		RepoDir:      repoDir,
+		BaseRef:      input.RequestedFrom,
+		ResolvedBase: input.ResolvedBase,
+		ResolvedHead: input.ResolvedHead,
+	}, nil
 }
 
 // fileReadRef picks the ref file_read resolves paths against.
@@ -636,677 +616,4 @@ func buildToolRegistry(collector *tool.CommentCollector, fr *tool.FileReader) *t
 	reg.Register(tool.NewCodeSearch(fr))
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
 	return reg
-}
-
-const (
-	githubReviewBatchSize          = 50
-	githubSummaryBatchSize         = 50
-	githubSummaryMaxPayloadBytes   = 60 * 1024
-	githubSummaryFragmentBytes     = 4 * 1024
-	githubReconciliationAttempts   = 6
-	githubReconciliationPollPeriod = 500 * time.Millisecond
-)
-
-type githubRepository struct {
-	remote     string
-	repository github.Repository
-}
-
-type githubPostingTarget struct {
-	githubRepository
-	prNumber int
-}
-
-type githubSummaryFinding struct {
-	comment model.LlmComment
-	reason  string
-}
-
-// postCommentsToGitHub posts review comments to the unique PR whose base and
-// head SHA match the immutable range reviewed by this run.
-func postCommentsToGitHub(ctx context.Context, repoDir string, opts reviewOptions, comments []model.LlmComment, ghToken string) error {
-	configuration, err := github.NewConfigurationFromEnvironment()
-	if err != nil {
-		return err
-	}
-	return postCommentsToGitHubWithConfiguration(ctx, repoDir, opts, comments, ghToken, configuration)
-}
-
-func postCommentsToGitHubWithConfiguration(
-	ctx context.Context,
-	repoDir string,
-	opts reviewOptions,
-	comments []model.LlmComment,
-	ghToken string,
-	configuration github.Configuration,
-) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	reviewedHead := opts.reviewedHeadSHA
-	if reviewedHead == "" {
-		resolved, err := runGitCmdStdout(repoDir, "rev-parse", "--verify", "--end-of-options", opts.to+"^{commit}")
-		if err != nil {
-			return fmt.Errorf("resolve reviewed head %q: %w", opts.to, err)
-		}
-		reviewedHead = strings.TrimSpace(string(resolved))
-	}
-	if reviewedHead == "" {
-		return fmt.Errorf("reviewed head SHA is empty")
-	}
-
-	repositories, remoteNames, err := getGitHubRepositories(repoDir, configuration)
-	if err != nil {
-		return err
-	}
-	baseBranch, err := resolveGitHubBranch(repoDir, opts.from, remoteNames)
-	if err != nil {
-		return fmt.Errorf("resolve GitHub base branch from %q: %w", opts.from, err)
-	}
-	if baseBranch == "" {
-		return fmt.Errorf("cannot derive GitHub base branch from %q", opts.from)
-	}
-
-	var target *githubPostingTarget
-	for _, repository := range repositories {
-		prNumber, findErr := github.FindPRByHead(ctx, ghToken, repository.repository, baseBranch, reviewedHead)
-		if errors.Is(findErr, github.ErrNoMatchingPullRequest) {
-			continue
-		}
-		if findErr != nil {
-			return fmt.Errorf("discover PR in %s/%s: %w", repository.repository.Owner, repository.repository.Name, findErr)
-		}
-		if target != nil {
-			return fmt.Errorf(
-				"multiple configured GitHub remotes have open PRs for base=%s and reviewed commit %s",
-				baseBranch,
-				reviewedHead,
-			)
-		}
-		target = &githubPostingTarget{githubRepository: repository, prNumber: prNumber}
-	}
-	if target == nil {
-		return fmt.Errorf(
-			"no open PR found for base=%s and reviewed commit %s in configured GitHub remotes",
-			baseBranch,
-			reviewedHead,
-		)
-	}
-
-	ghClient := github.NewClient(ghToken, target.repository, target.prNumber)
-	if err := verifyGitHubPRTarget(ctx, ghClient, reviewedHead, baseBranch); err != nil {
-		return err
-	}
-	changedFiles, err := ghClient.ListChangedFiles(ctx)
-	if err != nil {
-		return fmt.Errorf("read PR diff: %w", err)
-	}
-	if err := verifyGitHubPRTarget(ctx, ghClient, reviewedHead, baseBranch); err != nil {
-		return err
-	}
-	inventory := buildGitHubDiffInventory(changedFiles)
-
-	ghComments := make([]github.Comment, 0, len(comments))
-	inlineSources := make([]model.LlmComment, 0, len(comments))
-	summaryFindings := make([]githubSummaryFinding, 0)
-	for _, comment := range comments {
-		startLine, endLine, hasLocation := githubCommentLocation(comment)
-		switch {
-		case comment.Side != model.CommentSideRight:
-			reason := "line side provenance is not RIGHT"
-			if comment.Side == model.CommentSideLeft {
-				reason = "resolved on the old side of the diff"
-			}
-			summaryFindings = append(summaryFindings, githubSummaryFinding{comment: comment, reason: reason})
-		case !hasLocation:
-			summaryFindings = append(summaryFindings, githubSummaryFinding{comment: comment, reason: "no valid line information"})
-		case !inventory.contains(comment.Path, startLine, endLine):
-			summaryFindings = append(summaryFindings, githubSummaryFinding{comment: comment, reason: "line range could not be verified in a complete right-side PR diff hunk"})
-		default:
-			ghComment := github.Comment{Path: comment.Path, Body: formatCommentBody(comment), Line: endLine, Side: model.CommentSideRight}
-			if startLine != endLine {
-				ghComment.StartLine = startLine
-				ghComment.StartSide = model.CommentSideRight
-			}
-			ghComments = append(ghComments, ghComment)
-			inlineSources = append(inlineSources, comment)
-		}
-	}
-
-	reviewRunID := newGitHubReviewRunID(*target, baseBranch, reviewedHead, comments)
-	if len(ghComments) == 0 {
-		commentURLs, err := postGitHubSummaryFindings(
-			ctx, ghClient, reviewedHead, baseBranch, reviewRunID, "summary", comments, 0, summaryFindings,
-		)
-		if err != nil {
-			return fmt.Errorf("post review summary: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "[ocr] No findings had a verified inline location; %d summary batch(es) posted\n", len(commentURLs))
-		return nil
-	}
-
-	reviewBody := buildSummaryOverview(comments, len(ghComments), len(summaryFindings))
-	fmt.Fprintf(os.Stderr, "[ocr] Posting %d verified inline comments to PR #%d in batches of at most %d\n", len(ghComments), target.prNumber, githubReviewBatchSize)
-	for start := 0; start < len(ghComments); start += githubReviewBatchSize {
-		end := min(start+githubReviewBatchSize, len(ghComments))
-		body := "OpenCodeReview inline findings (continued)."
-		if start == 0 {
-			body = reviewBody
-		}
-		batchIndex := start / githubReviewBatchSize
-		marker := githubPostingMarker(reviewRunID, "review", batchIndex)
-		body = marker + "\n" + body
-		landed, reconcileErr := githubReviewExists(ctx, ghClient, reviewedHead, marker)
-		if reconcileErr != nil {
-			return fmt.Errorf("check existing inline review batch: %w", reconcileErr)
-		}
-		if landed {
-			fmt.Fprintf(os.Stderr, "[ocr] Review batch %d was already present; skipping duplicate write\n", batchIndex+1)
-			continue
-		}
-		if err := verifyGitHubPRTarget(ctx, ghClient, reviewedHead, baseBranch); err != nil {
-			return err
-		}
-		reviewResp, createErr := ghClient.CreateReview(ctx, reviewedHead, github.ReviewRequest{
-			Body:     body,
-			Event:    "COMMENT",
-			Comments: ghComments[start:end],
-		})
-		if createErr != nil {
-			if githubReviewWriteIsAmbiguous(createErr) {
-				landed, reconcileErr := pollForGitHubReview(ctx, ghClient, reviewedHead, marker)
-				if reconcileErr != nil {
-					return errors.Join(
-						fmt.Errorf("create inline review: %w", createErr),
-						fmt.Errorf("reconcile ambiguous inline review write: %w", reconcileErr),
-					)
-				}
-				if landed {
-					fmt.Fprintln(os.Stderr, "[ocr] Review batch was accepted by GitHub despite an ambiguous response")
-					continue
-				}
-				return errors.Join(
-					fmt.Errorf("create inline review: %w", createErr),
-					fmt.Errorf("review batch outcome remains unknown after bounded reconciliation; refusing fallback"),
-				)
-			}
-
-			fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to create inline review batch, posting remaining findings as a summary instead: %v\n", createErr)
-			fallbackComments := make([]model.LlmComment, 0, len(inlineSources)-start+len(summaryFindings))
-			fallback := make([]githubSummaryFinding, 0, len(inlineSources)-start+len(summaryFindings))
-			for _, finding := range summaryFindings {
-				fallbackComments = append(fallbackComments, finding.comment)
-				fallback = append(fallback, finding)
-			}
-			for _, comment := range inlineSources[start:] {
-				fallbackComments = append(fallbackComments, comment)
-				fallback = append(fallback, githubSummaryFinding{comment: comment, reason: "inline review could not be created"})
-			}
-			commentURLs, summaryErr := postGitHubSummaryFindings(
-				ctx,
-				ghClient,
-				reviewedHead,
-				baseBranch,
-				reviewRunID,
-				fmt.Sprintf("fallback-%d", batchIndex),
-				fallbackComments,
-				0,
-				fallback,
-			)
-			if summaryErr != nil {
-				return errors.Join(fmt.Errorf("create inline review: %w", createErr), fmt.Errorf("post fallback summary: %w", summaryErr))
-			}
-			fmt.Fprintf(os.Stderr, "[ocr] Posted %d fallback summary batch(es)\n", len(commentURLs))
-			return nil
-		}
-		fmt.Fprintf(os.Stderr, "[ocr] Review batch posted successfully: %s\n", reviewResp.HTMLURL)
-	}
-	if len(summaryFindings) > 0 {
-		commentURLs, err := postGitHubSummaryFindings(
-			ctx, ghClient, reviewedHead, baseBranch, reviewRunID, "summary", comments, len(ghComments), summaryFindings,
-		)
-		if err != nil {
-			return fmt.Errorf("post non-inline findings: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "[ocr] Posted %d summary-only batch(es)\n", len(commentURLs))
-	}
-	return nil
-}
-
-func newGitHubReviewRunID(target githubPostingTarget, baseBranch, reviewedHead string, comments []model.LlmComment) string {
-	h := sha256.New()
-	writeField := func(value string) {
-		_, _ = fmt.Fprintf(h, "%d:", len(value))
-		_, _ = h.Write([]byte(value))
-	}
-	writeField(target.repository.Owner)
-	writeField(target.repository.Name)
-	writeField(fmt.Sprint(target.prNumber))
-	writeField(baseBranch)
-	writeField(reviewedHead)
-	for _, comment := range comments {
-		writeField(comment.Path)
-		writeField(comment.Content)
-		writeField(comment.SuggestionCode)
-		writeField(comment.ExistingCode)
-		writeField(fmt.Sprint(comment.StartLine))
-		writeField(fmt.Sprint(comment.EndLine))
-		writeField(comment.Side)
-		writeField(comment.Category)
-		writeField(comment.Severity)
-	}
-	sum := h.Sum(nil)
-	return hex.EncodeToString(sum[:12])
-}
-
-func githubPostingMarker(runID, kind string, batch int) string {
-	return fmt.Sprintf("<!-- ocr-review-%s-%s-%d -->", runID, kind, batch)
-}
-
-func githubReviewWriteIsAmbiguous(err error) bool {
-	var apiErr *github.APIError
-	if errors.As(err, &apiErr) {
-		return apiErr.StatusCode == http.StatusRequestTimeout || apiErr.StatusCode >= http.StatusInternalServerError
-	}
-	return true
-}
-
-func githubReviewExists(ctx context.Context, client *github.Client, commitSHA, marker string) (bool, error) {
-	reviews, err := client.ListReviews(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, review := range reviews {
-		if review.CommitID == commitSHA && strings.Contains(review.Body, marker) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func pollForGitHubReview(ctx context.Context, client *github.Client, commitSHA, marker string) (bool, error) {
-	for attempt := 0; attempt < githubReconciliationAttempts; attempt++ {
-		landed, err := githubReviewExists(ctx, client, commitSHA, marker)
-		if err != nil || landed {
-			return landed, err
-		}
-		if attempt+1 < githubReconciliationAttempts {
-			if err := waitForGitHubReconciliation(ctx); err != nil {
-				return false, err
-			}
-		}
-	}
-	return false, nil
-}
-
-func githubIssueCommentExists(ctx context.Context, client *github.Client, marker string) (string, bool, error) {
-	comments, err := client.ListIssueComments(ctx)
-	if err != nil {
-		return "", false, err
-	}
-	for _, comment := range comments {
-		if strings.Contains(comment.Body, marker) {
-			return comment.HTMLURL, true, nil
-		}
-	}
-	return "", false, nil
-}
-
-func pollForGitHubIssueComment(ctx context.Context, client *github.Client, marker string) (string, bool, error) {
-	for attempt := 0; attempt < githubReconciliationAttempts; attempt++ {
-		commentURL, landed, err := githubIssueCommentExists(ctx, client, marker)
-		if err != nil || landed {
-			return commentURL, landed, err
-		}
-		if attempt+1 < githubReconciliationAttempts {
-			if err := waitForGitHubReconciliation(ctx); err != nil {
-				return "", false, err
-			}
-		}
-	}
-	return "", false, nil
-}
-
-func waitForGitHubReconciliation(ctx context.Context) error {
-	timer := time.NewTimer(githubReconciliationPollPeriod)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func postGitHubSummaryFindings(
-	ctx context.Context,
-	client *github.Client,
-	reviewedHead string,
-	baseBranch string,
-	runID string,
-	kind string,
-	comments []model.LlmComment,
-	inlineCount int,
-	findings []githubSummaryFinding,
-) ([]string, error) {
-	batches, err := buildGitHubSummaryBatches(runID, kind, comments, inlineCount, findings)
-	if err != nil {
-		return nil, err
-	}
-	commentURLs := make([]string, 0, len(batches))
-	for i, batch := range batches {
-		commentURL, landed, err := githubIssueCommentExists(ctx, client, batch.marker)
-		if err != nil {
-			return nil, fmt.Errorf("check existing summary batch %d: %w", i+1, err)
-		}
-		if landed {
-			commentURLs = append(commentURLs, commentURL)
-			continue
-		}
-		if err := verifyGitHubPRTarget(ctx, client, reviewedHead, baseBranch); err != nil {
-			return nil, err
-		}
-		commentURL, createErr := client.CreateIssueComment(ctx, batch.body)
-		if createErr == nil {
-			commentURLs = append(commentURLs, commentURL)
-			continue
-		}
-		if !githubReviewWriteIsAmbiguous(createErr) {
-			return nil, fmt.Errorf("create summary batch %d: %w", i+1, createErr)
-		}
-		commentURL, landed, reconcileErr := pollForGitHubIssueComment(ctx, client, batch.marker)
-		if reconcileErr != nil {
-			return nil, errors.Join(
-				fmt.Errorf("create summary batch %d: %w", i+1, createErr),
-				fmt.Errorf("reconcile ambiguous summary write: %w", reconcileErr),
-			)
-		}
-		if !landed {
-			return nil, errors.Join(
-				fmt.Errorf("create summary batch %d: %w", i+1, createErr),
-				fmt.Errorf("summary batch outcome remains unknown after bounded reconciliation; refusing another write"),
-			)
-		}
-		commentURLs = append(commentURLs, commentURL)
-	}
-	return commentURLs, nil
-}
-
-func getGitHubRepositories(repoDir string, configuration github.Configuration) ([]githubRepository, []string, error) {
-	output, err := runGitCmdStdout(repoDir, "remote")
-	if err != nil {
-		return nil, nil, fmt.Errorf("list git remotes: %w", err)
-	}
-	remoteNames := strings.Fields(string(output))
-	if len(remoteNames) == 0 {
-		return nil, nil, fmt.Errorf("repository has no Git remotes")
-	}
-
-	repositories := make([]githubRepository, 0, len(remoteNames))
-	seen := make(map[string]struct{})
-	for _, remote := range remoteNames {
-		remoteURL, remoteErr := runGitCmdStdout(repoDir, "remote", "get-url", remote)
-		if remoteErr != nil {
-			return nil, nil, fmt.Errorf("read URL for git remote %q: %w", remote, remoteErr)
-		}
-		repository, parseErr := configuration.ResolveRepository(strings.TrimSpace(string(remoteURL)))
-		if parseErr != nil {
-			continue
-		}
-		key := strings.ToLower(repository.Owner + "/" + repository.Name)
-		if _, exists := seen[key]; exists {
-			continue
-		}
-		seen[key] = struct{}{}
-		repositories = append(repositories, githubRepository{remote: remote, repository: repository})
-	}
-	if len(repositories) == 0 {
-		return nil, nil, fmt.Errorf("no parseable GitHub repository found in configured remotes")
-	}
-	return repositories, remoteNames, nil
-}
-
-func normalizeGitHubBranch(ref string, remoteNames []string) string {
-	if local, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
-		return local
-	}
-	ref, remoteTracking := strings.CutPrefix(ref, "refs/remotes/")
-	if !remoteTracking {
-		return ref
-	}
-	for _, remote := range remoteNames {
-		if strings.HasPrefix(ref, remote+"/") {
-			return strings.TrimPrefix(ref, remote+"/")
-		}
-	}
-	return ref
-}
-
-func resolveGitHubBranch(repoDir, ref string, remoteNames []string) (string, error) {
-	resolved, err := runGitCmdStdout(repoDir, "rev-parse", "--symbolic-full-name", "--verify", "--end-of-options", ref)
-	if err != nil {
-		return "", err
-	}
-	fullName := strings.TrimSpace(string(resolved))
-	if !strings.HasPrefix(fullName, "refs/heads/") && !strings.HasPrefix(fullName, "refs/remotes/") {
-		return "", fmt.Errorf("ref resolved to %q instead of a local or remote-tracking branch", fullName)
-	}
-	return normalizeGitHubBranch(fullName, remoteNames), nil
-}
-
-func verifyGitHubPRTarget(ctx context.Context, client *github.Client, reviewedHead, expectedBase string) error {
-	pull, err := client.GetPRInfo(ctx)
-	if err != nil {
-		return fmt.Errorf("read PR target: %w", err)
-	}
-	if pull.Head.SHA != reviewedHead {
-		return fmt.Errorf("PR head changed from reviewed commit %s to %s; rerun the review before posting", reviewedHead, pull.Head.SHA)
-	}
-	if pull.Base.Ref != expectedBase {
-		return fmt.Errorf("PR base changed from %s to %s; rerun the review before posting", expectedBase, pull.Base.Ref)
-	}
-	if pull.State != "open" {
-		return fmt.Errorf("PR is %s; rerun discovery before posting", pull.State)
-	}
-	return nil
-}
-
-func githubCommentLocation(comment model.LlmComment) (startLine, endLine int, ok bool) {
-	endLine = comment.EndLine
-	if endLine <= 0 {
-		endLine = comment.StartLine
-	}
-	if endLine <= 0 {
-		return 0, 0, false
-	}
-	startLine = endLine
-	if comment.StartLine > 0 {
-		startLine = comment.StartLine
-	}
-	if startLine > endLine {
-		return 0, 0, false
-	}
-	return startLine, endLine, true
-}
-
-// formatCommentBody formats a finding as a structured GitHub review comment.
-func formatCommentBody(comment model.LlmComment) string {
-	var body strings.Builder
-	if badge := buildBadge(comment); badge != "" {
-		body.WriteString("**")
-		body.WriteString(badge)
-		body.WriteString("**\n\n")
-	}
-	body.WriteString(comment.Content)
-	if comment.SuggestionCode != "" {
-		if strings.Contains(comment.SuggestionCode, "```") {
-			body.WriteString("\n\n**Suggested code:**\n\n")
-			for _, line := range strings.Split(comment.SuggestionCode, "\n") {
-				body.WriteString("    ")
-				body.WriteString(line)
-				body.WriteByte('\n')
-			}
-		} else {
-			body.WriteString("\n\n**Suggestion:**\n```suggestion\n")
-			body.WriteString(comment.SuggestionCode)
-			if !strings.HasSuffix(comment.SuggestionCode, "\n") {
-				body.WriteByte('\n')
-			}
-			body.WriteString("```")
-		}
-	}
-
-	return body.String()
-}
-
-type githubSummaryBatch struct {
-	marker string
-	body   string
-}
-
-func buildGitHubSummaryBatches(
-	runID string,
-	kind string,
-	comments []model.LlmComment,
-	inlineCount int,
-	findings []githubSummaryFinding,
-) ([]githubSummaryBatch, error) {
-	fragments := make([]string, 0, len(findings))
-	for _, finding := range findings {
-		fragments = append(fragments, splitGitHubSummaryText(formatGitHubSummaryFinding(finding))...)
-	}
-	if len(fragments) == 0 {
-		return nil, nil
-	}
-
-	batches := make([]githubSummaryBatch, 0, (len(fragments)+githubSummaryBatchSize-1)/githubSummaryBatchSize)
-	current := make([]string, 0, githubSummaryBatchSize)
-	flush := func() {
-		marker := githubPostingMarker(runID, kind, len(batches))
-		body := marker + "\n" + buildSummaryBodyFromFragments(comments, inlineCount, len(findings), current)
-		batches = append(batches, githubSummaryBatch{marker: marker, body: body})
-		current = current[:0]
-	}
-
-	for _, fragment := range fragments {
-		marker := githubPostingMarker(runID, kind, len(batches))
-		candidate := append(append([]string(nil), current...), fragment)
-		candidateBody := marker + "\n" + buildSummaryBodyFromFragments(comments, inlineCount, len(findings), candidate)
-		payloadSize, err := githubIssueCommentPayloadSize(candidateBody)
-		if err != nil {
-			return nil, err
-		}
-		if len(current) > 0 && (len(candidate) > githubSummaryBatchSize || payloadSize > githubSummaryMaxPayloadBytes) {
-			flush()
-			candidate = []string{fragment}
-			marker = githubPostingMarker(runID, kind, len(batches))
-			candidateBody = marker + "\n" + buildSummaryBodyFromFragments(comments, inlineCount, len(findings), candidate)
-			payloadSize, err = githubIssueCommentPayloadSize(candidateBody)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if payloadSize > githubSummaryMaxPayloadBytes {
-			return nil, fmt.Errorf("summary fragment requires %d encoded bytes, exceeding the %d-byte batch limit", payloadSize, githubSummaryMaxPayloadBytes)
-		}
-		current = candidate
-	}
-	if len(current) > 0 {
-		flush()
-	}
-	return batches, nil
-}
-
-func githubIssueCommentPayloadSize(body string) (int, error) {
-	payload, err := json.Marshal(struct {
-		Body string `json:"body"`
-	}{Body: body})
-	if err != nil {
-		return 0, fmt.Errorf("measure GitHub summary payload: %w", err)
-	}
-	return len(payload), nil
-}
-
-func splitGitHubSummaryText(text string) []string {
-	if text == "" {
-		return []string{""}
-	}
-	parts := make([]string, 0, (len(text)+githubSummaryFragmentBytes-1)/githubSummaryFragmentBytes)
-	for len(text) > githubSummaryFragmentBytes {
-		end := githubSummaryFragmentBytes
-		for end > 0 && !utf8.ValidString(text[:end]) {
-			end--
-		}
-		if end == 0 {
-			end = githubSummaryFragmentBytes
-		}
-		parts = append(parts, text[:end])
-		text = text[end:]
-	}
-	parts = append(parts, text)
-	return parts
-}
-
-func formatGitHubSummaryFinding(finding githubSummaryFinding) string {
-	location := finding.comment.Path
-	if startLine, endLine, ok := githubCommentLocation(finding.comment); ok {
-		if startLine == endLine {
-			location = fmt.Sprintf("%s (line %d)", location, endLine)
-		} else {
-			location = fmt.Sprintf("%s (lines %d-%d)", location, startLine, endLine)
-		}
-	}
-	return fmt.Sprintf(
-		"#### `%s`\n\n_Summary reason: %s._\n\n%s",
-		location,
-		finding.reason,
-		formatCommentBody(finding.comment),
-	)
-}
-
-func buildSummaryBodyFromFragments(comments []model.LlmComment, inlineCount, summaryCount int, fragments []string) string {
-	var body strings.Builder
-
-	body.WriteString("## OpenCodeReview Summary\n\n")
-	body.WriteString(fmt.Sprintf("%d comment(s) generated.\n\n", len(comments)))
-	body.WriteString(fmt.Sprintf("- Inline findings: %d\n", inlineCount))
-	body.WriteString(fmt.Sprintf("- Summary-only findings: %d\n\n", summaryCount))
-
-	if len(fragments) > 0 {
-		body.WriteString("### Findings without a verified inline location\n\n")
-		for _, fragment := range fragments {
-			body.WriteString(fragment)
-			body.WriteString("\n\n---\n\n")
-		}
-	}
-
-	severityCount := make(map[string]int)
-	for _, comment := range comments {
-		if comment.Severity != "" {
-			severityCount[comment.Severity]++
-		}
-	}
-
-	if len(severityCount) > 0 {
-		body.WriteString("### Severity breakdown:\n\n")
-		severities := make([]string, 0, len(severityCount))
-		for severity := range severityCount {
-			severities = append(severities, severity)
-		}
-		sort.Strings(severities)
-		for _, severity := range severities {
-			count := severityCount[severity]
-			body.WriteString(fmt.Sprintf("- **%s**: %d\n", severity, count))
-		}
-		body.WriteString("\n")
-	}
-
-	body.WriteString("---\n")
-	body.WriteString("*Generated by OpenCodeReview*")
-
-	return body.String()
-}
-
-func buildSummaryOverview(comments []model.LlmComment, inlineCount, summaryCount int) string {
-	return buildSummaryBodyFromFragments(comments, inlineCount, summaryCount, nil)
 }

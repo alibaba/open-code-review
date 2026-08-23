@@ -193,12 +193,24 @@ requires range mode with both `--from` and `--to`; provide the token with
 `--github-token`, or let the CLI read it from `GITHUB_TOKEN`.
 
 The CLI discovers the unique open pull request whose base branch and reviewed
-head commit match the range. You do not provide a pull-request number. Only
-findings with verified locations on the right side of the pull-request diff
-become inline comments; other findings are preserved in the pull-request
-summary. Inline comments and summaries are sent in safe batches, and the
-pull-request head, base, and open state are checked during posting so stale
-reviews are not attached to a changed target.
+head commit match the range. You do not provide a pull-request number. At
+posting time, OCR builds separate inventories for the old and new sides of the
+pull-request diff. Only findings whose entire range is exclusive to the new
+side become inline comments. Old-side, incomplete, and ambiguous ranges
+(including the same line number appearing on both sides) are preserved in the
+pull-request summary.
+
+Inline comments and summaries are sent in deterministic, retry-safe batches.
+Before every write, OCR checks that the pull request is open, its base branch
+and head still match, and the current base tip produces the exact merge-base
+commit recorded by the completed review. A moving base tip is allowed only
+when that merge-base stays unchanged. Existing inline and fallback sequences
+are resumed without duplicating findings or retrying an inline batch that has
+already fallen back to the summary.
+
+The local review output is produced before GitHub delivery. If any posting
+step fails, OCR keeps that output but exits with a non-zero status so scripts
+and CI cannot mistake the delivery failure for success.
 
 The token must have access to the target repository and permission to read and
 write pull requests. For a fine-grained personal access token or GitHub App,
