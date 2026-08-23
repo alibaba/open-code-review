@@ -63,6 +63,29 @@ This outputs:
 | Branch comparison | `ocr delegate preview --from main --to feature` |
 | Single commit | `ocr delegate preview -c abc123` |
 
+### CLI Output Compatibility
+
+The `--format` flag is available in `ocr` v1.9.0 and later. The Skill and
+the installed CLI can be updated independently, so try the JSON form first
+and make the fallback decision from the actual error:
+
+1. Run the requested `preview` or `rule` command with `--format json`.
+2. If it fails specifically with `unknown flag: --format`, rerun the same
+   command without `--format json` and use text output for the rest of the
+   delegation run. Preserve the explicit mode, ref, file, and rule information
+   from that output; do not parse text output as JSON or invent missing schema
+   fields.
+3. Do not retry without the flag for any other error. Report that error and
+   stop the affected workflow.
+
+For integrations that require `schema_version` or other JSON fields, do not
+silently fall back to text. Require `ocr` v1.9.0 or newer, verify with
+`ocr --version`, and upgrade the CLI when necessary:
+
+```bash
+npm install -g @alibaba-group/open-code-review
+```
+
 ### Step 2: Get Rules for Files
 
 ```bash
@@ -166,4 +189,20 @@ If the user requested "review and fix":
 - **Working directory matters** — `ocr delegate` operates on the Git repo at the current directory. Use `--repo /path` to override.
 - **Untracked files in workspace mode** — `preview` includes untracked files. For these, read the file directly instead of using `git diff`.
 - **Background context** — pass `--background` to `preview` when you have requirement context; it appears in the output for your reference during review.
+
+### Recovering Oversized Background Context
+
+`--background-file` has two independent limits. The raw file must not exceed
+1 MiB, and the sanitized content must not exceed 8000 characters. Either
+condition aborts the command. When the command reports either limit:
+
+1. Do not silently truncate the source file.
+2. Summarize the original material while preserving its requirements,
+   constraints, acceptance criteria, and other review-critical details.
+3. Retry the affected command with `--background "<summary>"`; omit
+   `--background-file` because the file option takes precedence when both are
+   provided.
+4. If a faithful summary is not possible, omit the OCR background entirely and
+   read the original material directly during the review.
+
 - **Coverage is mandatory** — every `reviewable_files` entry must end as reviewed or explicitly skipped; do not silently omit files.
