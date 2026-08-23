@@ -213,7 +213,6 @@ type FunctionDef struct {
 
 // ClientConfig holds configuration for connecting to an LLM service.
 type ClientConfig struct {
-	Provider     string            // Known provider name (e.g. "gemini", "openai") or empty
 	URL          string            // Full API endpoint URL
 	APIKey       string            // Bearer token / API key
 	Model        string            // Default model override
@@ -299,7 +298,6 @@ func limitErrorBodyForLog(raw string) string {
 // ResolvedEndpoint because it belongs to the run, not to the endpoint.
 func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 	cfg := ClientConfig{
-		Provider:       ep.Provider,
 		URL:            ep.URL,
 		APIKey:         ep.Token,
 		Model:          ep.Model,
@@ -527,7 +525,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		}
 	}
 	if err != nil {
-		return nil, formatGeminiError(c.cfg.Provider, c.cfg.URL, model, err)
+		return nil, enrichOpenAIError(err)
 	}
 
 	return c.mapOpenAIResponse(sdkResp), nil
@@ -550,7 +548,7 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 	if err != nil {
 		class, phase := classifyStreamError(err)
 		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
-		return nil, formatGeminiError(c.cfg.Provider, c.cfg.URL, string(params.Model), err)
+		return nil, enrichOpenAIError(err)
 	}
 	return resp, nil
 }
@@ -627,105 +625,30 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 	return resp, nil
 }
 
-// openAIErrorDetails captures unmarshaled and raw fields from an *openai.Error.
-type openAIErrorDetails struct {
-	Status   int
-	Message  string
-	Code     string
-	Type     string
-	RawBody  string
-	Original error
-}
-
-// extractOpenAIErrorDetails unwraps an *openai.Error (embedding *apierror.Error),
-// capturing the HTTP status, message, error code, error type, and raw JSON or text body.
-// If the response body was unread, it reads, closes, and restores the body stream.
-// Returns false if err does not unwrap to an *openai.Error.
-func extractOpenAIErrorDetails(err error) (*openAIErrorDetails, bool) {
+// enrichOpenAIError adds a restored error response body when the OpenAI SDK
+// could not extract one. It leaves standard OpenAI error payloads unchanged.
+func enrichOpenAIError(err error) error {
 	if err == nil {
-		return nil, false
+		return nil
 	}
 	var apiErr *openai.Error
 	if !errors.As(err, &apiErr) {
-		return nil, false
+		return err
 	}
-
-	details := &openAIErrorDetails{
-		Status:   apiErr.StatusCode,
-		Message:  apiErr.Message,
-		Code:     apiErr.Code,
-		Type:     apiErr.Type,
-		Original: err,
-	}
-
-	if details.Status == 0 && apiErr.Response != nil {
-		details.Status = apiErr.Response.StatusCode
-	}
-
-	if raw := apiErr.RawJSON(); raw != "" {
-		details.RawBody = limitErrorBodyForLog(raw)
-	} else if apiErr.Response != nil && apiErr.Response.Body != nil {
-		bodyBytes, _ := io.ReadAll(apiErr.Response.Body)
-		_ = apiErr.Response.Body.Close()
-		apiErr.Response.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-		details.RawBody = limitErrorBodyForLog(string(bodyBytes))
-	}
-
-	return details, true
-}
-
-// formatGeminiError formats structured error details for Google Gemini endpoints
-// (whose 400 Bad Request details live in custom nested JSON fields like google.rpc.ErrorInfo).
-// Non-Gemini providers return the original error unmodified.
-func formatGeminiError(provider, url, model string, err error) error {
-	if err == nil || !isGemini(provider, url) {
+	if strings.TrimSpace(apiErr.RawJSON()) != "" || apiErr.Response == nil || apiErr.Response.Body == nil {
 		return err
 	}
 
-	details, ok := extractOpenAIErrorDetails(err)
-	if !ok {
+	body, readErr := io.ReadAll(apiErr.Response.Body)
+	_ = apiErr.Response.Body.Close()
+	apiErr.Response.Body = io.NopCloser(bytes.NewReader(body))
+	if readErr != nil {
 		return err
 	}
-
-	statusText := http.StatusText(details.Status)
-	var parts []string
-	if details.Status > 0 {
-		if statusText != "" {
-			parts = append(parts, fmt.Sprintf("Google Gemini API error (HTTP %d %s, model: %s)", details.Status, statusText, model))
-		} else {
-			parts = append(parts, fmt.Sprintf("Google Gemini API error (HTTP %d, model: %s)", details.Status, model))
-		}
-	} else {
-		parts = append(parts, fmt.Sprintf("Google Gemini API error (model: %s)", model))
-	}
-
-	if details.Message != "" {
-		parts = append(parts, fmt.Sprintf("message: %s", details.Message))
-	}
-	if details.Code != "" {
-		parts = append(parts, fmt.Sprintf("code: %s", details.Code))
-	}
-	if details.Type != "" {
-		parts = append(parts, fmt.Sprintf("type: %s", details.Type))
-	}
-	if details.RawBody != "" && details.RawBody != details.Message {
-		parts = append(parts, fmt.Sprintf("response body: %s", details.RawBody))
-	}
-
-	if len(parts) > 0 {
-		return fmt.Errorf("%s: %w", strings.Join(parts, ", "), err)
+	if body := limitErrorBodyForLog(string(body)); body != "" {
+		return fmt.Errorf("OpenAI-compatible API error response body: %s: %w", body, err)
 	}
 	return err
-}
-
-func isGemini(provider, url string) bool {
-	if strings.EqualFold(provider, "gemini") {
-		return true
-	}
-	if strings.Contains(strings.ToLower(url), "generativelanguage.googleapis.com") {
-		return true
-	}
-	return false
 }
 
 // buildOpenAIParams converts the shared ChatRequest into OpenAI SDK parameters.
