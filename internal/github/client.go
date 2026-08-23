@@ -46,11 +46,16 @@ type Configuration struct {
 // Repository is a parsed GitHub repository bound to its validated API
 // configuration.
 type Repository struct {
-	Owner string
-	Name  string
-
+	owner         string
+	name          string
 	configuration Configuration
 }
+
+// Owner returns the repository owner.
+func (r Repository) Owner() string { return r.owner }
+
+// Name returns the repository name.
+func (r Repository) Name() string { return r.name }
 
 // Client represents a GitHub API client scoped to one repository and PR.
 type Client struct {
@@ -73,29 +78,10 @@ func NewConfigurationFromEnvironment() (Configuration, error) {
 	return newConfiguration(serverURL, apiURL, &http.Client{Timeout: 30 * time.Second}, false)
 }
 
-// NewTestConfiguration creates an explicitly injected test configuration.
-// It is the only constructor that permits HTTP or an API host different from
-// the logical GitHub remote host.
-func NewTestConfiguration(githubHost, apiURL string, httpClient *http.Client) (Configuration, error) {
-	githubHost = strings.TrimSpace(githubHost)
-	if githubHost == "" {
-		return Configuration{}, fmt.Errorf("test GitHub host is empty")
-	}
-	parsedAPI, err := parseAbsoluteURL("test GitHub API URL", apiURL, true)
-	if err != nil {
-		return Configuration{}, err
-	}
-	if httpClient == nil {
-		return Configuration{}, fmt.Errorf("test GitHub HTTP client is nil")
-	}
-	return Configuration{
-		githubHost: strings.ToLower(githubHost),
-		apiBaseURL: strings.TrimRight(parsedAPI.String(), "/"),
-		httpClient: httpClient,
-	}, nil
-}
-
 func newConfiguration(serverURL, apiURL string, httpClient *http.Client, allowHTTP bool) (Configuration, error) {
+	if httpClient == nil {
+		return Configuration{}, fmt.Errorf("GitHub HTTP client is nil")
+	}
 	server, err := parseAbsoluteURL("GITHUB_SERVER_URL", serverURL, allowHTTP)
 	if err != nil {
 		return Configuration{}, err
@@ -150,15 +136,45 @@ func parseAbsoluteURL(name, raw string, allowHTTP bool) (*url.URL, error) {
 
 // NewClient creates a GitHub API client from a repository whose remote and API
 // endpoint were validated together.
-func NewClient(token string, repository Repository, prNumber int) *Client {
+func NewClient(token string, repository Repository, prNumber int) (*Client, error) {
+	if err := repository.validate(); err != nil {
+		return nil, err
+	}
+	if prNumber < 0 {
+		return nil, fmt.Errorf("GitHub pull request number must not be negative")
+	}
 	return &Client{
 		token:      token,
-		repoOwner:  repository.Owner,
-		repoName:   repository.Name,
+		repoOwner:  repository.owner,
+		repoName:   repository.name,
 		prNumber:   prNumber,
 		baseURL:    repository.configuration.apiBaseURL,
 		httpClient: repository.configuration.httpClient,
+	}, nil
+}
+
+func (c Configuration) validate() error {
+	if strings.TrimSpace(c.githubHost) == "" || strings.TrimSpace(c.apiBaseURL) == "" {
+		return fmt.Errorf("GitHub configuration is incomplete")
 	}
+	apiURL, err := url.Parse(c.apiBaseURL)
+	if err != nil || apiURL.Scheme == "" || apiURL.Hostname() == "" {
+		return fmt.Errorf("GitHub configuration has an invalid API base URL")
+	}
+	if c.httpClient == nil {
+		return fmt.Errorf("GitHub configuration HTTP client is nil")
+	}
+	return nil
+}
+
+func (r Repository) validate() error {
+	if strings.TrimSpace(r.owner) == "" || strings.TrimSpace(r.name) == "" {
+		return fmt.Errorf("GitHub repository owner and name are required")
+	}
+	if err := r.configuration.validate(); err != nil {
+		return fmt.Errorf("GitHub repository configuration: %w", err)
+	}
+	return nil
 }
 
 // Comment represents a right-side pull request review comment.
@@ -203,6 +219,7 @@ type PullRequest struct {
 	} `json:"head"`
 	Base struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"base"`
 }
 
@@ -267,7 +284,7 @@ func (c *Client) ListReviews(ctx context.Context) ([]ReviewResponse, error) {
 			return reviews, nil
 		}
 	}
-	return nil, fmt.Errorf("pull request review list exceeds %d entries", pageSize*maxResultPages)
+	return nil, fmt.Errorf("pull request review list reached the %d-entry pagination limit; cannot prove completeness", pageSize*maxResultPages)
 }
 
 // CreateIssueComment creates a non-inline comment on the PR.
@@ -303,7 +320,7 @@ func (c *Client) ListIssueComments(ctx context.Context) ([]IssueComment, error) 
 			return comments, nil
 		}
 	}
-	return nil, fmt.Errorf("pull request issue comment list exceeds %d entries", pageSize*maxResultPages)
+	return nil, fmt.Errorf("pull request issue comment list reached the %d-entry pagination limit; cannot prove completeness", pageSize*maxResultPages)
 }
 
 // GetPRInfo gets the current pull request head and base metadata.
@@ -340,7 +357,34 @@ func (c *Client) ListChangedFiles(ctx context.Context) ([]ChangedFile, error) {
 			return files, nil
 		}
 	}
-	return nil, fmt.Errorf("pull request changed-file list exceeds %d files", pageSize*maxResultPages)
+	return nil, fmt.Errorf("pull request changed-file list reached the %d-file pagination limit; cannot prove completeness", pageSize*maxResultPages)
+}
+
+// MergeBase returns GitHub's merge base for two exact commit SHAs.
+func (c *Client) MergeBase(ctx context.Context, baseSHA, headSHA string) (string, error) {
+	if strings.TrimSpace(baseSHA) == "" || strings.TrimSpace(headSHA) == "" {
+		return "", fmt.Errorf("GitHub compare requires non-empty base and head SHAs")
+	}
+	endpoint := fmt.Sprintf(
+		"%s/repos/%s/%s/compare/%s...%s",
+		c.baseURL,
+		url.PathEscape(c.repoOwner),
+		url.PathEscape(c.repoName),
+		url.PathEscape(baseSHA),
+		url.PathEscape(headSHA),
+	)
+	var response struct {
+		MergeBaseCommit struct {
+			SHA string `json:"sha"`
+		} `json:"merge_base_commit"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, endpoint, nil, &response, http.StatusOK); err != nil {
+		return "", err
+	}
+	if response.MergeBaseCommit.SHA == "" {
+		return "", fmt.Errorf("GitHub compare response omitted merge-base SHA")
+	}
+	return response.MergeBaseCommit.SHA, nil
 }
 
 // FindPRByHead finds the unique open PR whose base branch and head SHA match
@@ -350,10 +394,13 @@ func FindPRByHead(ctx context.Context, token string, repository Repository, base
 	if headSHA == "" {
 		return 0, fmt.Errorf("reviewed head SHA is empty")
 	}
-	client := NewClient(token, repository, 0)
+	client, err := NewClient(token, repository, 0)
+	if err != nil {
+		return 0, err
+	}
 	var matches []int
 	for page := 1; page <= maxResultPages; page++ {
-		u, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/pulls", client.baseURL, repository.Owner, repository.Name))
+		u, err := url.Parse(fmt.Sprintf("%s/repos/%s/%s/pulls", client.baseURL, repository.owner, repository.name))
 		if err != nil {
 			return 0, fmt.Errorf("build pull request discovery URL: %w", err)
 		}
@@ -377,7 +424,7 @@ func FindPRByHead(ctx context.Context, token string, repository Repository, base
 			break
 		}
 		if page == maxResultPages {
-			return 0, fmt.Errorf("open pull request list exceeds %d entries", pageSize*maxResultPages)
+			return 0, fmt.Errorf("open pull request discovery reached the %d-entry pagination limit; cannot prove a unique match", pageSize*maxResultPages)
 		}
 	}
 
@@ -494,14 +541,5 @@ func (c Configuration) ResolveRepository(remoteURL string) (Repository, error) {
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return Repository{}, fmt.Errorf("unable to parse repository info from URL: %s", remoteURL)
 	}
-	return Repository{Owner: parts[0], Name: parts[1], configuration: c}, nil
-}
-
-// ParseRepoInfo parses repository owner and name from a Git remote URL.
-func ParseRepoInfo(remoteURL string) (owner, repo string, err error) {
-	repository, err := ResolveRepository(remoteURL)
-	if err != nil {
-		return "", "", err
-	}
-	return repository.Owner, repository.Name, nil
+	return Repository{owner: parts[0], name: parts[1], configuration: c}, nil
 }
