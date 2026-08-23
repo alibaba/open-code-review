@@ -669,7 +669,7 @@ func extractOpenAIErrorDetails(err error) (*openAIErrorDetails, bool) {
 		bodyBytes, _ := io.ReadAll(apiErr.Response.Body)
 		_ = apiErr.Response.Body.Close()
 		apiErr.Response.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-		details.RawBody = strings.TrimSpace(string(bodyBytes))
+		details.RawBody = limitErrorBodyForLog(string(bodyBytes))
 	}
 
 	return details, true
