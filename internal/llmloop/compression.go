@@ -136,10 +136,11 @@ func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEs
 		return result
 	}
 
-	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, prevSummaryTokenEstimate)
+	frozenTokens := CountMessagesTokens(messages[:result.frozenEnd])
+	result.activeCount = computeActiveZoneSize(result.rounds, messages, maxTokens, frozenTokens+prevSummaryTokenEstimate)
 	if result.activeCount >= len(result.rounds) {
 		// Everything fits — no compression needed.
-		result.compressEnd = len(messages)
+		result.compressEnd = result.frozenEnd
 		result.activeCount = 0
 		return result
 	}
@@ -211,7 +212,7 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 // the user prompt] + [active].
 func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePath string) ([]llm.Message, error) {
 	if len(r.deps.Template.MemoryCompressionTask.Messages) == 0 || len(msgs) <= 2 {
-		return msgs[:min(len(msgs), 2)], nil
+		return msgs, nil
 	}
 
 	part := partitionMessages(msgs, r.deps.Template.MaxTokens, 0)
