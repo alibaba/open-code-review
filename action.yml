@@ -42,6 +42,11 @@ inputs:
   llm_timeout:
     description: LLM request timeout in seconds (mapped to env OCR_LLM_TIMEOUT).
     required: false
+    default: '300'
+  review_timeout:
+    description: Review timeout in integer minutes, from 1 through 120.
+    required: false
+    default: '10'
   github_token:
     description: GitHub token used to post review comments.
     required: false
@@ -244,6 +249,29 @@ runs:
         echo "MERGE_BASE=$MERGE_BASE" >> "$GITHUB_ENV"
         echo "Reviewing ${HEAD_SHA} from merge-base ${MERGE_BASE} (base origin/${BASE_REF})"
 
+    - name: Validate review_timeout
+      env:
+        REVIEW_TIMEOUT: ${{ inputs.review_timeout }}
+      shell: bash
+      run: |
+        if [[ ! "$REVIEW_TIMEOUT" =~ ^[0-9]+$ ]]; then
+          echo "::error::review_timeout must be a base-10 integer from 1 through 120 minutes"
+          exit 1
+        fi
+        NORMALIZED_REVIEW_TIMEOUT="$REVIEW_TIMEOUT"
+        while [[ "$NORMALIZED_REVIEW_TIMEOUT" == 0* && "$NORMALIZED_REVIEW_TIMEOUT" != "0" ]]; do
+          NORMALIZED_REVIEW_TIMEOUT="${NORMALIZED_REVIEW_TIMEOUT#0}"
+        done
+        if [[ "$NORMALIZED_REVIEW_TIMEOUT" == "0" || ${#NORMALIZED_REVIEW_TIMEOUT} -gt 3 ]]; then
+          echo "::error::review_timeout must be between 1 and 120 minutes"
+          exit 1
+        fi
+        REVIEW_TIMEOUT_NUMBER=$((10#$NORMALIZED_REVIEW_TIMEOUT))
+        if (( REVIEW_TIMEOUT_NUMBER < 1 || REVIEW_TIMEOUT_NUMBER > 120 )); then
+          echo "::error::review_timeout must be between 1 and 120 minutes"
+          exit 1
+        fi
+
     - name: Install OpenCodeReview
       shell: bash
       env:
@@ -255,10 +283,36 @@ runs:
 
     - name: Configure OCR
       env:
+        OCR_LLM_URL: ${{ inputs.llm_url }}
+        OCR_LLM_MODEL: ${{ inputs.llm_model }}
+        OCR_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
+        OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         OCR_EXTRA_BODY: ${{ inputs.llm_extra_body }}
         OCR_LANGUAGE: ${{ inputs.language }}
       shell: bash
       run: |
+        case "$OCR_USE_ANTHROPIC" in
+          true)
+            OCR_LLM_PROTOCOL="anthropic"
+            ;;
+          false)
+            OCR_LLM_PROTOCOL="openai"
+            ;;
+          *)
+            echo "::error::llm_use_anthropic must be the lowercase literal true or false"
+            exit 1
+            ;;
+        esac
+        ocr config unset provider
+        ocr config set llm.auth_token ""
+        ocr config set llm.extra_headers ""
+        ocr config set llm.retry_codes ""
+        ocr config set llm.url "$OCR_LLM_URL"
+        ocr config set llm.model "$OCR_LLM_MODEL"
+        ocr config set llm.use_anthropic "$OCR_USE_ANTHROPIC"
+        ocr config set llm.protocol "$OCR_LLM_PROTOCOL"
+        ocr config set llm.auth_header "$OCR_LLM_AUTH_HEADER"
+        ocr config set llm.auth_token_cmd 'printf "%s" "$OCR_LLM_TOKEN"'
         ocr config set llm.extra_body "$OCR_EXTRA_BODY"
         ocr config set language "$OCR_LANGUAGE"
 
@@ -271,12 +325,14 @@ runs:
         OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         OCR_LLM_EXTRA_HEADERS: ${{ inputs.llm_extra_headers }}
         OCR_LLM_TIMEOUT: ${{ inputs.llm_timeout }}
+        REVIEW_TIMEOUT: ${{ inputs.review_timeout }}
         OCR_REVIEW_CONCURRENCY: ${{ inputs.review_concurrency }}
         OCR_BACKGROUND: ${{ inputs.background }}
         OCR_RULE: ${{ inputs.rule }}
       shell: bash
       run: |
-        ARGS=(--from "${MERGE_BASE}" --to "${HEAD_SHA}" --audience agent --format json)
+        export OCR_LLM_TIMEOUT="${OCR_LLM_TIMEOUT:-300}"
+        ARGS=(--from "${MERGE_BASE}" --to "${HEAD_SHA}" --audience agent --format json --timeout "$REVIEW_TIMEOUT")
         [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
         [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")
