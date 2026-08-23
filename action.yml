@@ -271,6 +271,7 @@ runs:
           echo "::error::review_timeout must be between 1 and 120 minutes"
           exit 1
         fi
+        echo "REVIEW_TIMEOUT=$REVIEW_TIMEOUT_NUMBER" >> "$GITHUB_ENV"
 
     - name: Install OpenCodeReview
       shell: bash
@@ -325,7 +326,6 @@ runs:
         OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         OCR_LLM_EXTRA_HEADERS: ${{ inputs.llm_extra_headers }}
         OCR_LLM_TIMEOUT: ${{ inputs.llm_timeout }}
-        REVIEW_TIMEOUT: ${{ inputs.review_timeout }}
         OCR_REVIEW_CONCURRENCY: ${{ inputs.review_concurrency }}
         OCR_BACKGROUND: ${{ inputs.background }}
         OCR_RULE: ${{ inputs.rule }}

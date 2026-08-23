@@ -250,6 +250,18 @@ function readJsonLines(file) {
     .map((line) => JSON.parse(line));
 }
 
+function readEnvAssignments(file) {
+  const values = {};
+  if (!fs.existsSync(file)) return values;
+  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    if (!line) continue;
+    const separator = line.indexOf("=");
+    if (separator < 1) continue;
+    values[line.slice(0, separator)] = line.slice(separator + 1);
+  }
+  return values;
+}
+
 function configValues(calls) {
   const values = {};
   for (const args of calls) {
@@ -362,7 +374,7 @@ function testReviewTimeoutForwardedSeparatelyFromLlmTimeout() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha" },
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TIMEOUT: values.review_timeout },
       { replaceResultPaths: true }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
@@ -404,7 +416,7 @@ function testDefaultLlmTimeoutExportedSeparatelyFromReviewTimeout() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha" },
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TIMEOUT: values.review_timeout },
       { replaceResultPaths: true }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
@@ -437,7 +449,7 @@ function testEmptyLlmTimeoutNormalizesBeforeReviewInvocation() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha" },
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TIMEOUT: values.review_timeout },
       { replaceResultPaths: true }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
@@ -447,6 +459,49 @@ function testEmptyLlmTimeoutNormalizesBeforeReviewInvocation() {
     assert.strictEqual(reviewCall.env.OCR_LLM_TIMEOUT, "300");
     assert.strictEqual(reviewCall.args[timeoutIndex + 1], "10");
     assert.notStrictEqual(reviewCall.args[timeoutIndex + 1], reviewCall.env.OCR_LLM_TIMEOUT);
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps() {
+  const validation = validationStep();
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(validation, "action.yml must retain review_timeout validation");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      review_timeout: "010",
+      llm_url: "https://llm.example.invalid/v1",
+      llm_auth_token: "unused-token",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+    });
+    const validationResult = runStep(validation, values, fixture);
+    assert.strictEqual(
+      validationResult.status,
+      0,
+      `review_timeout=010 validation failed; ${resultDescription(validationResult)}`
+    );
+    const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+    assert.strictEqual(exported.REVIEW_TIMEOUT, "10", "validation must export normalized decimal review_timeout");
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(run.env, "REVIEW_TIMEOUT"),
+      "Run OpenCodeReview must consume the normalized GITHUB_ENV value, not rebind the raw input"
+    );
+    const result = runStep(
+      run,
+      values,
+      fixture,
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TIMEOUT: exported.REVIEW_TIMEOUT },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    const timeoutIndex = reviewCall.args.indexOf("--timeout");
+    assert.strictEqual(reviewCall.args[timeoutIndex + 1], "10");
   } finally {
     removeFixture(fixture);
   }
@@ -685,7 +740,7 @@ function testRunRetainsExtraHeadersEnvironmentOverride() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha" },
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TIMEOUT: values.review_timeout },
       { replaceResultPaths: true }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
@@ -723,6 +778,7 @@ const TESTS = [
   ["review_timeout forwards --timeout separately from llm_timeout", testReviewTimeoutForwardedSeparatelyFromLlmTimeout],
   ["default llm_timeout exports independently from review_timeout", testDefaultLlmTimeoutExportedSeparatelyFromReviewTimeout],
   ["empty llm_timeout normalizes before review invocation", testEmptyLlmTimeoutNormalizesBeforeReviewInvocation],
+  ["review_timeout with a leading zero normalizes across steps", testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps],
   ["Configure OCR builds a complete llm config", testConfigureBuildsCompleteLlmConfig],
   ["Configure OCR never persists the token", testConfigureNeverPersistsToken],
   ["Configure OCR neutralizes stale provider and static token", testConfigureNeutralizesStaleProviderAndStaticToken],
