@@ -2056,3 +2056,83 @@ func TestFormatOpenAIError_NilAndNonAPIError(t *testing.T) {
 		t.Errorf("formatOpenAIError(customErr) = %v, want %v", got, customErr)
 	}
 }
+
+func TestFormatOpenAIError_EmptyDetails(t *testing.T) {
+	apiErr := &openai.Error{
+		StatusCode: http.StatusBadGateway,
+		Request:    httptest.NewRequest(http.MethodPost, "https://api.example.com/v1/chat/completions", nil),
+		Response: &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Body:       http.NoBody,
+		},
+	}
+
+	err := formatOpenAIError("openai", "gpt-test", apiErr)
+	if !strings.Contains(err.Error(), "OpenAI API error (HTTP 502 Bad Gateway, model: gpt-test)") {
+		t.Errorf("expected formatted provider context, got: %s", err)
+	}
+
+	var got *openai.Error
+	if !errors.As(err, &got) || got != apiErr {
+		t.Errorf("expected wrapped original API error, got: %v", err)
+	}
+}
+
+func TestFormatOpenAIError_ClosesReplacedResponseBody(t *testing.T) {
+	body := &trackingReadCloser{Reader: strings.NewReader("upstream error")}
+	apiErr := &openai.Error{
+		StatusCode: http.StatusBadRequest,
+		Request:    httptest.NewRequest(http.MethodPost, "https://api.example.com/v1/chat/completions", nil),
+		Response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body:       body,
+		},
+	}
+
+	_ = formatOpenAIError("openai", "gpt-test", apiErr)
+	if !body.closed {
+		t.Error("original response body was not closed")
+	}
+
+	restored, err := io.ReadAll(apiErr.Response.Body)
+	if err != nil {
+		t.Fatalf("read restored response body: %v", err)
+	}
+	if got, want := string(restored), "upstream error"; got != want {
+		t.Errorf("restored response body = %q, want %q", got, want)
+	}
+}
+
+func TestLimitErrorResponseBody(t *testing.T) {
+	body := &trackingReadCloser{Reader: strings.NewReader(strings.Repeat("x", maxErrorBodyBytes+1))}
+	resp, err := limitErrorResponseBody(httptest.NewRequest(http.MethodGet, "https://api.example.com", nil), func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusBadGateway, Body: body}, nil
+	})
+	if err != nil {
+		t.Fatalf("limitErrorResponseBody: %v", err)
+	}
+
+	contents, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read limited response body: %v", err)
+	}
+	if got, want := len(contents), maxErrorBodyBytes; got != want {
+		t.Errorf("limited response body length = %d, want %d", got, want)
+	}
+	if err := resp.Body.Close(); err != nil {
+		t.Fatalf("close limited response body: %v", err)
+	}
+	if !body.closed {
+		t.Error("limited response body did not close the transport body")
+	}
+}
+
+type trackingReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closed = true
+	return nil
+}

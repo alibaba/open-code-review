@@ -43,6 +43,8 @@ var AppVersion = "dev"
 // shrink it, same as keyCmdTimeout.
 var bedrockConfigLoadTimeout = 60 * time.Second
 
+const maxErrorBodyBytes = 64 * 1024
+
 func userAgent(provider string) string {
 	ua := "open-code-review/" + AppVersion
 	if provider != "" {
@@ -270,6 +272,22 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 	}
 }
 
+// limitErrorResponseBody bounds provider error payloads before the OpenAI SDK
+// reads them into memory. The wrapper delegates Close to the transport body.
+func limitErrorResponseBody(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+	resp, err := next(req)
+	if resp != nil && resp.StatusCode >= http.StatusBadRequest && resp.Body != nil {
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{
+			Reader: io.LimitReader(resp.Body, maxErrorBodyBytes),
+			Closer: resp.Body,
+		}
+	}
+	return resp, err
+}
+
 // --- Factory ---
 
 // NewLLMClient creates the appropriate client based on the resolved endpoint protocol.
@@ -409,6 +427,7 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithMaxRetries(5),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
+		openaiopt.WithMiddleware(limitErrorResponseBody),
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
@@ -630,6 +649,7 @@ func formatOpenAIError(provider, model string, err error) error {
 			rawBody = strings.TrimSpace(raw)
 		} else if apiErr.Response != nil && apiErr.Response.Body != nil {
 			bodyBytes, _ := io.ReadAll(apiErr.Response.Body)
+			_ = apiErr.Response.Body.Close()
 			apiErr.Response.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 			rawBody = strings.TrimSpace(string(bodyBytes))
 		}
@@ -666,7 +686,7 @@ func formatOpenAIError(provider, model string, err error) error {
 			parts = append(parts, fmt.Sprintf("response body: %s", rawBody))
 		}
 
-		if len(parts) > 1 || rawBody != "" {
+		if len(parts) > 0 {
 			return fmt.Errorf("%s: %w", strings.Join(parts, ", "), err)
 		}
 	}
