@@ -297,11 +297,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if opts.postToPR && resultErr == nil && len(comments) > 0 {
 		target, err := githubPostingTargetFromManifest(cc.RepoDir, manifest)
 		if err != nil {
-			postErr = fmt.Errorf("post review to GitHub: %w", err)
-			fmt.Fprintf(os.Stderr, "[ocr] ERROR: %v\n", postErr)
+			postErr = githubPostingError(err)
 		} else if _, err := ghpost.Post(runCtx, target, comments, ghpost.Options{Token: getGitHubToken(opts.githubToken)}); err != nil {
-			postErr = fmt.Errorf("post review to GitHub: %w", err)
-			fmt.Fprintf(os.Stderr, "[ocr] ERROR: %v\n", postErr)
+			postErr = githubPostingError(err)
 		}
 	}
 	if resultErr != nil {
@@ -321,6 +319,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return errors.Join(resultErr, emitErr, postErr)
 	}
 	return errors.Join(emitErr, postErr)
+}
+
+func githubPostingError(err error) error {
+	return fmt.Errorf("post review to GitHub: %w", err)
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {

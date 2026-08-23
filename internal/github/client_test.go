@@ -41,7 +41,10 @@ func TestResolveRepositoryValidatesConfiguredGitHubHost(t *testing.T) {
 	}
 	for _, remote := range []string{
 		"https://github.com/acme/widget.git",
+		"https://github.com/acme/widget/",
+		"https://github.com/acme/widget.git/",
 		"git@github.com:acme/widget.git",
+		"git@github.com:acme/widget.git/",
 		"ssh://git@github.com/acme/widget.git",
 	} {
 		repository, err := configuration.ResolveRepository(remote)

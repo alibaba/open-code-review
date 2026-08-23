@@ -4,6 +4,7 @@
 package ghpost
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -12,37 +13,64 @@ import (
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
+const reviewRunIDBytes = 12 // 96 bits, rendered as 24 hexadecimal characters.
+
+type postingIdentity struct {
+	path           string
+	startLine      int
+	endLine        int
+	category       string
+	severity       string
+	content        string
+	suggestionCode string
+	existingCode   string
+}
+
+// commentPostingIdentity is the single projection used for canonical ordering
+// and retry-marker hashing. Keep it synchronized with fields that affect
+// GitHub-rendered output. Thinking is intentionally excluded because it is
+// never posted.
+func commentPostingIdentity(comment model.LlmComment) postingIdentity {
+	return postingIdentity{
+		path:           comment.Path,
+		startLine:      comment.StartLine,
+		endLine:        comment.EndLine,
+		category:       comment.Category,
+		severity:       comment.Severity,
+		content:        comment.Content,
+		suggestionCode: comment.SuggestionCode,
+		existingCode:   comment.ExistingCode,
+	}
+}
+
+func comparePostingIdentity(left, right postingIdentity) int {
+	if result := cmp.Compare(left.path, right.path); result != 0 {
+		return result
+	}
+	if result := cmp.Compare(left.startLine, right.startLine); result != 0 {
+		return result
+	}
+	if result := cmp.Compare(left.endLine, right.endLine); result != 0 {
+		return result
+	}
+	for _, fields := range [][2]string{
+		{left.category, right.category},
+		{left.severity, right.severity},
+		{left.content, right.content},
+		{left.suggestionCode, right.suggestionCode},
+		{left.existingCode, right.existingCode},
+	} {
+		if result := cmp.Compare(fields[0], fields[1]); result != 0 {
+			return result
+		}
+	}
+	return 0
+}
+
 func canonicalComments(comments []model.LlmComment) []model.LlmComment {
 	ordered := slices.Clone(comments)
 	slices.SortStableFunc(ordered, func(left, right model.LlmComment) int {
-		if left.Path != right.Path {
-			if left.Path < right.Path {
-				return -1
-			}
-			return 1
-		}
-		if left.StartLine != right.StartLine {
-			return left.StartLine - right.StartLine
-		}
-		if left.EndLine != right.EndLine {
-			return left.EndLine - right.EndLine
-		}
-		fields := [][2]string{
-			{left.Category, right.Category},
-			{left.Severity, right.Severity},
-			{left.Content, right.Content},
-			{left.SuggestionCode, right.SuggestionCode},
-			{left.ExistingCode, right.ExistingCode},
-		}
-		for _, field := range fields {
-			if field[0] < field[1] {
-				return -1
-			}
-			if field[0] > field[1] {
-				return 1
-			}
-		}
-		return 0
+		return comparePostingIdentity(commentPostingIdentity(left), commentPostingIdentity(right))
 	})
 	return ordered
 }
@@ -60,16 +88,17 @@ func reviewRunID(owner, name string, prNumber int, baseBranch string, target Tar
 	writeField(target.ResolvedBase)
 	writeField(target.ResolvedHead)
 	for _, comment := range canonicalComments(comments) {
-		writeField(comment.Path)
-		writeField(fmt.Sprint(comment.StartLine))
-		writeField(fmt.Sprint(comment.EndLine))
-		writeField(comment.Category)
-		writeField(comment.Severity)
-		writeField(comment.Content)
-		writeField(comment.SuggestionCode)
-		writeField(comment.ExistingCode)
+		identity := commentPostingIdentity(comment)
+		writeField(identity.path)
+		writeField(fmt.Sprint(identity.startLine))
+		writeField(fmt.Sprint(identity.endLine))
+		writeField(identity.category)
+		writeField(identity.severity)
+		writeField(identity.content)
+		writeField(identity.suggestionCode)
+		writeField(identity.existingCode)
 	}
-	return hex.EncodeToString(hash.Sum(nil)[:12])
+	return hex.EncodeToString(hash.Sum(nil)[:reviewRunIDBytes])
 }
 
 func postingMarker(runID, kind string, batch int) string {
