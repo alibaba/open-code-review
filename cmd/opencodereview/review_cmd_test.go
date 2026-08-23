@@ -4,7 +4,9 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,36 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/session"
 )
+
+func TestGitHubPostingErrorIsReturnedWithoutLogging(t *testing.T) {
+	originalStderr := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stderr = writer
+	t.Cleanup(func() { os.Stderr = originalStderr })
+
+	sentinel := errors.New("delivery failed")
+	got := githubPostingError(sentinel)
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	os.Stderr = originalStderr
+	var output bytes.Buffer
+	if _, err := io.Copy(&output, reader); err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close stderr reader: %v", err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("githubPostingError wrote stderr: %q", output.String())
+	}
+	if !errors.Is(got, sentinel) || !strings.Contains(got.Error(), "post review to GitHub") {
+		t.Fatalf("githubPostingError = %v", got)
+	}
+}
 
 func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
 	err := validateReviewRefs(t.TempDir(), reviewOptions{commit: "-O./pwn.sh"})

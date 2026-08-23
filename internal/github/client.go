@@ -535,7 +535,8 @@ func (c Configuration) ResolveRepository(remoteURL string) (Repository, error) {
 		return Repository{}, fmt.Errorf("remote host %q does not match configured GitHub host %q", remoteHost, c.githubHost)
 	}
 
-	repoPath = strings.TrimSuffix(strings.TrimSpace(repoPath), ".git")
+	repoPath = strings.Trim(strings.TrimSpace(repoPath), "/")
+	repoPath = strings.TrimSuffix(repoPath, ".git")
 
 	parts := strings.Split(repoPath, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {

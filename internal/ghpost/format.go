@@ -101,6 +101,7 @@ func formatCommentBody(comment model.LlmComment) string {
 }
 
 func splitSummaryText(text string) []string {
+	text = strings.ToValidUTF8(text, "\uFFFD")
 	if text == "" {
 		return []string{""}
 	}

@@ -6,6 +6,7 @@ package ghpost
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/model"
 )
@@ -55,5 +56,21 @@ func TestFormatCommentBodyIndentsSuggestionContainingFence(t *testing.T) {
 	body := formatCommentBody(model.LlmComment{SuggestionCode: "before\n```go\nafter"})
 	if !strings.Contains(body, "**Suggested code:**\n\n    before\n    ```go\n    after\n") {
 		t.Fatalf("fenced suggestion = %q", body)
+	}
+}
+
+func TestSplitSummaryTextNormalizesInvalidUTF8(t *testing.T) {
+	text := string([]byte{0xff, 0xfe}) + strings.Repeat("a", summaryFragmentBytes+10)
+	parts := splitSummaryText(text)
+	if len(parts) < 2 {
+		t.Fatalf("splitSummaryText returned %d part(s), want multiple", len(parts))
+	}
+	for i, part := range parts {
+		if !utf8.ValidString(part) {
+			t.Fatalf("part %d contains invalid UTF-8: %q", i, part)
+		}
+	}
+	if got := strings.Join(parts, ""); !strings.HasPrefix(got, "\uFFFD") {
+		t.Fatalf("normalized text = %q", got[:min(len(got), 16)])
 	}
 }
