@@ -487,3 +487,19 @@ func TestResolveOutputWriter_SafeByDefaultStripsNonMachineReadable(t *testing.T)
 		t.Fatal("expected strip to be true for non-machine-readable format")
 	}
 }
+
+// TestStripAnsiWriter_EscIntermediateBytesLengthExceededFallback pins that an
+// escape sequence with excessive intermediate bytes (0x20..0x2f) triggers a safe flush.
+func TestStripAnsiWriter_EscIntermediateBytesLengthExceededFallback(t *testing.T) {
+	var buf bytes.Buffer
+	w := &stripAnsiWriter{dst: &buf}
+	longIntermediates := strings.Repeat(" ", maxCSISequenceLength+10)
+	in := "\033" + longIntermediates
+	want := "\033" + longIntermediates
+	if _, err := w.Write([]byte(in)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if buf.String() != want {
+		t.Fatalf("got %q, want %q", buf.String(), want)
+	}
+}

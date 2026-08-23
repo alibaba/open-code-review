@@ -387,6 +387,11 @@ func (w *stripAnsiWriter) Write(p []byte) (int, error) {
 			case c >= 0x20 && c <= 0x2f:
 				// Intermediate byte of a multi-byte escape (e.g. ESC ( B);
 				// keep collecting so the whole sequence is discarded.
+				if len(w.pending) >= maxCSISequenceLength {
+					out = append(out, w.pending...)
+					w.pending = w.pending[:0]
+					w.state = ansiNormal
+				}
 			default:
 				// Single-byte escape sequence. Discard.
 				w.state = ansiNormal
@@ -621,6 +626,7 @@ func emitRunResult(
 	out io.Writer,
 	retryReport *llm.RetryReport,
 ) error {
+	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
 	duration := time.Since(startTime)

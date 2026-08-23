@@ -694,6 +694,7 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 // review findings — there is no SARIF result to emit, and a differently-shaped
 // document would confuse consumers expecting a SARIF report.
 func outputPreview(p *agent.DiffPreview, outputFormat string, out io.Writer) error {
+	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	if outputFormat == "sarif" {
 		return fmt.Errorf("--format sarif is not supported with --preview: SARIF output requires completed review findings")
 	}
