@@ -419,3 +419,71 @@ func TestStripAnsiWriter_WriteFailureReturnsConsumedLen(t *testing.T) {
 		t.Fatal("expected underlying write error to propagate")
 	}
 }
+
+// TestStripAnsiWriter_CSIInvalidByteFallback pins that an invalid CSI byte
+// (non-ASCII >= 0x80 or control char < 0x20) safely flushes pending bytes as
+// normal text without corrupting or swallowing user content.
+func TestStripAnsiWriter_CSIInvalidByteFallback(t *testing.T) {
+	var buf bytes.Buffer
+	w := &stripAnsiWriter{dst: &buf}
+	in := "hello\033[\xe4\xbd\xa0world"
+	want := "hello\033[\xe4\xbd\xa0world"
+	if _, err := w.Write([]byte(in)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if buf.String() != want {
+		t.Fatalf("got %q, want %q", buf.String(), want)
+	}
+}
+
+// TestStripAnsiWriter_CSILengthExceededFallback pins that an unclosed or
+// oversized CSI sequence exceeding maxCSISequenceLength is flushed to avoid
+// unbounded buffering and content truncation.
+func TestStripAnsiWriter_CSILengthExceededFallback(t *testing.T) {
+	var buf bytes.Buffer
+	w := &stripAnsiWriter{dst: &buf}
+	longParam := strings.Repeat("1", maxCSISequenceLength+10)
+	in := "\033[" + longParam
+	want := "\033[" + longParam
+	if _, err := w.Write([]byte(in)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if buf.String() != want {
+		t.Fatalf("got %q, want %q", buf.String(), want)
+	}
+}
+
+// TestStripAnsiWriter_OSCLengthExceededFallback pins that an unclosed or
+// oversized OSC sequence exceeding maxOSCSequenceLength is flushed to avoid
+// swallowing subsequent user content.
+func TestStripAnsiWriter_OSCLengthExceededFallback(t *testing.T) {
+	var buf bytes.Buffer
+	w := &stripAnsiWriter{dst: &buf}
+	longBody := strings.Repeat("x", maxOSCSequenceLength+10)
+	in := "\033]" + longBody
+	want := "\033]" + longBody
+	if _, err := w.Write([]byte(in)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if buf.String() != want {
+		t.Fatalf("got %q, want %q", buf.String(), want)
+	}
+}
+
+// TestResolveOutputWriter_SafeByDefaultStripsNonMachineReadable pins that any
+// non-machine-readable format (not json/sarif) wraps the writer in stripAnsiWriter.
+func TestResolveOutputWriter_SafeByDefaultStripsNonMachineReadable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out.custom")
+	w, closeFn, err := resolveOutputWriter(path, "custom_txt")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	defer closeFn()
+	lazy, ok := w.(*lazyFileWriter)
+	if !ok {
+		t.Fatalf("expected *lazyFileWriter, got %T", w)
+	}
+	if !lazy.strip {
+		t.Fatal("expected strip to be true for non-machine-readable format")
+	}
+}

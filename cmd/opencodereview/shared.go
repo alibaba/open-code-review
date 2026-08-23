@@ -291,7 +291,12 @@ type quietHandle struct {
 // json and sarif move [ocr] progress lines off stdout and suppress the trace
 // summary, which is already carried inside the document.
 func isMachineReadable(outputFormat string) bool {
-	return outputFormat == "json" || outputFormat == "sarif"
+	switch strings.ToLower(strings.TrimSpace(outputFormat)) {
+	case "json", "sarif":
+		return true
+	default:
+		return false
+	}
 }
 
 // newQuietHandle routes [ocr] progress lines away from stdout so they cannot
@@ -325,6 +330,11 @@ func (h *quietHandle) Restore() {
 	h.fn()
 	h.fn = nil
 }
+
+const (
+	maxOSCSequenceLength = 4096
+	maxCSISequenceLength = 256
+)
 
 // stripAnsiState is the ANSI escape parsing state for stripAnsiWriter.
 type stripAnsiState int
@@ -387,6 +397,10 @@ func (w *stripAnsiWriter) Write(p []byte) (int, error) {
 			if c >= 0x40 && c <= 0x7e {
 				w.state = ansiNormal
 				w.pending = w.pending[:0]
+			} else if c < 0x20 || c >= 0x80 || len(w.pending) >= maxCSISequenceLength {
+				out = append(out, w.pending...)
+				w.pending = w.pending[:0]
+				w.state = ansiNormal
 			}
 		case ansiOSC:
 			w.pending = append(w.pending, c)
@@ -396,6 +410,12 @@ func (w *stripAnsiWriter) Write(p []byte) (int, error) {
 				w.pending = w.pending[:0]
 			case 0x1b: // possible ST terminator (ESC \)
 				w.state = ansiOSCEsc
+			default:
+				if len(w.pending) >= maxOSCSequenceLength {
+					out = append(out, w.pending...)
+					w.pending = w.pending[:0]
+					w.state = ansiNormal
+				}
 			}
 		case ansiOSCEsc:
 			if c == '\\' { // ST terminates the OSC string
@@ -534,7 +554,7 @@ func resolveOutputWriter(path, format string) (io.Writer, func() error, error) {
 	if st, err := os.Stat(parent); err != nil || !st.IsDir() {
 		return nil, nil, fmt.Errorf("--output directory does not exist: %s", parent)
 	}
-	w := &lazyFileWriter{path: path, strip: format == "text"}
+	w := &lazyFileWriter{path: path, strip: !isMachineReadable(format)}
 	return w, w.Close, nil
 }
 
@@ -662,7 +682,7 @@ func emitRunResult(
 	// after them but must not separate the summary from the end of output.
 	outputRetryReportText(out, retryReport)
 	if summary := ag.ProjectSummary(); summary != "" {
-		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", summary)
+		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", sanitizeTerminal(summary))
 	}
 	// Text rendering ignores fmt.Fprintf write errors; surface them here so a
 	// failed --output write (permission, disk full) fails the command non-zero

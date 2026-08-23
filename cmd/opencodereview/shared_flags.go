@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -109,6 +110,16 @@ func validateAudience(audience string) error {
 	}
 }
 
+func validateOutputFormat(format string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(format))
+	switch normalized {
+	case "text", "json", "sarif":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("invalid --format value %q: must be 'text', 'json', or 'sarif'", format)
+	}
+}
+
 func validateReviewOptions(opts *reviewOptions) error {
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
@@ -119,6 +130,11 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if err := validateAudience(opts.audience); err != nil {
 		return err
 	}
+	normalizedFormat, err := validateOutputFormat(opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	opts.outputFormat = normalizedFormat
 	const minMaxTools = 10
 	if opts.maxTools < 0 {
 		return fmt.Errorf("--max-tools must be a non-negative integer (0 means use template default)")
@@ -143,6 +159,11 @@ func validateScanOptions(opts *scanOptions) error {
 	if err := validateAudience(opts.audience); err != nil {
 		return err
 	}
+	normalizedFormat, err := validateOutputFormat(opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	opts.outputFormat = normalizedFormat
 	if opts.maxTools < 0 {
 		return fmt.Errorf("--max-tools must be a non-negative integer (0 means use template default)")
 	}

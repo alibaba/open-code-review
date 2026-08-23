@@ -210,3 +210,37 @@ func TestParseScanFlags_OutputPath(t *testing.T) {
 		t.Errorf("outputPath = %q, want scan.json", opts.outputPath)
 	}
 }
+
+func TestParseReviewFlags_InvalidFormat(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--format", "xml"})
+	if err == nil {
+		t.Fatal("expected error for invalid format 'xml'")
+	}
+}
+
+func TestParseScanFlags_InvalidFormat(t *testing.T) {
+	_, err := parseScanFlags([]string{"--format", "yaml"})
+	if err == nil {
+		t.Fatal("expected error for invalid format 'yaml'")
+	}
+}
+
+func TestParseReviewFlags_NormalizedFormat(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--format", " JSON "})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.outputFormat != "json" {
+		t.Errorf("outputFormat = %q, want json", opts.outputFormat)
+	}
+}
+
+func TestParseScanFlags_NormalizedFormat(t *testing.T) {
+	opts, err := parseScanFlags([]string{"--format", " SARIF "})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.outputFormat != "sarif" {
+		t.Errorf("outputFormat = %q, want sarif", opts.outputFormat)
+	}
+}
