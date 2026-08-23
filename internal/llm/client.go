@@ -664,7 +664,7 @@ func extractOpenAIErrorDetails(err error) (*openAIErrorDetails, bool) {
 	}
 
 	if raw := apiErr.RawJSON(); raw != "" {
-		details.RawBody = strings.TrimSpace(raw)
+		details.RawBody = limitErrorBodyForLog(raw)
 	} else if apiErr.Response != nil && apiErr.Response.Body != nil {
 		bodyBytes, _ := io.ReadAll(apiErr.Response.Body)
 		_ = apiErr.Response.Body.Close()
