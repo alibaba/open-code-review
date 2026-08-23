@@ -272,20 +272,14 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 	}
 }
 
-// limitErrorResponseBody bounds provider error payloads before the OpenAI SDK
-// reads them into memory. The wrapper delegates Close to the transport body.
-func limitErrorResponseBody(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
-	resp, err := next(req)
-	if resp != nil && resp.StatusCode >= http.StatusBadRequest && resp.Body != nil {
-		resp.Body = struct {
-			io.Reader
-			io.Closer
-		}{
-			Reader: io.LimitReader(resp.Body, maxErrorBodyBytes),
-			Closer: resp.Body,
-		}
+// limitErrorBodyForLog bounds the payload included in terminal and session logs
+// without truncating the HTTP response before the SDK parses it.
+func limitErrorBodyForLog(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) <= maxErrorBodyBytes {
+		return raw
 	}
-	return resp, err
+	return strings.ToValidUTF8(raw[:maxErrorBodyBytes], "\uFFFD") + "... (truncated)"
 }
 
 // --- Factory ---
