@@ -534,7 +534,7 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		}
 	}
 	if err != nil {
-		return nil, formatOpenAIError(c.cfg.Provider, model, err)
+		return nil, formatGeminiError(c.cfg.Provider, c.cfg.URL, model, err)
 	}
 
 	return c.mapOpenAIResponse(sdkResp), nil
@@ -557,7 +557,7 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 	if err != nil {
 		class, phase := classifyStreamError(err)
 		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
-		return nil, formatOpenAIError(c.cfg.Provider, string(params.Model), err)
+		return nil, formatGeminiError(c.cfg.Provider, c.cfg.URL, string(params.Model), err)
 	}
 	return resp, nil
 }
@@ -634,73 +634,105 @@ func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params ope
 	return resp, nil
 }
 
-// formatOpenAIError extracts structured error details from an OpenAI SDK error
-// (*openai.Error, which embeds *apierror.Error), including HTTP status, code,
-// message, and the raw JSON response payload (crucial for providers like
-// Google Gemini whose 400 Bad Request details live in custom nested JSON fields).
-func formatOpenAIError(provider, model string, err error) error {
+// openAIErrorDetails captures unmarshaled and raw fields from an *openai.Error.
+type openAIErrorDetails struct {
+	Status   int
+	Message  string
+	Code     string
+	Type     string
+	RawBody  string
+	Original error
+}
+
+// extractOpenAIErrorDetails unwraps an *openai.Error (embedding *apierror.Error),
+// capturing the HTTP status, message, error code, error type, and raw JSON or text body.
+// If the response body was unread, it reads, closes, and restores the body stream.
+// Returns false if err does not unwrap to an *openai.Error.
+func extractOpenAIErrorDetails(err error) (*openAIErrorDetails, bool) {
 	if err == nil {
-		return nil
+		return nil, false
 	}
 	var apiErr *openai.Error
-	if errors.As(err, &apiErr) {
-		var rawBody string
-		if raw := apiErr.RawJSON(); raw != "" {
-			rawBody = strings.TrimSpace(raw)
-		} else if apiErr.Response != nil && apiErr.Response.Body != nil {
-			bodyBytes, _ := io.ReadAll(apiErr.Response.Body)
-			_ = apiErr.Response.Body.Close()
-			apiErr.Response.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-			rawBody = strings.TrimSpace(string(bodyBytes))
-		}
+	if !errors.As(err, &apiErr) {
+		return nil, false
+	}
 
-		status := apiErr.StatusCode
-		if status == 0 && apiErr.Response != nil {
-			status = apiErr.Response.StatusCode
-		}
-		statusText := http.StatusText(status)
+	details := &openAIErrorDetails{
+		Status:   apiErr.StatusCode,
+		Message:  apiErr.Message,
+		Code:     apiErr.Code,
+		Type:     apiErr.Type,
+		Original: err,
+	}
 
-		pName := providerDisplayName(provider)
+	if details.Status == 0 && apiErr.Response != nil {
+		details.Status = apiErr.Response.StatusCode
+	}
 
-		var parts []string
-		if status > 0 {
-			if statusText != "" {
-				parts = append(parts, fmt.Sprintf("%s error (HTTP %d %s, model: %s)", pName, status, statusText, model))
-			} else {
-				parts = append(parts, fmt.Sprintf("%s error (HTTP %d, model: %s)", pName, status, model))
-			}
+	if raw := apiErr.RawJSON(); raw != "" {
+		details.RawBody = strings.TrimSpace(raw)
+	} else if apiErr.Response != nil && apiErr.Response.Body != nil {
+		bodyBytes, _ := io.ReadAll(apiErr.Response.Body)
+		_ = apiErr.Response.Body.Close()
+		apiErr.Response.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+		details.RawBody = strings.TrimSpace(string(bodyBytes))
+	}
+
+	return details, true
+}
+
+// formatGeminiError formats structured error details for Google Gemini endpoints
+// (whose 400 Bad Request details live in custom nested JSON fields like google.rpc.ErrorInfo).
+// Non-Gemini providers return the original error unmodified.
+func formatGeminiError(provider, url, model string, err error) error {
+	if err == nil || !isGemini(provider, url) {
+		return err
+	}
+
+	details, ok := extractOpenAIErrorDetails(err)
+	if !ok {
+		return err
+	}
+
+	statusText := http.StatusText(details.Status)
+	var parts []string
+	if details.Status > 0 {
+		if statusText != "" {
+			parts = append(parts, fmt.Sprintf("Google Gemini API error (HTTP %d %s, model: %s)", details.Status, statusText, model))
 		} else {
-			parts = append(parts, fmt.Sprintf("%s error (model: %s)", pName, model))
+			parts = append(parts, fmt.Sprintf("Google Gemini API error (HTTP %d, model: %s)", details.Status, model))
 		}
+	} else {
+		parts = append(parts, fmt.Sprintf("Google Gemini API error (model: %s)", model))
+	}
 
-		if apiErr.Message != "" {
-			parts = append(parts, fmt.Sprintf("message: %s", apiErr.Message))
-		}
-		if apiErr.Code != "" {
-			parts = append(parts, fmt.Sprintf("code: %s", apiErr.Code))
-		}
-		if apiErr.Type != "" {
-			parts = append(parts, fmt.Sprintf("type: %s", apiErr.Type))
-		}
-		if rawBody != "" && rawBody != apiErr.Message {
-			parts = append(parts, fmt.Sprintf("response body: %s", rawBody))
-		}
+	if details.Message != "" {
+		parts = append(parts, fmt.Sprintf("message: %s", details.Message))
+	}
+	if details.Code != "" {
+		parts = append(parts, fmt.Sprintf("code: %s", details.Code))
+	}
+	if details.Type != "" {
+		parts = append(parts, fmt.Sprintf("type: %s", details.Type))
+	}
+	if details.RawBody != "" && details.RawBody != details.Message {
+		parts = append(parts, fmt.Sprintf("response body: %s", details.RawBody))
+	}
 
-		if len(parts) > 0 {
-			return fmt.Errorf("%s: %w", strings.Join(parts, ", "), err)
-		}
+	if len(parts) > 0 {
+		return fmt.Errorf("%s: %w", strings.Join(parts, ", "), err)
 	}
 	return err
 }
 
-func providerDisplayName(provider string) string {
-	if p, ok := LookupProvider(provider); ok && p.DisplayName != "" {
-		return p.DisplayName
+func isGemini(provider, url string) bool {
+	if strings.EqualFold(provider, "gemini") {
+		return true
 	}
-	if provider != "" {
-		return provider
+	if strings.Contains(strings.ToLower(url), "generativelanguage.googleapis.com") {
+		return true
 	}
-	return "LLM"
+	return false
 }
 
 // buildOpenAIParams converts the shared ChatRequest into OpenAI SDK parameters.

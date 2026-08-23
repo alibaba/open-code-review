@@ -1924,7 +1924,74 @@ func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
 	}
 }
 
-func TestFormatOpenAIError_Gemini400BadRequest(t *testing.T) {
+func TestExtractOpenAIErrorDetails(t *testing.T) {
+	if details, ok := extractOpenAIErrorDetails(nil); ok || details != nil {
+		t.Errorf("extractOpenAIErrorDetails(nil) = (%v, %v), want (nil, false)", details, ok)
+	}
+
+	stdErr := errors.New("standard error")
+	if details, ok := extractOpenAIErrorDetails(stdErr); ok || details != nil {
+		t.Errorf("extractOpenAIErrorDetails(stdErr) = (%v, %v), want (nil, false)", details, ok)
+	}
+
+	apiErr := &openai.Error{
+		StatusCode: http.StatusBadRequest,
+		Message:    "Invalid tool choice",
+		Code:       "invalid_tool",
+		Type:       "invalid_request_error",
+		Request:    httptest.NewRequest(http.MethodPost, "https://example.com", nil),
+		Response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"detail":"deep"}}`)),
+		},
+	}
+
+	details, ok := extractOpenAIErrorDetails(apiErr)
+	if !ok || details == nil {
+		t.Fatalf("extractOpenAIErrorDetails(apiErr) failed")
+	}
+	if details.Status != http.StatusBadRequest {
+		t.Errorf("Status = %d, want %d", details.Status, http.StatusBadRequest)
+	}
+	if details.Message != "Invalid tool choice" {
+		t.Errorf("Message = %q, want %q", details.Message, "Invalid tool choice")
+	}
+	if details.Code != "invalid_tool" {
+		t.Errorf("Code = %q, want %q", details.Code, "invalid_tool")
+	}
+	if details.Type != "invalid_request_error" {
+		t.Errorf("Type = %q, want %q", details.Type, "invalid_request_error")
+	}
+	if details.RawBody != `{"error":{"detail":"deep"}}` {
+		t.Errorf("RawBody = %q, want %q", details.RawBody, `{"error":{"detail":"deep"}}`)
+	}
+}
+
+func TestIsGemini(t *testing.T) {
+	tests := []struct {
+		provider string
+		url      string
+		want     bool
+	}{
+		{"gemini", "", true},
+		{"Gemini", "", true},
+		{"GEMINI", "", true},
+		{"", "https://generativelanguage.googleapis.com/v1beta/openai", true},
+		{"custom-gemini", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", true},
+		{"openai", "https://api.openai.com/v1", false},
+		{"deepseek", "https://api.deepseek.com/v1", false},
+		{"", "https://api.anthropic.com", false},
+	}
+
+	for _, tt := range tests {
+		got := isGemini(tt.provider, tt.url)
+		if got != tt.want {
+			t.Errorf("isGemini(%q, %q) = %v, want %v", tt.provider, tt.url, got, tt.want)
+		}
+	}
+}
+
+func TestFormatGeminiError_Gemini400BadRequest(t *testing.T) {
 	geminiErrBody := `{"error":{"code":400,"message":"Invalid argument in tool call","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"FIELD_VIOLATION","metadata":{"field":"messages.tool_calls"}}]}}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1973,7 +2040,7 @@ func TestFormatOpenAIError_Gemini400BadRequest(t *testing.T) {
 	}
 }
 
-func TestFormatOpenAIError_Streaming400BadRequest(t *testing.T) {
+func TestFormatGeminiError_NonGeminiUntouched(t *testing.T) {
 	errBody := `{"error":{"message":"streaming rejected","type":"invalid_request_error","code":"param_invalid"}}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1984,11 +2051,10 @@ func TestFormatOpenAIError_Streaming400BadRequest(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenAIClient(ClientConfig{
-		Provider:  "openai",
-		URL:       server.URL + "/v1/chat/completions",
-		APIKey:    "test-key",
-		Model:     "gpt-4o",
-		ExtraBody: map[string]any{"stream": true},
+		Provider: "openai",
+		URL:      server.URL + "/v1/chat/completions",
+		APIKey:   "test-key",
+		Model:    "gpt-4o",
 	})
 
 	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
@@ -1997,22 +2063,61 @@ func TestFormatOpenAIError_Streaming400BadRequest(t *testing.T) {
 		MaxTokens: 64,
 	})
 	if err == nil {
+		t.Fatal("CompletionsWithCtx succeeded, want error")
+	}
+
+	// For non-Gemini providers, the error must be returned unmodified without "Google Gemini API error" prefix
+	errMsg := err.Error()
+	if strings.Contains(errMsg, "Google Gemini API error") {
+		t.Errorf("did not expect Google Gemini prefix for openai provider, got: %s", errMsg)
+	}
+
+	rawErr := &openai.Error{
+		StatusCode: http.StatusBadRequest,
+		Message:    "non-gemini error",
+	}
+	if got := formatGeminiError("openai", "https://api.openai.com", "gpt-4o", rawErr); got != rawErr {
+		t.Errorf("formatGeminiError for openai = %v, want exact original error pointer %v", got, rawErr)
+	}
+}
+
+func TestFormatGeminiError_Streaming400BadRequest(t *testing.T) {
+	errBody := `{"error":{"code":400,"message":"streaming rejected","status":"INVALID_ARGUMENT"}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(errBody))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		Provider:  "gemini",
+		URL:       server.URL + "/v1/chat/completions",
+		APIKey:    "test-key",
+		Model:     "gemini-3.6-flash",
+		ExtraBody: map[string]any{"stream": true},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Model:     "gemini-3.6-flash",
+		Messages:  []Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 64,
+	})
+	if err == nil {
 		t.Fatal("CompletionsWithCtx streaming succeeded, want HTTP 400 error")
 	}
 
 	errMsg := err.Error()
-	if !strings.Contains(errMsg, "OpenAI API error") {
+	if !strings.Contains(errMsg, "Google Gemini API error") {
 		t.Errorf("expected provider name in error, got: %s", errMsg)
 	}
 	if !strings.Contains(errMsg, "streaming rejected") {
 		t.Errorf("expected error message in error, got: %s", errMsg)
 	}
-	if !strings.Contains(errMsg, "param_invalid") {
-		t.Errorf("expected error code in error, got: %s", errMsg)
-	}
 }
 
-func TestFormatOpenAIError_PlainTextBody(t *testing.T) {
+func TestFormatGeminiError_PlainTextBody(t *testing.T) {
 	plainText := "Bad Request: upstream gateway rejected request syntax"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2023,13 +2128,14 @@ func TestFormatOpenAIError_PlainTextBody(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenAIClient(ClientConfig{
-		URL:    server.URL + "/v1/chat/completions",
-		APIKey: "test-key",
-		Model:  "custom-model",
+		Provider: "gemini",
+		URL:      server.URL + "/v1/chat/completions",
+		APIKey:   "test-key",
+		Model:    "gemini-3.6-flash",
 	})
 
 	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
-		Model:     "custom-model",
+		Model:     "gemini-3.6-flash",
 		Messages:  []Message{{Role: "user", Content: "hello"}},
 		MaxTokens: 64,
 	})
@@ -2046,29 +2152,29 @@ func TestFormatOpenAIError_PlainTextBody(t *testing.T) {
 	}
 }
 
-func TestFormatOpenAIError_NilAndNonAPIError(t *testing.T) {
-	if got := formatOpenAIError("openai", "m", nil); got != nil {
-		t.Errorf("formatOpenAIError(nil) = %v, want nil", got)
+func TestFormatGeminiError_NilAndNonAPIError(t *testing.T) {
+	if got := formatGeminiError("gemini", "", "m", nil); got != nil {
+		t.Errorf("formatGeminiError(nil) = %v, want nil", got)
 	}
 
 	customErr := errors.New("context deadline exceeded")
-	if got := formatOpenAIError("openai", "m", customErr); got != customErr {
-		t.Errorf("formatOpenAIError(customErr) = %v, want %v", got, customErr)
+	if got := formatGeminiError("gemini", "", "m", customErr); got != customErr {
+		t.Errorf("formatGeminiError(customErr) = %v, want %v", got, customErr)
 	}
 }
 
-func TestFormatOpenAIError_EmptyDetails(t *testing.T) {
+func TestFormatGeminiError_EmptyDetails(t *testing.T) {
 	apiErr := &openai.Error{
 		StatusCode: http.StatusBadGateway,
-		Request:    httptest.NewRequest(http.MethodPost, "https://api.example.com/v1/chat/completions", nil),
+		Request:    httptest.NewRequest(http.MethodPost, "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", nil),
 		Response: &http.Response{
 			StatusCode: http.StatusBadGateway,
 			Body:       http.NoBody,
 		},
 	}
 
-	err := formatOpenAIError("openai", "gpt-test", apiErr)
-	if !strings.Contains(err.Error(), "OpenAI API error (HTTP 502 Bad Gateway, model: gpt-test)") {
+	err := formatGeminiError("", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-test", apiErr)
+	if !strings.Contains(err.Error(), "Google Gemini API error (HTTP 502 Bad Gateway, model: gemini-test)") {
 		t.Errorf("expected formatted provider context, got: %s", err)
 	}
 
@@ -2078,18 +2184,18 @@ func TestFormatOpenAIError_EmptyDetails(t *testing.T) {
 	}
 }
 
-func TestFormatOpenAIError_ClosesReplacedResponseBody(t *testing.T) {
+func TestFormatGeminiError_ClosesReplacedResponseBody(t *testing.T) {
 	body := &trackingReadCloser{Reader: strings.NewReader("upstream error")}
 	apiErr := &openai.Error{
 		StatusCode: http.StatusBadRequest,
-		Request:    httptest.NewRequest(http.MethodPost, "https://api.example.com/v1/chat/completions", nil),
+		Request:    httptest.NewRequest(http.MethodPost, "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", nil),
 		Response: &http.Response{
 			StatusCode: http.StatusBadRequest,
 			Body:       body,
 		},
 	}
 
-	_ = formatOpenAIError("openai", "gpt-test", apiErr)
+	_ = formatGeminiError("gemini", "", "gemini-test", apiErr)
 	if !body.closed {
 		t.Error("original response body was not closed")
 	}

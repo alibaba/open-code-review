@@ -832,7 +832,7 @@ func TestOpenAIResponsesClient_ExtraBodyPromptCacheKeyOverridesSessionID(t *test
 	}
 }
 
-func TestOpenAIResponsesClient_FormatError400(t *testing.T) {
+func TestOpenAIResponsesClient_FormatGeminiError400(t *testing.T) {
 	errBody := `{"error":{"message":"responses parameter invalid","type":"invalid_request_error","code":"invalid_param"}}`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -843,10 +843,10 @@ func TestOpenAIResponsesClient_FormatError400(t *testing.T) {
 	defer server.Close()
 
 	client := NewLLMClient(ResolvedEndpoint{
-		Provider: "openai",
+		Provider: "gemini",
 		URL:      server.URL + "/v1",
 		Token:    "test-key",
-		Model:    "gpt-5.4",
+		Model:    "gemini-3.6-flash",
 		Protocol: ProtocolOpenAIResponses,
 	}, nil)
 
@@ -858,7 +858,7 @@ func TestOpenAIResponsesClient_FormatError400(t *testing.T) {
 	}
 
 	errMsg := err.Error()
-	if !strings.Contains(errMsg, "OpenAI API error") {
+	if !strings.Contains(errMsg, "Google Gemini API error") {
 		t.Errorf("expected provider name in error, got: %s", errMsg)
 	}
 	if !strings.Contains(errMsg, "HTTP 400 Bad Request") {
