@@ -169,6 +169,7 @@ class ConfigService(
     }
 
     /** 写单个配置项，返回写后的配置。CLI 退出码非 0 时 [CliService.runRaw] 会抛 [CliException]。 */
+    @Synchronized
     fun set(key: String, value: String): OcrConfig? {
         cli.runRaw(toConfigSetArgs(key, value), cwd, {})
         return read()
