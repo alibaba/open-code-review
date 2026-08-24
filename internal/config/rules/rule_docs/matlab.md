@@ -36,7 +36,7 @@
 
 #### Comments and Documentation
 
-- A function without a description header, or a header that restates the function name without saying what the function does, what it returns, and what the caller must guarantee
+- In a function added or substantially rewritten by this diff: a function without a description header, or a header that restates the function name without saying what the function does, what it returns, and what the caller must guarantee
 - Input or output variables described neither in the header nor as a trailing comment in the `arguments` blocks
 - Non-obvious logic — index arithmetic, sign conventions, unit conversions, matrix assembly — left uncommented
 - A comment that contradicts the code beside it; this is a correctness signal, not a style one, since one of the two is wrong
