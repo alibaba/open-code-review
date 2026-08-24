@@ -29,7 +29,7 @@ import kotlinx.serialization.json.JsonElement
 val HostJson: Json = Json {
     classDiscriminator = "type"
     encodeDefaults = true
-    explicitNulls = false
+    explicitNulls = true
 }
 
 @Serializable
