@@ -22,6 +22,10 @@ const { spawnSync } = require("child_process");
 const ROOT = path.resolve(__dirname, "../..");
 const ACTION_PATH = path.join(ROOT, "action.yml");
 const ACTION_TEXT = fs.readFileSync(ACTION_PATH, "utf8");
+const CI_PATH = path.join(ROOT, ".github/workflows/ci.yml");
+const CI_TEXT = fs.readFileSync(CI_PATH, "utf8");
+const EXAMPLE_README_PATH = path.join(ROOT, "examples/github_actions/README.md");
+const EXAMPLE_README_TEXT = fs.readFileSync(EXAMPLE_README_PATH, "utf8");
 
 function parseScalar(raw) {
   const value = raw.trim();
@@ -71,9 +75,14 @@ function parseSteps(text) {
   function finish() {
     if (!current) return;
     const rawLines = current.lines;
-    const runMarker = rawLines.findIndex((line) => /^      run:\s*\|\s*$/.test(line));
+    const runDeclarations = rawLines
+      .map((line, index) => (/^\s*run:\s*/.test(line) ? { line, index } : undefined))
+      .filter(Boolean);
+    assert.ok(runDeclarations.length <= 1, `step ${current.name} must not define multiple run blocks`);
     let run;
-    if (runMarker >= 0) {
+    if (runDeclarations.length === 1) {
+      const { line, index: runMarker } = runDeclarations[0];
+      assert.match(line, /^      run:\s*\|\s*$/, `step ${current.name} uses an unsupported run scalar`);
       const body = [];
       for (let index = runMarker + 1; index < rawLines.length; index += 1) {
         const line = rawLines[index];
@@ -89,13 +98,28 @@ function parseSteps(text) {
     }
 
     const env = {};
-    const envMarker = rawLines.findIndex((line) => /^      env:\s*$/.test(line));
+    const envDeclarations = rawLines
+      .map((line, index) => (/^\s*env:\s*$/.test(line) ? { line, index } : undefined))
+      .filter(Boolean);
+    assert.ok(envDeclarations.length <= 1, `step ${current.name} must not define multiple env blocks`);
+    const envMarker = envDeclarations.length === 1 ? envDeclarations[0].index : -1;
     if (envMarker >= 0) {
+      assert.match(
+        envDeclarations[0].line,
+        /^      env:\s*$/,
+        `step ${current.name} uses unsupported env indentation`
+      );
       for (let index = envMarker + 1; index < rawLines.length; index += 1) {
         const line = rawLines[index];
         if (line.trim() === "") continue;
+        if (/^      [A-Za-z_][A-Za-z0-9_-]*:\s*/.test(line)) break;
         const match = /^        ([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/.exec(line);
-        if (!match) break;
+        assert.ok(match, `step ${current.name} contains an unsupported env value or indentation`);
+        assert.doesNotMatch(
+          match[2],
+          /^(?:\||>|\|-|>-|\|\+|>\+)$/,
+          `step ${current.name} contains an unsupported multiline env value`
+        );
         env[match[1]] = parseScalar(match[2]);
       }
     }
@@ -105,6 +129,12 @@ function parseSteps(text) {
   }
 
   for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^    -(?:\s|$)/.test(lines[index]) && !/^    - name:\s*/.test(lines[index])) {
+      assert.fail(`unsupported nameless composite step at line ${index + 1}`);
+    }
+    if (/^\s*-\s+name:\s*/.test(lines[index]) && !/^    - name:\s*/.test(lines[index])) {
+      assert.fail(`unsupported composite step indentation at line ${index + 1}`);
+    }
     const match = /^    - name:\s*(.*)\s*$/.exec(lines[index]);
     if (match) {
       finish();
@@ -114,6 +144,8 @@ function parseSteps(text) {
     }
   }
   finish();
+  const names = steps.map((step) => step.name);
+  assert.strictEqual(new Set(names).size, names.length, "composite step names must be unique");
   return steps;
 }
 
@@ -129,9 +161,11 @@ function inputValues(overrides = {}) {
 }
 
 function resolveInputExpressions(value, values) {
-  return String(value).replace(/\$\{\{\s*inputs\.([A-Za-z0-9_]+)\s*\}\}/g, (_match, name) => {
+  const resolved = String(value).replace(/\$\{\{\s*inputs\.([A-Za-z0-9_]+)\s*\}\}/g, (_match, name) => {
     return values[name] === undefined ? "" : String(values[name]);
   });
+  assert.doesNotMatch(resolved, /\$\{\{[^}]+\}\}/, "unsupported or unresolved action expression");
+  return resolved;
 }
 
 function renderedEnv(step, values) {
@@ -154,7 +188,7 @@ function stepNamed(name) {
 function validationStep() {
   return STEPS.find((step) => {
     const haystack = `${step.name}\n${step.run || ""}`;
-    return /review[ _-]?timeout/i.test(haystack);
+    return /review(?:[ _-]?task)?[ _-]?timeout/i.test(haystack);
   });
 }
 
@@ -176,7 +210,7 @@ function makeFixture() {
 const fs = require("fs");
 const args = process.argv.slice(2);
 const env = {};
-for (const name of ["OCR_LLM_TIMEOUT", "OCR_LLM_EXTRA_HEADERS", "OCR_REVIEW_TIMEOUT", "REVIEW_TIMEOUT", "OCR_TIMEOUT"]) {
+for (const name of ["OCR_LLM_TIMEOUT", "OCR_LLM_EXTRA_HEADERS", "REVIEW_TASK_TIMEOUT", "OCR_TIMEOUT"]) {
   if (process.env[name] !== undefined) env[name] = process.env[name];
 }
 const record = { args, env };
@@ -187,6 +221,13 @@ if (args[0] === "config" && args[1] === "set") {
 } else if (args[0] === "config" && args[1] === "unset") {
   fs.appendFileSync(process.env.OCR_CONFIG, JSON.stringify(args) + "\\n");
   process.stdout.write("ocr config unset " + args.slice(2).join(" ") + "\\n");
+} else if (args[0] === "version") {
+  const output = Object.prototype.hasOwnProperty.call(process.env, "OCR_FAKE_VERSION_OUTPUT")
+    ? process.env.OCR_FAKE_VERSION_OUTPUT
+    : "open-code-review 1.9.10 contract-test/fixture";
+  process.stdout.write(output);
+  if (output && !output.endsWith("\\n")) process.stdout.write("\\n");
+  process.exit(Number(process.env.OCR_FAKE_VERSION_STATUS || 0));
 } else if (args[0] === "review") {
   process.stdout.write(JSON.stringify({ comments: [], warnings: [] }));
 } else {
@@ -269,16 +310,7 @@ function configValues(calls) {
     if (args[0] !== "config" || args[1] !== "set") continue;
     const key = args[2];
     const value = args[3];
-    if (key === "llm" && typeof value === "string") {
-      try {
-        const parsed = JSON.parse(value);
-        for (const [field, fieldValue] of Object.entries(parsed)) values[`llm.${field}`] = fieldValue;
-      } catch (_err) {
-        // A malformed aggregate config is deliberately left for assertions.
-      }
-    } else if (key) {
-      values[key] = value;
-    }
+    if (key) values[key] = value;
   }
   return values;
 }
@@ -298,28 +330,47 @@ function allFixtureFiles(root) {
 }
 
 function escapedRegExp(value) {
-  return new RegExp(value.replace(/[.*+?^${}()|[\[\]\\]/g, "\\$&"));
+  return new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
 
 function assertValidation(value, expectedValid) {
   const step = validationStep();
-  assert.ok(step, "action.yml must add a validation step that references review_timeout");
+  assert.ok(step, "action.yml must add a validation step that references review_task_timeout");
   const fixture = makeFixture();
   try {
-    const result = runStep(step, inputValues({ review_timeout: value }), fixture);
+    const result = runStep(step, inputValues({ review_task_timeout: value }), fixture);
     if (expectedValid) {
-      assert.strictEqual(result.status, 0, `review_timeout=${JSON.stringify(value)} should be accepted; ${resultDescription(result)}`);
+      assert.strictEqual(result.status, 0, `review_task_timeout=${JSON.stringify(value)} should be accepted; ${resultDescription(result)}`);
     } else {
-      assert.notStrictEqual(result.status, 0, `review_timeout=${JSON.stringify(value)} should be rejected; ${resultDescription(result)}`);
+      assert.notStrictEqual(result.status, 0, `review_task_timeout=${JSON.stringify(value)} should be rejected; ${resultDescription(result)}`);
     }
   } finally {
     removeFixture(fixture);
   }
 }
 
-function testReviewTimeoutInputDefault() {
-  assert.ok(INPUTS.review_timeout, "action.yml must define the review_timeout input");
-  assert.strictEqual(INPUTS.review_timeout.default, "10", "review_timeout default must be 10 minutes");
+function testReviewTaskTimeoutInputNameAndScope() {
+  assert.ok(INPUTS.review_task_timeout, "action.yml must define the review_task_timeout input");
+  assert.ok(!INPUTS.review_timeout, "the not-yet-released review_timeout input must be renamed");
+  assert.strictEqual(
+    INPUTS.review_task_timeout.default,
+    "10",
+    "review_task_timeout default must remain 10 minutes"
+  );
+  const inputBlock = ACTION_TEXT.match(
+    /^  review_task_timeout:\s*$([\s\S]*?)(?=^  [A-Za-z0-9_]+:\s*$|^outputs:|^runs:)/m
+  );
+  assert.ok(inputBlock, "action.yml must expose review_task_timeout metadata");
+  assert.match(
+    inputBlock[1],
+    /per-(?:file|task)|concurrent task/i,
+    "review_task_timeout must describe its per-file/per-task scope"
+  );
+  assert.doesNotMatch(
+    inputBlock[1],
+    /whole[- ]review|wall[- ]clock cap/i,
+    "review_task_timeout must not promise a whole-review wall-clock cap"
+  );
 }
 
 function testLlmTimeoutInputDefault() {
@@ -332,7 +383,7 @@ function testReviewTimeoutValidationAcceptsBoundaries() {
 }
 
 function testReviewTimeoutValidationRejectsMalformedValues() {
-  for (const value of ["", "${{ inputs.review_timeout }}", "1.5", "+10", "0", "-1", "-10", "121"]) {
+  for (const value of ["", "1.5", "+10", "0", "-1", "-10", "121"]) {
     assertValidation(value, false);
   }
 }
@@ -340,17 +391,17 @@ function testReviewTimeoutValidationRejectsMalformedValues() {
 function testValidationPrecedesNpmInstall() {
   const validation = validationStep();
   const install = installStep();
-  assert.ok(validation, "action.yml must add review_timeout validation before installation");
+  assert.ok(validation, "action.yml must add review_task_timeout validation before installation");
   assert.ok(install, "action.yml must retain an OpenCodeReview installation step");
-  assert.ok(validation.index < install.index, "review_timeout validation must occur before NPM install");
+  assert.ok(validation.index < install.index, "review_task_timeout validation must occur before NPM install");
 
   const fixture = makeFixture();
   try {
-    const values = inputValues({ review_timeout: "121", ocr_version: "contract-test" });
+    const values = inputValues({ review_task_timeout: "121", ocr_version: "contract-test" });
     const script = `${renderedRun(validation, values)}\n${renderedRun(install, values)}`;
     const env = Object.assign({}, renderedEnv(validation, values), renderedEnv(install, values));
     const result = runShell(script, env, fixture);
-    assert.notStrictEqual(result.status, 0, `invalid review_timeout must stop the action; ${resultDescription(result)}`);
+    assert.notStrictEqual(result.status, 0, `invalid review_task_timeout must stop the action; ${resultDescription(result)}`);
     assert.deepStrictEqual(readJsonLines(fixture.npmCallsPath), [], "NPM must not run after timeout validation fails");
   } finally {
     removeFixture(fixture);
@@ -363,7 +414,7 @@ function testReviewTimeoutForwardedSeparatelyFromLlmTimeout() {
   const fixture = makeFixture();
   try {
     const values = inputValues({
-      review_timeout: "10",
+      review_task_timeout: "10",
       llm_timeout: "900",
       llm_url: "https://llm.example.invalid/v1",
       llm_auth_token: "unused-token",
@@ -374,7 +425,7 @@ function testReviewTimeoutForwardedSeparatelyFromLlmTimeout() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TIMEOUT: values.review_timeout },
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout },
       { replaceResultPaths: true }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
@@ -388,12 +439,12 @@ function testReviewTimeoutForwardedSeparatelyFromLlmTimeout() {
       1,
       `review timeout must be forwarded exactly once; args=${JSON.stringify(reviewCall.args)}`
     );
-    assert.strictEqual(reviewCall.args[timeoutIndices[0] + 1], "10", "review_timeout must be passed as --timeout");
+    assert.strictEqual(reviewCall.args[timeoutIndices[0] + 1], "10", "review_task_timeout must be passed as --timeout");
     assert.strictEqual(reviewCall.env.OCR_LLM_TIMEOUT, "900", "llm_timeout must remain the LLM request timeout");
     assert.notStrictEqual(
       reviewCall.args[timeoutIndices[0] + 1],
       reviewCall.env.OCR_LLM_TIMEOUT,
-      "review_timeout and llm_timeout must remain distinct settings"
+      "review_task_timeout and llm_timeout must remain distinct settings"
     );
   } finally {
     removeFixture(fixture);
@@ -406,7 +457,7 @@ function testDefaultLlmTimeoutExportedSeparatelyFromReviewTimeout() {
   const fixture = makeFixture();
   try {
     const values = inputValues({
-      review_timeout: "10",
+      review_task_timeout: "10",
       llm_url: "https://llm.example.invalid/v1",
       llm_auth_token: "unused-token",
       llm_model: "contract-model",
@@ -416,14 +467,14 @@ function testDefaultLlmTimeoutExportedSeparatelyFromReviewTimeout() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TIMEOUT: values.review_timeout },
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout },
       { replaceResultPaths: true }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
     const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
     assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
     const timeoutIndex = reviewCall.args.indexOf("--timeout");
-    assert.ok(timeoutIndex >= 0, "Run OpenCodeReview must forward review_timeout");
+    assert.ok(timeoutIndex >= 0, "Run OpenCodeReview must forward review_task_timeout");
     assert.strictEqual(reviewCall.args[timeoutIndex + 1], "10");
     assert.strictEqual(reviewCall.env.OCR_LLM_TIMEOUT, "300");
     assert.notStrictEqual(reviewCall.args[timeoutIndex + 1], reviewCall.env.OCR_LLM_TIMEOUT);
@@ -438,7 +489,7 @@ function testEmptyLlmTimeoutNormalizesBeforeReviewInvocation() {
   const fixture = makeFixture();
   try {
     const values = inputValues({
-      review_timeout: "10",
+      review_task_timeout: "10",
       llm_timeout: "",
       llm_url: "https://llm.example.invalid/v1",
       llm_auth_token: "unused-token",
@@ -449,7 +500,7 @@ function testEmptyLlmTimeoutNormalizesBeforeReviewInvocation() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TIMEOUT: values.review_timeout },
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout },
       { replaceResultPaths: true }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
@@ -467,12 +518,12 @@ function testEmptyLlmTimeoutNormalizesBeforeReviewInvocation() {
 function testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps() {
   const validation = validationStep();
   const run = stepNamed("Run OpenCodeReview");
-  assert.ok(validation, "action.yml must retain review_timeout validation");
+  assert.ok(validation, "action.yml must retain review_task_timeout validation");
   assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
   const fixture = makeFixture();
   try {
     const values = inputValues({
-      review_timeout: "010",
+      review_task_timeout: "010",
       llm_url: "https://llm.example.invalid/v1",
       llm_auth_token: "unused-token",
       llm_model: "contract-model",
@@ -482,19 +533,19 @@ function testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps() {
     assert.strictEqual(
       validationResult.status,
       0,
-      `review_timeout=010 validation failed; ${resultDescription(validationResult)}`
+      `review_task_timeout=010 validation failed; ${resultDescription(validationResult)}`
     );
     const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
-    assert.strictEqual(exported.REVIEW_TIMEOUT, "10", "validation must export normalized decimal review_timeout");
+    assert.strictEqual(exported.REVIEW_TASK_TIMEOUT, "10", "validation must export normalized decimal review_task_timeout");
     assert.ok(
-      !Object.prototype.hasOwnProperty.call(run.env, "REVIEW_TIMEOUT"),
+      !Object.prototype.hasOwnProperty.call(run.env, "REVIEW_TASK_TIMEOUT"),
       "Run OpenCodeReview must consume the normalized GITHUB_ENV value, not rebind the raw input"
     );
     const result = runStep(
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TIMEOUT: exported.REVIEW_TIMEOUT },
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: exported.REVIEW_TASK_TIMEOUT },
       { replaceResultPaths: true }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
@@ -633,25 +684,49 @@ function testConfigureProtocolTracksUseAnthropic() {
   }
 }
 
-function testConfigureRejectsInvalidUseAnthropicBeforeMutation() {
+function testConfigurePreservesLegacyUseAnthropicResolution() {
   const configure = stepNamed("Configure OCR");
   assert.ok(configure, "action.yml must retain the Configure OCR step");
-  for (const value of ["TRUE", "1", "t", "yes", ""]) {
+  const inputBlock = ACTION_TEXT.match(
+    /^  llm_use_anthropic:\s*$([\s\S]*?)(?=^  [A-Za-z0-9_]+:\s*$|^outputs:|^runs:)/m
+  );
+  assert.ok(inputBlock, "action.yml must expose llm_use_anthropic metadata");
+  assert.match(
+    inputBlock[1],
+    /explicitly\s+supplied\s+empty\s+string/i,
+    "llm_use_anthropic docs must distinguish an explicit empty value from omitting the required input"
+  );
+  const cases = [
+    ["true", "true", "anthropic"],
+    ["TRUE", "true", "anthropic"],
+    ["1", "true", "anthropic"],
+    ["yes", "true", "anthropic"],
+    ["YeS", "true", "anthropic"],
+    ["", "true", "anthropic"],
+    ["false", "false", "openai"],
+    ["FALSE", "false", "openai"],
+    ["0", "false", "openai"],
+    ["no", "false", "openai"],
+    ["unexpected", "false", "openai"],
+  ];
+  for (const [value, expectedBoolean, expectedProtocol] of cases) {
     const fixture = makeFixture();
     try {
       const values = inputValues({
         llm_url: "https://llm.example.invalid/v1",
         llm_model: "contract-model",
         llm_use_anthropic: value,
-        llm_auth_token: "invalid-boolean-token-sentinel",
+        llm_auth_token: "legacy-boolean-token-sentinel",
       });
       const result = runStep(configure, values, fixture);
-      assert.notStrictEqual(result.status, 0, `llm_use_anthropic=${JSON.stringify(value)} must fail`);
-      assert.deepStrictEqual(
-        configOperations(fixture),
-        [],
-        `llm_use_anthropic=${JSON.stringify(value)} must fail before any config mutation`
+      assert.strictEqual(
+        result.status,
+        0,
+        `legacy llm_use_anthropic=${JSON.stringify(value)} must remain accepted; ${resultDescription(result)}`
       );
+      const configured = configValues(configOperations(fixture));
+      assert.strictEqual(configured["llm.use_anthropic"], expectedBoolean);
+      assert.strictEqual(configured["llm.protocol"], expectedProtocol);
     } finally {
       removeFixture(fixture);
     }
@@ -729,7 +804,7 @@ function testRunRetainsExtraHeadersEnvironmentOverride() {
   const fixture = makeFixture();
   try {
     const values = inputValues({
-      review_timeout: "10",
+      review_task_timeout: "10",
       llm_url: "https://llm.example.invalid/v1",
       llm_auth_token: "unused-token",
       llm_model: "contract-model",
@@ -740,13 +815,46 @@ function testRunRetainsExtraHeadersEnvironmentOverride() {
       run,
       values,
       fixture,
-      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TIMEOUT: values.review_timeout },
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout },
       { replaceResultPaths: true }
     );
     assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
     const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
     assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
     assert.strictEqual(reviewCall.env.OCR_LLM_EXTRA_HEADERS, values.llm_extra_headers);
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testRunFailsClosedWhenValidatedTaskTimeoutIsMissing() {
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_auth_token: "unused-token",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+    });
+    const result = runStep(
+      run,
+      values,
+      fixture,
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "" },
+      { replaceResultPaths: true }
+    );
+    assert.notStrictEqual(result.status, 0, "Run OpenCodeReview must fail when validated timeout state is missing");
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /validated review_task_timeout is missing/i,
+      "missing timeout failure must identify the validation boundary"
+    );
+    assert.ok(
+      !readJsonLines(fixture.callsPath).some((call) => call.args[0] === "review"),
+      "Run OpenCodeReview must fail before invoking OCR"
+    );
   } finally {
     removeFixture(fixture);
   }
@@ -769,25 +877,229 @@ function testOfficialNpmPackageInstallIsPreserved() {
   }
 }
 
+function testInstallEnforcesAuthTokenCommandVersionFloor() {
+  const install = installStep();
+  assert.ok(install, "action.yml must retain the Install OpenCodeReview step");
+  const inputBlock = ACTION_TEXT.match(
+    /^  ocr_version:\s*$([\s\S]*?)(?=^  [A-Za-z0-9_]+:\s*$|^outputs:|^runs:)/m
+  );
+  assert.ok(inputBlock, "action.yml must expose ocr_version metadata");
+  assert.match(inputBlock[1], /1\.9\.6/, "ocr_version must document the minimum compatible OCR release");
+
+  const cases = [
+    { output: "open-code-review 1.9.5 linux/amd64", valid: false },
+    { output: "open-code-review 1.9.6 linux/amd64", valid: true },
+    { output: "open-code-review v1.9.10 linux/amd64", valid: true },
+    { output: "open-code-review 1.10.0 linux/amd64", valid: true },
+    { output: "open-code-review 1.9.6+brokerkit.1 linux/amd64", valid: true },
+    { output: "open-code-review 1.9.6-rc.1 linux/amd64", valid: false },
+    { output: "open-code-review 01.09.006 linux/amd64", valid: false },
+    { output: "open-code-review 1.9.6+! linux/amd64", valid: false },
+    { output: "version unavailable", valid: false },
+    { output: "", valid: false },
+    { output: "version command unavailable", status: 7, valid: false, commandFailure: true },
+  ];
+
+  for (const testCase of cases) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(
+        install,
+        inputValues({ ocr_version: "contract-test" }),
+        fixture,
+        {
+          OCR_FAKE_VERSION_OUTPUT: testCase.output,
+          OCR_FAKE_VERSION_STATUS: String(testCase.status || 0),
+        }
+      );
+      const message = `version output ${JSON.stringify(testCase.output)}; ${resultDescription(result)}`;
+      if (testCase.valid) assert.strictEqual(result.status, 0, `supported ${message}`);
+      else assert.notStrictEqual(result.status, 0, `unsupported ${message}`);
+      if (testCase.commandFailure) {
+        assert.match(
+          result.stdout,
+          /Unable to read the installed OpenCodeReview version/,
+          `failed version command must produce an actionable error; ${message}`
+        );
+      }
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
+function testContractHarnessFailsClosedOnUnsupportedYamlShapes() {
+  assert.throws(
+    () => parseSteps(ACTION_TEXT.replace("    - name: Configure OCR", "   - name: Configure OCR")),
+    /unsupported|step/i,
+    "changed step indentation must fail instead of silently dropping a step"
+  );
+  assert.throws(
+    () =>
+      parseSteps(
+        ACTION_TEXT.replace(
+          "    - name: Configure OCR",
+          "    - uses: example/action@v1\n\n    - name: Configure OCR"
+        )
+      ),
+    /unsupported|step/i,
+    "nameless composite steps must fail instead of being appended to the previous named step"
+  );
+  assert.throws(
+    () =>
+      parseSteps(
+        ACTION_TEXT.replace(
+          "    - name: Configure OCR",
+          "    -\n      uses: example/action@v1\n\n    - name: Configure OCR"
+        )
+      ),
+    /unsupported|step/i,
+    "block-style nameless composite steps must fail instead of being appended to the previous step"
+  );
+  assert.throws(
+    () =>
+      parseSteps(
+        ACTION_TEXT.replace(
+          "      run: |\n        if command -v git",
+          "      run: >-\n        if command -v git"
+        )
+      ),
+    /unsupported|run/i,
+    "unsupported run scalar styles must fail instead of producing an undefined shell block"
+  );
+  assert.throws(
+    () =>
+      parseSteps(
+        ACTION_TEXT.replace(
+          "        OCR_EXTRA_BODY: ${{ inputs.llm_extra_body }}",
+          "        OCR_EXTRA_BODY: >-\n          ${{ inputs.llm_extra_body }}"
+        )
+      ),
+    /unsupported|env/i,
+    "multiline env values must fail instead of truncating the environment map"
+  );
+  assert.throws(
+    () => parseSteps(ACTION_TEXT.replace("    - name: Configure OCR", "    - name: Run OpenCodeReview")),
+    /duplicate|step/i,
+    "duplicate step names must fail instead of making step selection ambiguous"
+  );
+  assert.throws(
+    () => resolveInputExpressions("${{ github.ref }}", {}),
+    /unsupported|unresolved|expression/i,
+    "non-input action expressions must not remain unresolved in executed test fixtures"
+  );
+}
+
+function testRequiredStepTopologyAndEnvironmentContracts() {
+  const required = {
+    "Validate review_task_timeout": ["REVIEW_TASK_TIMEOUT"],
+    "Install OpenCodeReview": ["OCR_VERSION"],
+    "Configure OCR": [
+      "OCR_LLM_URL",
+      "OCR_LLM_MODEL",
+      "OCR_USE_ANTHROPIC",
+      "OCR_LLM_AUTH_HEADER",
+      "OCR_EXTRA_BODY",
+      "OCR_LANGUAGE",
+    ],
+    "Run OpenCodeReview": [
+      "OCR_LLM_URL",
+      "OCR_LLM_TOKEN",
+      "OCR_LLM_MODEL",
+      "OCR_USE_ANTHROPIC",
+      "OCR_LLM_AUTH_HEADER",
+      "OCR_LLM_EXTRA_HEADERS",
+      "OCR_LLM_TIMEOUT",
+      "OCR_REVIEW_CONCURRENCY",
+      "OCR_BACKGROUND",
+      "OCR_RULE",
+    ],
+  };
+  for (const [name, envNames] of Object.entries(required)) {
+    const step = stepNamed(name);
+    assert.ok(step, `action.yml must retain the ${name} step`);
+    assert.strictEqual(typeof step.run, "string", `${name} must retain a supported shell block`);
+    for (const envName of envNames) {
+      assert.ok(Object.prototype.hasOwnProperty.call(step.env, envName), `${name} must define ${envName}`);
+    }
+  }
+}
+
+function testGithubActionContractsRunInCi() {
+  assert.match(
+    CI_TEXT,
+    /^\s+- name:\s*Test GitHub Actions contracts\s*$[\s\S]*?^\s+run:\s*npm run test:github-actions\s*$/m,
+    "ci.yml must execute the complete GitHub Actions contract suite"
+  );
+  assert.match(
+    CI_TEXT,
+    /paths:\s*[\s\S]*?examples\/github_actions\/README\.md/,
+    "ci.yml must run the contract suite when the GitHub Actions README changes"
+  );
+  assert.match(
+    CI_TEXT,
+    /uses:\s*actions\/checkout@[0-9a-f]{40}\s*#\s*v7/,
+    "the newly added GitHub-hosted contract job must pin checkout to an immutable commit"
+  );
+  assert.match(
+    CI_TEXT,
+    /uses:\s*actions\/setup-node@[0-9a-f]{40}\s*#\s*v7/,
+    "the newly added GitHub-hosted contract job must pin setup-node to an immutable commit"
+  );
+}
+
+function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
+  assert.match(
+    EXAMPLE_README_TEXT,
+    /\| `review_task_timeout` \| `'10'` \|[^\n]*(?:per-file|per-task|concurrent task)[^\n]*\|/i,
+    "GitHub Actions README must document the per-task timeout and its default"
+  );
+  assert.match(
+    EXAMPLE_README_TEXT,
+    /\| `llm_timeout` \| `'300'` \|[^\n]*(?:LLM|HTTP)[^\n]*seconds[^\n]*\|/i,
+    "GitHub Actions README must document the LLM request timeout and its default"
+  );
+  assert.match(
+    EXAMPLE_README_TEXT,
+    /ocr_version[^\n]*1\.9\.6/i,
+    "GitHub Actions README must document the minimum compatible OCR version"
+  );
+  const sample = EXAMPLE_README_TEXT.match(
+    /### Use a specific OCR version[\s\S]*?ocr_version:\s*['\"]?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)['\"]?/
+  );
+  assert.ok(sample, "GitHub Actions README must include a valid stable OCR version sample");
+  const [major, minor, patch] = sample.slice(1, 4).map(Number);
+  assert.ok(
+    major > 1 || (major === 1 && (minor > 9 || (minor === 9 && patch >= 6))),
+    "GitHub Actions README must not recommend an OCR version below the supported floor"
+  );
+}
+
 const TESTS = [
-  ["review_timeout defaults to 10", testReviewTimeoutInputDefault],
+  ["review_task_timeout names and describes the CLI task deadline", testReviewTaskTimeoutInputNameAndScope],
   ["llm_timeout defaults to the CLI's 5-minute timeout", testLlmTimeoutInputDefault],
-  ["review_timeout accepts 1/10/120", testReviewTimeoutValidationAcceptsBoundaries],
-  ["review_timeout rejects malformed values", testReviewTimeoutValidationRejectsMalformedValues],
-  ["review_timeout validation runs before NPM install", testValidationPrecedesNpmInstall],
-  ["review_timeout forwards --timeout separately from llm_timeout", testReviewTimeoutForwardedSeparatelyFromLlmTimeout],
-  ["default llm_timeout exports independently from review_timeout", testDefaultLlmTimeoutExportedSeparatelyFromReviewTimeout],
+  ["review_task_timeout accepts 1/10/120", testReviewTimeoutValidationAcceptsBoundaries],
+  ["review_task_timeout rejects malformed values", testReviewTimeoutValidationRejectsMalformedValues],
+  ["review_task_timeout validation runs before NPM install", testValidationPrecedesNpmInstall],
+  ["review_task_timeout forwards --timeout separately from llm_timeout", testReviewTimeoutForwardedSeparatelyFromLlmTimeout],
+  ["default llm_timeout exports independently from review_task_timeout", testDefaultLlmTimeoutExportedSeparatelyFromReviewTimeout],
   ["empty llm_timeout normalizes before review invocation", testEmptyLlmTimeoutNormalizesBeforeReviewInvocation],
-  ["review_timeout with a leading zero normalizes across steps", testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps],
+  ["review_task_timeout with a leading zero normalizes across steps", testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps],
   ["Configure OCR builds a complete llm config", testConfigureBuildsCompleteLlmConfig],
   ["Configure OCR never persists the token", testConfigureNeverPersistsToken],
   ["Configure OCR neutralizes stale provider and static token", testConfigureNeutralizesStaleProviderAndStaticToken],
   ["Configure OCR sets a protocol consistent with use_anthropic", testConfigureProtocolTracksUseAnthropic],
-  ["Configure OCR rejects invalid use_anthropic before mutation", testConfigureRejectsInvalidUseAnthropicBeforeMutation],
+  ["Configure OCR preserves legacy use_anthropic resolution", testConfigurePreservesLegacyUseAnthropicResolution],
   ["Configure OCR clears stale persisted extra headers", testConfigureClearsStaleExtraHeadersBeforeTokenCommand],
   ["Configure OCR clears stale persisted retry codes", testConfigureClearsStaleRetryCodesBeforeEndpointConfig],
   ["Run OpenCodeReview retains the extra-headers env override", testRunRetainsExtraHeadersEnvironmentOverride],
+  ["Run OpenCodeReview fails closed without validated task timeout", testRunFailsClosedWhenValidatedTaskTimeoutIsMissing],
   ["the official OpenCodeReview NPM install is preserved", testOfficialNpmPackageInstallIsPreserved],
+  ["Install OpenCodeReview enforces the auth_token_cmd version floor", testInstallEnforcesAuthTokenCommandVersionFloor],
+  ["contract harness fails closed on unsupported YAML shapes", testContractHarnessFailsClosedOnUnsupportedYamlShapes],
+  ["required action steps and env contracts are present", testRequiredStepTopologyAndEnvironmentContracts],
+  ["GitHub Actions contracts run in CI", testGithubActionContractsRunInCi],
+  ["GitHub Actions README documents timeout and version contracts", testExampleReadmeDocumentsTimeoutAndVersionContracts],
 ];
 
 function main() {
