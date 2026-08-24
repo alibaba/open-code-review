@@ -23,8 +23,8 @@ import kotlinx.serialization.json.JsonElement
  */
 
 /**
- * 出站 JSON 编码器。`explicitNulls = false` 使值为 null 的字段不参与输出，对应前端的 `undefined` 语义：
- * 前端对 null 的判断多为 `if (!x)` / `x !== false`，省略字段比显式发送 null 更安全，可避免产生 `"error": null` 这类误导性字段。
+ * 出站 JSON 编码器。`explicitNulls = true` 使值为 null 的字段显式输出为 `"field": null`，
+ * 与前端 TypeScript 类型声明（`field: Type | null` 非可选）的契约一致——前端期望字段始终存在。
  */
 val HostJson: Json = Json {
     classDiscriminator = "type"

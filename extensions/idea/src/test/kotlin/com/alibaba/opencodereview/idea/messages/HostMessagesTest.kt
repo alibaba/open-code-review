@@ -16,6 +16,7 @@ import com.alibaba.opencodereview.idea.model.ReviewMode
 import com.alibaba.opencodereview.idea.model.ReviewState
 import com.alibaba.opencodereview.idea.model.SupportedLocale
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -62,19 +63,22 @@ class HostMessagesTest {
     }
 
     @Test
-    fun `config 为 null 时字段整个消失而不是发 null`() {
+    fun `config 为 null 时显式发 null 而非省略`() {
         val json = parse(HostToWebview.Config(null).toJson())
         assertEquals("config", json["type"].toString().trim('"'))
-        // explicitNulls = false：字段缺失而非显式 null，与前端配置就绪判定语义一致。
-        assertFalse(json.containsKey("config"))
+        // explicitNulls = true：null 字段显式发 "config": null，与前端 OcrConfig | null 契约一致。
+        assertTrue(json.containsKey("config"))
+        assertTrue(json["config"] is JsonNull)
     }
 
     @Test
-    fun `stateChange 无错误时不带 error 字段`() {
+    fun `stateChange 无错误时 error 字段为 null`() {
         val ok = parse(HostToWebview.StateChange(ReviewState.RUNNING).toJson())
         assertEquals("stateChange", ok["type"].toString().trim('"'))
         assertEquals("running", ok["state"].toString().trim('"'))
-        assertFalse(ok.containsKey("error"))
+        // explicitNulls = true：null 字段显式发 "error": null，与前端 String | null 契约一致。
+        assertTrue(ok.containsKey("error"))
+        assertTrue(ok["error"] is JsonNull)
 
         val failed = parse(HostToWebview.StateChange(ReviewState.FAILED, "炸了").toJson())
         assertEquals("failed", failed["state"].toString().trim('"'))
@@ -189,8 +193,10 @@ class HostMessagesTest {
         assertEquals("false", conn["ok"].toString())
         assertEquals("401", conn["message"].toString().trim('"'))
 
-        // 成功时 message 为 null，对应字段应消失。
-        assertFalse(parse(ConfigPanelHostToWebview.ConnectionResult(true).toJson()).containsKey("message"))
+        // 成功时 message 为 null，显式发 "message": null（与前端 String | null 契约一致）。
+        val okConn = parse(ConfigPanelHostToWebview.ConnectionResult(true).toJson())
+        assertTrue(okConn.containsKey("message"))
+        assertTrue(okConn["message"] is JsonNull)
 
         assertEquals(
             "environmentResult",
