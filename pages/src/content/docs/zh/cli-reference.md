@@ -181,9 +181,11 @@ feature 分支*引入*的 diff——而非分支切出后落到 `main` 上的无
 token 可通过 `--github-token` 提供，也可由 CLI 从 `GITHUB_TOKEN` 读取。
 
 CLI 会查找 base 分支与已评审 head commit 都匹配的唯一 open pull request，无需提供
-pull-request 编号。发布时，OCR 分别建立 diff 旧侧与新侧的行清单。只有整个范围仅存在于
-新侧的发现才会成为 inline 评论；旧侧、不完整以及有歧义的范围（包括相同行号同时存在于
-两侧）都会保留在 pull-request summary 中。
+pull-request 编号。解析位置时，OCR 会记录每个发现来自变更文件的旧侧还是新侧。发布时，
+OCR 还会为 pull-request diff 建立行清单。只有来源为新侧，且整个范围包含在经过验证的完整
+右侧 diff hunk 中的发现才会成为 inline 评论。旧侧发现、没有来源侧信息的发现、无效范围，
+以及无法通过完整 patch 验证的范围都会保留在 pull-request summary 中。如果来源侧已知，
+数值行范围重叠本身不会使发现产生歧义。
 
 Inline 评论与 summary 会以确定且可安全重试的批次发送。每次写入前，OCR 都会检查 pull
 request 仍为 open、base 分支和 head 未改变，并确认当前 base tip 与 head 的 merge-base

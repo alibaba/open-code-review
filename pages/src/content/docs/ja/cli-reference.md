@@ -179,10 +179,13 @@ OCR は `merge-base(main, feature-branch)..feature-branch` を計算するため
 から読み込ませます。
 
 CLI は base ブランチとレビュー済み head commit が一致する唯一の open pull request
-を検索するため、pull-request 番号を指定する必要はありません。投稿時に OCR は diff の
-旧側と新側について別々の行インベントリを作成します。範囲全体が新側だけに存在する指摘
-のみ inline コメントになり、旧側、不完全、または曖昧な範囲（同じ行番号が両側に存在する
-場合を含む）は pull-request summary に保持されます。
+を検索するため、pull-request 番号を指定する必要はありません。位置を解決する際、OCR は
+各指摘が変更ファイルの旧側と新側のどちらから得られたかを記録します。投稿時には
+pull-request diff の行インベントリも作成します。取得元が新側で、範囲全体が検証済みの
+完全な右側 diff hunk に含まれる指摘だけが inline コメントになります。旧側の指摘、
+取得元の side 情報がない指摘、無効な範囲、完全な patch から検証できない範囲は
+pull-request summary に保持されます。side が判明している場合、数値上の行範囲が重なる
+だけでは指摘は曖昧になりません。
 
 Inline コメントと summary は、決定的で安全に再試行できる batch として送信されます。
 各書き込みの直前に、OCR は pull request が open のままであること、base ブランチと

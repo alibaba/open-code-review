@@ -193,12 +193,15 @@ requires range mode with both `--from` and `--to`; provide the token with
 `--github-token`, or let the CLI read it from `GITHUB_TOKEN`.
 
 The CLI discovers the unique open pull request whose base branch and reviewed
-head commit match the range. You do not provide a pull-request number. At
-posting time, OCR builds separate inventories for the old and new sides of the
-pull-request diff. Only findings whose entire range is exclusive to the new
-side become inline comments. Old-side, incomplete, and ambiguous ranges
-(including the same line number appearing on both sides) are preserved in the
-pull-request summary.
+head commit match the range. You do not provide a pull-request number. During
+location resolution, OCR records whether each finding came from the old or new
+side of the changed file. At posting time, OCR also builds an inventory of the
+pull-request diff. A finding becomes an inline comment only when its provenance
+is the new side and its entire range is contained in a verified, complete
+right-side diff hunk. Old-side findings, findings without side provenance,
+invalid ranges, and ranges that cannot be verified from a complete patch are
+preserved in the pull-request summary. Overlapping numeric line ranges alone do
+not make a finding ambiguous when its side is known.
 
 Inline comments and summaries are sent in deterministic, retry-safe batches.
 Before every write, OCR checks that the pull request is open, its base branch
