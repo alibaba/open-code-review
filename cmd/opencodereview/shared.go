@@ -686,10 +686,14 @@ func emitRunResult(
 		if p, ok := ag.(resumeInfoProvider); ok {
 			resumeInfo = p.ResumeInfo()
 		}
+		var groups []agent.FileGroupInfo
+		if p, ok := ag.(interface{ FileGroups() []agent.FileGroupInfo }); ok {
+			groups = p.FileGroups()
+		}
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport)
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)

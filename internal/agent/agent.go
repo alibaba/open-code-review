@@ -190,6 +190,8 @@ type Agent struct {
 	resumeInfo      *ResumeInfo
 	budgetExceeded  atomic.Bool // set when a token/tool-call budget gate stopped dispatch
 
+	fileGroups []FileGroup // semantic grouping result, stored for JSON output
+
 	// inputResolution holds this run's frozen commit endpoints (resolved_base/
 	// head/exact_range), and repoRemoteIdentity the credential-free repository
 	// identity. Both are captured from git during loadDiffs (which has a context)
@@ -446,6 +448,22 @@ func (a *Agent) Diffs() []model.Diff {
 	return a.diffs
 }
 
+// FileGroups returns the semantic grouping result for JSON output.
+func (a *Agent) FileGroups() []FileGroupInfo {
+	if len(a.fileGroups) == 0 {
+		return nil
+	}
+	result := make([]FileGroupInfo, len(a.fileGroups))
+	for i, g := range a.fileGroups {
+		files := make([]string, len(g.Diffs))
+		for j, d := range g.Diffs {
+			files[j] = d.NewPath
+		}
+		result[i] = FileGroupInfo{Label: g.Label, Files: files}
+	}
+	return result
+}
+
 // TotalTokensUsed returns PromptTokens + CompletionTokens across all LLM calls.
 // For Anthropic, PromptTokens already includes cache read/write tokens.
 func (a *Agent) TotalTokensUsed() int64 { return a.runner.TotalTokensUsed() }
@@ -609,6 +627,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	groupResult := groupDiffs(ctx, nonDeleted, a.args.LLMClient, a.args.Model,
 		a.args.Template, llmloop.PromptTokenLimit(a.args.Template.MaxTokens))
 	groups := groupResult.groups
+	a.fileGroups = groups
 	if groupResult.usage != nil {
 		a.runner.RecordUsage(groupResult.usage)
 	}

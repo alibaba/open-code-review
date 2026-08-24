@@ -24,6 +24,12 @@ type FileGroup struct {
 	Diffs []model.Diff
 }
 
+// FileGroupInfo is the exported, JSON-friendly representation of a file group.
+type FileGroupInfo struct {
+	Label string   `json:"label"`
+	Files []string `json:"files"`
+}
+
 type groupingResponse struct {
 	Label string   `json:"label"`
 	Files []string `json:"files"`

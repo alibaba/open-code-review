@@ -294,6 +294,7 @@ type jsonOutput struct {
 	Summary        *jsonSummary         `json:"summary,omitempty"`
 	ToolCalls      *jsonToolCalls       `json:"tool_calls"`
 	Comments       []model.LlmComment   `json:"comments"`
+	Groups         []agent.FileGroupInfo `json:"groups,omitempty"`
 	Warnings       []agent.AgentWarning `json:"warnings,omitempty"`
 	ProjectSummary string               `json:"project_summary,omitempty"`
 	Resume         *agent.ResumeInfo    `json:"resume,omitempty"`
@@ -323,7 +324,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
-	retryReport *llm.RetryReport) error {
+	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
 	payload := jsonOutput{
 		Status:   "success",
@@ -341,6 +342,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 			Elapsed:          duration.Round(time.Second).String(),
 			BudgetExceeded:   budgetExceeded,
 		},
+		Groups:         groups,
 		ProjectSummary: projectSummary,
 		Resume:         resumeInfo,
 		SessionID:      sessionID,
