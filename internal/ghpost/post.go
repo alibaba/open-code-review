@@ -68,6 +68,12 @@ type summaryBatch struct {
 	body   string
 }
 
+type fallbackSequence struct {
+	start          int
+	kind           string
+	includeSummary bool
+}
+
 // Post discovers the unique matching pull request, proves its current merge
 // base, and posts deterministic review and summary batches.
 func Post(ctx context.Context, target Target, comments []model.LlmComment, options Options) (Result, error) {
@@ -112,21 +118,21 @@ func Post(ctx context.Context, target Target, comments []model.LlmComment, optio
 	inline, inlineSources, summary := classifyFindings(ordered, inventory)
 	runID := reviewRunID(destination.repository.Owner(), destination.repository.Name(), destination.prNumber, baseBranch, target, ordered)
 
-	if fallbackStart, found, err := existingFallbackStart(ctx, client, runID, len(inline)); err != nil {
+	if fallback, found, err := existingFallbackSequence(ctx, client, runID, len(inline)); err != nil {
 		return result, fmt.Errorf("inspect fallback sequence: %w", err)
 	} else if found {
-		return resumeFallback(ctx, client, target, baseBranch, runID, ordered, inlineSources, summary, fallbackStart, result)
+		return resumeFallback(ctx, client, target, baseBranch, runID, ordered, inlineSources, summary, fallback, result)
 	}
 
 	if len(inline) == 0 {
-		if err := postSummary(ctx, client, target, baseBranch, runID, "summary", ordered, 0, summary); err != nil {
+		if err := postSummary(ctx, client, target, baseBranch, runID, "summary", ordered, 0, len(summary), summary); err != nil {
 			return result, fmt.Errorf("post review summary: %w", err)
 		}
 		result.SummaryComments = len(summary)
 		return result, nil
 	}
 
-	summaryBatches, err := buildSummaryBatches(runID, "summary", ordered, len(inline), summary)
+	summaryBatches, err := buildSummaryBatches(runID, "summary", ordered, len(inline), len(summary), summary)
 	if err != nil {
 		return result, fmt.Errorf("build review summary: %w", err)
 	}
@@ -148,45 +154,45 @@ func Post(ctx context.Context, target Target, comments []model.LlmComment, optio
 		if err != nil {
 			return result, fmt.Errorf("check existing inline review batch: %w", err)
 		}
-		if landed {
-			result.InlineComments += end - start
-			continue
-		}
-		if err := verifyTarget(ctx, client, target, baseBranch); err != nil {
-			return result, err
-		}
-		_, createErr := client.CreateReview(ctx, target.ResolvedHead, github.ReviewRequest{
-			Body: body, Event: "COMMENT", Comments: inline[start:end],
-		})
-		if createErr == nil {
-			result.InlineComments += end - start
-			continue
-		}
-		if writeIsAmbiguous(createErr) {
-			landed, reconcileErr := pollForReview(ctx, client, target.ResolvedHead, marker)
-			if reconcileErr != nil {
-				return result, errors.Join(fmt.Errorf("create inline review: %w", createErr), fmt.Errorf("reconcile ambiguous inline review write: %w", reconcileErr))
+		if !landed {
+			if err := verifyTarget(ctx, client, target, baseBranch); err != nil {
+				return result, err
 			}
-			if !landed {
-				return result, errors.Join(fmt.Errorf("create inline review: %w", createErr), fmt.Errorf("review batch outcome remains unknown after bounded reconciliation; refusing fallback"))
+			_, createErr := client.CreateReview(ctx, target.ResolvedHead, github.ReviewRequest{
+				Body: body, Event: "COMMENT", Comments: inline[start:end],
+			})
+			if createErr != nil && writeIsAmbiguous(createErr) {
+				landed, err = pollForReview(ctx, client, target.ResolvedHead, marker)
+				if err != nil {
+					return result, errors.Join(fmt.Errorf("create inline review: %w", createErr), fmt.Errorf("reconcile ambiguous inline review write: %w", err))
+				}
+				if !landed {
+					return result, errors.Join(fmt.Errorf("create inline review: %w", createErr), fmt.Errorf("review batch outcome remains unknown after bounded reconciliation; refusing fallback"))
+				}
+			} else if createErr != nil {
+				fallbackFindings := appendSummaryFindings(nil, inlineSources[start:], "inline review could not be created")
+				kind := fmt.Sprintf("fallback-remaining-%d", batchIndex)
+				if start == 0 {
+					fallbackFindings = appendSummaryFindings(summary, inlineSources, "inline review could not be created")
+					kind = "fallback-0"
+				}
+				if err := postSummary(ctx, client, target, baseBranch, runID, kind, ordered, start, len(ordered)-start, fallbackFindings); err != nil {
+					return result, errors.Join(fmt.Errorf("create inline review: %w", createErr), fmt.Errorf("post fallback summary: %w", err))
+				}
+				result.InlineComments = start
+				result.SummaryComments = len(ordered) - start
+				return result, nil
 			}
-			result.InlineComments += end - start
-			continue
 		}
 
-		fallback := appendSummaryFindings(summary, inlineSources[start:], "inline review could not be created")
-		kind := fmt.Sprintf("fallback-%d", batchIndex)
-		if err := postSummary(ctx, client, target, baseBranch, runID, kind, ordered, start, fallback); err != nil {
-			return result, errors.Join(fmt.Errorf("create inline review: %w", createErr), fmt.Errorf("post fallback summary: %w", err))
+		result.InlineComments += end - start
+		if start == 0 {
+			if err := postSummaryBatches(ctx, client, target, baseBranch, summaryBatches, 1); err != nil {
+				return result, fmt.Errorf("post non-inline finding continuations: %w", err)
+			}
 		}
-		result.InlineComments = start
-		result.SummaryComments = len(ordered) - start
-		return result, nil
 	}
 
-	if err := postSummaryBatches(ctx, client, target, baseBranch, summaryBatches, 1); err != nil {
-		return result, fmt.Errorf("post non-inline finding continuations: %w", err)
-	}
 	result.InlineComments = len(inline)
 	result.SummaryComments = len(summary)
 	return result, nil
@@ -237,34 +243,61 @@ func appendSummaryFindings(existing []summaryFinding, comments []model.LlmCommen
 	return result
 }
 
-func resumeFallback(ctx context.Context, client *github.Client, target Target, baseBranch, runID string, all, inline []model.LlmComment, summary []summaryFinding, start int, result Result) (Result, error) {
-	if start < 0 || start > len(inline) {
-		return result, fmt.Errorf("existing fallback sequence has invalid inline offset %d", start)
+func resumeFallback(ctx context.Context, client *github.Client, target Target, baseBranch, runID string, all, inline []model.LlmComment, summary []summaryFinding, sequence fallbackSequence, result Result) (Result, error) {
+	if sequence.start < 0 || sequence.start > len(inline) {
+		return result, fmt.Errorf("existing fallback sequence has invalid inline offset %d", sequence.start)
 	}
-	fallback := appendSummaryFindings(summary, inline[start:], "inline review could not be created")
-	kind := fmt.Sprintf("fallback-%d", start/reviewBatchSize)
-	if err := postSummary(ctx, client, target, baseBranch, runID, kind, all, start, fallback); err != nil {
+	var fallback []summaryFinding
+	if sequence.includeSummary {
+		fallback = appendSummaryFindings(summary, inline[sequence.start:], "inline review could not be created")
+	} else {
+		fallback = appendSummaryFindings(nil, inline[sequence.start:], "inline review could not be created")
+		summaryBatches, err := buildSummaryBatches(runID, "summary", all, len(inline), len(summary), summary)
+		if err != nil {
+			return result, fmt.Errorf("rebuild review summary: %w", err)
+		}
+		if err := postSummaryBatches(ctx, client, target, baseBranch, summaryBatches, 1); err != nil {
+			return result, fmt.Errorf("resume non-inline finding continuations: %w", err)
+		}
+	}
+	if err := postSummary(ctx, client, target, baseBranch, runID, sequence.kind, all, sequence.start, len(all)-sequence.start, fallback); err != nil {
 		return result, fmt.Errorf("resume fallback summary: %w", err)
 	}
-	result.InlineComments = start
-	result.SummaryComments = len(all) - start
+	result.InlineComments = sequence.start
+	result.SummaryComments = len(all) - sequence.start
 	return result, nil
 }
 
-func existingFallbackStart(ctx context.Context, client *github.Client, runID string, inlineCount int) (int, bool, error) {
+func existingFallbackSequence(ctx context.Context, client *github.Client, runID string, inlineCount int) (fallbackSequence, bool, error) {
 	comments, err := client.ListIssueComments(ctx)
 	if err != nil {
-		return 0, false, err
+		return fallbackSequence{}, false, err
 	}
+	var existing *fallbackSequence
 	for start := 0; start < inlineCount; start += reviewBatchSize {
-		prefix := fmt.Sprintf("<!-- ocr-review-%s-fallback-%d-", runID, start/reviewBatchSize)
-		for _, comment := range comments {
-			if strings.Contains(comment.Body, prefix) {
-				return start, true, nil
+		batchIndex := start / reviewBatchSize
+		sequences := []fallbackSequence{
+			{start: start, kind: fmt.Sprintf("fallback-%d", batchIndex), includeSummary: true},
+			{start: start, kind: fmt.Sprintf("fallback-remaining-%d", batchIndex)},
+		}
+		for _, sequence := range sequences {
+			prefix := fmt.Sprintf("<!-- ocr-review-%s-%s-", runID, sequence.kind)
+			for _, comment := range comments {
+				if !strings.Contains(comment.Body, prefix) {
+					continue
+				}
+				if existing != nil && *existing != sequence {
+					return fallbackSequence{}, false, fmt.Errorf("conflicting fallback sequences %q and %q", existing.kind, sequence.kind)
+				}
+				candidate := sequence
+				existing = &candidate
 			}
 		}
 	}
-	return 0, false, nil
+	if existing == nil {
+		return fallbackSequence{}, false, nil
+	}
+	return *existing, true, nil
 }
 
 func discoverTarget(ctx context.Context, token string, repositories []repositoryCandidate, baseBranch, headSHA string) (postingTarget, error) {
@@ -453,8 +486,8 @@ func waitForReconciliation(ctx context.Context) error {
 	}
 }
 
-func postSummary(ctx context.Context, client *github.Client, target Target, baseBranch, runID, kind string, all []model.LlmComment, inlineCount int, findings []summaryFinding) error {
-	batches, err := buildSummaryBatches(runID, kind, all, inlineCount, findings)
+func postSummary(ctx context.Context, client *github.Client, target Target, baseBranch, runID, kind string, all []model.LlmComment, inlineCount, summaryCount int, findings []summaryFinding) error {
+	batches, err := buildSummaryBatches(runID, kind, all, inlineCount, summaryCount, findings)
 	if err != nil {
 		return err
 	}
@@ -492,7 +525,7 @@ func postSummaryBatches(ctx context.Context, client *github.Client, target Targe
 	return nil
 }
 
-func buildSummaryBatches(runID, kind string, all []model.LlmComment, inlineCount int, findings []summaryFinding) ([]summaryBatch, error) {
+func buildSummaryBatches(runID, kind string, all []model.LlmComment, inlineCount, summaryCount int, findings []summaryFinding) ([]summaryBatch, error) {
 	fragments := make([]string, 0, len(findings))
 	for _, finding := range findings {
 		fragments = append(fragments, splitSummaryText(formatSummaryFinding(finding))...)
@@ -504,14 +537,14 @@ func buildSummaryBatches(runID, kind string, all []model.LlmComment, inlineCount
 	current := make([]string, 0, summaryBatchSize)
 	flush := func() {
 		marker := postingMarker(runID, kind, len(batches))
-		body := marker + "\n" + buildSummaryBody(all, inlineCount, len(findings), current)
+		body := marker + "\n" + buildSummaryBody(all, inlineCount, summaryCount, current)
 		batches = append(batches, summaryBatch{marker: marker, body: body})
 		current = current[:0]
 	}
 	for _, fragment := range fragments {
 		candidate := append(append([]string(nil), current...), fragment)
 		marker := postingMarker(runID, kind, len(batches))
-		payloadSize, err := issueCommentPayloadSize(marker + "\n" + buildSummaryBody(all, inlineCount, len(findings), candidate))
+		payloadSize, err := issueCommentPayloadSize(marker + "\n" + buildSummaryBody(all, inlineCount, summaryCount, candidate))
 		if err != nil {
 			return nil, err
 		}
@@ -519,7 +552,7 @@ func buildSummaryBatches(runID, kind string, all []model.LlmComment, inlineCount
 			flush()
 			candidate = []string{fragment}
 			marker = postingMarker(runID, kind, len(batches))
-			payloadSize, err = issueCommentPayloadSize(marker + "\n" + buildSummaryBody(all, inlineCount, len(findings), candidate))
+			payloadSize, err = issueCommentPayloadSize(marker + "\n" + buildSummaryBody(all, inlineCount, summaryCount, candidate))
 			if err != nil {
 				return nil, err
 			}
