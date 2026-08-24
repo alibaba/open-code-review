@@ -1152,7 +1152,7 @@ func TestResolveRuleEntries_BasicFile(t *testing.T) {
 		{Path: "**/*.xml", Rule: "sql-rules.md"},
 		{Path: "**/*.go", Rule: "Always check for nil"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, false)
 
 	if entries[0].Rule != "Check for SQL injection" {
 		t.Errorf("expected file content, got %q", entries[0].Rule)
@@ -1173,7 +1173,7 @@ func TestResolveRuleEntries_MultiLineInline(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.ts", Rule: "security.md\nBut this is multi-line\nso it should stay inline"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, false)
 
 	if entries[0].Rule != "security.md\nBut this is multi-line\nso it should stay inline" {
 		t.Errorf("multi-line rule should stay inline, got %q", entries[0].Rule)
@@ -1186,7 +1186,7 @@ func TestResolveRuleEntries_MissingFile(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.xml", Rule: "nonexistent.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, false)
 
 	// Missing file should clear the rule.
 	if entries[0].Rule != "" {
@@ -1194,21 +1194,45 @@ func TestResolveRuleEntries_MissingFile(t *testing.T) {
 	}
 }
 
-func TestResolveRuleEntries_AbsolutePath(t *testing.T) {
+func TestResolveRuleEntries_AbsolutePath_TrustedSource(t *testing.T) {
 	dir := t.TempDir()
 	ruleFile := filepath.Join(dir, "my-rule.md")
 	if err := os.WriteFile(ruleFile, []byte("absolute rule content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Use an absolute path pointing to a file in a different directory.
+	// Trusted source (custom --rule file / global ~/.opencodereview/rule.json):
+	// an absolute path pointing outside repoDir is allowed, since the source
+	// itself is operator-chosen.
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: ruleFile},
 	}
-	resolveRuleEntries(entries, "/some/other/repo")
+	resolveRuleEntries(entries, "/some/other/repo", true)
 
 	if entries[0].Rule != "absolute rule content" {
 		t.Errorf("expected absolute file content, got %q", entries[0].Rule)
+	}
+}
+
+func TestResolveRuleEntries_AbsolutePath_UntrustedSourceBlocked(t *testing.T) {
+	dir := t.TempDir()
+	ruleFile := filepath.Join(dir, "my-rule.md")
+	if err := os.WriteFile(ruleFile, []byte("absolute rule content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Untrusted source (project-local .opencodereview/rule.json, which is
+	// ordinary repo content): an absolute path pointing outside repoDir must
+	// be rejected, since repo content must not be able to read arbitrary
+	// files elsewhere on the host.
+	repoDir := t.TempDir()
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: ruleFile},
+	}
+	resolveRuleEntries(entries, repoDir, false)
+
+	if entries[0].Rule != "" {
+		t.Errorf("absolute path outside repoDir from an untrusted source should be blocked, got %q", entries[0].Rule)
 	}
 }
 
@@ -1226,7 +1250,7 @@ func TestResolveRuleEntries_TooLarge(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "big.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, false)
 
 	if entries[0].Rule != "" {
 		t.Errorf("oversized file should clear rule, got %q", entries[0].Rule)
@@ -1242,7 +1266,7 @@ func TestResolveRuleEntries_RelativePath(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "shared.md"},
 	}
-	resolveRuleEntries(entries, repoDir)
+	resolveRuleEntries(entries, repoDir, false)
 
 	if entries[0].Rule != "repo-level" {
 		t.Errorf("repo-level should win, got %q", entries[0].Rule)
@@ -1255,7 +1279,7 @@ func TestResolveRuleEntries_EmptyRule(t *testing.T) {
 		{Path: "**/*.ts", Rule: "  "},
 		{Path: "**/*.java", Rule: "\t\n"},
 	}
-	resolveRuleEntries(entries, "/tmp")
+	resolveRuleEntries(entries, "/tmp", false)
 
 	if entries[0].Rule != "" {
 		t.Errorf("empty rule should stay empty, got %q", entries[0].Rule)
@@ -1288,7 +1312,7 @@ func TestResolveRuleEntries_SymlinkSafety(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "evil.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, false)
 	// The symlink target is .json, which is not in the whitelist.
 	// The rule should be cleared.
 	if entries[0].Rule != "" {
@@ -1305,7 +1329,7 @@ func TestResolveRuleEntries_TxtExtension(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "rules.txt"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, false)
 
 	if entries[0].Rule != "rule from txt" {
 		t.Errorf(".txt should be accepted, got %q", entries[0].Rule)
@@ -1321,7 +1345,7 @@ func TestResolveRuleEntries_MarkdownExtension(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "rules.markdown"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, false)
 
 	if entries[0].Rule != "rule from markdown" {
 		t.Errorf(".markdown should be accepted, got %q", entries[0].Rule)
@@ -1341,7 +1365,7 @@ func TestResolveRuleEntries_SubdirectoryPath(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "docs/my-rule.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, false)
 
 	if entries[0].Rule != "nested rule" {
 		t.Errorf("subdirectory path should work, got %q", entries[0].Rule)
@@ -1477,16 +1501,16 @@ func TestResolveRuleEntries_PathTraversalBlocked(t *testing.T) {
 	}
 
 	entries := []ProjectRuleEntry{
-		{Path: "**/*.go", Rule: outside},         // absolute path to outside — allowed
+		{Path: "**/*.go", Rule: outside},         // absolute path to outside — blocked (untrusted source)
 		{Path: "**/*.ts", Rule: "../outside.md"}, // relative traversal — blocked
 	}
-	resolveRuleEntries(entries, dir)
+	// Untrusted source (project-local .opencodereview/rule.json): neither an
+	// absolute path nor a relative traversal may escape repoDir.
+	resolveRuleEntries(entries, dir, false)
 
-	// Absolute path to outside is allowed (explicit design choice).
-	if entries[0].Rule != "should not be read" {
-		t.Errorf("absolute path to outside should be allowed, got %q", entries[0].Rule)
+	if entries[0].Rule != "" {
+		t.Errorf("absolute path to outside repoDir should be blocked for an untrusted source, got %q", entries[0].Rule)
 	}
-	// Relative traversal should be blocked and rule cleared.
 	if entries[1].Rule != "" {
 		t.Errorf("relative traversal should be blocked, got %q", entries[1].Rule)
 	}
@@ -1497,7 +1521,7 @@ func TestResolveRuleEntries_EmptyRepoDirRelative(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "rules.md"},
 	}
-	resolveRuleEntries(entries, "")
+	resolveRuleEntries(entries, "", true)
 
 	if entries[0].Rule != "" {
 		t.Errorf("relative path with empty repoDir should be rejected, got %q", entries[0].Rule)
@@ -1514,7 +1538,7 @@ func TestResolveRuleEntries_EmptyRepoDirAbsolute(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: absFile},
 	}
-	resolveRuleEntries(entries, "")
+	resolveRuleEntries(entries, "", true)
 
 	if entries[0].Rule != "absolute content" {
 		t.Errorf("absolute path with empty repoDir should work, got %q", entries[0].Rule)
@@ -1538,7 +1562,7 @@ func TestResolveRuleEntries_GlobalRuleFileResolution(t *testing.T) {
 		{Path: "**/*.go", Rule: "reusable.md"},
 	}
 	// repoDir = ~/.opencodereview (where rule.json lives)
-	resolveRuleEntries(entries, globalRuleDir)
+	resolveRuleEntries(entries, globalRuleDir, true)
 
 	if entries[0].Rule != "global reusable rule" {
 		t.Errorf("global rule file should be resolved, got %q", entries[0].Rule)

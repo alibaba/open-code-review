@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
+
+	"github.com/alibaba/open-code-review/internal/pathutil"
 )
 
 // Resolver resolves a review rule for a file path.
@@ -345,7 +347,7 @@ func loadGlobalRule() (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal global rule: %w", err)
 	}
-	resolveRuleEntries(pr.Rules, filepath.Dir(path))
+	resolveRuleEntries(pr.Rules, filepath.Dir(path), true)
 	return &pr, nil
 }
 
@@ -358,7 +360,7 @@ func loadRuleFile(path string) (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal rule file %s: %w", path, err)
 	}
-	resolveRuleEntries(pr.Rules, filepath.Dir(path))
+	resolveRuleEntries(pr.Rules, filepath.Dir(path), true)
 	return &pr, nil
 }
 
@@ -380,7 +382,10 @@ func loadProjectRule(repoDir string) (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal project rule: %w", err)
 	}
-	resolveRuleEntries(pr.Rules, repoDir)
+	// repoDir here is ordinary repo content (may come from an untrusted branch/PR),
+	// so unlike the custom/global layers above, absolute rule-file references must
+	// not be allowed to escape repoDir — see resolveRuleEntries.
+	resolveRuleEntries(pr.Rules, repoDir, false)
 	return &pr, nil
 }
 
@@ -513,17 +518,22 @@ func looksLikeFilePath(s string) bool {
 }
 
 // resolveRuleEntries scans each entry's Rule field. When the value looks like a file
-// path, it reads the file content and replaces the Rule. Absolute paths are used
-// directly; relative paths are resolved against repoDir only. Multi-line and short
-// inline rules are left unchanged. If the file cannot be read, the Rule is cleared
-// (set to empty) and a warning is emitted.
-func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string) {
+// path, it reads the file content and replaces the Rule. Relative paths are always
+// resolved against repoDir only. Absolute paths are used directly only when
+// trustedSource is true (the custom --rule file or the global ~/.opencodereview/
+// rule.json, both chosen by the operator); for an untrusted source (the project-local
+// .opencodereview/rule.json, which is ordinary repo content and may come from an
+// unreviewed branch/PR), an absolute path must also resolve within repoDir, so repo
+// content can never point the reader at an arbitrary file elsewhere on the host.
+// Multi-line and short inline rules are left unchanged. If the file cannot be read,
+// the Rule is cleared (set to empty) and a warning is emitted.
+func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string, trustedSource bool) {
 	for i := range entries {
 		e := &entries[i]
 		if strings.TrimSpace(e.Rule) == "" || !looksLikeFilePath(e.Rule) {
 			continue
 		}
-		if content := tryReadRuleFile(e.Rule, repoDir); content != nil {
+		if content := tryReadRuleFile(e.Rule, repoDir, trustedSource); content != nil {
 			e.Rule = *content
 		} else {
 			e.Rule = ""
@@ -531,10 +541,11 @@ func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string) {
 	}
 }
 
-// tryReadRuleFile attempts to read a rule file. Absolute paths are used directly.
-// Relative paths are resolved against repoDir and validated to stay within repoDir.
+// tryReadRuleFile attempts to read a rule file. Relative paths are resolved against
+// repoDir and validated to stay within repoDir. Absolute paths are used directly only
+// when trustedSource is true; otherwise they too must resolve within repoDir.
 // Returns nil when the file cannot be read safely or does not exist.
-func tryReadRuleFile(rule string, repoDir string) *string {
+func tryReadRuleFile(rule string, repoDir string, trustedSource bool) *string {
 	if repoDir == "" {
 		if !filepath.IsAbs(rule) {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot resolve relative rule path %q without a repo dir\n", rule)
@@ -542,6 +553,10 @@ func tryReadRuleFile(rule string, repoDir string) *string {
 		}
 	}
 	if filepath.IsAbs(rule) {
+		if !trustedSource && !absPathWithinRepo(rule, repoDir) {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: rule file path escapes repo dir: %s\n", rule)
+			return nil
+		}
 		content, err := readRuleFileSafe(rule)
 		if err == nil {
 			return &content
@@ -572,6 +587,24 @@ func tryReadRuleFile(rule string, repoDir string) *string {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read rule file %s: %v\n", resolved, err)
 	}
 	return nil
+}
+
+// absPathWithinRepo reports whether the absolute path rule, once symlinks are
+// resolved on both sides, is repoDir itself or contained under it. Used to gate
+// absolute rule-file references coming from an untrusted (repo-committed) source.
+func absPathWithinRepo(rule, repoDir string) bool {
+	if repoDir == "" {
+		return false
+	}
+	canonicalRepo, err := pathutil.CanonicalPath(repoDir)
+	if err != nil {
+		return false
+	}
+	canonicalRule, err := pathutil.CanonicalPath(rule)
+	if err != nil {
+		return false
+	}
+	return pathutil.WithinBase(canonicalRepo, canonicalRule)
 }
 
 // readRuleFileSafe reads and validates a rule file. It enforces extension whitelist
