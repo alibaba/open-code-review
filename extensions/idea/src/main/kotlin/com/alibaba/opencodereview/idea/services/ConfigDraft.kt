@@ -2,6 +2,7 @@ package com.alibaba.opencodereview.idea.services
 
 import com.alibaba.opencodereview.idea.model.ConfigEntry
 import com.alibaba.opencodereview.idea.model.OcrJson
+import com.intellij.openapi.diagnostic.Logger
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -25,7 +26,11 @@ fun parseRawConfig(text: String): RawConfig {
     if (text.isBlank()) return emptyRawConfig()
     return runCatching {
         OcrJson.parseToJsonElement(text).jsonObject.toMutableMap()
-    }.getOrElse { emptyRawConfig() }
+    }.getOrElse {
+        // JSON 解析失败在此记录——readRaw 的外层 runCatching 只能捕获 IO 错误，JSON 错误被这里吞掉后到不了外层。
+        Logger.getInstance("ConfigDraft").warn("[ocr] Failed to parse config JSON, treating as empty", it)
+        emptyRawConfig()
+    }
 }
 
 /** 序列化为写盘用的两空格缩进 JSON。 */
