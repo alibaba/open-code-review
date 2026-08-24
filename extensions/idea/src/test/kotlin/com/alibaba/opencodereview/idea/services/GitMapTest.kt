@@ -125,6 +125,16 @@ class GitMapTest {
     }
 
     @Test
+    fun `porcelain 重命名-旧不引号新引号`() {
+        // 旧路径无特殊字符（不引号），新路径含空格（引号）。
+        // 走 ` -> ` 回退分支（旧路径无 ` -> `，不会误匹配），unquoteGitPath 去掉新路径引号。
+        assertEquals(
+            listOf(FileChange("new name.kt", FileStatus.RENAMED)),
+            parsePorcelain("R  normal.kt -> \"new name.kt\"\n"),
+        )
+    }
+
+    @Test
     fun `porcelain 忽略空行和过短的行`() {
         assertEquals(emptyList(), parsePorcelain("\nM\n  \n"))
     }
