@@ -96,9 +96,11 @@ output with one verdict.
 The always-available baseline; makes Semgrep, Trivy, and Snyk work with no Phoenix at all.
 This is also the fixture surface for every test that does not need a live Phoenix.
 
-**`internal/triage/`** — the new stage. Structurally a sibling of `internal/scan`:
-builds units of work (finding clusters grouped by fingerprint affinity — same rule and
-file, or same CVE), drives the shared `llmloop.Runner`, owns its own prompts and tool set.
+**`internal/triage/`** — the new stage. Structurally a sibling of `internal/scan`: it
+groups findings into units of work (one file per unit, split at 8 findings so the model's
+attention does not degrade), assembles its own prompts, drives the shared
+`llmloop.Runner`, and reconciles exactly one verdict per finding. A finding the model
+never adjudicated becomes `uncertain` rather than disappearing.
 
 ### 4.2 New package — fork-specific adapter
 
@@ -302,8 +304,9 @@ manual verification against a real session with `ocr review --preview` before me
 - Whether Phoenix's per-CVE reachability can answer at PR latency is unverified. If it
   cannot, the gate degrades to `unknown` for every SCA finding, which routes everything
   to triage — correct, but more expensive than intended.
-- The triage clustering heuristic (group by rule+file, or by CVE) is a first guess and
-  will need tuning against real PR volume.
+- The triage clustering heuristic (one unit per file, capped at 8 findings) is a first
+  guess and will need tuning against real PR volume — a lockfile with 40 CVEs becomes
+  five conversations that cannot see each other's reasoning.
 - Whether triage should be able to run against a *stale* SARIF (scanner run at a
   different commit than the review target) is unresolved. The plan should decide whether
   to reject it, or accept it with the line-shift tolerance the fingerprint already provides.
