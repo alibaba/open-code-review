@@ -238,16 +238,20 @@ The security variant must reach every surface the existing review reaches.
 | `plugins/open-code-review/opencode/open-code-review.ts` | Add `security?: boolean` and `findings?: string` to the input type; push `--security` / `--findings`. Extend `test/open-code-review.test.mjs`. |
 | `plugins/open-code-review/qca/` | Optional — delegate-mode security variant of `system-prompt.md`. |
 
-### 6.1 Skill-tree drift
+### 6.1 Skill-tree mirroring
 
-`skills/` and `plugins/open-code-review/skills/` are **not** symlinks, and their two
-existing skills already differ (`diff -rq` reports both `SKILL.md` files as differing).
-Adding a third pair triples the drift surface.
+`skills/` and `plugins/open-code-review/skills/` are not symlinks (a plugin install may
+materialize only the plugin subtree), but they are not drifted either. Each plugin copy
+is the canonical file with exactly one four-line note inserted after the `# Title`
+heading, explaining that it mirrors the canonical skill. That is the entire difference
+for both existing skills.
 
-This design adds a `make sync-skills` target that copies `skills/` into
-`plugins/open-code-review/skills/`, plus a CI check that fails when the two trees
-diverge. Reconciling the two *existing* pairs is in scope — the check cannot be
-introduced while it is already red.
+The mirror is currently maintained by hand, which is what makes a third pair a risk
+rather than a chore. This design adds `scripts/sync-skills.sh` (plus a `make sync-skills`
+target) that reproduces the plugin copy mechanically from the canonical file, and a CI
+check that regenerates and fails on any difference. Because the existing pairs already
+match the convention exactly, the check goes green on introduction — no reconciliation
+work is needed.
 
 ### 6.2 Naming
 
@@ -282,7 +286,7 @@ manual verification against a real session with `ocr review --preview` before me
 | Credential surface — REST provider needs an API token and workspace id in CI. | Env-only (`PHOENIX_API_TOKEN`); documented in the action and skill; never persisted to session JSONL. |
 | Prompt regression with no automated gate. | Manual verification requirement recorded as a merge blocker. |
 | Reachability gate is the highest-value and least-certain component. | Three-state everywhere; fail-closed test; the gate can be disabled by policy without disabling SCA. |
-| Skill-tree drift. | `make sync-skills` plus a CI divergence check; existing drift reconciled first. |
+| Skill-tree divergence as the mirror grows to three pairs. | `scripts/sync-skills.sh` generates the plugin copies; CI regenerates and fails on any difference. |
 | Phoenix API is unversioned for the new SCA endpoint. | Provider pins an explicit contract and fails loudly on shape mismatch rather than degrading to empty results. |
 
 ## 9. Out of scope
