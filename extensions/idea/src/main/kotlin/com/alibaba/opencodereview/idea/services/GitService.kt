@@ -215,6 +215,10 @@ class GitService(private val project: Project) {
     fun readWorkspaceFile(relPath: String): String? {
         val root = repoRoot() ?: return null
         val file = File(root, relPath)
+        // 防路径遍历：canonicalPath 解析 ../ 和符号链接后的真实路径，确认仍在仓库根内。
+        // runCatching 兜底：canonicalPath 遇 IO 异常不崩，按"不在仓库内"处理（优雅降级）。
+        val inRepo = runCatching { file.canonicalPath.startsWith(root.canonicalPath + File.separator) }.getOrDefault(false)
+        if (!inRepo) return null
         if (!file.isFile) return null
         return runCatching { file.readText() }.getOrNull()
     }
@@ -235,7 +239,9 @@ class GitService(private val project: Project) {
         val root = repoRoot() ?: return false
         if (ctx.mode == ReviewMode.WORKSPACE) {
             val file = File(root, relPath)
-            if (!file.isFile) return false
+            // 防路径遍历：同 readWorkspaceFile，canonicalPath 解析后确认在仓库根内。
+            val inRepo = runCatching { file.canonicalPath.startsWith(root.canonicalPath + File.separator) }.getOrDefault(false)
+            if (!inRepo || !file.isFile) return false
             return runCatching {
                 file.inputStream().use { it.readNBytes(BINARY_SAMPLE_BYTES).any { b -> b == 0.toByte() } }
             }.getOrDefault(false)
