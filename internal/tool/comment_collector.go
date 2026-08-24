@@ -13,9 +13,10 @@ import (
 // CommentCollector is a thread-safe, per-Agent comment store.
 // Each Agent instance owns its own collector so reviews across different repos do not interfere.
 type CommentCollector struct {
-	mu       sync.Mutex
-	comments []model.LlmComment
-	sides    []location.Side
+	mu          sync.Mutex
+	comments    []model.LlmComment
+	sides       []location.Side
+	reviewPaths []string
 }
 
 // NewCommentCollector creates an empty collector.
@@ -30,10 +31,22 @@ func (c *CommentCollector) Add(cm model.LlmComment) {
 
 // AddWithSide appends a comment and the file side that supplied its location.
 func (c *CommentCollector) AddWithSide(cm model.LlmComment, side location.Side) {
+	c.AddForReviewItem(cm, side, cm.Path)
+}
+
+// AddForReviewItem appends a comment with both its resolved location and the
+// review item that produced it. The two paths can differ after cross-file
+// re-filing: cm.Path is where the comment belongs, while reviewPath determines
+// which resumable checkpoint owns it.
+func (c *CommentCollector) AddForReviewItem(cm model.LlmComment, side location.Side, reviewPath string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.comments = append(c.comments, cm)
 	c.sides = append(c.sides, side)
+	if reviewPath == "" {
+		reviewPath = cm.Path
+	}
+	c.reviewPaths = append(c.reviewPaths, reviewPath)
 }
 
 // Comments returns all collected comments.
@@ -69,6 +82,22 @@ func (c *CommentCollector) CommentsAndSidesForPath(path string) ([]model.LlmComm
 	var sides []location.Side
 	for i, cm := range c.comments {
 		if cm.Path == path {
+			comments = append(comments, cm)
+			sides = append(sides, sideAt(c.sides, i))
+		}
+	}
+	return comments, sides
+}
+
+// CommentsAndSidesForReviewItem returns comments produced by one review item,
+// even when resolution re-filed them to a different final path.
+func (c *CommentCollector) CommentsAndSidesForReviewItem(path string) ([]model.LlmComment, []location.Side) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var comments []model.LlmComment
+	var sides []location.Side
+	for i, cm := range c.comments {
+		if reviewPathAt(c.reviewPaths, i, cm.Path) == path {
 			comments = append(comments, cm)
 			sides = append(sides, sideAt(c.sides, i))
 		}
@@ -116,6 +145,11 @@ func (c *CommentCollector) ReplaceSince(start int, replacements []model.LlmComme
 	}
 	c.comments = append(c.comments[:start:start], replacements...)
 	c.sides = append(c.sides[:start:start], make([]location.Side, len(replacements))...)
+	reviewPaths := make([]string, len(replacements))
+	for i := range replacements {
+		reviewPaths[i] = replacements[i].Path
+	}
+	c.reviewPaths = append(c.reviewPaths[:start:start], reviewPaths...)
 }
 
 // RemoveByPathAndIndices removes comments for a given path whose per-path index
@@ -125,6 +159,7 @@ func (c *CommentCollector) RemoveByPathAndIndices(path string, indices map[int]s
 	defer c.mu.Unlock()
 	keptComments := c.comments[:0]
 	keptSides := c.sides[:0]
+	keptReviewPaths := c.reviewPaths[:0]
 	pathIdx := 0
 	for i, cm := range c.comments {
 		if cm.Path == path {
@@ -136,14 +171,24 @@ func (c *CommentCollector) RemoveByPathAndIndices(path string, indices map[int]s
 		}
 		keptComments = append(keptComments, cm)
 		keptSides = append(keptSides, sideAt(c.sides, i))
+		keptReviewPaths = append(keptReviewPaths, reviewPathAt(c.reviewPaths, i, cm.Path))
 	}
 	tail := c.comments[len(keptComments):]
 	for i := range tail {
 		tail[i] = model.LlmComment{}
 	}
 	clear(c.sides[len(keptSides):])
+	clear(c.reviewPaths[len(keptReviewPaths):])
 	c.comments = keptComments
 	c.sides = keptSides
+	c.reviewPaths = keptReviewPaths
+}
+
+func reviewPathAt(paths []string, index int, fallback string) string {
+	if index < 0 || index >= len(paths) || paths[index] == "" {
+		return fallback
+	}
+	return paths[index]
 }
 
 func sideAt(sides []location.Side, index int) location.Side {
