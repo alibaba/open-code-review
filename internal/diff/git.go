@@ -688,28 +688,29 @@ func (p *Provider) runGitSplit(ctx context.Context, args ...string) (string, str
 	return stdout.String(), stderr.String(), err
 }
 
-// gitDiagLimit bounds how much of git's output is quoted back in an error.
-// Git's own diagnosis is a line or two; the ceiling matters only because
-// runGit returns stdout and stderr combined, so a command that failed partway
-// through can carry a prefix of real diff along with it.
+// gitDiagLimit bounds how much of git's stderr is quoted back in an error.
+// Git's own diagnosis is a line or two, so the ceiling is a backstop for the
+// pathological case — a flood of warnings ahead of the fatal — rather than the
+// common one.
 const gitDiagLimit = 2000
 
 // gitFailure builds an error that carries git's own message.
 //
-// runGit captures stdout and stderr together and every diff-producing caller
-// used to drop that output on the floor, so a failure surfaced as a bare
-// "git show failed: exit status 129" — true, and useless. Diagnosing one then
-// meant asking the reporter to re-run the command by hand to see what git
-// actually said (#972). The exit status alone cannot distinguish an
-// unsupported option from a bad revision or a permission error.
-func gitFailure(op, out string, err error) error {
-	diag := strings.TrimSpace(out)
+// Every diff-producing caller used to drop git's output on the floor, so a
+// failure surfaced as a bare "git show failed: exit status 129" — true, and
+// useless. Diagnosing one then meant asking the reporter to re-run the command
+// by hand to see what git actually said (#972). The exit status alone cannot
+// distinguish an unsupported option from a bad revision or a permission error.
+//
+// Callers pass stderr, never runGit's combined output; see runGitSplit for why.
+func gitFailure(op, stderr string, err error) error {
+	diag := strings.TrimSpace(stderr)
 	if diag == "" {
 		return fmt.Errorf("%s failed: %w", op, err)
 	}
 	if len(diag) > gitDiagLimit {
-		// Keep the tail: git writes its diagnosis last, after whatever
-		// reached stdout before the failure.
+		// Keep the tail: die() exits the process, so the fatal git ends on is
+		// the last thing it writes, behind any warnings that preceded it.
 		diag = diag[len(diag)-gitDiagLimit:]
 		// Cutting by bytes can land mid-rune. Git speaks the user's locale,
 		// so this is not hypothetical — #972 came from a Japanese-language

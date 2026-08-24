@@ -199,9 +199,10 @@ func TestGetDiff_CancelledMidWriteReportsCancellation(t *testing.T) {
 	if strings.Contains(got, secret) {
 		t.Errorf("cancelled command leaked stdout into the error:\n%s", got)
 	}
-	// Reporting the cancellation rather than "signal: killed" also lets
-	// classifyItemError see it: it matches on context.DeadlineExceeded to
-	// choose the timeout failure class over the generic provider one.
+	// The leak assertion above holds with or without runGitSplit's cancellation
+	// guard, since quoting stderr alone already keeps stdout out of the error.
+	// This assertion is what pins the guard: drop it and the guard can go too,
+	// leaving "signal: killed" — the mechanism instead of the reason.
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("error %q does not unwrap to the cancellation", got)
 	}
