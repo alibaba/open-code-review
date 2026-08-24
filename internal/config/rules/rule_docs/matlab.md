@@ -4,21 +4,19 @@
 
 - Spelling errors in function names, local function names, variable names, struct field names, or `arguments` block parameter names at their declaration sites; do not report spelling errors at reference sites, as these are determined by the declaration
 - Typos in `error`/`warning`/`assert` message text, error identifiers, `fprintf`/`disp` log output, or the function description header that affect readability
-- Comments, identifiers, or log messages written in German rather than English
 
 #### File and Function Structure
 
-- A `.m` file that does not begin with the `function` keyword; scripts are not permitted
-- A file whose leading function name does not match the file name
+- In a new file, or when this diff renames the leading function: a leading function name that does not match the file name
 - Functions longer than roughly 200 lines that could be decomposed into local functions; report as non-blocking unless the length actively obscures a defect
 - Nested functions used where a local function would do; nested functions share the parent workspace and should be reserved for cases that genuinely require shared access
 - A helper called from exactly one parent function and placed in its own file instead of as a local function below the parent
-- Missing `%%` section markers, or section markers without a description of what the section does, in a function long enough to need structure
+- In a function added or substantially rewritten by this diff: missing `%%` section markers, or section markers without a description of what the section does, once the function is long enough to need structure
 - Do not report file length alone, and do not report structure findings on files that were only touched incidentally
 
 #### Argument Validation and Input Contracts
 
-- A function without an `arguments (Input)` block, or with an input block but no `arguments (Output)` block
+- In a new function, when the surrounding file already validates inputs and outputs via `arguments (Input)`/`arguments (Output)` blocks elsewhere: a function missing one of the two. Do not report this on an existing function being edited for an unrelated reason, or in a codebase that does not otherwise use this pattern
 - An `arguments` block placed after executable code rather than immediately following the function description header
 - Parameters declared with neither a size, a class, nor a validator function — an empty declaration validates nothing
 - Missing size specification where the shape is known (`(:,1)`, `(1,1)`, `(:,:)`); missing class specification where the type is known (`double`, `logical`, `string`, `struct`)
@@ -30,9 +28,9 @@
 #### Naming Conventions
 
 - `i` or `j` used as a loop counter or any other variable; both are built-in functions for the imaginary unit, and shadowing them silently changes complex arithmetic elsewhere in the function
-- Any built-in shadowed by a variable name — `length`, `size`, `sum`, `max`, `min`, `end`, `error`, `table`, `str`, `time`, `power`, `line` are the common offenders. Treat as blocking when the shadowed built-in is called later in the same scope
-- Function or variable names not in `snake_case`; single-letter or cryptic names where a descriptive name is possible; abbreviations that are not established domain terms
-- Logical variables not prefixed with `is`, `b_`, or `l_`
+- Any built-in shadowed by a variable name — `length`, `size`, `sum`, `max`, `min`, `error`, `table`, `str`, `time`, `power`, `line` are the common offenders. Treat as blocking when the shadowed built-in is called later in the same scope
+- Function or variable names not in `lowerCamelCase`; single-letter or cryptic names where a descriptive name is possible; abbreviations that are not established domain terms
+- Logical variables not prefixed with `is`
 - A variable reused within one function for a second purpose, or reassigned to a different class or array shape; this costs both readability and run time
 - Do not report abbreviations that are standard in the domain and do not report established naming in surrounding untouched code
 
@@ -141,5 +139,5 @@ Confirm the code is on a hot path and that the data scale justifies the finding 
 #### Compatibility and Code Analyzer
 
 - Toolbox-dependent functions used in code that is expected to run without that toolbox license
-- Remaining Code Analyzer warnings in the changed lines; the file should show a clean checkmark
+- Remaining Code Analyzer warnings in the changed lines
 - Do not report a compatibility concern without naming the introducing release — an unverified claim here is worse than silence
