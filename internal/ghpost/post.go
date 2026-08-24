@@ -126,7 +126,14 @@ func Post(ctx context.Context, target Target, comments []model.LlmComment, optio
 		return result, nil
 	}
 
+	summaryBatches, err := buildSummaryBatches(runID, "summary", ordered, len(inline), summary)
+	if err != nil {
+		return result, fmt.Errorf("build review summary: %w", err)
+	}
 	overview := buildSummaryBody(ordered, len(inline), len(summary), nil)
+	if len(summaryBatches) > 0 {
+		overview = strings.TrimPrefix(summaryBatches[0].body, summaryBatches[0].marker+"\n")
+	}
 	for start := 0; start < len(inline); start += reviewBatchSize {
 		end := min(start+reviewBatchSize, len(inline))
 		batchIndex := start / reviewBatchSize
@@ -177,10 +184,8 @@ func Post(ctx context.Context, target Target, comments []model.LlmComment, optio
 		return result, nil
 	}
 
-	if len(summary) > 0 {
-		if err := postSummary(ctx, client, target, baseBranch, runID, "summary", ordered, len(inline), summary); err != nil {
-			return result, fmt.Errorf("post non-inline findings: %w", err)
-		}
+	if err := postSummaryBatches(ctx, client, target, baseBranch, summaryBatches, 1); err != nil {
+		return result, fmt.Errorf("post non-inline finding continuations: %w", err)
 	}
 	result.InlineComments = len(inline)
 	result.SummaryComments = len(summary)
@@ -453,7 +458,12 @@ func postSummary(ctx context.Context, client *github.Client, target Target, base
 	if err != nil {
 		return err
 	}
-	for i, batch := range batches {
+	return postSummaryBatches(ctx, client, target, baseBranch, batches, 0)
+}
+
+func postSummaryBatches(ctx context.Context, client *github.Client, target Target, baseBranch string, batches []summaryBatch, start int) error {
+	for i := start; i < len(batches); i++ {
+		batch := batches[i]
 		_, landed, err := issueCommentExists(ctx, client, batch.marker)
 		if err != nil {
 			return fmt.Errorf("check existing summary batch %d: %w", i+1, err)
