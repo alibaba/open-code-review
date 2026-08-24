@@ -163,6 +163,23 @@ func TestCommentCollectorKeepsSidesAlignedThroughFiltering(t *testing.T) {
 	}
 }
 
+func TestCommentCollectorKeepsFinalAndReviewPathsSeparate(t *testing.T) {
+	c := NewCommentCollector()
+	c.AddForReviewItem(cm("b.go", "re-filed"), location.SideNew, "a.go")
+
+	finalComments, finalSides := c.CommentsAndSidesForPath("b.go")
+	if len(finalComments) != 1 || len(finalSides) != 1 || finalSides[0] != location.SideNew {
+		t.Fatalf("final path comments/sides = %+v/%+v", finalComments, finalSides)
+	}
+	reviewComments, reviewSides := c.CommentsAndSidesForReviewItem("a.go")
+	if len(reviewComments) != 1 || reviewComments[0].Path != "b.go" || len(reviewSides) != 1 || reviewSides[0] != location.SideNew {
+		t.Fatalf("review item comments/sides = %+v/%+v", reviewComments, reviewSides)
+	}
+	if comments, _ := c.CommentsAndSidesForReviewItem("b.go"); len(comments) != 0 {
+		t.Fatalf("destination review item unexpectedly owns comments: %+v", comments)
+	}
+}
+
 func TestCommentCollector_RemoveByPathAndIndices_NoMatch(t *testing.T) {
 	c := NewCommentCollector()
 	c.Add(cm("a.go", "x"))

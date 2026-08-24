@@ -671,7 +671,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 						}
 					}
 				}
-				r.deps.CommentCollector.AddWithSide(*cm, side)
+				r.deps.CommentCollector.AddForReviewItem(*cm, side, newPath)
 			}
 		}
 

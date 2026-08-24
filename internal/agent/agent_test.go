@@ -6,10 +6,13 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
@@ -23,6 +26,62 @@ import (
 type fakeAgentClient struct {
 	responses []*llm.ChatResponse
 	calls     int
+}
+
+type orderedRefileClient struct {
+	checkpointPath string
+	mu             sync.Mutex
+	calls          map[string]int
+}
+
+func (c *orderedRefileClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	path := ""
+	for _, message := range req.Messages {
+		content, ok := message.Content.(string)
+		if !ok {
+			continue
+		}
+		switch {
+		case strings.Contains(content, "Review a.go"):
+			path = "a.go"
+		case strings.Contains(content, "Review b.go"):
+			path = "b.go"
+		}
+	}
+	if path == "" {
+		return nil, fmt.Errorf("request did not identify a review path")
+	}
+
+	c.mu.Lock()
+	call := c.calls[path]
+	c.calls[path] = call + 1
+	c.mu.Unlock()
+
+	if path == "b.go" {
+		return agentTaskDoneResponse(), nil
+	}
+	if call > 0 {
+		return agentTaskDoneResponse(), nil
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(c.checkpointPath)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read session checkpoint: %w", err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			var record struct {
+				Type     string `json:"type"`
+				FilePath string `json:"filePath"`
+			}
+			if json.Unmarshal([]byte(line), &record) == nil && record.Type == "review_item_done" && record.FilePath == "b.go" {
+				return codeCommentResponse("a.go"), nil
+			}
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return nil, fmt.Errorf("b.go checkpoint was not written before a.go comment")
 }
 
 func (f *fakeAgentClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -992,6 +1051,84 @@ func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {
 	}
 	if !strings.Contains(comments[0].Content, "null pointer") {
 		t.Errorf("Content = %q", comments[0].Content)
+	}
+}
+
+func TestDispatchSubtasksPersistsLateCrossFileRefileWithProducingSubtask(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	sess := session.New(repoDir, "feature", "fake", session.SessionOptions{
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+	})
+	checkpointPath, err := session.SessionFilePath(repoDir, sess.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	client := &orderedRefileClient{checkpointPath: checkpointPath, calls: map[string]int{}}
+	a := New(Args{
+		From:             "main",
+		To:               "feature",
+		LLMClient:        client,
+		Model:            "fake",
+		Session:          sess,
+		CommentCollector: collector,
+		Tools:            reg,
+		MaxConcurrency:   2,
+		Template: template.Template{
+			MaxTokens:           100000,
+			MaxToolRequestTimes: 3,
+			MainTask: template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{current_file_path}}: {{diff}}"}},
+			},
+		},
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment", Description: "comment"}},
+		},
+	})
+	a.diffs = []model.Diff{
+		{
+			OldPath: "a.go",
+			NewPath: "a.go",
+			Diff:    "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n package a\n+var changed = true\n",
+		},
+		{
+			OldPath: "b.go",
+			NewPath: "b.go",
+			Diff:    "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1,2 @@\n package b\n+foo := bar.Baz()\n",
+		},
+	}
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if len(comments) != 1 || comments[0].Path != "b.go" {
+		t.Fatalf("current comments = %+v, want one comment re-filed to b.go", comments)
+	}
+	if err := sess.Finalize(); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	rawSession, err := os.ReadFile(checkpointPath)
+	if err != nil {
+		t.Fatalf("read session JSONL: %v", err)
+	}
+	if !strings.Contains(string(rawSession), "potential null pointer") {
+		t.Fatal("session JSONL omitted the late cross-file comment")
+	}
+
+	resumed, err := session.LoadComments(repoDir, sess.SessionID)
+	if err != nil {
+		t.Fatalf("LoadComments: %v", err)
+	}
+	if len(resumed) != 1 || resumed[0].Path != "b.go" {
+		t.Fatalf("resumed comments = %+v, want the re-filed b.go comment", resumed)
 	}
 }
 

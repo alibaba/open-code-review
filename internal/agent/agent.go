@@ -797,7 +797,7 @@ dispatchLoop:
 			}
 			for _, d := range g.Diffs {
 				fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-				comments, sides := a.args.CommentCollector.CommentsAndSidesForPath(d.NewPath)
+				comments, sides := a.args.CommentCollector.CommentsAndSidesForReviewItem(d.NewPath)
 				a.markCompleted(d)
 				a.session.RecordReviewItemDoneWithSides(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments, sides)
 			}
@@ -878,7 +878,7 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 			continue
 		}
 		for i, cm := range item.Comments {
-			a.args.CommentCollector.AddWithSide(cm, locationSideAt(item.CommentSides, i))
+			a.args.CommentCollector.AddForReviewItem(cm, locationSideAt(item.CommentSides, i), effectivePath(d))
 		}
 		a.session.RecordReviewItemReusedWithSides(effectivePath(d), d.OldPath, d.NewPath, fingerprint, resume.SessionID, item.Comments, item.CommentSides)
 		a.markReused(d)
