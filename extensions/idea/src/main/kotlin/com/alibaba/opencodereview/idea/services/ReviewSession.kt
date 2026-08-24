@@ -10,9 +10,11 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** 有评论则 done，无评论但 CLI 报错则 failed，否则 empty。 */
+private const val STATUS_COMPLETED_WITH_ERRORS = "completed_with_errors"
+
 fun resultToState(result: CliResult): ReviewState = when {
     result.comments.isNotEmpty() -> ReviewState.DONE
-    result.status == "completed_with_errors" -> ReviewState.FAILED
+    result.status == STATUS_COMPLETED_WITH_ERRORS -> ReviewState.FAILED
     else -> ReviewState.EMPTY
 }
 

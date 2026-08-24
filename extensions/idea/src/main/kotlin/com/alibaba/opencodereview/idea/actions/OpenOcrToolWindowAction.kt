@@ -10,8 +10,12 @@ class OpenOcrToolWindowAction : AnAction() {
     override fun update(event: AnActionEvent) {
         event.presentation.isEnabledAndVisible = event.project != null
     }
+    companion object {
+        private const val TOOL_WINDOW_ID = "Open Code Review"
+    }
+
     override fun actionPerformed(event: AnActionEvent) {
         val project = event.project ?: return
-        ToolWindowManager.getInstance(project).getToolWindow("Open Code Review")?.activate(null)
+        ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)?.activate(null)
     }
 }

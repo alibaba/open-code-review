@@ -52,10 +52,10 @@ fun buildReviewArgs(opts: CliRunOptions): List<String> = buildList {
     when (opts.mode) {
         ReviewMode.WORKSPACE -> Unit
         ReviewMode.BRANCH -> {
-            opts.from?.takeIf(String::isNotBlank)?.let { addAll(listOf("--from", it)) }
-            opts.to?.takeIf(String::isNotBlank)?.let { addAll(listOf("--to", it)) }
+            opts.from?.takeIf(String::isNotBlank)?.let { addAll(listOf("--from", it.trim())) }
+            opts.to?.takeIf(String::isNotBlank)?.let { addAll(listOf("--to", it.trim())) }
         }
-        ReviewMode.COMMIT -> opts.commit?.takeIf(String::isNotBlank)?.let { addAll(listOf("--commit", it)) }
+        ReviewMode.COMMIT -> opts.commit?.takeIf(String::isNotBlank)?.let { addAll(listOf("--commit", it.trim())) }
     }
     addAll(listOf("--format", "json"))
     // JSON 结果走 stdout，进度日志走 stderr，供插件实时回显。
@@ -116,7 +116,7 @@ private val ERROR_PREFIX_REGEX = Regex("^error:\\s*", RegexOption.IGNORE_CASE)
 
 /** 从 CLI stderr 中提取最有用的报错文本：优先最后一条 `error:` 行，否则取最后一行非空内容。 */
 fun extractCliError(stderr: String): String {
-    val lines = stderr.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
+    val lines = stderr.lineSequence().map(String::trim).filter(String::isNotEmpty)
     val errLine = lines.lastOrNull { it.startsWith("error:", ignoreCase = true) }
     if (errLine != null) return errLine.replaceFirst(ERROR_PREFIX_REGEX, "")
     return lines.lastOrNull().orEmpty()
