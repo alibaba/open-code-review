@@ -614,6 +614,9 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	toDispatch := a.applyResume(a.diffs)
 
 	var wg sync.WaitGroup
+	var resultMu sync.Mutex
+	filterReviewItems := make(map[string]struct{})
+	var completedItems []completedReviewItem
 
 	concurrency := a.args.MaxConcurrency
 	if concurrency <= 0 {
@@ -734,6 +737,9 @@ dispatchLoop:
 				a.recordWarning("subtask_error", d.NewPath, err.Error())
 				return
 			}
+			resultMu.Lock()
+			filterReviewItems[d.NewPath] = struct{}{}
+			resultMu.Unlock()
 			if !completed {
 				if stop != nil {
 					a.markFailed(d, stop.class, stop.reason)
@@ -751,16 +757,30 @@ dispatchLoop:
 				}
 				return
 			}
-			comments, sides := a.args.CommentCollector.CommentsAndSidesForReviewItem(d.NewPath)
 			a.markCompleted(d)
-			a.session.RecordReviewItemDoneWithSides(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments, sides)
+			resultMu.Lock()
+			completedItems = append(completedItems, completedReviewItem{diff: d, fingerprint: fingerprint})
+			resultMu.Unlock()
 		}(toDispatch[i])
 	}
 
 	wg.Wait()
-	// All subtasks finished — collect comments from the global collector once.
+	// All main-task subtasks must finish before filtering. A comment can be
+	// re-filed to another diff by an asynchronous worker, so filtering a final
+	// path while producers are still active makes the result depend on goroutine
+	// order. The pool-wide wait is safe here because no further Submit calls can
+	// occur after the subtask join.
 	if a.args.CommentWorkerPool != nil {
 		a.args.CommentWorkerPool.Await()
+	}
+	a.executeReviewFilters(ctx, filterReviewItems, concurrency, timeout)
+
+	// Persist checkpoints only after every final-path filter has completed. Each
+	// checkpoint remains owned by its producing review item, including comments
+	// that were re-filed to a different destination path.
+	for _, item := range completedItems {
+		comments, sides := a.args.CommentCollector.CommentsAndSidesForReviewItem(item.diff.NewPath)
+		a.session.RecordReviewItemDoneWithSides(item.diff.NewPath, item.diff.OldPath, item.diff.NewPath, item.fingerprint, comments, sides)
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		a.recordContextFailure(ctxErr)
@@ -1169,6 +1189,11 @@ type subtaskStop struct {
 	reportAsError bool
 }
 
+type completedReviewItem struct {
+	diff        model.Diff
+	fingerprint string
+}
+
 // registerCoverage freezes the coverage denominator before any reuse or
 // concurrent dispatch: it registers every non-deleted diff as a selected item
 // and seals the set. Deleted files are excluded — they are never dispatched, so
@@ -1332,18 +1357,6 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 		}
 		return completed, stop, nil
 	}()
-	if err == nil {
-		// REVIEW_FILTER_TASK runs after the main loop and decides which of the
-		// just-collected comments to drop. It needs to see comments produced by
-		// this file's async CommentWorkerPool units, so wait for those to drain
-		// first. This must be keyed to newPath: a pool-wide Await here would run
-		// concurrently with other files' Submit calls and misuses sync.WaitGroup
-		// ("Add called concurrently with Wait").
-		if a.args.CommentWorkerPool != nil {
-			a.args.CommentWorkerPool.AwaitKey(newPath)
-		}
-		a.executeReviewFilter(ctx, d, newPath)
-	}
 	if err != nil {
 		return false, nil, err
 	}
@@ -1418,6 +1431,14 @@ var filterTools = []llm.ToolDef{
 // executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are
 // provably incorrect based solely on the diff. Errors are logged and silently ignored.
 func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath string) {
+	a.executeReviewFilterForReviewItems(ctx, d, newPath, nil)
+}
+
+// executeReviewFilterForReviewItems filters only comments produced by the
+// selected review items. Filtering still groups candidates by their final path,
+// while the ownership scope prevents resumed comments from being reviewed a
+// second time.
+func (a *Agent) executeReviewFilterForReviewItems(ctx context.Context, d model.Diff, newPath string, reviewItems map[string]struct{}) {
 	ctx, span := telemetry.StartSpan(ctx, "review_filter.execute")
 	defer span.End()
 	telemetry.SetAttr(span, "file.path", newPath)
@@ -1433,7 +1454,7 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 		return
 	}
 
-	comments := a.args.CommentCollector.CommentsForPath(newPath)
+	comments, pathIndices := a.args.CommentCollector.CommentsAndPathIndicesForReviewItems(newPath, reviewItems)
 	if len(comments) == 0 {
 		return
 	}
@@ -1497,12 +1518,66 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 		return
 	}
 
-	a.args.CommentCollector.RemoveByPathAndIndices(newPath, indices)
+	removeIndices := make(map[int]struct{}, len(indices))
+	for index := range indices {
+		removeIndices[pathIndices[index]] = struct{}{}
+	}
+	a.args.CommentCollector.RemoveByPathAndIndices(newPath, removeIndices)
 	telemetry.Event(ctx, "review_filter.completed",
 		attribute.String("file.path", newPath),
 		attribute.Int("total_comments", len(comments)),
 		attribute.Int("removed", len(indices)))
 	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for %s\n", len(indices), newPath)
+}
+
+// executeReviewFilters runs the post-join filter phase once per final comment
+// path. Filters retain the configured per-file concurrency limit, but no
+// checkpoint can be persisted until the whole phase joins.
+func (a *Agent) executeReviewFilters(ctx context.Context, reviewItems map[string]struct{}, concurrency int, timeout time.Duration) {
+	ft := a.args.Template.ReviewFilterTask
+	if ft == nil || len(ft.Messages) == 0 {
+		return
+	}
+	paths := a.args.CommentCollector.FinalPathsForReviewItems(reviewItems)
+	if len(paths) == 0 {
+		return
+	}
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, concurrency)
+	for _, path := range paths {
+		d := a.findDiff(path)
+		if d == nil {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for %s: diff not found\n", path)
+			continue
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(path string, d model.Diff) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(stdout.Writer(), "[ocr] Review filter panic for %s: %v\n%s\n", path, r, debug.Stack())
+					telemetry.ErrorEvent(ctx, "review_filter.panic", fmt.Errorf("panic: %v", r),
+						telemetry.AnyToAttr("file.path", path))
+					a.recordWarning("review_filter_error", path, fmt.Sprintf("panic: %v", r))
+				}
+			}()
+
+			filterCtx := ctx
+			var cancel context.CancelFunc
+			if timeout > 0 {
+				filterCtx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+			}
+			a.executeReviewFilterForReviewItems(filterCtx, d, path, reviewItems)
+		}(path, *d)
+	}
+	wg.Wait()
 }
 
 // buildFilterCommentsJSON serializes comments into a JSON array with generated IDs.

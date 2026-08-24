@@ -180,6 +180,32 @@ func TestCommentCollectorKeepsFinalAndReviewPathsSeparate(t *testing.T) {
 	}
 }
 
+func TestCommentCollectorScopesFinalPathCommentsToReviewItems(t *testing.T) {
+	c := NewCommentCollector()
+	c.AddForReviewItem(cm("b.go", "reused destination comment"), location.SideOld, "b.go")
+	c.AddForReviewItem(cm("b.go", "new cross-file comment"), location.SideNew, "a.go")
+	c.AddForReviewItem(cm("c.go", "another cross-file comment"), location.SideNew, "a.go")
+
+	reviewItems := map[string]struct{}{"a.go": {}}
+	comments, pathIndices := c.CommentsAndPathIndicesForReviewItems("b.go", reviewItems)
+	if len(comments) != 1 || comments[0].Content != "new cross-file comment" {
+		t.Fatalf("scoped comments = %+v, want only the new cross-file comment", comments)
+	}
+	if len(pathIndices) != 1 || pathIndices[0] != 1 {
+		t.Fatalf("path indices = %v, want [1]", pathIndices)
+	}
+	paths := c.FinalPathsForReviewItems(reviewItems)
+	if len(paths) != 2 || paths[0] != "b.go" || paths[1] != "c.go" {
+		t.Fatalf("final paths = %v, want [b.go c.go]", paths)
+	}
+
+	c.RemoveByPathAndIndices("b.go", map[int]struct{}{pathIndices[0]: {}})
+	remaining := c.CommentsForPath("b.go")
+	if len(remaining) != 1 || remaining[0].Content != "reused destination comment" {
+		t.Fatalf("remaining comments = %+v, want only the reused comment", remaining)
+	}
+}
+
 func TestCommentCollector_RemoveByPathAndIndices_NoMatch(t *testing.T) {
 	c := NewCommentCollector()
 	c.Add(cm("a.go", "x"))

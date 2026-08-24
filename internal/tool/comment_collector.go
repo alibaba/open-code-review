@@ -4,6 +4,7 @@
 package tool
 
 import (
+	"sort"
 	"sync"
 
 	"github.com/alibaba/open-code-review/internal/location"
@@ -105,6 +106,50 @@ func (c *CommentCollector) CommentsAndSidesForReviewItem(path string) ([]model.L
 	return comments, sides
 }
 
+// CommentsAndPathIndicesForReviewItems returns comments filed at path that
+// were produced by one of the selected review items. The returned indices are
+// positions among all comments filed at path, so callers can safely pass a
+// selected subset back to RemoveByPathAndIndices. A nil reviewItems map selects
+// every review item for backwards-compatible, path-only filtering.
+func (c *CommentCollector) CommentsAndPathIndicesForReviewItems(path string, reviewItems map[string]struct{}) ([]model.LlmComment, []int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var comments []model.LlmComment
+	var pathIndices []int
+	pathIndex := 0
+	for i, cm := range c.comments {
+		if cm.Path != path {
+			continue
+		}
+		if reviewItemSelected(reviewItems, reviewPathAt(c.reviewPaths, i, cm.Path)) {
+			comments = append(comments, cm)
+			pathIndices = append(pathIndices, pathIndex)
+		}
+		pathIndex++
+	}
+	return comments, pathIndices
+}
+
+// FinalPathsForReviewItems returns the unique final comment paths produced by
+// the selected review items. Paths are sorted so post-processing order is
+// deterministic. A nil reviewItems map selects every review item.
+func (c *CommentCollector) FinalPathsForReviewItems(reviewItems map[string]struct{}) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	paths := make(map[string]struct{})
+	for i, cm := range c.comments {
+		if reviewItemSelected(reviewItems, reviewPathAt(c.reviewPaths, i, cm.Path)) {
+			paths[cm.Path] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(paths))
+	for path := range paths {
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Snapshot returns the current count of stored comments. Pair with Since /
 // ReplaceSince to operate on the comments added between two points in time
 // (e.g. before / after a scan batch).
@@ -189,6 +234,14 @@ func reviewPathAt(paths []string, index int, fallback string) string {
 		return fallback
 	}
 	return paths[index]
+}
+
+func reviewItemSelected(reviewItems map[string]struct{}, reviewPath string) bool {
+	if reviewItems == nil {
+		return true
+	}
+	_, ok := reviewItems[reviewPath]
+	return ok
 }
 
 func sideAt(sides []location.Side, index int) location.Side {
