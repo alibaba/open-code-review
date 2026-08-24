@@ -12,8 +12,22 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/ghpost"
+	"github.com/alibaba/open-code-review/internal/location"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 )
+
+func TestGitHubFindingsMapsSidesAndFailsClosedWhenMissing(t *testing.T) {
+	comments := []model.LlmComment{{Content: "old"}, {Content: "new"}, {Content: "legacy"}}
+	findings := githubFindings(comments, []location.Side{location.SideOld, location.SideNew})
+	want := []ghpost.Side{ghpost.SideOld, ghpost.SideNew, ghpost.SideUnknown}
+	for i := range want {
+		if findings[i].Side != want[i] || findings[i].Comment.Content != comments[i].Content {
+			t.Fatalf("finding %d = %+v, want side %q", i, findings[i], want[i])
+		}
+	}
+}
 
 func TestGitHubPostingErrorIsReturnedWithoutLogging(t *testing.T) {
 	originalStderr := os.Stderr

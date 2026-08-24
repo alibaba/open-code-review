@@ -6,6 +6,7 @@ package diff
 import (
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -58,6 +59,17 @@ func TestRelocateAcrossFiles_RefilesToImplementation(t *testing.T) {
 	// right file while still pointing at the wrong line.
 	if cm.StartLine <= 0 || cm.EndLine < cm.StartLine {
 		t.Fatalf("StartLine/EndLine = %d/%d; want a resolved range", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestRelocateAcrossFilesCarriesResolvedSide(t *testing.T) {
+	comment := &model.LlmComment{
+		Path:         "src/span.h",
+		ExistingCode: "\tif(text == NULL) return;\n\tva_end(args);",
+	}
+	path, side, ok := RelocateAcrossFilesWithSide(comment, diffsFixture())
+	if !ok || path != "src/span.c" || side != location.SideNew {
+		t.Fatalf("RelocateAcrossFilesWithSide = %q, %q, %v", path, side, ok)
 	}
 }
 

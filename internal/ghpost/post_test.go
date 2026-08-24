@@ -193,6 +193,20 @@ func postTarget(repoDir, headSHA string) Target {
 	return Target{RepoDir: repoDir, BaseRef: "master", ResolvedBase: "reviewed-base", ResolvedHead: headSHA}
 }
 
+// The posting fixtures use line 2 for resolved new-side findings and line 1
+// for comments whose legacy checkpoint has no side provenance.
+func testFindings(comments []model.LlmComment) []Finding {
+	findings := make([]Finding, len(comments))
+	for i, comment := range comments {
+		side := SideUnknown
+		if comment.StartLine == 2 {
+			side = SideNew
+		}
+		findings[i] = Finding{Comment: comment, Side: side}
+	}
+	return findings
+}
+
 func TestCanonicalCommentsStabilizeMarkersAndBatches(t *testing.T) {
 	comments := []model.LlmComment{
 		{Path: "z.go", StartLine: 9, EndLine: 9, Content: "last", Category: "bug"},
@@ -211,13 +225,18 @@ func TestCanonicalCommentsStabilizeMarkersAndBatches(t *testing.T) {
 		t.Fatalf("canonicalComments mutated input: %#v", comments)
 	}
 	target := Target{ResolvedBase: "base-a", ResolvedHead: "head"}
-	id1 := reviewRunID("acme", "widget", 14, "master", target, first)
-	id2 := reviewRunID("acme", "widget", 14, "master", target, second)
+	id1 := reviewRunID("acme", "widget", 14, "master", target, testFindings(first))
+	id2 := reviewRunID("acme", "widget", 14, "master", target, testFindings(second))
 	if id1 != id2 {
 		t.Fatalf("stable IDs differ: %q != %q", id1, id2)
 	}
+	withDifferentSide := testFindings(first)
+	withDifferentSide[0].Side = SideOld
+	if changed := reviewRunID("acme", "widget", 14, "master", target, withDifferentSide); changed == id1 {
+		t.Fatal("source side did not affect marker identity")
+	}
 	target.ResolvedBase = "base-b"
-	if changed := reviewRunID("acme", "widget", 14, "master", target, first); changed == id1 {
+	if changed := reviewRunID("acme", "widget", 14, "master", target, testFindings(first)); changed == id1 {
 		t.Fatal("resolved base did not affect marker identity")
 	}
 }
@@ -234,7 +253,7 @@ func TestPostRestoredFindingUsesRightOnlyInventory(t *testing.T) {
 	if err := json.Unmarshal(raw, &restored); err != nil {
 		t.Fatalf("unmarshal comment: %v", err)
 	}
-	result, err := Post(context.Background(), postTarget(repoDir, headSHA), []model.LlmComment{restored}, Options{Token: "token"})
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings([]model.LlmComment{restored}), Options{Token: "token"})
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
@@ -247,19 +266,36 @@ func TestPostRestoredFindingUsesRightOnlyInventory(t *testing.T) {
 	}
 }
 
-func TestPostRoutesBothSideLineToSummary(t *testing.T) {
+func TestPostRoutesUnknownSideToSummary(t *testing.T) {
 	repoDir, headSHA := newPostRepo(t)
 	state := defaultPostState(headSHA)
 	newPostServer(t, state)
-	result, err := Post(context.Background(), postTarget(repoDir, headSHA), []model.LlmComment{{Path: "main.go", StartLine: 1, EndLine: 1, Content: "ambiguous"}}, Options{Token: "token"})
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings([]model.LlmComment{{Path: "main.go", StartLine: 1, EndLine: 1, Content: "ambiguous"}}), Options{Token: "token"})
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
 	if result.InlineComments != 0 || result.SummaryComments != 1 || len(state.reviewPosts) != 0 || len(state.issuePosts) != 1 {
 		t.Fatalf("result = %+v, reviews = %d, summaries = %d", result, len(state.reviewPosts), len(state.issuePosts))
 	}
-	if !strings.Contains(state.issuePosts[0], "line range is ambiguous across both sides of the PR diff") {
+	if !strings.Contains(state.issuePosts[0], "line side provenance is unavailable") {
 		t.Fatalf("summary = %q", state.issuePosts[0])
+	}
+}
+
+func TestPostUsesExplicitNewSideInsideOverlappingNumericRanges(t *testing.T) {
+	repoDir, headSHA := newPostRepo(t)
+	state := defaultPostState(headSHA)
+	newPostServer(t, state)
+	finding := Finding{
+		Comment: model.LlmComment{Path: "main.go", StartLine: 1, EndLine: 1, Content: "new-side context"},
+		Side:    SideNew,
+	}
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), []Finding{finding}, Options{Token: "token"})
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if result.InlineComments != 1 || result.SummaryComments != 0 || len(state.reviewPosts) != 1 {
+		t.Fatalf("result = %+v, reviews = %d", result, len(state.reviewPosts))
 	}
 }
 
@@ -271,7 +307,7 @@ func TestPostIncludesMixedSummaryFindingInReviewBody(t *testing.T) {
 		{Path: "main.go", StartLine: 1, EndLine: 1, Content: "ambiguous"},
 		{Path: "main.go", StartLine: 2, EndLine: 2, Content: "inline"},
 	}
-	result, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings(comments), Options{Token: "token"})
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
@@ -283,7 +319,7 @@ func TestPostIncludesMixedSummaryFindingInReviewBody(t *testing.T) {
 		"2 comment(s) generated.",
 		"Inline findings: 1",
 		"Summary-only findings: 1",
-		"line range is ambiguous across both sides of the PR diff",
+		"line side provenance is unavailable",
 		"ambiguous",
 	} {
 		if !strings.Contains(body, want) {
@@ -306,7 +342,7 @@ func TestPostVerifiesMergeBaseBeforeEveryReviewWrite(t *testing.T) {
 	for i := range comments {
 		comments[i] = model.LlmComment{Path: "main.go", StartLine: 2, EndLine: 2, Content: fmt.Sprintf("finding-%02d", i)}
 	}
-	_, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	_, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings(comments), Options{Token: "token"})
 	if err == nil || !strings.Contains(err.Error(), "PR merge-base changed") {
 		t.Fatalf("Post error = %v", err)
 	}
@@ -320,7 +356,7 @@ func TestPostAllowsBaseTipChangeWhenMergeBaseIsStable(t *testing.T) {
 	state := defaultPostState(headSHA)
 	state.baseSHAForCall = func(call int) string { return fmt.Sprintf("base-tip-%d", call) }
 	newPostServer(t, state)
-	if _, err := Post(context.Background(), postTarget(repoDir, headSHA), []model.LlmComment{{Path: "main.go", StartLine: 2, EndLine: 2, Content: "finding"}}, Options{Token: "token"}); err != nil {
+	if _, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings([]model.LlmComment{{Path: "main.go", StartLine: 2, EndLine: 2, Content: "finding"}}), Options{Token: "token"}); err != nil {
 		t.Fatalf("Post: %v", err)
 	}
 	if len(state.reviewPosts) != 1 {
@@ -338,7 +374,7 @@ func TestPostVerifiesMergeBaseBeforeSummaryWrite(t *testing.T) {
 		return "reviewed-base"
 	}
 	newPostServer(t, state)
-	_, err := Post(context.Background(), postTarget(repoDir, headSHA), []model.LlmComment{{Path: "main.go", StartLine: 1, EndLine: 1, Content: "summary"}}, Options{Token: "token"})
+	_, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings([]model.LlmComment{{Path: "main.go", StartLine: 1, EndLine: 1, Content: "summary"}}), Options{Token: "token"})
 	if err == nil || !strings.Contains(err.Error(), "PR merge-base changed") {
 		t.Fatalf("Post error = %v", err)
 	}
@@ -362,7 +398,7 @@ func TestPostVerifiesMergeBaseBeforeFallbackWrite(t *testing.T) {
 	for i := range comments {
 		comments[i] = model.LlmComment{Path: "main.go", StartLine: 2, EndLine: 2, Content: fmt.Sprintf("finding-%02d", i)}
 	}
-	_, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	_, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings(comments), Options{Token: "token"})
 	if err == nil || !strings.Contains(err.Error(), "PR merge-base changed") {
 		t.Fatalf("Post error = %v", err)
 	}
@@ -376,10 +412,10 @@ func TestPostResumesExistingFallbackWithoutRetryingInline(t *testing.T) {
 	state := defaultPostState(headSHA)
 	comments := []model.LlmComment{{Path: "main.go", StartLine: 2, EndLine: 2, Content: "finding"}}
 	canonical := canonicalComments(comments)
-	runID := reviewRunID("acme", "widget", 14, "master", postTarget(repoDir, headSHA), canonical)
+	runID := reviewRunID("acme", "widget", 14, "master", postTarget(repoDir, headSHA), testFindings(canonical))
 	state.issueBodies = []string{postingMarker(runID, "fallback-0", 0) + "\nexisting"}
 	newPostServer(t, state)
-	result, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings(comments), Options{Token: "token"})
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
@@ -401,11 +437,11 @@ func TestPostResumesRemainingFallbackWithoutRetryingInline(t *testing.T) {
 		})
 	}
 	canonical := canonicalComments(comments)
-	runID := reviewRunID("acme", "widget", 14, "master", postTarget(repoDir, headSHA), canonical)
+	runID := reviewRunID("acme", "widget", 14, "master", postTarget(repoDir, headSHA), testFindings(canonical))
 	state.issueBodies = []string{postingMarker(runID, "fallback-remaining-1", 0) + "\nexisting"}
 	newPostServer(t, state)
 
-	result, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings(comments), Options{Token: "token"})
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
@@ -422,10 +458,10 @@ func TestPostRepairsPartialFallbackAndKeepsGlobalCounts(t *testing.T) {
 		comments[i] = model.LlmComment{Path: "main.go", StartLine: 2, EndLine: 2, Content: fmt.Sprintf("finding-%02d", i)}
 	}
 	canonical := canonicalComments(comments)
-	runID := reviewRunID("acme", "widget", 14, "master", postTarget(repoDir, headSHA), canonical)
+	runID := reviewRunID("acme", "widget", 14, "master", postTarget(repoDir, headSHA), testFindings(canonical))
 	state.issueBodies = []string{postingMarker(runID, "fallback-0", 1) + "\nexisting second batch"}
 	newPostServer(t, state)
-	result, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings(comments), Options{Token: "token"})
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
@@ -446,7 +482,7 @@ func TestPostFallbackHeaderUsesGlobalCounts(t *testing.T) {
 	for i := range comments {
 		comments[i] = model.LlmComment{Path: "main.go", StartLine: 2, EndLine: 2, Content: fmt.Sprintf("finding-%02d", i)}
 	}
-	_, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	_, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings(comments), Options{Token: "token"})
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
@@ -476,7 +512,7 @@ func TestPostLaterFallbackDoesNotRepeatEmbeddedSummaryFindings(t *testing.T) {
 		})
 	}
 
-	result, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings(comments), Options{Token: "token"})
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
@@ -522,7 +558,7 @@ func TestPostPublishesSummaryContinuationsBeforeLaterFallback(t *testing.T) {
 		})
 	}
 
-	result, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings(comments), Options{Token: "token"})
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
@@ -548,7 +584,7 @@ func TestPostReconcilesAcceptedAmbiguousReviewWrite(t *testing.T) {
 	state.reviewPostStatus = http.StatusInternalServerError
 	state.acceptFailedPost = true
 	newPostServer(t, state)
-	result, err := Post(context.Background(), postTarget(repoDir, headSHA), []model.LlmComment{{Path: "main.go", StartLine: 2, EndLine: 2, Content: "finding"}}, Options{Token: "token"})
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings([]model.LlmComment{{Path: "main.go", StartLine: 2, EndLine: 2, Content: "finding"}}), Options{Token: "token"})
 	if err != nil {
 		t.Fatalf("Post: %v", err)
 	}
@@ -562,7 +598,7 @@ func TestPostRefusesFallbackWhileReviewWriteIsUnknown(t *testing.T) {
 	state := defaultPostState(headSHA)
 	state.reviewPostStatus = http.StatusInternalServerError
 	newPostServer(t, state)
-	_, err := Post(context.Background(), postTarget(repoDir, headSHA), []model.LlmComment{{Path: "main.go", StartLine: 2, EndLine: 2, Content: "finding"}}, Options{Token: "token"})
+	_, err := Post(context.Background(), postTarget(repoDir, headSHA), testFindings([]model.LlmComment{{Path: "main.go", StartLine: 2, EndLine: 2, Content: "finding"}}), Options{Token: "token"})
 	if err == nil || !strings.Contains(err.Error(), "outcome remains unknown") {
 		t.Fatalf("Post error = %v", err)
 	}

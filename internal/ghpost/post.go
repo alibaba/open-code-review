@@ -48,6 +48,21 @@ type Result struct {
 	SummaryComments   int
 }
 
+// Side is the resolved source side carried into GitHub posting.
+type Side string
+
+const (
+	SideUnknown Side = ""
+	SideOld     Side = "OLD"
+	SideNew     Side = "NEW"
+)
+
+// Finding keeps a review comment and its source-side provenance together.
+type Finding struct {
+	Comment model.LlmComment
+	Side    Side
+}
+
 type repositoryCandidate struct {
 	remote     string
 	repository github.Repository
@@ -76,7 +91,7 @@ type fallbackSequence struct {
 
 // Post discovers the unique matching pull request, proves its current merge
 // base, and posts deterministic review and summary batches.
-func Post(ctx context.Context, target Target, comments []model.LlmComment, options Options) (Result, error) {
+func Post(ctx context.Context, target Target, findings []Finding, options Options) (Result, error) {
 	if err := validateTarget(target); err != nil {
 		return Result{}, err
 	}
@@ -113,10 +128,11 @@ func Post(ctx context.Context, target Target, comments []model.LlmComment, optio
 		return result, err
 	}
 
-	ordered := canonicalComments(comments)
+	orderedFindings := canonicalFindings(findings)
+	ordered := findingComments(orderedFindings)
 	inventory := buildDiffInventory(files)
-	inline, inlineSources, summary := classifyFindings(ordered, inventory)
-	runID := reviewRunID(destination.repository.Owner(), destination.repository.Name(), destination.prNumber, baseBranch, target, ordered)
+	inline, inlineSources, summary := classifyFindings(orderedFindings, inventory)
+	runID := reviewRunID(destination.repository.Owner(), destination.repository.Name(), destination.prNumber, baseBranch, target, orderedFindings)
 
 	if fallback, found, err := existingFallbackSequence(ctx, client, runID, len(inline)); err != nil {
 		return result, fmt.Errorf("inspect fallback sequence: %w", err)
@@ -206,13 +222,14 @@ func validateTarget(target Target) error {
 	return nil
 }
 
-func classifyFindings(comments []model.LlmComment, inventory diffInventory) ([]github.Comment, []model.LlmComment, []summaryFinding) {
-	inline := make([]github.Comment, 0, len(comments))
-	inlineSources := make([]model.LlmComment, 0, len(comments))
+func classifyFindings(findings []Finding, inventory diffInventory) ([]github.Comment, []model.LlmComment, []summaryFinding) {
+	inline := make([]github.Comment, 0, len(findings))
+	inlineSources := make([]model.LlmComment, 0, len(findings))
 	summary := make([]summaryFinding, 0)
-	for _, comment := range comments {
+	for _, finding := range findings {
+		comment := finding.Comment
 		start, end, _ := commentLocation(comment)
-		switch classifyLocation(comment, inventory) {
+		switch classifyLocation(finding, inventory) {
 		case locationRightOnly:
 			candidate := github.Comment{Path: comment.Path, Body: formatCommentBody(comment), Line: end, Side: "RIGHT"}
 			if start != end {
@@ -221,10 +238,10 @@ func classifyFindings(comments []model.LlmComment, inventory diffInventory) ([]g
 			}
 			inline = append(inline, candidate)
 			inlineSources = append(inlineSources, comment)
-		case locationAmbiguous:
-			summary = append(summary, summaryFinding{comment: comment, reason: "line range is ambiguous across both sides of the PR diff"})
 		case locationLeftOnly:
 			summary = append(summary, summaryFinding{comment: comment, reason: "line range belongs to the old side of the PR diff"})
+		case locationSideUnknown:
+			summary = append(summary, summaryFinding{comment: comment, reason: "line side provenance is unavailable"})
 		case locationInvalid:
 			summary = append(summary, summaryFinding{comment: comment, reason: "no valid line information"})
 		default:
@@ -232,6 +249,14 @@ func classifyFindings(comments []model.LlmComment, inventory diffInventory) ([]g
 		}
 	}
 	return inline, inlineSources, summary
+}
+
+func findingComments(findings []Finding) []model.LlmComment {
+	comments := make([]model.LlmComment, len(findings))
+	for i := range findings {
+		comments[i] = findings[i].Comment
+	}
+	return comments
 }
 
 func appendSummaryFindings(existing []summaryFinding, comments []model.LlmComment, reason string) []summaryFinding {

@@ -75,7 +75,18 @@ func canonicalComments(comments []model.LlmComment) []model.LlmComment {
 	return ordered
 }
 
-func reviewRunID(owner, name string, prNumber int, baseBranch string, target Target, comments []model.LlmComment) string {
+func canonicalFindings(findings []Finding) []Finding {
+	ordered := slices.Clone(findings)
+	slices.SortStableFunc(ordered, func(left, right Finding) int {
+		if result := comparePostingIdentity(commentPostingIdentity(left.Comment), commentPostingIdentity(right.Comment)); result != 0 {
+			return result
+		}
+		return cmp.Compare(left.Side, right.Side)
+	})
+	return ordered
+}
+
+func reviewRunID(owner, name string, prNumber int, baseBranch string, target Target, findings []Finding) string {
 	hash := sha256.New()
 	writeField := func(value string) {
 		_, _ = fmt.Fprintf(hash, "%d:", len(value))
@@ -87,8 +98,8 @@ func reviewRunID(owner, name string, prNumber int, baseBranch string, target Tar
 	writeField(baseBranch)
 	writeField(target.ResolvedBase)
 	writeField(target.ResolvedHead)
-	for _, comment := range canonicalComments(comments) {
-		identity := commentPostingIdentity(comment)
+	for _, finding := range canonicalFindings(findings) {
+		identity := commentPostingIdentity(finding.Comment)
 		writeField(identity.path)
 		writeField(fmt.Sprint(identity.startLine))
 		writeField(fmt.Sprint(identity.endLine))
@@ -97,6 +108,7 @@ func reviewRunID(owner, name string, prNumber int, baseBranch string, target Tar
 		writeField(identity.content)
 		writeField(identity.suggestionCode)
 		writeField(identity.existingCode)
+		writeField(string(finding.Side))
 	}
 	return hex.EncodeToString(hash.Sum(nil)[:reviewRunIDBytes])
 }
