@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../agent-code-analyzer-r2"
+		},
+		{
+			"path": "../internal-cloude-skills"
+		}
+	],
+	"settings": {}
+}
