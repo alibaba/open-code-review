@@ -388,6 +388,32 @@ func TestPostResumesExistingFallbackWithoutRetryingInline(t *testing.T) {
 	}
 }
 
+func TestPostResumesRemainingFallbackWithoutRetryingInline(t *testing.T) {
+	repoDir, headSHA := newPostRepo(t)
+	state := defaultPostState(headSHA)
+	comments := make([]model.LlmComment, 0, 52)
+	comments = append(comments, model.LlmComment{
+		Path: "main.go", StartLine: 1, EndLine: 1, Content: "ambiguous-summary",
+	})
+	for i := 0; i < 51; i++ {
+		comments = append(comments, model.LlmComment{
+			Path: "main.go", StartLine: 2, EndLine: 2, Content: fmt.Sprintf("finding-%02d", i),
+		})
+	}
+	canonical := canonicalComments(comments)
+	runID := reviewRunID("acme", "widget", 14, "master", postTarget(repoDir, headSHA), canonical)
+	state.issueBodies = []string{postingMarker(runID, "fallback-remaining-1", 0) + "\nexisting"}
+	newPostServer(t, state)
+
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if result.InlineComments != 50 || result.SummaryComments != 2 || len(state.reviewPosts) != 0 || len(state.issuePosts) != 0 {
+		t.Fatalf("result = %+v, review posts = %d, issue posts = %d", result, len(state.reviewPosts), len(state.issuePosts))
+	}
+}
+
 func TestPostRepairsPartialFallbackAndKeepsGlobalCounts(t *testing.T) {
 	repoDir, headSHA := newPostRepo(t)
 	state := defaultPostState(headSHA)
@@ -432,6 +458,87 @@ func TestPostFallbackHeaderUsesGlobalCounts(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("summary missing %q: %q", want, body)
 		}
+	}
+}
+
+func TestPostLaterFallbackDoesNotRepeatEmbeddedSummaryFindings(t *testing.T) {
+	repoDir, headSHA := newPostRepo(t)
+	state := defaultPostState(headSHA)
+	state.failReviewPost = 2
+	newPostServer(t, state)
+	comments := make([]model.LlmComment, 0, 52)
+	comments = append(comments, model.LlmComment{
+		Path: "main.go", StartLine: 1, EndLine: 1, Content: "ambiguous-summary",
+	})
+	for i := 0; i < 51; i++ {
+		comments = append(comments, model.LlmComment{
+			Path: "main.go", StartLine: 2, EndLine: 2, Content: fmt.Sprintf("finding-%02d", i),
+		})
+	}
+
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if result.InlineComments != 50 || result.SummaryComments != 2 || len(state.reviewPosts) != 1 || len(state.issuePosts) != 1 {
+		t.Fatalf("result = %+v, review posts = %d, issue posts = %d", result, len(state.reviewPosts), len(state.issuePosts))
+	}
+	if !strings.Contains(state.reviewPosts[0].Body, "ambiguous-summary") {
+		t.Fatalf("review body does not contain embedded summary finding: %q", state.reviewPosts[0].Body)
+	}
+	fallback := state.issuePosts[0]
+	if !strings.Contains(fallback, "-fallback-remaining-1-0 -->") {
+		t.Fatalf("fallback does not use remaining-only marker: %q", fallback)
+	}
+	if strings.Contains(fallback, "ambiguous-summary") {
+		t.Fatalf("fallback repeats embedded summary finding: %q", fallback)
+	}
+	for _, want := range []string{
+		"52 comment(s) generated.",
+		"Inline findings: 50",
+		"Summary-only findings: 2",
+		"finding-50",
+	} {
+		if !strings.Contains(fallback, want) {
+			t.Fatalf("fallback missing %q: %q", want, fallback)
+		}
+	}
+}
+
+func TestPostPublishesSummaryContinuationsBeforeLaterFallback(t *testing.T) {
+	repoDir, headSHA := newPostRepo(t)
+	state := defaultPostState(headSHA)
+	state.failReviewPost = 2
+	newPostServer(t, state)
+	comments := make([]model.LlmComment, 0, 102)
+	for i := 0; i < 51; i++ {
+		comments = append(comments, model.LlmComment{
+			Path: "main.go", StartLine: 1, EndLine: 1, Content: fmt.Sprintf("summary-%02d", i),
+		})
+	}
+	for i := 0; i < 51; i++ {
+		comments = append(comments, model.LlmComment{
+			Path: "main.go", StartLine: 2, EndLine: 2, Content: fmt.Sprintf("finding-%02d", i),
+		})
+	}
+
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if result.InlineComments != 50 || result.SummaryComments != 52 || len(state.reviewPosts) != 1 || len(state.issuePosts) != 2 {
+		t.Fatalf("result = %+v, review posts = %d, issue posts = %d", result, len(state.reviewPosts), len(state.issuePosts))
+	}
+	delivered := state.reviewPosts[0].Body + "\n" + strings.Join(state.issuePosts, "\n")
+	for i := 0; i < 51; i++ {
+		finding := fmt.Sprintf("summary-%02d", i)
+		if count := strings.Count(delivered, finding); count != 1 {
+			t.Fatalf("%q delivered %d times, want exactly once", finding, count)
+		}
+	}
+	fallback := state.issuePosts[1]
+	if strings.Contains(fallback, "summary-") || !strings.Contains(fallback, "finding-50") {
+		t.Fatalf("fallback = %q", fallback)
 	}
 }
 
