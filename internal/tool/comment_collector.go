@@ -6,6 +6,7 @@ package tool
 import (
 	"sync"
 
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -14,6 +15,7 @@ import (
 type CommentCollector struct {
 	mu       sync.Mutex
 	comments []model.LlmComment
+	sides    []location.Side
 }
 
 // NewCommentCollector creates an empty collector.
@@ -23,9 +25,15 @@ func NewCommentCollector() *CommentCollector {
 
 // Add appends a comment to the collector.
 func (c *CommentCollector) Add(cm model.LlmComment) {
+	c.AddWithSide(cm, location.SideUnknown)
+}
+
+// AddWithSide appends a comment and the file side that supplied its location.
+func (c *CommentCollector) AddWithSide(cm model.LlmComment, side location.Side) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.comments = append(c.comments, cm)
+	c.sides = append(c.sides, side)
 }
 
 // Comments returns all collected comments.
@@ -37,17 +45,35 @@ func (c *CommentCollector) Comments() []model.LlmComment {
 	return out
 }
 
-// CommentsForPath returns a copy of comments whose Path matches the given path.
-func (c *CommentCollector) CommentsForPath(path string) []model.LlmComment {
+// Sides returns the location provenance aligned with Comments.
+func (c *CommentCollector) Sides() []location.Side {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var out []model.LlmComment
-	for _, cm := range c.comments {
+	out := make([]location.Side, len(c.sides))
+	copy(out, c.sides)
+	return out
+}
+
+// CommentsForPath returns a copy of comments whose Path matches the given path.
+func (c *CommentCollector) CommentsForPath(path string) []model.LlmComment {
+	comments, _ := c.CommentsAndSidesForPath(path)
+	return comments
+}
+
+// CommentsAndSidesForPath returns comments for path and their aligned source
+// sides from one locked snapshot.
+func (c *CommentCollector) CommentsAndSidesForPath(path string) ([]model.LlmComment, []location.Side) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var comments []model.LlmComment
+	var sides []location.Side
+	for i, cm := range c.comments {
 		if cm.Path == path {
-			out = append(out, cm)
+			comments = append(comments, cm)
+			sides = append(sides, sideAt(c.sides, i))
 		}
 	}
-	return out
+	return comments, sides
 }
 
 // Snapshot returns the current count of stored comments. Pair with Since /
@@ -89,6 +115,7 @@ func (c *CommentCollector) ReplaceSince(start int, replacements []model.LlmComme
 		return
 	}
 	c.comments = append(c.comments[:start:start], replacements...)
+	c.sides = append(c.sides[:start:start], make([]location.Side, len(replacements))...)
 }
 
 // RemoveByPathAndIndices removes comments for a given path whose per-path index
@@ -96,9 +123,10 @@ func (c *CommentCollector) ReplaceSince(start int, replacements []model.LlmComme
 func (c *CommentCollector) RemoveByPathAndIndices(path string, indices map[int]struct{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	kept := c.comments[:0]
+	keptComments := c.comments[:0]
+	keptSides := c.sides[:0]
 	pathIdx := 0
-	for _, cm := range c.comments {
+	for i, cm := range c.comments {
 		if cm.Path == path {
 			if _, remove := indices[pathIdx]; remove {
 				pathIdx++
@@ -106,11 +134,21 @@ func (c *CommentCollector) RemoveByPathAndIndices(path string, indices map[int]s
 			}
 			pathIdx++
 		}
-		kept = append(kept, cm)
+		keptComments = append(keptComments, cm)
+		keptSides = append(keptSides, sideAt(c.sides, i))
 	}
-	tail := c.comments[len(kept):]
+	tail := c.comments[len(keptComments):]
 	for i := range tail {
 		tail[i] = model.LlmComment{}
 	}
-	c.comments = kept
+	clear(c.sides[len(keptSides):])
+	c.comments = keptComments
+	c.sides = keptSides
+}
+
+func sideAt(sides []location.Side, index int) location.Side {
+	if index < 0 || index >= len(sides) {
+		return location.SideUnknown
+	}
+	return sides[index]
 }

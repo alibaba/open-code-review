@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -49,11 +50,12 @@ type ResumeState struct {
 
 // ResumeItem is a completed file-level checkpoint, keyed by diff fingerprint.
 type ResumeItem struct {
-	FilePath    string
-	OldPath     string
-	NewPath     string
-	Fingerprint string
-	Comments    []model.LlmComment
+	FilePath     string
+	OldPath      string
+	NewPath      string
+	Fingerprint  string
+	Comments     []model.LlmComment
+	CommentSides []location.Side
 }
 
 type resumeRecord struct {
@@ -74,6 +76,7 @@ type resumeRecord struct {
 	SourceSessionID string             `json:"sourceSessionId"`
 	Error           string             `json:"error"`
 	Comments        []model.LlmComment `json:"comments"`
+	CommentSides    []location.Side    `json:"commentSides"`
 	RunManifest     *RunManifest       `json:"run_manifest"`
 }
 
@@ -165,11 +168,12 @@ func (s *ResumeState) applyResumeLine(line []byte) error {
 			filePath = rec.NewPath
 		}
 		s.Items[rec.Fingerprint] = ResumeItem{
-			FilePath:    filePath,
-			OldPath:     rec.OldPath,
-			NewPath:     rec.NewPath,
-			Fingerprint: rec.Fingerprint,
-			Comments:    copyLlmComments(rec.Comments),
+			FilePath:     filePath,
+			OldPath:      rec.OldPath,
+			NewPath:      rec.NewPath,
+			Fingerprint:  rec.Fingerprint,
+			Comments:     copyLlmComments(rec.Comments),
+			CommentSides: copyLocationSides(rec.CommentSides),
 		}
 	case "review_item_failed":
 		if rec.Fingerprint != "" {
@@ -225,6 +229,7 @@ func (s *ResumeState) Item(fingerprint string) (ResumeItem, bool) {
 		return ResumeItem{}, false
 	}
 	item.Comments = copyLlmComments(item.Comments)
+	item.CommentSides = copyLocationSides(item.CommentSides)
 	return item, true
 }
 
@@ -355,6 +360,15 @@ func copyLlmComments(in []model.LlmComment) []model.LlmComment {
 		return nil
 	}
 	out := make([]model.LlmComment, len(in))
+	copy(out, in)
+	return out
+}
+
+func copyLocationSides(in []location.Side) []location.Side {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]location.Side, len(in))
 	copy(out, in)
 	return out
 }

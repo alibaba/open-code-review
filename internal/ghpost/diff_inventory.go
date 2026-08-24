@@ -31,7 +31,7 @@ const (
 	locationUnverified
 	locationLeftOnly
 	locationRightOnly
-	locationAmbiguous
+	locationSideUnknown
 )
 
 func buildDiffInventory(files []github.ChangedFile) diffInventory {
@@ -129,22 +129,22 @@ func parseHunkCount(raw string) int {
 	return parseHunkNumber(raw)
 }
 
-func classifyLocation(comment model.LlmComment, inventory diffInventory) locationClass {
+func classifyLocation(finding Finding, inventory diffInventory) locationClass {
+	comment := finding.Comment
 	start, end, ok := commentLocation(comment)
 	if !ok {
 		return locationInvalid
 	}
-	right := containsRange(inventory.right[comment.Path], start, end)
-	left := overlapsRange(inventory.left[comment.Path], start, end)
-	switch {
-	case right && left:
-		return locationAmbiguous
-	case right:
-		return locationRightOnly
-	case left:
+	switch finding.Side {
+	case SideNew:
+		if containsRange(inventory.right[comment.Path], start, end) {
+			return locationRightOnly
+		}
+		return locationUnverified
+	case SideOld:
 		return locationLeftOnly
 	default:
-		return locationUnverified
+		return locationSideUnknown
 	}
 }
 
@@ -169,15 +169,6 @@ func commentLocation(comment model.LlmComment) (int, int, bool) {
 func containsRange(ranges []lineRange, start, end int) bool {
 	for _, candidate := range ranges {
 		if start >= candidate.start && end <= candidate.end {
-			return true
-		}
-	}
-	return false
-}
-
-func overlapsRange(ranges []lineRange, start, end int) bool {
-	for _, candidate := range ranges {
-		if start <= candidate.end && end >= candidate.start {
 			return true
 		}
 	}

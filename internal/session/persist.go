@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -173,20 +174,28 @@ func (jw *jsonlWriter) WriteSessionStart(startTime time.Time) string {
 
 // WriteReviewItemDone writes a file-level resume checkpoint for a completed diff.
 func (jw *jsonlWriter) WriteReviewItemDone(filePath, oldPath, newPath, fingerprint string, comments []model.LlmComment) string {
-	return jw.writeReviewItemRecord("review_item_done", filePath, oldPath, newPath, fingerprint, "", "", comments)
+	return jw.WriteReviewItemDoneWithSides(filePath, oldPath, newPath, fingerprint, comments, nil)
+}
+
+func (jw *jsonlWriter) WriteReviewItemDoneWithSides(filePath, oldPath, newPath, fingerprint string, comments []model.LlmComment, sides []location.Side) string {
+	return jw.writeReviewItemRecord("review_item_done", filePath, oldPath, newPath, fingerprint, "", "", comments, sides)
 }
 
 // WriteReviewItemReused writes a checkpoint reused from a previous session.
 func (jw *jsonlWriter) WriteReviewItemReused(filePath, oldPath, newPath, fingerprint, sourceSessionID string, comments []model.LlmComment) string {
-	return jw.writeReviewItemRecord("review_item_reused", filePath, oldPath, newPath, fingerprint, sourceSessionID, "", comments)
+	return jw.WriteReviewItemReusedWithSides(filePath, oldPath, newPath, fingerprint, sourceSessionID, comments, nil)
+}
+
+func (jw *jsonlWriter) WriteReviewItemReusedWithSides(filePath, oldPath, newPath, fingerprint, sourceSessionID string, comments []model.LlmComment, sides []location.Side) string {
+	return jw.writeReviewItemRecord("review_item_reused", filePath, oldPath, newPath, fingerprint, sourceSessionID, "", comments, sides)
 }
 
 // WriteReviewItemFailed writes a file-level checkpoint for a failed diff.
 func (jw *jsonlWriter) WriteReviewItemFailed(filePath, oldPath, newPath, fingerprint, errorMsg string) string {
-	return jw.writeReviewItemRecord("review_item_failed", filePath, oldPath, newPath, fingerprint, "", errorMsg, nil)
+	return jw.writeReviewItemRecord("review_item_failed", filePath, oldPath, newPath, fingerprint, "", errorMsg, nil, nil)
 }
 
-func (jw *jsonlWriter) writeReviewItemRecord(recordType, filePath, oldPath, newPath, fingerprint, sourceSessionID, errorMsg string, comments []model.LlmComment) string {
+func (jw *jsonlWriter) writeReviewItemRecord(recordType, filePath, oldPath, newPath, fingerprint, sourceSessionID, errorMsg string, comments []model.LlmComment, sides []location.Side) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -205,6 +214,9 @@ func (jw *jsonlWriter) writeReviewItemRecord(recordType, filePath, oldPath, newP
 	}
 	if len(comments) > 0 {
 		rec["comments"] = comments
+	}
+	if len(sides) > 0 {
+		rec["commentSides"] = sides
 	}
 	if sourceSessionID != "" {
 		rec["sourceSessionId"] = sourceSessionID

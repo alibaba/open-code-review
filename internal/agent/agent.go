@@ -29,6 +29,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
@@ -464,6 +465,21 @@ func (a *Agent) FileGroups() []FileGroupInfo {
 	return result
 }
 
+// CommentSides returns source-side provenance aligned with the comments from Run.
+func (a *Agent) CommentSides() []location.Side {
+	if a == nil || a.args.CommentCollector == nil {
+		return nil
+	}
+	return a.args.CommentCollector.Sides()
+}
+
+func locationSideAt(sides []location.Side, index int) location.Side {
+	if index < 0 || index >= len(sides) {
+		return location.SideUnknown
+	}
+	return sides[index]
+}
+
 // TotalTokensUsed returns PromptTokens + CompletionTokens across all LLM calls.
 // For Anthropic, PromptTokens already includes cache read/write tokens.
 func (a *Agent) TotalTokensUsed() int64 { return a.runner.TotalTokensUsed() }
@@ -781,9 +797,9 @@ dispatchLoop:
 			}
 			for _, d := range g.Diffs {
 				fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-				comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
+				comments, sides := a.args.CommentCollector.CommentsAndSidesForPath(d.NewPath)
 				a.markCompleted(d)
-				a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+				a.session.RecordReviewItemDoneWithSides(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments, sides)
 			}
 		}(group)
 	}
@@ -861,10 +877,10 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 			toDispatch = append(toDispatch, d)
 			continue
 		}
-		for _, cm := range item.Comments {
-			a.args.CommentCollector.Add(cm)
+		for i, cm := range item.Comments {
+			a.args.CommentCollector.AddWithSide(cm, locationSideAt(item.CommentSides, i))
 		}
-		a.session.RecordReviewItemReused(effectivePath(d), d.OldPath, d.NewPath, fingerprint, resume.SessionID, item.Comments)
+		a.session.RecordReviewItemReusedWithSides(effectivePath(d), d.OldPath, d.NewPath, fingerprint, resume.SessionID, item.Comments, item.CommentSides)
 		a.markReused(d)
 		reused++
 	}

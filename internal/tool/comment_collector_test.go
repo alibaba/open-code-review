@@ -6,6 +6,7 @@ package tool
 import (
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -142,6 +143,23 @@ func TestCommentCollector_RemoveByPathAndIndices(t *testing.T) {
 		if paths[i] != w {
 			t.Errorf("index %d: got %q, want %q", i, paths[i], w)
 		}
+	}
+}
+
+func TestCommentCollectorKeepsSidesAlignedThroughFiltering(t *testing.T) {
+	c := NewCommentCollector()
+	c.AddWithSide(cm("a.go", "old"), location.SideOld)
+	c.AddWithSide(cm("b.go", "new"), location.SideNew)
+	c.AddWithSide(cm("a.go", "unknown"), location.SideUnknown)
+	c.RemoveByPathAndIndices("a.go", map[int]struct{}{0: {}})
+
+	comments := c.Comments()
+	sides := c.Sides()
+	if len(comments) != 2 || len(sides) != 2 {
+		t.Fatalf("comments/sides lengths = %d/%d", len(comments), len(sides))
+	}
+	if comments[0].Path != "b.go" || sides[0] != location.SideNew || comments[1].Content != "unknown" || sides[1] != location.SideUnknown {
+		t.Fatalf("comments = %+v, sides = %+v", comments, sides)
 	}
 }
 

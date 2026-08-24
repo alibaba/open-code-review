@@ -14,6 +14,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
@@ -608,6 +609,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		resolveAndCollect := func(rctx context.Context) {
 			for i := range comments {
 				cm := &comments[i]
+				side := location.SideUnknown
 				var d *model.Diff
 				if r.deps.DiffLookup != nil {
 					d = r.deps.DiffLookup(cm.Path)
@@ -618,11 +620,15 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 				// LLM step overwrites; and it runs even when d is nil, since a
 				// comment filed against a path this run holds no diff for is
 				// exactly the case that search can still place.
-				located := d != nil && diff.ResolveComment(cm, d)
+				located := false
+				if d != nil {
+					side, located = diff.ResolveCommentSide(cm, d)
+				}
 				if !located && r.deps.AllDiffs != nil {
 					from := cm.Path
-					if to, ok := diff.RelocateAcrossFiles(cm, r.deps.AllDiffs()); ok {
+					if to, resolvedSide, ok := diff.RelocateAcrossFilesWithSide(cm, r.deps.AllDiffs()); ok {
 						located = true
+						side = resolvedSide
 						r.RecordWarning("comment_refiled", to, fmt.Sprintf(
 							"comment filed against %s describes code in %s; re-filed", from, to))
 					}
@@ -647,7 +653,10 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 							rlCtx := llm.ContextWithSessionKey(rctx,
 								llm.SessionTaskKey(r.deps.Session.SessionID, string(session.ReLocationTask), cm.Path))
 							reqCtx := r.requestCtx(rlCtx, cm.Path, session.ReLocationTask, rlRec.RequestNo)
-							_, resp := diff.ReLocateComment(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
+							resolvedSide, resp := diff.ReLocateCommentSide(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
+							if resolvedSide != location.SideUnknown {
+								side = resolvedSide
+							}
 							if resp != nil {
 								rlRec.SetResponse(resp, time.Since(rlStart))
 								if resp.Usage != nil {
@@ -662,7 +671,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 						}
 					}
 				}
-				r.deps.CommentCollector.Add(*cm)
+				r.deps.CommentCollector.AddWithSide(*cm, side)
 			}
 		}
 

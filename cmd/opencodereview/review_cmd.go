@@ -19,7 +19,9 @@ import (
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/ghpost"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/mcp"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -298,7 +300,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		target, err := githubPostingTargetFromManifest(cc.RepoDir, manifest)
 		if err != nil {
 			postErr = githubPostingError(err)
-		} else if _, err := ghpost.Post(runCtx, target, comments, ghpost.Options{Token: getGitHubToken(opts.githubToken)}); err != nil {
+		} else if _, err := ghpost.Post(runCtx, target, githubFindings(comments, ag.CommentSides()), ghpost.Options{Token: getGitHubToken(opts.githubToken)}); err != nil {
 			postErr = githubPostingError(err)
 		}
 	}
@@ -319,6 +321,23 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return errors.Join(resultErr, emitErr, postErr)
 	}
 	return errors.Join(emitErr, postErr)
+}
+
+func githubFindings(comments []model.LlmComment, sides []location.Side) []ghpost.Finding {
+	findings := make([]ghpost.Finding, len(comments))
+	for i, comment := range comments {
+		side := ghpost.SideUnknown
+		if i < len(sides) {
+			switch sides[i] {
+			case location.SideOld:
+				side = ghpost.SideOld
+			case location.SideNew:
+				side = ghpost.SideNew
+			}
+		}
+		findings[i] = ghpost.Finding{Comment: comment, Side: side}
+	}
+	return findings
 }
 
 func githubPostingError(err error) error {
