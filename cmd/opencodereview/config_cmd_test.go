@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -1068,8 +1069,8 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, max_tokens, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
+		"Supported keys: provider, model, max_tokens, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, llm.prompt_cache, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, prompt_cache, aws_region, aws_profile\n" +
 		"Protocol values: anthropic, anthropic-bedrock, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
@@ -1598,5 +1599,89 @@ func TestSetConfigValueLlmRetryCodesNoWarningForValidCodes(t *testing.T) {
 	}
 	if len(cfg.Llm.RetryCodes) != 2 {
 		t.Errorf("RetryCodes = %v, want [403 400]", cfg.Llm.RetryCodes)
+	}
+}
+
+func TestSetConfigValuePromptCache(t *testing.T) {
+	// The key is tri-state on disk, so each case checks the pointer as well as
+	// the value: writing `true` must be distinguishable from never setting it,
+	// otherwise `omitempty` would silently drop an explicit re-enable.
+	keys := []struct {
+		name string
+		key  string
+		read func(*Config) *bool
+	}{
+		{
+			name: "llm section",
+			key:  "llm.prompt_cache",
+			read: func(c *Config) *bool { return c.Llm.PromptCache },
+		},
+		{
+			name: "preset provider",
+			key:  "providers.anthropic.prompt_cache",
+			read: func(c *Config) *bool { return c.Providers["anthropic"].PromptCache },
+		},
+		{
+			name: "custom provider",
+			key:  "custom_providers.my-gateway.prompt_cache",
+			read: func(c *Config) *bool { return c.CustomProviders["my-gateway"].PromptCache },
+		},
+	}
+
+	for _, k := range keys {
+		t.Run(k.name, func(t *testing.T) {
+			for _, value := range []string{"false", "0"} {
+				cfg := &Config{}
+				if err := setConfigValue(cfg, k.key, value); err != nil {
+					t.Fatalf("setConfigValue(%s, %s): %v", k.key, value, err)
+				}
+				got := k.read(cfg)
+				if got == nil {
+					t.Fatalf("%s=%s left the field unset", k.key, value)
+				}
+				if *got {
+					t.Errorf("%s=%s stored true, want false", k.key, value)
+				}
+			}
+
+			cfg := &Config{}
+			if err := setConfigValue(cfg, k.key, "true"); err != nil {
+				t.Fatalf("setConfigValue(%s, true): %v", k.key, err)
+			}
+			if got := k.read(cfg); got == nil || !*got {
+				t.Errorf("%s=true stored %v, want an explicit true", k.key, got)
+			}
+
+			if err := setConfigValue(&Config{}, k.key, "sometimes"); err == nil {
+				t.Errorf("%s accepted a non-boolean value", k.key)
+			}
+		})
+	}
+}
+
+// TestSetConfigValuePromptCacheRoundTrip guards the on-disk representation:
+// `prompt_cache` is the field a user reaches for when their gateway rejects
+// cache_control, so it has to survive being written and read back.
+func TestSetConfigValuePromptCacheRoundTrip(t *testing.T) {
+	cfg := &Config{}
+	if err := setConfigValue(cfg, "custom_providers.my-gateway.prompt_cache", "false"); err != nil {
+		t.Fatalf("setConfigValue: %v", err)
+	}
+
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if !strings.Contains(string(data), `"prompt_cache":false`) {
+		t.Fatalf("prompt_cache=false was dropped on write: %s", data)
+	}
+
+	var readBack Config
+	if err := json.Unmarshal(data, &readBack); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	got := readBack.CustomProviders["my-gateway"].PromptCache
+	if got == nil || *got {
+		t.Errorf("prompt_cache read back as %v, want an explicit false", got)
 	}
 }

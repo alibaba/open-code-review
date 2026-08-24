@@ -315,6 +315,32 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
 ```
 
+### 关闭提示词缓存
+
+OCR 会在 Anthropic 请求上打 `cache_control` 断点，让系统提示词、工具列表和对话前缀
+按缓存价计费。部分 Anthropic 兼容网关会严格校验请求体，遇到该字段直接拒绝而不是忽略，
+导致每次评审都失败：
+
+```
+400 Bad Request {"errorCode":"INVALID_ARGUMENT", ...
+  "unsafeParams":"{unrecognizedProperty=cache_control}",
+  "message":"Request contained an unrecognized field"}
+```
+
+把 `prompt_cache` 设为 `false`，OCR 就不再发送这些标记：
+
+```bash
+ocr config set providers.anthropic.prompt_cache false
+ocr config set custom_providers.my-gateway.prompt_cache false
+ocr config set llm.prompt_cache false
+```
+
+`OCR_LLM_PROMPT_CACHE=false` 对最终解析出的配置有同样效果。在端点来自环境变量的
+CI 场景下这条路更短。它会双向覆盖配置文件中的取值。
+
+该键未设置时缓存默认开启；关掉它损失的是钱而不是正确性——评审照常运行，只是每个请求
+都按完整输入 token 计价。除非你的端点确实拒绝该字段，否则不要动它。
+
 ### 提示词缓存的会话亲和性
 
 OCR 为每个 LLM 对话派生一个提示词缓存亲和性密钥，作用域为评审会话及其中的任务（`<会话 ID>-<任务类型>-<作用域哈希>`）。提示词缓存按前缀匹配，因此按对话划分密钥可让每个不断增长的对话（如某个文件的评审工具循环）稳定路由到同一缓存节点，而不是把整次运行压在一个热点密钥上；密钥中的会话 ID 前缀可将供应商侧缓存日志与 `ocr session` 记录对应。

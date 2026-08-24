@@ -33,6 +33,15 @@ type ResolvedEndpoint struct {
 	Timeout    time.Duration
 	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
 
+	// PromptCacheDisabled suppresses the prompt-cache breakpoints OCR adds on
+	// its own initiative — today the Anthropic `cache_control` markers on the
+	// system prompt, the tool list and the latest message. Anthropic-compatible
+	// gateways that validate the request body strictly reject `cache_control`
+	// as an unrecognized field, which fails every review request rather than
+	// just losing the cache discount. Off by default: caching is what makes a
+	// multi-turn review affordable, so it is given up only on request.
+	PromptCacheDisabled bool
+
 	// AmbientAuth marks an endpoint that carries no token and needs no base
 	// URL, because the transport supplies both — AWS SigV4 signing derives the
 	// host from the region and the credentials from the environment's own
@@ -62,8 +71,14 @@ const (
 	// whichever strategy resolves, rather than inside tryOCREnv like other
 	// OCR_LLM_* vars. This lets it override timeout for all resolution paths
 	// (OCR env, config file, provider config, Claude Code env, shell RC).
-	envOCRLLMTimeout   = "OCR_LLM_TIMEOUT"
-	envOCRUseAnthropic = "OCR_USE_ANTHROPIC"
+	envOCRLLMTimeout = "OCR_LLM_TIMEOUT"
+	// envOCRLLMPromptCache is a global override applied the same way as
+	// OCR_LLM_TIMEOUT, so a gateway that rejects `cache_control` can be worked
+	// around without a config file — the deployment that hits this most often
+	// is CI, where the endpoint comes from environment variables alone.
+	// Set it to a false value (0, false) to stop OCR emitting the markers.
+	envOCRLLMPromptCache = "OCR_LLM_PROMPT_CACHE"
+	envOCRUseAnthropic   = "OCR_USE_ANTHROPIC"
 )
 
 // Environment variable names from Claude Code configuration.
@@ -153,15 +168,21 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 // strategy resolves the endpoint. Parsed once, up front — see the call site in
 // ResolveEndpointWithOptions for why the timing matters.
 type envOverrides struct {
-	timeout    time.Duration
-	hasTimeout bool
-	headers    map[string]string
+	timeout        time.Duration
+	hasTimeout     bool
+	headers        map[string]string
+	promptCache    bool
+	hasPromptCache bool
 }
 
 func parseEnvOverrides() (envOverrides, error) {
 	var env envOverrides
 	var err error
 	env.timeout, env.hasTimeout, err = parseTimeoutEnv()
+	if err != nil {
+		return envOverrides{}, err
+	}
+	env.promptCache, env.hasPromptCache, err = parsePromptCacheEnv()
 	if err != nil {
 		return envOverrides{}, err
 	}
@@ -183,6 +204,9 @@ func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint, env envOverrid
 	ep.Model = stripModelSuffix(ep.Model)
 	if env.hasTimeout {
 		ep.Timeout = env.timeout
+	}
+	if env.hasPromptCache {
+		ep.PromptCacheDisabled = !env.promptCache
 	}
 	if env.headers != nil {
 		if ep.ExtraHeaders == nil {
@@ -214,6 +238,24 @@ func parseTimeoutEnv() (time.Duration, bool, error) {
 		return 0, false, fmt.Errorf("OCR_LLM_TIMEOUT: %w", err)
 	}
 	return d, true, nil
+}
+
+// parsePromptCacheEnv reads and validates OCR_LLM_PROMPT_CACHE. Returns the
+// parsed value and true if set, or false and false if unset/empty. An
+// unparseable value is an error rather than a silent default, on the same
+// reasoning as parseTimeoutEnv: someone who sets OCR_LLM_PROMPT_CACHE=no is
+// working around a failing endpoint, and quietly ignoring the typo would leave
+// them staring at the same rejection with no idea the knob never took effect.
+func parsePromptCacheEnv() (bool, bool, error) {
+	raw := strings.TrimSpace(os.Getenv(envOCRLLMPromptCache))
+	if raw == "" {
+		return false, false, nil
+	}
+	enabled, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, false, fmt.Errorf("%s must be a boolean (true/false, 1/0), got %q", envOCRLLMPromptCache, raw)
+	}
+	return enabled, true, nil
 }
 
 // validateTimeoutSec converts a config-file timeout (in seconds) to time.Duration.
@@ -307,6 +349,7 @@ type llmFileConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	PromptCache  *bool             `json:"prompt_cache,omitempty"` // pointer to distinguish unset from false; nil = enabled
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
@@ -322,6 +365,7 @@ type providerEntryConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	PromptCache  *bool             `json:"prompt_cache,omitempty"` // pointer to distinguish unset from false; nil = enabled
 
 	// AWSProfile and AWSRegion apply to ambient-auth providers that sign with
 	// SigV4 (currently bedrock). Both are optional: without them the standard
@@ -586,10 +630,19 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		ExtraHeaders: extraHeaders,
 		Timeout:      timeout,
 		RetryCodes:   retryCodes,
-		AmbientAuth:  ambientAuth,
-		AWSProfile:   entry.AWSProfile,
-		AWSRegion:    entry.AWSRegion,
+
+		PromptCacheDisabled: promptCacheDisabled(entry.PromptCache),
+		AmbientAuth:         ambientAuth,
+		AWSProfile:          entry.AWSProfile,
+		AWSRegion:           entry.AWSRegion,
 	}, true, nil
+}
+
+// promptCacheDisabled reads the tri-state `prompt_cache` config field. Unset
+// means enabled, matching the behavior of every release before the field
+// existed.
+func promptCacheDisabled(v *bool) bool {
+	return v != nil && !*v
 }
 
 // tryLegacyLlmConfig resolves an endpoint from the legacy llm config block.
@@ -691,6 +744,8 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		ExtraHeaders: cfg.Llm.ExtraHeaders,
 		Timeout:      timeout,
 		RetryCodes:   retryCodes,
+
+		PromptCacheDisabled: promptCacheDisabled(cfg.Llm.PromptCache),
 	}, true, nil
 }
 

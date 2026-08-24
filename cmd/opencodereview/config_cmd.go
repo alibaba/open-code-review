@@ -303,6 +303,10 @@ type ProviderEntry struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	// PromptCache is nil when unset, which means enabled. Set it to false for
+	// an Anthropic-compatible gateway that rejects `cache_control` as an
+	// unrecognized field instead of ignoring it.
+	PromptCache *bool `json:"prompt_cache,omitempty"`
 
 	// AWSProfile and AWSRegion pin the credentials and region for providers that
 	// authenticate from the AWS chain (bedrock). Both are optional — without
@@ -353,6 +357,7 @@ type LlmConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	PromptCache  *bool             `json:"prompt_cache,omitempty"` // nil = default true; false = omit cache_control
 }
 
 // TelemetryConfig holds telemetry-specific settings.
@@ -414,6 +419,7 @@ var supportedConfigKeys = []string{
 	"llm.extra_body",
 	"llm.extra_headers",
 	"llm.retry_codes",
+	"llm.prompt_cache",
 	"language",
 	"telemetry.enabled",
 	"telemetry.exporter",
@@ -574,8 +580,14 @@ func setConfigValue(cfg *Config, key, value string) error {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		cfg.Llm.RetryCodes = codes
+	case "llm.prompt_cache", "llm.PromptCache":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for llm.prompt_cache: %w", err)
+		}
+		cfg.Llm.PromptCache = &b
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, prompt_cache, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -644,6 +656,12 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		entry.RetryCodes = codes
+	case "prompt_cache":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid boolean for %s: %w", key, err)
+		}
+		entry.PromptCache = &b
 	case "aws_region", "aws_profile":
 		normalized, err := normalizeAWSSetting(field, key, value)
 		if err != nil {
@@ -658,7 +676,7 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			entry.AWSProfile = normalized
 		}
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, prompt_cache, aws_region, aws_profile", field)
 	}
 	return nil
 }

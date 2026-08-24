@@ -218,6 +218,13 @@ type ClientConfig struct {
 	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
 	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
 	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+
+	// DisablePromptCache stops the Anthropic protocol from attaching
+	// `cache_control` breakpoints to the request. It exists for
+	// Anthropic-compatible gateways that reject the field as unrecognized
+	// instead of ignoring it; see ResolvedEndpoint.PromptCacheDisabled.
+	DisablePromptCache bool
+
 	// SessionKey is the fallback prompt-cache affinity key
 	// for requests whose context carries none (see ContextWithSessionKey).
 	//
@@ -285,14 +292,17 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // ResolvedEndpoint because it belongs to the run, not to the endpoint.
 func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 	cfg := ClientConfig{
-		URL:            ep.URL,
-		APIKey:         ep.Token,
-		Model:          ep.Model,
-		AuthHeader:     ep.AuthHeader,
-		Timeout:        ep.Timeout,
-		ExtraBody:      ep.ExtraBody,
-		ExtraHeaders:   ep.ExtraHeaders,
-		RetryCodes:     ep.RetryCodes,
+		URL:          ep.URL,
+		APIKey:       ep.Token,
+		Model:        ep.Model,
+		AuthHeader:   ep.AuthHeader,
+		Timeout:      ep.Timeout,
+		ExtraBody:    ep.ExtraBody,
+		ExtraHeaders: ep.ExtraHeaders,
+		RetryCodes:   ep.RetryCodes,
+
+		DisablePromptCache: ep.PromptCacheDisabled,
+
 		retryCollector: collector,
 		AWSProfile:     ep.AWSProfile,
 		AWSRegion:      ep.AWSRegion,
@@ -1190,12 +1200,22 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 		Messages:  messages,
 	}
 
+	// Every `cache_control` marker below is optional to the request's meaning:
+	// dropping them costs the cache discount and nothing else. A gateway that
+	// rejects the field outright leaves no working request at all, so
+	// DisablePromptCache trades the discount for a review that runs.
+	cacheBreakpoints := !c.cfg.DisablePromptCache
+
 	if len(systemBlocks) > 0 {
-		systemBlocks[len(systemBlocks)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
+		if cacheBreakpoints {
+			systemBlocks[len(systemBlocks)-1].CacheControl = anthropic.NewCacheControlEphemeralParam()
+		}
 		params.System = systemBlocks
 	}
 	if len(tools) > 0 {
-		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+		if cacheBreakpoints {
+			tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
+		}
 		params.Tools = tools
 		if req.ToolChoice == "required" {
 			params.ToolChoice = anthropic.ToolChoiceUnionParam{
@@ -1205,7 +1225,7 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	}
 	// Dynamic breakpoint on the latest message so multi-turn history is
 	// cached incrementally: read the full previous prefix, write only the delta.
-	if len(messages) > 0 {
+	if cacheBreakpoints && len(messages) > 0 {
 		last := &messages[len(messages)-1]
 		if len(last.Content) > 0 {
 			if cc := last.Content[len(last.Content)-1].GetCacheControl(); cc != nil {

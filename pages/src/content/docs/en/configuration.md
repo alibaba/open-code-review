@@ -344,6 +344,35 @@ without patching the source:
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
 ```
 
+### Disable prompt caching
+
+OCR marks Anthropic requests with `cache_control` breakpoints so the system
+prompt, the tool list and the conversation prefix are billed at the cached
+rate. Some Anthropic-compatible gateways validate the request body strictly and
+reject the field instead of ignoring it, failing every review:
+
+```
+400 Bad Request {"errorCode":"INVALID_ARGUMENT", ...
+  "unsafeParams":"{unrecognizedProperty=cache_control}",
+  "message":"Request contained an unrecognized field"}
+```
+
+Set `prompt_cache` to `false` to stop OCR sending the markers:
+
+```bash
+ocr config set providers.anthropic.prompt_cache false
+ocr config set custom_providers.my-gateway.prompt_cache false
+ocr config set llm.prompt_cache false
+```
+
+`OCR_LLM_PROMPT_CACHE=false` does the same for whichever configuration OCR
+resolves, which is the shorter route in CI where the endpoint comes from
+environment variables. It overrides the config file in both directions.
+
+Caching is on whenever the key is unset, and turning it off costs money rather
+than correctness: reviews still run, and every request pays full input-token
+price. Leave it alone unless your endpoint actually rejects the field.
+
 ### Session affinity for prompt caching
 
 OCR derives a prompt-cache affinity key for every LLM conversation, scoped

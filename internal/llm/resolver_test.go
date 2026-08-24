@@ -268,6 +268,12 @@ func clearAllEnv(t *testing.T) {
 		"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL",
 		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 		"MINIMAX_GLOBAL_API_KEY", "MINIMAX_API_KEY",
+		// The three globals parseEnvOverrides validates. These matter more
+		// than the rest of the list: the others merely contribute a value, but
+		// an unparseable one of these aborts resolution before any strategy
+		// runs, so a stray export on a developer machine or a self-hosted
+		// runner fails ~100 tests that never meant to involve it.
+		envOCRLLMTimeout, envOCRLLMExtraHeaders, envOCRLLMPromptCache,
 	} {
 		t.Setenv(k, "")
 	}
@@ -1965,6 +1971,29 @@ func TestNewLLMClient_DefaultTimeout(t *testing.T) {
 	}
 }
 
+// TestNewLLMClient_PromptCacheDisabledForwarded covers the seam between the two
+// halves of this setting: the resolver decides it, the Anthropic client acts on
+// it, and nothing else would notice if NewLLMClient stopped carrying it across.
+func TestNewLLMClient_PromptCacheDisabledForwarded(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		ep := ResolvedEndpoint{
+			URL:                 "https://api.example.com",
+			Token:               "test-token",
+			Model:               "test-model",
+			Protocol:            ProtocolAnthropic,
+			PromptCacheDisabled: disabled,
+		}
+
+		client, ok := NewLLMClient(ep, nil).(*AnthropicClient)
+		if !ok {
+			t.Fatalf("expected *AnthropicClient for protocol %q", ep.Protocol)
+		}
+		if client.cfg.DisablePromptCache != disabled {
+			t.Errorf("PromptCacheDisabled=%v produced cfg.DisablePromptCache=%v", disabled, client.cfg.DisablePromptCache)
+		}
+	}
+}
+
 func TestResolveEndpoint_ProviderConfigTimeoutSec(t *testing.T) {
 	clearAllEnv(t)
 
@@ -2620,5 +2649,135 @@ func TestResolveEndpoint_RedundantRetryCodesFiltered(t *testing.T) {
 	}
 	if len(ep.RetryCodes) != 1 || ep.RetryCodes[0] != 403 {
 		t.Errorf("RetryCodes = %v, want [403] (429 should be filtered)", ep.RetryCodes)
+	}
+}
+
+// writePromptCacheConfig writes a config whose Anthropic provider carries the
+// given tri-state prompt_cache value (nil for unset).
+func writePromptCacheConfig(t *testing.T, promptCache *bool) string {
+	t.Helper()
+	cfgFile := filepath.Join(t.TempDir(), "config.json")
+	cfg := configFile{
+		Provider: "gateway",
+		Model:    "m",
+		CustomProviders: map[string]providerEntryConfig{
+			"gateway": {
+				APIKey:      "k",
+				URL:         "http://localhost/v1",
+				Protocol:    "anthropic",
+				Model:       "m",
+				PromptCache: promptCache,
+			},
+		},
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+	if err := os.WriteFile(cfgFile, data, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return cfgFile
+}
+
+func TestResolveEndpoint_ProviderPromptCache(t *testing.T) {
+	enabled, disabled := true, false
+
+	tests := []struct {
+		name        string
+		promptCache *bool
+		want        bool
+	}{
+		// Unset is the case that matters for compatibility: every config
+		// written before prompt_cache existed must keep its caching.
+		{name: "unset keeps caching", promptCache: nil, want: false},
+		{name: "true keeps caching", promptCache: &enabled, want: false},
+		{name: "false disables caching", promptCache: &disabled, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envOCRLLMPromptCache, "")
+			ep, err := ResolveEndpoint(writePromptCacheConfig(t, tt.promptCache))
+			if err != nil {
+				t.Fatalf("ResolveEndpoint: %v", err)
+			}
+			if ep.PromptCacheDisabled != tt.want {
+				t.Errorf("PromptCacheDisabled = %v, want %v", ep.PromptCacheDisabled, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveEndpoint_LegacyLlmPromptCache(t *testing.T) {
+	t.Setenv(envOCRLLMPromptCache, "")
+
+	cfgFile := filepath.Join(t.TempDir(), "config.json")
+	disabled := false
+	cfg := configFile{
+		Llm: llmFileConfig{
+			URL:         "http://localhost/v1/messages",
+			AuthToken:   "t",
+			Model:       "m",
+			Protocol:    "anthropic",
+			PromptCache: &disabled,
+		},
+	}
+	data, _ := json.Marshal(cfg)
+	if err := os.WriteFile(cfgFile, data, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	ep, err := ResolveEndpoint(cfgFile)
+	if err != nil {
+		t.Fatalf("ResolveEndpoint: %v", err)
+	}
+	if !ep.PromptCacheDisabled {
+		t.Error("PromptCacheDisabled = false, want true from llm.prompt_cache")
+	}
+}
+
+// TestResolveEndpoint_PromptCacheEnvOverride pins the precedence: the env var
+// wins over the config file in both directions, so a CI job can turn caching
+// off for a strict gateway, and back on, without editing config.json.
+func TestResolveEndpoint_PromptCacheEnvOverride(t *testing.T) {
+	enabled, disabled := true, false
+
+	tests := []struct {
+		name        string
+		env         string
+		promptCache *bool
+		want        bool
+	}{
+		{name: "env false overrides config true", env: "false", promptCache: &enabled, want: true},
+		{name: "env true overrides config false", env: "true", promptCache: &disabled, want: false},
+		{name: "env 0 disables an unset config", env: "0", promptCache: nil, want: true},
+		{name: "empty env leaves config alone", env: "", promptCache: &disabled, want: true},
+		{name: "whitespace env leaves config alone", env: "  ", promptCache: &disabled, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envOCRLLMPromptCache, tt.env)
+			ep, err := ResolveEndpoint(writePromptCacheConfig(t, tt.promptCache))
+			if err != nil {
+				t.Fatalf("ResolveEndpoint: %v", err)
+			}
+			if ep.PromptCacheDisabled != tt.want {
+				t.Errorf("PromptCacheDisabled = %v, want %v", ep.PromptCacheDisabled, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveEndpoint_InvalidPromptCacheEnv(t *testing.T) {
+	t.Setenv(envOCRLLMPromptCache, "yes-please")
+
+	_, err := ResolveEndpoint(writePromptCacheConfig(t, nil))
+	if err == nil {
+		t.Fatal("expected an error for an unparseable OCR_LLM_PROMPT_CACHE")
+	}
+	if !strings.Contains(err.Error(), envOCRLLMPromptCache) {
+		t.Errorf("error %q does not name the offending variable", err.Error())
 	}
 }
