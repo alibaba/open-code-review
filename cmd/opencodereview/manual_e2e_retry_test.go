@@ -47,7 +47,7 @@ func runManualReview(t *testing.T, srv *fakeLLM) manualResult {
 	repoDir := retryTestRepo(t)
 	startFakeLLM(t, srv)
 
-	cc, err := loadCommonContext(repoDir, "", 0, 4, true)
+	cc, err := loadCommonContext(repoDir, "", "", 0, 4, true)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
