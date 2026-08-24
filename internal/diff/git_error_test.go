@@ -9,8 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
@@ -132,15 +134,90 @@ func TestGetDiff_WorkspaceFailureSurfacesFallbackMessage(t *testing.T) {
 	}
 }
 
+// shimGit puts a fake `git` at the front of PATH for the duration of the test.
+func shimGit(t *testing.T, body string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH shim relies on a shebang script")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatalf("write git shim: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestGetDiff_FailureQuotesStderrNotStdout pins the split that keeps repository
+// content out of the error.
+//
+// Git writes the diff to stdout and its diagnosis to stderr. Quoting the two
+// together means a command that dies mid-write contributes a tail made purely
+// of diff — source code, and whatever that source contains. The string does not
+// stay local either: reviewResultError passes it to span.RecordError, so it
+// reaches the configured telemetry backend.
+func TestGetDiff_FailureQuotesStderrNotStdout(t *testing.T) {
+	const secret = "API_KEY=sk-not-a-real-key-do-not-log"
+
+	// Writes plausible diff to stdout, a diagnosis to stderr, and fails.
+	shimGit(t, "echo '+"+secret+"'\necho 'fatal: shim refused' >&2\nexit 128\n")
+
+	repo := t.TempDir()
+	_, err := NewCommitProvider(repo, "HEAD", nil).GetDiff(context.Background())
+	if err == nil {
+		t.Fatal("expected GetDiff to fail")
+	}
+
+	got := err.Error()
+	if strings.Contains(got, secret) {
+		t.Errorf("error carries stdout content:\n%s", got)
+	}
+	if !strings.Contains(got, "shim refused") {
+		t.Errorf("error %q lost the stderr diagnosis", got)
+	}
+}
+
+// TestGetDiff_CancelledMidWriteReportsCancellation covers the case that has no
+// diagnosis to quote at all: a signalled process writes nothing to stderr, so
+// combining the streams left the error made entirely of diff content.
+func TestGetDiff_CancelledMidWriteReportsCancellation(t *testing.T) {
+	const secret = "API_KEY=sk-not-a-real-key-do-not-log"
+
+	// Streams diff to stdout and never exits, so cancellation always lands
+	// inside the write window rather than depending on timing.
+	shimGit(t, "while :; do echo '+"+secret+"'; done\n")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	repo := t.TempDir()
+	_, err := NewCommitProvider(repo, "HEAD", nil).GetDiff(ctx)
+	if err == nil {
+		t.Fatal("expected GetDiff to fail")
+	}
+
+	got := err.Error()
+	if strings.Contains(got, secret) {
+		t.Errorf("cancelled command leaked stdout into the error:\n%s", got)
+	}
+	// Reporting the cancellation rather than "signal: killed" also lets
+	// classifyItemError see it: it matches on context.DeadlineExceeded to
+	// choose the timeout failure class over the generic provider one.
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error %q does not unwrap to the cancellation", got)
+	}
+}
+
 // TestGetDiff_CommitFailureSurfacesGitMessage is the regression test for #972:
 // `git show` failing used to surface as a bare exit status, so neither the
 // reporter nor a maintainer could tell an unsupported option from a bad
 // revision without re-running the command by hand.
 func TestGetDiff_CommitFailureSurfacesGitMessage(t *testing.T) {
+	const missingSHA = "0b335be72cb7e342c115ff3ffadbe741a4715377"
+
 	repo := initRepoWithChange(t)
 	runner := gitcmd.New(2)
 
-	provider := NewCommitProvider(repo, "0b335be72cb7e342c115ff3ffadbe741a4715377", runner)
+	provider := NewCommitProvider(repo, missingSHA, runner)
 
 	_, err := provider.GetDiff(context.Background())
 	if err == nil {
@@ -151,10 +228,15 @@ func TestGetDiff_CommitFailureSurfacesGitMessage(t *testing.T) {
 	if !strings.Contains(got, "git show failed") {
 		t.Errorf("error %q lost the operation name", got)
 	}
-	// Git words this differently across versions ("bad object", "unknown
-	// revision", "ambiguous argument"), so assert that it said something at
-	// all rather than pinning one phrasing.
-	if !strings.Contains(got, "fatal:") && !strings.Contains(got, "error:") {
+	// Anchor on the object name, not on git's prose. Git words this
+	// differently across versions ("bad object", "unknown revision",
+	// "ambiguous argument") and translates all of it: under zh_CN the line
+	// opens with 致命错误, so asserting "fatal:" would pass in CI's English // allow-non-english: names the translated prefix this assertion must not depend on
+	// container and fail for a translated developer. The SHA is the one part
+	// no locale rewrites, and its presence is what proves git's message came
+	// through at all. isNotGitRepoError pairs its English phrase with a
+	// locale-proof check for the same reason.
+	if !strings.Contains(got, missingSHA) {
 		t.Errorf("error %q carries no message from git; only the exit status survived", got)
 	}
 
