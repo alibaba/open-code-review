@@ -178,6 +178,7 @@ class ConfigService(
      * 按顺序写多个配置项。顺序有意义：`provider` 须在 `model` 前生效，否则 model 写到顶层而非 provider 条目
      * （见 [applyConfigEntries] 的 model 分支）。中途失败回滚到 setMany 前的快照，避免半应用（如 provider 改了但 api_key 没写）。
      */
+    @Synchronized
     fun setMany(entries: List<ConfigEntry>): OcrConfig? {
         val snapshot = readRaw()
         val applied = mutableListOf<ConfigEntry>()
