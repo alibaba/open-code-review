@@ -11,7 +11,6 @@ import (
 )
 
 var uuidV4Re = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
-var sha256HexRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func TestNewSessionKey(t *testing.T) {
 	k1 := NewSessionKey()
@@ -49,6 +48,9 @@ func TestSessionTaskKey(t *testing.T) {
 	}
 	if got := SessionTaskKey("sess", "plan_task", ""); got != "sess-plan_task" {
 		t.Errorf("SessionTaskKey without scope = %q, want %q", got, "sess-plan_task")
+	}
+	if got := SessionTaskKey("01234567-89ab-4cde-8fab-0123456789ab", "", ""); got != "01234567" {
+		t.Errorf("SessionTaskKey with UUID only = %q, want %q", got, "01234567")
 	}
 
 	k1 := SessionTaskKey("sess", "main_task", "a/b.go")
@@ -96,28 +98,46 @@ func TestSessionTaskKeyProviderSafeLength(t *testing.T) {
 		if got != SessionTaskKey(sessionKey, taskType, "src/example.go") {
 			t.Errorf("SessionTaskKey(%s) is not deterministic", taskType)
 		}
-	}
-
-	planKey := SessionTaskKey(sessionKey, "plan_task", "src/example.go")
-	if !strings.HasPrefix(planKey, sessionKey+"-plan_task-") {
-		t.Errorf("short derived key lost readable prefix: %q", planKey)
-	}
-	for _, taskType := range []string{"memory_compression_task", "re_location_task", "review_filter_task"} {
-		got := SessionTaskKey(sessionKey, taskType, "src/example.go")
-		if !sha256HexRe.MatchString(got) {
-			t.Errorf("long SessionTaskKey(%s) = %q, want SHA-256 hex digest", taskType, got)
+		wantPrefix := sessionKey[:sessionTaskKeySessionPrefixLength] + "-" + taskType + "-"
+		if !strings.HasPrefix(got, wantPrefix) {
+			t.Errorf("SessionTaskKey(%s) = %q, want readable prefix %q", taskType, got, wantPrefix)
 		}
 	}
 }
 
-func TestSessionTaskKeyBoundsLongBaseKey(t *testing.T) {
+func TestSessionTaskKeyTruncatesLongSessionComponent(t *testing.T) {
 	baseKey := strings.Repeat("x", maxSessionTaskKeyLength+1)
 	got := SessionTaskKey(baseKey, "", "")
-	if !sha256HexRe.MatchString(got) {
-		t.Fatalf("SessionTaskKey(long base key) = %q, want SHA-256 hex digest", got)
+	want := strings.Repeat("x", sessionTaskKeySessionPrefixLength)
+	if got != want {
+		t.Fatalf("SessionTaskKey(long base key) = %q, want %q", got, want)
 	}
-	if got == baseKey {
-		t.Error("SessionTaskKey returned an overlong base key unchanged")
+}
+
+func TestSessionTaskKeyTruncatesLongTaskType(t *testing.T) {
+	sessionKey := "01234567-89ab-4cde-8fab-0123456789ab"
+	taskType := strings.Repeat("t", maxSessionTaskKeyTaskTypeLength+1)
+	got := SessionTaskKey(sessionKey, taskType, "src/example.go")
+	if len(got) != maxSessionTaskKeyLength {
+		t.Fatalf("SessionTaskKey(long task type) length = %d, want %d: %q", len(got), maxSessionTaskKeyLength, got)
+	}
+	wantPrefix := sessionKey[:sessionTaskKeySessionPrefixLength] + "-" + taskType[:maxSessionTaskKeyTaskTypeLength] + "-"
+	if !strings.HasPrefix(got, wantPrefix) {
+		t.Errorf("SessionTaskKey(long task type) = %q, want readable prefix %q", got, wantPrefix)
+	}
+}
+
+func TestSessionTaskKeySessionPrefixCollisionBoundary(t *testing.T) {
+	scope := "src/example.go"
+	first := SessionTaskKey("01234567-0000-4000-8000-000000000000", "main_task", scope)
+	samePrefix := SessionTaskKey("01234567-ffff-4fff-bfff-ffffffffffff", "main_task", scope)
+	if first != samePrefix {
+		t.Errorf("sessions with the same eight-character prefix produced different keys: %q != %q", first, samePrefix)
+	}
+
+	differentPrefix := SessionTaskKey("89abcdef-0000-4000-8000-000000000000", "main_task", scope)
+	if first == differentPrefix {
+		t.Errorf("sessions with different eight-character prefixes produced the same key: %q", first)
 	}
 }
 

@@ -20,10 +20,16 @@ import (
 // can be configured without OCR knowing each provider's convention.
 const SessionKeyTemplateVar = "{ocr_session_key}"
 
-// maxSessionTaskKeyLength keeps generated affinity keys compatible with
-// OpenAI's prompt_cache_key limit. Short keys remain readable; longer derived
-// keys are replaced with a deterministic SHA-256 digest.
-const maxSessionTaskKeyLength = 64
+const (
+	// maxSessionTaskKeyLength is OpenAI's prompt_cache_key limit.
+	maxSessionTaskKeyLength = 64
+	// sessionTaskKeySessionPrefixLength keeps the first 32 bits of a UUID so
+	// provider logs can still be correlated with the persisted session ID.
+	sessionTaskKeySessionPrefixLength = 8
+	// maxSessionTaskKeyTaskTypeLength leaves room for two separators and the
+	// scope's 16-character digest while preserving all built-in task names.
+	maxSessionTaskKeyTaskTypeLength = maxSessionTaskKeyLength - sessionTaskKeySessionPrefixLength - 2 - 16
+)
 
 // sessionKeyCtxKey is the context key carrying the run's session key.
 type sessionKeyCtxKey struct{}
@@ -51,25 +57,27 @@ func ContextWithSessionKey(ctx context.Context, key string) context.Context {
 // prefix on a consistent node instead.
 //
 // The scope (usually a file path) is hashed so the key stays header-safe. The
-// session key and task type remain readable while the complete key fits the
-// provider-safe limit; longer keys become a SHA-256 digest of the full derived
-// value.
+// session component is shortened to the first eight characters of its UUID,
+// and task types longer than the available 38 characters are truncated. This
+// leaves every built-in task type readable while keeping all derived keys
+// within the provider-safe limit. The shortened component is only a cache
+// routing hint; the complete session ID remains unchanged in persisted state.
 func SessionTaskKey(sessionKey, taskType, scope string) string {
-	var key string
-	if taskType == "" && scope == "" {
-		key = sessionKey
-	} else if scope == "" {
-		key = sessionKey + "-" + taskType
-	} else {
-		sum := sha256.Sum256([]byte(scope))
-		key = fmt.Sprintf("%s-%s-%x", sessionKey, taskType, sum[:8])
+	if len(sessionKey) > sessionTaskKeySessionPrefixLength {
+		sessionKey = sessionKey[:sessionTaskKeySessionPrefixLength]
+	}
+	if len(taskType) > maxSessionTaskKeyTaskTypeLength {
+		taskType = taskType[:maxSessionTaskKeyTaskTypeLength]
 	}
 
-	if len(key) <= maxSessionTaskKeyLength {
-		return key
+	if taskType == "" && scope == "" {
+		return sessionKey
 	}
-	sum := sha256.Sum256([]byte(key))
-	return fmt.Sprintf("%x", sum[:])
+	if scope == "" {
+		return sessionKey + "-" + taskType
+	}
+	sum := sha256.Sum256([]byte(scope))
+	return fmt.Sprintf("%s-%s-%x", sessionKey, taskType, sum[:8])
 }
 
 // SessionKeyFromContext returns the session key carried by ctx, or "" when
