@@ -89,7 +89,7 @@ class JcefConfigPanelHost(
             d?.let { runCatching { it.close(DialogWrapper.OK_EXIT_CODE) } }
             w?.let { runCatching { it.dispose() } }
         }
-        if (app.isDispatchThread) cleanup() else app.invokeLater(cleanup)
+        if (app.isDispatchThread) cleanup() else app.invokeLater(cleanup, com.intellij.openapi.application.ModalityState.any())
     }
 
     private fun onEdt(block: () -> Unit) {
