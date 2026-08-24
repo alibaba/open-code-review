@@ -62,6 +62,18 @@ func resolveMaxTokens(templateDefault int, cfg *Config, cliOverride int) (int, e
 	return cfg.MaxTokens, nil
 }
 
+// resolveEffort applies the standard precedence for the review effort preset:
+// CLI flag > saved app config > EffortDefault.
+func resolveEffort(cfg *Config, cliOverride string) (template.Effort, error) {
+	if cliOverride != "" {
+		return template.ParseEffort(cliOverride)
+	}
+	if cfg != nil && cfg.Effort != "" {
+		return template.ParseEffort(cfg.Effort)
+	}
+	return template.EffortDefault, nil
+}
+
 // loadCommonContext validates the working directory, loads the embedded
 // template, raises MaxToolRequestTimes when maxTools exceeds the default,
 // resolves the absolute repo path, loads system review rules, and creates

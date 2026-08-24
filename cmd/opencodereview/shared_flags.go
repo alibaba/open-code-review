@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/spf13/cobra"
 )
 
@@ -152,6 +153,11 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if opts.maxTokensBudget < 0 {
 		return fmt.Errorf("--max-tokens-budget must be a non-negative integer (0 means unlimited)")
 	}
+	if opts.effort != "" {
+		if _, err := template.ParseEffort(opts.effort); err != nil {
+			return fmt.Errorf("--effort: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -207,6 +213,8 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addProviderFlag(cmd, &opts.provider)
 	addModelFlag(cmd, &opts.model)
+	cmd.Flags().StringVar(&opts.effort, "effort", "", "review effort preset: low | medium | high (\"\" = configured or default medium)")
+	cmd.RegisterFlagCompletionFunc("effort", completeEnum(template.EffortNames()...))
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
 	addPreviewFlag(cmd, &opts.preview)
 }

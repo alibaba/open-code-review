@@ -108,8 +108,8 @@ func TestLoadDefault_FieldsPopulated(t *testing.T) {
 	if tpl.PlanModeLineThreshold != 50 {
 		t.Errorf("PlanModeLineThreshold = %d, want 50", tpl.PlanModeLineThreshold)
 	}
-	if tpl.PlanModeGroupLineThreshold != 120 {
-		t.Errorf("PlanModeGroupLineThreshold = %d, want 120", tpl.PlanModeGroupLineThreshold)
+	if tpl.PlanModeGroupLineThreshold != 100 {
+		t.Errorf("PlanModeGroupLineThreshold = %d, want 100", tpl.PlanModeGroupLineThreshold)
 	}
 }
 
@@ -351,12 +351,12 @@ func TestResolveLang(t *testing.T) {
 
 func TestPlanRequired(t *testing.T) {
 	tests := []struct {
-		name       string
-		tpl        Template
-		fileCount  int
-		total      int64
-		maxFile    int64
-		want       bool
+		name      string
+		tpl       Template
+		fileCount int
+		total     int64
+		maxFile   int64
+		want      bool
 	}{
 		{
 			name:      "single file exceeds per-file threshold",
