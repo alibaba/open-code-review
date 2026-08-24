@@ -271,7 +271,8 @@ func TestSniffer_CanonicalConfigIncludesObjCRule(t *testing.T) {
 
 func TestLooksLikeObjC(t *testing.T) {
 	objc := []string{
-		"#import \"a.h\"", "#include <stdio.h>", "#pragma once", "#ifdef DEBUG", "#ifndef FOO_H",
+		"#import \"a.h\"", "#include <stdio.h>", "#pragma once",
+		"#ifdef DEBUG", "#ifndef FOO_H", "#if TARGET_OS_IPHONE", "#define kMaxRetries 3",
 		"@import Foundation;", "@interface Foo", "@implementation Foo", "@class Foo;", "@protocol Foo",
 		"//", "/* Copyright 2026. */",
 	}
@@ -280,7 +281,10 @@ func TestLooksLikeObjC(t *testing.T) {
 			t.Errorf("looksLikeObjC(%q) = false, want true", line)
 		}
 	}
-	notObjc := []string{"", "function y = f(x)", "classdef Foo", "% a comment", "x = 1;"}
+	// "#" alone must NOT sniff as ObjC: Octave, which also uses ".m", treats
+	// "#" as a comment character, so a bare "#" prefix would misclassify a
+	// real Octave/MATLAB file.
+	notObjc := []string{"", "function y = f(x)", "classdef Foo", "% a comment", "x = 1;", "# an Octave comment"}
 	for _, line := range notObjc {
 		if looksLikeObjC(line) {
 			t.Errorf("looksLikeObjC(%q) = true, want false", line)

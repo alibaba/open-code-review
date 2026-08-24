@@ -196,7 +196,7 @@ a `**/*.m` match, OCR peeks at the file's **first non-blank line**:
 
 | First line looks like | Rule doc used |
 |---|---|
-| `#import`, `#include`, `#pragma`, `#ifdef`, `#ifndef`, `@import`, `@interface`, `@implementation`, `@class`, `@protocol`, `//`, or `/*` | `objc.md` |
+| `#import`, `#include`, `#pragma`, `#if` (covers `#ifdef`/`#ifndef` too), `#define`, `@import`, `@interface`, `@implementation`, `@class`, `@protocol`, `//`, or `/*` | `objc.md` |
 | anything else (including no content available to sniff, e.g. a deleted file) | `matlab.md` |
 
 A C-style comment opener (`//` or `/*`) counts as an ObjC signal on its own:
@@ -204,6 +204,10 @@ MATLAB comments start with `%` and a `.m` file can't legally begin with `/` in
 MATLAB, so the two are unambiguous. This matters because the Xcode file
 template opens with a `//` banner, and most real projects put a license
 header first — the actual `#import` is rarely on line one.
+
+Deliberately not widened to a bare `#`: Octave, which also uses `.m`, treats
+`#` as a comment character, so that would misclassify a real Octave/MATLAB
+file as Objective-C.
 
 The content is read **at the ref under review**, not from your working tree:
 `ocr review --from/--to` reads via `git show <to>:<path>` and `--commit` via

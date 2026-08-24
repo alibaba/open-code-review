@@ -155,10 +155,12 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 | 先頭行の内容 | 使用されるルールドキュメント |
 |---|---|
-| `#import`、`#include`、`#pragma`、`#ifdef`、`#ifndef`、`@import`、`@interface`、`@implementation`、`@class`、`@protocol`、`//`、または `/*` | `objc.md` |
+| `#import`、`#include`、`#pragma`、`#if`(`#ifdef`/`#ifndef` も含む)、`#define`、`@import`、`@interface`、`@implementation`、`@class`、`@protocol`、`//`、または `/*` | `objc.md` |
 | それ以外(スニッフィング対象のコンテンツがない場合、例えばファイルが削除されている場合も含む) | `matlab.md` |
 
 C スタイルのコメント開始記号(`//` または `/*`)はそれ単独で信頼できる ObjC のシグナルになります。MATLAB のコメントは `%` で始まり、MATLAB では `.m` ファイルが `/` で始まることは文法上あり得ないため、両者は明確に区別できます。これが重要な理由は、Xcode のファイルテンプレートが `//` のバナーコメントで始まり、実際の多くのプロジェクトでは先頭にライセンスヘッダーが置かれるため、本当の `#import` が 1 行目に来ることは稀だからです。
+
+単独の `#` にまで対象を広げていないのは意図的です。同じく `.m` を使う Octave では `#` がコメント記号であるため、広げてしまうと本物の Octave/MATLAB ファイルを Objective-C と誤判定してしまいます。
 
 コンテンツは作業ツリーからではなく、**レビュー対象の ref 上**で読み取られます: `ocr review --from/--to` は `git show <to>:<path>` 経由で、`--commit` は `git show <commit>:<path>` 経由で読み取るため、その ref がチェックアウトされていなくてもスニッフィングは正しく行われます。ワークスペースレビュー、`ocr scan`、`ocr rules check` には ref がなく、それらが対象とする作業ツリーをそのまま読み取ります。ファイルがまったく読み取れない場合は、`matlab.md` にフォールバックします。
 

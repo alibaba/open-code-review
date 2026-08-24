@@ -176,10 +176,12 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 | 首行内容 | 使用的规则文档 |
 |---|---|
-| `#import`、`#include`、`#pragma`、`#ifdef`、`#ifndef`、`@import`、`@interface`、`@implementation`、`@class`、`@protocol`、`//` 或 `/*` | `objc.md` |
+| `#import`、`#include`、`#pragma`、`#if`（也覆盖 `#ifdef`/`#ifndef`）、`#define`、`@import`、`@interface`、`@implementation`、`@class`、`@protocol`、`//` 或 `/*` | `objc.md` |
 | 其他任何情况（包括没有内容可嗅探，例如文件已被删除） | `matlab.md` |
 
 C 风格的注释起始符（`//` 或 `/*`）本身就是可靠的 ObjC 信号：MATLAB 的注释以 `%` 开头，而 `.m` 文件在 MATLAB 中不能以 `/` 合法开头，因此两者不会混淆。这一点很重要，因为 Xcode 的文件模板首行是 `//` 横幅注释，而大多数实际项目会先放置许可证头——真正的 `#import` 很少出现在第一行。
+
+刻意没有把匹配范围扩大到单独的 `#`：Octave 同样使用 `.m` 扩展名，并把 `#` 当作注释符号，扩大匹配会把一个真正的 Octave/MATLAB 文件误判为 Objective-C。
 
 内容是**在被审查的 ref 上**读取的，而不是从你的工作区读取：`ocr review --from/--to` 通过 `git show <to>:<path>` 读取，`--commit` 通过 `git show <commit>:<path>` 读取，因此即使该 ref 未被检出，嗅探结果依然正确。工作区审查、`ocr scan` 以及 `ocr rules check` 没有 ref，直接读取工作区——这正是它们所审查的对象。如果文件完全无法读取，解析将回退到 `matlab.md`。
 

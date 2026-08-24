@@ -146,9 +146,13 @@ func (s *sniffer) showAtRef(path string) string {
 // start with "%" and a MATLAB file cannot legally begin with "/" at all, so a
 // C-style comment opener is itself a reliable ObjC signal — which matters
 // because the Xcode file template and most license headers put a comment, not
-// a directive, on line 1.
+// a directive, on line 1. "#if" covers "#ifdef"/"#ifndef" too (both start
+// with it) as well as a bare platform guard like "#if TARGET_OS_IPHONE".
+// Deliberately not widened to a bare "#": Octave, which also uses ".m",
+// treats "#" as a comment character, so that would misclassify a real
+// Octave/MATLAB file.
 var objcSniffPrefixes = []string{
-	"#import", "#include", "#pragma", "#ifdef", "#ifndef",
+	"#import", "#include", "#pragma", "#if", "#define",
 	"@import", "@interface", "@implementation", "@class", "@protocol",
 	"//", "/*",
 }
