@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -37,6 +38,7 @@ type reviewOptions struct {
 	excludes        string
 	outputFormat    string
 	audience        string
+	outputPath      string
 	background      string
 	backgroundFile  string
 	provider        string
@@ -106,7 +108,17 @@ func init() {
 	registerReviewFlags(reviewCmd, &reviewOpts)
 }
 
-func executeReviewContext(ctx context.Context, opts reviewOptions) error {
+func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
+	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := closeOut(); cerr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close output file: %w", cerr))
+		}
+	}()
+
 	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
@@ -125,7 +137,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	opts.background = bg
 
 	if opts.preview {
-		return runPreviewContext(ctx, cc, opts)
+		return runPreviewContext(ctx, cc, opts, out)
 	}
 
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
@@ -265,7 +277,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	var emitErr error
 	emitted := manifest != nil || runErr == nil
 	if emitted {
-		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, retryReport)
+		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		}
@@ -466,7 +478,7 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 	return nil
 }
 
-func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions) error {
+func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
 	preview, err := agent.Preview(ctx, agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
@@ -479,7 +491,7 @@ func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOption
 		return fmt.Errorf("preview failed: %w", err)
 	}
 
-	return outputPreview(preview, opts.outputFormat)
+	return outputPreview(preview, opts.outputFormat, out)
 }
 
 func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {

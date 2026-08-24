@@ -70,7 +70,7 @@ func newManifestFlowAgent(t *testing.T, diffs []model.Diff, resume *session.Resu
 
 func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *session.ResumeState, client llm.LLMClient) *Agent {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
 		ReviewMode:  session.ReviewModeRange,
@@ -79,6 +79,7 @@ func newManifestFlowAgentWithClient(t *testing.T, diffs []model.Diff, resume *se
 		ResumedFrom: resumedFromSession(resume),
 		Operation:   session.OperationReview,
 	})
+	t.Cleanup(func() { _ = sh.Finalize() })
 	a := New(Args{
 		RepoDir:    repoDir,
 		From:       "main",
@@ -285,7 +286,7 @@ func TestManifestFlowCancellationBeforeDispatchStartsNoSubtask(t *testing.T) {
 }
 
 func TestManifestFlowRunInputFailureIsPersisted(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
 		ReviewMode: session.ReviewModeRange,

@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,13 @@ func addOutputFlags(cmd *cobra.Command, format, audience *string) {
 	cmd.Flags().StringVar(audience, "audience", "human", "output audience: human (show progress; on stderr for json/sarif) or agent (summary only)")
 	cmd.RegisterFlagCompletionFunc("format", completeEnum("text", "json", "sarif"))
 	cmd.RegisterFlagCompletionFunc("audience", completeEnum("human", "agent"))
+}
+
+// addOutputPathFlag registers --output/-o: write results to a UTF-8 file
+// instead of stdout. "" or "-" keeps stdout; a real path is created lazily on
+// the first write so a failed run never truncates an existing file.
+func addOutputPathFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVarP(target, "output", "o", "", "write results to a UTF-8 file (default: stdout; '-' also means stdout)")
 }
 
 func addExcludeFlag(cmd *cobra.Command, target *string) {
@@ -102,6 +110,16 @@ func validateAudience(audience string) error {
 	}
 }
 
+func validateOutputFormat(format string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(format))
+	switch normalized {
+	case "text", "json", "sarif":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("invalid --format value %q: must be 'text', 'json', or 'sarif'", format)
+	}
+}
+
 func validateReviewOptions(opts *reviewOptions) error {
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
@@ -112,6 +130,11 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if err := validateAudience(opts.audience); err != nil {
 		return err
 	}
+	normalizedFormat, err := validateOutputFormat(opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	opts.outputFormat = normalizedFormat
 	const minMaxTools = 10
 	if opts.maxTools < 0 {
 		return fmt.Errorf("--max-tools must be a non-negative integer (0 means use template default)")
@@ -136,6 +159,11 @@ func validateScanOptions(opts *scanOptions) error {
 	if err := validateAudience(opts.audience); err != nil {
 		return err
 	}
+	normalizedFormat, err := validateOutputFormat(opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	opts.outputFormat = normalizedFormat
 	if opts.maxTools < 0 {
 		return fmt.Errorf("--max-tools must be a non-negative integer (0 means use template default)")
 	}
@@ -174,6 +202,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	cmd.RegisterFlagCompletionFunc("resume", completeSessionIDs)
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
+	addOutputPathFlag(cmd, &opts.outputPath)
 	addConcurrencyFlags(cmd, &opts.concurrency, &opts.perFileTimeout, &opts.maxTools, &opts.maxGitProcs, &opts.maxTokens, &opts.maxTokensBudget)
 	addBackgroundFlags(cmd, &opts.background, &opts.backgroundFile)
 	addProviderFlag(cmd, &opts.provider)
@@ -190,6 +219,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	cmd.Flags().StringVar(&opts.paths, "path", "", "comma-separated repo-relative directories or files to scan (default: whole repo)")
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
+	addOutputPathFlag(cmd, &opts.outputPath)
 	cmd.Flags().IntVar(&opts.concurrency, "concurrency", 8, "max concurrent file scans")
 	cmd.Flags().IntVar(&opts.perFileTimeout, "timeout", 10, "concurrent task timeout in minutes")
 	cmd.Flags().IntVar(&opts.maxTools, "max-tools", 0, "max tool call rounds per file; only takes effect when greater than template default")

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -43,7 +44,7 @@ func TestRunScanPreview(t *testing.T) {
 		t.Fatalf("LoadScanDefault: %v", err)
 	}
 	silenceStdout(t, func() {
-		if err := runScanPreview(cc, scanTpl, nil, "text"); err != nil {
+		if err := runScanPreview(cc, scanTpl, nil, "text", os.Stdout); err != nil {
 			t.Fatalf("runScanPreview error: %v", err)
 		}
 	})
@@ -62,7 +63,7 @@ func TestRunScanPreviewJSONFormat(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := runScanPreview(cc, scanTpl, nil, "json"); err != nil {
+		if err := runScanPreview(cc, scanTpl, nil, "json", os.Stdout); err != nil {
 			t.Errorf("runScanPreview error: %v", err)
 		}
 	})
@@ -143,7 +144,7 @@ func TestRunScanPreviewCreatesNoSession(t *testing.T) {
 		t.Fatalf("LoadScanDefault: %v", err)
 	}
 	silenceStdout(t, func() {
-		if err := runScanPreview(cc, scanTpl, nil, "text"); err != nil {
+		if err := runScanPreview(cc, scanTpl, nil, "text", os.Stdout); err != nil {
 			t.Fatalf("runScanPreview error: %v", err)
 		}
 	})

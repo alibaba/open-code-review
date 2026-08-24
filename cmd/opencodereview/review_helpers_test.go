@@ -5,14 +5,16 @@ package main
 
 import (
 	"context"
+	"io"
+	"os"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
-func runPreview(cc *commonContext, opts reviewOptions) error {
-	return runPreviewContext(context.Background(), cc, opts)
+func runPreview(cc *commonContext, opts reviewOptions, out io.Writer) error {
+	return runPreviewContext(context.Background(), cc, opts, out)
 }
 
 func TestRunPreview(t *testing.T) {
@@ -23,7 +25,7 @@ func TestRunPreview(t *testing.T) {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
 	silenceStdout(t, func() {
-		if err := runPreview(cc, reviewOptions{commit: "HEAD"}); err != nil {
+		if err := runPreview(cc, reviewOptions{commit: "HEAD"}, os.Stdout); err != nil {
 			t.Fatalf("runPreview error: %v", err)
 		}
 	})
@@ -39,7 +41,7 @@ func TestRunPreviewJSONFormat(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := runPreview(cc, reviewOptions{commit: "HEAD", outputFormat: "json"}); err != nil {
+		if err := runPreview(cc, reviewOptions{commit: "HEAD", outputFormat: "json"}, os.Stdout); err != nil {
 			t.Errorf("runPreview error: %v", err)
 		}
 	})
@@ -73,7 +75,7 @@ func TestRunPreviewCreatesNoSession(t *testing.T) {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
 	silenceStdout(t, func() {
-		if err := runPreview(cc, reviewOptions{commit: "HEAD"}); err != nil {
+		if err := runPreview(cc, reviewOptions{commit: "HEAD"}, os.Stdout); err != nil {
 			t.Fatalf("runPreview error: %v", err)
 		}
 	})

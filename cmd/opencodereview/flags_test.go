@@ -176,3 +176,71 @@ func TestParseReviewFlags_ShortFlags(t *testing.T) {
 		t.Error("expected preview=true")
 	}
 }
+
+func TestParseReviewFlags_OutputPath(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"long flag", []string{"--output", "result.json"}, "result.json"},
+		{"short flag", []string{"-o", "result.json"}, "result.json"},
+		{"stdout dash", []string{"-o", "-"}, "-"},
+		{"default empty", []string{}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts, err := parseReviewFlags(tc.args)
+			if err != nil {
+				t.Fatalf("parseReviewFlags: %v", err)
+			}
+			if opts.outputPath != tc.want {
+				t.Errorf("outputPath = %q, want %q", opts.outputPath, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseScanFlags_OutputPath(t *testing.T) {
+	opts, err := parseScanFlags([]string{"--output", "scan.json"})
+	if err != nil {
+		t.Fatalf("parseScanFlags: %v", err)
+	}
+	if opts.outputPath != "scan.json" {
+		t.Errorf("outputPath = %q, want scan.json", opts.outputPath)
+	}
+}
+
+func TestParseReviewFlags_InvalidFormat(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--format", "xml"})
+	if err == nil {
+		t.Fatal("expected error for invalid format 'xml'")
+	}
+}
+
+func TestParseScanFlags_InvalidFormat(t *testing.T) {
+	_, err := parseScanFlags([]string{"--format", "yaml"})
+	if err == nil {
+		t.Fatal("expected error for invalid format 'yaml'")
+	}
+}
+
+func TestParseReviewFlags_NormalizedFormat(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--format", " JSON "})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.outputFormat != "json" {
+		t.Errorf("outputFormat = %q, want json", opts.outputFormat)
+	}
+}
+
+func TestParseScanFlags_NormalizedFormat(t *testing.T) {
+	opts, err := parseScanFlags([]string{"--format", " SARIF "})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.outputFormat != "sarif" {
+		t.Errorf("outputFormat = %q, want sarif", opts.outputFormat)
+	}
+}

@@ -109,6 +109,7 @@ unstaged + untracked 变更。
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个文件的 `REVIEW_FILTER_TASK` LLM 后处理调用。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
+| `--output <path>` | `-o` | 标准输出 | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--audience <who>` | — | `human` | `human` 流式输出进度行（`--format` 为 `json`/`sarif` 时输出到 stderr，使 stdout 保持为单个可解析文档）；`agent` 完全抑制进度行，只打印最终摘要 / JSON。 |
 | `--background <text>` | `-b` | — | 注入 plan + main prompt 的可选需求 / 业务上下文。 |
 | `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
@@ -346,6 +347,7 @@ ocr s      [flags]   (alias)
 |---|---|---|---|
 | `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。 |
 | `--exclude <patterns>` | - | - | 逗号分隔的 gitignore 风格排除模式（如 `**/generated/*,*.pb.go`）；与 `rule.json` 的 excludes 合并。 |
+| `--output <path>` | `-o` | 标准输出 | 将扫描结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--preview` | `-p` | `false` | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。支持 `--format json`；不支持 `--format sarif`。 |
 
 ```bash

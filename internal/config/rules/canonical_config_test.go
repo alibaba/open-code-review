@@ -37,7 +37,7 @@ func TestSystemRuleCanonicalConfig(t *testing.T) {
 }
 
 func TestComposedResolverCanonicalConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	dir := t.TempDir()
 	ocrDir := filepath.Join(dir, ".opencodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
@@ -78,7 +78,7 @@ func TestComposedResolverCanonicalConfig_ProjectRuleChangeChangesOutput(t *testi
 	build := func(rule string) string {
 		t.Helper()
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setTestHome(t, home)
 		dir := t.TempDir()
 		ocrDir := filepath.Join(dir, ".opencodereview")
 		if err := os.MkdirAll(ocrDir, 0o755); err != nil {

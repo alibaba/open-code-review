@@ -1097,7 +1097,7 @@ func TestRunConfigUnset_InvalidKey(t *testing.T) {
 }
 
 func TestRunConfigSetWarnsWhenActiveProviderShadowsLegacyLLMConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	configPath, err := defaultConfigPath()
 	if err != nil {
 		t.Fatal(err)
@@ -1146,7 +1146,7 @@ func TestLegacyLLMShadowWarning(t *testing.T) {
 }
 
 func TestRunConfigUnsetProviderClearsSelectionAndKeepsProviderEntries(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	configPath, err := defaultConfigPath()
 	if err != nil {
 		t.Fatal(err)

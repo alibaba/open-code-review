@@ -26,7 +26,7 @@ func outputText(comments []model.LlmComment) {
 		return
 	}
 	for _, c := range comments {
-		renderComment(c)
+		renderComment(c, os.Stdout)
 	}
 }
 
@@ -64,21 +64,21 @@ func isSubtaskErrorType(warningType string) bool {
 	return warningType == "subtask_error" || warningType == "scan_subtask_error"
 }
 
-func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning, manifest *session.RunManifest) {
+func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning, manifest *session.RunManifest, out io.Writer) {
 	if manifest != nil {
-		fmt.Println(manifestMessage(manifest, len(comments)))
+		fmt.Fprintln(out, manifestMessage(manifest, len(comments)))
 		for _, c := range comments {
-			renderComment(c)
+			renderComment(c, out)
 		}
 	} else if len(comments) == 0 {
 		if hasSubtaskErrors(warnings) {
-			fmt.Println("Some files could not be reviewed due to errors (see warnings below).")
+			fmt.Fprintln(out, "Some files could not be reviewed due to errors (see warnings below).")
 		} else {
-			fmt.Println("No comments generated. Looks good to me.")
+			fmt.Fprintln(out, "No comments generated. Looks good to me.")
 		}
 	} else {
 		for _, c := range comments {
-			renderComment(c)
+			renderComment(c, out)
 		}
 	}
 	for _, w := range warnings {
@@ -89,13 +89,13 @@ func outputTextWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	}
 }
 
-func renderComment(comment model.LlmComment) {
+func renderComment(comment model.LlmComment, out io.Writer) {
 	lines := buildDiffLines(comment)
 	if len(lines) == 0 && comment.Content == "" {
 		return
 	}
 
-	fmt.Printf("\n%s\n", colorf("\033[2m", "─── %s:%d-%d ───", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine))
+	fmt.Fprintf(out, "\n%s\n", colorf("\033[2m", "─── %s:%d-%d ───", sanitizeTerminal(comment.Path), comment.StartLine, comment.EndLine))
 
 	if comment.Content != "" {
 		badge := buildBadge(comment)
@@ -110,25 +110,25 @@ func renderComment(comment model.LlmComment) {
 			if i == 0 && badge != "" && strings.HasPrefix(ln, badge) {
 				ln = colorize(severityColor(comment.Severity), badge) + ln[len(badge):]
 			}
-			fmt.Printf("%s\n", ln)
+			fmt.Fprintf(out, "%s\n", ln)
 		}
-		fmt.Println()
+		fmt.Fprintln(out)
 	}
 
 	if len(lines) > 0 {
 		for _, dl := range lines {
 			switch dl.Type {
 			case suggestdiff.DiffAdded:
-				printDiffLine("+", sanitizeTerminal(dl.Content), "\033[92m", "\033[48;2;0;60;0m")
+				printDiffLine(out, "+", sanitizeTerminal(dl.Content), "\033[92m", "\033[48;2;0;60;0m")
 			case suggestdiff.DiffDeleted:
-				printDiffLine("-", sanitizeTerminal(dl.Content), "\033[91m", "\033[48;2;70;0;0m")
+				printDiffLine(out, "-", sanitizeTerminal(dl.Content), "\033[91m", "\033[48;2;70;0;0m")
 			case suggestdiff.DiffContext:
-				printDiffLine(" ", sanitizeTerminal(dl.Content), "\033[2m", "\033[48;2;38;38;38m")
+				printDiffLine(out, " ", sanitizeTerminal(dl.Content), "\033[2m", "\033[48;2;38;38;38m")
 			}
 		}
 	}
 
-	fmt.Println()
+	fmt.Fprintln(out)
 }
 
 // buildBadge renders a compact "[category · severity]" tag for a finding. It returns
@@ -169,12 +169,12 @@ func severityColor(severity string) string {
 // printDiffLine renders a single diff line with colored prefix and background on
 // content. With color disabled it emits "<prefix> <content>", which keeps the
 // +/-/space gutter that carries the added/deleted/context meaning in plain text.
-func printDiffLine(prefix, content, fgColor, bgColor string) {
+func printDiffLine(out io.Writer, prefix, content, fgColor, bgColor string) {
 	if !colorOn() {
-		fmt.Printf("%s %s\n", prefix, content)
+		fmt.Fprintf(out, "%s %s\n", prefix, content)
 		return
 	}
-	fmt.Printf("%s%s%s %s%s\n", fgColor+bgColor, prefix, ansiReset+bgColor, content, ansiReset)
+	fmt.Fprintf(out, "%s%s%s %s%s\n", fgColor+bgColor, prefix, ansiReset+bgColor, content, ansiReset)
 }
 
 // wrapByRunes splits text into lines that fit within maxWidth **rune** columns.
@@ -322,10 +322,10 @@ func outputJSON(comments []model.LlmComment) error {
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
 	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
-	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity,
+	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
 	retryReport *llm.RetryReport) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
-	out := jsonOutput{
+	payload := jsonOutput{
 		Status:   "success",
 		LLM:      llmIdentity,
 		TraceID:  traceID,
@@ -355,29 +355,29 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	if byTool == nil {
 		byTool = make(map[string]int64)
 	}
-	out.ToolCalls = &jsonToolCalls{
+	payload.ToolCalls = &jsonToolCalls{
 		Total:  total,
 		ByTool: byTool,
 	}
 	if manifest != nil {
-		out.Status = string(manifest.TerminalState)
-		out.Message = manifestMessage(manifest, len(comments))
+		payload.Status = string(manifest.TerminalState)
+		payload.Message = manifestMessage(manifest, len(comments))
 	} else if len(comments) == 0 {
 		if hasSubtaskErrors(warnings) {
-			out.Message = "Some files could not be reviewed due to errors."
+			payload.Message = "Some files could not be reviewed due to errors."
 		} else {
-			out.Message = "No comments generated. Looks good to me."
+			payload.Message = "No comments generated. Looks good to me."
 		}
 	}
 	if len(publishedWarnings) > 0 {
-		out.Warnings = publishedWarnings
+		payload.Warnings = publishedWarnings
 		if manifest == nil && hasSubtaskErrors(publishedWarnings) {
-			out.Status = "completed_with_errors"
+			payload.Status = "completed_with_errors"
 		} else if manifest == nil {
-			out.Status = "completed_with_warnings"
+			payload.Status = "completed_with_warnings"
 		}
 	}
-	// budgetExceeded deliberately does NOT touch out.Status. Reaching the
+	// budgetExceeded deliberately does NOT touch payload.Status. Reaching the
 	// aggregate token budget is a controlled coverage truncation, so it is already
 	// expressed in the manifest as failed(budget) on the items that never got
 	// dispatched — which makes terminal_state read "partial" whenever anything was
@@ -385,9 +385,9 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 	// and the budget reason stays observable through three deterministic outlets:
 	// summary.budget_exceeded, the token_budget_reached warning, and
 	// coverage.failed[].classification == "budget".
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return enc.Encode(payload)
 }
 
 // retryStages maps internal task types to concise terminal labels. The slice
@@ -603,8 +603,8 @@ func manifestMessage(manifest *session.RunManifest, findings int) string {
 	}
 }
 
-func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity) error {
-	out := jsonOutput{
+func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity, out io.Writer) error {
+	payload := jsonOutput{
 		Status:   "skipped",
 		LLM:      llmIdentity,
 		TraceID:  traceID,
@@ -614,9 +614,9 @@ func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity) error {
 			ByTool: map[string]int64{},
 		},
 	}
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	return enc.Encode(payload)
 }
 
 // emitFailureUsage writes a best-effort structured usage record to stderr when
@@ -693,26 +693,29 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 // rejected with an error because a preview contains file/rule metadata, not
 // review findings — there is no SARIF result to emit, and a differently-shaped
 // document would confuse consumers expecting a SARIF report.
-func outputPreview(p *agent.DiffPreview, outputFormat string) error {
+func outputPreview(p *agent.DiffPreview, outputFormat string, out io.Writer) error {
+	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	if outputFormat == "sarif" {
 		return fmt.Errorf("--format sarif is not supported with --preview: SARIF output requires completed review findings")
 	}
 	if outputFormat == "json" {
-		return outputPreviewJSON(p)
+		return outputPreviewJSON(p, out)
 	}
-	outputPreviewText(p)
-	return nil
+	outputPreviewText(p, out)
+	// outputPreviewText drops fmt.Fprintf write errors; surface deferred
+	// writer errors so a failed --output write fails the command non-zero.
+	return writeOutError(out)
 }
 
-func outputPreviewJSON(p *agent.DiffPreview) error {
-	enc := json.NewEncoder(os.Stdout)
+func outputPreviewJSON(p *agent.DiffPreview, out io.Writer) error {
+	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(p)
 }
 
-func outputPreviewText(p *agent.DiffPreview) {
+func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 	if p.TotalFiles == 0 {
-		fmt.Println("No files changed.")
+		fmt.Fprintln(out, "No files changed.")
 		return
 	}
 
@@ -727,19 +730,19 @@ func outputPreviewText(p *agent.DiffPreview) {
 	}
 	pathFmt := fmt.Sprintf("%%-%ds", maxPathLen)
 
-	fmt.Printf("\nPreview: %d file(s) changed  |  %s  %s\n", p.TotalFiles,
+	fmt.Fprintf(out, "\nPreview: %d file(s) changed  |  %s  %s\n", p.TotalFiles,
 		colorf("\033[32m", "+%d", p.TotalInsertions),
 		colorf("\033[31m", "-%d", p.TotalDeletions))
 
 	if p.ReviewableCount > 0 {
-		fmt.Printf("\n%s\n", colorf("\033[1m", "Will review (%d):", p.ReviewableCount))
+		fmt.Fprintf(out, "\n%s\n", colorf("\033[1m", "Will review (%d):", p.ReviewableCount))
 		for _, e := range p.Entries {
 			if !e.WillReview {
 				continue
 			}
 			// The counts are padded before colorizing so the columns stay aligned
 			// whether or not the escape sequences are present.
-			fmt.Printf("  %s  "+pathFmt+" %s %s\n",
+			fmt.Fprintf(out, "  %s  "+pathFmt+" %s %s\n",
 				statusBadge(e.Status), sanitizeTerminal(e.Path),
 				colorf("\033[32m", "+%-4d", e.Insertions),
 				colorf("\033[31m", "-%-4d", e.Deletions))
@@ -747,18 +750,18 @@ func outputPreviewText(p *agent.DiffPreview) {
 	}
 
 	if p.ExcludedCount > 0 {
-		fmt.Printf("\n%s\n", colorf("\033[1m", "Excluded from review (%d):", p.ExcludedCount))
+		fmt.Fprintf(out, "\n%s\n", colorf("\033[1m", "Excluded from review (%d):", p.ExcludedCount))
 		for _, e := range p.Entries {
 			if e.WillReview {
 				continue
 			}
-			fmt.Printf("  %s  "+pathFmt+" %s\n",
+			fmt.Fprintf(out, "  %s  "+pathFmt+" %s\n",
 				statusBadge(e.Status), sanitizeTerminal(e.Path),
 				colorf("\033[2m", "(%s)", sanitizeTerminal(string(e.ExcludeReason))))
 		}
 	}
 
-	fmt.Println()
+	fmt.Fprintln(out)
 }
 
 // statusBadge renders the per-file status tag. The letter carries the meaning,
