@@ -70,7 +70,7 @@ func objcRuleText(t *testing.T) string {
 // resolveIn builds a real resolver for dir/ref and resolves path.
 func resolveIn(t *testing.T, dir, ref, path string, runner *gitcmd.Runner) string {
 	t.Helper()
-	t.Setenv("HOME", t.TempDir()) // isolate from a real ~/.opencodereview/rule.json
+	setTestHome(t, t.TempDir()) // isolate from a real ~/.opencodereview/rule.json
 	r, _, err := NewResolver(dir, "", ResolverOptions{Ref: ref, Runner: runner})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -160,7 +160,7 @@ func TestSniffer_ReadsAtRefNotCheckedOut(t *testing.T) {
 // and discard the user rule.
 func TestSniffer_UserRuleOutranksSniff(t *testing.T) {
 	dir, _ := initRepo(t, map[string]string{"ios/ViewController.m": objcSource})
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	writeFile(t, dir, ".opencodereview/rule.json",
 		`{"rules":[{"path":"**/*.m","rule":"MY PROJECT RULE"}]}`)
@@ -178,7 +178,7 @@ func TestSniffer_UserRuleOutranksSniff(t *testing.T) {
 // system half, not the MATLAB rule the path alone would select.
 func TestSniffer_MergeSystemRuleUsesSniffedRule(t *testing.T) {
 	dir, _ := initRepo(t, map[string]string{"ios/ViewController.m": objcSource})
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	writeFile(t, dir, ".opencodereview/rule.json",
 		`{"rules":[{"path":"**/*.m","rule":"MY PROJECT RULE","merge_system_rule":true}]}`)
@@ -208,7 +208,7 @@ func TestSniffer_ResolveDetailKeepsPatternPlain(t *testing.T) {
 		"ios/ViewController.m": objcSource,
 		"Models/main.m":        matlabSource,
 	})
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	r, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
@@ -243,7 +243,7 @@ func TestSniffer_ResolveDetailKeepsPatternPlain(t *testing.T) {
 // folded into CanonicalConfig explicitly or editing it would not invalidate the
 // run manifest's rule_config_sha256.
 func TestSniffer_CanonicalConfigIncludesObjCRule(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	r, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
