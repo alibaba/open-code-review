@@ -5,7 +5,9 @@ package diff
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -36,7 +38,16 @@ func makeTask() *template.LlmConversation {
 	return &template.LlmConversation{
 		Messages: []template.ChatMessage{
 			{Role: "system", Content: "you are a helper"},
-			{Role: "user", Content: "diff:\n{diff}\n\ncomment:\n{suggestion_content}"},
+			{Role: "user", Content: "diff:\n{diff}\ncode:\n{existing_code}\nsuggestion:\n{suggestion_content}"},
+		},
+	}
+}
+
+func makeCandidateTask() *template.LlmConversation {
+	return &template.LlmConversation{
+		Messages: []template.ChatMessage{
+			{Role: "system", Content: "select candidate"},
+			{Role: "user", Content: "comment:\n{suggestion_content}\ncode:\n{existing_code}\nsuggestion:\n{suggestion_code}\nthinking:\n{thinking}\ncandidates:\n{candidates}"},
 		},
 	}
 }
@@ -126,6 +137,198 @@ func TestReLocateComment_LLMReturnsValidCode(t *testing.T) {
 	}
 	if cm.StartLine == 0 || cm.EndLine == 0 {
 		t.Fatalf("expected non-zero lines after re-location, got %d-%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestReLocateCommentCandidate_SelectsPrecomputedLocation(t *testing.T) {
+	cm := model.LlmComment{
+		Path:           "main.go",
+		Content:        "The second branch should not fail after success.",
+		ExistingCode:   "status = failed",
+		SuggestionCode: "status = succeeded",
+	}
+	candidates := []CommentLocationCandidate{
+		{ID: "1", Path: "main.go", StartLine: 10, EndLine: 10, Snippet: "status = failed", Context: "if err != nil {\nstatus = failed\n}"},
+		{ID: "2", Path: "main.go", StartLine: 42, EndLine: 44, Snippet: "status = failed", Context: "if remoteStatus == \"\" {\nstatus = failed\n}"},
+	}
+	client := &mockLLMClient{response: newMockResponse(`{"candidate_id":2}`)}
+	msgs := BuildCandidateReLocationMessages(&cm, candidates, makeCandidateTask())
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	if !strings.Contains(msgs[1].ExtractText(), "remoteStatus") {
+		t.Fatalf("candidate prompt did not include context: %s", msgs[1].ExtractText())
+	}
+
+	ok, resp := ReLocateCommentCandidate(context.Background(), &cm, candidates, client, msgs, "test-model", 1000)
+	if !ok {
+		t.Fatal("expected candidate re-location to succeed")
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if cm.StartLine != 42 || cm.EndLine != 44 {
+		t.Fatalf("lines = %d-%d, want 42-44", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestBuildCandidateReLocationMessages_RendersCandidatesAsJSON(t *testing.T) {
+	cm := model.LlmComment{
+		Path:         "main.go",
+		Content:      "The second branch is wrong.",
+		ExistingCode: "target()",
+	}
+	candidates := []CommentLocationCandidate{
+		{
+			ID:        "1",
+			Path:      "main.go",
+			StartLine: 10,
+			EndLine:   12,
+			Snippet:   "fmt.Println(```)",
+			Context:   "payload := `{\"candidate_id\":1}`\nfmt.Println(```)",
+		},
+	}
+
+	msgs := BuildCandidateReLocationMessages(&cm, candidates, makeCandidateTask())
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	text := msgs[1].ExtractText()
+	marker := "candidates:\n"
+	start := strings.Index(text, marker)
+	if start < 0 {
+		t.Fatalf("candidate prompt missing candidate section: %s", text)
+	}
+	candidateJSON := text[start+len(marker):]
+	if strings.Contains(candidateJSON, "matched code:\n```") || strings.Contains(candidateJSON, "candidate context:\n```") {
+		t.Fatalf("candidate list should not use Markdown fences as structure: %s", candidateJSON)
+	}
+	var rendered []struct {
+		CandidateID string `json:"candidate_id"`
+		MatchedCode string `json:"matched_code"`
+		Context     string `json:"context"`
+	}
+	if err := json.Unmarshal([]byte(candidateJSON), &rendered); err != nil {
+		t.Fatalf("candidate list is not valid JSON: %v\n%s", err, candidateJSON)
+	}
+	if len(rendered) != 1 || rendered[0].CandidateID != "1" {
+		t.Fatalf("rendered candidates = %+v, want candidate 1", rendered)
+	}
+	if rendered[0].MatchedCode != "fmt.Println(```)" || !strings.Contains(rendered[0].Context, `{"candidate_id":1}`) {
+		t.Fatalf("rendered candidate lost code content: %+v", rendered[0])
+	}
+}
+
+func TestBuildCandidateReLocationMessages_DoesNotExpandInsertedPlaceholders(t *testing.T) {
+	cm := model.LlmComment{
+		Path:           "main.go",
+		Content:        "Do not replace this literal token: {candidates}",
+		ExistingCode:   "target()",
+		SuggestionCode: "Do not replace this literal token either: {thinking}",
+		Thinking:       "Keep {existing_code} as plain text.",
+	}
+	candidates := []CommentLocationCandidate{{
+		ID:        "1",
+		Path:      "main.go",
+		StartLine: 10,
+		EndLine:   10,
+		Snippet:   "target()",
+	}}
+
+	msgs := BuildCandidateReLocationMessages(&cm, candidates, makeCandidateTask())
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	text := msgs[1].ExtractText()
+	if !strings.Contains(text, "Do not replace this literal token: {candidates}") {
+		t.Fatalf("suggestion content placeholder literal was re-expanded: %s", text)
+	}
+	if !strings.Contains(text, "Do not replace this literal token either: {thinking}") {
+		t.Fatalf("suggestion code placeholder literal was re-expanded: %s", text)
+	}
+	if !strings.Contains(text, "Keep {existing_code} as plain text.") {
+		t.Fatalf("thinking placeholder literal was re-expanded: %s", text)
+	}
+}
+
+func TestReLocateCommentCandidate_NullCandidateDeclines(t *testing.T) {
+	cm := model.LlmComment{Path: "main.go", Content: "issue", ExistingCode: "x"}
+	candidates := []CommentLocationCandidate{{ID: "1", Path: "main.go", StartLine: 1, EndLine: 1, Snippet: "x"}}
+	client := &mockLLMClient{response: newMockResponse(`{"candidate_id":null}`)}
+
+	ok, resp := ReLocateCommentCandidate(context.Background(), &cm, candidates, client, BuildCandidateReLocationMessages(&cm, candidates, makeCandidateTask()), "test-model", 1000)
+	if ok {
+		t.Fatal("expected null candidate to decline")
+	}
+	if resp == nil {
+		t.Fatal("expected response to be recorded")
+	}
+	if cm.StartLine != 0 || cm.EndLine != 0 {
+		t.Fatalf("lines = %d-%d, want 0-0", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestReLocateCommentCandidate_StrictParserRejectsProse(t *testing.T) {
+	cm := model.LlmComment{Path: "main.go", Content: "issue", ExistingCode: "x"}
+	candidates := []CommentLocationCandidate{{ID: "2", Path: "main.go", StartLine: 2, EndLine: 2, Snippet: "x"}}
+	client := &mockLLMClient{response: newMockResponse("The candidate is 2.")}
+
+	ok, resp := ReLocateCommentCandidate(context.Background(), &cm, candidates, client, BuildCandidateReLocationMessages(&cm, candidates, makeCandidateTask()), "test-model", 1000)
+	if ok {
+		t.Fatal("expected strict parser to reject prose")
+	}
+	if resp == nil {
+		t.Fatal("expected response to be returned")
+	}
+	if cm.StartLine != 0 || cm.EndLine != 0 {
+		t.Fatalf("lines = %d-%d, want 0-0", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestParseCandidateID_StrictJSONObjectOnly(t *testing.T) {
+	tests := []struct {
+		name       string
+		content    string
+		wantID     string
+		wantParsed bool
+	}{
+		{name: "number id", content: `{"candidate_id":2}`, wantID: "2", wantParsed: true},
+		{name: "string id", content: `{"candidate_id":"2"}`, wantID: "2", wantParsed: true},
+		{name: "null id", content: `{"candidate_id":null}`, wantParsed: true},
+		{name: "string null", content: `{"candidate_id":"null"}`, wantParsed: false},
+		{name: "prose", content: "Candidate 2 is correct.", wantParsed: false},
+		{name: "bare number", content: "2", wantParsed: false},
+		{name: "fenced json", content: "```json\n{\"candidate_id\":2}\n```", wantID: "2", wantParsed: true},
+		{name: "fenced json with prose", content: "Here is the answer:\n```json\n{\"candidate_id\":2}\n```", wantParsed: false},
+		{name: "missing field", content: `{}`, wantParsed: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotID, gotParsed := ParseCandidateID(tt.content)
+			if gotID != tt.wantID || gotParsed != tt.wantParsed {
+				t.Fatalf("ParseCandidateID() = %q/%v, want %q/%v", gotID, gotParsed, tt.wantID, tt.wantParsed)
+			}
+		})
+	}
+}
+
+func TestBuildCandidateReLocationRetryMessages(t *testing.T) {
+	base := []llm.Message{
+		llm.NewTextMessage("system", "select"),
+		llm.NewTextMessage("user", "candidates"),
+	}
+	got := BuildCandidateReLocationRetryMessages(base, "candidate 2")
+	if len(got) != 4 {
+		t.Fatalf("messages = %d, want 4", len(got))
+	}
+	if got[2].Role != "assistant" || got[2].ExtractText() != "candidate 2" {
+		t.Fatalf("assistant retry context = %q/%q", got[2].Role, got[2].ExtractText())
+	}
+	if got[3].Role != "user" ||
+		!strings.Contains(got[3].ExtractText(), "Return exactly one JSON object") ||
+		!strings.Contains(got[3].ExtractText(), `{"candidate_id":null}`) {
+		t.Fatalf("retry instruction = %q/%q", got[3].Role, got[3].ExtractText())
 	}
 }
 

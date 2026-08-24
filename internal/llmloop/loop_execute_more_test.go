@@ -19,10 +19,16 @@ import (
 // letting tests drive the full main loop turn by turn.
 type scriptedLLMClient struct {
 	responses []*llm.ChatResponse
+	requests  []llm.ChatRequest
 	calls     int
 }
 
-func (s *scriptedLLMClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func ptr[T any](v T) *T {
+	return &v
+}
+
+func (s *scriptedLLMClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	s.requests = append(s.requests, req)
 	if s.calls >= len(s.responses) {
 		return s.responses[len(s.responses)-1], nil
 	}
@@ -66,6 +72,13 @@ func codeCommentResponse(reasoning, content string) *llm.ChatResponse {
 			}},
 		}}},
 	}
+}
+
+func testCandidateReLocationTask() *template.LlmConversation {
+	return &template.LlmConversation{Messages: []template.ChatMessage{
+		{Role: "system", Content: "select candidate"},
+		{Role: "user", Content: "{suggestion_content}\n{existing_code}\n{suggestion_code}\n{thinking}\n{candidates}"},
+	}}
 }
 
 // TestRunPerFile_BackfillsThinkingFromReasoningContent verifies the full
@@ -263,6 +276,200 @@ func TestExecuteToolCall_CodeCommentDiffResolved(t *testing.T) {
 	// ResolveComment should have located "foo bar" on line 2 of NewFileContent.
 	if comments[0].StartLine != 2 {
 		t.Errorf("comment StartLine = %d, want 2 (resolved from file content)", comments[0].StartLine)
+	}
+}
+
+func TestExecuteToolCall_CodeCommentAmbiguousSameFileUsesCandidateRelocation(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	client := &fakeClient{responses: []*llm.ChatResponse{{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: ptr(`{"candidate_id":2}`)}}},
+		Usage:   &llm.UsageInfo{PromptTokens: 3, CompletionTokens: 1},
+	}}}
+	d := &model.Diff{
+		NewPath: "main.go",
+		Diff: `@@ -10,6 +10,10 @@
+ func first() {
++	beforeFirst()
++	target()
++	afterFirst()
+ }
+@@ -40,6 +44,10 @@
+ func second() {
++	beforeSecond()
++	target()
++	afterSecond()
+ }
+`,
+	}
+	r := NewRunner(Deps{
+		LLMClient:        client,
+		Model:            "test-model",
+		Template:         template.Template{MaxToolRequestTimes: 5, MaxTokens: 1000000, CandidateReLocationTask: testCandidateReLocationTask()},
+		Tools:            reg,
+		CommentCollector: collector,
+		DiffLookup:       func(string) *model.Diff { return d },
+		AllDiffs:         func() []model.Diff { return []model.Diff{*d} },
+		Session:          session.New(t.TempDir(), "main", "test-model", session.SessionOptions{ReviewMode: "diff"}),
+	})
+
+	cp := r.executeToolCall(context.Background(), "main.go", llm.ToolCall{
+		Function: llm.FunctionCall{
+			Name:      tool.CodeComment.Name(),
+			Arguments: `{"comments":[{"content":"the second branch is wrong","existing_code":"target()"}]}`,
+		},
+	}, &session.TaskRecord{}, "")
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("cp.Data = %q, want CommentSucceed", cp.Data)
+	}
+	comments := collector.Comments()
+	if len(comments) != 1 {
+		t.Fatalf("collected %d comments, want 1", len(comments))
+	}
+	if comments[0].StartLine != 46 || comments[0].EndLine != 46 {
+		t.Fatalf("comment lines = %d-%d, want 46-46", comments[0].StartLine, comments[0].EndLine)
+	}
+	if client.calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1 candidate re-location call", client.calls)
+	}
+	if got := client.requests[0].Messages[1].ExtractText(); !strings.Contains(got, "beforeSecond()") {
+		t.Fatalf("candidate prompt missing context: %s", got)
+	}
+}
+
+func TestExecuteToolCall_CodeCommentPrefersUniqueCurrentFileMatch(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	client := &fakeClient{responses: []*llm.ChatResponse{{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: ptr(`{"candidate_id":2}`)}}},
+	}}}
+	current := model.Diff{
+		NewPath: "current.go",
+		Diff: `@@ -10,3 +10,5 @@
+ func current() {
++	target()
+ }
+`,
+	}
+	other := model.Diff{
+		NewPath: "other.go",
+		Diff: `@@ -20,3 +20,5 @@
+ func other() {
++	target()
+ }
+`,
+	}
+	r := NewRunner(Deps{
+		LLMClient:        client,
+		Model:            "test-model",
+		Template:         template.Template{MaxToolRequestTimes: 5, MaxTokens: 1000000, CandidateReLocationTask: testCandidateReLocationTask()},
+		Tools:            reg,
+		CommentCollector: collector,
+		DiffLookup: func(path string) *model.Diff {
+			if path == "current.go" {
+				return &current
+			}
+			return nil
+		},
+		AllDiffs: func() []model.Diff { return []model.Diff{current, other} },
+		Session:  session.New(t.TempDir(), "main", "test-model", session.SessionOptions{ReviewMode: "diff"}),
+	})
+
+	cp := r.executeToolCall(context.Background(), "current.go", llm.ToolCall{
+		Function: llm.FunctionCall{
+			Name:      tool.CodeComment.Name(),
+			Arguments: `{"comments":[{"content":"issue","existing_code":"target()"}]}`,
+		},
+	}, &session.TaskRecord{}, "")
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("cp.Data = %q, want CommentSucceed", cp.Data)
+	}
+	comments := collector.Comments()
+	if len(comments) != 1 {
+		t.Fatalf("collected %d comments, want 1", len(comments))
+	}
+	if comments[0].Path != "current.go" || comments[0].StartLine != 11 || comments[0].EndLine != 11 {
+		t.Fatalf("comment location = %s:%d-%d, want current.go:11-11", comments[0].Path, comments[0].StartLine, comments[0].EndLine)
+	}
+	if client.calls != 0 {
+		t.Fatalf("LLM calls = %d, want no candidate re-location call", client.calls)
+	}
+}
+
+func TestExecuteToolCall_CodeCommentCandidateRelocationRetriesTwiceStrictly(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: ptr("Candidate 2 is not the correct location.")}}}},
+		{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: ptr(`{"candidate_id":99}`)}}}},
+		{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: ptr(`{"candidate_id":2}`)}}}},
+	}}
+	d := &model.Diff{
+		NewPath: "main.go",
+		Diff: `@@ -10,6 +10,10 @@
+ func first() {
++	beforeFirst()
++	target()
++	afterFirst()
+ }
+@@ -40,6 +44,10 @@
+ func second() {
++	beforeSecond()
++	target()
++	afterSecond()
+ }
+`,
+	}
+	r := NewRunner(Deps{
+		LLMClient:        client,
+		Model:            "test-model",
+		Template:         template.Template{MaxToolRequestTimes: 5, MaxTokens: 1000000, CandidateReLocationTask: testCandidateReLocationTask()},
+		Tools:            reg,
+		CommentCollector: collector,
+		DiffLookup:       func(string) *model.Diff { return d },
+		AllDiffs:         func() []model.Diff { return []model.Diff{*d} },
+		Session:          session.New(t.TempDir(), "main", "test-model", session.SessionOptions{ReviewMode: "diff"}),
+	})
+
+	cp := r.executeToolCall(context.Background(), "main.go", llm.ToolCall{
+		Function: llm.FunctionCall{
+			Name:      tool.CodeComment.Name(),
+			Arguments: `{"comments":[{"content":"the second branch is wrong","existing_code":"target()"}]}`,
+		},
+	}, &session.TaskRecord{}, "")
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("cp.Data = %q, want CommentSucceed", cp.Data)
+	}
+	comments := collector.Comments()
+	if len(comments) != 1 {
+		t.Fatalf("collected %d comments, want 1", len(comments))
+	}
+	if comments[0].StartLine != 46 || comments[0].EndLine != 46 {
+		t.Fatalf("comment lines = %d-%d, want 46-46", comments[0].StartLine, comments[0].EndLine)
+	}
+	if client.calls != 3 {
+		t.Fatalf("LLM calls = %d, want initial call plus 2 retries", client.calls)
+	}
+	if len(client.requests) != 3 {
+		t.Fatalf("recorded requests = %d, want 3", len(client.requests))
+	}
+	if got := len(client.requests[0].Messages); got != 2 {
+		t.Fatalf("first request messages = %d, want 2", got)
+	}
+	if got := len(client.requests[1].Messages); got != 4 {
+		t.Fatalf("first retry messages = %d, want 4", got)
+	}
+	if got := len(client.requests[2].Messages); got != 6 {
+		t.Fatalf("second retry messages = %d, want 6", got)
 	}
 }
 

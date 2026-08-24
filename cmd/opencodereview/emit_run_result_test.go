@@ -319,6 +319,44 @@ func TestEmitRunResult_JSONWithComments(t *testing.T) {
 	}
 }
 
+func TestEmitRunResult_DoesNotResolveAmbiguousCommentToFirstMatch(t *testing.T) {
+	ag := &mockResultProvider{
+		filesReviewed: 1,
+		diffs: []model.Diff{{
+			NewPath: "main.go",
+			Diff: `@@ -1,6 +1,8 @@
+ func first() {
++	target()
+ }
+ func second() {
++	target()
+ }
+`,
+		}},
+	}
+	comments := []model.LlmComment{{
+		Path:         "main.go",
+		Content:      "ambiguous repeated code",
+		ExistingCode: "target()",
+	}}
+
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, comments, time.Now(), "json", "developer", nil, nil, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(out.Comments) != 1 {
+		t.Fatalf("comments = %d, want 1", len(out.Comments))
+	}
+	if out.Comments[0].StartLine != 0 || out.Comments[0].EndLine != 0 {
+		t.Fatalf("comment lines = %d-%d, want unresolved 0-0", out.Comments[0].StartLine, out.Comments[0].EndLine)
+	}
+}
+
 func TestEmitRunResult_JSONWithResumeInfo(t *testing.T) {
 	ag := &mockResultProvider{
 		filesReviewed: 2,

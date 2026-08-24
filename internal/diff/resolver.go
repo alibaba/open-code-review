@@ -4,6 +4,7 @@
 package diff
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/alibaba/open-code-review/internal/model"
@@ -45,13 +46,10 @@ func ResolveLineNumbers(comments []model.LlmComment, diffs []model.Diff) []model
 			continue
 		}
 
-		// Primary: try matching from deleted/context lines in diff hunks
-		if resolveFromHunk(d, cm) {
-			continue
+		candidates := ResolveCommentCandidates(cm, d)
+		if len(candidates) == 1 {
+			ApplyCandidate(cm, candidates[0])
 		}
-
-		// Fallback: scan the new file content for consecutive matches
-		resolveFromFileContent(d, cm)
 	}
 
 	return result
@@ -70,6 +68,80 @@ func ResolveComment(cm *model.LlmComment, d *model.Diff) bool {
 		return true
 	}
 	return resolveFromFileContent(d, cm)
+}
+
+// CommentLocationCandidate is one place where ExistingCode matched.
+type CommentLocationCandidate struct {
+	ID        string
+	Path      string
+	StartLine int
+	EndLine   int
+	Snippet   string
+	Context   string
+}
+
+// ResolveCommentCandidates returns locations that match cm.ExistingCode in d,
+// using ResolveComment's existing search order while keeping ambiguity visible:
+// new-side hunks, old-side hunks, then full new-file content.
+func ResolveCommentCandidates(cm *model.LlmComment, d *model.Diff) []CommentLocationCandidate {
+	return assignCandidateIDs(commentCandidates(cm, d))
+}
+
+func commentCandidates(cm *model.LlmComment, d *model.Diff) []CommentLocationCandidate {
+	if cm == nil || d == nil || cm.ExistingCode == "" {
+		return nil
+	}
+	if cm.StartLine > 0 || cm.EndLine > 0 {
+		return []CommentLocationCandidate{{
+			Path:      candidatePath(d),
+			StartLine: cm.StartLine,
+			EndLine:   cm.EndLine,
+			Snippet:   cm.ExistingCode,
+		}}
+	}
+
+	targetLines := splitAndNormalize(cm.ExistingCode)
+	if len(targetLines) == 0 {
+		return nil
+	}
+
+	hunks := ParseHunks(d.Diff)
+	if candidates := collectHunkCandidates(hunks, targetLines, d, true); len(candidates) > 0 {
+		return candidates
+	}
+
+	if candidates := collectHunkCandidates(hunks, targetLines, d, false); len(candidates) > 0 {
+		return candidates
+	}
+
+	return fileContentCandidates(d, targetLines)
+}
+
+// ApplyCandidate mutates cm to point at c.
+func ApplyCandidate(cm *model.LlmComment, c CommentLocationCandidate) {
+	if cm == nil {
+		return
+	}
+	if c.Path != "" {
+		cm.Path = c.Path
+	}
+	cm.StartLine = c.StartLine
+	cm.EndLine = c.EndLine
+}
+
+// RelocationCandidates returns candidate anchors across the reviewed diff set.
+func RelocationCandidates(cm *model.LlmComment, diffs []model.Diff) []CommentLocationCandidate {
+	if cm == nil || cm.ExistingCode == "" || len(diffs) == 0 {
+		return nil
+	}
+	var candidates []CommentLocationCandidate
+	for i := range diffs {
+		d := &diffs[i]
+		probe := *cm
+		probe.StartLine, probe.EndLine = 0, 0
+		candidates = append(candidates, commentCandidates(&probe, d)...)
+	}
+	return assignCandidateIDs(candidates)
 }
 
 // RelocateAcrossFiles handles the comment whose ExistingCode belongs to a
@@ -136,6 +208,85 @@ func RelocateAcrossFiles(cm *model.LlmComment, diffs []model.Diff) (string, bool
 	cm.StartLine = hits[0].start
 	cm.EndLine = hits[0].end
 	return hits[0].path, true
+}
+
+func candidatePath(d *model.Diff) string {
+	if d == nil {
+		return ""
+	}
+	if d.NewPath != "" && d.NewPath != "/dev/null" {
+		return d.NewPath
+	}
+	if d.OldPath != "" && d.OldPath != "/dev/null" {
+		return d.OldPath
+	}
+	return ""
+}
+
+func collectHunkCandidates(hunks []Hunk, targetLines []string, d *model.Diff, newSide bool) []CommentLocationCandidate {
+	var candidates []CommentLocationCandidate
+	for i := range hunks {
+		sideLines := extractSideLines(&hunks[i], newSide)
+		candidates = append(candidates, candidatesFromIndexedLines(sideLines, targetLines, d)...)
+	}
+	return candidates
+}
+
+func candidatesFromIndexedLines(sideLines []indexedLine, targetLines []string, d *model.Diff) []CommentLocationCandidate {
+	if len(targetLines) == 0 || len(sideLines) < len(targetLines) {
+		return nil
+	}
+
+	var candidates []CommentLocationCandidate
+	for i := 0; i <= len(sideLines)-len(targetLines); i++ {
+		if !indexedLinesMatch(sideLines[i:], targetLines) {
+			continue
+		}
+		contextStart := max(0, i-3)
+		contextEnd := min(len(sideLines), i+len(targetLines)+3)
+		candidates = append(candidates, CommentLocationCandidate{
+			Path:      candidatePath(d),
+			StartLine: sideLines[i].lineNum,
+			EndLine:   sideLines[i+len(targetLines)-1].lineNum,
+			Snippet:   snippetFromIndexedLines(sideLines[i : i+len(targetLines)]),
+			Context:   snippetFromIndexedLines(sideLines[contextStart:contextEnd]),
+		})
+	}
+	return candidates
+}
+
+func indexedLinesMatch(sideLines []indexedLine, targetLines []string) bool {
+	if len(sideLines) < len(targetLines) {
+		return false
+	}
+	for i, target := range targetLines {
+		if sideLines[i].content != target {
+			return false
+		}
+	}
+	return true
+}
+
+func snippetFromIndexedLines(lines []indexedLine) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(lines))
+	for _, l := range lines {
+		parts = append(parts, l.content)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func assignCandidateIDs(candidates []CommentLocationCandidate) []CommentLocationCandidate {
+	for i := range candidates {
+		candidates[i].ID = candidateID(i)
+	}
+	return candidates
+}
+
+func candidateID(i int) string {
+	return strconv.Itoa(i + 1)
 }
 
 // indexedLine pairs a normalized line with its absolute file line number.
@@ -280,6 +431,24 @@ func resolveFromFileContent(d *model.Diff, cm *model.LlmComment) bool {
 	}
 
 	return false
+}
+
+func fileContentCandidates(d *model.Diff, targetLines []string) []CommentLocationCandidate {
+	if d == nil || d.NewFileContent == "" || len(targetLines) == 0 {
+		return nil
+	}
+
+	fileLines := strings.Split(d.NewFileContent, "\n")
+	sideLines := make([]indexedLine, 0, len(fileLines))
+	for i, line := range fileLines {
+		n := normalizeLine(strings.TrimRight(line, "\r"))
+		if n == "" {
+			continue
+		}
+		sideLines = append(sideLines, indexedLine{lineNum: i + 1, content: n})
+	}
+
+	return candidatesFromIndexedLines(sideLines, targetLines, d)
 }
 
 // splitAndNormalize splits code text into lines and normalizes each one.

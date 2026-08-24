@@ -20,11 +20,12 @@ type Template struct {
 	MaxTokens             int              `json:"MAX_TOKENS"`
 	// MaxCompletionTokens is a runtime-only output cap. When zero, callers
 	// retain the template's historical MaxTokens behavior.
-	MaxCompletionTokens   int              `json:"-"`
-	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
-	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD"`
-	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
-	ReviewFilterTask      *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	MaxCompletionTokens     int              `json:"-"`
+	MaxToolRequestTimes     int              `json:"MAX_TOOL_REQUEST_TIMES"`
+	PlanModeLineThreshold   int              `json:"PLAN_MODE_LINE_THRESHOLD"`
+	ReLocationTask          *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
+	CandidateReLocationTask *LlmConversation `json:"CANDIDATE_RE_LOCATION_TASK,omitempty"`
+	ReviewFilterTask        *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 }
 
 // ScanTemplate holds the full-file scan task template configuration loaded
@@ -82,14 +83,15 @@ type manifestConversation struct {
 }
 
 type templateManifest struct {
-	MainTask              manifestConversation  `json:"MAIN_TASK"`
-	PlanTask              *manifestConversation `json:"PLAN_TASK,omitempty"`
-	MemoryCompressionTask manifestConversation  `json:"MEMORY_COMPRESSION_TASK"`
-	MaxTokens             int                   `json:"MAX_TOKENS"`
-	MaxToolRequestTimes   int                   `json:"MAX_TOOL_REQUEST_TIMES"`
-	PlanModeLineThreshold int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
-	ReLocationTask        *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
-	ReviewFilterTask      *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	MainTask                manifestConversation  `json:"MAIN_TASK"`
+	PlanTask                *manifestConversation `json:"PLAN_TASK,omitempty"`
+	MemoryCompressionTask   manifestConversation  `json:"MEMORY_COMPRESSION_TASK"`
+	MaxTokens               int                   `json:"MAX_TOKENS"`
+	MaxToolRequestTimes     int                   `json:"MAX_TOOL_REQUEST_TIMES"`
+	PlanModeLineThreshold   int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
+	ReLocationTask          *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
+	CandidateReLocationTask *manifestConversation `json:"CANDIDATE_RE_LOCATION_TASK,omitempty"`
+	ReviewFilterTask        *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
 }
 
 func resolveConversation(m manifestConversation) (LlmConversation, error) {
@@ -145,6 +147,9 @@ func LoadDefault() (*Template, error) {
 		return nil, fmt.Errorf("MEMORY_COMPRESSION_TASK: %w", err)
 	}
 	if tpl.ReLocationTask, err = resolveOptionalConversation(m.ReLocationTask, "RE_LOCATION_TASK"); err != nil {
+		return nil, err
+	}
+	if tpl.CandidateReLocationTask, err = resolveOptionalConversation(m.CandidateReLocationTask, "CANDIDATE_RE_LOCATION_TASK"); err != nil {
 		return nil, err
 	}
 	if tpl.ReviewFilterTask, err = resolveOptionalConversation(m.ReviewFilterTask, "REVIEW_FILTER_TASK"); err != nil {
