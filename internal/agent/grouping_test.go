@@ -403,3 +403,55 @@ func containsSubstring(s, sub string) bool {
 	}
 	return false
 }
+
+func TestGroupChurn(t *testing.T) {
+	tests := []struct {
+		name    string
+		group   FileGroup
+		total   int64
+		maxFile int64
+	}{
+		{
+			name: "single file",
+			group: FileGroup{Diffs: []model.Diff{
+				{Insertions: 30, Deletions: 10},
+			}},
+			total: 40, maxFile: 40,
+		},
+		{
+			name: "multiple files, max is first",
+			group: FileGroup{Diffs: []model.Diff{
+				{Insertions: 50, Deletions: 10},
+				{Insertions: 20, Deletions: 5},
+				{Insertions: 10, Deletions: 3},
+			}},
+			total: 98, maxFile: 60,
+		},
+		{
+			name: "multiple files, max is last",
+			group: FileGroup{Diffs: []model.Diff{
+				{Insertions: 10, Deletions: 5},
+				{Insertions: 20, Deletions: 10},
+				{Insertions: 40, Deletions: 40},
+			}},
+			total: 125, maxFile: 80,
+		},
+		{
+			name:    "empty group",
+			group:   FileGroup{Diffs: nil},
+			total:   0,
+			maxFile: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			total, maxFile := groupChurn(tt.group)
+			if total != tt.total {
+				t.Errorf("total = %d, want %d", total, tt.total)
+			}
+			if maxFile != tt.maxFile {
+				t.Errorf("maxFile = %d, want %d", maxFile, tt.maxFile)
+			}
+		})
+	}
+}

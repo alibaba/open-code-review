@@ -1303,6 +1303,19 @@ func (a *Agent) groupHasComments(g FileGroup) bool {
 	return false
 }
 
+// groupChurn returns the group's aggregate churn and its largest single-file
+// churn. Both feed Template.PlanRequired.
+func groupChurn(g FileGroup) (total, maxFile int64) {
+	for _, d := range g.Diffs {
+		changed := d.Insertions + d.Deletions
+		total += changed
+		if changed > maxFile {
+			maxFile = changed
+		}
+	}
+	return total, maxFile
+}
+
 // executeGroupSubtask performs the Plan Phase + Main Loop for a file group. It
 // returns (completed, stop, err): a hard Go error (err) for provider/config/ctx
 // failures the caller classifies via classifyItemError, or a structured *stop
@@ -1313,21 +1326,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute.group."+groupKey)
 	defer span.End()
 
-	// totalChanged is the group's aggregate churn, reported as-is in telemetry.
-	// maxFileChanged is the largest single-file churn and is what gates the plan
-	// phase: PLAN_MODE_LINE_THRESHOLD was calibrated per file, so summing a
-	// group's diffs would push almost every group over the threshold and make
-	// the plan phase effectively unconditional. Gating on the biggest member
-	// keeps the original "is any single file substantial enough to warrant
-	// planning?" semantics regardless of how many files share a group.
-	var totalChanged, maxFileChanged int64
-	for _, d := range g.Diffs {
-		changed := d.Insertions + d.Deletions
-		totalChanged += changed
-		if changed > maxFileChanged {
-			maxFileChanged = changed
-		}
-	}
+	totalChanged, maxFileChanged := groupChurn(g)
 	telemetry.SetAttr(span, "group.label", groupKey)
 	telemetry.SetAttr(span, "group.file_count", len(g.Diffs))
 	telemetry.SetAttr(span, "lines.changed", totalChanged)
@@ -1346,21 +1345,15 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 	// Merge system rules for all files in the group
 	rule := a.resolveGroupSystemRule(g.Diffs)
 
-	threshold := a.args.Template.PlanModeLineThreshold
-
 	// Phase 1: Plan (skip when changes are below threshold)
+	planEnabled := a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0
+	planRequired := a.args.Template.PlanRequired(len(g.Diffs), totalChanged, maxFileChanged)
+
 	var planResult string
-	if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 && threshold > 0 && maxFileChanged < int64(threshold) {
-		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping plan phase for group %q (largest file %d lines < threshold %d)\n", groupKey, maxFileChanged, threshold)
-		// lines.changed stays on the event with its original aggregate meaning so
-		// existing dashboards keep resolving; lines.changed.max_file is additive and
-		// carries the value the skip decision was actually made on.
-		telemetry.Event(ctx, "plan.skipped",
-			telemetry.AnyToAttr("group.label", groupKey),
-			telemetry.AnyToAttr("lines.changed", totalChanged),
-			telemetry.AnyToAttr("lines.changed.max_file", maxFileChanged),
-			telemetry.AnyToAttr("threshold", threshold))
-	} else if a.args.Template.PlanTask != nil && len(a.args.Template.PlanTask.Messages) > 0 {
+	switch {
+	case !planEnabled:
+		// No plan task configured.
+	case planRequired:
 		var err error
 		planResult, err = a.executeGroupPlanPhase(ctx, g, concatenatedDiffs, changeFilesExcludingGroup, rule)
 		if err != nil {
@@ -1369,6 +1362,16 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 				telemetry.AnyToAttr("group.label", groupKey))
 			planResult = ""
 		}
+	default:
+		fmt.Fprintf(stdout.Writer(), "[ocr] Skipping plan phase for group %q (%d file(s), max %d lines, total %d lines)\n",
+			groupKey, len(g.Diffs), maxFileChanged, totalChanged)
+		telemetry.Event(ctx, "plan.skipped",
+			telemetry.AnyToAttr("group.label", groupKey),
+			telemetry.AnyToAttr("group.file_count", len(g.Diffs)),
+			telemetry.AnyToAttr("lines.changed", totalChanged),
+			telemetry.AnyToAttr("lines.changed.max_file", maxFileChanged),
+			telemetry.AnyToAttr("threshold", a.args.Template.PlanModeLineThreshold),
+			telemetry.AnyToAttr("threshold.group", a.args.Template.PlanModeGroupLineThreshold))
 	}
 
 	// Phase 2: Main task loop (multi-round)

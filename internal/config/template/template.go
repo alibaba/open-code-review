@@ -14,19 +14,18 @@ import (
 // Template holds the native agent task template configuration.
 // Scan-mode fields live in ScanTemplate, not here.
 type Template struct {
-	MainTask              LlmConversation  `json:"MAIN_TASK"`
-	PlanTask              *LlmConversation `json:"PLAN_TASK,omitempty"`
-	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
-	MaxTokens             int              `json:"MAX_TOKENS"`
-	// MaxCompletionTokens is a runtime-only output cap. When zero, callers
-	// retain the template's historical MaxTokens behavior.
-	MaxCompletionTokens   int              `json:"-"`
-	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
-	PlanModeLineThreshold int              `json:"PLAN_MODE_LINE_THRESHOLD"`
-	MaxReviewRounds       int              `json:"MAX_REVIEW_ROUNDS"`
-	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
-	ReviewFilterTask      *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
-	GroupingTask          *LlmConversation `json:"GROUPING_TASK,omitempty"`
+	MainTask                   LlmConversation  `json:"MAIN_TASK"`
+	PlanTask                   *LlmConversation `json:"PLAN_TASK,omitempty"`
+	MemoryCompressionTask      LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
+	MaxTokens                  int              `json:"MAX_TOKENS"`
+	MaxCompletionTokens        int              `json:"MAX_COMPLETION_TOKENS"`
+	MaxToolRequestTimes        int              `json:"MAX_TOOL_REQUEST_TIMES"`
+	PlanModeLineThreshold      int              `json:"PLAN_MODE_LINE_THRESHOLD"`
+	PlanModeGroupLineThreshold int              `json:"PLAN_MODE_GROUP_LINE_THRESHOLD"`
+	MaxReviewRounds            int              `json:"MAX_REVIEW_ROUNDS"`
+	ReLocationTask             *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
+	ReviewFilterTask           *LlmConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	GroupingTask               *LlmConversation `json:"GROUPING_TASK,omitempty"`
 }
 
 // ScanTemplate holds the full-file scan task template configuration loaded
@@ -38,7 +37,7 @@ type ScanTemplate struct {
 	MemoryCompressionTask LlmConversation  `json:"MEMORY_COMPRESSION_TASK"`
 	ReLocationTask        *LlmConversation `json:"RE_LOCATION_TASK,omitempty"`
 	MaxTokens             int              `json:"MAX_TOKENS"`
-	MaxCompletionTokens   int              `json:"-"`
+	MaxCompletionTokens   int              `json:"MAX_COMPLETION_TOKENS,omitempty"`
 	ToolRequestWaitTimeMs int              `json:"TOOL_REQUEST_WAIT_TIME_MS"`
 	MaxToolRequestTimes   int              `json:"MAX_TOOL_REQUEST_TIMES"`
 	MaxSubtaskExecMinutes int              `json:"MAX_SUBTASK_EXECUTION_TIME_MINUTES"`
@@ -57,6 +56,26 @@ func (t Template) ReviewRounds() int {
 		return 1
 	}
 	return t.MaxReviewRounds
+}
+
+// PlanRequired reports whether a group warrants the plan phase based on its
+// churn profile. Two thresholds cooperate: PlanModeLineThreshold gates on the
+// largest single file (catches a big rewrite), while PlanModeGroupLineThreshold
+// gates on the group's combined churn (catches several moderate files that
+// together need structured guidance). The group threshold is deliberately larger
+// to avoid making the plan phase unconditional.
+func (t Template) PlanRequired(fileCount int, totalChanged, maxFileChanged int64) bool {
+	if t.PlanModeLineThreshold <= 0 {
+		return true
+	}
+	if maxFileChanged >= int64(t.PlanModeLineThreshold) {
+		return true
+	}
+	if fileCount >= 2 && t.PlanModeGroupLineThreshold > 0 &&
+		totalChanged >= int64(t.PlanModeGroupLineThreshold) {
+		return true
+	}
+	return false
 }
 
 // CompletionTokenLimit returns the output cap for LLM requests. Runtime
@@ -92,16 +111,18 @@ type manifestConversation struct {
 }
 
 type templateManifest struct {
-	MainTask              manifestConversation  `json:"MAIN_TASK"`
-	PlanTask              *manifestConversation `json:"PLAN_TASK,omitempty"`
-	MemoryCompressionTask manifestConversation  `json:"MEMORY_COMPRESSION_TASK"`
-	MaxTokens             int                   `json:"MAX_TOKENS"`
-	MaxToolRequestTimes   int                   `json:"MAX_TOOL_REQUEST_TIMES"`
-	PlanModeLineThreshold int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
-	MaxReviewRounds       int                   `json:"MAX_REVIEW_ROUNDS"`
-	ReLocationTask        *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
-	ReviewFilterTask      *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
-	GroupingTask          *manifestConversation `json:"GROUPING_TASK,omitempty"`
+	MainTask                   manifestConversation  `json:"MAIN_TASK"`
+	PlanTask                   *manifestConversation `json:"PLAN_TASK,omitempty"`
+	MemoryCompressionTask      manifestConversation  `json:"MEMORY_COMPRESSION_TASK"`
+	MaxTokens                  int                   `json:"MAX_TOKENS"`
+	MaxCompletionTokens        int                   `json:"MAX_COMPLETION_TOKENS"`
+	MaxToolRequestTimes        int                   `json:"MAX_TOOL_REQUEST_TIMES"`
+	PlanModeLineThreshold      int                   `json:"PLAN_MODE_LINE_THRESHOLD"`
+	PlanModeGroupLineThreshold int                   `json:"PLAN_MODE_GROUP_LINE_THRESHOLD"`
+	MaxReviewRounds            int                   `json:"MAX_REVIEW_ROUNDS"`
+	ReLocationTask             *manifestConversation `json:"RE_LOCATION_TASK,omitempty"`
+	ReviewFilterTask           *manifestConversation `json:"REVIEW_FILTER_TASK,omitempty"`
+	GroupingTask               *manifestConversation `json:"GROUPING_TASK,omitempty"`
 }
 
 func resolveConversation(m manifestConversation) (LlmConversation, error) {
@@ -144,8 +165,10 @@ func LoadDefault() (*Template, error) {
 
 	var tpl Template
 	tpl.MaxTokens = m.MaxTokens
+	tpl.MaxCompletionTokens = m.MaxCompletionTokens
 	tpl.MaxToolRequestTimes = m.MaxToolRequestTimes
 	tpl.PlanModeLineThreshold = m.PlanModeLineThreshold
+	tpl.PlanModeGroupLineThreshold = m.PlanModeGroupLineThreshold
 	tpl.MaxReviewRounds = m.MaxReviewRounds
 
 	if tpl.MainTask, err = resolveConversation(m.MainTask); err != nil {
