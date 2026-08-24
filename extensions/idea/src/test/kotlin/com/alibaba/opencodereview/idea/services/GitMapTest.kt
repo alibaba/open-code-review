@@ -97,6 +97,34 @@ class GitMapTest {
     }
 
     @Test
+    fun `porcelain 重命名-含空格引号格式取新路径`() {
+        assertEquals(
+            listOf(FileChange("your file.kt", FileStatus.RENAMED)),
+            parsePorcelain("R  \"my file.kt\" -> \"your file.kt\"\n"),
+        )
+    }
+
+    @Test
+    fun `porcelain 重命名-文件名含箭头不误匹配`() {
+        // 文件名 "a -> b.kt" 含空格+箭头，git 加引号；新路径 result.kt 无引号。
+        // 旧代码 indexOf(" -> ") 会匹配到文件名内部的箭头，取错路径。
+        // 修复后优先找 `" -> `（闭引号+箭头），正确定位分隔符。
+        assertEquals(
+            listOf(FileChange("result.kt", FileStatus.RENAMED)),
+            parsePorcelain("R  \"a -> b.kt\" -> result.kt\n"),
+        )
+    }
+
+    @Test
+    fun `porcelain 重命名-含箭头无空格不引号`() {
+        // x->y.kt 含 -> 但无空格，git 不加引号；` -> ` 不会出现在文件名里。
+        assertEquals(
+            listOf(FileChange("z.kt", FileStatus.RENAMED)),
+            parsePorcelain("R  x->y.kt -> z.kt\n"),
+        )
+    }
+
+    @Test
     fun `porcelain 忽略空行和过短的行`() {
         assertEquals(emptyList(), parsePorcelain("\nM\n  \n"))
     }

@@ -35,8 +35,16 @@ fun parsePorcelain(output: String): List<FileChange> {
         } else if (x == 'R' || y == 'R' || x == 'C' || y == 'C') {
             // 重命名(R)与复制(C)都是 `old -> new` 格式，取 new。
             code = if (x == 'R' || y == 'R') 'R' else 'C'
-            val arrow = path.indexOf(" -> ")
-            if (arrow >= 0) path = path.substring(arrow + 4)
+            // 引号格式（旧路径含空格等特殊字符，git 加了引号）：分隔符是 `" -> `（闭引号 + 箭头）。
+            // 不用 `" -> "`（多一个引号）——新路径可能没引号（无特殊字符），不要求新路径也带引号。
+            val quotedSep = path.indexOf("\" -> ")
+            if (quotedSep >= 0) {
+                path = path.substring(quotedSep + 5) // 跳过 `" -> `（5 字符），保留新路径
+            } else {
+                // 无引号格式：文件名不含空格，` -> ` 不会出现在文件名里，直接找即可。
+                val arrow = path.indexOf(" -> ")
+                if (arrow >= 0) path = path.substring(arrow + 4)
+            }
         } else {
             // 暂存区状态优先，没有再取工作区状态
             code = if (x != ' ' && x != '?') x else y
