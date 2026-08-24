@@ -263,6 +263,35 @@ func TestPostRoutesBothSideLineToSummary(t *testing.T) {
 	}
 }
 
+func TestPostIncludesMixedSummaryFindingInReviewBody(t *testing.T) {
+	repoDir, headSHA := newPostRepo(t)
+	state := defaultPostState(headSHA)
+	newPostServer(t, state)
+	comments := []model.LlmComment{
+		{Path: "main.go", StartLine: 1, EndLine: 1, Content: "ambiguous"},
+		{Path: "main.go", StartLine: 2, EndLine: 2, Content: "inline"},
+	}
+	result, err := Post(context.Background(), postTarget(repoDir, headSHA), comments, Options{Token: "token"})
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if result.InlineComments != 1 || result.SummaryComments != 1 || len(state.reviewPosts) != 1 || len(state.issuePosts) != 0 {
+		t.Fatalf("result = %+v, reviews = %d, issue comments = %d", result, len(state.reviewPosts), len(state.issuePosts))
+	}
+	body := state.reviewPosts[0].Body
+	for _, want := range []string{
+		"2 comment(s) generated.",
+		"Inline findings: 1",
+		"Summary-only findings: 1",
+		"line range is ambiguous across both sides of the PR diff",
+		"ambiguous",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("review summary missing %q: %q", want, body)
+		}
+	}
+}
+
 func TestPostVerifiesMergeBaseBeforeEveryReviewWrite(t *testing.T) {
 	repoDir, headSHA := newPostRepo(t)
 	state := defaultPostState(headSHA)
