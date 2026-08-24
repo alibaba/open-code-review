@@ -50,6 +50,11 @@ type Deps struct {
 	// applies.
 	AllDiffs func() []model.Diff
 
+	// CommentReviewPath maps the main-loop path and resolved comment to the
+	// resumable review item that owns the finding. Diff review supplies this for
+	// semantic multi-file groups; scan leaves it nil and keeps the loop path.
+	CommentReviewPath func(runPath string, comment model.LlmComment) string
+
 	// NewRequestMeta builds the retry-report identity for one logical LLM
 	// request. Non-nil only for review: the retry report describes ocr review,
 	// and this Runner is shared with scan (internal/scan.Agent calls RunPerFile),
@@ -671,7 +676,11 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 						}
 					}
 				}
-				r.deps.CommentCollector.AddForReviewItem(*cm, side, newPath)
+				reviewPath := newPath
+				if r.deps.CommentReviewPath != nil {
+					reviewPath = r.deps.CommentReviewPath(newPath, *cm)
+				}
+				r.deps.CommentCollector.AddForReviewItem(*cm, side, reviewPath)
 			}
 		}
 

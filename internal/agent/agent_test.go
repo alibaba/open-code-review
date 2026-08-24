@@ -29,12 +29,11 @@ type fakeAgentClient struct {
 }
 
 type orderedRefileClient struct {
-	checkpointPath string
-	mu             sync.Mutex
-	calls          map[string]int
+	mu    sync.Mutex
+	calls map[string]int
 }
 
-func (c *orderedRefileClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+func reviewRequestPath(req llm.ChatRequest) string {
 	path := ""
 	for _, message := range req.Messages {
 		content, ok := message.Content.(string)
@@ -42,12 +41,26 @@ func (c *orderedRefileClient) CompletionsWithCtx(_ context.Context, req llm.Chat
 			continue
 		}
 		switch {
-		case strings.Contains(content, "Review a.go"):
+		case strings.Contains(content, "Review a.go"), strings.Contains(content, "path=\"a.go\""), strings.Contains(content, "Filter a.go"):
 			path = "a.go"
-		case strings.Contains(content, "Review b.go"):
+		case strings.Contains(content, "Review b.go"), strings.Contains(content, "path=\"b.go\""), strings.Contains(content, "Filter b.go"):
 			path = "b.go"
 		}
 	}
+	return path
+}
+
+func requestHasTool(req llm.ChatRequest, name string) bool {
+	for _, def := range req.Tools {
+		if def.Function.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *orderedRefileClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	path := reviewRequestPath(req)
 	if path == "" {
 		return nil, fmt.Errorf("request did not identify a review path")
 	}
@@ -63,25 +76,60 @@ func (c *orderedRefileClient) CompletionsWithCtx(_ context.Context, req llm.Chat
 	if call > 0 {
 		return agentTaskDoneResponse(), nil
 	}
+	return codeCommentResponse("a.go"), nil
+}
 
-	deadline := time.Now().Add(3 * time.Second)
+type filterCheckpointRaceClient struct {
+	checkpointPath string
+	mu             sync.Mutex
+	calls          map[string]int
+}
+
+func (c *filterCheckpointRaceClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	path := reviewRequestPath(req)
+	if path == "" {
+		return nil, fmt.Errorf("request did not identify a review path")
+	}
+	if requestHasTool(req, "report_incorrect_comments") {
+		return reviewFilterRemoveResponse("c-0"), nil
+	}
+
+	c.mu.Lock()
+	call := c.calls[path]
+	c.calls[path] = call + 1
+	c.mu.Unlock()
+
+	if path == "b.go" {
+		if _, err := waitForReviewItemCheckpoint(c.checkpointPath, "a.go", 500*time.Millisecond); err != nil {
+			return nil, err
+		}
+		return agentTaskDoneResponse(), nil
+	}
+	if call > 0 {
+		return agentTaskDoneResponse(), nil
+	}
+	return codeCommentResponse("a.go"), nil
+}
+
+func waitForReviewItemCheckpoint(path, filePath string, timeout time.Duration) (bool, error) {
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(c.checkpointPath)
+		data, err := os.ReadFile(path)
 		if err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("read session checkpoint: %w", err)
+			return false, fmt.Errorf("read session checkpoint: %w", err)
 		}
 		for _, line := range strings.Split(string(data), "\n") {
 			var record struct {
 				Type     string `json:"type"`
 				FilePath string `json:"filePath"`
 			}
-			if json.Unmarshal([]byte(line), &record) == nil && record.Type == "review_item_done" && record.FilePath == "b.go" {
-				return codeCommentResponse("a.go"), nil
+			if json.Unmarshal([]byte(line), &record) == nil && record.Type == "review_item_done" && record.FilePath == filePath {
+				return true, nil
 			}
 		}
 		time.Sleep(time.Millisecond)
 	}
-	return nil, fmt.Errorf("b.go checkpoint was not written before a.go comment")
+	return false, nil
 }
 
 func (f *fakeAgentClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -146,6 +194,28 @@ func codeCommentResponse(path string) *llm.ChatResponse {
 		}},
 		Model: "fake",
 		Usage: &llm.UsageInfo{PromptTokens: 50, CompletionTokens: 20},
+	}
+}
+
+func reviewFilterRemoveResponse(ids ...string) *llm.ChatResponse {
+	content := ""
+	args, _ := json.Marshal(map[string]any{"comment_ids": ids})
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{
+				Content: &content,
+				ToolCalls: []llm.ToolCall{{
+					ID:   "call_filter",
+					Type: "function",
+					Function: llm.FunctionCall{
+						Name:      "report_incorrect_comments",
+						Arguments: string(args),
+					},
+				}},
+			},
+		}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
 	}
 }
 
@@ -1070,7 +1140,7 @@ func TestDispatchSubtasksPersistsLateCrossFileRefileWithProducingSubtask(t *test
 	collector := tool.NewCommentCollector()
 	reg := tool.NewRegistry()
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
-	client := &orderedRefileClient{checkpointPath: checkpointPath, calls: map[string]int{}}
+	client := &orderedRefileClient{calls: map[string]int{}}
 	a := New(Args{
 		From:             "main",
 		To:               "feature",
@@ -1079,12 +1149,12 @@ func TestDispatchSubtasksPersistsLateCrossFileRefileWithProducingSubtask(t *test
 		Session:          sess,
 		CommentCollector: collector,
 		Tools:            reg,
-		MaxConcurrency:   2,
+		MaxConcurrency:   1,
 		Template: template.Template{
 			MaxTokens:           100000,
 			MaxToolRequestTimes: 3,
 			MainTask: template.LlmConversation{
-				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{current_file_path}}: {{diff}}"}},
+				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diffs}}"}},
 			},
 		},
 		MainToolDefs: []llm.ToolDef{
@@ -1094,14 +1164,14 @@ func TestDispatchSubtasksPersistsLateCrossFileRefileWithProducingSubtask(t *test
 	})
 	a.diffs = []model.Diff{
 		{
-			OldPath: "a.go",
-			NewPath: "a.go",
-			Diff:    "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n package a\n+var changed = true\n",
-		},
-		{
 			OldPath: "b.go",
 			NewPath: "b.go",
 			Diff:    "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1,2 @@\n package b\n+foo := bar.Baz()\n",
+		},
+		{
+			OldPath: "a.go",
+			NewPath: "a.go",
+			Diff:    "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n package a\n+var changed = true\n",
 		},
 	}
 
@@ -1129,6 +1199,83 @@ func TestDispatchSubtasksPersistsLateCrossFileRefileWithProducingSubtask(t *test
 	}
 	if len(resumed) != 1 || resumed[0].Path != "b.go" {
 		t.Fatalf("resumed comments = %+v, want the re-filed b.go comment", resumed)
+	}
+}
+
+func TestDispatchSubtasksFiltersBeforePersistingCrossFileCheckpoints(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+	sess := session.New(repoDir, "feature", "fake", session.SessionOptions{
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+	})
+	checkpointPath, err := session.SessionFilePath(repoDir, sess.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	client := &filterCheckpointRaceClient{
+		checkpointPath: checkpointPath,
+		calls:          map[string]int{},
+	}
+	a := New(Args{
+		From:             "main",
+		To:               "feature",
+		LLMClient:        client,
+		Model:            "fake",
+		Session:          sess,
+		CommentCollector: collector,
+		Tools:            reg,
+		MaxConcurrency:   2,
+		Template: template.Template{
+			MaxTokens:           100000,
+			MaxToolRequestTimes: 3,
+			MainTask: template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diffs}}"}},
+			},
+			ReviewFilterTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Filter {{path}}: {{comments}} against {{diff}}"}},
+			},
+		},
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment", Description: "comment"}},
+		},
+	})
+	a.diffs = []model.Diff{
+		{
+			OldPath: "a.go",
+			NewPath: "a.go",
+			Diff:    "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1,2 @@\n package a\n+var changed = true\n",
+		},
+		{
+			OldPath: "b.go",
+			NewPath: "b.go",
+			Diff:    "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1,2 @@\n package b\n+foo := bar.Baz()\n",
+		},
+	}
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatchSubtasks: %v", err)
+	}
+	if len(comments) != 0 {
+		t.Fatalf("current comments = %+v, want the destination filter to remove the re-filed comment", comments)
+	}
+	if err := sess.Finalize(); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+
+	resumed, err := session.LoadComments(repoDir, sess.SessionID)
+	if err != nil {
+		t.Fatalf("LoadComments: %v", err)
+	}
+	if len(resumed) != 0 {
+		t.Fatalf("resumed comments = %+v, want the filtered comment to stay removed", resumed)
 	}
 }
 
