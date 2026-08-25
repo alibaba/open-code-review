@@ -135,6 +135,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
+		{"contracts/Token.sol", "Reentrancy"},
+		{"src/Vault.vy", "Access Control"},
 	}
 
 	for _, tt := range tests {

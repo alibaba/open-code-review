@@ -85,6 +85,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".THRIFT", true},
 		{".capnp", true},
 		{".CAPNP", true},
+		{".sol", true},
+		{".SOL", true},
+		{".vy", true},
+		{".VY", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -240,6 +244,14 @@ func TestIsExcludedPath(t *testing.T) {
 		{"zig _test suffix", "src/parser_test.zig", true},
 		{"zig non-test", "src/parser.zig", false},
 		{"zig test in filename", "src/testutil.zig", false},
+
+		// Solidity test files (Hardhat test/ dir, Foundry *.t.sol convention)
+		{"solidity foundry test", "src/Counter.t.sol", true},
+		{"solidity foundry test nested", "contracts/test/Vault.t.sol", true},
+		{"solidity hardhat test dir", "test/Counter.sol", true},
+		{"solidity hardhat test nested", "packages/core/test/unit/Vault.sol", true},
+		{"solidity non-test", "src/Counter.sol", false},
+		{"solidity t.sol in filename", "src/contract.sol", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},
