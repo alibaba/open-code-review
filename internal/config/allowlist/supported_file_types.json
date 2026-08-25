@@ -98,5 +98,7 @@
   ".thrift",
   ".capnp",
   ".sol",
-  ".vy"
+  ".vy",
+  ".jinja2",
+  ".j2"
 ]

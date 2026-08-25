@@ -145,6 +145,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
 		{"contracts/token.vy", "Language Restrictions"},
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
+		{"templates/account.jinja2", "Jinja Escaping Boundaries"},
+		{"templates/email.j2", "Jinja Escaping Boundaries"},
+		{"templates/account.JINJA2", "Jinja Escaping Boundaries"},
+		{"templates/email.J2", "Jinja Escaping Boundaries"},
 	}
 
 	for _, tt := range tests {
