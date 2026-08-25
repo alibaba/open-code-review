@@ -1,0 +1,94 @@
+{
+  "name": "@sinonjs/fake-timers",
+  "description": "Fake JavaScript timers",
+  "version": "15.4.0",
+  "homepage": "https://github.com/sinonjs/fake-timers",
+  "author": "Christian Johansen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sinonjs/fake-timers.git"
+  },
+  "bugs": {
+    "mail": "christian@cjohansen.no",
+    "url": "https://github.com/sinonjs/fake-timers/issues"
+  },
+  "license": "BSD-3-Clause",
+  "scripts": {
+    "lint": "eslint .",
+    "test-node": "mocha --timeout 200 test/ integration-test/ -R dot --check-leaks",
+    "test-headless": "mochify --driver puppeteer",
+    "test-check-coverage": "npm run test-coverage && nyc check-coverage",
+    "test-cloud": "npm run test-edge && npm run test-firefox && npm run test-safari",
+    "test-edge": "BROWSER_NAME=MicrosoftEdge mochify --config mochify.webdriver.js",
+    "test-firefox": "BROWSER_NAME=firefox mochify --config mochify.webdriver.js",
+    "test-safari": "BROWSER_NAME=safari mochify --config mochify.webdriver.js",
+    "test-coverage": "nyc -x mochify.webdriver.js -x coverage --all --reporter text --reporter html --reporter lcovonly npm run test-node",
+    "test": "npm run test-node && npm run test-headless",
+    "posttest": "npm run types:build",
+    "prettier:check": "prettier --check '**/*.{js,css,md}'",
+    "prettier:write": "prettier --write '**/*.{js,css,md}'",
+    "preversion": "./scripts/preversion.sh",
+    "version": "./scripts/version.sh",
+    "postversion": "./scripts/postversion.sh",
+    "prepare": "husky",
+    "types:build": "tsgo -p tsconfig.types.json",
+    "types:check": "tsgo -p tsconfig.types.json --noEmit",
+    "types:smoke": "tsgo -p test/typescript-consumer/tsconfig.json --noEmit && tsgo -p test/typescript-no-dom-consumer/tsconfig.json --noEmit"
+  },
+  "types": "./types/fake-timers-src.d.ts",
+  "lint-staged": {
+    "*.{js,css,md}": "prettier --check",
+    "*.js": "eslint"
+  },
+  "mochify": {
+    "reporter": "dot",
+    "timeout": 10000,
+    "bundle": "esbuild --bundle --sourcemap=inline --define:process.env.NODE_DEBUG=\"\"",
+    "bundle_stdin": "require",
+    "spec": "test/**/*-test.js"
+  },
+  "files": [
+    "src/",
+    "types/"
+  ],
+  "devDependencies": {
+    "@mochify/cli": "^1.0.0",
+    "@mochify/driver-puppeteer": "^1.0.1",
+    "@mochify/driver-webdriver": "^1.0.0",
+    "@sinonjs/eslint-config": "^7.0.3",
+    "@sinonjs/referee-sinon": "12.0.1",
+    "@types/node": "^25.6.0",
+    "@typescript/native-preview": "^7.0.0-dev.20260505.1",
+    "esbuild": "^0.28.0",
+    "eslint": "^10.3.0",
+    "husky": "^9.1.7",
+    "jsdom": "29.1.1",
+    "lint-staged": "16.4.0",
+    "mocha": "11.7.5",
+    "nyc": "18.0.0",
+    "prettier": "3.8.3"
+  },
+  "main": "./src/fake-timers-src.js",
+  "dependencies": {
+    "@sinonjs/commons": "^3.0.1"
+  },
+  "nyc": {
+    "branches": 85,
+    "lines": 92,
+    "functions": 92,
+    "statements": 92,
+    "exclude": [
+      "**/*-test.js",
+      "coverage/**",
+      "types/**",
+      "fake-timers.js"
+    ]
+  },
+  "browser": {
+    "vm": false,
+    "node:timers": false,
+    "node:timers/promises": false,
+    "timers": false,
+    "timers/promises": false
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "extends": "../../api-extractor.json",
+  "mainEntryPointFilePath": "/Users/simen/repos/jest/packages/jest-snapshot-utils/build/index.d.ts",
+  "projectFolder": "/Users/simen/repos/jest/packages/jest-snapshot-utils"
+}

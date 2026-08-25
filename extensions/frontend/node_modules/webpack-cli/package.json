@@ -1,0 +1,75 @@
+{
+  "name": "webpack-cli",
+  "version": "7.2.2",
+  "description": "CLI for webpack & friends",
+  "keywords": [
+    "webpack",
+    "cli",
+    "scaffolding",
+    "module",
+    "bundler",
+    "web"
+  ],
+  "homepage": "https://github.com/webpack/webpack-cli/tree/main/packages/webpack-cli",
+  "bugs": "https://github.com/webpack/webpack-cli/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/webpack/webpack-cli.git"
+  },
+  "funding": {
+    "type": "opencollective",
+    "url": "https://opencollective.com/webpack"
+  },
+  "license": "MIT",
+  "main": "./lib/index.js",
+  "bin": {
+    "webpack-cli": "./bin/cli.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "!**/*__tests__"
+  ],
+  "dependencies": {
+    "@discoveryjs/json-ext": "^1.1.0",
+    "commander": "^14.0.3",
+    "cross-spawn": "^7.0.6",
+    "envinfo": "^7.21.0",
+    "import-local": "^3.2.0",
+    "interpret": "^3.1.1",
+    "rechoir": "^0.8.0",
+    "webpack-merge": "^6.0.1"
+  },
+  "devDependencies": {
+    "@types/envinfo": "^7.8.4"
+  },
+  "peerDependencies": {
+    "js-yaml": "^4.0.0 || ^5.0.0",
+    "json5": "^2.2.3",
+    "toml": "^3.0.0 || ^4.0.0",
+    "webpack": "^5.101.0",
+    "webpack-bundle-analyzer": "^4.0.0 || ^5.0.0",
+    "webpack-dev-server": "^5.0.0 || ^6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "js-yaml": {
+      "optional": true
+    },
+    "json5": {
+      "optional": true
+    },
+    "toml": {
+      "optional": true
+    },
+    "webpack-bundle-analyzer": {
+      "optional": true
+    },
+    "webpack-dev-server": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "gitHead": "fb50f766851f500ca12867a2aa9de81fa6e368f9"
+}

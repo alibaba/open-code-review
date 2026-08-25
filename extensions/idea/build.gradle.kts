@@ -58,7 +58,7 @@ intellijPlatform {
 //
 // 没装 node、或者只想编 Kotlin 时：./gradlew build -PskipFrontend=true
 // ---------------------------------------------------------------------------
-val frontendDir = layout.projectDirectory.dir("frontend")
+val frontendDir = layout.projectDirectory.dir("../frontend")
 val webviewOutDir = layout.projectDirectory.dir("src/main/resources/webview")
 val skipFrontend = providers.gradleProperty("skipFrontend").map(String::toBoolean).getOrElse(false)
 val npmCommand = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) "npm.cmd" else "npm"
@@ -109,6 +109,7 @@ val frontendBuild by tasks.registering(Exec::class) {
     description = "把 frontend/ 打包到 src/main/resources/webview/"
     dependsOn(frontendInstall)
     workingDir = dir
+    environment("OCR_TARGET", "idea")
     commandLine(npm ?: npmCommand, "run", "build")
     inputs.dir(frontendDir.dir("src"))
     inputs.files(
