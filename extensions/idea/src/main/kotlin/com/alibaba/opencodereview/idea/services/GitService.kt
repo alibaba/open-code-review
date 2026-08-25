@@ -288,12 +288,14 @@ class GitService(private val project: Project) {
      * diff 打开时为两侧文档挂载内容的钩子。branch/commit 模式两侧内容是
      * DiffContentFactory 现创建的匿名文档，外部无法获取句柄，只能在创建当口回调。
      */
+    @Volatile
     var diffDecorator: ((relPath: String, side: Side, document: Document) -> Unit)? = null
 
     /**
      * diff 视图创建之后的钩子，用于挂载内嵌面板。
      * 与 diffDecorator 分开：行高亮挂在文档上须在 showDiff 之前，面板挂在编辑器实例上须在之后。
      */
+    @Volatile
     var diffViewerReady: ((relPath: String, side: Side, document: Document, clickedIndex: Int?) -> Unit)? = null
 
     /**
