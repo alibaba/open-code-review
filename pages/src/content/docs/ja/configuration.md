@@ -280,27 +280,42 @@ SDK がすでにリトライするため、設定ファイルから読み込む�
 
 ### ファイルごとのプロンプト上限
 
-OCR はデフォルトで、ファイルごとのレビューにおいて 58,888 トークンのプロンプト上限を
-使用します。より大きなコンテキストウィンドウを持つモデル向けに、`max_tokens` を
-保存して上限を引き上げられます。
+OCR はデフォルトで、`ocr review` のレビュー 1 回につき 200,000 トークンのプロンプト
+上限を使用します（`ocr scan` はより小さい 58,888 を使います）。モデルのコンテキスト
+ウィンドウに合わせて `max_tokens` を保存すれば、この上限を変更できます。
 
 ```bash
-ocr config set max_tokens 200000
+ocr config set max_tokens 400000
 ```
 
 この設定は `ocr review` と `ocr scan` の両方に適用されます。保存済みの設定を
 変更せずに一度だけ上書きするには `--max-tokens` を使用します。
 
 ```bash
-ocr review --max-tokens 200000
-ocr scan --max-tokens 200000
+ocr review --max-tokens 400000
+ocr scan --max-tokens 120000
 ```
 
 実行時のフラグは `max_tokens` より優先されます。どちらも設定されていない場合、
-OCR は組み込みのタスクテンプレートのデフォルト値を使用します。この上限はファイル
-単位であり、モデルの出力トークン上限、および実行全体のトークン使用量を制限する
-`--max-tokens-budget` のいずれとも独立しています。組み込みのデフォルトに戻すには
-`ocr config unset max_tokens` を実行してください。
+OCR は組み込みのタスクテンプレートのデフォルト値を使用します。この上限が制約するのは
+**プロンプト**だけです。モデルの出力上限は別の `MAX_COMPLETION_TOKENS`（デフォルト
+`16384`）が制御するため、`max_tokens` を上げても出力予算は一緒に広がりません。また、
+実行全体のトークン使用量を制限する `--max-tokens-budget` とも独立しています。
+組み込みのデフォルトに戻すには `ocr config unset max_tokens` を実行してください。
+
+### レビューの労力プリセット（effort）
+
+`effort` は、ファイルグループごとに main ループを何ラウンド実行するかを決めます:
+`low` = 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド。
+ラウンドが多いほど recall は上がりますが、時間とトークン消費も増えます。
+
+```bash
+ocr config set effort high     # 永続化
+ocr review --effort low        # この実行のみ
+ocr config unset effort        # デフォルトの medium に戻す
+```
+
+優先順位は `--effort` フラグ > 保存済みの `effort` > デフォルトの `medium` です。
 
 ### 接続性を検証する
 

@@ -261,25 +261,40 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 
 ### 每文件提示词上限
 
-OCR 默认为每次文件评审设置 58,888 token 的提示词上限。如果模型上下文窗口更大，
-可以通过保存 `max_tokens` 来提高上限：
+OCR 默认为 `ocr review` 的每次评审设置 200,000 token 的提示词上限
+（`ocr scan` 使用更小的 58,888）。如果模型上下文窗口不同，可以通过保存
+`max_tokens` 来调整：
 
 ```bash
-ocr config set max_tokens 200000
+ocr config set max_tokens 400000
 ```
 
 该设置同时作用于 `ocr review` 和 `ocr scan`。使用 `--max-tokens` 可以在不修改
 已保存配置的情况下临时覆盖一次：
 
 ```bash
-ocr review --max-tokens 200000
-ocr scan --max-tokens 200000
+ocr review --max-tokens 400000
+ocr scan --max-tokens 120000
 ```
 
 单次运行的参数优先级高于 `max_tokens`；如果两者都未设置，OCR 会使用内置任务模板
-的默认值。该上限按文件计算，与模型的输出 token 上限、以及限制单次运行总 token
-用量的 `--max-tokens-budget` 都相互独立。可以用 `ocr config unset max_tokens`
-恢复为内置默认值。
+的默认值。该上限只约束**提示词**：模型的输出上限由单独的
+`MAX_COMPLETION_TOKENS`（默认 `16384`）控制，因此调高 `max_tokens` 不会连带放大
+输出预算。它同样与限制单次运行总 token 用量的 `--max-tokens-budget` 相互独立。
+可以用 `ocr config unset max_tokens` 恢复为内置默认值。
+
+### 评审投入档位（effort）
+
+`effort` 决定每个文件组要跑几轮 main 循环：`low` = 1 轮，`medium` = 2 轮（默认），
+`high` = 3 轮。轮数越多召回越高，耗时与 token 消耗也越多。
+
+```bash
+ocr config set effort high     # 持久化
+ocr review --effort low        # 仅本次运行
+ocr config unset effort        # 恢复默认的 medium
+```
+
+优先级为：`--effort` 参数 > 已保存的 `effort` > 默认 `medium`。
 
 ### 验证连通性
 

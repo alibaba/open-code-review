@@ -14,8 +14,8 @@ the data is enough to answer "what did the agent spend time on?",
 Telemetry is **off by default**. Once enabled, OCR exports:
 
 - **Spans** — three pipeline-level spans (`review.run`, `diff.parse`,
-  `subtask.execute.<file>`) plus one short-lived `event.*` span per
-  decision-point event.
+  `subtask.execute.group.<group-key>`) plus one short-lived `event.*`
+  span per decision-point event.
 - **Metrics** — aggregated counts and histograms for review duration,
   files reviewed, comments generated, LLM requests / tokens / latency,
   and tool calls / latency.
@@ -111,14 +111,20 @@ The full span tree for a review:
 review.run
 ├── diff.parse
 ├── event.review.started                   (decision-point event)
-├── subtask.execute.<file1>
-│   ├── event.plan.skipped                 (when changes are below threshold)
+├── subtask.execute.group.<group-key1>
+│   ├── event.plan.skipped                 (when changes are below both thresholds)
 │   ├── event.plan.failed                  (when plan phase errored)
 │   ├── event.token.threshold.exceeded     (when prompt > 80% of max_tokens)
+│   ├── main.loop                          (one span per review round)
 │   └── event.subtask.error                (when the subtask errored)
-├── subtask.execute.<file2>
+├── subtask.execute.group.<group-key2>
 └── …
 ```
+
+One `subtask.execute.group.*` span is emitted per reviewed **group**, not
+per file — files are bundled semantically before review. The group key is
+the group's file paths, sorted and comma-joined (a single path when the
+group holds one file).
 
 LLM round trips and tool executions are **not** emitted as separate
 spans — they show up only in metrics (see below). Decision-point events
@@ -131,12 +137,13 @@ Each span carries useful attributes:
 |---|---|
 | `review.run` | `error` (set when the run failed) |
 | `diff.parse` | `files.changed`, `lines.inserted`, `lines.deleted` |
-| `subtask.execute.<file>` | `file.path`, `lines.changed`, `lines.inserted`, `lines.deleted` |
+| `subtask.execute.group.<group-key>` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file` |
+| `main.loop` | `group.label`, `round` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
-| `event.plan.skipped` | `group.label`, `lines.changed`, `lines.changed.max_file`, `threshold` |
-| `event.plan.failed` | `file.path`, `message` |
-| `event.token.threshold.exceeded` | `file.path`, `tokens`, `max_tokens` |
-| `event.subtask.error` | `file.path`, `error` |
+| `event.plan.skipped` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file`, `threshold`, `threshold.group` |
+| `event.plan.failed` | `group.label`, `message` |
+| `event.token.threshold.exceeded` | `group.label`, `tokens`, `max_tokens`, `round` |
+| `event.subtask.error` | `group.label`, `error` |
 
 ### Metrics
 
@@ -163,10 +170,10 @@ The full list:
 |---|---|
 | `review.started` | Diffs loaded; we know how many files we'll review. |
 | `no.files.changed` | The diff resolved to zero files. |
-| `plan.skipped` | A file was below `PLAN_MODE_LINE_THRESHOLD`. |
+| `plan.skipped` | A group was below both plan thresholds: its largest file changed fewer than `PLAN_MODE_LINE_THRESHOLD` lines, and (for 2+ file groups) the total was below `PLAN_MODE_GROUP_LINE_THRESHOLD`. |
 | `plan.failed` | The plan phase errored; main loop ran without a plan. |
-| `token.threshold.exceeded` | Initial prompt tokens > 80 % of `MAX_TOKENS`; file skipped. |
-| `subtask.error` | A per-file subtask errored — emitted with `Error` span status. |
+| `token.threshold.exceeded` | Prompt tokens > 80 % of `MAX_TOKENS` (the input ceiling); group skipped. |
+| `subtask.error` | A per-group subtask errored — emitted with `Error` span status. |
 
 Use these to alert on degraded review quality long before a user
 notices.
@@ -282,11 +289,14 @@ OCR exports **everything**. There is no sampling configuration; OTel's
 sampling is the responsibility of your collector. For a typical review
 run that's:
 
-- 1 `review.run` span + 1 `diff.parse` span + 1 `subtask.execute.<file>`
-  span per reviewed file + 1 short-lived `event.*` span per
-  decision-point event.
-- A 10-file PR produces ~15–25 spans total. LLM round trips and tool
-  calls add to the metric counters but do not create extra spans.
+- 1 `review.run` span + 1 `diff.parse` span + 1
+  `subtask.execute.group.<group-key>` span per reviewed group (plus its
+  `plan.execute` / `main.loop` / `review_filter.execute` children) + 1
+  short-lived `event.*` span per decision-point event.
+- A 10-file PR produces ~15–25 spans total — fewer when grouping bundles
+  files together, more when the effort preset runs extra review rounds.
+  LLM round trips and tool calls add to the metric counters but do not
+  create extra spans.
 
 The export is **batched and asynchronous** — telemetry doesn't block
 the review loop. If the collector is unreachable, OCR logs a warning

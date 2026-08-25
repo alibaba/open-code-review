@@ -70,7 +70,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr scan` | `ocr s` | 无需 Git diff，扫描完整文件。 |
 | `ocr rules check <file>` | — | 显示某文件路径适用哪条规则及其来源。 |
 | `ocr config set <key> <value>` | — | 将一个配置值持久化到 `~/.opencodereview/config.json`。 |
-| `ocr config unset custom_providers.<name>` | — | 删除一个自定义 provider（若它是当前启用的，则清空启用的 `provider`/`model`）。 |
+| `ocr config unset <key>` | — | 清除一个已保存的配置值（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
 | `ocr config provider` | — | 交互式 provider 配置 TUI。 |
 | `ocr config model` | — | 交互式 model 选择 TUI。 |
 | `ocr llm test` | — | 发送一条简短 chat 请求以验证配置的端点。 |
@@ -85,7 +85,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 ## `ocr review`
 
-主命令。解析 Git diff，分发 per-file 子 agent，收集评审评论并打印。
+主命令。解析 Git diff，把语义相关的文件分组，为每组分发一个子 agent，收集评审评论并打印。
 
 ### 概要
 
@@ -117,9 +117,10 @@ unstaged + untracked 变更。
 | `--concurrency <n>` | — | `8` | 并行评审的最大文件数。 |
 | `--timeout <minutes>` | — | `10` | 每文件截止时间。`0` 关闭超时。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
-| `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`30`）；1–9 会被上调到 `10`；任何 `≥ 10` 的值都覆盖模板默认（即使小于 `30`）。 |
-| `--max-tokens <n>` | — | 配置或模板默认 | 每文件提示词 token 上限。覆盖本次运行已保存的 `max_tokens` 设置。 |
+| `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |
+| `--max-tokens <n>` | — | 配置或模板默认 | 每文件**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
 | `--max-tokens-budget <n>` | — | `0`（无限制） | 限制本次评审的输入 + 输出 token 总量。超出预算后停止分发，并仍会发布部分结果。 |
+| `--effort <level>` | — | 配置或 `medium` | 评审投入档位：`low` = 1 轮 main 循环，`medium` = 2 轮（默认），`high` = 3 轮。轮数越多召回越高、耗时与 token 也越多。可用 `ocr config set effort <level>` 持久化。 |
 | `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
 | `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |
@@ -461,15 +462,18 @@ Rule:
 
 ```text
 ocr config set <key> <value>
-ocr config unset custom_providers.<name>   Delete a custom provider
+ocr config unset <key>                     Clear a saved config value
 ocr config provider                        Interactive provider setup
 ocr config model                           Interactive model selection
 ```
 
-- **`set`**——非交互式写入单个配置值。
-- **`unset`**——删除一个自定义 provider。仅支持
-  `custom_providers.<name>`。若删除的是当前启用的 provider，则 `provider` 和
-  `model` 被清空（运行 `ocr config provider` 重新选择）。
+- **`set`**——非交互式写入单个配置值（如
+  `ocr config set effort high`）。
+- **`unset`**——清除一个已保存的配置值。支持 `provider`、`max_tokens`、
+  `effort`、`custom_providers.<name>` 和 `mcp_servers.<name>`。删除当前启用的
+  自定义 provider 时，`provider` 和 `model` 一并被清空（运行
+  `ocr config provider` 重新选择）；`ocr config unset effort` 会回到默认的
+  `medium` 档位。
 - **`provider`**——启动交互式 provider 配置 TUI（无额外参数；非交互式请用
   `ocr config set provider <name>`）。
 - **`model`**——启动交互式 model 选择 TUI（无额外参数；非交互式请用
@@ -634,10 +638,11 @@ ocr completion powershell > ocr.ps1
   vs 结构化载荷。需要二者兼得时组合使用。
 - `--background` 是提升评审质量最有效的参数之一——从其他 agent 调用时，始终传入
   需求 / PR 描述。
-- 某文件 diff 单独超过 `MAX_TOKENS` 的 80%（默认 `58888`）时，会在调用 LLM 前
+- 某文件 diff 单独超过 `MAX_TOKENS` 的 80%（默认 `200000`）时，会在调用 LLM 前
   被丢弃。这会记录日志但不会使运行失败。
-- 当某文件变更行数低于 `PLAN_MODE_LINE_THRESHOLD`（`50`）时，plan 阶段会被
-  **自动跳过**。
+- 当一个文件组既没有单个文件的变更行数达到 `PLAN_MODE_LINE_THRESHOLD`（`50`），
+  合计变更行数也没达到 `PLAN_MODE_GROUP_LINE_THRESHOLD`（`100`，仅对多文件组
+  生效）时，plan 阶段会被**自动跳过**。
 
 ## 另见
 
