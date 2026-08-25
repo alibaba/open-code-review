@@ -8,11 +8,6 @@ description: >
   full-file scanning, and delegate mode. Produces line-level review comments with
   severity/category classifications and can automatically apply fixes.
 license: Apache-2.0
-compatibility: >
-  Requires the `ocr` CLI installed (via `npm install -g
-  @alibaba-group/open-code-review` or GitHub release binary). Review and scan modes
-  require a configured LLM provider (Anthropic, OpenAI-compatible, or others).
-  Delegate mode requires no OCR-side LLM configuration.
 metadata:
   author: alibaba
   homepage: https://github.com/alibaba/open-code-review
@@ -57,17 +52,14 @@ LLM not configured & user does not want to configure?
 
 Analyze the review target and extract concise business context to improve review quality.
 
-- Short context (< 2000 chars): `--background "context"` / `-b "context"`
-- Long context (PRD/docs): write to a temporary `.md` file, `--background-file <path>` / `-B <path>` (max 1 MB, hard limit 8000 chars)
+- Short context (< 2000 chars): `--background "context"` / `-b "context"` (inline raw string)
+- Long context (PRD/docs): write to a temporary `.md` file, `--background-file <path>` / `-B <path>` (max 1 MB; stripped & wrapped in `<ocr_user_background>` tags; soft limit 2000 chars, hard limit 8000)
 
 ### Step 2: Execute Review or Scan
 
 **Always use `--audience agent`** (suppresses progress UI). Prefer `--format json`.
 
-> 💡 **Prevent console truncation**: When reviewing many files or running a full-repo `scan`, stdout may exceed the host agent's tool output buffer and be hard-truncated, corrupting the JSON.
-> - **Anticipate large reviews**: redirect to a file directly (e.g. `ocr scan --audience agent --format json -b "ctx" > scratch/ocr_result.json`), then read it with a file-reading tool. Note that run-level failure JSON goes to **stderr** — don't miss it when redirecting stdout.
-> - **Already truncated**: **no need to re-run `ocr`** — extract comments on demand via `ocr session comments <session-id> --severity high,critical --json`.
-> - **Windows PowerShell**: PowerShell 5's `>` redirect writes UTF-16 by default, which corrupts JSON — use `Out-File -Encoding utf8` or run through bash instead.
+> 💡 **Prevent output truncation**: For large reviews or scans, prefer `--output <path>` / `-o <path>` (e.g. `ocr scan --audience agent --format json -o scratch/ocr_result.json -b "ctx"`). OCR writes natively to a UTF-8 file and prints the file path on stderr. Then inspect it directly via `view_file`.
 
 #### Review Mode (Diff-based)
 
@@ -76,7 +68,7 @@ Analyze the review target and extract concise business context to improve review
 | "Review my changes" | `ocr review --audience agent --format json -b "ctx"` |
 | "Review feature PR" | `ocr review --audience agent --format json -b "ctx" --from main --to feature` |
 | "Review commit abc123" | `ocr review --audience agent --format json -b "ctx" --commit abc123` |
-| "Write results to file" | `ocr review --audience agent --format json --output result.json -b "ctx"` |
+| "Write results to file" | `ocr review --audience agent --format json -o result.json -b "ctx"` |
 | "Which files will be reviewed?" | `ocr review --preview --format json` |
 | "Resume interrupted review" | `ocr review --audience agent --format json --from main --to feature --resume <session-id>` |
 
@@ -87,7 +79,7 @@ Analyze the review target and extract concise business context to improve review
 | "Scan the whole repo" | `ocr scan --audience agent --format json -b "ctx"` |
 | "Scan src/auth/ for security" | `ocr scan --audience agent --format json --path src/auth -b "security audit"` |
 | "Fast scan without summary" | `ocr scan --audience agent --format json --no-summary --no-dedup` |
-| "Write results to file" | `ocr scan --audience agent --format json --output result.json -b "ctx"` |
+| "Write results to file" | `ocr scan --audience agent --format json -o result.json -b "ctx"` |
 | "Resume interrupted scan" | `ocr scan --audience agent --format json --resume <session-id>` |
 | "Which files will be scanned?" | `ocr scan --preview --format json` |
 
@@ -122,15 +114,13 @@ JSON output core structure:
     "severity": "high",
     "suggestion_code": "Optional fix suggestion",
     "existing_code": "Original code",
-    "thinking": "Optional: LLM reasoning"
+    "thinking": "Optional LLM reasoning"
   }],
   "warnings": [{ "file": "...", "message": "...", "type": "timeout" }],
-  "project_summary": "Optional: scan-mode repository summary",
+  "project_summary": "Optional scan summary",
   "manifest": { "terminal_state": "complete", "coverage": { "selected": 12, "completed": 10, "reused": 0, "failed": 2, "waived": 0 } }
 }
 ```
-
-> **Structure notes**: `manifest` is emitted in review mode only (scan has no manifest, so scan `status` uses the `success` variants); `tool_calls` is always emitted; `llm`, `trace_id`, `project_summary`, `resume`, `message` are optional; run-level failures emit a `status:"failed"` JSON object to **stderr**.
 
 Classify by severity:
 
@@ -176,21 +166,21 @@ If no issues found: "Review complete — 0 issues found across N files."
 - **Working directory matters** — `ocr` operates on the git repo in cwd. Use `--repo /path` to override.
 - **Workspace mode includes untracked files** — Bare `ocr review` reviews staged + unstaged + untracked changes.
 - **Plan phase at 50+ lines** — Diffs exceeding 50 changed lines run a pre-review risk analysis plan phase.
-- **Background sanitization** — Applies to `--background-file` (`-B`) only: control characters stripped, content wrapped in `<ocr_user_background>` tags; soft limit 2000 chars, hard limit 8000. Inline `--background` (`-b`) is passed through raw with no sanitization or length limit.
+- **Background sanitization** — Applies to `--background-file` (`-B`) only: control chars stripped, wrapped in `<ocr_user_background>` tags, soft limit 2000 chars, hard limit 8000. Inline `--background` (`-b`) passes through raw without limits.
 - **Ref injection defense** — `--from`/`--to`/`--commit` values cannot start with `-`.
 - **Scan mode needs no git** — `ocr scan` runs on non-git directories.
 - **Resume conditions** — `ocr scan` fully supports `--resume`; `ocr review` supports `--resume` only in `--from/--to` or `--commit` modes (not workspace mode).
 - **`--preview` and `--resume` are mutually exclusive.**
 - **Language configuration** — Default: English. Switch via `ocr config set language 中文`.
-- **Avoid tool-buffer truncation** — stdout exceeding the host agent's tool output buffer gets hard-truncated, corrupting JSON. For large runs, redirect to a file (`> scratch/ocr_result.json`) and read it with a file-reading tool; if truncation already happened, no need to re-run `ocr` — extract via `ocr session comments <session-id>`. On Windows PowerShell, use `Out-File -Encoding utf8` instead of `>` (PowerShell 5's `>` writes UTF-16 and corrupts JSON).
+- **Prevent Tool Output Truncation** — For large reviews or scans, prefer `-o <path>` / `--output <path>` to write directly to a UTF-8 file and read with `view_file`. If output is truncated, extract comments via `ocr session comments <session-id>` without re-running.
 - **Do not test connectivity pre-emptively** — Execute review/scan directly; troubleshoot only on actual LLM failure (see troubleshooting.md).
 
 ## Verification
 
 After review completes:
 
-1. Command exit code is 0 (non-zero only on run-level failure or when every selected item failed)
-2. JSON `status` field: `"complete"` for review (or `"partial"` with acceptable warnings); `"success"` for scan (`completed_with_warnings` / `completed_with_errors` acceptable — inspect `warnings`)
+1. Command exit code is 0
+2. JSON `status` field is `"complete"` (or `"partial"` with acceptable warnings)
 3. `comments` array structured as expected
 4. `summary.files_reviewed` matches target count
 
@@ -199,4 +189,3 @@ After review completes:
 - Homepage & Docs: https://github.com/alibaba/open-code-review
 - NPM Package: https://www.npmjs.com/package/@alibaba-group/open-code-review
 - Issue Tracker: https://github.com/alibaba/open-code-review/issues
-- Official site: https://open-codereview.ai
