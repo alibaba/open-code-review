@@ -167,6 +167,8 @@ If the user requested "review and fix":
 - **Untracked files in workspace mode** — `preview` includes untracked files. For these, read the file directly instead of using `git diff`.
 - **Background context** — pass `--background` to `preview` when you have requirement context; it appears in the output for your reference during review.
 
+- **Coverage is mandatory** — every `reviewable_files` entry must end as reviewed or explicitly skipped; do not silently omit files.
+
 ### Recovering Oversized Background Context
 
 `--background-file` has two independent limits. The raw file must not exceed
@@ -185,8 +187,6 @@ condition aborts the command. When the command reports either limit:
    oversized file and fail again.
 4. If a faithful summary is not possible, omit the OCR background entirely and
    read the original material directly during the review.
-
-- **Coverage is mandatory** — every `reviewable_files` entry must end as reviewed or explicitly skipped; do not silently omit files.
 
 ### Troubleshooting CLI Version Compatibility
 
