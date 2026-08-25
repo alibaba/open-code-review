@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/delegate"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/spf13/cobra"
 )
 
@@ -31,6 +33,7 @@ type delegateOptions struct {
 
 var delegatePreviewOpts delegateOptions
 var delegateRuleOpts delegateOptions
+var delegateTaskOpts delegateOptions
 
 var delegateCmd = &cobra.Command{
 	Use:     "delegate",
@@ -79,11 +82,28 @@ var delegateRuleCmd = &cobra.Command{
 	},
 }
 
+var delegateTaskCmd = &cobra.Command{
+	Use:   "task [flags]",
+	Short: "Output a single structured review task for a host coding agent (no LLM required)",
+	Long: "Aggregates the resolved scope, applied excludes, resolved review rules, " +
+		"background context, and the collected diffs into one structured review task " +
+		"document handed to a host coding agent. No LLM is called during generation.",
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateDelegateOptions(&delegateTaskOpts); err != nil {
+			return err
+		}
+		return executeDelegateTask(delegateTaskOpts)
+	},
+}
+
 func init() {
 	registerDelegateFlags(delegatePreviewCmd, &delegatePreviewOpts)
 	registerDelegateFlags(delegateRuleCmd, &delegateRuleOpts)
+	registerDelegateFlags(delegateTaskCmd, &delegateTaskOpts)
 	delegateCmd.AddCommand(delegatePreviewCmd)
 	delegateCmd.AddCommand(delegateRuleCmd)
+	delegateCmd.AddCommand(delegateTaskCmd)
 }
 
 // delegateContext holds the shared state for delegate sub-commands.
@@ -235,6 +255,149 @@ func executeDelegateRule(opts delegateOptions, paths []string) error {
 	}
 	fmt.Print(delegate.RuleGroupsMarkdown(groups))
 	return nil
+}
+
+func executeDelegateTask(opts delegateOptions) error {
+	dc, err := loadDelegateContext(opts)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+
+	preview, err := dc.preview(ctx)
+	if err != nil {
+		return fmt.Errorf("preview failed: %w", err)
+	}
+
+	spec := delegate.TaskSpec{
+		SchemaVersion: delegate.TaskSchemaVersion,
+		Repository:    dc.cc.RepoDir,
+		Scope: delegate.TaskScope{
+			Mode:            dc.reviewMode(),
+			From:            dc.opts.from,
+			To:              dc.opts.to,
+			Commit:          dc.opts.commit,
+			MergeBase:       dc.mergeBase(ctx),
+			TotalFiles:      preview.TotalFiles,
+			ReviewableCount: preview.ReviewableCount,
+			ExcludedCount:   preview.ExcludedCount,
+			TotalInsertions: preview.TotalInsertions,
+			TotalDeletions:  preview.TotalDeletions,
+			ReviewableFiles: taskFiles(preview.Entries, true),
+			ExcludedFiles:   taskFiles(preview.Entries, false),
+		},
+		Excludes:           splitPaths(opts.excludes),
+		Background:         opts.background,
+		AcceptanceCriteria: delegate.DefaultAcceptanceCriteria(),
+	}
+
+	reviewablePaths := make([]string, 0, preview.ReviewableCount)
+	for _, e := range preview.Entries {
+		if e.WillReview {
+			reviewablePaths = append(reviewablePaths, e.Path)
+		}
+	}
+	spec.Rules = taskRuleGroups(delegate.GroupRules(dc.resolver(), reviewablePaths))
+
+	diffs, err := collectTaskDiffs(ctx, dc, preview)
+	if err != nil {
+		return fmt.Errorf("diff collection failed: %w", err)
+	}
+	spec.Diffs = diffs
+
+	if opts.format == "json" {
+		return writeDelegateJSON(spec)
+	}
+	fmt.Print(delegate.TaskMarkdown(spec))
+	return nil
+}
+
+func taskFiles(entries []model.PreviewEntry, reviewable bool) []delegate.TaskFile {
+	files := make([]delegate.TaskFile, 0)
+	for _, e := range entries {
+		if e.WillReview != reviewable {
+			continue
+		}
+		files = append(files, delegate.TaskFile{
+			Path:          e.Path,
+			Status:        e.Status,
+			Insertions:    e.Insertions,
+			Deletions:     e.Deletions,
+			ExcludeReason: string(e.ExcludeReason),
+		})
+	}
+	return files
+}
+
+func taskRuleGroups(groups []delegate.RuleGroup) []delegate.TaskRuleGroup {
+	out := make([]delegate.TaskRuleGroup, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, delegate.TaskRuleGroup{
+			GroupID: g.ID,
+			Source:  g.Source,
+			Pattern: g.Pattern,
+			Files:   g.Files,
+			Rule:    g.Text,
+		})
+	}
+	return out
+}
+
+// collectTaskDiffs gathers the real change content for reviewable files via the
+// same diff provider the review path uses. It never reads LLM output: it walks
+// the git diff and keeps only hunks for files the preview marked as reviewable.
+func collectTaskDiffs(ctx context.Context, dc *delegateContext, preview *model.Preview) ([]delegate.TaskDiff, error) {
+	provider, err := newTaskDiffProvider(dc)
+	if err != nil {
+		return nil, err
+	}
+	all, err := provider.GetDiff(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("git diff failed: %w", err)
+	}
+
+	reviewable := make(map[string]bool, preview.ReviewableCount)
+	for _, e := range preview.Entries {
+		if e.WillReview {
+			reviewable[e.Path] = true
+		}
+	}
+
+	hunks := make(map[string]string, len(all))
+	for _, d := range all {
+		path := d.NewPath
+		if path == "/dev/null" {
+			path = d.OldPath
+		}
+		if reviewable[path] {
+			hunks[path] = strings.TrimRight(d.Diff, "\r\n")
+		}
+	}
+
+	diffs := make([]delegate.TaskDiff, 0, len(reviewable))
+	for _, e := range preview.Entries {
+		if !e.WillReview {
+			continue
+		}
+		h, ok := hunks[e.Path]
+		if !ok {
+			continue // reviewable file with no content hunk (e.g. pure rename)
+		}
+		diffs = append(diffs, delegate.TaskDiff{Path: e.Path, Hunk: h})
+	}
+	return diffs, nil
+}
+
+func newTaskDiffProvider(dc *delegateContext) (*diff.Provider, error) {
+	switch dc.reviewMode() {
+	case "range":
+		return diff.NewProvider(dc.cc.RepoDir, dc.opts.from, dc.opts.to, dc.cc.GitRunner), nil
+	case "commit":
+		return diff.NewCommitProvider(dc.cc.RepoDir, dc.opts.commit, dc.cc.GitRunner), nil
+	case "workspace":
+		return diff.NewWorkspaceProvider(dc.cc.RepoDir, dc.cc.GitRunner), nil
+	}
+	return nil, fmt.Errorf("unknown review mode for delegate task: %s", dc.reviewMode())
 }
 
 const delegateSchemaVersion = "1"
