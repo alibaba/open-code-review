@@ -287,19 +287,19 @@ type jsonLLMIdentity struct {
 }
 
 type jsonOutput struct {
-	Status         string               `json:"status"`
-	LLM            *jsonLLMIdentity     `json:"llm,omitempty"`
-	TraceID        string               `json:"trace_id,omitempty"`
-	Message        string               `json:"message,omitempty"`
-	Summary        *jsonSummary         `json:"summary,omitempty"`
-	ToolCalls      *jsonToolCalls       `json:"tool_calls"`
-	Comments       []model.LlmComment   `json:"comments"`
+	Status         string                `json:"status"`
+	LLM            *jsonLLMIdentity      `json:"llm,omitempty"`
+	TraceID        string                `json:"trace_id,omitempty"`
+	Message        string                `json:"message,omitempty"`
+	Summary        *jsonSummary          `json:"summary,omitempty"`
+	ToolCalls      *jsonToolCalls        `json:"tool_calls"`
+	Comments       []model.LlmComment    `json:"comments"`
 	Groups         []agent.FileGroupInfo `json:"groups,omitempty"`
-	Warnings       []agent.AgentWarning `json:"warnings,omitempty"`
-	ProjectSummary string               `json:"project_summary,omitempty"`
-	Resume         *agent.ResumeInfo    `json:"resume,omitempty"`
-	SessionID      string               `json:"session_id,omitempty"`
-	Manifest       *session.RunManifest `json:"manifest,omitempty"`
+	Warnings       []agent.AgentWarning  `json:"warnings,omitempty"`
+	ProjectSummary string                `json:"project_summary,omitempty"`
+	Resume         *agent.ResumeInfo     `json:"resume,omitempty"`
+	SessionID      string                `json:"session_id,omitempty"`
+	Manifest       *session.RunManifest  `json:"manifest,omitempty"`
 	// RetryReport is the frozen LLM retry report (ocr.llm-retry-report/v1).
 	// Reuses llm.RetryReport's own field/tag definitions rather than mirroring
 	// them here, and sits last with omitempty so a first-try-success run emits
