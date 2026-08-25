@@ -1646,7 +1646,7 @@ func (a *Agent) resolveGroupSystemRule(diffs []model.Diff) string {
 	var blocks []ruleBlock
 	index := make(map[string]int, len(sorted))
 	for _, d := range sorted {
-		r := a.args.SystemRule.Resolve(strings.ToLower(d.NewPath))
+		r := a.args.SystemRule.Resolve(d.NewPath)
 		if r == "" {
 			continue
 		}

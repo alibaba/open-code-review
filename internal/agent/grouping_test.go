@@ -6,6 +6,10 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
@@ -387,6 +391,50 @@ func TestResolveGroupSystemRule(t *testing.T) {
 		a := New(Args{SystemRule: real})
 		if got := a.resolveGroupSystemRule([]model.Diff{diff("main.go")}); got == "" {
 			t.Error("expected a non-empty rule for a .go file")
+		}
+	})
+
+	// Regression test: resolveGroupSystemRule must pass the path through
+	// verbatim, not lowercased. The sniffer-wrapped resolver does its own
+	// internal lowercasing for glob matching, but also does real file I/O
+	// (disk read or `git show`) to sniff .m content — lowercasing the path
+	// before that call breaks the read for any mixed-case path (e.g.
+	// ios/ViewController.m -> ios/viewcontroller.m doesn't exist), silently
+	// falling back to the wrong rule instead of erroring loudly.
+	t.Run("mixed-case .m path still sniffs as Objective-C", func(t *testing.T) {
+		dir := t.TempDir()
+		git := func(args ...string) {
+			t.Helper()
+			cmd := exec.Command("git", args...)
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+		const objcHeader = "#import \"ViewController.h\"\n\n@implementation ViewController\n@end\n"
+		full := filepath.Join(dir, "ios", "ViewController.m")
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(objcHeader), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("init")
+		git("config", "user.email", "t@t.co")
+		git("config", "user.name", "t")
+		git("add", "-A")
+		git("commit", "-m", "init")
+
+		t.Setenv("HOME", t.TempDir())
+		resolver, _, err := rules.NewResolver(dir, "", rules.ResolverOptions{})
+		if err != nil {
+			t.Fatalf("NewResolver: %v", err)
+		}
+
+		a := New(Args{SystemRule: resolver})
+		got := a.resolveGroupSystemRule([]model.Diff{diff("ios/ViewController.m")})
+		if strings.Contains(got, "Indexing, Shapes, and Implicit Expansion") {
+			t.Errorf("resolved the MATLAB rule for a real ObjC file — mixed-case path broke the content sniff:\n%s", got)
 		}
 	})
 }
