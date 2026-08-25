@@ -76,6 +76,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"templates/account.HBS", "Handlebars/Mustache Escaping Boundaries"},
 		{"templates/email.mustache", "Handlebars/Mustache Escaping Boundaries"},
 		{"templates/email.MUSTACHE", "Handlebars/Mustache Escaping Boundaries"},
+		{"templates/account.jinja2", "Jinja Escaping Boundaries"},
+		{"templates/email.j2", "Jinja Escaping Boundaries"},
+		{"templates/account.JINJA2", "Jinja Escaping Boundaries"},
+		{"templates/email.J2", "Jinja Escaping Boundaries"},
 		{"src/main/resources/mapper/usermapper.xml", "SQL Logic Error Detection"},
 		{"src/main/resources/dao/userdao.xml", "SQL Logic Error Detection"},
 		{"pom.xml", "snapshot"},
@@ -145,10 +149,6 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
 		{"contracts/token.vy", "Language Restrictions"},
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
-		{"templates/account.jinja2", "Jinja Escaping Boundaries"},
-		{"templates/email.j2", "Jinja Escaping Boundaries"},
-		{"templates/account.JINJA2", "Jinja Escaping Boundaries"},
-		{"templates/email.J2", "Jinja Escaping Boundaries"},
 	}
 
 	for _, tt := range tests {

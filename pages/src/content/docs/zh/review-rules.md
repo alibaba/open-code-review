@@ -144,6 +144,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.go` | `go.md`——Go 源代码。 |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`——FreeMarker 模板（SSTI / XSS / null 处理）。 |
 | `**/*.{hbs,mustache}` | `handlebars_mustache.md`——Handlebars 与 Mustache 模板。 |
+| `**/*.{jinja2,j2}` | `jinja.md`——Jinja 模板 |
 | `**/*.ets` | `arkts.md`——ArkTS / HarmonyOS。 |
 | `**/*.astro` | `astro.md`——Astro 组件与 islands。 |
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
@@ -169,7 +170,6 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.m` | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
 | `**/*.sol` | `solidity.md`——Solidity 智能合约。 |
 | `**/*.vy` | `vyper.md`——Vyper 智能合约。 |
-| `**/*.{jinja2,j2}` | `jinja.md`——Jinja 模板 |
 | *(fallback)* | `default.md` |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。
