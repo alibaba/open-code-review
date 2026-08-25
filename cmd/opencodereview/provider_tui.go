@@ -53,11 +53,22 @@ const (
 	manualStepAuthHeader
 )
 
-// cpProtocols lists the protocol options offered in the Custom and Manual
-// provider forms. Using the canonical names from protocol.go means whatever the
-// user picks flows through resolver normalization unchanged and is written to
-// config verbatim.
+// cpProtocols lists the protocol options offered in the Custom provider form.
+// Using the canonical names from protocol.go means whatever the user picks
+// flows through resolver normalization unchanged and is written to config
+// verbatim.
 var cpProtocols = []string{
+	llm.ProtocolAnthropic,
+	llm.ProtocolOpenAIChatCompletions,
+	llm.ProtocolOpenAIResponses,
+	llm.ProtocolAnthropicBedrock,
+}
+
+// manualProtocols lists the protocol options offered in the Manual form, which
+// writes llm.url and llm.auth_token. Bedrock is deliberately absent: that block
+// holds no region or profile, and bedrock uses neither the url nor the token it
+// does hold, so the resolver rejects the combination outright.
+var manualProtocols = []string{
 	llm.ProtocolAnthropic,
 	llm.ProtocolOpenAIChatCompletions,
 	llm.ProtocolOpenAIResponses,
@@ -181,9 +192,29 @@ type providerTUIModel struct {
 // its index in cpProtocols. Unknown / empty values default to the OpenAI Chat
 // Completions entry (index 1) to preserve legacy behavior where any non-anthropic
 // protocol was treated as OpenAI.
+// cpAmbientProtocol reports whether the protocol selected in the Custom form
+// authenticates from the environment rather than from a stored credential. Such
+// a provider has no url, no api key and no auth header to collect, so the form
+// ends at the protocol step instead of walking three fields that would be
+// written as dead config.
+func (m providerTUIModel) cpAmbientProtocol() bool {
+	return cpProtocols[m.cpProtocolIdx] == llm.ProtocolAnthropicBedrock
+}
+
 func cpProtocolIndex(protocol string) int {
+	return protocolIndexIn(cpProtocols, protocol)
+}
+
+// manualProtocolIndex is cpProtocolIndex for the Manual form's shorter list. A
+// config that names bedrock in llm.protocol is unusable there and lands on the
+// default rather than an out-of-range index; the resolver reports why.
+func manualProtocolIndex(protocol string) int {
+	return protocolIndexIn(manualProtocols, protocol)
+}
+
+func protocolIndexIn(list []string, protocol string) int {
 	normalized := llm.NormalizeProtocol(protocol)
-	for i, p := range cpProtocols {
+	for i, p := range list {
 		if p == normalized {
 			return i
 		}
@@ -365,7 +396,7 @@ func newProviderTUI(cfg *Config, configPath string) providerTUIModel {
 		// protocols including openai-responses); fall back to use_anthropic for
 		// configs written before llm.protocol existed.
 		if cfg.Llm.Protocol != "" {
-			m.manualProtocolIdx = cpProtocolIndex(cfg.Llm.Protocol)
+			m.manualProtocolIdx = manualProtocolIndex(cfg.Llm.Protocol)
 		} else if cfg.Llm.UseAnthropic == nil || *cfg.Llm.UseAnthropic {
 			m.manualProtocolIdx = 0 // anthropic
 		} else {
@@ -966,6 +997,11 @@ func (m providerTUIModel) apiKeyStepCanConfirm() (ok bool, errMsg string) {
 	}
 	if m.activeTab == tabOfficial {
 		p := m.currentProvider()
+		if p.AmbientAuth {
+			// Reachable when an existing config is edited: an empty key is the
+			// correct state for a provider that signs from the AWS chain.
+			return true, ""
+		}
 		if officialProviderEnvKeySet(p) {
 			return true, ""
 		}
@@ -1124,6 +1160,9 @@ func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 		m.cpStep = cpStepProtocol
 		return m, nil
 	case cpStepProtocol:
+		if m.cpAmbientProtocol() {
+			return m.finishCustomForm()
+		}
 		m.cpStep = cpStepBaseURL
 		return m, m.cpURLInput.Focus()
 	case cpStepBaseURL:
@@ -1148,31 +1187,38 @@ func (m providerTUIModel) handleCustomFormEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cpAuthInput.Blur()
-		if m.editingCustom {
-			r := m.result()
-			if err := m.applyEditCustomProviderSave(); err != nil {
-				return m, nil
-			}
-			// Edit succeeded — drop the user into the model list for this provider.
-			m.editingCustom = false
-			m.editTargetName = ""
-			m.apiKeyInput.SetValue("")
-			m.apiKeyMasked = false
-			m.apiKeyOriginal = ""
-			if idx := m.findCustomIdx(r.provider); idx >= 0 {
-				m.customIdx = idx
-			}
-			m.step = stepModel
-			m.prepareModelSelection(r.provider, m.customProviderEntry(r.provider, ProviderEntry{}).Model)
-			return m, nil
-		}
-		if m.creatingCustom {
-			return m.applyCreateCustomProvider()
-		}
-		m.confirmed = true
-		return m, tea.Quit
+		return m.finishCustomForm()
 	}
 	return m, nil
+}
+
+// finishCustomForm saves the Custom provider form. It runs from the auth-header
+// step for a token-based protocol and from the protocol step for an ambient one,
+// which has nothing further to collect.
+func (m providerTUIModel) finishCustomForm() (tea.Model, tea.Cmd) {
+	if m.editingCustom {
+		r := m.result()
+		if err := m.applyEditCustomProviderSave(); err != nil {
+			return m, nil
+		}
+		// Edit succeeded — drop the user into the model list for this provider.
+		m.editingCustom = false
+		m.editTargetName = ""
+		m.apiKeyInput.SetValue("")
+		m.apiKeyMasked = false
+		m.apiKeyOriginal = ""
+		if idx := m.findCustomIdx(r.provider); idx >= 0 {
+			m.customIdx = idx
+		}
+		m.step = stepModel
+		m.prepareModelSelection(r.provider, m.customProviderEntry(r.provider, ProviderEntry{}).Model)
+		return m, nil
+	}
+	if m.creatingCustom {
+		return m.applyCreateCustomProvider()
+	}
+	m.confirmed = true
+	return m, tea.Quit
 }
 
 func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
@@ -1205,6 +1251,9 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 		Protocol:   r.protocol,
 		AuthHeader: r.authHeader,
 		APIKey:     strings.TrimSpace(m.apiKeyInput.Value()),
+	}
+	if r.protocol == llm.ProtocolAnthropicBedrock {
+		entry.APIKey = ""
 	}
 	m.existingCfg.CustomProviders[r.provider] = entry
 
@@ -1248,6 +1297,8 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		AuthHeader: v.AuthHeader,
 		TimeoutSec: v.TimeoutSec,
 		RetryCodes: append([]int(nil), v.RetryCodes...),
+		AWSProfile: v.AWSProfile,
+		AWSRegion:  v.AWSRegion,
 	}
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
@@ -1317,6 +1368,11 @@ func (m *providerTUIModel) applyEditCustomProviderSave() error {
 	entry.AuthHeader = r.authHeader
 	if key, edited := m.customAPIKeyForSave(); edited {
 		entry.APIKey = key
+	}
+	// Switching an entry to an ambient protocol drops the key it no longer uses,
+	// rather than leaving a live credential in a file nothing reads it from.
+	if entry.Protocol == llm.ProtocolAnthropicBedrock {
+		entry.APIKey = ""
 	}
 	// If name changed, delete old key
 	if r.editTargetName != "" && r.editTargetName != r.provider {
@@ -1458,7 +1514,7 @@ func (m providerTUIModel) updateManualForm(key string, msg tea.KeyPressMsg) (tea
 				}
 				return m, nil
 			case "down", "j":
-				if m.manualProtocolIdx < len(cpProtocols)-1 {
+				if m.manualProtocolIdx < len(manualProtocols)-1 {
 					m.manualProtocolIdx++
 				}
 				return m, nil
@@ -1800,6 +1856,14 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 			m.formError = err.Error()
 			return m, nil
 		}
+		if m.activeTab == tabOfficial && m.currentProvider().AmbientAuth {
+			// An ambient-auth provider has no key to collect, so the model step
+			// is the last one. Showing an API-key prompt that must be left blank
+			// would read as a step the user failed to complete.
+			m.formError = ""
+			m.confirmed = true
+			return m, tea.Quit
+		}
 		m.step = stepAPIKey
 		m.formError = ""
 		m.loadExistingAPIKey()
@@ -1927,13 +1991,21 @@ func (m providerTUIModel) result() providerTUIResult {
 				apiKey = m.apiKeyOriginal
 			}
 			authHeader, _ := llm.NormalizeAuthHeader(m.cpAuthInput.Value())
+			url := m.cpURLInput.Value()
+			// An ambient protocol collects none of these. Clearing them also
+			// covers switching an existing entry over to one: the url the
+			// previous protocol needed is dead config under bedrock, and leaving
+			// it behind is how a stale host outlives the change that removed it.
+			if m.cpAmbientProtocol() {
+				url, apiKey, authHeader = "", "", ""
+			}
 			r := providerTUIResult{
 				provider:       m.cpNameInput.Value(),
 				apiKey:         apiKey,
 				isCustom:       true,
 				isEdit:         m.editingCustom,
 				editTargetName: m.editTargetName,
-				url:            m.cpURLInput.Value(),
+				url:            url,
 				protocol:       protocol,
 				authHeader:     authHeader,
 			}
@@ -1990,7 +2062,7 @@ func (m providerTUIModel) result() providerTUIResult {
 			url:        m.manualURLInput.Value(),
 			model:      m.manualModelInput.Value(),
 			apiKey:     apiKey,
-			protocol:   cpProtocols[m.manualProtocolIdx],
+			protocol:   manualProtocols[m.manualProtocolIdx],
 			authHeader: authHeader,
 		}
 	}
@@ -2177,9 +2249,13 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 	fields := []field{
 		{"Provider name", m.cpNameInput.Value(), m.cpStep == cpStepName},
 		{"Protocol", cpProtocols[m.cpProtocolIdx], m.cpStep == cpStepProtocol},
-		{"Base URL", m.cpURLInput.Value(), m.cpStep == cpStepBaseURL},
-		{"API Key", strings.Repeat("*", len(m.apiKeyInput.Value())), m.cpStep == cpStepAPIKey},
-		{"Auth Header", m.cpAuthInput.Value(), m.cpStep == cpStepAuthHeader},
+	}
+	if !m.cpAmbientProtocol() {
+		fields = append(fields,
+			field{"Base URL", m.cpURLInput.Value(), m.cpStep == cpStepBaseURL},
+			field{"API Key", strings.Repeat("*", len(m.apiKeyInput.Value())), m.cpStep == cpStepAPIKey},
+			field{"Auth Header", m.cpAuthInput.Value(), m.cpStep == cpStepAuthHeader},
+		)
 	}
 
 	for _, f := range fields {
@@ -2197,6 +2273,9 @@ func (m providerTUIModel) viewCustomProviderForm(s *strings.Builder) {
 						cur := "      "
 						s.WriteString(cur + tuiItemStyle.Render(proto) + "\n")
 					}
+				}
+				if m.cpAmbientProtocol() {
+					s.WriteString(tuiDimStyle.Render("    credentials come from the AWS chain; pin a region or profile with `ocr config set custom_providers."+m.cpNameInput.Value()+".aws_region <r>`") + "\n")
 				}
 			case cpStepBaseURL:
 				s.WriteString("    " + m.cpURLInput.View() + "\n")
@@ -2256,7 +2335,7 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 
 	fields := []field{
 		{"URL", m.manualURLInput.Value(), m.manualStep == manualStepURL},
-		{"Protocol", cpProtocols[m.manualProtocolIdx], m.manualStep == manualStepProtocol},
+		{"Protocol", manualProtocols[m.manualProtocolIdx], m.manualStep == manualStepProtocol},
 		{"Model", m.manualModelInput.Value(), m.manualStep == manualStepModel},
 		{"Auth Token", strings.Repeat("*", len(m.manualTokenInput.Value())), m.manualStep == manualStepAuthToken},
 		{"Auth Header", m.manualAuthHeaderInput.Value(), m.manualStep == manualStepAuthHeader},
@@ -2269,7 +2348,7 @@ func (m providerTUIModel) viewManualTab(s *strings.Builder) {
 			case manualStepURL:
 				s.WriteString("    " + m.manualURLInput.View() + "\n")
 			case manualStepProtocol:
-				for i, proto := range cpProtocols {
+				for i, proto := range manualProtocols {
 					if i == m.manualProtocolIdx {
 						cur := "    " + tuiCursorStyle.Render(tuiCursor) + " "
 						s.WriteString(cur + tuiSelectedItemStyle.Render(proto) + "\n")

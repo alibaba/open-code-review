@@ -4,6 +4,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -55,6 +56,7 @@ func TestSeverityColor(t *testing.T) {
 // TestRenderComment_BadgeInline verifies the badge is colorized and rendered inline
 // with the first line of the comment content.
 func TestRenderComment_BadgeInline(t *testing.T) {
+	setColor(t, true)
 	out := captureStdout(t, func() {
 		renderComment(model.LlmComment{
 			Path:      "internal/mcp/client.go",
@@ -63,7 +65,7 @@ func TestRenderComment_BadgeInline(t *testing.T) {
 			Content:   "Potential environment variable leak.",
 			Category:  "security",
 			Severity:  "high",
-		})
+		}, os.Stdout)
 	})
 	if !strings.Contains(out, "[security · high]") {
 		t.Errorf("expected badge in output, got:\n%s", out)

@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -45,7 +46,7 @@ func TestEmitRunResult_JSONBudgetStopIsPartial(t *testing.T) {
 		},
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, nil)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -96,7 +97,7 @@ func TestEmitRunResult_JSONBudgetDoesNotOverrideLegacyStatus(t *testing.T) {
 		budgetExceeded: true,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, nil)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -124,7 +125,7 @@ func TestEmitRunResult_JSONNoBudgetIsSuccess(t *testing.T) {
 		totalTokens:   15,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, nil)
+		err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -249,7 +250,7 @@ func TestEmitRunResult_BudgetExceededFalseOmittedFromJSON(t *testing.T) {
 		totalTokens:   10,
 	}
 	got := captureStdout(t, func() {
-		err := emitRunResult(context.Background(), ag, []model.LlmComment{}, time.Now(), "json", "developer", nil, nil, nil)
+		err := emitRunResult(context.Background(), ag, []model.LlmComment{}, time.Now(), "json", "developer", nil, nil, os.Stdout, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
