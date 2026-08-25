@@ -186,7 +186,7 @@ matching order:
 | `**/*.m` | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files)) |
 | `**/*.sol` | `solidity.md` — Solidity smart contracts. |
 | `**/*.vy` | `vyper.md` — Vyper smart contracts. |
-| `**/*.{jinja2,j2}` | `jinja.md` — Jinja templates (escaping, SSTI, undefined values, and context handling). |
+| `**/*.{jinja2,j2}` | `jinja.md` — Jinja templates |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

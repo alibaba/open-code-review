@@ -148,7 +148,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.m` | `matlab.md`（または[コンテンツスニッフィング](#content-sniffing-for-m-files)により `objc.md`） |
 | `**/*.sol` | `solidity.md`: Solidity スマートコントラクト。 |
 | `**/*.vy` | `vyper.md`: Vyper スマートコントラクト。 |
-| `**/*.{jinja2,j2}` | `jinja.md`: Jinja テンプレート（エスケープ、SSTI、未定義値、コンテキスト処理）。 |
+| `**/*.{jinja2,j2}` | `jinja.md`: Jinja テンプレート |
 | *(fallback)* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。
