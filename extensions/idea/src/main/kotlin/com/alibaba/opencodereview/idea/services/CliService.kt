@@ -171,6 +171,7 @@ class CliService(private val cliPath: String = "ocr") {
                     thisLogger().warn("[ocr] 上一个 CLI 进程 ${FORCE_KILL_DELAY_MS}ms 未退出，强制终止")
                     stale.destroyForcibly()
                 }
+                stale.closeStreamsQuietly()
             }
         }
         val stderr = StringBuilder()

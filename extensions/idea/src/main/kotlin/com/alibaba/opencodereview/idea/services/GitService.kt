@@ -372,7 +372,8 @@ class GitService(private val project: Project) {
             val from = resolveGitRef(root, ctx.from.orEmpty())
             val to = ctx.to?.takeIf { it.isNotBlank() }?.let { resolveGitRef(root, it) } ?: "HEAD"
             // 与 getBranchDiff 的三点差异保持一致：左侧取 merge-base，而非 from 的当前位置。
-            if (from != null) mergeBase(from, to) ?: from else null
+            // mergeBase 失败时返回 null（让 openDiff 优雅降级为空左侧），而非回退到 from（会与文件列表基准不一致）。
+            if (from != null) mergeBase(from, to) else null
         }
 
         ReviewMode.COMMIT -> ctx.commit?.takeIf { it.isNotBlank() }?.let { "$it^" }

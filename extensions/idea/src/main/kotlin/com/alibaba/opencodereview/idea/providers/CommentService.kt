@@ -139,6 +139,8 @@ class CommentService(
             this.context = context
             statuses.clear()
             expanded.clear()
+            jumpBlockReasons.clear()
+            locateNotes.clear()
         }
         clearHighlighters()
 

@@ -96,7 +96,11 @@ class SidebarRouter(
 
             is WebviewToHost.Malformed -> {
                 thisLogger().warn("[ocr] Sidebar received invalid message: ${msg.reason}")
-                post(HostToWebview.StateChange(ReviewState.FAILED, msg.reason))
+                // 仅在审查进行中时才发 FAILED，避免覆盖 IDLE/DONE 等正常状态
+                if (session.get() != null) {
+                    session.getAndSet(null)
+                    post(HostToWebview.StateChange(ReviewState.FAILED, msg.reason))
+                }
             }
 
             // 配置面板的消息不应出现在侧栏通道；无法识别的类型可能来自更高版本的前端，直接忽略。
