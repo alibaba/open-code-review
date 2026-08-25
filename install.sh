@@ -8,7 +8,8 @@
 # Prefer to inspect first:
 #   curl -fsSL https://open-codereview.ai/install.sh -o install.sh
 #   less install.sh && sh install.sh
-# Env: OCR_INSTALL_DIR (default /usr/local/bin), OCR_VERSION (default latest).
+# Env: OCR_INSTALL_DIR (default /usr/local/bin), OCR_VERSION (default latest),
+# OCR_GITHUB_MIRROR (default unset; download the binary through a mirror domain).
 set -eu
 
 main() {
@@ -42,13 +43,25 @@ main() {
   fi
 
   asset="${ASSET_PREFIX}-${os}-${arch}"
-  base="https://github.com/$REPO/releases/download/$VERSION"
+  prefix="$(printf '%s' "${OCR_GITHUB_MIRROR:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  prefix="${prefix#https://}"
+  prefix="${prefix#http://}"
+  prefix="${prefix%/}"
+  case "$prefix" in *[[:space:]]*) err "OCR_GITHUB_MIRROR contains spaces: '$prefix'" ;; esac
+  if [ -n "$prefix" ]; then
+    printf 'warning: downloading from unofficial GitHub mirror "%s" (checksum integrity is not guaranteed)\n' "$prefix" >&2
+    base="https://${prefix}/github.com/$REPO/releases/download/$VERSION"
+  else
+    base="https://github.com/$REPO/releases/download/$VERSION"
+  fi
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' INT TERM EXIT
 
   printf 'downloading %s %s (%s/%s)...\n' "$BIN" "$VERSION" "$os" "$arch"
   curl -fsSL -o "$tmp/$asset" "$base/$asset" || err "download failed: $base/$asset"
-  curl -fsSL -o "$tmp/sha256sum.txt" "$base/sha256sum.txt" || err "sha256sum.txt download failed"
+
+  curl -fsSL --connect-timeout 5 --max-time 15 -o "$tmp/sha256sum.txt" "$base/sha256sum.txt" ||
+    err "sha256sum.txt download failed"
 
   want="$(awk -v a="$asset" '$2 == a {print tolower($1)}' "$tmp/sha256sum.txt")"
   [ -n "$want" ] || err "no checksum entry for $asset in sha256sum.txt"

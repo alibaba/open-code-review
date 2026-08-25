@@ -21,10 +21,12 @@
   "**/test/**/*.lhs",
   "**/*Spec.lhs",
   "**/tests/**/*.nim",
+  "**/tests/**/*.R",
   "**/__snapshots__/**",
   "**/*.snap",
   "**/testdata/**",
   "**/fixtures/**",
+  "**/.ipynb_checkpoints/**",
   "**/*.generated.*",
   "**/*.gen.go",
   "**/*.pb.go",
@@ -34,5 +36,13 @@
   "**/*Tests.swift",
   "**/Tests/**/*.swift",
   "**/tests/**/*.elm",
-  "**/vendor/**/*.{jsonnet,libsonnet}"
+  "**/vendor/**/*.{jsonnet,libsonnet}",
+  "**/test/**/*.zig",
+  "**/*_test.zig",
+  "**/kitex_gen/**/*.go",
+  "**/*.capnp.h",
+  "**/*.capnp.go",
+  "**/*.capnp.ts",
+  "**/*_capnp.rs",
+  "**/*_capnp.py"
 ]

@@ -145,7 +145,7 @@ cat <path>                     # new untracked files
 | `--rule <path>` | Путь к пользовательскому rule.json. |
 | `--exclude <patterns>` | Разделённые запятыми шаблоны исключения. |
 | `-b, --background <text>` | Бизнес-контекст. |
-| `-B, --background-file <path>` | Бизнес-контекст из файла Markdown. |
+| `-B, --background-file <path>` | Бизнес-контекст из файла Markdown (приоритет над `-b`). |
 
 ## Сравнение с другими режимами интеграции
 

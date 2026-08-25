@@ -14,6 +14,7 @@ const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: 'en', label: 'English' },
   { value: 'zh', label: '中文' }, // allow-non-english: language options are labelled in their own language
   { value: 'ja', label: '日本語' }, // allow-non-english: language options are labelled in their own language
+  { value: 'ko', label: '한국어' }, // allow-non-english: language options are labelled in their own language
   { value: 'ru', label: 'Русский' }, // allow-non-english: language options are labelled in their own language
 ];
 
@@ -21,8 +22,18 @@ const LANG_BADGE: Record<Language, string> = {
   en: 'En',
   zh: '中', // allow-non-english: single-glyph locale badge
   ja: 'あ', // allow-non-english: single-glyph locale badge
+  ko: '한', // allow-non-english: single-glyph locale badge
   ru: 'Ru',
 };
+
+// Locales whose badge glyph needs a script-specific face; everything else uses
+// the default stack below.
+const LANG_BADGE_FONT: Partial<Record<Language, string>> = {
+  ja: "'Hiragino Sans', sans-serif",
+  ko: "'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif",
+};
+
+const DEFAULT_LANG_BADGE_FONT = "'PingFang SC', -apple-system, sans-serif";
 
 const navTabs = [
   { path: '/features', labelKey: 'navbar.features' },
@@ -152,7 +163,7 @@ const Navbar: React.FC = () => {
                 lineHeight: '18px',
                 textAlign: 'center' as const,
                 width: '100%',
-                fontFamily: language === 'ja' ? "'Hiragino Sans', sans-serif" : "'PingFang SC', -apple-system, sans-serif",
+                fontFamily: LANG_BADGE_FONT[language] ?? DEFAULT_LANG_BADGE_FONT,
               }}>
                 {LANG_BADGE[language]}
               </span>

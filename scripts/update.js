@@ -13,6 +13,7 @@ const { spawnSync } = require("child_process");
 
 const { resolveNativeBinary } = require("./platform");
 const { loadPackageJson } = require("./install.js");
+const { SEMVER_RE, parseVersionOutput, semverGt } = require("./version");
 
 const stateDir = path.join(os.homedir(), ".opencodereview");
 const tsFile = path.join(stateDir, "last-update-check");
@@ -66,8 +67,7 @@ function getInstalledVersion(binPath) {
       encoding: "utf8",
       timeout: 3000,
     });
-    const match = (result.stdout || "").match(/v(\d+\.\d+(?:\.\d+)?)/);
-    return match ? match[1] : null;
+    return parseVersionOutput(result.stdout);
   } catch (_) {
     return null;
   }
@@ -111,21 +111,6 @@ function fetchLatestVersion(pkg) {
       resolve(null);
     });
   });
-}
-
-const SEMVER_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
-
-function semverGt(a, b) {
-  const pa = a.replace(/-.*$/, "").split(".").map(Number);
-  const pb = b.replace(/-.*$/, "").split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) > (pb[i] || 0)) return true;
-    if ((pa[i] || 0) < (pb[i] || 0)) return false;
-  }
-  const aPre = a.includes("-");
-  const bPre = b.includes("-");
-  if (bPre && !aPre) return true;
-  return false;
 }
 
 function writeHint(latestVersion, pkgName) {
