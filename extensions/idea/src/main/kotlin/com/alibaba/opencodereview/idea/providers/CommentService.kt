@@ -725,8 +725,8 @@ class CommentService(
 
     /** 把 CLI 给的相对路径解析成项目内文件；越出仓库根的路径一律拒绝。基准用 repoRoot：评论路径是仓库根相对（git diff 默认），子目录打开项目时 basePath≠repoRoot 会导致双重嵌套找不到文件。 */
     private fun resolveProjectFile(relative: String): VirtualFile? {
-        val base = git.repoRoot()?.toPath()?.normalize() ?: return null
-        val target = runCatching { base.resolve(relative).normalize() }.getOrNull() ?: return null
+        val base = git.repoRoot()?.toPath()?.toRealPath() ?: return null
+        val target = runCatching { base.resolve(relative).toRealPath() }.getOrNull() ?: return null
         if (!target.startsWith(base)) return null
         return LocalFileSystem.getInstance().refreshAndFindFileByNioFile(target)
     }
