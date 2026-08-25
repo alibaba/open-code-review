@@ -22,12 +22,20 @@ configurable LLM service, and generates review comments.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	// Runs for every subcommand, always before any RunE: validate --color once
-	// flags are parsed, then resolve the color decision from them.
+	// flags are parsed, then resolve the color decision from them, and for
+	// commands that need git, check the installed git version (warning, not
+	// failing).
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateColorMode(colorMode); err != nil {
 			return err
 		}
 		colorEnabled = resolveColor()
+		if !commandNeedsGit(cmd) {
+			return nil
+		}
+		if err := gitcmd.CheckGitVersion(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+		}
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -44,16 +52,6 @@ func init() {
 	rootCmd.SetFlagErrorFunc(flagErrorWithSuggestion)
 	rootCmd.Flags().BoolP("version", "V", false, "version for ocr")
 	addColorFlags(rootCmd)
-
-	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		if !commandNeedsGit(cmd) {
-			return nil
-		}
-		if err := gitcmd.CheckGitVersion(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
-		}
-		return nil
-	}
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(reviewCmd)

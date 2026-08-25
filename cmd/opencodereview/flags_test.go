@@ -216,6 +216,9 @@ func TestCommandNeedsGit_RootVersionFlag(t *testing.T) {
 	}
 	if commandNeedsGit(cmd) {
 		t.Error("commandNeedsGit() = true for root --version, want false")
+	}
+}
+
 func TestParseReviewFlags_OutputPath(t *testing.T) {
 	tests := []struct {
 		name string
