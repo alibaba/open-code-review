@@ -97,7 +97,9 @@ object ShellEnv {
         binCache.clear()
     }
 
-    private fun shell(): String = System.getenv("SHELL")?.takeIf(String::isNotBlank) ?: "/bin/zsh"
+    private fun shell(): String =
+        System.getenv("SHELL")?.takeIf(String::isNotBlank)
+            ?: if (System.getProperty("os.name").startsWith("Mac")) "/bin/zsh" else "/bin/bash"
 
     /**
      * 执行命令收集 stdout，超时强杀。stdin 立即关闭避免交互式 shell 等待输入，
