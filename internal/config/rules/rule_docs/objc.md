@@ -1,4 +1,4 @@
-> Favor precision over recall: report only defects demonstrably introduced or exposed by the changed Objective-C code. Treat reachable crashes, use-after-free, persistent leaks, data corruption, security failures, races, and deadlocks as blocking; treat naming, modernization, style, and speculative performance advice as non-blocking. Review only the lines changed in this diff. Before reporting non-local behavior, use `file_read` and `code_search` to verify ownership, ARC versus MRC build mode, API contracts, protocol and category declarations, deployment targets, queue use, and object lifecycle. Do not infer retain cycles, nullability, thread use, or availability from names alone, and do not restate compiler or static-analyzer diagnostics unless the diff creates a concrete runtime consequence.
+> Favor precision over recall: report only defects demonstrable within the supplied review scope and relevant repository context. Treat reachable crashes, use-after-free, persistent leaks, data corruption, security failures, races, and deadlocks as blocking; treat naming, modernization, style, and speculative performance advice as non-blocking. In diff-based review, report findings on changed lines; in full-file scan mode, review the supplied file. Before reporting non-local behavior, use `file_read` and `code_search` to verify ownership, ARC versus MRC build mode, API contracts, protocol and category declarations, deployment targets, queue use, and object lifecycle. Do not infer retain cycles, nullability, thread use, or availability from names alone, and do not restate compiler or static-analyzer diagnostics unless the reviewed code creates a concrete runtime consequence.
 
 #### ARC and Object Ownership
 
@@ -57,7 +57,8 @@
 - Code casts an immutable collection to a mutable type and mutates it instead of obtaining a mutable copy
 - An index or `NSRange` can exceed the current collection/string bounds after filtering, asynchronous mutation, failed search, or unchecked external input
 - `NSString.length` or raw `NSRange` offsets split a surrogate pair or composed character sequence in user-visible text where grapheme boundaries matter
-- A pointer returned by `UTF8String`, `bytes`, or another borrowed-buffer accessor is stored or used asynchronously after its owning object can deallocate or its mutable backing store can change
+- A C string returned by `UTF8String` is used after the temporary conversion buffer's lifetime, including after the surrounding autorelease pool drains; retaining the `NSString` alone is insufficient, so copy the bytes before the pointer escapes that context
+- A pointer returned by `bytes` or another borrowed-buffer accessor is stored or used asynchronously after its owning object can deallocate or its mutable backing store can change
 - A runtime-derived or user-controlled string is passed as the format argument to `NSLog`, `stringWithFormat:`, or another variadic formatter instead of as a `%@` value
 - A nonliteral format string and its arguments have incompatible types or widths, such as using fixed-width integer specifiers for `NSInteger`, `NSUInteger`, or `size_t`, causing undefined varargs reads
 
