@@ -46,9 +46,8 @@ sealed class CommentAnchorResult {
 
 /** 去掉行首的 diff 标记（`+`/`-`）与首尾空白，用于 existingCode 与文件内容的宽松比较。 */
 internal fun normalizeLine(line: String): String {
-    var s = line.trim()
-    if (s.startsWith("+") || s.startsWith("-")) s = s.substring(1).trim()
-    return s
+    val s = line.trim()
+    return if (s.startsWith("+") || s.startsWith("-")) s.substring(1).trim() else s
 }
 
 /** 按行拆分并逐行 [normalizeLine]，丢弃空行——空行在不同版本间易增减，纳入匹配只会拖累滑窗。 */

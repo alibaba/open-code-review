@@ -138,7 +138,7 @@ object IdeaTheme {
     }
 
     /** 字体名里要剥掉的字符：会破坏 `:root{}` 结构（`} ; \ 换行）或提前闭合外层 `<style>` 块（`<`，防 `</style` 注入）。 */
-    private val FONT_NAME_INVALID = Regex("[\"\\\\};\\n\\r<]")
+    private val FONT_NAME_INVALID = Regex("[\"\\\\{};\\n\\r<]")
 
     /** 字体名可能含空格（如 "JetBrains Mono"），必须加引号，否则整条声明会被浏览器丢弃。 */
     private fun cssFontStack(family: String?, generic: String): String {
