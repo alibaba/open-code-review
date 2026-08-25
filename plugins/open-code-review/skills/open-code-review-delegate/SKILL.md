@@ -61,9 +61,9 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content â€
 
 Use git directly based on the mode/ref info from Step 1:
 
-Always pass `--no-pager` when reading diffs or file content through Git so a PTY-based agent environment does not start an interactive pager and wait for input.
+Always pass `--no-pager` when reading diffs or file content through Git. Otherwise, in an agent environment that allocates a pseudo-terminal (PTY), Git may launch an interactive pager that waits for input.
 
-Disabling the pager does not limit how much output the host captures. For a potentially large diff, inspect the stat first, redirect the full diff to a temporary file, and read that file in bounded chunks:
+`--no-pager` does not bound the amount of output captured by the host. For a potentially large diff, inspect the `--stat` output first, redirect the full diff to a temporary file, and read it in bounded chunks:
 
 ```bash
 git --no-pager diff --stat <merge_base>..<to> -- <path>
