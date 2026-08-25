@@ -101,6 +101,13 @@ object ShellEnv {
         System.getenv("SHELL")?.takeIf(String::isNotBlank)
             ?: if (System.getProperty("os.name").startsWith("Mac")) "/bin/zsh" else "/bin/bash"
 
+    /** 关闭进程三路流，吞掉异常（与 CliService.closeStreamsQuietly 一致）。 */
+    private fun Process.closeStreamsQuietly() {
+        runCatching { inputStream.close() }
+        runCatching { outputStream.close() }
+        runCatching { errorStream.close() }
+    }
+
     /**
      * 执行命令收集 stdout，超时强杀。stdin 立即关闭避免交互式 shell 等待输入，
      * stderr 丢弃避免 rc 文件输出污染结果。
@@ -128,6 +135,9 @@ object ShellEnv {
             process.destroyForcibly()
             Thread.currentThread().interrupt()
             return null
+        } finally {
+            // 三条退出路径（超时/正常/中断）都经过 finally，确保 fd 不泄漏。
+            process.closeStreamsQuietly()
         }
     }
 }
