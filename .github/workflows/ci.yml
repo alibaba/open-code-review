@@ -119,14 +119,15 @@ jobs:
           rm -f ./opencodereview
 
   github-actions:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 10
+    container:
+      image: node:24
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: '24'
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
 
       - name: Test GitHub Actions contracts
         run: npm run test:github-actions

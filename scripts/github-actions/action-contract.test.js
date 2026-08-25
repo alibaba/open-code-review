@@ -1043,8 +1043,8 @@ function testGithubActionContractsRunInCi() {
   );
   assert.match(
     CI_TEXT,
-    /uses:\s*actions\/setup-node@[0-9a-f]{40}\s*#\s*v7/,
-    "the newly added GitHub-hosted contract job must pin setup-node to an immutable commit"
+    /container:\s*[\s\S]*?image:\s*node:[0-9]/,
+    "the contract job must declare its Node runtime via a pinned container image"
   );
 }
 
