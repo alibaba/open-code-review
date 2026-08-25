@@ -64,7 +64,7 @@
 
 #### Protocols, Delegates, and Selectors
 
-- An `@optional` protocol method is sent to a nonnil object without first verifying `respondsToSelector:`, making an unimplemented selector reachable
+- An `@optional` protocol method is sent to a non-`nil` object without first verifying `respondsToSelector:`, making an unimplemented selector reachable
 - A weak or concurrently replaceable delegate is read once for `respondsToSelector:` and again for invocation, allowing a different object to receive the unchecked selector; hold one strong local across the check and call
 - A class claims protocol conformance while a required method is a stub, returns a placeholder, or violates a required behavior visible in the protocol or its callers
 - A target-action, notification, timer, callback, or `performSelector:` use supplies a selector with the wrong arity or an incompatible parameter/return ABI
@@ -75,7 +75,7 @@
 
 #### Categories and Runtime Modification
 
-- A category implements a selector already provided by the class, replacing the class implementation without a supported way to call it, or two categories implement the same selector and the selected implementation depends on category loading order; confirm the collision with `code_search`
+- A category implements a selector that the original class, a superclass, or another category on the same class also implements, so which implementation runs is undefined; confirm the collision with `code_search`
 - A category declares a property but provides neither accessors nor associated storage, making the property compile as a declaration but fail when messaged
 - Associated-object storage uses a key already used for a different value, or an association policy that conflicts with the value's required ownership or thread behavior
 - Method swizzling can execute more than once, so repeated exchanges toggle or corrupt the installed behavior; one-time installation must be explicit
@@ -86,14 +86,15 @@
 
 #### Core Foundation and C Interoperability
 
-- A Core Foundation result obtained through a Create or Copy rule is neither released nor transferred on every exit path
-- A non-owned Get-rule Core Foundation result is released or transferred as though owned, or is used after the owner that guarantees its lifetime can disappear
+- A Core Foundation result returned under the Create Rule, for example by a function whose name contains `Create` or `Copy`, is neither released nor transferred on every exit path
+- A non-owned Core Foundation result returned under the Get Rule is released or transferred as though owned, or is used after the owner that guarantees its lifetime can disappear
 - `__bridge_retained`/`CFBridgingRetain` is not balanced by a release, or `__bridge_transfer`/`CFBridgingRelease` is followed by another release of the same ownership
 - A plain `__bridge` pointer escapes beyond the Objective-C object's lifetime even though no ownership was transferred
-- A C callback context, function pointer, or stored `void *` uses the wrong bridge/retain convention, leaving either a dangling Objective-C object or a leaked retained context
+- A C callback's function-pointer type has an incompatible signature or calling convention, so the caller and callback disagree about argument or return-value representation
+- A callback context or another stored `void *` uses the wrong bridge/retain convention, leaving a dangling Objective-C object or leaking a retained context
 - A C API receives a stack address, temporary buffer, or borrowed Foundation bytes that can outlive the backing storage during asynchronous use
 - A buffer length, element count, or struct layout passed across the C boundary is computed in the wrong unit or with a narrowing conversion, allowing out-of-bounds access
-- Do not request ownership changes without first applying the called API's documented Create/Get and callback-context contract
+- Do not request ownership changes without first applying the called API's documented Create Rule or Get Rule and its callback-context contract
 
 #### Error Handling and Exceptions
 
@@ -106,7 +107,7 @@
 - Wrapping an error discards the domain/code or underlying error that existing callers use to choose recovery behavior
 - Do not report an unused optional `NSError` detail when the primary failure is handled completely and no caller needs the additional distinction
 
-#### Concurrency, Queues, and UI Isolation
+#### Concurrency, Queues, and Main-Thread UI Access
 
 - Mutable state or a mutable Foundation collection is read and written from concurrently reachable queues without a single proven synchronization strategy
 - UIKit or AppKit state is read or mutated from a background queue where the framework requires main-thread access
@@ -121,7 +122,7 @@
 
 #### KVC, KVO, and Notifications
 
-- A string key/key path does not name a KVC-compliant property, including a stale literal left by a rename or refactor, making runtime lookup raise or silently target the wrong member
+- A string key/key path does not name a KVC-compliant property, including a stale literal left by a rename or refactor, causing the runtime lookup to raise an exception or silently target the wrong member
 - `setValue:nil forKey:` can reach a non-object property without a valid `setNilValueForKey:` policy
 - Direct ivar mutation bypasses automatic KVO notifications for a property whose observers are verified to require the change
 - A setter or KVC mutation triggers automatic KVO while the same change is also wrapped in manual `willChange...`/`didChange...` calls, causing duplicate observations, or the manual calls are unbalanced on an exit path
