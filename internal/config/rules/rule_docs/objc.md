@@ -2,7 +2,7 @@
 
 #### ARC and Object Ownership
 
-- A new strong ownership edge completes a cycle that keeps an object graph alive after its intended lifecycle; verify both directions of the cycle rather than flagging every strong reference
+- A strong ownership edge completes a cycle that keeps an object graph alive after its intended lifecycle; verify both directions of the cycle rather than flagging every strong reference
 - An object-valued `assign` or `unsafe_unretained` reference is dereferenced after the referenced object can deallocate, creating a dangling pointer; do not recommend `weak` unless the target and build mode support zeroing weak references
 - A `weak` reference is the only reference to an object that must remain alive to complete required work, so the work can silently disappear before it runs
 - In a file proven to use manual reference counting: a result owned through `alloc`, `new`, `copy`, `mutableCopy`, or `retain` is not released on every path, an autoreleased object is stored without retain/copy, or an owned object is over-released. Do not apply MRC rules to ARC-managed files
@@ -14,7 +14,7 @@
 - An escaping block stored by an object strongly captures that same object, directly or through another captured owner, completing a retain cycle
 - `__block` is used as though it made an Objective-C object non-retaining under ARC; ARC retains object-valued `__block` captures unless they are explicitly weak
 - A weak reference is converted to a strong reference outside the escaping block, so the block still captures and retains the object it was intended not to own
-- Several reads of a weak capture must refer to the same live object for the operation to be valid, but the block does not promote it once to a strong local before use
+- Several reads of a weak capture must refer to the same live object for the operation to be valid, but the block does not first promote the capture to a strong local and use that local for all dependent reads
 - An escaping block is stored by raw assignment in MRC, or by a custom setter that fails to honor a `copy` contract, allowing a stack block to outlive its scope
 - An `NSTimer`, `CADisplayLink`, block-based observer, operation, or subscription retains its target/block while its owner retains the registration object, and no invalidation or ownership break occurs on every lifecycle exit
 - An asynchronous completion applies stale state or updates an owner after that operation has been cancelled, replaced, or made irrelevant by lifecycle teardown
@@ -34,7 +34,7 @@
 
 - An initializer uses the original receiver after `[super init...]` instead of assigning and checking the object returned by the superclass initializer
 - A designated initializer skips the superclass's designated initializer, or a convenience initializer bypasses the class's designated initializer, leaving required inherited or local state unset
-- A newly added initializer, `initWithCoder:`, or factory path returns an object without establishing invariants that other construction paths establish
+- A construction path, including an initializer, `initWithCoder:`, or factory method, returns an object without establishing invariants that other construction paths establish
 - An initializer invokes an overridable method before the instance is fully initialized, and an existing or permitted subclass override can observe or act on partial state
 - Initialization failure returns a partially usable object instead of `nil`, or a factory method silently substitutes a fallback that violates its documented failure contract
 - A subclass inherits an initializer that cannot establish the subclass's mandatory state and does not override or mark that initializer unavailable
@@ -59,14 +59,14 @@
 - `NSString.length` or raw `NSRange` offsets split a surrogate pair or composed character sequence in user-visible text where grapheme boundaries matter
 - A C string returned by `UTF8String` is used after the temporary conversion buffer's lifetime, including after the surrounding autorelease pool drains; retaining the `NSString` alone is insufficient, so copy the bytes before the pointer escapes that context
 - A pointer returned by `bytes` or another borrowed-buffer accessor is stored or used asynchronously after its owning object can deallocate or its mutable backing store can change
-- A runtime-derived or user-controlled string is passed as the format argument to `NSLog`, `stringWithFormat:`, or another variadic formatter instead of as a `%@` value
+- A runtime-derived or user-controlled string is used directly as the format argument to `NSLog`, `stringWithFormat:`, or another variadic formatter rather than supplied as a value argument to a literal format such as `%@`
 - A nonliteral format string and its arguments have incompatible types or widths, such as using fixed-width integer specifiers for `NSInteger`, `NSUInteger`, or `size_t`, causing undefined varargs reads
 
 #### Protocols, Delegates, and Selectors
 
 - An `@optional` protocol method is sent to a nonnil object without first verifying `respondsToSelector:`, making an unimplemented selector reachable
 - A weak or concurrently replaceable delegate is read once for `respondsToSelector:` and again for invocation, allowing a different object to receive the unchecked selector; hold one strong local across the check and call
-- A class newly claims protocol conformance while a required method is a stub, returns a placeholder, or violates a required behavior visible in the protocol or its callers
+- A class claims protocol conformance while a required method is a stub, returns a placeholder, or violates a required behavior visible in the protocol or its callers
 - A target-action, notification, timer, callback, or `performSelector:` use supplies a selector with the wrong arity or an incompatible parameter/return ABI
 - A method declaration and implementation use incompatible parameter or return types for the same selector, and runtime dispatch can therefore pass or interpret values incorrectly
 - A framework class, selector, constant, or enum case introduced after the verified minimum deployment target is reachable without an availability guard or supported fallback; name the exact platform version when reporting it
@@ -75,7 +75,7 @@
 
 #### Categories and Runtime Modification
 
-- A category adds a selector already implemented by the class or another category, as confirmed by `code_search`; load order then decides which implementation wins
+- A category implements a selector already provided by the class, replacing the class implementation without a supported way to call it, or two categories implement the same selector and the selected implementation depends on category loading order; confirm the collision with `code_search`
 - A category declares a property but provides neither accessors nor associated storage, making the property compile as a declaration but fail when messaged
 - Associated-object storage uses a key already used for a different value, or an association policy that conflicts with the value's required ownership or thread behavior
 - Method swizzling can execute more than once, so repeated exchanges toggle or corrupt the installed behavior; one-time installation must be explicit
@@ -102,7 +102,7 @@
 - A failure return is ignored and the code continues with nil, partial, or stale output as though the operation succeeded
 - A method reports success while also setting an error, reports failure without the error required by its contract, or invokes a completion with contradictory result/error values
 - An `@catch` block swallows an exception and continues with potentially corrupted state, or catches programmer exceptions as though they were ordinary recoverable errors
-- Recoverable I/O, validation, or service failures are newly converted into exceptions across an API that otherwise uses `NSError` or explicit result values
+- Recoverable I/O, validation, or service failures are converted into exceptions across an API that otherwise uses `NSError` or explicit result values
 - Wrapping an error discards the domain/code or underlying error that existing callers use to choose recovery behavior
 - Do not report an unused optional `NSError` detail when the primary failure is handled completely and no caller needs the additional distinction
 
@@ -121,7 +121,7 @@
 
 #### KVC, KVO, and Notifications
 
-- A string key/key path no longer names a KVC-compliant property after a rename or refactor, making runtime lookup raise or silently target the wrong member
+- A string key/key path does not name a KVC-compliant property, including a stale literal left by a rename or refactor, making runtime lookup raise or silently target the wrong member
 - `setValue:nil forKey:` can reach a non-object property without a valid `setNilValueForKey:` policy
 - Direct ivar mutation bypasses automatic KVO notifications for a property whose observers are verified to require the change
 - A setter or KVC mutation triggers automatic KVO while the same change is also wrapped in manual `willChange...`/`didChange...` calls, causing duplicate observations, or the manual calls are unbalanced on an exit path
@@ -136,7 +136,7 @@
 #### Archiving and External Dynamic Input
 
 - Data from an untrusted or replaceable source is decoded with unrestricted `NSKeyedUnarchiver` APIs instead of secure coding with an explicit allowed-class set
-- A class claims `NSSecureCoding` support but decodes nested objects with unrestricted `decodeObjectForKey:` before validating their classes
+- A class claims `NSSecureCoding` support but decodes an enclosed object with untyped `decodeObjectForKey:` rather than `decodeObjectOfClass:forKey:` or `decodeObjectOfClasses:forKey:`, so the expected class is not constrained before object construction
 - `initWithCoder:` accepts decoded types, ranges, enum values, or object graphs that violate invariants enforced by normal initializers
 - Selector or class names derived from external input are passed to `NSSelectorFromString`, `NSClassFromString`, `performSelector:`, or runtime invocation without an allowlist, exposing unintended code paths
 - Deserialization failure is replaced with a partially populated object that callers cannot distinguish from valid persisted state
