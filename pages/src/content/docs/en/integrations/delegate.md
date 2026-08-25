@@ -48,6 +48,13 @@ curl -o .claude/commands/delegate-review.md \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/delegate-review.md
 ```
 
+For full-file scanning, install the scan command as well:
+
+```bash
+curl -o .claude/commands/delegate-scan.md \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/delegate-scan.md
+```
+
 ### Any agent — Skill
 
 ```bash
@@ -129,12 +136,60 @@ Classify each finding by severity:
 - **Medium** — performance concerns, error handling gaps. Report with context.
 - **Low** — style nits, minor suggestions. Discard silently unless clearly valuable.
 
+## Full-file scan (no diff)
+
+Steps 1–4 above review a diff. When there is no meaningful diff — auditing an
+unfamiliar codebase, a directory, or a set of files — use `ocr delegate scan`
+instead. It is the delegation counterpart of `ocr scan`, and it replaces the
+preview + rule pair with a single call:
+
+```bash
+ocr delegate scan [--path <dirs-or-files>] [--exclude <patterns>] [--batch <strategy>]
+```
+
+Outputs:
+
+- **batches** — files grouped exactly as `ocr scan` would dispatch them, each
+  with a batch id, its grouping key, and per-file line counts
+- **excluded files** — with exclusion reason
+- **rule groups** — the resolved review rules (omit with `--no-rules`)
+
+Unlike `delegate preview`, this works outside a Git repository: a full-file
+scan needs no refs.
+
+### Workflow
+
+1. **Run the plan.** Check `scannable_count` before proceeding — narrow with
+   `--path` if the scan is larger than intended.
+2. **Review one batch per sub-agent.** The batch is the unit OCR sized for a
+   single isolated context; dispatch batches in parallel where practical.
+3. **Read each file in full.** There is no diff — the whole file is the
+   subject.
+4. **Apply the matching rule group** as the review checklist, exploring
+   callers, definitions and tests to confirm each finding is real.
+5. **Report** using the same severity classification as Step 5 above, and
+   close with a coverage summary.
+
+Scanning whole files surfaces far more candidates than diff review, and
+long-standing code is usually intentional. Favor precision: report a finding
+only when you can name its concrete consequence.
+
+### Scan-only flags
+
+| Flag | Description |
+|------|-------------|
+| `--path <paths>` | Comma-separated directories or files to scan (default: whole repo) |
+| `--batch <strategy>` | Override grouping: `none`, `by-language`, `by-directory` |
+| `--batch-size <n>` | Max files per batch (0 = template default) |
+| `--no-rules` | Omit resolved rules from the plan |
+
 ## Sub-commands reference
 
 | Command | Purpose |
 |---------|---------|
 | `ocr delegate preview` | List reviewable files + mode/ref metadata |
 | `ocr delegate rule <path...>` | Resolve review rules grouped by content |
+| `ocr delegate scan` | Full-file scan plan: batches + rules, no diff needed |
 
 ## Shared flags
 

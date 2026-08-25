@@ -159,6 +159,9 @@ ocr review --format json --output result.json
 # OCR은 파일 선택과 규칙 해석만 담당; LLM 설정 불필요
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
+
+# 위임 모드의 전체 파일 스캔 — 계획(파일 + 배치 + 규칙) 생성, 에이전트가 스캔 수행
+ocr delegate scan --path src
 ```
 
 ## Documentation

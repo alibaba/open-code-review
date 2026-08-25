@@ -46,7 +46,10 @@ Output review spec for host-agent delegation (no LLM required).`,
   ocr delegate preview
 
   # Get rules for multiple files (grouped by content)
-  ocr delegate rule internal/agent/agent.go internal/llm/client.go`,
+  ocr delegate rule internal/agent/agent.go internal/llm/client.go
+
+  # Plan a full-file scan (no diff needed): files + batches + rules
+  ocr delegate scan --path internal/agent`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Help()

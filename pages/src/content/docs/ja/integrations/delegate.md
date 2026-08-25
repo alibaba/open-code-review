@@ -36,6 +36,13 @@ curl -o .claude/commands/delegate-review.md \
   https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/delegate-review.md
 ```
 
+全ファイルスキャンには、scan コマンドもインストールしてください：
+
+```bash
+curl -o .claude/commands/delegate-scan.md \
+  https://raw.githubusercontent.com/alibaba/open-code-review/main/plugins/open-code-review/claude-code/commands/delegate-scan.md
+```
+
 ### 任意のエージェント — Skill
 
 ```bash
@@ -115,12 +122,48 @@ cat <path>                     # 新規未追跡ファイル
 - **Medium** — パフォーマンスの懸念、エラーハンドリングの欠落。コンテキスト付きで報告。
 - **Low** — スタイルの提案、軽微な改善。明確に価値がない限り静かに破棄。
 
+## 全ファイルスキャン（diff 不要）
+
+上記のワークフローは diff をレビューします。意味のある diff がない場合 — 未知のコードベース、ディレクトリ、あるいは一連のファイルを監査する場合 — は `ocr delegate scan` を使ってください。これは `ocr scan` のデリゲーションモード版で、preview と rule の 2 ステップを 1 回の呼び出しに置き換えます：
+
+```bash
+ocr delegate scan [--path <ディレクトリまたはファイル>] [--exclude <patterns>] [--batch <strategy>]
+```
+
+出力内容：
+
+- **バッチ** — `ocr scan` が実際にディスパッチするのと同じ方法でグループ化されたファイル。各バッチにバッチ ID、グループキー、ファイルごとの行数を含む
+- **除外ファイル** — 除外理由付き
+- **ルールグループ** — 解決済みのレビュールール（`--no-rules` で省略可）
+
+`delegate preview` とは異なり、Git リポジトリでない通常のディレクトリでも動作します。全ファイルスキャンには ref が不要だからです。
+
+### ワークフロー
+
+1. **スキャン計画を生成する。** 先に `scannable_count` を確認し、想定より広ければ `--path` で絞り込みます。
+2. **バッチごとにサブエージェントでレビューする。** バッチは OCR が単一の隔離コンテキスト向けに設計したディスパッチ単位です。可能な場合は並列に実行します。
+3. **各ファイルを全文読む。** diff は存在せず、ファイル全体がレビュー対象です。
+4. **対応するルールグループをチェックリストとして適用し**、必要に応じて呼び出し元・定義・テストを確認して、各指摘が実在するか裏付けます。
+5. **報告する。** 重大度の分類は上記のステップと同じで、最後にカバレッジのサマリーを付けます。
+
+全ファイルスキャンは diff レビューよりはるかに多くの候補を出しますが、長く残っているコードは通常は意図的なものです。適合率を優先し、具体的な影響を指摘できる場合にのみ報告してください。
+
+### スキャン専用フラグ
+
+| フラグ | 説明 |
+|--------|------|
+| `--path <paths>` | スキャン対象のディレクトリまたはファイル（カンマ区切り、既定：リポジトリ全体） |
+| `--batch <strategy>` | グループ化戦略の上書き：`none`、`by-language`、`by-directory` |
+| `--batch-size <n>` | バッチあたりの最大ファイル数（0 = テンプレート既定値） |
+| `--no-rules` | 計画から解決済みルールを省く |
+
 ## サブコマンドリファレンス
 
 | コマンド | 目的 |
 |----------|------|
 | `ocr delegate preview` | レビュー可能ファイル＋mode/ref メタデータの一覧 |
 | `ocr delegate rule <path...>` | 内容別にグループ化されたレビュールールの解決 |
+| `ocr delegate scan` | 全ファイルスキャン計画：バッチ＋ルール、diff 不要 |
 
 ## 共通フラグ
 

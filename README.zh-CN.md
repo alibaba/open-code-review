@@ -159,6 +159,9 @@ ocr review --format json --output result.json
 # OCR 负责文件选择和规则解析；无需配置 LLM
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
+
+# 委托模式下的全文件扫描 — 生成计划（文件 + 批次 + 规则），由 agent 执行扫描
+ocr delegate scan --path src
 ```
 
 ## 文档

@@ -159,6 +159,9 @@ ocr review --format json --output result.json
 # OCR handles file selection and rule resolution; no LLM configuration needed
 ocr delegate preview
 ocr delegate rule src/main.go src/handler.go
+
+# Full-file scan in delegation mode — plan (files + batches + rules), agent scans
+ocr delegate scan --path src
 ```
 
 ## Documentation

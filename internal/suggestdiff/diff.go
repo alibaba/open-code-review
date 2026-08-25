@@ -22,6 +22,22 @@ type DiffLine struct {
 	Content string
 }
 
+// sameLine reports whether two lines count as unchanged for diff purposes.
+//
+// Leading and trailing whitespace is ignored: ExistingCode is a model-quoted
+// excerpt whose indentation cannot be trusted, so requiring byte equality would
+// render an entire block as rewritten whenever the model re-indented its quote.
+// This is the same tolerance diff.normalizeLine applies when matching
+// ExistingCode against the real file to resolve line numbers.
+//
+// Case is deliberately NOT folded. Identifiers differ by case in essentially
+// every language — in Go it is the exported/unexported boundary — so folding it
+// made a `foo` -> `Foo` suggestion render as a single unchanged context line
+// showing the OLD text, i.e. as though the suggestion changed nothing.
+func sameLine(a, b string) bool {
+	return strings.TrimSpace(a) == strings.TrimSpace(b)
+}
+
 // ComputeLineDiff returns a line-level diff between oldLines and newLines.
 // Uses Myers-style LCS to find common subsequences, then emits context/added/deleted lines.
 func ComputeLineDiff(oldLines, newLines []string) []DiffLine {
@@ -37,7 +53,7 @@ func ComputeLineDiff(oldLines, newLines []string) []DiffLine {
 	}
 	for i := 1; i <= m; i++ {
 		for j := 1; j <= n; j++ {
-			if strings.EqualFold(strings.TrimSpace(oldLines[i-1]), strings.TrimSpace(newLines[j-1])) {
+			if sameLine(oldLines[i-1], newLines[j-1]) {
 				lcs[i][j] = lcs[i-1][j-1] + 1
 			} else {
 				lcs[i][j] = max(lcs[i-1][j], lcs[i][j-1])
@@ -50,7 +66,7 @@ func ComputeLineDiff(oldLines, newLines []string) []DiffLine {
 	i, j := m, n
 	back := make([]DiffLine, 0, max(m, n)*2)
 	for i > 0 || j > 0 {
-		if i > 0 && j > 0 && strings.EqualFold(strings.TrimSpace(oldLines[i-1]), strings.TrimSpace(newLines[j-1])) {
+		if i > 0 && j > 0 && sameLine(oldLines[i-1], newLines[j-1]) {
 			back = append(back, DiffLine{Type: DiffContext, Content: oldLines[i-1]})
 			i--
 			j--

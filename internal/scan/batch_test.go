@@ -74,16 +74,55 @@ func TestGroupBatches_ByDirectory(t *testing.T) {
 	items := itemList(
 		"README.md",       // <root>
 		"cmd/main.go",     // cmd
-		"internal/a/x.go", // internal
-		"internal/b/y.go", // internal
+		"internal/a/x.go", // internal/a
+		"internal/b/y.go", // internal/b
 		"cmd/scan.go",     // cmd
 		"LICENSE",         // <root>
 	)
 	got := batchPaths(groupBatches(items, BatchByDirectory, 0))
 	want := [][]string{
-		{"README.md", "LICENSE"},               // <root>
-		{"cmd/main.go", "cmd/scan.go"},         // cmd
-		{"internal/a/x.go", "internal/b/y.go"}, // internal
+		{"README.md", "LICENSE"},       // <root>
+		{"cmd/main.go", "cmd/scan.go"}, // cmd
+		{"internal/a/x.go"},            // internal/a
+		{"internal/b/y.go"},            // internal/b
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v\nwant %v", got, want)
+	}
+}
+
+// The layout this strategy exists for: everything under one top-level
+// directory. Keying on the first path segment put all of these in a single
+// batch, so by-directory grouped nothing at all.
+func TestGroupBatches_ByDirectory_SingleTopLevelDirRepo(t *testing.T) {
+	items := itemList(
+		"internal/scan/agent.go",
+		"internal/scan/batch.go",
+		"internal/llm/client.go",
+		"internal/diff/resolver.go",
+	)
+	got := batchPaths(groupBatches(items, BatchByDirectory, 0))
+	want := [][]string{
+		{"internal/diff/resolver.go"},
+		{"internal/llm/client.go"},
+		{"internal/scan/agent.go", "internal/scan/batch.go"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v\nwant %v", got, want)
+	}
+}
+
+// Nested directories must stay distinct rather than folding into their parent.
+func TestGroupBatches_ByDirectory_NestedDirsStaySeparate(t *testing.T) {
+	items := itemList(
+		"src/app/ui/button.ts",
+		"src/app/ui/input.ts",
+		"src/app/main.ts",
+	)
+	got := batchPaths(groupBatches(items, BatchByDirectory, 0))
+	want := [][]string{
+		{"src/app/main.ts"},
+		{"src/app/ui/button.ts", "src/app/ui/input.ts"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v\nwant %v", got, want)
