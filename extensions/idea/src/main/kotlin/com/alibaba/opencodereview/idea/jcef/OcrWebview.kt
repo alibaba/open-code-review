@@ -106,6 +106,7 @@ internal class OcrWebview(
 
     /** resize 后强制整屏重绘，修复离屏渲染模式下 resize 后面板大面积变白。 */
     private fun scheduleFullRepaint() {
+        if (disposed) return
         repaintTimers.forEach { it.restart() }
     }
 
