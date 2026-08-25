@@ -283,14 +283,14 @@ runs:
       run: |
         npm install -g "@alibaba-group/open-code-review@${OCR_VERSION}"
         echo "OpenCodeReview installed:"
-        OCR_VERSION_OUTPUT="$(ocr version 2>&1)" || {
+        OCR_VERSION_OUTPUT="$(ocr version 2>/dev/null)" || {
           echo "::error::Unable to read the installed OpenCodeReview version"
           exit 1
         }
         printf '%s\n' "$OCR_VERSION_OUTPUT"
         OCR_VERSION_LINE="${OCR_VERSION_OUTPUT%%$'\n'*}"
         if [[ ! "$OCR_VERSION_LINE" =~ ^open-code-review[[:space:]]+v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?([[:space:]]|$) ]]; then
-          echo "::error::Unable to verify the installed OpenCodeReview version; v1.9.6 or newer is required"
+          echo "::error::Unable to parse the installed OpenCodeReview version; a stable release v1.9.6 or newer is required (prerelease versions are not supported)"
           exit 1
         fi
         OCR_VERSION_MAJOR=$((10#${BASH_REMATCH[1]}))
