@@ -66,9 +66,12 @@ class JcefConfigPanelHost(
         webview = view
         val created = PanelDialog(view.component)
         dialog = created
+        // OcrWebview 内部 messageBus.connect(this) 把自己挂到 Disposer 树（ROOT_DISPOSABLE 下）；
+        // 注册为本 host 的子节点，否则 IDE 关闭时 Disposer 找不到 parent → memory leak。
+        Disposer.register(this, view)
         // 对话框关闭（点击关闭按钮、按 Esc 或由页面发送 closeConfigPanel）时销毁 webview，否则 CEF browser 会持续驻留，下次又重新创建。
         Disposer.register(created.disposable) {
-            view.dispose()
+            view.dispose()  // 幂等，Disposer 也会调一次
             if (webview === view) webview = null
             if (dialog === created) dialog = null
         }

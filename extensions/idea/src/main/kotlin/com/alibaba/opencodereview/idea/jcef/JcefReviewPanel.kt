@@ -9,6 +9,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.progress.ProcessCanceledException
+import com.intellij.openapi.util.Disposer
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.jcef.JBCefApp
 import javax.swing.JComponent
@@ -62,6 +63,9 @@ class JcefReviewPanel(project: Project) : Disposable {
             webview = vw
             component = comp
             channel = ch
+            // OcrWebview 内部 messageBus.connect(this) 把自己挂到 Disposer 树（ROOT_DISPOSable 下）；
+            // 必须注册为本面板的子节点，否则 IDE 关闭时 Disposer 找不到 parent → memory leak。
+            vw?.let { Disposer.register(this, it) }
         }
     }
 
