@@ -56,20 +56,33 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content â€
 
 Use git directly based on the mode/ref info from Step 1:
 
+#### Pager and Large-Output Behavior in Agent and CI Environments
+
+Always pass `--no-pager` when reading diffs or file content through Git. Some agent and CI runners allocate a pseudo-terminal (PTY), which can cause Git to start an interactive pager such as `less`. The pager may then wait indefinitely for input that the automated command cannot provide. A host-side timeout can terminate the command and report exit code 137. This is a pager and PTY interaction, not a Git diff size limitation.
+
+Disabling the pager does not limit how much output the host captures. For a potentially large diff, inspect the stat first, redirect the full diff to a temporary file, and read that file in bounded chunks:
+
+```bash
+git --no-pager diff --stat <merge_base>..<to> -- <path>
+diff_file=$(mktemp)
+git --no-pager diff <merge_base>..<to> -- <path> > "$diff_file"
+# Read "$diff_file" with a file-reading tool in bounded chunks, then remove it.
+```
+
 **Range mode** (merge_base provided in preview output):
 ```bash
-git diff <merge_base>..<to> -- <path>
+git --no-pager diff <merge_base>..<to> -- <path>
 ```
 
 **Commit mode**:
 ```bash
-git show <commit> -- <path>
+git --no-pager show <commit> -- <path>
 ```
 
 **Workspace mode**:
 ```bash
 # Tracked files
-git diff HEAD -- <path>
+git --no-pager diff HEAD -- <path>
 # New untracked files â€” read directly (entire file is new code)
 cat <path>
 ```
