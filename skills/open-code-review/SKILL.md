@@ -16,7 +16,7 @@ compatibility: >
 metadata:
   author: alibaba
   homepage: https://github.com/alibaba/open-code-review
-  version: "2.1.0"
+  version: "1.10.0"
 ---
 
 # Open Code Review
@@ -57,8 +57,8 @@ LLM not configured & user does not want to configure?
 
 Analyze the review target and extract concise business context to improve review quality.
 
-- Short context: `--background "context"` / `-b "context"` (inline string, passed through raw — no sanitization, no length limit)
-- Long context (PRD/docs): write to a temporary `.md` file, `--background-file <path>` / `-B <path>` (max 1 MB; control characters stripped, wrapped in `<ocr_user_background>` tags; soft limit 2000 chars, hard limit 8000)
+- Short context (< 2000 chars): `--background "context"` / `-b "context"`
+- Long context (PRD/docs): write to a temporary `.md` file, `--background-file <path>` / `-B <path>` (max 1 MB, hard limit 8000 chars)
 
 ### Step 2: Execute Review or Scan
 
@@ -76,6 +76,7 @@ Analyze the review target and extract concise business context to improve review
 | "Review my changes" | `ocr review --audience agent --format json -b "ctx"` |
 | "Review feature PR" | `ocr review --audience agent --format json -b "ctx" --from main --to feature` |
 | "Review commit abc123" | `ocr review --audience agent --format json -b "ctx" --commit abc123` |
+| "Write results to file" | `ocr review --audience agent --format json --output result.json -b "ctx"` |
 | "Which files will be reviewed?" | `ocr review --preview --format json` |
 | "Resume interrupted review" | `ocr review --audience agent --format json --from main --to feature --resume <session-id>` |
 
@@ -86,6 +87,7 @@ Analyze the review target and extract concise business context to improve review
 | "Scan the whole repo" | `ocr scan --audience agent --format json -b "ctx"` |
 | "Scan src/auth/ for security" | `ocr scan --audience agent --format json --path src/auth -b "security audit"` |
 | "Fast scan without summary" | `ocr scan --audience agent --format json --no-summary --no-dedup` |
+| "Write results to file" | `ocr scan --audience agent --format json --output result.json -b "ctx"` |
 | "Resume interrupted scan" | `ocr scan --audience agent --format json --resume <session-id>` |
 | "Which files will be scanned?" | `ocr scan --preview --format json` |
 

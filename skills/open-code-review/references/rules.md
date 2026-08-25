@@ -30,6 +30,7 @@
 - `rule` value: inline string OR file reference (`.md`, `.txt`, `.markdown`; max 512 KB)
 - `merge_system_rule: true`: merges with matching system rules (instead of replacing them)
 - `include`/`exclude`: top-level file filtering (gitignore-style glob, supports `**` and `{a,b}`)
+- **Extended Language Support**: Native rule resolution supports Java, TS/JS, Go, Python, C/C++, Rust, as well as Swift, Jsonnet, and file pattern matching for Jupyter Notebook (`.ipynb`), R, Zig, Elm, Thrift, and Cap'n Proto.
 
 ## Debugging Rule Matching
 
