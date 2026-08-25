@@ -134,7 +134,7 @@ type RuleDetail struct {
 	// only: callers that serialize RuleDetail (e.g. delegateRuleGroupJSON)
 	// must not surface this, since Pattern is a versioned "the glob that
 	// matched" contract that a sniff annotation would silently break.
-	SniffedAs string
+	SniffedAs string `json:"-"`
 }
 
 // DetailResolver extends Resolver with source metadata.

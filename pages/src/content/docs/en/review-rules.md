@@ -182,7 +182,7 @@ matching order:
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
-| `**/*.m` | `matlab.md` by default — see [Content sniffing for `.m` files](#content-sniffing-for-m-files) below. |
+| `**/*.m` | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files)) |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
@@ -190,57 +190,15 @@ plan and main task prompts.
 
 ### Content sniffing for `.m` files
 
-`.m` is shared by two unrelated languages — MATLAB and Objective-C — so path
-matching alone can't tell them apart. Before falling back to `matlab.md` for
-a `**/*.m` match, OCR peeks at the file's **first non-blank line**:
+`.m` is shared by MATLAB and Objective-C. OCR peeks at the file's first
+non-blank line to disambiguate: if it looks like Objective-C (e.g. `#import`,
+`@implementation`, a C-style comment), `objc.md` is used instead of
+`matlab.md`. When the content cannot be read, resolution falls back to
+`matlab.md`.
 
-| First line looks like | Rule doc used |
-|---|---|
-| `#import`, `#include`, `#pragma`, `#if` (covers `#ifdef`/`#ifndef` too), `#define`, `@import`, `@interface`, `@implementation`, `@class`, `@protocol`, `//`, or `/*` | `objc.md` |
-| anything else (including no content available to sniff, e.g. a deleted file) | `matlab.md` |
-
-A C-style comment opener (`//` or `/*`) counts as an ObjC signal on its own:
-MATLAB comments start with `%` and a `.m` file can't legally begin with `/` in
-MATLAB, so the two are unambiguous. This matters because the Xcode file
-template opens with a `//` banner, and most real projects put a license
-header first — the actual `#import` is rarely on line one.
-
-Deliberately not widened to a bare `#`: Octave, which also uses `.m`, treats
-`#` as a comment character, so that would misclassify a real Octave/MATLAB
-file as Objective-C.
-
-The content is read **at the ref under review**, not from your working tree:
-`ocr review --from/--to` reads via `git show <to>:<path>` and `--commit` via
-`git show <commit>:<path>`, so the sniff is correct even when that ref isn't
-checked out. Workspace reviews, `ocr scan`, and `ocr rules check` have no ref
-and read the working tree, which is the thing they operate on. If the file
-can't be read at all, resolution falls back to `matlab.md`.
-
-`objc.md` currently ships as a copy of the generic `default.md` checklist —
-it's a placeholder in OCR's source
-(`internal/config/rules/rule_docs/objc.md`) for a maintainer to fill in with
-real Objective-C–specific guidance later; since it's compiled into the
-binary via `go:embed`, changing it requires rebuilding OCR from source, not
-just editing the file on disk. If you need Objective-C–specific guidance
-today without rebuilding, use a project-level
-[`.opencodereview/rule.json`](#rule-file-format-layers-1-3) entry matching
-your `.m` paths (e.g. `ios/**/*.m`) — project rules are checked before the
-system layer, so they take priority regardless of the sniff.
-
-`ocr rules check` reports when this sniff fired via a separate `Note:` line —
-`Pattern` always stays the plain glob that matched:
-
-```bash
-$ ocr rules check ios/ViewController.m
-File: ios/ViewController.m
-Source: System built-in
-Pattern: **/*.m
-Note:    rule selected by file content (objc), not by path alone
-Rule:
-────────────────────────────────────────
-…contents of objc.md…
-────────────────────────────────────────
-```
+> **Stability note.** The sniff heuristic may change between OCR versions. If
+> you need deterministic `.m` routing, set an explicit project-level rule for
+> your `.m` paths — project rules always outrank the system layer.
 
 ## Inspecting which rule wins: `ocr rules check`
 
