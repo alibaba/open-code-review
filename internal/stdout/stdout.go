@@ -43,7 +43,9 @@ func Quiet() func() {
 }
 
 // Swap replaces the stdout writer with replacement and returns a restore
-// function. It lets tests capture output written through Writer().
+// function. It lets tests capture output written through Writer(), and lets
+// callers redirect progress output to another stream (e.g. os.Stderr) so a
+// structured document can own stdout alone.
 // Usage:
 //
 //	var buf bytes.Buffer

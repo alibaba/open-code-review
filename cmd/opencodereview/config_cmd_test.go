@@ -1068,9 +1068,9 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, max_tokens, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes\n" +
-		"Protocol values: anthropic, openai, openai-responses\n" +
+		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
+		"Protocol values: anthropic, anthropic-bedrock, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
 		t.Errorf("unknown-key message drifted:\n got: %q\nwant: %q", err.Error(), want)
@@ -1097,7 +1097,7 @@ func TestRunConfigUnset_InvalidKey(t *testing.T) {
 }
 
 func TestRunConfigSetWarnsWhenActiveProviderShadowsLegacyLLMConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	configPath, err := defaultConfigPath()
 	if err != nil {
 		t.Fatal(err)
@@ -1146,7 +1146,7 @@ func TestLegacyLLMShadowWarning(t *testing.T) {
 }
 
 func TestRunConfigUnsetProviderClearsSelectionAndKeepsProviderEntries(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	configPath, err := defaultConfigPath()
 	if err != nil {
 		t.Fatal(err)

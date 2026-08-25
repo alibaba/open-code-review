@@ -2762,13 +2762,15 @@ func TestApplyCustomProviderConfigNormalizesAuthHeader(t *testing.T) {
 // --- protocol normalization / openai-responses support ---
 
 func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
-	// The slice drives both Custom and Manual forms — every canonical protocol
-	// must appear, in canonical order, so the TUI result() picks up the right
-	// string for each index.
+	// The Custom form offers every canonical protocol, in canonical order, so
+	// result() picks up the right string for each index. The Manual form writes
+	// llm.url + llm.auth_token and so omits bedrock, which uses neither; the two
+	// lists share their prefix, which is what keeps a single index helper honest.
 	want := []string{
 		llm.ProtocolAnthropic,
 		llm.ProtocolOpenAIChatCompletions,
 		llm.ProtocolOpenAIResponses,
+		llm.ProtocolAnthropicBedrock,
 	}
 	if len(cpProtocols) != len(want) {
 		t.Fatalf("cpProtocols has %d entries, want %d", len(cpProtocols), len(want))
@@ -2776,6 +2778,21 @@ func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
 	for i, p := range want {
 		if cpProtocols[i] != p {
 			t.Errorf("cpProtocols[%d] = %q, want %q", i, cpProtocols[i], p)
+		}
+	}
+
+	wantManual := want[:len(want)-1]
+	if len(manualProtocols) != len(wantManual) {
+		t.Fatalf("manualProtocols has %d entries, want %d", len(manualProtocols), len(wantManual))
+	}
+	for i, p := range wantManual {
+		if manualProtocols[i] != p {
+			t.Errorf("manualProtocols[%d] = %q, want %q", i, manualProtocols[i], p)
+		}
+	}
+	for _, p := range manualProtocols {
+		if p == llm.ProtocolAnthropicBedrock {
+			t.Error("manualProtocols offers bedrock; the llm block has no region, profile or use for its url and token")
 		}
 	}
 }
@@ -2792,6 +2809,7 @@ func TestCpProtocolIndex(t *testing.T) {
 		{"alias openai normalizes to chat-completions", "openai", 1},
 		{"alias OPENAI case-insensitive", "OPENAI", 1},
 		{"empty defaults to chat-completions", "", 1},
+		{"canonical bedrock", llm.ProtocolAnthropicBedrock, 3},
 		{"unknown defaults to chat-completions", "grpc", 1},
 	}
 	for _, tt := range tests {
@@ -2969,7 +2987,7 @@ func TestApplyManualConfig_DoubleWritesProtocolAndUseAnthropic(t *testing.T) {
 }
 
 // TestProviderTUIResult_ManualProtocolIsCanonical makes sure result() for the
-// Manual tab returns the canonical protocol name picked from cpProtocols.
+// Manual tab returns the canonical protocol name picked from manualProtocols.
 func TestProviderTUIResult_ManualProtocolIsCanonical(t *testing.T) {
 	cfg := &Config{}
 	m := newProviderTUI(cfg, "")
@@ -2979,7 +2997,7 @@ func TestProviderTUIResult_ManualProtocolIsCanonical(t *testing.T) {
 	m.manualModelInput.SetValue("m")
 	m.manualTokenInput.SetValue("t")
 
-	for i, want := range cpProtocols {
+	for i, want := range manualProtocols {
 		m.manualProtocolIdx = i
 		r := m.result()
 		if r.protocol != want {

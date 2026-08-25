@@ -77,14 +77,35 @@ sudo port upgrade open-code-review
 curl -fsSL https://open-codereview.ai/install.sh | sh
 ```
 
-Скрипт учитывает две переменные окружения:
+Скрипт учитывает три переменные окружения:
 
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
 | `OCR_INSTALL_DIR` | `/usr/local/bin` | Куда положить бинарник `ocr`. |
 | `OCR_VERSION` | последний релиз | Закрепить конкретный тег релиза (например `v1.2.3`). |
+| `OCR_GITHUB_MIRROR` | не задана | Скачивать бинарник релиза и его контрольную сумму через зеркало GitHub (например `gh-proxy.com`). |
 
 Скрипт поддерживает `darwin` и `linux` на `amd64` / `arm64`.
+
+#### Использование зеркала GitHub
+
+В некоторых регионах доступ к GitHub может быть медленным. Задайте `OCR_GITHUB_MIRROR` как домен зеркала, чтобы загружать бинарник релиза и его контрольную сумму через него:
+
+```bash
+export OCR_GITHUB_MIRROR='YOUR_MIRROR_DOMAIN'
+```
+
+Значение должно быть «голым» доменом — без схемы `https://` и без завершающего слэша (`gh-proxy.com`, а не `https://gh-proxy.com/`). Оно используется как зеркало с *префиксом пути*: бинарник загружается с
+`https://<зеркало>/github.com/alibaba/open-code-review/releases/download/<версия>/…`.
+Зеркала с подменой домена (например, переписывающие `github.com` на `hub.example.org`) не подходят под эту форму — используйте зеркало с префиксом пути.
+
+Зеркало покрывает и бинарник релиза, и его контрольную сумму `sha256sum.txt`. Разрешение версии (когда `OCR_VERSION` не задана) по-прежнему обращается к GitHub API напрямую, а не к зеркалу. Чтобы полностью пропустить разрешение версии, закрепите версию:
+
+```bash
+export OCR_VERSION='v1.2.3'
+```
+
+> **Примечание по безопасности:** Зеркало — это сторонний сервис, поэтому при заданной `OCR_GITHUB_MIRROR` и бинарник, и его `sha256sum.txt` загружаются с зеркала. Это значит, что вредоносное зеркало может отдать подменённый бинарник вместе с подходящей контрольной суммой; в режиме зеркала гарантия целостности не действует. Если зеркало не заслуживает доверия, сверьте загруженный файл с оригинальным `sha256sum.txt` на [странице релизов](https://github.com/alibaba/open-code-review/releases).
 
 В Windows с PowerShell 5.1 или новее запустите PowerShell-установщик:
 
@@ -92,9 +113,10 @@ curl -fsSL https://open-codereview.ai/install.sh | sh
 irm https://open-codereview.ai/install.ps1 | iex
 ```
 
-Установщик учитывает те же переменные `OCR_INSTALL_DIR` и `OCR_VERSION` (через
-`$env:OCR_INSTALL_DIR` / `$env:OCR_VERSION`). По умолчанию файлы устанавливаются
-в `%LOCALAPPDATA%\Programs\ocr`.
+Установщик учитывает те же переменные `OCR_INSTALL_DIR`, `OCR_VERSION` и
+`OCR_GITHUB_MIRROR` (через `$env:OCR_INSTALL_DIR` /
+`$env:OCR_VERSION` / `$env:OCR_GITHUB_MIRROR`). По умолчанию файлы
+устанавливаются в `%LOCALAPPDATA%\Programs\ocr`.
 
 ## Бинарник из GitHub Release
 

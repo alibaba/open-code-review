@@ -1,0 +1,50 @@
+name: Action Contract
+
+# The composite action in action.yml is shell, not Go, so `make test` cannot
+# reach it. This workflow runs the executable contract suite that drives those
+# shell blocks with fake `ocr`/`npm` binaries. examples/github_actions/README.md
+# is a trigger path because action-contract.test.js asserts its documented
+# defaults, which makes it part of the contract rather than prose.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'action.yml'
+      - 'package.json'
+      - 'scripts/github-actions/**'
+      - 'examples/github_actions/README.md'
+      - '.github/workflows/action-contract.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'action.yml'
+      - 'package.json'
+      - 'scripts/github-actions/**'
+      - 'examples/github_actions/README.md'
+      - '.github/workflows/action-contract.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  action-contract:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    # node:24 fixes the Node major and is Debian-based, so /bin/bash and npm are
+    # both present: the contract harness spawns /bin/bash directly. No
+    # `npm install` step — these tests use only Node built-ins, and installing
+    # would trigger the postinstall binary download for no benefit.
+    container:
+      image: node:24
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Trust workspace
+        run: git config --global --replace-all safe.directory '*'
+
+      - name: Test GitHub Actions contracts
+        run: npm run test:github-actions
