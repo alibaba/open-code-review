@@ -3,22 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
-    paths:
-      - '**'
-      - '!**.md'
-      # GitHub evaluates paths in order; this later positive pattern re-includes the contract docs.
-      - 'examples/github_actions/README.md'
-      - '!**/LICENSE'
-      - '!**/.gitignore'
+    paths-ignore:
+      - '**.md'
+      - '**/LICENSE'
+      - '**/.gitignore'
   pull_request:
     branches: [main]
-    paths:
-      - '**'
-      - '!**.md'
-      # GitHub evaluates paths in order; this later positive pattern re-includes the contract docs.
-      - 'examples/github_actions/README.md'
-      - '!**/LICENSE'
-      - '!**/.gitignore'
+    paths-ignore:
+      - '**.md'
+      - '**/LICENSE'
+      - '**/.gitignore'
 
 permissions:
   contents: read
@@ -117,20 +111,6 @@ jobs:
           echo "$HELP" | grep -q "session"
           echo "$HELP" | grep -q "rules"
           rm -f ./opencodereview
-
-  github-actions:
-    runs-on: self-hosted
-    timeout-minutes: 10
-    container:
-      image: node:24
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Trust workspace
-        run: git config --global --replace-all safe.directory '*'
-
-      - name: Test GitHub Actions contracts
-        run: npm run test:github-actions
 
   # Runs the suite natively on Windows, which the cross-compile job below cannot
   # do: it only proves the windows arms of the build-tag splits compile. GitHub

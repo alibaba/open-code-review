@@ -22,8 +22,8 @@ const { spawnSync } = require("child_process");
 const ROOT = path.resolve(__dirname, "../..");
 const ACTION_PATH = path.join(ROOT, "action.yml");
 const ACTION_TEXT = fs.readFileSync(ACTION_PATH, "utf8");
-const CI_PATH = path.join(ROOT, ".github/workflows/ci.yml");
-const CI_TEXT = fs.readFileSync(CI_PATH, "utf8");
+const CONTRACT_WORKFLOW_PATH = path.join(ROOT, ".github/workflows/action-contract.yml");
+const CONTRACT_WORKFLOW_TEXT = fs.readFileSync(CONTRACT_WORKFLOW_PATH, "utf8");
 const EXAMPLE_README_PATH = path.join(ROOT, "examples/github_actions/README.md");
 const EXAMPLE_README_TEXT = fs.readFileSync(EXAMPLE_README_PATH, "utf8");
 
@@ -1025,24 +1025,24 @@ function testRequiredStepTopologyAndEnvironmentContracts() {
   }
 }
 
-function testGithubActionContractsRunInCi() {
+function testContractsRunInDedicatedWorkflow() {
   assert.match(
-    CI_TEXT,
+    CONTRACT_WORKFLOW_TEXT,
     /^\s+- name:\s*Test GitHub Actions contracts\s*$[\s\S]*?^\s+run:\s*npm run test:github-actions\s*$/m,
-    "ci.yml must execute the complete GitHub Actions contract suite"
+    "action-contract.yml must execute the complete GitHub Actions contract suite"
   );
   assert.match(
-    CI_TEXT,
+    CONTRACT_WORKFLOW_TEXT,
     /paths:\s*[\s\S]*?examples\/github_actions\/README\.md/,
-    "ci.yml must run the contract suite when the GitHub Actions README changes"
+    "action-contract.yml must run the contract suite when the GitHub Actions README changes"
   );
   assert.match(
-    CI_TEXT,
+    CONTRACT_WORKFLOW_TEXT,
     /uses:\s*actions\/checkout@[0-9a-f]{40}\s*#\s*v7/,
-    "the newly added GitHub-hosted contract job must pin checkout to an immutable commit"
+    "the dedicated contract workflow must pin checkout to an immutable commit"
   );
   assert.match(
-    CI_TEXT,
+    CONTRACT_WORKFLOW_TEXT,
     /container:\s*[\s\S]*?image:\s*node:[0-9]/,
     "the contract job must declare its Node runtime via a pinned container image"
   );
@@ -1098,7 +1098,7 @@ const TESTS = [
   ["Install OpenCodeReview enforces the auth_token_cmd version floor", testInstallEnforcesAuthTokenCommandVersionFloor],
   ["contract harness fails closed on unsupported YAML shapes", testContractHarnessFailsClosedOnUnsupportedYamlShapes],
   ["required action steps and env contracts are present", testRequiredStepTopologyAndEnvironmentContracts],
-  ["GitHub Actions contracts run in CI", testGithubActionContractsRunInCi],
+  ["GitHub Actions contracts run in a dedicated workflow", testContractsRunInDedicatedWorkflow],
   ["GitHub Actions README documents timeout and version contracts", testExampleReadmeDocumentsTimeoutAndVersionContracts],
 ];
 
