@@ -56,9 +56,7 @@ Pass the reviewable file paths from Step 1. Output is grouped by rule content â€
 
 Use git directly based on the mode/ref info from Step 1:
 
-#### Pager and Large-Output Behavior in Agent and CI Environments
-
-Always pass `--no-pager` when reading diffs or file content through Git. Some agent and CI runners allocate a pseudo-terminal (PTY), which can cause Git to start an interactive pager such as `less`. The pager may then wait indefinitely for input that the automated command cannot provide. A host-side timeout can terminate the command and report exit code 137. This is a pager and PTY interaction, not a Git diff size limitation.
+Always pass `--no-pager` when reading diffs or file content through Git so a PTY-based agent environment does not start an interactive pager and wait for input.
 
 Disabling the pager does not limit how much output the host captures. For a potentially large diff, inspect the stat first, redirect the full diff to a temporary file, and read that file in bounded chunks:
 
