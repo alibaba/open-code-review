@@ -1,13 +1,11 @@
-// The following is the list of other files changed in this update.
+Other files changed in this update (not in this review group):
 <other_changed_files>
 {{change_files}}
 </other_changed_files>
 
-<current_file_path>{{current_file_path}}</current_file_path>
-
-<current_file_diff>
-{{diff}}
-</current_file_diff>
+<review_files>
+{{diffs}}
+</review_files>
 
 Current time in the real world: {{current_system_date_time}}
 
@@ -18,8 +16,11 @@ Current time in the real world: {{current_system_date_time}}
 ### Review Checklist
 {{system_rule}}
 
-### Review Plan (Optional)
+### Review Plan
 {{plan_guidance}}
 
-Now please review the code changes in <current_file_diff>
+### Previously Confirmed Findings
+{{confirmed_comments}}
+
+Now please review the code changes in <review_files> above.
 </user_task>

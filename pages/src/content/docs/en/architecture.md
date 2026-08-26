@@ -17,18 +17,22 @@ flowchart TD
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
-    E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every diff in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop → Comments</span>"]
+    D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
+    E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
 
-    A --> B --> C --> D --> E --> F
+    A --> B --> C --> D --> D2 --> E --> F
 ```
 
 The orchestration lives in the
 [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
-package, which spans four files: `agent.go` (main loop & dispatch),
-`compression.go` (memory compression), `preview.go` (the file filter),
-and `util.go` (helpers). Two entry points matter: `Agent.Run` (top of
-pipeline) and `Agent.dispatchSubtasks` (per-file fan-out).
+package, whose main files are `agent.go` (dispatch & per-group
+orchestration), `grouping.go` (semantic file grouping), `preview.go`
+(the file filter), and `util.go` (helpers); the tool-use loop and memory
+compression live alongside it in
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/).
+Two entry points matter: `Agent.Run` (top of pipeline) and
+`Agent.dispatchSubtasks` (per-group fan-out).
 
 ## The diff provider
 
@@ -87,24 +91,58 @@ Run `ocr review --preview` to see the full filter result without spending
 a token. See [Review Rules](../review-rules/#how-files-are-filtered) for
 the full algorithm.
 
-## Per-file subtask: plan + main
+## Semantic file grouping
 
-For every file that survives filtering, OCR fires a sub-agent. Each
-sub-agent runs in its own goroutine, bounded by `--concurrency` (default
-**8**), and has its own LLM message buffer.
+Files that survive filtering are **not** reviewed one at a time. Before
+dispatch, `groupDiffs` (in
+[`grouping.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/grouping.go))
+makes a single `GROUPING_TASK` LLM call carrying only file *metadata* —
+path, status (`ADDED` / `MODIFIED` / `DELETED` / `RENAMED`), and
+insertion/deletion counts — never diff content. The model returns a JSON
+array of `{label, files}` objects, and each group is then reviewed in one
+shared conversation so the agent can reason across related changes
+(handler + service + test, or a rename and its call sites).
+
+Three guards keep groups sane:
+
+| Guard | Effect |
+|---|---|
+| `maxFilesPerGroup = 10` | Oversized groups are split into 10-file chunks. |
+| Token budget | A group whose combined diffs exceed the prompt limit is split back into single-file groups. |
+| Coverage | Any file the model failed to assign gets its own single-file group. |
+
+Grouping is a best-effort optimisation, never a correctness gate: a
+failed, empty, or unparseable response logs a warning and falls back to
+one-file-per-group dispatch — exactly the old behaviour. The resulting
+grouping is also surfaced in JSON output.
+
+## Per-group subtask: plan + main
+
+For every group, OCR fires a sub-agent. Each sub-agent runs in its own
+goroutine, bounded by `--concurrency` (default **8**), and has its own
+LLM message buffer.
 
 A subtask has up to **two phases**:
 
 ### Phase 1 — Plan (optional)
 
+The plan phase is gated by `Template.PlanRequired`, which cooperates two
+thresholds:
+
 ```go
-threshold := template.PlanModeLineThreshold     // 50
-changeLines := d.Insertions + d.Deletions
-if changeLines < threshold { skip plan }
+// PLAN_MODE_LINE_THRESHOLD = 50, PLAN_MODE_GROUP_LINE_THRESHOLD = 100
+if maxFileChanged >= PlanModeLineThreshold           { plan }  // one big rewrite
+if fileCount >= 2 && total >= PlanModeGroupLineThreshold { plan }  // several moderate files
 ```
 
-For small diffs the plan adds latency without value, so it's skipped
-silently and the main loop runs straight away. For larger diffs OCR
+The per-file threshold catches a single large rewrite; the group
+threshold catches several moderate files that together warrant
+structured guidance. The group threshold is deliberately the larger of
+the two so the plan phase doesn't become unconditional for multi-file
+groups.
+
+For small changes the plan adds latency without value, so it's skipped
+silently and the main loop runs straight away. Otherwise OCR
 makes a **single** `PLAN_TASK` LLM call — no `Tools` field is sent, so
 the model cannot call tools during planning. The read-only tool subset
 (`code_search`, `file_read_diff`, `file_find` — the three tools whose
@@ -122,7 +160,7 @@ conversation with the model. The full tool set adds **`task_done`**,
 [Tools](../tools/) for the full catalogue.
 
 ```
-loop up to MAX_TOOL_REQUEST_TIMES (default 30):
+loop up to MAX_TOOL_REQUEST_TIMES (default 100):
     response = llm.complete(messages, tools)
     if response.toolCalls is empty:
         nudge model with "You did not successfully call any tools.
@@ -145,16 +183,45 @@ The loop has five exit conditions:
 
 In all cases collected `code_comment` calls become review comments.
 
+### Review rounds
+
+The main loop is not run once but up to `MAX_REVIEW_ROUNDS` times per
+group, to improve recall on large groups. The round count is set by the
+`--effort` preset:
+
+| `--effort` | Rounds |
+|---|---|
+| `low` | 1 |
+| `medium` (default) | 2 |
+| `high` | 3 |
+
+Each round after the first re-runs `MAIN_TASK` with the findings already
+confirmed by earlier rounds injected as `{{confirmed_comments}}`, and
+**without** the plan — a plan tends to act as a coverage ceiling once the
+obvious issues are found. Rounds stop early when a round adds no new
+findings, when the confirmed-comment cap is reached, or when the
+aggregate token budget (`--max-tokens-budget`) is exhausted.
+
 ## Memory compression
 
 A long tool-use loop will eventually overflow the context window. OCR
 manages this with a **three-zone partitioning** strategy that triggers
-on a token budget defined in `MAX_TOKENS = 58888`:
+on the prompt budget defined by `MAX_TOKENS = 200000`:
 
 | Threshold | Constant | Action |
 |---|---|---|
 | 60 % of MAX_TOKENS | `tokenSoftThreshold` | Kick off **async** background compression; current loop continues uninterrupted. |
 | 80 % of MAX_TOKENS | `tokenWarningThreshold` | Run compression **synchronously** before sending the next request. |
+
+> **`MAX_TOKENS` is an *input* ceiling.** It bounds the prompt — the
+> context-window budget the message buffer is compressed against — and
+> nothing else. The model's *output* cap is a separate knob,
+> `MAX_COMPLETION_TOKENS = 16384`, sent as `max_completion_tokens` on
+> every request (`Template.CompletionTokenLimit()`). Keeping them apart
+> means raising the prompt ceiling with `--max-tokens` for a
+> large-context model never silently inflates the output budget. When
+> `MAX_COMPLETION_TOKENS` is unset, `MAX_TOKENS` is used as the output
+> cap for backwards compatibility.
 
 ### The three zones
 
@@ -239,25 +306,27 @@ Before the LLM is even called, OCR runs a fail-fast check:
 tokenLimit := MaxTokens * 4 / 5     // 80 %
 if countMessagesTokens(messages) > tokenLimit {
     record warning "token_threshold_exceeded"
-    return nil      // skip this file
+    return nil      // skip this group
 }
 ```
 
 This catches monstrous diffs (auto-generated lock files, refactors
 touching thousands of lines) before they cost a request. The skipped
-file is reported as a non-fatal warning in stdout and added to the JSON
+group is reported as a non-fatal warning in stdout and added to the JSON
 `warnings` array.
 
 A second check runs in `filterLargeDiffs`: if the diff alone exceeds
-80 % of `MAX_TOKENS` it's filtered out before the per-file dispatcher is
-even spawned.
+80 % of `MAX_TOKENS` it's filtered out before grouping and dispatch even
+happen. A third guard runs inside grouping — see
+`enforceGroupTokenBudget` above.
 
 ## The template & placeholders
 
-`internal/config/template/task_template.json` holds **five prompts**:
+`internal/config/template/task_template.json` holds **six prompts**:
 
 | Key | Purpose |
 |---|---|
+| `GROUPING_TASK` | Bundles the changed files into semantic groups. |
 | `PLAN_TASK` | Planning phase — produces a checklist. |
 | `MAIN_TASK` | Main review loop — emits `code_comment` calls. |
 | `MEMORY_COMPRESSION_TASK` | Summarises the compress zone. |
@@ -269,20 +338,21 @@ Each prompt is a list of `{role, prompt_file}` references that point to
 `{"role": "system", "prompt_file": "main_task_system.md"}`). At load
 time `resolveConversation` reads those files into in-memory
 `{role, content}` messages, and template placeholders are then resolved
-per-file:
+per-group:
 
 | Placeholder | Replaced with |
 |---|---|
-| `{{system_rule}}` | The rule body resolved from the four-layer chain. |
-| `{{change_files}}` | Status + path of every other changed file in the PR. |
-| `{{diff}}` | This file's diff (raw `git diff` output). |
-| `{{current_file_path}}` | The new path of this file. |
-| `{{plan_guidance}}` | Output of the plan phase, or removed when plan is skipped. |
+| `{{system_rule}}` | The rule bodies resolved from the four-layer chain, merged across the group's files. |
+| `{{change_files}}` | Status + path of every changed file in the PR *outside* this group. |
+| `{{diffs}}` | The group's diffs, one XML element per file. |
+| `{{plan_guidance}}` | Output of the plan phase, or removed when plan is skipped or on rounds 2+. |
+| `{{confirmed_comments}}` | Findings confirmed by earlier review rounds (empty on round 1). |
 | `{{plan_tools}}` | Plan-phase tool definitions as plain text (rendered by `formatToolDefs`), used in the `PLAN_TASK` system prompt. |
 | `{{requirement_background}}` | The effective background from `--background` or `--background-file` (file takes precedence). |
 | `{{current_system_date_time}}` | Local timestamp for the run, formatted `YYYY-MM-DD HH:MM` (no seconds or timezone). |
+| `{{file_list}}` | (grouping only) file metadata — path, status, `+/-` counts. |
 | `{{context}}` | (compression only) the XML-rendered messages to summarise. |
-| `{{path}}` | File path, used in `REVIEW_FILTER_TASK`. |
+| `{{path}}` | Group key (comma-joined sorted paths), used in `REVIEW_FILTER_TASK`. |
 | `{{comments}}` | Accumulated comments (JSON), used in `REVIEW_FILTER_TASK`. |
 
 The placeholder substitution lives in
@@ -319,7 +389,8 @@ files directly — there's no database, just append-only logs. See
 
 When telemetry is enabled the agent emits three pipeline-level spans
 (`review.run` wrapping the whole job, `diff.parse` wrapping diff
-loading, and one `subtask.execute.<file>` per reviewed file) plus a
+loading, and one `subtask.execute.group.<group-key>` per reviewed
+group) plus a
 short-lived `event.<name>` span at each decision point (`plan.skipped`,
 `token.threshold.exceeded`, `subtask.error`, …). LLM round trips and
 tool calls are recorded only as metrics — not as spans. Prompt and
@@ -334,18 +405,19 @@ A few decisions are deliberately manual:
 - **Endpoint discovery has no fallback.** If your config + env + rc
   files don't yield a complete `(URL, token, model)` triple, OCR exits
   with a non-zero code rather than guessing.
-- **Sub-agent failures are isolated, not retried.** One failing file
+- **Sub-agent failures are isolated, not retried.** One failing group
   produces a warning; the rest continue. Retries belong in the wrapping
   CI pipeline, not the agent.
-- **No cross-file reasoning.** Every file is reviewed in its own LLM
-  conversation. Cross-file questions go through `file_read_diff` /
-  `code_search` tool calls, not shared context. Findings in those
-  *other* files are also off-limits as comment targets — the
+- **Cross-file reasoning is bounded by the group.** Files in the same
+  semantic group share one LLM conversation, so the agent can reason
+  across them directly. Files in *other* groups are reachable only
+  through `file_read_diff` / `code_search` tool calls, not shared
+  context, and findings in them are off-limits as comment targets — the
   `main_task` prompt instructs the model to use context tools for
-  understanding only, and to ignore issues that surface in files
-  outside the current diff.
+  understanding only, and to ignore issues that surface outside the
+  diffs it was given.
 
-These choices keep the run **deterministic per-file** and keep cost
+These choices keep the run **deterministic per-group** and keep cost
 predictable.
 
 ## Source-code map
@@ -355,8 +427,11 @@ If you want to read along:
 | Concern | File |
 |---|---|
 | Top-level command dispatch | `cmd/opencodereview/main.go` |
-| `review` flag parsing | `cmd/opencodereview/flags.go` |
-| Agent orchestration & compression | `internal/agent/` (agent.go, compression.go, util.go) |
+| `review` flag parsing | `cmd/opencodereview/shared_flags.go` |
+| Agent orchestration | `internal/agent/` (agent.go, util.go) |
+| Semantic file grouping | `internal/agent/grouping.go` |
+| Tool-use loop & memory compression | `internal/llmloop/` (loop.go, compression.go) |
+| Effort presets | `internal/config/template/effort.go` |
 | File filter / preview | `internal/agent/preview.go` |
 | Diff loading (Git modes) | `internal/diff/git.go` |
 | Rule resolution chain | `internal/config/rules/system_rules.go` |

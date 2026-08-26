@@ -18,8 +18,11 @@ inputs:
     description: Model name (mapped to env OCR_LLM_MODEL).
     required: true
   llm_use_anthropic:
-    description: "'true' for Anthropic Claude, 'false' for OpenAI-compatible APIs
-      (mapped to env OCR_USE_ANTHROPIC). Required to force an explicit choice."
+    description: >-
+      Selects the LLM protocol (mapped to env OCR_USE_ANTHROPIC). An explicitly supplied empty
+      string, true, 1, or yes selects Anthropic
+      case-insensitively; every other value selects the OpenAI-compatible
+      protocol, preserving the CLI environment contract.
     required: true
   llm_auth_header:
     description: Custom auth header name (mapped to env OCR_LLM_AUTH_HEADER).
@@ -42,12 +45,17 @@ inputs:
   llm_timeout:
     description: LLM request timeout in seconds (mapped to env OCR_LLM_TIMEOUT).
     required: false
+    default: '300'
+  review_task_timeout:
+    description: Per-file/concurrent-task timeout in integer minutes, from 1 through 120.
+    required: false
+    default: '10'
   github_token:
     description: GitHub token used to post review comments.
     required: false
     default: ${{ github.token }}
   ocr_version:
-    description: npm version spec for @alibaba-group/open-code-review.
+    description: npm version spec for @alibaba-group/open-code-review (v1.9.6 or newer required).
     required: false
     default: latest
   review_concurrency:
@@ -244,6 +252,30 @@ runs:
         echo "MERGE_BASE=$MERGE_BASE" >> "$GITHUB_ENV"
         echo "Reviewing ${HEAD_SHA} from merge-base ${MERGE_BASE} (base origin/${BASE_REF})"
 
+    - name: Validate review_task_timeout
+      env:
+        REVIEW_TASK_TIMEOUT: ${{ inputs.review_task_timeout }}
+      shell: bash
+      run: |
+        if [[ ! "$REVIEW_TASK_TIMEOUT" =~ ^[0-9]+$ ]]; then
+          echo "::error::review_task_timeout must be a base-10 integer from 1 through 120 minutes"
+          exit 1
+        fi
+        NORMALIZED_REVIEW_TASK_TIMEOUT="$REVIEW_TASK_TIMEOUT"
+        while [[ "$NORMALIZED_REVIEW_TASK_TIMEOUT" == 0* && "$NORMALIZED_REVIEW_TASK_TIMEOUT" != "0" ]]; do
+          NORMALIZED_REVIEW_TASK_TIMEOUT="${NORMALIZED_REVIEW_TASK_TIMEOUT#0}"
+        done
+        if [[ "$NORMALIZED_REVIEW_TASK_TIMEOUT" == "0" || ${#NORMALIZED_REVIEW_TASK_TIMEOUT} -gt 3 ]]; then
+          echo "::error::review_task_timeout must be between 1 and 120 minutes"
+          exit 1
+        fi
+        REVIEW_TASK_TIMEOUT_NUMBER=$((10#$NORMALIZED_REVIEW_TASK_TIMEOUT))
+        if (( REVIEW_TASK_TIMEOUT_NUMBER < 1 || REVIEW_TASK_TIMEOUT_NUMBER > 120 )); then
+          echo "::error::review_task_timeout must be between 1 and 120 minutes"
+          exit 1
+        fi
+        echo "REVIEW_TASK_TIMEOUT=$REVIEW_TASK_TIMEOUT_NUMBER" >> "$GITHUB_ENV"
+
     - name: Install OpenCodeReview
       shell: bash
       env:
@@ -251,14 +283,57 @@ runs:
       run: |
         npm install -g "@alibaba-group/open-code-review@${OCR_VERSION}"
         echo "OpenCodeReview installed:"
-        ocr version || true
+        OCR_VERSION_OUTPUT="$(ocr version 2>/dev/null)" || {
+          echo "::error::Unable to read the installed OpenCodeReview version"
+          exit 1
+        }
+        printf '%s\n' "$OCR_VERSION_OUTPUT"
+        OCR_VERSION_LINE="${OCR_VERSION_OUTPUT%%$'\n'*}"
+        if [[ ! "$OCR_VERSION_LINE" =~ ^open-code-review[[:space:]]+v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?([[:space:]]|$) ]]; then
+          echo "::error::Unable to parse the installed OpenCodeReview version; a stable release v1.9.6 or newer is required (prerelease versions are not supported)"
+          exit 1
+        fi
+        OCR_VERSION_MAJOR=$((10#${BASH_REMATCH[1]}))
+        OCR_VERSION_MINOR=$((10#${BASH_REMATCH[2]}))
+        OCR_VERSION_PATCH=$((10#${BASH_REMATCH[3]}))
+        if (( OCR_VERSION_MAJOR < 1 )) ||
+          (( OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR < 9 )) ||
+          (( OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR == 9 && OCR_VERSION_PATCH < 6 )); then
+          echo "::error::Installed OpenCodeReview ${OCR_VERSION_LINE} is unsupported; v1.9.6 or newer is required"
+          exit 1
+        fi
 
     - name: Configure OCR
       env:
+        OCR_LLM_URL: ${{ inputs.llm_url }}
+        OCR_LLM_MODEL: ${{ inputs.llm_model }}
+        OCR_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
+        OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         OCR_EXTRA_BODY: ${{ inputs.llm_extra_body }}
         OCR_LANGUAGE: ${{ inputs.language }}
       shell: bash
       run: |
+        NORMALIZED_USE_ANTHROPIC="$(printf '%s' "$OCR_USE_ANTHROPIC" | tr '[:upper:]' '[:lower:]')"
+        case "$NORMALIZED_USE_ANTHROPIC" in
+          ""|true|1|yes)
+            OCR_USE_ANTHROPIC="true"
+            OCR_LLM_PROTOCOL="anthropic"
+            ;;
+          *)
+            OCR_USE_ANTHROPIC="false"
+            OCR_LLM_PROTOCOL="openai"
+            ;;
+        esac
+        ocr config unset provider
+        ocr config set llm.auth_token ""
+        ocr config set llm.extra_headers ""
+        ocr config set llm.retry_codes ""
+        ocr config set llm.url "$OCR_LLM_URL"
+        ocr config set llm.model "$OCR_LLM_MODEL"
+        ocr config set llm.use_anthropic "$OCR_USE_ANTHROPIC"
+        ocr config set llm.protocol "$OCR_LLM_PROTOCOL"
+        ocr config set llm.auth_header "$OCR_LLM_AUTH_HEADER"
+        ocr config set llm.auth_token_cmd 'printf "%s" "$OCR_LLM_TOKEN"'
         ocr config set llm.extra_body "$OCR_EXTRA_BODY"
         ocr config set language "$OCR_LANGUAGE"
 
@@ -276,7 +351,12 @@ runs:
         OCR_RULE: ${{ inputs.rule }}
       shell: bash
       run: |
-        ARGS=(--from "${MERGE_BASE}" --to "${HEAD_SHA}" --audience agent --format json)
+        export OCR_LLM_TIMEOUT="${OCR_LLM_TIMEOUT:-300}"
+        if [ -z "${REVIEW_TASK_TIMEOUT:-}" ]; then
+          echo "::error::Validated review_task_timeout is missing; the timeout validation step must complete first"
+          exit 1
+        fi
+        ARGS=(--from "${MERGE_BASE}" --to "${HEAD_SHA}" --audience agent --format json --timeout "$REVIEW_TASK_TIMEOUT")
         [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
         [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")

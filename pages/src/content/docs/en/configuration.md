@@ -47,6 +47,7 @@ environment variable.
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
@@ -281,28 +282,44 @@ ignored. When supplied through `ocr config set`, OCR also prints a warning and
 omits them from the saved value. All 5xx responses are already retried by the
 SDK and cannot be added to `retry_codes`.
 
-### Per-file prompt limit
+### Prompt limit
 
-OCR defaults to a 58,888-token prompt ceiling for each file review. Increase
-it for a model with a larger context window by saving `max_tokens`:
+`max_tokens` is the **prompt** (input) ceiling for a single review unit:
+a file group for `ocr review`, a file for `ocr scan`. The embedded
+templates default to 200,000 tokens for `ocr review` and 58,888 for
+`ocr scan`. Change it for a model with a different context window by
+saving `max_tokens`:
 
 ```bash
-ocr config set max_tokens 200000
+ocr config set max_tokens 400000
 ```
 
 The setting applies to both `ocr review` and `ocr scan`. Use `--max-tokens`
 for a one-off override without changing the saved configuration:
 
 ```bash
-ocr review --max-tokens 200000
-ocr scan --max-tokens 200000
+ocr review --max-tokens 400000
+ocr scan --max-tokens 400000
 ```
 
 The per-run flag takes precedence over `max_tokens`; when neither is set, OCR
-uses the embedded task-template default. This limit is per file and is
-independent of both the model's output-token cap and `--max-tokens-budget`,
-which caps total token use for a run. Restore the embedded default with
-`ocr config unset max_tokens`.
+uses the embedded task-template default. The limit is independent of the
+model's **output** cap (`MAX_COMPLETION_TOKENS`, `16384` in both templates)
+and of `--max-tokens-budget`, which caps total token use for a whole run.
+Restore the embedded default with `ocr config unset max_tokens`.
+
+### Review effort
+
+`effort` sets how many review rounds each file group gets: `low` = 1,
+`medium` (the default) = 2, `high` = 3. More rounds find more issues at
+proportionally higher cost.
+
+```bash
+ocr config set effort high
+ocr config unset effort      # back to the default medium
+```
+
+`--effort low|medium|high` overrides the saved value for a single run.
 
 ### Verify connectivity
 
