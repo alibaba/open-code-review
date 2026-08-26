@@ -7,7 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"os"
+	"io"
 	"strconv"
 	"strings"
 
@@ -122,13 +122,13 @@ type sarifNotification struct {
 	Message sarifMessage `json:"message"`
 }
 
-// outputSARIF writes a SARIF v2.1.0 document to stdout. The document always
+// outputSARIF writes a SARIF v2.1.0 document to the provided writer. The document always
 // contains a single run with the 8 built-in category rules, one result per
 // LlmComment, and an invocation block carrying execution status and any
 // warnings as tool execution notifications. When comments is empty or nil,
 // results is an empty array (not null), so the document remains structurally
 // valid for SARIF consumers.
-func outputSARIF(comments []model.LlmComment, version string, warnings []agent.AgentWarning, manifest *session.RunManifest) error {
+func outputSARIF(comments []model.LlmComment, version string, warnings []agent.AgentWarning, manifest *session.RunManifest, out io.Writer) error {
 	report := sarifReport{
 		Schema:  sarifSchema,
 		Version: sarifVersion,
@@ -145,7 +145,7 @@ func outputSARIF(comments []model.LlmComment, version string, warnings []agent.A
 			Invocations: []sarifInvocation{sarifInvocationFromRun(warnings, manifest, len(comments))},
 		}},
 	}
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(report)
 }

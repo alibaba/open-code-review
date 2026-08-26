@@ -135,6 +135,7 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
+		{"Models/main.m", "Indexing, Shapes, and Implicit Expansion"},
 		{"sources/pool.move", "Ability Grants"},
 		{"contracts/amm/sources/router.move", "Ability Grants"},
 		{"Move.toml", "Move Package Manifest"},
@@ -162,7 +163,8 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 		"readme.md",
 		"docs/architecture.txt",
 		"Makefile",
-		"ios/ViewController.m",
+		// Note: .m now matches matlab.md, so it's no longer a "no rule
+		// matches" example; .mm remains one.
 		"ios/ViewController.mm",
 	}
 
@@ -261,8 +263,8 @@ func truncate(s string, maxLen int) string {
 }
 
 func TestNewResolver_DefaultOnly(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	resolver, _, err := NewResolver(t.TempDir(), "")
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
@@ -274,7 +276,7 @@ func TestNewResolver_DefaultOnly(t *testing.T) {
 }
 
 func TestNewResolver_ProjectFileMissing(t *testing.T) {
-	resolver, _, err := NewResolver(t.TempDir(), "")
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 
 	if err != nil {
 		t.Fatalf("NewResolver should not fail when project rule is missing: %v", err)
@@ -286,7 +288,7 @@ func TestNewResolver_ProjectFileMissing(t *testing.T) {
 }
 
 func TestNewResolver_ProjectRuleHighestPriority(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	dir := t.TempDir()
 	ocrDir := filepath.Join(dir, ".opencodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
@@ -297,7 +299,7 @@ func TestNewResolver_ProjectRuleHighestPriority(t *testing.T) {
 		t.Fatalf("write rule.json: %v", err)
 	}
 
-	resolver, _, err := NewResolver(dir, "")
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -320,7 +322,7 @@ func TestNewResolver_ProjectRuleHighestPriority(t *testing.T) {
 }
 
 func TestNewResolver_ProjectRuleFirstMatchWinsWithinFile(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	// Project rule file:
 	//   <repo>/.opencodereview/rule.json
@@ -338,7 +340,7 @@ func TestNewResolver_ProjectRuleFirstMatchWinsWithinFile(t *testing.T) {
 		t.Fatalf("write rule.json: %v", err)
 	}
 
-	resolver, _, err := NewResolver(dir, "")
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -360,7 +362,7 @@ func TestNewResolver_ProjectRuleFallsBackToSystem(t *testing.T) {
 		t.Fatalf("write rule.json: %v", err)
 	}
 
-	resolver, _, err := NewResolver(dir, "")
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -379,7 +381,7 @@ func TestNewResolver_CustomRuleOverridesDefault(t *testing.T) {
 		t.Fatalf("write custom rule: %v", err)
 	}
 
-	resolver, _, err := NewResolver(t.TempDir(), customPath)
+	resolver, _, err := NewResolver(t.TempDir(), customPath, ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -396,7 +398,7 @@ func TestNewResolver_CustomRuleOverridesDefault(t *testing.T) {
 }
 
 func TestNewResolver_EmptyRuleSkippedAndFallsBack(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	dir := t.TempDir()
 	ocrDir := filepath.Join(dir, ".opencodereview")
@@ -408,7 +410,7 @@ func TestNewResolver_EmptyRuleSkippedAndFallsBack(t *testing.T) {
 		t.Fatalf("write rule.json: %v", err)
 	}
 
-	resolver, _, err := NewResolver(dir, "")
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -429,7 +431,7 @@ func TestNewResolver_EmptyRuleSkippedAndFallsBack(t *testing.T) {
 }
 
 func TestNewResolver_EmptyRuleMergeSystemRuleReturnsSystemOnly(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	dir := t.TempDir()
 	ocrDir := filepath.Join(dir, ".opencodereview")
@@ -441,7 +443,7 @@ func TestNewResolver_EmptyRuleMergeSystemRuleReturnsSystemOnly(t *testing.T) {
 		t.Fatalf("write rule.json: %v", err)
 	}
 
-	resolver, _, err := NewResolver(dir, "")
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -462,7 +464,7 @@ func TestNewResolver_EmptyRuleMergeSystemRuleReturnsSystemOnly(t *testing.T) {
 }
 
 func TestNewResolver_ProjectRuleReplacesSystemRuleByDefault(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	// Project rule file:
 	//   <repo>/.opencodereview/rule.json
@@ -480,7 +482,7 @@ func TestNewResolver_ProjectRuleReplacesSystemRuleByDefault(t *testing.T) {
 		t.Fatalf("write rule.json: %v", err)
 	}
 
-	resolver, _, err := NewResolver(dir, "")
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -492,7 +494,7 @@ func TestNewResolver_ProjectRuleReplacesSystemRuleByDefault(t *testing.T) {
 }
 
 func TestNewResolver_ProjectRuleMergesSystemRule(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	// Project rule file:
 	//   <repo>/.opencodereview/rule.json
@@ -510,7 +512,7 @@ func TestNewResolver_ProjectRuleMergesSystemRule(t *testing.T) {
 		t.Fatalf("write rule.json: %v", err)
 	}
 
-	resolver, _, err := NewResolver(dir, "")
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -534,7 +536,7 @@ func TestNewResolver_ProjectRuleMergesSystemRule(t *testing.T) {
 }
 
 func TestNewResolver_MergeSystemRuleKeepsRulePriority(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	// Project rule file:
 	//   <repo>/.opencodereview/rule.json
@@ -560,7 +562,7 @@ func TestNewResolver_MergeSystemRuleKeepsRulePriority(t *testing.T) {
 		t.Fatalf("write custom rule: %v", err)
 	}
 
-	resolver, _, err := NewResolver(repoDir, customPath)
+	resolver, _, err := NewResolver(repoDir, customPath, ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -603,7 +605,7 @@ func TestNewResolver_CustomOverridesProject(t *testing.T) {
 		t.Fatalf("write rule.json: %v", err)
 	}
 
-	resolver, _, err := NewResolver(repoDir, customPath)
+	resolver, _, err := NewResolver(repoDir, customPath, ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -637,7 +639,7 @@ func TestNewResolver_ProjectFileMalformed(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	_, _, err := NewResolver(dir, "")
+	_, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err == nil {
 		t.Errorf("expected error for malformed project rule.json")
 	}
@@ -735,7 +737,7 @@ func TestNewResolver_FileFilterMerged(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	_, filter, err := NewResolver(repoDir, "")
+	_, filter, err := NewResolver(repoDir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -754,7 +756,7 @@ func TestNewResolver_FileFilterMerged(t *testing.T) {
 }
 
 func TestNewResolver_FileFilterNilWhenEmpty(t *testing.T) {
-	_, filter, err := NewResolver(t.TempDir(), "")
+	_, filter, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -781,7 +783,7 @@ func TestNewResolver_FileFilterPriorityOverride(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	_, filter, err := NewResolver(repoDir, customPath)
+	_, filter, err := NewResolver(repoDir, customPath, ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -825,7 +827,7 @@ func TestNewResolver_FileFilterFallsToProject(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	_, filter, err := NewResolver(repoDir, customPath)
+	_, filter, err := NewResolver(repoDir, customPath, ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -838,7 +840,7 @@ func TestNewResolver_FileFilterFallsToProject(t *testing.T) {
 }
 
 func TestResolveDetail_SystemDefault(t *testing.T) {
-	resolver, _, err := NewResolver(t.TempDir(), "")
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -857,8 +859,8 @@ func TestResolveDetail_SystemDefault(t *testing.T) {
 }
 
 func TestResolveDetail_SystemPatternMatch(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	resolver, _, err := NewResolver(t.TempDir(), "")
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -877,8 +879,8 @@ func TestResolveDetail_SystemPatternMatch(t *testing.T) {
 }
 
 func TestResolveDetail_SystemPrismaPatternMatch(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	resolver, _, err := NewResolver(t.TempDir(), "")
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -901,8 +903,8 @@ func TestResolveDetail_SystemPrismaPatternMatch(t *testing.T) {
 }
 
 func TestResolveDetail_SystemGoPatternMatch(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	resolver, _, err := NewResolver(t.TempDir(), "")
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -932,8 +934,8 @@ func TestResolveDetail_SystemGoPatternMatch(t *testing.T) {
 }
 
 func TestResolveDetail_SystemPHPPatternMatch(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	resolver, _, err := NewResolver(t.TempDir(), "")
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -964,7 +966,7 @@ func TestResolveDetail_SystemPHPPatternMatch(t *testing.T) {
 
 func TestResolveDetail_SystemMoveTomlPatternPrecedesMove(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	resolver, _, err := NewResolver(t.TempDir(), "")
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -992,8 +994,8 @@ func TestResolveDetail_SystemMoveTomlPatternPrecedesMove(t *testing.T) {
 }
 
 func TestResolveDetail_SystemComposerPatternPrecedesJSON(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	resolver, _, err := NewResolver(t.TempDir(), "")
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -1022,7 +1024,7 @@ func TestResolveDetail_SystemComposerPatternPrecedesJSON(t *testing.T) {
 }
 
 func TestResolveDetail_ProjectOverridesSystem(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	dir := t.TempDir()
 	ocrDir := filepath.Join(dir, ".opencodereview")
 	if err := os.MkdirAll(ocrDir, 0o755); err != nil {
@@ -1033,7 +1035,7 @@ func TestResolveDetail_ProjectOverridesSystem(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	resolver, _, err := NewResolver(dir, "")
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -1058,7 +1060,7 @@ func TestResolveDetail_ProjectOverridesSystem(t *testing.T) {
 }
 
 func TestResolveDetail_MergeSystemRule(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 
 	// Project rule file:
 	//   <repo>/.opencodereview/rule.json
@@ -1076,7 +1078,7 @@ func TestResolveDetail_MergeSystemRule(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	resolver, _, err := NewResolver(dir, "")
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -1123,7 +1125,7 @@ func TestResolveDetail_CustomOverridesAll(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	resolver, _, err := NewResolver(repoDir, customPath)
+	resolver, _, err := NewResolver(repoDir, customPath, ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -1149,7 +1151,7 @@ func TestNewResolver_BraceExpansionInProjectRule(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	resolver, _, err := NewResolver(dir, "")
+	resolver, _, err := NewResolver(dir, "", ResolverOptions{})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -1557,7 +1559,7 @@ func TestResolveRuleEntries_EmptyRepoDirAbsolute(t *testing.T) {
 func TestResolveRuleEntries_GlobalRuleFileResolution(t *testing.T) {
 	// Simulate loadGlobalRule: repoDir = filepath.Dir(~/.opencodereview/rule.json)
 	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
+	setTestHome(t, homeDir)
 
 	globalRuleDir := filepath.Join(homeDir, ".opencodereview")
 	if err := os.MkdirAll(globalRuleDir, 0o755); err != nil {
@@ -1576,6 +1578,15 @@ func TestResolveRuleEntries_GlobalRuleFileResolution(t *testing.T) {
 	if entries[0].Rule != "global reusable rule" {
 		t.Errorf("global rule file should be resolved, got %q", entries[0].Rule)
 	}
+}
+
+// specialCaseRuleDocs lists rule_docs files loaded directly by Go code rather
+// than referenced from system_rules.json's path_rule_map, so the orphan-file
+// check in TestSystemRulesIntegrity must not flag them.
+var specialCaseRuleDocs = map[string]bool{
+	// Backs the MATLAB/Objective-C ".m" content sniff in sniffer.Resolve;
+	// loaded via loadObjCRule, called from NewResolver.
+	"objc.md": true,
 }
 
 // referencedRuleFiles reads the embedded system_rules.json and returns the set of
@@ -1653,7 +1664,7 @@ func TestSystemRulesIntegrity(t *testing.T) {
 			if e.IsDir() {
 				continue
 			}
-			if !refs[e.Name()] {
+			if !refs[e.Name()] && !specialCaseRuleDocs[e.Name()] {
 				t.Errorf("rule_docs/%s is not referenced by system_rules.json (orphan file)", e.Name())
 			}
 		}
@@ -1737,18 +1748,9 @@ func TestLoadGlobalRule(t *testing.T) {
 	globalRulePath := func(home string) string {
 		return filepath.Join(home, ".opencodereview", "rule.json")
 	}
-	// loadGlobalRule resolves the home dir with os.UserHomeDir, which reads
-	// USERPROFILE on Windows and never falls back to HOME. Setting HOME alone
-	// left the subtests reading the real profile, where the rule file they just
-	// wrote does not exist. Set both; the one that does not apply is harmless.
-	setHome := func(t *testing.T, home string) {
-		t.Helper()
-		t.Setenv("HOME", home)
-		t.Setenv("USERPROFILE", home)
-	}
 
 	t.Run("missing file is not an error", func(t *testing.T) {
-		setHome(t, t.TempDir())
+		setTestHome(t, t.TempDir())
 		pr, err := loadGlobalRule()
 		if err != nil || pr != nil {
 			t.Fatalf("expected nil,nil for missing global rule: pr=%v err=%v", pr, err)
@@ -1757,7 +1759,7 @@ func TestLoadGlobalRule(t *testing.T) {
 
 	t.Run("read error when path is a directory", func(t *testing.T) {
 		home := t.TempDir()
-		setHome(t, home)
+		setTestHome(t, home)
 		// Create the rule.json path as a directory so ReadFile fails with a
 		// non-NotExist error (EISDIR), exercising the wrapped-error branch.
 		if err := os.MkdirAll(globalRulePath(home), 0o755); err != nil {
@@ -1770,7 +1772,7 @@ func TestLoadGlobalRule(t *testing.T) {
 
 	t.Run("unmarshal error on invalid JSON", func(t *testing.T) {
 		home := t.TempDir()
-		setHome(t, home)
+		setTestHome(t, home)
 		path := globalRulePath(home)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("mkdir parent: %v", err)
@@ -1785,7 +1787,7 @@ func TestLoadGlobalRule(t *testing.T) {
 
 	t.Run("valid file returns rule", func(t *testing.T) {
 		home := t.TempDir()
-		setHome(t, home)
+		setTestHome(t, home)
 		path := globalRulePath(home)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("mkdir parent: %v", err)

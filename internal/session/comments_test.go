@@ -11,7 +11,7 @@ import (
 
 func TestLoadComments_ReturnsCommentsInOrder(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := New(repoDir, "main", "test-model", SessionOptions{
@@ -45,7 +45,7 @@ func TestLoadComments_ReturnsCommentsInOrder(t *testing.T) {
 
 func TestLoadComments_LaterCheckpointSupersedes(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := New(repoDir, "main", "test-model", SessionOptions{
@@ -75,7 +75,7 @@ func TestLoadComments_LaterCheckpointSupersedes(t *testing.T) {
 
 func TestLoadComments_MissingSession(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	if _, err := LoadComments(t.TempDir(), "nonexistent"); err == nil {
 		t.Fatal("expected error for missing session")
 	}
