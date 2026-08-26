@@ -229,6 +229,34 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 	return nil
 }
 
+// checkAPIKeyRequirement decides whether a provider selection may be saved with
+// no api_key. It mirrors the resolver's precedence (static api_key ->
+// api_key_cmd -> env var), so an already-configured command satisfies the
+// requirement and picking a model for such a provider does not fail and abandon
+// the save. apiKeyCmd is trimmed because the resolver treats a whitespace-only
+// command as unset, so without this a command of "   " would satisfy the check
+// here and then fail resolution with "no api_key or api_key_cmd configured".
+//
+// An ambient-auth provider has no credential to save at all: demanding one would
+// make it impossible to configure, since the credentials live in the AWS chain
+// rather than the config file.
+func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.Provider, isPreset bool) error {
+	if apiKey != "" || strings.TrimSpace(apiKeyCmd) != "" {
+		return nil
+	}
+	switch {
+	case isPreset && preset.AmbientAuth:
+		return nil
+	case isPreset && preset.EnvVar != "":
+		if os.Getenv(preset.EnvVar) == "" {
+			return fmt.Errorf("API key is required for provider %s (configure it, set providers.%s.api_key_cmd, or set $%s)", providerName, providerName, preset.EnvVar)
+		}
+		return nil
+	default:
+		return fmt.Errorf("API key is required for provider %s (configure it or set providers.%s.api_key_cmd)", providerName, providerName)
+	}
+}
+
 func applyOfficialProviderConfig(configPath string, cfg *Config, result providerTUIResult) error {
 	if result.provider == "" {
 		return fmt.Errorf("provider and model are required")
@@ -240,20 +268,8 @@ func applyOfficialProviderConfig(configPath string, cfg *Config, result provider
 
 	preset, isPreset := llm.LookupProvider(result.provider)
 
-	// Mirror the resolver's precedence (static api_key -> api_key_cmd -> env var):
-	// an already-configured api_key_cmd satisfies the requirement, so picking a
-	// model for such a provider must not fail and abandon the save. Trimmed
-	// because the resolver treats a whitespace-only command as unset, so without
-	// this a command of "   " would satisfy the check here and then fail
-	// resolution with "no api_key or api_key_cmd configured".
-	if result.apiKey == "" && strings.TrimSpace(cfg.Providers[result.provider].APIKeyCmd) == "" {
-		if isPreset && preset.EnvVar != "" {
-			if os.Getenv(preset.EnvVar) == "" {
-				return fmt.Errorf("API key is required for provider %s (configure it, set providers.%s.api_key_cmd, or set $%s)", result.provider, result.provider, preset.EnvVar)
-			}
-		} else {
-			return fmt.Errorf("API key is required for provider %s (configure it or set providers.%s.api_key_cmd)", result.provider, result.provider)
-		}
+	if err := checkAPIKeyRequirement(result.provider, result.apiKey, cfg.Providers[result.provider].APIKeyCmd, preset, isPreset); err != nil {
+		return err
 	}
 
 	if cfg.Providers == nil {

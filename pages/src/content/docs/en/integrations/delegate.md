@@ -147,7 +147,7 @@ Classify each finding by severity:
 | `--rule <path>` | Custom rule.json path |
 | `--exclude <patterns>` | Comma-separated exclude patterns |
 | `-b, --background <text>` | Business context |
-| `-B, --background-file <path>` | Business context from Markdown file |
+| `-B, --background-file <path>` | Business context from Markdown file (takes precedence over `-b`) |
 
 ## Comparison with other integration modes
 

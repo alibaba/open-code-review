@@ -292,6 +292,8 @@ func TestCloneProviderEntry_CopiesEveryField(t *testing.T) {
 		RetryCodes:   []int{403},
 		ExtraBody:    map[string]any{"temperature": 0.7},
 		ExtraHeaders: map[string]string{"X-Trace": "on"},
+		AWSRegion:    "us-west-2",
+		AWSProfile:   "example-profile",
 	}
 
 	rv := reflect.ValueOf(orig)

@@ -4,12 +4,16 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
+	"github.com/alibaba/open-code-review/internal/stdout"
 )
 
 func TestResolveMaxTokensPrecedence(t *testing.T) {
@@ -69,31 +73,61 @@ func TestApplyCLIExcludes_NilFileFilter(t *testing.T) {
 	}
 }
 
-func TestNewQuietHandle_NoOp(t *testing.T) {
-	h := newQuietHandle("text", "developer")
-	if h.fn != nil {
-		t.Error("expected no-op handle for text/developer")
+// TestNewQuietHandle_Routing pins where [ocr] progress lines go for each
+// (format, audience) pair. The machine-readable + human rows are the fix for
+// #928: those runs used to discard progress entirely, leaving the user staring
+// at a silent terminal until the document appeared.
+func TestNewQuietHandle_Routing(t *testing.T) {
+	tests := []struct {
+		name       string
+		format     string
+		audience   string
+		wantWriter io.Writer
+	}{
+		{name: "text human keeps stdout", format: "text", audience: "human", wantWriter: os.Stdout},
+		{name: "json human streams to stderr", format: "json", audience: "human", wantWriter: os.Stderr},
+		{name: "sarif human streams to stderr", format: "sarif", audience: "human", wantWriter: os.Stderr},
+		{name: "text agent discards", format: "text", audience: "agent", wantWriter: io.Discard},
+		{name: "json agent discards", format: "json", audience: "agent", wantWriter: io.Discard},
+		{name: "sarif agent discards", format: "sarif", audience: "agent", wantWriter: io.Discard},
 	}
-	h.Restore()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := stdout.Writer()
+			h := newQuietHandle(tt.format, tt.audience)
+			if got := stdout.Writer(); got != tt.wantWriter {
+				t.Errorf("progress writer = %#v, want %#v", got, tt.wantWriter)
+			}
+			h.Restore()
+			if got := stdout.Writer(); got != before {
+				t.Errorf("Restore left writer as %#v, want %#v", got, before)
+			}
+		})
+	}
 }
 
-func TestNewQuietHandle_JSON(t *testing.T) {
-	h := newQuietHandle("json", "developer")
-	if h.fn == nil {
-		t.Error("expected fn to be set for json format")
-	}
-	h.Restore()
-	if h.fn != nil {
-		t.Error("expected fn to be nil after Restore")
-	}
-}
+// TestNewQuietHandle_JSONHumanKeepsStdoutForDocument guards the invariant the
+// stderr redirect relies on: progress written through stdout.Writer() must not
+// reach os.Stdout, so the JSON document stays the only thing on stdout and
+// remains parseable.
+func TestNewQuietHandle_JSONHumanKeepsStdoutForDocument(t *testing.T) {
+	var out string
+	// captureStderr must wrap the handle creation: newQuietHandle captures the
+	// current value of os.Stderr, so the pipe has to be installed first.
+	progress := captureStderr(t, func() {
+		out = captureStdout(t, func() {
+			h := newQuietHandle("json", "human")
+			defer h.Restore()
+			fmt.Fprintln(stdout.Writer(), "[ocr] reviewing foo.go")
+		})
+	})
 
-func TestNewQuietHandle_Agent(t *testing.T) {
-	h := newQuietHandle("text", "agent")
-	if h.fn == nil {
-		t.Error("expected fn to be set for agent audience")
+	if out != "" {
+		t.Errorf("stdout must stay clean for the document, got %q", out)
 	}
-	h.Restore()
+	if !strings.Contains(progress, "[ocr] reviewing foo.go") {
+		t.Errorf("progress must reach stderr, got %q", progress)
+	}
 }
 
 func TestQuietHandle_NilReceiver(t *testing.T) {
@@ -102,7 +136,7 @@ func TestQuietHandle_NilReceiver(t *testing.T) {
 }
 
 func TestQuietHandle_IdempotentRestore(t *testing.T) {
-	h := newQuietHandle("json", "developer")
+	h := newQuietHandle("json", "human")
 	h.Restore()
 	h.Restore()
 	if h.fn != nil {
