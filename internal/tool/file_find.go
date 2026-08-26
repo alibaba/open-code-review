@@ -44,6 +44,12 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 		return "", err
 	}
 
+	var lowerQuery, lowerNormalizedQuery string
+	if !caseSensitive {
+		lowerQuery = strings.ToLower(queryName)
+		lowerNormalizedQuery = strings.ToLower(normalizedQuery)
+	}
+
 	var matched []string
 	for _, f := range files {
 		base := f
@@ -54,8 +60,8 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 		if caseSensitive {
 			match = strings.Contains(base, queryName) || strings.Contains(f, normalizedQuery)
 		} else {
-			match = strings.Contains(strings.ToLower(base), strings.ToLower(queryName)) ||
-				strings.Contains(strings.ToLower(f), strings.ToLower(normalizedQuery))
+			match = strings.Contains(strings.ToLower(base), lowerQuery) ||
+				strings.Contains(strings.ToLower(f), lowerNormalizedQuery)
 		}
 		if match {
 			matched = append(matched, f)
