@@ -136,6 +136,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
 		{"Models/main.m", "Indexing, Shapes, and Implicit Expansion"},
+		{"config/prod.dhall", "Integrity Hashes"},
+		{"schemas/package.dhall", "Integrity Hashes"},
 	}
 
 	for _, tt := range tests {
