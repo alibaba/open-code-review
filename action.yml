@@ -92,9 +92,26 @@ inputs:
       IoU (intersection-over-union) threshold used by incremental mode to decide
       whether a new multi-line comment overlaps an existing one. Two single-line
       comments match when on the same line; single- vs multi-line never match.
-      Value in (0, 1]; ignored unless incremental is true.
+      Value in (0, 1]. Read only when incremental is true: resolve_outdated
+      decides overlap by any shared line, with no threshold, because a missed
+      overlap there resolves a thread whose finding is still live.
     required: false
     default: '0.6'
+  resolve_outdated:
+    description: >-
+      Resolve the action's own outdated inline review threads (threads GitHub
+      has already marked outdated because their lines no longer exist in the
+      diff). Threads a human replied to, threads already resolved, and threads
+      whose lines a finding from the current run still covers are never touched.
+      One of: 'false' (default, does nothing and makes no API calls), 'report'
+      (log what would be resolved, change nothing — run this first), 'true'
+      (actually resolve). 'true' requires the calling workflow to grant
+      `contents: write` in its own `permissions:` block; the default read-only
+      token cannot resolve a thread and the action will warn and continue.
+      A thread is covered when a current finding shares ANY line with it; the
+      incremental_overlap_threshold IoU test is not used here.
+    required: false
+    default: 'false'
   review_comment_batch_size:
     description: >-
       Maximum number of inline comments packed into a single createReview call.
@@ -159,6 +176,16 @@ outputs:
   comments_failed:
     description: Number of inline comments that failed to post.
     value: ${{ steps.post.outputs.comments_failed }}
+  comments_resolved:
+    description: >-
+      Number of outdated bot review threads resolved this run. Always 0 unless
+      resolve_outdated is 'true'.
+    value: ${{ steps.post.outputs.comments_resolved }}
+  comments_resolved_preview:
+    description: >-
+      Number of threads resolve_outdated 'report' mode would have resolved.
+      Always 0 in 'false' and 'true' modes.
+    value: ${{ steps.post.outputs.comments_resolved_preview }}
   summary_comment_url:
     description: URL of the posted/updated summary comment, if any.
     value: ${{ steps.post.outputs.summary_comment_url }}
@@ -396,6 +423,7 @@ runs:
         OCR_REVIEW_COMMENT_BATCH_SIZE: ${{ inputs.review_comment_batch_size }}
         OCR_ROUTE_SEVERITY_BELOW: ${{ inputs.route_severity_below }}
         OCR_ROUTE_CATEGORIES: ${{ inputs.route_categories }}
+        OCR_RESOLVE_OUTDATED: ${{ inputs.resolve_outdated }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |
@@ -426,4 +454,5 @@ runs:
             reviewCommentBatchSize: parseInt(process.env.OCR_REVIEW_COMMENT_BATCH_SIZE, 10),
             routeSeverityBelow: process.env.OCR_ROUTE_SEVERITY_BELOW,
             routeCategories: process.env.OCR_ROUTE_CATEGORIES,
+            resolveOutdated: process.env.OCR_RESOLVE_OUTDATED,
           });
