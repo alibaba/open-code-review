@@ -36,25 +36,34 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 	}
 
 	caseSensitive, _ := args["case_sensitive"].(bool)
+	// Normalize Windows-style backslash separators so subpath queries
+	// (e.g. `pkg\util.go`) resolve identically on every platform.
+	query := strings.ReplaceAll(queryName, "\\", "/")
 
 	files, err := p.listGitFiles(ctx)
 	if err != nil {
 		return "", err
 	}
 
+	// Precompute the query comparison form once; the file list can be
+	// large, so avoid recomputing strings.ToLower(query) on every iter.
+	var queryCmp string
+	if caseSensitive {
+		queryCmp = query
+	} else {
+		queryCmp = strings.ToLower(query)
+	}
+
 	var matched []string
 	for _, f := range files {
-		base := f
-		if idx := strings.LastIndex(f, "/"); idx != -1 {
-			base = f[idx+1:]
+		// Match against the full relative path (forward slashes), which
+		// subsumes base-filename matching and enables directory-scoped
+		// queries such as `pkg/util` or `internal/diff`.
+		pathCmp := f
+		if !caseSensitive {
+			pathCmp = strings.ToLower(f)
 		}
-		match := false
-		if caseSensitive {
-			match = strings.Contains(base, queryName)
-		} else {
-			match = strings.Contains(strings.ToLower(base), strings.ToLower(queryName))
-		}
-		if match {
+		if strings.Contains(pathCmp, queryCmp) {
 			matched = append(matched, f)
 		}
 		if len(matched) >= fileFindMaxCount {
