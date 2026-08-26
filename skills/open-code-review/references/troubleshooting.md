@@ -6,8 +6,8 @@
 |---------|--------|
 | Rate limit errors | Lower `--concurrency` to 2-4 |
 | Frequent 429 / 5xx errors | 429 and all 5xx are already retried by the SDK by default; if still failing, lower `--concurrency` or add custom 4xx retry codes (`ocr config set llm.retry_codes 403,400`) |
-| Excessive token cost | Set `--max-tokens-budget 500000` (or lower) |
-| Single large file truncated | Set `--max-tokens 200000` or `ocr config set max_tokens 200000` |
+| Token cost too high | Set `--max-tokens-budget 500000` (or lower) |
+| Single large file truncated | Set `--max-tokens 200000` or `ocr config set max_tokens 200000` (template default: 58888) |
 | Large file timeouts | Increase `--timeout 20` |
 | Excessive agent tool turns | Set `--max-tools 60` |
 | Windows git overhead | Lower `--max-git-procs 8` |
@@ -24,7 +24,7 @@
 | Token overflow | File diff too large | Use `--exclude`, set `--max-tokens` or `--max-tokens-budget` |
 | Rate limited | Concurrency too high | Lower `--concurrency` (429 is already retried by the SDK; `retry_codes` supports extra 4xx codes only) |
 | Wrong comment language | Default English | Run `ocr config set language 中文` |
-| Tool Output truncation / corrupted JSON | stdout exceeds the host agent's tool output buffer | **No need to re-run `ocr`**: use `ocr session comments <session-id> --severity high,critical --json`; or pass `-o result.json` / `--output result.json` (native UTF-8 file write) upfront and read via `view_file` |
+| Tool Output truncation / corrupted JSON | stdout exceeds the host agent's tool output buffer | **No need to re-run `ocr`**: use `ocr session comments <session-id> --severity high,critical --json` |
 | `--resume` fails | Review workspace mode | Review resume requires `--from/--to` or `--commit`; or use `scan --resume` |
 | `--preview` + `--resume` error | Mutually exclusive | Use one or the other |
 
