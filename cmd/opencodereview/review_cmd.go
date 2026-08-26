@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -37,6 +38,7 @@ type reviewOptions struct {
 	excludes        string
 	outputFormat    string
 	audience        string
+	outputPath      string
 	background      string
 	backgroundFile  string
 	provider        string
@@ -47,6 +49,7 @@ type reviewOptions struct {
 	maxGitProcs     int
 	maxTokens       int
 	maxTokensBudget int
+	effort          string
 	noFilter        bool
 	preview         bool
 }
@@ -89,10 +92,9 @@ var reviewCmd = &cobra.Command{
   # Exclude generated files / fixtures
   ocr review --exclude '**/generated/*,**/testdata/*'
 
-  # Provide requirement/business context inline, from a Markdown file, or both
+  # Provide requirement/business context inline or from a Markdown file
   ocr review --background "Adding rate limiting to the login API"
-  ocr review --background-file ./docs/requirements.md
-  ocr review --background "Focus on auth" --background-file ./docs/requirements.md`,
+  ocr review --background-file ./docs/requirements.md`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := validateReviewOptions(&reviewOpts); err != nil {
 			return err
@@ -107,8 +109,19 @@ func init() {
 	registerReviewFlags(reviewCmd, &reviewOpts)
 }
 
-func executeReviewContext(ctx context.Context, opts reviewOptions) error {
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
+func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
+	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := closeOut(); cerr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close output file: %w", cerr))
+		}
+	}()
+
+	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
 	}
@@ -119,28 +132,14 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 		return err
 	}
 
-	if opts.commit != "" && opts.background == "" {
-		if msg, err := getCommitMessage(cc.RepoDir, opts.commit); err == nil && msg != "" {
-			opts.background = msg
-		}
+	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
+	if err != nil {
+		return err
 	}
-
-	// Only touch the background when --background-file is set, so the existing
-	// --background behaviour (raw, unsanitised) is preserved for users who do
-	// not opt into the file-based context.
-	if opts.backgroundFile != "" {
-		// Resolve relative paths against the git top-level (cc.RepoDir), matching
-		// file_read semantics, so `-B ./docs/context.md` works from any directory.
-		bgPath := resolveBackgroundFilePath(cc.RepoDir, opts.backgroundFile)
-		fileBackground, err := loadBackgroundFile(bgPath)
-		if err != nil {
-			return err
-		}
-		opts.background = mergeBackground(opts.background, fileBackground)
-	}
+	opts.background = bg
 
 	if opts.preview {
-		return runPreviewContext(ctx, cc, opts)
+		return runPreviewContext(ctx, cc, opts, out)
 	}
 
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
@@ -155,12 +154,17 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	if err != nil {
 		return err
 	}
-	cc.Template.MaxCompletionTokens = cc.Template.MaxTokens
 	maxTokens, err := resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
 	}
 	cc.Template.MaxTokens = maxTokens
+
+	effort, err := resolveEffort(rt.AppCfg, opts.effort)
+	if err != nil {
+		return err
+	}
+	cc.Template.ApplyEffort(effort)
 
 	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
 	// input it returns pins the run to the very commits this check passed on, so
@@ -280,7 +284,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	var emitErr error
 	emitted := manifest != nil || runErr == nil
 	if emitted {
-		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, retryReport)
+		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		}
@@ -481,7 +485,7 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 	return nil
 }
 
-func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions) error {
+func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
 	preview, err := agent.Preview(ctx, agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,
@@ -494,7 +498,7 @@ func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOption
 		return fmt.Errorf("preview failed: %w", err)
 	}
 
-	return outputPreview(preview, opts.outputFormat)
+	return outputPreview(preview, opts.outputFormat, out)
 }
 
 func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {

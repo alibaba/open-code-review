@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/alibaba/open-code-review/internal/llm"
 )
 
 // TestHandleCustomFormEnter_Steps drives handleCustomFormEnter through the create
@@ -189,6 +191,64 @@ func TestUpdateCustomProviderForm_Esc(t *testing.T) {
 		got := out.(providerTUIModel)
 		if !got.cancelled || cmd == nil {
 			t.Error("ctrl+c should cancel and quit")
+		}
+	})
+}
+
+// TestCustomFormEndsAtProtocolForBedrock covers the Custom form's ambient
+// branch. Bedrock has no url, no api key and no auth header to collect, so
+// walking those three steps would ask for values the client never reads and
+// store them as dead config. The form finishes at the protocol step instead.
+func TestCustomFormEndsAtProtocolForBedrock(t *testing.T) {
+	setup := func(t *testing.T) providerTUIModel {
+		t.Helper()
+		cfg := &Config{}
+		m := newProviderTUI(cfg, filepath.Join(t.TempDir(), "c.json"))
+		m.activeTab = tabCustom
+		m.creatingCustom = true
+		m.cpStep = cpStepProtocol
+		m.cpProtocolIdx = cpProtocolIndex(llm.ProtocolAnthropicBedrock)
+		m.cpNameInput.SetValue("bedrock-eu")
+		return m
+	}
+
+	t.Run("protocol step saves instead of advancing", func(t *testing.T) {
+		m := setup(t)
+		out, _ := m.handleCustomFormEnter()
+		got := out.(providerTUIModel)
+		if got.creatingCustom {
+			t.Error("still creating after the protocol step; the form did not finish")
+		}
+		entry, ok := got.existingCfg.CustomProviders["bedrock-eu"]
+		if !ok {
+			t.Fatal("provider was not written to config")
+		}
+		if entry.Protocol != llm.ProtocolAnthropicBedrock {
+			t.Errorf("Protocol = %q, want %q", entry.Protocol, llm.ProtocolAnthropicBedrock)
+		}
+		if entry.URL != "" || entry.APIKey != "" || entry.AuthHeader != "" {
+			t.Errorf("entry carries token-protocol fields: url=%q api_key=%q auth_header=%q", entry.URL, entry.APIKey, entry.AuthHeader)
+		}
+	})
+
+	t.Run("a token protocol still walks to the url step", func(t *testing.T) {
+		m := setup(t)
+		m.cpProtocolIdx = cpProtocolIndex(llm.ProtocolOpenAIChatCompletions)
+		out, _ := m.handleCustomFormEnter()
+		got := out.(providerTUIModel)
+		if got.cpStep != cpStepBaseURL {
+			t.Errorf("cpStep = %d, want cpStepBaseURL", got.cpStep)
+		}
+	})
+
+	t.Run("values left by a previous protocol are dropped", func(t *testing.T) {
+		m := setup(t)
+		m.cpURLInput.SetValue("https://stale.invalid/v1")
+		m.cpAuthInput.SetValue("X-Api-Key")
+		m.apiKeyInput.SetValue("sk-stale")
+		r := m.result()
+		if r.url != "" || r.apiKey != "" || r.authHeader != "" {
+			t.Errorf("result kept stale fields: url=%q apiKey=%q authHeader=%q", r.url, r.apiKey, r.authHeader)
 		}
 	})
 }

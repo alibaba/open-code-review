@@ -139,10 +139,30 @@ The same predicate is mirrored in the workflow's `concurrency.group`: matching e
 
 ### Use a specific OCR version
 
+The action requires `ocr_version` 1.9.6 or newer because its secure token configuration uses
+`llm.auth_token_cmd`. The action fails early with a version-specific error when an older or
+unverifiable CLI is installed.
+
 ```yaml
 - uses: alibaba/open-code-review@main
   with:
-    ocr_version: 1.0.0
+    ocr_version: 1.9.10
+```
+
+### Configure review and LLM timeouts
+
+The task and request timeouts are independent:
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `review_task_timeout` | `'10'` | Per-file/concurrent-task timeout in minutes passed to `ocr review --timeout`; it is not a whole-review wall-clock cap. |
+| `llm_timeout` | `'300'` | LLM HTTP request timeout in seconds, applied independently to each model request. |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    review_task_timeout: '30'
+    llm_timeout: '900'
 ```
 
 ### Add custom review rules

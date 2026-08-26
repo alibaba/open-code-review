@@ -232,6 +232,44 @@ func TestBuildResponsesParams_Tools(t *testing.T) {
 	}
 }
 
+// TestBuildResponsesParams_ToolChoice locks the tool_choice mapping the
+// review-filter task depends on. ChatRequest.ToolChoice="required" must become
+// responses.ToolChoiceOptionsRequired on the wire, and only when tools are
+// attached. Any other value (including "auto") is intentionally left
+// untranslated, matching the Anthropic client's behavior.
+func TestBuildResponsesParams_ToolChoice(t *testing.T) {
+	client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
+	tool := ToolDef{Function: FunctionDef{Name: "f", Description: "d", Parameters: map[string]any{"type": "object"}}}
+
+	tests := []struct {
+		name       string
+		tools      []ToolDef
+		toolChoice string
+		wantSet    bool
+	}{
+		{name: "required with tools", tools: []ToolDef{tool}, toolChoice: "required", wantSet: true},
+		{name: "auto with tools is not translated", tools: []ToolDef{tool}, toolChoice: "auto", wantSet: false},
+		{name: "empty with tools leaves provider default", tools: []ToolDef{tool}, toolChoice: "", wantSet: false},
+		{name: "required without tools is dropped", tools: nil, toolChoice: "required", wantSet: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params := client.buildResponsesParams("gpt-5.4", ChatRequest{
+				Messages:   []Message{{Role: "user", Content: "hi"}},
+				Tools:      tt.tools,
+				ToolChoice: tt.toolChoice,
+			})
+			if got := params.ToolChoice.OfToolChoiceMode.Valid(); got != tt.wantSet {
+				t.Fatalf("tool_choice set = %v, want %v", got, tt.wantSet)
+			}
+			if tt.wantSet && params.ToolChoice.OfToolChoiceMode.Value != responses.ToolChoiceOptionsRequired {
+				t.Errorf("tool_choice = %q, want %q", params.ToolChoice.OfToolChoiceMode.Value, responses.ToolChoiceOptionsRequired)
+			}
+		})
+	}
+}
+
 func TestBuildResponsesParams_StoreAndCacheKey(t *testing.T) {
 	client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
 

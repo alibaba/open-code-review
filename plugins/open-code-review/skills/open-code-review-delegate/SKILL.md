@@ -156,7 +156,7 @@ If the user requested "review and fix":
 | `--rule <path>` | Custom rule.json path |
 | `--exclude <patterns>` | Comma-separated exclude patterns |
 | `-b, --background <text>` | Business context |
-| `-B, --background-file <path>` | Business context from Markdown file |
+| `-B, --background-file <path>` | Business context from Markdown file (takes precedence over `-b`) |
 | `-f, --format <text\|json>` | Output format; use `json` for agent integrations |
 
 ## Gotchas
@@ -167,3 +167,42 @@ If the user requested "review and fix":
 - **Untracked files in workspace mode** — `preview` includes untracked files. For these, read the file directly instead of using `git diff`.
 - **Background context** — pass `--background` to `preview` when you have requirement context; it appears in the output for your reference during review.
 - **Coverage is mandatory** — every `reviewable_files` entry must end as reviewed or explicitly skipped; do not silently omit files.
+
+### Recovering Oversized Background Context
+
+`--background-file` has two independent limits. The raw file must not exceed
+1 MiB, and the sanitized content must not exceed 8000 characters. Either
+condition aborts the command. When the command reports either limit:
+
+1. Do not silently truncate the source file.
+2. Summarize the original material while preserving its requirements,
+   constraints, acceptance criteria, and other review-critical details.
+3. Retry the affected command by passing the summary as one shell-safe
+   argument (for example, use a quoted/escaped argument produced by the host
+   shell, or write it to a new size-bounded file and pass that file). Do not
+   place untrusted summary text directly in a double-quoted shell template;
+   `$()`, backticks, quotes, and variable references can still be evaluated.
+   Omit the original `--background-file` so the CLI does not reload the same
+   oversized file and fail again.
+4. If a faithful summary is not possible, omit the OCR background entirely and
+   read the original material directly during the review.
+
+### Troubleshooting CLI Version Compatibility
+
+The `--format` flag is available in `ocr` v1.9.0 and later. The Skill and the
+installed CLI can be updated independently. If a requested `preview` or `rule`
+command with `--format json` fails specifically with `unknown flag: --format`,
+rerun it without the flag and use text output for the rest of the delegation
+run. Preserve the explicit mode, ref, file, and rule information from that
+output; do not parse text output as JSON or invent missing schema fields. Do
+not retry without the flag for any other error; report it and stop the affected
+workflow.
+
+The host-agent Skill may consume the equivalent text output to complete its
+review checklist. Programmatic integrations that require `schema_version` or
+other JSON fields must require a JSON-capable CLI instead: verify with
+`ocr --version` and upgrade when necessary:
+
+```bash
+npm install -g @alibaba-group/open-code-review
+```

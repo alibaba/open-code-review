@@ -133,7 +133,7 @@ cat <path>                     # 新規未追跡ファイル
 | `--rule <path>` | カスタム rule.json パス |
 | `--exclude <patterns>` | カンマ区切りの除外パターン |
 | `-b, --background <text>` | ビジネスコンテキスト |
-| `-B, --background-file <path>` | Markdown ファイルからビジネスコンテキストを読み込み |
+| `-B, --background-file <path>` | Markdown ファイルからビジネスコンテキストを読み込み（`-b` より優先） |
 
 ## 他の統合モードとの比較
 

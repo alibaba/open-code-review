@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
+
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 )
 
 // Resolver resolves a review rule for a file path.
@@ -111,11 +113,28 @@ func LoadDefault() (*SystemRule, error) {
 	return &rule, nil
 }
 
+// loadObjCRule reads the embedded Objective-C rule doc used by the ".m"
+// content sniff. It is not referenced from system_rules.json's path_rule_map,
+// so it is loaded explicitly rather than through the PathRules loop.
+func loadObjCRule() (string, error) {
+	content, err := rulesFS.ReadFile("rule_docs/objc.md")
+	if err != nil {
+		return "", fmt.Errorf("read objc rule file: %w", err)
+	}
+	return strings.TrimRight(string(content), "\n"), nil
+}
+
 // RuleDetail contains the resolved rule along with metadata about its source.
 type RuleDetail struct {
 	Rule    string // rule text
 	Source  string // "custom" | "project" | "global" | "system"
-	Pattern string // glob pattern that matched, or "default" for fallback
+	Pattern string // glob pattern that matched, or "default" for fallback — always a plain glob, never annotated
+	// SniffedAs is "" for a plain path match, or the sniffed language (e.g.
+	// "objc") when content sniffing overrode the path-based rule. Internal
+	// only: callers that serialize RuleDetail (e.g. delegateRuleGroupJSON)
+	// must not surface this, since Pattern is a versioned "the glob that
+	// matched" contract that a sniff annotation would silently break.
+	SniffedAs string `json:"-"`
 }
 
 // DetailResolver extends Resolver with source metadata.
@@ -128,16 +147,7 @@ type DetailResolver interface {
 // The first match wins; if none match, it falls back to DefaultRule.
 // Supports full glob syntax including ** for recursive directory matching.
 func (r *SystemRule) Resolve(path string) string {
-	lowerPath := strings.ToLower(path)
-	for _, pr := range r.PathRules {
-		expanded := expandBraces(pr.Pattern)
-		for _, p := range expanded {
-			if matched, _ := doublestar.Match(strings.ToLower(p), lowerPath); matched {
-				return pr.Rule
-			}
-		}
-	}
-	return r.DefaultRule
+	return r.resolveDetail(path).Rule
 }
 
 // CanonicalConfig returns a deterministic, order-stable field list describing this
@@ -257,7 +267,22 @@ type composedResolver struct {
 	custom  *ProjectRule // highest: --rule flag
 	project *ProjectRule // high: .opencodereview/rule.json
 	global  *ProjectRule // low: ~/.opencodereview/rule.json
-	system  *SystemRule  // lowest: embedded default
+	system  systemLayer  // lowest: embedded default, decorated by sniffer
+}
+
+// ResolverOptions carries the optional git context the resolver needs to read
+// file content when disambiguating extensions shared by several languages
+// (currently only ".m": MATLAB vs Objective-C). The zero value is valid and
+// makes content reads fall back to the working tree.
+type ResolverOptions struct {
+	// Ref is the git ref whose content should be inspected — the review head
+	// (--to) in range mode, or --commit in commit mode. Empty reads the
+	// working tree, which is what `ocr scan` and `ocr rules check` want.
+	Ref string
+
+	// Runner bounds concurrent git subprocesses. Optional; when nil the
+	// resolver shells out to git directly.
+	Runner *gitcmd.Runner
 }
 
 // NewResolver builds a Resolver with the following priority:
@@ -266,9 +291,18 @@ type composedResolver struct {
 //  3. Global ~/.opencodereview/rule.json (first match wins)
 //  4. Embedded system default rules
 //
+// The system layer is wrapped in a sniffer so ".m" files can be resolved as
+// Objective-C when their content says so. Wrapping the *system* layer (rather
+// than the composed resolver) keeps user layers outranking the sniff.
+//
 // It also returns a FileFilter with the merged include/exclude patterns from all layers.
-func NewResolver(repoDir, customRulePath string) (Resolver, *FileFilter, error) {
+func NewResolver(repoDir, customRulePath string, opts ResolverOptions) (Resolver, *FileFilter, error) {
 	sysRule, err := LoadDefault()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	objcRule, err := loadObjCRule()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -302,7 +336,13 @@ func NewResolver(repoDir, customRulePath string) (Resolver, *FileFilter, error) 
 		custom:  customRule,
 		project: projectRule,
 		global:  globalRule,
-		system:  sysRule,
+		system: &sniffer{
+			inner:    sysRule,
+			repoDir:  repoDir,
+			ref:      opts.Ref,
+			runner:   opts.Runner,
+			objcRule: objcRule,
+		},
 	}, filter, nil
 }
 
@@ -463,7 +503,7 @@ func (c *composedResolver) ResolveDetail(path string) RuleDetail {
 	return c.system.resolveDetail(path)
 }
 
-func (c *composedResolver) matchProjectRuleDetail(pr *ProjectRule, path string, source string) *RuleDetail {
+func (c *composedResolver) matchProjectRuleDetail(pr *ProjectRule, path, source string) *RuleDetail {
 	entry := matchProjectRuleEntry(pr, path)
 	if entry == nil {
 		return nil

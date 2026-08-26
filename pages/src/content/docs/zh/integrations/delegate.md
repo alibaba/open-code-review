@@ -133,7 +133,7 @@ cat <path>                     # 新的未跟踪文件
 | `--rule <path>` | 自定义 rule.json 路径 |
 | `--exclude <patterns>` | 逗号分隔的排除模式 |
 | `-b, --background <text>` | 业务上下文 |
-| `-B, --background-file <path>` | 从 Markdown 文件读取业务上下文 |
+| `-B, --background-file <path>` | 从 Markdown 文件读取业务上下文（优先于 `-b`） |
 
 ## 与其他集成方式的对比
 
