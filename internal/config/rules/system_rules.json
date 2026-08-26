@@ -42,6 +42,7 @@
     "**/*.zig": "zig.md",
     "**/*.thrift": "thrift.md",
     "**/*.capnp": "capnp.md",
+    "**/*.m": "matlab.md",
     "**/*.sol": "solidity.md",
     "**/*.vy": "vyper.md"
   }

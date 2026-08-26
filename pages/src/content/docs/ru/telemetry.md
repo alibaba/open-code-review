@@ -15,8 +15,8 @@ OCR включает полноценную встроенную поддерж�
 По умолчанию телеметрия **отключена**. После включения OCR экспортирует:
 
 - **Спаны** — три спана уровня конвейера (`review.run`, `diff.parse`,
-  `subtask.execute.<file>`) и по одному кратковременному спану `event.*` для
-  каждого события в точке принятия решения.
+  `subtask.execute.group.<group-key>`) и по одному кратковременному спану
+  `event.*` для каждого события в точке принятия решения.
 - **Метрики** — агрегированные счётчики и гистограммы длительности ревью,
   проверенных файлов, созданных комментариев, запросов / токенов / задержки LLM,
   а также вызовов / задержки инструментов.
@@ -114,14 +114,20 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:3000/api/public/otel
 review.run
 ├── diff.parse
 ├── event.review.started                   (decision-point event)
-├── subtask.execute.<file1>
-│   ├── event.plan.skipped                 (when changes are below threshold)
+├── subtask.execute.group.<group-key1>
+│   ├── event.plan.skipped                 (when changes are below both thresholds)
 │   ├── event.plan.failed                  (when plan phase errored)
 │   ├── event.token.threshold.exceeded     (when prompt > 80% of max_tokens)
+│   ├── main.loop                          (one span per review round)
 │   └── event.subtask.error                (when the subtask errored)
-├── subtask.execute.<file2>
+├── subtask.execute.group.<group-key2>
 └── …
 ```
+
+Один спан `subtask.execute.group.*` создаётся на каждую проверенную **группу**,
+а не на каждый файл: файлы семантически объединяются в группы до ревью. Ключ
+группы — это пути файлов группы, отсортированные и соединённые запятыми (для
+группы из одного файла это просто этот путь).
 
 Циклы запросов к LLM и выполнения инструментов **не** создают отдельных
 спанов: они отображаются только в метриках (см. ниже). События в точках
@@ -134,12 +140,13 @@ review.run
 |---|---|
 | `review.run` | `error` (устанавливается при сбое запуска) |
 | `diff.parse` | `files.changed`, `lines.inserted`, `lines.deleted` |
-| `subtask.execute.<file>` | `file.path`, `lines.changed`, `lines.inserted`, `lines.deleted` |
+| `subtask.execute.group.<group-key>` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file` |
+| `main.loop` | `group.label`, `round` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
-| `event.plan.skipped` | `file.path`, `lines.changed`, `threshold` |
-| `event.plan.failed` | `file.path`, `message` |
-| `event.token.threshold.exceeded` | `file.path`, `tokens`, `max_tokens` |
-| `event.subtask.error` | `file.path`, `error` |
+| `event.plan.skipped` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file`, `threshold`, `threshold.group` |
+| `event.plan.failed` | `group.label`, `message` |
+| `event.token.threshold.exceeded` | `group.label`, `tokens`, `max_tokens`, `round` |
+| `event.subtask.error` | `group.label`, `error` |
 
 ### Метрики
 
@@ -166,10 +173,10 @@ OCR записывает числовые метрики с помощью из�
 |---|---|
 | `review.started` | Различия загружены; известно количество файлов для ревью. |
 | `no.files.changed` | После разрешения diff не осталось файлов. |
-| `plan.skipped` | Файл содержал меньше изменений, чем `PLAN_MODE_LINE_THRESHOLD`. |
+| `plan.skipped` | Группа оказалась ниже обоих порогов plan: у самого большого файла группы изменений меньше, чем `PLAN_MODE_LINE_THRESHOLD`, и (для групп из 2+ файлов) суммарно меньше, чем `PLAN_MODE_GROUP_LINE_THRESHOLD`. |
 | `plan.failed` | Этап планирования завершился с ошибкой; основной цикл запущен без плана. |
-| `token.threshold.exceeded` | Число токенов начального промпта превысило 80 % от `MAX_TOKENS`; файл пропущен. |
-| `subtask.error` | Подзадача отдельного файла завершилась с ошибкой; создаётся со статусом спана `Error`. |
+| `token.threshold.exceeded` | Число токенов промпта превысило 80 % от `MAX_TOKENS` (предел ввода); группа пропущена. |
+| `subtask.error` | Подзадача отдельной группы завершилась с ошибкой; создаётся со статусом спана `Error`. |
 
 Используйте эти события, чтобы обнаруживать ухудшение качества ревью задолго до
 того, как его заметит пользователь.
@@ -287,11 +294,14 @@ OCR экспортирует **всё**. Настройка сэмплирова
 ваш коллектор OTel. Обычный запуск ревью создаёт:
 
 - 1 спан `review.run` + 1 спан `diff.parse` + 1 спан
-  `subtask.execute.<file>` на каждый проверенный файл + 1 кратковременный спан
-  `event.*` на каждое событие в точке принятия решения.
-- PR из 10 файлов создаёт в общей сложности примерно 15–25 спанов. Циклы
-  запросов LLM и вызовы инструментов увеличивают счётчики метрик, но не создают
-  дополнительные спаны.
+  `subtask.execute.group.<group-key>` на каждую проверенную группу (плюс его
+  дочерние `plan.execute` / `main.loop` / `review_filter.execute`) +
+  1 кратковременный спан `event.*` на каждое событие в точке принятия решения.
+- PR из 10 файлов создаёт в общей сложности примерно 15–25 спанов — меньше,
+  когда группировка объединяет файлы, и больше, когда предустановка effort
+  выполняет дополнительные раунды ревью. Циклы запросов LLM и вызовы
+  инструментов увеличивают счётчики метрик, но не создают дополнительные
+  спаны.
 
 Экспорт выполняется **пакетно и асинхронно**, поэтому телеметрия не блокирует
 цикл ревью. Если коллектор недоступен, OCR записывает предупреждение и
