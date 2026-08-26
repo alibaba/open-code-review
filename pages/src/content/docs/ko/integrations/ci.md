@@ -7,7 +7,7 @@ sidebar:
 Pull Request나 Merge Request마다 OCR을 실행합니다. 업스트림 저장소는 그대로 복사해
 설정만 하면 되는 파이프라인 두 벌을 제공합니다. 하나는 GitHub Actions용, 하나는
 GitLab CI용입니다. 둘 다 [CLI 레퍼런스](../cli-reference/#json)에서 설명하는 핵심
-명령을 얇게 감싼 것입니다.
+명령을 감싸기만 한 얇은 래퍼입니다.
 
 ## CI/CD 연동은 어떻게 동작하나 {#how-ci-cd-integration-works}
 
@@ -15,14 +15,14 @@ GitLab CI용입니다. 둘 다 [CLI 레퍼런스](../cli-reference/#json)에서 
 절은 그 흐름을 각각 구현한 것일 뿐입니다.
 
 1. **PR / MR 이벤트에서 트리거.** 새 pull request, 갱신된 merge request, 또는 수동으로
-   남긴 `/open-code-review` 코멘트가 작업을 시작시킵니다.
+   남긴 `/open-code-review` 코멘트가 작업을 시작합니다.
 2. **러너에 `ocr` 설치.** 보통
    `npm install -g @alibaba-group/open-code-review`를 씁니다. 러너는 일회성이므로
    실행할 때마다 설치합니다.
 3. **CI 시크릿으로 LLM 설정.** `ocr config set`으로 엔드포인트·토큰·모델을
    지정합니다. 러너에는 기댈 만한 `~/.opencodereview`가 남아 있지 않습니다.
 4. **range 모드로 리뷰 실행.** 기계가 읽을 수 있는 형식으로 출력해 stdout이 깔끔한
-   JSON 봉투가 되게 합니다.
+   JSON 응답만 담게 합니다.
 
    ```bash
    ocr review \
@@ -33,19 +33,19 @@ GitLab CI용입니다. 둘 다 [CLI 레퍼런스](../cli-reference/#json)에서 
    ```
 
    `--format json`은 파싱 가능한 페이로드를 만들고, `--audience agent`는 진행 상황
-   출력을 억제합니다. 모든 레시피가 소비하는 봉투 구조는
+   출력을 억제합니다. 모든 레시피가 소비하는 응답 구조는
    [JSON 출력](../cli-reference/#json)을 참고하세요.
 5. **JSON 파싱** 후 `comments[]`를 순회합니다.
 6. **코멘트를 PR / MR에 게시.** 각 플랫폼의 리뷰 API를 씁니다. 유효한 라인 정보가
    없는 항목(파일 단위 지적)은 인라인으로 달지 않고 요약 노트에 모읍니다. 인라인
    일괄 등록 API가 요청을 거부하면 게시 단계가 일반 요약 코멘트로 대체합니다.
 
-여기에는 항상 두 종류의 자격 증명이 등장합니다. OCR이 지적을 생성할 때 쓰는 **LLM
-자격 증명**과, 게시 단계가 코멘트를 남길 때 쓰는 **PR/MR 쓰기 토큰**입니다. GitHub
-레시피는 후자를 `GITHUB_TOKEN`으로 별도 설정 없이 얻습니다. GitLab은
-`GITLAB_API_TOKEN`을 명시적으로 두기를 권장하지만, fork MR에서는 내장
-`CI_JOB_TOKEN`이 대체로 쓰입니다(`/discussions`로 디스커션을 남길 수 있습니다).
-안정적으로 쓰려면 전용 토큰을 권장합니다.
+여기에는 항상 두 종류의 자격 증명이 등장합니다. 하나는 OCR이 지적을 생성할 때 쓰는
+**LLM 자격 증명**이고, 다른 하나는 게시 단계가 코멘트를 남길 때 쓰는 **PR/MR 쓰기
+토큰**입니다. GitHub 레시피는 후자를 `GITHUB_TOKEN`으로 별도 설정 없이 얻습니다.
+GitLab은 `GITLAB_API_TOKEN`을 명시적으로 두기를 권장하지만, fork MR에서는 내장
+`CI_JOB_TOKEN`이 대체 수단으로 쓰입니다(`/discussions`로 디스커션을 남길 수
+있습니다). 안정적으로 쓰려면 전용 토큰을 권장합니다.
 
 ## GitHub Actions {#github-actions}
 
@@ -55,7 +55,7 @@ GitLab CI용입니다. 둘 다 [CLI 레퍼런스](../cli-reference/#json)에서 
 
 ### 무엇을 하나 {#what-it-does}
 
-- `pull_request_target`(`opened`) 이벤트와, 본문이 `/open-code-review` 또는
+- `pull_request_target`(`opened`) 이벤트와 본문이 `/open-code-review` 또는
   `@open-code-review`로 시작하는 `issue_comment` 이벤트에서 트리거합니다. 후자
   덕분에 리뷰어가 PR에 코멘트를 남겨 OCR을 다시 돌릴 수 있습니다.
   (`pull_request` 대신 `pull_request_target`을 쓰는 이유는 fork에서 올라온 PR에서도
@@ -63,7 +63,7 @@ GitLab CI용입니다. 둘 다 [CLI 레퍼런스](../cli-reference/#json)에서 
   실행하지 않습니다.)
 - `npm install -g @alibaba-group/open-code-review`로 OCR을 설치하고,
   `ocr config set`으로 설정을 기록한 뒤, 브랜치 range 모드로 핵심 명령을 실행합니다.
-- JSON 봉투를 파싱해 각 지적을 GitHub Pull Request Review API로 인라인 리뷰 코멘트로
+- JSON 응답을 파싱해 각 지적을 GitHub Pull Request Review API로 인라인 리뷰 코멘트로
   게시합니다. 라인 정보가 없는 코멘트는 요약 본문에 모읍니다. 일괄 등록이 실패하면
   코멘트를 하나씩 게시하는 방식으로 대체하고, 통계를 요약 코멘트로 남깁니다.
 
@@ -104,7 +104,7 @@ curl -o .github/workflows/ocr-review.yml \
 
 #### 배경 맥락 {#background-context}
 
-`--background`는 효과가 가장 큰 플래그 하나입니다.
+`--background`는 효과가 가장 큰 플래그입니다.
 [모든 패턴에 적용되는 팁](../#tips-that-apply-to-every-pattern)을 참고하세요. PR
 제목을 넘기면 됩니다(`feat(auth): add OAuth2 support`처럼 제목이 시맨틱 규약을 따를
 때 특히 잘 맞습니다).
@@ -146,7 +146,7 @@ PR에서 제어할 수 있는 값은 `run:` 안에 `${{ }}`로 직접 넣지 말
 
 #### 동시 실행 수 {#concurrency}
 
-기본값은 파일 그룹당 하나씩, 서브 Agent 8개를 병렬로 돌립니다. 큰 PR에서 LLM
+기본적으로 파일 그룹당 하나씩, 서브 Agent 8개를 병렬로 돌립니다. 큰 PR에서 LLM
 프로바이더의 요청 한도를 넘지 않으려면 값을 낮추세요:
 
 ```yaml
@@ -162,7 +162,7 @@ PR에서 제어할 수 있는 값은 `run:` 안에 `${{ }}`로 직접 넣지 말
 
 #### 트리거 조건 {#trigger-pattern}
 
-기본 워크플로는 PR **opened**와, `/open-code-review` 또는 `@open-code-review`로
+기본 워크플로는 PR **opened**와 `/open-code-review` 또는 `@open-code-review`로
 시작하는 PR 코멘트에서 트리거합니다. 흔히 다음 두 가지를 조정합니다.
 
 더 많은 PR 생명주기 이벤트에서 실행하기(예: 새 커밋이 푸시되면 다시 리뷰):
@@ -295,7 +295,7 @@ SARIF는 기계가 읽는 형식이므로 OCR은 stdout에 진행 상황을 출�
 - `merge_requests` 이벤트에서 트리거합니다(생성·수정·재오픈 등 모든 MR 이벤트).
 - `node:20` 이미지에서 실행하며, OCR을 설치하고 `ocr config set`으로 설정한 뒤 MR
   diff 모드로 핵심 명령을 실행합니다.
-- 인라인 Python 스크립트로 JSON 봉투를 파싱해 각 지적을 GitLab 디스커션(diff 위
+- 인라인 Python 스크립트로 JSON 응답을 파싱해 각 지적을 GitLab 디스커션(diff 위
   인라인)으로 게시합니다. 위치를 정확히 잡기 위해 MR의 `versions` 엔드포인트로
   올바른 `base_sha` / `start_sha` / `head_sha`를 계산합니다. 인라인으로 달 수 없는
   코멘트는 일반 MR 노트로 대체하고, 마지막에 요약 노트를 남깁니다.
@@ -340,7 +340,7 @@ include:
 
 > **봇 이름을 빠르게 붙이는 팁.** 프로젝트 액세스 토큰과 그룹 액세스 토큰은 토큰의
 > **이름**이 MR 디스커션 옆에 표시됩니다. 토큰 이름을 `OpenCodeReview Bot`으로
-> 지으면 다른 설정 없이 리뷰어에 브랜드를 붙일 수 있습니다.
+> 지으면 다른 설정 없이 리뷰어 이름에 브랜드를 입힐 수 있습니다.
 > [서비스 계정 명의로 게시하기](#post-under-a-service-account-identity)에 적힌 더
 > 견고한 서비스 계정 설정까지는 필요 없을 때 쓸 만합니다.
 

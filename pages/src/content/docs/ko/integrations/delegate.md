@@ -4,7 +4,7 @@ sidebar:
   order: 5
 ---
 
-위임 모드(Delegation Mode)에서는 OCR이 결정적인 엔지니어링(파일 선택, 규칙 해석)을
+위임 모드(Delegation Mode)에서는 OCR이 결정적 엔지니어링(파일 선택, 규칙 해석)을
 맡고, 실제 코드 리뷰는 호스트 Agent가 자신의 LLM으로 수행합니다. OCR 쪽에는 LLM
 엔드포인트가 필요 없습니다.
 

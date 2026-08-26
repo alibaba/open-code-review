@@ -58,7 +58,7 @@ SKILL.md는 프롬프트입니다. 호출한 Agent가 이 파일을 읽고 각 �
    LLM에 연결되는지 확인합니다.
 2. **CLI가 없으면 자동 설치.** `which ocr`이 "NOT INSTALLED"를 반환하면 Agent가
    `npm install -g @alibaba-group/open-code-review`를 실행하고 작업을 이어 갑니다.
-   일상적인 설치 단계로 보고 사용자에게 묻지 않습니다.
+   일상적인 설치 단계로 여겨 사용자에게 묻지 않습니다.
 3. **LLM 설정이 없으면 멈추고 질문.** `ocr llm test`가 실패하면 Agent는 자격 증명을
    임의로 지어내지 *않습니다*. 지원하는 두 가지 방법(환경 변수 또는
    `ocr config set …`)을 안내하고 사용자가 API 키를 줄 때까지 기다립니다.
@@ -77,8 +77,8 @@ SKILL.md는 프롬프트입니다. 호출한 Agent가 이 파일을 읽고 각 �
 
 정확한 분류 기준과 출력 템플릿, 주의할 점을 포함한 전체 프롬프트는
 [`skills/open-code-review/SKILL.md`](https://github.com/alibaba/open-code-review/blob/main/skills/open-code-review/SKILL.md)에
-있습니다. 위 동작을 더 조이고 싶다면(예: 수정 전에 항상 묻도록 기본값을 바꾸는 등)
-로컬 사본을 편집하세요.
+있습니다. 위 동작을 더 엄격하게 바꾸고 싶다면(예: 수정 전에 항상 묻도록 기본값을
+바꾸는 등) 로컬 사본을 편집하세요.
 
 ## Anthropic Agent SDK {#anthropic-agent-sdk}
 
@@ -96,7 +96,7 @@ agent.run("Review my staged changes — focus on race conditions.")
 
 SDK가 SKILL.md 프롬프트를 읽으면 Agent가
 [스킬이 하는 일](#what-the-skill-does)에 적힌 워크플로를 실행합니다.
-`npm install` 대체 설치와, LLM이 설정되어 있지 않을 때 자격 증명을 묻는 단계도
+`npm install` 대체 설치도, LLM이 설정되어 있지 않을 때 자격 증명을 묻는 단계도
 여기에 포함됩니다.
 
 ## 다른 Agent 프레임워크 {#other-agent-frameworks}
