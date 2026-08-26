@@ -136,6 +136,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
 		{"Models/main.m", "Indexing, Shapes, and Implicit Expansion"},
+		{"sources/pool.move", "Ability Grants"},
+		{"contracts/amm/sources/router.move", "Ability Grants"},
+		{"Move.toml", "Move Package Manifest"},
+		{"contracts/amm/Move.toml", "Move Package Manifest"},
 	}
 
 	for _, tt := range tests {
@@ -954,6 +958,35 @@ func TestResolveDetail_SystemPHPPatternMatch(t *testing.T) {
 			} {
 				if !strings.Contains(detail.Rule, required) {
 					t.Errorf("expected PHP rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemMoveTomlPatternPrecedesMove(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"Move.toml", "packages/library/Move.toml", "PACKAGES/APP/MOVE.TOML"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/Move.toml" {
+				t.Errorf("expected pattern '**/Move.toml', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Move Package Manifest Hygiene",
+				"rev = \"main\"",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected rule to contain %q for %s", required, path)
 				}
 			}
 		})

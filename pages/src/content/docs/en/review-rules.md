@@ -152,6 +152,8 @@ matching order:
 | `**/build.gradle` | `build_gradle.md` — Gradle dependencies. |
 | `**/package.json` | `package_json.md` — NPM dependencies / scripts. |
 | `**/Cargo.toml` | `cargo_toml.md` — Rust manifest. |
+| `**/Move.toml` | `move_toml.md` — Move package manifest. |
+| `**/*.move` | `move.md` — Move source. |
 | `**/composer.json` | `composer_json.md` — Composer dependencies, autoloading, scripts, plugins, and package configuration. |
 | `**/*.{json,json5}` | `json.md` — generic JSON (also matches `.json5`). |
 | `.github/workflows/**/*.{yaml,yml}` | `github_workflows.md` — GitHub Actions workflow YAML. |

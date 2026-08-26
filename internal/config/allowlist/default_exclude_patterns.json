@@ -44,5 +44,9 @@
   "**/*.capnp.go",
   "**/*.capnp.ts",
   "**/*_capnp.rs",
-  "**/*_capnp.py"
+  "**/*_capnp.py",
+  "**/build/**/*.move",
+  "**/tests/**/*.move",
+  "**/*_test.move",
+  "**/*_tests.move"
 ]

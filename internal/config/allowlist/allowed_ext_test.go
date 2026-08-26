@@ -86,6 +86,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".THRIFT", true},
 		{".capnp", true},
 		{".CAPNP", true},
+		{".move", true},
+		{".MOVE", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -225,6 +227,25 @@ func TestIsExcludedPath(t *testing.T) {
 		{"capnp generated python", "schema/addressbook_capnp.py", true},
 		{"capnp schema is reviewed", "schema/addressbook.capnp", false},
 		{"capnp in filename only", "src/capnp_helpers.go", false},
+
+		// Move build output and test files. The build/ pattern is deliberately
+		// scoped by extension: IsExcludedPath applies every pattern to every
+		// path with no language dispatch, so a bare "**/build/**" would also
+		// drop Java, Gradle, TypeScript and CMake output.
+		{"move build dir", "build/mypkg/sources/pool.move", true},
+		{"move build vendored dependency", "build/MyPkg/sources/dependencies/Sui/tx_context.move", true},
+		{"move tests dir", "tests/pool_tests.move", true},
+		{"move tests dir under sources", "sources/trading/tests/market/clearinghouse_test.move", true},
+		{"move _tests suffix", "sources/pool_tests.move", true},
+		// Singular _test.move is as common as the plural and often lives in
+		// sources/ rather than tests/, e.g. aptos-core's
+		// move-examples/hello_blockchain/sources/hello_blockchain_test.move.
+		{"move _test suffix", "sources/hello_blockchain_test.move", true},
+		{"move non-test", "sources/pool.move", false},
+		{"move tests in filename", "sources/tests_helper.move", false},
+		{"move build pattern does not catch ts", "frontend/build/index.ts", false},
+		{"move build pattern does not catch java", "build/classes/com/example/Foo.java", false},
+		{"move build pattern does not catch go", "build/main.go", false},
 
 		// Jsonnet vendored dependencies (written by `jb install`, wiped by `rm -rf vendor`).
 		// The pattern is extension-scoped: IsExcludedPath applies every pattern to every
