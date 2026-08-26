@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -30,6 +32,7 @@ type scanOptions struct {
 	excludes        string
 	outputFormat    string
 	audience        string
+	outputPath      string
 	background      string
 	concurrency     int
 	perFileTimeout  int
@@ -105,8 +108,18 @@ func splitPaths(raw string) []string {
 	return out
 }
 
-func executeScan(opts scanOptions) error {
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, false)
+func executeScan(opts scanOptions) (retErr error) {
+	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := closeOut(); cerr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close output file: %w", cerr))
+		}
+	}()
+
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, "", opts.maxTools, opts.maxGitProcs, false)
 	if err != nil {
 		return err
 	}
@@ -139,13 +152,14 @@ func executeScan(opts scanOptions) error {
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
-		// Enumeration itself writes to stdout (the per-file charset-decode
-		// notice), so the machine-readable formats must be silenced around the
-		// whole preview, not just around a final emit. Without this the JSON
-		// document is preceded by human-readable lines and no longer parses.
+		// Enumeration itself writes to stdout.Writer() (the per-file
+		// charset-decode notice), which `out` does not cover, so the
+		// machine-readable formats must be silenced around the whole preview
+		// rather than around a final emit. Without this the JSON document is
+		// preceded by human-readable lines and no longer parses.
 		q := newQuietHandle(opts.outputFormat, opts.audience)
 		defer q.Restore()
-		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat)
+		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat, out)
 	}
 
 	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)
@@ -160,7 +174,6 @@ func executeScan(opts scanOptions) error {
 	if err != nil {
 		return err
 	}
-	scanTpl.MaxCompletionTokens = scanTpl.MaxTokens
 	maxTokens, err := resolveMaxTokens(scanTpl.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
@@ -237,7 +250,7 @@ func executeScan(opts scanOptions) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, nil)
+	return emitRunResult(ctx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, nil)
 }
 
 func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (*session.ResumeState, error) {
@@ -257,7 +270,7 @@ func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (
 	return state, nil
 }
 
-func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string) error {
+func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string, out io.Writer) error {
 	preview, err := scan.Preview(context.Background(), scan.Args{
 		RepoDir:          cc.RepoDir,
 		Paths:            scanPaths,
@@ -271,5 +284,5 @@ func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths
 	if err != nil {
 		return fmt.Errorf("scan preview failed: %w", err)
 	}
-	return outputPreview(preview, outputFormat)
+	return outputPreview(preview, outputFormat, out)
 }

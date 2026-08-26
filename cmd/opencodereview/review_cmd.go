@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -37,6 +38,7 @@ type reviewOptions struct {
 	excludes        string
 	outputFormat    string
 	audience        string
+	outputPath      string
 	background      string
 	backgroundFile  string
 	provider        string
@@ -47,6 +49,7 @@ type reviewOptions struct {
 	maxGitProcs     int
 	maxTokens       int
 	maxTokensBudget int
+	effort          string
 	noFilter        bool
 	preview         bool
 }
@@ -106,8 +109,19 @@ func init() {
 	registerReviewFlags(reviewCmd, &reviewOpts)
 }
 
-func executeReviewContext(ctx context.Context, opts reviewOptions) error {
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, true)
+func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error) {
+	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := closeOut(); cerr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close output file: %w", cerr))
+		}
+	}()
+
+	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, opts.maxTools, opts.maxGitProcs, true)
 	if err != nil {
 		return err
 	}
@@ -125,7 +139,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	opts.background = bg
 
 	if opts.preview {
-		return runPreviewContext(ctx, cc, opts)
+		return runPreviewContext(ctx, cc, opts, out)
 	}
 
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
@@ -140,12 +154,17 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	if err != nil {
 		return err
 	}
-	cc.Template.MaxCompletionTokens = cc.Template.MaxTokens
 	maxTokens, err := resolveMaxTokens(cc.Template.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
 	}
 	cc.Template.MaxTokens = maxTokens
+
+	effort, err := resolveEffort(rt.AppCfg, opts.effort)
+	if err != nil {
+		return err
+	}
+	cc.Template.ApplyEffort(effort)
 
 	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
 	// input it returns pins the run to the very commits this check passed on, so
@@ -265,7 +284,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) error {
 	var emitErr error
 	emitted := manifest != nil || runErr == nil
 	if emitted {
-		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, retryReport)
+		emitErr = emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, retryReport)
 		if emitErr != nil {
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		}
@@ -466,11 +485,12 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 	return nil
 }
 
-func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions) error {
-	// Loading diffs itself writes to stdout (the per-file charset-decode
-	// notice), so the machine-readable formats must be silenced around Preview,
-	// not just around the final emit. Without this the JSON document is
-	// preceded by human-readable lines and no longer parses.
+func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
+	// Loading diffs itself writes to stdout.Writer() (the per-file
+	// charset-decode notice), which `out` does not cover: the notice is
+	// printed while diffs are parsed, long before the document is written.
+	// Machine-readable formats must silence it around the whole of Preview,
+	// or the JSON document is preceded by human-readable lines.
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
@@ -486,7 +506,7 @@ func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOption
 		return fmt.Errorf("preview failed: %w", err)
 	}
 
-	return outputPreview(preview, opts.outputFormat)
+	return outputPreview(preview, opts.outputFormat, out)
 }
 
 func initMCPClients(ctx context.Context, cfg *Config, tools *tool.Registry, repoDir, version string) []*mcp.Client {

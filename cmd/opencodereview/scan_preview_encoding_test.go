@@ -56,7 +56,7 @@ func TestScanPreviewJSONStaysParseableWithLegacyFiles(t *testing.T) {
 	writeAndCommit(t, dir, "blob.go", scanPreviewGarbage())
 	writeAndCommit(t, dir, "clean.go", []byte("package auth\n\nfunc Clean() {}\n"))
 
-	cc, err := loadCommonContext(dir, "", 0, 0, false)
+	cc, err := loadCommonContext(dir, "", "", 0, 0, false)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestScanPreviewJSONStaysParseableWithLegacyFiles(t *testing.T) {
 		var notice bytes.Buffer
 		restore := stdout.Swap(&notice)
 		rendered := captureStdout(t, func() {
-			if err := runScanPreview(cc, scanTpl, nil, "text"); err != nil {
+			if err := runScanPreview(cc, scanTpl, nil, "text", os.Stdout); err != nil {
 				t.Fatalf("runScanPreview: %v", err)
 			}
 		})
@@ -99,7 +99,7 @@ func TestScanPreviewJSONStaysParseableWithLegacyFiles(t *testing.T) {
 			q := newQuietHandle("json", "")
 			defer q.Restore()
 
-			if err := runScanPreview(cc, scanTpl, nil, "json"); err != nil {
+			if err := runScanPreview(cc, scanTpl, nil, "json", os.Stdout); err != nil {
 				t.Fatalf("runScanPreview: %v", err)
 			}
 		})

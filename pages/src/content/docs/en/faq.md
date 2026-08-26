@@ -144,7 +144,9 @@ fails to match `tsx`.
 ### A file shows zero comments — was it actually reviewed?
 
 Open the [Session Viewer](../viewer/) (`ocr viewer`), find the session,
-and look at the file's `main_task` lane:
+and look at the `main_task` lane of the group that contains the file
+(groups are keyed by their file paths, so a file reviewed on its own
+appears under its own path):
 
 - Tool calls present + ends in `task_done` → reviewed cleanly.
 - Tool calls present + ends mid-loop → look for an error card.
@@ -168,13 +170,17 @@ agent integrations (the SKILL, the Claude Code plugin) read the
 ### Token threshold exceeded
 
 ```
-[ocr] WARNING: prompt tokens (94000) exceed 80% of max_tokens(58888) for src/big.sql
+[ocr] WARNING: prompt tokens (240000) exceed 80% of max_tokens(200000) [round 1] for group "src/big.sql"
 ```
 
-The initial prompt for that file (rule + diff + change-files list) was
-already past 80 % of `MAX_TOKENS = 58888` before the model could even
-respond. OCR skips the file and continues — you'll see this in
+The initial prompt for that group (rule + diffs + change-files list) was
+already past 80 % of `MAX_TOKENS = 200000` before the model could even
+respond. OCR skips the group and continues — you'll see this in
 `warnings` in JSON mode too.
+
+`MAX_TOKENS` is the **prompt** ceiling only. The model's output is capped
+independently by `MAX_COMPLETION_TOKENS` (`16384`), so this warning is
+always about input size.
 
 Mitigations:
 
@@ -185,11 +191,19 @@ Mitigations:
 
 ### Plan phase took forever and the file is small
 
-Run `ocr review --preview` first. If the file's `lines.changed` is
-above `PLAN_MODE_LINE_THRESHOLD` (default **50**), the plan phase runs.
-That's by design — large diffs benefit from a planning pass. To skip
-it for a single review, run with a smaller diff, or temporarily edit
-the embedded template (advanced; you'll need to override `--tools`).
+Run `ocr review --preview` first. The plan phase runs when **either**
+threshold is crossed:
+
+- The largest file in the group changed at least
+  `PLAN_MODE_LINE_THRESHOLD` lines (default **50**), **or**
+- The group holds 2+ files and their combined `lines.changed` reaches
+  `PLAN_MODE_GROUP_LINE_THRESHOLD` (default **100**).
+
+So a small file can still get a plan pass if it was grouped with other
+changes that add up. That's by design — large or wide diffs benefit
+from a planning pass. To skip it for a single review, run with a
+smaller diff, or temporarily edit the embedded template (advanced;
+you'll need to override `--tools`).
 
 ### "Max tool requests reached"
 
@@ -197,31 +211,31 @@ the embedded template (advanced; you'll need to override `--tools`).
 [ocr] Max tool requests reached for src/foo.go.
 ```
 
-The model spent 30 (`MAX_TOOL_REQUEST_TIMES`) tool-use rounds without
-calling `task_done`. Comments emitted up to that point are still
-collected and rendered. If this happens on most files, the issue is
-usually one of:
+The model spent all 100 (`MAX_TOOL_REQUEST_TIMES`) tool-use rounds
+without calling `task_done`. Comments emitted up to that point are
+still collected and rendered. If this happens on most groups, the issue
+is usually one of:
 
 - Model isn't great at following the "call `task_done` when finished"
   instruction. Switch to a stronger model (e.g., Claude Opus).
 - A tool keeps erroring and the model keeps retrying. Look at the
   session JSONL — if the same tool result repeats, that's why.
-- The file is genuinely large or context-heavy and 30 rounds isn't
-  enough. Raise or lower the cap with `--max-tools <n>` (e.g.,
-  `--max-tools 40` for more, `--max-tools 15` for fewer). Values 1–9
-  are clamped up to 10; `0` (the default) uses the template default of
-  30.
+- The group is genuinely large or context-heavy and 100 rounds isn't
+  enough. Raise the cap with `--max-tools <n>` (e.g., `--max-tools
+  150`). The flag only ever *raises* the limit — a value below the
+  template default of `100` is ignored, values 1–49 are clamped up to
+  `50`, and `0` keeps the template default.
 - The model does not support native tool calling at all (common with
   local models) — see
   ["No tool calls parsed" (local models / Ollama)](#no-tool-calls-parsed-local-models-ollama).
 
 ### Some sub-agents fail; the run still exits 0
 
-By design. OCR isolates per-file failures so one bad file doesn't kill
+By design. OCR isolates per-group failures so one bad group doesn't kill
 a 20-file review. The aggregate exit code is `0` if *anything*
 succeeded; only a fully-failed run (zero successful sub-agents) exits
 non-zero. Check the `warnings` array in JSON mode or stderr in text
-mode to see which files failed.
+mode to see which groups failed.
 
 ### CI run is much slower than local
 
@@ -285,16 +299,25 @@ stack — see [Telemetry](../telemetry/).
 
 Common levers:
 
-- Plan phase is on for files ≥ 50 lines. It costs an extra LLM call
-  per file. Lowering the threshold reduces cost; raising it improves
-  small-PR speed.
-- `MAX_TOOL_REQUEST_TIMES = 30` is generous. A model that uses every
+- The effort preset controls how many review rounds each group gets:
+  `low` = 1, `medium` (the default) = 2, `high` = 3. Cost scales roughly
+  with the round count, so `--effort low` is the single biggest lever if
+  you want a cheaper run; `--effort high` is the most expensive.
+- Plan phase is on for groups whose largest file is ≥ 50 lines, or whose
+  2+ files total ≥ 100 lines. It costs an extra LLM call per group.
+  Lowering the thresholds reduces cost; raising them improves small-PR
+  speed.
+- `MAX_TOOL_REQUEST_TIMES = 100` is generous. A model that uses every
   round will produce a longer (more tokens) conversation than one that
   finishes in 3 rounds. Stronger models tend to finish faster.
   Conversely, if you raised it with `--max-tools` to fight "max tool
-  requests reached", expect cost per file to grow roughly linearly.
+  requests reached", expect cost per group to grow roughly linearly.
 - Memory compression itself is an LLM call. Long subtasks pay for
   compression rounds in addition to review rounds.
+- Semantic grouping adds one small LLM call per run. It only sees file
+  metadata (paths, status, insertion/deletion counts) — never diff
+  content — so it is cheap, and it usually pays for itself by reviewing
+  related files together instead of once per file.
 
 ### How do I reduce LLM calls?
 

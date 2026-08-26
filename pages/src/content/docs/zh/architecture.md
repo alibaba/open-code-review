@@ -15,17 +15,20 @@ flowchart TD
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range<br/>Per file: detect charset, decode non-UTF-8 to UTF-8 (decode.go)</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
-    E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every diff in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop → Comments</span>"]
+    D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
+    E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
 
-    A --> B --> C --> D --> E --> F
+    A --> B --> C --> D --> D2 --> E --> F
 ```
 
 编排逻辑位于
 [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
-包，分布在四个文件：`agent.go`（主循环与分发）、`compression.go`（记忆压缩）、
-`preview.go`（文件过滤）和 `util.go`（辅助）。两个入口点值得关注：`Agent.Run`
-（流水线顶部）和 `Agent.dispatchSubtasks`（per-file 扇出）。
+包，主要文件有：`agent.go`（分发与按组编排）、`grouping.go`（语义文件分组）、
+`preview.go`（文件过滤）和 `util.go`（辅助）；工具调用循环与记忆压缩位于相邻的
+[`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)。
+两个入口点值得关注：`Agent.Run`（流水线顶部）和 `Agent.dispatchSubtasks`
+（per-group 扇出）。
 
 ## diff provider
 
@@ -86,9 +89,24 @@ undecodable_encoding — 字节在任何受支持的字符集下都不是可解�
 运行 `ocr review --preview` 可不花 token 查看完整过滤结果。完整算法见
 [评审规则](../review-rules/#how-files-are-filtered)。
 
-## per-file 子任务：plan + main
+## 语义文件分组
 
-对每个通过过滤的文件，OCR 启动一个子 agent。每个子 agent 在自己的 goroutine
+过滤之后，OCR 先做一次 `GROUPING_TASK` LLM 调用（`internal/agent/grouping.go`），
+只把**文件元数据**（路径、状态、`+`/`-` 行数）发给模型——不含 diff 内容——请它
+把语义相关的文件聚成一组，一起评审。通常会归为一组的文件包括：同一模块 / 特性、
+存在生产者/消费者关系（接口与实现）、同一资源的 i18n / 配置变体、以及同目录下
+协作完成同一件事的文件。
+
+约束与兜底：
+
+- 每个文件恰好属于一个组；单个组最多 `maxFilesPerGroup = 10` 个文件。
+- 一组 diff 的合计 token 超过限制时，该组被拆成单文件组
+  （`enforceGroupTokenBudget`）。
+- 分组调用失败、返回空或只有 1 个文件时，退化为**每文件一组**的分发方式。
+
+## 每组子任务：plan + main
+
+对每个文件组，OCR 启动一个子 agent。每个子 agent 在自己的 goroutine
 中运行，受 `--concurrency`（默认 **8**）约束，并有独立的 LLM 消息缓冲区。
 
 一个子任务最多有**两个阶段**：
@@ -96,10 +114,18 @@ undecodable_encoding — 字节在任何受支持的字符集下都不是可解�
 ### 阶段 1——Plan（可选）
 
 ```go
-threshold := template.PlanModeLineThreshold     // 50
-changeLines := d.Insertions + d.Deletions
-if changeLines < threshold { skip plan }
+// template.PlanRequired(fileCount, totalChanged, maxFileChanged)
+PlanModeLineThreshold      = 50    // 组内单文件最大变更行数
+PlanModeGroupLineThreshold = 100   // 多文件组的合计变更行数
+
+if maxFileChanged >= 50                      { run plan }   // 单文件大改
+if fileCount >= 2 && totalChanged >= 100     { run plan }   // 多个中等改动
+otherwise                                    { skip plan }
 ```
+
+两个阈值协同工作：`PLAN_MODE_LINE_THRESHOLD` 看组内最大的那个文件，
+`PLAN_MODE_GROUP_LINE_THRESHOLD` 看整组的合计变更量；后者故意取更大的值，
+以免 plan 阶段变成无条件执行。
 
 对小 diff，plan 只会增加延迟、没有价值，因此被静默跳过，main 循环直接运行。对较大
 diff，OCR 做一次**单次** `PLAN_TASK` LLM 调用——不发送 `Tools` 字段，因此模型
@@ -109,14 +135,20 @@ diff，OCR 做一次**单次** `PLAN_TASK` LLM 调用——不发送 `Tools` 字
 让模型知道后续可用什么。模型返回一份清单，作为 main prompt 中的
 `{{plan_guidance}}`。
 
-### 阶段 2——main 循环
+### 阶段 2——main 循环（多轮）
 
 main 循环组装 `MAIN_TASK` prompt，与模型展开工具调用对话。完整工具集在
 plan 阶段工具基础上加 **`task_done`**、**`code_comment`** 和
 **`file_read`**——完整清单见[工具](../tools/)。
 
+整个 main 循环最多重复 `MAX_REVIEW_ROUNDS` 次（由 `--effort` 控制：
+`low` = 1 轮，`medium` = 2 轮（默认），`high` = 3 轮）。第 2 轮起会剥离
+plan 结果（避免它成为召回上限），并把上一轮已确认的评论作为「已发现」上下文
+回传，让模型去找**新**问题。某一轮没有新增发现，或已确认评论数达到上限时，
+提前停止。
+
 ```
-loop up to MAX_TOOL_REQUEST_TIMES (default 30):
+loop up to MAX_TOOL_REQUEST_TIMES (default 100):
     response = llm.complete(messages, tools)
     if response.toolCalls is empty:
         nudge model with "You did not successfully call any tools.
@@ -140,7 +172,9 @@ loop up to MAX_TOOL_REQUEST_TIMES (default 30):
 ## 记忆压缩
 
 长的工具调用循环最终会溢出上下文窗口。OCR 用**三分区**策略管理，触发于
-`MAX_TOKENS = 58888` 定义的 token 预算：
+`MAX_TOKENS = 200000` 定义的 token 预算。注意 `MAX_TOKENS` 只是**提示词**上限；
+模型的输出上限由单独的 `MAX_COMPLETION_TOKENS = 16384` 控制，因此用
+`--max-tokens` 抬高提示词上限不会连带放大输出预算。
 
 | 阈值 | 常量 | 动作 |
 |---|---|---|
@@ -218,22 +252,24 @@ func (a *Agent) runCompression(ctx context.Context, msgs []llm.Message, filePath
 tokenLimit := MaxTokens * 4 / 5     // 80 %
 if countMessagesTokens(messages) > tokenLimit {
     record warning "token_threshold_exceeded"
-    return nil      // skip this file
+    return nil      // skip this group
 }
 ```
 
 这会在巨大 diff（自动生成的 lock 文件、触及数千行的重构）耗费请求之前把它们拦截下来。
-被跳过的文件作为非致命警告在 stdout 报告，并加入 JSON `warnings` 数组。
+被跳过的那一组作为非致命警告在 stdout 报告，并加入 JSON `warnings` 数组。
 
 第二个检查在 `filterLargeDiffs` 中运行：若 diff 单独超过 `MAX_TOKENS` 的 80 %，
-它在 per-file 分发器启动前就被过滤掉。
+它在分组与分发发生之前就被过滤掉。第三道守卫在分组内部运行——见上文的
+`enforceGroupTokenBudget`。
 
 ## 模板与占位符
 
-`internal/config/template/task_template.json` 含**五个 prompt**：
+`internal/config/template/task_template.json` 含**六个 prompt**：
 
 | Key | 用途 |
 |---|---|
+| `GROUPING_TASK` | 把变更文件聚成语义相关的组。 |
 | `PLAN_TASK` | plan 阶段——产出清单。 |
 | `MAIN_TASK` | main 评审循环——发出 `code_comment` 调用。 |
 | `MEMORY_COMPRESSION_TASK` | 摘要 compress 区。 |
@@ -243,20 +279,21 @@ if countMessagesTokens(messages) > tokenLimit {
 每个 prompt 是一个 `{role, prompt_file}` 引用列表，指向模板目录中的 `.md` 文件
 （如 `{"role": "system", "prompt_file": "main_task_system.md"}`）。加载时
 `resolveConversation` 把这些文件读入内存中的 `{role, content}` 消息，随后模板
-占位符按文件解析：
+占位符按组解析：
 
 | 占位符 | 替换为 |
 |---|---|
 | `{{system_rule}}` | 从四层链解析出的规则正文。 |
-| `{{change_files}}` | PR 中其他每个变更文件的状态 + 路径。 |
-| `{{diff}}` | 本文件的 diff（原始 `git diff` 输出）。 |
-| `{{current_file_path}}` | 本文件的新路径。 |
+| `{{change_files}}` | 本次变更中**不属于当前组**的其他文件的状态 + 路径。 |
+| `{{diffs}}` | 当前组内所有文件的 diff，逐个包在 `<file>` 元素中，整体放在 `<review_files>` 里。 |
+| `{{file_list}}` | （仅 `GROUPING_TASK`）变更文件的元数据清单：路径、状态、`+`/`-` 行数。 |
 | `{{plan_guidance}}` | plan 阶段的输出，plan 被跳过时移除。 |
+| `{{confirmed_comments}}` | 前几轮已确认的发现；第 1 轮为空并被移除。 |
 | `{{plan_tools}}` | plan 阶段工具定义的纯文本（由 `formatToolDefs` 渲染），用于 `PLAN_TASK` system prompt。 |
 | `{{requirement_background}}` | `--background` 或 `--background-file` 的有效内容（文件优先）。 |
 | `{{current_system_date_time}}` | 运行的本地时间戳，格式 `YYYY-MM-DD HH:MM`（无秒或时区）。 |
 | `{{context}}` | （仅压缩）要摘要的 XML 渲染消息。 |
-| `{{path}}` | 文件路径，用于 `REVIEW_FILTER_TASK`。 |
+| `{{path}}` | 组的 key（组内文件路径，逗号分隔），用于 `REVIEW_FILTER_TASK`。 |
 | `{{comments}}` | 累积的评论（JSON），用于 `REVIEW_FILTER_TASK`。 |
 
 占位符替换位于
@@ -290,7 +327,8 @@ Web UI（`ocr viewer`）直接读这些文件——没有数据库，只有 appe
 ## 遥测
 
 启用遥测后，agent 发出三个流水线级 span（`review.run` 包裹整个作业、
-`diff.parse` 包裹 diff 加载、每个被评审文件一个 `subtask.execute.<file>`），加上
+`diff.parse` 包裹 diff 加载、每个被评审的组一个
+`subtask.execute.group.<group-key>`），加上
 每个决策点一个短生命周期的 `event.<name>` span（`plan.skipped`、
 `token.threshold.exceeded`、`subtask.error`……）。LLM 往返和工具调用仅作为
 metrics 记录——不作为 span。prompt 与响应内容**绝不**附加到遥测；
@@ -302,14 +340,15 @@ metrics 记录——不作为 span。prompt 与响应内容**绝不**附加到�
 
 - **端点发现没有回退。** 若你的 config + env + rc 文件给不出完整的
   `(URL, token, model)` 三元组，OCR 以非零码退出，而非猜测。
-- **子 agent 失败被隔离，不重试。** 一个失败文件产生一条警告；其余继续。重试
+- **子 agent 失败被隔离，不重试。** 一个失败的组产生一条警告；其余继续。重试
   属于包裹它的 CI 流水线，而非 agent。
-- **无跨文件推理。** 每个文件在它自己的 LLM 对话中评审。跨文件问题通过
-  `file_read_diff` / `code_search` 工具调用，而非共享上下文。那些*其他*文件中
-  的发现也禁止作为评论目标——`main_task` prompt 指示模型仅将上下文工具用于
-  理解，并忽略在当前 diff 之外文件中出现的问题。
+- **跨文件推理以组为边界。** 同一语义组内的文件共享一个 LLM 对话，因此 agent
+  可以直接在它们之间推理。*其他*组的文件只能通过 `file_read_diff` /
+  `code_search` 工具调用触达，不共享上下文，其中的发现也禁止作为评论目标——
+  `main_task` prompt 指示模型仅将上下文工具用于理解，并忽略在给定 diff 之外
+  出现的问题。
 
-这些选择让运行**按文件确定性**，并让成本可预测。
+这些选择让运行**按组确定性**，并让成本可预测。
 
 ## 源码地图
 
@@ -318,8 +357,11 @@ metrics 记录——不作为 span。prompt 与响应内容**绝不**附加到�
 | 关注点 | 文件 |
 |---|---|
 | 顶层命令分发 | `cmd/opencodereview/main.go` |
-| `review` 参数解析 | `cmd/opencodereview/flags.go` |
-| agent 编排与压缩 | `internal/agent/`（agent.go、compression.go、util.go） |
+| `review` 参数解析 | `cmd/opencodereview/shared_flags.go` |
+| agent 编排 | `internal/agent/`（agent.go、util.go） |
+| 语义文件分组 | `internal/agent/grouping.go` |
+| 工具调用循环与记忆压缩 | `internal/llmloop/`（loop.go、compression.go） |
+| effort 档位 | `internal/config/template/effort.go` |
 | 文件过滤 / 预览 | `internal/agent/preview.go` |
 | diff 加载（Git 模式） | `internal/diff/git.go` |
 | 规则解析链 | `internal/config/rules/system_rules.go` |

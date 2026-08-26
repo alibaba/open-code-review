@@ -45,7 +45,7 @@ func TestReviewE2E_CleanRunEmitsNoRetryReport(t *testing.T) {
 	if strings.Contains(out, "retry_report") {
 		t.Errorf("a first-try-success run must not emit retry_report:\n%s", out)
 	}
-	if strings.Contains(errOut, "LLM retry report") {
+	if strings.Contains(errOut, "LLM retry report summary") {
 		t.Errorf("nothing should reach the failure exit either:\n%s", errOut)
 	}
 }
@@ -141,17 +141,17 @@ func TestReviewE2E_RetryReportReachesTextExit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("partial coverage must exit 0: %v\nstderr: %s", err, errOut)
 	}
-	if !strings.Contains(out, "LLM retry report:") {
+	if !strings.Contains(out, "LLM retry report summary:") {
 		t.Fatalf("terminal summary missing from stdout:\n%s", out)
 	}
-	if !strings.Contains(out, "rate_limited(429) -> success") {
+	if !strings.Contains(out, "rate limited (HTTP 429) -> succeeded") {
 		t.Errorf("attempt chain missing from the terminal summary:\n%s", out)
 	}
-	if !strings.Contains(out, "provider(402) -> failed") {
+	if !strings.Contains(out, "rejected by provider (HTTP 402) -> failed") {
 		t.Errorf("failed request missing from the terminal summary:\n%s", out)
 	}
 	// The summary is a run result, so it must not be duplicated onto stderr.
-	if strings.Contains(errOut, "LLM retry report") {
+	if strings.Contains(errOut, "LLM retry report summary") {
 		t.Errorf("report must not also appear on stderr:\n%s", errOut)
 	}
 	// It must carry no secret material: the token, the endpoint URL and raw
@@ -209,10 +209,10 @@ func TestReviewE2E_AllFilesFailTextPublishesReportOnce(t *testing.T) {
 	if err == nil {
 		t.Fatal("a fully failed review must exit non-zero")
 	}
-	if !strings.Contains(out, "LLM retry report:") {
+	if !strings.Contains(out, "LLM retry report summary:") {
 		t.Fatalf("report missing from stdout:\n%s", out)
 	}
-	if strings.Contains(errOut, "LLM retry report:") {
+	if strings.Contains(errOut, "LLM retry report summary:") {
 		t.Errorf("report duplicated onto stderr:\n%s", errOut)
 	}
 	if !strings.Contains(errOut, "[ocr] usage on failure:") {

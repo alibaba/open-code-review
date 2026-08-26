@@ -149,12 +149,15 @@ plugin）读 `existing_code` 字段并自行在文件中定位。
 ### Token threshold exceeded
 
 ```
-[ocr] WARNING: prompt tokens (94000) exceed 80% of max_tokens(58888) for src/big.sql
+[ocr] WARNING: prompt tokens (94000) exceed 80% of max_tokens(200000) for src/big.sql
 ```
 
 该文件的初始 prompt（规则 + diff + change-files 列表）在模型能响应之前就已超过
-`MAX_TOKENS = 58888` 的 80 %。OCR 跳过该文件并继续——JSON 模式下你也会在
-`warnings` 中看到。
+`MAX_TOKENS` 的 80 %（review 默认 `200000`；`ocr scan` 用更小的 `58888`）。
+OCR 跳过该文件并继续——JSON 模式下你也会在 `warnings` 中看到。
+
+注意 `MAX_TOKENS` 只限制**提示词**。模型的输出上限由单独的
+`MAX_COMPLETION_TOKENS = 16384` 控制，所以调高 `--max-tokens` 不会放大输出预算。
 
 缓解：
 
@@ -164,9 +167,10 @@ plugin）读 `existing_code` 字段并自行在文件中定位。
 
 ### plan 阶段花了很久而文件很小
 
-先运行 `ocr review --preview`。若文件的 `lines.changed` 超过
-`PLAN_MODE_LINE_THRESHOLD`（默认 **50**），plan 阶段会运行。这是有意为之——大
-diff 能从 plan 中受益。要为单次评审跳过它，用更小 diff 运行，或临时编辑内嵌模板
+先运行 `ocr review --preview`。plan 阶段在下面任一条件成立时运行：组内某个文件的
+`lines.changed` 达到 `PLAN_MODE_LINE_THRESHOLD`（默认 **50**），或该组含 2 个以上
+文件且合计变更行数达到 `PLAN_MODE_GROUP_LINE_THRESHOLD`（默认 **100**）。这是有意
+为之——大 diff 能从 plan 中受益。要为单次评审跳过它，用更小 diff 运行，或临时编辑内嵌模板
 （高级；需覆盖 `--tools`）。
 
 ### "Max tool requests reached"
@@ -175,14 +179,15 @@ diff 能从 plan 中受益。要为单次评审跳过它，用更小 diff 运行
 [ocr] Max tool requests reached for src/foo.go.
 ```
 
-模型花了 30（`MAX_TOOL_REQUEST_TIMES`）轮工具调用却没调 `task_done`。到那时为
+模型用尽了 100 轮（`MAX_TOOL_REQUEST_TIMES`）工具调用却没调 `task_done`。到那时为
 止发出的评论仍被收集并渲染。若多数文件都这样，问题通常是：
 
 - 模型不擅长遵循“完成后调 `task_done`”指令。换更强模型（如 Claude Opus）。
 - 某工具持续报错而模型持续重试。看会话 JSONL——若同一工具结果重复，即是原因。
-- 文件确实大或上下文重，30 轮不够。用 `--max-tools <n>` 调高或调低
-  （如 `--max-tools 40` 更多，`--max-tools 15` 更少）。1–9 会被上调到 10；
-  `0`（默认）用模板默认 30。
+- 文件确实大或上下文重，100 轮不够。用 `--max-tools <n>` 调高
+  （如 `--max-tools 150`）。`--max-tools` 只能**上调**：小于模板默认值
+  （`100`）的值不生效，1–49 还会先被上调到 `50`；`0`（默认）直接用模板默认
+  `100`。
 - 模型完全不支持原生工具调用（本地模型常见）——见
   ["No tool calls parsed"（本地模型 / Ollama）](#no-tool-calls-parsed-本地模型-ollama)。
 
@@ -246,9 +251,11 @@ metrics 体系——见[遥测](../telemetry/)。
 
 常见因素：
 
-- 文件 ≥ 50 行时 plan 阶段开启。它每文件多一次 LLM 调用。降低阈值可减少成本；升高
-  阈值可提升小 PR 的速度。
-- `MAX_TOOL_REQUEST_TIMES = 30` 很宽松。用满轮数的模型会产出比 3 轮就完成的模型
+- 文件 ≥ 50 行（或多文件组合计 ≥ 100 行）时 plan 阶段开启。它每组多一次 LLM 调用。
+  降低阈值可减少成本；升高阈值可提升小 PR 的速度。
+- main 循环默认跑 2 轮（`medium` 档）。用 `--effort low` 只跑 1 轮可近似减半评审
+  成本；`--effort high`（3 轮）召回更高但更贵。
+- `MAX_TOOL_REQUEST_TIMES = 100` 很宽松。用满轮数的模型会产出比 3 轮就完成的模型
   更长（更多 token）的对话。更强模型倾向于更快完成。反过来，若你为应对 "max tool
   requests reached" 用 `--max-tools` 调高，预期每文件成本大致线性增长。
 - 记忆压缩本身是一次 LLM 调用。较长的子任务除评审轮外，还要为压缩轮付费。
@@ -256,6 +263,7 @@ metrics 体系——见[遥测](../telemetry/)。
 ### 如何减少 LLM 调用？
 
 - 添加 `include` 列表，使 OCR 不评审你不关心的文件。
+- 用 `--effort low` 把 main 循环降到 1 轮。
 - 若你的账户有 burst-mode 计价，调低 `--concurrency`。
 - 传 `--background`——更充分的前期上下文有时能让模型无需 `file_read` /
   `code_search` 往返即可完成。

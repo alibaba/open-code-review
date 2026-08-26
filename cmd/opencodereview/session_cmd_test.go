@@ -15,7 +15,7 @@ import (
 
 func TestRunSessionList_TextIncludesSessionID(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
@@ -44,7 +44,7 @@ func TestRunSessionList_TextIncludesSessionID(t *testing.T) {
 
 func TestRunSessionList_JSON(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
@@ -71,7 +71,7 @@ func TestRunSessionList_JSON(t *testing.T) {
 
 func TestRunSessionList_EmptyRepo(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	got := captureStdout(t, func() {
@@ -86,7 +86,7 @@ func TestRunSessionList_EmptyRepo(t *testing.T) {
 
 func TestRunSessionShow_Text(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
@@ -112,7 +112,7 @@ func TestRunSessionShow_Text(t *testing.T) {
 
 func TestRunSessionShow_JSON(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
@@ -145,7 +145,7 @@ func TestRunSessionShow_JSON(t *testing.T) {
 
 func TestRunSessionComments_TextRendersLikeReview(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
@@ -172,7 +172,7 @@ func TestRunSessionComments_TextRendersLikeReview(t *testing.T) {
 
 func TestRunSessionComments_SeverityFilter(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
@@ -206,7 +206,7 @@ func TestRunSessionComments_SeverityFilter(t *testing.T) {
 
 func TestRunSessionComments_JSON(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
@@ -235,7 +235,7 @@ func TestRunSessionComments_JSON(t *testing.T) {
 
 func TestRunSessionComments_JSONEmptyIsArray(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
@@ -257,7 +257,7 @@ func TestRunSessionComments_JSONEmptyIsArray(t *testing.T) {
 
 func TestRunSessionComments_NoCommentsMessage(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 
 	sh := session.New(repoDir, "main", "test-model", session.SessionOptions{
@@ -279,7 +279,7 @@ func TestRunSessionComments_NoCommentsMessage(t *testing.T) {
 
 func TestRunSessionShow_MissingID(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	err := runSessionShowCompat([]string{})
 	if err == nil {
 		t.Fatal("expected error for missing session id")

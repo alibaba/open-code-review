@@ -14,13 +14,14 @@ flowchart TD
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
     C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range<br/>Per file: detect charset, decode non-UTF-8 to UTF-8 (decode.go)</span>"]
     D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
-    E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every diff in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop → Comments</span>"]
+    D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
+    E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
 
-    A --> B --> C --> D --> E --> F
+    A --> B --> C --> D --> D2 --> E --> F
 ```
 
-オーケストレーションのロジックは [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/) パッケージにあり、4 つのファイルに分かれています: `agent.go`（メインループとディスパッチ）、`compression.go`（メモリ圧縮）、`preview.go`（ファイルフィルタリング）、`util.go`（ヘルパー）。注目すべきエントリポイントは 2 つです: `Agent.Run`（パイプラインの最上部）と `Agent.dispatchSubtasks`（ファイルごとのファンアウト）。
+オーケストレーションのロジックは [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/) パッケージにあり、主要なファイルは `agent.go`（ディスパッチとグループごとのオーケストレーション）、`grouping.go`（セマンティックなファイルグルーピング）、`preview.go`（ファイルフィルタリング）、`util.go`（ヘルパー）です。ツール呼び出しループとメモリ圧縮は、その隣にある [`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/) にあります。注目すべきエントリポイントは 2 つです: `Agent.Run`（パイプラインの最上部）と `Agent.dispatchSubtasks`（グループごとのファンアウト）。
 
 ## diff provider
 
@@ -63,28 +64,46 @@ undecodable_encoding — バイトがサポート対象のどの文字コード�
 
 `ocr review --preview` を実行すると、token を消費せずに完全なフィルタリング結果を確認できます。完全なアルゴリズムは[レビュールール](../review-rules/#how-files-are-filtered)を参照してください。
 
-## ファイルごとのサブタスク: plan + main
+## セマンティックなファイルグルーピング
 
-フィルタリングを通過した各ファイルについて、OCR はサブエージェントを起動します。各サブエージェントは自身の goroutine 内で実行され、`--concurrency`（デフォルト **8**）によって制限され、独立した LLM メッセージバッファを持ちます。
+フィルタリングのあと、OCR はまず `GROUPING_TASK` の LLM 呼び出しを 1 回行います（`internal/agent/grouping.go`）。モデルに送るのは**ファイルのメタデータ**（パス、状態、`+`/`-` 行数）だけで、diff の内容は含みません。そのうえで、意味的に関連するファイルを 1 つのグループにまとめ、一緒にレビューできるようにします。典型的に同じグループになるのは、同一モジュール / 機能に属するファイル、生産者と消費者の関係（インターフェースと実装）、同じリソースの i18n / 設定バリアント、そして同じディレクトリで同じ目的のために協働しているファイルです。
+
+制約とフォールバック:
+
+- 各ファイルはちょうど 1 つのグループに属します。1 グループの上限は `maxFilesPerGroup = 10` ファイルです。
+- グループ内の diff の合計 token が上限を超える場合、そのグループは単一ファイルのグループに分割されます（`enforceGroupTokenBudget`）。
+- グルーピング呼び出しが失敗した場合、空の応答が返った場合、あるいはファイルが 1 つしかない場合は、**ファイルごとに 1 グループ**のディスパッチにフォールバックします。
+
+## グループごとのサブタスク: plan + main
+
+各ファイルグループについて、OCR はサブエージェントを起動します。各サブエージェントは自身の goroutine 内で実行され、`--concurrency`（デフォルト **8**）によって制限され、独立した LLM メッセージバッファを持ちます。
 
 1 つのサブタスクは最大**2 つの段階**を持ちます:
 
 ### 段階 1: Plan（任意）
 
 ```go
-threshold := template.PlanModeLineThreshold     // 50
-changeLines := d.Insertions + d.Deletions
-if changeLines < threshold { skip plan }
+// template.PlanRequired(fileCount, totalChanged, maxFileChanged)
+PlanModeLineThreshold      = 50    // グループ内の単一ファイルの最大変更行数
+PlanModeGroupLineThreshold = 100   // 複数ファイルグループの合計変更行数
+
+if maxFileChanged >= 50                      { run plan }   // 単一ファイルの大きな変更
+if fileCount >= 2 && totalChanged >= 100     { run plan }   // 中規模の変更が複数
+otherwise                                    { skip plan }
 ```
+
+2 つのしきい値は連携して働きます。`PLAN_MODE_LINE_THRESHOLD` はグループ内で最も大きいファイルを見て、`PLAN_MODE_GROUP_LINE_THRESHOLD` はグループ全体の合計変更量を見ます。後者を意図的に大きめの値にしているのは、plan 段階が無条件に実行されてしまうのを避けるためです。
 
 小さな diff に対しては、plan はレイテンシを増やすだけで価値がないため、静かにスキップされ、main ループが直接実行されます。より大きな diff に対しては、OCR は**1 回だけ** `PLAN_TASK` の LLM 呼び出しを行います。`Tools` フィールドを送らないため、plan の間モデルはツールを呼び出せません。読み取り専用ツールのサブセット（`code_search`、`file_read_diff`、`file_find`。`tools.json` で `plan_task` フラグが `true` の 3 つ）が、`{{plan_tools}}` プレースホルダー（`formatToolDefs` でレンダリング）を通じてプレーンテキストとして埋め込まれ、あとで何が使えるかをモデルに知らせます。モデルはチェックリストを返し、それが main prompt 内の `{{plan_guidance}}` になります。
 
-### 段階 2: main ループ
+### 段階 2: main ループ（複数ラウンド）
 
 main ループは `MAIN_TASK` prompt を組み立て、モデルとツール呼び出しの対話を展開します。完全なツールセットは、plan 段階のツールに **`task_done`**、**`code_comment`**、**`file_read`** を加えたものです。完全な一覧は[ツール](../tools/)を参照してください。
 
+main ループ全体は最大 `MAX_REVIEW_ROUNDS` 回繰り返されます（`--effort` で制御: `low` = 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド）。2 ラウンド目以降は plan の結果を取り除き（それが recall の上限になってしまうのを避けるため）、前のラウンドで確定したコメントを「すでに見つかった指摘」のコンテキストとして渡し、モデルに**新しい**問題を探させます。あるラウンドで新しい指摘が出なかった場合、または確定コメント数が上限に達した場合は、早期に停止します。
+
 ```
-loop up to MAX_TOOL_REQUEST_TIMES (default 30):
+loop up to MAX_TOOL_REQUEST_TIMES (default 100):
     response = llm.complete(messages, tools)
     if response.toolCalls is empty:
         nudge model with "You did not successfully call any tools.
@@ -107,7 +126,7 @@ loop up to MAX_TOOL_REQUEST_TIMES (default 30):
 
 ## メモリ圧縮
 
-長いツール呼び出しループは、最終的にコンテキストウィンドウをあふれさせます。OCR は**3 分割**戦略で管理し、`MAX_TOKENS = 58888` で定義される token 予算でトリガーされます:
+長いツール呼び出しループは、最終的にコンテキストウィンドウをあふれさせます。OCR は**3 分割**戦略で管理し、`MAX_TOKENS = 200000` で定義される token 予算でトリガーされます。なお `MAX_TOKENS` は**プロンプト**の上限にすぎません。モデルの出力上限は別の `MAX_COMPLETION_TOKENS = 16384` で制御されるため、`--max-tokens` でプロンプト上限を上げても出力予算が一緒に広がることはありません。
 
 | しきい値 | 定数 | 動作 |
 |---|---|---|
@@ -170,40 +189,42 @@ LLM を呼び出す前に、OCR はまず fail-fast のチェックを行いま�
 tokenLimit := MaxTokens * 4 / 5     // 80 %
 if countMessagesTokens(messages) > tokenLimit {
     record warning "token_threshold_exceeded"
-    return nil      // skip this file
+    return nil      // skip this group
 }
 ```
 
-これにより、巨大な diff（自動生成された lock ファイル、数千行に触れるリファクタリング）がリクエストを消費する前にそれらを食い止めます。スキップされたファイルは致命的でない警告として stdout に報告され、JSON の `warnings` 配列に追加されます。
+これにより、巨大な diff（自動生成された lock ファイル、数千行に触れるリファクタリング）がリクエストを消費する前にそれらを食い止めます。スキップされたグループは致命的でない警告として stdout に報告され、JSON の `warnings` 配列に追加されます。
 
-2 つ目のチェックは `filterLargeDiffs` の中で実行されます: diff が単独で `MAX_TOKENS` の 80% を超える場合、ファイルごとのディスパッチャーが起動する前にフィルタリングで除去されます。
+2 つ目のチェックは `filterLargeDiffs` の中で実行されます: diff が単独で `MAX_TOKENS` の 80% を超える場合、グルーピングとディスパッチが行われる前にフィルタリングで除去されます。3 つ目のガードはグルーピングの内部で実行されます——上記の `enforceGroupTokenBudget` を参照してください。
 
 ## テンプレートとプレースホルダー
 
-`internal/config/template/task_template.json` には**5 つの prompt** が含まれます:
+`internal/config/template/task_template.json` には**6 つの prompt** が含まれます:
 
 | Key | 用途 |
 |---|---|
+| `GROUPING_TASK` | 変更ファイルを意味的に関連するグループにまとめます。 |
 | `PLAN_TASK` | plan 段階。チェックリストを生成します。 |
 | `MAIN_TASK` | main レビューループ。`code_comment` 呼び出しを発行します。 |
 | `MEMORY_COMPRESSION_TASK` | compress ゾーンを要約します。 |
 | `REVIEW_FILTER_TASK` | ループ後に、明らかに誤りと証明できるコメントを削除する処理。 |
 | `RE_LOCATION_TASK` | `existing_code` を照合できないコメントを再アンカーします。 |
 
-各 prompt は `{role, prompt_file}` 参照のリストで、テンプレートディレクトリ内の `.md` ファイルを指します（例: `{"role": "system", "prompt_file": "main_task_system.md"}`）。読み込み時に `resolveConversation` がこれらのファイルをメモリ内の `{role, content}` メッセージに読み込み、その後テンプレートのプレースホルダーがファイルごとに解決されます:
+各 prompt は `{role, prompt_file}` 参照のリストで、テンプレートディレクトリ内の `.md` ファイルを指します（例: `{"role": "system", "prompt_file": "main_task_system.md"}`）。読み込み時に `resolveConversation` がこれらのファイルをメモリ内の `{role, content}` メッセージに読み込み、その後テンプレートのプレースホルダーがグループごとに解決されます:
 
 | プレースホルダー | 置換される内容 |
 |---|---|
 | `{{system_rule}}` | 4 層チェーンから解決されたルール本文。 |
-| `{{change_files}}` | PR 内の他の各変更ファイルの状態 + パス。 |
-| `{{diff}}` | このファイルの diff（生の `git diff` 出力）。 |
-| `{{current_file_path}}` | このファイルの新しいパス。 |
+| `{{change_files}}` | 今回の変更のうち、**現在のグループに含まれない**他のファイルの状態 + パス。 |
+| `{{diffs}}` | 現在のグループに含まれる全ファイルの diff。各ファイルが `<file>` 要素に包まれ、全体が `<review_files>` に入ります。 |
+| `{{file_list}}` | （`GROUPING_TASK` のみ）変更ファイルのメタデータ一覧: パス、状態、`+`/`-` 行数。 |
 | `{{plan_guidance}}` | plan 段階の出力。plan がスキップされた場合は削除されます。 |
+| `{{confirmed_comments}}` | 前のラウンドで確定した指摘。1 ラウンド目は空で削除されます。 |
 | `{{plan_tools}}` | plan 段階のツール定義のプレーンテキスト（`formatToolDefs` でレンダリング）。`PLAN_TASK` の system prompt に使用されます。 |
 | `{{requirement_background}}` | `--background` または `--background-file` の有効な内容（ファイルが優先）。 |
 | `{{current_system_date_time}}` | 実行時のローカルタイムスタンプ。形式は `YYYY-MM-DD HH:MM`（秒やタイムゾーンなし）。 |
 | `{{context}}` | （圧縮時のみ）要約対象の XML レンダリング済みメッセージ。 |
-| `{{path}}` | ファイルパス。`REVIEW_FILTER_TASK` に使用されます。 |
+| `{{path}}` | グループのキー（グループ内のファイルパスをカンマ区切りで連結）。`REVIEW_FILTER_TASK` に使用されます。 |
 | `{{comments}}` | 蓄積されたコメント（JSON）。`REVIEW_FILTER_TASK` に使用されます。 |
 
 プレースホルダーの置換は [`agent.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/agent.go) にあります。テンプレート自体は CLI では上書きできません。prompt を変更するには、[`task_template.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/template/task_template.json) を編集して再ビルドする必要があります。`--tools` 引数は*ツールレジストリ*の上書きです（`internal/config/toolsconfig` が消費する JSON を置き換えます）。テンプレートの上書きではありません。[ツール](../tools/#customizing-tools)を参照してください。
@@ -224,17 +245,17 @@ if countMessagesTokens(messages) > tokenLimit {
 
 ## テレメトリ
 
-テレメトリを有効にすると、agent は 3 つのパイプラインレベルの span を発行します（`review.run` はジョブ全体を包み、`diff.parse` は diff の読み込みを包み、レビューされた各ファイルにつき 1 つの `subtask.execute.<file>`）。加えて、各決定ポイントで短命な `event.<name>` span を発行します（`plan.skipped`、`token.threshold.exceeded`、`subtask.error`……）。LLM の往復とツール呼び出しは metrics としてのみ記録され、span としては記録されません。prompt とレスポンスの内容がテレメトリに添付されることは**決してありません**。`OCR_CONTENT_LOGGING` フラグは配線済みですが、現在はデッドコードです。完全な schema は[テレメトリ](../telemetry/)を参照してください。
+テレメトリを有効にすると、agent は 3 つのパイプラインレベルの span を発行します（`review.run` はジョブ全体を包み、`diff.parse` は diff の読み込みを包み、レビューされた各グループにつき 1 つの `subtask.execute.group.<group-key>`）。加えて、各決定ポイントで短命な `event.<name>` span を発行します（`plan.skipped`、`token.threshold.exceeded`、`subtask.error`……）。LLM の往復とツール呼び出しは metrics としてのみ記録され、span としては記録されません。prompt とレスポンスの内容がテレメトリに添付されることは**決してありません**。`OCR_CONTENT_LOGGING` フラグは配線済みですが、現在はデッドコードです。完全な schema は[テレメトリ](../telemetry/)を参照してください。
 
 ## *自動化されない*もの
 
 一部の決定は意図的に手動のままにされています:
 
 - **エンドポイント発見にフォールバックはありません。** config + env + rc ファイルが完全な `(URL, token, model)` の三つ組を与えられない場合、OCR は推測するのではなく非ゼロコードで終了します。
-- **サブエージェントの失敗は隔離され、リトライされません。** 1 つの失敗したファイルは 1 つの警告を生成し、残りは継続します。リトライは、それを包む CI パイプラインの責務であり、agent の責務ではありません。
-- **クロスファイルの推論はありません。** 各ファイルはそれ自身の LLM 対話でレビューされます。ファイルをまたぐ問題は `file_read_diff` / `code_search` ツール呼び出しを通じて扱われ、共有コンテキストは使いません。それら*他の*ファイルで見つかった問題をコメント対象にすることも禁止されています。`main_task` prompt は、コンテキストツールを理解のためだけに使い、現在の diff の外にあるファイルで見つかった問題は無視するようモデルに指示します。
+- **サブエージェントの失敗は隔離され、リトライされません。** 1 つの失敗したグループは 1 つの警告を生成し、残りは継続します。リトライは、それを包む CI パイプラインの責務であり、agent の責務ではありません。
+- **クロスファイルの推論はグループの範囲に限られます。** 同じセマンティックグループに属するファイルは 1 つの LLM 対話を共有するため、agent はそれらをまたいで直接推論できます。*他の*グループのファイルには `file_read_diff` / `code_search` ツール呼び出しからしか到達できず、コンテキストは共有されません。そこで見つかった問題をコメント対象にすることも禁止されています。`main_task` prompt は、コンテキストツールを理解のためだけに使い、与えられた diff の外で見つかった問題は無視するようモデルに指示します。
 
-これらの選択により、実行は**ファイルごとに決定的**になり、コストが予測可能になります。
+これらの選択により、実行は**グループごとに決定的**になり、コストが予測可能になります。
 
 ## ソースコードマップ
 
@@ -243,8 +264,11 @@ if countMessagesTokens(messages) > tokenLimit {
 | 関心事 | ファイル |
 |---|---|
 | トップレベルのコマンドディスパッチ | `cmd/opencodereview/main.go` |
-| `review` の引数解析 | `cmd/opencodereview/flags.go` |
-| agent のオーケストレーションと圧縮 | `internal/agent/`（agent.go、compression.go、util.go） |
+| `review` の引数解析 | `cmd/opencodereview/shared_flags.go` |
+| agent のオーケストレーション | `internal/agent/`（agent.go、util.go） |
+| セマンティックなファイルグルーピング | `internal/agent/grouping.go` |
+| ツール呼び出しループとメモリ圧縮 | `internal/llmloop/`（loop.go、compression.go） |
+| effort プリセット | `internal/config/template/effort.go` |
 | ファイルフィルタリング / プレビュー | `internal/agent/preview.go` |
 | diff の読み込み（Git モード） | `internal/diff/git.go` |
 | ルール解決チェーン | `internal/config/rules/system_rules.go` |
