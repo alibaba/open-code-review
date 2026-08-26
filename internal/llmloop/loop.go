@@ -118,8 +118,8 @@ func NewRunner(deps Deps) *Runner {
 // ultimately depends on the LLM client honouring context cancellation, and no
 // additional deadline is imposed here: the job already carries its own
 // timeout.
-// Scan does not currently call this because it freezes no retry report; its
-// analogous session-finalization race is outside this change.
+// Both diff-review and scan modes call this prior to session finalization so
+// background compression goroutines are joined before session_end is written.
 func (r *Runner) WaitBackground() {
 	r.bg.Wait()
 }
@@ -227,6 +227,53 @@ const (
 	// could not continue. Token/context driven but not a declared budget.
 	StopCompression
 )
+
+// String names the stop for diagnostics — telemetry attributes, log lines and
+// test failure messages. Without it a MainLoopStop formats as a bare integer,
+// which tells the reader nothing about which exit fired.
+func (s MainLoopStop) String() string {
+	switch s {
+	case StopNone:
+		return "none"
+	case StopMaxRounds:
+		return "max_rounds"
+	case StopEmptyRounds:
+		return "empty_rounds"
+	case StopCompression:
+		return "compression"
+	default:
+		return fmt.Sprintf("MainLoopStop(%d)", int(s))
+	}
+}
+
+// Reason is the safe, human-facing sentence for a stop, and the single source of
+// truth for it: the diff-review manifest reason and the scan subtask warning
+// both render this string, so the same stop can never read differently in the
+// two commands' output. Each return is a static literal — never error text, a
+// path or a provider payload — because callers persist it into machine-readable
+// output.
+//
+// Under --format json the [ocr] progress lines that would say which exit fired
+// are discarded by stdout.Quiet(), so this is the only stop diagnostic that
+// survives an ephemeral CI runner. Every stop must therefore read distinctly,
+// including one added to the enum after this was written: the default names the
+// unrecognized value instead of silently reusing the StopNone catch-all, so a
+// new constant announces itself in the artifact rather than hiding behind a
+// message that says nothing.
+func (s MainLoopStop) Reason() string {
+	switch s {
+	case StopNone:
+		return "main task stopped before completing"
+	case StopMaxRounds:
+		return "reached the maximum tool-request rounds without finishing"
+	case StopEmptyRounds:
+		return "stopped after repeated rounds without a usable tool result"
+	case StopCompression:
+		return "stopped because context compression exceeded its threshold"
+	default:
+		return fmt.Sprintf("main task stopped for an unrecognized reason (stop=%d)", int(s))
+	}
+}
 
 // RunPerFile drives the main LLM conversation loop for a single file.
 // It sends messages with the configured tool definitions, executes any
@@ -520,19 +567,13 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
 	}
 
-	// Always inject the current file path for code_comment.
-	// The model sometimes hallucinates a path, so we override it.
-	if t == tool.CodeComment && newPath != "" {
-		args["path"] = newPath
-	}
-
 	startTime := time.Now()
 
 	if t == tool.CodeComment {
 		telemetry.PrintToolCallStarted(t.Name(), args)
 		_, toolSpan := telemetry.StartToolSpan(ctx, t.Name())
 
-		comments, errMsg := tool.ParseComments(args)
+		comments, errMsg := tool.ParseCommentsWithPath(args, newPath)
 		if errMsg != "" {
 			dur := time.Since(startTime)
 			telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), fmt.Errorf("%s", errMsg))

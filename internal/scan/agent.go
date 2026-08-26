@@ -372,6 +372,12 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// Project-level summary runs after all batches; never blocks return.
 	a.maybeRunProjectSummary(ctx, comments)
 
+	// Join background memory compression before anything finalizes the session.
+	// Those jobs are cancelled rather than awaited when a conversation ends, so
+	// their LLM request can still be in flight here; joining them ensures no
+	// background goroutine is left leaking or writing to a finalized session.
+	a.runner.WaitBackground()
+
 	// A persistence failure is a delivery error in its own right: when the scan
 	// also failed, both facts are reported (errors.Join) rather than letting the
 	// dispatch error hide the fact that session_end never reached disk.
@@ -533,16 +539,18 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		// batch and feed them into the per-batch dedup hook.
 		batchStart := a.args.CommentCollector.Snapshot()
 
-		n, budgetHit, err := a.dispatchBatch(ctx, bi, batch)
+		n, budgetHit, checkpoints, err := a.dispatchBatch(ctx, bi, batch)
 		dispatched += n
 		if err != nil {
 			// ctx cancelled mid-batch: stop scheduling further batches but
 			// still return whatever we've collected so far.
+			// Persist completed items so the next resume does not scan them again.
+			a.recordBatchCheckpoints(checkpoints, batchStart, nil)
 			return a.args.CommentCollector.Comments(), err
 		}
 
 		// Drain async comment workers BEFORE dedup so all of this batch's
-		// comments are visible. recordCompleted has its own Await for
+		// comments are visible. recordBatchCheckpoints has its own Await for
 		// checkpoint correctness; this one keeps the dedup input complete.
 		// CommentWorkerPool.Await is cumulative across batches - that is fine
 		// since batches are sequential here.
@@ -550,7 +558,8 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 			a.args.CommentWorkerPool.Await()
 		}
 
-		a.maybeRunDedup(ctx, bi, batchStart)
+		dedupCheckpoints := a.maybeRunDedup(ctx, bi, batchStart)
+		a.recordBatchCheckpoints(checkpoints, batchStart, dedupCheckpoints)
 
 		// The per-file budget gate inside dispatchBatch tripped — stop
 		// scheduling any remaining batches.
@@ -566,6 +575,56 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	return a.args.CommentCollector.Comments(), nil
 }
 
+type batchCheckpoint struct {
+	item             model.ScanItem
+	reused           bool
+	originalComments []model.LlmComment
+}
+
+// recordBatchCheckpoints persists safe per-file comments after batch dedup.
+// New same-file groups use the canonical result. Reused items keep their source
+// checkpoint, and cross-file groups keep raw per-file comments so invalidating
+// one file cannot erase another file's finding on resume.
+func (a *Agent) recordBatchCheckpoints(
+	checkpoints []batchCheckpoint,
+	batchStart int,
+	dedupCheckpoints map[string][]model.LlmComment,
+) {
+	if len(checkpoints) == 0 {
+		return
+	}
+	if a.args.CommentWorkerPool != nil {
+		a.args.CommentWorkerPool.Await()
+	}
+	finalCommentsByPath := groupCommentsByPath(a.args.CommentCollector.Since(batchStart))
+	for _, checkpoint := range checkpoints {
+		fingerprint := a.scanItemFingerprint(checkpoint.item)
+		comments := finalCommentsByPath[checkpoint.item.Path]
+		if checkpoint.reused {
+			comments = checkpoint.originalComments
+			sourceSessionID := ""
+			if a.args.Resume != nil {
+				sourceSessionID = a.args.Resume.SessionID
+			}
+			a.session.RecordReviewItemReused(checkpoint.item.Path, checkpoint.item.Path, checkpoint.item.Path,
+				fingerprint, sourceSessionID, comments)
+			continue
+		}
+		if dedupCheckpoints != nil {
+			comments = dedupCheckpoints[checkpoint.item.Path]
+		}
+		a.session.RecordReviewItemDone(checkpoint.item.Path, checkpoint.item.Path, checkpoint.item.Path, fingerprint, comments)
+	}
+}
+
+func groupCommentsByPath(comments []model.LlmComment) map[string][]model.LlmComment {
+	byPath := make(map[string][]model.LlmComment)
+	for _, comment := range comments {
+		byPath[comment.Path] = append(byPath[comment.Path], comment)
+	}
+	return byPath
+}
+
 // resolveBatchStrategy reads the strategy from the scan template, defaulting
 // to BatchNone for unrecognized / empty values.
 func (a *Agent) resolveBatchStrategy() BatchStrategy {
@@ -574,8 +633,9 @@ func (a *Agent) resolveBatchStrategy() BatchStrategy {
 
 // dispatchBatch fans out the files of a single batch concurrently and
 // blocks until they all finish (or ctx is cancelled). Returns the number
-// of files dispatched, whether the token budget was hit mid-batch, and
-// ctx.Err() if cancelled.
+// of files dispatched, whether the token budget was hit mid-batch, the
+// completed/reused files whose checkpoints need recording, and ctx.Err()
+// if cancelled.
 //
 // The budget gate is checked per file, right after acquiring the
 // concurrency slot and before launching the subtask: if the tokens already
@@ -583,7 +643,7 @@ func (a *Agent) resolveBatchStrategy() BatchStrategy {
 // budget, the file (and all remaining files in the batch) are skipped.
 // This keeps overrun bounded by roughly one in-flight file per worker,
 // instead of a whole batch as the coarse batch-level gate did.
-func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.ScanItem) (int64, bool, error) {
+func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.ScanItem) (int64, bool, []batchCheckpoint, error) {
 	concurrency := a.args.MaxConcurrency
 	if concurrency <= 0 {
 		concurrency = 8
@@ -592,27 +652,12 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
 
 	var (
-		wg          sync.WaitGroup
-		dispatched  int64
-		budgetHit   bool
-		completedMu sync.Mutex
-		completed   []model.ScanItem
+		wg            sync.WaitGroup
+		dispatched    int64
+		budgetHit     bool
+		checkpointsMu sync.Mutex
+		checkpoints   []batchCheckpoint
 	)
-
-	recordCompleted := func() {
-		// Drain async comment writes before checkpointing completed files.
-		if a.args.CommentWorkerPool != nil {
-			a.args.CommentWorkerPool.Await()
-		}
-		completedMu.Lock()
-		items := append([]model.ScanItem(nil), completed...)
-		completedMu.Unlock()
-		for _, it := range items {
-			fingerprint := a.scanItemFingerprint(it)
-			comments := a.args.CommentCollector.CommentsForPath(it.Path)
-			a.session.RecordReviewItemDone(it.Path, it.Path, it.Path, fingerprint, comments)
-		}
-	}
 
 	for i := range batch {
 		it := batch[i]
@@ -621,7 +666,13 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 			for _, cm := range item.Comments {
 				a.args.CommentCollector.Add(cm)
 			}
-			a.session.RecordReviewItemReused(it.Path, it.Path, it.Path, fingerprint, a.args.Resume.SessionID, item.Comments)
+			checkpointsMu.Lock()
+			checkpoints = append(checkpoints, batchCheckpoint{
+				item:             it,
+				reused:           true,
+				originalComments: item.Comments,
+			})
+			checkpointsMu.Unlock()
 			continue
 		}
 
@@ -647,8 +698,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 		case sem <- struct{}{}:
 		case <-ctx.Done():
 			wg.Wait()
-			recordCompleted()
-			return dispatched, budgetHit, ctx.Err()
+			return dispatched, budgetHit, checkpoints, ctx.Err()
 		}
 
 		dispatched++
@@ -685,15 +735,14 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 				}
 				return
 			}
-			completedMu.Lock()
-			completed = append(completed, it)
-			completedMu.Unlock()
+			checkpointsMu.Lock()
+			checkpoints = append(checkpoints, batchCheckpoint{item: it})
+			checkpointsMu.Unlock()
 		}(it, fingerprint)
 	}
 
 	wg.Wait()
-	recordCompleted()
-	return dispatched, budgetHit, nil
+	return dispatched, budgetHit, checkpoints, nil
 }
 
 // executeSubtask runs the scan pipeline for one file:
@@ -717,7 +766,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 
 	rule := ""
 	if a.args.SystemRule != nil {
-		rule = a.args.SystemRule.Resolve(strings.ToLower(it.Path))
+		rule = a.args.SystemRule.Resolve(it.Path)
 	}
 
 	planGuidance := a.maybeRunPlan(ctx, it, rule)
@@ -738,12 +787,19 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		return false, "", nil
 	}
 
-	completed, _, err := a.runner.RunPerFile(ctx, messages, it.Path)
+	completed, stop, err := a.runner.RunPerFile(ctx, messages, it.Path)
 	if err != nil {
 		return false, "", err
 	}
 	if !completed {
-		return false, "main_task did not complete before stopping", nil
+		// Scan sessions opt out of the run manifest, so this one string is the
+		// whole diagnostic: it feeds both RecordReviewItemFailed and the
+		// scan_subtask_error warning, and under --format json the [ocr] progress
+		// lines that would say which exit fired are discarded. Name the trigger
+		// via the shared Reason() instead of a second hardcoded sentence, so
+		// scan and review never describe the same stop differently. The prefix
+		// stays for the resume records and warnings that already match on it.
+		return false, "main_task did not complete before stopping: " + stop.Reason(), nil
 	}
 	return true, "", nil
 }
@@ -879,10 +935,12 @@ func buildSummaryCommentsList(comments []model.LlmComment) string {
 // at least DedupMinComments comments, invokes the DEDUP_TASK LLM to merge
 // near-duplicate findings. On any failure (LLM error / malformed JSON /
 // invalid grouping) the original batch comments are kept unchanged — dedup
-// is a best-effort optimization, never a correctness gate.
-func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) {
+// is a best-effort optimization, never a correctness gate. The returned map
+// contains safe per-file checkpoints: canonical comments for same-file groups
+// and original comments for cross-file groups.
+func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) map[string][]model.LlmComment {
 	if !a.dedupEnabled() {
-		return
+		return nil
 	}
 	dt := a.args.Template.DedupTask
 	minN := a.args.Template.DedupMinComments
@@ -892,7 +950,7 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) {
 
 	batchComments := a.args.CommentCollector.Since(batchStart)
 	if len(batchComments) < minN {
-		return
+		return nil
 	}
 
 	payload := buildDedupCommentsJSON(batchComments)
@@ -919,22 +977,23 @@ func (a *Agent) maybeRunDedup(ctx context.Context, batchIdx, batchStart int) {
 	if err != nil {
 		rec.SetError(err, time.Since(startTime))
 		fmt.Fprintf(stdout.Writer(), "[ocr] scan dedup failed for batch #%d: %v (keeping originals)\n", batchIdx, err)
-		return
+		return nil
 	}
 	rec.SetResponse(resp, time.Since(startTime))
 	a.runner.RecordUsage(resp.Usage)
 
-	deduped, ok := applyDedupGroups(resp.Content(), batchComments)
+	deduped, dedupCheckpoints, ok := applyDedupGroupsWithCheckpoints(resp.Content(), batchComments)
 	if !ok {
 		fmt.Fprintf(stdout.Writer(), "[ocr] scan dedup batch #%d: malformed groups, keeping originals\n", batchIdx)
-		return
+		return nil
 	}
 	if len(deduped) == len(batchComments) {
 		// No-op result — don't bother rewriting the collector.
-		return
+		return nil
 	}
 	a.args.CommentCollector.ReplaceSince(batchStart, deduped)
 	fmt.Fprintf(stdout.Writer(), "[ocr] scan dedup batch #%d: %d → %d comments\n", batchIdx, len(batchComments), len(deduped))
+	return dedupCheckpoints
 }
 
 // buildDedupCommentsJSON renders the batch comments as a JSON list with
@@ -966,10 +1025,18 @@ func buildDedupCommentsJSON(comments []model.LlmComment) string {
 // when the groups don't cover every input id exactly once (safety: we
 // refuse to silently drop comments we can't account for).
 func applyDedupGroups(rawJSON string, originals []model.LlmComment) ([]model.LlmComment, bool) {
+	comments, _, ok := applyDedupGroupsWithCheckpoints(rawJSON, originals)
+	return comments, ok
+}
+
+func applyDedupGroupsWithCheckpoints(
+	rawJSON string,
+	originals []model.LlmComment,
+) ([]model.LlmComment, map[string][]model.LlmComment, bool) {
 	stripped := llmloop.StripMarkdownFences(rawJSON)
 	stripped = strings.TrimSpace(stripped)
 	if stripped == "" {
-		return nil, false
+		return nil, nil, false
 	}
 	var parsed struct {
 		Groups []struct {
@@ -978,7 +1045,7 @@ func applyDedupGroups(rawJSON string, originals []model.LlmComment) ([]model.Llm
 		} `json:"groups"`
 	}
 	if err := json.Unmarshal([]byte(stripped), &parsed); err != nil {
-		return nil, false
+		return nil, nil, false
 	}
 
 	idToIdx := make(map[string]int, len(originals))
@@ -988,34 +1055,48 @@ func applyDedupGroups(rawJSON string, originals []model.LlmComment) ([]model.Llm
 
 	seen := make(map[string]bool, len(originals))
 	var out []model.LlmComment
+	checkpoints := make(map[string][]model.LlmComment)
 	for _, g := range parsed.Groups {
 		if len(g.Members) == 0 {
-			return nil, false
+			return nil, nil, false
 		}
 		canonicalIdx, ok := idToIdx[g.Members[0]]
 		if !ok {
-			return nil, false
+			return nil, nil, false
 		}
+		memberPaths := make(map[string]bool)
+		memberIndices := make([]int, 0, len(g.Members))
 		for _, id := range g.Members {
-			if _, exists := idToIdx[id]; !exists {
-				return nil, false // unknown id
+			idx, exists := idToIdx[id]
+			if !exists {
+				return nil, nil, false // unknown id
 			}
 			if seen[id] {
-				return nil, false // duplicate assignment
+				return nil, nil, false // duplicate assignment
 			}
 			seen[id] = true
+			memberPaths[originals[idx].Path] = true
+			memberIndices = append(memberIndices, idx)
 		}
 		canonical := originals[canonicalIdx]
 		if len(g.Members) > 1 && g.MergedContent != "" {
 			canonical.Content = g.MergedContent
 		}
 		out = append(out, canonical)
+		if len(memberPaths) == 1 {
+			checkpoints[canonical.Path] = append(checkpoints[canonical.Path], canonical)
+			continue
+		}
+		for _, idx := range memberIndices {
+			original := originals[idx]
+			checkpoints[original.Path] = append(checkpoints[original.Path], original)
+		}
 	}
 
 	if len(seen) != len(originals) {
-		return nil, false // some id missing
+		return nil, nil, false // some id missing
 	}
-	return out, true
+	return out, checkpoints, true
 }
 
 // formatPlanGuidance parses the PLAN_TASK JSON output into a markdown

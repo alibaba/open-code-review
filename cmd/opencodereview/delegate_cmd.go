@@ -13,6 +13,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/delegate"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -93,7 +94,8 @@ type delegateContext struct {
 }
 
 func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, 0, opts.maxGitProcs, true)
+	contentRef, _ := tool.ParseReviewMode(opts.from, opts.to, opts.commit).RefValue(opts.to, opts.commit)
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, contentRef, 0, opts.maxGitProcs, true)
 	if err != nil {
 		return nil, err
 	}
@@ -105,22 +107,11 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 		return nil, err
 	}
 
-	// Resolve background from --background-file if set.
-	if opts.backgroundFile != "" {
-		bgPath := resolveBackgroundFilePath(cc.RepoDir, opts.backgroundFile)
-		fileBackground, err := loadBackgroundFile(bgPath)
-		if err != nil {
-			return nil, err
-		}
-		opts.background = mergeBackground(opts.background, fileBackground)
+	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
+	if err != nil {
+		return nil, err
 	}
-
-	// Auto-fill background from commit message when reviewing a single commit.
-	if opts.commit != "" && opts.background == "" {
-		if msg, err := getCommitMessage(cc.RepoDir, opts.commit); err == nil && msg != "" {
-			opts.background = msg
-		}
-	}
+	opts.background = bg
 
 	return &delegateContext{cc: cc, opts: opts}, nil
 }

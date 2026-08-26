@@ -42,7 +42,7 @@ func writeRangeResumeSession(t *testing.T, repoDir string, files ...string) stri
 // session that completed no items.
 func TestLoadReviewResumeState_WithSession(t *testing.T) {
 	t.Run("success returns state with completed items", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setTestHome(t, t.TempDir())
 		repoDir := t.TempDir()
 		id := writeRangeResumeSession(t, repoDir, "a.go", "b.go")
 
@@ -56,7 +56,7 @@ func TestLoadReviewResumeState_WithSession(t *testing.T) {
 	})
 
 	t.Run("review mode mismatch errors", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setTestHome(t, t.TempDir())
 		repoDir := t.TempDir()
 		id := writeRangeResumeSession(t, repoDir, "a.go")
 
@@ -71,7 +71,7 @@ func TestLoadReviewResumeState_WithSession(t *testing.T) {
 	// the one case resume exists for unrecoverable. It is now admitted: the
 	// manifest is verifiable, so the whole selected set is simply re-dispatched.
 	t.Run("no completed items is admitted", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setTestHome(t, t.TempDir())
 		repoDir := t.TempDir()
 		id := writeRangeResumeSession(t, repoDir) // no items recorded
 

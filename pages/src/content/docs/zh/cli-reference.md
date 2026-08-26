@@ -45,6 +45,23 @@ Use "ocr session -h" for more information about session inspection.
 GitHub: https://github.com/alibaba/open-code-review
 ```
 
+## 全局参数
+
+所有命令均可使用，且放在子命令前后皆可
+（`ocr --color=never review` 与 `ocr review --color=never` 等价）。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--color <auto\|always\|never>` | `auto` | 何时输出 ANSI 颜色。`auto` 仅在 stdout 是终端时着色，因此管道或重定向得到的是纯文本。`always` 会在管道中保留颜色（便于配合 `\| less -R`）。 |
+
+当 stdout 不是终端时，文本输出始终为纯文本，因此可以安全地通过管道传递：
+
+```bash
+ocr review --commit HEAD | gh issue comment 123 --body-file -
+```
+
+`TERM=dumb` 同样会关闭颜色。
+
 ## 命令总览
 
 | 命令 | 别名 | 作用 |
@@ -53,7 +70,7 @@ GitHub: https://github.com/alibaba/open-code-review
 | `ocr scan` | `ocr s` | 无需 Git diff，扫描完整文件。 |
 | `ocr rules check <file>` | — | 显示某文件路径适用哪条规则及其来源。 |
 | `ocr config set <key> <value>` | — | 将一个配置值持久化到 `~/.opencodereview/config.json`。 |
-| `ocr config unset custom_providers.<name>` | — | 删除一个自定义 provider（若它是当前启用的，则清空启用的 `provider`/`model`）。 |
+| `ocr config unset <key>` | — | 清除一个已保存的配置值（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
 | `ocr config provider` | — | 交互式 provider 配置 TUI。 |
 | `ocr config model` | — | 交互式 model 选择 TUI。 |
 | `ocr llm test` | — | 发送一条简短 chat 请求以验证配置的端点。 |
@@ -68,7 +85,7 @@ GitHub: https://github.com/alibaba/open-code-review
 
 ## `ocr review`
 
-主命令。解析 Git diff，分发 per-file 子 agent，收集评审评论并打印。
+主命令。解析 Git diff，把语义相关的文件分组，为每组分发一个子 agent，收集评审评论并打印。
 
 ### 概要
 
@@ -92,6 +109,7 @@ unstaged + untracked 变更。
 | `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个文件的 `REVIEW_FILTER_TASK` LLM 后处理调用。 |
 | `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
+| `--output <path>` | `-o` | 标准输出 | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--audience <who>` | — | `human` | `human` 流式输出进度行（`--format` 为 `json`/`sarif` 时输出到 stderr，使 stdout 保持为单个可解析文档）；`agent` 完全抑制进度行，只打印最终摘要 / JSON。 |
 | `--background <text>` | `-b` | — | 注入 plan + main prompt 的可选需求 / 业务上下文。 |
 | `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
@@ -99,9 +117,10 @@ unstaged + untracked 变更。
 | `--concurrency <n>` | — | `8` | 并行评审的最大文件数。 |
 | `--timeout <minutes>` | — | `10` | 每文件截止时间。`0` 关闭超时。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
-| `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`30`）；1–9 会被上调到 `10`；任何 `≥ 10` 的值都覆盖模板默认（即使小于 `30`）。 |
-| `--max-tokens <n>` | — | 配置或模板默认 | 每文件提示词 token 上限。覆盖本次运行已保存的 `max_tokens` 设置。 |
+| `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |
+| `--max-tokens <n>` | — | 配置或模板默认 | 每文件**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
 | `--max-tokens-budget <n>` | — | `0`（无限制） | 限制本次评审的输入 + 输出 token 总量。超出预算后停止分发，并仍会发布部分结果。 |
+| `--effort <level>` | — | 配置或 `medium` | 评审投入档位：`low` = 1 轮 main 循环，`medium` = 2 轮（默认），`high` = 3 轮。轮数越多召回越高、耗时与 token 也越多。可用 `ocr config set effort <level>` 持久化。 |
 | `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
 | `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |
@@ -329,6 +348,7 @@ ocr s      [flags]   (alias)
 |---|---|---|---|
 | `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。 |
 | `--exclude <patterns>` | - | - | 逗号分隔的 gitignore 风格排除模式（如 `**/generated/*,*.pb.go`）；与 `rule.json` 的 excludes 合并。 |
+| `--output <path>` | `-o` | 标准输出 | 将扫描结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
 | `--preview` | `-p` | `false` | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。支持 `--format json`；不支持 `--format sarif`。 |
 
 ```bash
@@ -442,15 +462,18 @@ Rule:
 
 ```text
 ocr config set <key> <value>
-ocr config unset custom_providers.<name>   Delete a custom provider
+ocr config unset <key>                     Clear a saved config value
 ocr config provider                        Interactive provider setup
 ocr config model                           Interactive model selection
 ```
 
-- **`set`**——非交互式写入单个配置值。
-- **`unset`**——删除一个自定义 provider。仅支持
-  `custom_providers.<name>`。若删除的是当前启用的 provider，则 `provider` 和
-  `model` 被清空（运行 `ocr config provider` 重新选择）。
+- **`set`**——非交互式写入单个配置值（如
+  `ocr config set effort high`）。
+- **`unset`**——清除一个已保存的配置值。支持 `provider`、`max_tokens`、
+  `effort`、`custom_providers.<name>` 和 `mcp_servers.<name>`。删除当前启用的
+  自定义 provider 时，`provider` 和 `model` 一并被清空（运行
+  `ocr config provider` 重新选择）；`ocr config unset effort` 会回到默认的
+  `medium` 档位。
 - **`provider`**——启动交互式 provider 配置 TUI（无额外参数；非交互式请用
   `ocr config set provider <name>`）。
 - **`model`**——启动交互式 model 选择 TUI（无额外参数；非交互式请用
@@ -615,10 +638,11 @@ ocr completion powershell > ocr.ps1
   vs 结构化载荷。需要二者兼得时组合使用。
 - `--background` 是提升评审质量最有效的参数之一——从其他 agent 调用时，始终传入
   需求 / PR 描述。
-- 某文件 diff 单独超过 `MAX_TOKENS` 的 80%（默认 `58888`）时，会在调用 LLM 前
+- 某文件 diff 单独超过 `MAX_TOKENS` 的 80%（默认 `200000`）时，会在调用 LLM 前
   被丢弃。这会记录日志但不会使运行失败。
-- 当某文件变更行数低于 `PLAN_MODE_LINE_THRESHOLD`（`50`）时，plan 阶段会被
-  **自动跳过**。
+- 当一个文件组既没有单个文件的变更行数达到 `PLAN_MODE_LINE_THRESHOLD`（`50`），
+  合计变更行数也没达到 `PLAN_MODE_GROUP_LINE_THRESHOLD`（`100`，仅对多文件组
+  生效）时，plan 阶段会被**自动跳过**。
 
 ## 另见
 
