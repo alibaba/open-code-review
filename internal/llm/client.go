@@ -1082,15 +1082,10 @@ func isThinkingToolChoiceConflict(err error) bool {
 func omitAnthropicToolChoice(
 	params *anthropic.MessageNewParams,
 	opts []option.RequestOption,
-	extraBody map[string]any,
 ) []option.RequestOption {
 	params.ToolChoice = anthropic.ToolChoiceUnionParam{}
 	withoutToolChoice := append([]option.RequestOption(nil), opts...)
-	withoutToolChoice = append(withoutToolChoice, option.WithJSONDel("tool_choice"))
-	if toolChoice, ok := extraBody["tool_choice"]; ok {
-		withoutToolChoice = append(withoutToolChoice, option.WithJSONSet("tool_choice", toolChoice))
-	}
-	return withoutToolChoice
+	return append(withoutToolChoice, option.WithJSONDel("tool_choice"))
 }
 
 // CompletionsWithCtx sends a chat completion request with context support.
@@ -1131,7 +1126,9 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
 		opts = append(opts, option.WithHeader(k, v))
 	}
-	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
+	extraBody := expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey)
+	_, hasExplicitToolChoice := extraBody["tool_choice"]
+	for k, v := range extraBody {
 		// This client is non-streaming: it calls Messages.New, which expects a
 		// single JSON body. If a provider config sets extra_body.stream=true,
 		// forwarding it here makes the API answer with SSE and every call fails
@@ -1143,17 +1140,20 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 	}
 
 	requestOpts := opts
-	if params.ToolChoice.OfAny != nil && c.requiresAutomaticToolChoice(model) {
-		requestOpts = omitAnthropicToolChoice(&params, opts, c.cfg.ExtraBody)
+	if params.ToolChoice.OfAny != nil && !hasExplicitToolChoice && c.requiresAutomaticToolChoice(model) {
+		requestOpts = omitAnthropicToolChoice(&params, opts)
 	}
 
 	sdkResp, err := c.sdk.Messages.New(ctx, params, requestOpts...)
-	if err != nil && params.ToolChoice.OfAny != nil && isThinkingToolChoiceConflict(err) {
+	if err != nil && params.ToolChoice.OfAny != nil && !hasExplicitToolChoice && isThinkingToolChoiceConflict(err) {
 		// Anthropic-compatible thinking endpoints only permit automatic or no
 		// tool choice. Retry once without the forced choice. Only a successful
 		// retry proves the capability, so an unrelated fallback failure cannot
 		// permanently weaken later review-filter requests.
-		requestOpts = omitAnthropicToolChoice(&params, opts, c.cfg.ExtraBody)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		requestOpts = omitAnthropicToolChoice(&params, opts)
 		sdkResp, err = c.sdk.Messages.New(ctx, params, requestOpts...)
 		if err == nil {
 			c.thinkingToolChoiceConflicts.Store(model, struct{}{})

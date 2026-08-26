@@ -1543,6 +1543,49 @@ func TestAnthropicClient_LearnedConflictPreservesExtraBodyToolChoice(t *testing.
 	}
 }
 
+func TestAnthropicClient_ExplicitExtraBodyToolChoiceDoesNotFallback(t *testing.T) {
+	var requests atomic.Int32
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{
+			"message":"The tool_choice parameter does not support being set to required or object in thinking mode"
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:        server.URL + "/v1/messages",
+		APIKey:     "test-key",
+		Model:      "qwen-test",
+		AuthHeader: "x-api-key",
+		ExtraBody:  map[string]any{"tool_choice": map[string]any{"type": "any"}},
+	})
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:   []Message{{Role: "user", Content: "ping"}},
+		Tools:      []ToolDef{{Function: FunctionDef{Name: "f", Parameters: map[string]any{"type": "object"}}}},
+		ToolChoice: "required",
+		MaxTokens:  64,
+	})
+	if err == nil {
+		t.Fatal("expected explicit tool-choice conflict to be returned")
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+	toolChoice, present := gotBody["tool_choice"].(map[string]any)
+	if !present || toolChoice["type"] != "any" {
+		t.Fatalf("tool_choice = %#v, want explicit type any", gotBody["tool_choice"])
+	}
+	if client.requiresAutomaticToolChoice("qwen-test") {
+		t.Fatal("explicit extra_body.tool_choice conflict was learned as an OCR capability")
+	}
+}
+
 // newOpenAITestServer returns an httptest server that captures each request's headers
 // and JSON body and responds with a minimal valid chat completion.
 func newOpenAITestServer(gotHeaders *http.Header, gotBody *map[string]any) *httptest.Server {
