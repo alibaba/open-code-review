@@ -52,7 +52,7 @@ intellijPlatform {
 // ---------------------------------------------------------------------------
 // 前端构建
 //
-// frontend/ 是 VS Code 扩展前端的副本（见 frontend/UPSTREAM.md），产物直接落到
+// frontend/ 是 VS Code 扩展前端的副本，产物直接落到
 // src/main/resources/webview/。processResources 依赖它，所以 ./gradlew build
 // 会自动带上 npm install + npm run build。
 //

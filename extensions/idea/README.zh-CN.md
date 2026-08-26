@@ -76,8 +76,9 @@ cd extensions/idea
 ### 调试要点
 
 - **双端通信**：WebView 与宿主通过 JCEF 桥以 `postMessage` 通信，消息类型定义在
-  `frontend/src/shared/messages.ts`。两端发收都走 `dispatch` / `handle`，定位问题先看这里。
-  桥接传输层是唯一与 VS Code 扩展不同的文件（见 `frontend/UPSTREAM.md`）。
+  `extensions/frontend/src/shared/messages.ts`。两端发收都走 `dispatch` / `handle`，定位问题先看这里。
+  桥接传输层是唯一与 VS Code 扩展不同的文件：`frontend/src/webview/bridge.idea.ts`（对应
+  `bridge.vsc.ts`）。webpack 通过 `NormalModuleReplacementPlugin` 根据 `OCR_TARGET` 选择正确的桥接模块。
 - **CLI 调用**：所有 `ocr` 子命令由
   `src/main/kotlin/com/alibaba/opencodereview/idea/services/CliService.kt` 通过 `ProcessBuilder` 执行。
   CLI 退出码非 0 时会 reject 并带上 stderr 中的 `Error:` 文本，便于排查「审查失败/连接失败」。
@@ -120,19 +121,22 @@ cd extensions/idea
 
 采用与 VS Code 扩展相同的 **Monolithic WebView + Thin Host** 方案：
 
-- **WebView** 是独立构建的 Preact SPA——`extensions/vscode/src/{webview,shared}` 的逐字节副本，
-  靠 `frontend/UPSTREAM.md` 中的脚本保持同步。
+- **WebView** 是独立构建的 Preact SPA，与 VS Code 扩展共用 `extensions/frontend/` 下的前端源码。
+  唯一 IDEA 特有文件为 `bridge.idea.ts`；webpack 通过 `NormalModuleReplacementPlugin` 根据 `OCR_TARGET`
+  环境变量选择正确的桥接模块（`bridge.idea.ts` / `bridge.vsc.ts`）。
 - **宿主层**（Kotlin / IntelliJ）轻薄，只负责 CLI 调用、文件系统、Git 操作、编辑器评论，
   并通过 JCEF 承载 WebView。
-- 两者通过 JCEF 桥以 `postMessage` 通信，用 `frontend/src/shared/` 中的 TypeScript 共享类型保证类型安全。
+- 两者通过 JCEF 桥以 `postMessage` 通信，用 `extensions/frontend/src/shared/` 中的 TypeScript
+  共享类型保证类型安全。
 
 ```
-extensions/idea/
-├── src/main/kotlin/         宿主（Kotlin / IntelliJ）：services / providers / jcef / messages
-├── frontend/src/
-│   ├── shared/              双端共享类型与 postMessage 协议（vscode 的逐字节副本）
-│   └── webview/             WebView SPA（Preact）：views / components / store / bridge
-└── src/main/resources/      plugin.xml / icons / 已打包的 webview 产物
+extensions/
+├── frontend/              共享前端（WebView SPA + 共享类型）
+│   ├── src/shared/         双端共享类型与 postMessage 协议
+│   └── src/webview/        WebView SPA（Preact）：views / components / store / bridge
+└── idea/
+    ├── src/main/kotlin/    宿主（Kotlin / IntelliJ）：services / providers / jcef / messages
+    └── src/main/resources/ plugin.xml / icons / 已打包的 webview 产物
 ```
 
 ---

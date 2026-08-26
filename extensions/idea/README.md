@@ -78,9 +78,10 @@ tool window strip and can start a review.
 ### Debugging notes
 
 - **Two-way messaging**: the webview and host communicate via `postMessage` through the JCEF bridge;
-  message types live in `frontend/src/shared/messages.ts`. Both sides route through `dispatch` / `handle`
-  — start there when debugging. The bridge transport is the only file that differs from the VS Code
-  extension (see `frontend/UPSTREAM.md`).
+  message types live in `extensions/frontend/src/shared/messages.ts`. Both sides route through `dispatch`
+  / `handle` — start there when debugging. The bridge transport is the only file that differs from the
+  VS Code extension: `frontend/src/webview/bridge.idea.ts` (vs. `bridge.vsc.ts`). webpack selects the
+  correct bridge via `NormalModuleReplacementPlugin` based on the `OCR_TARGET` environment variable.
 - **CLI invocation**: all `ocr` sub-commands run via `ProcessBuilder` in
   `src/main/kotlin/com/alibaba/opencodereview/idea/services/CliService.kt`. A non-zero CLI exit code
   rejects with the `Error:` text from stderr, which helps diagnose "review failed / connection failed".
@@ -123,20 +124,23 @@ In IntelliJ IDEA: `Settings → Plugins → ⚙️ → Install Plugin from Disk�
 
 It uses the same **Monolithic WebView + Thin Host** design as the VS Code extension:
 
-- The **WebView** is a separately built Preact SPA — a verbatim copy of `extensions/vscode/src/{webview,shared}`,
-  kept in sync by the script documented in `frontend/UPSTREAM.md`.
+- The **WebView** is a separately built Preact SPA, shared with the VS Code extension at
+  `extensions/frontend/`. The only IDEA-specific file is `bridge.idea.ts`; webpack selects the
+  correct bridge (`bridge.idea.ts` vs. `bridge.vsc.ts`) via `NormalModuleReplacementPlugin` based on
+  the `OCR_TARGET` environment variable.
 - The **Host** layer (Kotlin / IntelliJ) is thin, handling only CLI invocation, the file system, Git
   operations, and editor comments. It hosts the webview inside JCEF.
 - The two communicate via `postMessage` through a JCEF bridge, with shared TypeScript types in
-  `frontend/src/shared/` for type safety.
+  `extensions/frontend/src/shared/` for type safety.
 
 ```
-extensions/idea/
-├── src/main/kotlin/         Host (Kotlin / IntelliJ): services / providers / jcef / messages
-├── frontend/src/
-│   ├── shared/              shared types & postMessage protocol (verbatim copy of vscode)
-│   └── webview/             WebView SPA (Preact): views / components / store / bridge
-└── src/main/resources/      plugin.xml / icons / bundled webview output
+extensions/
+├── frontend/                shared frontend (webview SPA + shared types)
+│   ├── src/shared/          shared types & postMessage protocol
+│   └── src/webview/         WebView SPA (Preact): views / components / store / bridge
+└── idea/
+    ├── src/main/kotlin/     Host (Kotlin / IntelliJ): services / providers / jcef / messages
+    └── src/main/resources/  plugin.xml / icons / bundled webview output
 ```
 
 ---
