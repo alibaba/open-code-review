@@ -182,10 +182,23 @@ matching order:
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
+| `**/*.m` | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files)) |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
 plan and main task prompts.
+
+### Content sniffing for `.m` files
+
+`.m` is shared by MATLAB and Objective-C. OCR peeks at the file's first
+non-blank line to disambiguate: if it looks like Objective-C (e.g. `#import`,
+`@implementation`, a C-style comment), `objc.md` is used instead of
+`matlab.md`. When the content cannot be read, resolution falls back to
+`matlab.md`.
+
+> **Stability note.** The sniff heuristic may change between OCR versions. If
+> you need deterministic `.m` routing, set an explicit project-level rule for
+> your `.m` paths — project rules always outrank the system layer.
 
 ## Inspecting which rule wins: `ocr rules check`
 

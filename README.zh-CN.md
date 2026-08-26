@@ -152,6 +152,9 @@ ocr scan                          # 扫描整个仓库
 ocr scan --path internal/agent    # 扫描指定目录或文件
 ocr scan --resume <session-id>   # 恢复中断的全量文件扫描
 
+# 将结果输出到文件（AI 宿主 agent 推荐）
+ocr review --format json --output result.json
+
 # 委托模式 — 让你的 AI 编程 agent 自己执行评审
 # OCR 负责文件选择和规则解析；无需配置 LLM
 ocr delegate preview
