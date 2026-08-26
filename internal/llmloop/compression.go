@@ -70,6 +70,12 @@ func CountMessagesTokens(msgs []llm.Message) int {
 	var total int
 	for _, m := range msgs {
 		total += llm.CountTokens(m.ExtractText())
+		// Native's replay payload (thinking blocks, reasoning items,
+		// encrypted_content, reasoning_content) goes out on the wire once
+		// this message replays, but ExtractText() never sees it — without
+		// this, softLimit/warnLimit would systematically under-count
+		// reasoning-heavy conversations. See NativeTurn.EstimatedTokens.
+		total += m.Native.EstimatedTokens()
 	}
 	return total
 }
@@ -182,7 +188,10 @@ func stripMarkdownFences(s string) string {
 }
 
 // buildMessageXML serializes msgs into the <message><content> form expected
-// by the MEMORY_COMPRESSION_TASK prompt template.
+// by the MEMORY_COMPRESSION_TASK prompt template. Includes ReasoningContent
+// alongside ExtractText() — a reasoning-only turn (VisibleContent() empty)
+// would otherwise render as a blank <content> block, leaving the summarizer
+// with no way to know what happened in that round.
 func buildMessageXML(msgs []llm.Message) string {
 	var sb strings.Builder
 	for i, m := range msgs {
@@ -190,6 +199,11 @@ func buildMessageXML(msgs []llm.Message) string {
 		sb.WriteString("    <content>\n")
 		sb.WriteString(fmt.Sprintf("      %s\n", m.ExtractText()))
 		sb.WriteString("    </content>\n")
+		if m.ReasoningContent != "" {
+			sb.WriteString("    <reasoning>\n")
+			sb.WriteString(fmt.Sprintf("      %s\n", m.ReasoningContent))
+			sb.WriteString("    </reasoning>\n")
+		}
 		sb.WriteString("</message>")
 		if i < len(msgs)-1 {
 			sb.WriteString("\n")

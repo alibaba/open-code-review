@@ -298,6 +298,7 @@ type TaskCard struct {
 	RequestMessages  any // preserved for display
 	RequestNo        int
 	ResponseContent  string
+	ReasoningContent string // the model's reasoning/thinking text for this turn, if the provider exposed any
 	ToolCalls        []ToolCallInfo
 	DurationMs       int64
 	Error            string
@@ -386,6 +387,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 		case "llm_response":
 			fp, _ := rec["filePath"].(string)
 			content, _ := rec["content"].(string)
+			reasoning, _ := rec["reasoning_content"].(string)
 			durationMs := int64(0)
 			if d, ok := rec["duration_ms"].(float64); ok {
 				durationMs = int64(d)
@@ -419,6 +421,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				if len(cards) > 0 && cards[len(cards)-1].ResponseContent == "" {
 					card := cards[len(cards)-1]
 					card.ResponseContent = content
+					card.ReasoningContent = reasoning
 					card.DurationMs = durationMs
 					card.Model = model
 					card.Error = errStr

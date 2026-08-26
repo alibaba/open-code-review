@@ -242,24 +242,29 @@ func (jw *jsonlWriter) WriteLLMRequest(filePath string, taskType TaskType, reque
 	return uuid
 }
 
-// WriteLLMResponse writes a response entry with model, content, tool calls, usage.
-func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration) string {
+// WriteLLMResponse writes a response entry with model, content, reasoning,
+// tool calls, usage. reasoningContent is the plain audit-facing projection of
+// the model's reasoning for this turn (see ResponseRecord.ReasoningContent) —
+// not the opaque replay state a later request needs to continue the
+// conversation, which the session transcript never carries.
+func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content, reasoningContent string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
 	rec := map[string]any{
-		"uuid":        uuid,
-		"parentUuid":  jw.lastUUID,
-		"type":        "llm_response",
-		"sessionId":   jw.sessionID,
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		"filePath":    filePath,
-		"taskType":    string(taskType),
-		"model":       model,
-		"content":     content,
-		"tool_calls":  toolCalls,
-		"duration_ms": duration.Milliseconds(),
+		"uuid":              uuid,
+		"parentUuid":        jw.lastUUID,
+		"type":              "llm_response",
+		"sessionId":         jw.sessionID,
+		"timestamp":         time.Now().UTC().Format(time.RFC3339),
+		"filePath":          filePath,
+		"taskType":          string(taskType),
+		"model":             model,
+		"content":           content,
+		"reasoning_content": reasoningContent,
+		"tool_calls":        toolCalls,
+		"duration_ms":       duration.Milliseconds(),
 		"usage": map[string]int{
 			"prompt_tokens":      usage.PromptTokens,
 			"completion_tokens":  usage.CompletionTokens,

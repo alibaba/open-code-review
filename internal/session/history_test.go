@@ -118,7 +118,8 @@ func TestSetResponse(t *testing.T) {
 	resp := &llm.ChatResponse{
 		Choices: []llm.Choice{{
 			Message: llm.ResponseMessage{
-				Content: &content,
+				Content:          &content,
+				ReasoningContent: "because the diff touches auth code",
 			},
 		}},
 		Model: "gpt-4",
@@ -136,6 +137,9 @@ func TestSetResponse(t *testing.T) {
 	if rec.Response.Content != "response text" {
 		t.Errorf("Content = %q", rec.Response.Content)
 	}
+	if rec.Response.ReasoningContent != "because the diff touches auth code" {
+		t.Errorf("ReasoningContent = %q", rec.Response.ReasoningContent)
+	}
 	if rec.Response.Model != "gpt-4" {
 		t.Errorf("Model = %q", rec.Response.Model)
 	}
@@ -147,6 +151,47 @@ func TestSetResponse(t *testing.T) {
 	}
 	if rec.Duration != 2*time.Second {
 		t.Errorf("Duration = %v", rec.Duration)
+	}
+}
+
+// TestSetResponse_PersistsReasoningContent guards the audit-transcript gap
+// raised in review: the raw per-turn llm_response record must carry the
+// model's reasoning text, not just Content/ToolCalls/Usage — otherwise a
+// human auditing session.jsonl has no way to see why the model did what it
+// did on a turn that produced no visible text.
+func TestSetResponse_PersistsReasoningContent(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	fs := sh.GetOrCreateFileSession("file.go")
+	rec := fs.AppendTaskRecord(MainTask, []llm.Message{llm.NewTextMessage("user", "hi")})
+
+	content := ""
+	resp := &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{
+				Content:          &content,
+				ReasoningContent: "auditable reasoning text",
+			},
+		}},
+		Model: "test-model",
+	}
+	rec.SetResponse(resp, time.Second)
+	sh.Finalize()
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var found bool
+	for _, r := range records {
+		if r["type"] != "llm_response" {
+			continue
+		}
+		found = true
+		if r["reasoning_content"] != "auditable reasoning text" {
+			t.Errorf("reasoning_content = %v, want %q", r["reasoning_content"], "auditable reasoning text")
+		}
+	}
+	if !found {
+		t.Fatal("no llm_response record found in session JSONL")
 	}
 }
 

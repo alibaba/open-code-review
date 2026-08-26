@@ -266,6 +266,17 @@
                     </div>
                 </details>
                 {{end}}
+                {{with .ReasoningContent}}
+                <details class="tool-detail">
+                    <summary class="tool-detail-toggle">
+                        <span class="chevron-sm"></span>
+                        <span>Reasoning</span>
+                    </summary>
+                    <div class="tool-detail-body">
+                        <div class="response-text">{{.}}</div>
+                    </div>
+                </details>
+                {{end}}
                 {{with .ResponseContent}}
                 <div class="card-body response-content">
                     <div class="response-text">{{.}}</div>

@@ -30,7 +30,8 @@ func TestNewToolCallMessage(t *testing.T) {
 		{ID: "c1", Type: "function", Function: FunctionCall{Name: "tool_a", Arguments: `{}`}},
 		{ID: "c2", Type: "function", Function: FunctionCall{Name: "tool_b", Arguments: `{"x":1}`}},
 	}
-	m := NewToolCallMessage("thinking", calls)
+	native := NativeTurn{Family: "anthropic-messages", Payload: "opaque"}
+	m := NewToolCallMessage("thinking", calls, native, "reasoning text")
 	if m.Role != "assistant" {
 		t.Errorf("Role = %q, want assistant", m.Role)
 	}
@@ -43,6 +44,12 @@ func TestNewToolCallMessage(t *testing.T) {
 	if m.ToolCalls[0].ID != "c1" || m.ToolCalls[1].Function.Name != "tool_b" {
 		t.Errorf("ToolCalls not copied correctly")
 	}
+	if m.Native != native {
+		t.Errorf("Native = %+v, want %+v", m.Native, native)
+	}
+	if m.ReasoningContent != "reasoning text" {
+		t.Errorf("ReasoningContent = %q, want %q", m.ReasoningContent, "reasoning text")
+	}
 
 	// Mutation of original must not affect the message.
 	calls[0].ID = "mutated"
@@ -52,7 +59,7 @@ func TestNewToolCallMessage(t *testing.T) {
 }
 
 func TestNewToolCallMessage_NilCalls(t *testing.T) {
-	m := NewToolCallMessage("text", nil)
+	m := NewToolCallMessage("text", nil, NativeTurn{}, "")
 	if m.ToolCalls != nil {
 		t.Errorf("expected nil ToolCalls for nil input, got %v", m.ToolCalls)
 	}

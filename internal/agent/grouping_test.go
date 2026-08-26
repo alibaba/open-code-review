@@ -21,9 +21,11 @@ import (
 type fakeGroupingClient struct {
 	response string
 	err      error
+	gotReq   llm.ChatRequest
 }
 
-func (f *fakeGroupingClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func (f *fakeGroupingClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.gotReq = req
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -281,6 +283,35 @@ func TestCallGroupingLLM_EmptyResponse(t *testing.T) {
 	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 4096, nil)
 	if err == nil {
 		t.Fatal("expected error for empty response")
+	}
+}
+
+// TestCallGroupingLLM_UsesTemplateMaxTokens guards against reintroducing the
+// hardcoded MaxTokens: 4096 this replaced: a small, task-specific cap left no
+// room for a provider config that enables Anthropic extended thinking via
+// extra_body.thinking with a larger budget_tokens, so the grouping call
+// failed with "max_tokens must be greater than thinking.budget_tokens" even
+// though the main review loop's own MAX_TOKENS was large enough.
+func TestCallGroupingLLM_UsesTemplateMaxTokens(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}}
+	task := &template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+	}
+
+	client := &fakeGroupingClient{response: `[{"label":"a","files":["a.go"]}]`}
+	if _, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 32000, nil); err != nil {
+		t.Fatalf("callGroupingLLM: %v", err)
+	}
+	if client.gotReq.MaxTokens != 32000 {
+		t.Errorf("MaxTokens = %d, want 32000 (the template's own limit)", client.gotReq.MaxTokens)
+	}
+
+	client = &fakeGroupingClient{response: `[{"label":"a","files":["a.go"]}]`}
+	if _, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 0, nil); err != nil {
+		t.Fatalf("callGroupingLLM: %v", err)
+	}
+	if client.gotReq.MaxTokens != 4096 {
+		t.Errorf("MaxTokens = %d, want fallback 4096 when the template leaves MAX_TOKENS unset", client.gotReq.MaxTokens)
 	}
 }
 

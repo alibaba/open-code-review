@@ -114,6 +114,13 @@ type ResponseRecord struct {
 	ToolCalls []llm.ToolCall
 	Model     string
 	Usage     *TokenUsage
+	// ReasoningContent is the model's reasoning/thinking text for this turn,
+	// when the provider exposed any (see llm.ChatResponse.ReasoningContent).
+	// This is the plain, human-readable projection for local audit/debugging
+	// — not the opaque replay state (llm.Message.Native) a later request
+	// needs to continue the conversation, which this record deliberately
+	// never carries.
+	ReasoningContent string
 }
 
 // ToolResultRecord records the result of a tool call executed after the LLM response.
@@ -437,10 +444,11 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 	}
 
 	tr.Response = &ResponseRecord{
-		Content:   content,
-		ToolCalls: choice.Message.ToolCalls,
-		Model:     resp.Model,
-		Usage:     usage,
+		Content:          content,
+		ToolCalls:        choice.Message.ToolCalls,
+		Model:            resp.Model,
+		Usage:            usage,
+		ReasoningContent: choice.Message.ReasoningContent,
 	}
 	tr.Duration = duration
 
@@ -454,7 +462,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 					"arguments": tc.Function.Arguments,
 				})
 			}
-			p.WriteLLMResponse(fs.FilePath, tr.Type, content, toolCallsJSON, resp.Model, *usage, duration)
+			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration)
 		}
 	}
 }

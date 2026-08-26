@@ -111,6 +111,10 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 		})
 	}
 
+	if maxTokens <= 0 {
+		maxTokens = 4096
+	}
+
 	resp, err := client.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     modelName,
 		Messages:  messages,
