@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/spf13/cobra"
 )
@@ -157,10 +158,13 @@ func runConfigUnset(key string) error {
 	if key == "max_tokens" {
 		return unsetMaxTokens(configPath)
 	}
+	if key == "effort" {
+		return unsetEffort(configPath)
+	}
 
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("unset supports provider, max_tokens, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
 	}
 
 	switch parts[0] {
@@ -169,7 +173,7 @@ func runConfigUnset(key string) error {
 	case "mcp_servers":
 		return unsetMCPServer(configPath, parts[1])
 	default:
-		return fmt.Errorf("unset supports provider, max_tokens, custom_providers.<name>, and mcp_servers.<name>")
+		return fmt.Errorf("unset supports provider, max_tokens, effort, custom_providers.<name>, and mcp_servers.<name>")
 	}
 }
 
@@ -185,6 +189,21 @@ func unsetMaxTokens(configPath string) error {
 	}
 
 	fmt.Println("Cleared max_tokens; using the embedded template default.")
+	return nil
+}
+
+func unsetEffort(configPath string) error {
+	cfg, err := loadOrCreateConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	cfg.Effort = ""
+	if err := saveConfig(configPath, cfg); err != nil {
+		return err
+	}
+
+	fmt.Println("Cleared effort; using the default medium preset.")
 	return nil
 }
 
@@ -333,6 +352,7 @@ type Config struct {
 	Provider        string                     `json:"provider,omitempty"`
 	Model           string                     `json:"model,omitempty"`
 	MaxTokens       int                        `json:"max_tokens,omitempty"`
+	Effort          string                     `json:"effort,omitempty"`
 	Providers       map[string]ProviderEntry   `json:"providers,omitempty"`
 	CustomProviders map[string]ProviderEntry   `json:"custom_providers,omitempty"`
 	Llm             LlmConfig                  `json:"llm,omitempty"`
@@ -401,6 +421,7 @@ var supportedConfigKeys = []string{
 	"provider",
 	"model",
 	"max_tokens",
+	"effort",
 	"providers.<name>.<field>",
 	"custom_providers.<name>.<field>",
 	"mcp_servers.<name>.<field>",
@@ -480,6 +501,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid max_tokens %q: must be a positive integer", value)
 		}
 		cfg.MaxTokens = maxTokens
+	case "effort":
+		e, err := template.ParseEffort(value)
+		if err != nil {
+			return err
+		}
+		cfg.Effort = string(e)
 	case "llm.url", "llm.URL":
 		cfg.Llm.URL = value
 	case "llm.auth_token", "llm.AuthToken":

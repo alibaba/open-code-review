@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +52,7 @@ func TestOutputSARIF_BasicStructure(t *testing.T) {
 		{Path: "a.go", Content: "fix", StartLine: 1, EndLine: 1, Category: "bug", Severity: "high"},
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF(comments, "test-version", nil, nil); err != nil {
+		if err := outputSARIF(comments, "test-version", nil, nil, os.Stdout); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -92,7 +93,7 @@ func TestOutputSARIF_BasicStructure(t *testing.T) {
 
 func TestOutputSARIF_EmptyComments(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := outputSARIF(nil, "test-version", nil, nil); err != nil {
+		if err := outputSARIF(nil, "test-version", nil, nil, os.Stdout); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -117,7 +118,7 @@ func TestOutputSARIF_EmptyComments(t *testing.T) {
 func TestEmitRunResult_SarifNoFiles(t *testing.T) {
 	ag := &mockResultProvider{filesReviewed: 0}
 	out := captureStdout(t, func() {
-		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "sarif", "developer", nil, nil, nil); err != nil {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "sarif", "developer", nil, nil, os.Stdout, nil); err != nil {
 			t.Fatalf("emitRunResult: %v", err)
 		}
 	})
@@ -144,7 +145,7 @@ func TestOutputSARIF_FullFieldMapping(t *testing.T) {
 		Severity:       "high",
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil); err != nil {
+		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, os.Stdout); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -240,7 +241,7 @@ func TestOutputSARIF_EmptyCategory(t *testing.T) {
 		Severity:  "medium",
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil); err != nil {
+		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, os.Stdout); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -265,7 +266,7 @@ func TestOutputSARIF_ZeroLineNumbers(t *testing.T) {
 		Severity:       "high",
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil); err != nil {
+		if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, os.Stdout); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -313,7 +314,7 @@ func TestOutputSARIF_NoFixes(t *testing.T) {
 				Severity:       "high",
 			}
 			out := captureStdout(t, func() {
-				if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil); err != nil {
+				if err := outputSARIF([]model.LlmComment{comment}, "v1", nil, nil, os.Stdout); err != nil {
 					t.Fatalf("outputSARIF: %v", err)
 				}
 			})
@@ -381,7 +382,7 @@ func TestEmitRunResult_Sarif(t *testing.T) {
 		{Path: "main.go", Content: "nil deref", StartLine: 10, EndLine: 10, Category: "bug", Severity: "critical"},
 	}
 	out := captureStdout(t, func() {
-		if err := emitRunResult(context.Background(), ag, comments, time.Now(), "sarif", "developer", nil, nil, nil); err != nil {
+		if err := emitRunResult(context.Background(), ag, comments, time.Now(), "sarif", "developer", nil, nil, os.Stdout, nil); err != nil {
 			t.Fatalf("emitRunResult: %v", err)
 		}
 	})
@@ -404,7 +405,7 @@ func TestOutputSARIF_SchemaCompliance(t *testing.T) {
 		{Path: "a.go", Content: "test", StartLine: 5, EndLine: 10, Category: "security", Severity: "medium"},
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF(comments, "v1", nil, nil); err != nil {
+		if err := outputSARIF(comments, "v1", nil, nil, os.Stdout); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -459,7 +460,7 @@ func TestOutputSARIF_SchemaCompliance(t *testing.T) {
 
 func TestOutputSARIF_JSONFormatting(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := outputSARIF(nil, "v1", nil, nil); err != nil {
+		if err := outputSARIF(nil, "v1", nil, nil, os.Stdout); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -481,7 +482,7 @@ func TestOutputSARIF_MultipleComments(t *testing.T) {
 		{Path: "c.go", Content: "bad naming", StartLine: 5, EndLine: 5, Category: "style", Severity: "low"},
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF(comments, "v1", nil, nil); err != nil {
+		if err := outputSARIF(comments, "v1", nil, nil, os.Stdout); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -723,7 +724,7 @@ func TestSarifResults_DuplicateFingerprints(t *testing.T) {
 		{Path: "a.go", Content: "SQL injection 2", Category: "security", ExistingCode: "query('SELECT * FROM users WHERE id=' + id)", StartLine: 20, EndLine: 20},
 	}
 	out := captureStdout(t, func() {
-		if err := outputSARIF(comments, "v1", nil, nil); err != nil {
+		if err := outputSARIF(comments, "v1", nil, nil, os.Stdout); err != nil {
 			t.Fatalf("outputSARIF: %v", err)
 		}
 	})
@@ -748,7 +749,7 @@ func TestSarifResults_DuplicateFingerprints(t *testing.T) {
 // --preview --format sarif should error, not emit a non-SARIF document.
 func TestOutputPreview_SarifRejects(t *testing.T) {
 	p := &agent.DiffPreview{TotalFiles: 0}
-	err := outputPreview(p, "sarif")
+	err := outputPreview(p, "sarif", os.Stdout)
 	if err == nil {
 		t.Error("outputPreview should return an error for sarif format")
 	}

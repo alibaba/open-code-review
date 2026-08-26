@@ -197,7 +197,7 @@ func TestExecuteToolCall_CodeCommentAsyncPool(t *testing.T) {
 	cp := r.executeToolCall(context.Background(), "async.go", llm.ToolCall{
 		Function: llm.FunctionCall{
 			Name:      tool.CodeComment.Name(),
-			Arguments: `{"comments":[{"content":"issue","existing_code":"foo"}]}`,
+			Arguments: `{"comments":[{"content":"issue","existing_code":"foo","path":"async.go"}]}`,
 		},
 	}, rec, "")
 
@@ -245,7 +245,7 @@ func TestExecuteToolCall_CodeCommentDiffResolved(t *testing.T) {
 	cp := r.executeToolCall(context.Background(), "resolved.go", llm.ToolCall{
 		Function: llm.FunctionCall{
 			Name:      tool.CodeComment.Name(),
-			Arguments: `{"comments":[{"content":"issue","existing_code":"foo bar"}]}`,
+			Arguments: `{"comments":[{"content":"issue","existing_code":"foo bar","path":"resolved.go"}]}`,
 		},
 	}, rec, "")
 
