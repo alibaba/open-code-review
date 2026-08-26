@@ -7,9 +7,9 @@
 | Rate limit errors | Lower `--concurrency` to 2-4 |
 | Frequent 429 / 5xx errors | 429 and all 5xx are already retried by the SDK by default; if still failing, lower `--concurrency` or add custom 4xx retry codes (`ocr config set llm.retry_codes 403,400`) |
 | Token cost too high | Set `--max-tokens-budget 500000` (or lower) |
-| Single large file truncated | Set `--max-tokens 200000` or `ocr config set max_tokens 200000` (template default: 58888) |
+| Single large file truncated | Set `--max-tokens 300000` or `ocr config set max_tokens 300000` (template default: review 200k, scan 58.8k) |
 | Large file timeouts | Increase `--timeout 20` |
-| Excessive agent tool turns | Set `--max-tools 60` |
+| Excessive agent tool turns | Set `--max-tools 100` (review template default: 100, min clamp: 50; scan template default: 60) |
 | Windows git overhead | Lower `--max-git-procs 8` |
 | Slow LLM response | Set `OCR_LLM_TIMEOUT=120` (seconds) |
 

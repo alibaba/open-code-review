@@ -13,15 +13,16 @@
 | `--exclude` | | `""` | Comma-separated gitignore-style exclude patterns |
 | `--concurrency` | | `8` | Maximum concurrent file worker count |
 | `--timeout` | | `10` | Per-file timeout in minutes |
-| `--max-tools` | | `0` (template default) | Maximum tool-call turns per file (template default: 30 for review, 60 for scan; review mode clamped to min 10; scan mode takes effect only when greater than 60) |
+| `--max-tools` | | `0` (template default) | Maximum tool-call turns per file (template default: 100 for review, 60 for scan; review mode clamped to min 50; scan mode takes effect only when greater than 60) |
 | `--max-git-procs` | | `16` | Maximum concurrent git sub-processes |
 | `--max-tokens-budget` | | `0` (unlimited) | Token budget cap; outputs partial results gracefully if exceeded |
 | `--provider` | | Configured Provider | Per-run override for LLM Provider (e.g. `openai`, `anthropic`) |
 | `--model` | | Configured Model | Per-run override for LLM model |
-| `--max-tokens` | | `0` | Per-run override for per-file prompt token limit (0 = template/configured default: 58888) |
+| `--max-tokens` | | `0` | Per-run override for per-file prompt token limit (0 = template/configured default: 200000 for review, 58888 for scan) |
 | `--resume` | | `""` | Resumes an interrupted session ID (`scan` supports all; `review` requires `--from/--to` or `--commit`) |
 | `--tools` | | Built-in | Path to JSON tools configuration file |
 | `--preview` | `-p` | `false` | Dry-run: lists target files without invoking LLM (supports `--format json`) |
+| `--color` | | `auto` | Control console color output: `auto`, `always`, `never` (or via `--no-color` / `NO_COLOR` env var) |
 
 ## Review-Only Flags
 

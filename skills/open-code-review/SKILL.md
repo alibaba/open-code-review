@@ -177,7 +177,7 @@ If no issues found: "Review complete — 0 issues found across N files."
 - **Resume conditions** — `ocr scan` fully supports `--resume`; `ocr review` supports `--resume` only in `--from/--to` or `--commit` modes (not workspace mode).
 - **`--preview` and `--resume` are mutually exclusive.**
 - **Language configuration** — Default: English. Switch via `ocr config set language 中文`.
-- **Default MAX_TOKENS** — Default prompt token ceiling is 58888 (configurable via `--max-tokens` or `max_tokens`, e.g. `--max-tokens 200000`).
+- **Default MAX_TOKENS** — Default prompt token ceiling is 200,000 in review mode and 58,888 in scan mode (configurable via `--max-tokens` or `max_tokens`).
 - **Prevent Tool Output Truncation** — For large reviews or scans, prefer `-o <path>` / `--output <path>` to write directly to a UTF-8 file and read with `view_file`. If output is truncated, extract comments via `ocr session comments <session-id> --severity high,critical --json` without re-running.
 - **Do not test connectivity pre-emptively** — Execute review/scan directly; troubleshoot only on actual LLM failure (see troubleshooting.md).
 
