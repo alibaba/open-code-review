@@ -11,7 +11,7 @@ license: Apache-2.0
 metadata:
   author: alibaba
   homepage: https://github.com/alibaba/open-code-review
-  version: "1.10.0"
+  version: "1.10.1"
 ---
 
 # Open Code Review
@@ -118,9 +118,11 @@ JSON output core structure:
   }],
   "warnings": [{ "file": "...", "message": "...", "type": "timeout" }],
   "project_summary": "Optional scan summary",
-  "manifest": { "terminal_state": "complete", "coverage": { "selected": 12, "completed": 10, "reused": 0, "failed": 2, "waived": 0 } }
+  "manifest": { "terminal_state": "complete", "coverage": { "selected": [{ "item_id": "...", "path": "..." }], "completed": [...], "reused": [], "failed": [], "waived": [] } }
 }
 ```
+
+> **Structure notes**: `manifest` is emitted in review mode only (`manifest.coverage` fields are `CoverageItem[]` arrays; read `summary.files_reviewed` for total files reviewed); `tool_calls` is always emitted; `llm`, `trace_id`, `project_summary`, `resume`, `message` are optional; run-level failures emit a `status:"failed"` JSON object to **stderr**.
 
 Classify by severity:
 
@@ -162,7 +164,7 @@ If no issues found: "Review complete — 0 issues found across N files."
 ## Gotchas & Notes
 
 - **Always use `--audience agent`** — `human` mode outputs progress UI that pollutes agent output.
-- **Per-run overrides** — Override provider/model/token-limit on single runs using `--provider <name>`, `--model <name>`, or `--max-tokens <n>`.
+- **Per-run overrides** — Override provider/model/tokens/effort on single runs using `--provider <name>`, `--model <name>`, `--max-tokens <n>`, or `--effort <low|medium|high>`.
 - **Working directory matters** — `ocr` operates on the git repo in cwd. Use `--repo /path` to override.
 - **Workspace mode includes untracked files** — Bare `ocr review` reviews staged + unstaged + untracked changes.
 - **Plan phase at 50+ lines** — Diffs exceeding 50 changed lines run a pre-review risk analysis plan phase.
@@ -172,6 +174,7 @@ If no issues found: "Review complete — 0 issues found across N files."
 - **Resume conditions** — `ocr scan` fully supports `--resume`; `ocr review` supports `--resume` only in `--from/--to` or `--commit` modes (not workspace mode).
 - **`--preview` and `--resume` are mutually exclusive.**
 - **Language configuration** — Default: English. Switch via `ocr config set language 中文`.
+- **Default MAX_TOKENS** — Default prompt token ceiling is 200,000 (configurable via `--max-tokens` or `max_tokens`).
 - **Prevent Tool Output Truncation** — For large reviews or scans, prefer `-o <path>` / `--output <path>` to write directly to a UTF-8 file and read with `view_file`. If output is truncated, extract comments via `ocr session comments <session-id>` without re-running.
 - **Do not test connectivity pre-emptively** — Execute review/scan directly; troubleshoot only on actual LLM failure (see troubleshooting.md).
 

@@ -1,6 +1,6 @@
 # MCP Server Integration
 
-OCR review agents can invoke external MCP server tools (e.g. database schema lookup, API doc search) to enrich review context.
+OCR review agents can invoke external MCP server tools (e.g. database schema lookup, API doc search) to enrich review context. **Note: MCP server tools are currently loaded in `ocr review` mode only; full-file `ocr scan` mode does not load MCP servers.**
 
 ## Configuration Examples
 

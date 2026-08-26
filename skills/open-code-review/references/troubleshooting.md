@@ -9,7 +9,7 @@
 | Excessive token cost | Set `--max-tokens-budget 500000` (or lower) |
 | Single large file truncated | Set `--max-tokens 200000` or `ocr config set max_tokens 200000` |
 | Large file timeouts | Increase `--timeout 20` |
-| Excessive agent tool turns | Set `--max-tools 15` |
+| Excessive agent tool turns | Set `--max-tools 60` |
 | Windows git overhead | Lower `--max-git-procs 8` |
 | Slow LLM response | Set `OCR_LLM_TIMEOUT=120` (seconds) |
 
@@ -24,7 +24,7 @@
 | Token overflow | File diff too large | Use `--exclude`, set `--max-tokens` or `--max-tokens-budget` |
 | Rate limited | Concurrency too high | Lower `--concurrency` (429 is already retried by the SDK; `retry_codes` supports extra 4xx codes only) |
 | Wrong comment language | Default English | Run `ocr config set language 中文` |
-| Tool Output truncation / corrupted JSON | stdout exceeds the host agent's tool output buffer | **No need to re-run `ocr`**: use `ocr session comments <session-id> --severity high,critical --json`; or redirect to a file upfront (`ocr ... > result.json`) and read it with a file tool. Windows PowerShell: use `Out-File -Encoding utf8` instead of `>` (PowerShell 5 writes UTF-16) |
+| Tool Output truncation / corrupted JSON | stdout exceeds the host agent's tool output buffer | **No need to re-run `ocr`**: use `ocr session comments <session-id> --severity high,critical --json`; or pass `-o result.json` / `--output result.json` (native UTF-8 file write) upfront and read via `view_file` |
 | `--resume` fails | Review workspace mode | Review resume requires `--from/--to` or `--commit`; or use `scan --resume` |
 | `--preview` + `--resume` error | Mutually exclusive | Use one or the other |
 
@@ -34,7 +34,7 @@ Large reviews or full-file scans can be resumed after interruption (`scan` mode 
 
 ```bash
 # List recent sessions
-ocr session list [--limit 10] [--json]
+ocr session list [--limit 20] [--json]
 
 # View session details
 ocr session show <session-id> [--json]

@@ -30,20 +30,20 @@ export OCR_LLM_PROTOCOL=anthropic
 
 # Optional extended variables
 export OCR_LLM_AUTH_HEADER="Authorization: Bearer <api-key>"  # Custom auth header
-export OCR_LLM_EXTRA_HEADERS='{"X-Custom": "value"}'          # Extra request headers (JSON)
+export OCR_LLM_EXTRA_HEADERS="X-Custom=value,X-Two=v2"         # Extra request headers (comma-separated key=value pairs)
 export OCR_USE_ANTHROPIC=1                                    # Force Anthropic protocol (OCR_LLM_PROTOCOL takes priority)
 export OCR_LLM_TIMEOUT=120                                    # LLM request timeout (seconds)
 export OCR_CONFIG_PATH=/path/to/config.json                   # Custom config path (read-only commands only, e.g. ocr llm test)
 ```
 
-Supported protocols: `anthropic`, `openai`, `openai-responses`.
+Supported protocols: `anthropic`, `openai`, `openai-responses` (built-in `openai-responses` preset is used for GPT-5.6 models with `OPENAI_RESPONSES_API_KEY`).
 
 ### Option: Per-Run CLI Overrides (No Global Config Modification Required)
 
-Override provider, model, or per-file token limit directly during execution:
+Override provider, model, tokens, or review effort directly during execution:
 
 ```bash
-ocr review --provider anthropic --model claude-opus-5 --max-tokens 200000 --audience agent --format json
+ocr review --provider anthropic --model claude-opus-5 --max-tokens 200000 --effort low --audience agent --format json
 ```
 
 Model names as listed by `ocr llm providers`.
@@ -73,14 +73,15 @@ ocr config set llm.protocol anthropic
 ocr config set llm.retry_codes 403,400         # Add custom 4xx retry codes (4xx only; 408/409/429 and all 5xx are already retried by the SDK)
 ocr config set llm.timeout_sec 120             # LLM request timeout (seconds)
 ocr config set llm.auth_header "Bearer <key>"  # Custom auth header
-ocr config set llm.extra_headers '{"X-Custom": "v"}'  # Extra request headers (JSON object)
+ocr config set llm.extra_headers "X-Custom=v"  # Extra request headers (comma-separated key=value)
 ocr config set llm.extra_body '{"temperature": 0.1}'  # Extra request body fields (JSON object)
 ocr config set max_tokens 200000               # Per-file token limit
+ocr config set effort low                      # Review effort preset (low, medium, high)
 ```
 
 ## Resolution Priority (High → Low)
 
-1. **CLI Flags** (`--provider` / `--model` / `--max-tokens`)
+1. **CLI Flags** (`--provider` / `--model` / `--max-tokens` / `--effort`)
 2. **Configuration file** (`~/.opencodereview/config.json`) — checks active provider block, then legacy `llm.*` block
 3. **`OCR_LLM_*` environment variables**
 4. **Claude Code fallback** (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`)
@@ -92,11 +93,14 @@ ocr config set max_tokens 200000               # Per-file token limit
 
 ```bash
 ocr llm test          # Test LLM connectivity
-ocr llm providers     # List all built-in provider presets and available models
+ocr llm providers     # List all built-in provider presets (supports AWS Bedrock, OpenAI Responses, Gemini, Grok, SiliconFlow, Kimi-Global, etc.)
 ocr config provider   # Interactive provider configuration (TUI)
 ocr config model      # Interactive model selection (TUI)
-ocr config unset llm.url           # Remove a single config key
+ocr config unset provider          # Clear active provider and model
+ocr config unset max_tokens        # Reset per-file token limit to default
+ocr config unset effort            # Reset review effort to default medium
 ocr config unset custom_providers.my-gateway  # Remove an entire custom provider
+ocr config unset mcp_servers.docs  # Remove a specific MCP server
 ocr config set language 中文       # Change review comment language (default: English)
 ```
 
