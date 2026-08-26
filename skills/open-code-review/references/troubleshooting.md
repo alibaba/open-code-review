@@ -43,7 +43,7 @@ ocr session show <session-id> [--json]
 ocr session comments <session-id> [--json] [--severity critical,high] [--category security,bug]
 
 # Resume interrupted review or scan
-ocr review --audience agent --format json --resume <session-id>
+ocr review --audience agent --format json --from <ref> --to <ref> --resume <session-id>
 ocr scan --audience agent --format json --resume <session-id>
 ```
 
