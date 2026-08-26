@@ -225,3 +225,25 @@ func TestShouldSkipFile(t *testing.T) {
 		})
 	}
 }
+
+func TestFileFind_PathWithSubdirectory(t *testing.T) {
+	dir := setupFileFindRepo(t)
+	p := NewFileFind(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	got, err := p.Execute(context.Background(), map[string]any{"query_name": "pkg/util"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "pkg/util.go") {
+		t.Fatalf("expected to find pkg/util.go when querying 'pkg/util', got: %s", got)
+	}
+
+	gotWin, errWin := p.Execute(context.Background(), map[string]any{"query_name": `pkg\util.go`})
+	if errWin != nil {
+		t.Fatal(errWin)
+	}
+	if !strings.Contains(gotWin, "pkg/util.go") {
+		t.Fatalf("expected to find pkg/util.go when querying 'pkg\\util.go', got: %s", gotWin)
+	}
+}
+

@@ -31,11 +31,13 @@ func (p *FileFindProvider) Tool() Tool { return FileFind }
 
 func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (string, error) {
 	queryName, _ := args["query_name"].(string)
-	if strings.TrimSpace(queryName) == "" {
+	queryName = strings.TrimSpace(queryName)
+	if queryName == "" {
 		return "// The file was not found", nil
 	}
 
 	caseSensitive, _ := args["case_sensitive"].(bool)
+	normalizedQuery := strings.ReplaceAll(queryName, "\\", "/")
 
 	files, err := p.listGitFiles(ctx)
 	if err != nil {
@@ -50,9 +52,10 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 		}
 		match := false
 		if caseSensitive {
-			match = strings.Contains(base, queryName)
+			match = strings.Contains(base, queryName) || strings.Contains(f, normalizedQuery)
 		} else {
-			match = strings.Contains(strings.ToLower(base), strings.ToLower(queryName))
+			match = strings.Contains(strings.ToLower(base), strings.ToLower(queryName)) ||
+				strings.Contains(strings.ToLower(f), strings.ToLower(normalizedQuery))
 		}
 		if match {
 			matched = append(matched, f)
