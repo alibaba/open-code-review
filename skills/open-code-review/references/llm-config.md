@@ -100,5 +100,3 @@ ocr config unset custom_providers.my-gateway  # Remove an entire custom provider
 ocr config unset mcp_servers.docs  # Remove a specific MCP server
 ocr config set language 中文       # Change review comment language (default: English)
 ```
-
-**Never invent or hardcode API keys.** Stop and ask the user for credentials when missing.

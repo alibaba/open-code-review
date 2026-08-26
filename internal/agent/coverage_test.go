@@ -13,6 +13,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -180,27 +181,6 @@ func TestFilterDiffs(t *testing.T) {
 	}
 }
 
-func TestResolveSystemRule(t *testing.T) {
-	t.Run("nil SystemRule returns empty", func(t *testing.T) {
-		a := New(Args{SystemRule: nil})
-		if got := a.resolveSystemRule("main.go"); got != "" {
-			t.Errorf("expected empty, got %q", got)
-		}
-	})
-
-	t.Run("with resolver", func(t *testing.T) {
-		rule, err := rules.LoadDefault()
-		if err != nil {
-			t.Skipf("cannot load default rules: %v", err)
-		}
-		a := New(Args{SystemRule: rule})
-		got := a.resolveSystemRule("main.go")
-		if got == "" {
-			t.Error("expected non-empty rule for .go file")
-		}
-	})
-}
-
 func TestFindDiff(t *testing.T) {
 	a := New(Args{})
 	a.diffs = []model.Diff{
@@ -235,7 +215,7 @@ func TestExecuteReviewFilter_NoFilterTask(t *testing.T) {
 		},
 	})
 
-	a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go"}, "a.go")
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go"}}}, nil)
 	if client.calls != 0 {
 		t.Errorf("no LLM calls expected when ReviewFilterTask is nil, got %d", client.calls)
 	}
@@ -259,7 +239,7 @@ func TestExecuteReviewFilter_NoComments(t *testing.T) {
 		},
 	})
 
-	a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x"}, "a.go")
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
 	if client.calls != 0 {
 		t.Errorf("no LLM calls expected when no comments exist, got %d", client.calls)
 	}
@@ -269,11 +249,19 @@ func TestExecuteReviewFilter_RemovesComments(t *testing.T) {
 	tmpDir := t.TempDir()
 	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
 
-	filterResp := `["c-1"]`
 	client := &fakeAgentClient{
 		responses: []*llm.ChatResponse{{
 			Choices: []llm.Choice{{
-				Message: llm.ResponseMessage{Content: &filterResp},
+				Message: llm.ResponseMessage{
+					ToolCalls: []llm.ToolCall{{
+						ID:   "call_1",
+						Type: "function",
+						Function: llm.FunctionCall{
+							Name:      "report_incorrect_comments",
+							Arguments: `{"comment_ids":["c-1"]}`,
+						},
+					}},
+				},
 			}},
 			Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
 		}},
@@ -299,7 +287,7 @@ func TestExecuteReviewFilter_RemovesComments(t *testing.T) {
 		},
 	})
 
-	a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+code"}, "a.go")
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}}, nil)
 
 	comments := collector.CommentsForPath("a.go")
 	if len(comments) != 2 {
@@ -338,7 +326,7 @@ func TestExecuteReviewFilter_LLMError(t *testing.T) {
 		},
 	})
 
-	a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x"}, "a.go")
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
 
 	comments := collector.CommentsForPath("a.go")
 	if len(comments) != 1 {
@@ -346,7 +334,191 @@ func TestExecuteReviewFilter_LLMError(t *testing.T) {
 	}
 }
 
-func TestExecutePlanPhase(t *testing.T) {
+func TestExecuteReviewFilter_SkipFilter(t *testing.T) {
+	t.Run("AC-1: SkipFilter disables the filter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			SkipFilter:       true,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}}, nil)
+
+		if client.calls != 0 {
+			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
+		}
+		comments := collector.CommentsForPath("a.go")
+		if len(comments) != 1 {
+			t.Errorf("comments should be unchanged when filter is skipped, got %d", len(comments))
+		}
+	})
+
+	t.Run("AC-2: All comments preserved when skipped", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment 1"})
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment 2"})
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment 3"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			SkipFilter:       true,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}}, nil)
+
+		comments := collector.CommentsForPath("a.go")
+		if len(comments) != 3 {
+			t.Fatalf("expected 3 comments when filter is skipped, got %d", len(comments))
+		}
+	})
+
+	t.Run("AC-3: Default (no SkipFilter) still runs filter", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+
+		client := &fakeAgentClient{
+			responses: []*llm.ChatResponse{{
+				Choices: []llm.Choice{{
+					Message: llm.ResponseMessage{
+						ToolCalls: []llm.ToolCall{{
+							ID:   "call_1",
+							Type: "function",
+							Function: llm.FunctionCall{
+								Name:      "report_incorrect_comments",
+								Arguments: `{"comment_ids":["c-1"]}`,
+							},
+						}},
+					},
+				}},
+				Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+			}},
+		}
+
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "keep this"})
+		collector.Add(model.LlmComment{Path: "a.go", Content: "remove this"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}} path={{path}} diff={{diff}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+code"}}}, nil)
+
+		if client.calls == 0 {
+			t.Error("LLM client should have been called when SkipFilter is false (default)")
+		}
+		comments := collector.CommentsForPath("a.go")
+		if len(comments) != 1 {
+			t.Errorf("expected 1 comment after filter, got %d", len(comments))
+		}
+	})
+
+	t.Run("AC-4: SkipFilter is reached when ReviewFilterTask is non-nil", func(t *testing.T) {
+		// After the nil-template guard, SkipFilter is the next early-return.
+		// With a non-nil ReviewFilterTask + zero comments, the function would
+		// normally fall through to the LLM call; SkipFilter must short-circuit it.
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+		collector := tool.NewCommentCollector()
+		collector.Add(model.LlmComment{Path: "a.go", Content: "comment"})
+
+		a := New(Args{
+			LLMClient:        client,
+			Model:            "test",
+			Session:          sess,
+			SkipFilter:       true,
+			CommentCollector: collector,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
+
+		if client.calls != 0 {
+			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
+		}
+		if len(collector.CommentsForPath("a.go")) != 1 {
+			t.Errorf("comments should be unchanged when filter is skipped")
+		}
+	})
+
+	t.Run("AC-5: Skip takes priority over no comments", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
+		client := &fakeAgentClient{}
+
+		a := New(Args{
+			LLMClient:  client,
+			Model:      "test",
+			Session:    sess,
+			SkipFilter: true,
+			Template: template.Template{
+				ReviewFilterTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+				},
+				MaxTokens:           10000,
+				MaxToolRequestTimes: 5,
+				MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+			},
+		})
+
+		a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
+
+		if client.calls != 0 {
+			t.Errorf("no LLM calls expected when SkipFilter is true, got %d", client.calls)
+		}
+	})
+}
+
+func TestExecuteGroupPlanPhase(t *testing.T) {
 	tmpDir := t.TempDir()
 	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
 
@@ -369,7 +541,10 @@ func TestExecutePlanPhase(t *testing.T) {
 			PlanTask: &template.LlmConversation{
 				Messages: []template.ChatMessage{
 					{Role: "system", Content: "You are a planner. Date: {{current_system_date_time}}"},
-					{Role: "user", Content: "Plan review for {{current_file_path}}. Rule: {{system_rule}}. Changes: {{change_files}}. Diff: {{diff}}. Background: {{requirement_background}}. Tools: {{plan_tools}}"},
+					// {{diffs}} (plural), not {{diff}}: the group plan phase renders every
+					// member's diff into one block and no longer substitutes the
+					// single-file {{current_file_path}}/{{diff}} pair.
+					{Role: "user", Content: "Plan review. Rule: {{system_rule}}. Changes: {{change_files}}. Diffs: {{diffs}}. Background: {{requirement_background}}. Tools: {{plan_tools}}"},
 				},
 			},
 			MaxTokens:           10000,
@@ -379,9 +554,17 @@ func TestExecutePlanPhase(t *testing.T) {
 	})
 	a.currentDate = "2025-06-26 10:00"
 
-	result, err := a.executePlanPhase(context.Background(), "main.go", "+new code", "helper.go", "check for bugs")
+	g := FileGroup{
+		Label: "core",
+		Diffs: []model.Diff{
+			{NewPath: "main.go", Diff: "+new code"},
+			{NewPath: "helper.go", Diff: "+helper code"},
+		},
+	}
+	result, err := a.executeGroupPlanPhase(context.Background(), g,
+		buildConcatenatedDiffs(g.Diffs), "other.go", "check for bugs")
 	if err != nil {
-		t.Fatalf("executePlanPhase: %v", err)
+		t.Fatalf("executeGroupPlanPhase: %v", err)
 	}
 	if result != "review plan output" {
 		t.Errorf("result = %q", result)
@@ -389,9 +572,14 @@ func TestExecutePlanPhase(t *testing.T) {
 	if a.TotalInputTokens() != 20 {
 		t.Errorf("TotalInputTokens = %d, want 20", a.TotalInputTokens())
 	}
+	// The plan record is filed under the group key, not any single member, so the
+	// retry report and the resume checkpoint join on the same string.
+	if recs := sess.GetOrCreateFileSession("helper.go,main.go").TaskRecords[session.PlanTask]; len(recs) != 1 {
+		t.Errorf("group file session holds %d plan records, want 1", len(recs))
+	}
 }
 
-func TestExecutePlanPhase_LLMError(t *testing.T) {
+func TestExecuteGroupPlanPhase_LLMError(t *testing.T) {
 	tmpDir := t.TempDir()
 	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
 
@@ -403,7 +591,7 @@ func TestExecutePlanPhase_LLMError(t *testing.T) {
 		Session:   sess,
 		Template: template.Template{
 			PlanTask: &template.LlmConversation{
-				Messages: []template.ChatMessage{{Role: "user", Content: "{{diff}}"}},
+				Messages: []template.ChatMessage{{Role: "user", Content: "{{diffs}}"}},
 			},
 			MaxTokens:           10000,
 			MaxToolRequestTimes: 5,
@@ -411,7 +599,8 @@ func TestExecutePlanPhase_LLMError(t *testing.T) {
 		},
 	})
 
-	_, err := a.executePlanPhase(context.Background(), "a.go", "+x", "", "")
+	g := FileGroup{Label: "single", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}
+	_, err := a.executeGroupPlanPhase(context.Background(), g, buildConcatenatedDiffs(g.Diffs), "", "")
 	if err != nil {
 		t.Logf("expected no-error from empty response, got: %v", err)
 	}
@@ -433,7 +622,7 @@ func TestExecuteSubtask_EmptyMainTask(t *testing.T) {
 	})
 	a.currentDate = "2025-06-26 10:00"
 
-	completed, stop, err := a.executeSubtask(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x", Insertions: 1})
+	completed, stop, err := a.executeGroupSubtask(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x", Insertions: 1}}})
 	if err == nil {
 		t.Fatal("expected error for empty main_task messages")
 	}
@@ -461,7 +650,7 @@ func TestExecuteSubtask_TokenThresholdExceeded(t *testing.T) {
 			MaxToolRequestTimes: 5,
 			MainTask: template.LlmConversation{
 				Messages: []template.ChatMessage{
-					{Role: "user", Content: "Review: {{diff}}"},
+					{Role: "user", Content: "Review: {{diffs}}"},
 				},
 			},
 		},
@@ -469,7 +658,7 @@ func TestExecuteSubtask_TokenThresholdExceeded(t *testing.T) {
 	a.currentDate = "2025-06-26 10:00"
 	a.diffs = []model.Diff{{NewPath: "a.go", Diff: strings.Repeat("code ", 200), Insertions: 100}}
 
-	completed, stop, err := a.executeSubtask(context.Background(), a.diffs[0])
+	completed, stop, err := a.executeGroupSubtask(context.Background(), FileGroup{Label: a.diffs[0].NewPath, Diffs: []model.Diff{a.diffs[0]}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -537,12 +726,12 @@ func TestExecuteSubtask_WithPlanPhase(t *testing.T) {
 			PlanModeLineThreshold: 0,
 			PlanTask: &template.LlmConversation{
 				Messages: []template.ChatMessage{
-					{Role: "user", Content: "Plan for {{current_file_path}}: {{diff}}"},
+					{Role: "user", Content: "Plan for: {{diffs}}"},
 				},
 			},
 			MainTask: template.LlmConversation{
 				Messages: []template.ChatMessage{
-					{Role: "user", Content: "Review {{current_file_path}} with plan {{plan_guidance}}: {{diff}}"},
+					{Role: "user", Content: "Review with plan {{plan_guidance}}: {{diffs}}"},
 				},
 			},
 		},
@@ -553,9 +742,9 @@ func TestExecuteSubtask_WithPlanPhase(t *testing.T) {
 	a.currentDate = "2025-06-26 10:00"
 	a.diffs = []model.Diff{{NewPath: "main.go", OldPath: "main.go", Diff: "+new code", Insertions: 5}}
 
-	completed, stop, err := a.executeSubtask(context.Background(), a.diffs[0])
+	completed, stop, err := a.executeGroupSubtask(context.Background(), FileGroup{Label: a.diffs[0].NewPath, Diffs: []model.Diff{a.diffs[0]}})
 	if err != nil {
-		t.Fatalf("executeSubtask: %v", err)
+		t.Fatalf("executeGroupSubtask: %v", err)
 	}
 	if !completed {
 		t.Fatal("expected completed review")
@@ -576,14 +765,14 @@ func TestExecuteSubtask_ContextCancelled(t *testing.T) {
 		Template: template.Template{
 			MaxTokens:           10000,
 			MaxToolRequestTimes: 5,
-			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "{{diff}}"}}},
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "{{diffs}}"}}},
 		},
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	completed, stop, err := a.executeSubtask(ctx, model.Diff{NewPath: "a.go", Diff: "+x", Insertions: 1})
+	completed, stop, err := a.executeGroupSubtask(ctx, FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x", Insertions: 1}}})
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
 	}
@@ -599,11 +788,21 @@ func TestExecuteReviewFilter_WithTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
 	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})
 
-	filterResp := `[]`
 	client := &fakeAgentClient{
 		responses: []*llm.ChatResponse{{
-			Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &filterResp}}},
-			Usage:   &llm.UsageInfo{PromptTokens: 5, CompletionTokens: 2},
+			Choices: []llm.Choice{{
+				Message: llm.ResponseMessage{
+					ToolCalls: []llm.ToolCall{{
+						ID:   "call_1",
+						Type: "function",
+						Function: llm.FunctionCall{
+							Name:      "approve_all_comments",
+							Arguments: `{}`,
+						},
+					}},
+				},
+			}},
+			Usage: &llm.UsageInfo{PromptTokens: 5, CompletionTokens: 2},
 		}},
 	}
 
@@ -625,7 +824,7 @@ func TestExecuteReviewFilter_WithTimeout(t *testing.T) {
 		},
 	})
 
-	a.executeReviewFilter(context.Background(), model.Diff{NewPath: "a.go", Diff: "+x"}, "a.go")
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
 
 	comments := collector.CommentsForPath("a.go")
 	if len(comments) != 1 {
@@ -644,7 +843,7 @@ func TestDispatchSubtasks_AllFilteredBySize(t *testing.T) {
 		Template: template.Template{
 			MaxTokens:           10,
 			MaxToolRequestTimes: 5,
-			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "{{diff}}"}}},
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "{{diffs}}"}}},
 		},
 	})
 	a.diffs = []model.Diff{
@@ -715,6 +914,39 @@ func TestClassifyItemError(t *testing.T) {
 			if strings.Contains(reason, "sk-LEAKED-SECRET") || strings.Contains(reason, "/home/alice") {
 				t.Errorf("reason leaked raw error text: %q", reason)
 			}
+		})
+	}
+}
+
+// classifyMainLoopStop keeps the unknown class for the empty-round and
+// compression exits, but each reason must name its trigger: in --format json
+// runs the manifest reason is the only stop diagnostic that leaves the runner,
+// so the three non-budget stops must not collapse into one string.
+func TestClassifyMainLoopStop(t *testing.T) {
+	reasons := make(map[string]llmloop.MainLoopStop)
+	for _, tc := range []struct {
+		name       string
+		stop       llmloop.MainLoopStop
+		wantClass  session.FailureClass
+		wantReason string
+	}{
+		{"max_rounds", llmloop.StopMaxRounds, session.FailureBudget, "reached the maximum tool-request rounds without finishing"},
+		{"empty_rounds", llmloop.StopEmptyRounds, session.FailureUnknown, "stopped after repeated rounds without a usable tool result"},
+		{"compression", llmloop.StopCompression, session.FailureUnknown, "stopped because context compression exceeded its threshold"},
+		{"none", llmloop.StopNone, session.FailureUnknown, "main task stopped before completing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			class, reason := classifyMainLoopStop(tc.stop)
+			if class != tc.wantClass {
+				t.Errorf("class = %q, want %q", class, tc.wantClass)
+			}
+			if reason != tc.wantReason {
+				t.Errorf("reason = %q, want %q", reason, tc.wantReason)
+			}
+			if prev, dup := reasons[reason]; dup {
+				t.Errorf("reason %q is shared by %v and %v; stops must stay distinguishable", reason, prev, tc.stop)
+			}
+			reasons[reason] = tc.stop
 		})
 	}
 }

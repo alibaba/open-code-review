@@ -136,7 +136,7 @@ schema 见[评审规则](../../review-rules/)。
 
 #### 并发
 
-默认 8 个并行 per-file 子 agent。大 PR 上调低，以免触发 LLM provider 速率限制：
+默认 8 个并行子 agent——每个文件组一个。大 PR 上调低，以免触发 LLM provider 速率限制：
 
 ```yaml
 - name: Run OCR review
@@ -225,6 +225,33 @@ if: |
    ```
 
 评审现在会以你 app 的名字而非 `github-actions[bot]` 发布。
+
+#### 将发现上传到 GitHub Code Scanning（SARIF）
+
+`--format sarif` 会把
+[SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+报告写入 stdout。把它重定向到文件，并用 CodeQL 的 `upload-sarif`
+action 上传，让发现出现在 **Security → Code scanning** 下：
+
+```yaml
+- name: Run OCR review
+  env:
+    BASE_REF: ${{ github.base_ref }}
+    HEAD_REF: ${{ github.head_ref }}
+  run: |
+    ocr review \
+      --from "origin/$BASE_REF" \
+      --to "origin/$HEAD_REF" \
+      --format sarif --audience agent > results.sarif
+
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+SARIF 是机器可读格式，因此 OCR 会在 stdout 上抑制进度行，`results.sarif`
+只包含报告本身。`--preview` 不支持 `--format sarif`——请运行完整的
+review（或 `ocr scan`）来生成报告。
 
 ### 故障排查
 
@@ -318,7 +345,7 @@ script:
 #### 自定义规则与并发
 
 与 GitHub Actions 配方相同的参数——`--rule` 传项目专属规则文件，
-`--concurrency` 限制并行子 agent（默认 8）：
+`--concurrency` 限制并行子 agent（默认 8，每个文件组一个）：
 
 ```yaml
 script:

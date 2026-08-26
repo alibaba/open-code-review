@@ -5,7 +5,8 @@
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--audience` | | `human` | `human` (progress UI) or `agent` (summary only). **Always use `agent`.** |
-| `--format` | `-f` | `text` | `text` or `json` |
+| `--format` | `-f` | `text` | `text`, `json`, or `sarif` |
+| `--output` | `-o` | `""` (stdout) | Writes review/scan output to a UTF-8 file (`-` for stdout). Created lazily (won't truncate existing file on run failure), automatically strips ANSI color codes for text format |
 | `--background` | `-b` | `""` | Business context string |
 | `--rule` | | `""` | Path to custom rule.json |
 | `--repo` | | cwd | Git repository root directory |
@@ -29,7 +30,7 @@
 | `--from` | | Source ref in Range mode |
 | `--to` | | Target ref in Range mode |
 | `--commit` | `-c` | Single commit hash (compared against its parent) |
-| `--background-file` | `-B` | Markdown file path as business context (max 1 MB) |
+| `--background-file` | `-B` | Markdown file path as business context (max 1 MB; takes precedence over `--background`) |
 
 ## Scan-Only Flags
 

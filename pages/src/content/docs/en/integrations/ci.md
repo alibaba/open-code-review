@@ -157,8 +157,8 @@ See [Review Rules](../../review-rules/) for the schema.
 
 #### Concurrency
 
-The default is 8 parallel per-file sub-agents. Lower it on large PRs
-to stay under your LLM provider's rate limits:
+The default is 8 parallel sub-agents, one per file group. Lower it on
+large PRs to stay under your LLM provider's rate limits:
 
 ```yaml
 - name: Run OCR review
@@ -257,6 +257,35 @@ for a GitHub App installation token.
 
 Reviews will now appear as posted by your app's name instead of
 `github-actions[bot]`.
+
+#### Upload findings to GitHub Code Scanning (SARIF)
+
+`--format sarif` writes a
+[SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+report to stdout. Pipe it to a file and upload it with the CodeQL
+`upload-sarif` action so findings appear under
+**Security → Code scanning**:
+
+```yaml
+- name: Run OCR review
+  env:
+    BASE_REF: ${{ github.base_ref }}
+    HEAD_REF: ${{ github.head_ref }}
+  run: |
+    ocr review \
+      --from "origin/$BASE_REF" \
+      --to "origin/$HEAD_REF" \
+      --format sarif --audience agent > results.sarif
+
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+SARIF is machine-readable, so OCR suppresses progress lines on stdout
+and `results.sarif` contains only the report. `--preview` does not
+support `--format sarif` — run a full review (or `ocr scan`) to
+produce a report.
 
 ### Troubleshooting
 

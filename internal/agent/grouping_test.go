@@ -1,0 +1,505 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
+package agent
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/alibaba/open-code-review/internal/config/rules"
+	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/model"
+)
+
+type fakeGroupingClient struct {
+	response string
+	err      error
+}
+
+func (f *fakeGroupingClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	content := f.response
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{Role: "assistant", Content: &content},
+		}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{TotalTokens: 100},
+	}, nil
+}
+
+func TestToSingleFileGroups(t *testing.T) {
+	diffs := []model.Diff{
+		{NewPath: "a.go"},
+		{NewPath: "b.go"},
+	}
+	groups := toSingleFileGroups(diffs)
+	if len(groups) != 2 {
+		t.Fatalf("got %d groups, want 2", len(groups))
+	}
+	if groups[0].Label != "a.go" || groups[1].Label != "b.go" {
+		t.Errorf("labels = [%q, %q]", groups[0].Label, groups[1].Label)
+	}
+}
+
+func TestParseGroupingResponse_Valid(t *testing.T) {
+	diffs := []model.Diff{
+		{NewPath: "internal/auth/handler.go"},
+		{NewPath: "internal/auth/handler_test.go"},
+		{NewPath: "docs/README.md"},
+	}
+	content := `[
+		{"label": "auth handler", "files": ["internal/auth/handler.go", "internal/auth/handler_test.go"]},
+		{"label": "docs", "files": ["docs/README.md"]}
+	]`
+	groups, err := parseGroupingResponse(content, diffs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("got %d groups, want 2", len(groups))
+	}
+	if len(groups[0].Diffs) != 2 {
+		t.Errorf("group 0 has %d diffs, want 2", len(groups[0].Diffs))
+	}
+	if groups[0].Label != "auth handler" {
+		t.Errorf("group 0 label = %q", groups[0].Label)
+	}
+}
+
+func TestParseGroupingResponse_MarkdownFenced(t *testing.T) {
+	diffs := []model.Diff{
+		{NewPath: "a.go"},
+		{NewPath: "b.go"},
+	}
+	content := "```json\n" + `[{"label":"all","files":["a.go","b.go"]}]` + "\n```"
+	groups, err := parseGroupingResponse(content, diffs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(groups))
+	}
+}
+
+func TestParseGroupingResponse_DuplicateFile(t *testing.T) {
+	diffs := []model.Diff{
+		{NewPath: "a.go"},
+	}
+	content := `[{"label":"g1","files":["a.go"]},{"label":"g2","files":["a.go"]}]`
+	groups, err := parseGroupingResponse(content, diffs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Duplicate is skipped; file stays in first group only
+	if len(groups) != 1 {
+		t.Fatalf("got %d groups, want 1 (duplicate skipped)", len(groups))
+	}
+	if len(groups[0].Diffs) != 1 || groups[0].Diffs[0].NewPath != "a.go" {
+		t.Errorf("unexpected group content: %+v", groups[0])
+	}
+}
+
+func TestParseGroupingResponse_MissingFile(t *testing.T) {
+	diffs := []model.Diff{
+		{NewPath: "a.go"},
+		{NewPath: "b.go"},
+	}
+	content := `[{"label":"g1","files":["a.go"]}]`
+	groups, err := parseGroupingResponse(content, diffs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// b.go not covered by LLM response, gets its own single-file group
+	if len(groups) != 2 {
+		t.Fatalf("got %d groups, want 2 (one from LLM + one fallback)", len(groups))
+	}
+	if groups[1].Diffs[0].NewPath != "b.go" {
+		t.Errorf("uncovered file group: got %q, want b.go", groups[1].Diffs[0].NewPath)
+	}
+}
+
+func TestParseGroupingResponse_UnknownFile(t *testing.T) {
+	diffs := []model.Diff{
+		{NewPath: "a.go"},
+	}
+	content := `[{"label":"g1","files":["a.go","unknown.go"]}]`
+	groups, err := parseGroupingResponse(content, diffs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// unknown.go is skipped; a.go still forms the group
+	if len(groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(groups))
+	}
+	if len(groups[0].Diffs) != 1 || groups[0].Diffs[0].NewPath != "a.go" {
+		t.Errorf("unexpected group: %+v", groups[0])
+	}
+}
+
+func TestParseGroupingResponse_InvalidJSON(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}}
+	_, err := parseGroupingResponse("not json", diffs)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestEnforceGroupTokenBudget_NoSplit(t *testing.T) {
+	groups := []FileGroup{
+		{Label: "small", Diffs: []model.Diff{{NewPath: "a.go", Diff: "short"}}},
+	}
+	result := enforceGroupTokenBudget(groups, 10000)
+	if len(result) != 1 {
+		t.Fatalf("got %d groups, want 1", len(result))
+	}
+}
+
+func TestEnforceGroupTokenBudget_Split(t *testing.T) {
+	largeDiff := make([]byte, 50000)
+	for i := range largeDiff {
+		largeDiff[i] = 'x'
+	}
+	groups := []FileGroup{
+		{Label: "big", Diffs: []model.Diff{
+			{NewPath: "a.go", Diff: string(largeDiff)},
+			{NewPath: "b.go", Diff: string(largeDiff)},
+		}},
+	}
+	result := enforceGroupTokenBudget(groups, 100)
+	if len(result) != 2 {
+		t.Fatalf("got %d groups, want 2 (split)", len(result))
+	}
+}
+
+func TestEnforceMaxFilesPerGroup_NoSplit(t *testing.T) {
+	groups := []FileGroup{
+		{Label: "small", Diffs: []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}}},
+	}
+	result := enforceMaxFilesPerGroup(groups)
+	if len(result) != 1 {
+		t.Fatalf("got %d groups, want 1", len(result))
+	}
+}
+
+func TestEnforceMaxFilesPerGroup_Split(t *testing.T) {
+	diffs := make([]model.Diff, 25)
+	for i := range diffs {
+		diffs[i] = model.Diff{NewPath: "file" + string(rune('a'+i)) + ".go"}
+	}
+	groups := []FileGroup{{Label: "big", Diffs: diffs}}
+	result := enforceMaxFilesPerGroup(groups)
+	if len(result) != 3 {
+		t.Fatalf("got %d groups, want 3 (25 files / 10 max = 3 chunks)", len(result))
+	}
+	if len(result[0].Diffs) != 10 || len(result[1].Diffs) != 10 || len(result[2].Diffs) != 5 {
+		t.Errorf("chunk sizes: %d, %d, %d", len(result[0].Diffs), len(result[1].Diffs), len(result[2].Diffs))
+	}
+}
+
+func TestFileGroupKey_Single(t *testing.T) {
+	key := fileGroupKey([]model.Diff{{NewPath: "a.go"}})
+	if key != "a.go" {
+		t.Errorf("got %q, want %q", key, "a.go")
+	}
+}
+
+func TestFileGroupKey_Multiple(t *testing.T) {
+	key := fileGroupKey([]model.Diff{{NewPath: "b.go"}, {NewPath: "a.go"}})
+	if key != "a.go,b.go" {
+		t.Errorf("got %q, want %q (sorted)", key, "a.go,b.go")
+	}
+}
+
+func TestGroupDiffs_SingleFile(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}}
+	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0)
+	if len(result.groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(result.groups))
+	}
+}
+
+func TestGroupDiffs_NoGroupingTask(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}}
+	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0)
+	if len(result.groups) != 2 {
+		t.Fatalf("got %d groups, want 2 (fallback to per-file)", len(result.groups))
+	}
+}
+
+func TestGroupDiffs_LLMError_Fallback(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}}
+	client := &fakeGroupingClient{err: fmt.Errorf("connection refused")}
+	tpl := template.Template{
+		GroupingTask: &template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+		},
+	}
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
+	if len(result.groups) != 2 {
+		t.Fatalf("got %d groups, want 2 (fallback on error)", len(result.groups))
+	}
+}
+
+func TestGroupDiffs_LLMSuccess(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}, {NewPath: "c.go"}}
+	client := &fakeGroupingClient{
+		response: `[{"label":"ab","files":["a.go","b.go"]},{"label":"c","files":["c.go"]}]`,
+	}
+	tpl := template.Template{
+		GroupingTask: &template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+		},
+	}
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
+	if len(result.groups) != 2 {
+		t.Fatalf("got %d groups, want 2", len(result.groups))
+	}
+	if result.groups[0].Label != "ab" {
+		t.Errorf("group 0 label = %q, want %q", result.groups[0].Label, "ab")
+	}
+	if len(result.groups[0].Diffs) != 2 {
+		t.Errorf("group 0 has %d diffs, want 2", len(result.groups[0].Diffs))
+	}
+}
+
+func TestCallGroupingLLM_EmptyResponse(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}}
+	client := &fakeGroupingClient{response: ""}
+	task := &template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+	}
+	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task)
+	if err == nil {
+		t.Fatal("expected error for empty response")
+	}
+}
+
+func TestBuildFileMetadataTable(t *testing.T) {
+	diffs := []model.Diff{
+		{NewPath: "a.go", IsNew: true, Insertions: 10, Deletions: 0},
+		{NewPath: "b.go", IsDeleted: true, Insertions: 0, Deletions: 5},
+	}
+	table := buildFileList(diffs)
+	if !contains(table, "ADDED") || !contains(table, "DELETED") {
+		t.Errorf("table missing status:\n%s", table)
+	}
+	if !contains(table, "a.go") || !contains(table, "b.go") {
+		t.Errorf("table missing paths:\n%s", table)
+	}
+}
+
+func TestResolveGroupSystemRule(t *testing.T) {
+	const (
+		goRule  = "GO CHECKLIST"
+		xmlRule = "XML CHECKLIST"
+	)
+	// DefaultRule is deliberately empty so a path matching neither pattern
+	// resolves to no rule at all, which is the skip case below.
+	resolver := &rules.SystemRule{
+		PathRules: []rules.PathRule{
+			{Pattern: "*.go", Rule: goRule},
+			{Pattern: "*.xml", Rule: xmlRule},
+		},
+	}
+	diff := func(path string) model.Diff { return model.Diff{NewPath: path} }
+
+	t.Run("nil resolver returns empty", func(t *testing.T) {
+		a := New(Args{})
+		if got := a.resolveGroupSystemRule([]model.Diff{diff("a.go")}); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+
+	t.Run("single file returns the bare rule", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		if got := a.resolveGroupSystemRule([]model.Diff{diff("a.go")}); got != goRule {
+			t.Errorf("got %q, want %q", got, goRule)
+		}
+	})
+
+	// The untagged form is what every same-language group renders, so it must stay
+	// byte-identical to the pre-tagging output — no wrapper, no duplicated rule.
+	t.Run("one rule set across many files stays untagged", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		got := a.resolveGroupSystemRule([]model.Diff{diff("b.go"), diff("a.go")})
+		if got != goRule {
+			t.Errorf("got %q, want the bare rule %q", got, goRule)
+		}
+	})
+
+	t.Run("mixed rule sets are tagged with their files", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		got := a.resolveGroupSystemRule([]model.Diff{diff("b.go"), diff("m.xml"), diff("a.go")})
+		want := "<rules for=\"a.go, b.go\">\n" + goRule + "\n</rules>\n" +
+			"<rules for=\"m.xml\">\n" + xmlRule + "\n</rules>"
+		if got != want {
+			t.Errorf("got:\n%s\n\nwant:\n%s", got, want)
+		}
+	})
+
+	t.Run("output does not depend on input order", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		forward := a.resolveGroupSystemRule([]model.Diff{diff("a.go"), diff("m.xml")})
+		reverse := a.resolveGroupSystemRule([]model.Diff{diff("m.xml"), diff("a.go")})
+		if forward != reverse {
+			t.Errorf("input order changed the output:\n%s\n---\n%s", forward, reverse)
+		}
+	})
+
+	t.Run("caller slice is not reordered", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		in := []model.Diff{diff("z.go"), diff("a.go")}
+		a.resolveGroupSystemRule(in)
+		if in[0].NewPath != "z.go" || in[1].NewPath != "a.go" {
+			t.Errorf("input slice was reordered: %q, %q", in[0].NewPath, in[1].NewPath)
+		}
+	})
+
+	t.Run("files resolving to no rule are skipped", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		got := a.resolveGroupSystemRule([]model.Diff{diff("a.go"), diff("README.md")})
+		if got != goRule {
+			t.Errorf("got %q, want the bare Go rule %q", got, goRule)
+		}
+	})
+
+	t.Run("no file resolves to a rule", func(t *testing.T) {
+		a := New(Args{SystemRule: resolver})
+		if got := a.resolveGroupSystemRule([]model.Diff{diff("README.md")}); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
+
+	// Smoke test against the real shipped rule set rather than a hand-built one:
+	// the glob patterns in system_rules.json must actually resolve for a plain
+	// source path, which a synthetic resolver cannot show.
+	t.Run("default rule set resolves a real path", func(t *testing.T) {
+		real, err := rules.LoadDefault()
+		if err != nil {
+			t.Skipf("cannot load default rules: %v", err)
+		}
+		a := New(Args{SystemRule: real})
+		if got := a.resolveGroupSystemRule([]model.Diff{diff("main.go")}); got == "" {
+			t.Error("expected a non-empty rule for a .go file")
+		}
+	})
+
+	// Regression test: resolveGroupSystemRule must pass the path through
+	// verbatim, not lowercased. The sniffer-wrapped resolver does its own
+	// internal lowercasing for glob matching, but also does real file I/O
+	// (disk read or `git show`) to sniff .m content — lowercasing the path
+	// before that call breaks the read for any mixed-case path (e.g.
+	// ios/ViewController.m -> ios/viewcontroller.m doesn't exist), silently
+	// falling back to the wrong rule instead of erroring loudly.
+	t.Run("mixed-case .m path still sniffs as Objective-C", func(t *testing.T) {
+		dir := t.TempDir()
+		git := func(args ...string) {
+			t.Helper()
+			cmd := exec.Command("git", args...)
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+		const objcHeader = "#import \"ViewController.h\"\n\n@implementation ViewController\n@end\n"
+		full := filepath.Join(dir, "ios", "ViewController.m")
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(objcHeader), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("init")
+		git("config", "user.email", "t@t.co")
+		git("config", "user.name", "t")
+		git("add", "-A")
+		git("commit", "-m", "init")
+
+		t.Setenv("HOME", t.TempDir())
+		resolver, _, err := rules.NewResolver(dir, "", rules.ResolverOptions{})
+		if err != nil {
+			t.Fatalf("NewResolver: %v", err)
+		}
+
+		a := New(Args{SystemRule: resolver})
+		got := a.resolveGroupSystemRule([]model.Diff{diff("ios/ViewController.m")})
+		if strings.Contains(got, "Indexing, Shapes, and Implicit Expansion") {
+			t.Errorf("resolved the MATLAB rule for a real ObjC file — mixed-case path broke the content sniff:\n%s", got)
+		}
+	})
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsSubstring(s, sub))
+}
+
+func containsSubstring(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
+func TestGroupChurn(t *testing.T) {
+	tests := []struct {
+		name    string
+		group   FileGroup
+		total   int64
+		maxFile int64
+	}{
+		{
+			name: "single file",
+			group: FileGroup{Diffs: []model.Diff{
+				{Insertions: 30, Deletions: 10},
+			}},
+			total: 40, maxFile: 40,
+		},
+		{
+			name: "multiple files, max is first",
+			group: FileGroup{Diffs: []model.Diff{
+				{Insertions: 50, Deletions: 10},
+				{Insertions: 20, Deletions: 5},
+				{Insertions: 10, Deletions: 3},
+			}},
+			total: 98, maxFile: 60,
+		},
+		{
+			name: "multiple files, max is last",
+			group: FileGroup{Diffs: []model.Diff{
+				{Insertions: 10, Deletions: 5},
+				{Insertions: 20, Deletions: 10},
+				{Insertions: 40, Deletions: 40},
+			}},
+			total: 125, maxFile: 80,
+		},
+		{
+			name:    "empty group",
+			group:   FileGroup{Diffs: nil},
+			total:   0,
+			maxFile: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			total, maxFile := groupChurn(tt.group)
+			if total != tt.total {
+				t.Errorf("total = %d, want %d", total, tt.total)
+			}
+			if maxFile != tt.maxFile {
+				t.Errorf("maxFile = %d, want %d", maxFile, tt.maxFile)
+			}
+		})
+	}
+}

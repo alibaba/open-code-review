@@ -5,10 +5,14 @@ import { describe, expect, it } from 'vitest';
 import { extractHeadings } from './extractHeadings';
 import { parseExplicitHeadingId } from './headingId';
 
+// Russian on purpose: explicit heading IDs exist for text that cannot produce a
+// usable ASCII slug on its own.
+const HEADING = 'Что делает навк'; // allow-non-english: fixture heading that cannot produce an ASCII slug
+
 describe('explicit heading IDs', () => {
   it('separates a trailing explicit ID from the visible heading text', () => {
-    expect(parseExplicitHeadingId('Что делает навк {#what-the-skill-does}')).toEqual({
-      text: 'Что делает навк',
+    expect(parseExplicitHeadingId(`${HEADING} {#what-the-skill-does}`)).toEqual({
+      text: HEADING,
       id: 'what-the-skill-does',
     });
   });
@@ -18,8 +22,8 @@ describe('explicit heading IDs', () => {
   });
 
   it('uses the explicit ID in the table of contents without exposing its marker', () => {
-    expect(extractHeadings('## Что делает навк {#what-the-skill-does}')).toEqual([
-      { id: 'what-the-skill-does', text: 'Что делает навк', level: 2 },
+    expect(extractHeadings(`## ${HEADING} {#what-the-skill-does}`)).toEqual([
+      { id: 'what-the-skill-does', text: HEADING, level: 2 },
     ]);
   });
 });

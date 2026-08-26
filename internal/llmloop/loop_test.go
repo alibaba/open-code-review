@@ -19,10 +19,13 @@ type fakeClient struct {
 	responses []*llm.ChatResponse
 	requests  []llm.ChatRequest
 	calls     int
+	// sessionKeys records llm.SessionKeyFromContext for each call.
+	sessionKeys []string
 }
 
-func (f *fakeClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+func (f *fakeClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	f.requests = append(f.requests, req)
+	f.sessionKeys = append(f.sessionKeys, llm.SessionKeyFromContext(ctx))
 	if f.calls >= len(f.responses) {
 		content := ""
 		return &llm.ChatResponse{
@@ -222,6 +225,30 @@ func TestRunPerFile_InvalidTaskDoneStateRetries(t *testing.T) {
 				t.Fatalf("expected invalid state to be retried, got %d LLM calls", client.calls)
 			}
 		})
+	}
+}
+
+func TestRunPerFile_TagsRequestsWithTaskSessionKey(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		taskDoneResponse(),
+	}}
+	deps := newTestDeps(client)
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review this file")}
+	if _, _, err := runner.RunPerFile(context.Background(), msgs, "main.go"); err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+
+	want := llm.SessionTaskKey(deps.Session.SessionID, string(session.MainTask), "main.go")
+	if len(client.sessionKeys) != 2 {
+		t.Fatalf("expected 2 recorded session keys, got %d", len(client.sessionKeys))
+	}
+	for i, got := range client.sessionKeys {
+		if got != want {
+			t.Errorf("call %d session key = %q, want %q", i, got, want)
+		}
 	}
 }
 
@@ -481,10 +508,10 @@ func TestExecuteToolCall_ArgumentsEdgeCases(t *testing.T) {
 			wantContains: "'comments' array is required",
 		},
 		{
-			name:        "valid args keeps path override",
+			name:        "valid args uses per-item path",
 			toolName:    "code_comment",
-			arguments:   `{"path":"hallucinated.go","comments":[{"content":"issue","existing_code":"foo"}]}`,
-			wantComment: "file.go",
+			arguments:   `{"comments":[{"content":"issue","existing_code":"foo","path":"item.go"}]}`,
+			wantComment: "item.go",
 		},
 		{
 			name:         "empty string args",
@@ -551,7 +578,7 @@ func TestExecuteToolCall_ArgumentsEdgeCases(t *testing.T) {
 	}
 }
 
-func TestExecuteToolCall_CodeCommentOverridesHallucinatedPath(t *testing.T) {
+func TestExecuteToolCall_CodeCommentUsesPerItemPath(t *testing.T) {
 	collector := tool.NewCommentCollector()
 	reg := tool.NewRegistry()
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
@@ -563,11 +590,11 @@ func TestExecuteToolCall_CodeCommentOverridesHallucinatedPath(t *testing.T) {
 	})
 
 	args := map[string]any{
-		"path": "wrong.go",
 		"comments": []any{
 			map[string]any{
 				"content":       "issue",
 				"existing_code": "foo",
+				"path":          "item-level.go",
 			},
 		},
 	}
@@ -576,7 +603,7 @@ func TestExecuteToolCall_CodeCommentOverridesHallucinatedPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cp := r.executeToolCall(context.Background(), "correct.go", llm.ToolCall{
+	cp := r.executeToolCall(context.Background(), "group-key", llm.ToolCall{
 		Function: llm.FunctionCall{
 			Name:      "code_comment",
 			Arguments: string(argsJSON),
@@ -590,7 +617,235 @@ func TestExecuteToolCall_CodeCommentOverridesHallucinatedPath(t *testing.T) {
 	if len(comments) != 1 {
 		t.Fatalf("expected 1 comment, got %d", len(comments))
 	}
-	if comments[0].Path != "correct.go" {
-		t.Errorf("path override: got %q, want %q", comments[0].Path, "correct.go")
+	if comments[0].Path != "item-level.go" {
+		t.Errorf("comment path: got %q, want %q", comments[0].Path, "item-level.go")
+	}
+}
+
+func graceRoundCommentResponse() *llm.ChatResponse {
+	content := ""
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{
+				Content: &content,
+				ToolCalls: []llm.ToolCall{{
+					ID:   "call_grace",
+					Type: "function",
+					Function: llm.FunctionCall{
+						Name:      "code_comment",
+						Arguments: `{"comments":[{"content":"found a bug","existing_code":"x := 1"}]}`,
+					},
+				}},
+			},
+		}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{PromptTokens: 50, CompletionTokens: 20},
+	}
+}
+
+func TestRunPerFile_GraceRoundSubmitsComment(t *testing.T) {
+	// Round 1: file_read (exhausts budget with MaxToolRequestTimes=1)
+	// Grace round: model calls code_comment
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		graceRoundCommentResponse(),
+	}}
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&fakeFileReadProvider{result: "package main\n"})
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	deps := Deps{
+		LLMClient:        client,
+		Model:            "fake",
+		Template:         template.Template{MaxTokens: 100000, MaxToolRequestTimes: 1},
+		Tools:            reg,
+		CommentCollector: collector,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+		},
+		Session: session.New("/tmp/test-repo", "main", "fake", session.SessionOptions{}),
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	completed, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if completed {
+		t.Fatal("expected not completed (budget exhausted)")
+	}
+	if stop != StopMaxRounds {
+		t.Fatalf("stop = %v, want StopMaxRounds", stop)
+	}
+	// Grace round should have been called (call 2)
+	if client.calls != 2 {
+		t.Fatalf("LLM calls = %d, want 2 (1 main + 1 grace)", client.calls)
+	}
+	// The grace round should only have code_comment + task_done tools
+	graceReq := client.requests[1]
+	if len(graceReq.Tools) != 2 {
+		t.Fatalf("grace round tools = %d, want 2", len(graceReq.Tools))
+	}
+	// Comment should have been collected
+	comments := collector.Comments()
+	if len(comments) != 1 {
+		t.Fatalf("comments = %d, want 1", len(comments))
+	}
+	if comments[0].Path != "main.go" {
+		t.Errorf("comment path = %q, want main.go", comments[0].Path)
+	}
+	// Token usage should include grace round
+	if runner.TotalInputTokens() != 70 {
+		t.Errorf("TotalInputTokens = %d, want 70 (20+50)", runner.TotalInputTokens())
+	}
+}
+
+func TestRunPerFile_GraceRoundSkippedWhenContextCancelled(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+	}}
+	deps := newTestDeps(client)
+	deps.Template.MaxToolRequestTimes = 1
+	deps.MainToolDefs = []llm.ToolDef{
+		{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+		{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+	}
+	runner := NewRunner(deps)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel after the main loop exits but before grace round runs.
+	// We simulate this by using a client that cancels ctx after the first call.
+	origClient := client
+	client.responses = []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+	}
+	_ = origClient
+
+	// Use a wrapper that cancels after first call
+	cancelClient := &cancelAfterNClient{inner: client, cancelAt: 1, cancel: cancel}
+	deps.LLMClient = cancelClient
+	runner = NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	_, stop, _ := runner.RunPerFile(ctx, msgs, "main.go")
+	if stop != StopMaxRounds {
+		t.Fatalf("stop = %v, want StopMaxRounds", stop)
+	}
+	// Grace round should have been skipped (only 1 LLM call total)
+	if cancelClient.calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1 (grace skipped due to ctx cancel)", cancelClient.calls)
+	}
+}
+
+type cancelAfterNClient struct {
+	inner    *fakeClient
+	cancelAt int
+	cancel   context.CancelFunc
+	calls    int
+}
+
+func (c *cancelAfterNClient) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.calls++
+	resp, err := c.inner.CompletionsWithCtx(ctx, req)
+	if c.calls >= c.cancelAt {
+		c.cancel()
+	}
+	return resp, err
+}
+
+func TestRunPerFile_GraceRoundNotTriggeredOnEmptyRoundsStop(t *testing.T) {
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
+		fileReadToolCallResponse("call_2", `{"path":"main.go"}`),
+		fileReadToolCallResponse("call_3", `{"path":"main.go"}`),
+	}}
+	reg := tool.NewRegistry()
+	reg.Register(&fakeFileReadProvider{result: ""})
+	deps := Deps{
+		LLMClient:        client,
+		Model:            "fake",
+		Template:         template.Template{MaxTokens: 100000, MaxToolRequestTimes: 10},
+		Tools:            reg,
+		CommentCollector: tool.NewCommentCollector(),
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
+		Session: session.New("/tmp/test-repo", "main", "fake", session.SessionOptions{}),
+	}
+	runner := NewRunner(deps)
+
+	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
+	_, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if stop != StopEmptyRounds {
+		t.Fatalf("stop = %v, want StopEmptyRounds", stop)
+	}
+	// Should NOT trigger grace round — only 3 LLM calls (empty rounds)
+	if client.calls != 3 {
+		t.Fatalf("LLM calls = %d, want 3 (no grace round on empty-rounds stop)", client.calls)
+	}
+}
+
+// MainLoopStop must be self-describing in both registers: String() for logs and
+// telemetry, Reason() for the manifest reason and scan warning that are the only
+// stop diagnostics surviving a --format json run. Neither may collide across
+// stops, or a reader cannot tell which exit fired from the artifact alone.
+func TestMainLoopStopStringAndReason(t *testing.T) {
+	names := make(map[string]MainLoopStop)
+	reasons := make(map[string]MainLoopStop)
+	for _, tc := range []struct {
+		stop     MainLoopStop
+		wantName string
+	}{
+		{StopNone, "none"},
+		{StopMaxRounds, "max_rounds"},
+		{StopEmptyRounds, "empty_rounds"},
+		{StopCompression, "compression"},
+	} {
+		t.Run(tc.wantName, func(t *testing.T) {
+			name := tc.stop.String()
+			if name != tc.wantName {
+				t.Errorf("String() = %q, want %q", name, tc.wantName)
+			}
+			reason := tc.stop.Reason()
+			if reason == "" {
+				t.Fatal("Reason() is empty; every stop needs a diagnostic sentence")
+			}
+			if prev, dup := names[name]; dup {
+				t.Errorf("String() %q is shared by %v and %v", name, prev, tc.stop)
+			}
+			if prev, dup := reasons[reason]; dup {
+				t.Errorf("Reason() %q is shared by %v and %v; stops must stay distinguishable", reason, prev, tc.stop)
+			}
+			names[name] = tc.stop
+			reasons[reason] = tc.stop
+		})
+	}
+}
+
+// A value outside the enum must name itself in both registers rather than borrow
+// the StopNone catch-all. This also guards the enum's growth: adding a constant
+// after StopCompression makes this test fail, which is the prompt to give the new
+// stop its own String() and Reason() case instead of letting it fall through to
+// a message that says nothing.
+func TestMainLoopStopUnknownValue(t *testing.T) {
+	unknown := StopCompression + 1
+
+	if got, want := unknown.String(), "MainLoopStop(4)"; got != want {
+		t.Errorf("String() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
+	}
+	if got, want := unknown.Reason(), "main task stopped for an unrecognized reason (stop=4)"; got != want {
+		t.Errorf("Reason() = %q, want %q; a new constant needs its own case in String() and Reason()", got, want)
+	}
+	if unknown.Reason() == StopNone.Reason() {
+		t.Error("an unrecognized stop reuses the StopNone catch-all; the collapsed message is back")
 	}
 }

@@ -5,6 +5,7 @@ package llm
 
 import (
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -75,7 +76,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "hy-tokenplan", "iflytek", "kimi", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "siliconflow-cn", "tencent-tokenhub", "volcengine", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -167,10 +168,9 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 	if p.AuthHeader != "" {
 		t.Errorf("AuthHeader = %q, want empty", p.AuthHeader)
 	}
+	// GPT-5.6 models are intentionally absent here: they require the Responses
+	// API and live under the "openai-responses" preset (issue #559).
 	expectedModels := []string{
-		"gpt-5.6-sol",
-		"gpt-5.6-terra",
-		"gpt-5.6-luna",
 		"gpt-5.5",
 		"gpt-5.4",
 		"gpt-5.4-mini",
@@ -182,6 +182,68 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 		if p.Models[i] != model {
 			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
 		}
+	}
+}
+
+func TestLookupProvider_OpenAIResponsesDetails(t *testing.T) {
+	const expectedEnvVar = "OPENAI_RESPONSES_API_KEY"
+
+	p, ok := LookupProvider("openai-responses")
+	if !ok {
+		t.Fatal("openai-responses not found")
+	}
+	if p.Protocol != ProtocolOpenAIResponses {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIResponses)
+	}
+	if p.BaseURL != "https://api.openai.com/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://api.openai.com/v1")
+	}
+	if p.EnvVar != expectedEnvVar {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, expectedEnvVar)
+	}
+	if p.AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
+	}
+	expectedModels := []string{
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
+	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
+}
+
+// TestGPT56ModelsUseResponsesProtocol guards the fix for issue #559: GPT-5.6
+// models require the OpenAI Responses API (/v1/responses). A built-in provider
+// pointing at api.openai.com must never offer a gpt-5.6 model over Chat
+// Completions, because ocr's tool-calling review workflow then fails with a
+// 400 ("function tools with reasoning_effort are not supported ... in
+// /v1/chat/completions").
+func TestGPT56ModelsUseResponsesProtocol(t *testing.T) {
+	const gpt56Prefix = "gpt-5.6"
+	found := false
+	for _, p := range ListProviders() {
+		if !strings.Contains(p.BaseURL, "api.openai.com") {
+			continue
+		}
+		for _, m := range p.Models {
+			if !strings.HasPrefix(m, gpt56Prefix) {
+				continue
+			}
+			found = true
+			if p.Protocol != ProtocolOpenAIResponses {
+				t.Errorf("provider %q offers %q over %q; GPT-5.6 needs %q", p.Name, m, p.Protocol, ProtocolOpenAIResponses)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no built-in OpenAI provider offers a %q model; expected the openai-responses preset to serve them", gpt56Prefix)
 	}
 }
 
@@ -314,15 +376,53 @@ func TestLookupProvider_MistralDetails(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_XAIDetails(t *testing.T) {
+	p, ok := LookupProvider("xai")
+	if !ok {
+		t.Fatal("xai not found")
+	}
+	if p.DisplayName != "xAI Grok API" {
+		t.Errorf("DisplayName = %q, want %q", p.DisplayName, "xAI Grok API")
+	}
+	if p.Protocol != ProtocolOpenAIChatCompletions {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIChatCompletions)
+	}
+	if p.BaseURL != "https://api.x.ai/v1" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://api.x.ai/v1")
+	}
+	if p.EnvVar != "XAI_API_KEY" {
+		t.Errorf("EnvVar = %q, want %q", p.EnvVar, "XAI_API_KEY")
+	}
+	if p.AuthHeader != "" {
+		t.Errorf("AuthHeader = %q, want empty (OpenAI-compatible uses Bearer by default)", p.AuthHeader)
+	}
+	expectedModels := []string{
+		"grok-4.6",
+		"grok-4.5",
+		"grok-4.3",
+	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
+}
+
 // TestProviders_AllProtocolsCanonical verifies every registry entry uses a
 // canonical protocol constant — no stale "openai" / "anthropic" literals that
 // would bypass NormalizeProtocol downstream.
 func TestProviders_AllProtocolsCanonical(t *testing.T) {
+	// Delegates to ValidateProtocol rather than re-listing the canonical names,
+	// so adding a protocol does not silently leave this assertion behind.
 	for _, p := range ListProviders() {
-		switch p.Protocol {
-		case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses:
-		default:
-			t.Errorf("provider %q has non-canonical Protocol %q", p.Name, p.Protocol)
+		if NormalizeProtocol(p.Protocol) != p.Protocol {
+			t.Errorf("provider %q Protocol %q is not in canonical form", p.Name, p.Protocol)
+		}
+		if err := ValidateProtocol(p.Protocol); err != nil {
+			t.Errorf("provider %q has non-canonical Protocol %q: %v", p.Name, p.Protocol, err)
 		}
 	}
 }

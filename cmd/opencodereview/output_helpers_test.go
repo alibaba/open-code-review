@@ -173,7 +173,7 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "fail"}}
-	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", nil, false, nil)
+	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", nil, false, nil, os.Stdout, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -286,7 +286,7 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	comments := []model.LlmComment{{Path: "b.go", Content: "test"}}
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "c.go", Message: "failed"}}
-	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", nil, false, nil)
+	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", nil, false, nil, os.Stdout, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -324,7 +324,7 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "warning", Message: "something"}}
-	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", nil, false, nil)
+	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", nil, false, nil, os.Stdout, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -353,7 +353,7 @@ func TestOutputJSONNoFiles(t *testing.T) {
 	os.Stdout = w
 
 	identity := &jsonLLMIdentity{Provider: "anthropic", Model: "claude-opus-4-6"}
-	err := outputJSONNoFiles("test-trace-id-456", identity)
+	err := outputJSONNoFiles("test-trace-id-456", identity, os.Stdout)
 
 	_ = w.Close()
 	os.Stdout = old
@@ -388,11 +388,20 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stdout = w
+	// Drain while fn runs. Reading only after fn returns caps the capture at
+	// whatever the pipe buffer holds: 64 KiB on Linux, far less on a Windows
+	// anonymous pipe, and a payload past that blocks the writer forever.
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = buf.ReadFrom(r)
+	}()
 	fn()
 	_ = w.Close()
 	os.Stdout = old
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
+	<-done
+	_ = r.Close()
 	return buf.String()
 }
 
@@ -406,11 +415,19 @@ func captureStderr(t *testing.T, fn func()) string {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stderr = w
+	// Drained concurrently for the same reason as captureStdout: an undrained
+	// pipe deadlocks fn once its output exceeds the OS pipe buffer.
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = buf.ReadFrom(r)
+	}()
 	fn()
 	_ = w.Close()
 	os.Stderr = old
-	var buf bytes.Buffer
-	_, _ = buf.ReadFrom(r)
+	<-done
+	_ = r.Close()
 	return buf.String()
 }
 
@@ -441,7 +458,7 @@ func TestOutputText_WithComments(t *testing.T) {
 func TestOutputTextWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	warnings := []agent.AgentWarning{{Type: "warning", File: "x.go", Message: "slow"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(nil, warnings, nil)
+		outputTextWithWarnings(nil, warnings, nil, os.Stdout)
 	})
 	if !strings.Contains(got, "Looks good to me") {
 		t.Errorf("expected 'Looks good to me', got %q", got)
@@ -451,7 +468,7 @@ func TestOutputTextWithWarnings_NoCommentsNoErrors(t *testing.T) {
 func TestOutputTextWithWarnings_NoCommentsWithSubtaskError(t *testing.T) {
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "y.go", Message: "failed"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(nil, warnings, nil)
+		outputTextWithWarnings(nil, warnings, nil, os.Stdout)
 	})
 	if !strings.Contains(got, "could not be reviewed") {
 		t.Errorf("expected subtask error message, got %q", got)
@@ -464,7 +481,7 @@ func TestOutputTextWithWarnings_WithComments(t *testing.T) {
 	}
 	warnings := []agent.AgentWarning{{Type: "info", File: "b.go", Message: "note"}}
 	got := captureStdout(t, func() {
-		outputTextWithWarnings(comments, warnings, nil)
+		outputTextWithWarnings(comments, warnings, nil, os.Stdout)
 	})
 	if !strings.Contains(got, "a.go") {
 		t.Errorf("expected comment path, got %q", got)
@@ -476,7 +493,7 @@ func TestOutputTextWithWarnings_WithComments(t *testing.T) {
 
 func TestRenderComment_EmptyContentNoDiff(t *testing.T) {
 	got := captureStdout(t, func() {
-		renderComment(model.LlmComment{Path: "skip.go", StartLine: 1, EndLine: 1, Content: "", ExistingCode: "", SuggestionCode: ""})
+		renderComment(model.LlmComment{Path: "skip.go", StartLine: 1, EndLine: 1, Content: "", ExistingCode: "", SuggestionCode: ""}, os.Stdout)
 	})
 	if got != "" {
 		t.Errorf("expected empty output for empty comment, got %q", got)
@@ -485,7 +502,7 @@ func TestRenderComment_EmptyContentNoDiff(t *testing.T) {
 
 func TestRenderComment_ContentOnly(t *testing.T) {
 	got := captureStdout(t, func() {
-		renderComment(model.LlmComment{Path: "file.go", StartLine: 5, EndLine: 10, Content: "consider renaming"})
+		renderComment(model.LlmComment{Path: "file.go", StartLine: 5, EndLine: 10, Content: "consider renaming"}, os.Stdout)
 	})
 	if !strings.Contains(got, "file.go:5-10") {
 		t.Errorf("expected path:line range, got %q", got)
@@ -504,7 +521,7 @@ func TestRenderComment_WithDiff(t *testing.T) {
 			Content:        "rename var",
 			ExistingCode:   "old := 1\n",
 			SuggestionCode: "new := 1\n",
-		})
+		}, os.Stdout)
 	})
 	if !strings.Contains(got, "diff.go:1-2") {
 		t.Errorf("expected path:line range, got %q", got)
@@ -527,7 +544,7 @@ func TestPrintDiffLine(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := captureStdout(t, func() {
-				printDiffLine(tc.prefix, tc.content, "\033[92m", "\033[48;2;0;60;0m")
+				printDiffLine(os.Stdout, tc.prefix, tc.content, "\033[92m", "\033[48;2;0;60;0m")
 			})
 			if !strings.Contains(got, tc.prefix) {
 				t.Errorf("expected prefix %q in output, got %q", tc.prefix, got)
@@ -542,7 +559,7 @@ func TestPrintDiffLine(t *testing.T) {
 func TestOutputPreviewText_NoFiles(t *testing.T) {
 	p := &agent.DiffPreview{TotalFiles: 0}
 	got := captureStdout(t, func() {
-		outputPreviewText(p)
+		outputPreviewText(p, os.Stdout)
 	})
 	if !strings.Contains(got, "No files changed") {
 		t.Errorf("expected 'No files changed', got %q", got)
@@ -562,7 +579,7 @@ func TestOutputPreviewText_WithReviewableFiles(t *testing.T) {
 		ExcludedCount:   0,
 	}
 	got := captureStdout(t, func() {
-		outputPreviewText(p)
+		outputPreviewText(p, os.Stdout)
 	})
 	if !strings.Contains(got, "2 file(s) changed") {
 		t.Errorf("expected file count, got %q", got)
@@ -588,7 +605,7 @@ func TestOutputPreviewText_WithExcludedFiles(t *testing.T) {
 		ExcludedCount:   1,
 	}
 	got := captureStdout(t, func() {
-		outputPreviewText(p)
+		outputPreviewText(p, os.Stdout)
 	})
 	if !strings.Contains(got, "Will review (1)") {
 		t.Errorf("expected 'Will review (1)', got %q", got)

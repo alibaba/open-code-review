@@ -59,7 +59,8 @@ Analyze the review target and extract concise business context to improve review
 
 **Always use `--audience agent`** (suppresses progress UI). Prefer `--format json`.
 
-> 💡 **Handling Output Truncation**: For large reviews or scans, if stdout exceeds the host agent's tool output buffer, **no need to re-run `ocr`** — extract high-priority comments on demand via `ocr session comments <session-id> --severity high,critical --json`.
+> 💡 **Prevent output truncation**: For large reviews or scans, prefer `--output <path>` / `-o <path>` (e.g. `ocr scan --audience agent --format json -o scratch/ocr_result.json -b "ctx"`). OCR writes natively to a UTF-8 file (created lazily on first write) and prints the file path on stderr. Then inspect it directly via `view_file`.
+> - If truncation already happened on stdout: **no need to re-run `ocr`** — extract comments on demand via `ocr session comments <session-id> --severity high,critical --json`.
 
 #### Review Mode (Diff-based)
 
@@ -68,6 +69,7 @@ Analyze the review target and extract concise business context to improve review
 | "Review my changes" | `ocr review --audience agent --format json -b "ctx"` |
 | "Review feature PR" | `ocr review --audience agent --format json -b "ctx" --from main --to feature` |
 | "Review commit abc123" | `ocr review --audience agent --format json -b "ctx" --commit abc123` |
+| "Write results to file" | `ocr review --audience agent --format json -o result.json -b "ctx"` |
 | "Which files will be reviewed?" | `ocr review --preview --format json` |
 | "Resume interrupted review" | `ocr review --audience agent --format json --from main --to feature --resume <session-id>` |
 
@@ -78,6 +80,7 @@ Analyze the review target and extract concise business context to improve review
 | "Scan the whole repo" | `ocr scan --audience agent --format json -b "ctx"` |
 | "Scan src/auth/ for security" | `ocr scan --audience agent --format json --path src/auth -b "security audit"` |
 | "Fast scan without summary" | `ocr scan --audience agent --format json --no-summary --no-dedup` |
+| "Write results to file" | `ocr scan --audience agent --format json -o result.json -b "ctx"` |
 | "Resume interrupted scan" | `ocr scan --audience agent --format json --resume <session-id>` |
 | "Which files will be scanned?" | `ocr scan --preview --format json` |
 
@@ -172,8 +175,8 @@ If no issues found: "Review complete — 0 issues found across N files."
 - **Resume conditions** — `ocr scan` fully supports `--resume`; `ocr review` supports `--resume` only in `--from/--to` or `--commit` modes (not workspace mode).
 - **`--preview` and `--resume` are mutually exclusive.**
 - **Language configuration** — Default: English. Switch via `ocr config set language 中文`.
-- **Default MAX_TOKENS** — Default prompt token ceiling is 58888 (configurable via `--max-tokens` or `max_tokens`).
-- **Prevent Tool Output Truncation** — If output is truncated, extract comments via `ocr session comments <session-id> --severity high,critical --json` without re-running.
+- **Default MAX_TOKENS** — Default prompt token ceiling is 58888 (configurable via `--max-tokens` or `max_tokens`, e.g. `--max-tokens 200000`).
+- **Prevent Tool Output Truncation** — For large reviews or scans, prefer `-o <path>` / `--output <path>` to write directly to a UTF-8 file and read with `view_file`. If output is truncated, extract comments via `ocr session comments <session-id> --severity high,critical --json` without re-running.
 - **Do not test connectivity pre-emptively** — Execute review/scan directly; troubleshoot only on actual LLM failure (see troubleshooting.md).
 
 ## Verification

@@ -27,6 +27,8 @@ Commands:
 Examples:
   ocr review --from master --to dev        Review diff range
   ocr review --commit abc123               Review a single commit
+  ocr review --background "Focus on auth"                                           Review with inline context
+  ocr review -B ./docs/requirements.md                                              Review with context file
   ocr config provider                      Interactive provider setup
   ocr config model                         Interactive model selection
   ocr config set llm.model opus-4-6        Set a config value
@@ -43,6 +45,24 @@ Use "ocr session -h" for more information about session inspection.
 
 GitHub: https://github.com/alibaba/open-code-review
 ```
+
+## Global flags
+
+Available on every command, and accepted either before or after the subcommand
+(`ocr --color=never review` and `ocr review --color=never` are equivalent).
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--color <auto\|always\|never>` | `auto` | When to emit ANSI color. `auto` colorizes only when stdout is a terminal, so piping or redirecting yields plain text. `always` keeps color through a pipe (useful for `\| less -R`). |
+
+Text output is plain whenever stdout is not a terminal, so it can be piped
+safely:
+
+```bash
+ocr review --commit HEAD | gh issue comment 123 --body-file -
+```
+
+`TERM=dumb` also disables color.
 
 ## Command summary
 
@@ -68,8 +88,9 @@ GitHub: https://github.com/alibaba/open-code-review
 
 ## `ocr review`
 
-The main command. Resolves a Git diff, dispatches per-file sub-agents,
-collects review comments, and prints them.
+The main command. Resolves a Git diff, groups the changed files
+semantically, dispatches one sub-agent per group, collects review
+comments, and prints them.
 
 ### Synopsis
 
@@ -89,16 +110,22 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--from <ref>` | — | — | Source ref to start the diff from (e.g., `main`). |
 | `--to <ref>` | — | — | Target ref to end the diff at (e.g., `feature-branch`). When set, OCR computes `merge-base(from, to)..to`. |
 | `--commit <sha>` | `-c` | — | Single commit to review (vs its parent). |
-| `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`. |
+| `--preview` | `-p` | `false` | Run the filter pipeline but skip the LLM. Prints the file list and exclusion reasons. Honors `--format json`; `--format sarif` is not supported (a preview has no completed findings to emit). |
+| `--no-filter` | — | `false` | Keep all review comments and skip the per-group `REVIEW_FILTER_TASK` LLM post-processing call. |
 | `--resume <session-id>` | — | — | Resume from a previous compatible range or commit review session. |
-| `--format <fmt>` | `-f` | `text` | `text` (human-readable) or `json` (machine-readable comment array). |
-| `--audience <who>` | — | `human` | `human` streams progress lines; `agent` quiets stdout and prints only the final summary / JSON. |
+| `--format <fmt>` | `-f` | `text` | `text` (human-readable), `json` (machine-readable comment array), or `sarif` (SARIF 2.1.0 report for GitHub Code Scanning). |
+| `--output <path>` | `-o` | stdout | Write review results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
+| `--audience <who>` | — | `human` | `human` streams progress lines (to stderr when `--format` is `json`/`sarif`, so stdout stays a single parseable document); `agent` suppresses progress entirely and prints only the final summary / JSON. |
 | `--background <text>` | `-b` | — | Optional requirement / business context injected into the plan + main prompts. |
-| `--concurrency <n>` | — | `8` | Maximum number of files reviewed in parallel. |
-| `--timeout <minutes>` | — | `10` | Per-file deadline. `0` disables the timeout. |
+| `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Takes precedence over `--background` when both are set. |
+| `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
+| `--concurrency <n>` | — | `8` | Maximum number of file groups reviewed in parallel. |
+| `--timeout <minutes>` | — | `10` | Per-group deadline. `0` disables the timeout. Automatically extended by 50 % when the effort preset runs more than one review round. |
+| `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
-| `--max-tools <n>` | — | template default | Max tool-call rounds per file. `0` uses the template default (`30`); values 1–9 are clamped up to `10`; any value `≥ 10` overrides the template default (even if smaller than `30`). |
-| `--max-tokens <n>` | — | config or template default | Per-file prompt token ceiling. Overrides the saved `max_tokens` setting for this run. |
+| `--max-tools <n>` | — | template default | Max tool-call rounds per group. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. The flag only ever *raises* the cap — a value below the template default is ignored. |
+| `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per group; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
+| `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Dispatch stops once the budget is exceeded and partial results are still published. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
@@ -183,12 +210,27 @@ ocr review --from main --to feature-branch --resume <session-id>
 ocr review --commit abc123 --resume <session-id>
 ```
 
-Resume is strict by design:
+Resume is strict by design. Checkpoints are only reused when the resumed run
+would review the same thing the parent did:
 
 - workspace reviews cannot be resumed
-- range reviews must use the same `--from` and `--to`
-- commit reviews must use the same `--commit`
+- the review mode must match: a range session cannot be resumed as a commit one
+- the resolved input must match. Ref *spellings* are not compared — `abc1234`
+  and `abc1234def` name the same commit — but if the same refs now resolve to a
+  different diff, or the rules or filters changed the selected file set, the
+  whole resume is rejected rather than partially reused
+- a provider or model change must be asked for explicitly with `--provider` /
+  `--model`. A change that arrived through config or the environment is rejected
+- the parent must carry a run manifest, which is what its input is verified
+  against. After file dispatch begins, Ctrl-C cancels the review gracefully and
+  records one, so completed checkpoints remain resumable. A process killed
+  before graceful shutdown and sessions older than run manifests do not have one
+- only files the parent's manifest settled are reused. A checkpoint the manifest
+  does not account for, or one that is unreadable, costs that file its
+  checkpoint and nothing more — it is simply reviewed again
 - `--preview` and `--resume` cannot be used together
+
+A rejected resume writes nothing: no session, no manifest, no LLM call.
 
 ### Output
 
@@ -228,6 +270,18 @@ Use this in CI / when piping into another agent.
 ```bash
 ocr review --format json --audience agent
 ```
+
+The document is always written to stdout on its own. With the default
+`--audience human` the `[ocr]` progress lines stream to **stderr** as the review
+runs, so you can watch a long run and still pipe stdout straight into a parser:
+
+```bash
+ocr review --format json > result.json   # progress still visible on the terminal
+ocr review --format json | jq .summary   # stdout is a single JSON document
+```
+
+Pass `--audience agent` to drop the progress lines altogether, or `2>/dev/null`
+to discard them at the shell.
 
 ```json
 {
@@ -291,7 +345,7 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 | Code | Meaning |
 |---|---|
 | `0` | Review completed (possibly with zero comments, possibly with non-fatal warnings). |
-| `1` | Fatal error — bad flags, can't resolve LLM endpoint, all per-file sub-agents failed, etc. The error text is printed to stderr. |
+| `1` | Fatal error — bad flags, can't resolve LLM endpoint, all per-group sub-agents failed, etc. The error text is printed to stderr. |
 
 Non-fatal warnings (a single sub-agent failed, a file exceeded the token
 threshold, etc.) are printed inline; in JSON mode they're added to the
@@ -316,7 +370,8 @@ With no `--path`, the whole repository is scanned.
 |---|---|---|---|
 | `--path <list>` | - | whole repo | Comma-separated repo-relative directories or files to scan (e.g., `internal/agent`, `internal/llm/client.go`). |
 | `--exclude <patterns>` | - | - | Comma-separated gitignore-style patterns to skip (e.g., `**/generated/*,*.pb.go`); merged with `rule.json` excludes. |
-| `--preview` | `-p` | `false` | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. Honors `--format json`. |
+| `--output <path>` | `-o` | stdout | Write scan results to a UTF-8 file (`-` means stdout). Lazily created on first write so failed runs leave existing files untouched. Text format automatically strips ANSI color codes. |
+| `--preview` | `-p` | `false` | Enumerate and filter files without calling the LLM. Prints the file list, reviewable/excluded counts, total lines, and per-file exclusion reasons. Honors `--format json`; `--format sarif` is not supported. |
 
 ```bash
 ocr scan --preview                              # see what would be scanned
@@ -358,6 +413,9 @@ ocr session list --json
 | `--limit <n>` | `20` | Cap the number of listed sessions. Use `0` for unlimited. |
 
 ### `ocr session show`
+
+A resumed run also prints the run it continued, and the provider/model
+transition when the resume crossed one.
 
 ```bash
 ocr session show <session-id>
@@ -430,16 +488,19 @@ setup TUIs. Four subcommands:
 
 ```text
 ocr config set <key> <value>
-ocr config unset custom_providers.<name>   Delete a custom provider
+ocr config unset <key>                     Clear a saved key
 ocr config provider                        Interactive provider setup
 ocr config model                           Interactive model selection
 ```
 
-- **`set`** — write a single config value non-interactively.
-- **`unset`** — delete a custom provider. Only
-  `custom_providers.<name>` is supported. If the deleted provider was the
-  active one, `provider` and `model` are cleared (run `ocr config provider`
-  to pick a new one).
+- **`set`** — write a single config value non-interactively. `effort`
+  accepts `low` / `medium` / `high` and sets the default review effort for
+  every run; `--effort` overrides it per invocation.
+- **`unset`** — clear a saved key. `provider`, `max_tokens`, `effort`,
+  `custom_providers.<name>`, and `mcp_servers.<name>` are supported.
+  Clearing `effort` restores the default `medium` preset. If a deleted
+  provider was the active one, `provider` and `model` are cleared (run
+  `ocr config provider` to pick a new one).
 - **`provider`** — launch the interactive provider-setup TUI (no extra
   arguments; use `ocr config set provider <name>` for non-interactive
   setup).
@@ -609,17 +670,30 @@ Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
 
 ## Tips & gotchas
 
-- `--audience agent` does **not** imply `--format json`. They control
-  different things — quiet UI vs structured payload. Combine them when you
-  want both.
+- `--audience agent` does **not** imply `--format json`, and `--format json`
+  does not imply a quiet terminal. They control different things — quiet UI vs
+  structured payload. `--format json` alone keeps progress visible on stderr;
+  add `--audience agent` when you want it gone.
 - `--background` is one of the highest-leverage flags for review quality —
   always pass the requirement / PR description when invoking from another
   agent.
-- A file whose diff alone exceeds 80 % of `MAX_TOKENS` (`58888` by default)
+- A file whose diff alone exceeds 80 % of `MAX_TOKENS` (`200000` by default)
   is dropped before the LLM is called. This is logged but does not fail
   the run.
-- The plan phase is **automatically skipped** when changed lines for a file
-  fall below `PLAN_MODE_LINE_THRESHOLD` (`50`).
+- `MAX_TOKENS` caps the **prompt** only. The model's output is capped
+  separately by `MAX_COMPLETION_TOKENS` (`16384`), so raising
+  `--max-tokens` for a large-context model does not inflate output cost.
+- The plan phase is **automatically skipped** when changed lines fall below
+  both `PLAN_MODE_LINE_THRESHOLD` (`50`, applied to the largest single file
+  in the group) and `PLAN_MODE_GROUP_LINE_THRESHOLD` (`100`, applied to the
+  combined churn of a group with 2+ files).
+- Files are bundled into semantic groups by one cheap metadata-only LLM
+  call before review, so related changes (handler + service + test) are
+  reviewed in a single conversation. Grouping failures fall back silently
+  to one-file-per-group.
+- `--effort high` is the cheapest quality lever when a review feels
+  shallow; `--effort low` roughly halves cost versus the default when you
+  just want a fast sanity pass.
 
 ## See Also
 

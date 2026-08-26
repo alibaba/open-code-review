@@ -91,8 +91,8 @@ function testIdenticalStructurePasses() {
   // Same outline, DIFFERENT heading text (simulating translations). Must pass:
   // the check compares structure, not text.
   const en = readme(["## What is it?", "### Details", "## Usage"]);
-  const zh = readme(["## 这是什么？", "### 细节", "## 使用方法"]);
-  const ja = readme(["## これは何ですか？", "### 詳細", "## 使い方"]);
+  const zh = readme(["## 这是什么？", "### 细节", "## 使用方法"]); // allow-non-english: fixture mimics translated README headings
+  const ja = readme(["## これは何ですか？", "### 詳細", "## 使い方"]); // allow-non-english: fixture mimics translated README headings
   const { ok, errors } = compareReadmeStructures([
     { name: "README.md", content: en },
     { name: "README.zh-CN.md", content: zh },

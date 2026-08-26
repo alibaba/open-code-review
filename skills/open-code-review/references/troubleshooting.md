@@ -24,7 +24,7 @@
 | Token overflow | File diff too large | Use `--exclude`, set `--max-tokens` or `--max-tokens-budget` |
 | Rate limited | Concurrency too high | Lower `--concurrency` (429 is already retried by the SDK; `retry_codes` supports extra 4xx codes only) |
 | Wrong comment language | Default English | Run `ocr config set language 中文` |
-| Tool Output truncation / corrupted JSON | stdout exceeds the host agent's tool output buffer | **No need to re-run `ocr`**: use `ocr session comments <session-id> --severity high,critical --json` |
+| Tool Output truncation / corrupted JSON | stdout exceeds the host agent's tool output buffer | **No need to re-run `ocr`**: use `ocr session comments <session-id> --severity high,critical --json`; or pass `-o result.json` / `--output result.json` (native UTF-8 file write) upfront and read via `view_file` |
 | `--resume` fails | Review workspace mode | Review resume requires `--from/--to` or `--commit`; or use `scan --resume` |
 | `--preview` + `--resume` error | Mutually exclusive | Use one or the other |
 

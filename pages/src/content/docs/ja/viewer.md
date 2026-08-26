@@ -54,13 +54,13 @@ JSONL ファイルが現れ次第表示されます。
 詳細ページが最も有用です。以下を表示します：
 
 1. **ヘッダー**——diff 範囲、モデル、ブランチ、合計 token、実行時間。
-2. **ファイルごとのグループ**——レビューされた各ファイルにつき 1 ブロック。各ファイル内には、5 つの「タスクタイプ」のスイムレーン：
+2. **ファイルごとのグループ**——レビューされた各**グループ**につき 1 ブロック。ファイルはレビュー前に意味的にまとめられるため、1 つのブロックが複数の関連ファイルをカバーすることがあり、そのタイトルはグループのファイルパスです。各グループ内には、5 つの「タスクタイプ」のスイムレーン：
 
 | タスクタイプ | 出現条件 |
 |---|---|
-| `plan_task` | plan フェーズが実行された（ファイルが ≥ `PLAN_MODE_LINE_THRESHOLD`）。 |
-| `main_task` | すべてのファイル。メインのレビューループ。 |
-| `review_filter_task` | そのファイルに対してレビュー後のコメントフィルタリング処理が実行された。 |
+| `plan_task` | plan フェーズが実行された（グループ内で最大のファイルが ≥ `PLAN_MODE_LINE_THRESHOLD`、または 2 ファイル以上で合計 ≥ `PLAN_MODE_GROUP_LINE_THRESHOLD`）。 |
+| `main_task` | すべてのグループ。メインのレビューループ——レビューラウンドごとに 1 パス。 |
+| `review_filter_task` | そのグループに対してレビュー後のコメントフィルタリング処理が実行された。 |
 | `memory_compression_task` | active+compress 領域が予算の 60 % / 80 % を超えた。 |
 | `re_location_task` | ある `code_comment` がアンカーできず、フォールバックの再位置特定が実行された。 |
 
@@ -85,7 +85,7 @@ JSONL トランスクリプト（各 `llm_request` レコードの `messages` �
 
 ### 「なぜモデルはこう言ったのか？」
 
-ターミナル出力であるコメントを開き、ビューアでそのファイルを見つけ、その `main_task` スイムレーンを下にたどります。
+ターミナル出力であるコメントを開き、ビューアでそのファイルを含む**グループ**を見つけ、その `main_task` スイムレーンを下にたどります。
 **ツール呼び出し**の中に、あなたが気にしている `code_comment` を含むカードこそが、それを生み出したラウンドです。カードの
 Response にはモデルの推論が表示されます。モデルに送信された prompt + コンテキストを正確に知るには、JSONL トランスクリプトで
 そのリクエスト番号の `llm_request` レコード（その `messages` フィールド）を開いてください。
@@ -119,6 +119,8 @@ JSONL ファイルの各行は 1 つのイベントです：
 {"type": "llm_response", "filePath": "src/foo.go", "taskType": "main_task", "model": "claude-sonnet-4-6", "content": "Found 2 issues…", "duration_ms": 8421, "usage": {"prompt_tokens": 12450, "completion_tokens": 320}}
 {"type": "tool_call", "filePath": "src/foo.go", "tool_name": "file_read", "arguments": "{\"file_path\":\"src/foo.go\",\"start_line\":1,\"end_line\":50}", "result": "File: src/foo.go (Total lines: 220)\nIS_TRUNCATED: false\nLINE_RANGE: 1-50\n1|package foo…", "ok": true, "duration_ms": 14}
 ```
+
+`filePath` が保持するのは**グループのキー**です: 1 ファイルのグループならその 1 つのパス、複数ファイルがまとめてレビューされた場合はそのグループのパスをソートしてカンマで連結したものになります。
 
 行は追記専用（append-only）です——不完全な JSONL は、セッションが実行中に中断されたことを意味し、ビューアは書き込み済みの
 内容をレンダリングします。

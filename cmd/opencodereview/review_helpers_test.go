@@ -5,21 +5,27 @@ package main
 
 import (
 	"context"
+	"io"
+	"os"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
+func runPreview(cc *commonContext, opts reviewOptions, out io.Writer) error {
+	return runPreviewContext(context.Background(), cc, opts, out)
+}
+
 func TestRunPreview(t *testing.T) {
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "x.go", "package x\n", "add x")
-	cc, err := loadCommonContext(dir, "", 0, 0, true)
+	cc, err := loadCommonContext(dir, "", "", 0, 0, true)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
 	silenceStdout(t, func() {
-		if err := runPreview(cc, reviewOptions{commit: "HEAD"}); err != nil {
+		if err := runPreview(cc, reviewOptions{commit: "HEAD"}, os.Stdout); err != nil {
 			t.Fatalf("runPreview error: %v", err)
 		}
 	})
@@ -29,13 +35,13 @@ func TestRunPreviewJSONFormat(t *testing.T) {
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "main.go", "package main\n", "add main")
 	gitCommitFile(t, dir, "notes.md", "# notes\n", "add notes")
-	cc, err := loadCommonContext(dir, "", 0, 0, true)
+	cc, err := loadCommonContext(dir, "", "", 0, 0, true)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
 
 	out := captureStdout(t, func() {
-		if err := runPreview(cc, reviewOptions{commit: "HEAD", outputFormat: "json"}); err != nil {
+		if err := runPreview(cc, reviewOptions{commit: "HEAD", outputFormat: "json"}, os.Stdout); err != nil {
 			t.Errorf("runPreview error: %v", err)
 		}
 	})
@@ -64,12 +70,12 @@ func TestRunPreviewCreatesNoSession(t *testing.T) {
 
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "x.go", "package x\n", "add x")
-	cc, err := loadCommonContext(dir, "", 0, 0, true)
+	cc, err := loadCommonContext(dir, "", "", 0, 0, true)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
 	silenceStdout(t, func() {
-		if err := runPreview(cc, reviewOptions{commit: "HEAD"}); err != nil {
+		if err := runPreview(cc, reviewOptions{commit: "HEAD"}, os.Stdout); err != nil {
 			t.Fatalf("runPreview error: %v", err)
 		}
 	})

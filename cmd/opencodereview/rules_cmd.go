@@ -30,7 +30,7 @@ var rulesCheckCmd = &cobra.Command{
 	Long:  "Show which review rule applies to the given file path, including its source layer and matched pattern.",
 	Example: `  ocr rules check src/main/java/com/example/Foo.java
   ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml`,
-	Args: cobra.ExactArgs(1),
+	Args: exactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runRulesCheck(args[0])
 	},
@@ -48,7 +48,7 @@ func runRulesCheck(filePath string) error {
 		return err
 	}
 
-	resolver, _, err := rules.NewResolver(resolvedRepo, rulesCheckRulePath)
+	resolver, _, err := rules.NewResolver(resolvedRepo, rulesCheckRulePath, rules.ResolverOptions{})
 	if err != nil {
 		return fmt.Errorf("load rules: %w", err)
 	}
@@ -58,7 +58,7 @@ func runRulesCheck(filePath string) error {
 		return fmt.Errorf("resolver does not support detail inspection")
 	}
 
-	detail := dr.ResolveDetail(strings.ToLower(filePath))
+	detail := dr.ResolveDetail(filePath)
 
 	sourceLabel := map[string]string{
 		"custom":  "Custom (--rule)",
@@ -70,6 +70,9 @@ func runRulesCheck(filePath string) error {
 	fmt.Printf("File: %s\n", filePath)
 	fmt.Printf("Source: %s\n", sourceLabel[detail.Source])
 	fmt.Printf("Pattern: %s\n", detail.Pattern)
+	if detail.SniffedAs != "" {
+		fmt.Printf("Note:    rule selected by file content (%s), not by path alone\n", detail.SniffedAs)
+	}
 	fmt.Println("Rule:")
 	fmt.Println(strings.Repeat("─", 40))
 	fmt.Println(detail.Rule)

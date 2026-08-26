@@ -44,5 +44,6 @@ Displays effective rules, source hierarchy (Custom/Project/Global/System), and m
 ## Behavioral Details
 
 - **Case-insensitive matching**: `path` patterns and matched file paths are compared in lowercase.
+- **Content-based sniffing for ambiguous extensions**: for shared extensions like `.m`, OCR inspects file header heuristics to automatically distinguish between MATLAB and Objective-C, applying the appropriate ruleset.
 - **include/exclude take effect at a single level**: only the highest-priority layer that configures include/exclude is used (Custom > Project > Global); layers are not merged.
 - **File references are heuristic**: only a value that is a single line, contains no spaces, and has a supported extension (`.md`/`.txt`/`.markdown`) is treated as a file path; inline text containing spaces is treated as inline. Project-level rules resolve relative to the repository root (cannot escape it); custom rules (`--rule`) and global rules resolve relative to the directory containing the `rule.json` file. On read failure (missing/oversized/unsupported extension), the rule is emptied with a WARNING rather than an error.

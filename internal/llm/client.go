@@ -4,6 +4,7 @@
 // Package llm provides LLM client interfaces supporting multiple protocols.
 // Supported protocols (canonical names, see protocol.go):
 //   - "anthropic" — Anthropic Messages API
+//   - "anthropic-bedrock" — the same API served by AWS Bedrock, SigV4-signed
 //   - "openai" — OpenAI Chat Completions API
 //   - "openai-responses" — OpenAI Responses API
 package llm
@@ -15,12 +16,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/bedrock"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	openai "github.com/openai/openai-go/v3"
 	openaiopt "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
@@ -28,6 +32,15 @@ import (
 )
 
 var AppVersion = "dev"
+
+// bedrockConfigLoadTimeout bounds how long NewAnthropicBedrockClient may spend
+// in awsconfig.LoadDefaultConfig. Credential resolution itself (SSO refresh,
+// AssumeRole, credential_process) is lazy — deferred to the first signed
+// request, where cfg.Timeout already applies — but region auto-detection can
+// still reach the network, and this keeps that bounded rather than relying
+// solely on the AWS SDK's own defaults. Package var, not const, so tests can
+// shrink it, same as keyCmdTimeout.
+var bedrockConfigLoadTimeout = 60 * time.Second
 
 func userAgent(provider string) string {
 	ua := "open-code-review/" + AppVersion
@@ -205,6 +218,29 @@ type ClientConfig struct {
 	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
 	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
 	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+	// SessionKey is the fallback prompt-cache affinity key
+	// for requests whose context carries none (see ContextWithSessionKey).
+	//
+	// Review and scan runs tag every request context with the real session's ID,
+	// so this fallback only serves session-less callers such as `ocr llm test`.
+	//
+	// Auto-generated when empty. The effective key replaces `SessionKeyTemplateVar` in Extra* values.
+	SessionKey string
+
+	// retryCollector receives one record per real HTTP attempt. It is
+	// unexported because it is not configuration: it is a handle on the current
+	// run, owned by llmRuntime and set only by NewLLMClient, and the three
+	// exported constructors keep their signatures because of it.
+	//
+	// A nil collector is fully inert: no middleware is mounted and nothing about
+	// the request path changes. That is the state for llm test, and for any
+	// caller that builds a client without one.
+	retryCollector *RetryCollector
+
+	// AWSProfile and AWSRegion are used only by SigV4 providers (bedrock).
+	// Empty means the standard AWS credential chain decides.
+	AWSProfile string
+	AWSRegion  string
 }
 
 // retryCodesMiddleware returns an HTTP middleware that forces the SDK to retry
@@ -243,20 +279,29 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // The defensive default keeps legacy callers that somehow bypass resolver
 // normalization working (they previously got OpenAIClient for any non-anthropic
 // protocol).
-func NewLLMClient(ep ResolvedEndpoint) LLMClient {
+//
+// collector observes every HTTP attempt the returned client makes; pass nil to
+// build a client that is not observed. It is a parameter rather than a field on
+// ResolvedEndpoint because it belongs to the run, not to the endpoint.
+func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 	cfg := ClientConfig{
-		URL:          ep.URL,
-		APIKey:       ep.Token,
-		Model:        ep.Model,
-		AuthHeader:   ep.AuthHeader,
-		Timeout:      ep.Timeout,
-		ExtraBody:    ep.ExtraBody,
-		ExtraHeaders: ep.ExtraHeaders,
-		RetryCodes:   ep.RetryCodes,
+		URL:            ep.URL,
+		APIKey:         ep.Token,
+		Model:          ep.Model,
+		AuthHeader:     ep.AuthHeader,
+		Timeout:        ep.Timeout,
+		ExtraBody:      ep.ExtraBody,
+		ExtraHeaders:   ep.ExtraHeaders,
+		RetryCodes:     ep.RetryCodes,
+		retryCollector: collector,
+		AWSProfile:     ep.AWSProfile,
+		AWSRegion:      ep.AWSRegion,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
 		return NewAnthropicClient(cfg)
+	case ProtocolAnthropicBedrock:
+		return NewAnthropicBedrockClient(cfg)
 	case ProtocolOpenAIResponses:
 		return NewOpenAIResponsesClient(cfg)
 	default:
@@ -339,9 +384,14 @@ type OpenAIClient struct {
 }
 
 // NewOpenAIClient creates a new OpenAI-compatible LLM client.
+// ExtraHeaders are applied per request (not baked into the SDK client) so
+// SessionKeyTemplateVar can expand to the session key each request carries.
 func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
 	}
 	baseURL := strings.TrimRight(cfg.URL, "/")
 	if !strings.HasSuffix(baseURL, "/chat/completions") {
@@ -357,11 +407,11 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 	}
-	for k, v := range cfg.ExtraHeaders {
-		opts = append(opts, openaiopt.WithHeader(k, v))
-	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	return &OpenAIClient{
@@ -375,13 +425,30 @@ type ChatRequest struct {
 	Model       string    `json:"model"`
 	Messages    []Message `json:"messages"`
 	Tools       []ToolDef `json:"tools,omitempty"`
+	ToolChoice  string    `json:"tool_choice,omitempty"` // "auto", "required", or "none"; empty means provider default
 	Temperature *float64  `json:"temperature,omitempty"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
 	SessionID   string    `json:"-"` // per-file agent loop session ID; used as prompt_cache_key by the Responses API client
 }
 
 // CompletionsWithCtx sends a chat completion request with context support for cancellation and timeout.
-func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+//
+// The deferred finalizeRequest is the client boundary for the retry report: it is
+// the only place that knows the logical request is over, and it covers every exit
+// path including the streaming branch, the EOF recovery and a panic. Results are
+// named so the defer can read the error actually returned.
+func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	defer func() {
+		// A panic still has to finalize, or the entry stays unfinalized and Freeze
+		// drops the whole run's report. The panic value itself is re-raised
+		// unchanged so agent.go's per-file recovery behaves exactly as before.
+		if r := recover(); r != nil {
+			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
+			panic(r)
+		}
+		finalizeRequest(ctx, c.cfg.retryCollector, err)
+	}()
+
 	model := req.Model
 	if model == "" {
 		model = c.cfg.Model
@@ -389,8 +456,16 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 
 	params := c.buildOpenAIParams(model, req)
 
+	sessionKey := c.cfg.SessionKey
+	if k := SessionKeyFromContext(ctx); k != "" {
+		sessionKey = k
+	}
+
 	var opts []openaiopt.RequestOption
-	for k, v := range c.cfg.ExtraBody {
+	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
+		opts = append(opts, openaiopt.WithHeader(k, v))
+	}
+	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
 		// Skip the "stream" key here. The streaming decision below uses a
 		// dedicated boolean check, and when streaming is enabled the SDK's
 		// NewStreaming method sets stream=true on the wire itself. When
@@ -408,6 +483,15 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 
 	sdkResp, err := c.sdk.Chat.Completions.New(ctx, params, opts...)
 	if errors.Is(err, io.ErrUnexpectedEOF) {
+		// The truncated response was observed as HTTP 200, so it is corrected here
+		// rather than in the defer: this SDK call ends now, and a second one is
+		// about to append its own attempts under the same logical request.
+		//
+		// Both corrections sit ahead of their ctx early return. Placing them after
+		// would leave a truncated attempt recorded as a success whenever the parent
+		// context was cancelled in between — no invariant would complain, since a
+		// cancelled request needs no error attempt, but the record would be wrong.
+		reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassNetwork, FailurePhaseResponseDecode)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
@@ -416,6 +500,9 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 			sdkResp = retryResp
 			err = nil
 		} else {
+			if errors.Is(retryErr, io.ErrUnexpectedEOF) {
+				reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassNetwork, FailurePhaseResponseDecode)
+			}
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, ctxErr
 			}
@@ -431,7 +518,29 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 	return c.mapOpenAIResponse(sdkResp), nil
 }
 
+// completionsStreaming consumes an SSE completion and corrects the retry report
+// when the stream fails after it was already established.
+//
+// The correction lives in this one wrapper instead of at the inner function's
+// four error returns: a mid-stream failure is invisible to the observer, which
+// saw only the HTTP 200 that opened the stream. It must not finalize the logical
+// request — CompletionsWithCtx returns this call directly, so its defer already
+// does, and a second Finalize would be recorded as a violation.
+//
+// A stream that never opened needs nothing here: stream.Err() then carries the
+// non-2xx *apierror.Error, the observer already recorded that attempt as an
+// error, and ReviseLastAttempt's precondition makes this a no-op.
 func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.ChatCompletionNewParams, opts ...openaiopt.RequestOption) (*ChatResponse, error) {
+	resp, err := c.completionsStreamingInner(ctx, params, opts...)
+	if err != nil {
+		class, phase := classifyStreamError(err)
+		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *OpenAIClient) completionsStreamingInner(ctx context.Context, params openai.ChatCompletionNewParams, opts ...openaiopt.RequestOption) (*ChatResponse, error) {
 	stream := c.sdk.Chat.Completions.NewStreaming(ctx, params, opts...)
 	defer stream.Close()
 
@@ -474,18 +583,18 @@ func (c *OpenAIClient) completionsStreaming(ctx context.Context, params openai.C
 			builder.WriteString(reasoningContent)
 		}
 		if !accumulator.AddChunk(chunk) {
-			return nil, fmt.Errorf("OpenAI streaming response contained inconsistent chunks")
+			return nil, &streamIntegrityError{reason: "contained inconsistent chunks"}
 		}
 	}
 	if err := stream.Err(); err != nil {
 		return nil, err
 	}
 	if len(choiceOrder) == 0 {
-		return nil, fmt.Errorf("OpenAI streaming response contained no choices")
+		return nil, &streamIntegrityError{reason: "contained no choices"}
 	}
 	for _, index := range choiceOrder {
 		if !finishedChoices[index] {
-			return nil, fmt.Errorf("OpenAI streaming response ended before choice %d finished", index)
+			return nil, &streamIntegrityError{reason: fmt.Sprintf("ended before choice %d finished", index)}
 		}
 	}
 
@@ -559,6 +668,11 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 
 	if len(tools) > 0 {
 		params.Tools = tools
+	}
+	if req.ToolChoice != "" && len(tools) > 0 {
+		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{
+			OfAuto: openai.String(req.ToolChoice),
+		}
 	}
 	if req.MaxTokens > 0 {
 		params.MaxCompletionTokens = openai.Int(int64(req.MaxTokens))
@@ -638,12 +752,34 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 type AnthropicClient struct {
 	cfg ClientConfig
 	sdk anthropic.Client
+
+	// initErr defers a construction failure to the first request. The client
+	// factory returns an LLMClient with no error channel, and the alternative —
+	// panicking, as the SDK's own bedrock helper does — would surface a Go
+	// stack trace to someone whose real problem is an expired AWS session.
+	initErr error
+
+	// bedrock marks a client whose requests are SigV4-signed for Bedrock, along
+	// with the region and profile that were actually resolved. Bedrock's
+	// rejections need translating (see explainError) and the resolved region is
+	// worth showing, because a request sent to the wrong one fails in a way that
+	// looks like a bad model ID.
+	bedrock    bool
+	awsRegion  string
+	awsProfile string
 }
 
 // NewAnthropicClient creates a new Anthropic Messages API client.
+// The Anthropic API manages prompt-cache affinity server-side, so unlike the
+// OpenAI client no session key body field is injected; the key is still
+// available to ExtraHeaders/ExtraBody via SessionKeyTemplateVar, applied per
+// request so it can expand to the session key each request carries.
 func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
 	}
 	if !strings.HasSuffix(cfg.URL, "/v1/messages") && !strings.HasSuffix(cfg.URL, "/v1/messages/") {
 		baseURL := strings.TrimRight(cfg.URL, "/")
@@ -679,11 +815,11 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		)
 	}
 
-	for k, v := range cfg.ExtraHeaders {
-		opts = append(opts, option.WithHeader(k, v))
-	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	return &AnthropicClient{
@@ -692,8 +828,229 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	}
 }
 
+// NewAnthropicBedrockClient creates a client for Anthropic models served by AWS
+// Bedrock.
+//
+// The wire format is the Messages API, so this reuses AnthropicClient wholesale;
+// the bedrock middleware from the official SDK handles what differs — SigV4
+// signing, moving the model from the body into the URL path, injecting
+// anthropic_version, and deriving the host from the region.
+//
+// No api_key is involved. Credentials come from the standard AWS chain
+// (AWS_PROFILE, SSO cache, instance role, AWS_ACCESS_KEY_ID…), or from
+// AWS_BEARER_TOKEN_BEDROCK if set. Region comes from AWS_REGION or the active
+// profile.
+func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.SessionKey == "" {
+		cfg.SessionKey = NewSessionKey()
+	}
+
+	// cfg.URL is deliberately unused: bedrock.WithConfig is appended last and
+	// installs its own base URL from the resolved region, so anything set here
+	// would be overwritten rather than honoured. A custom endpoint (a VPC
+	// endpoint, say) would need to be threaded through the AWS config instead.
+	opts := []option.RequestOption{
+		option.WithMaxRetries(5),
+		option.WithHeader("User-Agent", userAgent("claude")),
+		option.WithRequestTimeout(cfg.Timeout),
+		// Bedrock authenticates by SigV4 signature, added by the middleware
+		// below at transport time. Any API-key header the SDK would otherwise
+		// attach — including an empty one — is rejected outright with
+		// "Invalid API Key format: Must start with pre-defined prefix", so both
+		// are removed here, before signing.
+		option.WithHeaderDel("Authorization"),
+		option.WithHeaderDel("X-Api-Key"),
+	}
+	// ExtraHeaders are applied per request in CompletionsWithCtx, where the
+	// session key template can expand — same as the plain Anthropic client.
+	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
+		opts = append(opts, option.WithMiddleware(mw))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
+	}
+
+	// Load the AWS config here rather than calling bedrock.WithLoadDefaultConfig,
+	// which panics on failure.
+	var loadOpts []func(*awsconfig.LoadOptions) error
+	if cfg.AWSProfile != "" {
+		loadOpts = append(loadOpts, awsconfig.WithSharedConfigProfile(cfg.AWSProfile))
+	}
+	if cfg.AWSRegion != "" {
+		loadOpts = append(loadOpts, awsconfig.WithRegion(cfg.AWSRegion))
+	}
+	loadCtx, cancel := context.WithTimeout(context.Background(), bedrockConfigLoadTimeout)
+	defer cancel()
+	awsCfg, err := awsconfig.LoadDefaultConfig(loadCtx, loadOpts...)
+	if err != nil {
+		return &AnthropicClient{
+			cfg:        cfg,
+			bedrock:    true,
+			awsProfile: cfg.AWSProfile,
+			initErr: fmt.Errorf("bedrock: could not load AWS configuration: %w\n"+
+				"  bedrock uses the standard AWS credential chain — set AWS_PROFILE, or run `aws sso login%s`", err, ssoLoginProfileArg(cfg.AWSProfile)),
+		}
+	}
+	if awsCfg.Region == "" {
+		return &AnthropicClient{
+			cfg:        cfg,
+			bedrock:    true,
+			awsProfile: cfg.AWSProfile,
+			initErr: fmt.Errorf("bedrock: no AWS region resolved\n" +
+				"  set AWS_REGION, or give the active profile a region — the region decides which bedrock-runtime host is used"),
+		}
+	}
+
+	// Drop the credential-chain bearer token, always.
+	//
+	// bedrock.WithConfig prefers bearer auth over SigV4 whenever
+	// cfg.BearerAuthTokenProvider is non-nil, and LoadDefaultConfig populates
+	// that provider from the SSO token cache — the OIDC access token, which is
+	// for identity services, not Bedrock. So an SSO-authenticated caller
+	// (i.e. most enterprise setups) silently sends `Authorization: Bearer
+	// <sso-token>` and Bedrock answers 403 "Invalid API Key format: Must start
+	// with pre-defined prefix".
+	//
+	// Clearing it unconditionally is what gives AWS_BEARER_TOKEN_BEDROCK the
+	// precedence its documentation describes. WithConfig's doc comment says the
+	// variable wins, but the code only consults it when the provider is nil
+	// (bedrock.go: `if cfg.BearerAuthTokenProvider == nil`), so leaving an
+	// SSO-derived provider in place would make a deliberately configured Bedrock
+	// API key unreachable — the same silent substitution, with the user's real
+	// token discarded. Cleared here, WithConfig re-reads the variable and builds
+	// a static provider from it; unset, the SigV4 path runs.
+	awsCfg.BearerAuthTokenProvider = nil
+
+	// Appended last on purpose, and the order depends on the SDK wrapping
+	// direction: each option wraps the ones before it, so the last appended
+	// middleware ends up innermost — signing runs closest to the wire, after any
+	// header the earlier options set, and a retry re-signs rather than replaying
+	// a stale signature. Moving this call earlier silently breaks both.
+	opts = append(opts, bedrock.WithConfig(awsCfg))
+
+	return &AnthropicClient{
+		cfg:        cfg,
+		sdk:        anthropic.NewClient(opts...),
+		bedrock:    true,
+		awsRegion:  awsCfg.Region,
+		awsProfile: cfg.AWSProfile,
+	}
+}
+
+// BedrockContext reports the AWS region and profile a Bedrock client resolved,
+// so callers can show what a request actually used. ok is false for every other
+// protocol. An empty profile means the ambient chain chose the credentials.
+func (c *AnthropicClient) BedrockContext() (region, profile string, ok bool) {
+	if !c.bedrock {
+		return "", "", false
+	}
+	return c.awsRegion, c.awsProfile, true
+}
+
+func ssoLoginProfileArg(profile string) string {
+	if profile == "" {
+		return ""
+	}
+	return " --profile " + profile
+}
+
+// bedrockWhere describes the region and profile in one clause, for error text.
+func (c *AnthropicClient) bedrockWhere() string {
+	region := c.awsRegion
+	if region == "" {
+		region = "unknown region"
+	}
+	if c.awsProfile == "" {
+		return fmt.Sprintf("region %s, credentials from the ambient AWS chain", region)
+	}
+	return fmt.Sprintf("region %s, profile %s", region, c.awsProfile)
+}
+
+// explainError translates a Bedrock rejection into the action that fixes it.
+// Two of these are actively misleading as the service words them: the API-key
+// complaint has nothing to do with any api_key the user could configure, and a
+// model that is merely absent from the region reads as a malformed identifier.
+// Non-Bedrock clients are unaffected — the error is returned untouched.
+func (c *AnthropicClient) explainError(model string, err error) error {
+	if err == nil || !c.bedrock {
+		return err
+	}
+	msg := err.Error()
+	where := c.bedrockWhere()
+
+	// Order matters here, and the two AccessDenied shapes are why: Bedrock
+	// answers both "your IAM policy forbids this" and "this account has not
+	// enabled the model" with AccessDeniedException, and the fixes have nothing
+	// in common. The specific wording is matched before the generic code.
+	switch {
+	// First: the bearer-token path produces this even when credentials are
+	// otherwise valid, so a later "denied" branch would mislabel it.
+	case strings.Contains(msg, "Invalid API Key format"):
+		if os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "" {
+			return fmt.Errorf("bedrock rejected the token in AWS_BEARER_TOKEN_BEDROCK (%s): %w\n"+
+				"  unset that variable to sign requests with SigV4 instead", where, err)
+		}
+		return fmt.Errorf("bedrock rejected an API-key header rather than a signature (%s): %w\n"+
+			"  no api_key applies to bedrock; this means a bearer token reached the request, not that a key is missing", where, err)
+	case strings.Contains(msg, "don't have access to the model"):
+		return fmt.Errorf("bedrock has no access enabled for model %q (%s): %w\n"+
+			"  model access is granted per account and per region in the Bedrock console; an IAM policy alone does not enable it", model, where, err)
+	case strings.Contains(msg, "model identifier is invalid"),
+		strings.Contains(msg, "inference profile") && strings.Contains(msg, "not found"):
+		return fmt.Errorf("bedrock rejected model %q (%s): %w\n"+
+			"  run `aws bedrock list-inference-profiles%s` to see what this account offers — IDs are account- and region-scoped, and a version suffix such as -v1:0 is invalid for the newer families",
+			model, where, err, listProfilesRegionArg(c.awsRegion))
+	// Specific credential codes only. A bare "expired" would also claim an
+	// expired TLS certificate is an SSO problem.
+	case strings.Contains(msg, "ExpiredToken"), strings.Contains(msg, "ExpiredTokenException"),
+		strings.Contains(msg, "SSOProviderInvalidToken"), strings.Contains(msg, "InvalidGrantException"),
+		strings.Contains(msg, "NoCredentialProviders"), strings.Contains(msg, "failed to refresh cached credentials"):
+		return fmt.Errorf("bedrock could not authenticate: AWS credentials are expired or unavailable (%s): %w\n"+
+			"  run `aws sso login%s`, or refresh whichever credential source this profile uses", where, err, ssoLoginProfileArg(c.awsProfile))
+	// "not authorized to invoke this API operation" is IAM's own wording, so it
+	// belongs here rather than in the model-access branch above: the fix is a
+	// policy change, not a console toggle.
+	case strings.Contains(msg, "AccessDenied"),
+		strings.Contains(msg, "not authorized to invoke this API operation"):
+		return fmt.Errorf("bedrock denied access to model %q (%s): %w\n"+
+			"  credentials resolved, so this is an authorization gap: the identity needs bedrock:InvokeModel on this model in this region, and the account needs model access enabled for it", model, where, err)
+	}
+	// Everything else — ValidationException on max_tokens, a network reset, a
+	// throttle — keeps the service's own wording. Guessing at a cause here would
+	// send people after the wrong problem, which is the failure this function
+	// exists to prevent.
+	return fmt.Errorf("bedrock request failed (%s): %w", where, err)
+}
+
+func listProfilesRegionArg(region string) string {
+	if region == "" {
+		return ""
+	}
+	return " --region " + region
+}
+
 // CompletionsWithCtx sends a chat completion request with context support.
-func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+//
+// The deferred finalizeRequest is this client's boundary for the retry report;
+// see the OpenAI counterpart for why it is deferred and why the results are
+// named. A parameter-building failure returns before any HTTP attempt, so
+// Finalize finds no entry and the request stays out of the report entirely.
+func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (resp *ChatResponse, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			finalizeRequest(ctx, c.cfg.retryCollector, errRequestPanicked)
+			panic(r)
+		}
+		finalizeRequest(ctx, c.cfg.retryCollector, err)
+	}()
+
+	if c.initErr != nil {
+		return nil, c.initErr
+	}
+
 	model := req.Model
 	if model == "" {
 		model = c.cfg.Model
@@ -704,8 +1061,16 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		return nil, err
 	}
 
+	sessionKey := c.cfg.SessionKey
+	if k := SessionKeyFromContext(ctx); k != "" {
+		sessionKey = k
+	}
+
 	var opts []option.RequestOption
-	for k, v := range c.cfg.ExtraBody {
+	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
+		opts = append(opts, option.WithHeader(k, v))
+	}
+	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
 		// This client is non-streaming: it calls Messages.New, which expects a
 		// single JSON body. If a provider config sets extra_body.stream=true,
 		// forwarding it here makes the API answer with SSE and every call fails
@@ -718,7 +1083,7 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 
 	sdkResp, err := c.sdk.Messages.New(ctx, params, opts...)
 	if err != nil {
-		return nil, err
+		return nil, c.explainError(model, err)
 	}
 
 	return c.mapAnthropicResponse(sdkResp), nil
@@ -832,6 +1197,11 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	if len(tools) > 0 {
 		tools[len(tools)-1].OfTool.CacheControl = anthropic.NewCacheControlEphemeralParam()
 		params.Tools = tools
+		if req.ToolChoice == "required" {
+			params.ToolChoice = anthropic.ToolChoiceUnionParam{
+				OfAny: &anthropic.ToolChoiceAnyParam{},
+			}
+		}
 	}
 	// Dynamic breakpoint on the latest message so multi-turn history is
 	// cached incrementally: read the full previous prefix, write only the delta.

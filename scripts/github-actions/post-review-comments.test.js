@@ -16,7 +16,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks } = require(path.join(__dirname, "post-review-comments.js"));
 
 // REVIEW_TAG as the production code builds it for this test's hardcoded run
 // identity (context.runId=undefined -> 0, runAttempt=undefined -> 1). Used as
@@ -1714,6 +1714,104 @@ function testBuildBadgeMatchesCliDegeneration() {
   assert.strictEqual(buildBadge({ category: "\n\r\t", severity: "\n" }), "");
 }
 
+// #882: buildBadgeImage renders category+severity metadata as a single
+// shields.io static badge in the reviewer-suggested format
+// img.shields.io/badge/<category>-<severity>-<color> (color keyed off
+// severity: low green, medium orange, high red, critical darkred), whose alt
+// text is the exact plain-text badge content. Any non-empty metadata renders a
+// badge — a single field gets a single segment, and an unknown severity falls
+// back to the fixed category color rather than yielding "undefined".
+function testBuildBadgeImage() {
+  // both known -> single combined badge, severity picks the color
+  assert.strictEqual(
+    buildBadgeImage({ category: "bug", severity: "high" }),
+    "![bug · high](https://img.shields.io/badge/bug-high-red)"
+  );
+  assert.strictEqual(
+    buildBadgeImage({ category: "security", severity: "critical" }),
+    "![security · critical](https://img.shields.io/badge/security-critical-darkred)"
+  );
+  assert.strictEqual(
+    buildBadgeImage({ category: "performance", severity: "medium" }),
+    "![performance · medium](https://img.shields.io/badge/performance-medium-orange)"
+  );
+  assert.strictEqual(
+    buildBadgeImage({ category: "style", severity: "low" }),
+    "![style · low](https://img.shields.io/badge/style-low-green)"
+  );
+  // only one field present -> single-segment badge in a fixed color
+  assert.strictEqual(
+    buildBadgeImage({ category: "documentation" }),
+    "![documentation](https://img.shields.io/badge/documentation-blue)"
+  );
+  assert.strictEqual(
+    buildBadgeImage({ severity: "critical" }),
+    "![critical](https://img.shields.io/badge/critical-darkred)"
+  );
+  // neither -> "" (no badge line), matching buildBadge
+  assert.strictEqual(buildBadgeImage({}), "");
+  assert.strictEqual(buildBadgeImage(null), "");
+  assert.strictEqual(buildBadgeImage(undefined), "");
+  // unknown values -> badge still renders; a known severity picks its color,
+  // an unknown severity falls back to the fixed category color
+  assert.strictEqual(
+    buildBadgeImage({ category: "weird", severity: "high" }),
+    "![weird · high](https://img.shields.io/badge/weird-high-red)"
+  );
+  assert.strictEqual(
+    buildBadgeImage({ category: "bug", severity: "extreme" }),
+    "![bug · extreme](https://img.shields.io/badge/bug-extreme-blue)"
+  );
+  assert.strictEqual(
+    buildBadgeImage({ category: "weird" }),
+    "![weird](https://img.shields.io/badge/weird-blue)"
+  );
+  // case-insensitive enum match (metadata is normalized before comparison,
+  // but the alt text preserves the sanitized original like buildBadge does)
+  assert.strictEqual(
+    buildBadgeImage({ category: "Bug", severity: "HIGH" }),
+    "![Bug · HIGH](https://img.shields.io/badge/bug-high-red)"
+  );
+  // control chars are stripped before enum matching (sanitizeMetadata), so a
+  // value that sanitizes to a known enum still renders as an image
+  assert.strictEqual(
+    buildBadgeImage({ category: "bu\ng", severity: "high" }),
+    "![bug · high](https://img.shields.io/badge/bug-high-red)"
+  );
+  // Markdown-special characters in metadata are escaped in the alt text so a
+  // stray "]" can't prematurely close the image's [...] span and a "\" can't
+  // escape it (malformed model output at high temperature).
+  assert.strictEqual(
+    buildBadgeImage({ category: "x]y", severity: "high" }),
+    "![x\\]y · high](https://img.shields.io/badge/x%5Dy-high-red)"
+  );
+  assert.strictEqual(
+    buildBadgeImage({ category: "a[b", severity: "high" }),
+    "![a\\[b · high](https://img.shields.io/badge/a%5Bb-high-red)"
+  );
+  assert.strictEqual(
+    buildBadgeImage({ category: "bug", severity: "hi\\gh" }),
+    "![bug · hi\\\\gh](https://img.shields.io/badge/bug-hi%5Cgh-blue)"
+  );
+}
+
+// Drift guard for the SEVERITIES <-> SEVERITY_BADGE_COLOR invariant: every
+// severity enum member must have an explicit color so it does not silently
+// fall back to the fixed category color.
+function testSeverityBadgeColorCoversSeverities() {
+  for (const s of SEVERITIES) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(SEVERITY_BADGE_COLOR, s),
+      `SEVERITY_BADGE_COLOR is missing an entry for severity "${s}"`
+    );
+  }
+  // A non-enum severity (high-temperature model output, per reviewer) still
+  // renders via the fixed fallback color, never a "-undefined" URL.
+  const out = buildBadgeImage({ category: "bug", severity: "blocker" });
+  assert.strictEqual(out, "![bug · blocker](https://img.shields.io/badge/bug-blocker-blue)");
+  assert.ok(!out.includes("undefined"), "no undefined interpolated into output");
+}
+
 function testSanitizeMetadataStripsControlChars() {
   assert.strictEqual(sanitizeMetadata("clean"), "clean");
   assert.strictEqual(sanitizeMetadata("a\nb"), "ab");
@@ -1855,11 +1953,14 @@ function testFormatCommentBadgePlacement() {
   // with id and badge: id HTML comment stays first, badge on the next line
   const withBadge = formatComment({ content: "body", category: "bug", severity: "high" }, "ocr-1-1-abcd");
   assert.ok(withBadge.startsWith("<!-- ocr-1-1-abcd -->\n"), "id HTML comment is the first bytes");
-  assert.ok(withBadge.startsWith("<!-- ocr-1-1-abcd -->\n[bug · high]\n"), "badge follows id line");
+  assert.ok(
+    withBadge.startsWith("<!-- ocr-1-1-abcd -->\n![bug · high](https://img.shields.io/badge/bug-high-red)\n"),
+    "badge image follows id line"
+  );
   assert.ok(withBadge.endsWith("body"), "content preserved at the end");
   // without id: badge is the first line
   const noId = formatComment({ content: "body", category: "style", severity: "low" });
-  assert.ok(noId.startsWith("[style · low]\n"));
+  assert.ok(noId.startsWith("![style · low](https://img.shields.io/badge/style-low-green)\n"));
   // no metadata -> no badge line at all (byte-identical to pre-change output)
   const noBadge = formatComment({ content: "body" }, "ocr-1-1-abcd");
   assert.strictEqual(noBadge, "<!-- ocr-1-1-abcd -->\nbody");
@@ -1868,7 +1969,7 @@ function testFormatCommentBadgePlacement() {
     { content: "c", category: "bug", severity: "high", existing_code: "old", suggestion_code: "new" },
     "ocr-1-1-abcd"
   );
-  assert.match(withSuggestion, /\[bug · high\]/);
+  assert.match(withSuggestion, /!\[bug · high\]/);
   assert.match(withSuggestion, /\*\*Suggestion:\*\*/);
   assert.match(withSuggestion, /```suggestion/);
 }
@@ -1877,8 +1978,8 @@ function testFormatCommentBadgePlacement() {
 // path heading (PLAN_VALIDATION Risk A confirmed placement).
 function testFormatCommentMarkdownBadgePlacement() {
   const md = formatCommentMarkdown({ path: "a.js", content: "body", category: "bug", severity: "high" });
-  // badge is the first line, before the heading
-  assert.ok(md.startsWith("[bug · high]\n"), "badge is the leading line");
+  // badge image is the first line, before the heading
+  assert.ok(md.startsWith("![bug · high](https://img.shields.io/badge/bug-high-red)\n"), "badge is the leading line");
   assert.match(md, /### 📄 `a.js`/);
   assert.match(md, /body/);
   // no metadata -> no badge line, heading is first (byte-identical to pre-change)
@@ -2170,6 +2271,8 @@ async function main() {
   await testBatchTelemetryOutputs();
   // Badge + publication policy (#478)
   testBuildBadgeMatchesCliDegeneration();
+  testBuildBadgeImage();
+  testSeverityBadgeColorCoversSeverities();
   testSanitizeMetadataStripsControlChars();
   testBuildPolicyFailsOpenOnMalformed();
   testRouteCommentUnknownMetadataNeverRouted();

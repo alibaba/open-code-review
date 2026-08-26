@@ -57,7 +57,7 @@ func budgetAgentTestTemplate() template.Template {
 		MainTask: template.LlmConversation{
 			Messages: []template.ChatMessage{
 				{Role: "system", Content: "review"},
-				{Role: "user", Content: "review {{diff}} for {{current_file_path}}"},
+				{Role: "user", Content: "review {{diffs}}"},
 			},
 		},
 	}
@@ -85,7 +85,7 @@ func makeBudgetDiffs(n int) []model.Diff {
 // BudgetExceeded()==true with partial results returned.
 // Overrun is bounded by at most (concurrency) in-flight files — here 1.
 func TestDispatchSubtasks_TokenBudgetStopsDispatch(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	const perCall = 50_000
 	fake := &fakeBudgetAgentClient{perCallTokens: perCall}
 	a := New(Args{
@@ -100,6 +100,7 @@ func TestDispatchSubtasks_TokenBudgetStopsDispatch(t *testing.T) {
 			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
 		},
 	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
 	a.diffs = makeBudgetDiffs(10)
 	a.currentDate = "2025-06-26 10:00"
 	a.args.Tools.Freeze()
@@ -179,7 +180,7 @@ func TestDispatchSubtasks_TokenBudgetStopsDispatch(t *testing.T) {
 // the entire difference between this and the partial/exit-0 case above — the
 // boundary is deliberate, so it gets its own guard.
 func TestDispatchSubtasks_TokenBudgetBeforeFirstFileIsFailed(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	fake := &fakeBudgetAgentClient{perCallTokens: 50_000}
 	a := New(Args{
 		LLMClient:        fake,
@@ -193,6 +194,7 @@ func TestDispatchSubtasks_TokenBudgetBeforeFirstFileIsFailed(t *testing.T) {
 			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
 		},
 	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
 	a.diffs = makeBudgetDiffs(3)
 	a.currentDate = "2025-06-26 10:00"
 	a.args.Tools.Freeze()
@@ -243,7 +245,7 @@ func TestDispatchSubtasks_TokenBudgetBeforeFirstFileIsFailed(t *testing.T) {
 // TestDispatchSubtasks_UnlimitedBudget verifies MaxTokensBudget=0 runs every
 // file (default behavior unchanged — regression guard).
 func TestDispatchSubtasks_UnlimitedBudget(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	fake := &fakeBudgetAgentClient{perCallTokens: 50_000}
 	a := New(Args{
 		LLMClient:        fake,
@@ -257,6 +259,7 @@ func TestDispatchSubtasks_UnlimitedBudget(t *testing.T) {
 			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
 		},
 	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
 	a.diffs = makeBudgetDiffs(5)
 	a.currentDate = "2025-06-26 10:00"
 	a.args.Tools.Freeze()

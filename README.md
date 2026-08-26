@@ -50,6 +50,8 @@ Visit the [official website](https://open-codereview.ai) for more details.
 
 A real-world code review benchmark built from **50** popular open-source repositories, **200** real Pull Requests, and **10** programming languages — cross-validated by 80+ senior engineers (**1,505** annotated ground-truth issues).
 
+<a href="https://huggingface.co/datasets/Alibaba-Aone/aacr-bench"><img src="https://huggingface.co/favicon.ico" alt="Hugging Face" width="20" height="20" /> Explore the AACR-Bench dataset on Hugging Face</a>.
+
 | Metric | What it measures | Why it matters |
 |--------|-----------------|----------------|
 | **F1** | Harmonic mean of precision and recall | Best single number for overall review quality |
@@ -149,6 +151,9 @@ ocr review --from main --to feature-branch --resume <session-id>
 ocr scan                          # scan the entire repository
 ocr scan --path internal/agent    # scan a directory or specific files
 ocr scan --resume <session-id>   # resume an interrupted full-file scan
+
+# Save results to a file (recommended for AI host agents)
+ocr review --format json --output result.json
 
 # Delegation mode — let your AI coding agent perform the review itself
 # OCR handles file selection and rule resolution; no LLM configuration needed

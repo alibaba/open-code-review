@@ -6,10 +6,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
@@ -60,6 +62,18 @@ func resolveMaxTokens(templateDefault int, cfg *Config, cliOverride int) (int, e
 	return cfg.MaxTokens, nil
 }
 
+// resolveEffort applies the standard precedence for the review effort preset:
+// CLI flag > saved app config > EffortDefault.
+func resolveEffort(cfg *Config, cliOverride string) (template.Effort, error) {
+	if cliOverride != "" {
+		return template.ParseEffort(cliOverride)
+	}
+	if cfg != nil && cfg.Effort != "" {
+		return template.ParseEffort(cfg.Effort)
+	}
+	return template.EffortDefault, nil
+}
+
 // loadCommonContext validates the working directory, loads the embedded
 // template, raises MaxToolRequestTimes when maxTools exceeds the default,
 // resolves the absolute repo path, loads system review rules, and creates
@@ -69,7 +83,12 @@ func resolveMaxTokens(templateDefault int, cfg *Config, cliOverride int) (int, e
 // requireGit=true fails fast when the directory is not a git repo (review
 // path: diff concept requires git). requireGit=false allows non-git
 // directories (scan path: provider falls back to filepath.Walk).
-func loadCommonContext(repoDirInput, rulePath string, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
+//
+// contentRef is the git ref whose file content the rule resolver should
+// inspect when disambiguating ambiguous extensions — derive it via
+// tool.ParseReviewMode(from, to, commit).RefValue(to, commit). Pass "" to
+// read the working tree, which is what scan wants.
+func loadCommonContext(repoDirInput, rulePath, contentRef string, maxTools, maxGitProcs int, requireGit bool) (*commonContext, error) {
 	tpl, err := template.LoadDefault()
 	if err != nil {
 		return nil, fmt.Errorf("load default template: %w", err)
@@ -86,7 +105,14 @@ func loadCommonContext(repoDirInput, rulePath string, maxTools, maxGitProcs int,
 		return nil, err
 	}
 
-	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath)
+	// Built before the resolver: the sniffer reads file content at contentRef
+	// through this limiter.
+	gitRunner := gitcmd.New(maxGitProcs)
+
+	resolver, fileFilter, err := rules.NewResolver(repoDir, rulePath, rules.ResolverOptions{
+		Ref:    contentRef,
+		Runner: gitRunner,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("load rules: %w", err)
 	}
@@ -96,7 +122,7 @@ func loadCommonContext(repoDirInput, rulePath string, maxTools, maxGitProcs int,
 		RepoDir:    repoDir,
 		Resolver:   resolver,
 		FileFilter: fileFilter,
-		GitRunner:  gitcmd.New(maxGitProcs),
+		GitRunner:  gitRunner,
 		IsGitRepo:  isGit,
 	}, nil
 }
@@ -157,13 +183,27 @@ type llmRuntime struct {
 	PlanToolDefs []llm.ToolDef
 	MainToolDefs []llm.ToolDef
 	Collector    *tool.CommentCollector
-	AppCfg       *Config
+	// RetryCollector observes every LLM HTTP attempt this run makes. It is
+	// created here rather than on the session or the agent because the client is
+	// built before either exists, and it is per-run rather than package-level so
+	// two runs in one process cannot share data. scan gets one too; its requests
+	// carry no RequestMeta, so every attempt is dropped and the frozen report is
+	// nil.
+	RetryCollector *llm.RetryCollector
+	AppCfg         *Config
 	// RuntimeConfig holds the allowlisted, non-secret runtime settings (protocol,
 	// sanitized endpoint host, language, timeout) derived from the resolved
 	// endpoint and app config, for the run manifest's runtime_config_sha256. It
 	// never carries the token or full URL.
 	RuntimeConfig agent.RuntimeConfig
 }
+
+// newRetryCollector builds the per-run retry collector. It is a variable so a
+// test can hand back a collector whose invariants are already violated, which is
+// the only way to exercise the Freeze construction-error branch from the
+// outside: every production path finalizes every logical request on every exit,
+// so a well-behaved run can never produce one.
+var newRetryCollector = llm.NewRetryCollector
 
 // loadLLMRuntime loads tool defs from toolConfigPath, reads the app config
 // from the user's default config path (applying the configured language to
@@ -199,14 +239,17 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 		return nil, fmt.Errorf("resolve LLM endpoint: %w", err)
 	}
 
+	retryCollector := newRetryCollector()
+
 	return &llmRuntime{
-		Client:       llm.NewLLMClient(ep),
-		Model:        ep.Model,
-		Provider:     ep.Provider,
-		PlanToolDefs: planToolDefs,
-		MainToolDefs: mainToolDefs,
-		Collector:    tool.NewCommentCollector(),
-		AppCfg:       appCfg,
+		Client:         llm.NewLLMClient(ep, retryCollector),
+		Model:          ep.Model,
+		Provider:       ep.Provider,
+		PlanToolDefs:   planToolDefs,
+		MainToolDefs:   mainToolDefs,
+		Collector:      tool.NewCommentCollector(),
+		RetryCollector: retryCollector,
+		AppCfg:         appCfg,
 		RuntimeConfig: agent.RuntimeConfig{
 			Protocol:     ep.Protocol,
 			EndpointHost: sanitizeEndpointHost(ep.URL),
@@ -259,20 +302,46 @@ func excludeToolDef(defs []llm.ToolDef, name string) []llm.ToolDef {
 	return out
 }
 
-// quietHandle wraps a stdout.Quiet() restorer so callers can `defer
-// q.Restore()` for safety while emitRunResult restores it early when the
-// agent-text audience needs the trace summary on the user's terminal.
-// Restore is idempotent.
+// quietHandle wraps the restorer returned by whichever stdout redirection
+// newQuietHandle chose, so callers can `defer q.Restore()` for safety while
+// emitRunResult restores it early when the agent-text audience needs the trace
+// summary on the user's terminal. Restore is idempotent.
 type quietHandle struct {
 	fn func()
 }
 
-// newQuietHandle silences stdout when outputFormat=="json" or
-// audience=="agent"; otherwise the returned handle is a no-op restorer.
+// isMachineReadable reports whether the output format writes a structured
+// document to stdout that must not be interleaved with progress text. Both
+// json and sarif move [ocr] progress lines off stdout and suppress the trace
+// summary, which is already carried inside the document.
+func isMachineReadable(outputFormat string) bool {
+	switch strings.ToLower(strings.TrimSpace(outputFormat)) {
+	case "json", "sarif":
+		return true
+	default:
+		return false
+	}
+}
+
+// newQuietHandle routes [ocr] progress lines away from stdout so they cannot
+// corrupt a structured output document. What it does depends on why stdout
+// needs protecting:
+//
+//   - audience=="agent": the caller wants no progress at all, so progress is
+//     discarded regardless of format.
+//   - machine-readable format with a human audience: the human still asked to
+//     watch the run, so progress is redirected to stderr rather than dropped.
+//     Every result document (json, sarif, text) is written straight to
+//     os.Stdout and never through stdout.Writer(), so stdout stays a single
+//     parseable document while stderr carries the live progress.
+//   - otherwise: no-op, progress stays on stdout.
 func newQuietHandle(outputFormat, audience string) *quietHandle {
 	h := &quietHandle{}
-	if outputFormat == "json" || audience == "agent" {
+	switch {
+	case audience == "agent":
 		h.fn = stdout.Quiet()
+	case isMachineReadable(outputFormat):
+		h.fn = stdout.Swap(os.Stderr)
 	}
 	return h
 }
@@ -284,6 +353,238 @@ func (h *quietHandle) Restore() {
 	}
 	h.fn()
 	h.fn = nil
+}
+
+const (
+	maxOSCSequenceLength = 4096
+	maxCSISequenceLength = 256
+)
+
+// stripAnsiState is the ANSI escape parsing state for stripAnsiWriter.
+type stripAnsiState int
+
+const (
+	ansiNormal stripAnsiState = iota
+	ansiEsc
+	ansiCSI
+	ansiOSC
+	ansiOSCEsc
+)
+
+// stripAnsiWriter removes ANSI escape sequences (colors, cursor moves, OSC
+// control strings) from the byte stream it forwards, so terminal-only
+// decoration never reaches --output files. It tolerates sequences split
+// arbitrarily across Write calls: any in-progress sequence is buffered and
+// carried to the next Write. Payload bytes (non-ESC) pass through unchanged,
+// so stripping only discards decoration, never result content.
+type stripAnsiWriter struct {
+	dst     io.Writer
+	state   stripAnsiState
+	pending []byte // partial escape sequence carried across Write calls
+}
+
+func (w *stripAnsiWriter) Write(p []byte) (int, error) {
+	// Only new bytes are fed to the state machine. w.pending holds bytes that
+	// already entered an escape sequence in earlier calls — re-feeding them
+	// would re-parse the sequence start (e.g. '[' would be mistaken for a CSI
+	// final byte once the state is already ansiCSI) and leak the sequence into
+	// the output. The pending buffer is discarded wholesale on completion.
+	var out []byte
+	for _, c := range p {
+		switch w.state {
+		case ansiNormal:
+			if c == 0x1b {
+				w.state = ansiEsc
+				w.pending = append(w.pending, c)
+			} else {
+				out = append(out, c)
+			}
+		case ansiEsc:
+			w.pending = append(w.pending, c)
+			switch {
+			case c == '[':
+				w.state = ansiCSI
+			case c == ']', c == 'P', c == '^', c == '_':
+				// OSC, DCS, PM and APC strings all run until ST (or BEL for
+				// OSC); treat them uniformly through the OSC state.
+				w.state = ansiOSC
+			case c >= 0x20 && c <= 0x2f:
+				// Intermediate byte of a multi-byte escape (e.g. ESC ( B);
+				// keep collecting so the whole sequence is discarded.
+				if len(w.pending) >= maxCSISequenceLength {
+					out = append(out, w.pending...)
+					w.pending = w.pending[:0]
+					w.state = ansiNormal
+				}
+			default:
+				// Single-byte escape sequence. Discard.
+				w.state = ansiNormal
+				w.pending = w.pending[:0]
+			}
+		case ansiCSI:
+			w.pending = append(w.pending, c)
+			if c >= 0x40 && c <= 0x7e {
+				w.state = ansiNormal
+				w.pending = w.pending[:0]
+			} else if c < 0x20 || c >= 0x80 || len(w.pending) >= maxCSISequenceLength {
+				out = append(out, w.pending...)
+				w.pending = w.pending[:0]
+				w.state = ansiNormal
+			}
+		case ansiOSC:
+			w.pending = append(w.pending, c)
+			switch c {
+			case 0x07: // BEL terminates an OSC string
+				w.state = ansiNormal
+				w.pending = w.pending[:0]
+			case 0x1b: // possible ST terminator (ESC \)
+				w.state = ansiOSCEsc
+			default:
+				if len(w.pending) >= maxOSCSequenceLength {
+					out = append(out, w.pending...)
+					w.pending = w.pending[:0]
+					w.state = ansiNormal
+				}
+			}
+		case ansiOSCEsc:
+			if c == '\\' { // ST terminates the OSC string
+				w.state = ansiNormal
+				w.pending = w.pending[:0]
+			} else {
+				// Not a valid ST. The OSC ends here without one (e.g. a bare
+				// ESC terminator, which some terminals accept). The trailing
+				// byte is not part of the sequence and must be re-parsed:
+				// an ESC starts a new escape sequence, anything else is text.
+				w.state = ansiNormal
+				w.pending = w.pending[:0]
+				if c == 0x1b {
+					w.state = ansiEsc
+					w.pending = append(w.pending, c)
+				} else {
+					out = append(out, c)
+				}
+			}
+		}
+	}
+
+	if len(out) > 0 {
+		n, err := w.dst.Write(out)
+		if err != nil {
+			// The state machine has already consumed p; report the error but
+			// still return len(p) so a caller that retries on n < len(p) does
+			// not feed the same bytes through the state machine a second time.
+			return len(p), err
+		}
+		if n != len(out) {
+			return len(p), io.ErrShortWrite
+		}
+	}
+	return len(p), nil
+}
+
+// lazyFileWriter defers os.Create until the first Write so a run that never
+// produces output (LLM failure, preview error, interruption) leaves an
+// existing target file untouched instead of truncating it to zero bytes. The
+// "Results written" hint is printed to stderr only after the first successful
+// Write, so agents never see a path hint for a file that stayed empty or was
+// never persisted.
+type lazyFileWriter struct {
+	path     string
+	strip    bool // strip ANSI when the target format is text
+	once     sync.Once
+	file     *os.File
+	stripper *stripAnsiWriter
+	err      error // os.Create error
+	writeErr error // first error from a Write
+	hinted   bool  // hint already printed after a successful Write
+}
+
+func (w *lazyFileWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() {
+		f, err := os.Create(w.path)
+		if err != nil {
+			w.err = fmt.Errorf("create output file %s: %w", w.path, err)
+			return
+		}
+		w.file = f
+		if w.strip {
+			w.stripper = &stripAnsiWriter{dst: f}
+		}
+	})
+	if w.err != nil {
+		return 0, w.err
+	}
+	var n int
+	var err error
+	if w.stripper != nil {
+		n, err = w.stripper.Write(p)
+	} else {
+		n, err = w.file.Write(p)
+	}
+	if err != nil && w.writeErr == nil {
+		w.writeErr = err
+	}
+	if err == nil && !w.hinted {
+		w.hinted = true
+		fmt.Fprintf(os.Stderr, "[ocr] Results written to %s\n", w.path)
+	}
+	return n, err
+}
+
+// Err returns the first error encountered while creating or writing the
+// underlying file, or nil if none occurred. Text-mode rendering drops the
+// per-write errors of fmt.Fprintf, so callers use this to surface write
+// failures (e.g. permission denied on the first write) as a command error —
+// matching JSON mode, where Encoder.Encode propagates the same failure.
+func (w *lazyFileWriter) Err() error {
+	if w.err != nil {
+		return w.err
+	}
+	return w.writeErr
+}
+
+// writeOutError surfaces deferred write errors from writers that record them
+// (lazyFileWriter); plain writers such as os.Stdout report nil.
+func writeOutError(out io.Writer) error {
+	if r, ok := out.(interface{ Err() error }); ok {
+		return r.Err()
+	}
+	return nil
+}
+
+// Close closes the underlying file. It is a no-op when the file was never
+// created (no output produced), so failure paths cannot leave a fresh empty
+// file behind.
+func (w *lazyFileWriter) Close() error {
+	if w.file == nil {
+		return nil
+	}
+	return w.file.Close()
+}
+
+// resolveOutputWriter resolves the --output target into a writer plus a
+// cleanup function.
+//   - "" or "-"      → os.Stdout with a no-op cleanup (colors preserved, no hint)
+//   - otherwise      → a lazyFileWriter over os.Create(path), deferred until the
+//     first Write; text format wraps the file in stripAnsiWriter so ANSI
+//     colors never reach the result file.
+//
+// Fail-fast checks (directory target, missing parent) run here without
+// creating or truncating anything; deeper errors (permissions, disk) surface
+// on the first Write and fail the command non-zero.
+func resolveOutputWriter(path, format string) (io.Writer, func() error, error) {
+	if path == "" || path == "-" {
+		return os.Stdout, func() error { return nil }, nil
+	}
+	if st, err := os.Stat(path); err == nil && st.IsDir() {
+		return nil, nil, fmt.Errorf("--output %q is a directory", path)
+	}
+	parent := filepath.Dir(path)
+	if st, err := os.Stat(parent); err != nil || !st.IsDir() {
+		return nil, nil, fmt.Errorf("--output directory does not exist: %s", parent)
+	}
+	w := &lazyFileWriter{path: path, strip: !isMachineReadable(format)}
+	return w, w.Close, nil
 }
 
 // ResultProvider abstracts the metadata both internal/agent.Agent and
@@ -331,6 +632,13 @@ type resumeInfoProvider interface {
 //
 // q is the silencing handle returned by newQuietHandle; pass nil if no
 // silencing was set up (in which case the early restore is a no-op).
+//
+// retryReport is the frozen LLM retry report, or nil when there is nothing to
+// report (a clean run, or a caller that produces no report at all — `ocr scan`
+// never freezes one). It is passed as a parameter rather than added to
+// ResultProvider because the collector belongs to llmRuntime, not to the
+// agent; putting it on the interface would force internal/scan.Agent to
+// implement a method that is always nil.
 func emitRunResult(
 	ctx context.Context,
 	ag ResultProvider,
@@ -339,7 +647,10 @@ func emitRunResult(
 	outputFormat, audience string,
 	q *quietHandle,
 	llmIdentity *jsonLLMIdentity,
+	out io.Writer,
+	retryReport *llm.RetryReport,
 ) error {
+	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
 	comments = diff.ResolveLineNumbers(comments, ag.Diffs())
 
 	duration := time.Since(startTime)
@@ -351,20 +662,35 @@ func emitRunResult(
 	traceID := telemetry.TraceIDFromContext(ctx)
 	manifest := ag.RunManifest()
 
-	if outputFormat == "json" && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
-		return outputJSONNoFiles(traceID, llmIdentity)
+	// JSON and SARIF are machine-readable formats written to stdout; they
+	// share the same suppression of trace summaries and early stdout restore.
+	machineReadable := isMachineReadable(outputFormat)
+
+	if machineReadable && manifest == nil && len(comments) == 0 && ag.FilesReviewed() == 0 {
+		if outputFormat == "json" {
+			return outputJSONNoFiles(traceID, llmIdentity, out)
+		}
+		return outputSARIF(nil, Version, ag.Warnings(), manifest, out)
 	}
 
 	// Agent-text audiences need stdout back before PrintTraceSummary so the
 	// summary line lands on their terminal.
-	if audience == "agent" && outputFormat != "json" {
+	if audience == "agent" && !machineReadable {
 		q.Restore()
 	}
 
-	if outputFormat != "json" {
-		telemetry.PrintTraceSummary(ag.FilesReviewed(), int64(len(comments)),
-			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
-			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration)
+	if !machineReadable {
+		telemetry.PrintTraceSummary(telemetry.TraceSummary{
+			FilesReviewed:     ag.FilesReviewed(),
+			CommentsGenerated: int64(len(comments)),
+			InputTokens:       ag.TotalInputTokens(),
+			OutputTokens:      ag.TotalOutputTokens(),
+			TotalTokens:       ag.TotalTokensUsed(),
+			CacheReadTokens:   ag.TotalCacheReadTokens(),
+			CacheWriteTokens:  ag.TotalCacheWriteTokens(),
+			Duration:          duration,
+			SessionID:         ag.SessionID(),
+		})
 	}
 
 	if outputFormat == "json" {
@@ -372,14 +698,28 @@ func emitRunResult(
 		if p, ok := ag.(resumeInfoProvider); ok {
 			resumeInfo = p.ResumeInfo()
 		}
+		var groups []agent.FileGroupInfo
+		if p, ok := ag.(interface{ FileGroups() []agent.FileGroupInfo }); ok {
+			groups = p.FileGroups()
+		}
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity)
+			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
 	}
-	outputTextWithWarnings(comments, ag.Warnings(), manifest)
+	if outputFormat == "sarif" {
+		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)
+	}
+	outputTextWithWarnings(comments, ag.Warnings(), manifest, out)
+	// Between the comments/warnings block and the project summary: the report is
+	// run-level diagnostics about how the comments were obtained, so it reads
+	// after them but must not separate the summary from the end of output.
+	outputRetryReportText(out, retryReport)
 	if summary := ag.ProjectSummary(); summary != "" {
-		fmt.Printf("\n\n──────── Project Summary ────────\n\n%s\n", summary)
+		fmt.Fprintf(out, "\n\n──────── Project Summary ────────\n\n%s\n", sanitizeTerminal(summary))
 	}
-	return nil
+	// Text rendering ignores fmt.Fprintf write errors; surface them here so a
+	// failed --output write (permission, disk full) fails the command non-zero
+	// exactly like JSON mode does via Encoder.Encode.
+	return writeOutError(out)
 }

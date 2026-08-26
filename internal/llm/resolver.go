@@ -32,6 +32,18 @@ type ResolvedEndpoint struct {
 	// knob; users can still override via OCR_LLM_TIMEOUT.
 	Timeout    time.Duration
 	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
+
+	// AmbientAuth marks an endpoint that carries no token and needs no base
+	// URL, because the transport supplies both — AWS SigV4 signing derives the
+	// host from the region and the credentials from the environment's own
+	// chain. Completeness checks must treat an empty URL and Token as valid for
+	// these; requiring either would reject a correctly configured endpoint.
+	AmbientAuth bool
+
+	// AWSProfile and AWSRegion override the ambient AWS chain for SigV4
+	// providers. Empty means "let the AWS SDK decide".
+	AWSProfile string
+	AWSRegion  string
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -45,10 +57,11 @@ const (
 	// openai | openai-responses). Takes priority
 	// over OCR_USE_ANTHROPIC when set.
 	envOCRLLMProtocol = "OCR_LLM_PROTOCOL"
-	// envOCRLLMTimeout is a global override applied by finalizeResolvedEndpoint after
-	// ResolveEndpointWithOptions selects a strategy, rather than inside tryOCREnv like other OCR_LLM_* vars.
-	// This lets it override timeout for all resolution paths (OCR env, config file,
-	// provider config, Claude Code env, shell RC).
+	// envOCRLLMTimeout is a global override parsed at the top of
+	// ResolveEndpointWithOptions and applied by finalizeResolvedEndpoint to
+	// whichever strategy resolves, rather than inside tryOCREnv like other
+	// OCR_LLM_* vars. This lets it override timeout for all resolution paths
+	// (OCR env, config file, provider config, Claude Code env, shell RC).
 	envOCRLLMTimeout   = "OCR_LLM_TIMEOUT"
 	envOCRUseAnthropic = "OCR_USE_ANTHROPIC"
 )
@@ -83,6 +96,18 @@ func ResolveEndpointWithModelOverride(configPath, modelOverride string) (Resolve
 func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (ResolvedEndpoint, error) {
 	opts.Provider = strings.TrimSpace(opts.Provider)
 	opts.Model = strings.TrimSpace(opts.Model)
+
+	// The global env overrides are parsed before any strategy runs, even though
+	// they are applied to the endpoint afterwards. Parsing them inside
+	// finalizeResolvedEndpoint would let a typo'd OCR_LLM_TIMEOUT ("30s") or an
+	// unparseable OCR_LLM_EXTRA_HEADERS abort resolution *after* api_key_cmd
+	// already prompted 1Password/pinentry/Touch ID for a credential that then
+	// gets discarded.
+	env, err := parseEnvOverrides()
+	if err != nil {
+		return ResolvedEndpoint{}, err
+	}
+
 	if opts.Provider != "" {
 		ep, ok, err := tryOCRConfig(configPath, opts)
 		if err != nil {
@@ -95,7 +120,7 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 			}
 			return ResolvedEndpoint{}, fmt.Errorf("resolve OCR config file: provider %q is not configured in %s section because the config file does not exist", opts.Provider, section)
 		}
-		return finalizeResolvedEndpoint("OCR config file", ep)
+		return finalizeResolvedEndpoint("OCR config file", ep, env), nil
 	}
 
 	strategies := []struct {
@@ -113,40 +138,62 @@ func ResolveEndpointWithOptions(configPath string, opts ResolveOptions) (Resolve
 		if err != nil {
 			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", strategy.name, err)
 		}
-		if ok && ep.URL != "" && ep.Token != "" && ep.Model != "" {
-			return finalizeResolvedEndpoint(strategy.name, ep)
+		// An ambient-auth endpoint is complete without a URL or token: the
+		// transport supplies both. Everything else still needs all three.
+		complete := ep.Model != "" && (ep.AmbientAuth || (ep.URL != "" && ep.Token != ""))
+		if ok && complete {
+			return finalizeResolvedEndpoint(strategy.name, ep, env), nil
 		}
 	}
 
 	return ResolvedEndpoint{}, fmt.Errorf("no valid LLM endpoint configured; one of OCR_LLM_URL/OCR_LLM_TOKEN/OCR_LLM_MODEL, ~/.opencodereview/config.json, or ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN/ANTHROPIC_MODEL must be set")
 }
 
-func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint) (ResolvedEndpoint, error) {
+// envOverrides holds the global OCR_LLM_* overrides that apply to whichever
+// strategy resolves the endpoint. Parsed once, up front — see the call site in
+// ResolveEndpointWithOptions for why the timing matters.
+type envOverrides struct {
+	timeout    time.Duration
+	hasTimeout bool
+	headers    map[string]string
+}
+
+func parseEnvOverrides() (envOverrides, error) {
+	var env envOverrides
+	var err error
+	env.timeout, env.hasTimeout, err = parseTimeoutEnv()
+	if err != nil {
+		return envOverrides{}, err
+	}
+	if raw := os.Getenv(envOCRLLMExtraHeaders); raw != "" {
+		env.headers, err = ParseExtraHeaders(raw)
+		if err != nil {
+			return envOverrides{}, fmt.Errorf("%s: %w", envOCRLLMExtraHeaders, err)
+		}
+	}
+	return env, nil
+}
+
+// finalizeResolvedEndpoint stamps the source label, strips the model suffix and
+// applies the global env overrides, which win over config-file values.
+func finalizeResolvedEndpoint(source string, ep ResolvedEndpoint, env envOverrides) ResolvedEndpoint {
 	if ep.Source == "" {
 		ep.Source = source
 	}
 	ep.Model = stripModelSuffix(ep.Model)
-	envTimeout, ok, err := parseTimeoutEnv()
-	if err != nil {
-		return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", source, err)
+	if env.hasTimeout {
+		ep.Timeout = env.timeout
 	}
-	if ok {
-		ep.Timeout = envTimeout
-	}
-	if raw := os.Getenv(envOCRLLMExtraHeaders); raw != "" {
-		envHeaders, err := ParseExtraHeaders(raw)
-		if err != nil {
-			return ResolvedEndpoint{}, fmt.Errorf("resolve %s: %w", source, err)
-		}
+	if env.headers != nil {
 		if ep.ExtraHeaders == nil {
-			ep.ExtraHeaders = envHeaders
+			ep.ExtraHeaders = env.headers
 		} else {
-			for key, value := range envHeaders {
+			for key, value := range env.headers {
 				ep.ExtraHeaders[key] = value
 			}
 		}
 	}
-	return ep, nil
+	return ep
 }
 
 // parseTimeoutEnv reads and validates the OCR_LLM_TIMEOUT environment variable.
@@ -186,6 +233,16 @@ func validateTimeoutSec(sec int) (time.Duration, error) {
 	return time.Duration(sec) * time.Second, nil
 }
 
+// errBedrockNotConfigurable explains why the two url+token strategies reject the
+// bedrock protocol. Both describe a single HTTP endpoint and carry no place for
+// a region or a profile, and bedrock uses neither the url nor the token they do
+// carry. Accepting the value would switch transports and silently ignore the
+// rest of the block, so it is refused at the point it is read.
+func errBedrockNotConfigurable(key string) error {
+	return fmt.Errorf("%s cannot be %q: bedrock derives its host from aws_region and signs with the AWS credential chain, so it has no use for a url or a token; configure it as a provider instead (\"provider\": \"bedrock\")",
+		key, ProtocolAnthropicBedrock)
+}
+
 // tryOCREnv reads OCR-specific environment variables.
 func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	url := os.Getenv(envOCRLLMURL)
@@ -204,6 +261,9 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 		protocol = NormalizeProtocol(raw)
 		if err := ValidateProtocol(protocol); err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", err)
+		}
+		if protocol == ProtocolAnthropicBedrock {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", errBedrockNotConfigurable(envOCRLLMProtocol))
 		}
 	}
 	if protocol == "" {
@@ -240,9 +300,10 @@ type llmFileConfig struct {
 	AuthToken    string            `json:"auth_token,omitempty"`
 	AuthHeader   string            `json:"auth_header,omitempty"`
 	Model        string            `json:"model,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`      // anthropic|openai|openai-responses; takes priority over use_anthropic
-	UseAnthropic *bool             `json:"use_anthropic,omitempty"` // pointer to distinguish unset from false; legacy fallback when protocol is empty
-	TimeoutSec   int               `json:"timeout_sec,omitempty"`   // per-request HTTP timeout in seconds
+	AuthTokenCmd string            `json:"auth_token_cmd,omitempty"` // shell command whose stdout is the auth token; used when auth_token is empty
+	Protocol     string            `json:"protocol,omitempty"`       // anthropic|openai|openai-responses; takes priority over use_anthropic
+	UseAnthropic *bool             `json:"use_anthropic,omitempty"`  // pointer to distinguish unset from false; legacy fallback when protocol is empty
+	TimeoutSec   int               `json:"timeout_sec,omitempty"`    // per-request HTTP timeout in seconds
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
@@ -251,6 +312,7 @@ type llmFileConfig struct {
 // providerEntryConfig represents a single provider entry in config.json.
 type providerEntryConfig struct {
 	APIKey       string            `json:"api_key,omitempty"`
+	APIKeyCmd    string            `json:"api_key_cmd,omitempty"` // shell command whose stdout is the api key; used when api_key is empty
 	URL          string            `json:"url,omitempty"`
 	Protocol     string            `json:"protocol,omitempty"`
 	Model        string            `json:"model,omitempty"`
@@ -260,6 +322,13 @@ type providerEntryConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+
+	// AWSProfile and AWSRegion apply to ambient-auth providers that sign with
+	// SigV4 (currently bedrock). Both are optional: without them the standard
+	// AWS chain decides, same as any other AWS tool. Setting them in config
+	// makes a review run reproducible without exporting AWS_PROFILE first.
+	AWSProfile string `json:"aws_profile,omitempty"`
+	AWSRegion  string `json:"aws_region,omitempty"`
 }
 
 type configFile struct {
@@ -317,16 +386,43 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q is set but not configured in %s section", cfg.Provider, section)
 	}
 
+	// Pick the credential source here, but run api_key_cmd only just before
+	// returning (see below): a config typo must not trigger a secret-manager
+	// prompt before the cheap validation below has had a chance to fail.
+	// A whitespace-only api_key is a typo, not a credential: treat it as unset so
+	// it cannot silently shadow a working api_key_cmd (which otherwise resolves to
+	// a 401 with the command never running). A key with real content is used
+	// verbatim -- unlike command stdout, which has a mechanical trailing newline
+	// to strip, a static value has no artifact that trimming must undo.
 	apiKey := entry.APIKey
-	if apiKey == "" {
-		if isPreset && preset.EnvVar != "" {
-			apiKey = os.Getenv(preset.EnvVar)
+	if strings.TrimSpace(apiKey) == "" {
+		apiKey = ""
+	}
+	// Same rule for the command: `sh -c "   "` exits 0 with no output, so a
+	// whitespace-only api_key_cmd would suppress the env fallback and then fail
+	// with "produced empty output". Treating it as unset keeps the typo from
+	// being more disruptive than the equivalent typo in api_key.
+	apiKeyCmd := entry.APIKeyCmd
+	if strings.TrimSpace(apiKeyCmd) == "" {
+		apiKeyCmd = ""
+	}
+	switch {
+	case apiKey != "":
+		// Static api_key always wins. Warn (don't error) if a command is also set,
+		// so a config that keeps api_key_cmd as a deliberate fallback still works.
+		if apiKeyCmd != "" {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: provider %q has both api_key and api_key_cmd set; using the static api_key\n", cfg.Provider)
+		}
+	case apiKeyCmd == "" && isPreset && preset.EnvVar != "":
+		// Env var is the last resort: only when neither api_key nor api_key_cmd
+		// is set, and only for preset providers (custom ones have no fallback).
+		// Same whitespace rule as the static key above, so `export
+		// ANTHROPIC_API_KEY="  "` reports "no api_key configured" instead of
+		// sending `Authorization: Bearer  ` and getting an opaque 401.
+		if v := os.Getenv(preset.EnvVar); strings.TrimSpace(v) != "" {
+			apiKey = v
 		}
 	}
-	if apiKey == "" {
-		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key configured and no environment variable fallback found", cfg.Provider)
-	}
-
 	var url, protocol, authHeader, model string
 	var extraBody map[string]any
 
@@ -348,16 +444,42 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 			protocol = normalized
 		}
 	} else {
-		// Custom provider: url and protocol are required; model can come from cfg.Model.
-		if entry.URL == "" || entry.Protocol == "" {
-			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires url and protocol fields", cfg.Provider)
+		// Custom provider: protocol is always required; model can come from
+		// cfg.Model. url is required for every protocol that names an HTTP
+		// endpoint, which is all of them except bedrock — there the region
+		// decides the host, so demanding a url would mean storing a value the
+		// client never reads.
+		if entry.Protocol == "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires a protocol field", cfg.Provider)
 		}
 		normalized := NormalizeProtocol(entry.Protocol)
 		if err := ValidateProtocol(normalized); err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q: %w", cfg.Provider, err)
 		}
+		if normalized != ProtocolAnthropicBedrock && entry.URL == "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires a url field for protocol %q", cfg.Provider, normalized)
+		}
 		url = entry.URL
 		protocol = normalized
+	}
+
+	// Ambient auth follows the protocol actually in force, which is why this is
+	// resolved after the override above rather than read off the preset. A preset
+	// declares ambient auth (AmbientAuth), but an entry may override the preset's
+	// protocol: a bedrock preset switched to "openai" speaks a protocol with no
+	// SigV4 signing and needs a token like anything else. Conversely an entry
+	// that selects the bedrock protocol explicitly signs its requests whatever
+	// the preset says.
+	ambientAuth := protocol == ProtocolAnthropicBedrock ||
+		(isPreset && preset.AmbientAuth && entry.Protocol == "")
+
+	// No credential at all is an error, and it is reported before api_key_cmd
+	// runs: only the command's *execution* is deferred, not the emptiness check.
+	// An ambient-auth provider is the exception — it has no key to configure,
+	// since credentials come from the environment's own chain and the request is
+	// signed rather than bearing a token.
+	if apiKey == "" && apiKeyCmd == "" && !ambientAuth {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q has no api_key or api_key_cmd configured and no environment variable fallback found", cfg.Provider)
 	}
 
 	if cfg.Model != "" {
@@ -374,9 +496,17 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 	availableModels = append(availableModels, entry.Models...)
 
+	// A preset's Models list doubles as an allowlist for --model. For an
+	// ambient-auth provider it cannot: Bedrock identifiers are scoped to an
+	// account and a region, and an application inference profile ARN — a
+	// supported value, and the one to use when spend has to be attributed — can
+	// never appear in a list compiled upstream. The list stays a picker for
+	// `ocr config model`; it does not gate an override.
+	gateOverrideOnModelList := !ambientAuth
+
 	// Apply model override with validation.
 	if modelOverride != "" {
-		if len(availableModels) > 0 {
+		if gateOverrideOnModelList && len(availableModels) > 0 {
 			if !ModelListContains(availableModels, modelOverride) {
 				return ResolvedEndpoint{}, false, fmt.Errorf(
 					"model %q is not available for provider %q; available models: %s",
@@ -430,6 +560,20 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		url = ensureMessagesSuffix(url)
 	}
 
+	// Single api_key_cmd resolution site for both preset and custom providers,
+	// as late as possible: everything above can fail without running the
+	// command. An ambient-auth provider skips it entirely — the request is
+	// signed, so the command's output would be discarded, and running it anyway
+	// means a real 1Password / Touch ID prompt for a value nothing consumes.
+	// For everyone else a failing command is a hard error.
+	if apiKey == "" && apiKeyCmd != "" && !ambientAuth {
+		resolved, err := resolveKeyCmd(apiKeyCmd, fmt.Sprintf("api_key_cmd for provider %q", cfg.Provider))
+		if err != nil {
+			return ResolvedEndpoint{}, false, err
+		}
+		apiKey = resolved
+	}
+
 	return ResolvedEndpoint{
 		URL:          url,
 		Token:        apiKey,
@@ -442,6 +586,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		ExtraHeaders: extraHeaders,
 		Timeout:      timeout,
 		RetryCodes:   retryCodes,
+		AmbientAuth:  ambientAuth,
+		AWSProfile:   entry.AWSProfile,
+		AWSRegion:    entry.AWSRegion,
 	}, true, nil
 }
 
@@ -451,8 +598,29 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	if modelOverride != "" {
 		model = modelOverride
 	}
-	if cfg.Llm.URL == "" || cfg.Llm.AuthToken == "" || model == "" {
+	// Fall through to later strategies when the legacy block is incomplete. This
+	// includes the case where neither auth_token nor auth_token_cmd is set — and,
+	// critically, an incomplete block (e.g. missing url) never runs auth_token_cmd.
+	// "Incomplete" is judged after modelOverride is applied above, so a block
+	// missing only `model` is complete under --model and does run the command;
+	// that is the documented contract of ResolveEndpointWithModelOverride.
+	// Whitespace-only auth_token is treated as unset, same as api_key above, so it
+	// cannot shadow a working auth_token_cmd; same rule for the command itself.
+	token := cfg.Llm.AuthToken
+	if strings.TrimSpace(token) == "" {
+		token = ""
+	}
+	tokenCmd := cfg.Llm.AuthTokenCmd
+	if strings.TrimSpace(tokenCmd) == "" {
+		tokenCmd = ""
+	}
+	if cfg.Llm.URL == "" || model == "" || (token == "" && tokenCmd == "") {
 		return ResolvedEndpoint{}, false, nil
+	}
+	// Static auth_token always wins; warn if a command is also set. The command
+	// itself runs only just before returning, after the validation below.
+	if token != "" && tokenCmd != "" {
+		fmt.Fprintln(os.Stderr, "[ocr] WARNING: llm config has both auth_token and auth_token_cmd set; using the static auth_token")
 	}
 
 	// llm.protocol (normalized) wins over use_anthropic when set.
@@ -461,6 +629,9 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		protocol = NormalizeProtocol(raw)
 		if err := ValidateProtocol(protocol); err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
+		}
+		if protocol == ProtocolAnthropicBedrock {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", errBedrockNotConfigurable("llm.protocol"))
 		}
 	}
 	if protocol == "" {
@@ -497,9 +668,21 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}
 
+	// Runs last, after every cheap validation above: token is empty here only for
+	// an otherwise-complete block whose auth_token_cmd is set (guaranteed by the
+	// incompleteness check above), so a failing command is a hard error and an
+	// incomplete or invalid block never prompts for a credential.
+	if token == "" {
+		resolved, err := resolveKeyCmd(tokenCmd, "auth_token_cmd for llm config")
+		if err != nil {
+			return ResolvedEndpoint{}, false, err
+		}
+		token = resolved
+	}
+
 	return ResolvedEndpoint{
 		URL:          cfg.Llm.URL,
-		Token:        cfg.Llm.AuthToken,
+		Token:        token,
 		Model:        model,
 		Protocol:     protocol,
 		AuthHeader:   authHeader,

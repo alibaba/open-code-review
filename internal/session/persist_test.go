@@ -209,7 +209,7 @@ func TestSessionFilePermissions(t *testing.T) {
 	}
 
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	repoDir := t.TempDir()
 	sessionID := generateUUID()
@@ -243,7 +243,7 @@ func TestSessionFilePermissions(t *testing.T) {
 
 func TestFinalizeSurfacesWriterCreationErrorWithoutStdout(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 
 	// A regular file at this path makes creation of the sessions directory fail
 	// deterministically on every platform.
@@ -291,7 +291,7 @@ func TestFinalizeSurfacesWriterCreationErrorWithoutStdout(t *testing.T) {
 // force the failure by closing the underlying file out from under the buffered
 // writer; the Flush inside WriteSessionEnd then errors on the closed fd.
 func TestFinalizeSurfacesWriteError(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
 	if sh.persist == nil || sh.persist.file == nil {
@@ -309,7 +309,7 @@ func TestFinalizeSurfacesWriteError(t *testing.T) {
 // TestFinalizeReplaysWriteErrorOnEveryCall verifies that every call observes the
 // cached write error instead of a later call falsely reporting success.
 func TestFinalizeReplaysWriteErrorOnEveryCall(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
 	if sh.persist == nil || sh.persist.file == nil {
@@ -329,7 +329,7 @@ func TestFinalizeReplaysWriteErrorOnEveryCall(t *testing.T) {
 // TestFinalizeWritesSessionEndExactlyOnce verifies that repeated Finalize calls
 // do not append a second session_end record.
 func TestFinalizeWritesSessionEndExactlyOnce(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	setTestHome(t, t.TempDir())
 	repoDir := t.TempDir()
 	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
 	if err := sh.Finalize(); err != nil {
@@ -445,16 +445,19 @@ func TestReviewItemResumeRoundTrip(t *testing.T) {
 	}
 }
 
-func TestResumeStateValidateOptionsRejectsMismatchedRange(t *testing.T) {
+func TestResumeStateValidateOptionsRejectsMismatchedMode(t *testing.T) {
 	state := &ResumeState{
 		SessionID:  "s1",
 		ReviewMode: ReviewModeRange,
 		DiffFrom:   "main",
 		DiffTo:     "feature",
 	}
-	err := state.ValidateOptions(SessionOptions{ReviewMode: ReviewModeRange, DiffFrom: "main", DiffTo: "other"})
-	if err == nil {
-		t.Fatal("expected mismatch error")
+	if err := state.ValidateOptions(SessionOptions{ReviewMode: ReviewModeCommit, DiffCommit: "abc123"}); err == nil {
+		t.Fatal("expected mode mismatch error")
+	}
+	// Differing ref text under the same mode is not a rejection reason.
+	if err := state.ValidateOptions(SessionOptions{ReviewMode: ReviewModeRange, DiffFrom: "main", DiffTo: "other"}); err != nil {
+		t.Errorf("ref text must not decide admission, got: %v", err)
 	}
 }
 

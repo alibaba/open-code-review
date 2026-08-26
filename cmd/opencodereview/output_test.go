@@ -4,6 +4,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -55,6 +56,7 @@ func TestSeverityColor(t *testing.T) {
 // TestRenderComment_BadgeInline verifies the badge is colorized and rendered inline
 // with the first line of the comment content.
 func TestRenderComment_BadgeInline(t *testing.T) {
+	setColor(t, true)
 	out := captureStdout(t, func() {
 		renderComment(model.LlmComment{
 			Path:      "internal/mcp/client.go",
@@ -63,7 +65,7 @@ func TestRenderComment_BadgeInline(t *testing.T) {
 			Content:   "Potential environment variable leak.",
 			Category:  "security",
 			Severity:  "high",
-		})
+		}, os.Stdout)
 	})
 	if !strings.Contains(out, "[security · high]") {
 		t.Errorf("expected badge in output, got:\n%s", out)
@@ -94,7 +96,7 @@ func TestSanitizeTerminal(t *testing.T) {
 		{"strips carriage return", "fake\rreal", "fakereal"},
 		{"empty string", "", ""},
 		{"only control chars", "\x1b\x07\x00\x7f", ""},
-		{"unicode preserved", "代码审查 レビュー 🔍", "代码审查 レビュー 🔍"},
+		{"unicode preserved", "代码审查 レビュー 🔍", "代码审查 レビュー 🔍"}, // allow-non-english: fixture asserts non-ASCII output is preserved verbatim
 		{"mixed safe and unsafe", "path\x1b[0m/file.go", "path[0m/file.go"},
 		{"strips C1 CSI (U+009B)", "before\u009bafter", "beforeafter"},
 		{"strips C1 OSC (U+009D)", "before\u009dafter", "beforeafter"},

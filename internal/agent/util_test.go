@@ -18,23 +18,13 @@ func TestStripEmptyPlanBlock(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "english template wrapper is removed",
-			input: "header\n### Review Plan (Optional)\n{{plan_guidance}}\n\ntail",
+			name:  "review plan wrapper is removed",
+			input: "header\n### Review Plan\n{{plan_guidance}}\n\ntail",
 			want:  "header\ntail",
 		},
 		{
 			name:  "english template wrapper without trailing blank line is removed",
 			input: "header\n### Review Plan (Optional)\n{{plan_guidance}}\ntail",
-			want:  "header\ntail",
-		},
-		{
-			name:  "chinese template wrapper is removed",
-			input: "header\n### 审查计划\n{{plan_guidance}}\n\ntail",
-			want:  "header\ntail",
-		},
-		{
-			name:  "chinese optional wrapper is removed",
-			input: "header\n### 审查计划（可选）\n{{plan_guidance}}\n\ntail",
 			want:  "header\ntail",
 		},
 		{
@@ -44,7 +34,7 @@ func TestStripEmptyPlanBlock(t *testing.T) {
 		},
 		{
 			name:  "multiple wrappers all removed",
-			input: "### Review Plan (Optional)\n{{plan_guidance}}\n\nmiddle\n### 审查计划\n{{plan_guidance}}\n\nend",
+			input: "### Review Plan (Optional)\n{{plan_guidance}}\n\nmiddle\n### Review Plan\n{{plan_guidance}}\n\nend",
 			want:  "middle\nend",
 		},
 	}
@@ -63,7 +53,7 @@ func TestStripEmptyPlanBlock(t *testing.T) {
 }
 
 func TestStripEmptyPlanBlock_IntegrationWithReplaceAll(t *testing.T) {
-	template := "header\n### Review Plan (Optional)\n{{plan_guidance}}\n\ntail"
+	template := "header\n### Review Plan\n{{plan_guidance}}\n\ntail"
 
 	stripped := stripEmptyPlanBlock(template)
 	final := strings.ReplaceAll(stripped, "{{plan_guidance}}", "")

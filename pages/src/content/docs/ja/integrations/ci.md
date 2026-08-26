@@ -116,7 +116,7 @@ PR で制御可能な値は `${{ }}` を `run:` に直接展開するのでは�
 
 #### 並行数
 
-デフォルトはファイルごとに 8 つの並行サブ agent です。大きな PR では、LLM プロバイダーのレート制限に抵触しないよう下げてください。
+デフォルトは 8 つの並行サブ agent で、ファイルグループごとに 1 つです。大きな PR では、LLM プロバイダーのレート制限に抵触しないよう下げてください。
 
 ```yaml
 - name: Run OCR review
@@ -204,6 +204,35 @@ if: |
 
 レビューは `github-actions[bot]` ではなく、あなたの app の名前で投稿されるようになります。
 
+#### GitHub Code Scanning に指摘をアップロードする（SARIF）
+
+`--format sarif` は
+[SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+レポートを stdout に書き出します。ファイルにリダイレクトし、CodeQL の
+`upload-sarif` アクションでアップロードすると、指摘が
+**Security → Code scanning** に表示されます：
+
+```yaml
+- name: Run OCR review
+  env:
+    BASE_REF: ${{ github.base_ref }}
+    HEAD_REF: ${{ github.head_ref }}
+  run: |
+    ocr review \
+      --from "origin/$BASE_REF" \
+      --to "origin/$HEAD_REF" \
+      --format sarif --audience agent > results.sarif
+
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+SARIF は機械可読な形式なので、OCR は stdout 上の進捗行を抑制し、
+`results.sarif` にはレポートだけが含まれます。`--preview` は
+`--format sarif` に対応していません。レポートを生成するには、完全な
+review（または `ocr scan`）を実行してください。
+
 ### トラブルシューティング
 
 | 症状 | 原因 / 修正 |
@@ -287,7 +316,7 @@ script:
 #### カスタムルールと並行数
 
 GitHub Actions のレシピと同じ引数です——`--rule` でプロジェクト固有のルールファイルを渡し、
-`--concurrency` で並行サブ agent を制限します（デフォルトは 8）。
+`--concurrency` で並行サブ agent を制限します（デフォルトは 8、ファイルグループごとに 1 つ）。
 
 ```yaml
 script:

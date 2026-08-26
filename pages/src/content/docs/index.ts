@@ -59,6 +59,11 @@ import jaDelegate from './ja/integrations/delegate.md';
 import jaContributing from './ja/contributing.md';
 import jaFaq from './ja/faq.md';
 
+// Korean docs (incremental — partial LocalizedDocs)
+import koQuickstart from './ko/quickstart.md';
+import koInstallation from './ko/installation.md';
+import koConfiguration from './ko/configuration.md';
+
 // Russian docs (incremental — partial LocalizedDocs)
 import ruQuickstart from './ru/quickstart.md';
 import ruInstallation from './ru/installation.md';
@@ -154,6 +159,12 @@ const jaDocs: Record<DocSlug, string> = {
   'faq': jaFaq,
 };
 
+const koDocs: LocalizedDocs = {
+  'quickstart': koQuickstart,
+  'installation': koInstallation,
+  'configuration': koConfiguration,
+};
+
 const ruDocs: LocalizedDocs = {
   'quickstart': ruQuickstart,
   'installation': ruInstallation,
@@ -177,6 +188,8 @@ const docsMap: Record<Language, LocalizedDocs> = {
   en: enDocs,
   zh: zhDocs,
   ja: jaDocs,
+  // Korean docs are translated incrementally; untranslated pages fall back to English per-page.
+  ko: koDocs,
   ru: ruDocs,
 };
 

@@ -1,9 +1,10 @@
 # Install the ocr (Open Code Review) CLI from GitHub releases on Windows.
-#   irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 | iex
+#   irm https://open-codereview.ai/install.ps1 | iex
 # Prefer to inspect first:
-#   irm https://raw.githubusercontent.com/alibaba/open-code-review/main/install.ps1 -OutFile install.ps1
+#   irm https://open-codereview.ai/install.ps1 -OutFile install.ps1
 #   notepad install.ps1   # review, then: .\install.ps1
-# Env: OCR_INSTALL_DIR (default $env:LOCALAPPDATA\Programs\ocr), OCR_VERSION (default latest).
+# Env: OCR_INSTALL_DIR (default $env:LOCALAPPDATA\Programs\ocr), OCR_VERSION (default latest),
+# OCR_GITHUB_MIRROR (default unset; download the binary through a mirror domain).
 # Requires PowerShell 5.1+ or PowerShell 7+.
 
 $ErrorActionPreference = 'Stop'
@@ -103,7 +104,20 @@ $arch = Get-OcrArch
 $os = 'windows'
 $Version = Resolve-OcrVersion $Repo
 $asset = "$AssetPrefix-$os-$arch.exe"
-$base = "https://github.com/$Repo/releases/download/$Version"
+$Mirror = if (-not [string]::IsNullOrWhiteSpace($env:OCR_GITHUB_MIRROR)) {
+    $env:OCR_GITHUB_MIRROR.Trim() -replace '^https?://' -replace '/$'
+} else {
+    $null
+}
+if ($Mirror -and $Mirror -match '\s') {
+    Err "OCR_GITHUB_MIRROR contains spaces: '$Mirror'"
+}
+if ($Mirror) {
+    [Console]::Error.WriteLine("warning: downloading from unofficial GitHub mirror `"$Mirror`" (checksum integrity is not guaranteed)")
+    $base = "https://$Mirror/github.com/$Repo/releases/download/$Version"
+} else {
+    $base = "https://github.com/$Repo/releases/download/$Version"
+}
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("ocr-install-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
@@ -118,8 +132,9 @@ try {
     } catch {
         Err "download failed: $base/$asset"
     }
+
     try {
-        Invoke-WebRequest -Uri "$base/sha256sum.txt" -OutFile $sumPath -UseBasicParsing
+        Invoke-WebRequest -Uri "$base/sha256sum.txt" -OutFile $sumPath -UseBasicParsing -TimeoutSec 15
     } catch {
         Err 'sha256sum.txt download failed'
     }

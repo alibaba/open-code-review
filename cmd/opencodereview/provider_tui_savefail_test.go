@@ -10,17 +10,24 @@ import (
 	"testing"
 )
 
-// unwritableConfigPath returns a config path whose parent is a regular file, so
-// any saveConfig / loadOrCreateConfig against it fails (ENOTDIR). This is the
-// lever used to drive the save-failure + rollback branches of the TUI handlers.
+// unwritableConfigPath returns a config path that is itself a directory, so any
+// saveConfig / loadOrCreateConfig against it fails. This is the lever used to
+// drive the save-failure + rollback branches of the TUI handlers.
+//
+// A directory rather than the more obvious "parent is a regular file" trick:
+// Windows reports a path below a non-directory parent as ERROR_PATH_NOT_FOUND,
+// which os.IsNotExist accepts, so loadOrCreateConfig read that as "no config
+// yet" and returned an empty Config instead of an error. The reload then looked
+// like a success and the rollback branch never ran. A directory fails the write
+// on every platform, and reading it yields either an error or empty bytes that
+// fail to parse as JSON, so the reload fails everywhere too.
 func unwritableConfigPath(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	blocker := filepath.Join(dir, "blocker")
-	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
-		t.Fatalf("write blocker: %v", err)
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir blocking config dir: %v", err)
 	}
-	return filepath.Join(blocker, "config.json")
+	return path
 }
 
 // TestUpdateDeleteConfirm_SaveFailure drives the provider-delete confirm handler
