@@ -753,6 +753,12 @@ type AnthropicClient struct {
 	cfg ClientConfig
 	sdk anthropic.Client
 
+	// thinkingToolChoiceConflicts records models whose provider rejects forced
+	// tool choice while thinking is active. Later OCR-managed forced choices for
+	// that model use Anthropic's automatic choice for this client's lifetime,
+	// which is one review run. User-supplied extra_body fields remain untouched.
+	thinkingToolChoiceConflicts sync.Map
+
 	// initErr defers a construction failure to the first request. The client
 	// factory returns an LLMClient with no error channel, and the alternative —
 	// panicking, as the SDK's own bedrock helper does — would surface a Go
@@ -1032,6 +1038,61 @@ func listProfilesRegionArg(region string) string {
 	return " --region " + region
 }
 
+func (c *AnthropicClient) requiresAutomaticToolChoice(model string) bool {
+	_, ok := c.thinkingToolChoiceConflicts.Load(model)
+	return ok
+}
+
+func isThinkingToolChoiceConflict(err error) bool {
+	var apiErr *anthropic.Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	var body struct {
+		Message string `json:"message"`
+		Error   struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(apiErr.RawJSON()), &body); err != nil {
+		return false
+	}
+	message := body.Message
+	if message == "" {
+		message = body.Error.Message
+	}
+	message = strings.ToLower(message)
+	if !strings.Contains(message, "tool_choice") || !strings.Contains(message, "thinking") {
+		return false
+	}
+	for _, marker := range []string{
+		"does not support",
+		"not supported",
+		"not allowed",
+		"may not be enabled",
+		"incompatible",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func omitAnthropicToolChoice(
+	params *anthropic.MessageNewParams,
+	opts []option.RequestOption,
+	extraBody map[string]any,
+) []option.RequestOption {
+	params.ToolChoice = anthropic.ToolChoiceUnionParam{}
+	withoutToolChoice := append([]option.RequestOption(nil), opts...)
+	withoutToolChoice = append(withoutToolChoice, option.WithJSONDel("tool_choice"))
+	if toolChoice, ok := extraBody["tool_choice"]; ok {
+		withoutToolChoice = append(withoutToolChoice, option.WithJSONSet("tool_choice", toolChoice))
+	}
+	return withoutToolChoice
+}
+
 // CompletionsWithCtx sends a chat completion request with context support.
 //
 // The deferred finalizeRequest is this client's boundary for the retry report;
@@ -1081,7 +1142,23 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		opts = append(opts, option.WithJSONSet(k, v))
 	}
 
-	sdkResp, err := c.sdk.Messages.New(ctx, params, opts...)
+	requestOpts := opts
+	if params.ToolChoice.OfAny != nil && c.requiresAutomaticToolChoice(model) {
+		requestOpts = omitAnthropicToolChoice(&params, opts, c.cfg.ExtraBody)
+	}
+
+	sdkResp, err := c.sdk.Messages.New(ctx, params, requestOpts...)
+	if err != nil && params.ToolChoice.OfAny != nil && isThinkingToolChoiceConflict(err) {
+		// Anthropic-compatible thinking endpoints only permit automatic or no
+		// tool choice. Retry once without the forced choice. Only a successful
+		// retry proves the capability, so an unrelated fallback failure cannot
+		// permanently weaken later review-filter requests.
+		requestOpts = omitAnthropicToolChoice(&params, opts, c.cfg.ExtraBody)
+		sdkResp, err = c.sdk.Messages.New(ctx, params, requestOpts...)
+		if err == nil {
+			c.thinkingToolChoiceConflicts.Store(model, struct{}{})
+		}
+	}
 	if err != nil {
 		return nil, c.explainError(model, err)
 	}
