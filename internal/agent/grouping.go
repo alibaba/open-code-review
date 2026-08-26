@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
 )
 
@@ -41,9 +43,18 @@ type groupDiffsResult struct {
 	usage  *llm.UsageInfo
 }
 
+// groupingSessionOpts carries optional session-recording context.
+// When non-nil, callGroupingLLM writes an LLM request/response record into the
+// session history so the grouping call is visible in retry reports and viewers.
+type groupingSessionOpts struct {
+	session  *session.SessionHistory
+	provider string
+	model    string
+}
+
 // groupDiffs calls the LLM with file metadata (no diff content) to produce
 // semantic groups. Falls back to one-file-per-group on any error.
-func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, modelName string, tpl template.Template, tokenLimit int) groupDiffsResult {
+func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, modelName string, tpl template.Template, tokenLimit int, sessOpts *groupingSessionOpts) groupDiffsResult {
 	if len(diffs) <= 1 {
 		return groupDiffsResult{groups: toSingleFileGroups(diffs)}
 	}
@@ -52,7 +63,7 @@ func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, m
 		return groupDiffsResult{groups: toSingleFileGroups(diffs)}
 	}
 
-	groups, usage, err := callGroupingLLM(ctx, diffs, client, modelName, tpl.GroupingTask)
+	groups, usage, err := callGroupingLLM(ctx, diffs, client, modelName, tpl.GroupingTask, sessOpts)
 	if err != nil {
 		fmt.Fprintf(stdout.Writer(), "[ocr] LLM grouping failed (%v), falling back to per-file dispatch\n", err)
 		return groupDiffsResult{groups: toSingleFileGroups(diffs), usage: usage}
@@ -62,7 +73,7 @@ func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, m
 	return groupDiffsResult{groups: groups, usage: usage}
 }
 
-func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClient, modelName string, task *template.LlmConversation) (groups []FileGroup, usage *llm.UsageInfo, err error) {
+func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClient, modelName string, task *template.LlmConversation, sessOpts *groupingSessionOpts) (groups []FileGroup, usage *llm.UsageInfo, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			groups = nil
@@ -78,16 +89,43 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 		messages = append(messages, llm.NewTextMessage(m.Role, content))
 	}
 
+	const groupingFileKey = "__grouping__"
+
+	var rec *session.TaskRecord
+	if sessOpts != nil && sessOpts.session != nil {
+		fs := sessOpts.session.GetOrCreateFileSession(groupingFileKey)
+		rec = fs.AppendTaskRecord(session.GroupingTask, messages)
+		ctx = llm.ContextWithSessionKey(ctx,
+			llm.SessionTaskKey(sessOpts.session.SessionID, string(session.GroupingTask), groupingFileKey))
+		ctx = llm.WithRequestMeta(ctx, llm.RequestMeta{
+			Provider:  sessOpts.provider,
+			Model:     sessOpts.model,
+			FilePath:  groupingFileKey,
+			TaskType:  string(session.GroupingTask),
+			RequestNo: rec.RequestNo,
+		})
+	}
+
+	startTime := time.Now()
 	resp, err := client.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     modelName,
 		Messages:  messages,
 		MaxTokens: 4096,
 	})
+	duration := time.Since(startTime)
+
 	if err != nil {
+		if rec != nil {
+			rec.SetError(err, duration)
+		}
 		return nil, nil, fmt.Errorf("grouping LLM call: %w", err)
 	}
 
 	usage = resp.Usage
+
+	if rec != nil {
+		rec.SetResponse(resp, duration)
+	}
 
 	content := resp.Content()
 	if content == "" {

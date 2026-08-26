@@ -281,6 +281,7 @@ const (
 	MainTask              TaskType = "main_task"
 	MemoryCompressionTask TaskType = "memory_compression_task"
 	ReLocationTask        TaskType = "re_location_task"
+	GroupingTask          TaskType = "grouping_task"
 )
 
 // TaskCard links an LLM request with its response and tool calls.
