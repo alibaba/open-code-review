@@ -136,6 +136,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
 		{"Models/main.m", "Indexing, Shapes, and Implicit Expansion"},
+		{"src/myapp/core.clj", "Laziness, Sequences, and Resource Scope"},
+		{"src/myapp/views.cljs", "Laziness, Sequences, and Resource Scope"},
+		{"src/myapp/shared.cljc", "Laziness, Sequences, and Resource Scope"},
+		{"deps.edn", "EDN Data, Configuration, and Untrusted Input"},
 	}
 
 	for _, tt := range tests {
