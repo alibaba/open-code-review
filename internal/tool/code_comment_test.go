@@ -20,12 +20,11 @@ func TestParseComments(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name: "valid comments array",
+			name: "valid comments array with per-item path",
 			args: map[string]any{
-				"path": "main.go",
 				"comments": []any{
-					map[string]any{"content": "issue 1", "existing_code": "old"},
-					map[string]any{"content": "issue 2", "suggestion_code": "new"},
+					map[string]any{"content": "issue 1", "existing_code": "old", "path": "main.go"},
+					map[string]any{"content": "issue 2", "suggestion_code": "new", "path": "main.go"},
 				},
 			},
 			wantCount: 2,
@@ -33,8 +32,7 @@ func TestParseComments(t *testing.T) {
 		{
 			name: "comments as JSON string",
 			args: map[string]any{
-				"path":     "main.go",
-				"comments": `[{"content":"from string"}]`,
+				"comments": `[{"content":"from string","path":"main.go"}]`,
 			},
 			wantCount: 1,
 		},
@@ -50,34 +48,32 @@ func TestParseComments(t *testing.T) {
 		{
 			name: "missing content skips comment",
 			args: map[string]any{
-				"path": "file.go",
 				"comments": []any{
-					map[string]any{"existing_code": "has no content"},
+					map[string]any{"existing_code": "has no content", "path": "file.go"},
 				},
 			},
 			wantCount: 0,
 		},
 		{
 			name:    "empty comments array returns error",
-			args:    map[string]any{"path": "x.go", "comments": []any{}},
+			args:    map[string]any{"comments": []any{}},
 			wantErr: true,
 		},
 		{
 			name:    "no comments key returns error",
-			args:    map[string]any{"path": "x.go"},
+			args:    map[string]any{},
 			wantErr: true,
 		},
 		{
 			name:    "invalid JSON string returns error",
-			args:    map[string]any{"path": "x.go", "comments": "not json"},
+			args:    map[string]any{"comments": "not json"},
 			wantErr: true,
 		},
 		{
 			name: "thinking field preserved",
 			args: map[string]any{
-				"path": "a.go",
 				"comments": []any{
-					map[string]any{"content": "c", "thinking": "my reasoning"},
+					map[string]any{"content": "c", "thinking": "my reasoning", "path": "a.go"},
 				},
 			},
 			wantCount: 1,
@@ -105,13 +101,13 @@ func TestParseComments(t *testing.T) {
 
 func TestParseComments_Fields(t *testing.T) {
 	args := map[string]any{
-		"path": "src/app.ts",
 		"comments": []any{
 			map[string]any{
 				"content":         "fix null check",
 				"existing_code":   "if (x == null)",
 				"suggestion_code": "if (x === null)",
 				"thinking":        "strict equality is safer",
+				"path":            "src/app.ts",
 			},
 		},
 	}
@@ -146,13 +142,13 @@ func TestParseComments_Fields(t *testing.T) {
 func TestParseComments_CategorySeverity(t *testing.T) {
 	t.Run("parsed when present", func(t *testing.T) {
 		args := map[string]any{
-			"path": "main.go",
 			"comments": []any{
 				map[string]any{
 					"content":       "Potential nil pointer dereference.",
 					"existing_code": "x := *p",
 					"category":      "bug",
 					"severity":      "high",
+					"path":          "main.go",
 				},
 			},
 		}
@@ -173,11 +169,11 @@ func TestParseComments_CategorySeverity(t *testing.T) {
 
 	t.Run("zero-valued when absent", func(t *testing.T) {
 		args := map[string]any{
-			"path": "main.go",
 			"comments": []any{
 				map[string]any{
 					"content":       "Consider renaming for clarity.",
 					"existing_code": "a := 1",
+					"path":          "main.go",
 				},
 			},
 		}
@@ -198,13 +194,13 @@ func TestParseComments_CategorySeverity(t *testing.T) {
 
 	t.Run("normalizes casing", func(t *testing.T) {
 		args := map[string]any{
-			"path": "main.go",
 			"comments": []any{
 				map[string]any{
 					"content":       "Potential nil pointer dereference.",
 					"existing_code": "x := *p",
 					"category":      "Security",
 					"severity":      "Critical",
+					"path":          "main.go",
 				},
 			},
 		}
@@ -226,13 +222,13 @@ func TestParseComments_CategorySeverity(t *testing.T) {
 
 func TestParseComments_CategorySeveritySchemaDrift(t *testing.T) {
 	args := map[string]any{
-		"path": "main.go",
 		"comments": []any{
 			map[string]any{
 				"content":       "Use the canonical metadata fallback.",
 				"existing_code": "value := compute()",
 				"category":      "correctness",
 				"severity":      "info",
+				"path":          "main.go",
 			},
 		},
 	}
@@ -298,10 +294,9 @@ func TestCodeCommentProvider_Execute(t *testing.T) {
 		collector := NewCommentCollector()
 		p := &CodeCommentProvider{Collector: collector}
 		result, err := p.Execute(context.Background(), map[string]any{
-			"path": "main.go",
 			"comments": []any{
-				map[string]any{"content": "issue 1"},
-				map[string]any{"content": "issue 2"},
+				map[string]any{"content": "issue 1", "path": "main.go"},
+				map[string]any{"content": "issue 2", "path": "main.go"},
 			},
 		})
 		if err != nil {
@@ -318,8 +313,7 @@ func TestCodeCommentProvider_Execute(t *testing.T) {
 	t.Run("nil collector returns error message", func(t *testing.T) {
 		p := &CodeCommentProvider{Collector: nil}
 		result, err := p.Execute(context.Background(), map[string]any{
-			"path":     "main.go",
-			"comments": []any{map[string]any{"content": "x"}},
+			"comments": []any{map[string]any{"content": "x", "path": "main.go"}},
 		})
 		if err != nil {
 			t.Fatal(err)
