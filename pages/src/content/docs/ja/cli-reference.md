@@ -70,7 +70,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr scan` | `ocr s` | Git diff を必要とせず、ファイル全体をスキャンします。 |
 | `ocr rules check <file>` | — | あるファイルパスにどのルールが適用され、その出所はどこかを表示します。 |
 | `ocr config set <key> <value>` | — | 設定値を `~/.opencodereview/config.json` に永続化します。 |
-| `ocr config unset custom_providers.<name>` | — | カスタムプロバイダーを削除します（現在有効なものであれば、有効な `provider`/`model` もクリアされます）。 |
+| `ocr config unset <key>` | — | 保存済みの設定値をクリアします（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
 | `ocr config provider` | — | 対話的なプロバイダー設定 TUI。 |
 | `ocr config model` | — | 対話的な model 選択 TUI。 |
 | `ocr llm test` | — | 短い chat リクエストを送信し、設定されたエンドポイントを検証します。 |
@@ -85,7 +85,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 ## `ocr review`
 
-メインコマンドです。Git diff を解析し、ファイルごとのサブエージェントをディスパッチし、レビューコメントを収集して出力します。
+メインコマンドです。Git diff を解析し、意味的に関連するファイルをグループにまとめ、グループごとにサブエージェントをディスパッチし、レビューコメントを収集して出力します。
 
 ### 概要
 
@@ -108,6 +108,7 @@ ocr r      [flags]   (alias)
 | `--no-filter` | — | `false` | すべてのレビューコメントを保持し、ファイルごとの `REVIEW_FILTER_TASK` LLM 後処理呼び出しをスキップします。 |
 | `--resume <session-id>` | — | — | 以前の互換性のある範囲または単一 commit レビューセッションから再開します。 |
 | `--format <fmt>` | `-f` | `text` | `text`（人間が読みやすい形式）、`json`（機械可読なコメント配列）または `sarif`（GitHub Code Scanning 用の SARIF 2.1.0 レポート）。 |
+| `--output <path>` | `-o` | 標準出力 | レビュー結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
 | `--audience <who>` | — | `human` | `human` は進捗行をストリーム出力します（`--format` が `json`/`sarif` の場合は stderr に出力し、stdout は解析可能な単一ドキュメントのままになります）。`agent` は進捗行を完全に抑制し、最終サマリー / JSON のみを出力します。 |
 | `--background <text>` | `-b` | — | plan + main prompt に注入する、任意の要件 / 業務コンテキスト。 |
 | `--background-file <path>` | `-B` | — | レビューの背景として使用する Markdown ファイルのパス。`--background` も指定した場合は両方を結合します。 |
@@ -115,9 +116,10 @@ ocr r      [flags]   (alias)
 | `--concurrency <n>` | — | `8` | 並行してレビューするファイルの最大数。 |
 | `--timeout <minutes>` | — | `10` | ファイルごとの締め切り時間。`0` でタイムアウトを無効化します。 |
 | `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |
-| `--max-tools <n>` | — | テンプレートのデフォルト | ファイルごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`30`）を使用します。1〜9 は `10` に引き上げられます。`≥ 10` の値はすべてテンプレートのデフォルトを上書きします（`30` より小さくても）。 |
-| `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | ファイルごとのプロンプトトークン上限。この実行で保存済みの `max_tokens` 設定を上書きします。 |
+| `--max-tools <n>` | — | テンプレートのデフォルト | ファイルごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`100`）を使用します。1〜49 は `50` に引き上げられます。解決後の値はテンプレートのデフォルトを**上回る場合にのみ**適用されます（引き上げのみ可能で、引き下げはできません）。 |
+| `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | ファイルごとの**プロンプト**トークン上限（review のデフォルトは `200000`）。この実行で保存済みの `max_tokens` 設定を上書きします。出力の上限には影響しません。そちらは `MAX_COMPLETION_TOKENS`（`16384`）が個別に制御します。 |
 | `--max-tokens-budget <n>` | — | `0`（無制限） | レビュー全体の入力 + 出力トークン使用量を制限します。予算を超えると処理の割り当てを停止し、部分的な結果は引き続き公開されます。 |
+| `--effort <level>` | — | 設定または `medium` | レビューの労力プリセット: `low` = main ループ 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド。ラウンドが多いほど recall は上がりますが、時間とトークンも増えます。`ocr config set effort <level>` で永続化できます。 |
 | `--provider <name>` | — | — | 今回の実行で設定済み provider を選択します。`providers` と `custom_providers` の両方の名前を使用できます。 |
 | `--model <name>` | — | — | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
@@ -344,6 +346,7 @@ ocr s      [flags]   (alias)
 |---|---|---|---|
 | `--path <list>` | - | リポジトリ全体 | スキャン対象のリポジトリ相対ディレクトリまたはファイル（カンマ区切り、例: `internal/agent`、`internal/llm/client.go`）。 |
 | `--exclude <patterns>` | - | - | 除外する gitignore 形式のパターン（カンマ区切り、例: `**/generated/*,*.pb.go`）。`rule.json` の excludes とマージされます。 |
+| `--output <path>` | `-o` | 標準出力 | スキャン結果を UTF-8 ファイルに書き込みます（`-` は標準出力を表します）。初回書き込み時に遅延作成されるため、実行が失敗しても既存のファイルは変更されません。テキスト形式では ANSI カラーコードが自動的に削除されます。 |
 | `--preview` | `-p` | `false` | LLM を呼び出さずにファイルを列挙・フィルタリングします。ファイルリスト、レビュー対象/除外数、総行数、ファイルごとの除外理由を出力します。`--format json` に対応しています。`--format sarif` はサポートされていません。 |
 
 ```bash
@@ -457,13 +460,13 @@ key を `~/.opencodereview/config.json` に永続化し、対話的な設定 TUI
 
 ```text
 ocr config set <key> <value>
-ocr config unset custom_providers.<name>   Delete a custom provider
+ocr config unset <key>                     Clear a saved config value
 ocr config provider                        Interactive provider setup
 ocr config model                           Interactive model selection
 ```
 
-- **`set`**: 非対話的に単一の設定値を書き込みます。
-- **`unset`**: カスタムプロバイダーを削除します。サポートされるのは `custom_providers.<name>` のみです。削除するものが現在有効なプロバイダーの場合、`provider` と `model` がクリアされます（`ocr config provider` を実行して再選択してください）。
+- **`set`**: 非対話的に単一の設定値を書き込みます（例: `ocr config set effort high`）。
+- **`unset`**: 保存済みの設定値をクリアします。`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>` をサポートします。削除するものが現在有効なカスタムプロバイダーの場合、`provider` と `model` もクリアされます（`ocr config provider` を実行して再選択してください）。`ocr config unset effort` はデフォルトの `medium` プリセットに戻します。
 - **`provider`**: 対話的なプロバイダー設定 TUI を起動します（追加の引数なし。非対話的には `ocr config set provider <name>` を使用してください）。
 - **`model`**: 対話的な model 選択 TUI を起動します（追加の引数なし。非対話的には `ocr config set model <name>` を使用してください）。
 
@@ -616,8 +619,8 @@ ocr completion powershell > ocr.ps1
 
 - `--audience agent` は `--format json` を**含意しません**。両者は異なることを制御します。UI の抑制 vs 構造化されたペイロードです。両方が必要な場合は組み合わせて使用してください。
 - `--background` はレビュー品質を高めるのに最も効果的な引数の 1 つです。他の agent から呼び出す際は、常に要件 / PR の説明を渡してください。
-- あるファイルの diff が単独で `MAX_TOKENS` の 80%（デフォルト `58888`）を超える場合、LLM を呼び出す前に破棄されます。これはログに記録されますが、実行を失敗にはしません。
-- あるファイルの変更行数が `PLAN_MODE_LINE_THRESHOLD`（`50`）を下回る場合、plan 段階は**自動的にスキップ**されます。
+- あるファイルの diff が単独で `MAX_TOKENS` の 80%（デフォルト `200000`）を超える場合、LLM を呼び出す前に破棄されます。これはログに記録されますが、実行を失敗にはしません。
+- ファイルグループ内のどのファイルも `PLAN_MODE_LINE_THRESHOLD`（`50`）に達せず、かつ合計変更行数も `PLAN_MODE_GROUP_LINE_THRESHOLD`（`100`。複数ファイルのグループにのみ適用）に達しない場合、plan 段階は**自動的にスキップ**されます。
 
 ## 関連項目
 
