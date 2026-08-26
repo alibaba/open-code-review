@@ -118,8 +118,8 @@ func NewRunner(deps Deps) *Runner {
 // ultimately depends on the LLM client honouring context cancellation, and no
 // additional deadline is imposed here: the job already carries its own
 // timeout.
-// Scan does not currently call this because it freezes no retry report; its
-// analogous session-finalization race is outside this change.
+// Both diff-review and scan modes call this prior to session finalization so
+// background compression goroutines are joined before session_end is written.
 func (r *Runner) WaitBackground() {
 	r.bg.Wait()
 }
@@ -567,19 +567,13 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
 	}
 
-	// Always inject the current file path for code_comment.
-	// The model sometimes hallucinates a path, so we override it.
-	if t == tool.CodeComment && newPath != "" {
-		args["path"] = newPath
-	}
-
 	startTime := time.Now()
 
 	if t == tool.CodeComment {
 		telemetry.PrintToolCallStarted(t.Name(), args)
 		_, toolSpan := telemetry.StartToolSpan(ctx, t.Name())
 
-		comments, errMsg := tool.ParseComments(args)
+		comments, errMsg := tool.ParseCommentsWithPath(args, newPath)
 		if errMsg != "" {
 			dur := time.Since(startTime)
 			telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), fmt.Errorf("%s", errMsg))

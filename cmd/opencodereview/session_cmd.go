@@ -226,7 +226,7 @@ func runSessionComments(sessionID string) error {
 		return nil
 	}
 	for _, c := range filtered {
-		renderComment(c)
+		renderComment(c, os.Stdout)
 	}
 	return nil
 }

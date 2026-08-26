@@ -287,7 +287,7 @@ func TestReLocation_Identity(t *testing.T) {
 	cp := r.executeToolCall(context.Background(), "", llm.ToolCall{
 		Function: llm.FunctionCall{
 			Name:      tool.CodeComment.Name(),
-			Arguments: `{"path":"other.go","comments":[{"content":"issue","existing_code":"no such code"}]}`,
+			Arguments: `{"comments":[{"path":"other.go","content":"issue","existing_code":"no such code"}]}`,
 		},
 	}, nil, "")
 	if cp.Data != tool.CommentSucceed {
@@ -343,7 +343,7 @@ func TestReLocation_NoRequestWithoutTemplate(t *testing.T) {
 	r.executeToolCall(context.Background(), "", llm.ToolCall{
 		Function: llm.FunctionCall{
 			Name:      tool.CodeComment.Name(),
-			Arguments: `{"path":"other.go","comments":[{"content":"issue","existing_code":"no such code"}]}`,
+			Arguments: `{"comments":[{"path":"other.go","content":"issue","existing_code":"no such code"}]}`,
 		},
 	}, nil, "")
 
