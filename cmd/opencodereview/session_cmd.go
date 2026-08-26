@@ -326,8 +326,8 @@ func reviewedPaths(s *session.Summary) map[string]bool {
 	return paths
 }
 
-// printSessionCompare writes to stdout rather than an io.Writer because
-// renderComment (shared with `ocr review` output) does the same.
+// printSessionCompare writes to stdout, matching the other `ocr session`
+// subcommands.
 func printSessionCompare(beforeID, afterID string, before, after *session.Summary, result session.CompareResult) {
 	fmt.Printf("Comparing %s -> %s\n", beforeID, afterID)
 	fmt.Printf("  before: %s %s\n", displayMode(before.ReviewMode), describeRange(*before))
@@ -351,7 +351,7 @@ func printSessionCompare(beforeID, afterID string, before, after *session.Summar
 		}
 		fmt.Printf("\n=== %s (%d) ===\n", section.title, len(section.findings))
 		for _, c := range section.findings {
-			renderComment(c)
+			renderComment(c, os.Stdout)
 		}
 	}
 }
