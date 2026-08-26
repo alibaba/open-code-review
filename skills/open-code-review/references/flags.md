@@ -31,6 +31,8 @@
 | `--to` | | Target ref in Range mode |
 | `--commit` | `-c` | Single commit hash (compared against its parent) |
 | `--background-file` | `-B` | Markdown file path as business context (max 1 MB; takes precedence over `--background`) |
+| `--effort` | | Review effort preset: `low` (1 round) \| `medium` (default, 2 rounds) \| `high` (3 rounds) |
+| `--no-filter` | | Keep all review comments without LLM post-filtering (skips per-group filter task) |
 
 ## Scan-Only Flags
 

@@ -69,6 +69,7 @@ Analyze the review target and extract concise business context to improve review
 | "Review my changes" | `ocr review --audience agent --format json -b "ctx"` |
 | "Review feature PR" | `ocr review --audience agent --format json -b "ctx" --from main --to feature` |
 | "Review commit abc123" | `ocr review --audience agent --format json -b "ctx" --commit abc123` |
+| "High effort deep review" | `ocr review --audience agent --format json --effort high -b "ctx"` |
 | "Write results to file" | `ocr review --audience agent --format json -o result.json -b "ctx"` |
 | "Which files will be reviewed?" | `ocr review --preview --format json` |
 | "Resume interrupted review" | `ocr review --audience agent --format json --from main --to feature --resume <session-id>` |
@@ -165,7 +166,8 @@ If no issues found: "Review complete — 0 issues found across N files."
 ## Gotchas & Notes
 
 - **Always use `--audience agent`** — `human` mode outputs progress UI that pollutes agent output.
-- **Per-run overrides** — Override provider, model, or per-file token limit on single runs using `--provider <name>`, `--model <name>`, or `--max-tokens <n>`.
+- **Per-run overrides** — Override provider, model, tokens, or review effort on single runs using `--provider <name>`, `--model <name>`, `--max-tokens <n>`, or `--effort <low|medium|high>`.
+- **Review Effort Levels** — `--effort` preset: `low` (1 main loop round), `medium` (default, 2 rounds), `high` (3 rounds). Higher effort yields higher recall with more tokens. Persist via `ocr config set effort <level>`.
 - **Working directory matters** — `ocr` operates on the git repo in cwd. Use `--repo /path` to override.
 - **Workspace mode includes untracked files** — Bare `ocr review` reviews staged + unstaged + untracked changes.
 - **Plan phase at 50+ lines** — Diffs exceeding 50 changed lines run a pre-review risk analysis plan phase.
