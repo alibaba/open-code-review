@@ -704,6 +704,123 @@ func TestDispatchSubtasks_ResumeSkipsCompletedFiles(t *testing.T) {
 	}
 }
 
+// TestDispatchSubtasks_GraceRoundCompletionIsCheckpointedAndReused protects
+// the full scan-to-resume contract: after a context-tool call exhausts the
+// per-file budget, task_done(DONE) in the grace round must persist a
+// review_item_done checkpoint that a later scan reuses without another LLM
+// request. If grace-round completion stops propagating from llmloop, the
+// first scan records a failure instead and the resumed scan reruns the file.
+func TestDispatchSubtasks_GraceRoundCompletionIsCheckpointedAndReused(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repo := t.TempDir()
+	item := model.ScanItem{Path: "target.go", Content: "package target\n", LineCount: 1}
+	collector := tool.NewCommentCollector()
+	tools := tool.NewRegistry()
+	tools.Register(&tool.CodeCommentProvider{Collector: collector})
+	tools.Freeze()
+
+	content := ""
+	firstClient := &fakeScanClient{responses: []*llm.ChatResponse{
+		{
+			Choices: []llm.Choice{{Message: llm.ResponseMessage{
+				Content: &content,
+				ToolCalls: []llm.ToolCall{{
+					ID: "comment", Type: "function",
+					Function: llm.FunctionCall{
+						Name:      "code_comment",
+						Arguments: `{"comments":[{"content":"grace finding","existing_code":"package target"}]}`,
+					},
+				}},
+			}}},
+			Usage: &llm.UsageInfo{PromptTokens: 10, CompletionTokens: 5},
+		},
+		scanTaskDoneResponse(),
+	}}
+
+	tpl := makeTemplateWithFullScan()
+	tpl.MaxTokens = 100000
+	tpl.MaxToolRequestTimes = 1
+	previous := session.New(repo, "main", "test", session.SessionOptions{ReviewMode: session.ReviewModeFullScan})
+	first := NewAgent(Args{
+		RepoDir:          repo,
+		Template:         tpl,
+		LLMClient:        firstClient,
+		Model:            "test",
+		CommentCollector: collector,
+		Tools:            tools,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+		},
+		MaxConcurrency: 1,
+		SkipPlan:       true,
+		SkipDedup:      true,
+		SkipSummary:    true,
+		Session:        previous,
+	})
+	first.items = []model.ScanItem{item}
+	first.currentDate = "2026-08-20"
+
+	if _, err := first.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("first dispatchSubtasks: %v", err)
+	}
+	if firstClient.idx != 2 {
+		t.Fatalf("first LLM calls = %d, want 2 (context round plus grace round)", firstClient.idx)
+	}
+	if err := previous.Finalize(); err != nil {
+		t.Fatalf("finalize previous session: %v", err)
+	}
+
+	resume, err := session.LoadResumeState(repo, previous.SessionID)
+	if err != nil {
+		t.Fatalf("LoadResumeState: %v", err)
+	}
+	fingerprint := scanItemFingerprint(item)
+	checkpoint, ok := resume.Item(fingerprint)
+	if !ok {
+		t.Fatalf("resume state missing grace-completed item %q", item.Path)
+	}
+	if len(checkpoint.Comments) != 1 || checkpoint.Comments[0].Content != "grace finding" {
+		t.Fatalf("checkpoint comments = %+v, want the grace-round finding", checkpoint.Comments)
+	}
+
+	resumedClient := &fakeScanClient{}
+	resumed := NewAgent(Args{
+		RepoDir:          repo,
+		Template:         tpl,
+		LLMClient:        resumedClient,
+		Model:            "test",
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		MaxConcurrency:   1,
+		SkipPlan:         true,
+		SkipDedup:        true,
+		SkipSummary:      true,
+		Resume:           resume,
+		Session: session.New(repo, "main", "test", session.SessionOptions{
+			ReviewMode:  session.ReviewModeFullScan,
+			ResumedFrom: previous.SessionID,
+		}),
+	})
+	resumed.items = []model.ScanItem{item}
+	resumed.currentDate = "2026-08-20"
+
+	comments, err := resumed.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("resumed dispatchSubtasks: %v", err)
+	}
+	if resumedClient.idx != 0 {
+		t.Fatalf("resumed LLM calls = %d, want 0 for a reused grace-completed item", resumedClient.idx)
+	}
+	if len(comments) != 1 || comments[0].Content != "grace finding" {
+		t.Fatalf("resumed comments = %+v, want the checkpointed grace-round finding", comments)
+	}
+	info := resumed.ResumeInfo()
+	if info == nil || info.ReusedFiles != 1 || info.RerunFiles != 0 {
+		t.Fatalf("ResumeInfo = %+v, want 1 reused / 0 rerun", info)
+	}
+}
+
 func TestDispatchSubtasks_AllFailed(t *testing.T) {
 	client := &errorScanClient{err: context.DeadlineExceeded}
 

@@ -6,6 +6,7 @@ package llmloop
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,13 @@ import (
 	"github.com/alibaba/open-code-review/internal/tool"
 	"github.com/google/uuid"
 )
+
+// ErrTaskFailed is the sentinel wrapped by the task-failure error returned
+// when the model declares task_done(FAILED), in both the main loop and the
+// grace round. Callers can distinguish a model-declared failure from other
+// errors with errors.Is(err, ErrTaskFailed); the error text is unchanged
+// ("task failed: <model-provided detail>").
+var ErrTaskFailed = errors.New("task failed")
 
 // Deps bundles all per-call dependencies the Runner needs. Both
 // internal/agent (diff review) and internal/scan (full-file scan) build a
@@ -374,7 +382,12 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		for _, call := range calls {
 			cp := r.executeToolCall(ctx, newPath, call, rec, thinking)
 			if cp.Failed {
-				return false, StopNone, fmt.Errorf("task failed: %s", cp.Data)
+				// A model-declared failure stops the round immediately: any
+				// calls issued after task_done(FAILED) do not execute. This
+				// is intentionally asymmetric with task_done(DONE), which
+				// keeps executing the remaining calls so comments issued
+				// alongside it still land.
+				return false, StopNone, fmt.Errorf("%w: %s", ErrTaskFailed, cp.Data)
 			} else if cp.Completed {
 				results = append(results, tool.ToolCallResult{
 					ToolCallID: call.ID,
@@ -423,18 +436,31 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 	if stop == StopMaxRounds {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Max tool requests reached for %s.\n", newPath)
-		r.runGraceRound(ctx, messages, newPath, sessionID)
+		completed, err := r.runGraceRound(ctx, messages, newPath, sessionID)
+		if err != nil {
+			return false, StopNone, err
+		}
+		if completed {
+			return true, StopNone, nil
+		}
 	}
 	return false, stop, nil
 }
 
 // runGraceRound performs one final LLM call after the tool-request budget is
 // exhausted, giving the model a chance to submit any findings it identified
-// but did not yet report via code_comment.
-func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newPath string, sessionID string) {
+// but did not yet report via code_comment. It mirrors the main loop's
+// terminal semantics: a task_done(DONE) executed in this round completes the
+// file (RunPerFile reports completed=true so callers record a reusable
+// checkpoint), a task_done(FAILED) returns a task-failure error, and a
+// cancelled context returns ctx.Err() so callers classify the item as
+// FailureCancelled rather than FailureBudget. Every other outcome leaves the
+// run incomplete with budget exhaustion as the stop cause; only transient
+// LLM errors are swallowed so a network blip cannot mask the budget stop.
+func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newPath string, sessionID string) (bool, error) {
 	graceDefs := graceRoundToolDefs(r.deps.MainToolDefs)
 	if len(graceDefs) == 0 {
-		return
+		return false, nil
 	}
 
 	messages = append(messages, llm.NewTextMessage("user",
@@ -445,7 +471,7 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newP
 
 	if ctx.Err() != nil {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round skipped for %s: context cancelled\n", newPath)
-		return
+		return false, ctx.Err()
 	}
 
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
@@ -456,8 +482,14 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newP
 		SessionID: sessionID,
 	})
 	if err != nil {
+		// Cancellation is a user intent, not a transient outage: surface it
+		// like the main loop does instead of swallowing it below.
+		if ctx.Err() != nil {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Grace round cancelled for %s: %v\n", newPath, ctx.Err())
+			return false, ctx.Err()
+		}
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", newPath, err)
-		return
+		return false, nil
 	}
 
 	if resp.Usage != nil {
@@ -469,16 +501,56 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newP
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
-		return
+		return false, nil
+	}
+
+	// Cancellation wins over grace-round completion: if the context was
+	// cancelled while the response was in flight, discard the response
+	// without executing it, so a cancelled run is never recorded as
+	// completed, and return ctx.Err() so the item is classified as
+	// cancelled rather than budget-exhausted.
+	if ctx.Err() != nil {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round response discarded for %s: context cancelled\n", newPath)
+		return false, ctx.Err()
 	}
 
 	fs := r.deps.Session.GetOrCreateFileSession(newPath)
 	rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
 	rec.SetResponse(resp, 0)
 	thinking := resp.ReasoningContent()
+	completed := false
 	for _, call := range calls {
-		r.executeToolCall(ctx, newPath, call, rec, thinking)
+		// Cancellation wins over grace-round completion: a Ctrl-C that lands
+		// between the round's tool calls must stop the round, so a later
+		// task_done(DONE) never completes a run that was already cancelled.
+		if ctx.Err() != nil {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Grace round aborted for %s: context cancelled\n", newPath)
+			return false, ctx.Err()
+		}
+		cp := r.executeToolCall(ctx, newPath, call, rec, thinking)
+		if cp.Failed {
+			// Mirror the main loop: a model-declared failure surfaces as a
+			// task failure error, returning without executing the rest of
+			// the round. Intentionally asymmetric with the Completed branch
+			// below: task_done(FAILED) stops the round dead, while
+			// task_done(DONE) keeps executing so comments issued alongside
+			// it still land.
+			return false, fmt.Errorf("%w: %s", ErrTaskFailed, cp.Data)
+		}
+		if cp.Completed {
+			// Mirror the main loop: keep executing the remaining calls in
+			// the round so comments issued alongside task_done still land.
+			completed = true
+		}
 	}
+	// Final cancellation check: a Ctrl-C that lands during the round's last
+	// tool call must still discard the completion observed above, so a
+	// cancelled run is never recorded as completed.
+	if ctx.Err() != nil {
+		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round completion discarded for %s: context cancelled\n", newPath)
+		return false, ctx.Err()
+	}
+	return completed, nil
 }
 
 // graceRoundToolDefs returns the subset of tool definitions containing only
