@@ -63,6 +63,10 @@ import jaFaq from './ja/faq.md';
 import koQuickstart from './ko/quickstart.md';
 import koInstallation from './ko/installation.md';
 import koConfiguration from './ko/configuration.md';
+import koAgentSkill from './ko/integrations/agent-skill.md';
+import koClaudeCode from './ko/integrations/claude-code.md';
+import koCicd from './ko/integrations/ci.md';
+import koDelegate from './ko/integrations/delegate.md';
 
 // Russian docs (incremental — partial LocalizedDocs)
 import ruQuickstart from './ru/quickstart.md';
@@ -163,6 +167,10 @@ const koDocs: LocalizedDocs = {
   'quickstart': koQuickstart,
   'installation': koInstallation,
   'configuration': koConfiguration,
+  'agent-skill': koAgentSkill,
+  'claude-code': koClaudeCode,
+  'cicd': koCicd,
+  'delegate': koDelegate,
 };
 
 const ruDocs: LocalizedDocs = {
