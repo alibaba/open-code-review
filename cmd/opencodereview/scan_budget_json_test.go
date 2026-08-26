@@ -102,7 +102,7 @@ func TestScanBudgetJSON(t *testing.T) {
 			}
 
 			raw := captureStdout(t, func() {
-				if err := emitRunResult(context.Background(), ag, comments, time.Now(), "json", "developer", nil, nil, nil); err != nil {
+				if err := emitRunResult(context.Background(), ag, comments, time.Now(), "json", "developer", nil, nil, os.Stdout, nil); err != nil {
 					t.Fatalf("emitRunResult: %v", err)
 				}
 			})

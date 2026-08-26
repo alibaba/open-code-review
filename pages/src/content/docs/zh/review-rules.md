@@ -165,9 +165,19 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`——Jsonnet 配置模板与库。 |
 | `**/*.thrift` | `thrift.md`——Apache Thrift IDL 线协议兼容性。 |
 | `**/*.capnp` | `capnp.md`——Cap'n Proto schema 线协议兼容性。 |
+| `**/*.m` | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
 | *(fallback)* | `default.md` |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。
+
+### 针对 `.m` 文件的内容嗅探
+
+`.m` 被 MATLAB 和 Objective-C 共用。OCR 会窥探文件首个非空行来区分：如果
+看起来像 Objective-C（如 `#import`、`@implementation`、C 风格注释），则使用
+`objc.md` 而非 `matlab.md`。无法读取内容时回退到 `matlab.md`。
+
+> **稳定性说明。** 嗅探启发式可能在 OCR 版本之间变化。如果你需要确定性的 `.m`
+> 路由，请为 `.m` 路径设置显式的项目级规则——项目规则始终优先于系统层。
 
 ## 查看哪条规则生效：`ocr rules check`
 
