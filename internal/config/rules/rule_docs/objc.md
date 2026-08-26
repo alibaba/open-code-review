@@ -75,7 +75,8 @@
 
 #### Categories and Runtime Modification
 
-- A category implements a selector that the original class, a superclass, or another category on the same class also implements, so which implementation runs is undefined; confirm the collision with `code_search`
+- A category on a class defined in this repository implements a selector that the original class, a superclass, or another category on the same class also implements, so which implementation runs is undefined; confirm the collision with `code_search` before reporting it
+- A category on a framework class implements a selector that the framework itself already defines, which Apple documents as undefined behavior; `code_search` cannot see the SDK, so treat the override itself as the reportable signal and never read an empty search result as proof that no collision exists
 - A category declares a property but provides neither accessors nor associated storage, making the property compile as a declaration but fail when messaged
 - Associated-object storage uses a key already used for a different value, or an association policy that conflicts with the value's required ownership or thread behavior
 - Method swizzling can execute more than once, so repeated exchanges toggle or corrupt the installed behavior; one-time installation must be explicit
