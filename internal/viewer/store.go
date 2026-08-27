@@ -242,10 +242,11 @@ type ReviewComment struct {
 
 // ViewSession holds fully parsed records for one session.
 type ViewSession struct {
-	Summary    SessionSummary
-	TokenUsage TokenUsageSummary
-	Files      []*FileGroup     // ordered by file path
-	Comments   []*ReviewComment // review findings from review_item_done/reused records
+	Summary      SessionSummary
+	TokenUsage   TokenUsageSummary
+	Files        []*FileGroup     // ordered by file path
+	SessionTasks []*FileGroup     // session-level tasks (grouping, etc.) separated from file-level
+	Comments     []*ReviewComment // review findings from review_item_done/reused records
 }
 
 // TokenUsageSummary aggregates token counts across the session.
@@ -283,6 +284,10 @@ const (
 	ReLocationTask        TaskType = "re_location_task"
 	GroupingTask          TaskType = "grouping_task"
 )
+
+func isSessionLevelPath(fp string) bool {
+	return len(fp) > 4 && fp[:2] == "__" && fp[len(fp)-2:] == "__"
+}
 
 // TaskCard links an LLM request with its response and tool calls.
 type TaskCard struct {
@@ -561,6 +566,17 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 		return fileBreakdown[i].PromptTokens+fileBreakdown[i].CompletionTokens > fileBreakdown[j].PromptTokens+fileBreakdown[j].CompletionTokens
 	})
 	vs.TokenUsage.FileTokenBreakdown = fileBreakdown
+
+	// Separate session-level virtual paths from real file paths.
+	realFiles := make([]*FileGroup, 0, len(vs.Files))
+	for _, fg := range vs.Files {
+		if isSessionLevelPath(fg.FilePath) {
+			vs.SessionTasks = append(vs.SessionTasks, fg)
+		} else {
+			realFiles = append(realFiles, fg)
+		}
+	}
+	vs.Files = realFiles
 
 	sort.Slice(vs.Files, func(i, j int) bool {
 		return vs.Files[i].FilePath < vs.Files[j].FilePath

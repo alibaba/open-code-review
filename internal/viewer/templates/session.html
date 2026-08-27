@@ -92,7 +92,7 @@
                 <tbody>
                 {{range .}}
                     <tr>
-                        <td title="{{.FilePath}}">{{.FilePath | truncate 60}}</td>
+                        <td title="{{.FilePath}}">{{sessionTaskLabel .FilePath | truncate 60}}</td>
                         <td title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</td>
                         <td title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</td>
                         {{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<td title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</td><td title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</td>{{end}}
@@ -189,6 +189,55 @@
             <li>{{.}}</li>
         {{end}}
         </ul>
+    </div>
+</details>
+{{end}}
+
+{{if .Session.SessionTasks}}
+<details class="file-accordion section-accordion" open>
+    <summary class="file-accordion-header">
+        <span class="chevron"></span>
+        <span class="section-title">Session Tasks</span>
+        <span class="file-count-badge">{{len .Session.SessionTasks}} tasks</span>
+    </summary>
+    <div class="file-accordion-body">
+        <div class="conversations">
+{{range .Session.SessionTasks}}
+<details class="file-accordion">
+    <summary class="file-accordion-header">
+        <span class="chevron"></span>
+        <span class="file-path">{{sessionTaskLabel .FilePath}}</span>
+        <span class="file-count-badge">{{cardCount .Tasks}} requests</span>
+    </summary>
+    <div class="file-accordion-body">
+        {{range $tg := orderedTasks .Tasks}}
+        <div class="task-group {{taskTypeClass $tg.Type}}">
+            <h4 class="task-type-label">
+                <span class="task-type-dot"></span>
+                {{$tg.Type}}
+            </h4>
+            {{range $tg.Cards}}
+            <div class="card">
+                <div class="card-header">
+                    <span class="request-label">Request #{{.RequestNo}}</span>
+                    {{if .Model}}<span class="badge badge-model">{{.Model}}</span>{{end}}
+                    {{if or .PromptTokens .CompletionTokens}}<span class="badge badge-tokens">P:<span title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</span> C:<span title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</span>{{if or .CacheReadTokens .CacheWriteTokens}} CR:<span title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</span> CW:<span title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</span>{{end}}</span>{{end}}
+                    {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
+                    {{if .Error}}<span class="badge badge-error">{{.Error}}</span>{{end}}
+                </div>
+                {{with .ResponseContent}}
+                <div class="card-body response-content">
+                    <div class="response-text">{{.}}</div>
+                </div>
+                {{end}}
+            </div>
+            {{end}}
+        </div>
+        {{end}}
+    </div>
+</details>
+{{end}}
+        </div>
     </div>
 </details>
 {{end}}
