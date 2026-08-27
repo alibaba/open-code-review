@@ -192,13 +192,13 @@
     "main_task": true,
     "definition": {
       "name": "file_find",
-      "description": "Search for matching files in the current project by repository-relative path substring or filename keyword. Use this tool when you cannot find the files you need to view in the current change file list.\n\nThis tool searches for repository-relative paths containing specified keywords or subpaths (accepting both '/' and '\\' separators) in the project directory and returns a list of matching file paths. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\nsrc/main/java/UserService.java\nsrc/test/java/UserServiceTest.java",
+      "description": "Search for matching files in the current project based on filename keywords. When the query contains a path separator ('/' or '\\'), also matches against the full repository-relative path, enabling directory-scoped queries. Use this tool when you cannot find the files you need to view in the current change file list.\n\nThis tool searches for filenames containing specified keywords in the project directory and returns a list of matching file paths. Search is case-insensitive by default, adjustable via case_sensitive parameter.\n\nNote: This tool only supports returning the first 100 matching file paths; excess will be truncated.\n\nExample:\nInput:\nquery_name: UserService\nOutput:\nsrc/main/java/UserService.java\nsrc/test/java/UserServiceTest.java\n\nInput:\nquery_name: pkg/util\nOutput:\npkg/util.go\npkg/util_test.go",
       "parameters": {
         "type": "object",
         "properties": {
           "query_name": {
             "type": "string",
-            "description": "Substring or subpath to search for in repository-relative paths, accepting both '/' and '\\' separators. Supports partial matching."
+            "description": "Filename keyword to search for, supports partial matching. If the query contains '/' or '\\', falls back to matching against the full repository-relative path (e.g. 'pkg/util' or 'internal/diff/')."
           },
           "case_sensitive": {
             "type": "boolean",
