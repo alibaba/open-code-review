@@ -74,10 +74,15 @@ func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, m
 }
 
 func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClient, modelName string, task *template.LlmConversation, sessOpts *groupingSessionOpts) (groups []FileGroup, usage *llm.UsageInfo, err error) {
+	var rec *session.TaskRecord
+	startTime := time.Now()
 	defer func() {
 		if r := recover(); r != nil {
 			groups = nil
 			err = fmt.Errorf("grouping LLM panicked: %v", r)
+			if rec != nil {
+				rec.SetError(err, time.Since(startTime))
+			}
 		}
 	}()
 
@@ -91,7 +96,6 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 
 	const groupingFileKey = "__grouping__"
 
-	var rec *session.TaskRecord
 	if sessOpts != nil && sessOpts.session != nil {
 		fs := sessOpts.session.GetOrCreateFileSession(groupingFileKey)
 		rec = fs.AppendTaskRecord(session.GroupingTask, messages)
@@ -106,7 +110,6 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 		})
 	}
 
-	startTime := time.Now()
 	resp, err := client.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     modelName,
 		Messages:  messages,
