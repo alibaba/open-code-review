@@ -466,8 +466,8 @@ func TestSetConfigValueProviderExtraHeadersInvalid(t *testing.T) {
 func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 	cfg := &Config{}
 
-	if err := setConfigValue(cfg, "custom_providers.my-gateway.url", "https://gateway.internal.com/v1"); err != nil {
-		t.Fatalf("setConfigValue url: %v", err)
+	if err := setConfigValue(cfg, "custom_providers.my-gateway.protocol", llm.ProtocolAnthropicBedrock); err != nil {
+		t.Fatalf("setConfigValue protocol: %v", err)
 	}
 	if err := setConfigValue(cfg, "custom_providers.my-gateway.extra_headers", "X-Gateway=secret"); err != nil {
 		t.Fatalf("setConfigValue: %v", err)
@@ -480,6 +480,9 @@ func TestSetConfigValueCustomProviderExtraHeaders(t *testing.T) {
 	if v := entry.ExtraHeaders["X-Gateway"]; v != "secret" {
 		t.Errorf("ExtraHeaders[\"X-Gateway\"] = %q, want %q", v, "secret")
 	}
+	if entry.URL != "" {
+		t.Errorf("URL = %q, want empty for a custom Bedrock provider", entry.URL)
+	}
 }
 
 func TestSetConfigValueCustomProviderAuxiliaryFieldRequiresExistingProvider(t *testing.T) {
@@ -490,10 +493,10 @@ func TestSetConfigValueCustomProviderAuxiliaryFieldRequiresExistingProvider(t *t
 		value    string
 		coreKey  string
 	}{
-		{"extra_body", "nonexistent", "providers.nonexistent.extra_body", `{"temperature":0.2}`, "providers.nonexistent.url"},
-		{"extra_headers", "nonexistent", "providers.nonexistent.extra_headers", "X-Custom=value", "providers.nonexistent.url"},
-		{"retry_codes", "nonexistent", "providers.nonexistent.retry_codes", "400", "providers.nonexistent.url"},
-		{"custom provider namespace", "openai", "custom_providers.openai.extra_headers", "X-Custom=value", "custom_providers.openai.url"},
+		{"extra_body", "nonexistent", "providers.nonexistent.extra_body", `{"temperature":0.2}`, "providers.nonexistent.protocol"},
+		{"extra_headers", "nonexistent", "providers.nonexistent.extra_headers", "X-Custom=value", "providers.nonexistent.protocol"},
+		{"retry_codes", "nonexistent", "providers.nonexistent.retry_codes", "400", "providers.nonexistent.protocol"},
+		{"custom provider namespace", "my-gateway", "custom_providers.my-gateway.extra_headers", "X-Custom=value", "custom_providers.my-gateway.protocol"},
 	}
 
 	for _, tt := range tests {
@@ -503,8 +506,37 @@ func TestSetConfigValueCustomProviderAuxiliaryFieldRequiresExistingProvider(t *t
 			if err == nil {
 				t.Fatalf("expected error for %s on a missing provider", tt.key)
 			}
-			want := "provider \"" + tt.provider + "\" is not configured; set a core field (url, model, api_key, ...) first:\n" +
-				"  ocr config set " + tt.coreKey + " <endpoint>"
+			want := "provider \"" + tt.provider + "\" is not configured; set a core field first (protocol is required for every custom provider):\n" +
+				"  ocr config set " + tt.coreKey + " <protocol>"
+			if err.Error() != want {
+				t.Errorf("error = %q, want %q", err, want)
+			}
+			if cfg.CustomProviders != nil {
+				t.Errorf("CustomProviders = %#v, want nil", cfg.CustomProviders)
+			}
+		})
+	}
+}
+
+func TestSetConfigValueCustomProviderRejectsPresetName(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value string
+	}{
+		{"openai", "url", "https://gateway.internal.com/v1"},
+		{"OpenAI", "extra_headers", "X-Custom=value"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+" "+tt.field, func(t *testing.T) {
+			cfg := &Config{}
+			err := setConfigValue(cfg, "custom_providers."+tt.name+"."+tt.field, tt.value)
+			if err == nil {
+				t.Fatalf("expected preset-name conflict for %s", tt.field)
+			}
+			want := "custom provider name \"" + tt.name + "\" conflicts with a preset provider; use providers.openai." + tt.field +
+				" to configure the preset or choose a different custom provider name"
 			if err.Error() != want {
 				t.Errorf("error = %q, want %q", err, want)
 			}
