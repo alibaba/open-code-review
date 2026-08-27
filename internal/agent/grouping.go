@@ -135,11 +135,14 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 		return nil, usage, fmt.Errorf("grouping LLM returned empty response")
 	}
 
-	if rec != nil {
-		rec.SetResponse(resp, duration)
-	}
-
 	groups, err = parseGroupingResponse(content, diffs)
+	if rec != nil {
+		if err != nil {
+			rec.SetError(fmt.Errorf("grouping response parse failed: %w", err), duration)
+		} else {
+			rec.SetResponse(resp, duration)
+		}
+	}
 	return groups, usage, err
 }
 
