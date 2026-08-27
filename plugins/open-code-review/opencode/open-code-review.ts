@@ -290,7 +290,7 @@ const reviewArgs = {
   overallTimeoutMinutes: optionalPositiveInt(
     "Optional wall-clock timeout for the complete OCR process in minutes.",
   ),
-  maxTools: optionalPositiveInt("Maximum tool-call rounds per file; OCR enforces a minimum of 10."),
+  maxTools: optionalPositiveInt("Maximum tool-call rounds per file; OCR enforces a minimum of 50."),
   maxGitProcesses: optionalPositiveInt("Maximum concurrent Git subprocesses."),
   preview: tool.schema.boolean().optional().describe(
     "List the files that would be reviewed without calling an LLM.",
