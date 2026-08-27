@@ -228,7 +228,7 @@ PR이 빨리 리뷰되고 머지되길 바라시나요? 다음이 도움이 됩�
   주기를 짧게 유지하세요. 동의하지 않는다면 코멘트를 무시하지 말고 이유를 설명해
   주세요.
 
-## 기여자 라이선스 동의서(CLA) {#contributor-license-agreement-cla}
+## 기여자 라이선스 동의서 (CLA) {#contributor-license-agreement-cla}
 
 이 프로젝트는 Alibaba 오픈 소스 CLA를 요구합니다. 처음 PR을 열면 봇이 링크를
 남깁니다. 전자 서명하면 되고 1분이면 끝납니다. 이후의 PR에서는 다시 서명하지

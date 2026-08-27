@@ -120,7 +120,7 @@ OCR은 그룹마다 서브 Agent를 하나씩 띄웁니다. 서브 Agent는 각�
 
 서브태스크는 최대 **두 단계**로 이뤄집니다.
 
-### 1단계 — Plan(선택) {#phase-1-plan-optional}
+### 1단계 — Plan (선택) {#phase-1-plan-optional}
 
 plan 단계를 켤지는 `Template.PlanRequired`가 정하며, 임계값 두 개를 함께
 봅니다.

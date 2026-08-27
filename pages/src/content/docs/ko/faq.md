@@ -54,7 +54,7 @@ set`으로 새 값으로 바꾸세요.
 `git ls-files`를) 실행합니다. Git 작업 트리 안이 아니면 곧바로 종료합니다.
 저장소로 `cd` 하거나 `--repo /path/to/repo`를 넘기세요.
 
-### "No tool calls parsed"(로컬 모델 / Ollama) {#no-tool-calls-parsed-local-models-ollama}
+### "No tool calls parsed" (로컬 모델 / Ollama) {#no-tool-calls-parsed-local-models-ollama}
 
 ```
 [ocr] No tool calls parsed for src/foo.go, retrying...
