@@ -26,8 +26,8 @@ flowchart TD
 전체 흐름을 지휘하는 코드는
 [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
 패키지에 있습니다. 주요 파일은 `agent.go`(디스패치와 그룹별 오케스트레이션),
-`grouping.go`(의미 기반 파일 그룹화), `preview.go`(파일 필터), `util.go`(헬퍼)입니다.
-도구 호출 루프와 메모리 압축은 그 옆의
+`grouping.go`(의미 기반 파일 그룹화), `preview.go`(파일 필터),
+`util.go`(헬퍼)입니다. 도구 호출 루프와 메모리 압축은 그 옆의
 [`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)에
 있습니다. 진입점은 두 개가 중요합니다. `Agent.Run`(파이프라인 최상단)과
 `Agent.dispatchSubtasks`(그룹별 팬아웃)입니다.
@@ -45,8 +45,8 @@ flowchart TD
 | `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
 
 diff마다 옛/새 경로, 옛/새 hunk, 추가·삭제 줄 수, 바이너리 여부, 이름 변경
-감지 결과가 함께 실립니다. `DiffContextLines`는 **3**으로 고정돼 있으며 Git이 쓰는
-기본값과 같습니다.
+감지 결과가 함께 실립니다. `DiffContextLines`는 **3**으로 고정돼 있으며 Git이
+쓰는 기본값과 같습니다.
 
 추적되지 않는 파일은 디스크에서 읽어 파일 전체가 추가된 것으로 다룹니다.
 그래서 커밋 전에도 리뷰됩니다.
@@ -107,7 +107,7 @@ diff 프로바이더 단계에서, `internal/diff/git.go`의 `providerDirIgnoreD
 | 토큰 예산 | 그룹의 diff 합이 프롬프트 상한을 넘으면 파일당 그룹 하나로 되돌립니다. |
 | 커버리지 | 모델이 배정하지 못한 파일은 각자 단독 그룹이 됩니다. |
 
-그룹화는 잘되면 좋은 최적화일 뿐 정확성을 좌우하는 관문이
+그룹화는 성공을 보장하지 않는 최적화일 뿐 정확성을 좌우하는 관문이
 아닙니다. 호출이 실패하거나 응답이 비었거나 파싱되지 않으면 경고를 남기고
 파일당 그룹 하나로 디스패치합니다. 예전 동작 그대로입니다. 어떻게 묶였는지는
 JSON 출력에도 함께 실립니다.
@@ -377,9 +377,10 @@ OCR은 이 검사로 괴물 같은 diff(자동 생성된 lock 파일, 수천 줄
 그룹마다 하나씩 생기는 `subtask.execute.group.<group-key>`입니다. 여기에 결정
 지점마다 짧게 생겼다 사라지는 `event.<name>` 스팬(`plan.skipped`,
 `token.threshold.exceeded`, `subtask.error` 등)이 더해집니다. LLM 왕복과 도구
-호출은 스팬이 아니라 메트릭으로만 기록됩니다. 프롬프트와 응답 내용은 텔레메트리에
-**절대** 실리지 않습니다. `OCR_CONTENT_LOGGING` 플래그는 배선만 돼 있고 지금은 동작하지
-않습니다. 전체 스키마는 [텔레메트리](../telemetry/)를 참고하세요.
+호출은 스팬이 아니라 메트릭으로만 기록됩니다. 프롬프트와 응답 내용은
+텔레메트리에 **절대** 실리지 않습니다. `OCR_CONTENT_LOGGING` 플래그는 배선만 돼
+있고 지금은 동작하지 않습니다. 전체 스키마는
+[텔레메트리](../telemetry/)를 참고하세요.
 
 ## 자동화하지 *않은* 것 {#what-s-not-automated}
 
