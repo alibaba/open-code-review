@@ -285,8 +285,12 @@ const (
 	GroupingTask          TaskType = "grouping_task"
 )
 
+var sessionLevelPaths = map[string]bool{
+	"__grouping__": true,
+}
+
 func isSessionLevelPath(fp string) bool {
-	return len(fp) > 4 && fp[:2] == "__" && fp[len(fp)-2:] == "__"
+	return sessionLevelPaths[fp]
 }
 
 // TaskCard links an LLM request with its response and tool calls.

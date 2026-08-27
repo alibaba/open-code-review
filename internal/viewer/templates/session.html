@@ -92,7 +92,7 @@
                 <tbody>
                 {{range .}}
                     <tr>
-                        <td title="{{.FilePath}}">{{sessionTaskLabel .FilePath | truncate 60}}</td>
+                        <td title="{{sessionTaskLabel .FilePath}}">{{sessionTaskLabel .FilePath | truncate 60}}</td>
                         <td title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</td>
                         <td title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</td>
                         {{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<td title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</td><td title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</td>{{end}}
@@ -228,6 +228,39 @@
                 {{with .ResponseContent}}
                 <div class="card-body response-content">
                     <div class="response-text">{{.}}</div>
+                </div>
+                {{end}}
+                {{if .ToolCalls}}
+                <div class="tool-calls-section">
+                    <div class="tool-calls-label">Tool Calls ({{len .ToolCalls}})</div>
+                    {{range .ToolCalls}}
+                    <div class="tool-call-item {{if not .Ok}}tool-call-error{{end}}">
+                        <div class="tool-call-header">
+                            <span class="tool-icon">&#9881;</span>
+                            <strong class="tool-name">{{.Name}}</strong>
+                            {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
+                            {{if not .Ok}}<span class="badge badge-error">Failed</span>{{end}}
+                        </div>
+                        <details class="tool-detail">
+                            <summary class="tool-detail-toggle">
+                                <span class="chevron-sm"></span>
+                                <span>Show Details</span>
+                            </summary>
+                            <div class="tool-detail-body">
+                                <div class="tool-section">
+                                    <div class="tool-section-label">Arguments</div>
+                                    <pre>{{.Arguments}}</pre>
+                                </div>
+                                {{if .Result}}
+                                <div class="tool-section">
+                                    <div class="tool-section-label">Result</div>
+                                    <pre>{{.Result}}</pre>
+                                </div>
+                                {{end}}
+                            </div>
+                        </details>
+                    </div>
+                    {{end}}
                 </div>
                 {{end}}
             </div>
