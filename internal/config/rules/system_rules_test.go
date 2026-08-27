@@ -140,6 +140,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"shaders/compute.wgsl", "Texture and Buffer Access Safety"},
 		{"Shaders/Blur.metal", "Texture and Buffer Access Safety"},
 		{"Models/main.m", "Indexing, Shapes, and Implicit Expansion"},
+		{"src/Counter.sol", "Checks-Effects-Interactions"},
+		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
+		{"contracts/token.vy", "Language Restrictions"},
+		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
 	}
 
 	for _, tt := range tests {

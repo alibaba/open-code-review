@@ -80,6 +80,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions. |
 | `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints. |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | Print the review comments recorded in one session. |
+| `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | Compare two sessions' findings: new, persisting, resolved, not reviewed. |
 | `ocr viewer` | — | Launch the local web UI for past review sessions (`localhost:5483`). |
 | `ocr version` | — | Print version, commit, platform, build date, and GitHub URL. |
 
@@ -447,6 +448,32 @@ ocr session comments --severity critical,high --category bug,security <session-i
 | `--json` | `false` | Emit the comments as a JSON array. |
 | `--severity <list>` | all | Comma-separated severities to include (`critical`, `high`, `medium`, `low`). |
 | `--category <list>` | all | Comma-separated categories to include (e.g. `bug`, `security`). |
+
+### `ocr session compare`
+
+Groups the findings of two sessions into four buckets: **new** (only in the
+after session), **persisting** (in both), **resolved** (only in the before
+session) and **not reviewed** (in the before session, in files the after
+session never looked at, so they are not counted as resolved).
+
+Findings are matched on path, category and the offending snippet, not on line
+numbers, so a finding that only moved down the file still counts as
+persisting.
+
+```bash
+ocr session compare <before-session-id> <after-session-id>
+ocr session diff <before-session-id> <after-session-id>
+ocr session compare --json <before-session-id> <after-session-id>
+```
+
+Both sessions must belong to the same repository; otherwise the command
+fails. Different review modes only print a warning on stderr, so `--json`
+output stays pipeable.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--repo <path>` | current dir | Repository whose sessions should be compared. |
+| `--json` | `false` | Emit the comparison as JSON (`new`, `persisting`, `resolved`, `not_reviewed`). |
 
 ## `ocr rules`
 

@@ -78,6 +78,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | 保存されたレビューセッションを一覧表示します。 |
 | `ocr session show <id>` | `ocr sessions show <id>` | 1つのセッションとファイル単位のチェックポイントを表示します。 |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 1つのセッションに記録されたレビューコメントを表示します。 |
+| `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 2つのセッションの指摘を比較します：新規・継続・解決済み・未レビュー。 |
 | `ocr viewer` | — | 過去のレビューセッション用のローカル Web UI を起動します（`localhost:5483`）。 |
 | `ocr version` | — | バージョン、commit、プラットフォーム、ビルド日、GitHub URL を出力します。 |
 
@@ -422,6 +423,31 @@ ocr session comments --severity critical,high --category bug,security <session-i
 | `--json` | `false` | コメントを JSON 配列として出力します。 |
 | `--severity <list>` | すべて | 含める重要度をカンマ区切りで指定します（`critical`、`high`、`medium`、`low`）。 |
 | `--category <list>` | すべて | 含めるカテゴリをカンマ区切りで指定します（例: `bug`、`security`）。 |
+
+### `ocr session compare`
+
+2つのセッションの指摘を4つに分類します：**new**（after セッションのみ）、
+**persisting**（両方）、**resolved**（before セッションのみ）、
+**not reviewed**（before セッションにあり、after セッションがそのファイルを
+レビューしていないため解決済みとは数えないもの）。
+
+照合はパス・カテゴリ・該当コード片で行い、行番号は使いません。そのため行が
+ずれただけの指摘は persisting のままになります。
+
+```bash
+ocr session compare <before-session-id> <after-session-id>
+ocr session diff <before-session-id> <after-session-id>
+ocr session compare --json <before-session-id> <after-session-id>
+```
+
+2つのセッションは同じリポジトリのものである必要があります。異なる場合はエラー
+になります。レビューモードが異なる場合は stderr に警告を出すだけなので、
+`--json` の出力はそのままパイプできます。
+
+| フラグ | デフォルト | 説明 |
+|---|---|---|
+| `--repo <path>` | カレントディレクトリ | 比較するセッションが属するリポジトリ。 |
+| `--json` | `false` | 比較結果を JSON で出力します（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
 
 ## `ocr rules`
 

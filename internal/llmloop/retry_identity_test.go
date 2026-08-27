@@ -5,9 +5,11 @@ package llmloop
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -32,6 +34,8 @@ type metaCaptureClient struct {
 	// respond is called with the zero-based call index so a test can drive a
 	// multi-round tool loop.
 	respond func(n int) *llm.ChatResponse
+	// respondErr drives request failures and takes precedence over respond.
+	respondErr func(n int) (*llm.ChatResponse, error)
 }
 
 func (c *metaCaptureClient) CompletionsWithCtx(ctx context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -40,6 +44,9 @@ func (c *metaCaptureClient) CompletionsWithCtx(ctx context.Context, _ llm.ChatRe
 	n := len(c.captured)
 	c.captured = append(c.captured, capturedRequest{meta: meta, ok: ok})
 	c.mu.Unlock()
+	if c.respondErr != nil {
+		return c.respondErr(n)
+	}
 	if c.respond == nil {
 		return emptyResponse(), nil
 	}
@@ -141,6 +148,97 @@ func TestRunPerFile_MainTaskIdentity(t *testing.T) {
 					t.Errorf("request %d: meta RequestNo = %d, record = %d", i, reqs[i].meta.RequestNo, rec.RequestNo)
 				}
 			}
+		})
+	}
+}
+
+// TestRunPerFile_GraceRoundIsAMainTaskRound verifies that the grace round uses
+// the next main_task identity and records both responses and errors.
+func TestRunPerFile_GraceRoundIsAMainTaskRound(t *testing.T) {
+	// Delay the grace response so duration assertions are stable across platforms.
+	const graceDelay = 20 * time.Millisecond
+
+	cases := []struct {
+		name   string
+		client *metaCaptureClient
+		want   func(t *testing.T, grace *session.TaskRecord)
+	}{
+		{
+			name: "response recorded",
+			client: &metaCaptureClient{respond: func(n int) *llm.ChatResponse {
+				if n == 0 {
+					return fileReadToolCallResponse("call_1", `{"path":"main.go"}`)
+				}
+				time.Sleep(graceDelay)
+				return emptyResponse()
+			}},
+			want: func(t *testing.T, grace *session.TaskRecord) {
+				if grace.Response == nil {
+					t.Error("grace round response was not recorded")
+				}
+			},
+		},
+		{
+			name: "suppressed error recorded",
+			client: &metaCaptureClient{respondErr: func(n int) (*llm.ChatResponse, error) {
+				if n == 0 {
+					return fileReadToolCallResponse("call_1", `{"path":"main.go"}`), nil
+				}
+				time.Sleep(graceDelay)
+				return nil, errors.New("grace request failed")
+			}},
+			want: func(t *testing.T, grace *session.TaskRecord) {
+				if !strings.Contains(grace.Error, "grace request failed") {
+					t.Errorf("grace round error = %q, want the request error", grace.Error)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := newTestDeps(tc.client)
+			deps.Template.MaxToolRequestTimes = 1
+			deps.MainToolDefs = []llm.ToolDef{
+				{Type: "function", Function: llm.FunctionDef{Name: "code_comment"}},
+				{Type: "function", Function: llm.FunctionDef{Name: "task_done"}},
+				{Type: "function", Function: llm.FunctionDef{Name: "file_read"}},
+			}
+			deps.NewRequestMeta = metaFactory("openai", deps.Model)
+
+			completed, stop, err := NewRunner(deps).RunPerFile(
+				context.Background(),
+				[]llm.Message{llm.NewTextMessage("user", "review this file")},
+				"main.go",
+			)
+			if err != nil {
+				t.Fatalf("RunPerFile: %v", err)
+			}
+			if completed || stop != StopMaxRounds {
+				t.Fatalf("completed = %v, stop = %v; want false, StopMaxRounds", completed, stop)
+			}
+
+			reqs := tc.client.requests()
+			if len(reqs) != 2 {
+				t.Fatalf("got %d requests, want 2", len(reqs))
+			}
+			wantMeta(t, reqs[1], llm.RequestMeta{
+				Provider:  "openai",
+				Model:     "fake",
+				FilePath:  "main.go",
+				TaskType:  string(session.MainTask),
+				RequestNo: 2,
+			})
+
+			recs := deps.Session.GetOrCreateFileSession("main.go").TaskRecords[session.MainTask]
+			if len(recs) != 2 {
+				t.Fatalf("session holds %d main_task records, want 2", len(recs))
+			}
+			grace := recs[1]
+			if grace.Duration < graceDelay/2 {
+				t.Errorf("grace round duration = %v, want at least %v", grace.Duration, graceDelay/2)
+			}
+			tc.want(t, grace)
 		})
 	}
 }

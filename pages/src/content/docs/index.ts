@@ -59,6 +59,15 @@ import jaDelegate from './ja/integrations/delegate.md';
 import jaContributing from './ja/contributing.md';
 import jaFaq from './ja/faq.md';
 
+// Korean docs (incremental — partial LocalizedDocs)
+import koQuickstart from './ko/quickstart.md';
+import koInstallation from './ko/installation.md';
+import koConfiguration from './ko/configuration.md';
+import koAgentSkill from './ko/integrations/agent-skill.md';
+import koClaudeCode from './ko/integrations/claude-code.md';
+import koCicd from './ko/integrations/ci.md';
+import koDelegate from './ko/integrations/delegate.md';
+
 // Russian docs (incremental — partial LocalizedDocs)
 import ruQuickstart from './ru/quickstart.md';
 import ruInstallation from './ru/installation.md';
@@ -154,6 +163,16 @@ const jaDocs: Record<DocSlug, string> = {
   'faq': jaFaq,
 };
 
+const koDocs: LocalizedDocs = {
+  'quickstart': koQuickstart,
+  'installation': koInstallation,
+  'configuration': koConfiguration,
+  'agent-skill': koAgentSkill,
+  'claude-code': koClaudeCode,
+  'cicd': koCicd,
+  'delegate': koDelegate,
+};
+
 const ruDocs: LocalizedDocs = {
   'quickstart': ruQuickstart,
   'installation': ruInstallation,
@@ -177,8 +196,8 @@ const docsMap: Record<Language, LocalizedDocs> = {
   en: enDocs,
   zh: zhDocs,
   ja: jaDocs,
-  // Korean UI strings ship first; doc pages fall back to English until ko/ exists.
-  ko: {},
+  // Korean docs are translated incrementally; untranslated pages fall back to English per-page.
+  ko: koDocs,
   ru: ruDocs,
 };
 

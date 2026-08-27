@@ -42,7 +42,9 @@
     "**/*.zig": "zig.md",
     "**/*.thrift": "thrift.md",
     "**/*.capnp": "capnp.md",
-    "**/*.{glsl,hlsl,wgsl,metal}": "shader.md",
-    "**/*.m": "matlab.md"
+    "**/*.m": "matlab.md",
+    "**/*.sol": "solidity.md",
+    "**/*.vy": "vyper.md",
+    "**/*.{glsl,hlsl,wgsl,metal}": "shader.md"
   }
 }

@@ -222,7 +222,7 @@ func TestFileGroupKey_Multiple(t *testing.T) {
 
 func TestGroupDiffs_SingleFile(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}}
-	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0)
+	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0, nil)
 	if len(result.groups) != 1 {
 		t.Fatalf("got %d groups, want 1", len(result.groups))
 	}
@@ -230,7 +230,7 @@ func TestGroupDiffs_SingleFile(t *testing.T) {
 
 func TestGroupDiffs_NoGroupingTask(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}}
-	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0)
+	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0, nil)
 	if len(result.groups) != 2 {
 		t.Fatalf("got %d groups, want 2 (fallback to per-file)", len(result.groups))
 	}
@@ -244,7 +244,7 @@ func TestGroupDiffs_LLMError_Fallback(t *testing.T) {
 			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 		},
 	}
-	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0, nil)
 	if len(result.groups) != 2 {
 		t.Fatalf("got %d groups, want 2 (fallback on error)", len(result.groups))
 	}
@@ -260,7 +260,7 @@ func TestGroupDiffs_LLMSuccess(t *testing.T) {
 			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 		},
 	}
-	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0, nil)
 	if len(result.groups) != 2 {
 		t.Fatalf("got %d groups, want 2", len(result.groups))
 	}
@@ -278,7 +278,7 @@ func TestCallGroupingLLM_EmptyResponse(t *testing.T) {
 	task := &template.LlmConversation{
 		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 	}
-	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task)
+	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 4096, nil)
 	if err == nil {
 		t.Fatal("expected error for empty response")
 	}

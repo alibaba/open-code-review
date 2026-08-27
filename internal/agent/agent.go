@@ -625,7 +625,8 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 	// Group files semantically via LLM.
 	groupResult := groupDiffs(ctx, nonDeleted, a.args.LLMClient, a.args.Model,
-		a.args.Template, llmloop.PromptTokenLimit(a.args.Template.MaxTokens))
+		a.args.Template, llmloop.PromptTokenLimit(a.args.Template.MaxTokens),
+		&groupingSessionOpts{session: a.session, provider: a.args.Provider, model: a.args.Model})
 	groups := groupResult.groups
 	a.fileGroups = groups
 	if groupResult.usage != nil {

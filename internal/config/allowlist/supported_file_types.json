@@ -95,6 +95,8 @@
   ".zig",
   ".thrift",
   ".capnp",
+  ".sol",
+  ".vy",
   ".glsl",
   ".hlsl",
   ".wgsl",
