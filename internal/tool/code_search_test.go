@@ -460,6 +460,9 @@ func TestCodeSearchProvider_Execute_RejectsTraversalPattern(t *testing.T) {
 		{name: "leading parent", pattern: "../pkg", want: "Error: file_patterns must not contain .."},
 		{name: "middle parent", pattern: "pkg/../internal", want: "Error: file_patterns must not contain .."},
 		{name: "trailing parent", pattern: "pkg/..", want: "Error: file_patterns must not contain .."},
+		{name: "leading parent backslash", pattern: `..\pkg`, want: "Error: file_patterns must not contain .."},
+		{name: "middle parent backslash", pattern: `pkg\..\internal`, want: "Error: file_patterns must not contain .."},
+		{name: "trailing parent backslash", pattern: `pkg\..`, want: "Error: file_patterns must not contain .."},
 	}
 
 	for _, test := range tests {
