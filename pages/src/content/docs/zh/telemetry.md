@@ -150,6 +150,9 @@ OCR 通过 OTel meter 记录数值 metric——计数与直方图，由 collecto
 如需检查发给 LLM 或从 LLM 返回的内容，使用[会话查看器](../viewer/)读取的本地
 JSONL 转录。它们完全存在于 `~/.opencodereview/` 下的磁盘上，绝不发往 collector。
 
+如需更深入的调试，设置 `OCR_RAW_LOGGING=1`，可把每次 LLM 调用的原始请求与响应
+记录到 `~/.opencodereview/raw/`，提供比会话转录更详细的调试信息。默认关闭。
+
 ## 配方
 
 ### 本地调试用 console exporter

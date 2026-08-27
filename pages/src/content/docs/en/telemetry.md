@@ -196,6 +196,11 @@ the local JSONL transcripts that the [Session Viewer](../viewer/)
 reads. Those live entirely on disk under `~/.opencodereview/` and are
 never shipped to the collector.
 
+For deeper debugging, set `OCR_RAW_LOGGING=1` to capture the raw
+request and response bodies of every LLM call in
+`~/.opencodereview/raw/` — more detailed debugging information than
+the session transcripts. Off by default.
+
 ## Recipes
 
 ### Console exporter for local debugging

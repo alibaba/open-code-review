@@ -341,6 +341,12 @@ type ClientConfig struct {
 	// caller that builds a client without one.
 	retryCollector *RetryCollector
 
+	// rawHolder is the opt-in raw LLM capture sink (see raw.go).
+	// Unexported for the same reason as retryCollector: it is a handle on the
+	// current run, set only by NewLLMClient. A nil holder means capture is off
+	// and no raw middleware is mounted.
+	rawHolder *RawHolder
+
 	// AWSProfile and AWSRegion are used only by SigV4 providers (bedrock).
 	// Empty means the standard AWS credential chain decides.
 	AWSProfile string
@@ -385,9 +391,11 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // protocol).
 //
 // collector observes every HTTP attempt the returned client makes; pass nil to
-// build a client that is not observed. It is a parameter rather than a field on
-// ResolvedEndpoint because it belongs to the run, not to the endpoint.
-func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
+// build a client that is not observed. raw, when non-nil, mounts the raw
+// capture middleware (see raw.go) so every HTTP attempt is also recorded
+// verbatim. Both belong to the run, not to the endpoint, which is why they are
+// parameters rather than fields on ResolvedEndpoint.
+func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder) LLMClient {
 	cfg := ClientConfig{
 		URL:            ep.URL,
 		APIKey:         ep.Token,
@@ -398,6 +406,7 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 		ExtraHeaders:   ep.ExtraHeaders,
 		RetryCodes:     ep.RetryCodes,
 		retryCollector: collector,
+		rawHolder:      raw,
 		AWSProfile:     ep.AWSProfile,
 		AWSRegion:      ep.AWSRegion,
 	}
@@ -516,6 +525,9 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
+	}
+	if cfg.rawHolder != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
 
 	return &OpenAIClient{
@@ -934,6 +946,9 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	if cfg.retryCollector != nil {
 		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
+	if cfg.rawHolder != nil {
+		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
+	}
 
 	return &AnthropicClient{
 		cfg: cfg,
@@ -984,6 +999,9 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
+	}
+	if cfg.rawHolder != nil {
+		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
 
 	// Load the AWS config here rather than calling bedrock.WithLoadDefaultConfig,

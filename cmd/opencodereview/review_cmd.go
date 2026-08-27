@@ -234,6 +234,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
 
+	closeRaw := bindRawWriter(rt.RawHolder, cc.RepoDir, ag.Session())
+	defer closeRaw()
+
 	// Silence progress output during execution; restored before the trace
 	// summary in agent-text mode (and on function exit otherwise).
 	q := newQuietHandle(opts.outputFormat, opts.audience)

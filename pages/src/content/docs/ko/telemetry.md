@@ -189,6 +189,10 @@ LLM에 무엇을 보내고 무엇을 받았는지 들여다봐야 한다면
 [세션 뷰어](../viewer/)가 읽는 로컬 JSONL 기록을 쓰세요. 이 기록은 전부
 `~/.opencodereview/` 아래 디스크에만 있고 컬렉터로는 결코 보내지 않습니다.
 
+더 깊은 디버깅이 필요하면 `OCR_RAW_LOGGING=1`을 설정하세요. 모든 LLM 호출의
+원시 요청과 응답이 `~/.opencodereview/raw/`에 기록되어 세션 기록보다 더 자세한
+디버깅 정보를 제공합니다. 기본값은 꺼짐입니다.
+
 ## 레시피 {#recipes}
 
 ### 로컬 디버깅용 console 익스포터 {#console-exporter-for-local-debugging}

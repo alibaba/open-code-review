@@ -219,6 +219,9 @@ func executeScan(opts scanOptions) (retErr error) {
 		Resume:                resumeState,
 	})
 
+	closeRaw := bindRawWriter(rt.RawHolder, cc.RepoDir, ag.Session())
+	defer closeRaw()
+
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
