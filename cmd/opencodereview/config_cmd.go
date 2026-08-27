@@ -813,7 +813,20 @@ func setCustomProviderValue(cfg *Config, key, value string) error {
 	return setCustomProviderField(cfg, parts[1], parts[2], key, value)
 }
 
+func isAuxiliaryProviderField(field string) bool {
+	switch field {
+	case "extra_body", "extra_headers", "retry_codes":
+		return true
+	default:
+		return false
+	}
+}
+
 func setCustomProviderField(cfg *Config, name, field, key, value string) error {
+	if _, exists := cfg.CustomProviders[name]; isAuxiliaryProviderField(field) && !exists {
+		providerKey := strings.TrimSuffix(key, "."+field)
+		return fmt.Errorf("provider %q is not configured; set a core field (url, model, api_key, ...) first:\n  ocr config set %s.url <endpoint>", name, providerKey)
+	}
 	if cfg.CustomProviders == nil {
 		cfg.CustomProviders = make(map[string]ProviderEntry)
 	}
