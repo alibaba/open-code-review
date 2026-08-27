@@ -63,7 +63,7 @@ func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, m
 		return groupDiffsResult{groups: toSingleFileGroups(diffs)}
 	}
 
-	groups, usage, err := callGroupingLLM(ctx, diffs, client, modelName, tpl.GroupingTask, sessOpts)
+	groups, usage, err := callGroupingLLM(ctx, diffs, client, modelName, tpl.GroupingTask, tpl.CompletionTokenLimit(), sessOpts)
 	if err != nil {
 		fmt.Fprintf(stdout.Writer(), "[ocr] LLM grouping failed (%v), falling back to per-file dispatch\n", err)
 		return groupDiffsResult{groups: toSingleFileGroups(diffs), usage: usage}
@@ -73,7 +73,7 @@ func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, m
 	return groupDiffsResult{groups: groups, usage: usage}
 }
 
-func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClient, modelName string, task *template.LlmConversation, sessOpts *groupingSessionOpts) (groups []FileGroup, usage *llm.UsageInfo, err error) {
+func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClient, modelName string, task *template.LlmConversation, maxTokens int, sessOpts *groupingSessionOpts) (groups []FileGroup, usage *llm.UsageInfo, err error) {
 	var rec *session.TaskRecord
 	startTime := time.Now()
 	defer func() {
@@ -81,6 +81,7 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 			groups = nil
 			err = fmt.Errorf("grouping LLM panicked: %v", r)
 			if rec != nil {
+				rec.Response = nil
 				rec.SetError(err, time.Since(startTime))
 			}
 		}
@@ -113,7 +114,7 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 	resp, err := client.CompletionsWithCtx(ctx, llm.ChatRequest{
 		Model:     modelName,
 		Messages:  messages,
-		MaxTokens: 4096,
+		MaxTokens: maxTokens,
 	})
 	duration := time.Since(startTime)
 
@@ -126,13 +127,16 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 
 	usage = resp.Usage
 
-	if rec != nil {
-		rec.SetResponse(resp, duration)
-	}
-
 	content := resp.Content()
 	if content == "" {
+		if rec != nil {
+			rec.SetError(fmt.Errorf("grouping LLM returned empty response"), duration)
+		}
 		return nil, usage, fmt.Errorf("grouping LLM returned empty response")
+	}
+
+	if rec != nil {
+		rec.SetResponse(resp, duration)
 	}
 
 	groups, err = parseGroupingResponse(content, diffs)

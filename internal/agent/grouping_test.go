@@ -278,7 +278,7 @@ func TestCallGroupingLLM_EmptyResponse(t *testing.T) {
 	task := &template.LlmConversation{
 		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 	}
-	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, nil)
+	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 4096, nil)
 	if err == nil {
 		t.Fatal("expected error for empty response")
 	}

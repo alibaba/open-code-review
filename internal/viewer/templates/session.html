@@ -203,6 +203,36 @@
     <div class="file-accordion-body">
         <div class="conversations">
 {{range .Session.SessionTasks}}
+{{template "task-cards" .}}
+{{end}}
+        </div>
+    </div>
+</details>
+{{end}}
+
+{{if .Session.Files}}
+<details class="file-accordion section-accordion">
+    <summary class="file-accordion-header">
+        <span class="chevron"></span>
+        <span class="section-title">Conversations</span>
+        <span class="file-count-badge">{{len .Session.Files}} files</span>
+    </summary>
+    <div class="file-accordion-body">
+        <div class="conversations">
+{{range .Session.Files}}
+{{template "task-cards" .}}
+{{end}}
+        </div>
+    </div>
+</details>
+{{end}}
+
+<script src="/static/session.js"></script>
+</main>
+</body>
+</html>
+
+{{define "task-cards"}}
 <details class="file-accordion">
     <summary class="file-accordion-header">
         <span class="chevron"></span>
@@ -223,8 +253,19 @@
                     {{if .Model}}<span class="badge badge-model">{{.Model}}</span>{{end}}
                     {{if or .PromptTokens .CompletionTokens}}<span class="badge badge-tokens">P:<span title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</span> C:<span title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</span>{{if or .CacheReadTokens .CacheWriteTokens}} CR:<span title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</span> CW:<span title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</span>{{end}}</span>{{end}}
                     {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
-                    {{if .Error}}<span class="badge badge-error">{{.Error}}</span>{{end}}
+                    {{if .Error}}<span class="badge badge-error">Error</span>{{end}}
                 </div>
+                {{if .Error}}
+                <details class="error-detail">
+                    <summary class="error-detail-toggle">
+                        <span class="chevron-sm"></span>
+                        <span>Error Detail</span>
+                    </summary>
+                    <div class="error-detail-body">
+                        <pre class="error-content">{{.Error}}</pre>
+                    </div>
+                </details>
+                {{end}}
                 {{with .ResponseContent}}
                 <div class="card-body response-content">
                     <div class="response-text">{{.}}</div>
@@ -270,94 +311,3 @@
     </div>
 </details>
 {{end}}
-        </div>
-    </div>
-</details>
-{{end}}
-
-{{if .Session.Files}}
-<details class="file-accordion section-accordion">
-    <summary class="file-accordion-header">
-        <span class="chevron"></span>
-        <span class="section-title">Conversations</span>
-        <span class="file-count-badge">{{len .Session.Files}} files</span>
-    </summary>
-    <div class="file-accordion-body">
-        <div class="conversations">
-{{range .Session.Files}}
-<details class="file-accordion">
-    <summary class="file-accordion-header">
-        <span class="chevron"></span>
-        <span class="file-path">{{.FilePath}}</span>
-        <span class="file-count-badge">{{cardCount .Tasks}} requests</span>
-    </summary>
-    <div class="file-accordion-body">
-        {{range $tg := orderedTasks .Tasks}}
-        <div class="task-group {{taskTypeClass $tg.Type}}">
-            <h4 class="task-type-label">
-                <span class="task-type-dot"></span>
-                {{$tg.Type}}
-            </h4>
-            {{range $tg.Cards}}
-            <div class="card">
-                <div class="card-header">
-                    <span class="request-label">Request #{{.RequestNo}}</span>
-                    {{if .Model}}<span class="badge badge-model">{{.Model}}</span>{{end}}
-                    {{if or .PromptTokens .CompletionTokens}}<span class="badge badge-tokens">P:<span title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</span> C:<span title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</span>{{if or .CacheReadTokens .CacheWriteTokens}} CR:<span title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</span> CW:<span title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</span>{{end}}</span>{{end}}
-                    {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
-                    {{if .Error}}<span class="badge badge-error">{{.Error}}</span>{{end}}
-                </div>
-                {{with .ResponseContent}}
-                <div class="card-body response-content">
-                    <div class="response-text">{{.}}</div>
-                </div>
-                {{end}}
-                {{if .ToolCalls}}
-                <div class="tool-calls-section">
-                    <div class="tool-calls-label">Tool Calls ({{len .ToolCalls}})</div>
-                    {{range .ToolCalls}}
-                    <div class="tool-call-item {{if not .Ok}}tool-call-error{{end}}">
-                        <div class="tool-call-header">
-                            <span class="tool-icon">&#9881;</span>
-                            <strong class="tool-name">{{.Name}}</strong>
-                            {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
-                            {{if not .Ok}}<span class="badge badge-error">Failed</span>{{end}}
-                        </div>
-                        <details class="tool-detail">
-                            <summary class="tool-detail-toggle">
-                                <span class="chevron-sm"></span>
-                                <span>Show Details</span>
-                            </summary>
-                            <div class="tool-detail-body">
-                                <div class="tool-section">
-                                    <div class="tool-section-label">Arguments</div>
-                                    <pre>{{.Arguments}}</pre>
-                                </div>
-                                {{if .Result}}
-                                <div class="tool-section">
-                                    <div class="tool-section-label">Result</div>
-                                    <pre>{{.Result}}</pre>
-                                </div>
-                                {{end}}
-                            </div>
-                        </details>
-                    </div>
-                    {{end}}
-                </div>
-                {{end}}
-            </div>
-            {{end}}
-        </div>
-        {{end}}
-    </div>
-</details>
-{{end}}
-        </div>
-    </div>
-</details>
-{{end}}
-
-<script src="/static/session.js"></script>
-</main>
-</body>
-</html>
