@@ -403,6 +403,7 @@ var retryStages = []struct {
 	{session.MemoryCompressionTask, "Context compaction"},
 	{session.ReLocationTask, "Comment re-location"},
 	{session.ReviewFilterTask, "Comment filtering"},
+	{session.GroupingTask, "File grouping"},
 }
 
 // Keep the terminal concise; JSON retains every request.

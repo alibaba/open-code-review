@@ -184,6 +184,8 @@ matching order:
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
 | `**/*.{mojo,🔥}` | `mojo.md` — Mojo source. |
 | `**/*.m` | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files)) |
+| `**/*.sol` | `solidity.md` — Solidity smart contracts. |
+| `**/*.vy` | `vyper.md` — Vyper smart contracts. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

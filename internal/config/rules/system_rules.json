@@ -43,6 +43,8 @@
     "**/*.thrift": "thrift.md",
     "**/*.capnp": "capnp.md",
     "**/*.{mojo,🔥}": "mojo.md",
-    "**/*.m": "matlab.md"
+    "**/*.m": "matlab.md",
+    "**/*.sol": "solidity.md",
+    "**/*.vy": "vyper.md"
   }
 }

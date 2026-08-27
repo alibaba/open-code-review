@@ -186,6 +186,8 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.capnp` | `capnp.md` — совместимость схем Cap'n Proto на уровне wire. |
 | `**/*.{mojo,🔥}` | `mojo.md` - исходный код Mojo. |
 | `**/*.m` | `matlab.md` (или `objc.md` через [определение содержимого](#content-sniffing-for-m-files)) |
+| `**/*.sol` | `solidity.md` — смарт-контракты Solidity. |
+| `**/*.vy` | `vyper.md` — смарт-контракты Vyper. |
 | *(fallback)* | `default.md` |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

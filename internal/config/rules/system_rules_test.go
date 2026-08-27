@@ -138,6 +138,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/matmul.mojo", "Ownership, Borrowing, and Lifetimes"},
 		{"src/matmul.🔥", "Ownership, Borrowing, and Lifetimes"},
 		{"Models/main.m", "Indexing, Shapes, and Implicit Expansion"},
+		{"src/Counter.sol", "Checks-Effects-Interactions"},
+		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
+		{"contracts/token.vy", "Language Restrictions"},
+		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
 	}
 
 	for _, tt := range tests {
