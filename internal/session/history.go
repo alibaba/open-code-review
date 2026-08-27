@@ -116,11 +116,18 @@ type ResponseRecord struct {
 	Usage     *TokenUsage
 	// ReasoningContent is the model's reasoning/thinking text for this turn,
 	// when the provider exposed any (see llm.ChatResponse.ReasoningContent).
-	// This is the plain, human-readable projection for local audit/debugging
-	// — not the opaque replay state (llm.Message.Native) a later request
-	// needs to continue the conversation, which this record deliberately
-	// never carries.
+	// This is the plain, human-readable projection for local audit/debugging.
 	ReasoningContent string
+	// Native is the opaque replay state for this turn (see llm.NativeTurn) —
+	// e.g. an Anthropic thinking block with its signature, or an OpenAI
+	// Responses reasoning item with its encrypted_content. Unlike
+	// ReasoningContent's plain-text projection, this is the exact payload a
+	// later request needs to continue the conversation. copyMessages carries
+	// the same field into TaskRecord.RequestMessages and nativeTurnForJSON
+	// shapes it for the session JSONL, so both the in-memory record and the
+	// on-disk transcript can be replayed/exported losslessly. Nothing in this
+	// package parses or reshapes it.
+	Native llm.NativeTurn
 }
 
 // ToolResultRecord records the result of a tool call executed after the LLM response.
@@ -382,10 +389,12 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 	cp := make([]llm.Message, len(msgs))
 	for i, m := range msgs {
 		cp[i] = llm.Message{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  append([]llm.ToolCall(nil), m.ToolCalls...),
+			Role:             m.Role,
+			Content:          m.Content,
+			ToolCallID:       m.ToolCallID,
+			ToolCalls:        append([]llm.ToolCall(nil), m.ToolCalls...),
+			Native:           m.Native,
+			ReasoningContent: m.ReasoningContent,
 		}
 	}
 	return cp
@@ -394,19 +403,35 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 // copyMessagesForJSON produces a JSON-friendly slice for persistence.
 func copyMessagesForJSON(msgs []llm.Message) any {
 	type msg struct {
-		Role       string `json:"role"`
-		Content    any    `json:"content"`
-		ToolCallID string `json:"tool_call_id,omitempty"`
+		Role          string         `json:"role"`
+		Content       any            `json:"content"`
+		ToolCallID    string         `json:"tool_call_id,omitempty"`
+		ToolCalls     []llm.ToolCall `json:"tool_calls,omitempty"`
+		NativePayload any            `json:"native_payload,omitempty"`
 	}
 	out := make([]msg, 0, len(msgs))
 	for _, m := range msgs {
 		out = append(out, msg{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
+			Role:          m.Role,
+			Content:       m.Content,
+			ToolCallID:    m.ToolCallID,
+			ToolCalls:     m.ToolCalls,
+			NativePayload: nativeTurnForJSON(m.Native),
 		})
 	}
 	return out
+}
+
+// nativeTurnForJSON shapes an llm.NativeTurn into a JSON-marshalable value for
+// session persistence, or nil when the turn carries no replay state. Payload's
+// concrete type (an SDK request-param struct, or a plain string alias) is
+// already marshalable on its own terms — nothing here parses or reshapes it,
+// preserving fields like an Anthropic thinking block's signature verbatim.
+func nativeTurnForJSON(n llm.NativeTurn) any {
+	if n.Payload == nil {
+		return nil
+	}
+	return map[string]any{"family": n.Family, "payload": n.Payload}
 }
 
 // SetResponse records the LLM response in the most recent TaskRecord of the given type.
@@ -449,6 +474,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 		Model:            resp.Model,
 		Usage:            usage,
 		ReasoningContent: choice.Message.ReasoningContent,
+		Native:           resp.Native(),
 	}
 	tr.Duration = duration
 
@@ -462,7 +488,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 					"arguments": tc.Function.Arguments,
 				})
 			}
-			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration)
+			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration, nativeTurnForJSON(tr.Response.Native))
 		}
 	}
 }

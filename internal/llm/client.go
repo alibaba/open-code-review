@@ -80,12 +80,16 @@ type Message struct {
 	// from a ChatResponse. Zero value for every non-assistant message and for
 	// any assistant message built without one. Only the adapter that produced
 	// it — matched by a type assertion on Payload, never by Family — may reuse
-	// it; every other consumer (compression, session persistence, a different
-	// protocol's adapter) must ignore it and fall back to Content/ToolCalls.
-	// json:"-" because Payload can hold an arbitrarily large provider SDK
-	// struct: Message is JSON-tagged for the wire format, and letting Native
-	// ride along on an incidental direct marshal (a debug dump, a future
-	// persistence path) would be exactly the leak the comment above forbids.
+	// it for replay; every other consumer that just needs Content/ToolCalls
+	// (compression, a different protocol's adapter) must ignore it and fall
+	// back to those. json:"-" because Payload can hold an arbitrarily large
+	// provider SDK struct and Message is JSON-tagged for the wire format: an
+	// incidental direct marshal (a debug dump, a request body) must not carry
+	// it along. internal/session deliberately reaches past this tag — reading
+	// this field directly (and ChatResponse.Native() for a fresh response),
+	// never by marshaling Message itself — to persist it into the session
+	// transcript for offline replay/export; that is the one sanctioned
+	// exception to "ignore it and fall back".
 	Native NativeTurn `json:"-"`
 	// ReasoningContent is the plain, human-readable projection of this turn's
 	// reasoning — set alongside Native from the same ChatResponse, but usable
@@ -107,7 +111,10 @@ type Message struct {
 // or an OpenAI-compatible gateway's reasoning_content string. It must never be
 // parsed, edited, or reordered by anything other than the adapter that
 // produced it: those payloads are validated (signature) or only meaningful
-// (encrypted_content) to the exact provider that issued them.
+// (encrypted_content) to the exact provider that issued them. Persisting it
+// (internal/session writes Payload verbatim into the session transcript) is
+// fine precisely because nothing reads or reshapes it on the way there — it
+// goes to disk as the same value the adapter would replay, byte for byte.
 type NativeTurn struct {
 	// Family names the wire-format family that produced Payload
 	// ("anthropic-messages", "openai-chat-completions", "openai-responses").
@@ -296,7 +303,8 @@ type ResponseMessage struct {
 	// Native is the adapter-native replay state for this turn; see NativeTurn.
 	// json:"-" for the same reason as Message.Native: Payload can hold an
 	// arbitrarily large provider SDK struct that must never ride along on an
-	// incidental direct marshal of this type.
+	// incidental direct marshal of this type. internal/session reaches past
+	// this tag via Native()/ChatResponse.Native() to persist it deliberately.
 	Native NativeTurn `json:"-"`
 }
 

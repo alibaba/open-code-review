@@ -244,10 +244,12 @@ func (jw *jsonlWriter) WriteLLMRequest(filePath string, taskType TaskType, reque
 
 // WriteLLMResponse writes a response entry with model, content, reasoning,
 // tool calls, usage. reasoningContent is the plain audit-facing projection of
-// the model's reasoning for this turn (see ResponseRecord.ReasoningContent) —
-// not the opaque replay state a later request needs to continue the
-// conversation, which the session transcript never carries.
-func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content, reasoningContent string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration) string {
+// the model's reasoning for this turn (see ResponseRecord.ReasoningContent).
+// nativePayload is the opaque replay state for this turn (see
+// ResponseRecord.Native / llm.NativeTurn) already shaped for JSON by the
+// caller — nil when this turn carries none — and is written verbatim so
+// fields like an Anthropic thinking block's signature survive intact.
+func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content, reasoningContent string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration, nativePayload any) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -273,6 +275,9 @@ func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, cont
 	}
 	if reasoningContent != "" {
 		rec["reasoning_content"] = reasoningContent
+	}
+	if nativePayload != nil {
+		rec["native_payload"] = nativePayload
 	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
