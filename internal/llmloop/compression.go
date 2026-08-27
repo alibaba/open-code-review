@@ -63,19 +63,25 @@ type compressionState struct {
 	pendingJob *compressionJob
 }
 
+// messageTokens returns the rough token count of a single message: its
+// visible text plus whatever its Native replay payload (thinking blocks,
+// reasoning items, encrypted_content, reasoning_content) will add to the wire
+// once this message replays. ExtractText() never sees that payload, so every
+// caller that budgets against maxTokens must go through this helper rather
+// than calling llm.CountTokens(m.ExtractText()) directly — otherwise
+// reasoning-heavy conversations are systematically under-counted in one place
+// and not the other. See NativeTurn.EstimatedTokens.
+func messageTokens(m llm.Message) int {
+	return llm.CountTokens(m.ExtractText()) + m.Native.EstimatedTokens()
+}
+
 // CountMessagesTokens returns the rough token count of msgs by summing the
-// per-message text token count. Exported because both review and scan top
+// per-message token count. Exported because both review and scan top
 // layers may want it for pre-flight checks.
 func CountMessagesTokens(msgs []llm.Message) int {
 	var total int
 	for _, m := range msgs {
-		total += llm.CountTokens(m.ExtractText())
-		// Native's replay payload (thinking blocks, reasoning items,
-		// encrypted_content, reasoning_content) goes out on the wire once
-		// this message replays, but ExtractText() never sees it — without
-		// this, softLimit/warnLimit would systematically under-count
-		// reasoning-heavy conversations. See NativeTurn.EstimatedTokens.
-		total += m.Native.EstimatedTokens()
+		total += messageTokens(m)
 	}
 	return total
 }
@@ -113,9 +119,9 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 	count := 0
 	tokensUsed := 0
 	for i := len(rounds) - 1; i >= 0; i-- {
-		roundTokens := llm.CountTokens(messages[rounds[i].assistantIdx].ExtractText())
+		roundTokens := messageTokens(messages[rounds[i].assistantIdx])
 		for _, ti := range rounds[i].toolIdxs {
-			roundTokens += llm.CountTokens(messages[ti].ExtractText())
+			roundTokens += messageTokens(messages[ti])
 		}
 		if tokensUsed+roundTokens > budget {
 			break

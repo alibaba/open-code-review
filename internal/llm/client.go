@@ -43,6 +43,14 @@ var AppVersion = "dev"
 // shrink it, same as keyCmdTimeout.
 var bedrockConfigLoadTimeout = 60 * time.Second
 
+// defaultAnthropicMaxTokens is the max_tokens value buildAnthropicParams
+// falls back to when the caller leaves ChatRequest.MaxTokens unset. Extended
+// thinking's budget_tokens must stay strictly below whatever max_tokens is
+// actually sent, so the extra_body.thinking guard in CompletionsWithCtx
+// compares against this same default rather than the raw (possibly zero)
+// ChatRequest.MaxTokens.
+const defaultAnthropicMaxTokens = 8192
+
 func userAgent(provider string) string {
 	ua := "open-code-review/" + AppVersion
 	if provider != "" {
@@ -1307,7 +1315,11 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 			if req.ToolChoice == "required" {
 				continue
 			}
-			if budget, ok := anthropicThinkingBudgetTokens(v); ok && req.MaxTokens > 0 && budget >= int64(req.MaxTokens) {
+			effectiveMaxTokens := int64(req.MaxTokens)
+			if effectiveMaxTokens <= 0 {
+				effectiveMaxTokens = defaultAnthropicMaxTokens
+			}
+			if budget, ok := anthropicThinkingBudgetTokens(v); ok && budget >= effectiveMaxTokens {
 				continue
 			}
 		}
@@ -1442,7 +1454,7 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 
 	maxTokens := int64(req.MaxTokens)
 	if maxTokens <= 0 {
-		maxTokens = 8192
+		maxTokens = defaultAnthropicMaxTokens
 	}
 
 	params := anthropic.MessageNewParams{

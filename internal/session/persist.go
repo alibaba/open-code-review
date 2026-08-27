@@ -253,24 +253,26 @@ func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, cont
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
 	rec := map[string]any{
-		"uuid":              uuid,
-		"parentUuid":        jw.lastUUID,
-		"type":              "llm_response",
-		"sessionId":         jw.sessionID,
-		"timestamp":         time.Now().UTC().Format(time.RFC3339),
-		"filePath":          filePath,
-		"taskType":          string(taskType),
-		"model":             model,
-		"content":           content,
-		"reasoning_content": reasoningContent,
-		"tool_calls":        toolCalls,
-		"duration_ms":       duration.Milliseconds(),
+		"uuid":        uuid,
+		"parentUuid":  jw.lastUUID,
+		"type":        "llm_response",
+		"sessionId":   jw.sessionID,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		"filePath":    filePath,
+		"taskType":    string(taskType),
+		"model":       model,
+		"content":     content,
+		"tool_calls":  toolCalls,
+		"duration_ms": duration.Milliseconds(),
 		"usage": map[string]int{
 			"prompt_tokens":      usage.PromptTokens,
 			"completion_tokens":  usage.CompletionTokens,
 			"cache_read_tokens":  usage.CacheReadTokens,
 			"cache_write_tokens": usage.CacheWriteTokens,
 		},
+	}
+	if reasoningContent != "" {
+		rec["reasoning_content"] = reasoningContent
 	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
