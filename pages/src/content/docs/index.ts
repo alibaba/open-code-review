@@ -67,6 +67,9 @@ import koAgentSkill from './ko/integrations/agent-skill.md';
 import koClaudeCode from './ko/integrations/claude-code.md';
 import koCicd from './ko/integrations/ci.md';
 import koDelegate from './ko/integrations/delegate.md';
+import koCliReference from './ko/cli-reference.md';
+import koReviewRules from './ko/review-rules.md';
+import koTools from './ko/tools.md';
 
 // Russian docs (incremental — partial LocalizedDocs)
 import ruQuickstart from './ru/quickstart.md';
@@ -171,6 +174,9 @@ const koDocs: LocalizedDocs = {
   'claude-code': koClaudeCode,
   'cicd': koCicd,
   'delegate': koDelegate,
+  'cli-reference': koCliReference,
+  'review-rules': koReviewRules,
+  'tools': koTools,
 };
 
 const ruDocs: LocalizedDocs = {
