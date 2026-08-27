@@ -243,6 +243,37 @@ func TestFileFind_PathWithSubdirectory(t *testing.T) {
 	}
 }
 
+func TestFileFind_BasenamePrecisionAndFallback(t *testing.T) {
+	dir := setupFileFindRepo(t)
+	// Write an extra file under pkg/ that does NOT have 'util' in its basename
+	if err := os.WriteFile(filepath.Join(dir, "pkg", "helper.go"), []byte("package pkg\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := NewFileFind(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
+
+	// 1. Pure filename query "util" matches basename "util.go", staying precise
+	// without including "pkg/helper.go".
+	gotUtil, err := p.Execute(context.Background(), map[string]any{"query_name": "util"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotUtil, "pkg/util.go") {
+		t.Errorf("expected 'util' to match pkg/util.go, got: %s", gotUtil)
+	}
+	if strings.Contains(gotUtil, "pkg/helper.go") {
+		t.Errorf("expected 'util' not to match pkg/helper.go via basename matching, got: %s", gotUtil)
+	}
+
+	// 2. Subpath query "pkg/helper" matches nothing in basename pass, falls back to full relative path match.
+	gotSubpath, err := p.Execute(context.Background(), map[string]any{"query_name": "pkg/helper"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotSubpath, "pkg/helper.go") {
+		t.Errorf("expected 'pkg/helper' to match pkg/helper.go via fallback, got: %s", gotSubpath)
+	}
+}
+
 func TestShouldSkipFile(t *testing.T) {
 	tests := []struct {
 		path string

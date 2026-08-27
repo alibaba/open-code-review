@@ -54,20 +54,39 @@ func (p *FileFindProvider) Execute(ctx context.Context, args map[string]any) (st
 		queryCmp = strings.ToLower(query)
 	}
 
+	// 1. First pass: match against base filename (maintains precision for pure filename queries).
 	var matched []string
 	for _, f := range files {
-		// Match against the full relative path (forward slashes), which
-		// subsumes base-filename matching and enables directory-scoped
-		// queries such as `pkg/util` or `internal/diff`.
-		pathCmp := f
-		if !caseSensitive {
-			pathCmp = strings.ToLower(f)
+		base := f
+		if idx := strings.LastIndex(f, "/"); idx != -1 {
+			base = f[idx+1:]
 		}
-		if strings.Contains(pathCmp, queryCmp) {
+		baseCmp := base
+		if !caseSensitive {
+			baseCmp = strings.ToLower(base)
+		}
+		if strings.Contains(baseCmp, queryCmp) {
 			matched = append(matched, f)
 		}
 		if len(matched) >= fileFindMaxCount {
 			break
+		}
+	}
+
+	// 2. Fallback pass: if basename match returned no results, match against the full relative path
+	// (enables directory-scoped queries such as `pkg/util` or `internal/diff`).
+	if len(matched) == 0 {
+		for _, f := range files {
+			pathCmp := f
+			if !caseSensitive {
+				pathCmp = strings.ToLower(f)
+			}
+			if strings.Contains(pathCmp, queryCmp) {
+				matched = append(matched, f)
+			}
+			if len(matched) >= fileFindMaxCount {
+				break
+			}
 		}
 	}
 
