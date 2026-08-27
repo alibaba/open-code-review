@@ -64,6 +64,10 @@ type SessionHistory struct {
 	// Finalize, embedded into session_end and exposed to the CLI. Nil for
 	// legacy/scan runs.
 	finalManifest *RunManifest
+	// finalRetryReport is the frozen retry report handed back by the agent before
+	// Finalize and embedded into session_end. Nil is the common case: Freeze
+	// withholds a report unless something retried, failed or was cancelled.
+	finalRetryReport *llm.RetryReport
 	// persistInitErr records a failure to create the JSONL writer. The run may
 	// still produce a manifest for CLI output, but Finalize must report that the
 	// persisted-session outlet was never available.
@@ -219,6 +223,19 @@ func (sh *SessionHistory) FinalManifest() *RunManifest {
 	return &m
 }
 
+// SetFinalRetryReport stores the frozen retry report the agent produced, which
+// Finalize embeds into session_end. Passing nil leaves the field out, which is
+// what a run with nothing to report looks like. The report is frozen before it
+// gets here and never mutated, so it is stored by pointer rather than cloned.
+func (sh *SessionHistory) SetFinalRetryReport(r *llm.RetryReport) {
+	if sh == nil {
+		return
+	}
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	sh.finalRetryReport = r
+}
+
 // HasPersistence reports whether this session has a JSONL writer. A false value
 // means no resumable session file exists, even though the run still has its own
 // in-memory ID and may produce a CLI manifest.
@@ -324,6 +341,7 @@ func (sh *SessionHistory) Finalize() error {
 		p := sh.persist
 		persistInitErr := sh.persistInitErr
 		manifest := sh.finalManifest
+		retryReport := sh.finalRetryReport
 		duration := sh.EndTime.Sub(sh.StartTime)
 		filesReviewed := make([]string, 0, len(sh.FileSessions))
 		for fp := range sh.FileSessions {
@@ -341,7 +359,7 @@ func (sh *SessionHistory) Finalize() error {
 		// result is cached in finalizeErr. sync.Once guarantees every other
 		// caller blocks until this completes, then reads the same finalizeErr.
 		if p != nil {
-			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest)
+			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest, retryReport)
 		}
 	})
 	return sh.finalizeErr

@@ -81,6 +81,11 @@ type Args struct {
 	// LLM client for model inference.
 	LLMClient llm.LLMClient
 
+	// RetryCollector is the collector the LLMClient reports attempts to. The
+	// agent holds it only to freeze the report at the run boundary. Nil means
+	// this run persists none.
+	RetryCollector *llm.RetryCollector
+
 	// Tool registry mapping tool aliases to implementations.
 	Tools *tool.Registry
 
@@ -292,6 +297,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		if b := a.session.Manifest(); b != nil {
 			_ = b.SetRunFailure(session.RunFailureInput, "failed to resolve review input")
 		}
+		// Collector is empty here (no request issued yet); frozen anyway so a future
+		// path issuing requests before this exit cannot silently lose them.
+		a.freezeRetryReport()
 		manifestErr := a.finalizeManifest()
 		// Keep the load failure as the primary cause, but never drop a persistence
 		// failure: a run that could not even write its failed session_end must
@@ -328,6 +336,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		// run_failure), which is the correct terminal state for "nothing to do".
 		// A persistence failure here is still a delivery error — a clean skip
 		// cannot be claimed if its session_end never reached disk.
+		// Empty here too: grouping and every task run after this point.
+		a.freezeRetryReport()
 		manifestErr := a.finalizeManifest()
 		if ferr := a.session.Finalize(); ferr != nil {
 			manifestErr = errors.Join(manifestErr, fmt.Errorf("finalize session: %w", ferr))
@@ -385,6 +395,8 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// and be discarded wholesale. Cheap in the normal case — every job has
 	// already been cancelled by now.
 	a.runner.WaitBackground()
+	// Every request is finalized now, so the report can be frozen.
+	a.freezeRetryReport()
 	// Freeze coverage into the immutable manifest before session_end embeds it,
 	// so the CLI and the persisted session serialize the identical object. A
 	// persistence failure is a delivery error in its own right: when the review
@@ -1254,6 +1266,28 @@ func (a *Agent) finalizeManifest() error {
 	}
 	a.session.SetFinalManifest(&m)
 	return nil
+}
+
+// freezeRetryReport freezes this run's retry report into the session. Every
+// terminal path calls it just before finalizeManifest, and the normal path only
+// after WaitBackground: a request still in flight is un-finalized, and Freeze
+// discards the whole report over one such entry.
+//
+// A nil report is the ordinary outcome — Freeze withholds one unless something
+// retried, failed or was cancelled. An error means the collector's invariants
+// were violated, so the report contradicts itself and is published nowhere.
+func (a *Agent) freezeRetryReport() {
+	if a.args.RetryCollector == nil {
+		return
+	}
+	// The in-memory UUID, not a.SessionID(), which is "" when persistence failed:
+	// logical_request_id must stay unique per run, and Freeze rejects an empty
+	// run_id.
+	rep, err := a.args.RetryCollector.Freeze(a.session.SessionID)
+	if err != nil {
+		return
+	}
+	a.session.SetFinalRetryReport(rep)
 }
 
 func resumedFromSession(resume *session.ResumeState) string {

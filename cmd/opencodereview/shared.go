@@ -188,7 +188,8 @@ type llmRuntime struct {
 	// built before either exists, and it is per-run rather than package-level so
 	// two runs in one process cannot share data. scan gets one too; its requests
 	// carry no RequestMeta, so every attempt is dropped and the frozen report is
-	// nil.
+	// nil. The review path hands it to the agent for the pre-session_end snapshot;
+	// the command takes the equal output snapshot after Run. scan never freezes.
 	RetryCollector *llm.RetryCollector
 	AppCfg         *Config
 	// RuntimeConfig holds the allowlisted, non-secret runtime settings (protocol,
