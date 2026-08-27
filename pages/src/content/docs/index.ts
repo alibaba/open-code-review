@@ -59,17 +59,23 @@ import jaDelegate from './ja/integrations/delegate.md';
 import jaContributing from './ja/contributing.md';
 import jaFaq from './ja/faq.md';
 
-// Korean docs (incremental — partial LocalizedDocs)
+// Korean docs
 import koQuickstart from './ko/quickstart.md';
 import koInstallation from './ko/installation.md';
 import koConfiguration from './ko/configuration.md';
+import koCliReference from './ko/cli-reference.md';
+import koReviewRules from './ko/review-rules.md';
+import koArchitecture from './ko/architecture.md';
+import koTools from './ko/tools.md';
+import koMcp from './ko/mcp.md';
+import koViewer from './ko/viewer.md';
+import koTelemetry from './ko/telemetry.md';
 import koAgentSkill from './ko/integrations/agent-skill.md';
 import koClaudeCode from './ko/integrations/claude-code.md';
 import koCicd from './ko/integrations/ci.md';
 import koDelegate from './ko/integrations/delegate.md';
-import koCliReference from './ko/cli-reference.md';
-import koReviewRules from './ko/review-rules.md';
-import koTools from './ko/tools.md';
+import koContributing from './ko/contributing.md';
+import koFaq from './ko/faq.md';
 
 // Russian docs (incremental — partial LocalizedDocs)
 import ruQuickstart from './ru/quickstart.md';
@@ -166,17 +172,23 @@ const jaDocs: Record<DocSlug, string> = {
   'faq': jaFaq,
 };
 
-const koDocs: LocalizedDocs = {
+const koDocs: Record<DocSlug, string> = {
   'quickstart': koQuickstart,
   'installation': koInstallation,
   'configuration': koConfiguration,
+  'cli-reference': koCliReference,
+  'review-rules': koReviewRules,
+  'architecture': koArchitecture,
+  'tools': koTools,
+  'mcp': koMcp,
+  'viewer': koViewer,
+  'telemetry': koTelemetry,
   'agent-skill': koAgentSkill,
   'claude-code': koClaudeCode,
   'cicd': koCicd,
   'delegate': koDelegate,
-  'cli-reference': koCliReference,
-  'review-rules': koReviewRules,
-  'tools': koTools,
+  'contributing': koContributing,
+  'faq': koFaq,
 };
 
 const ruDocs: LocalizedDocs = {
@@ -202,7 +214,6 @@ const docsMap: Record<Language, LocalizedDocs> = {
   en: enDocs,
   zh: zhDocs,
   ja: jaDocs,
-  // Korean docs are translated incrementally; untranslated pages fall back to English per-page.
   ko: koDocs,
   ru: ruDocs,
 };

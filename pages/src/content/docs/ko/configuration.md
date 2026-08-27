@@ -10,9 +10,9 @@ sidebar:
 - **커맨드라인** — `ocr config set <key> <value>`. 스크립트와 CI에 적합합니다.
 - **직접 편집(권장하지 않음)** — JSON 파일을 직접 수정합니다(다음 `ocr config set` 기록 때 다시 포맷됩니다).
 
-## 모델 설정
+## 모델 설정 {#configuring-a-model}
 
-### 권장: 대화형 설정
+### 권장: 대화형 설정 {#recommended-interactive-setup}
 
 ```bash
 ocr config provider
@@ -24,7 +24,7 @@ ocr config provider
 ocr config model
 ```
 
-### 비대화형 설정 (CI / TUI가 없는 환경)
+### 비대화형 설정 (CI / TUI가 없는 환경) {#non-interactive-setup-ci-no-tui-environments}
 
 `ocr config set`으로 같은 설정 파일에 기록합니다:
 
@@ -34,7 +34,7 @@ ocr config set model                       claude-opus-4-6
 ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ```
 
-### 내장 프로바이더
+### 내장 프로바이더 {#built-in-providers}
 
 다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 선택한 뒤 API 키만 채우면 됩니다. `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다.
 
@@ -64,7 +64,7 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | `novita` | openai | `https://api.novita.ai/openai` | `NOVITA_API_KEY` |
 | `xai` | openai | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
-### 내장 프로바이더의 Base URL 재정의
+### 내장 프로바이더의 Base URL 재정의 {#overriding-a-built-in-provider-s-base-url}
 
 모든 내장 프로바이더에는 미리 설정된 Base URL이 있습니다(위 표 참고). 내장 프로바이더를 다른 엔드포인트로 보내려면 `providers.<name>.url`을 설정합니다(예: 자체 호스팅 LiteLLM 게이트웨이는 미리 설정된 기본값 `http://localhost:4000/v1`에 있는 경우가 드뭅니다):
 
@@ -77,7 +77,7 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 
 설정한 `url`이 미리 설정된 Base URL보다 우선합니다. `providers.<name>.url`이 비어 있으면(또는 지우면) OCR은 기본값으로 돌아가므로, 엔드포인트가 다를 때만 설정하면 됩니다.
 
-### AWS Bedrock
+### AWS Bedrock {#aws-bedrock}
 
 `bedrock`은 `anthropic`과 같은 Messages API를 사용하지만, 요청에 API 키를 싣는 대신 표준 AWS 자격 증명 체인으로 SigV4 서명을 하며 호스트는 리전이 결정합니다. 설정할 `api_key`가 없고, 서명을 대신할 키도 받지 않습니다:
 
@@ -109,7 +109,7 @@ Model:  claude-sonnet-5
 
 Bedrock은 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습니다**. 이 블록은 URL 하나와 토큰 하나를 기술하는 구조라 리전이나 프로필을 담을 자리가 없고, bedrock은 이 블록이 담는 두 값 중 어느 것도 쓰지 않습니다. 그래서 이 조합은 받아들인 뒤 무시하는 대신 거부합니다.
 
-### 커스텀 프로바이더
+### 커스텀 프로바이더 {#custom-providers}
 
 위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock` 중 하나):
 
@@ -155,7 +155,7 @@ ocr config set custom_providers.ollama.api_key   ollama
 
 Ollama는 API 키를 무시하지만 커스텀 프로바이더에는 비어 있지 않은 `api_key`가 필요하므로(커스텀 프로바이더에는 환경 변수 대체가 없음) 아무 자리 표시자 값이나 설정하세요. 모델 자체는 네이티브 도구 호출을 지원해야 합니다. 모델을 고르기 전에 FAQ의 ["No tool calls parsed" (local models / Ollama)](../faq/#no-tool-calls-parsed-local-models-ollama)를 참고하세요.
 
-### 타임아웃
+### 타임아웃 {#timeouts}
 
 LLM 요청마다 HTTP 타임아웃이 있으며 기본값은 **300초**입니다. 느린 로컬 모델(또는 큰 파일)에는 더 필요할 수 있습니다. 범위가 좁은 것부터 세 가지 설정이 있습니다:
 
@@ -173,7 +173,7 @@ LLM 요청마다 HTTP 타임아웃이 있으며 기본값은 **300초**입니다
 }
 ```
 
-### 명령으로 API 키 가져오기
+### 명령으로 API 키 가져오기 {#api-key-from-a-command}
 
 키를 설정 파일에 저장하는 대신 `api_key_cmd`가 실행 시점에 비밀 관리자(1Password, `pass`, `gopass` 등)에서 가져옵니다. 앞뒤 공백을 제거한 한 줄짜리 stdout이 키가 됩니다. 레거시 `llm` 블록에서는 같은 옵션을 `auth_token_cmd`로 사용할 수 있습니다.
 
@@ -201,7 +201,7 @@ Windows에서는 명령이 `sh`가 아니라 `cmd.exe`로 실행되므로 한쪽
 
 값이 셸 명령으로 실행되므로 `config.json`은 신뢰된 입력입니다. 소유자를 본인으로 유지하고 다른 사용자가 쓸 수 없게 하세요(OCR은 `0600` 권한으로 기록합니다).
 
-### 추가 재시도 상태 코드
+### 추가 재시도 상태 코드 {#additional-retry-status-codes}
 
 일부 LLM 프로바이더는 일시적 오류에 비표준 4xx 상태 코드를 사용합니다. 예를 들어 레이트 리밋에 `403`이나 `400`을 반환하기도 합니다. `retry_codes`를 설정하면 OCR이 기존 SDK 재시도 메커니즘으로 이런 요청을 재시도합니다.
 
@@ -214,7 +214,7 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 
 4xx HTTP 상태 코드만 허용됩니다. `408`, `409`, `429`는 SDK가 이미 재시도합니다. 설정 파일에서 읽을 때 이런 중복 코드는 무시되며, `ocr config set`으로 전달하면 OCR이 경고를 출력하고 저장 값에서 제외합니다. 5xx 응답은 모두 SDK가 이미 재시도하므로 `retry_codes`에 추가할 수 없습니다.
 
-### 프롬프트 상한
+### 프롬프트 상한 {#prompt-limit}
 
 `max_tokens`는 리뷰 단위 하나에 대한 **프롬프트**(입력) 상한입니다. 그 단위는 `ocr review`에서는 파일 그룹, `ocr scan`에서는 파일 하나입니다. 내장 템플릿의 기본값은 `ocr review` 200,000토큰, `ocr scan` 58,888토큰입니다. 컨텍스트 윈도가 다른 모델에서는 `max_tokens`를 저장해 바꿉니다:
 
@@ -231,7 +231,7 @@ ocr scan --max-tokens 400000
 
 실행별 플래그가 `max_tokens`보다 우선하고, 둘 다 없으면 OCR은 내장 작업 템플릿 기본값을 사용합니다. 이 상한은 모델의 **출력** 상한(`MAX_COMPLETION_TOKENS`, 두 템플릿 모두 `16384`)이나 실행 전체 토큰 사용량을 제한하는 `--max-tokens-budget`과는 별개입니다. `ocr config unset max_tokens`로 내장 기본값을 복원합니다.
 
-### 리뷰 강도(effort)
+### 리뷰 강도(effort) {#review-effort}
 
 `effort`는 파일 그룹마다 리뷰를 몇 라운드 돌릴지 정합니다. `low` = 1라운드, `medium`(기본값) = 2라운드, `high` = 3라운드입니다. 라운드가 늘어나면 더 많은 문제를 찾지만 비용도 그만큼 늘어납니다.
 
@@ -242,17 +242,17 @@ ocr config unset effort      # 기본값 medium으로 복귀
 
 `--effort low|medium|high`는 한 번의 실행에 한해 저장된 값을 재정의합니다.
 
-### 연결 검증
+### 연결 검증 {#verify-connectivity}
 
 ```bash
 ocr llm test
 ```
 
-### 기존 환경 변수 재사용
+### 기존 환경 변수 재사용 {#reuse-existing-environment-variables}
 
 Claude Code의 `ANTHROPIC_*` 또는 OCR 자체의 `OCR_LLM_*` 환경 변수를 이미 설정해 두었다면 OCR이 자동으로 인식합니다. 설정 파일이 필요 없습니다.
 
-### CC-Switch 사용
+### CC-Switch 사용 {#using-cc-switch}
 
 [CC-Switch](https://github.com/farion1231/cc-switch)를 [라우팅 서비스](https://www.ccswitch.io/en/docs?section=proxy&item=service)와 함께 사용 중이라면, 프로바이더 `url`을 로컬 프록시로 향하게 하면 됩니다. 다른 설정은 필요 없습니다:
 
@@ -266,7 +266,7 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 
 `api_key`는 아무 값이어도 됩니다. `extra_body`(및 다른 프로바이더별 필드)는 평소처럼 적용됩니다.
 
-### 벤더 고유 필드 전송
+### 벤더 고유 필드 전송 {#send-vendor-specific-fields}
 
 일부 프로바이더는 비표준 요청 필드를 요구합니다(Bedrock 스타일의 `thinking` 등). 소스를 고치지 않고 보내려면 모든 요청에 병합되는 `extra_body`를 사용합니다:
 
@@ -274,7 +274,7 @@ ocr config set providers.<name>.url http://127.0.0.1:15721/v1
 ocr config set providers.anthropic.extra_body '{"thinking":{"type":"disabled"}}'
 ```
 
-### 프롬프트 캐싱을 위한 세션 어피니티
+### 프롬프트 캐싱을 위한 세션 어피니티 {#session-affinity-for-prompt-caching}
 
 OCR은 LLM 대화마다 리뷰 세션과 그 안의 작업 범위로 한정된 프롬프트 캐시 어피니티 키(`<session-id>-<task-type>-<scope-hash>`)를 만듭니다. 프롬프트 캐시는 접두사로 매칭되므로, 대화별 키는 실행 전체를 핫 키 하나에 고정하는 대신 늘어나는 각 대화(파일 하나의 리뷰 도구 루프 등)를 일관된 캐시 노드에 붙잡아 둡니다. 세션 ID 접두사 덕분에 프로바이더 쪽 캐시 로그를 `ocr session` 기록과 대조할 수 있습니다.
 
@@ -288,7 +288,7 @@ ocr config set providers.openai.extra_body '{"prompt_cache_key": "{ocr_session_k
 ocr config set custom_providers.my-gateway.extra_headers "x-session-affinity={ocr_session_key}"
 ```
 
-## 리뷰 언어 설정
+## 리뷰 언어 설정 {#configuring-the-review-language}
 
 `language`는 리뷰 코멘트를 어떤 언어로 쓸지 정합니다. 비어 있으면 기본값은 영어입니다:
 
@@ -297,7 +297,7 @@ ocr config set language 中文
 ocr config set language English
 ```
 
-## 관련 문서
+## 관련 문서 {#see-also}
 
 - [빠른 시작](../quickstart/) — 최소 설정과 첫 리뷰.
 - [CLI 레퍼런스](../cli-reference/) — review 명령이 받는 모든 플래그.
