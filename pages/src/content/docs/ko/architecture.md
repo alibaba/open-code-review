@@ -26,8 +26,8 @@ flowchart TD
 전체 흐름을 지휘하는 코드는
 [`internal/agent/`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/)
 패키지에 있습니다. 주요 파일은 `agent.go`(디스패치와 그룹별 오케스트레이션),
-`grouping.go`(의미 기반 파일 그룹화), `preview.go`(파일 필터), `util.go`(헬퍼)
-입니다. 도구 호출 루프와 메모리 압축은 그 옆의
+`grouping.go`(의미 기반 파일 그룹화), `preview.go`(파일 필터), `util.go`(헬퍼)입니다.
+도구 호출 루프와 메모리 압축은 그 옆의
 [`internal/llmloop/`](https://github.com/alibaba/open-code-review/blob/main/internal/llmloop/)에
 있습니다. 진입점은 두 개가 중요합니다. `Agent.Run`(파이프라인 최상단)과
 `Agent.dispatchSubtasks`(그룹별 팬아웃)입니다.
@@ -45,8 +45,8 @@ flowchart TD
 | `Range` | `--from <a> --to <b>` | `merge-base(a, b)..b` |
 
 diff마다 옛/새 경로, 옛/새 hunk, 추가·삭제 줄 수, 바이너리 여부, 이름 변경
-감지 결과가 함께 실립니다. `DiffContextLines`는 **3**으로 고정돼 있으며,
-Git이 쓰는 기본값과 같습니다.
+감지 결과가 함께 실립니다. `DiffContextLines`는 **3**으로 고정돼 있으며 Git이 쓰는
+기본값과 같습니다.
 
 추적되지 않는 파일은 디스크에서 읽어 파일 전체가 추가된 것으로 다룹니다.
 그래서 커밋 전에도 리뷰됩니다.
@@ -65,8 +65,8 @@ default_path    — matched a built-in test-file exclude pattern
 ```
 
 파일을 남기기로 했다면 빈 문자열을 반환합니다. `deleted`는 `whyExcluded`가
-반환하지 **않습니다**. 남긴 파일의 diff가 `IsDeleted`로 표시될 때 이후
-`Preview()`에서 계산합니다. 관문은 이 순서로 돕니다.
+반환하지 **않습니다**. 남긴 파일의 diff가 `IsDeleted`로 표시되면 그다음에
+`Preview()`가 계산합니다. 관문은 이 순서로 돕니다.
 
 1. `binary` — 바이너리 파일을 가장 먼저 버립니다.
 2. `user_exclude` — 프로젝트의 `exclude`가 언제나 이깁니다.
@@ -107,7 +107,7 @@ diff 프로바이더 단계에서, `internal/diff/git.go`의 `providerDirIgnoreD
 | 토큰 예산 | 그룹의 diff 합이 프롬프트 상한을 넘으면 파일당 그룹 하나로 되돌립니다. |
 | 커버리지 | 모델이 배정하지 못한 파일은 각자 단독 그룹이 됩니다. |
 
-그룹화는 어디까지나 최선을 다하는 최적화일 뿐 정확성을 좌우하는 관문이
+그룹화는 잘되면 좋은 최적화일 뿐 정확성을 좌우하는 관문이
 아닙니다. 호출이 실패하거나 응답이 비었거나 파싱되지 않으면 경고를 남기고
 파일당 그룹 하나로 디스패치합니다. 예전 동작 그대로입니다. 어떻게 묶였는지는
 JSON 출력에도 함께 실립니다.
@@ -122,7 +122,7 @@ OCR은 그룹마다 서브 Agent를 하나씩 띄웁니다. 서브 Agent는 각�
 
 ### 1단계 — Plan (선택) {#phase-1-plan-optional}
 
-plan 단계를 켤지는 `Template.PlanRequired`가 정하며, 임계값 두 개를 함께
+plan 단계를 켤지는 `Template.PlanRequired`가 정하며 임계값 두 개를 함께
 봅니다.
 
 ```go
@@ -131,8 +131,8 @@ if maxFileChanged >= PlanModeLineThreshold           { plan }  // one big rewrit
 if fileCount >= 2 && total >= PlanModeGroupLineThreshold { plan }  // several moderate files
 ```
 
-파일 단위 임계값은 크게 갈아엎은 파일 하나를 잡아내고, 그룹 임계값은 각각은
-적당하지만 합치면 구조적인 안내가 필요한 여러 파일을 잡아냅니다. 그룹
+파일 단위 임계값은 크게 갈아엎은 파일 하나를 잡아내고, 그룹 임계값은 하나하나는
+적당해도 합치면 구조적인 안내가 필요해지는 여러 파일을 잡아냅니다. 그룹
 임계값을 일부러 더 크게 잡은 것은, 파일이 여럿인 그룹에서 plan 단계가 늘
 켜지는 일을 막기 위해서입니다.
 
@@ -189,15 +189,15 @@ main 루프는 한 번만 도는 게 아니라 그룹마다 최대 `MAX_REVIEW_R
 
 두 번째 라운드부터는 앞선 라운드에서 이미 확정된 지적을
 `{{confirmed_comments}}`로 넣어 `MAIN_TASK`를 다시 돌리되, plan은
-**빼고** 돌립니다. 뻔한 문제를 한 번 훑고 나면 plan이 오히려 커버리지의
-천장으로 작용하는 경향이 있기 때문입니다. 라운드는 새로 나온 지적이 없거나,
+**빼고** 돌립니다. 뻔한 문제를 한 번 훑고 나면 plan이 오히려 커버리지 천장
+노릇을 하기 쉽기 때문입니다. 라운드는 새로 나온 지적이 없거나,
 확정 코멘트 상한에 닿았거나, 누적 토큰 예산(`--max-tokens-budget`)이 바닥나면
 일찍 멈춥니다.
 
 ## 메모리 압축 {#memory-compression}
 
 도구 호출 루프가 길어지면 언젠가는 컨텍스트 윈도가 넘칩니다. OCR은
-`MAX_TOKENS = 200000`으로 정의된 프롬프트 예산을 기준으로 도는 **세 구역
+`MAX_TOKENS = 200000`으로 정의된 프롬프트 예산에 걸려 발동하는 **세 구역
 분할** 전략으로 이를 관리합니다.
 
 | 임계값 | 상수 | 동작 |
@@ -277,10 +277,10 @@ main 도구 호출 루프가 후처리 때문에 멈춰 서는 일이 없습니�
    조각을 다시 짚어 달라고 요청합니다. `existing_code`가 원문 그대로가 아니라
    조금 바꿔 쓰인 경우에 쓸모가 있습니다.
 3. **리뷰 필터** — main 루프가 끝나고 워커 풀이 비면 `REVIEW_FILTER_TASK` LLM
-   호출이 모인 코멘트를 diff와 대조해, 틀렸음이 분명한 것을 걷어 냅니다.
+   호출로 모인 코멘트를 diff와 대조해 틀렸음이 분명한 것을 걷어 냅니다.
    여기서 나는 오류는 기록만 하고 넘어갑니다.
 4. **라인 해석 두 번째 패스** — `Agent.Run`이 반환되고 나면 최상위 명령이
-   코멘트 전체에 대해 `diff.ResolveLineNumbers`를 다시 돌립니다
+   코멘트 전체를 대상으로 `diff.ResolveLineNumbers`를 다시 돌립니다
    (`cmd/opencodereview/review_cmd.go` 참고). `existing_code`가 여러 파일에
    걸치거나 재배치 단계에서 바뀐 코멘트를 잡아내기 위해서입니다.
 5. **렌더링** — `--format`에 따라 텍스트나 JSON으로 출력합니다.
@@ -297,9 +297,9 @@ if countMessagesTokens(messages) > tokenLimit {
 }
 ```
 
-덕분에 괴물 같은 diff(자동 생성된 lock 파일, 수천 줄을 건드리는 리팩터링)를
-요청 비용이 들기 전에 걸러 냅니다. 건너뛴 그룹은 치명적이지 않은 경고로 stdout에
-보고되고 JSON `warnings` 배열에도 들어갑니다.
+OCR은 이 검사로 괴물 같은 diff(자동 생성된 lock 파일, 수천 줄을 건드리는
+리팩터링)를 요청 비용이 들기 전에 걸러 냅니다. 건너뛴 그룹은 치명적이지 않은
+경고로 stdout에 보고되고 JSON `warnings` 배열에도 들어갑니다.
 
 두 번째 검사는 `filterLargeDiffs`에서 돕니다. diff만으로 `MAX_TOKENS`의 80%를
 넘으면 그룹화와 디스패치가 시작되기도 전에 걸러 냅니다. 세 번째 방어선은
@@ -319,7 +319,7 @@ if countMessagesTokens(messages) > tokenLimit {
 | `REVIEW_FILTER_TASK` | 루프가 끝난 뒤 틀렸음이 분명한 코멘트를 걷어 냅니다. |
 | `RE_LOCATION_TASK` | `existing_code`를 맞추지 못한 코멘트의 위치를 다시 짚습니다. |
 
-프롬프트는 저마다 `{role, prompt_file}` 참조의 목록이고, 이 참조는 템플릿
+프롬프트는 저마다 `{role, prompt_file}` 참조 목록이고, 이 참조는 템플릿
 디렉터리의 `.md` 파일을 가리킵니다(예:
 `{"role": "system", "prompt_file": "main_task_system.md"}`). 로드 시점에
 `resolveConversation`이 그 파일들을 읽어 메모리상의 `{role, content}` 메시지로
@@ -327,7 +327,7 @@ if countMessagesTokens(messages) > tokenLimit {
 
 | 플레이스홀더 | 치환되는 내용 |
 |---|---|
-| `{{system_rule}}` | 4계층 체인에서 해석한 규칙 본문을 그룹의 파일 전체에 대해 합친 것. |
+| `{{system_rule}}` | 4계층 체인에서 해석한 규칙 본문을 그룹의 파일 전체에 걸쳐 합친 것. |
 | `{{change_files}}` | 이 그룹 *바깥*에 있는 PR의 변경 파일 전체의 상태와 경로. |
 | `{{diffs}}` | 그룹의 diff. 파일 하나당 XML 요소 하나. |
 | `{{plan_guidance}}` | plan 단계의 출력. plan을 건너뛰었거나 2라운드 이후면 제거됩니다. |
@@ -376,9 +376,9 @@ if countMessagesTokens(messages) > tokenLimit {
 전체를 감싸는 `review.run`, diff 로딩을 감싸는 `diff.parse`, 그리고 리뷰한
 그룹마다 하나씩 생기는 `subtask.execute.group.<group-key>`입니다. 여기에 결정
 지점마다 짧게 생겼다 사라지는 `event.<name>` 스팬(`plan.skipped`,
-`token.threshold.exceeded`, `subtask.error` 등)이 더해집니다. LLM 왕복과 도구 호출은 스팬이 아니라
-메트릭으로만 기록됩니다. 프롬프트와 응답 내용은 텔레메트리에 **절대** 실리지
-않습니다. `OCR_CONTENT_LOGGING` 플래그는 배선만 돼 있고 지금은 동작하지
+`token.threshold.exceeded`, `subtask.error` 등)이 더해집니다. LLM 왕복과 도구
+호출은 스팬이 아니라 메트릭으로만 기록됩니다. 프롬프트와 응답 내용은 텔레메트리에
+**절대** 실리지 않습니다. `OCR_CONTENT_LOGGING` 플래그는 배선만 돼 있고 지금은 동작하지
 않습니다. 전체 스키마는 [텔레메트리](../telemetry/)를 참고하세요.
 
 ## 자동화하지 *않은* 것 {#what-s-not-automated}
@@ -386,7 +386,7 @@ if countMessagesTokens(messages) > tokenLimit {
 일부러 사람 손에 남겨 둔 결정이 몇 가지 있습니다.
 
 - **엔드포인트 탐색에는 대안이 없습니다.** 설정과 환경 변수, rc 파일을 다
-  뒤져도 `(URL, 토큰, 모델)` 세 값이 완전히 채워지지 않으면 OCR은 넘겨짚지
+  뒤져도 `(URL, token, model)` 세 값이 완전히 채워지지 않으면 OCR은 넘겨짚지
   않고 0이 아닌 코드로 종료합니다.
 - **서브 Agent 실패는 격리할 뿐 재시도하지 않습니다.** 그룹 하나가 실패하면
   경고를 남기고 나머지는 계속 갑니다. 재시도는 Agent가 아니라 그것을 감싸는

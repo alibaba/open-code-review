@@ -20,8 +20,8 @@ ANTHROPIC_MODEL must be set
 
 OCR이 엔드포인트 해석 체인을 끝까지
 돌았는데도([설정](../configuration/#reuse-existing-environment-variables))
-`(URL, 토큰, 모델)` 세 값이 다 갖춰진 조합을 찾지 못했다는 뜻입니다. 셋 중 하나를
-하세요.
+`(URL, token, model)` 세 값이 다 갖춰진 조합을 찾지 못했다는 뜻입니다. 다음 중
+하나를 택하세요.
 
 - `ocr config set llm.url …` / `llm.auth_token …` / `llm.model …`을 실행해
   `~/.opencodereview/config.json`을 채우거나,
@@ -35,12 +35,12 @@ OCR이 엔드포인트 해석 체인을 끝까지
 
 OCR은 세 값이 다 갖춰진 **첫 번째** 조합을 씁니다. 마지막이 아닙니다. 그래서
 설정 파일에 llm.* 키 세 개가 모두 있으면 환경 변수는 무시됩니다. 환경 변수가
-이기게 하려면 설정 키를 지우거나(파일을 `rm` 하거나 직접 unset) `ocr config
-set`으로 새 값으로 바꾸세요.
+이기게 하려면 설정 키를 지우거나(파일을 `rm` 하거나 직접 unset)
+`ocr config set`으로 새 값으로 바꾸세요.
 
 ### `ocr llm test`에서 401 / 403이 날 때 {#401-403-from-ocr-llm-test}
 
-토큰에 권한이 없거나, 만료됐거나, 다른 벤더의 것입니다. Anthropic과 OpenAI는 인증
+토큰에 권한이 없거나, 만료됐거나, 벤더가 다릅니다. Anthropic과 OpenAI는 인증
 헤더도 URL 모양도 다릅니다. `llm.use_anthropic`이 지금 가리키는 URL과 맞는지
 확인하세요.
 
@@ -84,8 +84,9 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 통과: 응답에 `report_bug`를 지목하는 구조화된 `tool_calls` 배열이 들어 있습니다.
 실패: "호출"이 `content` 안에 텍스트로 나옵니다.
 
-도구를 지원하는 모델인데 로컬 하드웨어에서 응답이 느린 것이라면, 대신 LLM
-제한 시간을 늘리세요. [제한 시간](../configuration/#timeouts)을 참고하세요.
+도구를 지원하는 모델인데 로컬 하드웨어에서 응답이 느린 것이라면 모델을 바꾸지
+말고 LLM 제한 시간을 늘리세요. [제한 시간](../configuration/#timeouts)을
+참고하세요.
 
 ## 필터링과 규칙 {#filtering-rules}
 
@@ -114,8 +115,8 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 
 ### 제가 만든 규칙이 안 걸립니다 {#my-custom-rule-isn-t-firing}
 
-`ocr rules check <file-path>`를 돌려 보세요. 어느 **계층**의 어떤 **glob
-패턴**이 걸렸는지 처음부터 끝까지 보여 줍니다.
+`ocr rules check <file-path>`를 돌려 보세요. 어느 **계층**의 어떤
+**glob 패턴**이 걸렸는지 처음부터 끝까지 보여 줍니다.
 
 ```
 File: src/api/UserHandler.go
@@ -147,7 +148,7 @@ Rule: …
 - `main_task` 카드가 아예 없다면 → 리뷰 전에 걸러진 것입니다. 위의
   [필터링과 규칙](#filtering-rules)을 참고하세요.
 
-### 코멘트의 `start_line`과 `end_line`이 `0`입니다 {#comments-have-startline-0-and-endline-0}
+### 코멘트에 `start_line: 0`, `end_line: 0`이 찍힙니다 {#comments-have-startline-0-and-endline-0}
 
 OCR이 코멘트를 diff의 정확한 줄에 붙이지 못했다는 뜻입니다. 흔한 원인은 둘입니다.
 
@@ -171,8 +172,8 @@ OCR이 코멘트를 diff의 정확한 줄에 붙이지 못했다는 뜻입니다
 갑니다. JSON 모드에서는 `warnings`에도 나옵니다.
 
 `MAX_TOKENS`는 **프롬프트** 상한일 뿐입니다. 모델의 출력은
-`MAX_COMPLETION_TOKENS`(`16384`)가 따로 제한하므로, 이 경고는 언제나 입력 크기에
-대한 것입니다.
+`MAX_COMPLETION_TOKENS`(`16384`)가 따로 제한하므로 이 경고는 언제나 입력 크기
+때문에 납니다.
 
 이렇게 줄일 수 있습니다.
 
@@ -204,15 +205,16 @@ OCR이 코멘트를 diff의 정확한 줄에 붙이지 못했다는 뜻입니다
 
 모델이 `task_done`을 부르지 않은 채 도구 호출 라운드 100회
 (`MAX_TOOL_REQUEST_TIMES`)를 다 썼다는 뜻입니다. 그때까지 나온 코멘트는 그대로
-모아 출력합니다. 이 일이 대부분의 그룹에서 벌어진다면 원인은 대개 다음
-중 하나입니다.
+모아 출력합니다. 이 일이 대부분의 그룹에서 벌어진다면 원인은 대개
+다음 중 하나입니다.
 
 - 모델이 "끝나면 `task_done`을 부르라"는 지시를 잘 따르지 못합니다. 더 강한
   모델로 바꾸세요(예: Claude Opus).
 - 어떤 도구가 계속 오류를 내고 모델이 계속 재시도합니다. 세션 JSONL을 보세요.
   같은 도구 결과가 반복된다면 그것이 원인입니다.
-- 그룹이 정말로 크거나 맥락이 많아 100라운드로는 모자랍니다. `--max-tools <n>`
-  으로 상한을 올리세요(예: `--max-tools 150`). 이 플래그는 상한을 *올리기만*
+- 그룹이 정말로 크거나 맥락이 많아 100라운드로는 모자랍니다.
+  `--max-tools <n>`으로 상한을 올리세요(예: `--max-tools 150`). 이 플래그는
+  상한을 *올리기만*
   합니다. 템플릿 기본값 `100`보다 낮은 값은 무시되고, 1~49는 `50`으로 올려
   맞추며, `0`은 템플릿 기본값을 그대로 씁니다.
 - 모델이 네이티브 도구 호출을 아예 지원하지 않습니다(로컬 모델에서 흔합니다).
@@ -221,7 +223,7 @@ OCR이 코멘트를 diff의 정확한 줄에 붙이지 못했다는 뜻입니다
 
 ### 서브 Agent 일부가 실패했는데 종료 코드가 0입니다 {#some-sub-agents-fail-the-run-still-exits-0}
 
-의도한 동작입니다. OCR은 그룹별 실패를 격리해, 그룹 하나가 잘못됐다고 파일
+의도한 동작입니다. OCR은 그룹별 실패를 격리해 그룹 하나가 잘못됐다고 파일
 20개짜리 리뷰가 통째로 죽지 않게 합니다. *하나라도* 성공했다면 전체 종료 코드는
 `0`입니다. 완전히 실패한 실행(성공한 서브 Agent가 0개)만 0이 아닌 코드로
 끝납니다. 어느 그룹이 실패했는지는 JSON 모드의 `warnings` 배열이나 텍스트 모드의
@@ -233,8 +235,8 @@ stderr에서 확인하세요.
 
 - **모델 요청 한도** — 한도에 걸리면 LLM 클라이언트가 물러섰다가 재시도합니다.
   애초에 한도에 닿지 않도록 `--concurrency`를 낮추세요(예: `4`).
-- **차가운 캐시** — 프로바이더가 프롬프트 캐싱을 지원한다면, 배포 직후 첫
-  실행은 그 이득을 보지 못합니다. 같은 구간의 이후 실행은 더 빠릅니다.
+- **캐시가 비어 있을 때** — 프로바이더가 프롬프트 캐싱을 지원하더라도 배포 직후
+  첫 실행은 그 이득을 보지 못합니다. 같은 구간의 이후 실행은 더 빠릅니다.
 
 ## 출력과 연동 {#output-integration}
 
@@ -242,8 +244,8 @@ stderr에서 확인하세요.
 
 **stderr**를 보고 있는 것은 아닌지 확인하세요. 진행 메시지는 경우에 따라
 stderr로 나갑니다(경고, 오류). `--audience agent`가 보장하는 깨끗한 stdout은
-*파서가 읽기 좋다*는 뜻입니다. 전부 없애려면 리다이렉트하세요.
-`ocr review --audience agent 2>/dev/null`처럼요.
+*파서가 읽기 좋다*는 뜻입니다. 전부 없애려면
+`ocr review --audience agent 2>/dev/null`처럼 리다이렉트하세요.
 
 ### JSON 출력이 `{ "files_reviewed": 0, "comments": [] }`입니다 {#json-output-is-filesreviewed-0-comments}
 
@@ -277,7 +279,7 @@ ocr review
 LLM 호출에는 별도 스팬이 생기지 않고 메트릭으로 기록됩니다.
 `ocr.llm.tokens_used`(카운터, 레이블 `model` + `type`),
 `ocr.llm.requests_total`(카운터, 레이블 `model` + `status`),
-`ocr.llm.request_duration_seconds`(히스토그램, 레이블 `model`)를 보세요. console
+`ocr.llm.request_duration_seconds`(히스토그램, 레이블 `model`)을 보세요. console
 익스포터는 이 집계를 그 자리에 출력합니다. 대시보드로 보려면 OTLP 익스포터로
 바꿔 메트릭 스택으로 보내세요. [텔레메트리](../telemetry/)를 참고하세요.
 
@@ -286,7 +288,7 @@ LLM 호출에는 별도 스팬이 생기지 않고 메트릭으로 기록됩니�
 흔히 쓰는 조절 수단입니다.
 
 - effort 프리셋이 그룹마다 리뷰를 몇 라운드 돌릴지 정합니다. `low` = 1,
-  `medium`(기본값) = 2, `high` = 3입니다. 비용은 대체로 라운드 수에 비례하므로,
+  `medium`(기본값) = 2, `high` = 3입니다. 비용은 대체로 라운드 수에 비례하므로
   싸게 돌리고 싶다면 `--effort low`가 가장 큰 수단이고 `--effort high`가 가장
   비쌉니다.
 - plan 단계는 가장 큰 파일이 50줄 이상인 그룹, 또는 파일 2개 이상의 합이 100줄

@@ -66,7 +66,7 @@ export OTEL_SERVICE_NAME=open-code-review-prod      # optional; default: open-co
 export OCR_CONTENT_LOGGING=0                        # reserved / currently a no-op (see Content logging)
 ```
 
-`OTEL_EXPORTER_OTLP_ENDPOINT`을 지정하면 `exporter=otlp`도 함께 강제됩니다.
+`OTEL_EXPORTER_OTLP_ENDPOINT`를 지정하면 `exporter=otlp`도 함께 강제됩니다.
 `OTEL_EXPORTER_OTLP_ENDPOINT=… ocr review`처럼 한 번만 돌릴 때 편합니다.
 
 ### 엔드포인트 형식 {#endpoint-format}
@@ -88,7 +88,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 
 HTTP 프로토콜에서는 엔드포인트가 **기준 URL**이고 그 뒤에 시그널별 경로가
 붙습니다. 그래서 `http://localhost:4318`은 트레이스를
-`http://localhost:4318/v1/traces`로 보냅니다. 기준 경로는 그대로 유지되므로,
+`http://localhost:4318/v1/traces`로 보냅니다. 기준 경로는 그대로 유지되므로
 접두 경로 아래에서 서비스되는 백엔드에도 맞출 수 있습니다.
 
 ```bash
@@ -171,7 +171,7 @@ OCR은 OTel 미터로 수치 메트릭을 기록합니다. 컬렉터가 뒷단�
 | `token.threshold.exceeded` | 프롬프트 토큰이 `MAX_TOKENS`(입력 상한)의 80%를 넘어 그룹을 건너뛰었습니다. |
 | `subtask.error` | 그룹별 서브태스크에서 오류가 났습니다. 스팬 상태 `Error`와 함께 나옵니다. |
 
-리뷰 품질이 나빠지고 있다는 신호를, 사용자가 알아차리기 한참 전에 잡아내는 알림
+리뷰 품질이 나빠지고 있다는 신호를 사용자가 알아차리기 한참 전에 잡아내는 알림
 기준으로 쓰세요.
 
 ## 콘텐츠 로깅 {#content-logging}
@@ -182,8 +182,8 @@ OCR은 OTel 미터로 수치 메트릭을 기록합니다. 컬렉터가 뒷단�
 정리한 메트릭·이벤트 스키마뿐입니다.
 
 `content_logging` 설정 키(그리고 이를 덮어쓰는 `OCR_CONTENT_LOGGING=1` 환경
-변수)는 설정 계층에 배선만 돼 있고, 지금은 프롬프트 내용을 내보내는 어떤 경로도
-제어하지 **않습니다**. 예약된 플래그로 여기시면 됩니다.
+변수)는 설정 계층에 배선만 돼 있을 뿐 지금은 프롬프트 내용을 내보내는 어떤
+경로도 제어하지 **않습니다**. 예약된 플래그로 여기시면 됩니다.
 
 LLM에 무엇을 보내고 무엇을 받았는지 들여다봐야 한다면
 [세션 뷰어](../viewer/)가 읽는 로컬 JSONL 기록을 쓰세요. 이 기록은 전부
@@ -273,12 +273,12 @@ OCR이 최종 텔레메트리 설정을 만들 때의 순서입니다.
 2. `~/.opencodereview/config.json`의 `telemetry.*` 키.
 3. 환경 변수(가장 높은 우선순위이며 파일을 **덮어씁니다**).
 
-그래서 설정에는 `telemetry.enabled=false`를 남겨 두고, 필요할 때만
+그래서 설정에는 `telemetry.enabled=false`를 남겨 두었다가 필요할 때만
 `OCR_ENABLE_TELEMETRY=1`로 실행 단위로 켤 수 있습니다.
 
 ## 샘플링과 부담 {#sampling-and-overhead}
 
-OCR은 **전부** 내보냅니다. 샘플링 설정은 없으며, OTel 샘플링은 컬렉터가 맡을
+OCR은 **전부** 내보냅니다. 샘플링 설정은 없으며 OTel 샘플링은 컬렉터가 맡을
 몫입니다. 보통의 리뷰 한 번이면 이 정도가 나옵니다.
 
 - `review.run` 스팬 1개 + `diff.parse` 스팬 1개 + 리뷰한 그룹마다
@@ -298,7 +298,7 @@ OCR은 **전부** 내보냅니다. 샘플링 설정은 없으며, OTel 샘플링
 | 증상 | 유력한 원인 |
 |---|---|
 | 아무것도 안 나감 | `OCR_ENABLE_TELEMETRY` / `telemetry.enabled`가 설정돼 있지 않습니다. 기본값은 **꺼짐**입니다. |
-| 로컬에서는 되는데 운영에서 실패 | 프로토콜이 컬렉터와 맞는지 확인하세요. 기본값은 gRPC인데, 관리형 백엔드 상당수는 HTTP OTLP만 받습니다. `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`을 지정하고 HTTP 포트(`4317`이 아니라 `4318`)를 쓰세요. |
+| 로컬에서는 되는데 운영에서 실패 | 프로토콜이 컬렉터와 맞는지 확인하세요. 기본값은 gRPC인데, 관리형 백엔드 상당수는 HTTP OTLP만 받습니다. `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`를 지정하고 HTTP 포트(`4317`이 아니라 `4318`)를 쓰세요. |
 | 아무것도 도착하지 않는데 오류도 없음 | 익스포터는 필요할 때 만들어지므로 엔드포인트가 틀렸어도 시작 시점이 아니라 내보내는 시점에 조용히 실패합니다. 컬렉터의 액세스 로그에서 어떤 경로로 요청이 갔는지 확인하세요. HTTP 프로토콜에서는 엔드포인트가 기준 URL이고 시그널 경로가 뒤에 붙으므로 `http://host:4318`은 `http://host:4318/v1/traces`로 POST 합니다. |
 | 스팬은 보이는데 메트릭이 없음 | 컬렉터에 따라 기본적으로 트레이스 파이프라인만 켜져 있습니다. 설정에 `metrics` 파이프라인을 더하세요. |
 | 스팬에 프롬프트가 없음 | OCR은 프롬프트 내용을 텔레메트리에 붙이지 않습니다. [콘텐츠 로깅](#content-logging)을 참고하세요. 대신 [세션 뷰어](../viewer/)로 기록을 들여다보세요. |
