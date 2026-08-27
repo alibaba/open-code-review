@@ -245,6 +245,58 @@ func TestExecuteReviewFilter_NoComments(t *testing.T) {
 	}
 }
 
+type filterRequestCaptureClient struct {
+	request llm.ChatRequest
+	calls   int
+}
+
+func (c *filterRequestCaptureClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.request = req
+	c.calls++
+	content := "I approve all comments."
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
+		Model:   "fake",
+	}, nil
+}
+
+func TestExecuteReviewFilter_OmitsToolChoiceAndFailsOpenWithoutToolCall(t *testing.T) {
+	sess := session.New(t.TempDir(), "main", "test", session.SessionOptions{ReviewMode: "diff"})
+	client := &filterRequestCaptureClient{}
+	collector := tool.NewCommentCollector()
+	collector.Add(model.LlmComment{Path: "a.go", Content: "keep this"})
+
+	a := New(Args{
+		LLMClient:        client,
+		Model:            "test",
+		Session:          sess,
+		CommentCollector: collector,
+		Template: template.Template{
+			ReviewFilterTask: &template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Filter: {{comments}}"}},
+			},
+			MaxTokens:           10000,
+			MaxToolRequestTimes: 5,
+			MainTask:            template.LlmConversation{Messages: []template.ChatMessage{{Role: "user", Content: "t"}}},
+		},
+	})
+
+	a.executeGroupReviewFilter(context.Background(), FileGroup{Label: "a.go", Diffs: []model.Diff{{NewPath: "a.go", Diff: "+x"}}}, nil)
+
+	if client.calls != 1 {
+		t.Fatalf("LLM calls = %d, want 1", client.calls)
+	}
+	if client.request.ToolChoice != "" {
+		t.Errorf("ToolChoice = %q, want provider default", client.request.ToolChoice)
+	}
+	if len(client.request.Tools) != len(filterTools) {
+		t.Errorf("tools = %d, want %d", len(client.request.Tools), len(filterTools))
+	}
+	if got := len(collector.CommentsForPath("a.go")); got != 1 {
+		t.Errorf("comments = %d, want 1 after text-only response", got)
+	}
+}
+
 func TestExecuteReviewFilter_RemovesComments(t *testing.T) {
 	tmpDir := t.TempDir()
 	sess := session.New(tmpDir, "main", "test", session.SessionOptions{ReviewMode: "diff"})

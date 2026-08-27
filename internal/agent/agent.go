@@ -1804,11 +1804,10 @@ func (a *Agent) executeGroupReviewFilter(ctx context.Context, g FileGroup, from 
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
-		Model:      a.args.Model,
-		Messages:   messages,
-		Tools:      filterTools,
-		ToolChoice: "required",
-		MaxTokens:  a.args.Template.CompletionTokenLimit(),
+		Model:     a.args.Model,
+		Messages:  messages,
+		Tools:     filterTools,
+		MaxTokens: a.args.Template.CompletionTokenLimit(),
 	})
 	duration := time.Since(startTime)
 	if err != nil {
