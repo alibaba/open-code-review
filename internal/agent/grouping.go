@@ -149,16 +149,8 @@ func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClie
 func buildFileList(diffs []model.Diff) string {
 	var sb strings.Builder
 	for _, d := range diffs {
-		status := "MODIFIED"
-		switch {
-		case d.IsNew:
-			status = "ADDED"
-		case d.IsDeleted:
-			status = "DELETED"
-		case d.IsRenamed:
-			status = "RENAMED"
-		}
-		sb.WriteString(fmt.Sprintf("%s (%s, +%d/-%d)\n", d.NewPath, status, d.Insertions, d.Deletions))
+		sb.WriteString(formatDiffEntry(d))
+		sb.WriteString("\n")
 	}
 	return sb.String()
 }

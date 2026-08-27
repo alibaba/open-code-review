@@ -1578,6 +1578,22 @@ func buildConcatenatedDiffs(diffs []model.Diff) string {
 	return sb.String()
 }
 
+// formatDiffEntry renders one changed file as STATUS   path (+N/-M). It is the
+// shared shape for both the grouping file list and the other-changed-files
+// block, so every prompt that enumerates files presents them identically.
+func formatDiffEntry(d model.Diff) string {
+	status := "MODIFIED"
+	switch {
+	case d.IsNew:
+		status = "ADDED"
+	case d.IsDeleted:
+		status = "DELETED"
+	case d.IsRenamed:
+		status = "RENAMED"
+	}
+	return fmt.Sprintf("%s   %s (+%d/-%d)", status, d.NewPath, d.Insertions, d.Deletions)
+}
+
 // buildChangeFilesExceptGroup returns a formatted list of changed files excluding all group members.
 func (a *Agent) buildChangeFilesExceptGroup(groupDiffs []model.Diff) string {
 	exclude := make(map[string]bool, len(groupDiffs))
@@ -1590,15 +1606,6 @@ func (a *Agent) buildChangeFilesExceptGroup(groupDiffs []model.Diff) string {
 		if d.IsBinary || exclude[d.NewPath] || exclude[d.OldPath] {
 			continue
 		}
-		status := "MODIFIED"
-		switch {
-		case d.IsNew:
-			status = "ADDED"
-		case d.IsDeleted:
-			status = "DELETED"
-		case d.OldPath != d.NewPath:
-			status = "RENAMED"
-		}
 		// Separator before the entry, conditional on something already being
 		// written, rather than after it conditional on the a.diffs index: the loop
 		// skips binaries and group members, so an index-based test emits a trailing
@@ -1607,7 +1614,7 @@ func (a *Agent) buildChangeFilesExceptGroup(groupDiffs []model.Diff) string {
 		if sb.Len() > 0 {
 			sb.WriteString("\n")
 		}
-		sb.WriteString(status + "   " + d.NewPath)
+		sb.WriteString(formatDiffEntry(d))
 	}
 	return sb.String()
 }
