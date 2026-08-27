@@ -80,6 +80,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session list` | `ocr sessions list`, `ocr session ls` | List saved review sessions. |
 | `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints. |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | Print the review comments recorded in one session. |
+| `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | Compare two sessions' findings: new, persisting, resolved, not reviewed. |
 | `ocr viewer` | — | Launch the local web UI for past review sessions (`localhost:5483`). |
 | `ocr version` | — | Print version, commit, platform, build date, and GitHub URL. |
 
@@ -120,7 +121,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Takes precedence over `--background` when both are set. |
 | `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
 | `--concurrency <n>` | — | `8` | Maximum number of file groups reviewed in parallel. |
-| `--timeout <minutes>` | — | `10` | Per-group deadline. `0` disables the timeout. Automatically extended by 50 % when the effort preset runs more than one review round. |
+| `--timeout <minutes>` | — | `15` | Per-group deadline. `0` disables the timeout. Scaled linearly by the number of effort review rounds (e.g. 15/30/45 min for low/medium/high). |
 | `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per group. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. The flag only ever *raises* the cap — a value below the template default is ignored. |
@@ -447,6 +448,32 @@ ocr session comments --severity critical,high --category bug,security <session-i
 | `--json` | `false` | Emit the comments as a JSON array. |
 | `--severity <list>` | all | Comma-separated severities to include (`critical`, `high`, `medium`, `low`). |
 | `--category <list>` | all | Comma-separated categories to include (e.g. `bug`, `security`). |
+
+### `ocr session compare`
+
+Groups the findings of two sessions into four buckets: **new** (only in the
+after session), **persisting** (in both), **resolved** (only in the before
+session) and **not reviewed** (in the before session, in files the after
+session never looked at, so they are not counted as resolved).
+
+Findings are matched on path, category and the offending snippet, not on line
+numbers, so a finding that only moved down the file still counts as
+persisting.
+
+```bash
+ocr session compare <before-session-id> <after-session-id>
+ocr session diff <before-session-id> <after-session-id>
+ocr session compare --json <before-session-id> <after-session-id>
+```
+
+Both sessions must belong to the same repository; otherwise the command
+fails. Different review modes only print a warning on stderr, so `--json`
+output stays pipeable.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--repo <path>` | current dir | Repository whose sessions should be compared. |
+| `--json` | `false` | Emit the comparison as JSON (`new`, `persisting`, `resolved`, `not_reviewed`). |
 
 ## `ocr rules`
 

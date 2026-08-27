@@ -448,33 +448,47 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newP
 		return
 	}
 
-	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	fs := r.deps.Session.GetOrCreateFileSession(newPath)
+	rec := fs.AppendTaskRecord(session.MainTask, messages)
+	startTime := time.Now()
+	reqCtx := r.requestCtx(ctx, newPath, session.MainTask, rec.RequestNo)
+
+	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  messages,
 		Tools:     graceDefs,
 		MaxTokens: r.deps.Template.CompletionTokenLimit(),
 		SessionID: sessionID,
 	})
+	duration := time.Since(startTime)
 	if err != nil {
+		rec.SetError(err, duration)
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", newPath, err)
 		return
 	}
 
+	rec.SetResponse(resp, duration)
+	totalTokens := int64(0)
 	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
 		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
 		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
 		atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
 		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
 	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
 		return
 	}
 
-	fs := r.deps.Session.GetOrCreateFileSession(newPath)
-	rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
-	rec.SetResponse(resp, 0)
 	thinking := resp.ReasoningContent()
 	for _, call := range calls {
 		r.executeToolCall(ctx, newPath, call, rec, thinking)

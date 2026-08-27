@@ -49,5 +49,11 @@
   "**/*.capnp.go",
   "**/*.capnp.ts",
   "**/*_capnp.rs",
-  "**/*_capnp.py"
+  "**/*_capnp.py",
+  "lib/**/*.sol",
+  "**/*.t.sol",
+  "**/test/**/*.sol",
+  "**/tests/**/*.sol",
+  "**/test/**/*.vy",
+  "**/tests/**/*.vy"
 ]
