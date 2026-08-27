@@ -130,6 +130,8 @@ ocr r      [flags]   (alias)
 | `--model <name>` | — | — | 이 실행에 한해 해석된 LLM 모델을 덮어씁니다(예: `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | 동시에 띄울 git 서브프로세스의 최대 개수. |
 | `--tools <path>` | — | 내장 | 커스텀 JSON 도구 설정 파일 경로. 내장 도구 정의를 덮어씁니다. |
+| `--post-to-pr` | — | `false` | 리뷰 지적을 일치하는 GitHub pull request에 게시합니다. 범위 모드(`--from`과 `--to`)와 GitHub token이 필요합니다. |
+| `--github-token <token>` | — | — | pull request 코멘트를 게시할 GitHub token. 생략하면 `GITHUB_TOKEN` 환경 변수를 사용합니다. |
 
 > 모드 플래그는 함께 쓸 수 없습니다. `--from`/`--to`, `--commit`, 아무것도 주지
 > 않기(워크스페이스 모드) 중 하나만 고르세요. 섞어 쓰면 오류로 중단됩니다.
@@ -178,6 +180,50 @@ ocr review --from main --to feature-branch
 
 OCR이 `merge-base(main, feature-branch)..feature-branch`를 계산하므로, 브랜치를 딴 뒤
 `main`에 들어온 무관한 변경은 빠지고 그 기능 브랜치가 *만들어 낸* diff만 보입니다.
+
+##### GitHub pull request에 지적 게시 {#posting-findings-to-a-github-pull-request}
+
+`--post-to-pr`로 리뷰 지적 게시를 명시적으로 켭니다. `--from`과 `--to`를 모두 지정한
+범위 모드가 필요합니다. token은 `--github-token`으로 전달하거나 CLI가
+`GITHUB_TOKEN`에서 읽도록 할 수 있습니다.
+
+CLI는 base 브랜치와 리뷰한 head commit이 범위와 일치하는 유일한 open pull request를
+찾습니다. pull request 번호를 직접 지정하지 않습니다. 위치를 확인할 때 OCR은 각 지적이
+변경된 파일의 이전 쪽과 새 쪽 중 어디에서 왔는지 기록합니다. 게시할 때는 pull request
+diff의 양쪽에 대한 줄 목록도 만듭니다. 출처가 새 쪽이고 전체 범위가 검증된 완전한 오른쪽
+diff hunk 안에 있는 지적만 inline 코멘트가 됩니다. 이전 쪽 지적, 쪽 정보가 없는 지적,
+유효하지 않은 범위, 완전한 patch에서 확인할 수 없는 범위는 pull request summary에
+보존됩니다. 어느 쪽인지 알고 있다면 숫자상 줄 범위가 겹친다는 이유만으로 지적을 모호하게
+처리하지 않습니다.
+
+Inline 코멘트와 summary는 순서가 결정적이고 재시도해도 안전한 batch로 전송됩니다. OCR은
+쓰기 작업 직전에 pull request가 여전히 open인지, base 브랜치와 head가 일치하는지, 현재
+base tip과 head의 merge-base가 완료된 리뷰에 기록된 commit과 정확히 같은지 확인합니다.
+Base tip은 merge-base가 바뀌지 않을 때만 이동할 수 있습니다. 기존 inline 및 fallback
+시퀀스는 지적을 중복 게시하거나 이미 summary로 fallback한 inline batch를 다시 시도하지
+않고 이어서 처리합니다.
+
+로컬 리뷰 출력은 GitHub에 전달하기 전에 생성됩니다. 게시 단계가 하나라도 실패하면 OCR은
+해당 출력을 유지하지만 0이 아닌 상태 코드로 종료합니다. 따라서 스크립트와 CI가 전달
+실패를 성공으로 잘못 판단하지 않습니다.
+
+Token에는 대상 저장소에 접근하고 pull request를 읽고 쓸 권한이 있어야 합니다.
+fine-grained personal access token 또는 GitHub App에는 저장소의 **Pull requests: Read
+and write** 권한을 부여하세요. classic personal access token에는 적절한 `repo` 또는
+`public_repo` scope를 부여하세요. GitHub Actions에서는 `pull-requests: write`를
+설정합니다. 저장소 및 fork 정책에 따라 쓰기 권한이 제한될 수도 있습니다. 이 권한은
+지적을 inline으로 게시할 수 없을 때 사용하는 issue 코멘트에도 적용됩니다.
+
+GitHub.com에서는 `GITHUB_SERVER_URL`과 `GITHUB_API_URL`을 설정하지 않거나 각각
+`https://github.com`과 `https://api.github.com`을 사용합니다. GitHub Enterprise
+Server에서는 `GITHUB_SERVER_URL`을 HTTPS server URL로 설정합니다. CLI는 기본적으로
+`https://HOST/api/v3`를 사용합니다. `GITHUB_API_URL`을 직접 설정한다면 HTTPS를 사용하고
+`GITHUB_SERVER_URL`과 host가 같아야 합니다. Git remote도 설정된 server host를 사용해야
+합니다. host가 일치하지 않으면 OCR은 token을 전송하기 전에 게시를 중단합니다.
+
+```bash
+GITHUB_TOKEN="$TOKEN" ocr review --from main --to feature-branch --post-to-pr
+```
 
 #### commit 모드 {#commit-mode}
 
