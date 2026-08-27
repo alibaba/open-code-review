@@ -151,6 +151,7 @@ diff 단계에서 일어납니다.
 | `**/*.java` | `java.md` |
 | `**/*.go` | `go.md` — Go 소스. |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — FreeMarker 템플릿(SSTI / XSS / null 처리). |
+| `**/*.{hbs,mustache}` | `handlebars_mustache.md` — Handlebars 및 Mustache 템플릿. |
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — Astro 컴포넌트와 아일랜드. |
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
