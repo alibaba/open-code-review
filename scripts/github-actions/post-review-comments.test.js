@@ -16,7 +16,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, preserveCheckpointMarker } = require(path.join(__dirname, "post-review-comments.js"));
 
 // REVIEW_TAG as the production code builds it for this test's hardcoded run
 // identity (context.runId=undefined -> 0, runAttempt=undefined -> 1). Used as
@@ -2421,6 +2421,51 @@ async function main() {
   await testDiffFetchFailureDegradesToPerComment();
   await testAllCommentsFilteredOutAccounting();
   await testCrossHunkRangeIsFilteredOut();
+  // Cross-push checkpoints (#476) — read path
+  testCheckpointMarkerRoundTrip();
+  testValidateCheckpointPayload();
+  await testCheckpointTwelveReasonsAreDistinct();
+  await testCheckpointSingleFieldMutationsFailClosed();
+  await testCheckpointAuthorVerificationFailsClosed();
+  await testCheckpointRejectsDifferentBotIdentity();
+  await testCheckpointWidenOnly();
+  await testCheckpointSameHeadRerun();
+  await testCheckpointResolveShape();
+  // Cross-push checkpoints (#476) — write path
+  await testCheckpointAdvanceGateTable();
+  await testCheckpointAdvanceRequiresFullSha();
+  await testCheckpointCarryForwardOnEveryBodyPath();
+  await testCheckpointAdvancesOnZeroFindings();
+  await testCheckpointNeverAdvancesWithoutSticky();
+  await testCheckpointCarryIsGatedLikeTheAdvance();
+  await testCheckpointResolverUsesPreReadComment();
+  await testCheckpointOptOutLeavesBodyUnchanged();
+  await testCheckpointWriteThenReadRoundTrip();
+  // Cross-push checkpoints (#476) — defect repairs
+  await testCheckpointAuthorSurvivesUnavailableGetUser();
+  testCheckpointBotTypeAloneEstablishesAuthorship();
+  await testCheckpointRejectsUserToServerAppComment();
+  await testCheckpointNoopLeavesSummaryUntouched();
+  await testCheckpointNoopSurvivesUnreadableOcrOutput();
+  await testCheckpointEventFullScopeTable();
+  await testCheckpointCarryNeverErasesExistingMarker();
+  await testCheckpointRescueSkipsAmbiguousMarkers();
+  await testCheckpointAdvanceRequiresAFingerprint();
+  await testSummaryShowsNarrowedRangeLabel();
+  await testCheckpointReasonsMatchTheDocs();
+  await testActionResolveScriptFallsBackInsteadOfThrowing();
+  await testActionScriptFingerprintCoversRepoLocalRules();
+  testActionResolveStepNeverFailsTheJob();
+  testActionFingerprintsRepoLocalRuleFile();
+  testActionFingerprintIncludesBackground();
+  testActionRangeFromIsAStepOutput();
+  testActionEmitsMachineReadableRangeOutputs();
+  testActionPinsGithubScriptSha();
+  await testActionUnresolvedVersionEmptiesTheFingerprint();
+  await testActionFingerprintCoversLlmHeaderAxes();
+  await testActionPinsAuthorToTheDefaultTokenApp();
+  await testActionResolveStepDeclaresItsRefInputs();
+  await testCheckpointMarkerMatchingIsStateless();
   console.log("All post-review-comments tests passed.");
 }
 function testParseDiffHunkRanges() {
@@ -3396,6 +3441,1796 @@ async function testCrossHunkRangeIsFilteredOut() {
   const summaryText = gh.updatedComments[0].body;
   // The failure names the whole span, not just its (valid) end line.
   assert.strictEqual(summaryText.includes("Lines 2-51 could not be resolved"), true);
+}
+
+// ---------------------------------------------------------------------------
+// Cross-push checkpoints (#476) — read path
+// ---------------------------------------------------------------------------
+
+const CK_OLD = "1a".repeat(20);
+const CK_MID = "2b".repeat(20);
+const CK_NEW = "3c".repeat(20);
+const CK_MB = "4d".repeat(20);
+const CK_MARKER_RE = /^<!-- ocr-checkpoint:v1 [A-Za-z0-9+/]+={0,2} -->$/;
+
+function ckPayload(over = {}) {
+  return Object.assign(
+    {
+      v: 1,
+      pr: 123,
+      head: CK_OLD,
+      base_ref: "main",
+      merge_base: CK_MB,
+      terminal_state: "complete",
+      fingerprint: "fp1",
+      run: "run-1",
+    },
+    over
+  );
+}
+
+// A sticky summary comment carrying (or not carrying) a checkpoint marker.
+function ckComment({ payload, login = "github-actions[bot]", body } = {}) {
+  const tail = body != null ? body : payload ? buildCheckpointMarker(payload) : "";
+  return {
+    id: 1,
+    html_url: "http://ex/1",
+    user: { login },
+    body: `${SUMMARY_MARKER}\nSummary prose\n\n${tail}`,
+  };
+}
+
+function ckGithub({ comments, login = "github-actions[bot]", listThrows = false, authThrows = false } = {}) {
+  return {
+    rest: {
+      users: {
+        getAuthenticated: async () => {
+          if (authThrows) throw new Error("auth unavailable");
+          return { data: { login } };
+        },
+      },
+      issues: {
+        listComments: async () => {
+          if (listThrows) throw new Error("listComments 503");
+          return { data: comments || [] };
+        },
+      },
+    },
+  };
+}
+
+function ckArgs(over = {}) {
+  return Object.assign(
+    {
+      github: ckGithub({ comments: [ckComment({ payload: ckPayload() })] }),
+      owner: "owner",
+      repo: "repo",
+      prNumber: 123,
+      enabled: true,
+      sticky: true,
+      fullReview: false,
+      headSha: CK_NEW,
+      baseRef: "main",
+      mergeBase: CK_MB,
+      fingerprint: "fp1",
+      isAncestor: async () => 0,
+      log: () => {},
+    },
+    over
+  );
+}
+
+// C10: the marker survives payloads that could break out of an HTML comment,
+// and every malformed body reads as "no checkpoint" instead of throwing.
+function testCheckpointMarkerRoundTrip() {
+  const payloads = [
+    ckPayload(),
+    ckPayload({ note: "contains --> a closing sequence" }),
+    ckPayload({ note: "line one\nline two" }),
+    ckPayload({ note: "多字节 テキスト ✅" }), // allow-non-english: fixture proves the base64 round trip is byte-exact for a non-ASCII note
+  ];
+  for (const p of payloads) {
+    const marker = buildCheckpointMarker(p);
+    assert.strictEqual(CK_MARKER_RE.test(marker), true, `marker shape for ${JSON.stringify(p.note)}`);
+    assert.deepStrictEqual(parseCheckpointMarker(marker), p, "round trip must be lossless");
+    // Embedded in a real body, surrounded by prose.
+    assert.deepStrictEqual(parseCheckpointMarker(`${SUMMARY_MARKER}\nprose\n${marker}\n`), p);
+  }
+
+  const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
+  const malformed = [
+    ["empty string", ""],
+    ["non-base64 payload", "<!-- ocr-checkpoint:v1 !!!not-base64!!! -->"],
+    ["base64 of non-JSON", `<!-- ocr-checkpoint:v1 ${b64("not json at all")} -->`],
+    ["base64 of a JSON array", `<!-- ocr-checkpoint:v1 ${b64("[1,2,3]")} -->`],
+    ["--> inside summary prose", "Summary mentioning --> an arrow, with no marker"],
+    ["two markers in one body", `${buildCheckpointMarker(ckPayload())}\n${buildCheckpointMarker(ckPayload({ head: CK_MID }))}`],
+  ];
+  for (const [label, body] of malformed) {
+    assert.strictEqual(parseCheckpointMarker(body), null, `${label} must read as no checkpoint`);
+  }
+  // Non-string input must not throw either.
+  assert.strictEqual(parseCheckpointMarker(undefined), null);
+  assert.strictEqual(parseCheckpointMarker(null), null);
+}
+
+// C2: each of the twelve fail-closed reasons has its own input class, and every
+// one of them reviews the FULL range.
+async function testCheckpointTwelveReasonsAreDistinct() {
+  const cases = [
+    ["disabled", { enabled: false }],
+    ["sticky_disabled", { sticky: false }],
+    ["manual_full_review", { fullReview: true }],
+    ["no_summary_comment", { github: ckGithub({ comments: [] }) }],
+    ["author_unverified", { github: ckGithub({ comments: [ckComment({ payload: ckPayload(), login: "fork-user" })] }) }],
+    ["corrupt_checkpoint", { github: ckGithub({ comments: [ckComment({ body: "no marker here" })] }) }],
+    ["schema_invalid", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ v: 2 }) })] }) }],
+    ["base_changed", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ merge_base: CK_MID }) })] }) }],
+    ["config_changed", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ fingerprint: "other" }) })] }) }],
+    ["not_ancestor", { isAncestor: async () => 1 }],
+    ["unknown_object", { isAncestor: async () => 128 }],
+    ["resolver_error", { github: ckGithub({ listThrows: true }) }],
+  ];
+  const seen = new Set();
+  for (const [reason, over] of cases) {
+    const r = await resolveCheckpointRange(ckArgs(over));
+    assert.strictEqual(r.reason, reason, `expected reason ${reason}, got ${r.reason}`);
+    assert.strictEqual(r.mode, "full", `${reason} must review the full range`);
+    assert.strictEqual(r.from, "", `${reason} must not narrow the range`);
+    seen.add(reason);
+  }
+  assert.strictEqual(seen.size, 12, "all twelve reasons must be reachable");
+
+  // Exit 128 is "could not check", never "is an ancestor": it must not slip
+  // through as a checkpoint under any other exit code either.
+  for (const status of [2, -1, 129, null, undefined, "0"]) {
+    const r = await resolveCheckpointRange(ckArgs({ isAncestor: async () => status }));
+    assert.strictEqual(r.mode, "full", `ancestry status ${status} must fail closed`);
+  }
+  // A throwing resolver is an error, not an ancestor.
+  const thrown = await resolveCheckpointRange(
+    ckArgs({ isAncestor: async () => { throw new Error("git missing"); } })
+  );
+  assert.strictEqual(thrown.reason, "resolver_error");
+  assert.strictEqual(thrown.mode, "full");
+}
+
+// C3: from one fully-valid input, every single-field mutation falls back to the
+// full range; only the unmutated row narrows it.
+async function testCheckpointSingleFieldMutationsFailClosed() {
+  const mutations = [
+    ["v", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ v: 2 }) })] }) }],
+    ["pr", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ pr: 999 }) })] }) }],
+    ["head format", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ head: "not-a-sha" }) })] }) }],
+    ["terminal_state", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ terminal_state: "partial" }) })] }) }],
+    ["merge_base", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ merge_base: CK_MID }) })] }) }],
+    ["base_ref", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ base_ref: "develop" }) })] }) }],
+    ["fingerprint", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ fingerprint: "fp2" }) })] }) }],
+    ["ancestry exit 1", { isAncestor: async () => 1 }],
+    ["ancestry exit 128", { isAncestor: async () => 128 }],
+    ["comment author", { github: ckGithub({ comments: [ckComment({ payload: ckPayload(), login: "someone-else" })] }) }],
+    ["stickySummary:false", { sticky: false }],
+  ];
+  assert.strictEqual(mutations.length, 11, "eleven single-field mutations");
+  for (const [label, over] of mutations) {
+    const r = await resolveCheckpointRange(ckArgs(over));
+    assert.strictEqual(r.mode, "full", `mutating ${label} must review the full range`);
+    assert.notStrictEqual(r.reason, "ok", `mutating ${label} must carry a fail-closed reason`);
+  }
+  const control = await resolveCheckpointRange(ckArgs());
+  assert.strictEqual(control.mode, "checkpoint");
+  assert.strictEqual(control.reason, "ok");
+  assert.strictEqual(control.from, CK_OLD, "the unmutated row narrows to the checkpoint head");
+  assert.strictEqual(control.to, CK_NEW);
+}
+
+// C9: authorship is verified against what GitHub attests about the WRITER — an
+// app slug, or a bot account — both of which the API derives from the token
+// that posted and neither of which a commenter can set. A well-formed marker
+// planted by a fork contributor is ignored, and an author GitHub attributes to
+// no bot at all is never given the benefit of the doubt.
+//
+// GET /user is deliberately not part of this (see
+// testCheckpointAuthorSurvivesUnavailableGetUser): it 403s for the default
+// GITHUB_TOKEN and for App installation tokens, i.e. for every token this
+// action actually runs with. The `authThrows: true` fixtures below keep that
+// endpoint broken to prove the gate no longer depends on it in either
+// direction.
+async function testCheckpointAuthorVerificationFailsClosed() {
+  const planted = ckComment({ payload: ckPayload(), login: "fork-contributor" });
+  const forked = await resolveCheckpointRange(ckArgs({ github: ckGithub({ comments: [planted] }) }));
+  assert.strictEqual(forked.reason, "author_unverified");
+  assert.strictEqual(forked.mode, "full");
+
+  // A human account with write permission is still not this action: no app
+  // attribution, no bot user, so the marker it carries is unusable.
+  const unresolved = await resolveCheckpointRange(
+    ckArgs({
+      github: ckGithub({
+        comments: [ckComment({ payload: ckPayload(), login: "release-manager" })],
+        authThrows: true,
+      }),
+    })
+  );
+  assert.strictEqual(unresolved.reason, "author_unverified");
+  assert.strictEqual(unresolved.mode, "full");
+
+  // Same via the lower-level reader, so the fail-closed behavior is pinned at
+  // the boundary and not only through the gate.
+  const read = await readCheckpointComment({
+    github: ckGithub({ comments: [ckComment({ payload: ckPayload(), login: "release-manager" })], authThrows: true }),
+    owner: "owner",
+    repo: "repo",
+    prNumber: 123,
+    log: () => {},
+  });
+  assert.strictEqual(read.reason, "author_unverified");
+  assert.strictEqual(read.payload, null);
+}
+
+// C9 (continued): a caller that knows which app its token belongs to can pin
+// the identity exactly. With appSlug set to this run's app, a marker left by
+// the default GITHUB_TOKEN ("github-actions[bot]") is a different writer and
+// must be rejected even though it is a perfectly good bot comment.
+async function testCheckpointRejectsDifferentBotIdentity() {
+  const github = ckGithub({ comments: [ckComment({ payload: ckPayload() })], login: "ocr-app[bot]" });
+  const gated = await resolveCheckpointRange(ckArgs({ github, appSlug: "ocr-app" }));
+  assert.strictEqual(gated.reason, "author_unverified");
+  assert.strictEqual(gated.mode, "full");
+  assert.strictEqual(gated.from, "");
+
+  const read = await readCheckpointComment({
+    github,
+    owner: "owner",
+    repo: "repo",
+    prNumber: 123,
+    appSlug: "ocr-app",
+    log: () => {},
+  });
+  assert.strictEqual(read.reason, "author_unverified");
+  assert.strictEqual(read.raw, "");
+}
+
+// C7: widen-only. An older checkpoint yields a wider range; the resolver never
+// moves the start forward past what the marker recorded.
+async function testCheckpointWidenOnly() {
+  // Ancestry chain OLD -> MID -> NEW under the real 0/1/128 exit-code contract.
+  const chain = [CK_OLD, CK_MID, CK_NEW];
+  const isAncestor = async (a, b) => {
+    const i = chain.indexOf(a);
+    const j = chain.indexOf(b);
+    if (i < 0 || j < 0) return 128;
+    return i <= j ? 0 : 1;
+  };
+  const withHead = async (head) =>
+    resolveCheckpointRange(
+      ckArgs({ github: ckGithub({ comments: [ckComment({ payload: ckPayload({ head }) })] }), isAncestor })
+    );
+
+  const older = await withHead(CK_OLD);
+  assert.strictEqual(older.mode, "checkpoint");
+  assert.strictEqual(older.from, CK_OLD, "an older checkpoint reviews the wider range");
+  const newer = await withHead(CK_MID);
+  assert.strictEqual(newer.mode, "checkpoint");
+  assert.strictEqual(newer.from, CK_MID);
+
+  // An object outside this clone is unprovable, never an ancestor.
+  const unknown = await withHead("9".repeat(40));
+  assert.strictEqual(unknown.reason, "unknown_object");
+  assert.strictEqual(unknown.mode, "full");
+}
+
+// C12: rerunning on the same head is a legal (empty) checkpoint range, not an
+// error and not a silent full re-review. It carries its own reason so the
+// posting step can tell "nothing to review" from "reviewed and found nothing"
+// (testCheckpointNoopLeavesSummaryUntouched).
+async function testCheckpointSameHeadRerun() {
+  const r = await resolveCheckpointRange(
+    ckArgs({ github: ckGithub({ comments: [ckComment({ payload: ckPayload({ head: CK_NEW }) })] }) })
+  );
+  assert.strictEqual(r.mode, "checkpoint");
+  assert.strictEqual(r.reason, "same_head_noop");
+  assert.strictEqual(r.from, CK_NEW);
+  assert.strictEqual(r.from, r.to);
+}
+
+// C11: the resolver's contract is a fixed eight-key shape in both modes, so a
+// consumer can read every field without existence checks.
+async function testCheckpointResolveShape() {
+  const expected = [
+    "ancestry",
+    "checkpointBefore",
+    "fingerprint",
+    "from",
+    "mode",
+    "reason",
+    "sourceRun",
+    "to",
+  ];
+  const checkpoint = await resolveCheckpointRange(ckArgs());
+  assert.deepStrictEqual(Object.keys(checkpoint).sort(), expected);
+  assert.deepStrictEqual(
+    [checkpoint.checkpointBefore, checkpoint.ancestry, checkpoint.sourceRun, checkpoint.fingerprint],
+    [CK_OLD, "ancestor", "run-1", "fp1"]
+  );
+
+  const disabled = await resolveCheckpointRange(ckArgs({ enabled: false }));
+  assert.deepStrictEqual(Object.keys(disabled).sort(), expected);
+  assert.deepStrictEqual(
+    [disabled.from, disabled.to, disabled.checkpointBefore, disabled.ancestry, disabled.sourceRun, disabled.fingerprint],
+    ["", CK_NEW, "", "", "", ""]
+  );
+
+  // A marker that was read but rejected still reports what it recorded, so the
+  // "why was this a full review" question is answerable from the outputs alone.
+  const rejected = await resolveCheckpointRange(ckArgs({ isAncestor: async () => 1 }));
+  assert.deepStrictEqual(Object.keys(rejected).sort(), expected);
+  assert.deepStrictEqual(
+    [rejected.mode, rejected.checkpointBefore, rejected.ancestry, rejected.from],
+    ["full", CK_OLD, "not_ancestor", ""]
+  );
+}
+
+// validateCheckpointPayload is the schema half of the gate; pin its verdicts
+// directly so a future field addition cannot silently loosen them.
+function testValidateCheckpointPayload() {
+  assert.strictEqual(validateCheckpointPayload(ckPayload(), { prNumber: 123 }), null);
+  const rejects = [
+    [null, {}],
+    [ckPayload({ v: "1" }), { prNumber: 123 }],
+    [ckPayload({ pr: 124 }), { prNumber: 123 }],
+    [ckPayload({ head: "ABCDEF0123456789".padEnd(40, "0") }), { prNumber: 123 }],
+    [ckPayload({ head: CK_OLD.slice(0, 39) }), { prNumber: 123 }],
+    [ckPayload({ terminal_state: "failed" }), { prNumber: 123 }],
+    [ckPayload({ terminal_state: "skipped" }), { prNumber: 123 }],
+    [ckPayload({ base_ref: "" }), { prNumber: 123 }],
+    [ckPayload({ merge_base: "" }), { prNumber: 123 }],
+    [ckPayload({ fingerprint: "" }), { prNumber: 123 }],
+  ];
+  for (const [payload, opts] of rejects) {
+    assert.strictEqual(typeof validateCheckpointPayload(payload, opts), "string");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-push checkpoints (#476) — write path (advance / carry-forward)
+// ---------------------------------------------------------------------------
+
+const CK_RESOLVED = "5e".repeat(20);
+const CARRY = buildCheckpointMarker(ckPayload({ head: CK_OLD, run: "carried" }));
+
+function ckManifest(over = {}) {
+  return Object.assign(
+    { terminal_state: "complete", input: { mode: "range", resolved_head: CK_RESOLVED } },
+    over
+  );
+}
+
+function ckRunOptions(over = {}) {
+  return Object.assign(
+    {
+      checkpointEnabled: true,
+      checkpointCarry: "",
+      checkpointBaseRef: "main",
+      checkpointMergeBase: CK_MB,
+      checkpointFingerprint: "fp1",
+    },
+    over
+  );
+}
+
+// Read back the single body this run actually wrote to the sticky summary.
+function lastSummaryBody(gh) {
+  if (gh.updatedComments.length > 0) return gh.updatedComments[gh.updatedComments.length - 1].body;
+  if (gh.issueComments.length > 0) return gh.issueComments[gh.issueComments.length - 1].body;
+  return null;
+}
+
+// K2/C4: the advance is gated on publication completeness. Only a run that is
+// terminal-complete, failed nothing, and published a summary may move the
+// checkpoint forward.
+async function testCheckpointAdvanceGateTable() {
+  const terminals = ["complete", "partial", "failed", "skipped", null];
+  const failures = [0, 1];
+  const published = [true, false];
+  let advancing = 0;
+  for (const terminal of terminals) {
+    for (const failed of failures) {
+      for (const isPublished of published) {
+        // failed=1 is produced the way production produces it: a finding whose
+        // line is provably outside the diff, so the 422 fallback can neither
+        // repost nor reconcile it.
+        const result = {
+          comments: [
+            failed === 1
+              ? { path: "src/a.js", content: "c1", start_line: 90, end_line: 90 }
+              : { path: "src/a.js", content: "c1", start_line: 1, end_line: 1 },
+          ],
+          manifest: terminal === null ? undefined : ckManifest({ terminal_state: terminal }),
+        };
+        const gh = makeGithub(
+          failed === 1
+            ? {
+                files: [{ filename: "src/a.js", patch: "@@ -1,2 +1,2 @@\n a\n b" }],
+                batchErrorSpec: [{ message: "Line could not be resolved", status: 422 }],
+              }
+            : {}
+        );
+        // published=false: the summary cannot be written at all (the issue
+        // comment API is down), so summaryUrl stays empty.
+        if (!isPublished) {
+          gh.rest.issues.listComments = async () => { throw makeErr("listComments unavailable", 503); };
+        }
+        const outputs = {};
+        await runPostReviewComments(
+          Object.assign(
+            {
+              github: gh,
+              context,
+              core: { setOutput: (k, v) => { outputs[k] = v; } },
+              fs: mockFs(JSON.stringify(result), ""),
+            },
+            ckRunOptions()
+          )
+        );
+        const body = lastSummaryBody(gh) || "";
+        const advanced = body.includes("ocr-checkpoint");
+        const label = `terminal=${terminal} failed=${failed} published=${isPublished}`;
+        // Pin the fixture itself: the "failed" axis must really have failed a
+        // finding, otherwise the row proves nothing.
+        assert.strictEqual(outputs.comments_failed, String(failed), `${label}: fixture failure count`);
+        assert.strictEqual(outputs.summary_comment_url === "", !isPublished, `${label}: fixture publication`);
+        const expectAdvance = terminal === "complete" && failed === 0 && isPublished;
+        assert.strictEqual(advanced, expectAdvance, `${label}: marker written=${advanced}`);
+        if (expectAdvance) {
+          advancing++;
+          // C5: the recorded head is the manifest's resolved head, not the
+          // runner's HEAD_SHA (which the fixture deliberately differs on).
+          const payload = parseCheckpointMarker(body);
+          assert.strictEqual(payload.head, CK_RESOLVED);
+          assert.notStrictEqual(payload.head, context.payload.pull_request.head.sha);
+          assert.strictEqual(payload.terminal_state, "complete");
+          assert.strictEqual(payload.pr, context.issue.number);
+          // C11: the advanced head is exported for the caller.
+          assert.strictEqual(outputs.checkpoint_after, CK_RESOLVED);
+        } else {
+          assert.strictEqual(outputs.checkpoint_after, "", `${label}: checkpoint_after must stay empty`);
+        }
+      }
+    }
+  }
+  assert.strictEqual(advancing, 1, "exactly one of the 20 cells may advance");
+}
+
+// A manifest whose resolved_head is not a full sha cannot identify a range, so
+// it never advances however complete the run was.
+async function testCheckpointAdvanceRequiresFullSha() {
+  for (const head of ["", "abc123", CK_RESOLVED.toUpperCase(), `${CK_RESOLVED}0`, undefined]) {
+    const result = {
+      comments: [],
+      manifest: ckManifest({ input: { resolved_head: head } }),
+    };
+    const gh = makeGithub({});
+    await runPostReviewComments(
+      Object.assign(
+        { github: gh, context, core: { setOutput() {} }, fs: mockFs(JSON.stringify(result), "") },
+        ckRunOptions()
+      )
+    );
+    assert.strictEqual(
+      (lastSummaryBody(gh) || "").includes("ocr-checkpoint"),
+      false,
+      `resolved_head ${JSON.stringify(head)} must not advance the checkpoint`
+    );
+  }
+}
+
+// C6/K7: every body-composition path re-emits the carried marker byte for byte
+// when it does not advance, so a rewritten summary never erases the checkpoint.
+async function testCheckpointCarryForwardOnEveryBodyPath() {
+  const paths = [
+    [
+      "json parse failure",
+      { raw: "not json", stderr: "ocr blew up", manifest: null },
+    ],
+    [
+      "zero findings, incomplete run",
+      { raw: JSON.stringify({ comments: [], manifest: ckManifest({ terminal_state: "partial" }) }), stderr: "" },
+    ],
+    [
+      "findings, incomplete run",
+      {
+        raw: JSON.stringify({
+          comments: [{ path: "src/a.js", content: "c1", start_line: 1, end_line: 1 }],
+          manifest: ckManifest({ terminal_state: "failed" }),
+        }),
+        stderr: "",
+      },
+    ],
+    [
+      "findings, no manifest at all",
+      {
+        raw: JSON.stringify({ comments: [{ path: "src/a.js", content: "c1", start_line: 1, end_line: 1 }] }),
+        stderr: "",
+      },
+    ],
+  ];
+  for (const [label, spec] of paths) {
+    const gh = makeGithub({});
+    await runPostReviewComments(
+      Object.assign(
+        { github: gh, context, core: { setOutput() {} }, fs: mockFs(spec.raw, spec.stderr) },
+        ckRunOptions({ checkpointCarry: CARRY })
+      )
+    );
+    const body = lastSummaryBody(gh);
+    assert.notStrictEqual(body, null, `${label}: a summary must be written`);
+    assert.strictEqual(body.split(CARRY).length, 2, `${label}: the carried marker must appear exactly once`);
+    assert.deepStrictEqual(
+      parseCheckpointMarker(body),
+      parseCheckpointMarker(CARRY),
+      `${label}: the carried marker must not be re-encoded`
+    );
+
+    // With no carry, the same path writes no checkpoint at all.
+    const bare = makeGithub({});
+    await runPostReviewComments(
+      Object.assign(
+        { github: bare, context, core: { setOutput() {} }, fs: mockFs(spec.raw, spec.stderr) },
+        ckRunOptions({ checkpointCarry: "" })
+      )
+    );
+    assert.strictEqual(
+      (lastSummaryBody(bare) || "").includes("ocr-checkpoint"),
+      false,
+      `${label}: no carry means no marker`
+    );
+  }
+}
+
+// C8: a clean run with no findings is the most common complete run there is; it
+// must advance the checkpoint through the zero-findings early return.
+async function testCheckpointAdvancesOnZeroFindings() {
+  const gh = makeGithub({});
+  const outputs = {};
+  await runPostReviewComments(
+    Object.assign(
+      {
+        github: gh,
+        context,
+        core: { setOutput: (k, v) => { outputs[k] = v; } },
+        fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest() }), ""),
+      },
+      ckRunOptions({ checkpointCarry: CARRY })
+    )
+  );
+  const body = lastSummaryBody(gh);
+  const payload = parseCheckpointMarker(body);
+  assert.strictEqual(payload.head, CK_RESOLVED, "the zero-findings path must advance");
+  assert.strictEqual(body.includes(CARRY), false, "advancing replaces the carried marker, never duplicates it");
+  assert.strictEqual(outputs.checkpoint_after, CK_RESOLVED);
+}
+
+// A non-sticky run has nowhere durable to keep a checkpoint, so it must never
+// advance one even when everything else is green.
+async function testCheckpointNeverAdvancesWithoutSticky() {
+  const gh = makeGithub({});
+  await runPostReviewComments(
+    Object.assign(
+      {
+        github: gh,
+        context,
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest() }), ""),
+        stickySummary: false,
+      },
+      ckRunOptions()
+    )
+  );
+  assert.strictEqual((lastSummaryBody(gh) || "").includes("ocr-checkpoint"), false);
+}
+
+// The carry must be gated on exactly the same two conditions as the advance.
+// A non-sticky run posts a fresh comment every time, so re-emitting a marker
+// read from an older comment would plant a checkpoint on a body that never
+// carried one; a run with checkpointing off must never emit a marker at all.
+// Both cases are reachable from the action: the resolve step exports
+// OCR_CHECKPOINT_CARRY without consulting sticky_summary.
+async function testCheckpointCarryIsGatedLikeTheAdvance() {
+  const cases = [
+    ["non-sticky", { stickySummary: false }, ckRunOptions({ checkpointCarry: CARRY })],
+    ["checkpointing off", {}, { checkpointEnabled: false, checkpointCarry: CARRY }],
+  ];
+  for (const [label, runOver, ckOver] of cases) {
+    // An otherwise-complete run: only the gate under test can suppress a marker.
+    const gh = makeGithub({});
+    const outputs = {};
+    await runPostReviewComments(
+      Object.assign(
+        {
+          github: gh,
+          context,
+          core: { setOutput: (k, v) => { outputs[k] = v; } },
+          fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest() }), ""),
+        },
+        runOver,
+        ckOver
+      )
+    );
+    const body = lastSummaryBody(gh) || "";
+    assert.strictEqual(body.includes("ocr-checkpoint"), false, `${label}: no marker may be emitted`);
+    assert.strictEqual(body.includes(CARRY), false, `${label}: the carry must not be re-emitted`);
+    assert.strictEqual(outputs.checkpoint_after, "", `${label}: nothing advanced`);
+  }
+
+  // The same run WITH both gates satisfied still carries, so the assertions
+  // above are pinning the gate rather than a body that never carries anything.
+  const gh = makeGithub({});
+  await runPostReviewComments(
+    Object.assign(
+      {
+        github: gh,
+        context,
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest({ terminal_state: "partial" }) }), ""),
+      },
+      ckRunOptions({ checkpointCarry: CARRY })
+    )
+  );
+  assert.strictEqual(lastSummaryBody(gh).includes(CARRY), true, "sticky + enabled still carries");
+}
+
+// The resolver accepts a pre-read comment so the action can list comments once
+// instead of twice (the caller needs the raw marker for the carry regardless).
+// The pre-read must be the observation the decision is made from — not merely
+// tolerated and then re-read.
+async function testCheckpointResolverUsesPreReadComment() {
+  let listCalls = 0;
+  const counting = ckGithub({ comments: [ckComment({ payload: ckPayload() })] });
+  const inner = counting.rest.issues.listComments;
+  counting.rest.issues.listComments = async (args) => {
+    listCalls += 1;
+    return inner(args);
+  };
+
+  const read = await readCheckpointComment({
+    github: counting,
+    owner: "owner",
+    repo: "repo",
+    prNumber: 123,
+    log: () => {},
+  });
+  assert.strictEqual(read.reason, "ok");
+  assert.strictEqual(listCalls, 1);
+
+  const range = await resolveCheckpointRange(ckArgs({ github: counting, read }));
+  assert.strictEqual(range.mode, "checkpoint");
+  assert.strictEqual(range.from, CK_OLD);
+  assert.strictEqual(listCalls, 1, "the pre-read must not be followed by a second listComments");
+
+  // A pre-read that failed closed still decides the outcome, and still costs no
+  // further reads.
+  const rejected = await resolveCheckpointRange(
+    ckArgs({ github: counting, read: { reason: "author_unverified", payload: null, raw: "" } })
+  );
+  assert.strictEqual(rejected.mode, "full");
+  assert.strictEqual(rejected.reason, "author_unverified");
+  assert.strictEqual(listCalls, 1);
+
+  // Omitting it keeps the standalone behavior: the resolver reads for itself.
+  const standalone = await resolveCheckpointRange(ckArgs({ github: counting }));
+  assert.strictEqual(standalone.mode, "checkpoint");
+  assert.strictEqual(listCalls, 2);
+}
+
+// C1/K3: with today's option set (no checkpoint options at all) nothing about
+// the emitted body or the existing outputs changes.
+async function testCheckpointOptOutLeavesBodyUnchanged() {
+  const result = { comments: [], manifest: ckManifest() };
+  const outputs = {};
+  const gh = makeGithub({});
+  await runPostReviewComments({
+    github: gh,
+    context,
+    core: { setOutput: (k, v) => { outputs[k] = v; } },
+    fs: mockFs(JSON.stringify(result), ""),
+  });
+  const body = lastSummaryBody(gh);
+  assert.strictEqual(body.includes("ocr-checkpoint"), false, "opt-out runs write no checkpoint");
+  assert.strictEqual(body, `${SUMMARY_MARKER}\n✅ **OpenCodeReview**: No comments generated. Looks good to me.`);
+  assert.strictEqual(outputs.comments_total, "0");
+  assert.strictEqual(outputs.checkpoint_after, "");
+}
+
+// The two halves must actually meet: a marker written by a real run has to be
+// accepted by the resolver on the next run, and the range it yields has to start
+// where the previous run stopped. Tested separately, each half can drift into a
+// shape the other rejects (a field the writer omits, a value the reader rejects)
+// while both suites stay green.
+async function testCheckpointWriteThenReadRoundTrip() {
+  const gh = makeGithub({});
+  await runPostReviewComments(
+    Object.assign(
+      {
+        github: gh,
+        context,
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest() }), ""),
+      },
+      ckRunOptions()
+    )
+  );
+  const written = lastSummaryBody(gh);
+
+  // Next run, same configuration and same base: the marker just written is the
+  // only input, and the new head descends from it.
+  const nextHead = "6f".repeat(20);
+  const range = await resolveCheckpointRange({
+    github: ckGithub({ comments: [{ id: 7, user: { login: "github-actions[bot]" }, body: written }] }),
+    owner: "owner",
+    repo: "repo",
+    prNumber: context.issue.number,
+    enabled: true,
+    sticky: true,
+    fullReview: false,
+    headSha: nextHead,
+    baseRef: "main",
+    mergeBase: CK_MB,
+    fingerprint: "fp1",
+    isAncestor: async (a, b) => (a === CK_RESOLVED && b === nextHead ? 0 : 1),
+    log: () => {},
+  });
+  assert.strictEqual(range.mode, "checkpoint");
+  assert.strictEqual(range.reason, "ok");
+  assert.strictEqual(range.from, CK_RESOLVED, "the next run starts where this one stopped");
+  assert.strictEqual(range.to, nextHead);
+
+  // Same marker, one setting different: the writer's fingerprint is what the
+  // reader compares, so a configuration change is caught end to end.
+  const reconfigured = await resolveCheckpointRange({
+    github: ckGithub({ comments: [{ id: 7, user: { login: "github-actions[bot]" }, body: written }] }),
+    owner: "owner",
+    repo: "repo",
+    prNumber: context.issue.number,
+    enabled: true,
+    sticky: true,
+    fullReview: false,
+    headSha: nextHead,
+    baseRef: "main",
+    mergeBase: CK_MB,
+    fingerprint: "fp2",
+    isAncestor: async () => 0,
+    log: () => {},
+  });
+  assert.strictEqual(reconfigured.reason, "config_changed");
+  assert.strictEqual(reconfigured.mode, "full");
+}
+
+// ---------------------------------------------------------------------------
+// Cross-push checkpoints (#476) — defect repairs
+// ---------------------------------------------------------------------------
+
+const REPO_ROOT = path.join(__dirname, "..", "..");
+const ACTION_YML = require("fs").readFileSync(path.join(REPO_ROOT, "action.yml"), "utf8");
+const ACTION_README = require("fs").readFileSync(
+  path.join(REPO_ROOT, "examples", "github_actions", "README.md"),
+  "utf8"
+);
+const HELPER_SOURCE = require("fs").readFileSync(path.join(__dirname, "post-review-comments.js"), "utf8");
+
+// The github-script blocks in action.yml cannot be executed from here (they
+// need the runner's octokit and env), so what this suite can pin is their text:
+// the load-bearing strings and the structure a fix depends on. That is weaker
+// than the js-side tests by construction, which is why the resolve step keeps
+// every decision it can inside post-review-comments.js.
+function actionStepBlock(name) {
+  const start = ACTION_YML.indexOf(`    - name: ${name}\n`);
+  assert.notStrictEqual(start, -1, `action.yml must have a "${name}" step`);
+  const next = ACTION_YML.indexOf("\n    - name: ", start + 1);
+  return next === -1 ? ACTION_YML.slice(start) : ACTION_YML.slice(start, next);
+}
+
+// …with one exception: the resolve step's script IS extractable from the block
+// scalar and runnable, because github-script just evaluates it as the body of an
+// async function with (github, context, core) in scope. Running it for real is
+// the only way to prove the two properties that matter most — it never throws,
+// and its fingerprint reacts to the repo's own rule file.
+function actionScriptSource(stepName) {
+  const block = actionStepBlock(stepName);
+  const header = "        script: |\n";
+  const at = block.indexOf(header);
+  assert.notStrictEqual(at, -1, `${stepName} must have an inline script`);
+  const body = [];
+  for (const line of block.slice(at + header.length).split("\n")) {
+    if (line.trim() === "") {
+      body.push("");
+      continue;
+    }
+    if (!line.startsWith("          ")) break;
+    body.push(line.slice(10));
+  }
+  return body.join("\n");
+}
+
+async function runActionScript(source, { github, context, core, env }) {
+  const saved = {};
+  for (const [k, v] of Object.entries(env)) {
+    saved[k] = process.env[k];
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try {
+    const fn = new Function("github", "context", "core", "require", `return (async () => {\n${source}\n})();`);
+    return await fn(github, context, core, require);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+function scriptCore() {
+  return {
+    outputs: {},
+    warnings: [],
+    infos: [],
+    setOutput(name, value) { this.outputs[name] = value; },
+    info(message) { this.infos.push(message); },
+    warning(message) { this.warnings.push(message); },
+  };
+}
+
+// The complete env the resolve step reads, so a test can vary one axis at a
+// time and know nothing else moved. GITHUB_WORKSPACE is a fresh empty dir:
+// no .opencodereview/rule.json, so that axis stays out of the picture.
+function resolveEnv(over = {}) {
+  const os = require("os");
+  return Object.assign(
+    {
+      GITHUB_ACTION_PATH: REPO_ROOT,
+      GITHUB_WORKSPACE: require("fs").mkdtempSync(path.join(os.tmpdir(), "ocr-fp-")),
+      OCR_HEAD_SHA: CK_NEW,
+      OCR_BASE_REF: "main",
+      OCR_MERGE_BASE: CK_MB,
+      OCR_STICKY_SUMMARY: "true",
+      OCR_FULL_REVIEW: "false",
+      OCR_EVENT_ACTION: "synchronize",
+      OCR_RULE_PATH: "",
+      OCR_FP_LLM_URL: "https://llm.example",
+      OCR_FP_LLM_MODEL: "model",
+      OCR_FP_LLM_USE_ANTHROPIC: "false",
+      OCR_FP_LANGUAGE: "en",
+      OCR_FP_LLM_EXTRA_BODY: "",
+      OCR_FP_LLM_AUTH_HEADER: "",
+      OCR_FP_LLM_TIMEOUT: "",
+      OCR_FP_LLM_EXTRA_HEADERS: "",
+      OCR_FP_RULE: "",
+      OCR_FP_ROUTE_SEVERITY_BELOW: "",
+      OCR_FP_ROUTE_CATEGORIES: "",
+      OCR_FP_BACKGROUND: "",
+      OCR_CHECKPOINT_APP_SLUG: "",
+      OCR_VERSION_ACTUAL: "1.2.3",
+    },
+    over
+  );
+}
+
+// U2 (executed, not just read). A missing helper is the real-world failure —
+// `uses: owner/repo@sha` without a checkout, a container that cannot see
+// GITHUB_ACTION_PATH — and it used to throw, failing a job whose review would
+// otherwise have run fine against the full range.
+async function testActionResolveScriptFallsBackInsteadOfThrowing() {
+  const fsReal = require("fs");
+  const os = require("os");
+  const empty = fsReal.mkdtempSync(path.join(os.tmpdir(), "ocr-noscript-"));
+  const core = scriptCore();
+  await runActionScript(actionScriptSource("Resolve review range"), {
+    github: {},
+    context: { repo: { owner: "owner", repo: "repo" }, issue: { number: 123 } },
+    core,
+    env: {
+      GITHUB_ACTION_PATH: empty,
+      GITHUB_WORKSPACE: empty,
+      OCR_HEAD_SHA: CK_NEW,
+      OCR_BASE_REF: "main",
+      OCR_MERGE_BASE: CK_MB,
+      OCR_STICKY_SUMMARY: "true",
+      OCR_FULL_REVIEW: "false",
+      OCR_EVENT_ACTION: "synchronize",
+      OCR_RULE_PATH: "",
+      OCR_FP_LLM_URL: "https://llm.example",
+      OCR_VERSION_ACTUAL: "1.2.3",
+    },
+  });
+  assert.strictEqual(core.warnings.length, 1, "the failure is reported as a warning");
+  assert.strictEqual(/could not resolve a range/.test(core.warnings[0]), true);
+  assert.strictEqual(core.outputs.range_mode, "full");
+  assert.strictEqual(core.outputs.range_reason, "resolver_error");
+  assert.strictEqual(core.outputs.range_from, "", "empty range_from means ${RANGE_FROM:-$MERGE_BASE}");
+  assert.strictEqual(core.outputs.range_to, CK_NEW);
+  assert.strictEqual(core.outputs.checkpoint_carry, "");
+}
+
+// U3/U4 (executed). The fingerprint is what makes "same configuration" mean
+// something. It must move when the repo's own rule file appears or changes —
+// that file is loaded by every review whether or not `rule` is set — and when
+// an input that changes what the model is told changes.
+async function testActionScriptFingerprintCoversRepoLocalRules() {
+  const fsReal = require("fs");
+  const os = require("os");
+  const source = actionScriptSource("Resolve review range");
+  const workspace = fsReal.mkdtempSync(path.join(os.tmpdir(), "ocr-ws-"));
+  const fingerprint = async (over = {}) => {
+    const core = scriptCore();
+    await runActionScript(source, {
+      github: { rest: { issues: { listComments: async () => ({ data: [] }) } } },
+      context: { repo: { owner: "owner", repo: "repo" }, issue: { number: 123 } },
+      core,
+      env: Object.assign(
+        {
+          GITHUB_ACTION_PATH: REPO_ROOT,
+          GITHUB_WORKSPACE: workspace,
+          OCR_HEAD_SHA: CK_NEW,
+          OCR_BASE_REF: "main",
+          OCR_MERGE_BASE: CK_MB,
+          OCR_STICKY_SUMMARY: "true",
+          OCR_FULL_REVIEW: "false",
+          OCR_EVENT_ACTION: "synchronize",
+          OCR_RULE_PATH: "",
+          OCR_FP_LLM_URL: "https://llm.example",
+          OCR_FP_LLM_MODEL: "model",
+          OCR_FP_LLM_USE_ANTHROPIC: "false",
+          OCR_FP_LANGUAGE: "en",
+          OCR_FP_LLM_EXTRA_BODY: "",
+          OCR_FP_RULE: "",
+          OCR_FP_ROUTE_SEVERITY_BELOW: "low",
+          OCR_FP_ROUTE_CATEGORIES: "",
+          OCR_FP_BACKGROUND: "",
+          OCR_VERSION_ACTUAL: "1.2.3",
+        },
+        over
+      ),
+    });
+    assert.strictEqual(core.outputs.range_reason, "no_summary_comment", "fixture: an empty PR reads no marker");
+    assert.strictEqual(core.warnings.length, 0, "a readable workspace produces no warning");
+    return core.outputs.config_fingerprint;
+  };
+
+  const none = await fingerprint();
+  assert.strictEqual(/^[0-9a-f]{16}$/.test(none), true, "the fingerprint is a short hex digest");
+
+  const ruleDir = path.join(workspace, ".opencodereview");
+  fsReal.mkdirSync(ruleDir, { recursive: true });
+  fsReal.writeFileSync(path.join(ruleDir, "rule.json"), '[{"path":"**","rule":"be strict"}]');
+  const added = await fingerprint();
+  assert.notStrictEqual(added, none, "adding .opencodereview/rule.json must invalidate the checkpoint");
+
+  fsReal.writeFileSync(path.join(ruleDir, "rule.json"), '[{"path":"**","rule":"be lenient"}]');
+  const edited = await fingerprint();
+  assert.notStrictEqual(edited, added, "editing its contents must invalidate the checkpoint");
+
+  // The inputs axis still works, `background` included.
+  const otherInputs = await fingerprint({ OCR_FP_BACKGROUND: "some background" });
+  assert.notStrictEqual(otherInputs, edited, "a changed input must invalidate the checkpoint");
+
+  // Two configurations that differ only in where one field ends must not hash
+  // alike. Joining the axes into a single "|"-delimited string made this pair
+  // identical ("low|a" + "" + "x" and "low" + "a|" + "x" both read as
+  // low|a||x), which is a checkpoint surviving a config change that should
+  // have invalidated it — the one direction this feature may never fail in.
+  const shifted = await fingerprint({ OCR_FP_ROUTE_SEVERITY_BELOW: "low|a", OCR_FP_ROUTE_CATEGORIES: "", OCR_FP_BACKGROUND: "x" });
+  const shiftedBack = await fingerprint({ OCR_FP_ROUTE_SEVERITY_BELOW: "low", OCR_FP_ROUTE_CATEGORIES: "a|", OCR_FP_BACKGROUND: "x" });
+  assert.notStrictEqual(shifted, shiftedBack, "no input value may shift a fingerprint field boundary");
+  const otherVersion = await fingerprint({ OCR_VERSION_ACTUAL: "1.2.4" });
+  assert.notStrictEqual(otherVersion, edited, "a changed OCR version must invalidate the checkpoint");
+}
+
+// U1. GET /user is 403 ("Resource not accessible by integration") for the
+// default GITHUB_TOKEN and for App installation tokens — i.e. for every token
+// this action runs with — so gating authorship on it meant production runs
+// always fell back to the full range and the feature never did anything. The
+// read path must establish authorship from what GitHub attests on the comment,
+// and must still reject an author it cannot attribute to a bot.
+async function testCheckpointAuthorSurvivesUnavailableGetUser() {
+  const viaApp = ckComment({ payload: ckPayload() });
+  viaApp.user = { login: "github-actions[bot]", type: "Bot" };
+  viaApp.performed_via_github_app = { slug: "github-actions" };
+  const github = ckGithub({ comments: [viaApp] });
+  let authCalls = 0;
+  github.rest.users.getAuthenticated = async () => {
+    authCalls += 1;
+    throw new Error("Resource not accessible by integration");
+  };
+
+  const range = await resolveCheckpointRange(ckArgs({ github }));
+  assert.strictEqual(range.reason, "ok", "a 403 on GET /user must not force a full review");
+  assert.strictEqual(range.mode, "checkpoint");
+  assert.strictEqual(range.from, CK_OLD);
+  assert.strictEqual(authCalls, 0, "the checkpoint read path must not call GET /user at all");
+
+  // What counts as "written by us", at the unit that decides it.
+  const shapes = [
+    ["app attribution only", { user: { login: "anything" }, performed_via_github_app: { slug: "github-actions" } }, true],
+    ["bot-typed user", { user: { login: "ocr-app[bot]", type: "Bot" } }, true],
+    ["bot login, no type", { user: { login: "github-actions[bot]" } }, true],
+    ["fork contributor", { user: { login: "fork-contributor", type: "User" } }, false],
+    ["maintainer", { user: { login: "release-manager", type: "User" } }, false],
+    ["no user at all", {}, false],
+  ];
+  for (const [label, comment, ours] of shapes) {
+    assert.strictEqual(isCheckpointAuthorOurs(comment), ours, `${label}: ours=${ours}`);
+  }
+  // A caller that knows its app pins the identity exactly.
+  assert.strictEqual(isCheckpointAuthorOurs({ user: { login: "github-actions[bot]" } }, "ocr-app"), false);
+  assert.strictEqual(isCheckpointAuthorOurs({ user: { login: "ocr-app[bot]" } }, "ocr-app"), true);
+}
+
+// U1 (corner). `user.type` alone carries the whole decision when there is no app
+// attribution and the login has no "[bot]" suffix. That shape is accepted: type
+// is GitHub's own attestation about the writer, derived from the posting token
+// and not settable by a commenter, so it is exactly the evidence the trust
+// boundary is written against — the login string is only ever a fallback way of
+// reading the same fact. Pinned because it is the one input where the two
+// signals disagree, and because narrowing it to "[bot]"-suffixed logins would
+// re-introduce name matching as a security check.
+function testCheckpointBotTypeAloneEstablishesAuthorship() {
+  assert.strictEqual(isCheckpointAuthorOurs({ user: { login: "plain", type: "Bot" } }), true);
+  // The same login without the Bot type is a human account: no evidence, no trust.
+  assert.strictEqual(isCheckpointAuthorOurs({ user: { login: "plain" } }), false);
+  // And it cannot satisfy a pinned app slug, since it names no app.
+  assert.strictEqual(isCheckpointAuthorOurs({ user: { login: "plain", type: "Bot" } }, "ocr-app"), false);
+}
+
+// U1 (hole). `performed_via_github_app` is also set on comments written with a
+// user-to-server token, i.e. by a HUMAN acting through some GitHub App (a CLI,
+// an editor integration, a browser extension). There the slug attests the
+// client, not the author, so accepting app attribution on its own would have
+// let a fork contributor plant a checkpoint just by commenting through any App
+// — exactly the party the documented trust boundary excludes. GitHub's
+// `user.type` is the discriminator, and it wins over the app attribution.
+async function testCheckpointRejectsUserToServerAppComment() {
+  const viaUserToServer = ckComment({ payload: ckPayload(), login: "fork-contributor" });
+  viaUserToServer.user.type = "User";
+  viaUserToServer.performed_via_github_app = { slug: "some-cli" };
+
+  assert.strictEqual(isCheckpointAuthorOurs(viaUserToServer), false, "a human's App client is not a bot writer");
+  // Even when the slug is the very app this action normally posts as.
+  const spoofedSlug = ckComment({ payload: ckPayload(), login: "fork-contributor" });
+  spoofedSlug.user.type = "User";
+  spoofedSlug.performed_via_github_app = { slug: "github-actions" };
+  assert.strictEqual(isCheckpointAuthorOurs(spoofedSlug), false);
+  assert.strictEqual(isCheckpointAuthorOurs(spoofedSlug, "github-actions"), false, "and a pinned slug does not rescue it");
+
+  // End to end: the planted marker is well-formed and would otherwise narrow.
+  const range = await resolveCheckpointRange(ckArgs({ github: ckGithub({ comments: [spoofedSlug] }) }));
+  assert.strictEqual(range.reason, "author_unverified");
+  assert.strictEqual(range.mode, "full");
+  assert.strictEqual(range.from, "");
+
+  // The bot-typed writer with the same app attribution is still accepted, so
+  // this pins the discriminator rather than the app check as a whole.
+  const viaBot = ckComment({ payload: ckPayload() });
+  viaBot.user.type = "Bot";
+  viaBot.performed_via_github_app = { slug: "github-actions" };
+  assert.strictEqual(isCheckpointAuthorOurs(viaBot), true);
+}
+
+// U6 (robustness). The no-op is checked before the OCR output is read, because
+// an empty range is also the range OCR is most likely to trip over: an error
+// banner written over the previous run's findings destroys them just as
+// thoroughly as "No comments generated" does.
+async function testCheckpointNoopSurvivesUnreadableOcrOutput() {
+  const previous = `${SUMMARY_MARKER}\n🔍 **OpenCodeReview** found **2** issue(s) in this PR.\n\n${CARRY}`;
+  const gh = makeGithub({
+    existingSummary: [{ id: 42, html_url: "http://ex/42", user: { login: "github-actions[bot]" }, body: previous }],
+  });
+  await runPostReviewComments(
+    Object.assign(
+      {
+        github: gh,
+        context,
+        core: { setOutput() {} },
+        fs: mockFs("not json at all", "ocr: empty commit range"),
+      },
+      ckRunOptions({ checkpointCarry: CARRY, checkpointNoop: true })
+    )
+  );
+  assert.deepStrictEqual(gh.updatedComments, [], "a no-op rerun must not post an error banner over the summary");
+  assert.deepStrictEqual(gh.issueComments, []);
+}
+
+// U6. A rerun on the same head reviews an empty range and therefore has nothing
+// to report. Writing "No comments generated" over the previous run's summary
+// would destroy findings for commits nobody touched, so the no-op leaves the
+// existing comment exactly as it is.
+async function testCheckpointNoopLeavesSummaryUntouched() {
+  const previous = `${SUMMARY_MARKER}\n🔍 **OpenCodeReview** found **2** issue(s) in this PR.\n\n${CARRY}`;
+  const stickyComment = () => [{ id: 42, html_url: "http://ex/42", user: { login: "github-actions[bot]" }, body: previous }];
+
+  const gh = makeGithub({ existingSummary: stickyComment() });
+  const outputs = {};
+  await runPostReviewComments(
+    Object.assign(
+      {
+        github: gh,
+        context,
+        core: { setOutput: (k, v) => { outputs[k] = v; } },
+        fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest() }), ""),
+      },
+      ckRunOptions({ checkpointCarry: CARRY, checkpointNoop: true })
+    )
+  );
+  assert.deepStrictEqual(gh.updatedComments, [], "a no-op rerun must not rewrite the summary");
+  assert.deepStrictEqual(gh.issueComments, [], "and must not post a second one");
+  assert.strictEqual(outputs.checkpoint_after, "", "nothing was reviewed, so nothing advanced");
+
+  // The same run without the flag DOES rewrite it, so the assertions above pin
+  // the no-op and not a path that never writes.
+  const rewriting = makeGithub({ existingSummary: stickyComment() });
+  await runPostReviewComments(
+    Object.assign(
+      {
+        github: rewriting,
+        context,
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest() }), ""),
+      },
+      ckRunOptions({ checkpointCarry: CARRY })
+    )
+  );
+  assert.strictEqual(rewriting.updatedComments.length, 1);
+  assert.strictEqual(rewriting.updatedComments[0].body.includes("No comments generated"), true);
+}
+
+// U7. Reopening a PR, or marking a draft ready, is a request for a fresh look
+// at the whole diff — not for the delta since the last push — even when a
+// perfectly valid checkpoint is sitting there.
+async function testCheckpointEventFullScopeTable() {
+  const rows = [
+    ["reopened", "full", "event_full_scope"],
+    ["ready_for_review", "full", "event_full_scope"],
+    ["synchronize", "checkpoint", "ok"],
+    ["opened", "checkpoint", "ok"],
+    ["", "checkpoint", "ok"],
+  ];
+  for (const [eventAction, mode, reason] of rows) {
+    const r = await resolveCheckpointRange(ckArgs({ eventAction }));
+    assert.strictEqual(r.mode, mode, `event ${JSON.stringify(eventAction)} -> mode ${mode}`);
+    assert.strictEqual(r.reason, reason, `event ${JSON.stringify(eventAction)} -> reason ${reason}`);
+    if (mode === "full") assert.strictEqual(r.from, "", "a full-scope event must not narrow the range");
+  }
+}
+
+// U9. The carry can come back empty for reasons that say nothing about the
+// marker's usefulness (author unprovable, listComments down). A run that then
+// completes without advancing must not blank a checkpoint it merely failed to
+// read.
+async function testCheckpointCarryNeverErasesExistingMarker() {
+  const planted = `${SUMMARY_MARKER}\nan older summary\n\n${CARRY}`;
+  const sticky = () => [{ id: 7, html_url: "http://ex/7", user: { login: "github-actions[bot]" }, body: planted }];
+  const nonAdvancing = {
+    "findings path (anchor + finalize)": {
+      comments: [{ path: "src/a.js", content: "c1", start_line: 1, end_line: 1 }],
+      manifest: ckManifest({ terminal_state: "partial" }),
+    },
+    "zero-findings path (postSummary)": { comments: [], manifest: ckManifest({ terminal_state: "partial" }) },
+  };
+  for (const [label, result] of Object.entries(nonAdvancing)) {
+    const gh = makeGithub({ existingSummary: sticky() });
+    await runPostReviewComments(
+      Object.assign(
+        { github: gh, context, core: { setOutput() {} }, fs: mockFs(JSON.stringify(result), "") },
+        ckRunOptions({ checkpointCarry: "" })
+      )
+    );
+    const body = lastSummaryBody(gh);
+    assert.strictEqual(body.split(CARRY).length, 2, `${label}: the existing marker must survive exactly once`);
+  }
+
+  // An advancing run still replaces it rather than keeping both.
+  const advancing = makeGithub({ existingSummary: sticky() });
+  await runPostReviewComments(
+    Object.assign(
+      {
+        github: advancing,
+        context,
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest() }), ""),
+      },
+      ckRunOptions({ checkpointCarry: "" })
+    )
+  );
+  const advanced = lastSummaryBody(advancing);
+  assert.strictEqual(advanced.includes(CARRY), false, "advancing supersedes the old marker");
+  assert.strictEqual(parseCheckpointMarker(advanced).head, CK_RESOLVED);
+
+  // The rescue itself, at the unit: it only ever fills a gap.
+  const marker = buildCheckpointMarker(ckPayload({ head: CK_MID }));
+  assert.strictEqual(preserveCheckpointMarker("fresh body", ""), "fresh body", "nothing to preserve");
+  assert.strictEqual(preserveCheckpointMarker("fresh body", `old\n\n${marker}`), `fresh body\n\n${marker}`);
+  assert.strictEqual(
+    preserveCheckpointMarker(`fresh\n\n${CARRY}`, `old\n\n${marker}`),
+    `fresh\n\n${CARRY}`,
+    "a body that already carries a marker is never given a second one"
+  );
+
+  // With checkpointing off, today's body is written unchanged: no rescue.
+  const optedOut = makeGithub({ existingSummary: sticky() });
+  await runPostReviewComments({
+    github: optedOut,
+    context,
+    core: { setOutput() {} },
+    fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest({ terminal_state: "partial" }) }), ""),
+  });
+  assert.strictEqual(lastSummaryBody(optedOut).includes("ocr-checkpoint"), false);
+}
+
+// U9 (continued). parseCheckpointMarker rejects a body carrying two markers as
+// ambiguous. The rescue must apply the same rule: copying one of the two into
+// the rewritten body would pick a winner and hand the next run a single
+// well-formed marker to narrow on. Rescuing nothing keeps the fail-closed
+// answer.
+async function testCheckpointRescueSkipsAmbiguousMarkers() {
+  const other = buildCheckpointMarker(ckPayload({ head: CK_MID, run: "other" }));
+  assert.strictEqual(parseCheckpointMarker(`old\n\n${CARRY}\n\n${other}`), null, "two markers are unreadable");
+
+  // At the unit.
+  assert.strictEqual(
+    preserveCheckpointMarker("fresh body", `old\n\n${CARRY}\n\n${other}`),
+    "fresh body",
+    "an ambiguous body is not resolved by picking one of its markers"
+  );
+
+  // And through the posting path: a non-advancing run over an ambiguous sticky
+  // summary leaves no marker behind, so the next run still reviews everything.
+  const gh = makeGithub({
+    existingSummary: [
+      {
+        id: 9,
+        html_url: "http://ex/9",
+        user: { login: "github-actions[bot]" },
+        body: `${SUMMARY_MARKER}\nolder summary\n\n${CARRY}\n\n${other}`,
+      },
+    ],
+  });
+  await runPostReviewComments(
+    Object.assign(
+      {
+        github: gh,
+        context,
+        core: { setOutput() {} },
+        fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest({ terminal_state: "partial" }) }), ""),
+      },
+      ckRunOptions({ checkpointCarry: "" })
+    )
+  );
+  assert.strictEqual(lastSummaryBody(gh).includes("ocr-checkpoint"), false, "neither marker is carried forward");
+}
+
+// The resolve step's failure path publishes an empty fingerprint (it fell over
+// before computing one). validateCheckpointPayload rejects a marker without a
+// fingerprint, so stamping one would trade a usable checkpoint for a dead one.
+async function testCheckpointAdvanceRequiresAFingerprint() {
+  const sticky = () => [
+    { id: 11, html_url: "http://ex/11", user: { login: "github-actions[bot]" }, body: `${SUMMARY_MARKER}\nolder\n\n${CARRY}` },
+  ];
+  const run = async (over) => {
+    const gh = makeGithub({ existingSummary: sticky() });
+    const outputs = {};
+    await runPostReviewComments(
+      Object.assign(
+        {
+          github: gh,
+          context,
+          core: { setOutput: (k, v) => { outputs[k] = v; } },
+          fs: mockFs(JSON.stringify({ comments: [], manifest: ckManifest() }), ""),
+        },
+        ckRunOptions(over)
+      )
+    );
+    return { body: lastSummaryBody(gh), outputs };
+  };
+
+  const blind = await run({ checkpointFingerprint: "", checkpointCarry: "" });
+  assert.strictEqual(blind.outputs.checkpoint_after, "", "a run with no fingerprint does not advance");
+  assert.strictEqual(blind.body.includes(CARRY), true, "and keeps the checkpoint it could not replace");
+  assert.strictEqual(validateCheckpointPayload(parseCheckpointMarker(blind.body), { prNumber: 123 }), null);
+
+  // Control: the same run with a fingerprint advances, so the assertion above
+  // pins the guard and not a path that never advances.
+  const control = await run({ checkpointCarry: "" });
+  assert.strictEqual(control.outputs.checkpoint_after, CK_RESOLVED);
+  assert.strictEqual(parseCheckpointMarker(control.body).head, CK_RESOLVED);
+}
+
+// U12. A summary that reports three findings for a two-commit slice of a
+// forty-commit PR is misleading unless it says so. One visible line, only when
+// the range really was narrowed.
+async function testSummaryShowsNarrowedRangeLabel() {
+  const withRange = async (over, result) => {
+    const gh = makeGithub({});
+    await runPostReviewComments(
+      Object.assign(
+        { github: gh, context, core: { setOutput() {} }, fs: mockFs(JSON.stringify(result), "") },
+        ckRunOptions(over)
+      )
+    );
+    return lastSummaryBody(gh);
+  };
+  const findings = {
+    comments: [{ path: "src/a.js", content: "c1", start_line: 1, end_line: 1 }],
+    manifest: ckManifest(),
+  };
+  const label = `Reviewed \`${CK_OLD.slice(0, 7)}..${CK_NEW.slice(0, 7)}\``;
+
+  const narrowed = await withRange({ rangeMode: "checkpoint", rangeFrom: CK_OLD, rangeTo: CK_NEW }, findings);
+  assert.strictEqual(narrowed.includes(label), true, "a narrowed run must name the range it reviewed");
+  assert.strictEqual(narrowed.includes("reviewed in a previous run"), true);
+  // Visible to a reader: not hidden inside an HTML comment. Scanned with
+  // indexOf, deliberately without a regex — HTML closes a comment on "--!>" as
+  // well as on "-->", and a pattern that knows only the common one silently
+  // reports a body as safe when it is not. An unterminated "<!--" hides
+  // everything after it, so running off the end counts as inside.
+  const insideComment = (text, at) => {
+    let i = 0;
+    while (i <= at) {
+      const open = text.indexOf("<!--", i);
+      if (open === -1 || open > at) return false;
+      const ends = ["-->", "--!>"].map((t) => text.indexOf(t, open + 4)).filter((e) => e !== -1);
+      const close = ends.length === 0 ? text.length : Math.min(...ends);
+      if (at < close) return true;
+      i = close + 1;
+    }
+    return false;
+  };
+  assert.strictEqual(
+    insideComment(narrowed, narrowed.indexOf(label)),
+    false,
+    "the label must be outside the HTML comments"
+  );
+  // Also on the zero-findings path, which is where a narrowed range is most
+  // likely to be mistaken for "the whole PR is clean".
+  const clean = await withRange({ rangeMode: "checkpoint", rangeFrom: CK_OLD, rangeTo: CK_NEW }, {
+    comments: [],
+    manifest: ckManifest(),
+  });
+  assert.strictEqual(clean.includes(label), true);
+
+  const full = await withRange({ rangeMode: "full", rangeFrom: "", rangeTo: CK_NEW }, findings);
+  assert.strictEqual(full.includes("Reviewed `"), false, "a full run must not claim a narrowed range");
+  const empty = await withRange({ rangeMode: "checkpoint", rangeFrom: CK_NEW, rangeTo: CK_NEW }, findings);
+  assert.strictEqual(empty.includes("Reviewed `"), false, "an empty range has nothing to label");
+  const off = await withRange({ checkpointEnabled: false, rangeMode: "checkpoint", rangeFrom: CK_OLD, rangeTo: CK_NEW }, findings);
+  assert.strictEqual(off.includes("Reviewed `"), false, "opt-out runs render today's body");
+}
+
+// U2. The resolve step only chooses where the review starts; every failure it
+// can hit has the same safe answer. It must never be the reason a job fails.
+function testActionResolveStepNeverFailsTheJob() {
+  const block = actionStepBlock("Resolve review range");
+  const tryAt = block.indexOf("\n          try {\n");
+  assert.notStrictEqual(tryAt, -1, "the resolve script body must run inside a try");
+  // The outer catch, at the script's own indentation — the rule-file reads have
+  // their own nested ones.
+  const catchAt = block.indexOf("\n          } catch (e) {");
+  assert.notStrictEqual(catchAt, -1, "…with a catch around the whole body");
+  for (const inside of [
+    "Could not locate ${REL}",
+    "require(helper)",
+    "readCheckpointComment(common)",
+    "resolveCheckpointRange(",
+  ]) {
+    const at = block.indexOf(inside);
+    assert.notStrictEqual(at, -1, `${inside} must still be part of the step`);
+    assert.strictEqual(at > tryAt && at < catchAt, true, `${inside} must sit inside the try block`);
+  }
+  const failurePath = block.slice(catchAt);
+  assert.strictEqual(failurePath.includes("core.warning("), true, "the failure path warns instead of throwing");
+  assert.strictEqual(failurePath.includes("mode: 'full'"), true, "…and falls back to the full range");
+  assert.strictEqual(failurePath.includes("reason: 'resolver_error'"), true);
+  assert.strictEqual(/core\.setFailed|throw /.test(failurePath), false, "the failure path must not fail the job");
+  assert.strictEqual(block.indexOf("throw new Error") > tryAt, true, "no throw may escape the try");
+}
+
+// The list the fingerprint is hashed over, which is what decides when a
+// checkpoint stops being comparable.
+function fingerprintDigestSource() {
+  const block = actionStepBlock("Resolve review range");
+  const at = block.indexOf(".update(JSON.stringify([");
+  assert.notStrictEqual(at, -1, "the fingerprint digest input must still be readable");
+  const end = block.indexOf("].map(", at);
+  assert.notStrictEqual(end, -1, "the fingerprint digest input must be a closed list");
+  return block.slice(at, end);
+}
+
+// U3. .opencodereview/rule.json is read from the repo whether or not `rule` is
+// set, so a commit that edits it changes what a review says and must invalidate
+// the checkpoint.
+function testActionFingerprintsRepoLocalRuleFile() {
+  const block = actionStepBlock("Resolve review range");
+  assert.strictEqual(block.includes("'.opencodereview/rule.json'"), true, "the repo-local rule file is looked up");
+  assert.strictEqual(
+    fingerprintDigestSource().includes("localRuleDigest"),
+    true,
+    "the repo-local rule digest must be part of the fingerprint"
+  );
+  // Absent file -> 'none'; unreadable file -> the existing fail-closed path.
+  assert.strictEqual(block.includes("let localRuleDigest = 'none';"), true);
+  const localAt = block.indexOf("const localRulePath");
+  assert.strictEqual(block.slice(localAt).includes("ruleUnverified = true;"), true, "unreadable means unverified");
+  assert.strictEqual(block.includes("range.reason = 'rule_unreadable';"), true, "…which forces a full review");
+}
+
+// U4. `background` changes what the model is told, so it changes what a review
+// would say, so it belongs in the fingerprint.
+function testActionFingerprintIncludesBackground() {
+  const block = actionStepBlock("Resolve review range");
+  const digest = fingerprintDigestSource();
+  // Both halves, per axis: passed in as its own variable, and read by the
+  // digest. Either one alone is the silent failure — an axis that looks covered
+  // and quietly stops invalidating checkpoints.
+  for (const [envVar, input] of [
+    ["OCR_FP_LLM_URL", "llm_url"],
+    ["OCR_FP_LLM_MODEL", "llm_model"],
+    ["OCR_FP_LLM_USE_ANTHROPIC", "llm_use_anthropic"],
+    ["OCR_FP_LANGUAGE", "language"],
+    ["OCR_FP_LLM_EXTRA_BODY", "llm_extra_body"],
+    ["OCR_FP_RULE", "rule"],
+    ["OCR_FP_ROUTE_SEVERITY_BELOW", "route_severity_below"],
+    ["OCR_FP_ROUTE_CATEGORIES", "route_categories"],
+    ["OCR_FP_BACKGROUND", "background"],
+  ]) {
+    assert.strictEqual(
+      block.includes(`${envVar}: \${{ inputs.${input} }}`),
+      true,
+      `the step must pass inputs.${input} as ${envVar}`
+    );
+    assert.strictEqual(
+      digest.includes(`process.env.${envVar},`),
+      true,
+      `${envVar} must be hashed into the fingerprint`
+    );
+  }
+}
+
+// U5. A narrowed range published through $GITHUB_ENV outlives the step: a
+// second use of this action in the same job would inherit it and skip commits
+// it was never told about. Step outputs are scoped to the step that set them.
+function testActionRangeFromIsAStepOutput() {
+  assert.strictEqual(/exportVariable\(\s*'RANGE_FROM'/.test(ACTION_YML), false, "RANGE_FROM must not be job env");
+  assert.strictEqual(/core\.exportVariable\(/.test(ACTION_YML), false, "nothing about the range may leak via $GITHUB_ENV");
+
+  const resolve = actionStepBlock("Resolve review range");
+  assert.strictEqual(resolve.includes("core.setOutput('range_from'"), true);
+
+  const review = actionStepBlock("Run OpenCodeReview");
+  assert.strictEqual(review.includes("RANGE_FROM: ${{ steps.range.outputs.range_from }}"), true);
+  assert.strictEqual(review.includes('--from "${RANGE_FROM:-$MERGE_BASE}"'), true, "empty output still means merge-base");
+
+  const post = actionStepBlock("Post review comments");
+  for (const name of ["checkpoint_carry", "config_fingerprint", "range_mode", "range_from", "range_to", "range_reason"]) {
+    assert.strictEqual(post.includes(`steps.range.outputs.${name}`), true, `the post step reads ${name} as a step output`);
+  }
+  assert.strictEqual(post.includes("same_head_noop"), true, "…including the no-op signal");
+}
+
+// U8. "Why was this a full review" has to be answerable by a workflow, not just
+// by a human reading the step log.
+function testActionEmitsMachineReadableRangeOutputs() {
+  const names = [
+    "range_from",
+    "range_to",
+    "range_mode",
+    "range_reason",
+    "range_summary",
+    "checkpoint_before",
+    "ancestry",
+    "source_run",
+  ];
+  const resolve = actionStepBlock("Resolve review range");
+  const outputsBlock = ACTION_YML.slice(ACTION_YML.indexOf("\noutputs:"), ACTION_YML.indexOf("\nruns:"));
+  for (const name of names) {
+    assert.strictEqual(resolve.includes(`core.setOutput('${name}'`), true, `the resolve step emits ${name}`);
+    assert.strictEqual(outputsBlock.includes(`\n  ${name}:`), true, `action.yml declares the ${name} output`);
+    assert.strictEqual(
+      outputsBlock.includes(`steps.range.outputs.${name} }}`),
+      true,
+      `${name} is mapped to the resolve step`
+    );
+    assert.strictEqual(ACTION_README.includes(`\`${name}\``), true, `the README documents ${name}`);
+  }
+  // checkpoint_after comes from the posting step, where it is recorded.
+  assert.strictEqual(outputsBlock.includes("steps.post.outputs.checkpoint_after }}"), true);
+  assert.strictEqual(ACTION_README.includes("`checkpoint_after`"), true);
+}
+
+// U10. A floating tag on a step that runs with the repo's token is a supply
+// chain hole, and this file already pins every other action by sha.
+function testActionPinsGithubScriptSha() {
+  assert.strictEqual(/actions\/github-script@v/.test(ACTION_YML), false, "no floating github-script tag may remain");
+  const uses = [...ACTION_YML.matchAll(/uses: actions\/github-script@([0-9a-f]{40})/g)].map((m) => m[1]);
+  assert.strictEqual(uses.length, 2, "both github-script steps are pinned");
+  assert.strictEqual(new Set(uses).size, 1, "…to the same sha");
+}
+
+// U11. `ocr_version` defaults to "latest", so falling back to `spec:${VERSION}`
+// pinned the axis to the constant "spec:latest" — it stopped distinguishing
+// versions in exactly the case it was written to cover. Nothing replaces it:
+// an unresolvable version produces an EMPTY fingerprint, which matches no
+// stored one (full review) and blocks the write (no advance).
+async function testActionUnresolvedVersionEmptiesTheFingerprint() {
+  const install = actionStepBlock("Install OpenCodeReview");
+  assert.strictEqual(install.includes("spec:${OCR_VERSION}"), false, "no constant may stand in for a version");
+  assert.strictEqual(install.includes('echo "OCR_VERSION_ACTUAL=${VERSION_ACTUAL}"'), true);
+
+  const core = scriptCore();
+  await runActionScript(actionScriptSource("Resolve review range"), {
+    github: ckGithub({ comments: [ckComment({ payload: ckPayload() })] }),
+    context: { repo: { owner: "owner", repo: "repo" }, issue: { number: 123 } },
+    core,
+    env: resolveEnv({ OCR_VERSION_ACTUAL: "" }),
+  });
+  assert.strictEqual(core.outputs.config_fingerprint, "", "an unresolved version fingerprints as nothing");
+  assert.strictEqual(core.outputs.range_mode, "full", "…so no stored fingerprint can match it");
+  assert.strictEqual(core.outputs.range_reason, "config_changed");
+  assert.strictEqual(core.outputs.range_from, "", "empty range_from means ${RANGE_FROM:-$MERGE_BASE}");
+  assert.strictEqual(
+    core.warnings.some((w) => /ocr version/.test(w)),
+    true,
+    "and the run says why it went wide"
+  );
+  // The empty fingerprint also blocks the advance
+  // (testCheckpointAdvanceRequiresAFingerprint pins that half).
+}
+
+// The gap the review caught: `llm_extra_headers` can point a byte-identical
+// `llm_model` at a different backend model, or at a different provider
+// altogether, so it changes what a review would say. `llm_auth_header` picks
+// the header the credential rides in, and `llm_timeout` shifts which runs
+// finish and which are cut short — i.e. the partial/complete distribution the
+// checkpoint gates on. All three belong in the fingerprint.
+async function testActionFingerprintCoversLlmHeaderAxes() {
+  const source = actionScriptSource("Resolve review range");
+  const emptyPr = { rest: { issues: { listComments: async () => ({ data: [] }) } } };
+  const runWith = async (over) => {
+    const core = scriptCore();
+    await runActionScript(source, {
+      github: emptyPr,
+      context: { repo: { owner: "owner", repo: "repo" }, issue: { number: 123 } },
+      core,
+      env: resolveEnv(over),
+    });
+    assert.strictEqual(core.outputs.range_reason, "no_summary_comment", "fixture: an empty PR reads no marker");
+    return core;
+  };
+
+  const base = (await runWith({})).outputs.config_fingerprint;
+  for (const [envVar, value] of [
+    ["OCR_FP_LLM_EXTRA_HEADERS", "X-Model=gpt-4o"],
+    ["OCR_FP_LLM_AUTH_HEADER", "X-Api-Key"],
+    ["OCR_FP_LLM_TIMEOUT", "600"],
+  ]) {
+    const changed = (await runWith({ [envVar]: value })).outputs.config_fingerprint;
+    assert.notStrictEqual(changed, base, `a changed ${envVar} must invalidate the checkpoint`);
+  }
+  // Two different header sets must not collide with each other either.
+  const a = (await runWith({ OCR_FP_LLM_EXTRA_HEADERS: "X-Model=a" })).outputs.config_fingerprint;
+  const b = (await runWith({ OCR_FP_LLM_EXTRA_HEADERS: "X-Model=b" })).outputs.config_fingerprint;
+  assert.notStrictEqual(a, b, "two header sets must not hash alike");
+
+  // Header VALUES carry credentials, so the axis goes in as a digest: the value
+  // may reach neither the step log nor anything the step publishes (the
+  // fingerprint is what the stored checkpoint carries).
+  const secret = "X-Api-Key=sk-live-must-never-be-published";
+  const leaky = await runWith({ OCR_FP_LLM_EXTRA_HEADERS: secret });
+  const published = JSON.stringify([leaky.outputs, leaky.warnings, leaky.infos]);
+  assert.strictEqual(published.includes("sk-live"), false, "the header value must not be published anywhere");
+  const digest = fingerprintDigestSource();
+  assert.strictEqual(digest.includes("process.env.OCR_FP_LLM_EXTRA_HEADERS"), false, "…so it is not inlined raw");
+  assert.strictEqual(digest.includes("extraHeadersDigest"), true, "…it is hashed first, like the rule file contents");
+  const resolve = actionStepBlock("Resolve review range");
+  for (const input of ["llm_extra_headers", "llm_auth_header", "llm_timeout"]) {
+    const envVar = `OCR_FP_${input.toUpperCase()}`;
+    assert.strictEqual(resolve.includes(`${envVar}: \${{ inputs.${input} }}`), true, `the step passes inputs.${input}`);
+  }
+}
+
+// The author check trusted any bot, not this action: `dependabot[bot]`,
+// `renovate[bot]` and any linter App all read as ours, so the effective trust
+// set was "any bot that can post an issue comment carrying the summary
+// marker". The default `github.token` is always the "github-actions" app, so
+// when the caller did not override the token the check can be pinned to that
+// one app. A caller-supplied token keeps the wider check: an installation
+// token cannot ask GitHub which app it is.
+async function testActionPinsAuthorToTheDefaultTokenApp() {
+  const resolve = actionStepBlock("Resolve review range");
+  assert.strictEqual(
+    resolve.includes("OCR_CHECKPOINT_APP_SLUG: ${{ inputs.github_token == github.token && 'github-actions' || '' }}"),
+    true,
+    "the slug is pinned only when the token is the default one"
+  );
+  assert.strictEqual(
+    resolve.includes("appSlug: process.env.OCR_CHECKPOINT_APP_SLUG || ''"),
+    true,
+    "…and it reaches the reader"
+  );
+
+  // The three cases from the review, straight through the predicate.
+  const linter = ckComment({ payload: ckPayload(), login: "some-linter" });
+  linter.user = { login: "some-linter", type: "Bot" };
+  linter.performed_via_github_app = { slug: "some-linter" };
+  for (const comment of [
+    ckComment({ payload: ckPayload(), login: "dependabot[bot]" }),
+    ckComment({ payload: ckPayload(), login: "renovate[bot]" }),
+    linter,
+  ]) {
+    const who = comment.user.login;
+    assert.strictEqual(isCheckpointAuthorOurs(comment, "github-actions"), false, `${who} is not this action`);
+    assert.strictEqual(isCheckpointAuthorOurs(comment, ""), true, `${who} still passes an unpinned run`);
+  }
+
+  // Executed through the action's own script: the same marker is rejected under
+  // a foreign bot and gets past the author gate under ours.
+  const reasonFor = async (login) => {
+    const core = scriptCore();
+    await runActionScript(actionScriptSource("Resolve review range"), {
+      github: ckGithub({ comments: [ckComment({ payload: ckPayload(), login })] }),
+      context: { repo: { owner: "owner", repo: "repo" }, issue: { number: 123 } },
+      core,
+      env: resolveEnv({ OCR_CHECKPOINT_APP_SLUG: "github-actions" }),
+    });
+    assert.strictEqual(core.outputs.range_mode, "full");
+    return core.outputs.range_reason;
+  };
+  assert.strictEqual(await reasonFor("dependabot[bot]"), "author_unverified", "another bot's marker is not ours");
+  assert.strictEqual(
+    await reasonFor("github-actions[bot]"),
+    "config_changed",
+    "our own app gets past the author gate and is stopped by the next one"
+  );
+}
+
+// U13. The reason set is documented in three places (the resolver's contract
+// comment, the README table, the action outputs) and drifted between them once
+// already. Enumerate it once, here, and fail if any copy falls behind.
+async function testCheckpointReasonsMatchTheDocs() {
+  const failClosed = [
+    ["disabled", { enabled: false }],
+    ["sticky_disabled", { sticky: false }],
+    ["manual_full_review", { fullReview: true }],
+    ["event_full_scope", { eventAction: "reopened" }],
+    ["no_summary_comment", { github: ckGithub({ comments: [] }) }],
+    ["author_unverified", { github: ckGithub({ comments: [ckComment({ payload: ckPayload(), login: "fork-user" })] }) }],
+    ["corrupt_checkpoint", { github: ckGithub({ comments: [ckComment({ body: "no marker here" })] }) }],
+    ["schema_invalid", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ v: 2 }) })] }) }],
+    ["base_changed", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ merge_base: CK_MID }) })] }) }],
+    ["config_changed", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ fingerprint: "other" }) })] }) }],
+    ["not_ancestor", { isAncestor: async () => 1 }],
+    ["unknown_object", { isAncestor: async () => 128 }],
+    ["resolver_error", { github: ckGithub({ listThrows: true }) }],
+  ];
+  const narrowing = [
+    ["ok", {}],
+    ["same_head_noop", { github: ckGithub({ comments: [ckComment({ payload: ckPayload({ head: CK_NEW }) })] }) }],
+  ];
+  const seen = new Set();
+  for (const [reason, over] of failClosed) {
+    const r = await resolveCheckpointRange(ckArgs(over));
+    assert.strictEqual(r.reason, reason, `expected reason ${reason}, got ${r.reason}`);
+    assert.strictEqual(r.mode, "full", `${reason} must review the full range`);
+    seen.add(reason);
+  }
+  for (const [reason, over] of narrowing) {
+    const r = await resolveCheckpointRange(ckArgs(over));
+    assert.strictEqual(r.reason, reason);
+    assert.strictEqual(r.mode, "checkpoint");
+    seen.add(reason);
+  }
+  assert.strictEqual(seen.size, failClosed.length + narrowing.length, "every reason has its own input class");
+  assert.strictEqual(failClosed.length, 13, "thirteen fail-closed reasons");
+
+  // The resolver's own contract comment must enumerate them, with a count that
+  // matches what it lists.
+  const contract = HELPER_SOURCE.slice(
+    HELPER_SOURCE.indexOf("// The ordered gate."),
+    HELPER_SOURCE.indexOf("async function resolveCheckpointRange")
+  );
+  assert.notStrictEqual(contract, "", "the resolver contract comment must exist");
+  assert.strictEqual(contract.includes("thirteen fail-closed"), true, "the documented count must match the list");
+  for (const [reason] of failClosed.concat(narrowing)) {
+    assert.strictEqual(contract.includes(reason), true, `the contract comment lists ${reason}`);
+  }
+
+  // …as must the README table, plus rule_unreadable, which only the action's
+  // last gate can produce.
+  const rows = new Set([...ACTION_README.matchAll(/^\| `([a-z_]+)` \|/gm)].map((m) => m[1]));
+  for (const [reason] of failClosed) {
+    assert.strictEqual(rows.has(reason), true, `the README reason table documents ${reason}`);
+  }
+  assert.strictEqual(rows.has("rule_unreadable"), true, "…including the action's own last gate");
+  // The two narrowing reasons are not table rows (the table says why a run went
+  // wide), so they are documented in prose instead.
+  assert.strictEqual(ACTION_README.includes("`same_head_noop`"), true, "the README explains the no-op rerun");
+  assert.strictEqual(ACTION_README.includes("checkpoint (ok)"), true, "…and shows what a narrowed run reports");
+  // Force-push lands on unknown_object (the orphaned commit is not in this
+  // shallow clone), not on not_ancestor.
+  const forcePush = /\| `unknown_object` \|([^\n]*)/.exec(ACTION_README);
+  assert.notStrictEqual(forcePush, null);
+  assert.strictEqual(/force-push/.test(forcePush[1]), true, "unknown_object is where a force-push actually lands");
+}
+
+// The resolve step's git refs come from $GITHUB_ENV, written by two earlier
+// steps. Reading them straight off the ambient job env made that dependency
+// invisible: nothing in the step said it needed those steps to have run. Pin
+// both halves — the declaration, and what happens when the declaration is empty
+// because an upstream step was skipped.
+async function testActionResolveStepDeclaresItsRefInputs() {
+  const block = actionStepBlock("Resolve review range");
+  for (const [envVar, source] of [
+    ["OCR_HEAD_SHA", "env.HEAD_SHA"],
+    ["OCR_BASE_REF", "env.BASE_REF"],
+    ["OCR_MERGE_BASE", "env.MERGE_BASE"],
+  ]) {
+    assert.strictEqual(
+      block.includes(`${envVar}: \${{ ${source} }}`),
+      true,
+      `the step must declare ${envVar} instead of reading the job env implicitly`
+    );
+    assert.strictEqual(block.includes(`process.env.${envVar}`), true, `…and read it as ${envVar}`);
+  }
+  for (const bare of ["process.env.HEAD_SHA", "process.env.BASE_REF", "process.env.MERGE_BASE"]) {
+    assert.strictEqual(block.includes(bare), false, `no undeclared ${bare} may remain`);
+  }
+
+  // Upstream skipped: all three arrive empty. The resolver must still go wide
+  // rather than narrow to a half-known range, and must not throw.
+  const core = scriptCore();
+  await runActionScript(actionScriptSource("Resolve review range"), {
+    github: ckGithub({ comments: [ckComment({ payload: ckPayload() })] }),
+    context: { repo: { owner: "owner", repo: "repo" }, issue: { number: 123 } },
+    core,
+    env: resolveEnv({ OCR_HEAD_SHA: "", OCR_BASE_REF: "", OCR_MERGE_BASE: "" }),
+  });
+  assert.strictEqual(core.outputs.range_mode, "full", "an empty ref set never narrows");
+  assert.strictEqual(core.outputs.range_reason, "base_changed", "…because the stored base cannot match an empty one");
+  assert.strictEqual(core.outputs.range_from, "", "empty range_from means ${RANGE_FROM:-$MERGE_BASE}");
+  assert.strictEqual(core.warnings.length, 0, "and it is a decision, not a crash");
+}
+
+// The flagless marker RegExp is shared across calls now. That is only safe
+// because a RegExp without `g` keeps no lastIndex; sharing a global one would
+// make the second call on an identical body behave differently from the first.
+// Both shared uses are exercised twice here, which is what a `g` flag on the
+// shared instance would break.
+async function testCheckpointMarkerMatchingIsStateless() {
+  const marker = buildCheckpointMarker(ckPayload({ head: CK_MID }));
+  const withMarker = `${SUMMARY_MARKER}\nprose\n\n${marker}`;
+
+  // preserveCheckpointMarker: the new body already carries a marker, so the old
+  // one is never appended — on every call, not just the first.
+  for (const pass of [1, 2]) {
+    assert.strictEqual(
+      preserveCheckpointMarker(withMarker, `${SUMMARY_MARKER}\nold\n\n${buildCheckpointMarker(ckPayload())}`),
+      withMarker,
+      `pass ${pass}: a body that already has a marker is returned untouched`
+    );
+  }
+
+  // readCheckpointComment: the raw marker it carries forward must be the marker,
+  // byte for byte, on every read of the same body.
+  const read = async () =>
+    readCheckpointComment({
+      github: ckGithub({ comments: [ckComment({ payload: ckPayload({ head: CK_MID }) })] }),
+      owner: "owner",
+      repo: "repo",
+      prNumber: 123,
+      log: () => {},
+    });
+  const first = await read();
+  const second = await read();
+  assert.strictEqual(first.raw, marker, "the carried marker is the marker itself");
+  assert.deepStrictEqual(second, first, "a second read of the same body reads the same thing");
 }
 
 main().catch((err) => {

@@ -166,6 +166,8 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.thrift` | `thrift.md`——Apache Thrift IDL 线协议兼容性。 |
 | `**/*.capnp` | `capnp.md`——Cap'n Proto schema 线协议兼容性。 |
 | `**/*.m` | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
+| `**/*.sol` | `solidity.md`——Solidity 智能合约。 |
+| `**/*.vy` | `vyper.md`——Vyper 智能合约。 |
 | *(fallback)* | `default.md` |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。
