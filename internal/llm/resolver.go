@@ -614,6 +614,11 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		apiKey = auth.AccessToken
 	}
 
+	// Gateway-specific request shaping applies only while the entry still points
+	// at the preset's own endpoint. A url or protocol override sends the request
+	// elsewhere, and that destination does not share the gateway's constraints.
+	codexGatewayBehavior := isPreset && entry.Protocol == "" && entry.URL == ""
+
 	return ResolvedEndpoint{
 		URL:                   url,
 		Token:                 apiKey,
@@ -626,9 +631,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		ExtraHeaders:          extraHeaders,
 		Timeout:               timeout,
 		RetryCodes:            retryCodes,
-		RequiresStreaming:     isPreset && entry.Protocol == "" && preset.RequiresStreaming,
-		RejectsSamplingParams: isPreset && entry.Protocol == "" && preset.RejectsSamplingParams,
-		DetailErrorEnvelope:   isPreset && entry.Protocol == "" && preset.DetailErrorEnvelope,
+		RequiresStreaming:     codexGatewayBehavior && preset.RequiresStreaming,
+		RejectsSamplingParams: codexGatewayBehavior && preset.RejectsSamplingParams,
+		DetailErrorEnvelope:   codexGatewayBehavior && preset.DetailErrorEnvelope,
 		AmbientAuth:           ambientAuth,
 		AWSProfile:            entry.AWSProfile,
 		AWSRegion:             entry.AWSRegion,
@@ -837,7 +842,6 @@ func parseShellRC(path, modelOverride string) (ResolvedEndpoint, bool, error) {
 
 	url := ensureMessagesSuffix(baseURL)
 
-	// Claude Code shell rc tokens are OAuth/Bearer-style credentials.
 	return ResolvedEndpoint{URL: url, Token: token, Model: model, Protocol: ProtocolAnthropic, AuthHeader: "authorization", Source: "Shell rc file"}, true, nil
 }
 

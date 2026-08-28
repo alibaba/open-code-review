@@ -141,9 +141,14 @@ func (c *OAuthClient) LoginLoopback(ctx context.Context, store CodexStore, noBro
 		return nil, err
 	}
 
-	listener, err := net.Listen("tcp", "localhost:1455")
+	// Bind the loopback address explicitly rather than resolving "localhost".
+	// A modified hosts file or resolver can point that name at a routable
+	// address, which would expose the callback (and the authorization code it
+	// receives) beyond this machine. The redirect URI registered with the
+	// provider still uses the localhost name, which resolves here normally.
+	listener, err := net.Listen("tcp", "127.0.0.1:1455")
 	if err != nil {
-		return nil, fmt.Errorf("start OAuth callback listener on localhost:1455: %w", err)
+		return nil, fmt.Errorf("start OAuth callback listener on 127.0.0.1:1455: %w", err)
 	}
 	result := make(chan callbackResult, 1)
 	mux := http.NewServeMux()
@@ -378,6 +383,12 @@ func (c *OAuthClient) RefreshIfNeeded(ctx context.Context, store CodexStore, now
 	}
 	if response.RefreshToken == "" {
 		response.RefreshToken = auth.RefreshToken
+	}
+	// A refresh response is not required to repeat the id_token. Carry the
+	// stored one forward so the account id and plan derived from it survive a
+	// refresh; otherwise every rotation would quietly blank them.
+	if response.IDToken == "" {
+		response.IDToken = auth.IDToken
 	}
 	rotated, err := authFromTokenResponse(response, now())
 	if err != nil {

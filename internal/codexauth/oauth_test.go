@@ -538,3 +538,39 @@ func TestRevoke(t *testing.T) {
 		t.Fatal("Revoke(nil) succeeded")
 	}
 }
+
+func TestRefreshIfNeededPreservesIdentityWhenIDTokenOmitted(t *testing.T) {
+	setTestHome(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A provider that does not re-issue the id_token on refresh.
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":864000}`))
+	}))
+	defer server.Close()
+
+	store := FileStore{}
+	existing := &CodexAuth{
+		AccessToken:  "old-access",
+		RefreshToken: "old-refresh",
+		IDToken:      "header.payload.signature",
+		AccountID:    "acct-123",
+		PlanType:     "plus",
+		ExpiresAt:    time.Now().Add(-time.Hour),
+	}
+	if err := store.Save(existing); err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+
+	client := &OAuthClient{Issuer: server.URL, HTTPClient: server.Client()}
+	got, err := client.RefreshIfNeeded(context.Background(), store, time.Now)
+	if err != nil {
+		t.Fatalf("RefreshIfNeeded returned error: %v", err)
+	}
+	if got.AccessToken != "new-access" {
+		t.Errorf("AccessToken = %q, want %q", got.AccessToken, "new-access")
+	}
+	if got.IDToken != existing.IDToken {
+		t.Errorf("IDToken = %q, want the stored token %q", got.IDToken, existing.IDToken)
+	}
+}
