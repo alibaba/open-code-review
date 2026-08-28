@@ -235,7 +235,8 @@ type ResponseMessage struct {
 	Content          *string    `json:"content,omitempty"`
 	ReasoningContent string     `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
-	Native NativeTurn `json:"-"` // opaque replay state; see NativeTurn
+	// json:"-" prevents incidental marshal; internal/session persists it explicitly.
+	Native NativeTurn `json:"-"`
 }
 
 // ChatResponse is the parsed result of a completion request.
