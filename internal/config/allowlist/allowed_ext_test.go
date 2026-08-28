@@ -37,6 +37,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".FTLH", true},
 		{".ftlx", true},
 		{".FTLX", true},
+		{".hbs", true},
+		{".HBS", true},
+		{".mustache", true},
+		{".MUSTACHE", true},
 		{".graphql", true},
 		{".GRAPHQL", true},
 		{".gql", true},
@@ -47,6 +51,7 @@ func TestIsAllowedExt(t *testing.T) {
 		{".JL", true},
 		{".hcl", true},
 		{".HCL", true},
+		{".m", true},
 		{".tfvars", true},
 		{".TFVARS", true},
 		{".bicep", true},
@@ -85,6 +90,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".THRIFT", true},
 		{".capnp", true},
 		{".CAPNP", true},
+		{".sol", true},
+		{".SOL", true},
+		{".vy", true},
+		{".VY", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},
@@ -155,6 +164,13 @@ func TestIsExcludedPath(t *testing.T) {
 
 		// Prisma schemas have no conventional default test-file exclusion.
 		{"prisma schema", "prisma/schema.prisma", false},
+
+		// Handlebars/Mustache have no extension-specific test-path convention;
+		// generic fixture directories remain excluded.
+		{"handlebars fixture", "test/fixtures/card.hbs", true},
+		{"mustache fixture", "spec/fixtures/email.mustache", true},
+		{"handlebars template in tests directory", "tests/templates/card.hbs", false},
+		{"mustache template in test directory", "test/templates/email.mustache", false},
 
 		// HarmonyOS oh_modules and test files
 		{"oh_modules root", "oh_modules/some_lib/index.ets", true},
@@ -240,6 +256,27 @@ func TestIsExcludedPath(t *testing.T) {
 		{"zig _test suffix", "src/parser_test.zig", true},
 		{"zig non-test", "src/parser.zig", false},
 		{"zig test in filename", "src/testutil.zig", false},
+		// Solidity/Vyper vendored deps and tests
+		{"solidity foundry lib", "lib/forge-std/src/Test.sol", true},
+		{"solidity vendored openzeppelin", "lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol", true},
+		{"solidity foundry test file", "test/Counter.t.sol", true},
+		{"solidity test file beside source", "src/Vault.t.sol", true},
+		// Test helpers and mocks carry no .t.sol suffix, so the directory patterns carry them.
+		{"solidity test helper", "test/utils/BaseTest.sol", true},
+		{"solidity nested test dir", "pkg/core/test/foundry/utils/BaseTest.sol", true},
+		{"solidity tests dir helper", "tests/extensions/TestBase.sol", true},
+		{"solidity test mock", "contracts/test/ERC20TestToken.sol", true},
+		{"vyper tests directory", "tests/mocks/erc20_mock.vy", true},
+		{"vyper test directory", "test/mocks/oracle_mock.vy", true},
+		// lib/**/*.sol is root-anchored on purpose: a project's own lib/ dir is real source.
+		{"solidity own lib dir", "src/lib/Math.sol", false},
+		{"solidity own nested lib dir", "contracts/lib/SafeMath.sol", false},
+		{"solidity non-root lib dir", "packages/foo/lib/forge-std/src/Test.sol", false},
+		{"solidity non-test", "src/Counter.sol", false},
+		{"solidity test in filename only", "src/TestHelper.sol", false},
+		{"solidity deploy script", "script/Deploy.s.sol", false},
+		{"vyper non-test", "src/token.vy", false},
+		{"vyper test in filename only", "src/test_helpers.vy", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

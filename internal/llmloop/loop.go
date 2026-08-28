@@ -351,14 +351,16 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		llmSpan.End()
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
-		content := resp.Content()
+		content := resp.VisibleContent()
 		calls := resp.ToolCalls()
 
 		if len(calls) == 0 {
 			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", newPath)
 			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
-			if content != "" {
-				messages = append(messages[:len(messages)-1], llm.NewTextMessage("assistant", content), messages[len(messages)-1])
+			native := resp.Native()
+			reasoning := resp.ReasoningContent()
+			if content != "" || native.Payload != nil || reasoning != "" {
+				messages = append(messages[:len(messages)-1], llm.NewToolCallMessage(content, nil, native, reasoning), messages[len(messages)-1])
 			}
 			continue
 		}
@@ -413,7 +415,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			consecutiveEmptyRounds = 0
 		}
 
-		succeed := r.addNextMessage(ctx, content, calls, results, &messages, newPath, st)
+		succeed := r.addNextMessage(ctx, content, calls, resp.Native(), thinking, results, &messages, newPath, st)
 		if !succeed {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", newPath)
 			stop = StopCompression
@@ -448,33 +450,47 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newP
 		return
 	}
 
-	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	fs := r.deps.Session.GetOrCreateFileSession(newPath)
+	rec := fs.AppendTaskRecord(session.MainTask, messages)
+	startTime := time.Now()
+	reqCtx := r.requestCtx(ctx, newPath, session.MainTask, rec.RequestNo)
+
+	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  messages,
 		Tools:     graceDefs,
 		MaxTokens: r.deps.Template.CompletionTokenLimit(),
 		SessionID: sessionID,
 	})
+	duration := time.Since(startTime)
 	if err != nil {
+		rec.SetError(err, duration)
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", newPath, err)
 		return
 	}
 
+	rec.SetResponse(resp, duration)
+	totalTokens := int64(0)
 	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
 		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
 		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
 		atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
 		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
 	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
 		return
 	}
 
-	fs := r.deps.Session.GetOrCreateFileSession(newPath)
-	rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
-	rec.SetResponse(resp, 0)
 	thinking := resp.ReasoningContent()
 	for _, call := range calls {
 		r.executeToolCall(ctx, newPath, call, rec, thinking)
@@ -567,19 +583,13 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
 	}
 
-	// Always inject the current file path for code_comment.
-	// The model sometimes hallucinates a path, so we override it.
-	if t == tool.CodeComment && newPath != "" {
-		args["path"] = newPath
-	}
-
 	startTime := time.Now()
 
 	if t == tool.CodeComment {
 		telemetry.PrintToolCallStarted(t.Name(), args)
 		_, toolSpan := telemetry.StartToolSpan(ctx, t.Name())
 
-		comments, errMsg := tool.ParseComments(args)
+		comments, errMsg := tool.ParseCommentsWithPath(args, newPath)
 		if errMsg != "" {
 			dur := time.Since(startTime)
 			telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), fmt.Errorf("%s", errMsg))
@@ -717,7 +727,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 // warning (80%) MaxTokens thresholds. Returns false when even after
 // synchronous compression the conversation is still over the warning
 // threshold — caller should stop the loop in that case.
-func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]llm.Message, filePath string, st *compressionState) bool {
+func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, native llm.NativeTurn, reasoningContent string, results []tool.ToolCallResult, messages *[]llm.Message, filePath string, st *compressionState) bool {
 	maxAllowed := r.deps.Template.MaxTokens
 	softLimit := int(float64(maxAllowed) * tokenSoftThreshold)
 	warnLimit := PromptTokenLimit(maxAllowed)
@@ -737,9 +747,9 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	}
 
 	if len(toolCalls) > 0 {
-		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls))
-	} else if assistantContent != "" {
-		*messages = append(*messages, llm.NewTextMessage("assistant", assistantContent))
+		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls, native, reasoningContent))
+	} else if assistantContent != "" || native.Payload != nil {
+		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, nil, native, reasoningContent))
 	}
 
 	for _, rs := range results {

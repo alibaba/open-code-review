@@ -4,11 +4,15 @@
 package session
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/llm"
+	anthropic "github.com/anthropics/anthropic-sdk-go"
 )
 
 func TestNew(t *testing.T) {
@@ -69,6 +73,50 @@ func TestGetOrCreateFileSession(t *testing.T) {
 	}
 }
 
+func TestFinalizeFilesReviewedUsesManifestSelectedPaths(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "model", SessionOptions{Operation: "review"})
+	sh.SetFinalManifest(&RunManifest{
+		SchemaVersion: ManifestSchemaVersion,
+		Coverage: Coverage{Selected: []CoverageItem{
+			{ItemID: "a", Path: "a.go"},
+			{ItemID: "b", Path: "b.go"},
+			{ItemID: "c", Path: "c.go"},
+		}},
+	})
+
+	// c.go deliberately has no FileSession: the manifest, not the conversation
+	// scope registry, is authoritative for the selected file list.
+	for _, key := range []string{"__grouping__", "a.go,b.go", "a.go", "b.go"} {
+		sh.GetOrCreateFileSession(key)
+	}
+	if err := sh.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var got []string
+	for _, rec := range records {
+		if rec["type"] != "session_end" {
+			continue
+		}
+		for _, raw := range rec["files_reviewed"].([]any) {
+			got = append(got, raw.(string))
+		}
+	}
+	sort.Strings(got)
+	want := []string{"a.go", "b.go", "c.go"}
+	if len(got) != len(want) {
+		t.Fatalf("files_reviewed = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("files_reviewed = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestAppendTaskRecord(t *testing.T) {
 	sh := New("/tmp/repo", "main", "model", SessionOptions{})
 	fs := sh.GetOrCreateFileSession("file.go")
@@ -109,6 +157,41 @@ func TestAppendTaskRecord_DefensiveCopy(t *testing.T) {
 	}
 }
 
+// TestAppendTaskRecord_CopiesNativeAndReasoningContent guards copyMessages'
+// own "deep copy" contract: an assistant history message carrying replay
+// state must keep that state in TaskRecord.RequestMessages too, not just in
+// the JSONL projection (copyMessagesForJSON) — otherwise anything reading the
+// in-memory record (e.g. a future compression/export path) would silently see
+// an incomplete turn.
+func TestAppendTaskRecord_CopiesNativeAndReasoningContent(t *testing.T) {
+	sh := New("/tmp/repo", "main", "model", SessionOptions{})
+	fs := sh.GetOrCreateFileSession("file.go")
+
+	native := llm.NativeTurn{Family: "anthropic-messages", Payload: anthropic.MessageParam{
+		Content: []anthropic.ContentBlockParamUnion{anthropic.NewThinkingBlock("sig-copy", "thinking")},
+	}}
+	msgs := []llm.Message{
+		llm.NewTextMessage("user", "hi"),
+		llm.NewToolCallMessage("", nil, native, "reasoning text"),
+	}
+	rec := fs.AppendTaskRecord(MainTask, msgs)
+
+	got := rec.RequestMessages[1]
+	if got.ReasoningContent != "reasoning text" {
+		t.Errorf("ReasoningContent = %q, want %q", got.ReasoningContent, "reasoning text")
+	}
+	if got.Native.Family != "anthropic-messages" {
+		t.Errorf("Native.Family = %q, want anthropic-messages", got.Native.Family)
+	}
+	payload, ok := got.Native.Payload.(anthropic.MessageParam)
+	if !ok {
+		t.Fatalf("Native.Payload type = %T, want anthropic.MessageParam", got.Native.Payload)
+	}
+	if len(payload.Content) != 1 || payload.Content[0].OfThinking == nil || payload.Content[0].OfThinking.Signature != "sig-copy" {
+		t.Errorf("Native.Payload signature not preserved: %+v", payload)
+	}
+}
+
 func TestSetResponse(t *testing.T) {
 	sh := New("/tmp/repo", "main", "model", SessionOptions{})
 	fs := sh.GetOrCreateFileSession("file.go")
@@ -118,7 +201,8 @@ func TestSetResponse(t *testing.T) {
 	resp := &llm.ChatResponse{
 		Choices: []llm.Choice{{
 			Message: llm.ResponseMessage{
-				Content: &content,
+				Content:          &content,
+				ReasoningContent: "because the diff touches auth code",
 			},
 		}},
 		Model: "gpt-4",
@@ -136,6 +220,9 @@ func TestSetResponse(t *testing.T) {
 	if rec.Response.Content != "response text" {
 		t.Errorf("Content = %q", rec.Response.Content)
 	}
+	if rec.Response.ReasoningContent != "because the diff touches auth code" {
+		t.Errorf("ReasoningContent = %q", rec.Response.ReasoningContent)
+	}
 	if rec.Response.Model != "gpt-4" {
 		t.Errorf("Model = %q", rec.Response.Model)
 	}
@@ -147,6 +234,206 @@ func TestSetResponse(t *testing.T) {
 	}
 	if rec.Duration != 2*time.Second {
 		t.Errorf("Duration = %v", rec.Duration)
+	}
+}
+
+// TestSetResponse_PersistsReasoningContent guards the audit-transcript gap
+// raised in review: the raw per-turn llm_response record must carry the
+// model's reasoning text, not just Content/ToolCalls/Usage — otherwise a
+// human auditing session.jsonl has no way to see why the model did what it
+// did on a turn that produced no visible text.
+func TestSetResponse_PersistsReasoningContent(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	fs := sh.GetOrCreateFileSession("file.go")
+	rec := fs.AppendTaskRecord(MainTask, []llm.Message{llm.NewTextMessage("user", "hi")})
+
+	content := ""
+	resp := &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{
+				Content:          &content,
+				ReasoningContent: "auditable reasoning text",
+			},
+		}},
+		Model: "test-model",
+	}
+	rec.SetResponse(resp, time.Second)
+	sh.Finalize()
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var found bool
+	for _, r := range records {
+		if r["type"] != "llm_response" {
+			continue
+		}
+		found = true
+		if r["reasoning_content"] != "auditable reasoning text" {
+			t.Errorf("reasoning_content = %v, want %q", r["reasoning_content"], "auditable reasoning text")
+		}
+	}
+	if !found {
+		t.Fatal("no llm_response record found in session JSONL")
+	}
+}
+
+// TestSetResponse_PersistsNativePayload guards the training-reflow gap raised
+// in review: the llm_response record must carry the opaque replay payload
+// (e.g. an Anthropic thinking block's signature), not just the plain-text
+// ReasoningContent projection — otherwise a session exported for training
+// cannot reconstruct a request that replays byte for byte.
+func TestSetResponse_PersistsNativePayload(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	fs := sh.GetOrCreateFileSession("file.go")
+	rec := fs.AppendTaskRecord(MainTask, []llm.Message{llm.NewTextMessage("user", "hi")})
+
+	native := llm.NativeTurn{
+		Family: "anthropic-messages",
+		Payload: anthropic.MessageParam{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				anthropic.NewThinkingBlock("sig-abc-123", "let me think this through"),
+			},
+		},
+	}
+	resp := &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{Native: native},
+		}},
+		Model: "test-model",
+	}
+	rec.SetResponse(resp, time.Second)
+	sh.Finalize()
+
+	if rec.Response.Native.Family != "anthropic-messages" {
+		t.Errorf("in-memory Native.Family = %q, want anthropic-messages", rec.Response.Native.Family)
+	}
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var found bool
+	for _, r := range records {
+		if r["type"] != "llm_response" {
+			continue
+		}
+		found = true
+		np, ok := r["native_payload"].(map[string]any)
+		if !ok {
+			t.Fatalf("native_payload missing or wrong shape: %v", r["native_payload"])
+		}
+		if np["family"] != "anthropic-messages" {
+			t.Errorf("native_payload.family = %v, want anthropic-messages", np["family"])
+		}
+		payload, err := json.Marshal(np["payload"])
+		if err != nil {
+			t.Fatalf("marshal native_payload.payload: %v", err)
+		}
+		if !bytes.Contains(payload, []byte(`"signature":"sig-abc-123"`)) {
+			t.Errorf("thinking signature not preserved verbatim in native_payload: %s", payload)
+		}
+	}
+	if !found {
+		t.Fatal("no llm_response record found in session JSONL")
+	}
+}
+
+// TestSetResponse_OmitsNativePayloadWhenAbsent guards the other half of the
+// same contract: an ordinary turn with nothing to replay beyond
+// Content/ToolCalls must not grow a native_payload key at all.
+func TestSetResponse_OmitsNativePayloadWhenAbsent(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	fs := sh.GetOrCreateFileSession("file.go")
+	rec := fs.AppendTaskRecord(MainTask, []llm.Message{llm.NewTextMessage("user", "hi")})
+
+	content := "plain text answer"
+	resp := &llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
+		Model:   "test-model",
+	}
+	rec.SetResponse(resp, time.Second)
+	sh.Finalize()
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var found bool
+	for _, r := range records {
+		if r["type"] != "llm_response" {
+			continue
+		}
+		found = true
+		if _, ok := r["native_payload"]; ok {
+			t.Errorf("native_payload should be omitted for a turn with no replay state, got %v", r["native_payload"])
+		}
+	}
+	if !found {
+		t.Fatal("no llm_response record found in session JSONL")
+	}
+}
+
+// TestAppendTaskRecord_PersistsToolCallsAndNativePayload guards
+// copyMessagesForJSON: the llm_request record's messages must be a
+// self-contained, replayable projection of what was actually sent — including
+// tool_calls (previously dropped) and, for an assistant history turn carrying
+// replay state, its native_payload with fields like a thinking signature
+// intact.
+func TestAppendTaskRecord_PersistsToolCallsAndNativePayload(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	fs := sh.GetOrCreateFileSession("file.go")
+
+	native := llm.NativeTurn{
+		Family: "anthropic-messages",
+		Payload: anthropic.MessageParam{
+			Role: anthropic.MessageParamRoleAssistant,
+			Content: []anthropic.ContentBlockParamUnion{
+				anthropic.NewThinkingBlock("sig-xyz", "thinking"),
+			},
+		},
+	}
+	toolCalls := []llm.ToolCall{{ID: "call_1", Type: "function", Function: llm.FunctionCall{Name: "code_comment", Arguments: "{}"}}}
+	msgs := []llm.Message{
+		llm.NewTextMessage("user", "hi"),
+		llm.NewToolCallMessage("", toolCalls, native, "thinking text"),
+	}
+	fs.AppendTaskRecord(MainTask, msgs)
+	sh.Finalize()
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var found bool
+	for _, r := range records {
+		if r["type"] != "llm_request" {
+			continue
+		}
+		found = true
+		reqMsgs, ok := r["messages"].([]any)
+		if !ok || len(reqMsgs) != 2 {
+			t.Fatalf("messages = %v", r["messages"])
+		}
+		assistantMsg, ok := reqMsgs[1].(map[string]any)
+		if !ok {
+			t.Fatalf("assistant message shape: %v", reqMsgs[1])
+		}
+		if _, ok := assistantMsg["tool_calls"]; !ok {
+			t.Errorf("tool_calls missing from persisted request message: %v", assistantMsg)
+		}
+		np, ok := assistantMsg["native_payload"].(map[string]any)
+		if !ok {
+			t.Fatalf("native_payload missing from persisted request message: %v", assistantMsg)
+		}
+		payload, err := json.Marshal(np["payload"])
+		if err != nil {
+			t.Fatalf("marshal native_payload.payload: %v", err)
+		}
+		if !bytes.Contains(payload, []byte(`"signature":"sig-xyz"`)) {
+			t.Errorf("thinking signature not preserved in request message: %s", payload)
+		}
+	}
+	if !found {
+		t.Fatal("no llm_request record found in session JSONL")
 	}
 }
 
