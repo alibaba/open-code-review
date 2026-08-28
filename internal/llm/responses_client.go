@@ -53,7 +53,14 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
 	}
-	// Raw before the retry observer; see NewOpenAIClient for why order matters.
+	// Admission gate outside the retry observer — see the OpenAI constructor
+	// in client.go for the ordering argument.
+	if gate := newAdmissionGate(cfg.MaxInFlight); gate != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newAdmissionMiddleware(gate)))
+	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters. It sits inside the
+	// admission gate so a response body still being read by raw is still
+	// counted as in-flight.
 	if cfg.rawHolder != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
