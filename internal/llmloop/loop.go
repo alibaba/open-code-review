@@ -351,10 +351,6 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		llmSpan.End()
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
-		// VisibleContent, not Content: Content() falls back to reasoning text
-		// when there's no visible answer, and that same text already rides
-		// along separately via resp.Native() — folding it into the ordinary
-		// content field here would send it twice on replay.
 		content := resp.VisibleContent()
 		calls := resp.ToolCalls()
 
@@ -363,20 +359,6 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
 			native := resp.Native()
 			reasoning := resp.ReasoningContent()
-			// Also splice in a native-only turn (no visible text, no tool
-			// call, but a real reasoning payload — e.g. a Responses reasoning
-			// item with encrypted_content and an empty summary). Checking
-			// native.Payload != nil is safe here: every adapter that sets it
-			// only does so when there's an actual native turn to preserve
-			// (see mapAnthropicResponse's hasThinking gate and the len(...)>0
-			// guards in the other two mappers) — none of them ever box an
-			// empty/meaningless value into Payload.
-			// reasoning != "" additionally catches a degenerate turn that has
-			// neither visible content nor a replayable Native payload (e.g. an
-			// openai-responses reasoning item with no accompanying
-			// message/function_call, which mapResponsesResponse deliberately
-			// excludes from Native): without this, that turn left no trace at
-			// all in history, and the model could repeat the same empty turn.
 			if content != "" || native.Payload != nil || reasoning != "" {
 				messages = append(messages[:len(messages)-1], llm.NewToolCallMessage(content, nil, native, reasoning), messages[len(messages)-1])
 			}

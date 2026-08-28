@@ -63,14 +63,8 @@ type compressionState struct {
 	pendingJob *compressionJob
 }
 
-// messageTokens returns the rough token count of a single message: its
-// visible text plus whatever its Native replay payload (thinking blocks,
-// reasoning items, encrypted_content, reasoning_content) will add to the wire
-// once this message replays. ExtractText() never sees that payload, so every
-// caller that budgets against maxTokens must go through this helper rather
-// than calling llm.CountTokens(m.ExtractText()) directly — otherwise
-// reasoning-heavy conversations are systematically under-counted in one place
-// and not the other. See NativeTurn.EstimatedTokens.
+// messageTokens counts visible text plus the Native replay payload that
+// ExtractText() does not see.
 func messageTokens(m llm.Message) int {
 	return llm.CountTokens(m.ExtractText()) + m.Native.EstimatedTokens()
 }
@@ -194,10 +188,7 @@ func stripMarkdownFences(s string) string {
 }
 
 // buildMessageXML serializes msgs into the <message><content> form expected
-// by the MEMORY_COMPRESSION_TASK prompt template. Includes ReasoningContent
-// alongside ExtractText() — a reasoning-only turn (VisibleContent() empty)
-// would otherwise render as a blank <content> block, leaving the summarizer
-// with no way to know what happened in that round.
+// by the MEMORY_COMPRESSION_TASK prompt template.
 func buildMessageXML(msgs []llm.Message) string {
 	var sb strings.Builder
 	for i, m := range msgs {

@@ -43,12 +43,8 @@ var AppVersion = "dev"
 // shrink it, same as keyCmdTimeout.
 var bedrockConfigLoadTimeout = 60 * time.Second
 
-// defaultAnthropicMaxTokens is the max_tokens value buildAnthropicParams
-// falls back to when the caller leaves ChatRequest.MaxTokens unset. Extended
-// thinking's budget_tokens must stay strictly below whatever max_tokens is
-// actually sent, so the extra_body.thinking guard in CompletionsWithCtx
-// compares against this same default rather than the raw (possibly zero)
-// ChatRequest.MaxTokens.
+// defaultAnthropicMaxTokens is used when ChatRequest.MaxTokens is unset.
+// The thinking guard also compares against this to decide whether to drop thinking.
 const defaultAnthropicMaxTokens = 8192
 
 func userAgent(provider string) string {
@@ -75,89 +71,41 @@ type Message struct {
 	Content    any        `json:"content"`                // string or []ContentBlock
 	ToolCallID string     `json:"tool_call_id,omitempty"` // OpenAI tool call identifier
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // assistant tool invocations
-	// Native carries the provider adapter's own representation of this
-	// assistant turn (see NativeTurn), when this message was built directly
-	// from a ChatResponse. Zero value for every non-assistant message and for
-	// any assistant message built without one. Only the adapter that produced
-	// it — matched by a type assertion on Payload, never by Family — may reuse
-	// it for replay; every other consumer that just needs Content/ToolCalls
-	// (compression, a different protocol's adapter) must ignore it and fall
-	// back to those. json:"-" because Payload can hold an arbitrarily large
-	// provider SDK struct and Message is JSON-tagged for the wire format: an
-	// incidental direct marshal (a debug dump, a request body) must not carry
-	// it along. internal/session deliberately reaches past this tag — reading
-	// this field directly (and ChatResponse.Native() for a fresh response),
-	// never by marshaling Message itself — to persist it into the session
-	// transcript for offline replay/export; that is the one sanctioned
-	// exception to "ignore it and fall back".
+	// Native is the opaque per-provider replay state for this assistant turn.
+	// Only the adapter that produced it (matched by type assertion) may reuse
+	// it; others fall back to Content/ToolCalls. json:"-" because Payload is
+	// an SDK struct unsuitable for incidental marshaling; internal/session
+	// persists it deliberately via ChatResponse.Native().
 	Native NativeTurn `json:"-"`
-	// ReasoningContent is the plain, human-readable projection of this turn's
-	// reasoning — set alongside Native from the same ChatResponse, but usable
-	// by anything that only wants readable text and has no business touching
-	// Native's opaque payload. compression.go's summarization prompt is the
-	// motivating consumer: without this, a reasoning-only turn (empty
-	// Content, since VisibleContent() never falls back to reasoning text)
-	// renders as a blank message in the compression XML, and the summarizer
-	// has no way to know what happened in that round. Deliberately excluded
-	// from ExtractText() and every request builder: folding it back into the
-	// text sent to the provider would recreate the exact reasoning_content
-	// duplication bug Native was introduced to fix.
+	// ReasoningContent is a readable projection of reasoning for display-only
+	// consumers (e.g. compression's summarization prompt). Excluded from
+	// ExtractText() and request builders to avoid duplicating what Native
+	// already carries.
 	ReasoningContent string `json:"-"`
 }
 
-// NativeTurn is the adapter-native, opaque replay state for one finalized
-// assistant turn — Anthropic thinking/redacted_thinking blocks with their
-// signatures, an OpenAI Responses reasoning item with its encrypted_content,
-// or an OpenAI-compatible gateway's reasoning_content string. It must never be
-// parsed, edited, or reordered by anything other than the adapter that
-// produced it: those payloads are validated (signature) or only meaningful
-// (encrypted_content) to the exact provider that issued them. Persisting it
-// (internal/session writes Payload verbatim into the session transcript) is
-// fine precisely because nothing reads or reshapes it on the way there — it
-// goes to disk as the same value the adapter would replay, byte for byte.
+// NativeTurn is the opaque replay state for one assistant turn. Payloads are
+// provider-validated (Anthropic signature, OpenAI encrypted_content) and must
+// never be parsed or reordered outside their originating adapter.
 type NativeTurn struct {
-	// Family names the wire-format family that produced Payload
-	// ("anthropic-messages", "openai-chat-completions", "openai-responses").
-	// It exists for observability/debugging only — the safety net that
-	// prevents a mismatched adapter from misusing Payload is the Go type
-	// assertion each adapter performs before use, not this string.
+	// Family: "anthropic-messages", "openai-chat-completions", or "openai-responses".
+	// For observability only; safety comes from the Go type assertion on Payload.
 	Family string
-	// Payload's concrete type is adapter-specific: anthropic.MessageParam,
-	// []responses.ResponseInputItemUnionParam, or ReasoningPayload. nil means
-	// this turn carries no native replay state (a plain response with
-	// nothing to preserve beyond Content/ToolCalls).
+	// Payload: anthropic.MessageParam, []responses.ResponseInputItemUnionParam,
+	// or ReasoningPayload. nil means nothing to preserve beyond Content/ToolCalls.
 	Payload any
 }
 
-// ReasoningPayload is the openai-chat-completions family's NativeTurn
-// payload: the gateway's raw reasoning_content string. Named (rather than a
-// bare string) so a type assertion on Payload can't accidentally match an
-// unrelated string value from a different source.
+// ReasoningPayload is the openai-chat-completions NativeTurn payload.
+// Named type so a type assertion can't accidentally match an unrelated string.
 type ReasoningPayload string
 
-// EstimatedTokens returns a rough token estimate for whatever this turn's
-// Payload carries beyond Content/ToolCalls — thinking blocks, reasoning
-// items, encrypted_content, a gateway's reasoning_content string — so a
-// caller sizing a request against a token budget (compression's threshold
-// checks) isn't blind to it. Once this turn replays, that payload really
-// goes out on the wire; a budget computed only from Content/ExtractText()
-// would systematically under-count it.
-//
-// Deliberately excludes whatever Payload carries that ExtractText()/Content()
-// already counts — an Anthropic MessageParam's text blocks, a Responses
-// message item's text — because CountMessagesTokens always adds this on top
-// of llm.CountTokens(m.ExtractText()); counting the same visible text twice
-// would over-count instead, which is just as wrong for a compression
-// threshold (it triggers compression earlier than the request actually
-// needs). This is deliberately crude otherwise — bytes/4 on whatever's left,
-// the same heuristic CountTokensForModel falls back to when tiktoken is
-// unavailable — good enough to keep a budget decision in the right ballpark.
+// EstimatedTokens returns a rough token estimate for the portion of Payload
+// not already counted by ExtractText() (thinking blocks, reasoning items,
+// tool-call arguments). Uses marshaled bytes/4 as the heuristic.
 func (n NativeTurn) EstimatedTokens() int {
 	switch p := n.Payload.(type) {
 	case ReasoningPayload:
-		// The whole payload IS the extra text; ExtractText() never sees it
-		// (the openai-chat-completions family keeps it out of Content), so
-		// there's nothing to exclude here.
 		return marshaledLen(p)
 	case anthropic.MessageParam:
 		var total int
@@ -168,12 +116,8 @@ func (n NativeTurn) EstimatedTokens() int {
 			case block.OfRedactedThinking != nil:
 				total += marshaledLen(block.OfRedactedThinking)
 			case block.OfToolUse != nil:
-				// Tool-call arguments: not double-counted (ExtractText()
-				// never reads ToolCalls either), so counting them here is a
-				// pure improvement over leaving them invisible to the budget.
 				total += marshaledLen(block.OfToolUse)
 			}
-			// OfText deliberately excluded: already in Content()/ExtractText().
 		}
 		return total
 	case []responses.ResponseInputItemUnionParam:
@@ -185,8 +129,6 @@ func (n NativeTurn) EstimatedTokens() int {
 			case item.OfFunctionCall != nil:
 				total += marshaledLen(item.OfFunctionCall)
 			}
-			// OfOutputMessage deliberately excluded: its text is already
-			// aggregated into Content() via sdkResp.OutputText().
 		}
 		return total
 	default:
@@ -194,8 +136,6 @@ func (n NativeTurn) EstimatedTokens() int {
 	}
 }
 
-// marshaledLen returns len(json.Marshal(v))/4, or 0 if v is nil or fails to
-// marshal — the shared bytes/4 heuristic every EstimatedTokens case uses.
 func marshaledLen(v any) int {
 	if v == nil {
 		return 0
@@ -221,13 +161,8 @@ func NewTextMessage(role, content string) Message {
 	return Message{Role: role, Content: content}
 }
 
-// NewToolCallMessage creates an assistant message, optionally carrying tool
-// invocations, the adapter-native replay state for this turn (native is the
-// zero NativeTurn when there is nothing to preserve, e.g. plain text with no
-// reasoning), and the plain-text projection of that reasoning for display-only
-// consumers (see Message.ReasoningContent). This is the single constructor for
-// assistant-turn history messages — do not build one with
-// NewTextMessage("assistant", ...), which cannot carry native or reasoning.
+// NewToolCallMessage creates an assistant history message. Use this instead of
+// NewTextMessage("assistant", ...) to preserve native replay state and reasoning.
 func NewToolCallMessage(content string, toolCalls []ToolCall, native NativeTurn, reasoningContent string) Message {
 	var tc []ToolCall
 	if len(toolCalls) > 0 {
@@ -300,12 +235,7 @@ type ResponseMessage struct {
 	Content          *string    `json:"content,omitempty"`
 	ReasoningContent string     `json:"reasoning_content,omitempty"`
 	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
-	// Native is the adapter-native replay state for this turn; see NativeTurn.
-	// json:"-" for the same reason as Message.Native: Payload can hold an
-	// arbitrarily large provider SDK struct that must never ride along on an
-	// incidental direct marshal of this type. internal/session reaches past
-	// this tag via Native()/ChatResponse.Native() to persist it deliberately.
-	Native NativeTurn `json:"-"`
+	Native NativeTurn `json:"-"` // opaque replay state; see NativeTurn
 }
 
 // ChatResponse is the parsed result of a completion request.
@@ -329,14 +259,9 @@ func (r *ChatResponse) Content() string {
 	return msg.ReasoningContent
 }
 
-// VisibleContent extracts the model's visible text answer, or "" if the
-// provider produced none. Unlike Content(), it never falls back to
-// ReasoningContent. History-building callers must use this one: falling back
-// would duplicate reasoning that Native already carries — a turn with empty
-// visible content and a non-empty reasoning_content (the common shape for
-// openai-chat-completions tool calls) would otherwise get that same text
-// written into both the ordinary content field and the reasoning_content
-// escape hatch on replay.
+// VisibleContent extracts visible text only, never falling back to
+// ReasoningContent. History builders must use this to avoid duplicating
+// reasoning that Native already carries.
 func (r *ChatResponse) VisibleContent() string {
 	if len(r.Choices) == 0 {
 		return ""
@@ -364,8 +289,7 @@ func (r *ChatResponse) ReasoningContent() string {
 	return r.Choices[0].Message.ReasoningContent
 }
 
-// Native extracts the adapter-native replay state of the first choice, if
-// any. See NativeTurn for how callers must use (or safely ignore) it.
+// Native extracts the replay state of the first choice, if any.
 func (r *ChatResponse) Native() NativeTurn {
 	if len(r.Choices) == 0 {
 		return NativeTurn{}
@@ -809,10 +733,6 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 			messages = append(messages, openai.ToolMessage(content, msg.ToolCallID))
 		case "assistant":
 			asst := openai.ChatCompletionAssistantMessageParam{}
-			// Content is required unless tool_calls is present: mirrors the two
-			// branches this replaced (AssistantMessage always set it; the
-			// tool-calls branch only did when non-empty, since the field is
-			// optional once tool_calls carries the turn).
 			if content != "" || len(msg.ToolCalls) == 0 {
 				asst.Content.OfString = openai.String(content)
 			}
@@ -827,10 +747,7 @@ func (c *OpenAIClient) buildOpenAIParams(model string, req ChatRequest) openai.C
 					},
 				})
 			}
-			// reasoning_content is a gateway extension the official SDK does not
-			// model (see issue #805): re-attach it verbatim via the param
-			// escape hatch rather than folding it into Content, which is what
-			// silently dropped it on replay before this change.
+			// reasoning_content: gateway extension not modeled by the SDK (#805).
 			if reasoning, ok := msg.Native.Payload.(ReasoningPayload); ok && reasoning != "" {
 				asst.SetExtraFields(map[string]any{"reasoning_content": string(reasoning)})
 			}
@@ -909,12 +826,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 		}
 
 		var reasoningContent string
-		// respjson.Field.Valid() is only meaningful for fields decoded into a
-		// known type; a genuine extra field like this one has none to check
-		// against and is always reported invalid by design (see the SDK's
-		// apijson decoder) — checking it here would make this branch dead
-		// code. Presence (ok) is the only signal available, matching the
-		// streaming path above, which never checked Valid() either.
+		// Presence (ok) is the only signal; Valid() is always false for extra fields.
 		if extra, ok := ch.Message.JSON.ExtraFields["reasoning_content"]; ok {
 			if err := json.Unmarshal([]byte(extra.Raw()), &reasoningContent); err != nil {
 				reasoningContent = extra.Raw()
@@ -1232,16 +1144,8 @@ func listProfilesRegionArg(region string) string {
 	return " --region " + region
 }
 
-// CompletionsWithCtx sends a chat completion request with context support.
-//
 // anthropicThinkingBudgetTokens extracts budget_tokens from an
-// extra_body.thinking value. The value always originates from a user's JSON
-// config decoded into ExtraBody (map[string]any), where json.Unmarshal
-// represents numbers as float64 — json.Number and the integer types are
-// handled too in case a caller (a test, a future programmatic config path)
-// builds the map by hand. Returns ok=false for any shape it doesn't
-// recognize, so CompletionsWithCtx forwards the value unchanged rather than
-// guessing wrong about a config it can't parse.
+// extra_body.thinking map. Returns ok=false for unrecognized shapes.
 func anthropicThinkingBudgetTokens(v any) (int64, bool) {
 	m, ok := v.(map[string]any)
 	if !ok {
@@ -1306,19 +1210,8 @@ func (c *AnthropicClient) CompletionsWithCtx(ctx context.Context, req ChatReques
 		if k == "stream" {
 			continue
 		}
-		// Extended thinking (extra_body.thinking, the supported way to turn it
-		// on today — see NativeTurn's anthropic-messages family for the replay
-		// side) has two hard requirements the API enforces, and ExtraBody is a
-		// client-wide setting forwarded to every request regardless of task —
-		// so a provider config that enables it for the main review loop must
-		// not silently break every other call shape:
-		//   - rejected together with a forced tool_choice (ReviewFilterTask
-		//     sets ToolChoice "required" for its single-shot classification);
-		//   - rejected when budget_tokens isn't strictly less than max_tokens
-		//     (GroupingTask hardcodes MaxTokens: 4096, well under a typical
-		//     thinking budget — see issue discussion after the #805 fix).
-		// Drop it for this one request rather than let an otherwise-unrelated
-		// task start failing.
+		// Drop thinking when it conflicts with this request's constraints:
+		// forced tool_choice or budget_tokens >= max_tokens.
 		if k == "thinking" {
 			if req.ToolChoice == "required" {
 				continue
@@ -1375,30 +1268,10 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 			pendingToolResults = append(pendingToolResults, msg)
 		case "assistant":
 			flushToolResults()
-			// Native carries the SDK's own MessageParam for this turn — built by
-			// Message.ToParam() at parse time — with thinking/redacted_thinking
-			// blocks and their signatures preserved verbatim, in original order,
-			// ahead of tool_use. Reuse it whole instead of reconstructing blocks
-			// from Content/ToolCalls, which is what silently dropped those
-			// blocks before this change (issue #805). A type-assertion failure
-			// (message built by another protocol, or with no native state)
-			// falls through to that reconstruction unchanged.
-			// len(native.Content) > 0 guards a Payload that type-asserts
-			// correctly but carries nothing (defensive: our own
-			// mapAnthropicResponse never produces this, but Payload is
-			// exported and could be set by any caller) — falling through to
-			// reconstruction beats replaying a message with no content
-			// blocks, which Anthropic rejects.
+			// Reuse the native MessageParam whole to preserve thinking blocks
+			// and signatures. Copy the slice to avoid mutating shared state
+			// when the cache_control breakpoint writes below.
 			if native, ok := msg.Native.Payload.(anthropic.MessageParam); ok && len(native.Content) > 0 {
-				// Content is a slice: assigning native by value still shares
-				// its backing array with whatever this Message's Native came
-				// from (a previous round's history, a session record). Giving
-				// it a fresh backing array here is half of what keeps the
-				// dynamic cache_control breakpoint below from mutating shared
-				// state — the other half, cloning the specific block it
-				// writes to, lives at that mutation site, since a plain slice
-				// copy does not deep-copy the pointer each element holds to
-				// its underlying block-param struct.
 				native.Content = append([]anthropic.ContentBlockParamUnion(nil), native.Content...)
 				messages = append(messages, native)
 				continue
@@ -1490,22 +1363,7 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 		last := &messages[len(messages)-1]
 		if n := len(last.Content); n > 0 {
 			lastIdx := n - 1
-			// Clone before mutating: GetCacheControl() returns a pointer into
-			// whichever block-param struct is active in the union, and this
-			// block may be a Native payload reused verbatim from a previous
-			// response (see the assistant branch above) — its pointer fields
-			// are shared with that stored history, so mutating through the
-			// pointer in place would leak this request's cache_control into
-			// an object other rounds/records still hold. Cloning through a
-			// JSON round trip works uniformly across every block variant
-			// without per-type copy code.
-			// err intentionally ignored beyond skipping the mutation: a clone
-			// failure here means the SDK's own generated type failed to round
-			// trip through its own (Un)MarshalJSON, which would indicate a bug
-			// in the vendored SDK, not in this call site. The safe fallback is
-			// to leave this block's cache_control untouched — the request still
-			// goes out, just without a fresh breakpoint on this turn, which
-			// costs cache efficiency, not correctness.
+			// Clone before mutating: the block may be shared with stored history.
 			cloned, err := cloneContentBlockParam(last.Content[lastIdx])
 			if err == nil {
 				if cc := cloned.GetCacheControl(); cc != nil {
@@ -1522,12 +1380,7 @@ func (c *AnthropicClient) buildAnthropicParams(model string, req ChatRequest) (a
 	return params, nil
 }
 
-// cloneContentBlockParam deep-copies a content block through a JSON round
-// trip. ContentBlockParamUnion's active variant is always a pointer
-// (OfToolUse, OfThinking, ...), so a plain value copy of the union struct
-// still aliases the pointed-to block-param struct; marshaling and
-// unmarshaling rebuilds it as an independent value without needing per-variant
-// copy code.
+// cloneContentBlockParam deep-copies a content block via JSON round trip.
 func cloneContentBlockParam(b anthropic.ContentBlockParamUnion) (anthropic.ContentBlockParamUnion, error) {
 	raw, err := json.Marshal(b)
 	if err != nil {
@@ -1569,9 +1422,6 @@ func (c *AnthropicClient) mapAnthropicResponse(sdkResp *anthropic.Message) *Chat
 	var textParts []string
 	var thinkingParts []string
 	var toolCalls []ToolCall
-	// hasThinking tracks thinking AND redacted_thinking blocks, unlike
-	// thinkingParts (which only collects readable text — a redacted block has
-	// none). It gates whether Native gets set at all, below.
 	var hasThinking bool
 
 	for _, block := range sdkResp.Content {
@@ -1608,14 +1458,8 @@ func (c *AnthropicClient) mapAnthropicResponse(sdkResp *anthropic.Message) *Chat
 		reasoningContent = strings.Join(thinkingParts, "\n")
 	}
 
-	// Native is only worth carrying when there's an actual
-	// thinking/redacted_thinking block to preserve: an ordinary text +
-	// tool_use turn round-trips losslessly through the existing
-	// Content()/ToolCalls() reconstruction, and setting it unconditionally
-	// would mean a response with zero content blocks (e.g. a truncated or
-	// error turn) produces a MessageParam with an empty Content slice — which
-	// buildAnthropicParams would then replay verbatim, and Anthropic rejects
-	// a message with no content blocks.
+	// Only set when thinking is present; ordinary turns round-trip via
+	// Content()/ToolCalls(). Anthropic rejects empty content blocks.
 	var native NativeTurn
 	if hasThinking {
 		native = NativeTurn{Family: "anthropic-messages", Payload: sdkResp.ToParam()}
@@ -1649,15 +1493,6 @@ func (c *AnthropicClient) mapAnthropicResponse(sdkResp *anthropic.Message) *Chat
 				Content:          contentStr,
 				ReasoningContent: reasoningContent,
 				ToolCalls:        toolCalls,
-				// native (see above) reuses the SDK's own response->request
-				// converter, ToParam(): it walks sdkResp.Content block by
-				// block, preserving order and copying thinking/redacted_thinking
-				// blocks (Signature/Data) verbatim — exactly the "pass back
-				// unmodified and in original order" replay contract Anthropic's
-				// API enforces. Reusing it beats hand-reconstructing blocks
-				// from the flattened Content()/ReasoningContent() strings,
-				// which is what dropped signatures before this change (issue
-				// #805).
 				Native: native,
 			},
 			FinishReason: finishReason,

@@ -180,6 +180,72 @@ func TestChatResponse_Content_StripsThinkTags(t *testing.T) {
 	}
 }
 
+func TestChatResponse_VisibleContent_NoChoices(t *testing.T) {
+	resp := &ChatResponse{}
+	if got := resp.VisibleContent(); got != "" {
+		t.Errorf("VisibleContent() with no choices = %q, want empty", got)
+	}
+}
+
+func TestChatResponse_VisibleContent_NilContent(t *testing.T) {
+	resp := &ChatResponse{
+		Choices: []Choice{{
+			Message: ResponseMessage{Content: nil, ReasoningContent: "should not appear"},
+		}},
+	}
+	if got := resp.VisibleContent(); got != "" {
+		t.Errorf("VisibleContent() = %q, want empty (must not fall back to reasoning)", got)
+	}
+}
+
+func TestChatResponse_VisibleContent_EmptyString(t *testing.T) {
+	empty := ""
+	resp := &ChatResponse{
+		Choices: []Choice{{
+			Message: ResponseMessage{Content: &empty, ReasoningContent: "should not appear"},
+		}},
+	}
+	if got := resp.VisibleContent(); got != "" {
+		t.Errorf("VisibleContent() = %q, want empty (must not fall back to reasoning)", got)
+	}
+}
+
+func TestChatResponse_VisibleContent_NormalText(t *testing.T) {
+	text := "hello world"
+	resp := &ChatResponse{
+		Choices: []Choice{{
+			Message: ResponseMessage{Content: &text},
+		}},
+	}
+	if got := resp.VisibleContent(); got != "hello world" {
+		t.Errorf("VisibleContent() = %q, want %q", got, "hello world")
+	}
+}
+
+func TestChatResponse_VisibleContent_StripsThinkTags(t *testing.T) {
+	text := "<think>internal</think>answer"
+	resp := &ChatResponse{
+		Choices: []Choice{{
+			Message: ResponseMessage{Content: &text},
+		}},
+	}
+	if got := resp.VisibleContent(); got != "internalanswer" {
+		t.Errorf("VisibleContent() = %q, want %q", got, "internalanswer")
+	}
+}
+
+func TestChatResponse_VisibleContent_WhitespaceOnly(t *testing.T) {
+	text := "   \n\t  "
+	resp := &ChatResponse{
+		Choices: []Choice{{
+			Message: ResponseMessage{Content: &text, ReasoningContent: "reasoning"},
+		}},
+	}
+	if got := resp.VisibleContent(); got != "" {
+		t.Errorf("VisibleContent() = %q, want empty (whitespace-only after trim)", got)
+	}
+}
+
 func TestChatResponse_ToolCalls(t *testing.T) {
 	resp := &ChatResponse{
 		Choices: []Choice{{

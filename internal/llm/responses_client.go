@@ -183,21 +183,7 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 		case "user":
 			input = append(input, responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser))
 		case "assistant":
-			// Native carries this turn's output items (reasoning/message/
-			// function_call) converted via each item's own ToParam(), in
-			// original order, with encrypted_content/id/Phase preserved
-			// verbatim. Reuse it whole instead of reconstructing a bare
-			// message + function_call items, which is what dropped reasoning
-			// items entirely on replay before this change (issue #805). A
-			// type-assertion failure (message built by another protocol, or
-			// with no native state) falls through to that reconstruction.
-			// len(items) > 0 guards a Payload that type-asserts correctly but
-			// carries nothing: our own mapResponsesResponse never boxes an
-			// empty slice (it only sets Native when nativeItems is
-			// non-empty), but Payload is exported and could be set to one by
-			// any caller — without this guard that would silently drop the
-			// turn's content/tool calls instead of falling through to the
-			// reconstruction below.
+			// Reuse native output items to preserve reasoning/encrypted_content.
 			if items, ok := msg.Native.Payload.([]responses.ResponseInputItemUnionParam); ok && len(items) > 0 {
 				input = append(input, items...)
 				continue
@@ -233,12 +219,7 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: input,
 		},
-		Store: openai.Bool(false),
-		// Requests the encrypted continuation payload on reasoning output
-		// items. Under the stateless store=false design above, this is the
-		// only channel that carries chain-of-thought across turns — without
-		// it a reasoning item replayed on the next request has nothing to
-		// resume from (see issue #805).
+		Store:   openai.Bool(false),
 		Include: []responses.ResponseIncludable{responses.ResponseIncludableReasoningEncryptedContent},
 	}
 
@@ -280,26 +261,9 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 
 	var toolCalls []ToolCall
 	var reasoningParts []string
-	// nativeItems collects this turn's output items converted to their
-	// request-side param form, in original order — reasoning ahead of the
-	// function_call it preceded, exactly as the API produced them. Each
-	// item's ToParam() re-serializes that item's own RawJSON verbatim (see
-	// the SDK's implementation), so encrypted_content, id and
-	// ResponseOutputMessage.Phase all ride along without being modeled here.
-	// Only the item types this agent loop actually produces are handled;
-	// an unrecognized type is simply absent from Native, which is no worse
-	// than today's behavior for it.
 	var nativeItems []responses.ResponseInputItemUnionParam
-	// hasActionableItem tracks whether this turn produced a function_call or
-	// message item — the same thing today's Content()/ToolCalls()
-	// reconstruction would also produce. A turn with only a reasoning item
-	// (nothing else — a truncated or otherwise degenerate turn) reconstructs
-	// to nothing today, which is correct: a lone reasoning item with no
-	// message/function_call alongside it is not a valid standalone input, and
-	// replaying it verbatim risks a 400 from the Responses API. Gate Native on
-	// this so that degenerate case falls back to reconstructing nothing,
-	// exactly like it always has, instead of resurrecting a dangling
-	// reasoning item.
+	// hasActionableItem gates Native: a lone reasoning item (no message or
+	// function_call) is not valid standalone input and risks a 400 on replay.
 	var hasActionableItem bool
 	for _, item := range sdkResp.Output {
 		switch item.Type {

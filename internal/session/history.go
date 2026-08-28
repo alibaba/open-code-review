@@ -114,20 +114,8 @@ type ResponseRecord struct {
 	ToolCalls []llm.ToolCall
 	Model     string
 	Usage     *TokenUsage
-	// ReasoningContent is the model's reasoning/thinking text for this turn,
-	// when the provider exposed any (see llm.ChatResponse.ReasoningContent).
-	// This is the plain, human-readable projection for local audit/debugging.
 	ReasoningContent string
-	// Native is the opaque replay state for this turn (see llm.NativeTurn) —
-	// e.g. an Anthropic thinking block with its signature, or an OpenAI
-	// Responses reasoning item with its encrypted_content. Unlike
-	// ReasoningContent's plain-text projection, this is the exact payload a
-	// later request needs to continue the conversation. copyMessages carries
-	// the same field into TaskRecord.RequestMessages and nativeTurnForJSON
-	// shapes it for the session JSONL, so both the in-memory record and the
-	// on-disk transcript can be replayed/exported losslessly. Nothing in this
-	// package parses or reshapes it.
-	Native llm.NativeTurn
+	Native           llm.NativeTurn
 }
 
 // ToolResultRecord records the result of a tool call executed after the LLM response.
@@ -422,11 +410,6 @@ func copyMessagesForJSON(msgs []llm.Message) any {
 	return out
 }
 
-// nativeTurnForJSON shapes an llm.NativeTurn into a JSON-marshalable value for
-// session persistence, or nil when the turn carries no replay state. Payload's
-// concrete type (an SDK request-param struct, or a plain string alias) is
-// already marshalable on its own terms — nothing here parses or reshapes it,
-// preserving fields like an Anthropic thinking block's signature verbatim.
 func nativeTurnForJSON(n llm.NativeTurn) any {
 	if n.Payload == nil {
 		return nil
