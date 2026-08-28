@@ -133,6 +133,11 @@
         {{if .Other}}<button type="button" class="comment-filter-chip cat-other" data-filter-kind="category" data-filter-value="other" aria-pressed="false">Other: {{.Other}}</button>{{end}}
     </div>
     {{end}}
+    <div class="comment-filter-bar marks-bar" aria-label="Comment marks">
+        <label class="marks-toggle"><input type="checkbox" data-hide-marked checked> Hide marked</label>
+        <span class="comment-filter-label" data-marks-count></span>
+        <button type="button" class="comment-filter-chip" data-clear-all-marks>Clear all marks</button>
+    </div>
     <div class="comment-groups">
     {{range groupCommentsByFile .Session.Comments}}
     <details class="comment-file-group" open>
@@ -143,11 +148,12 @@
         </summary>
         <div class="comment-file-body">
         {{range .Comments}}
-            <div class="comment-card" data-comment-card data-category="{{commentCategory .Category}}" data-severity="{{commentSeverity .Severity}}">
+            <div class="comment-card" data-comment-card data-category="{{commentCategory .Category}}" data-severity="{{commentSeverity .Severity}}" data-mark-id="{{.MarkID}}">
                 <div class="comment-meta">
                     {{if .Category}}<span class="comment-badge {{categoryClass .Category}}">{{.Category}}</span>{{end}}
                     {{if .Severity}}<span class="comment-badge {{severityClass .Severity}}">{{.Severity}}</span>{{end}}
                     {{if .StartLine}}<span class="comment-lines">L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}</span>{{end}}
+                    <span class="comment-badge mark-chip" data-mark-chip hidden></span>
                 </div>
                 <div class="comment-content">{{.Content}}</div>
                 {{if or .ExistingCode .SuggestionCode}}
@@ -166,6 +172,11 @@
                     {{end}}
                 </div>
                 {{end}}
+                <div class="comment-actions">
+                    <button type="button" class="mark-btn" data-set-mark="fixed">Fixed</button>
+                    <button type="button" class="mark-btn" data-set-mark="ignored">Ignored</button>
+                    <button type="button" class="mark-btn mark-clear" data-set-mark="">Clear</button>
+                </div>
             </div>
         {{end}}
         </div>

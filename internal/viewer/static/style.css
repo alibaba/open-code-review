@@ -1171,3 +1171,65 @@ p {
         transition-duration: 0.01ms !important;
     }
 }
+
+/* Comment marks (fixed / ignored) — issue #825.
+   State lives in the browser (localStorage); these are presentation only.
+   Chips follow the filled-badge pattern used by the .cat-* / severity
+   badges above: a background + color pair, with a dark-mode override. */
+.marks-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.marks-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+
+.mark-chip {
+    text-transform: capitalize;
+}
+
+.mark-fixed { background: #f0fdf4; color: #15803d; }
+.mark-ignored { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
+
+@media (prefers-color-scheme: dark) {
+    .mark-fixed { background: rgba(21, 128, 61, 0.12); color: #86efac; }
+    .mark-ignored { background: var(--badge-neutral-bg); color: var(--badge-neutral-fg); }
+}
+
+.comment-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.mark-btn {
+    appearance: none;
+    border: 1px solid var(--border, #d0d7de);
+    border-radius: 12px;
+    background: transparent;
+    padding: 0.2em 0.7em;
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.35;
+    cursor: pointer;
+    transition: opacity var(--transition), border-color var(--transition);
+    opacity: 0.75;
+}
+
+.mark-btn:hover { opacity: 1; }
+
+.mark-btn.mark-clear {
+    border-style: dashed;
+    opacity: 0.6;
+}

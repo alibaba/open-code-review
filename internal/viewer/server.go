@@ -27,32 +27,7 @@ func StartServer(addr, openMode string) error {
 		return fmt.Errorf("resolve sessions root: %w", err)
 	}
 
-	mux := http.NewServeMux()
-
-	// Static assets (must be registered before "/" catch-all)
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
-
-	// Routes
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		handleRepos(w, r, root)
-	})
-	mux.HandleFunc("/r/{repo}", func(w http.ResponseWriter, r *http.Request) {
-		repo := r.PathValue("repo")
-		if strings.Contains(repo, "..") || strings.Contains(repo, "/") {
-			http.Error(w, "invalid repo path", http.StatusBadRequest)
-			return
-		}
-		handleSessions(w, r, root, repo)
-	})
-	mux.HandleFunc("/r/{repo}/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
-		repo := r.PathValue("repo")
-		sid := r.PathValue("sessionID")
-		if strings.Contains(repo, "..") || strings.Contains(sid, "..") {
-			http.Error(w, "invalid path", http.StatusBadRequest)
-			return
-		}
-		handleSession(w, r, root, repo, sid)
-	})
+	mux := newMux(root)
 
 	// Wrap the mux with a Host-header allowlist. Without this, any web page
 	// the user visits can DNS-rebind its origin to 127.0.0.1 and read the
@@ -105,6 +80,44 @@ func StartServer(addr, openMode string) error {
 	}
 
 	return <-serveErr
+}
+
+// newMux builds the viewer's routing table against a sessions root. The
+// viewer is read-only: the document routes are registered with GET-only
+// patterns (which also serve HEAD), so the ServeMux itself answers any other
+// method with 405 + Allow before a handler runs. The root pattern matches
+// exactly "/" via {$}; every other unmatched path gets the ServeMux's 404.
+// New routes must register method-qualified patterns to keep this contract
+// testable (TestMux_HasNoWriteRoutes).
+func newMux(root string) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	// Static assets.
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
+
+	// Routes
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		handleRepos(w, r, root)
+	})
+	mux.HandleFunc("GET /r/{repo}", func(w http.ResponseWriter, r *http.Request) {
+		repo := r.PathValue("repo")
+		if strings.Contains(repo, "..") || strings.Contains(repo, "/") {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		handleSessions(w, r, root, repo)
+	})
+	mux.HandleFunc("GET /r/{repo}/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
+		repo := r.PathValue("repo")
+		sid := r.PathValue("sessionID")
+		if strings.Contains(repo, "..") || strings.Contains(sid, "..") {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		handleSession(w, r, root, repo, sid)
+	})
+
+	return mux
 }
 
 // displayURL builds the URL to print and hand to the browser.

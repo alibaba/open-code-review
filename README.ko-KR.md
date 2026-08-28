@@ -182,7 +182,7 @@ ocr delegate rule src/main.go src/handler.go
   - [기본 모드(OCR 관리)](https://open-codereview.ai/docs/configuration) — OCR이 설정된 LLM을 사용해 리뷰 수행
   - [위임 모드](https://open-codereview.ai/docs/delegate) — 코딩 에이전트가 자체 LLM을 사용해 리뷰 수행; OCR API 키 불필요
 - [CI/CD 연동](https://open-codereview.ai/docs/cicd) — GitHub Actions, GitLab CI, GitFlic CI, Gerrit 통합
-- [세션 뷰어](https://open-codereview.ai/docs/viewer) — 브라우저에서 리뷰 세션 탐색 및 재생
+- [세션 뷰어](https://open-codereview.ai/docs/viewer) — 브라우저에서 리뷰 세션 탐색 및 재생, 코멘트를 수정됨/무시됨으로 표시하고 숨길 수 있습니다
 - [텔레메트리](https://open-codereview.ai/docs/telemetry) — 관측성을 위한 OpenTelemetry 통합
 - [FAQ](https://open-codereview.ai/docs/faq) — 자주 묻는 질문과 문제 해결
 

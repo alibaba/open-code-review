@@ -9,6 +9,8 @@ package viewer
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -238,6 +240,7 @@ type ReviewComment struct {
 	EndLine        int
 	Category       string // bug, security, performance, maintainability, test, style, documentation, other
 	Severity       string // critical, high, medium, low
+	MarkID         string `json:"-"`
 }
 
 // ViewSession holds fully parsed records for one session.
@@ -330,6 +333,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	vs := &ViewSession{Files: make([]*FileGroup, 0)}
 	vs.Summary.Aborted = true
 	fileIndex := make(map[string]*FileGroup)
+	markOccurrences := make(map[string]int)
 
 	readErr := readJSONLLines(f, func(line []byte) {
 		var rec map[string]any
@@ -508,8 +512,9 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 		case "review_item_done", "review_item_reused":
 			fp, _ := rec["filePath"].(string)
+			recUUID, _ := rec["uuid"].(string)
 			if comments, ok := rec["comments"].([]any); ok {
-				for _, c := range comments {
+				for ci, c := range comments {
 					cm, ok := c.(map[string]any)
 					if !ok {
 						continue
@@ -539,6 +544,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 					if v, ok := cm["severity"].(string); ok {
 						rc.Severity = v
 					}
+					rc.MarkID = commentMarkID(recUUID, ci, rc, markOccurrences)
 					vs.Comments = append(vs.Comments, rc)
 				}
 			}
@@ -592,6 +598,24 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	vs.Summary.SessionID = sessionID
 	vs.Summary.CommentCount = len(vs.Comments)
 	return vs, readErr
+}
+
+// commentMarkID returns a stable identity for one comment within an immutable
+// session file. Records carry a top-level uuid: uuid#commentIndex is exact,
+// collision-free, and identical on every reload. Legacy records without a
+// uuid fall back to a sha256 over every comment field plus an occurrence
+// counter, so exact duplicate comments still get distinct identities.
+func commentMarkID(recordUUID string, commentIndex int, rc *ReviewComment, occurrences map[string]int) string {
+	if recordUUID != "" {
+		return fmt.Sprintf("%s#%d", recordUUID, commentIndex)
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%s\x00%s",
+		rc.FilePath, rc.Content, rc.SuggestionCode, rc.ExistingCode,
+		rc.StartLine, rc.EndLine, rc.Category, rc.Severity)))
+	key := hex.EncodeToString(sum[:])
+	n := occurrences[key]
+	occurrences[key] = n + 1
+	return fmt.Sprintf("%s#%d", key, n)
 }
 
 func applySessionEnd(summary *SessionSummary, rec map[string]any) {

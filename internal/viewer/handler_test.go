@@ -213,3 +213,108 @@ func TestHandleSession_EmptyCWD(t *testing.T) {
 		t.Errorf("status = %d, want 200", rr.Code)
 	}
 }
+
+// writeMarkIdentityFixture writes a session jsonl with a uuid-bearing
+// review_item_done record (two comments, identical content) plus a legacy
+// uuid-less record (also with a duplicate), so both MarkID identity forms
+// and their duplicate handling are exercised end to end.
+func writeMarkIdentityFixture(t *testing.T, root, repo, sid string) {
+	t.Helper()
+	repoDir := filepath.Join(root, repo)
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeJSONL(t, filepath.Join(repoDir, sid+".jsonl"),
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
+		`{"type":"review_item_done","uuid":"11111111-2222-3333-4444-555555555555","filePath":"main.go","comments":[`+
+			`{"content":"same finding","path":"main.go"},`+
+			`{"content":"same finding","path":"main.go"}]}`,
+		`{"type":"review_item_done","filePath":"legacy.go","comments":[`+
+			`{"content":"legacy finding","path":"legacy.go"},`+
+			`{"content":"legacy finding","path":"legacy.go"}]}`,
+		`{"type":"session_end","duration_seconds":5,"files_reviewed":["main.go"]}`,
+	)
+}
+
+// The session page is the marks UI's only server dependency: it must render
+// each card's stable data-mark-id plus the client-side buttons, and carry no
+// mark state itself — marks are browser state, applied by session.js.
+func TestHandleSession_RendersMarkIdentityNotState(t *testing.T) {
+	root := t.TempDir()
+	writeMarkIdentityFixture(t, root, "repo", "s1")
+
+	req := httptest.NewRequest("GET", "/r/repo/s1", nil)
+	rr := httptest.NewRecorder()
+	handleSession(rr, req, root, "repo", "s1")
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`data-mark-id="11111111-2222-3333-4444-555555555555#0"`,
+		`data-mark-id="11111111-2222-3333-4444-555555555555#1"`,
+		`data-set-mark="fixed"`, `data-set-mark="ignored"`,
+		`data-hide-marked`, `data-clear-all-marks`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("render missing %s", want)
+		}
+	}
+	if strings.Contains(body, `data-mark="`) {
+		t.Error("render carries a mark state; state must be client-side only")
+	}
+	if strings.Contains(body, `data-set-mark="solved"`) {
+		t.Error("render still offers the collapsed solved state")
+	}
+}
+
+// The viewer is read-only: no route may accept a write. The mux registers its
+// document routes with GET-only patterns, so any state-changing method is
+// answered by the ServeMux itself with 405 + Allow, and unmatched paths keep
+// 404ing. Driving newMux directly — rather than a live StartServer, whose
+// root comes from SessionsRoot() and whose goroutine outlives the test —
+// keeps the fixture root real, binds no ports, and leaks nothing. New routes
+// must register method-qualified patterns or these rows stop holding.
+func TestMux_HasNoWriteRoutes(t *testing.T) {
+	root := t.TempDir()
+	writeMarkIdentityFixture(t, root, "repo", "s1")
+
+	mux := newMux(root)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		want   int
+	}{
+		{"POST session route", http.MethodPost, "/r/repo/s1", http.StatusMethodNotAllowed},
+		{"PUT session route", http.MethodPut, "/r/repo/s1", http.StatusMethodNotAllowed},
+		{"DELETE session route", http.MethodDelete, "/r/repo/s1", http.StatusMethodNotAllowed},
+		{"PATCH session route", http.MethodPatch, "/r/repo/s1", http.StatusMethodNotAllowed},
+		{"POST repo route", http.MethodPost, "/r/repo", http.StatusMethodNotAllowed},
+		{"PUT repo route", http.MethodPut, "/r/repo", http.StatusMethodNotAllowed},
+		{"DELETE repo route", http.MethodDelete, "/r/repo", http.StatusMethodNotAllowed},
+		{"PATCH repo route", http.MethodPatch, "/r/repo", http.StatusMethodNotAllowed},
+		{"POST root", http.MethodPost, "/", http.StatusMethodNotAllowed},
+		{"PUT root", http.MethodPut, "/", http.StatusMethodNotAllowed},
+		{"DELETE root", http.MethodDelete, "/", http.StatusMethodNotAllowed},
+		{"PATCH root", http.MethodPatch, "/", http.StatusMethodNotAllowed},
+		{"OPTIONS root", http.MethodOptions, "/", http.StatusMethodNotAllowed},
+		{"GET session route still served", http.MethodGet, "/r/repo/s1", http.StatusOK},
+		{"HEAD session route still served", http.MethodHead, "/r/repo/s1", http.StatusOK},
+		{"GET repo route still served", http.MethodGet, "/r/repo", http.StatusOK},
+		{"POST to unknown write-looking path stays 404", http.MethodPost, "/r/repo/s1/marks", http.StatusNotFound},
+		{"GET unknown path stays 404", http.MethodGet, "/nope", http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader("{}"))
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+			if rr.Code != tt.want {
+				t.Errorf("%s %s = %d, want %d", tt.method, tt.path, rr.Code, tt.want)
+			}
+		})
+	}
+}

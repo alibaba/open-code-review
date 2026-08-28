@@ -182,7 +182,7 @@ ocr delegate rule src/main.go src/handler.go
   - [默认模式（OCR 驱动）](https://open-codereview.ai/docs/configuration) —— OCR 使用其已配置的 LLM 执行评审
   - [委托模式](https://open-codereview.ai/docs/delegate) —— 编程 Agent 使用自身的 LLM 执行评审；无需 OCR API Key
 - [CI/CD 集成](https://open-codereview.ai/docs/cicd) —— 支持 GitHub Actions、GitLab CI、GitFlic CI、Gerrit 集成
-- [会话查看器](https://open-codereview.ai/docs/viewer) —— 在浏览器中浏览和回放评审会话
+- [会话查看器](https://open-codereview.ai/docs/viewer) —— 在浏览器中浏览和回放评审会话，可将评审意见标记为已修复/已忽略并在处理时隐藏
 - [遥测](https://open-codereview.ai/docs/telemetry) —— OpenTelemetry 集成，用于可观测性
 - [FAQ](https://open-codereview.ai/docs/faq) —— 常见问题与故障排查
 
