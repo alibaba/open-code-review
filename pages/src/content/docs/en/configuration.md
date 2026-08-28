@@ -282,6 +282,25 @@ ignored. When supplied through `ocr config set`, OCR also prints a warning and
 omits them from the saved value. All 5xx responses are already retried by the
 SDK and cannot be added to `retry_codes`.
 
+### Provider in-flight limit
+
+`max_in_flight` caps how many LLM requests a single `ocr review` run keeps in
+flight against one provider at the same time. An in-flight request is one whose
+HTTP attempt is running or whose response body is still being read. Plan, main
+review, grace round, memory compression, comment re-location and the review
+filter all share the limit. SDK retries release their slot before the retry
+backoff sleep, and streaming responses hold theirs until the stream ends.
+
+It is a per-provider setting (unlike `timeout_sec`, there is no
+`llm.max_in_flight`):
+
+```bash
+ocr config set custom_providers.my-gateway.max_in_flight 4
+```
+
+The default is unset/`0`, meaning no limit. `ocr scan` and `ocr llm test` are
+not affected.
+
 ### Prompt limit
 
 `max_tokens` is the **prompt** (input) ceiling for a single review unit:

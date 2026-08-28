@@ -342,9 +342,15 @@ type ClientConfig struct {
 	retryCollector *RetryCollector
 
 	// AWSProfile and AWSRegion are used only by SigV4 providers (bedrock).
-	// Empty means the standard AWS credential chain decides.
+	// Empty means the standard credential chain decides.
 	AWSProfile string
 	AWSRegion  string
+
+	// MaxInFlight bounds the simultaneous in-flight provider attempts
+	// (transport in progress or response body still open) for clients built
+	// from this config. Zero or negative disables admission entirely: no
+	// middleware is mounted and the request path is unchanged.
+	MaxInFlight int
 }
 
 // retryCodesMiddleware returns an HTTP middleware that forces the SDK to retry
@@ -397,6 +403,7 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 		ExtraBody:      ep.ExtraBody,
 		ExtraHeaders:   ep.ExtraHeaders,
 		RetryCodes:     ep.RetryCodes,
+		MaxInFlight:    ep.MaxInFlight,
 		retryCollector: collector,
 		AWSProfile:     ep.AWSProfile,
 		AWSRegion:      ep.AWSRegion,
@@ -513,6 +520,16 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
+	// Admission gate, mounted OUTSIDE the retry observer: appended earlier
+	// ends up the outer layer, so the permit is acquired before the observer's
+	// startedAt — gate queue time stays out of duration_to_headers_ms and may
+	// only surface in the observed gap between attempts. The permit is also
+	// held across the per-attempt SigV4 signing in the Bedrock constructor
+	// below (the gate wraps the signing option there); that is accepted —
+	// signing is part of the attempt.
+	if gate := newAdmissionGate(cfg.MaxInFlight); gate != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newAdmissionMiddleware(gate)))
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
@@ -931,6 +948,12 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
 	}
+	// Admission gate outside the retry observer — see the OpenAI constructor
+	// for the ordering argument (acquire precedes the observer's startedAt, so
+	// duration_to_headers_ms keeps measuring transport time only).
+	if gate := newAdmissionGate(cfg.MaxInFlight); gate != nil {
+		opts = append(opts, option.WithMiddleware(newAdmissionMiddleware(gate)))
+	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
@@ -981,6 +1004,12 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	// session key template can expand — same as the plain Anthropic client.
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
+	}
+	// Admission gate outside the retry observer — see the OpenAI constructor
+	// for the ordering argument (acquire precedes the observer's startedAt, so
+	// duration_to_headers_ms keeps measuring transport time only).
+	if gate := newAdmissionGate(cfg.MaxInFlight); gate != nil {
+		opts = append(opts, option.WithMiddleware(newAdmissionMiddleware(gate)))
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
