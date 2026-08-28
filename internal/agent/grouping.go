@@ -16,9 +16,15 @@ import (
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
+	"github.com/alibaba/open-code-review/internal/telemetry"
 )
 
 const maxFilesPerGroup = 10
+
+// smallChangeSetLabel labels the single group a below-threshold change set is
+// bundled into. Unlike an LLM-produced label it carries no semantics, because
+// no partition was computed: every file simply went in together.
+const smallChangeSetLabel = "small change set"
 
 // FileGroup is a set of semantically related diffs to be reviewed in one LLM call.
 type FileGroup struct {
@@ -59,6 +65,15 @@ func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, m
 		return groupDiffsResult{groups: toSingleFileGroups(diffs)}
 	}
 
+	// A small change set decides its partition without an LLM round trip: too
+	// few files for the call to buy any information. Whether they can then share
+	// one review is a separate question that churn answers. See
+	// Template.GroupingPlan.
+	totalChanged, _ := diffsChurn(diffs)
+	if strategy := tpl.GroupingPlan(len(diffs), totalChanged); strategy != template.GroupingViaLLM {
+		return groupDiffsResult{groups: groupWithoutLLM(ctx, diffs, strategy, tpl, totalChanged, tokenLimit)}
+	}
+
 	if tpl.GroupingTask == nil || len(tpl.GroupingTask.Messages) == 0 {
 		return groupDiffsResult{groups: toSingleFileGroups(diffs)}
 	}
@@ -71,6 +86,48 @@ func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, m
 
 	groups = enforceGroupTokenBudget(groups, tokenLimit)
 	return groupDiffsResult{groups: groups, usage: usage}
+}
+
+// groupWithoutLLM partitions a below-threshold change set locally, in the shape
+// GroupingPlan chose. Both shapes report the file count and churn that drove
+// the decision but not the thresholds, which ride on the telemetry event
+// instead: a threshold of 0 disables its step, and there is then no meaningful
+// comparison for the log line to claim.
+func groupWithoutLLM(ctx context.Context, diffs []model.Diff, strategy template.GroupingStrategy, tpl template.Template, totalChanged int64, tokenLimit int) []FileGroup {
+	groups := toSingleFileGroups(diffs)
+	if strategy == template.GroupingBundleAll {
+		// enforceMaxFilesPerGroup guards a GroupingMinFiles raised past
+		// maxFilesPerGroup. enforceGroupTokenBudget is the prompt-size valve: a
+		// bundle that outgrows the limit degrades to per-file groups, which is
+		// exactly the shape a grouping failure already falls back to.
+		groups = enforceMaxFilesPerGroup([]FileGroup{{Label: smallChangeSetLabel, Diffs: diffs}})
+		groups = enforceGroupTokenBudget(groups, tokenLimit)
+	}
+
+	// The log describes the partition that came out, not the one GroupingPlan
+	// asked for: a bundle that trips a size valve above ends up as several
+	// groups, and a line still claiming "one group" would misdirect anyone
+	// tracing why more than one review call appeared. Telemetry keeps reporting
+	// the decision, since that is what the thresholds beside it explain.
+	var shape string
+	switch {
+	case len(groups) == 1:
+		shape = "reviewing as one group"
+	case len(groups) == len(diffs):
+		shape = "reviewing per file"
+	default:
+		shape = fmt.Sprintf("reviewing as %d groups", len(groups))
+	}
+	fmt.Fprintf(stdout.Writer(), "[ocr] Skipping LLM grouping for %d file(s), %d changed line(s) — %s\n",
+		len(diffs), totalChanged, shape)
+	telemetry.Event(ctx, "grouping.skipped",
+		telemetry.AnyToAttr("strategy", strategy.String()),
+		telemetry.AnyToAttr("group.file_count", len(diffs)),
+		telemetry.AnyToAttr("lines.changed", totalChanged),
+		telemetry.AnyToAttr("threshold.files", tpl.GroupingMinFiles),
+		telemetry.AnyToAttr("threshold.lines", tpl.GroupingBundleLineThreshold))
+
+	return groups
 }
 
 func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClient, modelName string, task *template.LlmConversation, maxTokens int, sessOpts *groupingSessionOpts) (groups []FileGroup, usage *llm.UsageInfo, err error) {

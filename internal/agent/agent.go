@@ -1320,10 +1320,12 @@ func (a *Agent) groupHasComments(g FileGroup) bool {
 	return false
 }
 
-// groupChurn returns the group's aggregate churn and its largest single-file
-// churn. Both feed Template.PlanRequired.
-func groupChurn(g FileGroup) (total, maxFile int64) {
-	for _, d := range g.Diffs {
+// diffsChurn returns the set's aggregate churn and its largest single-file
+// churn. Both feed Template.PlanRequired; the aggregate alone feeds
+// Template.GroupingPlan, which runs before any FileGroup exists and so takes
+// the diffs directly.
+func diffsChurn(diffs []model.Diff) (total, maxFile int64) {
+	for _, d := range diffs {
 		changed := d.Insertions + d.Deletions
 		total += changed
 		if changed > maxFile {
@@ -1343,7 +1345,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 	ctx, span := telemetry.StartSpan(ctx, "subtask.execute.group."+groupKey)
 	defer span.End()
 
-	totalChanged, maxFileChanged := groupChurn(g)
+	totalChanged, maxFileChanged := diffsChurn(g.Diffs)
 	telemetry.SetAttr(span, "group.label", groupKey)
 	telemetry.SetAttr(span, "group.file_count", len(g.Diffs))
 	telemetry.SetAttr(span, "lines.changed", totalChanged)

@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -52,6 +53,17 @@ func newFakeLLM() *fakeLLM {
 	}
 }
 
+// failAll makes every file in the fixture fail permanently. Tests that mean
+// "the whole review failed" use this rather than naming files, so they keep
+// meaning that when the fixture's file set changes.
+func (f *fakeLLM) failAll() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, name := range markers {
+		f.hardFail[name] = true
+	}
+}
+
 // attemptCounts snapshots the per-file real HTTP attempt counts.
 func (f *fakeLLM) attemptCounts() map[string]int {
 	f.mu.Lock()
@@ -67,7 +79,26 @@ func (f *fakeLLM) attemptCounts() map[string]int {
 // file name. The prompt's change_files section lists the *other* file's path,
 // so matching on the path itself would misattribute requests; the marker only
 // occurs in the reviewed file's diff body.
-var markers = map[string]string{"MARKER_ALPHA": "a.go", "MARKER_BETA": "b.go"}
+//
+// Every reviewed file needs its own marker for attribution to work, so this map
+// is also what defines the fixture's file set — see retryTestRepo.
+var markers = map[string]string{
+	"MARKER_ALPHA": "a.go",
+	"MARKER_BETA":  "b.go",
+	"MARKER_GAMMA": "c.go",
+	"MARKER_DELTA": "d.go",
+}
+
+// groupingSystemPrompt is a stable fragment of GROUPING_TASK's system prompt.
+// The grouping call carries file metadata only, never diff bodies, so it has no
+// marker to attribute it by; this is what identifies it instead.
+const groupingSystemPrompt = "file grouping assistant"
+
+// groupingReply is one element of the JSON array GROUPING_TASK must return.
+type groupingReply struct {
+	Label string   `json:"label"`
+	Files []string `json:"files"`
+}
 
 func (f *fakeLLM) fileOf(body []byte) string {
 	for marker, name := range markers {
@@ -84,6 +115,33 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	raw := body.Bytes()
 	file := f.fileOf(raw)
 	hasTools := bytes.Contains(raw, []byte(`"tools"`))
+
+	// Answer the grouping call with one group per file. These tests are about
+	// per-request retry accounting, which needs each file to be its own request;
+	// letting the model bundle them would collapse the very thing under test.
+	// Served before the injection switch on purpose: the grouping call carries no
+	// marker, so it must never absorb a file's 429 or 402.
+	if bytes.Contains(raw, []byte(groupingSystemPrompt)) {
+		w.Header().Set("Content-Type", "application/json")
+		groups := make([]groupingReply, 0, len(markers))
+		for _, name := range markers {
+			groups = append(groups, groupingReply{Label: name, Files: []string{name}})
+		}
+		// The grouping answer is JSON that has to survive being carried inside a
+		// JSON string, so let the encoder do both levels of quoting.
+		inner, err := json.Marshal(groups)
+		if err != nil {
+			panic(err)
+		}
+		text, err := json.Marshal(string(inner))
+		if err != nil {
+			panic(err)
+		}
+		_, _ = fmt.Fprintf(w, `{"id":"msg_group","type":"message","role":"assistant","model":"claude-test",
+			"content":[{"type":"text","text":%s}],
+			"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}}`, text)
+		return
+	}
 
 	f.mu.Lock()
 	f.attemptsByFile[file]++
@@ -137,13 +195,24 @@ func retryTestGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// retryTestRepo builds a two-file repo with one reviewable commit range
-// (HEAD~1..HEAD), each file carrying its own marker in the second commit only.
+// retryTestRepo builds a repo with one reviewable commit range (HEAD~1..HEAD),
+// each file carrying its own marker in the second commit only.
+//
+// The file set is `markers`, which holds enough files to reach
+// GROUPING_MIN_FILES. That matters: below it, grouping is decided locally and a
+// low-churn change set is bundled into a single group — one request covering
+// every file, which would collapse the per-request accounting these tests exist
+// to check. At or above it the grouping call runs, and the fake answers it with
+// one group per file.
 func retryTestRepo(t *testing.T) string {
 	t.Helper()
+	names := make([]string, 0, len(markers))
+	for _, name := range markers {
+		names = append(names, name)
+	}
 	dir := t.TempDir()
 	retryTestGit(t, dir, "init", "-q", "-b", "main")
-	for _, name := range []string{"a.go", "b.go"} {
+	for _, name := range names {
 		body := fmt.Sprintf("package p\n\nfunc %s() int { return 1 }\n", strings.TrimSuffix(name, ".go"))
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
