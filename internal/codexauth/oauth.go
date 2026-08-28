@@ -31,6 +31,11 @@ const (
 	lockRetry     = 50 * time.Millisecond
 )
 
+// NeedsRefresh reports whether the access token should be refreshed before use.
+func (a *CodexAuth) NeedsRefresh(now time.Time) bool {
+	return a == nil || a.ExpiresAt.IsZero() || !a.ExpiresAt.After(now.Add(refreshBefore))
+}
+
 var openBrowser = openBrowserURL
 
 // OAuthClient performs Codex OAuth requests. Issuer and HTTPClient are

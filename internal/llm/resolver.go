@@ -4,6 +4,7 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -13,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/codexauth"
 )
 
 // ResolvedEndpoint holds the resolved LLM endpoint configuration.
@@ -30,8 +33,9 @@ type ResolvedEndpoint struct {
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
 	// knob; users can still override via OCR_LLM_TIMEOUT.
-	Timeout    time.Duration
-	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
+	Timeout           time.Duration
+	RetryCodes        []int // additional HTTP status codes that trigger exponential-backoff retry
+	RequiresStreaming bool
 
 	// AmbientAuth marks an endpoint that carries no token and needs no base
 	// URL, because the transport supplies both — AWS SigV4 signing derives the
@@ -472,6 +476,17 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	// the preset says.
 	ambientAuth := protocol == ProtocolAnthropicBedrock ||
 		(isPreset && preset.AmbientAuth && entry.Protocol == "")
+	var externalAuth *codexauth.CodexAuth
+	if isPreset && preset.ExternalAuth && apiKey == "" && apiKeyCmd == "" {
+		auth, err := codexauth.Load()
+		if err != nil {
+			return ResolvedEndpoint{}, false, fmt.Errorf(
+				"codex provider is selected but not signed in: %w\n"+
+					"  run: ocr auth login", err)
+		}
+		externalAuth = auth
+		apiKey = auth.AccessToken
+	}
 
 	// No credential at all is an error, and it is reported before api_key_cmd
 	// runs: only the command's *execution* is deferred, not the emptiness check.
@@ -573,22 +588,32 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		}
 		apiKey = resolved
 	}
+	if externalAuth != nil && externalAuth.NeedsRefresh(time.Now()) {
+		auth, err := codexauth.NewOAuthClient().RefreshIfNeeded(context.Background(), codexauth.FileStore{}, time.Now)
+		if err != nil {
+			return ResolvedEndpoint{}, false, fmt.Errorf(
+				"refresh Codex authentication: %w\n"+
+					"  run: ocr auth login", err)
+		}
+		apiKey = auth.AccessToken
+	}
 
 	return ResolvedEndpoint{
-		URL:          url,
-		Token:        apiKey,
-		Model:        model,
-		Provider:     cfg.Provider,
-		Protocol:     protocol,
-		AuthHeader:   authHeader,
-		Source:       "provider:" + cfg.Provider,
-		ExtraBody:    extraBody,
-		ExtraHeaders: extraHeaders,
-		Timeout:      timeout,
-		RetryCodes:   retryCodes,
-		AmbientAuth:  ambientAuth,
-		AWSProfile:   entry.AWSProfile,
-		AWSRegion:    entry.AWSRegion,
+		URL:               url,
+		Token:             apiKey,
+		Model:             model,
+		Provider:          cfg.Provider,
+		Protocol:          protocol,
+		AuthHeader:        authHeader,
+		Source:            "provider:" + cfg.Provider,
+		ExtraBody:         extraBody,
+		ExtraHeaders:      extraHeaders,
+		Timeout:           timeout,
+		RetryCodes:        retryCodes,
+		RequiresStreaming: isPreset && preset.RequiresStreaming,
+		AmbientAuth:       ambientAuth,
+		AWSProfile:        entry.AWSProfile,
+		AWSRegion:         entry.AWSRegion,
 	}, true, nil
 }
 
