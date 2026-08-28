@@ -38,14 +38,15 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ### Built-in providers
 
 The following providers ship with OCR, with the Base URL and protocol
-preset — once selected, you only need to fill in the API key. If
-`providers.<name>.api_key` is unset, OCR falls back to the corresponding
-environment variable.
+preset. Most require an API key. If `providers.<name>.api_key` is unset,
+OCR falls back to the corresponding environment variable. The `codex`
+provider instead uses the ChatGPT credentials created by `ocr auth login`.
 
 | Name | Protocol | Base URL | API key env var |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
+| `codex` | openai-responses | `https://chatgpt.com/backend-api/codex` | — (`ocr auth login`) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |

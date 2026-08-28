@@ -36,13 +36,15 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 ### 内置 provider
 
-下列 provider 随 OCR 发布，已预置 Base URL 与协议，选中后只需填 API key。
-若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。
+下列 provider 随 OCR 发布，并已预置 Base URL 与协议。多数 provider 需要 API key；
+若 `providers.<name>.api_key` 未设置，会自动回退到对应的环境变量。`codex`
+改用 `ocr auth login` 创建的 ChatGPT 凭证。
 
 | 名称 | 协议 | Base URL | API key 环境变量 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
+| `codex` | openai-responses | `https://chatgpt.com/backend-api/codex` | —（`ocr auth login`） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |

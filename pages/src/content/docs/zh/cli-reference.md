@@ -505,6 +505,49 @@ ocr config model                           Interactive model selection
 
 完整的 key 参考、schema 与示例见[配置](../configuration/)。
 
+## `ocr auth`
+
+管理内置 `codex` provider 使用的 ChatGPT 凭证。凭证保存在
+`~/.opencodereview/auth/codex.json`。
+
+```text
+ocr auth <sub-command>
+
+Sub-commands:
+  login     使用 ChatGPT Codex 订阅登录
+  status    显示当前认证状态
+  logout    撤销并删除本地凭证
+```
+
+### `ocr auth login`
+
+```bash
+ocr auth login
+ocr auth login --no-browser
+ocr auth login --device
+```
+
+默认流程会打开浏览器，并在本地 loopback 地址接收 OAuth 回调。
+`--no-browser` 只打印授权 URL；`--device` 为无界面或远程 shell 使用
+设备码流程。这两个 flag 不能同时使用。
+
+### `ocr auth status`
+
+打印经过遮盖的 ChatGPT 账户 ID、订阅计划和 token 过期时间。
+
+```bash
+ocr auth status
+```
+
+### `ocr auth logout`
+
+尽可能撤销当前凭证，并删除本地凭证文件。如果服务端撤销失败，本地文件仍会
+被删除，OCR 会打印警告。
+
+```bash
+ocr auth logout
+```
+
 ## `ocr llm`
 
 LLM 工具命令。两个子命令：

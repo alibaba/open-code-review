@@ -4,8 +4,14 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +19,7 @@ import (
 	openaiopt "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
+	"github.com/tidwall/sjson"
 )
 
 // --- OpenAIResponsesClient ---
@@ -52,6 +59,9 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
 	}
+	if cfg.RequiresStreaming {
+		opts = append(opts, openaiopt.WithMiddleware(rewriteDetailErrorMiddleware))
+	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
@@ -79,6 +89,54 @@ func ensureResponsesEndpoint(cfg *ClientConfig) {
 		baseURL = baseURL + "/responses"
 	}
 	cfg.URL = baseURL
+}
+
+// rewriteDetailErrorMiddleware translates the Codex gateway's detail-only
+// error envelope into the shape the OpenAI SDK parses.
+func rewriteDetailErrorMiddleware(req *http.Request, next func(*http.Request) (*http.Response, error)) (*http.Response, error) {
+	resp, err := next(req)
+	if err != nil || resp == nil || resp.Body == nil || resp.StatusCode < http.StatusBadRequest {
+		return resp, err
+	}
+
+	body, readErr := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
+	if readErr != nil {
+		return resp, fmt.Errorf("read Codex error response: %w", readErr)
+	}
+	if closeErr != nil {
+		return resp, fmt.Errorf("close Codex error response: %w", closeErr)
+	}
+	setResponseBody(resp, body)
+
+	var envelope struct {
+		Detail string          `json:"detail"`
+		Error  json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil || envelope.Detail == "" || len(envelope.Error) > 0 {
+		return resp, nil
+	}
+
+	rewritten, err := json.Marshal(struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}{
+		Error: struct {
+			Message string `json:"message"`
+		}{Message: envelope.Detail},
+	})
+	if err != nil {
+		return resp, fmt.Errorf("rewrite Codex error response: %w", err)
+	}
+	setResponseBody(resp, rewritten)
+	return resp, nil
+}
+
+func setResponseBody(resp *http.Response, body []byte) {
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
 }
 
 // CompletionsWithCtx sends a Responses API request and maps the result back to
@@ -113,45 +171,181 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
-		// This client is non-streaming: it calls Responses.New, which expects a
-		// single JSON body. If a provider config sets extra_body.stream=true
-		// (valid for the Chat Completions client, which switches to a streaming
-		// path), forwarding it here makes the API answer with SSE and every
-		// call fails to decode. Drop the key rather than forward it.
+		// Streaming is selected only by the resolved provider. Forwarding an
+		// extra_body.stream setting could conflict with that selection or make an
+		// ordinary Responses.New call receive SSE, so it is always dropped here.
 		if k == "stream" {
 			continue
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 
-	sdkResp, err := c.sdk.Responses.New(ctx, params, opts...)
+	var sdkResp *responses.Response
+	if c.cfg.RequiresStreaming {
+		sdkResp, err = c.responsesStreaming(ctx, params, opts...)
+	} else {
+		sdkResp, err = c.sdk.Responses.New(ctx, params, opts...)
+	}
 	if err != nil {
 		return nil, err
 	}
 
-	// The Responses API returns HTTP 200 even when the response object is in a
-	// terminal failure state (failed/cancelled) or a non-terminal background
-	// state (queued/in_progress). The SDK therefore returns a nil Go error in
-	// those cases. Surface them as real errors so callers (ocr llm test, the
-	// review loop) that branch on err != nil actually fail instead of treating
-	// a dead response as success.
-	switch sdkResp.Status {
-	case responses.ResponseStatusFailed, responses.ResponseStatusCancelled:
-		err = fmt.Errorf("openai-responses request did not complete: status=%s", sdkResp.Status)
-	case responses.ResponseStatusQueued, responses.ResponseStatusInProgress:
-		err = fmt.Errorf("openai-responses returned non-terminal status=%s (background/async mode is not supported)", sdkResp.Status)
-	}
-	if err != nil {
-		// Correct the attempt here, where the status is known. The observer saw
-		// only the HTTP 200 that carried this dead response object, and nothing
-		// downstream would catch the omission: a request whose outcome is failed is
-		// listed with no error attempt at all, producing self-consistent counts
-		// over a record that misstates what happened.
+	if err = checkResponseStatus(sdkResp); err != nil {
 		reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassProvider, FailurePhaseResponseStatus)
 		return nil, err
 	}
 
 	return c.mapResponsesResponse(sdkResp), nil
+}
+
+type responseStatusError struct {
+	message string
+}
+
+func (e *responseStatusError) Error() string { return e.message }
+
+// checkResponseStatus turns unsuccessful response objects into errors. The
+// Responses API can return these states with HTTP 200, so the SDK does not
+// reject them itself.
+func checkResponseStatus(resp *responses.Response) error {
+	switch resp.Status {
+	case responses.ResponseStatusCompleted, responses.ResponseStatusIncomplete:
+		return nil
+	case responses.ResponseStatusFailed, responses.ResponseStatusCancelled:
+		return &responseStatusError{message: fmt.Sprintf("openai-responses request did not complete: status=%s", resp.Status)}
+	case responses.ResponseStatusQueued, responses.ResponseStatusInProgress:
+		return &responseStatusError{message: fmt.Sprintf("openai-responses returned non-terminal status=%s (background/async mode is not supported)", resp.Status)}
+	default:
+		return &responseStatusError{message: fmt.Sprintf("openai-responses returned unexpected status=%q", resp.Status)}
+	}
+}
+
+type responseStreamEventError struct {
+	code    string
+	message string
+	param   string
+}
+
+func (e *responseStreamEventError) Error() string {
+	message := "openai-responses stream error"
+	if e.code != "" {
+		message += ": code=" + e.code
+	}
+	if e.message != "" {
+		message += ": " + e.message
+	}
+	if e.param != "" {
+		message += " (param=" + e.param + ")"
+	}
+	return message
+}
+
+func (c *OpenAIResponsesClient) responsesStreaming(ctx context.Context, params responses.ResponseNewParams, opts ...openaiopt.RequestOption) (*responses.Response, error) {
+	resp, err := c.responsesStreamingInner(ctx, params, opts...)
+	if err == nil {
+		return resp, nil
+	}
+
+	var statusErr *responseStatusError
+	if errors.As(err, &statusErr) {
+		reviseAttempt(ctx, c.cfg.retryCollector, ErrorClassProvider, FailurePhaseResponseStatus)
+	} else {
+		class, phase := classifyStreamError(err)
+		reviseAttempt(ctx, c.cfg.retryCollector, class, phase)
+	}
+	return nil, err
+}
+
+func (c *OpenAIResponsesClient) responsesStreamingInner(ctx context.Context, params responses.ResponseNewParams, opts ...openaiopt.RequestOption) (*responses.Response, error) {
+	stream := c.sdk.Responses.NewStreaming(ctx, params, opts...)
+	defer stream.Close()
+
+	var accumulator responseStreamAccumulator
+	for stream.Next() {
+		if err := accumulator.add(stream.Current()); err != nil {
+			return nil, err
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return nil, err
+	}
+	return accumulator.response()
+}
+
+type indexedResponseOutputItem struct {
+	outputIndex int64
+	raw         json.RawMessage
+}
+
+type responseStreamAccumulator struct {
+	items    []indexedResponseOutputItem
+	terminal *responses.Response
+}
+
+func (a *responseStreamAccumulator) add(event responses.ResponseStreamEventUnion) error {
+	switch event.Type {
+	case "response.output_item.done":
+		done := event.AsResponseOutputItemDone()
+		a.items = append(a.items, indexedResponseOutputItem{
+			outputIndex: done.OutputIndex,
+			raw:         json.RawMessage(done.Item.RawJSON()),
+		})
+	case "response.completed", "response.failed", "response.incomplete":
+		response := event.Response
+		a.terminal = &response
+	case "error":
+		streamErr := event.AsError()
+		return &responseStreamEventError{
+			code:    streamErr.Code,
+			message: streamErr.Message,
+			param:   streamErr.Param,
+		}
+	}
+	return nil
+}
+
+func (a *responseStreamAccumulator) response() (*responses.Response, error) {
+	if a.terminal == nil {
+		return nil, &streamIntegrityError{reason: "ended before a terminal event"}
+	}
+
+	sort.SliceStable(a.items, func(i, j int) bool {
+		return a.items[i].outputIndex < a.items[j].outputIndex
+	})
+	rawItems := make([]json.RawMessage, len(a.items))
+	for i := range a.items {
+		rawItems[i] = a.items[i].raw
+	}
+	itemsJSON, err := json.Marshal(rawItems)
+	if err != nil {
+		return nil, fmt.Errorf("marshal openai-responses stream output: %w", err)
+	}
+
+	merged, err := sjson.SetRawBytes([]byte(a.terminal.RawJSON()), "output", itemsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("merge openai-responses stream output: %w", err)
+	}
+	var full responses.Response
+	if err := full.UnmarshalJSON(merged); err != nil {
+		return nil, fmt.Errorf("unmarshal accumulated openai-responses stream: %w", err)
+	}
+	if err := checkResponseStatus(&full); err != nil {
+		return nil, err
+	}
+	return &full, nil
+}
+
+// accumulateResponseStream rebuilds a complete response from output-item done
+// events and the terminal response envelope. Codex leaves the terminal
+// envelope's output array empty even though it emitted complete output items.
+func accumulateResponseStream(events []responses.ResponseStreamEventUnion) (*responses.Response, error) {
+	var accumulator responseStreamAccumulator
+	for _, event := range events {
+		if err := accumulator.add(event); err != nil {
+			return nil, err
+		}
+	}
+	return accumulator.response()
 }
 
 // buildResponsesParams converts the shared ChatRequest into Responses API
@@ -237,11 +431,13 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 			}
 		}
 	}
-	if req.MaxTokens > 0 {
-		params.MaxOutputTokens = openai.Int(int64(req.MaxTokens))
-	}
-	if req.Temperature != nil {
-		params.Temperature = openai.Float(*req.Temperature)
+	if !c.cfg.RequiresStreaming {
+		if req.MaxTokens > 0 {
+			params.MaxOutputTokens = openai.Int(int64(req.MaxTokens))
+		}
+		if req.Temperature != nil {
+			params.Temperature = openai.Float(*req.Temperature)
+		}
 	}
 
 	return params

@@ -522,6 +522,49 @@ ocr config model                           Interactive model selection
 
 키 전체 목록과 스키마, 예시는 [설정](../configuration/)을 참고하세요.
 
+## `ocr auth` {#ocr-auth}
+
+내장 `codex` 프로바이더가 사용하는 ChatGPT 자격 증명을 관리합니다. 자격 증명은
+`~/.opencodereview/auth/codex.json`에 저장됩니다.
+
+```text
+ocr auth <sub-command>
+
+Sub-commands:
+  login     ChatGPT Codex 구독으로 로그인
+  status    현재 인증 상태 표시
+  logout    자격 증명을 폐기하고 로컬에서 삭제
+```
+
+### `ocr auth login` {#ocr-auth-login}
+
+```bash
+ocr auth login
+ocr auth login --no-browser
+ocr auth login --device
+```
+
+기본 흐름은 브라우저를 열고 로컬 loopback 주소에서 OAuth 콜백을 받습니다.
+`--no-browser`는 인증 URL만 출력합니다. `--device`는 headless 또는 원격 shell에서
+device code 흐름을 사용합니다. 두 flag는 함께 쓸 수 없습니다.
+
+### `ocr auth status` {#ocr-auth-status}
+
+가린 ChatGPT 계정 ID, 구독 plan, token 만료 시각을 출력합니다.
+
+```bash
+ocr auth status
+```
+
+### `ocr auth logout` {#ocr-auth-logout}
+
+가능하면 현재 자격 증명을 폐기하고 로컬 자격 증명 파일을 삭제합니다. 서버 폐기에
+실패해도 로컬 파일은 삭제하며 OCR은 경고를 출력합니다.
+
+```bash
+ocr auth logout
+```
+
 ## `ocr llm` {#ocr-llm}
 
 LLM 유틸리티 명령입니다. 하위 명령은 두 가지입니다:

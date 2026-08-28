@@ -518,6 +518,51 @@ ocr config model                           Interactive model selection
 Полный справочник по ключам, схемы и примеры приведены в разделе
 [Конфигурация](../configuration/).
 
+## `ocr auth`
+
+Управляет учётными данными ChatGPT для встроенного провайдера `codex`.
+Учётные данные хранятся в `~/.opencodereview/auth/codex.json`.
+
+```text
+ocr auth <sub-command>
+
+Sub-commands:
+  login     Войти с подпиской ChatGPT Codex
+  status    Показать текущее состояние аутентификации
+  logout    Отозвать и удалить локальные учётные данные
+```
+
+### `ocr auth login`
+
+```bash
+ocr auth login
+ocr auth login --no-browser
+ocr auth login --device
+```
+
+По умолчанию команда открывает браузер и принимает обратный вызов OAuth на
+локальном loopback-адресе. `--no-browser` только выводит URL авторизации.
+`--device` использует поток device code для headless- или удалённого shell.
+Эти два флага нельзя использовать вместе.
+
+### `ocr auth status`
+
+Выводит замаскированный ID аккаунта ChatGPT, план подписки и срок действия token.
+
+```bash
+ocr auth status
+```
+
+### `ocr auth logout`
+
+По возможности отзывает текущие учётные данные и удаляет локальный файл.
+Если отзыв на сервере завершился ошибкой, локальный файл всё равно удаляется,
+а OCR выводит предупреждение.
+
+```bash
+ocr auth logout
+```
+
 ## `ocr llm`
 
 Служебные команды LLM. Доступны две подкоманды:

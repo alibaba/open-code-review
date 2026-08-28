@@ -41,14 +41,16 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ### Встроенные провайдеры
 
 Перечисленные ниже провайдеры поставляются вместе с OCR; для них заранее
-заданы базовый URL и протокол, поэтому после выбора достаточно указать
-API-ключ. Если `providers.<name>.api_key` не задан, OCR использует
-соответствующую переменную окружения.
+заданы базовый URL и протокол. Большинству нужен API-ключ. Если
+`providers.<name>.api_key` не задан, OCR использует соответствующую переменную
+окружения. Провайдер `codex` вместо этого использует учётные данные ChatGPT,
+созданные командой `ocr auth login`.
 
 | Имя | Протокол | Базовый URL | Переменная окружения для API-ключа |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
+| `codex` | openai-responses | `https://chatgpt.com/backend-api/codex` | — (`ocr auth login`) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |

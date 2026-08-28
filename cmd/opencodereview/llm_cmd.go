@@ -76,10 +76,7 @@ func runLLMTest() error {
 	}
 	task.ApplyLanguage(lang)
 
-	timeout := 30 * time.Second
-	if task.Timeout > 0 {
-		timeout = time.Duration(task.Timeout) * time.Second
-	}
+	timeout := llmTestTimeout(task.Timeout, ep.Timeout)
 
 	// No retry collector: llm test is a connectivity probe, not a review, and the
 	// retry report only describes ocr review.
@@ -130,6 +127,17 @@ func runLLMTest() error {
 	fmt.Printf("%s\n", content)
 	fmt.Println("✓ Connection test successful")
 	return nil
+}
+
+func llmTestTimeout(taskSeconds int, endpointTimeout time.Duration) time.Duration {
+	timeout := 30 * time.Second
+	if taskTimeout := time.Duration(taskSeconds) * time.Second; taskTimeout > timeout {
+		timeout = taskTimeout
+	}
+	if endpointTimeout > timeout {
+		timeout = endpointTimeout
+	}
+	return timeout
 }
 
 // bedrockContext reports the region and profile a Bedrock client resolved.
