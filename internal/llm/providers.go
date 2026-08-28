@@ -93,7 +93,10 @@ var registry = []Provider{
 		RequiresStreaming:     true,
 		RejectsSamplingParams: true,
 		DetailErrorEnvelope:   true,
-		Models:                []string{"gpt-5.6-luna", "gpt-5.6-terra"},
+		// A picker for `ocr config model`, not an allowlist: what a ChatGPT
+		// account can run depends on its plan and changes over time. The
+		// resolver does not gate --model for this provider.
+		Models: []string{"gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"},
 	},
 	{
 		Name:        "openai",

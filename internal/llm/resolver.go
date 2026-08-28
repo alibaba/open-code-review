@@ -530,7 +530,13 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	// supported value, and the one to use when spend has to be attributed — can
 	// never appear in a list compiled upstream. The list stays a picker for
 	// `ocr config model`; it does not gate an override.
-	gateOverrideOnModelList := !ambientAuth
+	//
+	// External-auth providers are the same case for the same reason. A Codex
+	// subscription exposes whatever models the signed-in account is entitled
+	// to, which differs by plan and changes over time, so a list compiled here
+	// cannot be authoritative. Let the endpoint decide and report its own
+	// refusal rather than blocking a model the account can actually run.
+	gateOverrideOnModelList := !ambientAuth && !(isPreset && preset.ExternalAuth)
 
 	// Apply model override with validation.
 	if modelOverride != "" {

@@ -241,7 +241,9 @@ func TestResolveEndpoint_CodexProtocolOverrideDisablesCodexBehaviors(t *testing.
 	}
 }
 
-func TestResolveEndpoint_CodexModelOverrideRemainsAllowlisted(t *testing.T) {
+// gpt-5.6-sol is served to entitled accounts but is not something the registry
+// can know about, so resolution must pass it through to the endpoint.
+func TestResolveEndpoint_CodexAcceptsAccountEntitledModel(t *testing.T) {
 	clearAllEnv(t)
 	setTestHome(t, t.TempDir())
 	if err := codexauth.Save(&codexauth.CodexAuth{
@@ -252,9 +254,12 @@ func TestResolveEndpoint_CodexModelOverrideRemainsAllowlisted(t *testing.T) {
 		t.Fatalf("save Codex auth: %v", err)
 	}
 
-	_, err := ResolveEndpointWithModelOverride(codexResolverConfig(t), "gpt-5.6-sol")
-	if err == nil || !strings.Contains(err.Error(), "not available for provider \"codex\"") {
-		t.Errorf("ResolveEndpointWithModelOverride error = %v", err)
+	got, err := ResolveEndpointWithModelOverride(codexResolverConfig(t), "gpt-5.6-sol")
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithModelOverride error = %v", err)
+	}
+	if got.Model != "gpt-5.6-sol" {
+		t.Errorf("Model = %q, want %q", got.Model, "gpt-5.6-sol")
 	}
 }
 
@@ -273,5 +278,30 @@ func TestNewLLMClient_CarriesProviderBehaviors(t *testing.T) {
 	}
 	if !client.cfg.RequiresStreaming || !client.cfg.RejectsSamplingParams || !client.cfg.DetailErrorEnvelope {
 		t.Errorf("client behaviors = %+v, want all enabled", client.cfg)
+	}
+}
+
+// A ChatGPT account's model entitlements are not knowable from the registry, so
+// the preset's Models list must not gate an override the account can run.
+func TestResolveEndpoint_CodexDoesNotGateModelOverride(t *testing.T) {
+	clearAllEnv(t)
+	store := &resolverCodexStore{auth: &codexauth.CodexAuth{
+		AccessToken: "access-token", RefreshToken: "refresh-token",
+		ExpiresAt: time.Now().Add(time.Hour),
+	}}
+	setCodexResolverAuthSeams(t, store, nil)
+	path, _ := writeResolverConfig(t, configFile{
+		Provider:  "codex",
+		Providers: map[string]providerEntryConfig{"codex": {}},
+	})
+
+	// A model absent from the preset list, which the signed-in account may
+	// still be entitled to run.
+	got, err := ResolveEndpointWithOptions(path, ResolveOptions{Model: "gpt-5.6-unlisted"})
+	if err != nil {
+		t.Fatalf("ResolveEndpoint rejected a model outside the preset list: %v", err)
+	}
+	if got.Model != "gpt-5.6-unlisted" {
+		t.Errorf("Model = %q, want %q", got.Model, "gpt-5.6-unlisted")
 	}
 }
