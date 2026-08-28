@@ -15,6 +15,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
+	"github.com/alibaba/open-code-review/internal/pathutil"
 )
 
 // Resolver resolves a review rule for a file path.
@@ -385,7 +386,7 @@ func loadGlobalRule() (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal global rule: %w", err)
 	}
-	resolveRuleEntries(pr.Rules, filepath.Dir(path))
+	resolveRuleEntries(pr.Rules, filepath.Dir(path), "")
 	return &pr, nil
 }
 
@@ -398,7 +399,7 @@ func loadRuleFile(path string) (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal rule file %s: %w", path, err)
 	}
-	resolveRuleEntries(pr.Rules, filepath.Dir(path))
+	resolveRuleEntries(pr.Rules, filepath.Dir(path), "")
 	return &pr, nil
 }
 
@@ -408,8 +409,25 @@ func loadRuleFile(path string) (*ProjectRule, error) {
 // root-relative diff paths. A subproject-local rule.json under the subdirectory is
 // intentionally not consulted; put shared rules at the repo root, or pass --rule.
 func loadProjectRule(repoDir string) (*ProjectRule, error) {
+	confineRoot, err := pathutil.CanonicalPath(repoDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve repo dir %s: %w", repoDir, err)
+	}
+
 	path := filepath.Join(repoDir, ".opencodereview", "rule.json")
-	data, err := os.ReadFile(path)
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("resolve project rule %s: %w", path, err)
+	}
+	if !pathutil.WithinBase(confineRoot, resolved) {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: project rule file escapes repo dir: %s\n", path)
+		return nil, nil
+	}
+
+	data, err := os.ReadFile(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -420,7 +438,7 @@ func loadProjectRule(repoDir string) (*ProjectRule, error) {
 	if err := json.Unmarshal(data, &pr); err != nil {
 		return nil, fmt.Errorf("unmarshal project rule: %w", err)
 	}
-	resolveRuleEntries(pr.Rules, repoDir)
+	resolveRuleEntries(pr.Rules, repoDir, confineRoot)
 	return &pr, nil
 }
 
@@ -552,18 +570,16 @@ func looksLikeFilePath(s string) bool {
 	return allowedRuleExts[strings.ToLower(filepath.Ext(s))]
 }
 
-// resolveRuleEntries scans each entry's Rule field. When the value looks like a file
-// path, it reads the file content and replaces the Rule. Absolute paths are used
-// directly; relative paths are resolved against repoDir only. Multi-line and short
-// inline rules are left unchanged. If the file cannot be read, the Rule is cleared
-// (set to empty) and a warning is emitted.
-func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string) {
+// resolveRuleEntries reads file references in each rule entry and replaces them with
+// the file content. confineRoot is the canonical repo root for the untrusted project
+// layer (empty for trusted layers, meaning no confinement).
+func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string, confineRoot string) {
 	for i := range entries {
 		e := &entries[i]
 		if strings.TrimSpace(e.Rule) == "" || !looksLikeFilePath(e.Rule) {
 			continue
 		}
-		if content := tryReadRuleFile(e.Rule, repoDir); content != nil {
+		if content := tryReadRuleFile(e.Rule, repoDir, confineRoot); content != nil {
 			e.Rule = *content
 		} else {
 			e.Rule = ""
@@ -571,10 +587,10 @@ func resolveRuleEntries(entries []ProjectRuleEntry, repoDir string) {
 	}
 }
 
-// tryReadRuleFile attempts to read a rule file. Absolute paths are used directly.
-// Relative paths are resolved against repoDir and validated to stay within repoDir.
-// Returns nil when the file cannot be read safely or does not exist.
-func tryReadRuleFile(rule string, repoDir string) *string {
+// tryReadRuleFile reads a rule file reference. Absolute paths are used directly;
+// relative paths resolve against repoDir. When confineRoot is non-empty, the resolved
+// path must stay inside it. Returns nil when the file cannot be read safely.
+func tryReadRuleFile(rule string, repoDir string, confineRoot string) *string {
 	if repoDir == "" {
 		if !filepath.IsAbs(rule) {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot resolve relative rule path %q without a repo dir\n", rule)
@@ -582,7 +598,7 @@ func tryReadRuleFile(rule string, repoDir string) *string {
 		}
 	}
 	if filepath.IsAbs(rule) {
-		content, err := readRuleFileSafe(rule)
+		content, err := readRuleFileSafe(rule, confineRoot)
 		if err == nil {
 			return &content
 		}
@@ -602,7 +618,7 @@ func tryReadRuleFile(rule string, repoDir string) *string {
 		return nil
 	}
 
-	content, err := readRuleFileSafe(resolved)
+	content, err := readRuleFileSafe(resolved, confineRoot)
 	if err == nil {
 		return &content
 	}
@@ -614,14 +630,17 @@ func tryReadRuleFile(rule string, repoDir string) *string {
 	return nil
 }
 
-// readRuleFileSafe reads and validates a rule file. It enforces extension whitelist
-// (.md / .txt / .markdown), a 512 KB size cap, and resolves symlinks before checking
-// the path. Symlinks are resolved first, then size is checked via Stat before reading.
-// Returns the trimmed content on success.
-func readRuleFileSafe(path string) (string, error) {
+// readRuleFileSafe reads and validates a rule file: extension whitelist, 512 KB cap,
+// and symlink resolution. When confineRoot is non-empty, the resolved path must stay
+// inside it. Returns the trimmed content on success.
+func readRuleFileSafe(path string, confineRoot string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return "", err
+	}
+
+	if confineRoot != "" && !pathutil.WithinBase(confineRoot, resolved) {
+		return "", fmt.Errorf("rule file path %q escapes repo dir %q", resolved, confineRoot)
 	}
 
 	if !allowedRuleExts[strings.ToLower(filepath.Ext(resolved))] {
