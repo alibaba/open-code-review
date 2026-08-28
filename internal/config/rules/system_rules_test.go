@@ -139,6 +139,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
+		{"src/matmul.mojo", "Ownership, Borrowing, and Lifetimes"},
+		{"src/matmul.🔥", "Ownership, Borrowing, and Lifetimes"},
 		{"Models/main.m", "Indexing, Shapes, and Implicit Expansion"},
 		{"src/Counter.sol", "Checks-Effects-Interactions"},
 		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},

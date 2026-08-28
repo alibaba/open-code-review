@@ -97,6 +97,8 @@
   ".zig",
   ".thrift",
   ".capnp",
+  ".mojo",
+  ".🔥",
   ".sol",
   ".vy"
 ]

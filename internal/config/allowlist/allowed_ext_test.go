@@ -90,6 +90,9 @@ func TestIsAllowedExt(t *testing.T) {
 		{".THRIFT", true},
 		{".capnp", true},
 		{".CAPNP", true},
+		{".mojo", true},
+		{".MOJO", true},
+		{".🔥", true},
 		{".sol", true},
 		{".SOL", true},
 		{".vy", true},
@@ -277,6 +280,10 @@ func TestIsExcludedPath(t *testing.T) {
 		{"solidity deploy script", "script/Deploy.s.sol", false},
 		{"vyper non-test", "src/token.vy", false},
 		{"vyper test in filename only", "src/test_helpers.vy", false},
+
+		// Mojo has no conventional default test-file exclusion.
+		{"mojo module", "src/matmul.mojo", false},
+		{"mojo fire extension", "src/matmul.🔥", false},
 
 		// Snapshot files
 		{"jest snapshot dir", "src/__snapshots__/App.test.js.snap", true},

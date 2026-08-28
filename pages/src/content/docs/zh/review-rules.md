@@ -166,6 +166,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`——Jsonnet 配置模板与库。 |
 | `**/*.thrift` | `thrift.md`——Apache Thrift IDL 线协议兼容性。 |
 | `**/*.capnp` | `capnp.md`——Cap'n Proto schema 线协议兼容性。 |
+| `**/*.{mojo,🔥}` | `mojo.md` - Mojo 源代码。 |
 | `**/*.m` | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
 | `**/*.sol` | `solidity.md`——Solidity 智能合约。 |
 | `**/*.vy` | `vyper.md`——Vyper 智能合约。 |
