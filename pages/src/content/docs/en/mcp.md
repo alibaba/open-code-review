@@ -26,7 +26,7 @@ cover it — MCP is for reaching beyond the checkout.
 
 ## Configuration
 
-#### Adding an MCP server
+#### Adding a local MCP server
 
 The `ocr config set` command writes these fields non-interactively. Array
 fields (`args`, `env`, `tools`) take a JSON array string:
@@ -48,6 +48,48 @@ ocr config set mcp_servers.docs.setup "npm install -g @acme/docs-mcp-server"
 ocr config set mcp_servers.docs.env '["DOCS_TOKEN=secret", "DOCS_REGION=eu"]'
 ```
 
+#### Adding a remote MCP server
+
+For servers that support **Streamable HTTP**, set `type` to `remote` and
+provide a `url` instead of a local command. Setting only `url` is not
+enough: the default type is `stdio`.
+
+For example, [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp)
+lets the reviewer search public library documentation and fetch pages
+such as API references or migration guides. Its anonymous endpoint is
+free to use with rate limits; no Parallel account, API key, or local
+server installation is required.
+
+Use a new server name so these commands do not overwrite an existing
+connection:
+
+```bash
+ocr config set mcp_servers.parallel-search.type remote
+ocr config set mcp_servers.parallel-search.url https://search.parallel.ai/mcp
+ocr config set mcp_servers.parallel-search.tools '["web_search", "web_fetch"]'
+```
+
+These commands save the connection in your user config. On the next
+review, OCR connects and makes `web_search` and `web_fetch` available to
+the agent alongside the built-in tools. The tool allowlist keeps any
+additional tools the server might offer out of the review. Other
+configured servers and your review settings are unchanged.
+
+Once configured, the agent can call these tools during reviews without
+asking before each call. Search queries, requested URLs, and any context
+included in tool arguments are sent to Parallel. Because this is user
+configuration, it applies across repositories: enable it only where
+external requests are allowed, and do not include secrets, private code,
+or internal URLs in requests. See Parallel's
+[Privacy Policy](https://parallel.ai/privacy-policy) and
+[Customer Terms](https://parallel.ai/customer-terms).
+
+To remove the connection before future reviews:
+
+```bash
+ocr config unset mcp_servers.parallel-search
+```
+
 #### Removing an MCP server
 
 Remove a server with `unset`:
@@ -60,11 +102,20 @@ MCP servers live under the `mcp_servers` key in your user config file (`~/.openc
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `command` | string | ✓ | Executable that starts the MCP server (e.g. `npx`, `uvx`, an absolute path). |
-| `args` | string array | | Arguments passed to `command`. |
+| `type` | string | | `stdio` (default) for a local subprocess, or `remote` for Streamable HTTP. |
+| `command` | string | For `stdio` | Executable that starts the MCP server (e.g. `npx`, `uvx`, an absolute path). |
+| `args` | string array | | Arguments passed to `command` (`stdio` only). |
+| `url` | string | For `remote` | HTTP or HTTPS MCP endpoint. |
+| `headers` | object | | HTTP header names and string values (`remote` only). Values expand `$VAR` or `${VAR}` from OCR's environment at connection time. Omit for anonymous access. |
 | `tools` | string array | | Allowlist of tool names to register. Empty = register every tool the server offers. |
-| `setup` | string | | Shell command run once before the server starts (e.g. install deps). Runs in the repo root with a 5-minute timeout. |
-| `env` | string array | | Extra environment variables in `KEY=VALUE` form. |
+| `setup` | string | | Shell command run once before the server starts (`stdio` only, e.g. install deps). Runs in the repo root with a 5-minute timeout. |
+| `env` | string array | | Extra subprocess environment variables in `KEY=VALUE` form (`stdio` only). |
+
+For remote servers that require authentication, follow that server's
+instructions for `headers`. Use single quotes around JSON passed to
+`ocr config set` when it contains environment variable references, so
+your shell does not expand them before OCR saves the configuration.
+The anonymous Parallel example above needs no headers or OAuth sign-in.
 
 ## Filtering tools
 
@@ -104,6 +155,9 @@ pollute `--format json` output on stdout:
 - `Running setup for MCP server "x": …` — the setup command is executing.
 - `failed to start MCP server "x": …` — the subprocess didn't connect
   within the 30-second init timeout, or `command` isn't on `PATH`.
+- `failed to connect to remote MCP server "x": …` indicates a connection
+  or initialization failure. Check the endpoint, network access, and any
+  required headers. OCR skips that server and continues the review.
 - `tool "y" conflicts with built-in tool, skipping` — rename the server's
   tool or drop it from `tools`.
 - `allowed tool "y" not found in server's tool list` — the name in `tools`
