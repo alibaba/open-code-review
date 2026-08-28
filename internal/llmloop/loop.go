@@ -356,9 +356,15 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 		if len(calls) == 0 {
 			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", newPath)
-			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
+			var additions []llm.Message
 			if content != "" {
-				messages = append(messages[:len(messages)-1], llm.NewTextMessage("assistant", content), messages[len(messages)-1])
+				additions = append(additions, llm.NewTextMessage("assistant", content))
+			}
+			additions = append(additions, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
+			if !r.appendMessagesWithCompression(ctx, additions, &messages, newPath, st) {
+				fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", newPath)
+				stop = StopCompression
+				break
 			}
 			continue
 		}
@@ -413,7 +419,11 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			consecutiveEmptyRounds = 0
 		}
 
-		succeed := r.addNextMessage(ctx, content, calls, results, &messages, newPath, st)
+		additions := []llm.Message{llm.NewToolCallMessage(content, calls)}
+		for _, rs := range results {
+			additions = append(additions, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
+		}
+		succeed := r.appendMessagesWithCompression(ctx, additions, &messages, newPath, st)
 		if !succeed {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", newPath)
 			stop = StopCompression
@@ -720,12 +730,14 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 	return tool.Of(result)
 }
 
-// addNextMessage extends the conversation with the assistant message and
-// tool responses, applying three-zone compression at the soft (60%) and
-// warning (80%) MaxTokens thresholds. Returns false when even after
+// appendMessagesWithCompression appends one logical conversation update and
+// applies three-zone compression at the soft (60%) and warning (80%)
+// MaxTokens thresholds. Callers pass the entire update at once so every
+// append path shares the same bounds and compression never runs between an
+// assistant message and its tool results. Returns false when even after
 // synchronous compression the conversation is still over the warning
 // threshold — caller should stop the loop in that case.
-func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]llm.Message, filePath string, st *compressionState) bool {
+func (r *Runner) appendMessagesWithCompression(ctx context.Context, additions []llm.Message, messages *[]llm.Message, filePath string, st *compressionState) bool {
 	maxAllowed := r.deps.Template.MaxTokens
 	softLimit := int(float64(maxAllowed) * tokenSoftThreshold)
 	warnLimit := PromptTokenLimit(maxAllowed)
@@ -744,15 +756,7 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 		}
 	}
 
-	if len(toolCalls) > 0 {
-		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls))
-	} else if assistantContent != "" {
-		*messages = append(*messages, llm.NewTextMessage("assistant", assistantContent))
-	}
-
-	for _, rs := range results {
-		*messages = append(*messages, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
-	}
+	*messages = append(*messages, additions...)
 
 	finalCount := CountMessagesTokens(*messages)
 	if finalCount > warnLimit {
@@ -771,7 +775,9 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 		r.triggerAsyncCompression(ctx, st, *messages, filePath)
 	}
 
-	return finalCount < warnLimit
+	// The exact complement of the sync trigger above: compression only runs
+	// strictly over the warning threshold, so sitting exactly at it is fine.
+	return finalCount <= warnLimit
 }
 
 // parseToolArgs unmarshals a tool call's raw JSON arguments, always

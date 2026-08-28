@@ -30,11 +30,15 @@ func PromptTokenLimit(maxTokens int) int {
 	return int(float64(maxTokens) * tokenWarningThreshold)
 }
 
-// round groups consecutive messages starting with an assistant message
-// followed by zero or more tool result messages.
+// round is one assistant turn plus everything that follows it up to the
+// next assistant message: its tool results and any interleaved user
+// messages, such as the no-tool retry nudge. Spanning the whole gap keeps
+// token accounting and zone boundaries aligned with the conversation the
+// model actually replays — index-only bookkeeping (assistant + tool roles)
+// left retry messages invisible to both.
 type round struct {
 	assistantIdx int
-	toolIdxs     []int
+	end          int // exclusive index of the message after the round
 }
 
 // partitionResult describes how messages should be split for compression.
@@ -74,23 +78,20 @@ func CountMessagesTokens(msgs []llm.Message) int {
 	return total
 }
 
-// groupIntoRounds parses messages[start:] into logical
-// (assistant + tool_results) pairs.
+// groupIntoRounds parses messages[start:] into rounds. Each assistant
+// message opens a round that runs until the next assistant message (or the
+// end of the conversation), so tool results and retry nudges stay with the
+// turn that produced them.
 func groupIntoRounds(messages []llm.Message, start int) []round {
 	var rounds []round
-	i := start
-	for i < len(messages) {
-		if messages[i].Role == "assistant" {
-			r := round{assistantIdx: i}
-			i++
-			for i < len(messages) && messages[i].Role == "tool" {
-				r.toolIdxs = append(r.toolIdxs, i)
-				i++
-			}
-			rounds = append(rounds, r)
-		} else {
-			i++
+	for i := start; i < len(messages); i++ {
+		if messages[i].Role != "assistant" {
+			continue
 		}
+		if n := len(rounds); n > 0 {
+			rounds[n-1].end = i
+		}
+		rounds = append(rounds, round{assistantIdx: i, end: len(messages)})
 	}
 	return rounds
 }
@@ -107,9 +108,9 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 	count := 0
 	tokensUsed := 0
 	for i := len(rounds) - 1; i >= 0; i-- {
-		roundTokens := llm.CountTokens(messages[rounds[i].assistantIdx].ExtractText())
-		for _, ti := range rounds[i].toolIdxs {
-			roundTokens += llm.CountTokens(messages[ti].ExtractText())
+		roundTokens := 0
+		for j := rounds[i].assistantIdx; j < rounds[i].end; j++ {
+			roundTokens += llm.CountTokens(messages[j].ExtractText())
 		}
 		if tokensUsed+roundTokens > budget {
 			break
@@ -146,12 +147,7 @@ func partitionMessages(messages []llm.Message, maxTokens int, prevSummaryTokenEs
 
 	// compressEnd = index after the last round NOT in active zone.
 	activeStartIdx := len(result.rounds) - result.activeCount
-	lastCompressRound := result.rounds[activeStartIdx-1]
-	if len(lastCompressRound.toolIdxs) > 0 {
-		result.compressEnd = lastCompressRound.toolIdxs[len(lastCompressRound.toolIdxs)-1] + 1
-	} else {
-		result.compressEnd = lastCompressRound.assistantIdx + 1
-	}
+	result.compressEnd = result.rounds[activeStartIdx-1].end
 
 	return result
 }

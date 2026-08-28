@@ -644,7 +644,11 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 	}}
 
 	st := &compressionState{}
-	ok := r.addNextMessage(context.Background(), strings.Repeat("word ", 200), calls, results, &msgs, "f.go", st)
+	additions := []llm.Message{llm.NewToolCallMessage(strings.Repeat("word ", 200), calls)}
+	for _, rs := range results {
+		additions = append(additions, llm.NewToolResultMessage(rs.ToolCallID, rs.Result))
+	}
+	ok := r.appendMessagesWithCompression(context.Background(), additions, &msgs, "f.go", st)
 
 	if !ok {
 		t.Error("expected true: sync compression should bring the count under the warning threshold")

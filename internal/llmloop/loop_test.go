@@ -335,6 +335,40 @@ func TestRunPerFile_UnknownTool(t *testing.T) {
 	}
 }
 
+// TestRunPerFile_NoToolRetryBoundedByCompression is a regression test: the
+// no-tool retry path must share the compression bounds of tool rounds. A
+// model that keeps answering without tool calls used to grow the
+// conversation without any token check; the loop must instead stop with
+// StopCompression once the conversation exceeds the warning threshold and
+// compression cannot shrink it.
+func TestRunPerFile_NoToolRetryBoundedByCompression(t *testing.T) {
+	content := strings.Repeat("chatter ", 200)
+	client := &fakeClient{responses: []*llm.ChatResponse{
+		{Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}}},
+	}}
+	deps := newTestDeps(client)
+	// No MemoryCompressionTask: compression cannot shrink the conversation,
+	// so crossing the warning threshold has to stop the loop.
+	deps.Template.MaxTokens = 100
+	deps.Template.MaxToolRequestTimes = 10
+	deps.Template.MemoryCompressionTask.Messages = nil
+	runner := NewRunner(deps)
+
+	completed, stop, err := runner.RunPerFile(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "main.go")
+	if err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	if completed {
+		t.Fatal("expected RunPerFile not to complete")
+	}
+	if stop != StopCompression {
+		t.Errorf("stop = %v, want StopCompression", stop)
+	}
+	if client.calls != 1 {
+		t.Errorf("LLM calls = %d, want 1 (loop must stop instead of retrying unbounded)", client.calls)
+	}
+}
+
 func TestRunPerFile_MaxToolRequestsWithoutTaskDoneDoesNotComplete(t *testing.T) {
 	content := ""
 	client := &fakeClient{responses: []*llm.ChatResponse{{
