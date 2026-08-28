@@ -126,7 +126,7 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 
 	sdkResp, err := c.sdk.Responses.New(ctx, params, opts...)
 	if err != nil {
-		return nil, err
+		return nil, enrichOpenAIError(err)
 	}
 
 	// The Responses API returns HTTP 200 even when the response object is in a

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
+	openai "github.com/openai/openai-go/v3"
 )
 
 func TestNewOpenAIClient_URLNormalization(t *testing.T) {
@@ -1921,4 +1922,265 @@ func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
 	if got := resp.Content(); got != "success" {
 		t.Errorf("Content() = %q, want %q", got, "success")
 	}
+}
+
+func TestOpenAIClient_EnrichesRestoredErrorBody(t *testing.T) {
+	errBody := `[{"error":{"code":400,"message":"Invalid argument in tool call","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"FIELD_VIOLATION","metadata":{"field":"messages.tool_calls"}}]}}]`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(errBody))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1/chat/completions",
+		APIKey: "test-key",
+		Model:  "custom-model",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Model:     "custom-model",
+		Messages:  []Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 64,
+	})
+	if err == nil {
+		t.Fatal("CompletionsWithCtx succeeded, want HTTP 400 error")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "OpenAI-compatible API error response body") {
+		t.Errorf("expected fallback prefix, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "FIELD_VIOLATION") {
+		t.Errorf("expected raw JSON response body details in error, got: %s", errMsg)
+	}
+
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected wrapped error to be unpackable as *openai.Error, got: %T", err)
+	}
+	if apiErr.RawJSON() != "" {
+		t.Errorf("RawJSON() = %q, want empty for array-wrapped payload", apiErr.RawJSON())
+	}
+	restored, readErr := io.ReadAll(apiErr.Response.Body)
+	if readErr != nil {
+		t.Fatalf("read restored response body: %v", readErr)
+	}
+	if got := string(restored); got != errBody {
+		t.Errorf("restored response body = %q, want %q", got, errBody)
+	}
+}
+
+func TestOpenAIClient_LeavesUsefulSDKErrorUnchanged(t *testing.T) {
+	errBody := `{"error":{"message":"streaming rejected","type":"invalid_request_error","code":"param_invalid"}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(errBody))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1/chat/completions",
+		APIKey: "test-key",
+		Model:  "custom-model",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Model:     "custom-model",
+		Messages:  []Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 64,
+	})
+	if err == nil {
+		t.Fatal("CompletionsWithCtx succeeded, want error")
+	}
+
+	errMsg := err.Error()
+	if strings.Contains(errMsg, "OpenAI-compatible API error response body") {
+		t.Errorf("did not expect fallback prefix for standard error, got: %s", errMsg)
+	}
+	var apiErr *openai.Error
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *openai.Error, got %T", err)
+	}
+	if apiErr.RawJSON() == "" {
+		t.Error("RawJSON() is empty, want SDK error payload")
+	}
+}
+
+func TestOpenAIClient_StreamingEnrichesRestoredErrorBody(t *testing.T) {
+	errBody := `[{"error":{"code":400,"message":"streaming rejected","status":"INVALID_ARGUMENT"}}]`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(errBody))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:       server.URL + "/v1/chat/completions",
+		APIKey:    "test-key",
+		Model:     "custom-model",
+		ExtraBody: map[string]any{"stream": true},
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Model:     "custom-model",
+		Messages:  []Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 64,
+	})
+	if err == nil {
+		t.Fatal("CompletionsWithCtx streaming succeeded, want HTTP 400 error")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "OpenAI-compatible API error response body") {
+		t.Errorf("expected fallback prefix, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "streaming rejected") {
+		t.Errorf("expected error message in error, got: %s", errMsg)
+	}
+}
+
+func TestOpenAIClient_EnrichesPlainTextErrorBody(t *testing.T) {
+	plainText := "Bad Request: upstream gateway rejected request syntax"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(plainText))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL:    server.URL + "/v1/chat/completions",
+		APIKey: "test-key",
+		Model:  "custom-model",
+	})
+
+	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Model:     "custom-model",
+		Messages:  []Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 64,
+	})
+	if err == nil {
+		t.Fatal("CompletionsWithCtx succeeded, want HTTP 400 error")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "OpenAI-compatible API error response body") {
+		t.Errorf("expected fallback prefix, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, plainText) {
+		t.Errorf("expected plain text response body, got: %s", errMsg)
+	}
+}
+
+func TestEnrichOpenAIError_NilAndNonAPIError(t *testing.T) {
+	if got := enrichOpenAIError(nil); got != nil {
+		t.Errorf("enrichOpenAIError(nil) = %v, want nil", got)
+	}
+
+	customErr := errors.New("context deadline exceeded")
+	if got := enrichOpenAIError(customErr); got != customErr {
+		t.Errorf("enrichOpenAIError(customErr) = %v, want %v", got, customErr)
+	}
+}
+
+func TestEnrichOpenAIError_EmptyResponseBodyUntouched(t *testing.T) {
+	apiErr := &openai.Error{
+		StatusCode: http.StatusBadGateway,
+		Request:    httptest.NewRequest(http.MethodPost, "https://api.example.com/v1/chat/completions", nil),
+		Response: &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Body:       http.NoBody,
+		},
+	}
+
+	if got := enrichOpenAIError(apiErr); got != apiErr {
+		t.Errorf("enrichOpenAIError(apiErr) = %v, want original error %v", got, apiErr)
+	}
+}
+
+func TestEnrichOpenAIError_ClosesAndRestoresResponseBody(t *testing.T) {
+	body := &trackingReadCloser{Reader: strings.NewReader("upstream error")}
+	apiErr := &openai.Error{
+		StatusCode: http.StatusBadRequest,
+		Request:    httptest.NewRequest(http.MethodPost, "https://api.example.com/v1/chat/completions", nil),
+		Response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body:       body,
+		},
+	}
+
+	err := enrichOpenAIError(apiErr)
+	if !strings.Contains(err.Error(), "upstream error") {
+		t.Errorf("expected response body in error, got: %s", err)
+	}
+	if !body.closed {
+		t.Error("original response body was not closed")
+	}
+
+	restored, err := io.ReadAll(apiErr.Response.Body)
+	if err != nil {
+		t.Fatalf("read restored response body: %v", err)
+	}
+	if got, want := string(restored), "upstream error"; got != want {
+		t.Errorf("restored response body = %q, want %q", got, want)
+	}
+}
+
+func TestEnrichOpenAIError_LimitsDiagnosticButRestoresFullBody(t *testing.T) {
+	bodyText := strings.Repeat("x", maxErrorBodyBytes) + "tail-marker"
+	apiErr := &openai.Error{
+		StatusCode: http.StatusBadRequest,
+		Request:    httptest.NewRequest(http.MethodPost, "https://api.example.com/v1/chat/completions", nil),
+		Response: &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Body:       io.NopCloser(strings.NewReader(bodyText)),
+		},
+	}
+
+	err := enrichOpenAIError(apiErr)
+	if !strings.Contains(err.Error(), "... (truncated)") {
+		t.Errorf("expected truncated diagnostic, got: %s", err)
+	}
+	if strings.Contains(err.Error(), "tail-marker") {
+		t.Errorf("diagnostic contains body content beyond the limit: %s", err)
+	}
+
+	restored, readErr := io.ReadAll(apiErr.Response.Body)
+	if readErr != nil {
+		t.Fatalf("read restored response body: %v", readErr)
+	}
+	if got := string(restored); got != bodyText {
+		t.Errorf("restored response body length = %d, want %d", len(got), len(bodyText))
+	}
+}
+
+func TestLimitErrorBodyForLog(t *testing.T) {
+	withinLimit := strings.Repeat("x", maxErrorBodyBytes)
+	if got := limitErrorBodyForLog(withinLimit); got != withinLimit {
+		t.Errorf("limitErrorBodyForLog within limit = %q, want unmodified input", got)
+	}
+
+	overLimit := strings.Repeat("x", maxErrorBodyBytes+1)
+	want := strings.Repeat("x", maxErrorBodyBytes) + "... (truncated)"
+	if got := limitErrorBodyForLog(overLimit); got != want {
+		t.Errorf("limitErrorBodyForLog over limit = %q, want %q", got, want)
+	}
+}
+
+type trackingReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (r *trackingReadCloser) Close() error {
+	r.closed = true
+	return nil
 }
