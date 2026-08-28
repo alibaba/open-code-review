@@ -44,6 +44,33 @@ func TestRequestDeviceCode(t *testing.T) {
 	}
 }
 
+func TestRequestDeviceCodeDefaultsNonPositiveInterval(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		interval string
+	}{
+		{name: "omitted"},
+		{name: "zero", interval: `,"interval":0`},
+		{name: "negative", interval: `,"interval":-1`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, `{"device_auth_id":"device-1","user_code":"CODE-123"`+tc.interval+`}`)
+			}))
+			defer server.Close()
+
+			client := &OAuthClient{Issuer: server.URL, HTTPClient: server.Client()}
+			got, err := client.requestDeviceCode(context.Background())
+			if err != nil {
+				t.Fatalf("requestDeviceCode: %v", err)
+			}
+			if got.Interval != defaultDevicePollInterval {
+				t.Errorf("Interval = %v, want %v", got.Interval, defaultDevicePollInterval)
+			}
+		})
+	}
+}
+
 func TestPollDeviceCodePendingThenSuccess(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,6 +117,30 @@ func TestPollDeviceCodeSlowDownAndExpiry(t *testing.T) {
 	}
 	_, err := client.pollDeviceCode(context.Background(), "device-1", "CODE-123", 0, now)
 	if err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("pollDeviceCode error = %v, want expiry", err)
+	}
+}
+
+func TestPollDeviceCodeCapsSleepAtExpiry(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+	client := &OAuthClient{Issuer: server.URL, HTTPClient: server.Client()}
+	start := time.Now()
+	calls := 0
+	now := func() time.Time {
+		calls++
+		if calls == 1 {
+			return start
+		}
+		return start.Add(deviceCodeLifetime - 10*time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	_, err := client.pollDeviceCode(ctx, "device-1", "CODE-123", time.Hour, now)
+	if err == nil || !strings.Contains(err.Error(), "expired after 15 minutes") {
 		t.Fatalf("pollDeviceCode error = %v, want expiry", err)
 	}
 }

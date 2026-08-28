@@ -17,7 +17,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -31,6 +34,7 @@ const (
 	lockRetry             = 50 * time.Millisecond
 	refreshLockStaleAfter = time.Minute
 	oauthHTTPTimeout      = 30 * time.Second
+	maxOAuthTokenLifetime = 365 * 24 * time.Hour
 )
 
 // NeedsRefresh reports whether the access token should be refreshed before use.
@@ -194,7 +198,6 @@ func callbackHandler(expectedState string, result chan<- callbackResult) http.Ha
 		query := r.URL.Query()
 		if query.Get("state") != expectedState {
 			http.Error(w, "invalid OAuth state", http.StatusBadRequest)
-			sendCallbackResult(result, callbackResult{err: errors.New("OAuth callback state did not match")})
 			return
 		}
 		if query.Get("error") != "" {
@@ -288,6 +291,9 @@ func authFromTokenResponse(response tokenResponse, now time.Time) (*CodexAuth, e
 	if response.ExpiresIn <= 0 {
 		return nil, errors.New("OAuth response did not contain a positive token lifetime")
 	}
+	if response.ExpiresIn > int64(maxOAuthTokenLifetime/time.Second) {
+		return nil, errors.New("OAuth response token lifetime exceeds the supported maximum")
+	}
 	accountID, planType := tokenMetadata(response.IDToken, response.AccessToken)
 	return &CodexAuth{
 		AccessToken:  response.AccessToken,
@@ -370,6 +376,9 @@ func (c *OAuthClient) RefreshIfNeeded(ctx context.Context, store CodexStore, now
 	if err := c.postJSON(ctx, c.issuer()+"/oauth/token", request, &response); err != nil {
 		return nil, fmt.Errorf("refresh Codex credentials: %w", err)
 	}
+	if response.RefreshToken == "" {
+		response.RefreshToken = auth.RefreshToken
+	}
 	rotated, err := authFromTokenResponse(response, now())
 	if err != nil {
 		return nil, fmt.Errorf("refresh Codex credentials: %w", err)
@@ -393,6 +402,11 @@ func acquireRefreshLock(ctx context.Context) (func(), error) {
 	for {
 		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
+			if _, writeErr := fmt.Fprintf(file, "%d\n", os.Getpid()); writeErr != nil {
+				_ = file.Close()
+				_ = os.Remove(lockPath)
+				return nil, fmt.Errorf("write Codex refresh lock owner: %w", writeErr)
+			}
 			if closeErr := file.Close(); closeErr != nil {
 				_ = os.Remove(lockPath)
 				return nil, fmt.Errorf("close Codex refresh lock: %w", closeErr)
@@ -407,10 +421,17 @@ func acquireRefreshLock(ctx context.Context) (func(), error) {
 			return nil, fmt.Errorf("inspect Codex refresh lock: %w", statErr)
 		}
 		if statErr == nil && time.Since(info.ModTime()) > refreshLockStaleAfter {
-			if removeErr := os.Remove(lockPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-				return nil, fmt.Errorf("remove stale Codex refresh lock: %w", removeErr)
+			ownerAlive, ownerErr := refreshLockOwnerAlive(lockPath)
+			if ownerErr != nil {
+				return nil, ownerErr
 			}
-			continue
+			// Age alone is not proof that a configurable refresh request has stopped.
+			if !ownerAlive {
+				if removeErr := os.Remove(lockPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+					return nil, fmt.Errorf("remove stale Codex refresh lock: %w", removeErr)
+				}
+				continue
+			}
 		}
 		timer := time.NewTimer(lockRetry)
 		select {
@@ -420,6 +441,34 @@ func acquireRefreshLock(ctx context.Context) (func(), error) {
 		case <-timer.C:
 		}
 	}
+}
+
+func refreshLockOwnerAlive(lockPath string) (bool, error) {
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read Codex refresh lock owner: %w", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return false, fmt.Errorf(
+			"stale Codex refresh lock %q has no valid owner PID; remove it after confirming no OCR process is refreshing credentials",
+			lockPath,
+		)
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return errors.Is(err, os.ErrPermission), nil
+	}
+	defer process.Release()
+	if runtime.GOOS == "windows" {
+		// FindProcess uses OpenProcess on Windows, so a successful lookup proves the owner still exists.
+		return true, nil
+	}
+	err = process.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, os.ErrPermission), nil
 }
 
 // Revoke asks OpenAI to revoke the refresh token.

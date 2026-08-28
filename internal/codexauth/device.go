@@ -15,7 +15,11 @@ import (
 	"time"
 )
 
-const deviceCodeLifetime = 15 * time.Minute
+const (
+	deviceCodeLifetime        = 15 * time.Minute
+	defaultDevicePollInterval = 5 * time.Second
+	minimumDevicePollInterval = time.Second
+)
 
 type deviceCode struct {
 	VerificationURL string
@@ -117,9 +121,17 @@ func (c *OAuthClient) requestDeviceCode(ctx context.Context) (deviceCode, error)
 	if decoded.DeviceAuthID == "" || decoded.UserCode == "" {
 		return deviceCode{}, errors.New("device-code response was incomplete")
 	}
-	interval := time.Duration(decoded.Interval) * time.Second
-	if interval < 0 {
-		return deviceCode{}, errors.New("device-code response contained a negative polling interval")
+	interval := defaultDevicePollInterval
+	intervalSeconds := int64(decoded.Interval)
+	if intervalSeconds > 0 {
+		if intervalSeconds > int64(deviceCodeLifetime/time.Second) {
+			interval = deviceCodeLifetime
+		} else {
+			interval = time.Duration(intervalSeconds) * time.Second
+		}
+	}
+	if interval < minimumDevicePollInterval {
+		interval = minimumDevicePollInterval
 	}
 	return deviceCode{
 		VerificationURL: c.issuer() + "/codex/device",
@@ -187,15 +199,24 @@ func (c *OAuthClient) pollDeviceCode(
 		if !pending {
 			return devicePollResponse{}, fmt.Errorf("device authorization endpoint returned %s", response.Status)
 		}
-		if !now().Before(deadline) {
+		remaining := deadline.Sub(now())
+		if remaining <= 0 {
 			return devicePollResponse{}, errors.New("device authorization expired after 15 minutes")
 		}
-		timer := time.NewTimer(interval)
+		sleep := interval
+		expiresAfterSleep := sleep >= remaining
+		if expiresAfterSleep {
+			sleep = remaining
+		}
+		timer := time.NewTimer(sleep)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return devicePollResponse{}, ctx.Err()
 		case <-timer.C:
+			if expiresAfterSleep {
+				return devicePollResponse{}, errors.New("device authorization expired after 15 minutes")
+			}
 		}
 	}
 }

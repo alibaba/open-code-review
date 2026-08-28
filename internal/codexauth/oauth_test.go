@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -133,7 +134,7 @@ func TestCallbackHandlerValidation(t *testing.T) {
 		{name: "success", host: "localhost:1455", query: "state=expected&code=code-value", wantStatus: http.StatusOK, wantCode: "code-value"},
 		{name: "IPv4 loopback", host: "127.0.0.1:1455", query: "state=expected&code=code-value", wantStatus: http.StatusOK, wantCode: "code-value"},
 		{name: "forbidden host", host: "attacker.example", query: "state=expected&code=code-value", wantStatus: http.StatusForbidden},
-		{name: "state mismatch", host: "localhost:1455", query: "state=wrong&code=code-value", wantStatus: http.StatusBadRequest, wantErr: "state"},
+		{name: "state mismatch", host: "localhost:1455", query: "state=wrong&code=code-value", wantStatus: http.StatusBadRequest},
 		{name: "denied", host: "localhost:1455", query: "state=expected&error=access_denied", wantStatus: http.StatusBadRequest, wantErr: "denied"},
 		{name: "missing code", host: "localhost:1455", query: "state=expected", wantStatus: http.StatusBadRequest, wantErr: "authorization code"},
 	}
@@ -163,6 +164,35 @@ func TestCallbackHandlerValidation(t *testing.T) {
 				t.Errorf("error = %v, want substring %q", got.err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestCallbackHandlerKeepsListeningAfterInvalidState(t *testing.T) {
+	result := make(chan callbackResult, 1)
+	handler := callbackHandler("expected", result)
+
+	badRequest := httptest.NewRequest(http.MethodGet, "/auth/callback?state=wrong&code=attacker", nil)
+	badRequest.Host = "localhost:1455"
+	badResponse := httptest.NewRecorder()
+	handler.ServeHTTP(badResponse, badRequest)
+	if badResponse.Code != http.StatusBadRequest {
+		t.Fatalf("bad callback status = %d, want %d", badResponse.Code, http.StatusBadRequest)
+	}
+	select {
+	case got := <-result:
+		t.Fatalf("invalid state completed login: %#v", got)
+	default:
+	}
+
+	validRequest := httptest.NewRequest(http.MethodGet, "/auth/callback?state=expected&code=legitimate", nil)
+	validRequest.Host = "localhost:1455"
+	validResponse := httptest.NewRecorder()
+	handler.ServeHTTP(validResponse, validRequest)
+	if validResponse.Code != http.StatusOK {
+		t.Fatalf("valid callback status = %d, want %d", validResponse.Code, http.StatusOK)
+	}
+	if got := <-result; got.code != "legitimate" || got.err != nil {
+		t.Fatalf("valid callback result = %#v", got)
 	}
 }
 
@@ -238,6 +268,16 @@ func TestExchangeCodeErrorsNeverContainTokens(t *testing.T) {
 	}
 }
 
+func TestAuthFromTokenResponseRejectsExcessiveLifetime(t *testing.T) {
+	now := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
+	_, err := authFromTokenResponse(tokenResponse{
+		AccessToken: "access", RefreshToken: "refresh", ExpiresIn: 1<<63 - 1,
+	}, now)
+	if err == nil || !strings.Contains(err.Error(), "lifetime exceeds") {
+		t.Fatalf("authFromTokenResponse error = %v, want excessive lifetime error", err)
+	}
+}
+
 func TestRefreshIfNeededRotatesAndPersistsTokens(t *testing.T) {
 	setTestHome(t)
 	now := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
@@ -269,6 +309,31 @@ func TestRefreshIfNeededRotatesAndPersistsTokens(t *testing.T) {
 	}
 	stored, _ := store.Load()
 	if stored.RefreshToken != "rotated-refresh" || store.saves != 1 {
+		t.Errorf("stored auth = %#v, saves = %d", stored, store.saves)
+	}
+}
+
+func TestRefreshIfNeededKeepsExistingRefreshTokenWhenResponseOmitsIt(t *testing.T) {
+	setTestHome(t)
+	now := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
+	store := &memoryStore{auth: &CodexAuth{
+		AccessToken: "old-access", RefreshToken: "existing-refresh", ExpiresAt: now.Add(time.Minute),
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTokenResponse(t, w, "new-access", "", "", 3600)
+	}))
+	defer server.Close()
+
+	client := &OAuthClient{Issuer: server.URL, HTTPClient: server.Client()}
+	got, err := client.RefreshIfNeeded(context.Background(), store, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("RefreshIfNeeded: %v", err)
+	}
+	if got.RefreshToken != "existing-refresh" {
+		t.Errorf("RefreshToken = %q, want existing-refresh", got.RefreshToken)
+	}
+	stored, _ := store.Load()
+	if stored.RefreshToken != "existing-refresh" || store.saves != 1 {
 		t.Errorf("stored auth = %#v, saves = %d", stored, store.saves)
 	}
 }
@@ -352,7 +417,8 @@ func TestAcquireRefreshLockBreaksStaleLock(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	lockPath := path + ".lock"
-	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+	const absentPID = 1 << 30
+	if err := os.WriteFile(lockPath, []byte(strconv.Itoa(absentPID)), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	staleTime := time.Now().Add(-2 * refreshLockStaleAfter)
@@ -367,6 +433,64 @@ func TestAcquireRefreshLockBreaksStaleLock(t *testing.T) {
 	defer release()
 	if _, err := os.Stat(lockPath); err != nil {
 		t.Errorf("active lock does not exist: %v", err)
+	}
+}
+
+func TestAcquireRefreshLockRejectsStaleLockWithoutOwner(t *testing.T) {
+	setTestHome(t)
+	path, err := Path()
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	lockPath := path + ".lock"
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	staleTime := time.Now().Add(-2 * refreshLockStaleAfter)
+	if err := os.Chtimes(lockPath, staleTime, staleTime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	_, err = acquireRefreshLock(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no valid owner PID") {
+		t.Fatalf("acquireRefreshLock error = %v, want invalid owner guidance", err)
+	}
+}
+
+func TestAcquireRefreshLockDoesNotBreakStaleLockOwnedByLiveProcess(t *testing.T) {
+	setTestHome(t)
+	path, err := Path()
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	lockPath := path + ".lock"
+	owner := strconv.Itoa(os.Getpid())
+	if err := os.WriteFile(lockPath, []byte(owner), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	staleTime := time.Now().Add(-2 * refreshLockStaleAfter)
+	if err := os.Chtimes(lockPath, staleTime, staleTime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err = acquireRefreshLock(ctx)
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("acquireRefreshLock error = %v, want deadline exceeded", err)
+	}
+	data, readErr := os.ReadFile(lockPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile: %v", readErr)
+	}
+	if string(data) != owner {
+		t.Errorf("lock owner = %q, want %q", data, owner)
 	}
 }
 

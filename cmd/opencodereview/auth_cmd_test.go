@@ -66,6 +66,17 @@ func TestRunAuthStatusMasksCredentialMetadata(t *testing.T) {
 	}
 }
 
+func TestRunAuthStatusReportsSignedOutWithoutError(t *testing.T) {
+	store := &commandAuthStore{loadErr: codexauth.ErrNotFound}
+	var output bytes.Buffer
+	if err := runAuthStatus(&output, store, time.Now()); err != nil {
+		t.Fatalf("runAuthStatus: %v", err)
+	}
+	if got := output.String(); got != "Not signed in, run ocr auth login.\n" {
+		t.Errorf("status output = %q", got)
+	}
+}
+
 func TestRunAuthStatusMarksExpiredAndReportsLoadFailure(t *testing.T) {
 	now := time.Now()
 	store := &commandAuthStore{auth: &codexauth.CodexAuth{AccessToken: "secret", ExpiresAt: now.Add(-time.Minute)}}

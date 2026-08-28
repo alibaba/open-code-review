@@ -602,6 +602,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		apiKey = resolved
 	}
 	if externalAuth != nil && externalAuth.NeedsRefresh(time.Now()) {
+		// Endpoint resolution has no caller context, so only the refresh timeout can bound this request.
 		refreshCtx, cancel := context.WithTimeout(context.Background(), codexRefreshTimeout)
 		defer cancel()
 		auth, err := newCodexOAuthClient().RefreshIfNeeded(refreshCtx, codexAuthStore, time.Now)

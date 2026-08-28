@@ -80,6 +80,10 @@ func init() {
 
 func runAuthStatus(out io.Writer, store codexauth.CodexStore, now time.Time) error {
 	auth, err := store.Load()
+	if errors.Is(err, codexauth.ErrNotFound) {
+		_, err = fmt.Fprintln(out, "Not signed in, run ocr auth login.")
+		return err
+	}
 	if err != nil {
 		return fmt.Errorf("load Codex authentication status: %w", err)
 	}
