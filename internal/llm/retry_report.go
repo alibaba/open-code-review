@@ -345,6 +345,13 @@ func (c *RetryCollector) RecordAttempt(m RequestMeta, a AttemptRecord, startedAt
 	a.DurationToHeadersMS = nonNegativeMillis(endedAt.Sub(startedAt))
 	a.ObservedBackoffMS = 0
 	if !e.lastAttemptEnd.IsZero() {
+		// This measures the interval between two real attempts as observed
+		// here, not the SDK's planned sleep. With a provider admission gate
+		// configured (max_in_flight), the interval may also include time the
+		// attempt spent queued for a permit: the gate sits outside this
+		// observer, so waiting happens before startedAt. The field remains
+		// "the measured gap", which is all it ever claimed; admission waiting
+		// is never included in duration_to_headers_ms above.
 		a.ObservedBackoffMS = nonNegativeMillis(startedAt.Sub(e.lastAttemptEnd))
 	}
 
