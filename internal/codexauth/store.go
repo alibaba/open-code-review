@@ -14,6 +14,9 @@ import (
 
 const authFileName = "codex.json"
 
+// ErrNotFound indicates that no Codex credentials have been saved locally.
+var ErrNotFound = errors.New("no Codex credentials found")
+
 // CodexAuth contains the credentials and account metadata returned by OpenAI's
 // OAuth service.
 type CodexAuth struct {
@@ -71,7 +74,7 @@ func (FileStore) Load() (*CodexAuth, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, errors.New("no Codex credentials found")
+			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("read Codex credentials: %w", err)
 	}
