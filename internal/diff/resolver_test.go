@@ -878,3 +878,54 @@ func TestResolveLineNumbers_DiffMarkerInExistingCode(t *testing.T) {
 		t.Errorf("diff marker in existing_code: expected 2..2, got %d..%d", cm.StartLine, cm.EndLine)
 	}
 }
+
+func TestResolveLineNumbers_InternalWhitespaceElidingTier(t *testing.T) {
+	diffs := []model.Diff{
+		{NewPath: "pkg/example/handler.go", Diff: testDiff},
+	}
+	// The quote drifts from the file by one internal space (`"request: %s"`
+	// vs `"request:%s"`-class drift): `Printf("handling request: %s", ...)`).
+	// Only the whitespace-eliding tier can place it.
+	comments := []model.LlmComment{
+		{Path: "pkg/example/handler.go", ExistingCode: `    log.Printf("handling request: %s" , r.URL.Path)`},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	// The added Printf line is new-side line 11 in the hunk.
+	if cm.StartLine != 11 || cm.EndLine != 11 {
+		t.Errorf("eliding tier: expected 11..11, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveFromFileContent_InternalWhitespaceElidingTier(t *testing.T) {
+	content := "line one\nvalue := compute( a, b )\nline three\n"
+	diffs := []model.Diff{
+		{NewPath: "file.go", NewFileContent: content},
+	}
+	comments := []model.LlmComment{
+		{Path: "file.go", ExistingCode: "value := compute(a,b)"},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 2 || cm.EndLine != 2 {
+		t.Errorf("eliding tier over file content: expected 2..2, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
+
+func TestResolveLineNumbers_NonWhitespaceDifferenceStillFails(t *testing.T) {
+	content := "int x = 1;\nint y = 2;\n"
+	diffs := []model.Diff{
+		{NewPath: "file.go", NewFileContent: content},
+	}
+	comments := []model.LlmComment{
+		{Path: "file.go", ExistingCode: "int x = 2;"},
+	}
+
+	result := ResolveLineNumbers(comments, diffs)
+	cm := result[0]
+	if cm.StartLine != 0 || cm.EndLine != 0 {
+		t.Errorf("materially different line must stay unresolved, got %d..%d", cm.StartLine, cm.EndLine)
+	}
+}
