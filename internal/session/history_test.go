@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -69,6 +70,50 @@ func TestGetOrCreateFileSession(t *testing.T) {
 	fs3 := sh.GetOrCreateFileSession("other.go")
 	if fs3 == fs1 {
 		t.Error("different paths should yield different sessions")
+	}
+}
+
+func TestFinalizeFilesReviewedUsesManifestSelectedPaths(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "model", SessionOptions{Operation: "review"})
+	sh.SetFinalManifest(&RunManifest{
+		SchemaVersion: ManifestSchemaVersion,
+		Coverage: Coverage{Selected: []CoverageItem{
+			{ItemID: "a", Path: "a.go"},
+			{ItemID: "b", Path: "b.go"},
+			{ItemID: "c", Path: "c.go"},
+		}},
+	})
+
+	// c.go deliberately has no FileSession: the manifest, not the conversation
+	// scope registry, is authoritative for the selected file list.
+	for _, key := range []string{"__grouping__", "a.go,b.go", "a.go", "b.go"} {
+		sh.GetOrCreateFileSession(key)
+	}
+	if err := sh.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var got []string
+	for _, rec := range records {
+		if rec["type"] != "session_end" {
+			continue
+		}
+		for _, raw := range rec["files_reviewed"].([]any) {
+			got = append(got, raw.(string))
+		}
+	}
+	sort.Strings(got)
+	want := []string{"a.go", "b.go", "c.go"}
+	if len(got) != len(want) {
+		t.Fatalf("files_reviewed = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("files_reviewed = %v, want %v", got, want)
+		}
 	}
 }
 

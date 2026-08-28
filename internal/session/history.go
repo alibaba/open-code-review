@@ -328,8 +328,17 @@ func (sh *SessionHistory) Finalize() error {
 		manifest := sh.finalManifest
 		duration := sh.EndTime.Sub(sh.StartTime)
 		filesReviewed := make([]string, 0, len(sh.FileSessions))
-		for fp := range sh.FileSessions {
-			filesReviewed = append(filesReviewed, fp)
+		if manifest != nil && manifest.SchemaVersion == ManifestSchemaVersion {
+			filesReviewed = make([]string, 0, len(manifest.Coverage.Selected))
+			for _, item := range manifest.Coverage.Selected {
+				filesReviewed = append(filesReviewed, item.Path)
+			}
+		} else {
+			// Legacy and scan sessions have no manifest, so retain the historical
+			// all-FileSessions behavior for their summary record.
+			for fp := range sh.FileSessions {
+				filesReviewed = append(filesReviewed, fp)
+			}
 		}
 		failures := atomic.LoadInt64(&sh.llmFailures)
 		sh.mu.Unlock()

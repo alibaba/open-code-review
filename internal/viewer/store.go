@@ -618,6 +618,7 @@ func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 			if err := json.Unmarshal(data, &manifest); err == nil && manifest.SchemaVersion == session.ManifestSchemaVersion {
 				summary.RunManifest = &manifest
 				summary.TerminalState = string(manifest.TerminalState)
+				summary.FilesReviewed = filesReviewedFromSelected(manifest.Coverage.Selected)
 				summary.SelectedCount = len(manifest.Coverage.Selected)
 				summary.CompletedCount = len(manifest.Coverage.Completed)
 				summary.ReusedCount = len(manifest.Coverage.Reused)
@@ -631,6 +632,14 @@ func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 		summary.Legacy = true
 		summary.FileCount = len(summary.FilesReviewed)
 	}
+}
+
+func filesReviewedFromSelected(selected []session.CoverageItem) []string {
+	files := make([]string, 0, len(selected))
+	for _, item := range selected {
+		files = append(files, item.Path)
+	}
+	return files
 }
 
 func taskDoneSucceeded(arguments string) bool {
