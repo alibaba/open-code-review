@@ -29,7 +29,7 @@ OCR разрешает правила через **четырёхуровнев�
 Системный уровень **всегда** присутствует (он вшит в бинарник), поэтому всегда
 разрешается *какое-то* правило.
 
-## Формат файла правил (уровни 1–3)
+## Формат файла правил (уровни 1–3) {#rule-file-format-layers-1-3}
 
 ```json
 {
@@ -162,14 +162,16 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.java` | `java.md` |
 | `**/*.go` | `go.md` — исходный код Go. |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — шаблоны FreeMarker (SSTI / XSS / обработка null). |
+| `**/*.{hbs,mustache}` | `handlebars_mustache.md` — шаблоны Handlebars и Mustache. |
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — компоненты и islands Astro. |
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
+| `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,hpp}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.py` | `python.md` — исходный код Python. |
+| `**/*.{py,ipynb}` | `python.md` — исходный код Python. |
 | `**/*.{php,phtml}` | `php.md` — исходный код PHP и шаблоны PHP. |
 | `**/*.proto` | `protobuf.md` — совместимость Protocol Buffers на уровне wire. |
 | `**/*.po` | `po.md` — исходные каталоги переводов gettext. |
@@ -179,11 +181,30 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.jl` | `julia.md` — исходный код Julia. |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
 | `**/*.bicep` | `bicep.md` — шаблоны Bicep (Azure). |
+| `**/*.elm` | `elm.md` - исходный код Elm. |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet. |
+| `**/*.thrift` | `thrift.md` — совместимость Apache Thrift IDL на уровне wire. |
+| `**/*.capnp` | `capnp.md` — совместимость схем Cap'n Proto на уровне wire. |
+| `**/*.m` | `matlab.md` (или `objc.md` через [определение содержимого](#content-sniffing-for-m-files)) |
+| `**/*.sol` | `solidity.md` — смарт-контракты Solidity. |
+| `**/*.vy` | `vyper.md` — смарт-контракты Vyper. |
 | *(fallback)* | `default.md` |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`
 в промптах plan и main task.
+
+### Определение содержимого для файлов `.m` {#content-sniffing-for-m-files}
+
+Расширение `.m` используется и MATLAB, и Objective-C. OCR заглядывает в первую
+непустую строку файла для различения: если она выглядит как Objective-C
+(например, `#import`, `@implementation`, комментарий в стиле C), вместо
+`matlab.md` используется `objc.md`. Если содержимое прочитать не удаётся,
+разрешение откатывается к `matlab.md`.
+
+> **Примечание о стабильности.** Эвристика определения может изменяться между
+> версиями OCR. Если вам нужна детерминированная маршрутизация `.m`, задайте
+> для `.m`-путей явное правило на уровне проекта — правила проекта всегда
+> имеют приоритет над системным уровнем.
 
 ## Проверка, какое правило выиграло: `ocr rules check`
 

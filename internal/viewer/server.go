@@ -196,15 +196,25 @@ func parseTemplate(name string) (*template.Template, error) {
 				return "task-memory"
 			case ReLocationTask:
 				return "task-relocation"
+			case GroupingTask:
+				return "task-grouping"
 			default:
 				return "task-default"
+			}
+		},
+		"sessionTaskLabel": func(fp string) string {
+			switch fp {
+			case "__grouping__":
+				return "File Grouping"
+			default:
+				return fp
 			}
 		},
 		"orderedTasks": func(tasks map[TaskType][]*TaskCard) []struct {
 			Type  TaskType
 			Cards []*TaskCard
 		} {
-			order := []TaskType{PlanTask, MainTask, ReLocationTask, MemoryCompressionTask}
+			order := []TaskType{PlanTask, MainTask, ReLocationTask, MemoryCompressionTask, GroupingTask}
 			var result []struct {
 				Type  TaskType
 				Cards []*TaskCard
@@ -218,7 +228,7 @@ func parseTemplate(name string) (*template.Template, error) {
 				}
 			}
 			for tt, cards := range tasks {
-				if tt != PlanTask && tt != MainTask && tt != ReLocationTask && tt != MemoryCompressionTask {
+				if tt != PlanTask && tt != MainTask && tt != ReLocationTask && tt != MemoryCompressionTask && tt != GroupingTask {
 					result = append(result, struct {
 						Type  TaskType
 						Cards []*TaskCard

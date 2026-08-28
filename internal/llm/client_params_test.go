@@ -70,6 +70,44 @@ func TestBuildOpenAIParams_Minimal(t *testing.T) {
 	}
 }
 
+// TestBuildOpenAIParams_ToolChoice locks the explicit tool_choice mapping for
+// callers that request it. openai.ChatCompletionToolChoiceOptionUnionParam
+// serializes OfAuto inline as a bare string, so this is the field that must carry
+// "required" onto the wire — and only when tools are actually attached.
+func TestBuildOpenAIParams_ToolChoice(t *testing.T) {
+	tool := ToolDef{Function: FunctionDef{Name: "f", Description: "d", Parameters: map[string]any{"type": "object"}}}
+	c := &OpenAIClient{}
+
+	tests := []struct {
+		name       string
+		tools      []ToolDef
+		toolChoice string
+		wantSet    bool
+		wantValue  string
+	}{
+		{name: "required with tools", tools: []ToolDef{tool}, toolChoice: "required", wantSet: true, wantValue: "required"},
+		{name: "auto with tools", tools: []ToolDef{tool}, toolChoice: "auto", wantSet: true, wantValue: "auto"},
+		{name: "empty with tools leaves provider default", tools: []ToolDef{tool}, toolChoice: "", wantSet: false},
+		{name: "required without tools is dropped", tools: nil, toolChoice: "required", wantSet: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params := c.buildOpenAIParams("gpt-x", ChatRequest{
+				Messages:   []Message{{Role: "user", Content: "hi"}},
+				Tools:      tt.tools,
+				ToolChoice: tt.toolChoice,
+			})
+			if got := params.ToolChoice.OfAuto.Valid(); got != tt.wantSet {
+				t.Fatalf("tool_choice set = %v, want %v", got, tt.wantSet)
+			}
+			if tt.wantSet && params.ToolChoice.OfAuto.Value != tt.wantValue {
+				t.Errorf("tool_choice = %q, want %q", params.ToolChoice.OfAuto.Value, tt.wantValue)
+			}
+		})
+	}
+}
+
 // TestBuildAnthropicParams_AllRoles exercises every message-role branch (system,
 // tool-result flushing, assistant with/without tool calls, user string and
 // content-block content) plus tools/system cache-control and temperature.
@@ -158,6 +196,45 @@ func TestBuildAnthropicParams_DefaultMaxTokens(t *testing.T) {
 	}
 	if params.Temperature.Valid() {
 		t.Error("expected temperature unset")
+	}
+}
+
+// TestBuildAnthropicParams_ToolChoice locks the explicit tool_choice mapping.
+// Anthropic has no bare "required" mode — the client must translate
+// ChatRequest.ToolChoice="required" into
+// ToolChoiceAnyParam ({"type":"any"}), and only when tools are attached.
+// Any other value (including "auto") is intentionally left untranslated,
+// since Anthropic's own default already behaves like "auto".
+func TestBuildAnthropicParams_ToolChoice(t *testing.T) {
+	tool := ToolDef{Function: FunctionDef{Name: "f", Description: "d", Parameters: map[string]any{"type": "object"}}}
+	c := &AnthropicClient{}
+
+	tests := []struct {
+		name       string
+		tools      []ToolDef
+		toolChoice string
+		wantAny    bool
+	}{
+		{name: "required with tools maps to any", tools: []ToolDef{tool}, toolChoice: "required", wantAny: true},
+		{name: "auto with tools is not translated", tools: []ToolDef{tool}, toolChoice: "auto", wantAny: false},
+		{name: "empty with tools leaves provider default", tools: []ToolDef{tool}, toolChoice: "", wantAny: false},
+		{name: "required without tools is dropped", tools: nil, toolChoice: "required", wantAny: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params, err := c.buildAnthropicParams("claude-x", ChatRequest{
+				Messages:   []Message{{Role: "user", Content: "hi"}},
+				Tools:      tt.tools,
+				ToolChoice: tt.toolChoice,
+			})
+			if err != nil {
+				t.Fatalf("buildAnthropicParams returned error: %v", err)
+			}
+			if got := params.ToolChoice.OfAny != nil; got != tt.wantAny {
+				t.Fatalf("tool_choice.OfAny set = %v, want %v", got, tt.wantAny)
+			}
+		})
 	}
 }
 
