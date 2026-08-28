@@ -182,6 +182,11 @@ func TestWhyExcluded_AllBranches(t *testing.T) {
 			item: model.ScanItem{Path: "main.go", Content: "x"},
 			want: model.ExcludeNone,
 		},
+		{
+			name: "Starlark file passes",
+			item: model.ScanItem{Path: "rules/library.bzl", Content: "x"},
+			want: model.ExcludeNone,
+		},
 	}
 
 	for _, tt := range tests {

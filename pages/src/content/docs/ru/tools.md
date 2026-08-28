@@ -255,8 +255,8 @@ LINE_RANGE: 10-80
 Набор кандидатов формируется командой `git ls-files --cached --others
 --exclude-standard` в режиме рабочей области или командой
 `git ls-tree -r --name-only <ref>` в режиме диапазона / коммита. Файлы без
-расширения пропускаются, кроме `Makefile`, `Dockerfile`, `LICENSE`, `Vagrantfile`
-и `Containerfile`.
+расширения пропускаются, кроме `Makefile`, `Dockerfile`, `LICENSE`, `Vagrantfile`,
+`Containerfile`, `BUILD` и `WORKSPACE`.
 
 ### Вывод
 

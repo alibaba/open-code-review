@@ -141,6 +141,34 @@ func TestWhyExcluded_ExtensionFilter(t *testing.T) {
 			expected: ExcludeNone,
 		},
 		{
+			name: "supported Starlark bzl extension",
+			diff: model.Diff{
+				NewPath: "rules/library.bzl",
+			},
+			expected: ExcludeNone,
+		},
+		{
+			name: "supported Starlark star extension",
+			diff: model.Diff{
+				NewPath: "config.star",
+			},
+			expected: ExcludeNone,
+		},
+		{
+			name: "supported Bazel extension",
+			diff: model.Diff{
+				NewPath: "MODULE.bazel",
+			},
+			expected: ExcludeNone,
+		},
+		{
+			name: "extensionless Starlark build file",
+			diff: model.Diff{
+				NewPath: "pkg/BUILD",
+			},
+			expected: ExcludeNone,
+		},
+		{
 			name: "file without extension",
 			diff: model.Diff{
 				NewPath: "Makefile",

@@ -225,7 +225,7 @@ hunk ヘッダー `@@ -x,y +m,n @@` から範囲を計算すべきです——�
 候補セットは、ワークスペースモードでは `git ls-files --cached --others --exclude-standard` から、
 区間 / commit モードでは `git ls-tree -r --name-only <ref>` から得られます。拡張子のないファイルは
 スキップされますが、`Makefile`、`Dockerfile`、`LICENSE`、`Vagrantfile`、
-`Containerfile` は例外です。
+`Containerfile`、`BUILD`、`WORKSPACE` は例外です。
 
 ### 出力
 

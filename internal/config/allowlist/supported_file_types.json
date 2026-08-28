@@ -97,6 +97,9 @@
   ".zig",
   ".thrift",
   ".capnp",
+  ".bzl",
+  ".bazel",
+  ".star",
   ".sol",
   ".vy"
 ]

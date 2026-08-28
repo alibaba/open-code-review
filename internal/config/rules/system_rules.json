@@ -43,6 +43,7 @@
     "**/*.zig": "zig.md",
     "**/*.thrift": "thrift.md",
     "**/*.capnp": "capnp.md",
+    "**/{BUILD,WORKSPACE,*.bzl,*.bazel,*.star}": "starlark.md",
     "**/*.m": "matlab.md",
     "**/*.sol": "solidity.md",
     "**/*.vy": "vyper.md"
