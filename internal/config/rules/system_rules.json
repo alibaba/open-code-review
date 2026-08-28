@@ -45,6 +45,7 @@
     "**/*.capnp": "capnp.md",
     "**/*.m": "matlab.md",
     "**/*.sol": "solidity.md",
-    "**/*.vy": "vyper.md"
+    "**/*.vy": "vyper.md",
+    "**/*.{glsl,hlsl,wgsl,metal}": "shader.md"
   }
 }

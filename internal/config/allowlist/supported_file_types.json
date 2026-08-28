@@ -98,5 +98,9 @@
   ".thrift",
   ".capnp",
   ".sol",
-  ".vy"
+  ".vy",
+  ".glsl",
+  ".hlsl",
+  ".wgsl",
+  ".metal"
 ]
