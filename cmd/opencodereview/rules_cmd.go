@@ -70,6 +70,9 @@ func runRulesCheck(filePath string) error {
 	fmt.Printf("File: %s\n", filePath)
 	fmt.Printf("Source: %s\n", sourceLabel[detail.Source])
 	fmt.Printf("Pattern: %s\n", detail.Pattern)
+	if len(detail.RuleFiles) > 0 {
+		fmt.Printf("Rule Files: %s\n", strings.Join(detail.RuleFiles, ", "))
+	}
 	if detail.SniffedAs != "" {
 		fmt.Printf("Note:    rule selected by file content (%s), not by path alone\n", detail.SniffedAs)
 	}

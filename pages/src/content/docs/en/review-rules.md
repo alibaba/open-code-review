@@ -59,6 +59,68 @@ Three independent fields:
   order**. The first `path` whose glob matches the file determines the
   prompt OCR sends to the model for that file.
 
+### Merging multiple rule files
+
+The `rule` field accepts either a string (inline text or a single `.md` file
+path) or an **array of strings** that merges several rule docs into one text —
+e.g. general + language + domain rules stacked. First-match-wins is unchanged:
+the single winning entry still applies; it just gets to carry multiple files.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*.java",
+      "rule": ["rules/java.md", "rules/security.md", "rules/convention.md"]
+    }
+  ]
+}
+```
+
+Array elements may mix file paths and inline text:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*.java",
+      "rule": ["rules/java.md", "extra: check exception handling"]
+    }
+  ]
+}
+```
+
+Merge format:
+
+- **Single value** (a string, or a one-element array) — emitted as-is, no
+  separator, byte-identical to the legacy behavior.
+- **Multiple files** — segments are joined with a blank line + `---` + blank
+  line. The merged rule text is pure content only — no per-file headings — so
+  the single-value, one-element-array, and multi-element-array cases are
+  uniform. File-source traceability is carried by the `Rule Files:` line that
+  `ocr rules check` prints (which never enters the LLM prompt), not by the
+  rule text.
+- A missing or empty element is dropped from the merged **rule text** (with a
+  warning); if all elements drop out the entry is skipped (same semantics as a
+  single missing file). A dropped **file path** is still listed in the
+  `Rule Files:` line as you wrote it, so a typo'd path that contributed nothing
+  stays visible. An empty/whitespace array element (e.g. a trailing comma) is
+  also dropped, but omitted from the `Rule Files:` line entirely since it is
+  neither a file nor inline text.
+
+> File paths inside an array are still bound by #1100's path-traversal
+> confinement: project-layer references cannot escape the repo root.
+
+Two caps bound an untrusted array so it cannot balloon I/O or memory:
+
+- **Count**: an array longer than 32 elements is truncated to its first 32
+  before any file is read; the rest are dropped with a warning. Empty elements
+  count toward the 32, so padding only starves the budget.
+- **Size**: the merged rule text is capped at 512 KB (524288 bytes). When an
+  input would push the total past the cap, that input is skipped (later,
+  smaller inputs still fit) with a warning; a single file larger than 512 KB
+  is rejected outright and the entry falls back to the system rule.
+
 ### Glob features
 
 OCR uses [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)
@@ -224,14 +286,17 @@ $ ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
 File: src/main/resources/mapper/UserMapper.xml
 Source: Custom (--rule)
 Pattern: **/*mapper*.xml
+Rule Files: rules/java.md, rules/security.md, rules/convention.md
 Rule:
 ────────────────────────────────────────
-…contents of your custom rule…
+…contents of your merged rule…
 ────────────────────────────────────────
 ```
 
-Use this whenever a rule isn't behaving the way you expected — it tells
-you the **layer** and the **pattern** that won.
+The `Rule Files:` line lists which files the matched rule came from (inline
+text is shown as `<inline>`), making merged content traceable. Use this
+whenever a rule isn't behaving the way you expected — it tells you the
+**layer** and the **pattern** that won.
 
 ## Recipes
 
@@ -276,6 +341,37 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
 
 Bypasses both the project and global layers — handy when a single PR
 needs a totally different review checklist (e.g., security-only review).
+
+### Project-level: stack language + concern rules
+
+Layer several rule docs onto the same path instead of cramming everything
+into one file. Pair a language base rule with any combination of concern
+rules — security, performance, convention — per `path`:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*.java",
+      "rule": ["rules/java.md", "rules/security.md", "rules/convention.md"]
+    },
+    {
+      "path": "**/*.c",
+      "rule": ["rules/cpp.md", "rules/security.md", "rules/performance.md"]
+    },
+    {
+      "path": "**/*.kt",
+      "rule": ["rules/kotlin.md", "rules/security.md"]
+    }
+  ]
+}
+```
+
+`rules/java.md`, `rules/cpp.md`, `rules/kotlin.md` carry the language-specific
+base rule, kept per `path`; `rules/security.md`, `rules/performance.md`,
+`rules/convention.md` are reusable concern rules you combine as needed.
+`ocr rules check` prints the `Rule Files:` line so you can confirm which
+combination actually applied.
 
 ### Global personal preferences
 

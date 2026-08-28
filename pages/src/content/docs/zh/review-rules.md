@@ -52,6 +52,61 @@ OCR 用一条**四层优先级链**解析规则。对每个文件路径，按序
 - `rules`——`{path, rule}` 条目数组，按**声明顺序**求值。第一个 `path` glob
   匹配该文件的条目，决定 OCR 发给模型的 prompt。
 
+### 合并多个规则文件
+
+`rule` 字段除了写字符串（内联文本或单个 `.md` 文件路径），还可以写成一个
+**字符串数组**，把多个规则 md 合并成一段文本——例如通用规范 + 语言规范 + 领域规范
+三层叠加。first-match-wins 不变：仍是命中的**那一条** entry 生效，只是这条 entry
+可以携带多个文件。
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*.java",
+      "rule": ["rules/java.md", "rules/security.md", "rules/convention.md"]
+    }
+  ]
+}
+```
+
+数组里也可以混用文件路径与内联文本：
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*.java",
+      "rule": ["rules/java.md", "extra: check exception handling"]
+    }
+  ]
+}
+```
+
+合并格式：
+
+- **单值**（字符串、或只有一个元素的数组）——原样输出，无分隔线，与旧行为
+  字节一致。
+- **多个文件**——每段之间用空行 + `---` + 空行衔接。合并正文只含纯规则内容，
+  **不带任何文件标题**，使单值、单元素数组、多元素数组三种形态完全统一。文件
+  来源追溯由 `ocr rules check` 打印的 `Rule Files:` 行承担（该行不进 LLM
+  prompt），而非正文。
+- 文件不存在或缺省时该段从合并**正文**中跳过（并打印警告）；全部缺失则该条
+  entry 被跳过（与单文件缺失语义一致）。被跳过的**文件路径**仍按你写的原样列在
+  `Rule Files:` 行，便于发现拼错路径、实际未贡献内容的文件；但空/纯空白元素
+  （如尾随逗号）虽同样跳过，却完全不出现在 `Rule Files:` 行（它既非文件也非内联文本）。
+
+> 数组中的文件路径同样受 #1100 的路径穿越防护约束：项目层的引用不可逃出仓库
+> 根目录。
+>
+> 两条上限约束不可信数组，避免 I/O 与内存被放大：
+>
+> - **数量**：数组超过 32 个元素时，在任何文件读取之前截断为前 32 个，其余丢弃并
+>   告警。空元素计入这 32 个名额，所以用空元素填充只会浪费预算。
+> - **体积**：合并正文上限 512 KB（524288 字节）。某输入会令总量超过上限时，该
+>   输入被跳过（后续更小的输入仍可放入）并告警；单个文件大于 512 KB 直接拒读，
+>   该 entry 回退到系统规则。
+
 ### glob 能力
 
 OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4)
@@ -203,13 +258,16 @@ $ ocr rules check --rule custom.json src/main/resources/mapper/UserMapper.xml
 File: src/main/resources/mapper/UserMapper.xml
 Source: Custom (--rule)
 Pattern: **/*mapper*.xml
+Rule Files: rules/java.md, rules/security.md, rules/convention.md
 Rule:
 ────────────────────────────────────────
-…contents of your custom rule…
+…contents of your merged rule…
 ────────────────────────────────────────
 ```
 
-当某条规则未按预期生效时用它——它会显示生效的**层**与**模式**。
+`Rule Files:` 行列出命中规则来自哪些文件（内联文本记为 `<inline>`），便于追溯
+合并后的内容来源。当某条规则未按预期生效时用它——它会显示生效的**层**与
+**模式**。
 
 ## 配方
 
@@ -253,6 +311,36 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
 
 同时绕过项目层与全局层——当单个 PR 需要完全不同的评审清单（如仅安全评审）时
 很方便。
+
+### 项目级：语言 base + 关注维度规则组合
+
+把多个规则 md 叠加到同一条路径，无需在单个 md 里堆砌所有内容。语言 base 规则
+随 `path` 对应的语言常驻，关注维度规则（security、performance、convention）按需
+任意组合：
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*.java",
+      "rule": ["rules/java.md", "rules/security.md", "rules/convention.md"]
+    },
+    {
+      "path": "**/*.c",
+      "rule": ["rules/cpp.md", "rules/security.md", "rules/performance.md"]
+    },
+    {
+      "path": "**/*.kt",
+      "rule": ["rules/kotlin.md", "rules/security.md"]
+    }
+  ]
+}
+```
+
+`rules/java.md`、`rules/cpp.md`、`rules/kotlin.md` 承载各语言 base 规则，
+随对应 `path` 常驻；`rules/security.md`、`rules/performance.md`、
+`rules/convention.md` 是可复用的关注维度规则，按需组合。`ocr rules check` 会打印
+`Rule Files:` 行，便于确认实际生效的组合。
 
 ### 全局个人偏好
 
