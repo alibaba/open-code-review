@@ -110,10 +110,10 @@ type TokenUsage struct {
 
 // ResponseRecord holds the parsed LLM response.
 type ResponseRecord struct {
-	Content   string
-	ToolCalls []llm.ToolCall
-	Model     string
-	Usage     *TokenUsage
+	Content          string
+	ToolCalls        []llm.ToolCall
+	Model            string
+	Usage            *TokenUsage
 	ReasoningContent string
 	Native           llm.NativeTurn
 }

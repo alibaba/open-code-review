@@ -1494,7 +1494,7 @@ func (c *AnthropicClient) mapAnthropicResponse(sdkResp *anthropic.Message) *Chat
 				Content:          contentStr,
 				ReasoningContent: reasoningContent,
 				ToolCalls:        toolCalls,
-				Native: native,
+				Native:           native,
 			},
 			FinishReason: finishReason,
 		}},
