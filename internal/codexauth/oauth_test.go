@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -80,6 +82,13 @@ func writeTokenResponse(t *testing.T, w http.ResponseWriter, access, refresh, id
 		AccessToken: access, RefreshToken: refresh, IDToken: id, ExpiresIn: expires,
 	}); err != nil {
 		t.Errorf("Encode token response: %v", err)
+	}
+}
+
+func TestNewOAuthClientHasBoundedHTTPTimeout(t *testing.T) {
+	client := NewOAuthClient()
+	if client.HTTPClient.Timeout != 30*time.Second {
+		t.Errorf("HTTP timeout = %v, want 30s", client.HTTPClient.Timeout)
 	}
 }
 
@@ -309,6 +318,76 @@ func TestRefreshIfNeededSkipsFreshToken(t *testing.T) {
 	}
 	if got.AccessToken != want.AccessToken || store.saves != 0 {
 		t.Errorf("got %#v, saves %d", got, store.saves)
+	}
+}
+
+func TestRefreshIfNeededRefreshesZeroExpiry(t *testing.T) {
+	setTestHome(t)
+	now := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
+	store := &memoryStore{auth: &CodexAuth{
+		AccessToken: "old-access", RefreshToken: "old-refresh",
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeTokenResponse(t, w, "new-access", "new-refresh", "", 3600)
+	}))
+	defer server.Close()
+
+	client := &OAuthClient{Issuer: server.URL, HTTPClient: server.Client()}
+	got, err := client.RefreshIfNeeded(context.Background(), store, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("RefreshIfNeeded: %v", err)
+	}
+	if got.AccessToken != "new-access" || store.saves != 1 {
+		t.Errorf("got %#v, saves %d", got, store.saves)
+	}
+}
+
+func TestAcquireRefreshLockBreaksStaleLock(t *testing.T) {
+	setTestHome(t)
+	path, err := Path()
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	lockPath := path + ".lock"
+	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	staleTime := time.Now().Add(-2 * refreshLockStaleAfter)
+	if err := os.Chtimes(lockPath, staleTime, staleTime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	release, err := acquireRefreshLock(context.Background())
+	if err != nil {
+		t.Fatalf("acquireRefreshLock: %v", err)
+	}
+	defer release()
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Errorf("active lock does not exist: %v", err)
+	}
+}
+
+func TestAcquireRefreshLockHonorsContextDeadline(t *testing.T) {
+	setTestHome(t)
+	path, err := Path()
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(path+".lock", nil, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err = acquireRefreshLock(ctx)
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("acquireRefreshLock error = %v, want deadline exceeded", err)
 	}
 }
 

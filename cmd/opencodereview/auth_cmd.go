@@ -103,17 +103,24 @@ func runAuthLogout(ctx context.Context, out io.Writer, store codexauth.CodexStor
 	var revokeErr error
 	if loadErr == nil {
 		revokeErr = client.Revoke(ctx, auth)
-	} else if !errors.Is(loadErr, codexauth.ErrNotFound) {
-		revokeErr = loadErr
 	}
 	if err := store.Clear(); err != nil {
 		return fmt.Errorf("clear local Codex credentials: %w", err)
 	}
-	if revokeErr != nil {
-		_, _ = fmt.Fprintln(out, "Local credentials were removed, but server-side revocation failed. The credential may remain valid for up to ten days.")
+	const accessTokenCaveat = "Already-issued access tokens may remain valid for up to ten days."
+	if loadErr != nil && !errors.Is(loadErr, codexauth.ErrNotFound) {
+		_, _ = fmt.Fprintln(out, "Local credentials were removed, but loading them for server-side revocation failed.", accessTokenCaveat)
 		return nil
 	}
-	_, err := fmt.Fprintln(out, "Signed out and removed local Codex credentials.")
+	if errors.Is(loadErr, codexauth.ErrNotFound) {
+		_, _ = fmt.Fprintln(out, "No local Codex credentials were found.", accessTokenCaveat)
+		return nil
+	}
+	if revokeErr != nil {
+		_, _ = fmt.Fprintln(out, "Local credentials were removed, but server-side revocation failed.", accessTokenCaveat)
+		return nil
+	}
+	_, err := fmt.Fprintln(out, "The refresh token was revoked and local Codex credentials were removed.", accessTokenCaveat)
 	return err
 }
 

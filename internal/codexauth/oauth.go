@@ -27,8 +27,10 @@ const (
 	RedirectURI = "http://localhost:1455/auth/callback"
 	Scope       = "openid profile email offline_access api.connectors.read api.connectors.invoke"
 
-	refreshBefore = 5 * time.Minute
-	lockRetry     = 50 * time.Millisecond
+	refreshBefore         = 5 * time.Minute
+	lockRetry             = 50 * time.Millisecond
+	refreshLockStaleAfter = time.Minute
+	oauthHTTPTimeout      = 30 * time.Second
 )
 
 // NeedsRefresh reports whether the access token should be refreshed before use.
@@ -64,7 +66,7 @@ type tokenResponse struct {
 
 // NewOAuthClient returns a client configured for OpenAI's production issuer.
 func NewOAuthClient() *OAuthClient {
-	return &OAuthClient{Issuer: Issuer, HTTPClient: http.DefaultClient}
+	return &OAuthClient{Issuer: Issuer, HTTPClient: &http.Client{Timeout: oauthHTTPTimeout}}
 }
 
 func (c *OAuthClient) issuer() string {
@@ -334,7 +336,7 @@ func (c *OAuthClient) RefreshIfNeeded(ctx context.Context, store CodexStore, now
 	if err != nil {
 		return nil, err
 	}
-	if auth.ExpiresAt.IsZero() || auth.ExpiresAt.After(now().Add(refreshBefore)) {
+	if !auth.NeedsRefresh(now()) {
 		return auth, nil
 	}
 
@@ -348,7 +350,7 @@ func (c *OAuthClient) RefreshIfNeeded(ctx context.Context, store CodexStore, now
 	if err != nil {
 		return nil, err
 	}
-	if auth.ExpiresAt.IsZero() || auth.ExpiresAt.After(now().Add(refreshBefore)) {
+	if !auth.NeedsRefresh(now()) {
 		return auth, nil
 	}
 	if auth.RefreshToken == "" {
@@ -399,6 +401,16 @@ func acquireRefreshLock(ctx context.Context) (func(), error) {
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("create Codex refresh lock: %w", err)
+		}
+		info, statErr := os.Stat(lockPath)
+		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect Codex refresh lock: %w", statErr)
+		}
+		if statErr == nil && time.Since(info.ModTime()) > refreshLockStaleAfter {
+			if removeErr := os.Remove(lockPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				return nil, fmt.Errorf("remove stale Codex refresh lock: %w", removeErr)
+			}
+			continue
 		}
 		timer := time.NewTimer(lockRetry)
 		select {

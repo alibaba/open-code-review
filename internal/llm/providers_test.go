@@ -205,6 +205,12 @@ func TestLookupProvider_CodexDetails(t *testing.T) {
 	if !p.RequiresStreaming {
 		t.Error("RequiresStreaming = false, want true")
 	}
+	if !p.RejectsSamplingParams {
+		t.Error("RejectsSamplingParams = false, want true")
+	}
+	if !p.DetailErrorEnvelope {
+		t.Error("DetailErrorEnvelope = false, want true")
+	}
 	expectedModels := []string{"gpt-5.6-luna", "gpt-5.6-terra"}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))

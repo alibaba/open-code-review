@@ -59,7 +59,7 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
 	}
-	if cfg.RequiresStreaming {
+	if cfg.DetailErrorEnvelope {
 		opts = append(opts, openaiopt.WithMiddleware(rewriteDetailErrorMiddleware))
 	}
 	if cfg.retryCollector != nil {
@@ -209,14 +209,12 @@ func (e *responseStatusError) Error() string { return e.message }
 // reject them itself.
 func checkResponseStatus(resp *responses.Response) error {
 	switch resp.Status {
-	case responses.ResponseStatusCompleted, responses.ResponseStatusIncomplete:
-		return nil
 	case responses.ResponseStatusFailed, responses.ResponseStatusCancelled:
 		return &responseStatusError{message: fmt.Sprintf("openai-responses request did not complete: status=%s", resp.Status)}
 	case responses.ResponseStatusQueued, responses.ResponseStatusInProgress:
 		return &responseStatusError{message: fmt.Sprintf("openai-responses returned non-terminal status=%s (background/async mode is not supported)", resp.Status)}
 	default:
-		return &responseStatusError{message: fmt.Sprintf("openai-responses returned unexpected status=%q", resp.Status)}
+		return nil
 	}
 }
 
@@ -332,6 +330,10 @@ func (a *responseStreamAccumulator) response() (*responses.Response, error) {
 	if err := checkResponseStatus(&full); err != nil {
 		return nil, err
 	}
+	if full.Status != responses.ResponseStatusCompleted && full.Status != responses.ResponseStatusIncomplete {
+		return nil, &responseStatusError{message: fmt.Sprintf(
+			"openai-responses terminal event carried unexpected status=%q", full.Status)}
+	}
 	return &full, nil
 }
 
@@ -431,7 +433,7 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 			}
 		}
 	}
-	if !c.cfg.RequiresStreaming {
+	if !c.cfg.RejectsSamplingParams {
 		if req.MaxTokens > 0 {
 			params.MaxOutputTokens = openai.Int(int64(req.MaxTokens))
 		}

@@ -31,10 +31,12 @@ type Provider struct {
 	// instance. The resolver skips its api_key requirement for these, because
 	// there is no key to configure and demanding one would make the provider
 	// impossible to use.
-	AmbientAuth       bool
-	ExternalAuth      bool
-	RequiresStreaming bool
-	Models            []string
+	AmbientAuth           bool
+	ExternalAuth          bool
+	RequiresStreaming     bool
+	RejectsSamplingParams bool
+	DetailErrorEnvelope   bool
+	Models                []string
 }
 
 var registry = []Provider{
@@ -83,13 +85,15 @@ var registry = []Provider{
 		},
 	},
 	{
-		Name:              "codex",
-		DisplayName:       "ChatGPT (Codex subscription)",
-		Protocol:          ProtocolOpenAIResponses,
-		BaseURL:           "https://chatgpt.com/backend-api/codex",
-		ExternalAuth:      true,
-		RequiresStreaming: true,
-		Models:            []string{"gpt-5.6-luna", "gpt-5.6-terra"},
+		Name:                  "codex",
+		DisplayName:           "ChatGPT (Codex subscription)",
+		Protocol:              ProtocolOpenAIResponses,
+		BaseURL:               "https://chatgpt.com/backend-api/codex",
+		ExternalAuth:          true,
+		RequiresStreaming:     true,
+		RejectsSamplingParams: true,
+		DetailErrorEnvelope:   true,
+		Models:                []string{"gpt-5.6-luna", "gpt-5.6-terra"},
 	},
 	{
 		Name:        "openai",

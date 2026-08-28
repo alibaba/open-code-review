@@ -93,7 +93,8 @@ func TestRunAuthLogoutRevokesAndClears(t *testing.T) {
 	if err := runAuthLogout(context.Background(), &output, store, client); err != nil {
 		t.Fatalf("runAuthLogout: %v", err)
 	}
-	if !store.cleared || !strings.Contains(output.String(), "Signed out") {
+	if !store.cleared || !strings.Contains(output.String(), "refresh token was revoked") ||
+		!strings.Contains(output.String(), "up to ten days") {
 		t.Errorf("cleared = %t, output = %q", store.cleared, output.String())
 	}
 }
@@ -109,7 +110,21 @@ func TestRunAuthLogoutClearsAfterRevocationFailure(t *testing.T) {
 	if err := runAuthLogout(context.Background(), &output, store, client); err != nil {
 		t.Fatalf("runAuthLogout: %v", err)
 	}
-	if !store.cleared || !strings.Contains(output.String(), "up to ten days") {
+	if !store.cleared || !strings.Contains(output.String(), "server-side revocation failed") ||
+		!strings.Contains(output.String(), "up to ten days") {
+		t.Errorf("cleared = %t, output = %q", store.cleared, output.String())
+	}
+}
+
+func TestRunAuthLogoutDistinguishesLoadFailure(t *testing.T) {
+	store := &commandAuthStore{loadErr: errors.New("broken credential file")}
+	var output bytes.Buffer
+	if err := runAuthLogout(context.Background(), &output, store, codexauth.NewOAuthClient()); err != nil {
+		t.Fatalf("runAuthLogout: %v", err)
+	}
+	if !store.cleared || !strings.Contains(output.String(), "loading them") ||
+		strings.Contains(output.String(), "but server-side revocation failed") ||
+		!strings.Contains(output.String(), "up to ten days") {
 		t.Errorf("cleared = %t, output = %q", store.cleared, output.String())
 	}
 }

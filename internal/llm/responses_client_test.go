@@ -347,8 +347,8 @@ func TestBuildResponsesParams_MaxTokensAndTemperature(t *testing.T) {
 	}
 
 	codex := NewOpenAIResponsesClient(ClientConfig{
-		URL:               "https://chatgpt.com/backend-api/codex",
-		RequiresStreaming: true,
+		URL:                   "https://chatgpt.com/backend-api/codex",
+		RejectsSamplingParams: true,
 	})
 	codexParams := codex.buildResponsesParams("gpt-5.6-luna", req)
 	if codexParams.Temperature.Valid() {
@@ -623,6 +623,33 @@ func TestOpenAIResponsesClient_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesClient_StatuslessResponseSucceeds(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+			"id":"resp_statusless",
+			"object":"response",
+			"model":"gateway-model",
+			"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+		}`)
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL: server.URL + "/v1", APIKey: "test-key", Model: "gateway-model",
+	})
+	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if resp.Content() != "ok" || resp.Choices[0].FinishReason != "stop" {
+		t.Errorf("response = %+v, want content ok and finish reason stop", resp)
+	}
+}
+
 // TestOpenAIResponsesClient_ExtraBodyStreamDropped verifies that an
 // extra_body.stream=true (valid for the Chat Completions client) is NOT
 // forwarded to the Responses API. Forwarding it makes the API answer with SSE
@@ -768,6 +795,16 @@ func TestAccumulateResponseStream(t *testing.T) {
 			t.Fatalf("error = %v, want failed response status", err)
 		}
 	})
+
+	t.Run("rejects an unexpected terminal status", func(t *testing.T) {
+		events := responseStreamEvents(t,
+			`{"type":"response.completed","sequence_number":1,"response":{"id":"resp_unknown","object":"response","model":"gpt-5.6-luna","status":"vendor_done","output":[]}}`,
+		)
+		_, err := accumulateResponseStream(events)
+		if err == nil || !strings.Contains(err.Error(), "unexpected status") {
+			t.Fatalf("error = %v, want unexpected terminal status", err)
+		}
+	})
 }
 
 func TestOpenAIResponsesClient_StreamingSSEPreservesNativeReasoning(t *testing.T) {
@@ -785,10 +822,11 @@ func TestOpenAIResponsesClient_StreamingSSEPreservesNativeReasoning(t *testing.T
 
 	temperature := 0.7
 	client := NewOpenAIResponsesClient(ClientConfig{
-		URL:               server.URL + "/v1",
-		APIKey:            "subscription-token",
-		Model:             "gpt-5.6-luna",
-		RequiresStreaming: true,
+		URL:                   server.URL + "/v1",
+		APIKey:                "subscription-token",
+		Model:                 "gpt-5.6-luna",
+		RequiresStreaming:     true,
+		RejectsSamplingParams: true,
 	})
 	resp, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
 		Messages:    []Message{{Role: "user", Content: "inspect"}},
@@ -835,10 +873,10 @@ func TestOpenAIResponsesClient_RewritesDetailError(t *testing.T) {
 	defer server.Close()
 
 	client := NewOpenAIResponsesClient(ClientConfig{
-		URL:               server.URL + "/v1",
-		APIKey:            "subscription-token",
-		Model:             "gpt-5.6-luna",
-		RequiresStreaming: true,
+		URL:                 server.URL + "/v1",
+		APIKey:              "subscription-token",
+		Model:               "gpt-5.6-luna",
+		DetailErrorEnvelope: true,
 	})
 	_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
 		Messages: []Message{{Role: "user", Content: "ping"}},

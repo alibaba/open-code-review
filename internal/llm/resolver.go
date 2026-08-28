@@ -33,9 +33,11 @@ type ResolvedEndpoint struct {
 	// Only config file (llm/provider sections) and OCR_LLM_TIMEOUT env var can set this.
 	// tryCCEnv and tryShellRC always leave it at 0 since those sources have no timeout
 	// knob; users can still override via OCR_LLM_TIMEOUT.
-	Timeout           time.Duration
-	RetryCodes        []int // additional HTTP status codes that trigger exponential-backoff retry
-	RequiresStreaming bool
+	Timeout               time.Duration
+	RetryCodes            []int // additional HTTP status codes that trigger exponential-backoff retry
+	RequiresStreaming     bool
+	RejectsSamplingParams bool
+	DetailErrorEnvelope   bool
 
 	// AmbientAuth marks an endpoint that carries no token and needs no base
 	// URL, because the transport supplies both — AWS SigV4 signing derives the
@@ -49,6 +51,13 @@ type ResolvedEndpoint struct {
 	AWSProfile string
 	AWSRegion  string
 }
+
+const codexRefreshTimeout = 30 * time.Second
+
+var (
+	codexAuthStore      codexauth.CodexStore = codexauth.FileStore{}
+	newCodexOAuthClient                      = codexauth.NewOAuthClient
+)
 
 // Environment variable names for OCR-specific configuration.
 const (
@@ -478,7 +487,11 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		(isPreset && preset.AmbientAuth && entry.Protocol == "")
 	var externalAuth *codexauth.CodexAuth
 	if isPreset && preset.ExternalAuth && apiKey == "" && apiKeyCmd == "" {
-		auth, err := codexauth.Load()
+		if entry.URL != "" || entry.Protocol != "" {
+			return ResolvedEndpoint{}, false, fmt.Errorf(
+				"provider %q cannot use Codex subscription authentication when url or protocol is overridden; set api_key explicitly", cfg.Provider)
+		}
+		auth, err := codexAuthStore.Load()
 		if err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf(
 				"codex provider is selected but not signed in: %w\n"+
@@ -589,7 +602,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		apiKey = resolved
 	}
 	if externalAuth != nil && externalAuth.NeedsRefresh(time.Now()) {
-		auth, err := codexauth.NewOAuthClient().RefreshIfNeeded(context.Background(), codexauth.FileStore{}, time.Now)
+		refreshCtx, cancel := context.WithTimeout(context.Background(), codexRefreshTimeout)
+		defer cancel()
+		auth, err := newCodexOAuthClient().RefreshIfNeeded(refreshCtx, codexAuthStore, time.Now)
 		if err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf(
 				"refresh Codex authentication: %w\n"+
@@ -599,21 +614,23 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	}
 
 	return ResolvedEndpoint{
-		URL:               url,
-		Token:             apiKey,
-		Model:             model,
-		Provider:          cfg.Provider,
-		Protocol:          protocol,
-		AuthHeader:        authHeader,
-		Source:            "provider:" + cfg.Provider,
-		ExtraBody:         extraBody,
-		ExtraHeaders:      extraHeaders,
-		Timeout:           timeout,
-		RetryCodes:        retryCodes,
-		RequiresStreaming: isPreset && preset.RequiresStreaming,
-		AmbientAuth:       ambientAuth,
-		AWSProfile:        entry.AWSProfile,
-		AWSRegion:         entry.AWSRegion,
+		URL:                   url,
+		Token:                 apiKey,
+		Model:                 model,
+		Provider:              cfg.Provider,
+		Protocol:              protocol,
+		AuthHeader:            authHeader,
+		Source:                "provider:" + cfg.Provider,
+		ExtraBody:             extraBody,
+		ExtraHeaders:          extraHeaders,
+		Timeout:               timeout,
+		RetryCodes:            retryCodes,
+		RequiresStreaming:     isPreset && entry.Protocol == "" && preset.RequiresStreaming,
+		RejectsSamplingParams: isPreset && entry.Protocol == "" && preset.RejectsSamplingParams,
+		DetailErrorEnvelope:   isPreset && entry.Protocol == "" && preset.DetailErrorEnvelope,
+		AmbientAuth:           ambientAuth,
+		AWSProfile:            entry.AWSProfile,
+		AWSRegion:             entry.AWSRegion,
 	}, true, nil
 }
 
