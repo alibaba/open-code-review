@@ -93,7 +93,7 @@ inputs:
       successfully (JSON status 'complete'), submit a formal GitHub APPROVE
       review instead of a summary comment.
     required: false
-    default: 'true'
+    default: 'false'
   incremental_overlap_threshold:
     description: >-
       IoU (intersection-over-union) threshold used by incremental mode to decide

@@ -61,7 +61,7 @@ sidebar:
 - 当评审未发现任何问题且所有选中的项均已成功评审时，发布步骤会提交正式的
   **approve** 评审（状态为 `APPROVE` 的 GitHub Pull Request Review）以替代摘要
   评论。未选中任何项、覆盖不完整或运行失败的场景绝不会触发批准——这些场景仍会
-  发布摘要评论。可通过 `approve_on_clean: 'false'` 动作输入禁用（默认开启）。
+  发布摘要评论。可通过 `approve_on_clean: 'false'` 动作输入禁用（默认关闭）。
 
 ### 安装
 

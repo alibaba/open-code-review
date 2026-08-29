@@ -81,7 +81,7 @@ The upstream workflow lives at
   summary comment. It never approves runs where nothing was selected,
   coverage was partial, or the run failed, those still get the
   summary comment. Disable with the `approve_on_clean: 'false'`
-  action input (enabled by default).
+  action input (disabled by default).
 
 ### Install
 
