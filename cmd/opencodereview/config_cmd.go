@@ -810,10 +810,26 @@ func setCustomProviderValue(cfg *Config, key, value string) error {
 	if len(parts) != 3 || parts[1] == "" || parts[2] == "" {
 		return fmt.Errorf("invalid custom provider key %q: expected custom_providers.<name>.<field>", key)
 	}
+	if preset, isPreset := llm.LookupProvider(parts[1]); isPreset {
+		return fmt.Errorf("custom provider name %q conflicts with a preset provider; use providers.%s.%s to configure the preset or choose a different custom provider name", parts[1], preset.Name, parts[2])
+	}
 	return setCustomProviderField(cfg, parts[1], parts[2], key, value)
 }
 
+func isAuxiliaryProviderField(field string) bool {
+	switch field {
+	case "extra_body", "extra_headers", "retry_codes":
+		return true
+	default:
+		return false
+	}
+}
+
 func setCustomProviderField(cfg *Config, name, field, key, value string) error {
+	if _, exists := cfg.CustomProviders[name]; isAuxiliaryProviderField(field) && !exists {
+		providerKey := strings.TrimSuffix(key, "."+field)
+		return fmt.Errorf("provider %q is not configured; set a core field first (protocol is required for every custom provider):\n  ocr config set %s.protocol <protocol>", name, providerKey)
+	}
 	if cfg.CustomProviders == nil {
 		cfg.CustomProviders = make(map[string]ProviderEntry)
 	}

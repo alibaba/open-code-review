@@ -231,7 +231,7 @@ returns `Error: no files found`.
 
 ## `file_find`
 
-Find files in the repo by filename keyword (substring match).
+Find files in the repo by repository-relative path or filename keyword (substring match).
 
 ### Schema
 
@@ -247,7 +247,7 @@ Find files in the repo by filename keyword (substring match).
 
 | Field | Required | Default | Notes |
 |---|---|---|---|
-| `query_name` | yes | — | Substring matched against each file's **basename** (the part after the last `/`), not the full path. |
+| `query_name` | yes | — | Substring matched against each file's **repository-relative path** (accepting both `/` and `\` path separators). |
 | `case_sensitive` | no | `false` | Set to `true` for exact-case matching. |
 
 The candidate set comes from `git ls-files --cached --others

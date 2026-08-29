@@ -1332,6 +1332,128 @@ func TestAnthropicClient_ExtraBodyStreamDropped(t *testing.T) {
 	}
 }
 
+// TestAnthropicClient_ExtraBodyThinkingDroppedWithForcedToolChoice verifies
+// that extra_body.thinking — the supported way to turn on extended thinking
+// today, see the CompletionsWithCtx comment — is dropped for a request whose
+// ToolChoice is "required". The Anthropic API rejects extended thinking
+// together with a forced tool_choice, and ExtraBody is a client-wide setting
+// forwarded to every request regardless of task, so a provider config that
+// enables thinking for the main review loop (ToolChoice "auto") must not
+// break ReviewFilterTask's forced single-shot tool call. Other requests
+// (ToolChoice "auto" or unset) must still get it forwarded.
+func TestAnthropicClient_ExtraBodyThinkingDroppedWithForcedToolChoice(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_thinking_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "test-key",
+		Model:  "claude-test",
+		ExtraBody: map[string]any{
+			"thinking": map[string]any{"type": "enabled", "budget_tokens": 10000},
+		},
+	})
+
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:   []Message{{Role: "user", Content: "hi"}},
+		MaxTokens:  64,
+		ToolChoice: "required",
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if _, present := gotBody["thinking"]; present {
+		t.Errorf("thinking must be dropped for a forced tool_choice request, got %v", gotBody["thinking"])
+	}
+
+	gotBody = nil
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:   []Message{{Role: "user", Content: "hi"}},
+		MaxTokens:  20000, // > budget_tokens (10000), so only ToolChoice is under test here
+		ToolChoice: "auto",
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotBody["thinking"] == nil {
+		t.Error("thinking must still be forwarded for a non-forced tool_choice request")
+	}
+}
+
+// TestAnthropicClient_ExtraBodyThinkingDroppedWhenBudgetExceedsMaxTokens
+// guards the real failure this reproduces: a provider config's
+// extra_body.thinking.budget_tokens is a single client-wide value, but
+// MaxTokens varies per call (see internal/agent/grouping.go's grouping call,
+// which had a hardcoded MaxTokens: 4096 well under a typical thinking
+// budget). The API rejects the request outright when budget_tokens isn't
+// strictly less than max_tokens ("max_tokens must be greater than
+// thinking.budget_tokens") — dropping thinking for that one call is safer
+// than letting an unrelated small-output task fail.
+func TestAnthropicClient_ExtraBodyThinkingDroppedWhenBudgetExceedsMaxTokens(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_thinking_budget_test",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"content":[{"type":"text","text":"ok"}],
+			"stop_reason":"end_turn",
+			"usage":{"input_tokens":1,"output_tokens":1}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewAnthropicClient(ClientConfig{
+		URL:    server.URL + "/v1/messages",
+		APIKey: "test-key",
+		Model:  "claude-test",
+		ExtraBody: map[string]any{
+			"thinking": map[string]any{"type": "enabled", "budget_tokens": float64(10000)},
+		},
+	})
+
+	// budget_tokens (10000) >= MaxTokens (4096): must be dropped.
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "hi"}},
+		MaxTokens: 4096,
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if _, present := gotBody["thinking"]; present {
+		t.Errorf("thinking must be dropped when budget_tokens >= MaxTokens, got %v", gotBody["thinking"])
+	}
+
+	// budget_tokens (10000) < MaxTokens (32000): must be forwarded.
+	gotBody = nil
+	if _, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages:  []Message{{Role: "user", Content: "hi"}},
+		MaxTokens: 32000,
+	}); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if gotBody["thinking"] == nil {
+		t.Error("thinking must still be forwarded when budget_tokens < MaxTokens")
+	}
+}
+
 // newOpenAITestServer returns an httptest server that captures each request's headers
 // and JSON body and responds with a minimal valid chat completion.
 func newOpenAITestServer(gotHeaders *http.Header, gotBody *map[string]any) *httptest.Server {

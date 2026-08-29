@@ -366,8 +366,8 @@ function testReviewTaskTimeoutInputNameAndScope() {
   assert.ok(!INPUTS.review_timeout, "the not-yet-released review_timeout input must be renamed");
   assert.strictEqual(
     INPUTS.review_task_timeout.default,
-    "10",
-    "review_task_timeout default must remain 10 minutes"
+    "15",
+    "review_task_timeout default must remain 15 minutes"
   );
   const inputBlock = ACTION_TEXT.match(
     /^  review_task_timeout:\s*$([\s\S]*?)(?=^  [A-Za-z0-9_]+:\s*$|^outputs:|^runs:)/m
@@ -1063,7 +1063,7 @@ function testContractsRunInDedicatedWorkflow() {
 function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   assert.match(
     EXAMPLE_README_TEXT,
-    /\| `review_task_timeout` \| `'10'` \|[^\n]*(?:per-file|per-task|concurrent task)[^\n]*\|/i,
+    /\| `review_task_timeout` \| `'15'` \|[^\n]*(?:per-file|per-task|concurrent task)[^\n]*\|/i,
     "GitHub Actions README must document the per-task timeout and its default"
   );
   assert.match(

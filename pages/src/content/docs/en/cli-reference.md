@@ -121,7 +121,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Takes precedence over `--background` when both are set. |
 | `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
 | `--concurrency <n>` | — | `8` | Maximum number of file groups reviewed in parallel. |
-| `--timeout <minutes>` | — | `10` | Per-group deadline. `0` disables the timeout. Automatically extended by 50 % when the effort preset runs more than one review round. |
+| `--timeout <minutes>` | — | `15` | Per-group deadline. `0` disables the timeout. Scaled linearly by the number of effort review rounds (e.g. 15/30/45 min for low/medium/high). |
 | `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
 | `--max-tools <n>` | — | template default | Max tool-call rounds per group. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. The flag only ever *raises* the cap — a value below the template default is ignored. |

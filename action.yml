@@ -49,7 +49,7 @@ inputs:
   review_task_timeout:
     description: Per-file/concurrent-task timeout in integer minutes, from 1 through 120.
     required: false
-    default: '10'
+    default: '15'
   github_token:
     description: GitHub token used to post review comments.
     required: false
