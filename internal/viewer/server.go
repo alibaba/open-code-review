@@ -4,11 +4,16 @@
 package viewer
 
 import (
+	"bufio"
 	"embed"
 	"fmt"
 	"html/template"
 	"io/fs"
+	"net"
 	"net/http"
+	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -61,12 +66,52 @@ func StartServer(addr string) error {
 	handler := securityHeaders(guarded)
 
 	srv := &http.Server{
-		Addr:    addr,
 		Handler: handler,
 	}
 
-	fmt.Printf("\nOpen browser: http://%s\n", DisplayAddr(addr))
-	return srv.ListenAndServe()
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- srv.Serve(ln)
+	}()
+
+	url := "http://" + DisplayAddr(addr)
+	fmt.Printf("\nPress Enter to open the URL in your browser")
+	if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err == nil {
+		if err := openBrowser(url); err != nil {
+			fmt.Printf("\nCould not open browser automatically: %v\n", err)
+		}
+	}
+
+	return <-serveErr
+}
+
+// Reference Gist: https://gist.github.com/sevkin/9798d67b2cb9d07cb05f89f14ba682f8
+func browserOpenCmd(goos, url string) *exec.Cmd {
+	var cmd string
+	var args []string
+
+	switch goos {
+	case "windows":
+		// rundll32 handles URLs with query parameters better than "cmd /c start".
+		cmd = "rundll32"
+		args = []string{"url.dll,FileProtocolHandler"}
+	case "darwin":
+		cmd = "open"
+	default: // "linux", "freebsd", "openbsd", "netbsd"
+		cmd = "xdg-open"
+	}
+
+	args = append(args, url)
+	return exec.Command(cmd, args...)
+}
+
+func openBrowser(url string) error {
+	return browserOpenCmd(runtime.GOOS, url).Start()
 }
 
 var cstZone = func() *time.Location {
