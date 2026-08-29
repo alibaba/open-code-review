@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -16,20 +17,26 @@ import (
 
 func TestApplyReviewMaxToolsOverride(t *testing.T) {
 	tests := []struct {
-		name     string
-		maxTools int
-		want     int
+		name        string
+		cliMaxTools int
+		want        int
 	}{
-		{name: "template default", maxTools: 0, want: 30},
-		{name: "lower override", maxTools: 10, want: 10},
-		{name: "middle override", maxTools: 20, want: 20},
-		{name: "higher override", maxTools: 40, want: 40},
+		{name: "template default", cliMaxTools: 0, want: 100},
+		{name: "below minimum clamps", cliMaxTools: 30, want: 50},
+		{name: "lower override", cliMaxTools: 50, want: 50},
+		{name: "middle override", cliMaxTools: 75, want: 75},
+		{name: "equal override", cliMaxTools: 100, want: 100},
+		{name: "higher override", cliMaxTools: 125, want: 125},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tpl := &template.Template{MaxToolRequestTimes: 30}
-			applyReviewMaxToolsOverride(tpl, tt.maxTools)
+			opts, err := parseReviewFlags([]string{"--max-tools", strconv.Itoa(tt.cliMaxTools)})
+			if err != nil {
+				t.Fatalf("parseReviewFlags: %v", err)
+			}
+			tpl := &template.Template{MaxToolRequestTimes: 100}
+			applyReviewMaxToolsOverride(tpl, opts.maxTools)
 			if tpl.MaxToolRequestTimes != tt.want {
 				t.Errorf("MaxToolRequestTimes = %d, want %d", tpl.MaxToolRequestTimes, tt.want)
 			}
