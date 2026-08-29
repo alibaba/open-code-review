@@ -36,7 +36,11 @@ type Provider struct {
 	RequiresStreaming     bool
 	RejectsSamplingParams bool
 	DetailErrorEnvelope   bool
-	Models                []string
+	// PromptCacheRetention selects the Responses prompt-cache retention class.
+	// Empty leaves the API default ("in_memory"), which is short lived; "24h"
+	// asks the provider to keep the prefix long enough to span a review.
+	PromptCacheRetention string
+	Models               []string
 }
 
 var registry = []Provider{
@@ -93,6 +97,7 @@ var registry = []Provider{
 		RequiresStreaming:     true,
 		RejectsSamplingParams: true,
 		DetailErrorEnvelope:   true,
+		PromptCacheRetention:  "24h",
 		// A picker for `ocr config model`, not an allowlist: what a ChatGPT
 		// account can run depends on its plan and changes over time. The
 		// resolver does not gate --model for this provider.

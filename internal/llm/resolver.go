@@ -38,6 +38,7 @@ type ResolvedEndpoint struct {
 	RequiresStreaming     bool
 	RejectsSamplingParams bool
 	DetailErrorEnvelope   bool
+	PromptCacheRetention  string
 
 	// AmbientAuth marks an endpoint that carries no token and needs no base
 	// URL, because the transport supplies both — AWS SigV4 signing derives the
@@ -640,6 +641,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		RequiresStreaming:     codexGatewayBehavior && preset.RequiresStreaming,
 		RejectsSamplingParams: codexGatewayBehavior && preset.RejectsSamplingParams,
 		DetailErrorEnvelope:   codexGatewayBehavior && preset.DetailErrorEnvelope,
+		PromptCacheRetention:  promptCacheRetention(codexGatewayBehavior, preset),
 		AmbientAuth:           ambientAuth,
 		AWSProfile:            entry.AWSProfile,
 		AWSRegion:             entry.AWSRegion,
@@ -1030,4 +1032,14 @@ func ParseRetryCodes(raw string) ([]int, []string, error) {
 		return nil, nil, err
 	}
 	return filtered, warnings, nil
+}
+
+// promptCacheRetention returns the preset's prompt-cache retention class, but
+// only while the entry still points at the preset's own endpoint. A redirected
+// url may front a gateway that rejects the field outright.
+func promptCacheRetention(gatewayBehavior bool, preset Provider) string {
+	if !gatewayBehavior {
+		return ""
+	}
+	return preset.PromptCacheRetention
 }
