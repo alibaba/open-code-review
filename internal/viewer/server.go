@@ -73,6 +73,7 @@ func StartServer(addr string) error {
 	if err != nil {
 		return err
 	}
+	defer ln.Close()
 
 	serveErr := make(chan error, 1)
 	go func() {
