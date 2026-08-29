@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/x/term"
 )
 
 //go:embed templates/*.html static/style.css static/session.js static/repos.js
@@ -81,11 +83,15 @@ func StartServer(addr string) error {
 	}()
 
 	url := "http://" + DisplayAddr(addr)
-	fmt.Printf("\nPress Enter to open the URL in your browser")
-	if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err == nil {
-		if err := openBrowser(url); err != nil {
-			fmt.Printf("\nCould not open browser automatically: %v\n", err)
+	if term.IsTerminal(os.Stdin.Fd()) {
+		fmt.Printf("\nPress Enter to open the URL in your browser")
+		if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err == nil {
+			if err := openBrowser(url); err != nil {
+				fmt.Printf("\nCould not open browser automatically: %v\n", err)
+			}
 		}
+	} else {
+		fmt.Printf("\nOpen browser: %s\n", url)
 	}
 
 	return <-serveErr
