@@ -66,15 +66,16 @@ argument. Otherwise the platform default runs — `open` on macOS, `xdg-open` on
 Linux and the BSDs, `rundll32` on Windows. Failing to open a browser is a
 warning on stderr and never fatal; the server keeps serving either way.
 
-## Three pages
+## Four pages
 
-The viewer has three URLs:
+The viewer has four URLs:
 
 | URL | What you see |
 |---|---|
 | `/` | List of all repositories that have sessions on disk. |
 | `/r/{repo}` | List of sessions for one repository, newest first. |
 | `/r/{repo}/{sessionID}` | Full detail for a single session. |
+| `/r/{repo}/compare` | Two sessions of one repository, compared. |
 
 `{repo}` is a path-encoded string (separators `/` and `\` replaced with
 `-`, colons replaced with `_` — the same encoding used to name the
@@ -89,7 +90,7 @@ total session count, and the most recent activity timestamp.
 
 For each session: ID (a UUID), branch name (when OCR was able to
 detect it), review mode, model, file count, duration, and a started-at
-timestamp.
+timestamp, and a `compare` link to the next-older session.
 
 ### `/r/{repo}/{sessionID}` — Session detail
 
@@ -112,6 +113,40 @@ The detail page is the interesting one. It shows:
 Each lane is a horizontal strip of **task cards** — one per LLM round
 trip. Cards are coloured by task type so you can see at a glance which
 phases dominated the run.
+
+### `/r/{repo}/compare` — Compare two sessions
+
+The same four buckets `ocr session compare` prints, rendered as a page.
+The session list has a **Compare** column: each row links to a
+comparison against the next-older session, so the newest row shows what
+changed since the run before it. The oldest row shows `-`, having no
+older run to compare against.
+
+Findings are sorted into four buckets:
+
+| Bucket | Meaning |
+|---|---|
+| New | Only the later run reported it. |
+| Persisting | Both runs reported it. |
+| Resolved | Only the earlier run reported it, and the later run did review that file. |
+| Not reviewed | Only the earlier run reported it, and the later run never looked at that file. Nobody re-checked it, so it is not resolved. |
+
+One thing the page does differently: the CLI omits a bucket that came
+out empty, the page always prints all four. `Resolved (0)` is an
+answer, and a section that silently vanished would read as a broken
+page.
+
+A run old enough to predate run manifests recorded no coverage, so
+every unmatched finding from it falls into Resolved rather than Not
+reviewed.
+
+To compare any other pair, edit the query string:
+`/r/{repo}/compare?before=<older session id>&after=<newer session id>`.
+Both ids must belong to the repository in the URL.
+
+If the two runs used different review modes, the page shows the same
+warning `ocr session compare` prints: they may not have looked at the
+same files, so the buckets are not directly comparable.
 
 ## What's in a task card
 

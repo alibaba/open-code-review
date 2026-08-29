@@ -27,32 +27,7 @@ func StartServer(addr, openMode string) error {
 		return fmt.Errorf("resolve sessions root: %w", err)
 	}
 
-	mux := http.NewServeMux()
-
-	// Static assets (must be registered before "/" catch-all)
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
-
-	// Routes
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		handleRepos(w, r, root)
-	})
-	mux.HandleFunc("/r/{repo}", func(w http.ResponseWriter, r *http.Request) {
-		repo := r.PathValue("repo")
-		if strings.Contains(repo, "..") || strings.Contains(repo, "/") {
-			http.Error(w, "invalid repo path", http.StatusBadRequest)
-			return
-		}
-		handleSessions(w, r, root, repo)
-	})
-	mux.HandleFunc("/r/{repo}/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
-		repo := r.PathValue("repo")
-		sid := r.PathValue("sessionID")
-		if strings.Contains(repo, "..") || strings.Contains(sid, "..") {
-			http.Error(w, "invalid path", http.StatusBadRequest)
-			return
-		}
-		handleSession(w, r, root, repo, sid)
-	})
+	mux := newMux(root)
 
 	// Wrap the mux with a Host-header allowlist. Without this, any web page
 	// the user visits can DNS-rebind its origin to 127.0.0.1 and read the
@@ -123,6 +98,58 @@ func displayURL(requestedAddr, listenerAddr string) (string, error) {
 		return "", fmt.Errorf("parse listener addr %q: %w", listenerAddr, err)
 	}
 	return "http://" + DisplayAddr(net.JoinHostPort(splitBindHost(requestedAddr), port)), nil
+}
+
+// unsafeSegment rejects a URL-supplied name that must stay a single directory
+// or file name once it reaches filepath.Join. ServeMux unescapes each path
+// segment, so "%2F" and "%5C" arrive here as real separators; "\" is one on
+// Windows, so it is rejected everywhere "/" is.
+func unsafeSegment(s string) bool {
+	return strings.Contains(s, "..") || strings.ContainsAny(s, `/\`)
+}
+
+// newMux builds the viewer's routing table. Split out of StartServer so route
+// dispatch - which pattern wins for "/r/{repo}/compare" - is testable without
+// binding a socket.
+func newMux(root string) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	// Static assets (must be registered before "/" catch-all)
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
+
+	// Routes
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		handleRepos(w, r, root)
+	})
+	mux.HandleFunc("/r/{repo}", func(w http.ResponseWriter, r *http.Request) {
+		repo := r.PathValue("repo")
+		if unsafeSegment(repo) {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		handleSessions(w, r, root, repo)
+	})
+	// Registered before the {sessionID} wildcard for readability only: a
+	// literal segment wins over a wildcard whatever the order.
+	mux.HandleFunc("/r/{repo}/compare", func(w http.ResponseWriter, r *http.Request) {
+		repo := r.PathValue("repo")
+		if unsafeSegment(repo) {
+			http.Error(w, "invalid repo path", http.StatusBadRequest)
+			return
+		}
+		handleCompare(w, r, root, repo)
+	})
+	mux.HandleFunc("/r/{repo}/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
+		repo := r.PathValue("repo")
+		sid := r.PathValue("sessionID")
+		if unsafeSegment(repo) || unsafeSegment(sid) {
+			http.Error(w, "invalid path", http.StatusBadRequest)
+			return
+		}
+		handleSession(w, r, root, repo, sid)
+	})
+
+	return mux
 }
 
 var cstZone = func() *time.Location {
