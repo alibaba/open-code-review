@@ -232,11 +232,11 @@ func TestBuildResponsesParams_Tools(t *testing.T) {
 	}
 }
 
-// TestBuildResponsesParams_ToolChoice locks the tool_choice mapping the
-// review-filter task depends on. ChatRequest.ToolChoice="required" must become
-// responses.ToolChoiceOptionsRequired on the wire, and only when tools are
-// attached. Any other value (including "auto") is intentionally left
-// untranslated, matching the Anthropic client's behavior.
+// TestBuildResponsesParams_ToolChoice locks the explicit tool_choice mapping.
+// ChatRequest.ToolChoice="required" must become responses.ToolChoiceOptionsRequired
+// on the wire, and only when tools are attached. Any other value (including
+// "auto") is intentionally left untranslated, matching the Anthropic client's
+// behavior.
 func TestBuildResponsesParams_ToolChoice(t *testing.T) {
 	client := NewOpenAIResponsesClient(ClientConfig{URL: "https://api.openai.com/v1"})
 	tool := ToolDef{Function: FunctionDef{Name: "f", Description: "d", Parameters: map[string]any{"type": "object"}}}

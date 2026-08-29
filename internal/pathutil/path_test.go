@@ -116,6 +116,64 @@ func TestCanonicalPath_NestedSymlink(t *testing.T) {
 	}
 }
 
+func TestWithinBase_SameFileFallback(t *testing.T) {
+	dir := t.TempDir()
+	baseDir := filepath.Join(dir, "base")
+	targetDir := filepath.Join(dir, "target")
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	base := filepath.Join(baseDir, "rules.md")
+	target := filepath.Join(targetDir, "rules.md")
+	if err := os.WriteFile(base, []byte("same file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(base, target); err != nil {
+		t.Skipf("hard links not supported: %v", err)
+	}
+
+	if !WithinBase(base, target) {
+		t.Fatalf("WithinBase(%q, %q) = false, want true via SameFile fallback", base, target)
+	}
+}
+
+func TestWithinBase_CaseInsensitiveVariant(t *testing.T) {
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "Repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "rules.md"), []byte("legit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// This only reproduces on a case-insensitive filesystem. Detect that first so
+	// the test can pass on case-sensitive CI runners.
+	variantDir := filepath.Join(dir, "repo")
+	lowerInfo, err := os.Stat(variantDir)
+	if err != nil || !os.SameFile(mustStat(t, repo), lowerInfo) {
+		t.Skip("filesystem is case-sensitive")
+	}
+
+	variant := filepath.Join(variantDir, "rules.md")
+	if !WithinBase(repo, variant) {
+		t.Fatalf("WithinBase(%q, %q) = false, want true for case variant", repo, variant)
+	}
+}
+
+func mustStat(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info
+}
+
 func TestWithinBase_AdditionalCases(t *testing.T) {
 	cases := []struct {
 		name   string

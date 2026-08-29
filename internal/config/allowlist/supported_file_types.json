@@ -47,6 +47,8 @@
   ".ftl",
   ".ftlh",
   ".ftlx",
+  ".hbs",
+  ".mustache",
   ".astro",
   ".vue",
   ".ipynb",

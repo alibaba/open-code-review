@@ -37,6 +37,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".FTLH", true},
 		{".ftlx", true},
 		{".FTLX", true},
+		{".hbs", true},
+		{".HBS", true},
+		{".mustache", true},
+		{".MUSTACHE", true},
 		{".graphql", true},
 		{".GRAPHQL", true},
 		{".gql", true},
@@ -160,6 +164,13 @@ func TestIsExcludedPath(t *testing.T) {
 
 		// Prisma schemas have no conventional default test-file exclusion.
 		{"prisma schema", "prisma/schema.prisma", false},
+
+		// Handlebars/Mustache have no extension-specific test-path convention;
+		// generic fixture directories remain excluded.
+		{"handlebars fixture", "test/fixtures/card.hbs", true},
+		{"mustache fixture", "spec/fixtures/email.mustache", true},
+		{"handlebars template in tests directory", "tests/templates/card.hbs", false},
+		{"mustache template in test directory", "test/templates/email.mustache", false},
 
 		// HarmonyOS oh_modules and test files
 		{"oh_modules root", "oh_modules/some_lib/index.ets", true},

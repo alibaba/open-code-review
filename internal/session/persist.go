@@ -242,8 +242,8 @@ func (jw *jsonlWriter) WriteLLMRequest(filePath string, taskType TaskType, reque
 	return uuid
 }
 
-// WriteLLMResponse writes a response entry with model, content, tool calls, usage.
-func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration) string {
+// WriteLLMResponse writes a response entry with model, content, reasoning, tool calls, and usage.
+func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content, reasoningContent string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration, nativePayload any) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -266,6 +266,12 @@ func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, cont
 			"cache_read_tokens":  usage.CacheReadTokens,
 			"cache_write_tokens": usage.CacheWriteTokens,
 		},
+	}
+	if reasoningContent != "" {
+		rec["reasoning_content"] = reasoningContent
+	}
+	if nativePayload != nil {
+		rec["native_payload"] = nativePayload
 	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid

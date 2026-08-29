@@ -21,9 +21,11 @@ import (
 type fakeGroupingClient struct {
 	response string
 	err      error
+	gotReq   llm.ChatRequest
 }
 
-func (f *fakeGroupingClient) CompletionsWithCtx(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func (f *fakeGroupingClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	f.gotReq = req
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -222,7 +224,7 @@ func TestFileGroupKey_Multiple(t *testing.T) {
 
 func TestGroupDiffs_SingleFile(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}}
-	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0)
+	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0, nil)
 	if len(result.groups) != 1 {
 		t.Fatalf("got %d groups, want 1", len(result.groups))
 	}
@@ -230,7 +232,7 @@ func TestGroupDiffs_SingleFile(t *testing.T) {
 
 func TestGroupDiffs_NoGroupingTask(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}}
-	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0)
+	result := groupDiffs(nil, diffs, nil, "", template.Template{}, 0, nil)
 	if len(result.groups) != 2 {
 		t.Fatalf("got %d groups, want 2 (fallback to per-file)", len(result.groups))
 	}
@@ -244,7 +246,7 @@ func TestGroupDiffs_LLMError_Fallback(t *testing.T) {
 			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 		},
 	}
-	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0, nil)
 	if len(result.groups) != 2 {
 		t.Fatalf("got %d groups, want 2 (fallback on error)", len(result.groups))
 	}
@@ -260,7 +262,7 @@ func TestGroupDiffs_LLMSuccess(t *testing.T) {
 			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 		},
 	}
-	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0)
+	result := groupDiffs(context.Background(), diffs, client, "fake", tpl, 0, nil)
 	if len(result.groups) != 2 {
 		t.Fatalf("got %d groups, want 2", len(result.groups))
 	}
@@ -278,23 +280,57 @@ func TestCallGroupingLLM_EmptyResponse(t *testing.T) {
 	task := &template.LlmConversation{
 		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
 	}
-	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task)
+	_, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 4096, nil)
 	if err == nil {
 		t.Fatal("expected error for empty response")
 	}
 }
 
+// TestCallGroupingLLM_UsesTemplateMaxTokens guards against reintroducing the
+// hardcoded MaxTokens: 4096 this replaced: a small, task-specific cap left no
+// room for a provider config that enables Anthropic extended thinking via
+// extra_body.thinking with a larger budget_tokens, so the grouping call
+// failed with "max_tokens must be greater than thinking.budget_tokens" even
+// though the main review loop's own MAX_TOKENS was large enough.
+func TestCallGroupingLLM_UsesTemplateMaxTokens(t *testing.T) {
+	diffs := []model.Diff{{NewPath: "a.go"}}
+	task := &template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+	}
+
+	client := &fakeGroupingClient{response: `[{"label":"a","files":["a.go"]}]`}
+	if _, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 32000, nil); err != nil {
+		t.Fatalf("callGroupingLLM: %v", err)
+	}
+	if client.gotReq.MaxTokens != 32000 {
+		t.Errorf("MaxTokens = %d, want 32000 (the template's own limit)", client.gotReq.MaxTokens)
+	}
+
+	client = &fakeGroupingClient{response: `[{"label":"a","files":["a.go"]}]`}
+	if _, _, err := callGroupingLLM(context.Background(), diffs, client, "fake", task, 0, nil); err != nil {
+		t.Fatalf("callGroupingLLM: %v", err)
+	}
+	if client.gotReq.MaxTokens != 4096 {
+		t.Errorf("MaxTokens = %d, want fallback 4096 when the template leaves MAX_TOKENS unset", client.gotReq.MaxTokens)
+	}
+}
+
 func TestBuildFileMetadataTable(t *testing.T) {
 	diffs := []model.Diff{
-		{NewPath: "a.go", IsNew: true, Insertions: 10, Deletions: 0},
-		{NewPath: "b.go", IsDeleted: true, Insertions: 0, Deletions: 5},
+		{NewPath: "a.go", IsNew: true, Insertions: 10},
+		{NewPath: "b.go", IsDeleted: true, Deletions: 5},
+		{NewPath: "c.go", OldPath: "old_c.go", IsRenamed: true, Insertions: 2, Deletions: 1},
+		{NewPath: "d.go", OldPath: "d.go", Insertions: 3, Deletions: 4},
 	}
-	table := buildFileList(diffs)
-	if !contains(table, "ADDED") || !contains(table, "DELETED") {
-		t.Errorf("table missing status:\n%s", table)
-	}
-	if !contains(table, "a.go") || !contains(table, "b.go") {
-		t.Errorf("table missing paths:\n%s", table)
+	// The grouping file list shares formatDiffEntry with the other-changed-files
+	// block, so both prompts enumerate files the same way. Pin the exact shape,
+	// including the per-entry trailing newline the grouping template relies on.
+	want := "ADDED   a.go (+10/-0)\n" +
+		"DELETED   b.go (+0/-5)\n" +
+		"RENAMED   c.go (+2/-1)\n" +
+		"MODIFIED   d.go (+3/-4)\n"
+	if got := buildFileList(diffs); got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
@@ -437,19 +473,6 @@ func TestResolveGroupSystemRule(t *testing.T) {
 			t.Errorf("resolved the MATLAB rule for a real ObjC file — mixed-case path broke the content sniff:\n%s", got)
 		}
 	})
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsSubstring(s, sub))
-}
-
-func containsSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
 
 func TestGroupChurn(t *testing.T) {
