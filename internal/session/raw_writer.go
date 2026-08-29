@@ -5,6 +5,7 @@ package session
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -32,6 +33,7 @@ type RawFileWriter struct {
 	sessionID string
 	file      *os.File
 	writer    *bufio.Writer
+	buf       bytes.Buffer
 	encoder   *json.Encoder
 }
 
@@ -61,14 +63,16 @@ func NewRawFileWriter(repoDir, sessionID string) (*RawFileWriter, error) {
 		file:      f,
 		writer:    bufio.NewWriter(f),
 	}
-	w.encoder = json.NewEncoder(w.writer)
+	w.encoder = json.NewEncoder(&w.buf)
 	w.encoder.SetEscapeHTML(false)
 	return w, nil
 }
 
-// Write appends rec as one JSONL line and flushes it to disk. The
-// per-record flush means a crashed run keeps every record written up to the
-// crash — the same durability trade-off the session JSONL writer makes.
+// Write appends rec as one JSONL line and flushes it to disk. The record is
+// marshaled in memory first, so a failed disk write leaves no partial line
+// that the next record would append after. The per-record flush means a
+// crashed run keeps every record written up to the crash — the same
+// durability trade-off the session JSONL writer makes.
 // Write errors are dropped: raw capture must never fail a review.
 func (w *RawFileWriter) Write(rec llm.RawRecord) {
 	w.mu.Lock()
@@ -77,9 +81,11 @@ func (w *RawFileWriter) Write(rec llm.RawRecord) {
 	if rec.Timestamp == "" {
 		rec.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	}
+	w.buf.Reset()
 	if err := w.encoder.Encode(rec); err != nil {
 		return
 	}
+	w.writer.Write(w.buf.Bytes())
 	_ = w.writer.Flush()
 }
 

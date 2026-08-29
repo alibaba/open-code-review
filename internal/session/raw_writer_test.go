@@ -203,15 +203,19 @@ func TestRawFileWriter_ConcurrentWrites(t *testing.T) {
 func TestRawFileWriter_OpenFailure(t *testing.T) {
 	home := t.TempDir()
 	setTestHome(t, home)
-	// Point HOME at a regular file so MkdirAll cannot create the raw tree.
-	fileHome := filepath.Join(home, "notadir")
-	if err := os.WriteFile(fileHome, []byte("x"), 0600); err != nil {
+	repoDir := "/repo"
+	// Squat the repo's raw directory path with a regular file: MkdirAll
+	// cannot create a directory over it, on any platform.
+	blocker := filepath.Join(home, ".opencodereview", rawSubDir, encodeRepoPath(repoDir))
+	if err := os.MkdirAll(filepath.Dir(blocker), 0700); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	t.Setenv("HOME", fileHome)
+	if err := os.WriteFile(blocker, []byte("x"), 0600); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
 
-	if _, err := NewRawFileWriter("/repo", "sess-x"); err == nil {
-		t.Fatal("expected open failure under unusable HOME")
+	if _, err := NewRawFileWriter(repoDir, "sess-x"); err == nil {
+		t.Fatal("expected open failure under unusable raw dir")
 	}
 }
 

@@ -45,6 +45,7 @@ func TestBindRawWriter_NilHolderIsNoop(t *testing.T) {
 
 	closer := bindRawWriter(nil, filepath.Join(home, "repo"), sess)
 	closer() // must not panic
+	sess.Finalize()
 
 	rawDir := filepath.Join(home, ".opencodereview", "raw")
 	if _, err := os.Stat(rawDir); !os.IsNotExist(err) {
@@ -74,6 +75,7 @@ func TestBindRawWriter_OpensSessionRawFile(t *testing.T) {
 	if !found {
 		t.Fatalf("raw capture file %s not created under %s", want, rawDir)
 	}
+	sess.Finalize()
 }
 
 func TestBindRawWriter_OpenFailureIsNoop(t *testing.T) {
