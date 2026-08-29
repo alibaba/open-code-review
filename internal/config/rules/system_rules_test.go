@@ -1674,8 +1674,13 @@ func TestLoadProjectRule_ConfinesUntrustedReferences(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := `{"rules":[{"path":"**/*.go","rule":"` + outside + `"}]}`
-	if err := os.WriteFile(filepath.Join(cfgDir, "rule.json"), []byte(cfg), 0o644); err != nil {
+	cfgData, err := json.Marshal(ProjectRule{
+		Rules: []ProjectRuleEntry{{Path: "**/*.go", Rule: outside}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "rule.json"), cfgData, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
