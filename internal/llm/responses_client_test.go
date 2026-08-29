@@ -1025,29 +1025,3 @@ func TestOpenAIResponsesClient_ExtraBodyPromptCacheKeyOverridesSessionID(t *test
 		t.Errorf("prompt_cache_key = %v, want typed SessionID %q", got, "file-session-uuid")
 	}
 }
-
-func TestOpenAIResponsesClient_SendsPromptCacheRetention(t *testing.T) {
-	client := NewOpenAIResponsesClient(ClientConfig{
-		URL:                  "https://example.invalid/v1",
-		Model:                "gpt-5.6-luna",
-		PromptCacheRetention: "24h",
-	})
-	params := client.buildResponsesParams("gpt-5.6-luna", ChatRequest{
-		SessionID: "conv-1",
-		Messages:  []Message{{Role: "user", Content: "review"}},
-	})
-	if got := string(params.PromptCacheRetention); got != "24h" {
-		t.Errorf("PromptCacheRetention = %q, want %q", got, "24h")
-	}
-
-	// A provider that does not opt in must not gain the field, since a
-	// non-OpenAI gateway can reject an unknown parameter outright.
-	plain := NewOpenAIResponsesClient(ClientConfig{URL: "https://example.invalid/v1", Model: "o3"})
-	plainParams := plain.buildResponsesParams("o3", ChatRequest{
-		SessionID: "conv-1",
-		Messages:  []Message{{Role: "user", Content: "review"}},
-	})
-	if got := string(plainParams.PromptCacheRetention); got != "" {
-		t.Errorf("non-opted provider got PromptCacheRetention %q, want empty", got)
-	}
-}

@@ -425,12 +425,6 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 	if req.SessionID != "" {
 		params.PromptCacheKey = openai.String(req.SessionID)
 	}
-	// The API default is "in_memory", which is short lived. A review issues
-	// dozens of turns against one growing conversation, so ask for the longer
-	// retention class where the provider supports it.
-	if c.cfg.PromptCacheRetention != "" {
-		params.PromptCacheRetention = responses.ResponseNewParamsPromptCacheRetention(c.cfg.PromptCacheRetention)
-	}
 	if len(tools) > 0 {
 		params.Tools = tools
 		if req.ToolChoice == "required" {

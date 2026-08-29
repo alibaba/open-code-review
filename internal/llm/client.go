@@ -323,7 +323,6 @@ type ClientConfig struct {
 	ExtraHeaders          map[string]string // Extra HTTP headers sent with every request
 	RetryCodes            []int             // Additional HTTP status codes that trigger retry
 	RequiresStreaming     bool
-	PromptCacheRetention  string
 	RejectsSamplingParams bool
 	DetailErrorEnvelope   bool
 	// SessionKey is the fallback prompt-cache affinity key
@@ -404,7 +403,6 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 		RequiresStreaming:     ep.RequiresStreaming,
 		RejectsSamplingParams: ep.RejectsSamplingParams,
 		DetailErrorEnvelope:   ep.DetailErrorEnvelope,
-		PromptCacheRetention:  ep.PromptCacheRetention,
 		retryCollector:        collector,
 		AWSProfile:            ep.AWSProfile,
 		AWSRegion:             ep.AWSRegion,
