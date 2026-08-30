@@ -27,20 +27,6 @@ installs may only materialize the plugin subtree.
 
 A skill for performing AI code review where OCR provides deterministic engineering (file filtering, rule resolution) and the host agent performs the actual review using its own intelligence and tools.
 
-## Prerequisites
-
-```bash
-which ocr || echo "NOT INSTALLED"
-```
-
-If `ocr` is not installed:
-
-```bash
-npm install -g @alibaba-group/open-code-review
-```
-
-No LLM configuration is needed for delegation mode.
-
 ## Workflow
 
 ### Step 1: Preview — Determine What to Review

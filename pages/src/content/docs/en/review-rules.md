@@ -160,6 +160,7 @@ matching order:
 | `**/*.java` | `java.md` |
 | `**/*.go` | `go.md` — Go source. |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md` — FreeMarker templates (SSTI / XSS / null handling). |
+| `**/*.{hbs,mustache}` | `handlebars_mustache.md` — Handlebars and Mustache templates. |
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — Astro components and islands. |
 | `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
@@ -183,6 +184,8 @@ matching order:
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
 | `**/*.m` | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files)) |
+| `**/*.sol` | `solidity.md` — Solidity smart contracts. |
+| `**/*.vy` | `vyper.md` — Vyper smart contracts. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

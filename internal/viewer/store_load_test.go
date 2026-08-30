@@ -70,7 +70,7 @@ func TestLoadSession_FullParse(t *testing.T) {
 	writeJSONL(t, filepath.Join(repoDir, "sess1.jsonl"),
 		`{"type":"session_start","timestamp":"2025-06-10T08:00:00Z","cwd":"/home/dev/proj","gitBranch":"feat","model":"claude-3","reviewMode":"commit","diffFrom":"aaa","diffTo":"bbb","diffCommit":"ccc"}`,
 		`{"type":"llm_request","filePath":"main.go","taskType":"main_task","request_no":1,"messages":[{"role":"user","content":"review this"}]}`,
-		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","content":"Code looks good","duration_ms":1500,"model":"claude-3","usage":{"prompt_tokens":100,"completion_tokens":50,"cache_read_tokens":10,"cache_write_tokens":5},"tool_calls":[{"name":"search","arguments":"query"}]}`,
+		`{"type":"llm_response","filePath":"main.go","taskType":"main_task","content":"Code looks good","reasoning_content":"checked for auth issues first","duration_ms":1500,"model":"claude-3","usage":{"prompt_tokens":100,"completion_tokens":50,"cache_read_tokens":10,"cache_write_tokens":5},"tool_calls":[{"name":"search","arguments":"query"}]}`,
 		`{"type":"tool_call","filePath":"main.go","taskType":"main_task","result":"found 3 results","ok":true,"duration_ms":20}`,
 		`{"type":"llm_request","filePath":"util.go","taskType":"plan_task","request_no":1,"messages":[]}`,
 		`{"type":"llm_response","filePath":"util.go","taskType":"plan_task","content":"planning","duration_ms":800,"model":"claude-3","usage":{"prompt_tokens":200,"completion_tokens":80,"cache_read_tokens":0,"cache_write_tokens":0}}`,
@@ -139,6 +139,9 @@ func TestLoadSession_FullParse(t *testing.T) {
 	}
 	if card.ResponseContent != "Code looks good" {
 		t.Errorf("ResponseContent = %q", card.ResponseContent)
+	}
+	if card.ReasoningContent != "checked for auth issues first" {
+		t.Errorf("ReasoningContent = %q", card.ReasoningContent)
 	}
 	if card.DurationMs != 1500 {
 		t.Errorf("DurationMs = %d", card.DurationMs)
@@ -277,7 +280,7 @@ func TestLoadSessionReadsV1Manifest(t *testing.T) {
 	}
 	writeJSONL(t, filepath.Join(repoDir, "manifest.jsonl"),
 		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
-		`{"type":"session_end","duration_seconds":1,"run_manifest":{"schema_version":"ocr.run-manifest/v1","run_id":"run-1","operation":"review","terminal_state":"complete","repository":{},"input":{"mode":"workspace"},"execution":{},"coverage":{"selected":[{"item_id":"a","path":"a.go"},{"item_id":"b","path":"b.go"}],"completed":[{"item_id":"a","path":"a.go"}],"reused":[{"item_id":"b","path":"b.go"}],"failed":[],"waived":[]},"elapsed_ms":1000}}`)
+		`{"type":"session_end","duration_seconds":1,"files_reviewed":["__grouping__","a.go,b.go","a.go"],"run_manifest":{"schema_version":"ocr.run-manifest/v1","run_id":"run-1","operation":"review","terminal_state":"complete","repository":{},"input":{"mode":"workspace"},"execution":{},"coverage":{"selected":[{"item_id":"a","path":"a.go"},{"item_id":"b","path":"b.go"}],"completed":[{"item_id":"a","path":"a.go"}],"reused":[{"item_id":"b","path":"b.go"}],"failed":[],"waived":[]},"elapsed_ms":1000}}`)
 
 	vs, err := LoadSession(root, "repo", "manifest")
 	if err != nil {
@@ -288,6 +291,9 @@ func TestLoadSessionReadsV1Manifest(t *testing.T) {
 	}
 	if vs.Summary.CompletedCount != 1 || vs.Summary.ReusedCount != 1 || vs.Summary.FailedCount != 0 || vs.Summary.WaivedCount != 0 {
 		t.Fatalf("coverage counts = %+v", vs.Summary)
+	}
+	if got := vs.Summary.FilesReviewed; len(got) != 2 || got[0] != "a.go" || got[1] != "b.go" {
+		t.Fatalf("files reviewed = %v, want [a.go b.go]", got)
 	}
 }
 

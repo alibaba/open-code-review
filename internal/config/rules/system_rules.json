@@ -15,6 +15,7 @@
     "**/*.java": "java.md",
     "**/*.go": "go.md",
     "**/*.{ftl,ftlh,ftlx}": "freemarker.md",
+    "**/*.{hbs,mustache}": "handlebars_mustache.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
     "**/*.{ts,js,tsx,jsx}": "ts_js_tsx_jsx.md",
@@ -42,6 +43,8 @@
     "**/*.zig": "zig.md",
     "**/*.thrift": "thrift.md",
     "**/*.capnp": "capnp.md",
-    "**/*.m": "matlab.md"
+    "**/*.m": "matlab.md",
+    "**/*.sol": "solidity.md",
+    "**/*.vy": "vyper.md"
   }
 }
