@@ -95,7 +95,11 @@ func runAuthStatus(out io.Writer, store codexauth.CodexStore, now time.Time) err
 	if !auth.ExpiresAt.IsZero() {
 		expiry = auth.ExpiresAt.Local().Format(time.RFC3339)
 		if !auth.ExpiresAt.After(now) {
-			expiry += " (expired)"
+			if auth.RefreshToken != "" {
+				expiry += " (expired; will refresh on next use)"
+			} else {
+				expiry += " (expired)"
+			}
 		}
 	}
 	_, err = fmt.Fprintf(out, "Account: %s\nPlan:    %s\nExpires: %s\n", maskedAccount(auth.AccountID), plan, expiry)
@@ -103,13 +107,23 @@ func runAuthStatus(out io.Writer, store codexauth.CodexStore, now time.Time) err
 }
 
 func runAuthLogout(ctx context.Context, out io.Writer, store codexauth.CodexStore, client *codexauth.OAuthClient) error {
-	auth, loadErr := store.Load()
-	var revokeErr error
-	if loadErr == nil {
-		revokeErr = client.Revoke(ctx, auth)
-	}
-	if err := store.Clear(); err != nil {
-		return fmt.Errorf("clear local Codex credentials: %w", err)
+	var loadErr, revokeErr error
+	// Hold the same cross-process lock a concurrent refresh uses: without it a
+	// mid-refresh `ocr review` can save rotated credentials after this Clear,
+	// resurrecting a session whose pre-rotation token the Revoke just killed.
+	err := codexauth.WithRefreshLock(ctx, func() error {
+		auth, loadLoadErr := store.Load()
+		loadErr = loadLoadErr
+		if loadLoadErr == nil {
+			revokeErr = client.Revoke(ctx, auth)
+		}
+		if clearErr := store.Clear(); clearErr != nil {
+			return fmt.Errorf("clear local Codex credentials: %w", clearErr)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	const accessTokenCaveat = "Already-issued access tokens may remain valid for up to ten days."
 	if loadErr != nil && !errors.Is(loadErr, codexauth.ErrNotFound) {
@@ -124,7 +138,7 @@ func runAuthLogout(ctx context.Context, out io.Writer, store codexauth.CodexStor
 		_, _ = fmt.Fprintln(out, "Local credentials were removed, but server-side revocation failed.", accessTokenCaveat)
 		return nil
 	}
-	_, err := fmt.Fprintln(out, "The refresh token was revoked and local Codex credentials were removed.", accessTokenCaveat)
+	_, err = fmt.Fprintln(out, "The refresh token was revoked and local Codex credentials were removed.", accessTokenCaveat)
 	return err
 }
 

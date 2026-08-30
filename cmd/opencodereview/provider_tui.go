@@ -1860,6 +1860,13 @@ func (m providerTUIModel) handleEnter() (tea.Model, tea.Cmd) {
 			// This provider has no key to collect, so the model step is the last
 			// one. Showing an API-key prompt that must be left blank would read as
 			// a step the user failed to complete.
+			//
+			// The api-key state still carries whatever the previously active
+			// provider seeded (or the user typed before backing out), and
+			// result() would report it as this provider's key — drop it.
+			m.apiKeyOriginal = ""
+			m.apiKeyMasked = false
+			m.apiKeyInput.SetValue("")
 			m.formError = ""
 			m.confirmed = true
 			return m, tea.Quit

@@ -167,8 +167,13 @@ func (c *OAuthClient) LoginLoopback(ctx context.Context, store CodexStore, noBro
 	authorizeURL := c.authorizeURL(pkce, state)
 	if noBrowser {
 		_, _ = fmt.Fprintf(out, "Open this URL to sign in:\n%s\n", authorizeURL)
-	} else if err := openBrowser(authorizeURL); err != nil {
-		_, _ = fmt.Fprintf(out, "Could not open a browser. Open this URL to sign in:\n%s\n", authorizeURL)
+	} else {
+		// A desktop opener can spawn successfully and still fail afterwards
+		// (headless sessions, xdg-open with no backend), and that reports no
+		// error at all. Sign-in must not depend on the browser actually
+		// opening, so the URL is always printed alongside the attempt.
+		_ = openBrowser(authorizeURL)
+		_, _ = fmt.Fprintf(out, "If a browser did not open, sign in here:\n%s\n", authorizeURL)
 	}
 
 	select {
@@ -252,6 +257,22 @@ func (c *OAuthClient) exchangeCode(ctx context.Context, code, redirectURI, verif
 	return authFromTokenResponse(response, now)
 }
 
+// isKnownOAuthErrorCode reports whether code is an error code from the OAuth 2.0
+// / device-authorization vocabularies. Error strings are built only from members
+// of this set so a server echoing submitted values can never smuggle token
+// material into an error message.
+func isKnownOAuthErrorCode(code string) bool {
+	switch code {
+	case "invalid_request", "invalid_client", "invalid_grant",
+		"unauthorized_client", "unsupported_grant_type", "invalid_scope",
+		"access_denied", "expired_token", "unauthorized",
+		"authorization_pending", "token_pending", "slow_down",
+		"temporarily_unavailable", "server_error":
+		return true
+	}
+	return false
+}
+
 func (c *OAuthClient) postForm(ctx context.Context, endpoint string, values url.Values, target any) error {
 	return c.post(ctx, endpoint, "application/x-www-form-urlencoded", strings.NewReader(values.Encode()), target)
 }
@@ -276,7 +297,14 @@ func (c *OAuthClient) post(ctx context.Context, endpoint, contentType string, bo
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		_, _ = io.Copy(io.Discard, response.Body)
+		data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		var oauthErr oauthErrorResponse
+		// Only surface error CODES from a fixed allowlist: free-text fields a
+		// server echoes back (error_description included) can contain submitted
+		// token material, and OAuth errors must never leak credentials.
+		if err := json.Unmarshal(data, &oauthErr); err == nil && isKnownOAuthErrorCode(oauthErr.Error) {
+			return fmt.Errorf("OAuth endpoint returned %s: %s", response.Status, oauthErr.Error)
+		}
 		return fmt.Errorf("OAuth endpoint returned %s", response.Status)
 	}
 	if target == nil {
@@ -422,7 +450,24 @@ func acquireRefreshLock(ctx context.Context) (func(), error) {
 				_ = os.Remove(lockPath)
 				return nil, fmt.Errorf("close Codex refresh lock: %w", closeErr)
 			}
-			return func() { _ = os.Remove(lockPath) }, nil
+			// Two waiters can break the same stale lock: one removes it and
+			// acquires, then the second's remove-then-create lands on the first
+			// holder's live lock. Reading our own PID back after the exclusive
+			// create closes that window; on mismatch we lost an unobserved race,
+			// so wait and retry instead of co-holding.
+			if owner, readErr := os.ReadFile(lockPath); readErr != nil ||
+				strings.TrimSpace(string(owner)) != strconv.Itoa(os.Getpid()) {
+				removeLockIfOwned(lockPath)
+				timer := time.NewTimer(lockRetry)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return nil, fmt.Errorf("wait for Codex credential refresh: %w", ctx.Err())
+				case <-timer.C:
+				}
+				continue
+			}
+			return func() { removeLockIfOwned(lockPath) }, nil
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("create Codex refresh lock: %w", err)
@@ -452,6 +497,30 @@ func acquireRefreshLock(ctx context.Context) (func(), error) {
 		case <-timer.C:
 		}
 	}
+}
+
+// removeLockIfOwned deletes the lock only while it still names this process, so
+// releasing after a stolen lock never deletes the new holder's file.
+func removeLockIfOwned(lockPath string) {
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return
+	}
+	if strings.TrimSpace(string(data)) == strconv.Itoa(os.Getpid()) {
+		_ = os.Remove(lockPath)
+	}
+}
+
+// WithRefreshLock runs fn while holding the cross-process refresh lock, so
+// credential teardown (logout) cannot interleave with a concurrent refresh
+// saving rotated tokens after the teardown's Clear.
+func WithRefreshLock(ctx context.Context, fn func() error) error {
+	release, err := acquireRefreshLock(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return fn()
 }
 
 func refreshLockOwnerAlive(lockPath string) (bool, error) {

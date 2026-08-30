@@ -122,7 +122,9 @@ func TestPollDeviceCodeSlowDownAndExpiry(t *testing.T) {
 }
 
 func TestPollDeviceCodeCapsSleepAtExpiry(t *testing.T) {
+	var polls int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&polls, 1)
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer server.Close()
@@ -134,7 +136,10 @@ func TestPollDeviceCodeCapsSleepAtExpiry(t *testing.T) {
 		if calls == 1 {
 			return start
 		}
-		return start.Add(deviceCodeLifetime - 10*time.Millisecond)
+		// 10ms of lifetime left at the first check, then past the deadline:
+		// the capped sleep must be followed by exactly one more poll, and
+		// expiry is declared only when THAT poll still reports pending.
+		return start.Add(deviceCodeLifetime - 10*time.Millisecond + time.Duration(calls-2)*20*time.Millisecond)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -142,6 +147,9 @@ func TestPollDeviceCodeCapsSleepAtExpiry(t *testing.T) {
 	_, err := client.pollDeviceCode(ctx, "device-1", "CODE-123", time.Hour, now)
 	if err == nil || !strings.Contains(err.Error(), "expired after 15 minutes") {
 		t.Fatalf("pollDeviceCode error = %v, want expiry", err)
+	}
+	if got := atomic.LoadInt32(&polls); got != 2 {
+		t.Fatalf("server polls = %d, want 2 (initial + final)", got)
 	}
 }
 

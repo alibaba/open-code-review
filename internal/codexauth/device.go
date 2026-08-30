@@ -171,6 +171,22 @@ func (c *OAuthClient) pollDeviceCode(
 		req.Header.Set("Content-Type", "application/json")
 		response, err := c.httpClient().Do(req)
 		if err != nil {
+			// This loop runs for the code's full 15-minute life and targets
+			// exactly the shells (headless, remote, VPN'd) where a brief
+			// transport blip is ordinary. A single failure must not discard a
+			// code the user may already have entered at the verification page;
+			// retry on the poll interval while lifetime remains. OAuth error
+			// RESPONSES (below) still abort immediately.
+			if deadline.Sub(now()) > 0 {
+				timer := time.NewTimer(interval)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return devicePollResponse{}, ctx.Err()
+				case <-timer.C:
+				}
+				continue
+			}
 			return devicePollResponse{}, fmt.Errorf("poll device authorization: %w", err)
 		}
 		data, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
@@ -210,8 +226,7 @@ func (c *OAuthClient) pollDeviceCode(
 			return devicePollResponse{}, errors.New("device authorization expired after 15 minutes")
 		}
 		sleep := interval
-		expiresAfterSleep := sleep >= remaining
-		if expiresAfterSleep {
+		if sleep >= remaining {
 			sleep = remaining
 		}
 		timer := time.NewTimer(sleep)
@@ -220,9 +235,11 @@ func (c *OAuthClient) pollDeviceCode(
 			timer.Stop()
 			return devicePollResponse{}, ctx.Err()
 		case <-timer.C:
-			if expiresAfterSleep {
-				return devicePollResponse{}, errors.New("device authorization expired after 15 minutes")
-			}
+			// When this sleep consumed the last of the lifetime, fall through
+			// and poll once more instead of declaring expiry: the user may have
+			// completed the authorization during the final sleep, and the
+			// server can still hand over the code. The post-poll deadline
+			// check above is what ends the flow if it still says pending.
 		}
 	}
 }
