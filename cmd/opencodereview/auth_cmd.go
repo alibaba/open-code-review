@@ -107,10 +107,12 @@ func runAuthStatus(out io.Writer, store codexauth.CodexStore, now time.Time) err
 }
 
 func runAuthLogout(ctx context.Context, out io.Writer, store codexauth.CodexStore, client *codexauth.OAuthClient) error {
+	const accessTokenCaveat = "Already-issued access tokens may remain valid for up to ten days."
 	var loadErr, revokeErr error
 	// Hold the same cross-process lock a concurrent refresh uses: without it a
 	// mid-refresh `ocr review` can save rotated credentials after this Clear,
 	// resurrecting a session whose pre-rotation token the Revoke just killed.
+	var clearFailed bool
 	err := codexauth.WithRefreshLock(ctx, func() error {
 		auth, loadLoadErr := store.Load()
 		loadErr = loadLoadErr
@@ -118,14 +120,24 @@ func runAuthLogout(ctx context.Context, out io.Writer, store codexauth.CodexStor
 			revokeErr = client.Revoke(ctx, auth)
 		}
 		if clearErr := store.Clear(); clearErr != nil {
+			clearFailed = true
 			return fmt.Errorf("clear local Codex credentials: %w", clearErr)
 		}
 		return nil
 	})
 	if err != nil {
-		return err
+		if clearFailed {
+			return err
+		}
+		// The lock was unavailable (contention, cancellation, or an unreadable
+		// stale lock). Local teardown must not leave tokens on disk because the
+		// lock could not be taken: clear best-effort and skip revocation.
+		if clearErr := store.Clear(); clearErr != nil {
+			return fmt.Errorf("clear local Codex credentials: %w", clearErr)
+		}
+		_, _ = fmt.Fprintln(out, "Local credentials were removed, but the credential refresh lock could not be acquired; server-side revocation was skipped.", accessTokenCaveat)
+		return nil
 	}
-	const accessTokenCaveat = "Already-issued access tokens may remain valid for up to ten days."
 	if loadErr != nil && !errors.Is(loadErr, codexauth.ErrNotFound) {
 		_, _ = fmt.Fprintln(out, "Local credentials were removed, but loading them for server-side revocation failed.", accessTokenCaveat)
 		return nil

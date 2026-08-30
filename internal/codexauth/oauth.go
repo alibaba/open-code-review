@@ -453,8 +453,10 @@ func acquireRefreshLock(ctx context.Context) (func(), error) {
 			// Two waiters can break the same stale lock: one removes it and
 			// acquires, then the second's remove-then-create lands on the first
 			// holder's live lock. Reading our own PID back after the exclusive
-			// create closes that window; on mismatch we lost an unobserved race,
-			// so wait and retry instead of co-holding.
+			// create detects the common ordering of that window; on mismatch we
+			// lost an unobserved race, so wait and retry instead of co-holding.
+			// The stale-break path guards its remove separately
+			// (removeStaleLockIfUnchanged).
 			if owner, readErr := os.ReadFile(lockPath); readErr != nil ||
 				strings.TrimSpace(string(owner)) != strconv.Itoa(os.Getpid()) {
 				removeLockIfOwned(lockPath)
@@ -477,16 +479,22 @@ func acquireRefreshLock(ctx context.Context) (func(), error) {
 			return nil, fmt.Errorf("inspect Codex refresh lock: %w", statErr)
 		}
 		if statErr == nil && time.Since(info.ModTime()) > refreshLockStaleAfter {
-			ownerAlive, ownerErr := refreshLockOwnerAlive(lockPath)
-			if ownerErr != nil {
-				return nil, ownerErr
+			observed, readErr := os.ReadFile(lockPath)
+			if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+				return nil, fmt.Errorf("read Codex refresh lock owner: %w", readErr)
 			}
-			// Age alone is not proof that a configurable refresh request has stopped.
-			if !ownerAlive {
-				if removeErr := os.Remove(lockPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-					return nil, fmt.Errorf("remove stale Codex refresh lock: %w", removeErr)
+			if readErr == nil {
+				ownerAlive, ownerErr := refreshLockOwnerAlive(lockPath)
+				if ownerErr != nil {
+					return nil, ownerErr
 				}
-				continue
+				// Age alone is not proof that a configurable refresh request has stopped.
+				if !ownerAlive {
+					if removeErr := removeStaleLockIfUnchanged(lockPath, observed); removeErr != nil {
+						return nil, removeErr
+					}
+					continue
+				}
 			}
 		}
 		timer := time.NewTimer(lockRetry)
@@ -509,6 +517,30 @@ func removeLockIfOwned(lockPath string) {
 	if strings.TrimSpace(string(data)) == strconv.Itoa(os.Getpid()) {
 		_ = os.Remove(lockPath)
 	}
+}
+
+// removeStaleLockIfUnchanged breaks a stale lock only when its content is
+// unchanged from the bytes observed before the owner-liveness probe. Another
+// waiter may have removed that stale lock and acquired a fresh one during the
+// probe; removing unconditionally would delete the fresh lock and let two
+// processes co-hold. The verify-then-remove gap stays a single read wide;
+// closing it fully needs a kernel-level lock (flock/LockFileEx) instead of
+// path-based ownership.
+func removeStaleLockIfUnchanged(lockPath string, observed []byte) error {
+	current, err := os.ReadFile(lockPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("re-read stale Codex refresh lock: %w", err)
+	}
+	if string(current) != string(observed) {
+		return nil
+	}
+	if removeErr := os.Remove(lockPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return fmt.Errorf("remove stale Codex refresh lock: %w", removeErr)
+	}
+	return nil
 }
 
 // WithRefreshLock runs fn while holding the cross-process refresh lock, so
