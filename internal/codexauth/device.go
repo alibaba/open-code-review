@@ -4,6 +4,7 @@
 package codexauth
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -153,11 +154,16 @@ func (c *OAuthClient) pollDeviceCode(
 	}
 	deadline := now().Add(deviceCodeLifetime)
 	for {
-		body := strings.NewReader(fmt.Sprintf(
-			`{"device_auth_id":%q,"user_code":%q}`,
-			deviceAuthID,
-			userCode,
-		))
+		// Server-derived values: JSON-encode rather than %q so the wire form
+		// stays valid whatever the deviceauth backend emits.
+		payload, err := json.Marshal(map[string]string{
+			"device_auth_id": deviceAuthID,
+			"user_code":      userCode,
+		})
+		if err != nil {
+			return devicePollResponse{}, fmt.Errorf("encode device-code poll request: %w", err)
+		}
+		body := bytes.NewReader(payload)
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.issuer()+"/api/accounts/deviceauth/token", body)
 		if err != nil {
 			return devicePollResponse{}, fmt.Errorf("create device-code poll request: %w", err)
