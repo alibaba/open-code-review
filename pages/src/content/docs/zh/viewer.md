@@ -10,9 +10,8 @@ sidebar:
 ## 启动
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
-ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer                        # binds localhost:5483
+ocr viewer --bind 0.0.0.0 -p 8080 # bind to all interfaces on port 8080
 ```
 
 默认地址是 `localhost:5483`。服务器在前台运行——`Ctrl+C` 停止。会话在每次请求时
@@ -21,9 +20,9 @@ JSONL 文件出现就会显示。
 
 > **DNS-rebinding 防护。** 查看器会对照 loopback 白名单
 > （`localhost`、`127.0.0.1`、`::1`）检查 `Host` 头。具体的绑定主机
-> （如 `--addr 192.168.1.10:5483`）会自动加入，但**通配**绑定
-> （`:3000`、`0.0.0.0`、`::`）不会——此时从 LAN IP 或主机名访问 UI 会返回
-> `forbidden host`。要让通配绑定可被访问，设置
+> （如 `--bind 192.168.1.10 -p 5483`）会自动加入。**通配**绑定
+> （`--bind 0.0.0.0` 或 `--bind ::`）接受任意 Host，并打印警告，因为它会在
+> 所有接口上暴露查看器。若要保持通配绑定的访问限制，设置
 > `OCR_VIEWER_ALLOWED_HOSTS` 为逗号分隔的允许主机名列表
 > （如 `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`）。
 

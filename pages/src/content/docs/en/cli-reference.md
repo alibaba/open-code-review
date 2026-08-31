@@ -598,11 +598,12 @@ provider` or non-interactively with `ocr config set provider <name>`.
 ocr viewer [flags]
 
 Flags:
-  --addr <address>   listen address (default: localhost:5483)
+  --bind <address>          interface to bind to (default "localhost")
+  -p, --port <port>         port to listen on (default 5483)
 
 Examples:
-  ocr viewer                     # start on default port
-  ocr viewer --addr :3000        # bind to all interfaces on port 3000
+  ocr viewer                       # start on localhost:5483
+  ocr viewer --bind 0.0.0.0 -p 8080  # bind to all interfaces on port 8080
 ```
 
 Starts an embedded HTTP server that reads

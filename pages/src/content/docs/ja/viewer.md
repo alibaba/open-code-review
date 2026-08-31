@@ -10,9 +10,8 @@ sidebar:
 ## 起動
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
-ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer                        # binds localhost:5483
+ocr viewer --bind 0.0.0.0 -p 8080 # bind to all interfaces on port 8080
 ```
 
 デフォルトのアドレスは `localhost:5483` です。サーバーはフォアグラウンドで実行されます——`Ctrl+C` で停止します。セッションは各リクエスト時に
@@ -21,9 +20,8 @@ JSONL ファイルが現れ次第表示されます。
 
 > **DNS リバインディング対策。** ビューアは `Host` ヘッダーをループバックのホワイトリスト
 > （`localhost`、`127.0.0.1`、`::1`）と照合します。具体的なバインドホスト
-> （`--addr 192.168.1.10:5483` など）は自動的に追加されますが、**ワイルドカード**バインド
-> （`:3000`、`0.0.0.0`、`::`）は追加されません——この場合、LAN IP やホスト名から UI にアクセスすると
-> `forbidden host` が返されます。ワイルドカードバインドをアクセス可能にするには、
+> （`--bind 192.168.1.10 -p 5483` など）は自動的に追加されます。**ワイルドカード**バインド
+> （`--bind 0.0.0.0` または `--bind ::`）は任意の Host を受け入れ、全インターフェースで公開されるため警告を出力します。ワイルドカードバインドを制限したままにするには、
 > `OCR_VIEWER_ALLOWED_HOSTS` にカンマ区切りの許可ホスト名リストを設定します
 > （例：`OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`）。
 

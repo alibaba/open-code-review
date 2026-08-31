@@ -11,9 +11,8 @@ sidebar:
 ## 실행하기 {#launching}
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
-ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer                        # binds localhost:5483
+ocr viewer --bind 0.0.0.0 -p 8080 # bind to all interfaces on port 8080
 ```
 
 기본 주소는 `localhost:5483`입니다. 서버는 포그라운드를 잡고 있으며 `Ctrl+C`로
@@ -23,10 +22,10 @@ ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
 
 > **DNS 리바인딩 방어.** 뷰어는 `Host` 헤더를 루프백 허용 목록(`localhost`,
 > `127.0.0.1`, `::1`)과 대조합니다. 바인드 호스트를 콕 집어 준 경우(예:
-> `--addr 192.168.1.10:5483`)는 자동으로 목록에 더해지지만 **와일드카드**
-> 바인드(`:3000`, `0.0.0.0`, `::`)는 그렇지 않습니다. 이때 LAN IP나 호스트
-> 이름으로 UI에 접근하면 `forbidden host`가 돌아옵니다. 와일드카드 바인드를
-> 열려면 `OCR_VIEWER_ALLOWED_HOSTS`에 허용할 호스트 이름을 쉼표로 이어
+> `--bind 192.168.1.10 -p 5483`)는 자동으로 목록에 더해집니다. **와일드카드**
+> 바인드(`--bind 0.0.0.0` 또는 `--bind ::`)는 모든 Host를 허용하며, 모든
+> 인터페이스에 노출되므로 경고를 출력합니다. 와일드카드 바인드를 제한하려면
+> `OCR_VIEWER_ALLOWED_HOSTS`에 허용할 호스트 이름을 쉼표로 이어
 > 지정하세요(예: `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`).
 
 ## 페이지 세 개 {#three-pages}
