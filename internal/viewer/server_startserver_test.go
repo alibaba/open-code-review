@@ -18,7 +18,7 @@ func TestStartServer_SessionsRootError(t *testing.T) {
 	if _, err := SessionsRoot(); err == nil {
 		t.Skip("home dir resolvable despite empty HOME; platform-specific")
 	}
-	if err := StartServer("127.0.0.1:0"); err == nil {
+	if err := StartServer("127.0.0.1:0", false); err == nil {
 		t.Fatal("expected StartServer to fail when sessions root cannot resolve")
 	}
 }
@@ -33,9 +33,37 @@ func TestStartServer_AddrInUse(t *testing.T) {
 	}
 	defer ln.Close()
 
-	err = StartServer(ln.Addr().String())
+	err = StartServer(ln.Addr().String(), false)
 	if err == nil {
 		t.Fatal("expected StartServer to fail binding an in-use address")
+	}
+}
+
+func TestShouldAutoOpenEnv(t *testing.T) {
+	tests := []struct {
+		name      string
+		requested bool
+		stdoutTTY bool
+		sshConn   string
+		display   string
+		wayland   string
+		goos      string
+		want      bool
+	}{
+		{"not requested", false, true, "", "", "", "darwin", false},
+		{"requested with tty", true, true, "", "", "", "darwin", true},
+		{"non-tty stdout", true, false, "", "", "", "darwin", false},
+		{"ssh session", true, true, "10.0.0.1 1234", "", "", "darwin", false},
+		{"linux with display", true, true, "", ":0", "", "linux", true},
+		{"linux with wayland", true, true, "", "", "wayland-0", "linux", true},
+		{"linux headless", true, true, "", "", "", "linux", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldAutoOpenEnv(tt.requested, tt.stdoutTTY, tt.sshConn, tt.display, tt.wayland, tt.goos); got != tt.want {
+				t.Errorf("shouldAutoOpenEnv(...) = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

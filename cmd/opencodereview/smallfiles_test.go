@@ -66,6 +66,9 @@ func TestViewerCmd_DefaultAddr(t *testing.T) {
 	if viewerOpts.addr != "localhost:5483" {
 		t.Errorf("default addr = %q, want localhost:5483", viewerOpts.addr)
 	}
+	if viewerOpts.noOpen {
+		t.Error("default no-open = true, want false")
+	}
 }
 
 func TestRunLLMProviders(t *testing.T) {
