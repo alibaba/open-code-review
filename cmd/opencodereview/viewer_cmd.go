@@ -22,6 +22,7 @@ var viewerCmd = &cobra.Command{
 	Long:    "Session history WebUI viewer.",
 	Args:    cobra.NoArgs,
 	Example: `  ocr viewer              # start + open browser
+  ocr viewer --addr :3000  # bind to all interfaces on port 3000
   ocr viewer --no-open    # just print the URL`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return viewer.StartServer(viewerOpts.addr, !viewerOpts.noOpen)

@@ -81,7 +81,7 @@ func StartServer(addr string, autoOpen bool) error {
 		serveErr <- srv.Serve(ln)
 	}()
 
-	url := "http://" + DisplayAddr(addr)
+	url := "http://" + DisplayAddr(ln.Addr().String())
 	fmt.Printf("Viewer ready: %s\n", url)
 	if shouldAutoOpen(autoOpen) {
 		go func() {
