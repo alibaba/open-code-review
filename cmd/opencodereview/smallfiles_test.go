@@ -62,9 +62,32 @@ func TestPrintVersion_WithCommitAndDate(t *testing.T) {
 	}
 }
 
-func TestViewerCmd_DefaultAddr(t *testing.T) {
-	if viewerOpts.addr != "localhost:5483" {
-		t.Errorf("default addr = %q, want localhost:5483", viewerOpts.addr)
+func TestViewerCmd_DefaultBindPort(t *testing.T) {
+	if viewerOpts.bind != "localhost" {
+		t.Errorf("default bind = %q, want localhost", viewerOpts.bind)
+	}
+	if viewerOpts.port != 5483 {
+		t.Errorf("default port = %d, want 5483", viewerOpts.port)
+	}
+}
+
+func TestViewerListenAddr(t *testing.T) {
+	tests := []struct {
+		name string
+		bind string
+		port int
+		want string
+	}{
+		{"defaults", "localhost", 5483, "localhost:5483"},
+		{"wildcard bind", "0.0.0.0", 8080, "0.0.0.0:8080"},
+		{"ipv6 bind", "::", 8080, "[::]:8080"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := viewerListenAddr(tt.bind, tt.port); got != tt.want {
+				t.Errorf("viewerListenAddr(%q, %d) = %q, want %q", tt.bind, tt.port, got, tt.want)
+			}
+		})
 	}
 }
 
