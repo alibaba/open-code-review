@@ -84,7 +84,7 @@ func StartServer(addr string) error {
 
 	url := "http://" + DisplayAddr(addr)
 	if term.IsTerminal(os.Stdin.Fd()) {
-		fmt.Printf("\nViewer ready: %s\n", url)
+		fmt.Printf("Viewer ready: %s\n", url)
 		fmt.Printf("Press Enter to open in browser...\n")
 		go func() {
 			if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
@@ -95,7 +95,7 @@ func StartServer(addr string) error {
 			}
 		}()
 	} else {
-		fmt.Printf("\nViewer ready: %s\n", url)
+		fmt.Printf("Viewer ready: %s\n", url)
 	}
 
 	return <-serveErr
