@@ -12,9 +12,10 @@ sidebar:
 ## Запуск
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
+ocr viewer                       # start + open browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --no-open             # just print the URL
 ```
 
 Адрес по умолчанию — `localhost:5483`. Сервер работает на переднем плане;

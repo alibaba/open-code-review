@@ -563,11 +563,13 @@ Built-in providers:
 ocr viewer [flags]
 
 Flags:
-  --addr <address>   listen address (default: localhost:5483)
+  --addr <address>   listen address (default "localhost:5483")
+      --no-open      do not open the browser automatically
 
 Examples:
-  ocr viewer                     # start on default port
+  ocr viewer                     # start + open browser
   ocr viewer --addr :3000        # bind to all interfaces on port 3000
+  ocr viewer --no-open           # just print the URL
 ```
 
 启动一个内嵌 HTTP 服务器，读取 `~/.opencodereview/sessions/...`，并以浏览器友好的 UI 渲染历史评审会话。见[会话查看器](../viewer/)。

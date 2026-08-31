@@ -12,9 +12,10 @@ review.
 ## Launching
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
+ocr viewer                       # start + open browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --no-open             # just print the URL
 ```
 
 The default address is `localhost:5483`. The server holds the foreground

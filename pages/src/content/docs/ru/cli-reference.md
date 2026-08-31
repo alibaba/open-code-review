@@ -579,11 +579,13 @@ Built-in providers:
 ocr viewer [flags]
 
 Flags:
-  --addr <address>   listen address (default: localhost:5483)
+  --addr <address>   listen address (default "localhost:5483")
+      --no-open      do not open the browser automatically
 
 Examples:
-  ocr viewer                     # start on default port
+  ocr viewer                     # start + open browser
   ocr viewer --addr :3000        # bind to all interfaces on port 3000
+  ocr viewer --no-open           # just print the URL
 ```
 
 Запускает встроенный HTTP-сервер, который читает данные из

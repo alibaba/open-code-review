@@ -11,9 +11,10 @@ sidebar:
 ## 실행하기 {#launching}
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
+ocr viewer                       # start + open browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --no-open             # just print the URL
 ```
 
 기본 주소는 `localhost:5483`입니다. 서버는 포그라운드를 잡고 있으며 `Ctrl+C`로

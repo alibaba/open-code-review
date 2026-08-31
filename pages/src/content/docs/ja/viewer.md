@@ -10,9 +10,10 @@ sidebar:
 ## 起動
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
+ocr viewer                       # start + open browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --no-open             # just print the URL
 ```
 
 デフォルトのアドレスは `localhost:5483` です。サーバーはフォアグラウンドで実行されます——`Ctrl+C` で停止します。セッションは各リクエスト時に
