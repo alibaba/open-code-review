@@ -16,6 +16,7 @@
     "**/*.go": "go.md",
     "**/*.{ftl,ftlh,ftlx}": "freemarker.md",
     "**/*.{hbs,mustache}": "handlebars_mustache.md",
+    "**/*.{jinja2,j2}": "jinja.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
     "**/*.{ts,js,tsx,jsx}": "ts_js_tsx_jsx.md",
