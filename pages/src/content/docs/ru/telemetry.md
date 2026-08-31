@@ -144,7 +144,7 @@ review.run
 | `subtask.execute.group.<group-key>` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file` |
 | `main.loop` | `group.label`, `round` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
-| `event.grouping.skipped` | `strategy`, `group.file_count`, `lines.changed`, `threshold.files`, `threshold.lines` |
+| `event.grouping.skipped` | `strategy`, `file.count`, `lines.changed`, `threshold.files`, `threshold.lines` |
 | `event.plan.skipped` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file`, `threshold`, `threshold.group` |
 | `event.plan.failed` | `group.label`, `message` |
 | `event.token.threshold.exceeded` | `group.label`, `tokens`, `max_tokens`, `round` |
@@ -175,7 +175,7 @@ OCR записывает числовые метрики с помощью из�
 |---|---|
 | `review.started` | Различия загружены; известно количество файлов для ревью. |
 | `no.files.changed` | После разрешения diff не осталось файлов. |
-| `grouping.skipped` | В наборе изменений оказалось меньше файлов, чем `GROUPING_MIN_FILES`, поэтому вызов группировки был пропущен. `strategy` — это `bundle_all` (объём изменений ниже `GROUPING_BUNDLE_LINE_THRESHOLD`, все файлы в одной группе) или `per_file` (на уровне порога и выше, по одной группе на файл). |
+| `grouping.skipped` | В наборе изменений оказалось меньше файлов, чем `GROUPING_MIN_FILES`, поэтому вызов группировки был пропущен. `strategy` — это `bundle_all` (объём изменений ниже `GROUPING_BUNDLE_LINE_THRESHOLD`, все файлы в одной группе) или `per_file` (на уровне порога и выше, по одной группе на файл). Набор из одного файла всегда даёт `per_file` — делить нечего, какими бы ни были пороги — и сообщается только здесь, без строки в терминале. |
 | `plan.skipped` | Группа оказалась ниже обоих порогов plan: у самого большого файла группы изменений меньше, чем `PLAN_MODE_LINE_THRESHOLD`, и (для групп из 2+ файлов) суммарно меньше, чем `PLAN_MODE_GROUP_LINE_THRESHOLD`. |
 | `plan.failed` | Этап планирования завершился с ошибкой; основной цикл запущен без плана. |
 | `token.threshold.exceeded` | Число токенов промпта превысило 80 % от `MAX_TOKENS` (предел ввода); группа пропущена. |

@@ -141,7 +141,7 @@ Each span carries useful attributes:
 | `subtask.execute.group.<group-key>` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file` |
 | `main.loop` | `group.label`, `round` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
-| `event.grouping.skipped` | `strategy`, `group.file_count`, `lines.changed`, `threshold.files`, `threshold.lines` |
+| `event.grouping.skipped` | `strategy`, `file.count`, `lines.changed`, `threshold.files`, `threshold.lines` |
 | `event.plan.skipped` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file`, `threshold`, `threshold.group` |
 | `event.plan.failed` | `group.label`, `message` |
 | `event.token.threshold.exceeded` | `group.label`, `tokens`, `max_tokens`, `round` |
@@ -172,7 +172,7 @@ The full list:
 |---|---|
 | `review.started` | Diffs loaded; we know how many files we'll review. |
 | `no.files.changed` | The diff resolved to zero files. |
-| `grouping.skipped` | The change set held fewer than `GROUPING_MIN_FILES` files, so the grouping call was skipped. `strategy` is `bundle_all` (churn below `GROUPING_BUNDLE_LINE_THRESHOLD`, every file in one group) or `per_file` (at or above it, one group per file). |
+| `grouping.skipped` | The change set held fewer than `GROUPING_MIN_FILES` files, so the grouping call was skipped. `strategy` is `bundle_all` (churn below `GROUPING_BUNDLE_LINE_THRESHOLD`, every file in one group) or `per_file` (at or above it, one group per file). A single-file change set is always `per_file` — there is nothing to partition, whatever the thresholds say — and reports only here, with no terminal line. |
 | `plan.skipped` | A group was below both plan thresholds: its largest file changed fewer than `PLAN_MODE_LINE_THRESHOLD` lines, and (for 2+ file groups) the total was below `PLAN_MODE_GROUP_LINE_THRESHOLD`. |
 | `plan.failed` | The plan phase errored; main loop ran without a plan. |
 | `token.threshold.exceeded` | Prompt tokens > 80 % of `MAX_TOKENS` (the input ceiling); group skipped. |

@@ -431,6 +431,74 @@ func TestGroupDiffs_BundleDisabledFallsToPerFile(t *testing.T) {
 	}
 }
 
+func TestGroupDiffs_SingleFileSkipsQuietly(t *testing.T) {
+	// A single file reports the skip through telemetry but prints nothing: the
+	// terminal reader gains nothing from being told that one file needs no
+	// partition. The group keeps the file path as its label, not
+	// smallChangeSetLabel — this path must not fall through to the bundle shape.
+	diffs := []model.Diff{{NewPath: "a.go", Insertions: 3, Deletions: 1, Diff: "diff a"}}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":["a.go"]}]`}
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(4, 200), 0, nil)
+	restore()
+
+	if client.called {
+		t.Error("grouping LLM was called for a single-file change set")
+	}
+	if len(result.groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(result.groups))
+	}
+	if result.groups[0].Label != "a.go" {
+		t.Errorf("label = %q, want the file path", result.groups[0].Label)
+	}
+	if got := buf.String(); got != "" {
+		t.Errorf("single-file skip printed %q, want no output", got)
+	}
+}
+
+func TestGroupDiffs_SingleFileSkipsWithGroupingDisabled(t *testing.T) {
+	// GroupingMinFiles of 0 makes GroupingPlan return GroupingViaLLM, so only the
+	// unconditional single-file short-circuit stops a pointless grouping call for
+	// one file. Guards the ordering of that check against GroupingPlan.
+	diffs := []model.Diff{{NewPath: "a.go", Insertions: 3, Diff: "diff a"}}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":["a.go"]}]`}
+	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(0, 200), 0, nil)
+	if client.called {
+		t.Error("grouping LLM was called for a single file with GroupingMinFiles disabled")
+	}
+	if len(result.groups) != 1 {
+		t.Fatalf("got %d groups, want 1", len(result.groups))
+	}
+}
+
+func TestGroupDiffs_BundleSplitByMaxFilesPerGroup(t *testing.T) {
+	// GroupingMinFiles raised past maxFilesPerGroup, which is the case the bundle's
+	// enforceMaxFilesPerGroup call exists to guard: the bundle is chopped into
+	// 10-file chunks, so the shape is neither one group nor one per file.
+	diffs := make([]model.Diff, 12)
+	for i := range diffs {
+		diffs[i] = model.Diff{NewPath: fmt.Sprintf("f%d.go", i), Insertions: 1, Diff: "d"}
+	}
+	client := &fakeGroupingClient{response: `[{"label":"x","files":["f0.go"]}]`}
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	result := groupDiffs(context.Background(), diffs, client, "fake", groupingSkipTemplate(13, 200), 0, nil)
+	restore()
+
+	if client.called {
+		t.Error("grouping LLM was called for a below-threshold change set")
+	}
+	if len(result.groups) != 2 {
+		t.Fatalf("got %d groups, want 2 (10 + 2)", len(result.groups))
+	}
+	if !strings.Contains(buf.String(), "reviewing as 2 groups") {
+		t.Errorf("log = %q, want it to name the 2-group shape", buf.String())
+	}
+}
+
 func TestCallGroupingLLM_EmptyResponse(t *testing.T) {
 	diffs := []model.Diff{{NewPath: "a.go"}}
 	client := &fakeGroupingClient{response: ""}

@@ -62,6 +62,20 @@ type groupingSessionOpts struct {
 // semantic groups. Falls back to one-file-per-group on any error.
 func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, modelName string, tpl template.Template, tokenLimit int, sessOpts *groupingSessionOpts) groupDiffsResult {
 	if len(diffs) <= 1 {
+		// Nothing to partition, whatever the thresholds say. This short-circuit is
+		// unconditional and must stay ahead of GroupingPlan, which returns
+		// GroupingViaLLM once GroupingMinFiles is 0 — that would send a grouping
+		// call for a single file. Keeping it here also keeps the group's label as
+		// the file path rather than smallChangeSetLabel.
+		//
+		// The skip is still reported: someone counting skipped groupings must not
+		// have to know about a hidden path. Telemetry only, though — it is
+		// aggregated and has to be complete, whereas a reader of the terminal does
+		// not need telling that one file needs no partition.
+		if len(diffs) == 1 {
+			totalChanged, _ := diffsChurn(diffs)
+			emitGroupingSkipped(ctx, template.GroupingPerFile, len(diffs), totalChanged, tpl)
+		}
 		return groupDiffsResult{groups: toSingleFileGroups(diffs)}
 	}
 
@@ -120,14 +134,26 @@ func groupWithoutLLM(ctx context.Context, diffs []model.Diff, strategy template.
 	}
 	fmt.Fprintf(stdout.Writer(), "[ocr] Skipping LLM grouping for %d file(s), %d changed line(s) — %s\n",
 		len(diffs), totalChanged, shape)
+	emitGroupingSkipped(ctx, strategy, len(diffs), totalChanged, tpl)
+
+	return groups
+}
+
+// emitGroupingSkipped records a partition that was decided without an LLM round
+// trip. Both skip paths report through here so their attribute sets cannot drift
+// apart.
+//
+// The count rides on file.count, not group.file_count: the event fires before any
+// FileGroup exists, so it describes the change set the way review.started does,
+// rather than the group-scoped spans that pair group.file_count with a
+// group.label there is none of here.
+func emitGroupingSkipped(ctx context.Context, strategy template.GroupingStrategy, fileCount int, totalChanged int64, tpl template.Template) {
 	telemetry.Event(ctx, "grouping.skipped",
 		telemetry.AnyToAttr("strategy", strategy.String()),
-		telemetry.AnyToAttr("group.file_count", len(diffs)),
+		telemetry.AnyToAttr("file.count", fileCount),
 		telemetry.AnyToAttr("lines.changed", totalChanged),
 		telemetry.AnyToAttr("threshold.files", tpl.GroupingMinFiles),
 		telemetry.AnyToAttr("threshold.lines", tpl.GroupingBundleLineThreshold))
-
-	return groups
 }
 
 func callGroupingLLM(ctx context.Context, diffs []model.Diff, client llm.LLMClient, modelName string, task *template.LlmConversation, maxTokens int, sessOpts *groupingSessionOpts) (groups []FileGroup, usage *llm.UsageInfo, err error) {
