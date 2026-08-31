@@ -84,14 +84,18 @@ func StartServer(addr string) error {
 
 	url := "http://" + DisplayAddr(addr)
 	if term.IsTerminal(os.Stdin.Fd()) {
-		fmt.Printf("\nPress Enter to open the URL in your browser")
-		if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err == nil {
+		fmt.Printf("\nViewer ready: %s\n", url)
+		fmt.Printf("Press Enter to open in browser...\n")
+		go func() {
+			if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
+				return
+			}
 			if err := openBrowser(url); err != nil {
 				fmt.Printf("\nCould not open browser automatically: %v\n", err)
 			}
-		}
+		}()
 	} else {
-		fmt.Printf("\nOpen browser: %s\n", url)
+		fmt.Printf("\nViewer ready: %s\n", url)
 	}
 
 	return <-serveErr
