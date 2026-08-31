@@ -177,6 +177,7 @@ diff 단계에서 일어납니다.
 | `**/*.m` | `matlab.md`(또는 [내용 탐지](#content-sniffing-for-m-files)로 `objc.md`) |
 | `**/*.sol` | `solidity.md` — Solidity 스마트 컨트랙트. |
 | `**/*.vy` | `vyper.md` — Vyper 스마트 컨트랙트. |
+| `**/*.cr` | `crystal.md` — Crystal 소스. |
 | *(대체값)* | `default.md` |
 
 해석된 규칙 본문은 plan과 main 작업 프롬프트에서 `{{system_rule}}` 자리에 들어갑니다.
