@@ -18,11 +18,12 @@ ocr viewer --bind 0.0.0.0 -p 8080 # bind to all interfaces on port 8080
 从 `~/.opencodereview/sessions/` 惰性扫描，因此另一个终端里运行的评审一旦其
 JSONL 文件出现就会显示。
 
-> **DNS-rebinding 防护。** 查看器会对照 loopback 白名单
-> （`localhost`、`127.0.0.1`、`::1`）检查 `Host` 头。具体的绑定主机
-> （如 `--bind 192.168.1.10 -p 5483`）会自动加入，但**通配**绑定
-> （`--bind 0.0.0.0` 或 `--bind ::`）不会加入任何非 loopback 主机。从 LAN IP 或
-> 主机名访问 UI 会返回 `forbidden host`，除非设置
+> **DNS-rebinding 防护，而非访问控制。** 查看器会对照白名单
+> （`localhost`、`127.0.0.1`、`::1`）检查 `Host` 头。这可以阻止 DNS rebinding，
+> 但能访问监听端口的对端仍可发送 `Host: localhost`；白名单不是身份认证，也不限制哪些
+> 网络对端可以连接。具体的绑定主机（如 `--bind 192.168.1.10 -p 5483`）会加入白名单。
+> **通配**绑定（`--bind 0.0.0.0` 或 `--bind ::`）不会加入非 loopback 主机。要在暴露
+> 查看器时允许特定的非 loopback `Host` 头，请设置
 > `OCR_VIEWER_ALLOWED_HOSTS` 为逗号分隔的允许主机名列表
 > （如 `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`）。
 

@@ -9,7 +9,6 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -57,8 +56,10 @@ func StartServer(addr string) error {
 	// = source code being reviewed and the LLM's analysis of it).
 	allowed := resolveAllowedHostsFromEnv(addr)
 	bindHost := splitBindHost(addr)
-	if isWildcardBindHost(bindHost) && os.Getenv(EnvAllowedHosts) == "" {
-		fmt.Printf("\nWarning: wildcard bind serves loopback hosts only; set OCR_VIEWER_ALLOWED_HOSTS to allow other hosts\n")
+	if isWildcardBindHost(bindHost) {
+		fmt.Printf("\nWarning: wildcard bind listens on all interfaces; the Host allowlist mitigates DNS rebinding but is not network access control\n")
+	} else if bindHost != "" && !isLoopbackHost(bindHost) {
+		fmt.Printf("\nWarning: non-loopback bind exposes the viewer on %s; the Host allowlist mitigates DNS rebinding but is not network access control\n", bindHost)
 	}
 	guarded := hostGuard(allowed, mux)
 
