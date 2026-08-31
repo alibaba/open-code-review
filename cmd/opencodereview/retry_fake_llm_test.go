@@ -37,6 +37,10 @@ type fakeLLM struct {
 	// attemptsByFile counts real HTTP attempts per file, so a test can assert
 	// the SDK retried rather than OCR re-requesting.
 	attemptsByFile map[string]int
+	// groupingCalls counts requests recognized as the GROUPING_TASK call, so a
+	// test can prove the recognition still works — see
+	// assertGroupingRecognized.
+	groupingCalls int
 	// rateLimitOnce lists files whose first attempt returns 429.
 	rateLimitOnce map[string]bool
 	// hardFail lists files whose every attempt returns 402.
@@ -61,6 +65,28 @@ func (f *fakeLLM) failAll() {
 	defer f.mu.Unlock()
 	for _, name := range markers {
 		f.hardFail[name] = true
+	}
+}
+
+// assertGroupingRecognized fails if no request matched groupingSystemPrompt.
+// Without it a reworded GROUPING_TASK system prompt would degrade these tests
+// silently: the fake would miss the grouping call, fall through to the plan
+// response, fail to parse as a grouping reply, and leave groupDiffs falling back
+// to per-file dispatch — the very shape the grouping branch constructs on
+// purpose. Every assertion would still pass with the coverage gone.
+//
+// One test calling this is enough. A prompt reword is a global event, so a
+// single guard catches it; it is deliberately not in startFakeLLM's cleanup,
+// because a test whose change set never reaches the grouping call would then
+// fail for the wrong reason.
+func (f *fakeLLM) assertGroupingRecognized(t *testing.T) {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.groupingCalls == 0 {
+		t.Fatalf("no request matched %q — did GROUPING_TASK's system prompt change? "+
+			"Point groupingSystemPrompt at a fragment that still appears in "+
+			"internal/config/template/prompts/grouping_task_system.md", groupingSystemPrompt)
 	}
 }
 
@@ -89,9 +115,13 @@ var markers = map[string]string{
 	"MARKER_DELTA": "d.go",
 }
 
-// groupingSystemPrompt is a stable fragment of GROUPING_TASK's system prompt.
-// The grouping call carries file metadata only, never diff bodies, so it has no
+// groupingSystemPrompt is a stable fragment of GROUPING_TASK's system prompt,
+// copied from internal/config/template/prompts/grouping_task_system.md. The
+// grouping call carries file metadata only, never diff bodies, so it has no
 // marker to attribute it by; this is what identifies it instead.
+//
+// Nothing links the two files at compile time, so a reword there silently stops
+// matching here. assertGroupingRecognized is what turns that into a failure.
 const groupingSystemPrompt = "file grouping assistant"
 
 // groupingReply is one element of the JSON array GROUPING_TASK must return.
@@ -122,6 +152,9 @@ func (f *fakeLLM) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Served before the injection switch on purpose: the grouping call carries no
 	// marker, so it must never absorb a file's 429 or 402.
 	if bytes.Contains(raw, []byte(groupingSystemPrompt)) {
+		f.mu.Lock()
+		f.groupingCalls++
+		f.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		groups := make([]groupingReply, 0, len(markers))
 		for _, name := range markers {
