@@ -28,6 +28,9 @@ var viewerCmd = &cobra.Command{
 	Example: `  ocr viewer                      # start on localhost:5483
   ocr viewer --bind 0.0.0.0 -p 8080  # bind to all interfaces on port 8080`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateViewerPort(viewerOpts.port); err != nil {
+			return err
+		}
 		addr := viewerListenAddr(viewerOpts.bind, viewerOpts.port)
 		fmt.Printf("Open Code Review Viewer starting on http://%s\n", viewer.DisplayAddr(addr))
 		return viewer.StartServer(addr)
@@ -41,4 +44,11 @@ func init() {
 
 func viewerListenAddr(bind string, port int) string {
 	return net.JoinHostPort(bind, strconv.Itoa(port))
+}
+
+func validateViewerPort(port int) error {
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535")
+	}
+	return nil
 }

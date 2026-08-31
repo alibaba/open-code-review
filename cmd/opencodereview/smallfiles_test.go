@@ -91,6 +91,25 @@ func TestViewerListenAddr(t *testing.T) {
 	}
 }
 
+func TestValidateViewerPort(t *testing.T) {
+	tests := []struct {
+		port    int
+		wantErr bool
+	}{
+		{1, false},
+		{5483, false},
+		{65535, false},
+		{0, true},
+		{-1, true},
+		{65536, true},
+	}
+	for _, tt := range tests {
+		if err := validateViewerPort(tt.port); (err != nil) != tt.wantErr {
+			t.Errorf("validateViewerPort(%d) error = %v, wantErr %v", tt.port, err, tt.wantErr)
+		}
+	}
+}
+
 func TestRunLLMProviders(t *testing.T) {
 	got := captureStdout(t, func() {
 		runLLMProviders()
