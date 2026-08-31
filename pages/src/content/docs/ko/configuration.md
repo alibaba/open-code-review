@@ -214,6 +214,21 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 
 4xx HTTP 상태 코드만 허용됩니다. `408`, `409`, `429`는 SDK가 이미 재시도합니다. 설정 파일에서 읽을 때 이런 중복 코드는 무시되며, `ocr config set`으로 전달하면 OCR이 경고를 출력하고 저장 값에서 제외합니다. 5xx 응답은 모두 SDK가 이미 재시도하므로 `retry_codes`에 추가할 수 없습니다.
 
+### 재시도 횟수 {#retry-attempts}
+
+OCR은 SDK가 일시적 오류로 판단한 요청을 기본적으로 최대 5회 재시도합니다.
+`max_retries`로 이 재시도 예산을 제한할 수 있습니다. 값은 최초 요청 이후의
+재시도 횟수이므로 `0`은 재시도를 비활성화하고 `1`은 HTTP 요청을 최대 2회 허용합니다.
+
+기존 LLM 엔드포인트 전체 또는 개별 프로바이더에 설정할 수 있습니다:
+
+```bash
+ocr config set llm.max_retries 1
+ocr config set custom_providers.my-gateway.max_retries 1
+```
+
+값은 0 이상의 정수여야 합니다. 설정하지 않으면 기본값인 5회가 유지됩니다.
+
 ### 프롬프트 상한 {#prompt-limit}
 
 `max_tokens`는 리뷰 단위 하나에 대한 **프롬프트**(입력) 상한입니다. 그 단위는 `ocr review`에서는 파일 그룹, `ocr scan`에서는 파일 하나입니다. 내장 템플릿의 기본값은 `ocr review` 200,000토큰, `ocr scan` 58,888토큰입니다. 컨텍스트 윈도가 다른 모델에서는 `max_tokens`를 저장해 바꿉니다:

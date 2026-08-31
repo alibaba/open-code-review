@@ -45,7 +45,7 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
 		openaiopt.WithBaseURL(sdkBaseURL),
-		openaiopt.WithMaxRetries(5),
+		openaiopt.WithMaxRetries(effectiveMaxRetries(cfg.MaxRetries)),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 	}

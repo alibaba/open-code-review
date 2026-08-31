@@ -1999,6 +1999,65 @@ func TestOpenAIClient_RetryCodesTriggersRetry(t *testing.T) {
 	}
 }
 
+func TestClientsHonorConfiguredMaxRetries(t *testing.T) {
+	tests := []struct {
+		name       string
+		protocol   string
+		maxRetries int
+		want       int32
+	}{
+		{name: "openai zero", protocol: ProtocolOpenAIChatCompletions, maxRetries: 0, want: 1},
+		{name: "openai one", protocol: ProtocolOpenAIChatCompletions, maxRetries: 1, want: 2},
+		{name: "responses one", protocol: ProtocolOpenAIResponses, maxRetries: 1, want: 2},
+		{name: "anthropic one", protocol: ProtocolAnthropic, maxRetries: 1, want: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After-Ms", "0")
+				w.WriteHeader(http.StatusInternalServerError)
+				if tt.protocol == ProtocolAnthropic {
+					_, _ = w.Write([]byte(`{"type":"error","error":{"type":"api_error","message":"temporary failure"}}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"error":{"type":"server_error","message":"temporary failure"}}`))
+			}))
+			defer server.Close()
+
+			cfg := ClientConfig{
+				URL:        server.URL + "/v1",
+				APIKey:     "test-key",
+				Model:      "test-model",
+				MaxRetries: &tt.maxRetries,
+			}
+			var client LLMClient
+			switch tt.protocol {
+			case ProtocolAnthropic:
+				cfg.URL += "/messages"
+				client = NewAnthropicClient(cfg)
+			case ProtocolOpenAIResponses:
+				client = NewOpenAIResponsesClient(cfg)
+			default:
+				client = NewOpenAIClient(cfg)
+			}
+
+			_, err := client.CompletionsWithCtx(context.Background(), ChatRequest{
+				Messages:  []Message{{Role: "user", Content: "ping"}},
+				MaxTokens: 16,
+			})
+			if err == nil {
+				t.Fatal("CompletionsWithCtx succeeded, want server error")
+			}
+			if got := requests.Load(); got != tt.want {
+				t.Fatalf("requests = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

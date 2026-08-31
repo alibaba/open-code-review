@@ -1136,8 +1136,8 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
+		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, llm.max_retries, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, max_retries, aws_region, aws_profile\n" +
 		"Protocol values: anthropic, anthropic-bedrock, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
@@ -1666,5 +1666,44 @@ func TestSetConfigValueLlmRetryCodesNoWarningForValidCodes(t *testing.T) {
 	}
 	if len(cfg.Llm.RetryCodes) != 2 {
 		t.Errorf("RetryCodes = %v, want [403 400]", cfg.Llm.RetryCodes)
+	}
+}
+
+func TestSetConfigValueMaxRetries(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want int
+	}{
+		{name: "legacy llm", key: "llm.max_retries", want: 0},
+		{name: "custom provider", key: "custom_providers.test.max_retries", want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{CustomProviders: map[string]ProviderEntry{
+				"test": {Protocol: llm.ProtocolOpenAIChatCompletions},
+			}}
+			if err := setConfigValue(cfg, tt.key, strconv.Itoa(tt.want)); err != nil {
+				t.Fatalf("setConfigValue: %v", err)
+			}
+			var got *int
+			if tt.key == "llm.max_retries" {
+				got = cfg.Llm.MaxRetries
+			} else {
+				entry := cfg.CustomProviders["test"]
+				got = entry.MaxRetries
+			}
+			if got == nil || *got != tt.want {
+				t.Fatalf("MaxRetries = %v, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetConfigValueRejectsInvalidMaxRetries(t *testing.T) {
+	for _, value := range []string{"-1", "many"} {
+		if err := setConfigValue(&Config{}, "llm.max_retries", value); err == nil {
+			t.Fatalf("setConfigValue accepted %q", value)
+		}
 	}
 }

@@ -1300,6 +1300,10 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		AWSProfile: v.AWSProfile,
 		AWSRegion:  v.AWSRegion,
 	}
+	if v.MaxRetries != nil {
+		maxRetries := *v.MaxRetries
+		out.MaxRetries = &maxRetries
+	}
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
 		for k, val := range v.ExtraBody {

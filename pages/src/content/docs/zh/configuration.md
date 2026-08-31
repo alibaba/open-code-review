@@ -260,6 +260,21 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 警告，并且不会把这些状态码保存到配置中。所有 5xx 响应也已由 SDK 默认重试，
 因此不能加入 `retry_codes`。
 
+### 重试次数
+
+OCR 默认最多对 SDK 判定为临时故障的请求重试五次。可以通过 `max_retries`
+限制这项重试预算。该值表示首次请求之后的重试次数，因此 `0` 表示不重试，`1`
+表示一次逻辑请求最多发出两次 HTTP 请求。
+
+可为旧版 LLM 端点全局设置，也可为单个提供商设置：
+
+```bash
+ocr config set llm.max_retries 1
+ocr config set custom_providers.my-gateway.max_retries 1
+```
+
+该值必须是非负整数。不设置时继续使用默认的五次重试。
+
 ### 每文件提示词上限
 
 OCR 默认为 `ocr review` 的每次评审设置 200,000 token 的提示词上限
