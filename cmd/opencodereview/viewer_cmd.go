@@ -9,7 +9,8 @@ import (
 )
 
 type viewerOptions struct {
-	addr string
+	addr   string
+	noOpen bool
 }
 
 var viewerOpts viewerOptions
@@ -20,13 +21,14 @@ var viewerCmd = &cobra.Command{
 	Short:   "Start the WebUI session viewer",
 	Long:    "Session history WebUI viewer.",
 	Args:    cobra.NoArgs,
-	Example: `  ocr viewer                     # start on default port
-  ocr viewer --addr :3000        # bind to all interfaces on port 3000`,
+	Example: `  ocr viewer              # start + open browser
+  ocr viewer --no-open    # just print the URL`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return viewer.StartServer(viewerOpts.addr)
+		return viewer.StartServer(viewerOpts.addr, !viewerOpts.noOpen)
 	},
 }
 
 func init() {
 	viewerCmd.Flags().StringVar(&viewerOpts.addr, "addr", "localhost:5483", "listen address")
+	viewerCmd.Flags().BoolVar(&viewerOpts.noOpen, "no-open", false, "do not open the browser automatically")
 }

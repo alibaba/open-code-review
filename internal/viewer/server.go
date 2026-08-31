@@ -4,7 +4,6 @@
 package viewer
 
 import (
-	"bufio"
 	"embed"
 	"fmt"
 	"html/template"
@@ -24,7 +23,7 @@ import (
 //go:embed templates/*.html static/style.css static/session.js static/repos.js
 var assets embed.FS
 
-func StartServer(addr string) error {
+func StartServer(addr string, autoOpen bool) error {
 	root, err := SessionsRoot()
 	if err != nil {
 		return fmt.Errorf("resolve sessions root: %w", err)
@@ -73,7 +72,7 @@ func StartServer(addr string) error {
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return err
+		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
 	defer ln.Close()
 
@@ -83,22 +82,43 @@ func StartServer(addr string) error {
 	}()
 
 	url := "http://" + DisplayAddr(addr)
-	if term.IsTerminal(os.Stdin.Fd()) {
-		fmt.Printf("Viewer ready: %s\n", url)
-		fmt.Printf("Press Enter to open in browser...\n")
+	fmt.Printf("Viewer ready: %s\n", url)
+	if shouldAutoOpen(autoOpen) {
 		go func() {
-			if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
-				return
-			}
 			if err := openBrowser(url); err != nil {
-				fmt.Printf("\nCould not open browser automatically: %v\n", err)
+				fmt.Fprintf(os.Stderr, "[ocr] WARNING: could not open browser: %v\n", err)
 			}
 		}()
-	} else {
-		fmt.Printf("Viewer ready: %s\n", url)
 	}
 
 	return <-serveErr
+}
+
+func shouldAutoOpen(requested bool) bool {
+	return shouldAutoOpenEnv(
+		requested,
+		term.IsTerminal(os.Stdout.Fd()),
+		os.Getenv("SSH_CONNECTION"),
+		os.Getenv("DISPLAY"),
+		os.Getenv("WAYLAND_DISPLAY"),
+		runtime.GOOS,
+	)
+}
+
+func shouldAutoOpenEnv(requested, stdoutTTY bool, sshConn, display, wayland, goos string) bool {
+	if !requested {
+		return false
+	}
+	if !stdoutTTY {
+		return false
+	}
+	if sshConn != "" {
+		return false
+	}
+	if goos == "linux" && display == "" && wayland == "" {
+		return false
+	}
+	return true
 }
 
 // Reference Gist: https://gist.github.com/sevkin/9798d67b2cb9d07cb05f89f14ba682f8
@@ -122,7 +142,14 @@ func browserOpenCmd(goos, url string) *exec.Cmd {
 }
 
 func openBrowser(url string) error {
-	return browserOpenCmd(runtime.GOOS, url).Start()
+	cmd := browserOpenCmd(runtime.GOOS, url)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() {
+		_ = cmd.Wait()
+	}()
+	return nil
 }
 
 var cstZone = func() *time.Location {
