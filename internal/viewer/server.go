@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -55,7 +56,12 @@ func StartServer(addr string) error {
 	// session JSONL exposed by this viewer (which contains LLM request bodies
 	// = source code being reviewed and the LLM's analysis of it).
 	allowed := resolveAllowedHostsFromEnv(addr)
-	guarded := hostGuard(allowed, mux)
+	bindHost := splitBindHost(addr)
+	allowAll := isWildcardBindHost(bindHost) && os.Getenv(EnvAllowedHosts) == ""
+	if allowAll {
+		fmt.Printf("\nWarning: wildcard bind exposes the viewer on all interfaces without host restrictions\n")
+	}
+	guarded := hostGuard(allowed, allowAll, mux)
 
 	// Outermost layer: set defense-in-depth security headers on every response.
 	handler := securityHeaders(guarded)
