@@ -94,17 +94,11 @@ func isWildcardBindHost(host string) bool {
 // not on the allowlist. This blocks DNS-rebinding attacks against the local
 // viewer: an attacker page that resolves its own domain to 127.0.0.1 still
 // sends the attacker's domain in the Host header, which fails this check.
-// Wildcard binds intentionally accept any Host because the operator has
-// already opted into listening on every interface.
-func hostGuard(allowed map[string]struct{}, wildcard bool, next http.Handler) http.Handler {
+func hostGuard(allowed map[string]struct{}, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := hostOnly(r.Host)
 		if host == "" {
 			http.Error(w, "forbidden host", http.StatusForbidden)
-			return
-		}
-		if wildcard {
-			next.ServeHTTP(w, r)
 			return
 		}
 		if isLoopbackHost(host) {

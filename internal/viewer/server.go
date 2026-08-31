@@ -57,11 +57,10 @@ func StartServer(addr string) error {
 	// = source code being reviewed and the LLM's analysis of it).
 	allowed := resolveAllowedHostsFromEnv(addr)
 	bindHost := splitBindHost(addr)
-	allowAll := isWildcardBindHost(bindHost) && os.Getenv(EnvAllowedHosts) == ""
-	if allowAll {
-		fmt.Printf("\nWarning: wildcard bind exposes the viewer on all interfaces without host restrictions\n")
+	if isWildcardBindHost(bindHost) && os.Getenv(EnvAllowedHosts) == "" {
+		fmt.Printf("\nWarning: wildcard bind serves loopback hosts only; set OCR_VIEWER_ALLOWED_HOSTS to allow other hosts\n")
 	}
-	guarded := hostGuard(allowed, allowAll, mux)
+	guarded := hostGuard(allowed, mux)
 
 	// Outermost layer: set defense-in-depth security headers on every response.
 	handler := securityHeaders(guarded)

@@ -20,9 +20,9 @@ JSONL 文件出现就会显示。
 
 > **DNS-rebinding 防护。** 查看器会对照 loopback 白名单
 > （`localhost`、`127.0.0.1`、`::1`）检查 `Host` 头。具体的绑定主机
-> （如 `--bind 192.168.1.10 -p 5483`）会自动加入。**通配**绑定
-> （`--bind 0.0.0.0` 或 `--bind ::`）接受任意 Host，并打印警告，因为它会在
-> 所有接口上暴露查看器。若要保持通配绑定的访问限制，设置
+> （如 `--bind 192.168.1.10 -p 5483`）会自动加入，但**通配**绑定
+> （`--bind 0.0.0.0` 或 `--bind ::`）不会加入任何非 loopback 主机。从 LAN IP 或
+> 主机名访问 UI 会返回 `forbidden host`，除非设置
 > `OCR_VIEWER_ALLOWED_HOSTS` 为逗号分隔的允许主机名列表
 > （如 `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`）。
 

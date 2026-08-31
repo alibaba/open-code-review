@@ -146,9 +146,9 @@ func TestHostGuard(t *testing.T) {
 		{"lan-bind-self", "192.168.1.10:5483", "", "192.168.1.10:5483", 200, true},
 		{"lan-bind-attacker-rejected", "192.168.1.10:5483", "", "attacker.example", 403, false},
 
-		// Wildcard bind: any Host is accepted because listening on all interfaces.
+		// Wildcard bind: only loopback allowed without env override
 		{"wildcard-bind-loopback-ok", "0.0.0.0:5483", "", "127.0.0.1:5483", 200, true},
-		{"wildcard-bind-attacker-allowed", "0.0.0.0:5483", "", "evil.example", 200, true},
+		{"wildcard-bind-attacker-rejected", "0.0.0.0:5483", "", "evil.example", 403, false},
 
 		// Env extension allows additional hosts
 		{"env-allowed", "0.0.0.0:5483", "ocr.lan,review.internal", "review.internal:5483", 200, true},
@@ -158,8 +158,7 @@ func TestHostGuard(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			allowed := buildAllowedHosts(splitBindHost(c.bindAddr), c.envVal)
-			allowAll := isWildcardBindHost(splitBindHost(c.bindAddr)) && c.envVal == ""
-			h := hostGuard(allowed, allowAll, inner)
+			h := hostGuard(allowed, inner)
 
 			req := httptest.NewRequest("GET", "http://test/", nil)
 			req.Host = c.hostHdr

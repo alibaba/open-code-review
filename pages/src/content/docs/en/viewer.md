@@ -24,9 +24,9 @@ another terminal shows up the moment its JSONL file appears.
 > **DNS-rebinding protection.** The viewer checks the `Host` header
 > against a loopback allowlist (`localhost`, `127.0.0.1`, `::1`). A
 > concrete bind host (e.g. `--bind 192.168.1.10 -p 5483`) is added
-> automatically. A **wildcard** bind (`--bind 0.0.0.0` or `--bind ::`)
-> accepts any Host and prints a warning, because it exposes the viewer on
-> every interface. To keep a wildcard bind restricted, set
+> automatically, but a **wildcard** bind (`--bind 0.0.0.0` or `--bind ::`)
+> does not add any non-loopback hosts. Accessing the UI from a LAN IP or
+> hostname returns `forbidden host` unless you set
 > `OCR_VIEWER_ALLOWED_HOSTS` to a comma-separated list of allowed
 > hostnames (e.g. `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`).
 
