@@ -114,6 +114,14 @@ func groupWithoutLLM(ctx context.Context, diffs []model.Diff, strategy template.
 		// maxFilesPerGroup. enforceGroupTokenBudget is the prompt-size valve: a
 		// bundle that outgrows the limit degrades to per-file groups, which is
 		// exactly the shape a grouping failure already falls back to.
+		//
+		// A known cost of bundling: the --max-tokens-budget look-ahead in
+		// dispatchSubtasks is per group, so a bundle makes it all-or-nothing over
+		// the whole change set — a rejected bundle covers no file at all, where
+		// per-file groups would have covered as many as the budget allowed. It
+		// also over-charges the bundle: that estimate sums estimateDiffFileTokens,
+		// which pays the fixed prompt overhead once per file, while a bundle's
+		// files share one conversation.
 		groups = enforceMaxFilesPerGroup([]FileGroup{{Label: smallChangeSetLabel, Diffs: diffs}})
 		groups = enforceGroupTokenBudget(groups, tokenLimit)
 	}

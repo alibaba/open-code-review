@@ -113,11 +113,12 @@ func (s GroupingStrategy) String() string {
 // and they answer different questions. GroupingMinFiles asks whether the
 // partition is worth computing at all: below it the space of sensible
 // partitions is tiny, so the LLM call buys no information. Only then does
-// GroupingBundleLineThreshold ask whether the files can share one review — a
-// bundled group spreads MAX_REVIEW_ROUNDS across every file in it, so past a
-// churn ceiling each file is better off with its own subtask and its own
-// rounds. File count is deliberately not re-examined at the second step: once
-// the count is low, churn alone decides.
+// GroupingBundleLineThreshold ask whether the files can share one review —
+// every one of a bundled group's MAX_REVIEW_ROUNDS rounds has to cover the
+// whole set's churn, so past a ceiling a single round's attention is spread too
+// thin and each file is better off in a subtask of its own. File count is
+// deliberately not re-examined at the second step: once the count is low, churn
+// alone decides.
 //
 // Only totalChanged gates the bundle, with no companion per-file threshold:
 // the largest single file's churn never exceeds the total, so a same-valued
