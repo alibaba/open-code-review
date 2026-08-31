@@ -97,6 +97,11 @@
   ".zig",
   ".thrift",
   ".capnp",
+  ".v",
+  ".sv",
+  ".vh",
+  ".vhd",
+  ".vhdl",
   ".sol",
   ".vy"
 ]

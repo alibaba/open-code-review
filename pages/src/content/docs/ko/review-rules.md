@@ -174,6 +174,8 @@ diff 단계에서 일어납니다.
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL 통신 호환성. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto 스키마 통신 호환성. |
+| `**/*.{v,sv,vh}` | `verilog.md` — Verilog 및 SystemVerilog RTL. |
+| `**/*.{vhd,vhdl}` | `vhdl.md` — VHDL RTL. |
 | `**/*.m` | `matlab.md`(또는 [내용 탐지](#content-sniffing-for-m-files)로 `objc.md`) |
 | `**/*.sol` | `solidity.md` — Solidity 스마트 컨트랙트. |
 | `**/*.vy` | `vyper.md` — Vyper 스마트 컨트랙트. |

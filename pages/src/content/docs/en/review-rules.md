@@ -183,6 +183,8 @@ matching order:
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
+| `**/*.{v,sv,vh}` | `verilog.md` — Verilog and SystemVerilog RTL. |
+| `**/*.{vhd,vhdl}` | `vhdl.md` — VHDL RTL. |
 | `**/*.m` | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files)) |
 | `**/*.sol` | `solidity.md` — Solidity smart contracts. |
 | `**/*.vy` | `vyper.md` — Vyper smart contracts. |
