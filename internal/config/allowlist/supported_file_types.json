@@ -49,6 +49,7 @@
   ".ftlx",
   ".hbs",
   ".mustache",
+  ".pug",
   ".astro",
   ".vue",
   ".ipynb",

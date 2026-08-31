@@ -141,6 +141,10 @@ func TestReviewE2E_RetryReportReachesTextExit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("partial coverage must exit 0: %v\nstderr: %s", err, errOut)
 	}
+	// This test attributes a 429 and a 402 to named files, which only holds while
+	// each file is its own request — i.e. while the fake still answers the
+	// grouping call with one group per file.
+	srv.assertGroupingRecognized(t)
 	if !strings.Contains(out, "LLM retry report summary:") {
 		t.Fatalf("terminal summary missing from stdout:\n%s", out)
 	}
@@ -169,8 +173,7 @@ func TestReviewE2E_RetryReportReachesTextExit(t *testing.T) {
 func TestReviewE2E_AllFilesFailPublishesReportOnce(t *testing.T) {
 	repoDir := retryTestRepo(t)
 	srv := newFakeLLM()
-	srv.hardFail["a.go"] = true
-	srv.hardFail["b.go"] = true
+	srv.failAll()
 	startFakeLLM(t, srv)
 
 	out, errOut, err := runReviewCapturingBoth(t, repoDir, "json")
@@ -201,8 +204,7 @@ func TestReviewE2E_AllFilesFailPublishesReportOnce(t *testing.T) {
 func TestReviewE2E_AllFilesFailTextPublishesReportOnce(t *testing.T) {
 	repoDir := retryTestRepo(t)
 	srv := newFakeLLM()
-	srv.hardFail["a.go"] = true
-	srv.hardFail["b.go"] = true
+	srv.failAll()
 	startFakeLLM(t, srv)
 
 	out, errOut, err := runReviewCapturingBoth(t, repoDir, "text")

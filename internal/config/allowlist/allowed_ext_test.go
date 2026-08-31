@@ -41,6 +41,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".HBS", true},
 		{".mustache", true},
 		{".MUSTACHE", true},
+		{".pug", true},
+		{".PUG", true},
 		{".graphql", true},
 		{".GRAPHQL", true},
 		{".gql", true},
@@ -181,6 +183,12 @@ func TestIsExcludedPath(t *testing.T) {
 		{"mustache fixture", "spec/fixtures/email.mustache", true},
 		{"handlebars template in tests directory", "tests/templates/card.hbs", false},
 		{"mustache template in test directory", "test/templates/email.mustache", false},
+
+		// Pug has no extension-specific test-path convention;
+		// generic fixture directories remain excluded.
+		{"pug fixture", "test/fixtures/page.pug", true},
+		{"pug template in tests directory", "tests/templates/page.pug", false},
+		{"pug template in test directory", "test/templates/page.pug", false},
 
 		// HarmonyOS oh_modules and test files
 		{"oh_modules root", "oh_modules/some_lib/index.ets", true},

@@ -76,6 +76,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"templates/account.HBS", "Handlebars/Mustache Escaping Boundaries"},
 		{"templates/email.mustache", "Handlebars/Mustache Escaping Boundaries"},
 		{"templates/email.MUSTACHE", "Handlebars/Mustache Escaping Boundaries"},
+		{"templates/account.pug", "Pug Escaping and Output Contexts"},
+		{"templates/account.PUG", "Pug Escaping and Output Contexts"},
 		{"src/main/resources/mapper/usermapper.xml", "SQL Logic Error Detection"},
 		{"src/main/resources/dao/userdao.xml", "SQL Logic Error Detection"},
 		{"pom.xml", "snapshot"},
@@ -907,6 +909,38 @@ func TestResolveDetail_SystemPrismaPatternMatch(t *testing.T) {
 			}
 			if !strings.Contains(detail.Rule, "Prisma Schema Review Principles") {
 				t.Errorf("expected Prisma rule, got %q", truncate(detail.Rule, 80))
+			}
+		})
+	}
+}
+
+func TestResolveDetail_SystemPugPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"index.pug", "views/account/profile.pug", "VIEWS/INDEX.PUG"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.pug" {
+				t.Errorf("expected pattern '**/*.pug', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Pug Escaping and Output Contexts",
+				"server-side template injection",
+				"&attributes",
+				"compileClient",
+				"Accessibility",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected Pug rule to contain %q", required)
+				}
 			}
 		})
 	}

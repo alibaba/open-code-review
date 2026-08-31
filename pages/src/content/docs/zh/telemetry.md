@@ -77,6 +77,7 @@ export OCR_CONTENT_LOGGING=0                        # reserved / currently a no-
 review.run
 ├── diff.parse
 ├── event.review.started                   (decision-point event)
+├── event.grouping.skipped                 (when the change set is below the grouping thresholds)
 ├── subtask.execute.group.<group-key1>
 │   ├── event.plan.skipped                 (when changes are below both thresholds)
 │   ├── event.plan.failed                  (when plan phase errored)
@@ -103,6 +104,7 @@ LLM 往返和工具执行**不**作为单独 span 发出——它们只出现在
 | `subtask.execute.group.<group-key>` | `group.label`、`group.file_count`、`lines.changed`、`lines.changed.max_file` |
 | `main.loop` | `group.label`、`round` |
 | `event.review.started` | `file.count`、`review.count`、`repo.dir` |
+| `event.grouping.skipped` | `strategy`、`file.count`、`lines.changed`、`threshold.files`、`threshold.lines` |
 | `event.plan.skipped` | `group.label`、`group.file_count`、`lines.changed`、`lines.changed.max_file`、`threshold`、`threshold.group` |
 | `event.plan.failed` | `group.label`、`message` |
 | `event.token.threshold.exceeded` | `group.label`、`tokens`、`max_tokens`、`round` |
@@ -131,6 +133,7 @@ OCR 通过 OTel meter 记录数值 metric——计数与直方图，由 collecto
 |---|---|
 | `review.started` | diff 已加载；我们知道将评审多少文件。 |
 | `no.files.changed` | diff 解析出零文件。 |
+| `grouping.skipped` | 变更集的文件数低于 `GROUPING_MIN_FILES`，因此跳过了分组调用。`strategy` 为 `bundle_all`（变更行数低于 `GROUPING_BUNDLE_LINE_THRESHOLD`，全部文件归一组）或 `per_file`（达到该阈值，每文件一组）。单文件变更集恒为 `per_file`——无论阈值如何取值，都没有可分之物——且只在此处上报，终端不打印。 |
 | `plan.skipped` | 某组低于两个 plan 阈值：其最大文件的变更行数少于 `PLAN_MODE_LINE_THRESHOLD`，且（对 2 个以上文件的组）合计变更行数低于 `PLAN_MODE_GROUP_LINE_THRESHOLD`。 |
 | `plan.failed` | plan 阶段出错；main 循环无 plan 运行。 |
 | `token.threshold.exceeded` | prompt token > `MAX_TOKENS`（输入上限）的 80 %；该组被跳过。 |
