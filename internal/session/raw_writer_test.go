@@ -6,9 +6,12 @@ package session
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 
@@ -86,7 +89,7 @@ func TestRawFileWriter_StampsSessionIDAndTimestamp(t *testing.T) {
 	}
 }
 
-func TestRawFileWriter_FlushesPerRecord(t *testing.T) {
+func TestRawFileWriter_LandsPerRecordOnDisk(t *testing.T) {
 	home := t.TempDir()
 	setTestHome(t, home)
 	repoDir := "/srv/repos/myapp"
@@ -105,16 +108,17 @@ func TestRawFileWriter_FlushesPerRecord(t *testing.T) {
 		t.Fatalf("read before close: %v", err)
 	}
 	if len(data) == 0 {
-		t.Fatal("record not flushed before Close")
+		t.Fatal("record not on disk before Close")
 	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 }
 
-// TestRawFileWriter_AppendsAcrossReopen covers the resume case: a resumed
-// run reuses the session ID, so reopening the writer must keep the previous
-// run's records instead of truncating the file.
+// TestRawFileWriter_AppendsAcrossReopen pins the O_APPEND contract: reopening
+// the same session ID must keep the previous records instead of truncating
+// the file. Today every run gets a fresh session ID, so this guards a
+// defensive path, not the live resume flow.
 func TestRawFileWriter_AppendsAcrossReopen(t *testing.T) {
 	home := t.TempDir()
 	setTestHome(t, home)
@@ -220,9 +224,123 @@ func TestRawFileWriter_OpenFailure(t *testing.T) {
 }
 
 // TestRawSubDirIsSeparateFromSessions guards the isolation contract: raw
-// captures must never land in the session checkpoint directory.
+// captures must never land in the session checkpoint directory. UseTestSessions
+// (run from this package's init) redirects both directories; pinning the
+// literals catches a collision or silent rename, whereas comparing the two
+// variables only ever saw two already-redirected strings.
 func TestRawSubDirIsSeparateFromSessions(t *testing.T) {
-	if rawSubDir == sessionSubDir {
-		t.Fatalf("rawSubDir == sessionSubDir == %q", sessionSubDir)
+	if rawSubDir != "test-raw" {
+		t.Errorf("rawSubDir = %q, want literal \"test-raw\"", rawSubDir)
+	}
+	if sessionSubDir != "test-sessions" {
+		t.Errorf("sessionSubDir = %q, want literal \"test-sessions\"", sessionSubDir)
+	}
+}
+
+// failingRawFile swallows its first n writes with err, then behaves like a
+// normal file — a transient disk failure the writer must survive.
+type failingRawFile struct {
+	data     []byte
+	failures int
+	err      error
+}
+
+func (f *failingRawFile) Write(p []byte) (int, error) {
+	if f.failures > 0 {
+		f.failures--
+		return 0, f.err
+	}
+	f.data = append(f.data, p...)
+	return len(p), nil
+}
+
+func (f *failingRawFile) Close() error { return nil }
+
+// captureStderrForTest captures everything written to os.Stderr during fn.
+func captureStderrForTest(t *testing.T, fn func()) string {
+	t.Helper()
+	r, wPipe, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	old := os.Stderr
+	os.Stderr = wPipe
+	defer func() { os.Stderr = old }()
+	fn()
+	wPipe.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stderr: %v", err)
+	}
+	return string(out)
+}
+
+// TestRawFileWriter_RecoversFromTransientWriteFailure pins the recovery
+// contract: one disk failure must drop only the one record in flight and warn
+// once, not silently kill every later capture.
+func TestRawFileWriter_RecoversFromTransientWriteFailure(t *testing.T) {
+	f := &failingRawFile{failures: 2, err: errors.New("no space left on device")}
+	w := &RawFileWriter{sessionID: "sess-1", file: f}
+	w.encoder = json.NewEncoder(&w.buf)
+	w.encoder.SetEscapeHTML(false)
+
+	stderr := captureStderrForTest(t, func() {
+		w.Write(llm.RawRecord{RequestID: "r1"})
+		w.Write(llm.RawRecord{RequestID: "r2"})
+		w.Write(llm.RawRecord{RequestID: "r3"})
+	})
+	if n := strings.Count(stderr, "raw logging failed"); n != 1 {
+		t.Errorf("got %d write-failure warnings, want 1: %q", n, stderr)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// r1 and r2 hit the failure and are dropped; r3 lands after recovery.
+	var ids []string
+	for _, line := range strings.Split(strings.TrimSpace(string(f.data)), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec struct {
+			RequestID string `json:"request_id"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("unparseable line %q: %v", line, err)
+		}
+		ids = append(ids, rec.RequestID)
+	}
+	if len(ids) != 1 || ids[0] != "r3" {
+		t.Errorf("surviving records = %v, want only r3", ids)
+	}
+}
+
+// TestRawFileWriter_EncodeFailureWarnsAndRecovers pins the no-silent-drop
+// contract: an unencodable record (e.g. an invalid RawMessage from a future
+// caller) warns once and must not wedge later records.
+func TestRawFileWriter_EncodeFailureWarnsAndRecovers(t *testing.T) {
+	f := &failingRawFile{}
+	w := &RawFileWriter{sessionID: "sess-1", file: f}
+	w.encoder = json.NewEncoder(&w.buf)
+	w.encoder.SetEscapeHTML(false)
+
+	stderr := captureStderrForTest(t, func() {
+		w.Write(llm.RawRecord{RequestID: "bad", Request: json.RawMessage(`{not-json`)})
+		w.Write(llm.RawRecord{RequestID: "good"})
+	})
+	if n := strings.Count(stderr, "raw logging failed"); n != 1 {
+		t.Errorf("got %d encode-failure warnings, want 1: %q", n, stderr)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data := string(f.data)
+	if strings.Contains(data, "bad") {
+		t.Errorf("unencodable record must be dropped, got: %q", data)
+	}
+	if !strings.Contains(data, `"request_id":"good"`) {
+		t.Errorf("record after encode failure not written: %q", data)
 	}
 }

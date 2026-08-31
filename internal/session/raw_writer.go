@@ -4,10 +4,10 @@
 package session
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -31,10 +31,11 @@ var rawSubDir = "raw"
 type RawFileWriter struct {
 	mu        sync.Mutex
 	sessionID string
-	file      *os.File
-	writer    *bufio.Writer
+	file      io.WriteCloser
 	buf       bytes.Buffer
 	encoder   *json.Encoder
+
+	warnOnce sync.Once
 }
 
 // NewRawFileWriter opens (creating if needed) the raw capture file for
@@ -42,8 +43,9 @@ type RawFileWriter struct {
 // 0700 and the file 0600, matching the session JSONL: captures contain full
 // prompts, completions and API keys' host endpoints, so they are per-user
 // only.
-// The file is opened O_APPEND: a resume reuses the session ID, and prior
-// runs' records must survive the reopened writer.
+// The file is opened O_APPEND, the natural mode for an append-only capture
+// file. Each run — resumed or not — gets a fresh session ID, so it owns a
+// fresh file.
 func NewRawFileWriter(repoDir, sessionID string) (*RawFileWriter, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -61,19 +63,16 @@ func NewRawFileWriter(repoDir, sessionID string) (*RawFileWriter, error) {
 	w := &RawFileWriter{
 		sessionID: sessionID,
 		file:      f,
-		writer:    bufio.NewWriter(f),
 	}
 	w.encoder = json.NewEncoder(&w.buf)
 	w.encoder.SetEscapeHTML(false)
 	return w, nil
 }
 
-// Write appends rec as one JSONL line and flushes it to disk. The record is
-// marshaled in memory first, so a failed disk write leaves no partial line
-// that the next record would append after. The per-record flush means a
-// crashed run keeps every record written up to the crash — the same
-// durability trade-off the session JSONL writer makes.
-// Write errors are dropped: raw capture must never fail a review.
+// Write appends rec as one JSONL line straight to disk, so a crashed run
+// keeps every record written up to the crash. A failed encode or write drops
+// that one record and the next simply tries again; raw capture must never
+// fail a review.
 func (w *RawFileWriter) Write(rec llm.RawRecord) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -83,19 +82,31 @@ func (w *RawFileWriter) Write(rec llm.RawRecord) {
 	}
 	w.buf.Reset()
 	if err := w.encoder.Encode(rec); err != nil {
+		w.warn(err)
 		return
 	}
-	w.writer.Write(w.buf.Bytes())
-	_ = w.writer.Flush()
+	line := w.buf.Bytes()
+	n, err := w.file.Write(line)
+	if n < len(line) && err == nil {
+		err = fmt.Errorf("short write: %d of %d bytes", n, len(line))
+	}
+	if err != nil {
+		w.warn(err)
+		return
+	}
 }
 
-// Close flushes any buffered data and closes the underlying file.
+// warn reports the first capture failure on stderr; later failures stay
+// silent so a degraded sink cannot spam every subsequent record.
+func (w *RawFileWriter) warn(err error) {
+	w.warnOnce.Do(func() {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: raw logging failed, captures may be dropped: %v\n", err)
+	})
+}
+
+// Close closes the capture file.
 func (w *RawFileWriter) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if err := w.writer.Flush(); err != nil {
-		w.file.Close()
-		return err
-	}
 	return w.file.Close()
 }

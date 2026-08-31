@@ -30,6 +30,9 @@ func RawLoggingEnabled() bool {
 // RawRecord is one JSONL line: everything captured about a single HTTP
 // attempt against an LLM endpoint. One logical request may expand into several
 // attempts inside the SDK retry loop, and each attempt gets its own record.
+//
+// "Raw" is capture-point, not wire-level: on Bedrock the records show the
+// pre-signing request and SSE-normalized response (SigV4 blocks moving in).
 type RawRecord struct {
 	// SessionID identifies the review/scan session this attempt belongs to. It
 	// is stamped by the writer, which is bound per session; the middleware
@@ -39,7 +42,8 @@ type RawRecord struct {
 	// RequestID identifies this attempt, not the logical request above it.
 	RequestID string `json:"request_id"`
 
-	// Timestamp is when the record was written, RFC 3339 UTC.
+	// Timestamp is when the HTTP attempt started, RFC 3339 UTC. The end of
+	// the attempt is Timestamp + DurationMs; the two fields share one base.
 	Timestamp string `json:"timestamp"`
 
 	// FilePath, TaskType and RequestNo mirror session.TaskRecord identity and
@@ -64,14 +68,25 @@ type RawRecord struct {
 	// connection.
 	DurationMs int64 `json:"duration_ms"`
 
+	// StatusCode is the HTTP status of this attempt; 0 when next() failed
+	// before any response arrived (transport error).
+	StatusCode int `json:"status_code,omitempty"`
+
 	// Headers are the request headers, with credential-bearing ones redacted
 	// by sensitiveHeader.
 	Headers map[string]string `json:"headers"`
 
 	// Request is the raw request body after extra_body merging and
-	// session-key expansion — exactly what was sent. Always valid JSON (the
-	// SDK marshals it), so unlike Response it needs no text fallback.
+	// session-key expansion — the shape the SDK logic sent, which on Bedrock
+	// precedes the provider adaptation (see RawRecord). Valid JSON whenever
+	// non-empty; an empty body leaves it null. Mutually exclusive with
+	// RequestText.
 	Request json.RawMessage `json:"request"`
+
+	// RequestText holds a non-JSON request body verbatim. Unreachable while
+	// the SDK marshals every body; a future mangling middleware would land
+	// here instead of dropping the whole record.
+	RequestText string `json:"request_text,omitempty"`
 
 	// Response holds the raw response body when it is valid JSON
 	// (every non-streaming completion response). Mutually exclusive with
@@ -163,14 +178,23 @@ func newRawMiddleware(holder *RawHolder) retryObserver {
 			if sensitiveHeader(k) {
 				headers[k] = "[REDACTED]"
 			} else {
-				headers[k] = vs[0]
+				// ", " is the RFC 9110 list form for repeated headers.
+				headers[k] = strings.Join(vs, ", ")
 			}
 		}
 
 		var reqBody []byte
+		var reqReadErr error
 		if req.Body != nil {
-			reqBody, _ = io.ReadAll(req.Body)
-			req.Body = io.NopCloser(bytes.NewReader(reqBody))
+			reqBody, reqReadErr = io.ReadAll(req.Body)
+			if reqReadErr != nil {
+				// Replay the failure to the SDK exactly as it would surface
+				// without capture; a clean truncated body would turn the
+				// client-side fault into a server-side 400.
+				req.Body = io.NopCloser(io.MultiReader(bytes.NewReader(reqBody), errReader{reqReadErr}))
+			} else {
+				req.Body = io.NopCloser(bytes.NewReader(reqBody))
+			}
 		}
 
 		model := meta.Model
@@ -188,13 +212,25 @@ func newRawMiddleware(holder *RawHolder) retryObserver {
 
 		rec := RawRecord{
 			RequestID: uuid.NewString(),
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Timestamp: startedAt.UTC().Format(time.RFC3339),
 			FilePath:  meta.FilePath,
 			TaskType:  meta.TaskType,
 			RequestNo: meta.RequestNo,
 			Model:     model,
 			Headers:   headers,
-			Request:   json.RawMessage(reqBody),
+		}
+		// A zero-length RawMessage fails to marshal and would drop the whole
+		// record, so an empty body stays null; malformed bytes would fail the
+		// same way, so they fall back to RequestText.
+		if len(reqBody) > 0 && reqReadErr == nil {
+			if json.Valid(reqBody) {
+				rec.Request = json.RawMessage(reqBody)
+			} else {
+				rec.RequestText = string(reqBody)
+			}
+		}
+		if reqReadErr != nil {
+			rec.Error = reqReadErr.Error()
 		}
 		if sc := oteltrace.SpanContextFromContext(req.Context()); sc.HasTraceID() {
 			rec.TraceID = sc.TraceID().String()
@@ -202,10 +238,18 @@ func newRawMiddleware(holder *RawHolder) retryObserver {
 
 		if err != nil {
 			rec.DurationMs = time.Since(startedAt).Milliseconds()
-			rec.Error = err.Error()
+			if reqReadErr != nil {
+				// Keep both: the request-body read failure is the root cause,
+				// next's error the downstream symptom.
+				rec.Error = reqReadErr.Error() + "; next: " + err.Error()
+			} else {
+				rec.Error = err.Error()
+			}
 			tw.Write(rec)
 			return resp, err
 		}
+
+		rec.StatusCode = resp.StatusCode
 
 		if resp.Body != nil {
 			respBody, readErr := io.ReadAll(resp.Body)

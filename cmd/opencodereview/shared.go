@@ -285,6 +285,10 @@ func bindRawWriter(holder *llm.RawHolder, repoDir string, sess *session.SessionH
 	}
 	holder.Set(w)
 	return func() {
+		// Detach before closing: LLM calls that run after this closer must
+		// bypass capture, not write to a closed file. Without this the
+		// guarantee depends on defer registration order.
+		holder.Set(nil)
 		if err := w.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: close raw file: %v\n", err)
 		}

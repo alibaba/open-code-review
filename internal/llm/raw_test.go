@@ -133,6 +133,9 @@ func TestRawMiddleware_CapturesRawBodiesAndMeta(t *testing.T) {
 	if rec.Model != "gpt-test" {
 		t.Errorf("model = %q, want gpt-test", rec.Model)
 	}
+	if rec.StatusCode != http.StatusOK {
+		t.Errorf("status_code = %d, want 200", rec.StatusCode)
+	}
 	if string(rec.Request) != reqBody {
 		t.Errorf("request = %q, want raw body", rec.Request)
 	}
@@ -186,6 +189,37 @@ func TestRawMiddleware_DurationCoversBodyRead(t *testing.T) {
 	}
 }
 
+// Timestamp must be the attempt start, so that [timestamp, timestamp +
+// duration_ms] reconstructs the attempt interval. The TTFB sleep inside
+// next() is what pins this: taken after next() returns, the timestamp would
+// land in a later RFC 3339 second than the start (the delay exceeds one
+// second) and the assertion below would fail.
+func TestRawMiddleware_TimestampIsAttemptStart(t *testing.T) {
+	req := rawRequest(t, context.Background(), `{}`, nil)
+	tw := &recordingRawWriter{}
+	holder := NewRawHolder()
+	holder.Set(tw)
+	mw := newRawMiddleware(holder)
+
+	const ttfb = 1100 * time.Millisecond
+	if _, err := mw(req, func(*http.Request) (*http.Response, error) {
+		time.Sleep(ttfb)
+		return jsonResponse(`{}`), nil
+	}); err != nil {
+		t.Fatalf("middleware: %v", err)
+	}
+	end := time.Now()
+
+	rec := tw.one(t)
+	ts, err := time.Parse(time.RFC3339, rec.Timestamp)
+	if err != nil {
+		t.Fatalf("timestamp %q not RFC 3339: %v", rec.Timestamp, err)
+	}
+	if !ts.Before(end.Truncate(time.Second)) {
+		t.Errorf("timestamp %v is not before the attempt end %v; want the attempt start", ts, end)
+	}
+}
+
 func TestRawMiddleware_RedactsAuthHeaders(t *testing.T) {
 	req := rawRequest(t, context.Background(), `{}`, map[string]string{
 		"Authorization":        "Bearer super-secret",
@@ -219,6 +253,30 @@ func TestRawMiddleware_RedactsAuthHeaders(t *testing.T) {
 		if strings.Contains(v, "secret") {
 			t.Errorf("secret leaked in headers: %v", rec.Headers)
 		}
+	}
+}
+
+// Repeated headers are legal on the wire; capture must keep every value in
+// the RFC 9110 comma-list form instead of silently truncating to the first.
+func TestRawMiddleware_MultiValueHeadersAreJoined(t *testing.T) {
+	req := rawRequest(t, context.Background(), `{}`, map[string]string{
+		"Anthropic-Beta": "prompt-caching-2024-07-31",
+	})
+	req.Header.Add("Anthropic-Beta", "files-api-2025-04-14")
+
+	tw := &recordingRawWriter{}
+	holder := NewRawHolder()
+	holder.Set(tw)
+	mw := newRawMiddleware(holder)
+
+	if _, err := mw(req, func(*http.Request) (*http.Response, error) { return jsonResponse(`{}`), nil }); err != nil {
+		t.Fatalf("middleware: %v", err)
+	}
+
+	rec := tw.one(t)
+	want := "prompt-caching-2024-07-31, files-api-2025-04-14"
+	if got := rec.Headers["Anthropic-Beta"]; got != want {
+		t.Errorf("Anthropic-Beta = %q, want %q", got, want)
 	}
 }
 
@@ -265,8 +323,106 @@ func TestRawMiddleware_TransportErrorRecordsErrorOnly(t *testing.T) {
 	if rec.Error != "connection reset" {
 		t.Errorf("error = %q, want transport error", rec.Error)
 	}
+	if rec.StatusCode != 0 {
+		t.Errorf("status_code = %d, want 0 (no response)", rec.StatusCode)
+	}
 	if rec.Response != nil || rec.ResponseText != "" {
 		t.Errorf("error record must carry no response: %q / %q", rec.Response, rec.ResponseText)
+	}
+}
+
+// A request-body read failure must be replayed to the SDK exactly as it would
+// surface without capture: a clean truncated body would turn the client-side
+// fault into a server-side 400. Mirrors the response-side errReader handling.
+func TestRawMiddleware_RequestBodyReadErrorReplayed(t *testing.T) {
+	readErr := errors.New("connection reset by peer")
+	req := rawRequest(t, context.Background(), "", nil)
+	req.Body = &brokenBody{partial: []byte(`{"model":"m",`), err: readErr}
+
+	tw := &recordingRawWriter{}
+	holder := NewRawHolder()
+	holder.Set(tw)
+	mw := newRawMiddleware(holder)
+
+	var sdkReadErr error
+	if _, err := mw(req, func(r *http.Request) (*http.Response, error) {
+		_, sdkReadErr = io.ReadAll(r.Body)
+		return jsonResponse(`{}`), nil
+	}); err != nil {
+		t.Fatalf("middleware: %v", err)
+	}
+	if !errors.Is(sdkReadErr, readErr) {
+		t.Errorf("SDK body read error = %v, want %v", sdkReadErr, readErr)
+	}
+
+	rec := tw.one(t)
+	if rec.Error != readErr.Error() {
+		t.Errorf("error = %q, want %q", rec.Error, readErr.Error())
+	}
+	// The partial bytes of a failed read are not valid JSON and stay out of
+	// Request; the error field carries the failure.
+	if rec.Request != nil {
+		t.Errorf("request = %q, want nil for a failed body read", rec.Request)
+	}
+	if _, err := json.Marshal(rec); err != nil {
+		t.Errorf("record is not encodable: %v", err)
+	}
+}
+
+// When next() fails for an independent reason (e.g. the context is cancelled
+// before the replayed body is read), the record must keep the body-read root
+// cause alongside the downstream error instead of letting either hide the
+// other.
+func TestRawMiddleware_JoinsRequestBodyReadErrorWithNextError(t *testing.T) {
+	readErr := errors.New("connection reset by peer")
+	req := rawRequest(t, context.Background(), "", nil)
+	req.Body = &brokenBody{partial: []byte(`{"model":"m",`), err: readErr}
+
+	tw := &recordingRawWriter{}
+	holder := NewRawHolder()
+	holder.Set(tw)
+	mw := newRawMiddleware(holder)
+
+	nextErr := errors.New("context deadline exceeded")
+	if _, err := mw(req, func(*http.Request) (*http.Response, error) {
+		return nil, nextErr
+	}); !errors.Is(err, nextErr) {
+		t.Fatalf("middleware error = %v, want %v", err, nextErr)
+	}
+
+	rec := tw.one(t)
+	want := readErr.Error() + "; next: " + nextErr.Error()
+	if rec.Error != want {
+		t.Errorf("error = %q, want %q", rec.Error, want)
+	}
+}
+
+// HTTP-level failures are not transport errors — the SDK retries them and the
+// body lands in the record as-is — so status_code must carry the signal.
+func TestRawMiddleware_RecordsNon200StatusCode(t *testing.T) {
+	req := rawRequest(t, context.Background(), `{"model":"m"}`, nil)
+
+	tw := &recordingRawWriter{}
+	holder := NewRawHolder()
+	holder.Set(tw)
+	mw := newRawMiddleware(holder)
+
+	_, err := mw(req, func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"slow down"}`)),
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("middleware: %v", err)
+	}
+
+	rec := tw.one(t)
+	if rec.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("status_code = %d, want 429", rec.StatusCode)
+	}
+	if rec.Error != "" {
+		t.Errorf("error = %q, want empty for an HTTP-level failure", rec.Error)
 	}
 }
 
@@ -296,6 +452,33 @@ func TestRawMiddleware_NonJSONResponseGoesToResponseText(t *testing.T) {
 	}
 	if rec.ResponseText != sse {
 		t.Errorf("response_text = %q, want SSE body", rec.ResponseText)
+	}
+}
+
+// The SDK marshals every request body, so this path is unreachable today; if a
+// future middleware mangles the bytes, the record must survive with them
+// verbatim instead of being dropped whole.
+func TestRawMiddleware_NonJSONRequestBodyGoesToRequestText(t *testing.T) {
+	req := rawRequest(t, context.Background(), `{not-json`, nil)
+
+	tw := &recordingRawWriter{}
+	holder := NewRawHolder()
+	holder.Set(tw)
+	mw := newRawMiddleware(holder)
+
+	if _, err := mw(req, func(*http.Request) (*http.Response, error) { return jsonResponse(`{}`), nil }); err != nil {
+		t.Fatalf("middleware: %v", err)
+	}
+
+	rec := tw.one(t)
+	if rec.Request != nil {
+		t.Errorf("request = %q, want empty for non-JSON body", rec.Request)
+	}
+	if rec.RequestText != `{not-json` {
+		t.Errorf("request_text = %q, want malformed body verbatim", rec.RequestText)
+	}
+	if _, err := json.Marshal(rec); err != nil {
+		t.Errorf("record is not encodable: %v", err)
 	}
 }
 
@@ -644,6 +827,11 @@ func TestRawMiddleware_EmptyBodies(t *testing.T) {
 	if len(rec.Request) != 0 || rec.Response != nil || rec.ResponseText != "" {
 		t.Errorf("captures must be empty: req=%q resp=%q text=%q", rec.Request, rec.Response, rec.ResponseText)
 	}
+	// The record must still encode: an empty non-nil Request used to fail
+	// json.Marshal and the writer silently dropped the whole record.
+	if _, err := json.Marshal(rec); err != nil {
+		t.Errorf("record with empty bodies is not encodable: %v", err)
+	}
 }
 
 // TestRawHolder_ConcurrentSetAndWrite exercises the holder's locking under
@@ -675,5 +863,68 @@ func TestRawHolder_ConcurrentSetAndWrite(t *testing.T) {
 		if !bytes.Equal(rec.Request, []byte(`{"model":"m"}`)) {
 			t.Fatalf("corrupted record under concurrency: %q", rec.Request)
 		}
+	}
+}
+
+// slowRawWriter stands in for a costly capture sink so timing pollution is
+// measurable regardless of disk speed.
+type slowRawWriter struct {
+	mu    sync.Mutex
+	count int
+	delay time.Duration
+}
+
+func (w *slowRawWriter) Write(rec RawRecord) {
+	time.Sleep(w.delay)
+	w.mu.Lock()
+	w.count++
+	w.mu.Unlock()
+}
+
+func (w *slowRawWriter) Close() error { return nil }
+
+// TestRawCaptureDoesNotInflateObserverTiming guards the middleware order: raw
+// must sit outside the retry observer, so its full-body read and writer call
+// never land inside the observer's DurationToHeadersMS window. If raw is
+// mounted inside, the sleeping writer pushes the measured duration past the
+// delay and this assertion goes red.
+func TestRawCaptureDoesNotInflateObserverTiming(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(openAIOKBody))
+	}))
+	defer server.Close()
+
+	const writeDelay = 300 * time.Millisecond
+	tw := &slowRawWriter{delay: writeDelay}
+	c := NewRetryCollector()
+	holder := NewRawHolder()
+	client := NewLLMClient(ResolvedEndpoint{
+		URL:      server.URL + "/v1",
+		Token:    "test-key",
+		Model:    "gpt-test",
+		Protocol: ProtocolOpenAIChatCompletions,
+	}, c, holder)
+	holder.Set(tw)
+
+	m := testMeta()
+	if _, err := ping(metaCtx(m), client); err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+
+	tw.mu.Lock()
+	writes := tw.count
+	tw.mu.Unlock()
+	if writes != 1 {
+		t.Fatalf("writer ran %d times, want 1 (assertion below only meaningful if capture is active)", writes)
+	}
+
+	got := attemptsFor(t, c, m)
+	if len(got) != 1 {
+		t.Fatalf("got %d attempts, want 1", len(got))
+	}
+	if got[0].DurationToHeadersMS >= writeDelay.Milliseconds()-50 {
+		t.Errorf("duration_to_headers_ms = %d, inflated by raw capture (writer sleeps %v)",
+			got[0].DurationToHeadersMS, writeDelay)
 	}
 }

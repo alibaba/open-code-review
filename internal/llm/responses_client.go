@@ -52,11 +52,12 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
 	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters.
 	if cfg.rawHolder != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	return &OpenAIResponsesClient{

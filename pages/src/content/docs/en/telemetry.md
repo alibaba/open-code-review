@@ -199,7 +199,10 @@ never shipped to the collector.
 For deeper debugging, set `OCR_RAW_LOGGING=1` to capture the raw
 request and response bodies of every LLM call in
 `~/.opencodereview/raw/` — more detailed debugging information than
-the session transcripts. Off by default.
+the session transcripts. Off by default. With streaming enabled, the
+capture reads the entire response body before handing it on to the
+rest of the processing. Capture redacts request headers but records
+request and response bodies as-is.
 
 ## Recipes
 

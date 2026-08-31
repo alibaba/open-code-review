@@ -523,11 +523,14 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
 	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
+	// Raw must register before the retry observer: the SDK wraps middlewares
+	// last-in-innermost, and raw's full-body read plus disk write would
+	// otherwise inflate the observer's DurationToHeadersMS.
 	if cfg.rawHolder != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	return &OpenAIClient{
@@ -943,11 +946,12 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
 	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters.
 	if cfg.rawHolder != nil {
 		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	return &AnthropicClient{
@@ -997,11 +1001,12 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
 	}
-	if cfg.retryCollector != nil {
-		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
-	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters.
 	if cfg.rawHolder != nil {
 		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
+	}
+	if cfg.retryCollector != nil {
+		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
 
 	// Load the AWS config here rather than calling bedrock.WithLoadDefaultConfig,
