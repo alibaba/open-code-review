@@ -91,6 +91,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/pages/index.astro", "client:*"},
 		{"src/components/app.tsx", "React"},
 		{"lib/utils.ts", "TypeScript"},
+		{"scripts/config.mjs", "TypeScript"},
+		{"server/bootstrap.cjs", "TypeScript"},
 		{"app.kt", "Null Safety"},
 		{"src/main/handler.cpp", "Smart Pointer"},
 		{"driver.c", "malloc"},

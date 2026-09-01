@@ -154,7 +154,7 @@ diff 단계에서 일어납니다.
 | `**/*.{hbs,mustache}` | `handlebars_mustache.md` — Handlebars 및 Mustache 템플릿. |
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — Astro 컴포넌트와 아일랜드. |
-| `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |

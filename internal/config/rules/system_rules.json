@@ -19,7 +19,7 @@
     "**/*.pug": "pug.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
-    "**/*.{ts,js,tsx,jsx}": "ts_js_tsx_jsx.md",
+    "**/*.{ts,js,tsx,jsx,mjs,cjs}": "ts_js_tsx_jsx.md",
     "**/*.{kt}": "kotlin.md",
     "**/*.rs": "rust.md",
     "**/*.{cpp,cc,hpp}": "cpp.md",
