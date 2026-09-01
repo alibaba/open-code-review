@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/viewer"
 )
@@ -80,17 +81,39 @@ func TestViewerCmd_DefaultAddr(t *testing.T) {
 
 // TestViewerCmd_RejectsInvalidOpenMode pins the validation wiring: an unknown
 // value must fail before the server binds a socket.
+//
+// RunE runs under a deadline because losing the guard does not turn this into a
+// returned error — it falls through to StartServer, which serves until the
+// listener fails and so never returns. Calling RunE directly would then hang
+// until the suite-wide timeout panic, blaming whichever test the runner was on
+// rather than this flag. ValidateOpenMode itself is covered in
+// internal/viewer's TestValidateOpenMode; what this test adds is that the
+// viewer command actually calls it, and calls it first.
 func TestViewerCmd_RejectsInvalidOpenMode(t *testing.T) {
-	prev := viewerOpts.open
-	t.Cleanup(func() { viewerOpts.open = prev })
+	prevOpen, prevAddr := viewerOpts.open, viewerOpts.addr
+	t.Cleanup(func() {
+		viewerOpts.open = prevOpen
+		viewerOpts.addr = prevAddr
+	})
 
+	// Port 0 so a regression binds an ephemeral port instead of fighting the
+	// default one with a viewer the developer may already have running.
 	viewerOpts.open = "yes"
-	err := viewerCmd.RunE(viewerCmd, nil)
-	if err == nil {
-		t.Fatal("RunE with --open=yes = nil, want a validation error")
-	}
-	if !strings.Contains(err.Error(), "invalid --open value") {
-		t.Errorf("error = %q, want it to mention the invalid --open value", err)
+	viewerOpts.addr = "127.0.0.1:0"
+
+	done := make(chan error, 1)
+	go func() { done <- viewerCmd.RunE(viewerCmd, nil) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("RunE with --open=yes = nil, want a validation error")
+		}
+		if !strings.Contains(err.Error(), "invalid --open value") {
+			t.Errorf("error = %q, want it to mention the invalid --open value", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunE did not return; --open is not validated before StartServer binds")
 	}
 }
 

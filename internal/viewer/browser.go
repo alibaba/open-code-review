@@ -53,6 +53,9 @@ func browserWarnf(format string, args ...any) {
 // its status is meaningful; one that becomes the browser holds the process for
 // the whole session. Waiting only this long distinguishes the two without
 // blocking the warning path forever.
+//
+// The duration and the treat-still-running-as-success rule are taken from the Go
+// toolchain's own opener (cmd/internal/browser.appearsSuccessful, also 3s).
 var browserWaitWindow = 3 * time.Second
 
 // shouldAutoOpen resolves the open decision against the live environment.
@@ -100,11 +103,16 @@ func shouldAutoOpenEnv(mode string, stdoutTTY bool, sshConn, display, wayland, g
 
 // browserCandidates returns the argv lists to try, in preference order.
 //
-// $BROWSER comes first when set, following the freedesktop convention the Go
-// toolchain also honors (cmd/internal/browser): a colon-separated list of
-// commands, each either embedding a %s placeholder for the URL or receiving it
-// as a trailing argument. It is read on Unix only — the separator would split
-// a Windows path at its drive letter, and the variable is not a Windows idiom.
+// $BROWSER comes first when set, parsed per the freedesktop convention as
+// Python's webbrowser module implements it: a colon-separated list of commands,
+// each either embedding a %s placeholder for the URL or receiving it as a
+// trailing argument. The Go toolchain deliberately does less here —
+// cmd/internal/browser treats $BROWSER as a single executable path, with no
+// colon splitting and no %s — so the richer parsing is this package's choice,
+// not something inherited. What is borrowed from Go is browserWaitWindow.
+//
+// $BROWSER is read on Unix only — the separator would split a Windows path at
+// its drive letter, and the variable is not a Windows idiom.
 //
 // Reference Gist: https://gist.github.com/sevkin/9798d67b2cb9d07cb05f89f14ba682f8
 func browserCandidates(goos, browserEnv, url string) [][]string {
