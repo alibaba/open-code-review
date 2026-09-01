@@ -1,0 +1,68 @@
+{
+  "name": "es-module-lexer",
+  "version": "2.3.2",
+  "description": "Lexes ES modules returning their import/export metadata",
+  "main": "dist/lexer.cjs",
+  "module": "dist/lexer.js",
+  "sideEffects": false,
+  "types": "types/lexer.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/lexer.d.ts",
+      "module": "./dist/lexer.js",
+      "import": "./dist/lexer.js",
+      "require": "./dist/lexer.cjs"
+    },
+    "./js": {
+      "types": "./types/lexer.d.ts",
+      "default": "./dist/lexer.asm.js"
+    },
+    "./minimal": {
+      "types": "./types/lexer.minimal.d.ts",
+      "module": "./dist/lexer.minimal.js",
+      "import": "./dist/lexer.minimal.js",
+      "require": "./dist/lexer.minimal.cjs"
+    },
+    "./minimal/js": {
+      "types": "./types/lexer.minimal.d.ts",
+      "default": "./dist/lexer.minimal.asm.js"
+    }
+  },
+  "scripts": {
+    "build": "npm install -g chomp ; chomp build",
+    "test": "npm install -g chomp ; chomp test"
+  },
+  "author": "Guy Bedford",
+  "license": "MIT",
+  "devDependencies": {
+    "@babel/cli": "^7.29.7",
+    "@babel/core": "^7.29.7",
+    "@babel/plugin-transform-modules-commonjs": "^7.29.7",
+    "@swc/cli": "^0.8.1",
+    "@swc/core": "^1.15.41",
+    "@types/node": "^25.9.3",
+    "kleur": "^4.1.5",
+    "mocha": "^11.7.6",
+    "terser": "^5.48.0",
+    "typescript": "^6.0.3"
+  },
+  "files": [
+    "dist",
+    "types",
+    "lexer.js"
+  ],
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guybedford/es-module-lexer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/guybedford/es-module-lexer/issues"
+  },
+  "homepage": "https://github.com/guybedford/es-module-lexer#readme",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "keywords": []
+}

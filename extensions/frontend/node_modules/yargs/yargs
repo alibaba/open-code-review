@@ -1,0 +1,5 @@
+// This file gets hit in node versions below node 12.17.0
+// when require('yargs/yargs') from CommonJS
+// because conditional exports not fully supported and treats as filename.
+
+module.exports = require('./yargs.cjs');

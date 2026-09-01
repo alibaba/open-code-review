@@ -1,0 +1,22 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+import {Options} from 'yargs';
+import {Config} from '@jest/types';
+
+export declare function buildArgv(
+  maybeArgv?: Array<string>,
+): Promise<Config.Argv>;
+
+export declare function run(
+  maybeArgv?: Array<string>,
+  project?: string,
+): Promise<void>;
+
+export declare const yargsOptions: {
+  [key: string]: Options;
+};

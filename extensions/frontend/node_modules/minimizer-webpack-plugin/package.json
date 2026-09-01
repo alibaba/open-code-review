@@ -1,0 +1,167 @@
+{
+  "name": "minimizer-webpack-plugin",
+  "version": "5.6.1",
+  "description": "Minimizer plugin for webpack",
+  "keywords": [
+    "uglify",
+    "uglify-js",
+    "uglify-es",
+    "terser",
+    "swc",
+    "esbuild",
+    "html",
+    "html-minifier",
+    "html-minifier-terser",
+    "css",
+    "cssnano",
+    "csso",
+    "clean-css",
+    "lightningcss",
+    "webpack",
+    "webpack-plugin",
+    "minification",
+    "compress",
+    "compressor",
+    "min",
+    "minification",
+    "minifier",
+    "minify",
+    "optimize",
+    "optimizer"
+  ],
+  "homepage": "https://github.com/webpack/minimizer-webpack-plugin",
+  "bugs": "https://github.com/webpack/minimizer-webpack-plugin/issues",
+  "repository": "webpack/minimizer-webpack-plugin",
+  "funding": {
+    "type": "opencollective",
+    "url": "https://opencollective.com/webpack"
+  },
+  "license": "MIT",
+  "author": "webpack Contrib Team",
+  "main": "dist/index.js",
+  "types": "types/index.d.ts",
+  "files": [
+    "dist",
+    "types"
+  ],
+  "scripts": {
+    "clean": "del-cli dist types",
+    "prebuild": "npm run clean",
+    "build:serialize-javascript": "node ./scripts/copy-serialize-javascript.js",
+    "build:types": "tsc --declaration --emitDeclarationOnly --outDir types && prettier \"types/**/*.ts\" --write",
+    "build:code": "babel src -d dist --copy-files",
+    "build": "npm-run-all -p \"build:**\"",
+    "security": "npm audit --production",
+    "lint:serialize-javascript": "node ./scripts/copy-serialize-javascript.js --check",
+    "lint:prettier": "prettier --list-different .",
+    "lint:code": "eslint --cache .",
+    "lint:spelling": "cspell \"**/*.*\"",
+    "lint:types": "tsc --pretty --noEmit",
+    "lint": "npm-run-all -l -p \"lint:**\"",
+    "fix:code": "npm run lint:code -- --fix",
+    "fix:prettier": "npm run lint:prettier -- --write",
+    "fix": "npm-run-all -l fix:code fix:prettier",
+    "test:base": "jest",
+    "test:watch": "npm run test:base -- --watch",
+    "test:coverage": "npm run test:base -- --collectCoverageFrom=\"src/**/*.js\" --coverage",
+    "pretest": "npm run lint",
+    "test": "npm run test:coverage",
+    "prepare": "husky install && npm run build",
+    "version": "changeset version",
+    "release": "npm run build && changeset publish"
+  },
+  "dependencies": {
+    "@jridgewell/trace-mapping": "^0.3.25",
+    "jest-worker": "^27.4.5",
+    "schema-utils": "^4.3.0",
+    "terser": "^5.31.1"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.24.7",
+    "@babel/core": "^7.24.7",
+    "@babel/preset-env": "^7.29.5",
+    "@changesets/cli": "^2.30.0",
+    "@changesets/get-github-info": "^0.8.0",
+    "@minify-html/node": "^0.16.4",
+    "@swc/core": "^1.15.30",
+    "@swc/css": "^0.0.28",
+    "@swc/html": "^1.15.30",
+    "@types/clean-css": "^4.2.11",
+    "@types/csso": "^5.0.4",
+    "@types/html-minifier-terser": "^7.0.2",
+    "@types/node": "^24.2.1",
+    "@types/serialize-javascript": "^5.0.2",
+    "@types/uglify-js": "^3.17.5",
+    "clean-css": "^5.3.3",
+    "copy-webpack-plugin": "^9.0.1",
+    "cspell": "^6.31.2",
+    "cssnano": "^7.1.9",
+    "csso": "^5.0.5",
+    "del": "^6.0.0",
+    "del-cli": "^3.0.1",
+    "esbuild": "^0.27.3",
+    "eslint": "^9.29.0",
+    "eslint-config-webpack": "^4.5.1",
+    "file-loader": "^6.2.0",
+    "html-minifier-terser": "^7.2.0",
+    "husky": "^7.0.2",
+    "jest": "^27.5.1",
+    "lightningcss": "^1.32.0",
+    "lint-staged": "^13.2.3",
+    "memfs": "^3.4.13",
+    "npm-run-all": "^4.1.5",
+    "postcss": "^8.5.14",
+    "prettier": "^3.6.0",
+    "prettier-2": "npm:prettier@^2",
+    "serialize-javascript": "^7.0.5",
+    "typescript": "^6.0.3",
+    "uglify-js": "^3.19.3",
+    "webpack": "^5.107.2",
+    "webpack-cli": "^4.10.0",
+    "worker-loader": "^3.0.8"
+  },
+  "peerDependencies": {
+    "webpack": "^5.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@minify-html/node": {
+      "optional": true
+    },
+    "@swc/core": {
+      "optional": true
+    },
+    "@swc/css": {
+      "optional": true
+    },
+    "@swc/html": {
+      "optional": true
+    },
+    "clean-css": {
+      "optional": true
+    },
+    "cssnano": {
+      "optional": true
+    },
+    "csso": {
+      "optional": true
+    },
+    "esbuild": {
+      "optional": true
+    },
+    "html-minifier-terser": {
+      "optional": true
+    },
+    "lightningcss": {
+      "optional": true
+    },
+    "postcss": {
+      "optional": true
+    },
+    "uglify-js": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">= 10.13.0"
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "name": "css-loader",
+  "version": "7.1.4",
+  "description": "css loader module for webpack",
+  "license": "MIT",
+  "repository": "webpack/css-loader",
+  "author": "Tobias Koppers @sokra",
+  "homepage": "https://github.com/webpack/css-loader",
+  "bugs": "https://github.com/webpack/css-loader/issues",
+  "funding": {
+    "type": "opencollective",
+    "url": "https://opencollective.com/webpack"
+  },
+  "main": "dist/cjs.js",
+  "engines": {
+    "node": ">= 18.12.0"
+  },
+  "scripts": {
+    "start": "npm run build -- -w",
+    "clean": "del-cli dist",
+    "validate:runtime": "es-check es5 \"dist/runtime/**/*.js\"",
+    "prebuild": "npm run clean",
+    "build": "cross-env NODE_ENV=production babel src -d dist --copy-files",
+    "postbuild": "npm run validate:runtime",
+    "commitlint": "commitlint --from=main",
+    "security": "npm audit --production",
+    "lint:prettier": "prettier --cache --list-different .",
+    "lint:js": "eslint --cache .",
+    "lint:spelling": "cspell --cache --no-must-find-files --quiet \"**/*.*\"",
+    "lint": "npm-run-all -l -p \"lint:**\"",
+    "fix:js": "npm run lint:js -- --fix",
+    "fix:prettier": "npm run lint:prettier -- --write",
+    "fix": "npm-run-all -l fix:js fix:prettier",
+    "test:only": "cross-env NODE_ENV=test jest",
+    "test:watch": "npm run test:only -- --watch",
+    "test:coverage": "npm run test:only -- --collectCoverageFrom=\"src/**/*.js\" --coverage",
+    "pretest": "npm run lint",
+    "test": "npm run test:coverage",
+    "prepare": "husky && npm run build",
+    "release": "standard-version"
+  },
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "@rspack/core": "0.x || ^1.0.0 || ^2.0.0-0",
+    "webpack": "^5.27.0"
+  },
+  "peerDependenciesMeta": {
+    "@rspack/core": {
+      "optional": true
+    },
+    "webpack": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "icss-utils": "^5.1.0",
+    "postcss": "^8.4.40",
+    "postcss-modules-extract-imports": "^3.1.0",
+    "postcss-modules-local-by-default": "^4.0.5",
+    "postcss-modules-scope": "^3.2.0",
+    "postcss-modules-values": "^4.0.0",
+    "postcss-value-parser": "^4.2.0",
+    "semver": "^7.6.3"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.24.8",
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.3",
+    "@commitlint/cli": "^19.3.0",
+    "@commitlint/config-conventional": "^19.2.2",
+    "@webpack-contrib/eslint-config-webpack": "^3.0.0",
+    "babel-jest": "^30.0.0",
+    "cross-env": "^7.0.3",
+    "cspell": "^8.13.1",
+    "del-cli": "^5.1.0",
+    "es-check": "^7.2.1",
+    "eslint": "^8.54.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.0",
+    "file-loader": "^6.2.0",
+    "husky": "^9.1.4",
+    "jest": "^30.0.0",
+    "jest-environment-jsdom": "^30.0.0",
+    "less": "^4.2.0",
+    "less-loader": "^12.2.0",
+    "lint-staged": "^15.2.8",
+    "memfs": "^4.11.1",
+    "mini-css-extract-plugin": "^2.9.0",
+    "npm-run-all": "^4.1.5",
+    "postcss-loader": "^8.1.1",
+    "postcss-preset-env": "^9.6.0",
+    "prettier": "^3.3.3",
+    "sass": "^1.77.8",
+    "sass-loader": "^14.2.1",
+    "standard-version": "^9.5.0",
+    "strip-ansi": "^6.0.0",
+    "style-loader": "^3.3.4",
+    "stylus": "^0.63.0",
+    "stylus-loader": "^8.1.0",
+    "url-loader": "^4.1.1",
+    "webpack": "^5.93.0"
+  },
+  "keywords": [
+    "webpack",
+    "css",
+    "loader",
+    "url",
+    "import"
+  ]
+}

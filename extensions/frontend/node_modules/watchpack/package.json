@@ -1,0 +1,68 @@
+{
+  "name": "watchpack",
+  "version": "2.5.2",
+  "description": "",
+  "homepage": "https://github.com/webpack/watchpack",
+  "bugs": {
+    "url": "https://github.com/webpack/watchpack/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/webpack/watchpack.git"
+  },
+  "license": "MIT",
+  "author": "Tobias Koppers @sokra",
+  "main": "lib/index.js",
+  "types": "types/index.js",
+  "directories": {
+    "test": "test"
+  },
+  "files": [
+    "lib/",
+    "types/"
+  ],
+  "scripts": {
+    "lint": "npm run lint:code && npm run lint:types && npm run lint:types-test && npm run lint:declarations && npm run fmt:check",
+    "lint:code": "eslint --cache .",
+    "lint:types": "tsc --noEmit",
+    "lint:types-test": "tsc -p tsconfig.types.test.json --noEmit",
+    "lint:declarations": "npm run fix:declarations && git diff --exit-code ./types",
+    "fix": "npm run fix:code && npm run fix:declarations",
+    "fix:code": "npm run lint:code -- --fix",
+    "fix:declarations": "tsc && npm run fmt -- ./types",
+    "fmt": "npm run fmt:base -- --log-level warn --write",
+    "fmt:check": "npm run fmt:base -- --check",
+    "fmt:base": "prettier --cache --ignore-unknown .",
+    "pretest": "npm run lint",
+    "test": "npm run test:coverage",
+    "test:base": "jest --runInBand",
+    "test:only": "npm run test:base",
+    "test:watch": "npm run test:base -- --watch",
+    "test:coverage": "npm run test:base -- --collectCoverageFrom=\"lib/**/*.js\" --coverage",
+    "benchmark": "node --max-old-space-size=4096 --hash-seed=1 --random-seed=1 --no-opt --predictable --predictable-gc-schedule --interpreted-frames-native-stack --allow-natives-syntax --expose-gc --no-concurrent-sweeping ./benchmark/run.mjs",
+    "version": "changeset version",
+    "release": "changeset publish"
+  },
+  "dependencies": {
+    "graceful-fs": "^4.1.2"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.30.0",
+    "@changesets/get-github-info": "^0.8.0",
+    "@codspeed/core": "^5.2.0",
+    "@types/glob-to-regexp": "^0.4.4",
+    "@types/graceful-fs": "^4.1.9",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.10.4",
+    "eslint": "^9.39.2",
+    "eslint-config-webpack": "^4.9.3",
+    "jest": "^30.3.0",
+    "prettier": "^3.7.4",
+    "tinybench": "^6.0.0",
+    "typescript": "^6.0.2",
+    "write-file-atomic": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=10.13.0"
+  }
+}

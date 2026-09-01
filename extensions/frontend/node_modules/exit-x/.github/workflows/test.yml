@@ -1,0 +1,39 @@
+name: Tests
+
+on: [push, pull_request]
+
+env:
+  FORCE_COLOR: 2
+
+jobs:
+  run:
+    name: Node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20]
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install npm dependencies
+        run: npm i
+
+      - name: Run tests
+        run: npm test
+
+      # We test multiple Windows shells because of prior stdout buffering issues
+      # filed against Grunt. https://github.com/joyent/node/issues/3584
+      - name: Run PowerShell tests
+        run: "npm test # PowerShell" # Pass comment to PS for easier debugging
+        shell: powershell
+        if: startsWith(matrix.os, 'windows')
