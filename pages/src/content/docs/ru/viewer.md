@@ -12,10 +12,11 @@ sidebar:
 ## Запуск
 
 ```bash
-ocr viewer                       # start + open browser
+ocr viewer                       # start and open the browser
 ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
-ocr viewer --no-open             # just print the URL
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
 ```
 
 Адрес по умолчанию — `localhost:5483`. Сервер работает на переднем плане;
@@ -31,6 +32,39 @@ ocr viewer --no-open             # just print the URL
 > сети возвращается `forbidden host`. Чтобы открыть wildcard-привязку, задайте
 > в `OCR_VIEWER_ALLOWED_HOSTS` разделённый запятыми список разрешённых имён
 > хостов (например, `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`).
+
+## Открытие браузера
+
+Как только сервер начинает слушать, `ocr viewer` открывает URL в браузере по
+умолчанию. Этим управляет `--open`, принимающий те же три значения, что и
+глобальный `--color`:
+
+| Значение | Поведение |
+|---|---|
+| `auto` (по умолчанию) | Открывать только там, где это скорее всего сработает — см. ниже. |
+| `always` | Открывать безусловно. Нужен там, где `auto` отказывается, а браузер на деле доступен: вывод уходит в конвейер, или WSL без дисплея. |
+| `never` | Только напечатать URL и больше ничего. |
+
+В режиме `auto` браузер **не** открывается, когда:
+
+- stdout не терминал — вывод перенаправлен или уходит в конвейер;
+- задана переменная `SSH_CONNECTION` **и** дисплей не переадресован — на
+  удалённой машине открывать некуда. `ssh -X` и `ssh -Y` задают `DISPLAY`, поэтому
+  под них подавления нет;
+- в Linux `DISPLAY` и `WAYLAND_DISPLAY` оба пусты — нет дисплейного сервера.
+
+Причина добавляется в строку готовности, чтобы намеренно подавленное
+автооткрытие не выглядело сломанным:
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+В Unix сначала пробуется `$BROWSER`: список команд через двоеточие, каждая либо
+содержит подстановку `%s` для URL, либо получает URL последним аргументом.
+Иначе запускается команда по умолчанию для платформы — `open` в macOS,
+`xdg-open` в Linux и BSD, `rundll32` в Windows. Неудачное открытие браузера —
+это предупреждение в stderr, а не фатальная ошибка: сервер продолжает работать.
 
 ## Три страницы
 

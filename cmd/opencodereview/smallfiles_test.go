@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/viewer"
 )
 
 func TestPrintVersion_Dev(t *testing.T) {
@@ -66,8 +68,29 @@ func TestViewerCmd_DefaultAddr(t *testing.T) {
 	if viewerOpts.addr != "localhost:5483" {
 		t.Errorf("default addr = %q, want localhost:5483", viewerOpts.addr)
 	}
-	if viewerOpts.noOpen {
-		t.Error("default no-open = true, want false")
+	if viewerOpts.open != viewer.OpenAuto {
+		t.Errorf("default open = %q, want %q", viewerOpts.open, viewer.OpenAuto)
+	}
+	// --open is the single control. --no-open never shipped, so it is not carried
+	// as an alias: two flags for one decision is the complexity this avoids.
+	if f := viewerCmd.Flags().Lookup("no-open"); f != nil {
+		t.Error("no-open flag present; --open=never is the only way to suppress opening")
+	}
+}
+
+// TestViewerCmd_RejectsInvalidOpenMode pins the validation wiring: an unknown
+// value must fail before the server binds a socket.
+func TestViewerCmd_RejectsInvalidOpenMode(t *testing.T) {
+	prev := viewerOpts.open
+	t.Cleanup(func() { viewerOpts.open = prev })
+
+	viewerOpts.open = "yes"
+	err := viewerCmd.RunE(viewerCmd, nil)
+	if err == nil {
+		t.Fatal("RunE with --open=yes = nil, want a validation error")
+	}
+	if !strings.Contains(err.Error(), "invalid --open value") {
+		t.Errorf("error = %q, want it to mention the invalid --open value", err)
 	}
 }
 

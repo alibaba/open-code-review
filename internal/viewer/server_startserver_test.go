@@ -5,6 +5,7 @@ package viewer
 
 import (
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -18,7 +19,7 @@ func TestStartServer_SessionsRootError(t *testing.T) {
 	if _, err := SessionsRoot(); err == nil {
 		t.Skip("home dir resolvable despite empty HOME; platform-specific")
 	}
-	if err := StartServer("127.0.0.1:0", false); err == nil {
+	if err := StartServer("127.0.0.1:0", OpenNever); err == nil {
 		t.Fatal("expected StartServer to fail when sessions root cannot resolve")
 	}
 }
@@ -33,35 +34,131 @@ func TestStartServer_AddrInUse(t *testing.T) {
 	}
 	defer ln.Close()
 
-	err = StartServer(ln.Addr().String(), false)
+	err = StartServer(ln.Addr().String(), OpenNever)
 	if err == nil {
 		t.Fatal("expected StartServer to fail binding an in-use address")
 	}
 }
 
-func TestShouldAutoOpenEnv(t *testing.T) {
+// TestDisplayURL pins the host to the *requested* address and the port to the
+// listener. Deriving the host from the listener instead makes the printed URL
+// disagree with the hostGuard allowlist, which is built from the requested one:
+// see TestDisplayURL_AgreesWithHostGuard.
+func TestDisplayURL(t *testing.T) {
 	tests := []struct {
 		name      string
-		requested bool
-		stdoutTTY bool
-		sshConn   string
-		display   string
-		wayland   string
-		goos      string
-		want      bool
+		requested string
+		listener  string
+		want      string
+		wantErr   bool
 	}{
-		{"not requested", false, true, "", "", "", "darwin", false},
-		{"requested with tty", true, true, "", "", "", "darwin", true},
-		{"non-tty stdout", true, false, "", "", "", "darwin", false},
-		{"ssh session", true, true, "10.0.0.1 1234", "", "", "darwin", false},
-		{"linux with display", true, true, "", ":0", "", "linux", true},
-		{"linux with wayland", true, true, "", "", "wayland-0", "linux", true},
-		{"linux headless", true, true, "", "", "", "linux", false},
+		{"default", "localhost:5483", "127.0.0.1:5483", "http://localhost:5483", false},
+		{"hostname bind keeps the hostname", "box.local:5483", "192.168.1.10:5483", "http://box.local:5483", false},
+		{"empty host wildcard", ":3000", "[::]:3000", "http://localhost:3000", false},
+		{"ipv4 wildcard", "0.0.0.0:8080", "0.0.0.0:8080", "http://localhost:8080", false},
+		{"ipv6 wildcard", "[::]:8080", "[::]:8080", "http://localhost:8080", false},
+		{"explicit loopback", "127.0.0.1:5483", "127.0.0.1:5483", "http://127.0.0.1:5483", false},
+		{"lan ip", "192.168.1.10:5483", "192.168.1.10:5483", "http://192.168.1.10:5483", false},
+		{"port zero reports the assigned port", "localhost:0", "127.0.0.1:53229", "http://localhost:53229", false},
+		{"wildcard port zero", ":0", "[::]:53229", "http://localhost:53229", false},
+		{"unparseable listener addr", "localhost:5483", "not-an-addr", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldAutoOpenEnv(tt.requested, tt.stdoutTTY, tt.sshConn, tt.display, tt.wayland, tt.goos); got != tt.want {
-				t.Errorf("shouldAutoOpenEnv(...) = %v, want %v", got, tt.want)
+			got, err := displayURL(tt.requested, tt.listener)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("displayURL(%q, %q) = %q, want error", tt.requested, tt.listener, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("displayURL(%q, %q) error = %v", tt.requested, tt.listener, err)
+			}
+			if got != tt.want {
+				t.Errorf("displayURL(%q, %q) = %q, want %q", tt.requested, tt.listener, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDisplayURL_AgreesWithHostGuard is the regression test for the auto-open
+// path: whatever URL we print and hand to the browser must survive the viewer's
+// own Host allowlist. Before displayURL existed, `--addr box.local:5483` opened
+// the resolved IP and landed on "403 forbidden host".
+func TestDisplayURL_AgreesWithHostGuard(t *testing.T) {
+	cases := []struct{ requested, listener string }{
+		{"localhost:5483", "127.0.0.1:5483"},
+		{"box.local:5483", "192.168.1.10:5483"},
+		{"127.0.0.1:5483", "127.0.0.1:5483"},
+		{"192.168.1.10:5483", "192.168.1.10:5483"},
+		{":3000", "[::]:3000"},
+		{"0.0.0.0:8080", "0.0.0.0:8080"},
+	}
+	for _, c := range cases {
+		t.Run(c.requested, func(t *testing.T) {
+			url, err := displayURL(c.requested, c.listener)
+			if err != nil {
+				t.Fatalf("displayURL: %v", err)
+			}
+			host := strings.TrimPrefix(url, "http://")
+
+			allowed := buildAllowedHosts(splitBindHost(c.requested), "")
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest("GET", "/", nil)
+			req.Host = host
+			hostGuard(allowed, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})).ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Errorf("hostGuard rejected the URL we would open: addr=%q url=%q status=%d body=%q",
+					c.requested, url, rec.Code, strings.TrimSpace(rec.Body.String()))
+			}
+		})
+	}
+}
+
+func TestShouldAutoOpenEnv(t *testing.T) {
+	tests := []struct {
+		name       string
+		mode       string
+		stdoutTTY  bool
+		sshConn    string
+		display    string
+		wayland    string
+		goos       string
+		want       bool
+		wantReason string
+	}{
+		{"never", OpenNever, true, "", "", "", "darwin", false, ""},
+		{"auto with tty", OpenAuto, true, "", "", "", "darwin", true, ""},
+		{"auto non-tty stdout", OpenAuto, false, "", "", "", "darwin", false, "stdout is not a terminal"},
+		{"auto linux with display", OpenAuto, true, "", ":0", "", "linux", true, ""},
+		{"auto linux with wayland", OpenAuto, true, "", "", "wayland-0", "linux", true, ""},
+		{"auto linux headless", OpenAuto, true, "", "", "", "linux", false, "no DISPLAY or WAYLAND_DISPLAY"},
+		// SSH is judged together with the display variables, not on its own: being
+		// remote only rules out a browser when nothing was forwarded.
+		{"auto ssh without forwarding", OpenAuto, true, "10.0.0.1 1234", "", "", "darwin", false, "SSH session with no forwarded display"},
+		{"auto ssh with X11 forwarding", OpenAuto, true, "10.0.0.1 1234", "localhost:10.0", "", "linux", true, ""},
+		{"auto ssh with wayland forwarding", OpenAuto, true, "10.0.0.1 1234", "", "wayland-0", "linux", true, ""},
+		{"auto ssh to linux without forwarding reports the ssh reason", OpenAuto, true, "10.0.0.1 1234", "", "", "linux", false, "SSH session with no forwarded display"},
+		// A local macOS session has no DISPLAY at all and must still open.
+		{"auto local darwin without display", OpenAuto, true, "", "", "", "darwin", true, ""},
+		// always overrides every auto-mode guard.
+		{"always over ssh", OpenAlways, true, "10.0.0.1 1234", "", "", "darwin", true, ""},
+		{"always on headless linux", OpenAlways, false, "10.0.0.1 1234", "", "", "linux", true, ""},
+		// An unvalidated value degrades to auto rather than opening blindly.
+		{"unknown mode behaves as auto", "bogus", false, "", "", "", "darwin", false, "stdout is not a terminal"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, reason := shouldAutoOpenEnv(tt.mode, tt.stdoutTTY, tt.sshConn, tt.display, tt.wayland, tt.goos)
+			if got != tt.want {
+				t.Errorf("shouldAutoOpenEnv(%q, ...) = %v, want %v", tt.mode, got, tt.want)
+			}
+			if reason != tt.wantReason {
+				t.Errorf("shouldAutoOpenEnv(%q, ...) reason = %q, want %q", tt.mode, reason, tt.wantReason)
 			}
 		})
 	}

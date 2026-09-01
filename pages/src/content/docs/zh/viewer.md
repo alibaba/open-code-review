@@ -10,10 +10,11 @@ sidebar:
 ## 启动
 
 ```bash
-ocr viewer                       # start + open browser
+ocr viewer                       # start and open the browser
 ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
-ocr viewer --no-open             # just print the URL
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
 ```
 
 默认地址是 `localhost:5483`。服务器在前台运行——`Ctrl+C` 停止。会话在每次请求时
@@ -27,6 +28,35 @@ JSONL 文件出现就会显示。
 > `forbidden host`。要让通配绑定可被访问，设置
 > `OCR_VIEWER_ALLOWED_HOSTS` 为逗号分隔的允许主机名列表
 > （如 `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`）。
+
+## 打开浏览器
+
+服务器一开始监听，`ocr viewer` 就会在默认浏览器中打开该 URL。这一行为由
+`--open` 控制，取值与全局的 `--color` 一致：
+
+| 取值 | 行为 |
+|---|---|
+| `auto`（默认） | 仅在大概率可用时打开——见下文。 |
+| `always` | 无条件打开。用于 `auto` 拒绝但其实有可用浏览器的场景——输出被管道接走，或 WSL 上没有显示环境。 |
+| `never` | 只打印 URL，不做别的。 |
+
+在 `auto` 模式下，以下情况**不会**打开浏览器：
+
+- stdout 不是终端——输出被管道或重定向了；
+- `SSH_CONNECTION` 已设置**且**没有转发任何显示环境——远程主机上无处可开。
+  `ssh -X` / `ssh -Y` 会设置 `DISPLAY`，因此不会被抑制；
+- Linux 上 `DISPLAY` 和 `WAYLAND_DISPLAY` 都为空——没有显示服务器。
+
+原因会附加在 ready 行末尾，这样"有意抑制"就不会被误认为"功能坏了"：
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+在 Unix 上会优先尝试 `$BROWSER`：以冒号分隔的命令列表，每一项要么含有代表
+URL 的 `%s` 占位符，要么把 URL 作为末尾参数接收。否则使用各平台的默认命令——
+macOS 上是 `open`，Linux 与 BSD 上是 `xdg-open`，Windows 上是 `rundll32`。
+打开浏览器失败只会在 stderr 上给出一条警告，绝不致命；无论如何服务器都继续提供服务。
 
 ## 三个页面
 

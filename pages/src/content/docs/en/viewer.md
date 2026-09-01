@@ -12,10 +12,11 @@ review.
 ## Launching
 
 ```bash
-ocr viewer                       # start + open browser
+ocr viewer                       # start and open the browser
 ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
-ocr viewer --no-open             # just print the URL
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
 ```
 
 The default address is `localhost:5483`. The server holds the foreground
@@ -31,6 +32,39 @@ another terminal shows up the moment its JSONL file appears.
 > `forbidden host`. To expose a wildcard bind, set
 > `OCR_VIEWER_ALLOWED_HOSTS` to a comma-separated list of allowed
 > hostnames (e.g. `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`).
+
+## Opening the browser
+
+`ocr viewer` opens the URL in your default browser as soon as the server is
+listening. `--open` controls this and takes the same three values as the global
+`--color`:
+
+| Value | Behavior |
+|---|---|
+| `auto` (default) | Open only where it is likely to work — see below. |
+| `always` | Open unconditionally. Use this where `auto` declines but a browser is in fact reachable — piped output, or WSL with no display. |
+| `never` | Print the URL and do nothing else. |
+
+In `auto` mode the browser is **not** opened when:
+
+- stdout is not a terminal — output is piped or redirected;
+- `SSH_CONNECTION` is set **and** no display is forwarded — a remote host with
+  nothing to open into. `ssh -X` and `ssh -Y` set `DISPLAY`, so they are not
+  suppressed;
+- on Linux, `DISPLAY` and `WAYLAND_DISPLAY` are both empty — no display server.
+
+The reason is appended to the ready line, so a deliberately suppressed
+auto-open never looks like a broken one:
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+On Unix, `$BROWSER` is tried first: a colon-separated list of commands, each
+either containing a `%s` placeholder for the URL or receiving it as a trailing
+argument. Otherwise the platform default runs — `open` on macOS, `xdg-open` on
+Linux and the BSDs, `rundll32` on Windows. Failing to open a browser is a
+warning on stderr and never fatal; the server keeps serving either way.
 
 ## Three pages
 

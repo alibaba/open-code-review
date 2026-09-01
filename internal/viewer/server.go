@@ -10,20 +10,18 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
-	"os"
-	"os/exec"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/charmbracelet/x/term"
 )
 
 //go:embed templates/*.html static/style.css static/session.js static/repos.js
 var assets embed.FS
 
-func StartServer(addr string, autoOpen bool) error {
+// StartServer binds addr and serves until the listener fails. openMode is one
+// of OpenAuto, OpenAlways or OpenNever; callers should have run
+// ValidateOpenMode first, and anything unrecognized behaves as OpenAuto.
+func StartServer(addr, openMode string) error {
 	root, err := SessionsRoot()
 	if err != nil {
 		return fmt.Errorf("resolve sessions root: %w", err)
@@ -70,23 +68,38 @@ func StartServer(addr string, autoOpen bool) error {
 		Handler: handler,
 	}
 
+	// Bind before printing or opening anything: once Listen returns, early
+	// connections queue in the accept backlog instead of being refused, so the
+	// browser cannot outrun the server.
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", addr, err)
 	}
+	// srv.Serve takes ownership and closes ln itself; this covers the
+	// early-return path below and any future one. Close is idempotent enough
+	// here — the second call just reports ErrClosed, which nothing reads.
 	defer ln.Close()
+
+	url, err := displayURL(addr, ln.Addr().String())
+	if err != nil {
+		return err
+	}
 
 	serveErr := make(chan error, 1)
 	go func() {
 		serveErr <- srv.Serve(ln)
 	}()
 
-	url := "http://" + DisplayAddr(ln.Addr().String())
-	fmt.Printf("Viewer ready: %s\n", url)
-	if shouldAutoOpen(autoOpen) {
+	autoOpen, suppressed := shouldAutoOpen(openMode)
+	if suppressed != "" {
+		fmt.Printf("Viewer ready: %s (browser not opened: %s)\n", url, suppressed)
+	} else {
+		fmt.Printf("Viewer ready: %s\n", url)
+	}
+	if autoOpen {
 		go func() {
 			if err := openBrowser(url); err != nil {
-				fmt.Fprintf(os.Stderr, "[ocr] WARNING: could not open browser: %v\n", err)
+				browserWarnf("could not open browser: %v", err)
 			}
 		}()
 	}
@@ -94,62 +107,22 @@ func StartServer(addr string, autoOpen bool) error {
 	return <-serveErr
 }
 
-func shouldAutoOpen(requested bool) bool {
-	return shouldAutoOpenEnv(
-		requested,
-		term.IsTerminal(os.Stdout.Fd()),
-		os.Getenv("SSH_CONNECTION"),
-		os.Getenv("DISPLAY"),
-		os.Getenv("WAYLAND_DISPLAY"),
-		runtime.GOOS,
-	)
-}
-
-func shouldAutoOpenEnv(requested, stdoutTTY bool, sshConn, display, wayland, goos string) bool {
-	if !requested {
-		return false
+// displayURL builds the URL to print and hand to the browser.
+//
+// The host comes from the requested address, not from the listener: net.Listen
+// resolves a hostname to an IP literal, while the Host allowlist in hostGuard is
+// built from the requested address (resolveAllowedHostsFromEnv). Using the
+// resolved form makes the two disagree, so `ocr viewer --addr box.local:5483`
+// would auto-open http://192.168.1.10:5483 and land on "403 forbidden host".
+//
+// The port comes from the listener so `--addr :0` reports the port the kernel
+// actually assigned rather than the literal 0.
+func displayURL(requestedAddr, listenerAddr string) (string, error) {
+	_, port, err := net.SplitHostPort(listenerAddr)
+	if err != nil {
+		return "", fmt.Errorf("parse listener addr %q: %w", listenerAddr, err)
 	}
-	if !stdoutTTY {
-		return false
-	}
-	if sshConn != "" {
-		return false
-	}
-	if goos == "linux" && display == "" && wayland == "" {
-		return false
-	}
-	return true
-}
-
-// Reference Gist: https://gist.github.com/sevkin/9798d67b2cb9d07cb05f89f14ba682f8
-func browserOpenCmd(goos, url string) *exec.Cmd {
-	var cmd string
-	var args []string
-
-	switch goos {
-	case "windows":
-		// rundll32 handles URLs with query parameters better than "cmd /c start".
-		cmd = "rundll32"
-		args = []string{"url.dll,FileProtocolHandler"}
-	case "darwin":
-		cmd = "open"
-	default: // "linux", "freebsd", "openbsd", "netbsd"
-		cmd = "xdg-open"
-	}
-
-	args = append(args, url)
-	return exec.Command(cmd, args...)
-}
-
-func openBrowser(url string) error {
-	cmd := browserOpenCmd(runtime.GOOS, url)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	go func() {
-		_ = cmd.Wait()
-	}()
-	return nil
+	return "http://" + DisplayAddr(net.JoinHostPort(splitBindHost(requestedAddr), port)), nil
 }
 
 var cstZone = func() *time.Location {

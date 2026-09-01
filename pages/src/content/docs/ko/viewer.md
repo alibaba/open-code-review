@@ -11,10 +11,11 @@ sidebar:
 ## 실행하기 {#launching}
 
 ```bash
-ocr viewer                       # start + open browser
+ocr viewer                       # start and open the browser
 ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
-ocr viewer --no-open             # just print the URL
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
 ```
 
 기본 주소는 `localhost:5483`입니다. 서버는 포그라운드를 잡고 있으며 `Ctrl+C`로
@@ -29,6 +30,38 @@ ocr viewer --no-open             # just print the URL
 > 이름으로 UI에 접근하면 `forbidden host`가 돌아옵니다. 와일드카드 바인드를
 > 열려면 `OCR_VIEWER_ALLOWED_HOSTS`에 허용할 호스트 이름을 쉼표로 이어
 > 지정하세요(예: `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`).
+
+## 브라우저 열기 {#opening-the-browser}
+
+서버가 수신을 시작하면 `ocr viewer`가 해당 URL을 기본 브라우저에서 엽니다. 이
+동작은 `--open`으로 제어하며, 전역 `--color`와 같은 세 가지 값을 받습니다.
+
+| 값 | 동작 |
+|---|---|
+| `auto`(기본값) | 동작할 가능성이 높을 때만 엽니다 — 아래 참조. |
+| `always` | 조건 없이 엽니다. `auto`가 열지 않지만 실제로는 브라우저에 닿을 수 있는 경우 — 출력이 파이프될 때, 디스플레이가 없는 WSL 등 — 에 사용하세요. |
+| `never` | URL만 출력하고 그 외에는 아무것도 하지 않습니다. |
+
+`auto` 모드에서는 다음 경우에 브라우저를 열지 **않습니다**.
+
+- stdout이 터미널이 아님 — 출력이 파이프되거나 리다이렉트됨
+- `SSH_CONNECTION`이 설정되어 있고 **또한** 전달된 디스플레이가 없음 — 원격
+  호스트에서 열 곳이 없음. `ssh -X` / `ssh -Y`는 `DISPLAY`를 설정하므로 억제되지
+  않습니다
+- Linux에서 `DISPLAY`와 `WAYLAND_DISPLAY`가 모두 비어 있음 — 디스플레이 서버 없음
+
+그 이유는 ready 줄 끝에 덧붙습니다. 의도적으로 억제된 자동 열기가 고장난 것으로
+보이는 일은 없습니다.
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+Unix에서는 `$BROWSER`를 먼저 시도합니다. 콜론으로 구분된 명령 목록이며, 각
+항목은 URL을 뜻하는 `%s` 자리표시자를 포함하거나 URL을 마지막 인자로 받습니다.
+그 외에는 플랫폼 기본 명령이 실행됩니다 — macOS는 `open`, Linux와 BSD는
+`xdg-open`, Windows는 `rundll32`. 브라우저를 열지 못하면 stderr에 경고만 남기고
+치명적으로 처리하지 않습니다. 어느 쪽이든 서버는 계속 서비스합니다.
 
 ## 페이지 세 개 {#three-pages}
 

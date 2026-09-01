@@ -580,17 +580,23 @@ Built-in providers:
 ocr viewer [flags]
 
 Flags:
-  --addr <address>   listen address (default "localhost:5483")
-      --no-open      do not open the browser automatically
+  --addr <address>   listen address (default: localhost:5483)
+  --open <mode>      when to open the browser: auto, always, never (default: auto)
 
 Examples:
-  ocr viewer                     # start + open browser
+  ocr viewer                     # start and open the browser
   ocr viewer --addr :3000        # bind to all interfaces on port 3000
-  ocr viewer --no-open           # just print the URL
+  ocr viewer --open=never        # just print the URL
+  ocr viewer --open=always       # force it when auto declines (piped output, WSL)
 ```
 
 `~/.opencodereview/sessions/...`를 읽어 지난 리뷰 세션을 브라우저에서 보기 좋게
 렌더링하는 내장 HTTP 서버를 띄웁니다. [세션 뷰어](../viewer/)를 참고하세요.
+
+`--open=auto`는 stdout이 터미널이 아닐 때, `SSH_CONNECTION`이 설정되어 있고
+전달된 디스플레이가 없을 때, 또는 Linux에서 `DISPLAY`와 `WAYLAND_DISPLAY`가 모두
+없을 때 브라우저 열기를 건너뜁니다. 그 이유는 URL과 함께 출력됩니다. auto가 열지
+않지만 실제로는 브라우저에 닿을 수 있다면 `--open=always`를 사용하세요.
 
 ## `ocr version` {#ocr-version}
 
