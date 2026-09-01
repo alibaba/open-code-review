@@ -670,6 +670,35 @@ async function testIncrementalOverlapThresholdPropagated() {
   assert.strictEqual(outputs.comments_inline, "0");
 }
 
+// Scope propagation: with the default scope ("bot"), a human reviewer's
+// comment is not history, so the overlapping comment is posted; with scope
+// "all" the same human comment suppresses it.
+async function testIncrementalScopeAllDedupesAgainstHumanComments() {
+  const history = [{ path: "src/a.js", line: 10, start_line: 10, side: "RIGHT", user: { login: "human-reviewer" } }];
+  const result = {
+    comments: [{ path: "src/a.js", content: "overlap", start_line: 10, end_line: 10 }],
+    warnings: [],
+  };
+
+  const defaultScope = await run({
+    result,
+    githubOpts: { history },
+    opts: { stickySummary: true, incremental: true },
+  });
+  assert.strictEqual(defaultScope.github.createReviewCalls.length, 1, "human comment ignored under scope bot");
+  assert.strictEqual(defaultScope.outputs.comments_skipped, "0");
+  assert.strictEqual(defaultScope.outputs.comments_inline, "1");
+
+  const allScope = await run({
+    result,
+    githubOpts: { history },
+    opts: { stickySummary: true, incremental: true, incrementalScope: "all" },
+  });
+  assert.strictEqual(allScope.github.createReviewCalls.length, 0, "human comment suppresses overlap under scope all");
+  assert.strictEqual(allScope.outputs.comments_skipped, "1");
+  assert.strictEqual(allScope.outputs.comments_inline, "0");
+}
+
 // ---- Idempotency tests (prevent duplicate review posts on retry) ----
 
 // Batch createReview fails with 5xx but the batch actually landed on the
@@ -2228,6 +2257,7 @@ async function main() {
   await testIncrementalAllOverlapPostsNoReview();
   await testIncrementalMultiLineIoUDefaultThreshold();
   await testIncrementalOverlapThresholdPropagated();
+  await testIncrementalScopeAllDedupesAgainstHumanComments();
   // Idempotency
   await testBatchLandedRetriesOnlyMissingComments();
   await testPerComment5xxAlreadyPostedTreatedAsSuccess();

@@ -177,12 +177,13 @@ The task and request timeouts are independent:
 
 ### Control comment posting (sticky summary & incremental)
 
-The action posts a summary issue comment plus inline review comments. Two inputs select the posting mode (combined, they give the four modes referenced above); a third tunes the incremental overlap test:
+The action posts a summary issue comment plus inline review comments. Two inputs select the posting mode (combined, they give the four modes referenced above); two more tune the incremental overlap test:
 
 | Input | Default | Description |
 |-------|---------|-------------|
 | `sticky_summary` | `'true'` | Update an existing summary comment in place instead of posting a new one each run. |
 | `incremental` | `'false'` | Only append inline comments whose `(path, line range)` does not overlap an existing bot review comment. History is never deleted (non-destructive). |
+| `incremental_scope` | `'bot'` | Whose existing comments `incremental` deduplicates against. `'bot'` = only comments posted by this action's token; `'all'` = every review comment on the PR, so a line a human reviewer already commented on is not commented again. Ignored unless `incremental` is `'true'`. |
 | `incremental_overlap_threshold` | `'0.6'` | IoU threshold `incremental` uses to decide whether a multi-line comment overlaps an existing one. Two single-line comments match on the same line; single- vs multi-line never match. Ignored unless `incremental` is `'true'`. |
 
 ```yaml
@@ -194,6 +195,8 @@ The action posts a summary issue comment plus inline review comments. Two inputs
 ```
 
 > `sticky_summary` and `incremental` must be quoted strings (`'true'`/`'false'`); the action compares them as strings, so an unquoted YAML boolean will not match.
+
+> The overlap test is positional, not semantic: with `incremental_scope: 'all'`, a human comment on the same lines suppresses the action's comment even when it is about something else.
 
 ### Review only what changed since the last run (checkpoints)
 
