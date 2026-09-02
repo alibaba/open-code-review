@@ -182,6 +182,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
 | `**/*.bicep` | `bicep.md` — шаблоны Bicep (Azure). |
 | `**/*.elm` | `elm.md` - исходный код Elm. |
+| `**/*.{ps1,psm1,psd1}` | `powershell.md` — скрипты, модули и файлы данных/манифестов PowerShell. |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — шаблоны конфигурации и библиотеки Jsonnet. |
 | `**/*.thrift` | `thrift.md` — совместимость Apache Thrift IDL на уровне wire. |
 | `**/*.capnp` | `capnp.md` — совместимость схем Cap'n Proto на уровне wire. |
