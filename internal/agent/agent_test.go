@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
+	"github.com/alibaba/open-code-review/internal/stdout"
 	"github.com/alibaba/open-code-review/internal/tool"
 )
 
@@ -1238,5 +1240,367 @@ func TestAgent_TokenAccumulation(t *testing.T) {
 	}
 	if a.TotalOutputTokens() != 5 {
 		t.Errorf("TotalOutputTokens = %d, want 5", a.TotalOutputTokens())
+	}
+}
+
+// --- --reuse-from (Args.Reuse) tests ---
+
+// TestApplyResumeWithReuseState mirrors TestApplyResumeReusesCompletedItems
+// AcrossModels for Args.Reuse: same engine, distinct source labeling. A reuse
+// state carries a "reuse:<run>" session id, which must flow into ResumeInfo
+// unchanged while the reused comments land in the collector.
+func TestApplyResumeWithReuseState(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	diffs := []model.Diff{
+		{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
+		{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
+		// A deleted file is never reusable, whatever the reuse state says: it
+		// always dispatches.
+		{NewPath: "gone.go", IsDeleted: true, Deletions: 5},
+	}
+	fp := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	reuse := &session.ResumeState{
+		SessionID: "reuse:old-run",
+		Model:     "anthropic-model",
+		Items: map[string]session.ResumeItem{
+			fp: {
+				FilePath:    "a.go",
+				OldPath:     "a.go",
+				NewPath:     "a.go",
+				Fingerprint: fp,
+				Comments: []model.LlmComment{{
+					Path:    "a.go",
+					Content: "cached comment",
+				}},
+			},
+		},
+		Manifest: &session.RunManifest{
+			SchemaVersion: session.ManifestSchemaVersion,
+			Coverage:      session.Coverage{Completed: []session.CoverageItem{{ItemID: fp, Fingerprint: fp}}},
+		},
+		Closed: true,
+	}
+	collector := tool.NewCommentCollector()
+	sess := session.New(t.TempDir(), "feature", "openai-model", session.SessionOptions{
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Operation:  session.OperationReview,
+	})
+	defer sess.Finalize()
+	a := New(Args{
+		From:             "main",
+		To:               "feature",
+		Model:            "openai-model",
+		CommentCollector: collector,
+		Reuse:            reuse,
+		Session:          sess,
+	})
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	toDispatch := a.applyResume(diffs)
+	restore()
+
+	if len(toDispatch) != 2 || toDispatch[0].NewPath != "b.go" || !toDispatch[1].IsDeleted {
+		t.Fatalf("toDispatch = %+v, want b.go plus the deleted file", toDispatch)
+	}
+	comments := collector.Comments()
+	if len(comments) != 1 || comments[0].Content != "cached comment" {
+		t.Fatalf("comments = %+v", comments)
+	}
+	info := a.ResumeInfo()
+	if info == nil || info.ReusedFiles != 1 || info.RerunFiles != 1 ||
+		info.ResumedFrom != "reuse:old-run" ||
+		info.PreviousModel != "anthropic-model" || info.CurrentModel != "openai-model" {
+		t.Fatalf("ResumeInfo = %+v", info)
+	}
+	// The deleted file dispatches but is not reviewable, so it stays out of the
+	// "reviewing" count.
+	if want := "[ocr] Reuse reuse:old-run: reusing 1 file(s), reviewing 1 file(s)\n"; buf.String() != want {
+		t.Errorf("print = %q, want %q", buf.String(), want)
+	}
+}
+
+// TestApplyResumeResumeTakesPrecedenceOverReuse pins the precedence when both
+// states are present: --resume is the strict path, so its state and its
+// "[ocr] Resume" labeling must win over the synthetic reuse state.
+func TestApplyResumeResumeTakesPrecedenceOverReuse(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	diffs := []model.Diff{{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1}}
+	fp := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	coverage := session.Coverage{Completed: []session.CoverageItem{{ItemID: fp, Fingerprint: fp}}}
+	resume := &session.ResumeState{
+		SessionID: "old-session",
+		Items:     map[string]session.ResumeItem{},
+		Manifest:  &session.RunManifest{Coverage: coverage},
+	}
+	reuse := &session.ResumeState{
+		SessionID: "reuse:other-run",
+		Items: map[string]session.ResumeItem{
+			fp: {FilePath: "a.go", NewPath: "a.go", Fingerprint: fp},
+		},
+		Manifest: &session.RunManifest{Coverage: coverage},
+	}
+	sess := session.New(t.TempDir(), "feature", "m", session.SessionOptions{
+		ReviewMode: session.ReviewModeRange,
+		Operation:  session.OperationReview,
+	})
+	defer sess.Finalize()
+	a := New(Args{
+		From:    "main",
+		To:      "feature",
+		Resume:  resume,
+		Reuse:   reuse,
+		Session: sess,
+	})
+
+	var buf bytes.Buffer
+	restore := stdout.Swap(&buf)
+	toDispatch := a.applyResume(diffs)
+	restore()
+
+	// resume has no checkpoint for fp, so the file dispatches — the reuse
+	// state must not step in as a fallback while a resume is in charge.
+	if len(toDispatch) != 1 {
+		t.Fatalf("toDispatch = %+v, want the file re-dispatched", toDispatch)
+	}
+	if info := a.ResumeInfo(); info == nil || info.ResumedFrom != "old-session" {
+		t.Fatalf("ResumeInfo = %+v, want the resume session as source", info)
+	}
+	if want := "[ocr] Resume old-session: reusing 0 file(s), reviewing 1 file(s)\n"; buf.String() != want {
+		t.Errorf("print = %q, want %q", buf.String(), want)
+	}
+}
+
+// newReuseFlowAgent mirrors newManifestFlowAgentWithClient for Args.Reuse: a
+// dispatch-ready agent whose reuse source is a synthetic reuse state, with no
+// ResumedFrom lineage (reuse runs are not resumes).
+func newReuseFlowAgent(t *testing.T, diffs []model.Diff, reuse *session.ResumeState, client llm.LLMClient) *Agent {
+	t.Helper()
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := session.New(repoDir, "feature", "fake", session.SessionOptions{
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Operation:  session.OperationReview,
+	})
+	t.Cleanup(func() { _ = sh.Finalize() })
+	a := New(Args{
+		RepoDir:    repoDir,
+		From:       "main",
+		To:         "feature",
+		ReviewMode: session.ReviewModeRange,
+		LLMClient:  client,
+		Model:      "fake",
+		Session:    sh,
+		Reuse:      reuse,
+		Template: template.Template{
+			MaxTokens:           100000,
+			MaxToolRequestTimes: 5,
+			MainTask: template.LlmConversation{
+				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diffs}}"}},
+			},
+		},
+		MainToolDefs: []llm.ToolDef{{
+			Type: "function",
+			Function: llm.FunctionDef{
+				Name:        "task_done",
+				Description: "finish the review",
+			},
+		}},
+	})
+	a.diffs = diffs
+	a.currentDate = "2026-09-02 12:00"
+	return a
+}
+
+// reuseStateFor builds the synthetic state loadReuseState would produce for
+// the given fingerprints (items keyed by fingerprint, coverage vouching for
+// them in the parent manifest).
+func reuseStateFor(sessionID string, diffs []model.Diff) *session.ResumeState {
+	items := make(map[string]session.ResumeItem, len(diffs))
+	coverage := make([]session.CoverageItem, 0, len(diffs))
+	for _, d := range diffs {
+		fp := reviewItemFingerprint(session.ReviewModeRange, d)
+		items[fp] = session.ResumeItem{
+			FilePath:    d.NewPath,
+			OldPath:     d.OldPath,
+			NewPath:     d.NewPath,
+			Fingerprint: fp,
+		}
+		coverage = append(coverage, session.CoverageItem{ItemID: fp, Path: d.NewPath, Fingerprint: fp})
+	}
+	return &session.ResumeState{
+		SessionID: sessionID,
+		RepoDir:   "elsewhere",
+		Model:     "parent-model",
+		Items:     items,
+		Manifest: &session.RunManifest{
+			SchemaVersion: session.ManifestSchemaVersion,
+			RunID:         strings.TrimPrefix(sessionID, "reuse:"),
+			Operation:     session.OperationReview,
+			Coverage:      session.Coverage{Completed: coverage},
+		},
+		Closed: true,
+	}
+}
+
+// sessionEventPath returns the JSONL path of the agent's persisted session.
+func sessionEventPath(t *testing.T, a *Agent) string {
+	t.Helper()
+	path, err := session.SessionFilePath(a.args.RepoDir, a.session.SessionID)
+	if err != nil {
+		t.Fatalf("SessionFilePath: %v", err)
+	}
+	return path
+}
+
+// TestReuseFlowMovedToReusesUnchangedFileReviewsChangedFresh is the headline
+// scenario: the reuse source was produced by a run with different --from/--to,
+// an unchanged file's fingerprint still matches (the fingerprint covers only
+// mode/paths/diff text), and only the genuinely changed file reaches the LLM.
+func TestReuseFlowMovedToReusesUnchangedFileReviewsChangedFresh(t *testing.T) {
+	// The parent reviewed unchanged.go as it stands and settled a finding.
+	unchanged := model.Diff{OldPath: "unchanged.go", NewPath: "unchanged.go", Diff: "+stable", Insertions: 1}
+	changed := model.Diff{OldPath: "changed.go", NewPath: "changed.go", Diff: "+changed-now", Insertions: 1}
+	reuse := reuseStateFor("reuse:parent-run", []model.Diff{unchanged})
+	// A moved --to: the parent ran main..feature-1, this run reviews main..feature-2.
+	// Fingerprints do not involve the refs, so the match survives the move.
+	reuse.DiffFrom, reuse.DiffTo = "main", "feature-1"
+	const reusedFinding = "PARENT_FINDING_ABOUT_UNCHANGED_GO"
+	fp := reviewItemFingerprint(session.ReviewModeRange, unchanged)
+	carried := reuse.Items[fp]
+	carried.Comments = []model.LlmComment{{Path: "unchanged.go", Content: reusedFinding}}
+	reuse.Items[fp] = carried
+
+	spy := &promptSpy{}
+	a := newReuseFlowAgent(t, []model.Diff{unchanged, changed}, reuse, spy)
+	a.args.To = "feature-2"
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	var merged bool
+	for _, c := range comments {
+		if c.Content == reusedFinding {
+			merged = true
+		}
+	}
+	if !merged {
+		t.Fatalf("reused finding must be merged into the output, got %+v", comments)
+	}
+	// Exactly one dispatch, for changed.go — unchanged.go was reused, so it is
+	// neither re-reviewed nor mentioned to the model.
+	spy.mu.Lock()
+	prompts := append([]string(nil), spy.prompts...)
+	spy.mu.Unlock()
+	if len(prompts) != 1 {
+		t.Fatalf("prompts = %d, want 1 (changed.go only)", len(prompts))
+	}
+	for _, prompt := range prompts {
+		if strings.Contains(prompt, reusedFinding) {
+			t.Error("a reused finding must not enter a new LLM context")
+		}
+		if strings.Contains(prompt, "unchanged.go") {
+			t.Error("a reused file must not be sent to the model again")
+		}
+	}
+
+	manifest := finishManifestFlow(t, a)
+	if len(manifest.Coverage.Reused) != 1 || manifest.Coverage.Reused[0].Path != "unchanged.go" {
+		t.Fatalf("reused coverage = %+v, want unchanged.go", manifest.Coverage.Reused)
+	}
+	if len(manifest.Coverage.Completed) != 1 || manifest.Coverage.Completed[0].Path != "changed.go" {
+		t.Fatalf("completed coverage = %+v, want changed.go reviewed fresh", manifest.Coverage.Completed)
+	}
+	if manifest.ParentRunID != "" {
+		t.Errorf("parent_run_id = %q, want empty: reuse carries no lineage", manifest.ParentRunID)
+	}
+	if info := a.ResumeInfo(); info == nil || info.ResumedFrom != "reuse:parent-run" || info.ReusedFiles != 1 || info.RerunFiles != 1 {
+		t.Fatalf("ResumeInfo = %+v, want reuse:parent-run with 1 reused and 1 rerun", info)
+	}
+	// The reuse source id is asserted on the persisted review_item_reused event
+	// and nowhere in the run manifest (schema v1 coverage has no source field).
+	raw, err := os.ReadFile(sessionEventPath(t, a))
+	if err != nil {
+		t.Fatalf("read session events: %v", err)
+	}
+	events := string(raw)
+	if !strings.Contains(events, `"type":"review_item_reused"`) {
+		t.Error("session must record a review_item_reused event")
+	}
+	if !strings.Contains(events, `"sourceSessionId":"reuse:parent-run"`) {
+		t.Error("review_item_reused must carry the reuse: source id")
+	}
+}
+
+// TestReuseFlowModeMismatchNeverMatches pins the structural exclusion: the
+// fingerprint's first field is the review mode, so a range-mode source cannot
+// match a commit-mode run even for byte-identical diffs.
+func TestReuseFlowModeMismatchNeverMatches(t *testing.T) {
+	diffs := []model.Diff{
+		{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
+		{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
+	}
+	reuse := reuseStateFor("reuse:parent-run", diffs)
+	spy := &promptSpy{}
+	a := newReuseFlowAgent(t, diffs, reuse, spy)
+	// Recast the run as commit mode: same paths, same diff text, other mode.
+	a.args.From, a.args.To, a.args.Commit = "", "", "abc123"
+	a.args.ReviewMode = session.ReviewModeCommit
+
+	if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if info := a.ResumeInfo(); info == nil || info.ReusedFiles != 0 || info.RerunFiles != 2 {
+		t.Fatalf("ResumeInfo = %+v, want 0 reused and 2 rerun", info)
+	}
+	manifest := finishManifestFlow(t, a)
+	if len(manifest.Coverage.Reused) != 0 || len(manifest.Coverage.Completed) != 2 {
+		t.Fatalf("coverage reused=%d completed=%d, want 0/2 — a range source must not match a commit run",
+			len(manifest.Coverage.Reused), len(manifest.Coverage.Completed))
+	}
+	spy.mu.Lock()
+	defer spy.mu.Unlock()
+	if len(spy.prompts) != 2 {
+		t.Fatalf("prompts = %d, want 2 (every file reviewed fresh)", len(spy.prompts))
+	}
+}
+
+// TestReuseFlowAllReusedDispatchesNothing covers the fully-reused run: no
+// group is formed, nothing is dispatched, the reused comments are the result,
+// and the run completes with every item in coverage.reused.
+func TestReuseFlowAllReusedDispatchesNothing(t *testing.T) {
+	diffs := []model.Diff{
+		{OldPath: "a.go", NewPath: "a.go", Diff: "+a", Insertions: 1},
+		{OldPath: "b.go", NewPath: "b.go", Diff: "+b", Insertions: 1},
+	}
+	reuse := reuseStateFor("reuse:parent-run", diffs)
+	for fp, item := range reuse.Items {
+		item.Comments = []model.LlmComment{{Path: item.NewPath, Content: "carried " + item.NewPath}}
+		reuse.Items[fp] = item
+	}
+	spy := &promptSpy{}
+	a := newReuseFlowAgent(t, diffs, reuse, spy)
+
+	comments, err := a.dispatchSubtasks(context.Background())
+	if err != nil {
+		t.Fatalf("an all-reused dispatch must succeed: %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("comments = %d, want both carried comment sets", len(comments))
+	}
+	spy.mu.Lock()
+	if len(spy.prompts) != 0 {
+		t.Fatalf("prompts = %d, want 0: a reused file must never reach the LLM", len(spy.prompts))
+	}
+	spy.mu.Unlock()
+
+	manifest := finishManifestFlow(t, a)
+	if manifest.TerminalState != session.StateComplete || len(manifest.Coverage.Reused) != 2 {
+		t.Fatalf("manifest terminal=%q reused=%d, want complete with 2 reused", manifest.TerminalState, len(manifest.Coverage.Reused))
 	}
 }
