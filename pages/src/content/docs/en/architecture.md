@@ -15,8 +15,8 @@ the source code with confidence.
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range<br/>Per file: detect charset, decode non-UTF-8 to UTF-8 (decode.go)</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -53,7 +53,15 @@ the same default Git uses.
 Untracked files are read from disk and treated as full-file additions so
 they're reviewed pre-commit.
 
-## The five-gate file filter
+As each file's new-file bytes are read, `finalizeDiff` hands them to
+`decodeDiffFile`: valid UTF-8 passes through byte-identically and the
+detector never runs. A file detected as GB18030, Big5, Shift-JIS, EUC-JP
+or EUC-KR above the confidence gate is decoded to UTF-8 in memory — both
+the hunk payload and the new-file content — while the `diff --git`,
+`index`, `---`, `+++` and `@@` frame lines stay raw, and nothing is
+written to disk.
+
+## The six-gate file filter
 
 Once diffs are loaded, every file passes through
 [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go).
@@ -64,6 +72,7 @@ binary          — file is binary
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
+undecodable_encoding — bytes are not decodable text in any supported charset
 ```
 
 …or empty if the file is kept. `deleted` is **not** returned by
@@ -71,12 +80,14 @@ default_path    — matched a built-in test-file exclude pattern
 file's diff reports `IsDeleted`. The gates run in this order:
 
 1. `binary` — binary files are dropped first.
-2. `user_exclude` — your project's `exclude` always wins.
-3. `user_include` — if the filter has include patterns **and** the file
+2. `undecodable_encoding` — files whose bytes aren't text in any
+   supported charset are dropped before the extension gate.
+3. `user_exclude` — your project's `exclude` always wins.
+4. `user_include` — if the filter has include patterns **and** the file
    matches one, it's kept immediately (returns empty), bypassing the
    `unsupported_ext` and `default_path` gates below.
-4. `unsupported_ext` filters by extension allowlist.
-5. `default_path` is the last gate: it matches built-in **test-file**
+5. `unsupported_ext` filters by extension allowlist.
+6. `default_path` is the last gate: it matches built-in **test-file**
    exclude patterns (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`,
    `**/__tests__/**`, `**/*_test.py`, `**/*_spec.rb`, `**/*.test.ets`, …).
    Every pattern is rooted with a `**/` prefix.

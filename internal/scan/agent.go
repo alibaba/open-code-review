@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -429,16 +430,28 @@ func (a *Agent) filterScanItems(items []model.ScanItem) []model.ScanItem {
 	var kept []model.ScanItem
 	skipped := 0
 	for _, it := range items {
-		if reason := a.whyExcluded(it); reason != model.ExcludeNone {
-			if it.IsBinary {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", it.Path)
-			} else {
-				fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", it.Path)
+		switch reason := a.whyExcluded(it); reason {
+		case model.ExcludeNone:
+			// The file IS reviewed. The undecoded warning lives at this
+			// filter site for the reason spelled out in filterDiffs in
+			// internal/agent/agent.go.
+			if it.UndecodedCharset != "" {
+				fmt.Fprintf(os.Stderr,
+					"[ocr] WARNING: %s left undecoded (detected %s); review text may contain replacement characters\n",
+					it.Path, it.UndecodedCharset)
 			}
+			kept = append(kept, it)
+		case model.ExcludeBinary:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — binary file\n", it.Path)
 			skipped++
-			continue
+		case model.ExcludeUndecodable:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — undecodable encoding (detected %s)\n",
+				it.Path, it.UndecodedCharset)
+			skipped++
+		default:
+			fmt.Fprintf(stdout.Writer(), "[ocr] Skipping %s — filtered by path/extension rules\n", it.Path)
+			skipped++
 		}
-		kept = append(kept, it)
 	}
 	if skipped > 0 {
 		fmt.Fprintf(stdout.Writer(), "[ocr] Filtered %d file(s) by include/exclude rules\n", skipped)
@@ -474,6 +487,11 @@ func (a *Agent) filterLargeScans(items []model.ScanItem) []model.ScanItem {
 func (a *Agent) whyExcluded(it model.ScanItem) model.ExcludeReason {
 	if it.IsBinary {
 		return model.ExcludeBinary
+	}
+	// Same position as internal/agent.whyExcluded: before the extension
+	// allowlist, so the encoding is reported as the reason.
+	if it.Unreviewable {
+		return model.ExcludeUndecodable
 	}
 	path := it.Path
 	if a.args.FileFilter != nil && a.args.FileFilter.IsUserExcluded(path) {

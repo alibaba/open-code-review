@@ -52,6 +52,10 @@ func (a *Agent) preview(ctx context.Context) (*model.Preview, error) {
 		reason := a.whyExcluded(it)
 		entry.WillReview = reason == model.ExcludeNone
 		entry.ExcludeReason = reason
+		// Reported whenever detection marked the file, not only when that
+		// marking excluded it: a file that is marked and still reviewed is the
+		// commoner case, and the review path already warns about it on stderr.
+		entry.DetectedCharset = it.UndecodedCharset
 		if entry.WillReview {
 			result.ReviewableCount++
 			result.TotalInsertions += entry.Insertions

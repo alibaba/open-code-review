@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 alibaba/open-code-review Contributors
+
+package textenc
+
+// Fixture source text, ASCII-only \uXXXX literals so make english-check stays
+// green and no non-UTF-8 bytes are ever checked in. Each is encoded at test time
+// with the matching x/text encoder.
+const (
+	srcGbk = "// \u7528\u6237\u8BA4\u8BC1\u6A21\u5757\uFF0C\u8D1F\u8D23\u6821\u9A8C\u4EE4\u724C\u5E76\u5237\u65B0\u4F1A\u8BDD\u72B6\u6001\u3002\n// \u5982\u679C\u4EE4\u724C\u5DF2\u7ECF\u8FC7\u671F\uFF0C\u8C03\u7528\u65B9\u9700\u8981\u91CD\u65B0\u767B\u5F55\u83B7\u53D6\u65B0\u7684\u51ED\u8BC1\u3002\npackage auth\n\n// Validate \u68C0\u67E5\u4F20\u5165\u7684\u4EE4\u724C\u662F\u5426\u6709\u6548\uFF0C\u5E76\u8FD4\u56DE\u5BF9\u5E94\u7684\u7528\u6237\u6807\u8BC6\u3002\nfunc Validate(token string) (string, error) {\n\tif token == \"\" {\n\t\treturn \"\", errEmptyToken\n\t}\n\treturn lookup(token)\n}\n"
+
+	srcBig5 = "// \u4F7F\u7528\u8005\u8A8D\u8B49\u6A21\u7D44\uFF0C\u8CA0\u8CAC\u6AA2\u9A57\u6B0A\u6756\u4E26\u66F4\u65B0\u5DE5\u4F5C\u968E\u6BB5\u72C0\u614B\u3002\n// \u82E5\u6B0A\u6756\u5DF2\u7D93\u903E\u671F\uFF0C\u547C\u53EB\u7AEF\u5FC5\u9808\u91CD\u65B0\u767B\u5165\u53D6\u5F97\u65B0\u7684\u6191\u8B49\u3002\npackage auth\n\n// Validate \u6AA2\u67E5\u50B3\u5165\u7684\u6B0A\u6756\u662F\u5426\u6709\u6548\uFF0C\u4E26\u56DE\u50B3\u5C0D\u61C9\u7684\u4F7F\u7528\u8005\u8B58\u5225\u78BC\u3002\nfunc Validate(token string) (string, error) {\n\tif token == \"\" {\n\t\treturn \"\", errEmptyToken\n\t}\n\treturn lookup(token)\n}\n"
+
+	srcSjis = "// \u5229\u7528\u8005\u8A8D\u8A3C\u30E2\u30B8\u30E5\u30FC\u30EB\u3067\u3059\u3002\u30C8\u30FC\u30AF\u30F3\u3092\u691C\u8A3C\u3057\u3066\u3001\u30BB\u30C3\u30B7\u30E7\u30F3\u72B6\u614B\u3092\u66F4\u65B0\u3057\u307E\u3059\u3002\n// \u30C8\u30FC\u30AF\u30F3\u306E\u6709\u52B9\u671F\u9650\u304C\u5207\u308C\u3066\u3044\u308B\u5834\u5408\u306F\u3001\u518D\u5EA6\u30ED\u30B0\u30A4\u30F3\u3057\u3066\u65B0\u3057\u3044\u8CC7\u683C\u60C5\u5831\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044\u3002\npackage auth\n\n// Validate \u306F\u6E21\u3055\u308C\u305F\u30C8\u30FC\u30AF\u30F3\u304C\u6709\u52B9\u304B\u3069\u3046\u304B\u3092\u8ABF\u3079\u3001\u5BFE\u5FDC\u3059\u308B\u5229\u7528\u8005\u8B58\u5225\u5B50\u3092\u8FD4\u3057\u307E\u3059\u3002\nfunc Validate(token string) (string, error) {\n\tif token == \"\" {\n\t\treturn \"\", errEmptyToken\n\t}\n\treturn lookup(token)\n}\n"
+
+	srcEucjp = "// \u5229\u7528\u8005\u8A8D\u8A3C\u30E2\u30B8\u30E5\u30FC\u30EB\u3067\u3059\u3002\u30C8\u30FC\u30AF\u30F3\u3092\u691C\u8A3C\u3057\u3066\u3001\u30BB\u30C3\u30B7\u30E7\u30F3\u72B6\u614B\u3092\u66F4\u65B0\u3057\u307E\u3059\u3002\n// \u30C8\u30FC\u30AF\u30F3\u306E\u6709\u52B9\u671F\u9650\u304C\u5207\u308C\u3066\u3044\u308B\u5834\u5408\u306F\u3001\u518D\u5EA6\u30ED\u30B0\u30A4\u30F3\u3057\u3066\u65B0\u3057\u3044\u8CC7\u683C\u60C5\u5831\u3092\u53D6\u5F97\u3057\u3066\u304F\u3060\u3055\u3044\u3002\npackage auth\n\n// Validate \u306F\u6E21\u3055\u308C\u305F\u30C8\u30FC\u30AF\u30F3\u304C\u6709\u52B9\u304B\u3069\u3046\u304B\u3092\u8ABF\u3079\u3001\u5BFE\u5FDC\u3059\u308B\u5229\u7528\u8005\u8B58\u5225\u5B50\u3092\u8FD4\u3057\u307E\u3059\u3002\nfunc Validate(token string) (string, error) {\n\tif token == \"\" {\n\t\treturn \"\", errEmptyToken\n\t}\n\treturn lookup(token)\n}\n"
+
+	srcEuckr = "// \uC0AC\uC6A9\uC790 \uC778\uC99D \uBAA8\uB4C8\uC785\uB2C8\uB2E4. \uD1A0\uD070\uC744 \uAC80\uC99D\uD558\uACE0 \uC138\uC158 \uC0C1\uD0DC\uB97C \uAC31\uC2E0\uD569\uB2C8\uB2E4.\n// \uD1A0\uD070\uC774 \uB9CC\uB8CC\uB41C \uACBD\uC6B0\uC5D0\uB294 \uB2E4\uC2DC \uB85C\uADF8\uC778\uD558\uC5EC \uC0C8\uB85C\uC6B4 \uC790\uACA9 \uC99D\uBA85\uC744 \uBC1B\uC544\uC57C \uD569\uB2C8\uB2E4.\npackage auth\n\n// Validate \uB294 \uC804\uB2EC\uB41C \uD1A0\uD070\uC774 \uC720\uD6A8\uD55C\uC9C0 \uD655\uC778\uD558\uACE0 \uD574\uB2F9 \uC0AC\uC6A9\uC790 \uC2DD\uBCC4\uC790\uB97C \uBC18\uD658\uD569\uB2C8\uB2E4.\nfunc Validate(token string) (string, error) {\n\tif token == \"\" {\n\t\treturn \"\", errEmptyToken\n\t}\n\treturn lookup(token)\n}\n"
+
+	srcUtf8JPComment = "// \u65E5\u672C\u8A9E\u306E\u30B3\u30E1\u30F3\u30C8\u3067\u3059"
+
+	srcUtf8CJKLong = "// \u3053\u306E\u30E2\u30B8\u30E5\u30FC\u30EB\u306F\u5229\u7528\u8005\u306E\u8A8D\u8A3C\u60C5\u5831\u3092\u691C\u8A3C\u3057\u3001\u30BB\u30C3\u30B7\u30E7\u30F3\u3092\u66F4\u65B0\u3059\u308B\u8CAC\u52D9\u3092\u6301\u3061\u307E\u3059\u3002"
+
+	srcFrenchComment = "// V\u00E9rifie que le jeton fourni est valide, puis r\u00E9g\u00E9n\u00E8re la cl\u00E9 associ\u00E9e.\n// Le param\u00E8tre doit \u00EAtre d\u00E9j\u00E0 d\u00E9cod\u00E9 c\u00F4t\u00E9 appelant ; sinon la r\u00E9f\u00E9rence \u00E9choue.\n"
+
+	srcFrenchSource = "// V\u00E9rifie le jeton et r\u00E9g\u00E9n\u00E8re la cl\u00E9.\npackage auth\n\nfunc Valider(jeton string) error {\n\t// La r\u00E9f\u00E9rence doit \u00EAtre d\u00E9j\u00E0 d\u00E9cod\u00E9e c\u00F4t\u00E9 appelant.\n\tif jeton == \"\" {\n\t\treturn errJetonVide\n\t}\n\treturn nil\n}\n"
+
+	srcSmartQuoteBase = "package auth\n\n// Validate reports whether the caller's token is still usable.\n// A token that expired is not an error; the caller just refreshes it.\nfunc Validate(token string) (string, error) {\n\tif token == \"\" {\n\t\treturn \"\", errEmptyToken\n\t}\n\treturn lookup(token)\n}\n"
+
+	srcShortGBK = "// \u4EE4\u724C\u6821\u9A8C\nfunc validateToken(tok string) bool { return tok != \"\" }\n"
+
+	srcRepeatBig5Phrase = "// \u6B0A\u6756\u6B0A\u6756\u6B0A\u6756\n"
+
+	srcGb18030WideTail = "// \u6269\u5C55\u5B57\u7B26 \U00020000 \u5F80\u8FD4\u3002\n"
+
+	srcFullwidthLine = "\u3000// \u4EE4\u724C\u6821\u9A8C\u5931\u8D25"
+)

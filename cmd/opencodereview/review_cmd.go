@@ -486,6 +486,14 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 }
 
 func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
+	// Loading diffs itself writes to stdout.Writer() (the per-file
+	// charset-decode notice), which `out` does not cover: the notice is
+	// printed while diffs are parsed, long before the document is written.
+	// Machine-readable formats must silence it around the whole of Preview,
+	// or the JSON document is preceded by human-readable lines.
+	q := newQuietHandle(opts.outputFormat, opts.audience)
+	defer q.Restore()
+
 	preview, err := agent.Preview(ctx, agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       opts.from,

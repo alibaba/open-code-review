@@ -47,7 +47,8 @@ OCR 用一条**四层优先级链**解析规则。对每个文件路径，按序
 
 - `include`——可选。glob 模式，用于*绕过*内置的默认排除模式（测试文件排除——见
   下文）。它不是白名单：不匹配任何 `include` 模式的文件仍会经过
-  `unsupported_ext` 和 `default_path` 检查，可能仍被评审。
+  `unsupported_ext` 和 `default_path` 检查，可能仍被评审。它也救不回被 `binary`
+  或 `undecodable_encoding` 丢弃的文件——那两道门在它之前运行。
 - `exclude`——可选。OCR 不予评审的文件 glob 模式。过滤中优先级最高。
 - `rules`——`{path, rule}` 条目数组，按**声明顺序**求值。第一个 `path` glob
   匹配该文件的条目，决定 OCR 发给模型的 prompt。
@@ -68,21 +69,23 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 ## 文件如何被过滤
 
-过滤是一个五重门算法，位于
+过滤是一个六重门算法，位于
 [`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go)。
 对每个 diff，OCR 依次问：
 
 1. **`binary`**——文件是二进制吗？排除。
-2. **`user_exclude`**——路径匹配任何用户 `exclude` 模式吗？排除。
-3. **`user_include`**——若用户定义了 `include`，路径匹配吗？若是，**立即保留**
+2. **`undecodable_encoding`**——字节在任何受支持的字符集下都能解码为文本吗？不能则排除。
+3. **`user_exclude`**——路径匹配任何用户 `exclude` 模式吗？排除。
+4. **`user_include`**——若用户定义了 `include`，路径匹配吗？若是，**立即保留**
    （绕过下面的 `unsupported_ext` 和 `default_path` 门）。
-4. **`unsupported_ext`**——文件扩展名在
+5. **`unsupported_ext`**——文件扩展名在
    [白名单](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)
    里吗？不在则排除。
-5. **`default_path`**——路径匹配某个内置测试文件排除模式
+6. **`default_path`**——路径匹配某个内置测试文件排除模式
    （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）吗？排除。
 
-通过全部五重门的文件才发给 LLM。`deleted` 原因（不是门——它在 `Preview()` 中
+通过全部六重门的文件才发给 LLM——发出的是解码后的 UTF-8 文本，而非原始字节。
+`deleted` 原因（不是门——它在 `Preview()` 中
 单独计算）标记新路径为 `/dev/null` 的文件；没有新内容可评审。用
 `ocr review --preview` 可在不花 token 的情况下打印此过滤结果。
 
