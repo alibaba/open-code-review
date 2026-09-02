@@ -339,6 +339,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.vy`                           | `vyper.md` — смарт-контракты Vyper.                                                              |
 | `**/*.rego`                         | `rego.md` — политики Rego (OPA).                                                                 |
 | _(fallback)_                        | `default.md`                                                                                     |
+| `**/*.{ps1,psm1,psd1}` | `powershell.md` — скрипты, модули и файлы данных/манифестов PowerShell. |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`
 в промптах plan и main task.

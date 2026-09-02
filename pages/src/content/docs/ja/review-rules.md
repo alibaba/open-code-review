@@ -276,6 +276,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.vy`                           | `vyper.md`: Vyper スマートコントラクト。                                                        |
 | `**/*.rego`                         | `rego.md`: Rego ポリシー（OPA）。                                                               |
 | _(fallback)_                        | `default.md`                                                                                    |
+| `**/*.{ps1,psm1,psd1}` | `powershell.md`: PowerShell スクリプト、モジュール、データ／マニフェストファイル。 |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。
 
