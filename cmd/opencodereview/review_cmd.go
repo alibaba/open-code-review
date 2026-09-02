@@ -17,6 +17,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/mcp"
 	"github.com/alibaba/open-code-review/internal/session"
@@ -128,7 +129,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
 	// Security (#112): reject ref-option injection before any git invocation.
-	if err := validateReviewRefs(cc.RepoDir, opts); err != nil {
+	// The shallow-clone recovery inside may substitute resolved SHAs into opts,
+	// which must happen before any provider is constructed (the first one is
+	// validateResumeIdentity below).
+	if err := validateReviewRefs(ctx, cc.GitRunner, cc.RepoDir, &opts); err != nil {
 		return err
 	}
 
@@ -458,29 +462,89 @@ func requireGitRepo(dir string) error {
 
 // validateReviewRefs rejects ref-option injection (#112): any --from/--to/
 // --commit value must be a real commit ref and must not start with '-'.
-func validateReviewRefs(repoDir string, opts reviewOptions) error {
-	refs := []struct {
+//
+// In a shallow clone (#634), a ref that fails raw resolution gets one
+// on-demand depth-1 fetch from origin before the verdict — the canonical
+// GitLab CI case (`GIT_DEPTH: "1"` single-branch clone, `--from
+// origin/$TARGET_BRANCH --to $CI_COMMIT_SHA`) dies right here without it.
+// Refs that resolve only through the fetch's fallback spellings (`origin/<name>`
+// or the ocr-fetch destination) are replaced in opts by their resolved SHAs:
+// the downstream `git diff`/`git show` call sites resolve refs raw and would
+// reject the bare spelling the flag carried. Non-shallow repositories, and
+// every path where refs resolve outright, keep today's behavior and commands.
+func validateReviewRefs(ctx context.Context, runner *gitcmd.Runner, repoDir string, opts *reviewOptions) error {
+	type refFlag struct {
 		flag string
 		ref  string
-	}{
+	}
+	refs := []refFlag{
 		{"--from", opts.from},
 		{"--to", opts.to},
 		{"--commit", opts.commit},
 	}
-	for _, item := range refs {
+	// resolveErr returns today's exact error for a ref that fails raw
+	// resolution (including git's own message when it printed one).
+	resolveErr := func(item refFlag) error {
+		out, err := runGitCmd(repoDir, "rev-parse", "--verify", "--end-of-options", item.ref+"^{commit}")
+		if err == nil {
+			return nil
+		}
+		msg := strings.TrimSpace(string(out))
+		if msg != "" {
+			return fmt.Errorf("%s value %q is not a valid commit ref: %s", item.flag, item.ref, msg)
+		}
+		return fmt.Errorf("%s value %q is not a valid commit ref", item.flag, item.ref)
+	}
+
+	for i, item := range refs {
 		if item.ref == "" {
 			continue
 		}
 		if strings.HasPrefix(item.ref, "-") {
 			return fmt.Errorf("%s value %q is not a valid git ref: refs must not start with '-'", item.flag, item.ref)
 		}
-		if out, err := runGitCmd(repoDir, "rev-parse", "--verify", "--end-of-options", item.ref+"^{commit}"); err != nil {
-			msg := strings.TrimSpace(string(out))
-			if msg != "" {
-				return fmt.Errorf("%s value %q is not a valid commit ref: %s", item.flag, item.ref, msg)
-			}
-			return fmt.Errorf("%s value %q is not a valid commit ref", item.flag, item.ref)
+		if err := resolveErr(item); err == nil {
+			continue
 		}
+
+		// Shallow-clone recovery: fetch every remaining unresolved ref from
+		// origin once at depth 1, then retry. EnsureShallowRefs is a no-op
+		// (returning a nil map) unless the repo is shallow with an origin
+		// URL, so this never disturbs other repositories.
+		pending := make([]refFlag, 0, len(refs)-i)
+		for _, rest := range refs[i:] {
+			if rest.ref != "" {
+				pending = append(pending, rest)
+			}
+		}
+		spellings := make([]string, len(pending))
+		for j, rest := range pending {
+			spellings[j] = rest.ref
+		}
+		resolved, ferr := diff.EnsureShallowRefs(ctx, runner, repoDir, spellings)
+		if ferr != nil {
+			// Fetch context only; the verdict below stays today's error.
+			fmt.Fprintf(os.Stderr, "[ocr] shallow clone: on-demand fetch failed: %v\n", ferr)
+		}
+		for _, rest := range pending {
+			err := resolveErr(rest)
+			if err == nil {
+				continue // resolves raw now (or always did): no substitution
+			}
+			sha, ok := resolved[rest.ref]
+			if !ok {
+				return err
+			}
+			switch rest.flag {
+			case "--from":
+				opts.from = sha
+			case "--to":
+				opts.to = sha
+			case "--commit":
+				opts.commit = sha
+			}
+		}
+		return nil
 	}
 	return nil
 }

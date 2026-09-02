@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/config/rules"
@@ -101,11 +102,19 @@ func loadDelegateContext(opts delegateOptions) (*delegateContext, error) {
 	}
 	applyCLIExcludes(cc, splitPaths(opts.excludes))
 
-	// Security: reject ref-option injection.
+	// Security: reject ref-option injection. The shallow-clone recovery inside
+	// may substitute resolved SHAs into the options, so the validated values
+	// flow back into the delegate options before any provider is built (#634).
+	// The recovery may fetch from origin over the network; unlike review_cmd,
+	// this path has no caller-supplied context, so bound it so a hung origin
+	// cannot stall the validation step indefinitely.
 	reviewOpts := reviewOptions{from: opts.from, to: opts.to, commit: opts.commit}
-	if err := validateReviewRefs(cc.RepoDir, reviewOpts); err != nil {
+	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer fetchCancel()
+	if err := validateReviewRefs(fetchCtx, cc.GitRunner, cc.RepoDir, &reviewOpts); err != nil {
 		return nil, err
 	}
+	opts.from, opts.to, opts.commit = reviewOpts.from, reviewOpts.to, reviewOpts.commit
 
 	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
 	if err != nil {
