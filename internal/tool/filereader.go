@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -62,6 +63,18 @@ type FileReader struct {
 	// Empty for ModeWorkspace.
 	Ref    string
 	Runner *gitcmd.Runner
+}
+
+// PathNotAtRefError reports that a requested path is absent from the reviewed
+// git tree. Callers can distinguish this deterministic model-input error from
+// transient git execution failures.
+type PathNotAtRefError struct {
+	Path string
+	Ref  string
+}
+
+func (e *PathNotAtRefError) Error() string {
+	return fmt.Sprintf("path %q does not exist at ref %q", e.Path, e.Ref)
 }
 
 // Read returns the full content of a file path (relative to RepoDir),
@@ -118,8 +131,12 @@ func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
 func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
+	gitPath := normalizeGitTreePath(path)
+	if err := fr.ensurePathAtRef(ctx, gitPath); err != nil {
+		return "", err
+	}
 
-	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
+	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + gitPath}
 	if fr.Runner != nil {
 		output, err := fr.Runner.Output(ctx, fr.RepoDir, args...)
 		if err != nil {
@@ -205,7 +222,12 @@ func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([
 }
 
 func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
-	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + path}
+	gitPath := normalizeGitTreePath(path)
+	if err := fr.ensurePathAtRef(ctx, gitPath); err != nil {
+		return nil, 0, err
+	}
+
+	args := []string{"-c", "core.quotepath=false", "show", "--end-of-options", fr.Ref + ":" + gitPath}
 
 	var collected []string
 	var totalLines int
@@ -245,4 +267,40 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, waitErr)
 	}
 	return collected, totalLines, nil
+}
+
+func normalizeGitTreePath(path string) string {
+	normalized := strings.ReplaceAll(path, `\`, "/")
+	return strings.TrimPrefix(pathpkg.Clean(normalized), "./")
+}
+
+// ensurePathAtRef checks the object before git show so an absent path is a
+// deterministic structural rejection rather than an opaque command failure.
+func (fr *FileReader) ensurePathAtRef(ctx context.Context, path string) error {
+	args := []string{
+		"-c", "core.quotepath=false",
+		"ls-tree", "-r", "--name-only", "-z", "--full-tree",
+		"--end-of-options", fr.Ref, "--", path,
+	}
+	var output []byte
+	var err error
+	if fr.Runner != nil {
+		output, err = fr.Runner.Output(ctx, fr.RepoDir, args...)
+	} else {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = fr.RepoDir
+		output, err = cmd.Output()
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("check path %q at ref %q: %w", path, fr.Ref, err)
+	}
+	for _, candidate := range strings.Split(string(output), "\x00") {
+		if candidate == path {
+			return nil
+		}
+	}
+	return &PathNotAtRefError{Path: path, Ref: fr.Ref}
 }

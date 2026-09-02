@@ -166,6 +166,56 @@ func TestReadLines_GitShow_Window(t *testing.T) {
 	}
 }
 
+func TestReadLines_GitShow_MissingPathIsStructuralError(t *testing.T) {
+	dir := setupTestRepo(t)
+	commit := getHeadCommit(t, dir)
+	fr := &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit}
+
+	_, _, err := fr.ReadLines(context.Background(), "invented/missing.go", 1, 100)
+	var pathErr *PathNotAtRefError
+	if !errors.As(err, &pathErr) {
+		t.Fatalf("ReadLines error = %v, want PathNotAtRefError", err)
+	}
+	if pathErr.Path != "invented/missing.go" || pathErr.Ref != commit {
+		t.Fatalf("PathNotAtRefError = %#v, want requested path and current ref", pathErr)
+	}
+}
+
+func TestRead_GitShow_NormalizesEquivalentPaths(t *testing.T) {
+	dir := setupTestRepo(t)
+	commit := getHeadCommit(t, dir)
+	fr := &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit}
+
+	for _, path := range []string{"./hello.go", "pkg/../hello.go", `pkg\util.go`, "pkg//util.go"} {
+		t.Run(path, func(t *testing.T) {
+			content, err := fr.Read(context.Background(), path)
+			if err != nil {
+				t.Fatalf("Read(%q): %v", path, err)
+			}
+			if !strings.Contains(content, "package ") {
+				t.Fatalf("Read(%q) = %q, want Go source", path, content)
+			}
+		})
+	}
+}
+
+func TestReadLines_GitShow_InvalidRefIsNotMissingPath(t *testing.T) {
+	dir := setupTestRepo(t)
+	fr := &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: "not-a-real-ref"}
+
+	_, _, err := fr.ReadLines(context.Background(), "hello.go", 1, 100)
+	if err == nil {
+		t.Fatal("ReadLines error = nil, want invalid ref error")
+	}
+	var pathErr *PathNotAtRefError
+	if errors.As(err, &pathErr) {
+		t.Fatalf("invalid ref was misclassified as missing path: %v", err)
+	}
+	if !strings.Contains(err.Error(), "check path") {
+		t.Fatalf("ReadLines error = %v, want path check failure", err)
+	}
+}
+
 func TestReadLines_Disk_RejectsParentTraversal(t *testing.T) {
 	base := t.TempDir()
 	repoDir := filepath.Join(base, "repo")

@@ -119,6 +119,8 @@ func setupFileFindRepo(t *testing.T) string {
 	write("Dockerfile", "FROM scratch\n")
 	write("LICENSE", "MIT\n")
 	write("data_binary", "binary\n")
+	write("DOC/\u4e91\u914d\u7f6e\u9879/project.yaml", "name: demo\n")
+	write("docs/review guide.md", "# Review\n")
 
 	run("git", "add", ".")
 	run("git", "commit", "-m", "init")
@@ -156,6 +158,46 @@ func TestFileFind_GitRepo_CommitMode(t *testing.T) {
 	}
 	if !strings.Contains(got, "main.go") {
 		t.Errorf("expected main.go in commit mode, got: %s", got)
+	}
+}
+
+func TestFileFind_GitRepo_PreservesUnicodeAndSpaces(t *testing.T) {
+	dir := setupFileFindRepo(t)
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := strings.TrimSpace(string(out))
+	unicodePath := "DOC/\u4e91\u914d\u7f6e\u9879/project.yaml"
+
+	tests := []struct {
+		name string
+		fr   *FileReader
+	}{
+		{name: "workspace", fr: &FileReader{RepoDir: dir, Mode: ModeWorkspace}},
+		{name: "commit", fr: &FileReader{RepoDir: dir, Mode: ModeCommit, Ref: commit}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := NewFileFind(tt.fr)
+			got, execErr := p.Execute(context.Background(), map[string]any{"query_name": "project.yaml"})
+			if execErr != nil {
+				t.Fatal(execErr)
+			}
+			if !strings.Contains(got, unicodePath) || strings.Contains(got, `\344`) {
+				t.Fatalf("unicode path was not preserved: %q", got)
+			}
+
+			got, execErr = p.Execute(context.Background(), map[string]any{"query_name": "review guide.md"})
+			if execErr != nil {
+				t.Fatal(execErr)
+			}
+			if !strings.Contains(got, "docs/review guide.md") {
+				t.Fatalf("path containing spaces was not preserved: %q", got)
+			}
+		})
 	}
 }
 

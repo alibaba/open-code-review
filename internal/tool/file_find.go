@@ -107,9 +107,15 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 
 	var args []string
 	if ref := p.FileReader.Ref; ref != "" {
-		args = []string{"ls-tree", "-r", "--name-only", "--end-of-options", ref}
+		args = []string{
+			"-c", "core.quotepath=false",
+			"ls-tree", "-r", "--name-only", "-z", "--end-of-options", ref,
+		}
 	} else {
-		args = []string{"ls-files", "--cached", "--others", "--exclude-standard"}
+		args = []string{
+			"-c", "core.quotepath=false",
+			"ls-files", "-z", "--cached", "--others", "--exclude-standard",
+		}
 	}
 
 	if p.FileReader.Runner != nil {
@@ -135,10 +141,10 @@ func (p *FileFindProvider) listGitFiles(parentCtx context.Context) ([]string, er
 	}
 
 	var files []string
-	lines := bytes.Split(bytes.TrimRight(output, "\n"), []byte{'\n'})
-	for _, line := range lines {
-		if len(line) > 0 {
-			s := string(line)
+	paths := bytes.Split(output, []byte{0})
+	for _, path := range paths {
+		if len(path) > 0 {
+			s := string(path)
 			// Skip binary-like files that lack meaningful extensions patterns
 			// and filter out paths in common generated/artifact directories.
 			if shouldSkipFile(s) {
