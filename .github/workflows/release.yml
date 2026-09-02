@@ -161,12 +161,13 @@ jobs:
 
   npm-publish:
     needs: release
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
       image: node:24
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
 
@@ -214,7 +215,7 @@ jobs:
             if [ "$already" = "$VERSION" ]; then
               echo "Skip: ${pkg_name}@${VERSION} already published"
             else
-              npm publish "$pkg_dir" --access public
+              npm publish "$pkg_dir" --access public --provenance
               echo "Published: ${pkg_name}@${VERSION}"
             fi
           done
@@ -237,7 +238,7 @@ jobs:
           if [ "$already" = "$VERSION" ]; then
             echo "Skip: ${pkg_name}@${VERSION} already published"
           else
-            npm publish --access public
+            npm publish --access public --provenance
             echo "Published: ${pkg_name}@${VERSION}"
           fi
         env:
