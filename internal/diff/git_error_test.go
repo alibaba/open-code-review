@@ -134,6 +134,11 @@ func TestGetDiff_WorkspaceFailureSurfacesFallbackMessage(t *testing.T) {
 	}
 }
 
+// TestUntrackedFilesListPropagatesGitFailure separates the two cases the old
+// `if err != nil || out == ""` folded together: a repository with no untracked
+// files, and git failing to enumerate them at all. The second one used to
+// return an empty list, so a workspace review carried on with the untracked
+// half of its input missing and no way for the caller to notice.
 func TestUntrackedFilesListPropagatesGitFailure(t *testing.T) {
 	repo := filepath.Join(t.TempDir(), "missing-repo")
 
@@ -142,6 +147,11 @@ func TestUntrackedFilesListPropagatesGitFailure(t *testing.T) {
 	_, err := provider.untrackedFilesList(context.Background())
 	if err == nil {
 		t.Fatal("expected untrackedFilesList to return git error")
+	}
+	// Pins gitFailure rather than any error: a bare fmt.Errorf would satisfy the
+	// check above while dropping git's own diagnosis, which is the #972 regression.
+	if got := err.Error(); !strings.Contains(got, "git ls-files failed") {
+		t.Errorf("error %q lost the operation name", got)
 	}
 }
 
