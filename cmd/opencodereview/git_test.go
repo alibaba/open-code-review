@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -141,7 +142,7 @@ func TestRequireGitRepo_Invalid(t *testing.T) {
 
 func TestValidateReviewRefs_ValidCommit(t *testing.T) {
 	dir := initTestGitRepo(t)
-	err := validateReviewRefs(dir, reviewOptions{commit: "HEAD"})
+	err := validateReviewRefs(context.Background(), nil, dir, &reviewOptions{commit: "HEAD"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -149,7 +150,7 @@ func TestValidateReviewRefs_ValidCommit(t *testing.T) {
 
 func TestValidateReviewRefs_InvalidCommit(t *testing.T) {
 	dir := initTestGitRepo(t)
-	err := validateReviewRefs(dir, reviewOptions{commit: "nonexistent-ref-xyz"})
+	err := validateReviewRefs(context.Background(), nil, dir, &reviewOptions{commit: "nonexistent-ref-xyz"})
 	if err == nil {
 		t.Fatal("expected error for invalid commit ref")
 	}
@@ -157,7 +158,7 @@ func TestValidateReviewRefs_InvalidCommit(t *testing.T) {
 
 func TestValidateReviewRefs_EmptySkipped(t *testing.T) {
 	dir := initTestGitRepo(t)
-	err := validateReviewRefs(dir, reviewOptions{})
+	err := validateReviewRefs(context.Background(), nil, dir, &reviewOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
