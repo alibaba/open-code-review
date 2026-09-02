@@ -48,6 +48,7 @@
     "**/*.{vhd,vhdl}": "vhdl.md",
     "**/*.m": "matlab.md",
     "**/*.sol": "solidity.md",
-    "**/*.vy": "vyper.md"
+    "**/*.vy": "vyper.md",
+    "**/*.{ps1,psm1,psd1}": "powershell.md"
   }
 }
