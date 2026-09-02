@@ -115,6 +115,9 @@ export class CliService {
       const proc = spawn(resolveBin(this.cliPath), args, {
         cwd,
         env: envExtra ? { ...getShellEnv(), ...envExtra } : getShellEnv(),
+        // A dedicated POSIX process group lets cancellation escalate without
+        // leaving the native CLI or any of its subprocesses behind.
+        detached: process.platform !== 'win32',
       });
       this.current = proc;
       let stdout = '';
@@ -160,10 +163,34 @@ export class CliService {
 
   cancel(): void {
     if (this.current && this.current.pid) {
-      this.current.kill('SIGTERM');
       const proc = this.current;
+
+      // Windows does not deliver POSIX signals to the launcher. Node maps
+      // kill('SIGTERM') to TerminateProcess, which kills only the launcher and
+      // can orphan its native child. taskkill /T terminates the complete tree.
+      if (process.platform === 'win32') {
+        const treeKill = spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+        const fallback = () => {
+          if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+        };
+        treeKill.once('error', fallback);
+        treeKill.once('close', (code) => {
+          if (code !== 0) fallback();
+        });
+        return;
+      }
+
+      proc.kill('SIGTERM');
       const forceKillTimer = setTimeout(() => {
-        if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+        if (proc.exitCode !== null || proc.signalCode !== null) return;
+        try {
+          process.kill(-proc.pid!, 'SIGKILL');
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ESRCH') proc.kill('SIGKILL');
+        }
       }, 3000);
       proc.once('close', () => clearTimeout(forceKillTimer));
     }

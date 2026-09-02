@@ -10,7 +10,11 @@ on:
     branches: [main]
     paths:
       - 'action.yml'
+      - 'bin/ocr.js'
+      - 'bin/ocr.test.js'
       - 'package.json'
+      - 'scripts/platform.js'
+      - 'scripts/version.js'
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
@@ -18,7 +22,11 @@ on:
     branches: [main]
     paths:
       - 'action.yml'
+      - 'bin/ocr.js'
+      - 'bin/ocr.test.js'
       - 'package.json'
+      - 'scripts/platform.js'
+      - 'scripts/version.js'
       - 'scripts/github-actions/**'
       - 'examples/github_actions/README.md'
       - '.github/workflows/action-contract.yml'
@@ -48,3 +56,6 @@ jobs:
 
       - name: Test GitHub Actions contracts
         run: npm run test:github-actions
+
+      - name: Test launcher contracts
+        run: npm run test:launcher
