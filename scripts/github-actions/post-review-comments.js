@@ -76,8 +76,8 @@ async function runPostReviewComments({
   stickySummary = true,
   incremental = false,
   // "bot" = deduplicate only against this token's own comments; "all" = against
-  // every review comment on the PR regardless of author. Unknown values behave
-  // as "bot".
+  // every review comment on the PR regardless of author. Case-insensitive;
+  // unknown values behave as "bot".
   incrementalScope = "bot",
   incrementalOverlapThreshold = DEFAULT_OVERLAP_THRESHOLD,
   reviewCommentBatchSize = DEFAULT_BATCH_SIZE,
@@ -328,7 +328,7 @@ async function runPostReviewComments({
   if (incremental && reviewComments.length > 0) {
     const existing = await listExistingReviewComments(github, owner, repo, prNumber, log);
     let hist = existing;
-    if (incrementalScope !== "all") {
+    if (String(incrementalScope).trim().toLowerCase() !== "all") {
       const botLogin = await getAuthenticatedLogin(github, log);
       hist = existing.filter((c) => isBotComment(c, botLogin));
     }

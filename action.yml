@@ -92,8 +92,8 @@ inputs:
       Whose existing review comments incremental mode deduplicates against.
       'bot' = only comments posted by this action's token; 'all' = every
       review comment on the PR regardless of author, so a line a human
-      reviewer already commented on is not commented again. Any other value
-      behaves as 'bot'. Ignored unless incremental is true.
+      reviewer already commented on is not commented again. Case-insensitive;
+      any other value behaves as 'bot'. Ignored unless incremental is true.
     required: false
     default: 'bot'
   incremental_overlap_threshold:
@@ -753,7 +753,7 @@ runs:
             stickySummary: ${{ inputs.sticky_summary == 'true' }},
             incremental: ${{ inputs.incremental == 'true' }},
             incrementalOverlapThreshold: parseFloat(process.env.OCR_INCREMENTAL_OVERLAP_THRESHOLD),
-            incrementalScope: process.env.OCR_INCREMENTAL_SCOPE || 'bot',
+            incrementalScope: process.env.OCR_INCREMENTAL_SCOPE,
             reviewCommentBatchSize: parseInt(process.env.OCR_REVIEW_COMMENT_BATCH_SIZE, 10),
             routeSeverityBelow: process.env.OCR_ROUTE_SEVERITY_BELOW,
             routeCategories: process.env.OCR_ROUTE_CATEGORIES,

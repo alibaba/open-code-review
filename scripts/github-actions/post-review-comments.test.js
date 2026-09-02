@@ -672,7 +672,8 @@ async function testIncrementalOverlapThresholdPropagated() {
 
 // Scope propagation: with the default scope ("bot"), a human reviewer's
 // comment is not history, so the overlapping comment is posted; with scope
-// "all" the same human comment suppresses it.
+// "all" (case-insensitive, exercised as "All") the same human comment
+// suppresses it.
 async function testIncrementalScopeAllDedupesAgainstHumanComments() {
   const history = [{ path: "src/a.js", line: 10, start_line: 10, side: "RIGHT", user: { login: "human-reviewer" } }];
   const result = {
@@ -692,7 +693,7 @@ async function testIncrementalScopeAllDedupesAgainstHumanComments() {
   const allScope = await run({
     result,
     githubOpts: { history },
-    opts: { stickySummary: true, incremental: true, incrementalScope: "all" },
+    opts: { stickySummary: true, incremental: true, incrementalScope: "All" },
   });
   assert.strictEqual(allScope.github.createReviewCalls.length, 0, "human comment suppresses overlap under scope all");
   assert.strictEqual(allScope.outputs.comments_skipped, "1");
