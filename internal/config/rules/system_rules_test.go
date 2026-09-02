@@ -174,6 +174,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
 		{"policies/authz.rego", "Default Posture"},
 		{"policies/authz.REGO", "Default Posture"},
+		{"scripts/deploy.ps1", "PowerShell Review Principles"},
+		{"modules/Build/Build.psm1", "PowerShell Review Principles"},
+		{"modules/Build/Build.psd1", "PowerShell Review Principles"},
 	}
 
 	for _, tt := range tests {
