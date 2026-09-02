@@ -134,6 +134,17 @@ func TestGetDiff_WorkspaceFailureSurfacesFallbackMessage(t *testing.T) {
 	}
 }
 
+func TestUntrackedFilesListPropagatesGitFailure(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "missing-repo")
+
+	provider := NewWorkspaceProvider(repo, nil)
+
+	_, err := provider.untrackedFilesList(context.Background())
+	if err == nil {
+		t.Fatal("expected untrackedFilesList to return git error")
+	}
+}
+
 // shimGit puts a fake `git` at the front of PATH for the duration of the test.
 func shimGit(t *testing.T, body string) {
 	t.Helper()
