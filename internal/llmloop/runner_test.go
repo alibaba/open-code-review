@@ -116,9 +116,15 @@ func TestRecordWarning(t *testing.T) {
 func TestRecordToolCall(t *testing.T) {
 	t_tempDir = t.TempDir()
 	r := newTestRunner(&fakeLLMClient{}, template.Template{})
-	r.recordToolCall("file_read")
-	r.recordToolCall("file_read")
-	r.recordToolCall("code_comment")
+	if got := r.recordToolCall("file_read"); got != 1 {
+		t.Errorf("first tool call number = %d, want 1", got)
+	}
+	if got := r.recordToolCall("file_read"); got != 2 {
+		t.Errorf("second tool call number = %d, want 2", got)
+	}
+	if got := r.recordToolCall("code_comment"); got != 3 {
+		t.Errorf("third tool call number = %d, want 3", got)
+	}
 
 	calls := r.ToolCalls()
 	if calls["file_read"] != 2 {
@@ -126,6 +132,23 @@ func TestRecordToolCall(t *testing.T) {
 	}
 	if calls["code_comment"] != 1 {
 		t.Errorf("code_comment = %d, want 1", calls["code_comment"])
+	}
+}
+
+func TestToolFailures_AreOrderedAndSnapshotIsolated(t *testing.T) {
+	r := NewRunner(Deps{})
+	r.recordToolFailure(2, "tool_b", "b.go", "second", nil, `{}`, 0)
+	r.recordToolFailure(1, "tool_a", "a.go", "first", nil, `{}`, 0)
+
+	failures := r.ToolFailures()
+	if len(failures) != 2 || failures[0].ToolCallNumber != 1 || failures[1].ToolCallNumber != 2 {
+		t.Fatalf("ToolFailures() = %+v, want call numbers 1, 2", failures)
+	}
+	failures[0].Error = "mutated"
+
+	again := r.ToolFailures()
+	if again[0].Error != "first" {
+		t.Errorf("ToolFailures snapshot mutated internal state: error = %q", again[0].Error)
 	}
 }
 

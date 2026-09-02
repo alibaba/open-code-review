@@ -17,6 +17,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 )
@@ -32,22 +33,26 @@ type mockResultProvider struct {
 	warnings         []agent.AgentWarning
 	projectSummary   string
 	toolCalls        map[string]int64
+	toolFailures     []llmloop.ToolFailureDetail
 	resumeInfo       *agent.ResumeInfo
 	sessionID        string
 	budgetExceeded   bool
 	manifest         *session.RunManifest
 }
 
-func (m *mockResultProvider) Diffs() []model.Diff               { return m.diffs }
-func (m *mockResultProvider) FilesReviewed() int64              { return m.filesReviewed }
-func (m *mockResultProvider) TotalInputTokens() int64           { return m.inputTokens }
-func (m *mockResultProvider) TotalOutputTokens() int64          { return m.outputTokens }
-func (m *mockResultProvider) TotalTokensUsed() int64            { return m.totalTokens }
-func (m *mockResultProvider) TotalCacheReadTokens() int64       { return m.cacheReadTokens }
-func (m *mockResultProvider) TotalCacheWriteTokens() int64      { return m.cacheWriteTokens }
-func (m *mockResultProvider) Warnings() []agent.AgentWarning    { return m.warnings }
-func (m *mockResultProvider) ProjectSummary() string            { return m.projectSummary }
-func (m *mockResultProvider) ToolCalls() map[string]int64       { return m.toolCalls }
+func (m *mockResultProvider) Diffs() []model.Diff            { return m.diffs }
+func (m *mockResultProvider) FilesReviewed() int64           { return m.filesReviewed }
+func (m *mockResultProvider) TotalInputTokens() int64        { return m.inputTokens }
+func (m *mockResultProvider) TotalOutputTokens() int64       { return m.outputTokens }
+func (m *mockResultProvider) TotalTokensUsed() int64         { return m.totalTokens }
+func (m *mockResultProvider) TotalCacheReadTokens() int64    { return m.cacheReadTokens }
+func (m *mockResultProvider) TotalCacheWriteTokens() int64   { return m.cacheWriteTokens }
+func (m *mockResultProvider) Warnings() []agent.AgentWarning { return m.warnings }
+func (m *mockResultProvider) ProjectSummary() string         { return m.projectSummary }
+func (m *mockResultProvider) ToolCalls() map[string]int64    { return m.toolCalls }
+func (m *mockResultProvider) ToolFailures() []llmloop.ToolFailureDetail {
+	return m.toolFailures
+}
 func (m *mockResultProvider) ResumeInfo() *agent.ResumeInfo     { return m.resumeInfo }
 func (m *mockResultProvider) SessionID() string                 { return m.sessionID }
 func (m *mockResultProvider) BudgetExceeded() bool              { return m.budgetExceeded }

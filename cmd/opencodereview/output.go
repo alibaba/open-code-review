@@ -15,6 +15,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/suggestdiff"
@@ -277,8 +278,35 @@ type jsonSummary struct {
 }
 
 type jsonToolCalls struct {
-	Total  int64            `json:"total"`
-	ByTool map[string]int64 `json:"by_tool"`
+	Total          int64                       `json:"total"`
+	ByTool         map[string]int64            `json:"by_tool"`
+	Failure        int64                       `json:"failure"`
+	FailureByTool  map[string]int64            `json:"failure_by_tool"`
+	FailureDetails []llmloop.ToolFailureDetail `json:"failure_details"`
+}
+
+func newJSONToolCalls(toolCalls map[string]int64, failures []llmloop.ToolFailureDetail) *jsonToolCalls {
+	var total int64
+	for _, count := range toolCalls {
+		total += count
+	}
+	failureByTool := make(map[string]int64)
+	for _, failure := range failures {
+		failureByTool[failure.ToolName]++
+	}
+	if toolCalls == nil {
+		toolCalls = make(map[string]int64)
+	}
+	if failures == nil {
+		failures = make([]llmloop.ToolFailureDetail, 0)
+	}
+	return &jsonToolCalls{
+		Total:          total,
+		ByTool:         toolCalls,
+		Failure:        int64(len(failures)),
+		FailureByTool:  failureByTool,
+		FailureDetails: failures,
+	}
 }
 
 type jsonLLMIdentity struct {
@@ -309,8 +337,9 @@ type jsonOutput struct {
 
 func outputJSON(comments []model.LlmComment) error {
 	out := jsonOutput{
-		Status:   "success",
-		Comments: comments,
+		Status:    "success",
+		ToolCalls: newJSONToolCalls(nil, nil),
+		Comments:  comments,
 	}
 	if len(comments) == 0 {
 		out.Message = "No comments generated. Looks good to me."
@@ -322,7 +351,8 @@ func outputJSON(comments []model.LlmComment) error {
 
 func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentWarning,
 	filesReviewed, inputTokens, outputTokens, totalTokens, cacheReadTokens, cacheWriteTokens int64,
-	duration time.Duration, projectSummary string, toolCalls map[string]int64, traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
+	duration time.Duration, projectSummary string, toolCalls map[string]int64, toolFailures []llmloop.ToolFailureDetail,
+	traceID string, resumeInfo *agent.ResumeInfo, sessionID string,
 	manifest *session.RunManifest, budgetExceeded bool, llmIdentity *jsonLLMIdentity, out io.Writer,
 	retryReport *llm.RetryReport, groups []agent.FileGroupInfo) error {
 	publishedWarnings := warningsForOutput(warnings, manifest)
@@ -349,18 +379,7 @@ func outputJSONWithWarnings(comments []model.LlmComment, warnings []agent.AgentW
 		Manifest:       manifest,
 		RetryReport:    retryReport,
 	}
-	var total int64
-	for _, v := range toolCalls {
-		total += v
-	}
-	byTool := toolCalls
-	if byTool == nil {
-		byTool = make(map[string]int64)
-	}
-	payload.ToolCalls = &jsonToolCalls{
-		Total:  total,
-		ByTool: byTool,
-	}
+	payload.ToolCalls = newJSONToolCalls(toolCalls, toolFailures)
 	if manifest != nil {
 		payload.Status = string(manifest.TerminalState)
 		payload.Message = manifestMessage(manifest, len(comments))
@@ -608,14 +627,12 @@ func manifestMessage(manifest *session.RunManifest, findings int) string {
 
 func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity, out io.Writer) error {
 	payload := jsonOutput{
-		Status:   "skipped",
-		LLM:      llmIdentity,
-		TraceID:  traceID,
-		Message:  "No supported files changed.",
-		Comments: []model.LlmComment{},
-		ToolCalls: &jsonToolCalls{
-			ByTool: map[string]int64{},
-		},
+		Status:    "skipped",
+		LLM:       llmIdentity,
+		TraceID:   traceID,
+		Message:   "No supported files changed.",
+		Comments:  []model.LlmComment{},
+		ToolCalls: newJSONToolCalls(nil, nil),
 	}
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
@@ -649,10 +666,8 @@ func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity, out io.Writ
 // was skipped, so the report is never duplicated and never silently dropped.
 func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat string, llmIdentity *jsonLLMIdentity,
 	retryReport *llm.RetryReport) {
-	var toolTotal int64
-	for _, v := range ag.ToolCalls() {
-		toolTotal += v
-	}
+	toolCallSummary := newJSONToolCalls(ag.ToolCalls(), ag.ToolFailures())
+	toolTotal := toolCallSummary.Total
 	budgetExceeded := ag.BudgetExceeded()
 	if outputFormat == "json" {
 		out := jsonOutput{
@@ -668,10 +683,7 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 				Elapsed:          duration.Round(time.Second).String(),
 				BudgetExceeded:   budgetExceeded,
 			},
-			ToolCalls: &jsonToolCalls{
-				Total:  toolTotal,
-				ByTool: ag.ToolCalls(),
-			},
+			ToolCalls:   toolCallSummary,
 			SessionID:   ag.SessionID(),
 			RetryReport: retryReport,
 		}
@@ -680,9 +692,14 @@ func emitFailureUsage(ag ResultProvider, duration time.Duration, outputFormat st
 		_ = enc.Encode(out)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "[ocr] usage on failure: %d file(s), %d input + %d output = %d total tokens, %d tool calls, elapsed %s, budget_exceeded=%v",
+	fmt.Fprintf(os.Stderr, "[ocr] usage on failure: %d file(s), %d input + %d output = %d total tokens, %d tool calls",
 		ag.FilesReviewed(), ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
-		toolTotal, duration.Round(time.Second).String(), budgetExceeded)
+		toolTotal)
+	if toolCallSummary.Failure > 0 {
+		fmt.Fprintf(os.Stderr, ", %d failed", toolCallSummary.Failure)
+	}
+	fmt.Fprintf(os.Stderr, ", elapsed %s, budget_exceeded=%v",
+		duration.Round(time.Second).String(), budgetExceeded)
 	if id := ag.SessionID(); id != "" {
 		fmt.Fprintf(os.Stderr, ", session %s", id)
 	}

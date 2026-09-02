@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -173,7 +174,7 @@ func TestOutputJSONWithWarnings_NoCommentsSubtaskError(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "x.go", Message: "fail"}}
-	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, "abc123trace", nil, "", nil, false, nil, os.Stdout, nil, nil)
+	err := outputJSONWithWarnings(nil, warnings, 1, 10, 5, 15, 0, 0, time.Second, "", nil, nil, "abc123trace", nil, "", nil, false, nil, os.Stdout, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -286,7 +287,13 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	comments := []model.LlmComment{{Path: "b.go", Content: "test"}}
 	warnings := []agent.AgentWarning{{Type: "subtask_error", File: "c.go", Message: "failed"}}
-	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, "trace-xyz-789", nil, "", nil, false, nil, os.Stdout, nil, nil)
+	failures := []llmloop.ToolFailureDetail{{
+		ToolCallNumber: 2,
+		ToolName:       "file_read",
+		FilePath:       "b.go",
+		Error:          "file not found",
+	}}
+	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, failures, "trace-xyz-789", nil, "", nil, false, nil, os.Stdout, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -296,6 +303,15 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(r)
+	if bytes.Contains(buf.Bytes(), []byte(`"arguments"`)) {
+		t.Fatalf("failure details must not expose tool arguments: %s", buf.String())
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(`"failure"`)) {
+		t.Fatalf("tool_calls must use the failure field: %s", buf.String())
+	}
+	if bytes.Contains(buf.Bytes(), []byte(`"failure_count"`)) {
+		t.Fatalf("tool_calls must not emit the legacy failure_count field: %s", buf.String())
+	}
 
 	var out jsonOutput
 	if err := json.Unmarshal(buf.Bytes(), &out); err != nil {
@@ -313,6 +329,16 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 	if out.ToolCalls == nil || out.ToolCalls.Total != 3 {
 		t.Errorf("ToolCalls.Total = %v", out.ToolCalls)
 	}
+	if out.ToolCalls.Failure != 1 || len(out.ToolCalls.FailureDetails) != 1 {
+		t.Fatalf("ToolCalls failures = %+v", out.ToolCalls)
+	}
+	if out.ToolCalls.FailureByTool["file_read"] != 1 {
+		t.Errorf("failure_by_tool = %+v, want file_read=1", out.ToolCalls.FailureByTool)
+	}
+	failure := out.ToolCalls.FailureDetails[0]
+	if failure.ToolCallNumber != 2 || failure.ToolName != "file_read" || failure.FilePath != "b.go" || failure.Error != "file not found" {
+		t.Errorf("failure detail = %+v", failure)
+	}
 	if out.TraceID != "trace-xyz-789" {
 		t.Errorf("trace_id = %q, want trace-xyz-789", out.TraceID)
 	}
@@ -324,7 +350,7 @@ func TestOutputJSONWithWarnings_NoCommentsNoErrors(t *testing.T) {
 	os.Stdout = w
 
 	warnings := []agent.AgentWarning{{Type: "warning", Message: "something"}}
-	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, "", nil, "", nil, false, nil, os.Stdout, nil, nil)
+	err := outputJSONWithWarnings(nil, warnings, 2, 50, 20, 70, 0, 0, time.Second, "", nil, nil, "", nil, "", nil, false, nil, os.Stdout, nil, nil)
 	_ = w.Close()
 	os.Stdout = old
 
@@ -377,6 +403,28 @@ func TestOutputJSONNoFiles(t *testing.T) {
 	}
 	if out.LLM == nil || out.LLM.Provider != "anthropic" || out.LLM.Model != "claude-opus-4-6" {
 		t.Fatalf("llm = %+v", out.LLM)
+	}
+	if out.ToolCalls == nil || out.ToolCalls.Failure != 0 || out.ToolCalls.FailureByTool == nil || len(out.ToolCalls.FailureByTool) != 0 || out.ToolCalls.FailureDetails == nil || len(out.ToolCalls.FailureDetails) != 0 {
+		t.Errorf("empty tool failure fields = %+v", out.ToolCalls)
+	}
+}
+
+func TestNewJSONToolCalls_FailureByTool(t *testing.T) {
+	failures := []llmloop.ToolFailureDetail{
+		{ToolName: "code_search"},
+		{ToolName: "file_read"},
+		{ToolName: "file_read"},
+		{ToolName: "file_find"},
+		{ToolName: "file_find"},
+		{ToolName: "file_find"},
+	}
+
+	got := newJSONToolCalls(nil, failures)
+	if got.Failure != 6 {
+		t.Fatalf("failure = %d, want 6", got.Failure)
+	}
+	if got.FailureByTool["code_search"] != 1 || got.FailureByTool["file_read"] != 2 || got.FailureByTool["file_find"] != 3 {
+		t.Errorf("failure_by_tool = %+v, want code_search=1 file_read=2 file_find=3", got.FailureByTool)
 	}
 }
 

@@ -501,4 +501,49 @@ func TestAddToolResult(t *testing.T) {
 	if tr.Result != "package main" {
 		t.Errorf("Result = %q", tr.Result)
 	}
+	if !tr.OK {
+		t.Error("successful tool result marked failed")
+	}
+}
+
+func TestAddToolFailure(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "model", SessionOptions{})
+	fs := sh.GetOrCreateFileSession("file.go")
+	rec := fs.AppendTaskRecord(MainTask, nil)
+
+	rec.AddToolFailure("code_search", `{"search_text":"needle"}`, "git grep failed", 25*time.Millisecond)
+
+	if len(rec.ToolResults) != 1 {
+		t.Fatalf("len = %d", len(rec.ToolResults))
+	}
+	result := rec.ToolResults[0]
+	if result.ToolName != "code_search" || result.OK || result.Result != "git grep failed" {
+		t.Errorf("failure result = %+v", result)
+	}
+	if result.Duration != 25*time.Millisecond {
+		t.Errorf("Duration = %s, want 25ms", result.Duration)
+	}
+
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	records := readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID))
+	var persisted map[string]any
+	for _, record := range records {
+		if record["type"] == "tool_call" {
+			persisted = record
+			break
+		}
+	}
+	if persisted == nil {
+		t.Fatal("failed tool call was not persisted")
+	}
+	if ok, _ := persisted["ok"].(bool); ok {
+		t.Errorf("persisted failure has ok=true: %+v", persisted)
+	}
+	if got := int64(persisted["duration_ms"].(float64)); got != 25 {
+		t.Errorf("persisted duration_ms = %d, want 25", got)
+	}
 }

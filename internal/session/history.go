@@ -123,6 +123,8 @@ type ToolResultRecord struct {
 	ToolName  string
 	Arguments string
 	Result    string
+	OK        bool
+	Duration  time.Duration
 }
 
 // SessionOptions holds optional metadata for a new session.
@@ -507,15 +509,26 @@ func (sh *SessionHistory) LLMFailures() int64 {
 // AddToolResult appends a tool call result to this task record and writes a
 // tool_call record to the JSONL stream.
 func (tr *TaskRecord) AddToolResult(toolName, arguments, result string) {
+	tr.addToolResult(toolName, arguments, result, true, 0)
+}
+
+// AddToolFailure appends and persists a failed tool call result.
+func (tr *TaskRecord) AddToolFailure(toolName, arguments, result string, duration time.Duration) {
+	tr.addToolResult(toolName, arguments, result, false, duration)
+}
+
+func (tr *TaskRecord) addToolResult(toolName, arguments, result string, ok bool, duration time.Duration) {
 	tr.ToolResults = append(tr.ToolResults, ToolResultRecord{
 		ToolName:  toolName,
 		Arguments: arguments,
 		Result:    result,
+		OK:        ok,
+		Duration:  duration,
 	})
 
 	if fs := tr.fileSession; fs != nil {
 		if p := fs.session.persist; p != nil {
-			p.WriteToolCall(fs.FilePath, tr.Type, toolName, arguments, result, true, 0)
+			p.WriteToolCall(fs.FilePath, tr.Type, toolName, arguments, result, ok, duration)
 		}
 	}
 }

@@ -224,6 +224,9 @@ func (a *Agent) Warnings() []llmloop.AgentWarning { return a.runner.Warnings() }
 // ToolCalls returns per-tool call counts accumulated during scan.
 func (a *Agent) ToolCalls() map[string]int64 { return a.runner.ToolCalls() }
 
+// ToolFailures returns failed registered-tool calls accumulated during scan.
+func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.ToolFailures() }
+
 // BudgetExceeded reports whether the aggregate token budget gate stopped
 // dispatch before every file was reviewed. Diagnostic only: scan still returns
 // its partial comments and a nil error, and the value reaches output solely as

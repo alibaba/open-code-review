@@ -494,18 +494,21 @@ func TestExecuteToolCall_ArgumentsEdgeCases(t *testing.T) {
 		wantContains   string // substring expected in cp.Data ("" = skip)
 		wantComment    string // if non-empty, expect one collected comment with this path
 		wantNonNilArgs bool   // dynamic tool: Execute must receive a non-nil args map
+		wantFailure    bool
 	}{
 		{
 			name:         "null args on code_comment (issue #382)",
 			toolName:     "code_comment",
 			arguments:    `null`,
 			wantContains: "'comments' array is required",
+			wantFailure:  true,
 		},
 		{
 			name:         "empty object on code_comment",
 			toolName:     "code_comment",
 			arguments:    `{}`,
 			wantContains: "'comments' array is required",
+			wantFailure:  true,
 		},
 		{
 			name:        "valid args uses per-item path",
@@ -518,12 +521,14 @@ func TestExecuteToolCall_ArgumentsEdgeCases(t *testing.T) {
 			toolName:     "code_comment",
 			arguments:    ``,
 			wantContains: "Error parsing tool arguments",
+			wantFailure:  true,
 		},
 		{
 			name:         "malformed json args",
 			toolName:     "code_comment",
 			arguments:    `{"comments":`,
 			wantContains: "Error parsing tool arguments",
+			wantFailure:  true,
 		},
 		{
 			name:           "null args on dynamic tool",
@@ -573,6 +578,13 @@ func TestExecuteToolCall_ArgumentsEdgeCases(t *testing.T) {
 				if dyn.gotArgs == nil {
 					t.Error("dynamic tool Execute received nil args map, want non-nil empty map")
 				}
+			}
+			failures := r.ToolFailures()
+			if tt.wantFailure && len(failures) != 1 {
+				t.Errorf("ToolFailures() = %+v, want one failure", failures)
+			}
+			if !tt.wantFailure && len(failures) != 0 {
+				t.Errorf("ToolFailures() = %+v, want no failures", failures)
 			}
 		})
 	}
