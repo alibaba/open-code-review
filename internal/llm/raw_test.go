@@ -136,14 +136,14 @@ func TestRawMiddleware_CapturesRawBodiesAndMeta(t *testing.T) {
 	if rec.StatusCode != http.StatusOK {
 		t.Errorf("status_code = %d, want 200", rec.StatusCode)
 	}
-	if string(rec.Request) != reqBody {
-		t.Errorf("request = %q, want raw body", rec.Request)
+	if string(rec.RequestBody) != reqBody {
+		t.Errorf("request_body = %q, want raw body", rec.RequestBody)
 	}
-	if string(rec.Response) != respBody {
-		t.Errorf("response = %q, want raw body", rec.Response)
+	if string(rec.ResponseBody) != respBody {
+		t.Errorf("response_body = %q, want raw body", rec.ResponseBody)
 	}
-	if rec.ResponseText != "" || rec.Error != "" {
-		t.Errorf("unexpected response_text=%q error=%q", rec.ResponseText, rec.Error)
+	if rec.ResponseBodyText != "" || rec.Error != "" {
+		t.Errorf("unexpected response_body_text=%q error=%q", rec.ResponseBodyText, rec.Error)
 	}
 	if rec.DurationMs < 0 {
 		t.Errorf("duration_ms = %d, want >= 0", rec.DurationMs)
@@ -241,17 +241,17 @@ func TestRawMiddleware_RedactsAuthHeaders(t *testing.T) {
 	}
 
 	rec := tw.one(t)
-	for k, v := range rec.Headers {
+	for k, v := range rec.RequestHeaders {
 		if sensitiveHeader(k) && v != "[REDACTED]" {
 			t.Errorf("header %s = %q, want [REDACTED]", k, v)
 		}
 	}
-	if got := rec.Headers["User-Agent"]; got != "open-code-review/test" {
+	if got := rec.RequestHeaders["User-Agent"]; got != "open-code-review/test" {
 		t.Errorf("User-Agent = %q, want passthrough value", got)
 	}
-	for _, v := range rec.Headers {
+	for _, v := range rec.RequestHeaders {
 		if strings.Contains(v, "secret") {
-			t.Errorf("secret leaked in headers: %v", rec.Headers)
+			t.Errorf("secret leaked in headers: %v", rec.RequestHeaders)
 		}
 	}
 }
@@ -275,8 +275,63 @@ func TestRawMiddleware_MultiValueHeadersAreJoined(t *testing.T) {
 
 	rec := tw.one(t)
 	want := "prompt-caching-2024-07-31, files-api-2025-04-14"
-	if got := rec.Headers["Anthropic-Beta"]; got != want {
+	if got := rec.RequestHeaders["Anthropic-Beta"]; got != want {
 		t.Errorf("Anthropic-Beta = %q, want %q", got, want)
+	}
+}
+
+func TestRawMiddleware_CapturesResponseHeaders(t *testing.T) {
+	req := rawRequest(t, context.Background(), `{}`, nil)
+	tw := &recordingRawWriter{}
+	holder := NewRawHolder()
+	holder.Set(tw)
+	mw := newRawMiddleware(holder)
+
+	if _, err := mw(req, func(*http.Request) (*http.Response, error) {
+		resp := jsonResponse(`{}`)
+		resp.Header = http.Header{
+			"X-Request-Id": {"req-abc123"},
+			"Set-Cookie":   {"session=super-secret"},
+		}
+		return resp, nil
+	}); err != nil {
+		t.Fatalf("middleware: %v", err)
+	}
+
+	rec := tw.one(t)
+	if got := rec.ResponseHeaders["X-Request-Id"]; got != "req-abc123" {
+		t.Errorf("X-Request-Id = %q, want req-abc123", got)
+	}
+	if got := rec.ResponseHeaders["Set-Cookie"]; got != "[REDACTED]" {
+		t.Errorf("Set-Cookie = %q, want [REDACTED]", got)
+	}
+}
+
+// A transport error has no response, so response_headers must be omitted
+// from the JSON rather than written as an empty map.
+func TestRawMiddleware_ResponseHeadersOmittedOnTransportError(t *testing.T) {
+	req := rawRequest(t, context.Background(), `{}`, nil)
+	tw := &recordingRawWriter{}
+	holder := NewRawHolder()
+	holder.Set(tw)
+	mw := newRawMiddleware(holder)
+
+	if _, err := mw(req, func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("dial tcp: connection refused")
+	}); err == nil {
+		t.Fatal("middleware must propagate the transport error")
+	}
+
+	rec := tw.one(t)
+	if rec.ResponseHeaders != nil {
+		t.Errorf("response_headers = %v, want nil on a transport error", rec.ResponseHeaders)
+	}
+	line, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("record is not encodable: %v", err)
+	}
+	if strings.Contains(string(line), "response_headers") {
+		t.Errorf("response_headers key present in JSON: %s", line)
 	}
 }
 
@@ -326,8 +381,8 @@ func TestRawMiddleware_TransportErrorRecordsErrorOnly(t *testing.T) {
 	if rec.StatusCode != 0 {
 		t.Errorf("status_code = %d, want 0 (no response)", rec.StatusCode)
 	}
-	if rec.Response != nil || rec.ResponseText != "" {
-		t.Errorf("error record must carry no response: %q / %q", rec.Response, rec.ResponseText)
+	if rec.ResponseBody != nil || rec.ResponseBodyText != "" {
+		t.Errorf("error record must carry no response body: %q / %q", rec.ResponseBody, rec.ResponseBodyText)
 	}
 }
 
@@ -360,9 +415,9 @@ func TestRawMiddleware_RequestBodyReadErrorReplayed(t *testing.T) {
 		t.Errorf("error = %q, want %q", rec.Error, readErr.Error())
 	}
 	// The partial bytes of a failed read are not valid JSON and stay out of
-	// Request; the error field carries the failure.
-	if rec.Request != nil {
-		t.Errorf("request = %q, want nil for a failed body read", rec.Request)
+	// RequestBody; the error field carries the failure.
+	if rec.RequestBody != nil {
+		t.Errorf("request_body = %q, want nil for a failed body read", rec.RequestBody)
 	}
 	if _, err := json.Marshal(rec); err != nil {
 		t.Errorf("record is not encodable: %v", err)
@@ -426,7 +481,7 @@ func TestRawMiddleware_RecordsNon200StatusCode(t *testing.T) {
 	}
 }
 
-func TestRawMiddleware_NonJSONResponseGoesToResponseText(t *testing.T) {
+func TestRawMiddleware_NonJSONResponseGoesToResponseBodyText(t *testing.T) {
 	// SSE bodies (extra_body.stream=true) are not JSON; stuffing them into a
 	// json.RawMessage field would emit a malformed JSONL line.
 	sse := "data: {\"delta\":\"a\"}\n\ndata: {\"delta\":\"b\"}\n\ndata: [DONE]\n\n"
@@ -447,18 +502,18 @@ func TestRawMiddleware_NonJSONResponseGoesToResponseText(t *testing.T) {
 	}
 
 	rec := tw.one(t)
-	if rec.Response != nil {
-		t.Errorf("response = %q, want empty for non-JSON body", rec.Response)
+	if rec.ResponseBody != nil {
+		t.Errorf("response_body = %q, want empty for non-JSON body", rec.ResponseBody)
 	}
-	if rec.ResponseText != sse {
-		t.Errorf("response_text = %q, want SSE body", rec.ResponseText)
+	if rec.ResponseBodyText != sse {
+		t.Errorf("response_body_text = %q, want SSE body", rec.ResponseBodyText)
 	}
 }
 
 // The SDK marshals every request body, so this path is unreachable today; if a
 // future middleware mangles the bytes, the record must survive with them
 // verbatim instead of being dropped whole.
-func TestRawMiddleware_NonJSONRequestBodyGoesToRequestText(t *testing.T) {
+func TestRawMiddleware_NonJSONRequestGoesToRequestBodyText(t *testing.T) {
 	req := rawRequest(t, context.Background(), `{not-json`, nil)
 
 	tw := &recordingRawWriter{}
@@ -471,11 +526,11 @@ func TestRawMiddleware_NonJSONRequestBodyGoesToRequestText(t *testing.T) {
 	}
 
 	rec := tw.one(t)
-	if rec.Request != nil {
-		t.Errorf("request = %q, want empty for non-JSON body", rec.Request)
+	if rec.RequestBody != nil {
+		t.Errorf("request_body = %q, want empty for non-JSON body", rec.RequestBody)
 	}
-	if rec.RequestText != `{not-json` {
-		t.Errorf("request_text = %q, want malformed body verbatim", rec.RequestText)
+	if rec.RequestBodyText != `{not-json` {
+		t.Errorf("request_body_text = %q, want malformed body verbatim", rec.RequestBodyText)
 	}
 	if _, err := json.Marshal(rec); err != nil {
 		t.Errorf("record is not encodable: %v", err)
@@ -537,11 +592,11 @@ func TestRawMiddleware_BodyReadErrorPropagates(t *testing.T) {
 	if rec.Error != readErr.Error() {
 		t.Errorf("error = %q, want %q", rec.Error, readErr.Error())
 	}
-	if rec.ResponseText != `{"partial":` {
-		t.Errorf("response_text = %q, want partial bytes", rec.ResponseText)
+	if rec.ResponseBodyText != `{"partial":` {
+		t.Errorf("response_body_text = %q, want partial bytes", rec.ResponseBodyText)
 	}
-	if rec.Response != nil {
-		t.Errorf("response = %q, want empty on read error", rec.Response)
+	if rec.ResponseBody != nil {
+		t.Errorf("response_body = %q, want empty on read error", rec.ResponseBody)
 	}
 }
 
@@ -678,7 +733,7 @@ func TestNewLLMClient_RawEndToEnd(t *testing.T) {
 	}
 	// The captured request must be the raw body — extra_body merged in.
 	var reqMap map[string]any
-	if err := json.Unmarshal(rec.Request, &reqMap); err != nil {
+	if err := json.Unmarshal(rec.RequestBody, &reqMap); err != nil {
 		t.Fatalf("request is not valid JSON: %v", err)
 	}
 	if reqMap["raw_marker"] != "raw-capture" {
@@ -689,14 +744,14 @@ func TestNewLLMClient_RawEndToEnd(t *testing.T) {
 	}
 	// The captured response must be the raw completion JSON.
 	var respMap map[string]any
-	if err := json.Unmarshal(rec.Response, &respMap); err != nil {
+	if err := json.Unmarshal(rec.ResponseBody, &respMap); err != nil {
 		t.Fatalf("response is not valid JSON: %v", err)
 	}
 	if respMap["id"] != "chatcmpl-test" {
 		t.Errorf("raw response id = %v, want chatcmpl-test", respMap["id"])
 	}
-	if rec.Headers["Authorization"] != "[REDACTED]" {
-		t.Errorf("Authorization = %q, want [REDACTED]", rec.Headers["Authorization"])
+	if rec.RequestHeaders["Authorization"] != "[REDACTED]" {
+		t.Errorf("Authorization = %q, want [REDACTED]", rec.RequestHeaders["Authorization"])
 	}
 }
 
@@ -752,19 +807,19 @@ func TestNewLLMClient_RawRecordsEveryRetryAttempt(t *testing.T) {
 	if recs[0].RequestID == "" || recs[0].RequestID == recs[1].RequestID {
 		t.Errorf("request_id must differ per attempt: %q vs %q", recs[0].RequestID, recs[1].RequestID)
 	}
-	if !bytes.Equal(recs[0].Request, recs[1].Request) {
-		t.Errorf("replayed request bodies differ:\n%s\n%s", recs[0].Request, recs[1].Request)
+	if !bytes.Equal(recs[0].RequestBody, recs[1].RequestBody) {
+		t.Errorf("replayed request bodies differ:\n%s\n%s", recs[0].RequestBody, recs[1].RequestBody)
 	}
 	for i, rec := range recs {
 		if rec.FilePath != "a/b.go" || rec.TaskType != "main_task" || rec.RequestNo != 1 {
 			t.Errorf("attempt %d identity = (%q,%q,%d), want meta values", i+1, rec.FilePath, rec.TaskType, rec.RequestNo)
 		}
 	}
-	if string(recs[0].Response) != errorBody {
-		t.Errorf("attempt 1 response = %q, want the 500 body", recs[0].Response)
+	if string(recs[0].ResponseBody) != errorBody {
+		t.Errorf("attempt 1 response body = %q, want the 500 body", recs[0].ResponseBody)
 	}
-	if string(recs[1].Response) != successBody {
-		t.Errorf("attempt 2 response = %q, want the success body", recs[1].Response)
+	if string(recs[1].ResponseBody) != successBody {
+		t.Errorf("attempt 2 response body = %q, want the success body", recs[1].ResponseBody)
 	}
 }
 
@@ -824,10 +879,10 @@ func TestRawMiddleware_EmptyBodies(t *testing.T) {
 		t.Fatal("resp is nil")
 	}
 	rec := tw.one(t)
-	if len(rec.Request) != 0 || rec.Response != nil || rec.ResponseText != "" {
-		t.Errorf("captures must be empty: req=%q resp=%q text=%q", rec.Request, rec.Response, rec.ResponseText)
+	if len(rec.RequestBody) != 0 || rec.ResponseBody != nil || rec.ResponseBodyText != "" {
+		t.Errorf("captures must be empty: req=%q resp=%q text=%q", rec.RequestBody, rec.ResponseBody, rec.ResponseBodyText)
 	}
-	// The record must still encode: an empty non-nil Request used to fail
+	// The record must still encode: an empty non-nil RequestBody used to fail
 	// json.Marshal and the writer silently dropped the whole record.
 	if _, err := json.Marshal(rec); err != nil {
 		t.Errorf("record with empty bodies is not encodable: %v", err)
@@ -860,8 +915,8 @@ func TestRawHolder_ConcurrentSetAndWrite(t *testing.T) {
 		t.Fatal("no records captured")
 	}
 	for _, rec := range tw.records {
-		if !bytes.Equal(rec.Request, []byte(`{"model":"m"}`)) {
-			t.Fatalf("corrupted record under concurrency: %q", rec.Request)
+		if !bytes.Equal(rec.RequestBody, []byte(`{"model":"m"}`)) {
+			t.Fatalf("corrupted record under concurrency: %q", rec.RequestBody)
 		}
 	}
 }

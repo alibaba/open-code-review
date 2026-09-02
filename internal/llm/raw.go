@@ -72,35 +72,40 @@ type RawRecord struct {
 	// before any response arrived (transport error).
 	StatusCode int `json:"status_code,omitempty"`
 
-	// Headers are the request headers, with credential-bearing ones redacted
-	// by sensitiveHeader.
-	Headers map[string]string `json:"headers"`
+	// RequestHeaders are the request headers, with credential-bearing ones
+	// redacted by sensitiveHeader.
+	RequestHeaders map[string]string `json:"request_headers"`
 
-	// Request is the raw request body after extra_body merging and
+	// ResponseHeaders are the response headers, redacted the same way —
+	// Set-Cookie is a credential too. Omitted when next() failed. The
+	// server-side request ID lives here, not in the body.
+	ResponseHeaders map[string]string `json:"response_headers,omitempty"`
+
+	// RequestBody is the raw request body after extra_body merging and
 	// session-key expansion — the shape the SDK logic sent, which on Bedrock
 	// precedes the provider adaptation (see RawRecord). Valid JSON whenever
 	// non-empty; an empty body leaves it null. Mutually exclusive with
-	// RequestText.
-	Request json.RawMessage `json:"request"`
+	// RequestBodyText.
+	RequestBody json.RawMessage `json:"request_body"`
 
-	// RequestText holds a non-JSON request body verbatim. Unreachable while
+	// RequestBodyText holds a non-JSON request body verbatim. Unreachable while
 	// the SDK marshals every body; a future mangling middleware would land
 	// here instead of dropping the whole record.
-	RequestText string `json:"request_text,omitempty"`
+	RequestBodyText string `json:"request_body_text,omitempty"`
 
-	// Response holds the raw response body when it is valid JSON
+	// ResponseBody holds the raw response body when it is valid JSON
 	// (every non-streaming completion response). Mutually exclusive with
-	// ResponseText.
-	Response json.RawMessage `json:"response,omitempty"`
+	// ResponseBodyText.
+	ResponseBody json.RawMessage `json:"response_body,omitempty"`
 
-	// ResponseText holds a non-JSON response body verbatim. This is the SSE
-	// stream text (extra_body.stream=true) — stuffing it into Response would
-	// emit a malformed JSONL line.
-	ResponseText string `json:"response_text,omitempty"`
+	// ResponseBodyText holds a non-JSON response body verbatim. This is the SSE
+	// stream text (extra_body.stream=true) — stuffing it into ResponseBody
+	// would emit a malformed JSONL line.
+	ResponseBodyText string `json:"response_body_text,omitempty"`
 
 	// Error carries the transport-level error when next() failed; the record
 	// then has no response. HTTP-level errors are not transport errors: the
-	// SDK retries them internally, and the body lands in Response as-is.
+	// SDK retries them internally, and the body lands in ResponseBody as-is.
 	Error string `json:"error,omitempty"`
 }
 
@@ -151,6 +156,24 @@ func sensitiveHeader(name string) bool {
 	return false
 }
 
+// captureHeaders flattens an http.Header for the record: credential-bearing
+// headers are redacted by name, repeated values are joined in the RFC 9110
+// list form.
+func captureHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for k, vs := range h {
+		if len(vs) == 0 {
+			continue
+		}
+		if sensitiveHeader(k) {
+			out[k] = "[REDACTED]"
+		} else {
+			out[k] = strings.Join(vs, ", ")
+		}
+	}
+	return out
+}
+
 // newRawMiddleware builds the SDK middleware that captures raw
 // request/response bodies into the writer held by holder. It sits inside the
 // SDK retry loop, so it records one line per real HTTP attempt.
@@ -170,18 +193,7 @@ func newRawMiddleware(holder *RawHolder) retryObserver {
 
 		meta, _ := RequestMetaFromContext(req.Context())
 
-		headers := make(map[string]string, len(req.Header))
-		for k, vs := range req.Header {
-			if len(vs) == 0 {
-				continue
-			}
-			if sensitiveHeader(k) {
-				headers[k] = "[REDACTED]"
-			} else {
-				// ", " is the RFC 9110 list form for repeated headers.
-				headers[k] = strings.Join(vs, ", ")
-			}
-		}
+		reqHeaders := captureHeaders(req.Header)
 
 		var reqBody []byte
 		var reqReadErr error
@@ -211,22 +223,22 @@ func newRawMiddleware(holder *RawHolder) retryObserver {
 		resp, err := next(req)
 
 		rec := RawRecord{
-			RequestID: uuid.NewString(),
-			Timestamp: startedAt.UTC().Format(time.RFC3339),
-			FilePath:  meta.FilePath,
-			TaskType:  meta.TaskType,
-			RequestNo: meta.RequestNo,
-			Model:     model,
-			Headers:   headers,
+			RequestID:      uuid.NewString(),
+			Timestamp:      startedAt.UTC().Format(time.RFC3339),
+			FilePath:       meta.FilePath,
+			TaskType:       meta.TaskType,
+			RequestNo:      meta.RequestNo,
+			Model:          model,
+			RequestHeaders: reqHeaders,
 		}
 		// A zero-length RawMessage fails to marshal and would drop the whole
 		// record, so an empty body stays null; malformed bytes would fail the
-		// same way, so they fall back to RequestText.
+		// same way, so they fall back to RequestBodyText.
 		if len(reqBody) > 0 && reqReadErr == nil {
 			if json.Valid(reqBody) {
-				rec.Request = json.RawMessage(reqBody)
+				rec.RequestBody = json.RawMessage(reqBody)
 			} else {
-				rec.RequestText = string(reqBody)
+				rec.RequestBodyText = string(reqBody)
 			}
 		}
 		if reqReadErr != nil {
@@ -250,6 +262,9 @@ func newRawMiddleware(holder *RawHolder) retryObserver {
 		}
 
 		rec.StatusCode = resp.StatusCode
+		if len(resp.Header) > 0 {
+			rec.ResponseHeaders = captureHeaders(resp.Header)
+		}
 
 		if resp.Body != nil {
 			respBody, readErr := io.ReadAll(resp.Body)
@@ -259,7 +274,7 @@ func newRawMiddleware(holder *RawHolder) retryObserver {
 				rec.DurationMs = time.Since(startedAt).Milliseconds()
 				rec.Error = readErr.Error()
 				if len(respBody) > 0 {
-					rec.ResponseText = string(respBody)
+					rec.ResponseBodyText = string(respBody)
 				}
 				tw.Write(rec)
 				resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(respBody), errReader{readErr}))
@@ -267,9 +282,9 @@ func newRawMiddleware(holder *RawHolder) retryObserver {
 			}
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			if json.Valid(respBody) {
-				rec.Response = json.RawMessage(respBody)
+				rec.ResponseBody = json.RawMessage(respBody)
 			} else {
-				rec.ResponseText = string(respBody)
+				rec.ResponseBodyText = string(respBody)
 			}
 		}
 

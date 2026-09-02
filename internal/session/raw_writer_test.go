@@ -62,9 +62,9 @@ func TestRawFileWriter_StampsSessionIDAndTimestamp(t *testing.T) {
 		t.Fatalf("NewRawFileWriter: %v", err)
 	}
 	w.Write(llm.RawRecord{
-		RequestID: "req-1",
-		Model:     "m",
-		Request:   json.RawMessage(`{"model":"m"}`),
+		RequestID:   "req-1",
+		Model:       "m",
+		RequestBody: json.RawMessage(`{"model":"m"}`),
 	})
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -326,7 +326,7 @@ func TestRawFileWriter_EncodeFailureWarnsAndRecovers(t *testing.T) {
 	w.encoder.SetEscapeHTML(false)
 
 	stderr := captureStderrForTest(t, func() {
-		w.Write(llm.RawRecord{RequestID: "bad", Request: json.RawMessage(`{not-json`)})
+		w.Write(llm.RawRecord{RequestID: "bad", RequestBody: json.RawMessage(`{not-json`)})
 		w.Write(llm.RawRecord{RequestID: "good"})
 	})
 	if n := strings.Count(stderr, "raw logging failed"); n != 1 {
