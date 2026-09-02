@@ -17,13 +17,20 @@ inputs:
   llm_model:
     description: Model name (mapped to env OCR_LLM_MODEL).
     required: true
+  llm_protocol:
+    description: >-
+      LLM protocol: openai, openai-responses, anthropic, or a custom protocol name
+      (mapped to env OCR_LLM_PROTOCOL). If omitted, falls back to the protocol
+      selected by llm_use_anthropic.
+    required: false
   llm_use_anthropic:
     description: >-
       Selects the LLM protocol (mapped to env OCR_USE_ANTHROPIC). An explicitly supplied empty
       string, true, 1, or yes selects Anthropic
       case-insensitively; every other value selects the OpenAI-compatible
-      protocol, preserving the CLI environment contract.
-    required: true
+      protocol, preserving the CLI environment contract. Ignored when llm_protocol is set.
+    required: false
+    default: 'false'
   llm_auth_header:
     description: Custom auth header name (mapped to env OCR_LLM_AUTH_HEADER).
     required: false
@@ -379,6 +386,7 @@ runs:
       env:
         OCR_LLM_URL: ${{ inputs.llm_url }}
         OCR_LLM_MODEL: ${{ inputs.llm_model }}
+        OCR_LLM_PROTOCOL: ${{ inputs.llm_protocol }}
         OCR_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
         OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         OCR_EXTRA_BODY: ${{ inputs.llm_extra_body }}
@@ -389,13 +397,14 @@ runs:
         case "$NORMALIZED_USE_ANTHROPIC" in
           ""|true|1|yes)
             OCR_USE_ANTHROPIC="true"
-            OCR_LLM_PROTOCOL="anthropic"
+            DEFAULT_PROTOCOL="anthropic"
             ;;
           *)
             OCR_USE_ANTHROPIC="false"
-            OCR_LLM_PROTOCOL="openai"
+            DEFAULT_PROTOCOL="openai"
             ;;
         esac
+        RESOLVED_PROTOCOL="${OCR_LLM_PROTOCOL:-$DEFAULT_PROTOCOL}"
         ocr config unset provider
         ocr config set llm.auth_token ""
         ocr config set llm.extra_headers ""
@@ -403,7 +412,7 @@ runs:
         ocr config set llm.url "$OCR_LLM_URL"
         ocr config set llm.model "$OCR_LLM_MODEL"
         ocr config set llm.use_anthropic "$OCR_USE_ANTHROPIC"
-        ocr config set llm.protocol "$OCR_LLM_PROTOCOL"
+        ocr config set llm.protocol "$RESOLVED_PROTOCOL"
         ocr config set llm.auth_header "$OCR_LLM_AUTH_HEADER"
         ocr config set llm.auth_token_cmd 'printf "%s" "$OCR_LLM_TOKEN"'
         ocr config set llm.extra_body "$OCR_EXTRA_BODY"
@@ -442,6 +451,7 @@ runs:
         # alike and a checkpoint survives a change that should have killed it.
         OCR_FP_LLM_URL: ${{ inputs.llm_url }}
         OCR_FP_LLM_MODEL: ${{ inputs.llm_model }}
+        OCR_FP_LLM_PROTOCOL: ${{ inputs.llm_protocol }}
         OCR_FP_LLM_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
         OCR_FP_LANGUAGE: ${{ inputs.language }}
         OCR_FP_LLM_EXTRA_BODY: ${{ inputs.llm_extra_body }}
@@ -574,6 +584,7 @@ runs:
               .update(JSON.stringify([
                 process.env.OCR_FP_LLM_URL,
                 process.env.OCR_FP_LLM_MODEL,
+                process.env.OCR_FP_LLM_PROTOCOL,
                 process.env.OCR_FP_LLM_USE_ANTHROPIC,
                 process.env.OCR_FP_LANGUAGE,
                 process.env.OCR_FP_LLM_EXTRA_BODY,
@@ -647,6 +658,7 @@ runs:
         OCR_LLM_URL: ${{ inputs.llm_url }}
         OCR_LLM_TOKEN: ${{ inputs.llm_auth_token }}
         OCR_LLM_MODEL: ${{ inputs.llm_model }}
+        OCR_LLM_PROTOCOL: ${{ inputs.llm_protocol }}
         OCR_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
         OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         OCR_LLM_EXTRA_HEADERS: ${{ inputs.llm_extra_headers }}
