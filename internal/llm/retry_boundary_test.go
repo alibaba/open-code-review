@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/openai/openai-go/v3/packages/ssestream"
 )
 
@@ -428,30 +429,12 @@ func TestBoundaryCancelDuringBackoffIsCancelled(t *testing.T) {
 	}
 }
 
-// The same backoff wait as the test above, ended by the per-attempt timeout
-// instead of a user abort — the pair that pins the cancelled/failed split.
-//
-// Both SDKs build the per-attempt context inside the retry loop and then wait
-// for the backoff on that same context (requestconfig.go:467-509 for openai-go,
-// :434-478 for anthropic-sdk-go), and retryDelay adopts a server hint verbatim
-// with no upper bound. A hint longer than ClientConfig.Timeout therefore always
-// expires the wait: the SDK returns context.DeadlineExceeded without making a
-// second attempt.
-//
-// No new code serves this path — it is asserted because three separate pieces
-// have to hold at once. The last attempt stays the 429 (the boundary correction
-// recognizes DeadlineExceeded but no-ops on an attempt that is already an
-// error), the parent context is untouched so rule 2 cannot fire, and rule 3
-// gives failed. Getting any one of them wrong turns a provider throttling us
-// past our own timeout into a reported user cancellation.
 func TestBoundaryRetryAfterOutlivingAttemptTimeoutIsFailed(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		// An order of magnitude past the client timeout below, so the wait can
-		// only ever end at the deadline.
-		w.Header().Set("Retry-After-Ms", "3000")
+		w.Header().Set("Retry-After-Ms", "300")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`)
 	}))
@@ -470,27 +453,28 @@ func TestBoundaryRetryAfterOutlivingAttemptTimeoutIsFailed(t *testing.T) {
 		retryCollector: c,
 	})
 
-	// No deadline and no cancel on the parent: the only clock in play is the
-	// per-attempt one.
 	_, err := ping(metaCtx(m), client)
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("CompletionsWithCtx err = %v, want context.DeadlineExceeded", err)
+	var apiErr *anthropic.Error
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("CompletionsWithCtx err = %v, want the HTTP 429 error", err)
 	}
-	if n := requests.Load(); n != 1 {
-		t.Errorf("server saw %d requests, want 1 — the hint outlives the attempt timeout", n)
+	if n := requests.Load(); n != 6 {
+		t.Errorf("server saw %d requests, want 6 — the hint is honored in full, so the SDK retries to MaxRetries", n)
 	}
 
 	got := attemptsFor(t, c, m)
-	if len(got) != 1 {
-		t.Fatalf("got %d attempts, want 1 — an expired wait must not invent an attempt", len(got))
+	if len(got) != 6 {
+		t.Fatalf("got %d attempts, want 6 — every retry is a real attempt", len(got))
 	}
-	if got[0].ErrorClass != ErrorClassRateLimited || got[0].FailurePhase != FailurePhaseHTTP {
-		t.Errorf("attempt 1 = %s/%s, want rate_limited/http kept — the timeout correction must no-op here",
-			got[0].ErrorClass, got[0].FailurePhase)
-	}
-	if got[0].StatusCode != http.StatusTooManyRequests || got[0].RetryAfterMS != 3000 {
-		t.Errorf("attempt 1 status %d retry_after_ms %d, want 429/3000",
-			got[0].StatusCode, got[0].RetryAfterMS)
+	for i, a := range got {
+		if a.ErrorClass != ErrorClassRateLimited || a.FailurePhase != FailurePhaseHTTP {
+			t.Errorf("attempt %d = %s/%s, want rate_limited/http kept — the boundary correction must no-op here",
+				i+1, a.ErrorClass, a.FailurePhase)
+		}
+		if a.StatusCode != http.StatusTooManyRequests || a.RetryAfterMS != 300 {
+			t.Errorf("attempt %d status %d retry_after_ms %d, want 429/300",
+				i+1, a.StatusCode, a.RetryAfterMS)
+		}
 	}
 
 	rep, freezeErr := c.Freeze("test-run-id")

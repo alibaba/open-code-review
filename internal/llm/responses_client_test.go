@@ -158,8 +158,8 @@ func TestBuildResponsesParams_ToolCallItems(t *testing.T) {
 	if items[2].OfFunctionCallOutput == nil {
 		t.Fatalf("items[2] should be a function_call_output")
 	}
-	if items[2].OfFunctionCallOutput.CallID != "call_abc" {
-		t.Errorf("function_call_output.CallID = %q, want %q", items[2].OfFunctionCallOutput.CallID, "call_abc")
+	if items[2].OfFunctionCallOutput.CallID.Value != "call_abc" {
+		t.Errorf("function_call_output.CallID = %q, want %q", items[2].OfFunctionCallOutput.CallID.Value, "call_abc")
 	}
 }
 

@@ -195,7 +195,9 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 				input = append(input, responses.ResponseInputItemParamOfFunctionCall(tc.Function.Arguments, tc.ID, tc.Function.Name))
 			}
 		case "tool":
-			input = append(input, responses.ResponseInputItemParamOfFunctionCallOutput(msg.ToolCallID, content))
+			item := responses.ResponseInputItemParamOfFunctionCallOutput(content)
+			item.OfFunctionCallOutput.CallID = param.NewOpt(msg.ToolCallID)
+			input = append(input, item)
 		default:
 			input = append(input, responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser))
 		}
