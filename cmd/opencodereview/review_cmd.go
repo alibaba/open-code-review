@@ -255,6 +255,12 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	}
 	startTime := time.Now()
 
+	// One admission scope for the whole review run: every child context derived
+	// from runCtx — plan, main loop, grace round, memory compression,
+	// re-location, and the review filter — inherits it (context.WithoutCancel
+	// preserves values). `ocr scan` and `ocr llm test` never wrap, so they stay
+	// ungated by construction.
+	runCtx = llm.ContextWithAdmissionScope(runCtx)
 	comments, runErr := ag.Run(runCtx)
 	manifest := ag.RunManifest()
 

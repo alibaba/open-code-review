@@ -52,6 +52,11 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
 	}
+	// Admission gate outside the retry observer — see the OpenAI constructor
+	// in client.go for the ordering argument.
+	if gate := newAdmissionGate(cfg.MaxInFlight); gate != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newAdmissionMiddleware(gate)))
+	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}

@@ -260,6 +260,21 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 警告，并且不会把这些状态码保存到配置中。所有 5xx 响应也已由 SDK 默认重试，
 因此不能加入 `retry_codes`。
 
+### Provider 并发上限
+
+`max_in_flight` 限制一次 `ocr review` 运行中同时对同一个 provider 发起的
+LLM 请求数量。正在传输的请求，以及响应体尚未读取完毕的请求，都计入该上限。
+计划、主评审、补漏轮次、记忆压缩、评论重新定位与评审过滤共享同一个限额；
+SDK 重试在退避等待前会释放占用的名额，流式响应则会持有名额直到流结束。
+
+它是按 provider 配置的选项（与 `timeout_sec` 不同，不支持 `llm.max_in_flight`）：
+
+```bash
+ocr config set custom_providers.my-gateway.max_in_flight 4
+```
+
+默认未设置（`0`），即不限制。`ocr scan` 与 `ocr llm test` 不受影响。
+
 ### 每文件提示词上限
 
 OCR 默认为 `ocr review` 的每次评审设置 200,000 token 的提示词上限

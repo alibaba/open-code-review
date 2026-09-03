@@ -214,6 +214,24 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 
 4xx HTTP 상태 코드만 허용됩니다. `408`, `409`, `429`는 SDK가 이미 재시도합니다. 설정 파일에서 읽을 때 이런 중복 코드는 무시되며, `ocr config set`으로 전달하면 OCR이 경고를 출력하고 저장 값에서 제외합니다. 5xx 응답은 모두 SDK가 이미 재시도하므로 `retry_codes`에 추가할 수 없습니다.
 
+### 프로바이더 동시 실행 한도 {#provider-in-flight-limit}
+
+`max_in_flight`는 한 번의 `ocr review` 실행에서 같은 프로바이더에 대해
+동시에 유지하는 LLM 요청 수를 제한합니다. HTTP 요청이 진행 중이거나
+응답 본문을 아직 읽고 있는 요청이 모두 이 한도에 포함됩니다. 계획,
+메인 리뷰, 보강 라운드, 메모리 압축, 코멘트 재배치, 리뷰 필터가 모두
+같은 한도를 공유합니다. SDK 재시도는 백오프 대기 전에 슬롯을 해제하고,
+스트리밍 응답은 스트림이 끝날 때까지 유지합니다.
+
+프로바이더별 설정입니다(`timeout_sec`와 달리 `llm.max_in_flight`는 없습니다):
+
+```bash
+ocr config set custom_providers.my-gateway.max_in_flight 4
+```
+
+기본값은 미설정(`0`)으로 제한이 없음을 뜻합니다. `ocr scan`과
+`ocr llm test`에는 영향을 주지 않습니다.
+
 ### 프롬프트 상한 {#prompt-limit}
 
 `max_tokens`는 리뷰 단위 하나에 대한 **프롬프트**(입력) 상한입니다. 그 단위는 `ocr review`에서는 파일 그룹, `ocr scan`에서는 파일 하나입니다. 내장 템플릿의 기본값은 `ocr review` 200,000토큰, `ocr scan` 58,888토큰입니다. 컨텍스트 윈도가 다른 모델에서는 `max_tokens`를 저장해 바꿉니다:

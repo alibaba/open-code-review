@@ -33,6 +33,14 @@ type ResolvedEndpoint struct {
 	Timeout    time.Duration
 	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
 
+	// MaxInFlight is the per-provider admission limit for review runs: the
+	// maximum number of simultaneous in-flight attempts (transport in
+	// progress or response body still open). Zero or negative disables the
+	// gate. It describes the provider endpoint capacity, so it lives on the
+	// provider entry rather than the llm section (unlike timeout_sec, which
+	// both sections accept).
+	MaxInFlight int
+
 	// AmbientAuth marks an endpoint that carries no token and needs no base
 	// URL, because the transport supplies both — AWS SigV4 signing derives the
 	// host from the region and the credentials from the environment's own
@@ -216,6 +224,15 @@ func parseTimeoutEnv() (time.Duration, bool, error) {
 	return d, true, nil
 }
 
+// validateMaxInFlight rejects negative admission limits. Zero means disabled
+// and is the default, so only negatives are configuration errors.
+func validateMaxInFlight(n int) error {
+	if n < 0 {
+		return fmt.Errorf("max_in_flight must be non-negative, got %d", n)
+	}
+	return nil
+}
+
 // validateTimeoutSec converts a config-file timeout (in seconds) to time.Duration.
 // Returns 0 for zero input (use default). Rejects negative values and overflow.
 func validateTimeoutSec(sec int) (time.Duration, error) {
@@ -329,6 +346,12 @@ type providerEntryConfig struct {
 	// makes a review run reproducible without exporting AWS_PROFILE first.
 	AWSProfile string `json:"aws_profile,omitempty"`
 	AWSRegion  string `json:"aws_region,omitempty"`
+
+	// MaxInFlight is the per-provider review admission limit; 0 disables.
+	// Provider-only by design: it describes the endpoint's capacity, not the
+	// model configuration, so (unlike timeout_sec) the llm section does not
+	// accept it.
+	MaxInFlight int `json:"max_in_flight,omitempty"`
 }
 
 type configFile struct {
@@ -556,6 +579,10 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 	}
 
+	if err := validateMaxInFlight(entry.MaxInFlight); err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+	}
+
 	if protocol == ProtocolAnthropic {
 		url = ensureMessagesSuffix(url)
 	}
@@ -586,6 +613,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		ExtraHeaders: extraHeaders,
 		Timeout:      timeout,
 		RetryCodes:   retryCodes,
+		MaxInFlight:  entry.MaxInFlight,
 		AmbientAuth:  ambientAuth,
 		AWSProfile:   entry.AWSProfile,
 		AWSRegion:    entry.AWSRegion,
