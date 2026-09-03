@@ -76,7 +76,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "codex", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}
@@ -175,6 +175,43 @@ func TestLookupProvider_OpenAIDetails(t *testing.T) {
 		"gpt-5.4",
 		"gpt-5.4-mini",
 	}
+	if len(p.Models) != len(expectedModels) {
+		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
+	}
+	for i, model := range expectedModels {
+		if p.Models[i] != model {
+			t.Errorf("Models[%d] = %q, want %q", i, p.Models[i], model)
+		}
+	}
+}
+
+func TestLookupProvider_CodexDetails(t *testing.T) {
+	p, ok := LookupProvider("codex")
+	if !ok {
+		t.Fatal("codex not found")
+	}
+	if p.Protocol != ProtocolOpenAIResponses {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolOpenAIResponses)
+	}
+	if p.BaseURL != "https://chatgpt.com/backend-api/codex" {
+		t.Errorf("BaseURL = %q, want %q", p.BaseURL, "https://chatgpt.com/backend-api/codex")
+	}
+	if p.EnvVar != "" {
+		t.Errorf("EnvVar = %q, want empty", p.EnvVar)
+	}
+	if !p.ExternalAuth {
+		t.Error("ExternalAuth = false, want true")
+	}
+	if !p.RequiresStreaming {
+		t.Error("RequiresStreaming = false, want true")
+	}
+	if !p.RejectsSamplingParams {
+		t.Error("RejectsSamplingParams = false, want true")
+	}
+	if !p.DetailErrorEnvelope {
+		t.Error("DetailErrorEnvelope = false, want true")
+	}
+	expectedModels := []string{"gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"}
 	if len(p.Models) != len(expectedModels) {
 		t.Fatalf("Models length = %d, want %d", len(p.Models), len(expectedModels))
 	}

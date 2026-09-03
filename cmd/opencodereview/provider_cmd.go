@@ -237,15 +237,15 @@ func applyCustomProviderConfig(configPath string, cfg *Config, result providerTU
 // command as unset, so without this a command of "   " would satisfy the check
 // here and then fail resolution with "no api_key or api_key_cmd configured".
 //
-// An ambient-auth provider has no credential to save at all: demanding one would
-// make it impossible to configure, since the credentials live in the AWS chain
+// Ambient-auth and external-auth providers have no credential to save here:
+// their credentials come from the environment chain or a dedicated token store
 // rather than the config file.
 func checkAPIKeyRequirement(providerName, apiKey, apiKeyCmd string, preset llm.Provider, isPreset bool) error {
 	if apiKey != "" || strings.TrimSpace(apiKeyCmd) != "" {
 		return nil
 	}
 	switch {
-	case isPreset && preset.AmbientAuth:
+	case isPreset && (preset.AmbientAuth || preset.ExternalAuth):
 		return nil
 	case isPreset && preset.EnvVar != "":
 		if os.Getenv(preset.EnvVar) == "" {

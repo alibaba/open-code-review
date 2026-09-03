@@ -25,14 +25,18 @@ type Provider struct {
 	BaseURL     string
 	AuthHeader  string // Anthropic-only; empty for OpenAI-compatible
 	EnvVar      string // environment variable name for API key fallback
-	Models      []string
 
 	// AmbientAuth marks a provider whose credentials come from the
 	// environment's own chain rather than an api_key — AWS SigV4, for
 	// instance. The resolver skips its api_key requirement for these, because
 	// there is no key to configure and demanding one would make the provider
 	// impossible to use.
-	AmbientAuth bool
+	AmbientAuth           bool
+	ExternalAuth          bool
+	RequiresStreaming     bool
+	RejectsSamplingParams bool
+	DetailErrorEnvelope   bool
+	Models                []string
 }
 
 var registry = []Provider{
@@ -79,6 +83,20 @@ var registry = []Provider{
 			"global.anthropic.claude-sonnet-5",
 			"global.anthropic.claude-opus-4-8",
 		},
+	},
+	{
+		Name:                  "codex",
+		DisplayName:           "ChatGPT (Codex subscription)",
+		Protocol:              ProtocolOpenAIResponses,
+		BaseURL:               "https://chatgpt.com/backend-api/codex",
+		ExternalAuth:          true,
+		RequiresStreaming:     true,
+		RejectsSamplingParams: true,
+		DetailErrorEnvelope:   true,
+		// A picker for `ocr config model`, not an allowlist: what a ChatGPT
+		// account can run depends on its plan and changes over time. The
+		// resolver does not gate --model for this provider.
+		Models: []string{"gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"},
 	},
 	{
 		Name:        "openai",

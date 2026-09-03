@@ -36,12 +36,13 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 
 ### 내장 프로바이더 {#built-in-providers}
 
-다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 선택한 뒤 API 키만 채우면 됩니다. `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다.
+다음 프로바이더는 Base URL과 프로토콜이 미리 설정된 채 OCR에 내장되어 있습니다. 대부분은 API 키가 필요하며, `providers.<name>.api_key`가 비어 있으면 OCR은 해당 환경 변수로 대체합니다. `codex`는 대신 `ocr auth login`이 만든 ChatGPT 자격 증명을 사용합니다.
 
 | 이름 | 프로토콜 | Base URL | API 키 환경 변수 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region`에서 결정 | — (AWS 자격 증명 체인) |
+| `codex` | openai-responses | `https://chatgpt.com/backend-api/codex` | — (`ocr auth login`) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |

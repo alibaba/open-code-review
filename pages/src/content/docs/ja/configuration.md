@@ -37,13 +37,15 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 ### 組み込み provider
 
 以下の provider が OCR に同梱されており、Base URL とプロトコルがプリセット
-されています——選択後は API key を入力するだけです。`providers.<name>.api_key`
-が未設定の場合は、対応する環境変数に自動的にフォールバックします。
+されています。多くは API key が必要です。`providers.<name>.api_key` が未設定の
+場合は対応する環境変数を使用します。`codex` は代わりに `ocr auth login` で
+作成した ChatGPT 認証情報を使用します。
 
 | 名称 | プロトコル | Base URL | API key 環境変数 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region` から決定 | —（AWS 認証情報チェーン） |
+| `codex` | openai-responses | `https://chatgpt.com/backend-api/codex` | —（`ocr auth login`） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |

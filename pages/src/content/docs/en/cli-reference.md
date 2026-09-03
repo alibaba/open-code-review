@@ -538,6 +538,51 @@ ocr config model                           Interactive model selection
 See [Configuration](../configuration/) for the full key reference,
 schemas, and examples.
 
+## `ocr auth`
+
+Manages the ChatGPT credentials used by the built-in `codex` provider.
+Credentials are stored in `~/.opencodereview/auth/codex.json`.
+
+```text
+ocr auth <sub-command>
+
+Sub-commands:
+  login     Sign in with a ChatGPT Codex subscription
+  status    Show the current authentication status
+  logout    Revoke and remove local credentials
+```
+
+### `ocr auth login`
+
+```bash
+ocr auth login
+ocr auth login --no-browser
+ocr auth login --device
+```
+
+The default flow opens a browser and receives the OAuth callback on a local
+loopback address. `--no-browser` prints the authorization URL instead.
+`--device` uses the device-code flow for headless or remote shells. The two
+flags cannot be combined.
+
+### `ocr auth status`
+
+Prints the masked ChatGPT account ID, subscription plan, and token expiry.
+
+```bash
+ocr auth status
+```
+
+### `ocr auth logout`
+
+Revokes the current credential when possible and removes the local credential
+file. If server-side revocation fails, the local file is still removed and OCR
+prints a warning.
+
+```bash
+ocr auth logout
+```
+
 ## `ocr llm`
 
 LLM utility commands. Two subcommands:

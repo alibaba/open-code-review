@@ -498,6 +498,51 @@ ocr config model                           Interactive model selection
 
 key の完全なリファレンス、schema、例は[設定](../configuration/)を参照してください。
 
+## `ocr auth`
+
+組み込みの `codex` プロバイダーが使用する ChatGPT 認証情報を管理します。
+認証情報は `~/.opencodereview/auth/codex.json` に保存されます。
+
+```text
+ocr auth <sub-command>
+
+Sub-commands:
+  login     ChatGPT Codex サブスクリプションでサインイン
+  status    現在の認証状態を表示
+  logout    認証情報を失効させ、ローカルから削除
+```
+
+### `ocr auth login`
+
+```bash
+ocr auth login
+ocr auth login --no-browser
+ocr auth login --device
+```
+
+既定のフローはブラウザーを開き、ローカルの loopback アドレスで OAuth
+コールバックを受け取ります。`--no-browser` は認証 URL のみを表示します。
+`--device` はヘッドレスまたはリモート shell 向けのデバイスコードフローを
+使用します。2 つの flag は同時に指定できません。
+
+### `ocr auth status`
+
+マスクした ChatGPT アカウント ID、サブスクリプションプラン、token の
+有効期限を表示します。
+
+```bash
+ocr auth status
+```
+
+### `ocr auth logout`
+
+可能な場合は現在の認証情報を失効させ、ローカルの認証情報ファイルを削除します。
+サーバー側の失効処理に失敗してもローカルファイルは削除され、OCR は警告を表示します。
+
+```bash
+ocr auth logout
+```
+
 ## `ocr llm`
 
 LLM ユーティリティコマンドです。2 つのサブコマンドがあります:
