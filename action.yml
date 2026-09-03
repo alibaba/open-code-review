@@ -496,6 +496,14 @@ runs:
             OCR_LLM_PROTOCOL="openai"
             ;;
         esac
+        # reasoning_effort is OpenAI-compatible vocabulary; the Anthropic API
+        # rejects unknown body fields, so fail fast instead of breaking every
+        # request. Anthropic thinking control goes through an explicit
+        # llm_extra_body key instead.
+        if [ -n "${LLM_REASONING_EFFORT:-}" ] && [ "$OCR_LLM_PROTOCOL" = "anthropic" ]; then
+          echo "::error::llm_reasoning_effort is supported only with OpenAI-compatible protocols"
+          exit 1
+        fi
         ocr config unset provider
         ocr config set llm.auth_token ""
         ocr config set llm.extra_headers ""

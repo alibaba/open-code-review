@@ -911,6 +911,29 @@ function testConfigureMergesReasoningEffortIntoExtraBody() {
   }
 }
 
+function testConfigureRejectsReasoningEffortOnAnthropic() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_model: "contract-model",
+      llm_use_anthropic: "true",
+      llm_auth_token: "unused-token",
+    });
+    const result = runStep(configure, values, fixture, { LLM_REASONING_EFFORT: "low" });
+    assert.notStrictEqual(result.status, 0, "Configure OCR must reject llm_reasoning_effort on the anthropic protocol");
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /::error::llm_reasoning_effort is supported only with OpenAI-compatible protocols/,
+      `the failure must name the llm_reasoning_effort input; ${resultDescription(result)}`
+    );
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
 function testConfigureRejectsMalformedExtraBodyWithActionableError() {
   const configure = stepNamed("Configure OCR");
   assert.ok(configure, "action.yml must retain the Configure OCR step");
@@ -1479,6 +1502,7 @@ const TESTS = [
   ["Run OpenCodeReview streams live progress when opted in", testRunStreamsProgressWhenOptedIn],
   ["llm_extra_body defaults to disabling thinking", testLlmExtraBodyDefaultDisablesThinking],
   ["Configure OCR merges reasoning_effort into extra_body", testConfigureMergesReasoningEffortIntoExtraBody],
+  ["Configure OCR rejects reasoning_effort on the anthropic protocol", testConfigureRejectsReasoningEffortOnAnthropic],
   ["Configure OCR rejects malformed extra_body with an actionable error", testConfigureRejectsMalformedExtraBodyWithActionableError],
   ["Configure OCR builds a complete llm config", testConfigureBuildsCompleteLlmConfig],
   ["Configure OCR never persists the token", testConfigureNeverPersistsToken],
