@@ -165,6 +165,28 @@ The task and request timeouts are independent:
     llm_timeout: '900'
 ```
 
+### Tune review depth and the token budget
+
+Both inputs are optional. Leaving one empty appends no flag, so the CLI default stands:
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `effort` | none | Review effort preset passed to `ocr review --effort`: `low`, `medium` or `high` (case-insensitive), which selects how many review rounds the agent runs. Unset leaves the CLI's own resolution, i.e. `medium`. |
+| `max_tokens_budget` | none | Aggregate token cap (input + output) passed to `ocr review --max-tokens-budget`. A non-negative integer without leading zeros; `0` means unlimited, and so does leaving it unset. |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    effort: 'high'
+    max_tokens_budget: '250000'
+```
+
+The budget is the only cap on a review's total spend: dispatch stops once it is exceeded, the files that were never reached are reported as `failed(budget)`, and the partial result is still posted (the job does not fail unless every selected item failed).
+
+> A leading zero is rejected rather than normalized, because the CLI parses integer flags with a base-0 conversion where `010` would quietly mean 8.
+
+> Changing `effort` invalidates any stored checkpoint (see [Review only what changed since the last run](#review-only-what-changed-since-the-last-run-checkpoints)), so the next run re-reviews the whole `merge-base..head` range at the new depth. `max_tokens_budget` does not: a run that hits its budget is partial, and only a complete run ever records a checkpoint.
+
 ### Add custom review rules
 
 ```yaml
