@@ -1277,6 +1277,39 @@ function testOfficialNpmPackageInstallIsPreserved() {
   }
 }
 
+function testInstallRejectsEffortBelowV1100() {
+  const install = installStep();
+  assert.ok(install, "action.yml must retain the Install OpenCodeReview step");
+  const cases = [
+    { output: "open-code-review 1.9.10 linux/amd64", effort: "low", valid: false },
+    { output: "open-code-review 1.10.0 linux/amd64", effort: "low", valid: true },
+    { output: "open-code-review v2.0.0 linux/amd64", effort: "high", valid: true },
+    { output: "open-code-review 1.9.10 linux/amd64", effort: "", valid: true },
+  ];
+  for (const testCase of cases) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(install, inputValues({ ocr_version: "contract-test" }), fixture, {
+        OCR_FAKE_VERSION_OUTPUT: testCase.output,
+        EFFORT: testCase.effort,
+      });
+      const message = `version ${JSON.stringify(testCase.output)} with effort=${JSON.stringify(testCase.effort)}; ${resultDescription(result)}`;
+      if (testCase.valid) {
+        assert.strictEqual(result.status, 0, `should pass: ${message}`);
+      } else {
+        assert.notStrictEqual(result.status, 0, `should fail: ${message}`);
+        assert.match(
+          `${result.stdout}\n${result.stderr}`,
+          /::error::The effort input requires OpenCodeReview v1\.10\.0 or newer/,
+          `the failure must name the effort input and the version floor; ${message}`
+        );
+      }
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
 function testInstallEnforcesAuthTokenCommandVersionFloor() {
   const install = installStep();
   assert.ok(install, "action.yml must retain the Install OpenCodeReview step");
@@ -1515,6 +1548,7 @@ const TESTS = [
   ["Run OpenCodeReview fails closed without validated task timeout", testRunFailsClosedWhenValidatedTaskTimeoutIsMissing],
   ["the official OpenCodeReview NPM install is preserved", testOfficialNpmPackageInstallIsPreserved],
   ["Install OpenCodeReview enforces the auth_token_cmd version floor", testInstallEnforcesAuthTokenCommandVersionFloor],
+  ["Install OpenCodeReview rejects the effort input below v1.10.0", testInstallRejectsEffortBelowV1100],
   ["contract harness fails closed on unsupported YAML shapes", testContractHarnessFailsClosedOnUnsupportedYamlShapes],
   ["required action steps and env contracts are present", testRequiredStepTopologyAndEnvironmentContracts],
   ["GitHub Actions contracts run in a dedicated workflow", testContractsRunInDedicatedWorkflow],

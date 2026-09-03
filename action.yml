@@ -467,6 +467,16 @@ runs:
           exit 1
         fi
 
+        # --effort was introduced in v1.10.0; reject an explicit effort input
+        # on older releases instead of letting the CLI fail on an unknown flag.
+        # max_tokens_budget predates the v1.9.6 floor and llm_reasoning_effort
+        # rides extra_body, so neither needs a gate.
+        if [ -n "${EFFORT:-}" ] &&
+          (( OCR_VERSION_MAJOR < 1 || (OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR < 10) )); then
+          echo "::error::The effort input requires OpenCodeReview v1.10.0 or newer"
+          exit 1
+        fi
+
         # Resolved version (not the spec, which is usually "latest"). It feeds
         # the checkpoint fingerprint so an OCR upgrade invalidates checkpoints
         # taken by the previous version. The gate above already guarantees a
