@@ -16,7 +16,7 @@
 
 const assert = require("assert");
 const path = require("path");
-const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, preserveCheckpointMarker } = require(path.join(__dirname, "post-review-comments.js"));
+const { runPostReviewComments, safeFence, fencedBlock, lineSpan, sameCommentSpan, overlapsHistory, resolveThreshold, DEFAULT_OVERLAP_THRESHOLD, newCommentId, getPostedCommentIds, computeRetryDelayMs, formatWarnings, resolveBatchSize, sortToSendDeterministically, chunkArray, buildRunTags, DEFAULT_BATCH_SIZE, buildBadge, buildBadgeImage, SEVERITY_BADGE_COLOR, sanitizeMetadata, buildPolicy, routeComment, formatComment, formatCommentMarkdown, NO_ROUTING, CATEGORIES, SEVERITIES, SEVERITY_RANK, parseDiffHunkRanges, classifyCommentAgainstDiff, describeCommentLocation, isLineResolutionFailure, getPrDiffHunks, SUMMARY_MARKER, buildCheckpointMarker, parseCheckpointMarker, validateCheckpointPayload, readCheckpointComment, resolveCheckpointRange, isCheckpointAuthorOurs, preserveCheckpointMarker, tailForComment, MAX_COMMENT_STDERR_CHARS } = require(path.join(__dirname, "post-review-comments.js"));
 
 // REVIEW_TAG as the production code builds it for this test's hardcoded run
 // identity (context.runId=undefined -> 0, runAttempt=undefined -> 1). Used as
@@ -2350,6 +2350,7 @@ async function main() {
   testActionResolveStepNeverFailsTheJob();
   testActionFingerprintsRepoLocalRuleFile();
   testActionFingerprintIncludesBackground();
+  testActionFingerprintReadsNormalizedAxes();
   testActionRangeFromIsAStepOutput();
   testActionEmitsMachineReadableRangeOutputs();
   testActionPinsGithubScriptSha();
@@ -2358,6 +2359,7 @@ async function main() {
   await testActionPinsAuthorToTheDefaultTokenApp();
   await testActionResolveStepDeclaresItsRefInputs();
   await testCheckpointMarkerMatchingIsStateless();
+  testTailForCommentKeepsTheTail();
   console.log("All post-review-comments tests passed.");
 }
 function testParseDiffHunkRanges() {
@@ -4786,6 +4788,30 @@ function testActionFingerprintIncludesBackground() {
   }
 }
 
+// The validated axes fingerprint the normalized values, not the raw inputs, so
+// spellings that mean the same thing (HIGH vs high, '0' vs '' vs '00') hash
+// identically and keep the checkpoint.
+function testActionFingerprintReadsNormalizedAxes() {
+  const block = actionStepBlock("Resolve review range");
+  const digest = fingerprintDigestSource();
+  for (const [envVar, normalized] of [
+    ["OCR_FP_EFFORT", "EFFORT"],
+    ["OCR_FP_MAX_TOKENS_BUDGET", "MAX_TOKENS_BUDGET"],
+    ["OCR_FP_LLM_REASONING_EFFORT", "LLM_REASONING_EFFORT"],
+  ]) {
+    assert.strictEqual(
+      block.includes(`${envVar}: \${{ env.${normalized} }}`),
+      true,
+      `the step must pass the normalized env.${normalized} as ${envVar}`
+    );
+    assert.strictEqual(
+      digest.includes(`process.env.${envVar},`),
+      true,
+      `${envVar} must be hashed into the fingerprint`
+    );
+  }
+}
+
 // U5. A narrowed range published through $GITHUB_ENV outlives the step: a
 // second use of this action in the same job would inherit it and skip commits
 // it was never told about. Step outputs are scoped to the step that set them.
@@ -5123,6 +5149,21 @@ async function testCheckpointMarkerMatchingIsStateless() {
   const second = await read();
   assert.strictEqual(first.raw, marker, "the carried marker is the marker itself");
   assert.deepStrictEqual(second, first, "a second read of the same body reads the same thing");
+}
+
+// The stderr dump that accompanies an unparseable result must keep the tail:
+// with stream_progress the file is mostly progress lines and the error that
+// killed the run is the last thing written.
+function testTailForCommentKeepsTheTail() {
+  assert.strictEqual(tailForComment("short"), "short", "text within the limit passes through");
+  assert.strictEqual(tailForComment("", 10), "", "empty text passes through");
+  const head = "HEAD-LINE\n" + "x".repeat(MAX_COMMENT_STDERR_CHARS);
+  const tail = "y".repeat(100) + "\nTAIL-LINE: the actual error";
+  const out = tailForComment(head + tail);
+  assert.ok(out.includes("TAIL-LINE: the actual error"), "the tail must survive truncation");
+  assert.ok(!out.includes("HEAD-LINE"), "the head must be truncated away");
+  assert.match(out, /earlier characters truncated; see the ocr-stderr\.log artifact/, "truncation must be announced");
+  assert.ok(out.length <= MAX_COMMENT_STDERR_CHARS + 200, "the result stays far below GitHub's comment limit");
 }
 
 main().catch((err) => {

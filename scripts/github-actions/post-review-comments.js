@@ -224,7 +224,10 @@ async function runPostReviewComments({
     result = JSON.parse(raw);
   } catch (e) {
     log(`Failed to parse OCR output: ${e.message}`);
-    const stderr = safeRead(fs, stderrPath).trim();
+    // stream_progress streams human-audience progress into stderr, so the file
+    // can dwarf GitHub's 65536-char comment limit; keep the tail, which is
+    // where the error that killed the run was written.
+    const stderr = tailForComment(safeRead(fs, stderrPath).trim());
     if (stderr) {
       // No manifest exists on this path (the output could not be parsed), so it
       // can only ever carry the previous checkpoint forward — never advance it.
@@ -1807,6 +1810,14 @@ function fencedBlock(content, language = "") {
   return block + fence;
 }
 
+const MAX_COMMENT_STDERR_CHARS = 20000;
+
+function tailForComment(text, limit = MAX_COMMENT_STDERR_CHARS) {
+  const s = String(text || "");
+  if (s.length <= limit) return s;
+  return `[... ${s.length - limit} earlier characters truncated; see the ocr-stderr.log artifact ...]\n${s.slice(-limit)}`;
+}
+
 function safeFence(content) {
   const matches = String(content || "").match(/`+/g) || [];
   const maxTicks = matches.reduce((max, ticks) => Math.max(max, ticks.length), 0);
@@ -2613,6 +2624,8 @@ module.exports = {
   formatWarnings,
   fencedBlock,
   safeFence,
+  tailForComment,
+  MAX_COMMENT_STDERR_CHARS,
   SUMMARY_MARKER,
   NO_LINE_REASON,
   resolveBatchSize,
