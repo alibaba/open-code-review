@@ -71,6 +71,11 @@ async function runPostReviewComments({
   context,
   core,
   fs,
+  // The pull request everything below posts to. action.yml resolves it before
+  // the review runs (pr_number input, then the event payload, then
+  // workflow_run.pull_requests[0]) because context.issue.number resolves
+  // nothing on a workflow_run. Omitting it keeps the event-derived number.
+  prNumber: prNumberOverride,
   resultPath = "/tmp/ocr-result.json",
   stderrPath = "/tmp/ocr-stderr.log",
   stickySummary = true,
@@ -113,7 +118,7 @@ async function runPostReviewComments({
 
   const owner = context.repo.owner;
   const repo = context.repo.repo;
-  const prNumber = context.issue.number;
+  const prNumber = prNumberOverride != null ? prNumberOverride : context.issue.number;
 
   // Per-run idempotency tags. context.runId / context.runAttempt come from
   // @actions/github's Context (parsed from GITHUB_RUN_ID / GITHUB_RUN_ATTEMPT).
