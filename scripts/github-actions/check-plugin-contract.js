@@ -198,7 +198,11 @@ const COMMAND_DIRS = ["plugins/open-code-review/claude-code/commands"];
 // at whitespace, a closing paren (markdown link syntax), a backtick, or a
 // quote; trailing prose punctuation is trimmed separately.
 function repoLinkPattern() {
-  const slug = REPO_SLUG.replace(/[/]/g, "\\/");
+  // The slug is interpolated into a regex source, so escape every character
+  // that would otherwise be read as a metacharacter. Backslash has to come
+  // first in the class so it is escaped before it can pair with a later
+  // replacement.
+  const slug = REPO_SLUG.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&");
   return new RegExp(
     "(?:https?:\\/\\/)?(?:" +
       `raw\\.githubusercontent\\.com\\/${slug}\\/main\\/` +
