@@ -82,6 +82,14 @@ inputs:
       are still published, and the review exits 0.
     required: false
     default: ''
+  stream_progress:
+    description: >-
+      Stream live [ocr] review progress to the workflow log (human audience
+      on stderr) instead of staying silent until the run finishes. One of:
+      true, false (case-insensitive). false (default) keeps the silent
+      agent-audience run with stderr captured to a log file.
+    required: false
+    default: 'false'
   upload_artifacts:
     description: >-
       Upload raw JSON result and stderr as workflow artifacts. Must be the
@@ -336,6 +344,7 @@ runs:
         REVIEW_TASK_TIMEOUT: ${{ inputs.review_task_timeout }}
         EFFORT_INPUT: ${{ inputs.effort }}
         MAX_TOKENS_BUDGET_INPUT: ${{ inputs.max_tokens_budget }}
+        STREAM_PROGRESS_INPUT: ${{ inputs.stream_progress }}
       shell: bash
       run: |
         if [[ ! "$REVIEW_TASK_TIMEOUT" =~ ^[0-9]+$ ]]; then
@@ -386,6 +395,20 @@ runs:
           fi
         fi
         echo "MAX_TOKENS_BUDGET=$NORMALIZED_MAX_TOKENS_BUDGET" >> "$GITHUB_ENV"
+
+        # Display-only toggle: 'true' streams human-audience progress lines to
+        # the workflow log, 'false' keeps the silent agent-audience run. It
+        # changes nothing the review would say, so it stays out of the
+        # checkpoint config fingerprint.
+        NORMALIZED_STREAM_PROGRESS="$(printf '%s' "$STREAM_PROGRESS_INPUT" | tr '[:upper:]' '[:lower:]')"
+        case "$NORMALIZED_STREAM_PROGRESS" in
+          true|false) ;;
+          *)
+            echo "::error::stream_progress must be one of: true, false (got '$STREAM_PROGRESS_INPUT')"
+            exit 1
+            ;;
+        esac
+        echo "STREAM_PROGRESS=$NORMALIZED_STREAM_PROGRESS" >> "$GITHUB_ENV"
 
     - name: Install OpenCodeReview
       shell: bash
@@ -719,15 +742,36 @@ runs:
           echo "::error::Validated review_task_timeout is missing; the Validate inputs step must complete first"
           exit 1
         fi
-        ARGS=(--from "${RANGE_FROM:-$MERGE_BASE}" --to "${HEAD_SHA}" --audience agent --format json --timeout "$REVIEW_TASK_TIMEOUT")
+        ARGS=(--from "${RANGE_FROM:-$MERGE_BASE}" --to "${HEAD_SHA}")
+        # stream_progress 'false' (default): agent audience, stderr captured to
+        # the log file without a live tee. Opt-in 'true': no --audience agent,
+        # so human-audience routing sends [ocr] progress lines to stderr; a
+        # FIFO feeds a background tee so progress streams live into the
+        # workflow log while still landing in the file for artifacts and the
+        # posting step. The tee is a real background job rather than process
+        # substitution so `wait` below guarantees the file is fully flushed
+        # before anything reads it. Neither mode disturbs $?.
+        [ "${STREAM_PROGRESS:-false}" = "true" ] || ARGS+=(--audience agent)
+        ARGS+=(--format json --timeout "$REVIEW_TASK_TIMEOUT")
         [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
         [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")
         [ -n "${EFFORT:-}" ] && ARGS+=(--effort "$EFFORT")
         [ -n "${MAX_TOKENS_BUDGET:-}" ] && ARGS+=(--max-tokens-budget "$MAX_TOKENS_BUDGET")
         set +e
-        ocr review "${ARGS[@]}" > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log
-        OCR_EXIT_CODE=$?
+        if [ "${STREAM_PROGRESS:-false}" = "true" ]; then
+          OCR_STDERR_FIFO="$(mktemp -u)"
+          mkfifo "$OCR_STDERR_FIFO" || exit 1
+          tee /tmp/ocr-stderr.log < "$OCR_STDERR_FIFO" >&2 &
+          TEE_PID=$!
+          ocr review "${ARGS[@]}" > /tmp/ocr-result.json 2> "$OCR_STDERR_FIFO"
+          OCR_EXIT_CODE=$?
+          wait "$TEE_PID"
+          rm -f "$OCR_STDERR_FIFO"
+        else
+          ocr review "${ARGS[@]}" > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log
+          OCR_EXIT_CODE=$?
+        fi
         set -e
         echo "OCR_EXIT_CODE=$OCR_EXIT_CODE" >> "$GITHUB_ENV"
         echo "=== OCR result ==="

@@ -702,6 +702,115 @@ function testEmptyEffortAndBudgetOmitTheFlags() {
   }
 }
 
+function testStreamProgressInputDefaultsToFalse() {
+  assert.ok(INPUTS.stream_progress, "action.yml must define the stream_progress input");
+  assert.strictEqual(
+    INPUTS.stream_progress.default,
+    "false",
+    "stream_progress must default to 'false' so live progress stays opt-in"
+  );
+  const inputBlock = ACTION_TEXT.match(
+    /^  stream_progress:\s*$([\s\S]*?)(?=^  [A-Za-z0-9_]+:\s*$|^outputs:|^runs:)/m
+  );
+  assert.ok(inputBlock, "action.yml must expose stream_progress metadata");
+  assert.match(inputBlock[1], /\[ocr\].*progress|progress.*\[ocr\]/i, "stream_progress must describe the [ocr] progress lines");
+}
+
+function testValidateInputsValidatesStreamProgress() {
+  const validation = validationStep();
+  assert.ok(validation, "action.yml must retain input validation");
+  for (const value of ["yes", "1", "", "on"]) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues({ stream_progress: value }), fixture);
+      assert.notStrictEqual(
+        result.status,
+        0,
+        `stream_progress=${JSON.stringify(value)} should be rejected; ${resultDescription(result)}`
+      );
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        /stream_progress must be one of/,
+        `rejection for stream_progress=${JSON.stringify(value)} must name the input; ${resultDescription(result)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+  const fixture = makeFixture();
+  try {
+    const result = runStep(validation, inputValues({ stream_progress: "TRUE" }), fixture);
+    assert.strictEqual(result.status, 0, `stream_progress=TRUE should be accepted; ${resultDescription(result)}`);
+    const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+    assert.strictEqual(exported.STREAM_PROGRESS, "true", "validation must export lowercase stream_progress");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testRunKeepsAgentAudienceAndLogFileByDefault() {
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  assert.match(
+    run.run,
+    /STREAM_PROGRESS:-false\}" = "true" \]; then\s+OCR_STDERR_FIFO="\$\(mktemp -u\)"\s+mkfifo "\$OCR_STDERR_FIFO" \|\| exit 1\s+tee \/tmp\/ocr-stderr\.log < "\$OCR_STDERR_FIFO" >&2 &\s+TEE_PID=\$!\s+ocr review "\$\{ARGS\[@\]\}" > \/tmp\/ocr-result\.json 2> "\$OCR_STDERR_FIFO"\s+OCR_EXIT_CODE=\$\?\s+wait "\$TEE_PID"\s+rm -f "\$OCR_STDERR_FIFO"\s+else\s+ocr review "\$\{ARGS\[@\]\}" > \/tmp\/ocr-result\.json 2>\/tmp\/ocr-stderr\.log/,
+    "the live-tee path must be gated on stream_progress, flush the FIFO-fed tee via wait, and the default path must redirect stderr to the log file"
+  );
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_auth_token: "unused-token",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+    });
+    const result = runStep(
+      run,
+      values,
+      fixture,
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15" },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    const audienceIndex = reviewCall.args.indexOf("--audience");
+    assert.ok(audienceIndex >= 0, "the default path must keep --audience agent");
+    assert.strictEqual(reviewCall.args[audienceIndex + 1], "agent");
+    assert.ok(fs.existsSync(fixture.stderrPath), "the default path must still capture stderr to the log file");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testRunStreamsProgressWhenOptedIn() {
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_auth_token: "unused-token",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+    });
+    const result = runStep(
+      run,
+      values,
+      fixture,
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15", STREAM_PROGRESS: "true" },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    assert.ok(!reviewCall.args.includes("--audience"), "stream_progress=true must drop --audience agent");
+    assert.ok(fs.existsSync(fixture.stderrPath), "the streaming path must still capture stderr to the log file");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
 function testConfigureBuildsCompleteLlmConfig() {
   const configure = stepNamed("Configure OCR");
   assert.ok(configure, "action.yml must retain the Configure OCR step");
@@ -1136,7 +1245,12 @@ function testContractHarnessFailsClosedOnUnsupportedYamlShapes() {
 
 function testRequiredStepTopologyAndEnvironmentContracts() {
   const required = {
-    "Validate inputs": ["REVIEW_TASK_TIMEOUT", "EFFORT_INPUT", "MAX_TOKENS_BUDGET_INPUT"],
+    "Validate inputs": [
+      "REVIEW_TASK_TIMEOUT",
+      "EFFORT_INPUT",
+      "MAX_TOKENS_BUDGET_INPUT",
+      "STREAM_PROGRESS_INPUT",
+    ],
     "Install OpenCodeReview": ["OCR_VERSION"],
     "Configure OCR": [
       "OCR_LLM_URL",
@@ -1233,6 +1347,10 @@ const TESTS = [
   ["effort and max_tokens_budget normalize and forward across steps", testEffortAndBudgetNormalizeAndForwardAcrossSteps],
   ["max_tokens_budget=0 normalizes to unlimited", testZeroMaxTokensBudgetNormalizesToUnlimited],
   ["empty effort and max_tokens_budget omit the CLI flags", testEmptyEffortAndBudgetOmitTheFlags],
+  ["stream_progress defaults to false and describes [ocr] progress", testStreamProgressInputDefaultsToFalse],
+  ["stream_progress validation accepts true/false case-insensitively", testValidateInputsValidatesStreamProgress],
+  ["Run OpenCodeReview keeps --audience agent and the log file by default", testRunKeepsAgentAudienceAndLogFileByDefault],
+  ["Run OpenCodeReview streams live progress when opted in", testRunStreamsProgressWhenOptedIn],
   ["Configure OCR builds a complete llm config", testConfigureBuildsCompleteLlmConfig],
   ["Configure OCR never persists the token", testConfigureNeverPersistsToken],
   ["Configure OCR neutralizes stale provider and static token", testConfigureNeutralizesStaleProviderAndStaticToken],
