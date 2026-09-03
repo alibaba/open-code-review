@@ -113,6 +113,36 @@ func TestEmitRunResult_JSONNoFiles(t *testing.T) {
 	}
 }
 
+func TestEmitRunResult_JSONIncludesToolFailureArguments(t *testing.T) {
+	ag := &mockResultProvider{
+		filesReviewed: 1,
+		toolCalls:     map[string]int64{"code_search": 1},
+		toolFailures: []llmloop.ToolFailureDetail{{
+			ToolCallNumber: 1,
+			ToolName:       "code_search",
+			FilePath:       "file.go",
+			Arguments:      `{"search_text":"needle"}`,
+			Error:          "git grep failed",
+		}},
+	}
+	got := captureStdout(t, func() {
+		if err := emitRunResult(context.Background(), ag, nil, time.Now(), "json", "developer", nil, nil, os.Stdout, nil); err != nil {
+			t.Fatalf("emitRunResult: %v", err)
+		}
+	})
+
+	var out jsonOutput
+	if err := json.Unmarshal([]byte(got), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.ToolCalls == nil || len(out.ToolCalls.FailureDetails) != 1 {
+		t.Fatalf("tool call failures = %+v, want one", out.ToolCalls)
+	}
+	if got := out.ToolCalls.FailureDetails[0].Arguments; got != `{"search_text":"needle"}` {
+		t.Errorf("failure arguments = %q, want raw tool arguments", got)
+	}
+}
+
 func TestEmitRunResult_JSONLLMIdentityNamedProvider(t *testing.T) {
 	ag := &mockResultProvider{filesReviewed: 1}
 	identity := &jsonLLMIdentity{Provider: "anthropic", Model: "claude-opus-4-6"}

@@ -519,7 +519,8 @@ func TestAddToolFailure(t *testing.T) {
 		t.Fatalf("len = %d", len(rec.ToolResults))
 	}
 	result := rec.ToolResults[0]
-	if result.ToolName != "code_search" || result.OK || result.Result != "git grep failed" {
+	if result.ToolName != "code_search" || result.Arguments != `{"search_text":"needle"}` ||
+		result.OK || result.Result != "git grep failed" {
 		t.Errorf("failure result = %+v", result)
 	}
 	if result.Duration != 25*time.Millisecond {
@@ -542,6 +543,9 @@ func TestAddToolFailure(t *testing.T) {
 	}
 	if ok, _ := persisted["ok"].(bool); ok {
 		t.Errorf("persisted failure has ok=true: %+v", persisted)
+	}
+	if got, _ := persisted["arguments"].(string); got != `{"search_text":"needle"}` {
+		t.Errorf("persisted arguments = %q, want raw tool arguments", got)
 	}
 	if got := int64(persisted["duration_ms"].(float64)); got != 25 {
 		t.Errorf("persisted duration_ms = %d, want 25", got)

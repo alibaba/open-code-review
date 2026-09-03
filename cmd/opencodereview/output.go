@@ -641,8 +641,8 @@ func outputJSONNoFiles(traceID string, llmIdentity *jsonLLMIdentity, out io.Writ
 
 // emitFailureUsage writes a best-effort structured usage record to stderr when
 // a review fails, so the outer caller still sees the cost of the failed attempt.
-// It carries only token/tool-call tallies and elapsed, never credentials or
-// prompts.
+// It carries token/tool-call diagnostics and elapsed. Failed tool-call details
+// include the raw arguments returned by the LLM.
 //
 // A plain aggregate budget stop does NOT reach here: it is a controlled coverage
 // truncation, so it yields terminal_state=partial and a nil error. It only

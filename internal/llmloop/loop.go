@@ -106,7 +106,9 @@ type ToolFailureDetail struct {
 	ToolCallNumber int64  `json:"tool_call_number"`
 	ToolName       string `json:"tool_name"`
 	FilePath       string `json:"file_path,omitempty"`
-	Error          string `json:"error"`
+	// Arguments is the raw tool-call argument string returned by the LLM.
+	Arguments string `json:"arguments"`
+	Error     string `json:"error"`
 }
 
 // NewRunner returns a Runner bound to the given dependencies.
@@ -212,6 +214,7 @@ func (r *Runner) recordToolFailure(number int64, name, filePath, errMsg string,
 		ToolCallNumber: number,
 		ToolName:       name,
 		FilePath:       filePath,
+		Arguments:      rawArguments,
 		Error:          errMsg,
 	}
 

@@ -291,6 +291,7 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 		ToolCallNumber: 2,
 		ToolName:       "file_read",
 		FilePath:       "b.go",
+		Arguments:      `{"path":"missing.go"}`,
 		Error:          "file not found",
 	}}
 	err := outputJSONWithWarnings(comments, warnings, 5, 100, 50, 150, 10, 5, 3*time.Second, "summary", map[string]int64{"file_read": 3}, failures, "trace-xyz-789", nil, "", nil, false, nil, os.Stdout, nil, nil)
@@ -303,9 +304,6 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(r)
-	if bytes.Contains(buf.Bytes(), []byte(`"arguments"`)) {
-		t.Fatalf("failure details must not expose tool arguments: %s", buf.String())
-	}
 	if !bytes.Contains(buf.Bytes(), []byte(`"failure"`)) {
 		t.Fatalf("tool_calls must use the failure field: %s", buf.String())
 	}
@@ -336,7 +334,8 @@ func TestOutputJSONWithWarnings(t *testing.T) {
 		t.Errorf("failure_by_tool = %+v, want file_read=1", out.ToolCalls.FailureByTool)
 	}
 	failure := out.ToolCalls.FailureDetails[0]
-	if failure.ToolCallNumber != 2 || failure.ToolName != "file_read" || failure.FilePath != "b.go" || failure.Error != "file not found" {
+	if failure.ToolCallNumber != 2 || failure.ToolName != "file_read" || failure.FilePath != "b.go" ||
+		failure.Arguments != `{"path":"missing.go"}` || failure.Error != "file not found" {
 		t.Errorf("failure detail = %+v", failure)
 	}
 	if out.TraceID != "trace-xyz-789" {
@@ -411,7 +410,7 @@ func TestOutputJSONNoFiles(t *testing.T) {
 
 func TestNewJSONToolCalls_FailureByTool(t *testing.T) {
 	failures := []llmloop.ToolFailureDetail{
-		{ToolName: "code_search"},
+		{ToolName: "code_search", Arguments: `{"search_text":"needle"}`},
 		{ToolName: "file_read"},
 		{ToolName: "file_read"},
 		{ToolName: "file_find"},
@@ -425,6 +424,9 @@ func TestNewJSONToolCalls_FailureByTool(t *testing.T) {
 	}
 	if got.FailureByTool["code_search"] != 1 || got.FailureByTool["file_read"] != 2 || got.FailureByTool["file_find"] != 3 {
 		t.Errorf("failure_by_tool = %+v, want code_search=1 file_read=2 file_find=3", got.FailureByTool)
+	}
+	if got.FailureDetails[0].Arguments != `{"search_text":"needle"}` {
+		t.Errorf("failure arguments = %q, want preserved detail arguments", got.FailureDetails[0].Arguments)
 	}
 }
 

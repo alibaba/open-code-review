@@ -195,6 +195,7 @@ func TestEmitFailureUsage_JSONEmitsStructuredRecord(t *testing.T) {
 			ToolCallNumber: 1,
 			ToolName:       "file_read",
 			FilePath:       "missing.go",
+			Arguments:      `{"file_path":"missing.go"}`,
 			Error:          "file not found",
 		}},
 	}
@@ -226,6 +227,9 @@ func TestEmitFailureUsage_JSONEmitsStructuredRecord(t *testing.T) {
 	}
 	if out.ToolCalls.FailureByTool["file_read"] != 1 {
 		t.Errorf("failure_by_tool = %+v, want file_read=1", out.ToolCalls.FailureByTool)
+	}
+	if got := out.ToolCalls.FailureDetails[0].Arguments; got != `{"file_path":"missing.go"}` {
+		t.Errorf("failure arguments = %q, want raw tool arguments", got)
 	}
 	if out.LLM == nil || out.LLM.Provider != "openai" || out.LLM.Model != "gpt-5.4" {
 		t.Fatalf("llm = %+v", out.LLM)

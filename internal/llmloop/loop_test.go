@@ -580,8 +580,12 @@ func TestExecuteToolCall_ArgumentsEdgeCases(t *testing.T) {
 				}
 			}
 			failures := r.ToolFailures()
-			if tt.wantFailure && len(failures) != 1 {
-				t.Errorf("ToolFailures() = %+v, want one failure", failures)
+			if tt.wantFailure {
+				if len(failures) != 1 {
+					t.Errorf("ToolFailures() = %+v, want one failure", failures)
+				} else if failures[0].Arguments != tt.arguments {
+					t.Errorf("failure arguments = %q, want %q", failures[0].Arguments, tt.arguments)
+				}
 			}
 			if !tt.wantFailure && len(failures) != 0 {
 				t.Errorf("ToolFailures() = %+v, want no failures", failures)

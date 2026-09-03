@@ -145,10 +145,11 @@ func TestToolFailures_AreOrderedAndSnapshotIsolated(t *testing.T) {
 		t.Fatalf("ToolFailures() = %+v, want call numbers 1, 2", failures)
 	}
 	failures[0].Error = "mutated"
+	failures[0].Arguments = "mutated"
 
 	again := r.ToolFailures()
-	if again[0].Error != "first" {
-		t.Errorf("ToolFailures snapshot mutated internal state: error = %q", again[0].Error)
+	if again[0].Error != "first" || again[0].Arguments != `{}` {
+		t.Errorf("ToolFailures snapshot mutated internal state: %+v", again[0])
 	}
 }
 

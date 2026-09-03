@@ -69,6 +69,9 @@ func TestExecuteToolCall_DynamicExecuteError(t *testing.T) {
 	if failure.ToolCallNumber != 1 || failure.ToolName != "dyn_fail" || failure.FilePath != "file.go" {
 		t.Errorf("failure identity = %+v", failure)
 	}
+	if failure.Arguments != `{"query":"needle"}` {
+		t.Errorf("failure arguments = %q, want raw tool arguments", failure.Arguments)
+	}
 	if failure.Error != "boom" {
 		t.Errorf("failure details = %+v", failure)
 	}
@@ -179,6 +182,9 @@ func TestExecuteToolCall_DynamicParseError(t *testing.T) {
 	}
 	if !strings.Contains(failures[0].Error, "Error parsing tool arguments") {
 		t.Errorf("parse failure details = %+v", failures[0])
+	}
+	if failures[0].Arguments != `{bad` {
+		t.Errorf("parse failure arguments = %q, want malformed raw arguments", failures[0].Arguments)
 	}
 }
 
