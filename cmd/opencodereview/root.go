@@ -19,6 +19,15 @@ An AI-powered code review tool that reads git diffs, sends them to a
 configurable LLM service, and generates review comments.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	// Runs for every subcommand, always before any RunE: validate --color once
+	// flags are parsed, then resolve the color decision from them.
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateColorMode(colorMode); err != nil {
+			return err
+		}
+		colorEnabled = resolveColor()
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetBool("version")
 		if v {
@@ -32,6 +41,7 @@ configurable LLM service, and generates review comments.`,
 func init() {
 	rootCmd.SetFlagErrorFunc(flagErrorWithSuggestion)
 	rootCmd.Flags().BoolP("version", "V", false, "version for ocr")
+	addColorFlags(rootCmd)
 
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(reviewCmd)

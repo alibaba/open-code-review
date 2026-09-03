@@ -47,8 +47,12 @@
   ".ftl",
   ".ftlh",
   ".ftlx",
+  ".hbs",
+  ".mustache",
+  ".pug",
   ".astro",
   ".vue",
+  ".ipynb",
   ".svelte",
   ".xml",
   ".yaml",
@@ -93,5 +97,12 @@
   ".libsonnet",
   ".zig",
   ".thrift",
-  ".capnp"
+  ".capnp",
+  ".v",
+  ".sv",
+  ".vh",
+  ".vhd",
+  ".vhdl",
+  ".sol",
+  ".vy"
 ]

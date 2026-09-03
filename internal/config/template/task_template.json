@@ -29,7 +29,18 @@
       { "role": "user", "prompt_file": "re_location_task_user.md" }
     ]
   },
-  "MAX_TOOL_REQUEST_TIMES": 30,
+  "GROUPING_TASK": {
+    "messages": [
+      { "role": "system", "prompt_file": "grouping_task_system.md" },
+      { "role": "user", "prompt_file": "grouping_task_user.md" }
+    ]
+  },
+  "MAX_TOOL_REQUEST_TIMES": 100,
   "PLAN_MODE_LINE_THRESHOLD": 50,
-  "MAX_TOKENS": 58888
+  "PLAN_MODE_GROUP_LINE_THRESHOLD": 100,
+  "GROUPING_MIN_FILES": 4,
+  "GROUPING_BUNDLE_LINE_THRESHOLD": 200,
+  "MAX_REVIEW_ROUNDS": 2,
+  "MAX_TOKENS": 200000,
+  "MAX_COMPLETION_TOKENS": 16384
 }

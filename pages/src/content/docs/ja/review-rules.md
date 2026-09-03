@@ -21,7 +21,7 @@ OCR は**4 層の優先順位チェーン**でルールを解決します。各�
 
 システム層は**常に**存在するため（バイナリに同梱）、必ず*何らかの*ルールが解決されます。
 
-## ルールファイル形式（層 1〜3）
+## ルールファイル形式（層 1〜3） {#rule-file-format-layers-1-3}
 
 ```json
 {
@@ -122,15 +122,16 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.java` | `java.md` |
 | `**/*.go` | `go.md`: Go ソースコード。 |
 | `**/*.{ftl,ftlh,ftlx}` | `freemarker.md`: FreeMarker テンプレート（SSTI / XSS / null 処理）。 |
+| `**/*.{hbs,mustache}` | `handlebars_mustache.md`: Handlebars / Mustache テンプレート。 |
 | `**/*.ets` | `arkts.md`: ArkTS / HarmonyOS。 |
 | `**/*.astro` | `astro.md`: Astro コンポーネントと islands。 |
-| `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,hpp}` | `cpp.md` |
+| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
-| `**/*.py` | `python.md`: Python ソースコード。 |
+| `**/*.{py,ipynb}` | `python.md`: Python ソースコード。 |
 | `**/*.{php,phtml}` | `php.md`: PHP ソースと PHP テンプレート。 |
 | `**/*.proto` | `protobuf.md`: Protocol Buffers のワイヤ互換性。 |
 | `**/*.po` | `po.md`: gettext 翻訳ソースカタログ。 |
@@ -144,9 +145,26 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。 |
 | `**/*.thrift` | `thrift.md`: Apache Thrift IDL のワイヤ互換性。 |
 | `**/*.capnp` | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。 |
+| `**/*.{v,sv,vh}` | `verilog.md`: Verilog および SystemVerilog の RTL。 |
+| `**/*.{vhd,vhdl}` | `vhdl.md`: VHDL の RTL。 |
+| `**/*.m` | `matlab.md`（または[コンテンツスニッフィング](#content-sniffing-for-m-files)により `objc.md`） |
+| `**/*.sol` | `solidity.md`: Solidity スマートコントラクト。 |
+| `**/*.vy` | `vyper.md`: Vyper スマートコントラクト。 |
 | *(fallback)* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。
+
+### `.m` ファイルのコンテンツスニッフィング {#content-sniffing-for-m-files}
+
+`.m` は MATLAB と Objective-C で共有されています。OCR はファイルの先頭の空でない
+行を覗き見して区別します: Objective-C らしい内容（例: `#import`、
+`@implementation`、C スタイルコメント）であれば `matlab.md` の代わりに `objc.md`
+を使用します。コンテンツを読み取れない場合は `matlab.md` にフォールバックします。
+
+> **安定性に関する注意。** スニッフィングのヒューリスティックは OCR のバージョン間
+> で変更される可能性があります。確定的な `.m` ルーティングが必要な場合は、`.m`
+> パスに明示的なプロジェクトレベルのルールを設定してください——プロジェクトルールは
+> 常にシステム層より優先されます。
 
 ## どのルールが有効かを確認する: `ocr rules check`
 

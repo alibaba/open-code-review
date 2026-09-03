@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -31,7 +32,7 @@ func TestLoadScanResumeState(t *testing.T) {
 func TestRunScanPreview(t *testing.T) {
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "y.go", "package y\n", "add y")
-	cc, err := loadCommonContext(dir, "", 0, 0, false)
+	cc, err := loadCommonContext(dir, "", "", 0, 0, false)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
@@ -40,7 +41,7 @@ func TestRunScanPreview(t *testing.T) {
 		t.Fatalf("LoadScanDefault: %v", err)
 	}
 	silenceStdout(t, func() {
-		if err := runScanPreviewContext(context.Background(), cc, scanTpl, nil, "text"); err != nil {
+		if err := runScanPreviewContext(context.Background(), cc, scanTpl, nil, "text", os.Stdout); err != nil {
 			t.Fatalf("runScanPreview error: %v", err)
 		}
 	})
@@ -49,7 +50,7 @@ func TestRunScanPreview(t *testing.T) {
 func TestRunScanPreviewJSONFormat(t *testing.T) {
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "y.go", "package y\n", "add y")
-	cc, err := loadCommonContext(dir, "", 0, 0, false)
+	cc, err := loadCommonContext(dir, "", "", 0, 0, false)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
@@ -59,7 +60,7 @@ func TestRunScanPreviewJSONFormat(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := runScanPreviewContext(context.Background(), cc, scanTpl, nil, "json"); err != nil {
+		if err := runScanPreviewContext(context.Background(), cc, scanTpl, nil, "json", os.Stdout); err != nil {
 			t.Errorf("runScanPreview error: %v", err)
 		}
 	})
@@ -87,7 +88,7 @@ func TestRunScanPreviewCreatesNoSession(t *testing.T) {
 
 	dir := initTestGitRepo(t)
 	gitCommitFile(t, dir, "y.go", "package y\n", "add y")
-	cc, err := loadCommonContext(dir, "", 0, 0, false)
+	cc, err := loadCommonContext(dir, "", "", 0, 0, false)
 	if err != nil {
 		t.Fatalf("loadCommonContext: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestRunScanPreviewCreatesNoSession(t *testing.T) {
 		t.Fatalf("LoadScanDefault: %v", err)
 	}
 	silenceStdout(t, func() {
-		if err := runScanPreviewContext(context.Background(), cc, scanTpl, nil, "text"); err != nil {
+		if err := runScanPreviewContext(context.Background(), cc, scanTpl, nil, "text", os.Stdout); err != nil {
 			t.Fatalf("runScanPreview error: %v", err)
 		}
 	})

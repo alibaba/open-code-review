@@ -43,7 +43,10 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | 名称 | プロトコル | Base URL | API key 環境変数 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
+| `bedrock` | anthropic-bedrock | `aws_region` から決定 | —（AWS 認証情報チェーン） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
+| `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
@@ -81,11 +84,57 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 `providers.<name>.url` が未設定（または削除）の場合、OCR はプリセット
 デフォルトにフォールバックします——エンドポイントが異なる場合のみ設定すればよいです。
 
+### AWS Bedrock
+
+`bedrock` は `anthropic` と同じ Messages API を話しますが、API key を持たせる
+代わりに標準の AWS 認証情報チェーンから SigV4 署名を行い、ホストはリージョンが
+決めます。設定すべき `api_key` はなく、署名の代わりとして受け付けることも
+ありません。
+
+```bash
+ocr config set provider                      bedrock
+ocr config set model                         us.anthropic.claude-sonnet-4-6
+ocr config set providers.bedrock.aws_region  us-west-2
+ocr config set providers.bedrock.aws_profile example-profile
+```
+
+| フィールド | 意味 |
+|---|---|
+| `providers.bedrock.aws_region` | リクエストを処理する `bedrock-runtime` ホストのリージョン。未設定なら `AWS_REGION` または有効なプロファイルにフォールバックします。 |
+| `providers.bedrock.aws_profile` | 認証情報を解決する名前付きプロファイル。未設定なら `AWS_PROFILE` または周囲のチェーンにフォールバックします。 |
+
+どちらも任意です。未設定なら他の AWS ツールと同様に標準チェーンが決めます。
+明示的に固定しておくと、先に `AWS_PROFILE` をエクスポートしなくても実行を
+再現でき、既定値が異なる CI ランナーで特に効きます。
+
+モデル識別子はアカウント**および**リージョンにスコープされるため、OCR が同梱
+する一覧は出発点であって閉じた集合ではありません。アカウントで有効な推論
+プロファイル ID やアプリケーション推論プロファイル ARN は、一覧になくても
+受け付けられます。`aws bedrock list-inference-profiles --region <region>` で
+そのアカウントが提供するものを確認できます。なお新しいファミリーでは
+`-v1:0` のようなバージョンサフィックスは無効です。
+
+bedrock には設定された URL がなく、ホストはリージョンが決めるため、
+`ocr llm test` は URL の代わりにリージョンとプロファイルを表示します。
+
+```
+Source: provider:bedrock
+Region: us-east-1
+Profile: example-profile
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+`llm.protocol` および `OCR_LLM_PROTOCOL` では bedrock を選べ**ません**。この
+ブロックは URL とトークンを 1 つずつ記述するもので、リージョンやプロファイルを
+置く場所がなく、bedrock はそこにある値をどちらも使いません。そのため黙って
+無視するのではなく、明示的に拒否されます。
+
 ### カスタム provider
 
 上記の表にない provider 名はすべてカスタムとみなされ、少なくとも `url` と
 `protocol` を指定する必要があります（`protocol` は `anthropic`、`openai`、
-または `openai-responses`）。
+`openai-responses`、または `anthropic-bedrock`）。
 
 ```bash
 ocr config set provider                             my-gateway
@@ -104,6 +153,18 @@ ocr config set custom_providers.openai-responses-gateway.url          https://ap
 ocr config set custom_providers.openai-responses-gateway.protocol     openai-responses
 ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
+```
+
+`anthropic-bedrock` プロトコルのカスタム provider に `url` は不要です（ホストは
+リージョンが決めます）。組み込みと同じ AWS フィールドを取れるので、2 つめの
+リージョンやプロファイルを別エントリとして持たせられます。
+
+```bash
+ocr config set provider                                bedrock-eu
+ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
+ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
+ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
+ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
 ```
 
 `url` には API の Base URL または完全な `/responses` エンドポイントのどちらを指定してもよく、OCR がどちらの形式も正規化します。
@@ -220,27 +281,42 @@ SDK がすでにリトライするため、設定ファイルから読み込む�
 
 ### ファイルごとのプロンプト上限
 
-OCR はデフォルトで、ファイルごとのレビューにおいて 58,888 トークンのプロンプト上限を
-使用します。より大きなコンテキストウィンドウを持つモデル向けに、`max_tokens` を
-保存して上限を引き上げられます。
+OCR はデフォルトで、`ocr review` のレビュー 1 回につき 200,000 トークンのプロンプト
+上限を使用します（`ocr scan` はより小さい 58,888 を使います）。モデルのコンテキスト
+ウィンドウに合わせて `max_tokens` を保存すれば、この上限を変更できます。
 
 ```bash
-ocr config set max_tokens 200000
+ocr config set max_tokens 400000
 ```
 
 この設定は `ocr review` と `ocr scan` の両方に適用されます。保存済みの設定を
 変更せずに一度だけ上書きするには `--max-tokens` を使用します。
 
 ```bash
-ocr review --max-tokens 200000
-ocr scan --max-tokens 200000
+ocr review --max-tokens 400000
+ocr scan --max-tokens 120000
 ```
 
 実行時のフラグは `max_tokens` より優先されます。どちらも設定されていない場合、
-OCR は組み込みのタスクテンプレートのデフォルト値を使用します。この上限はファイル
-単位であり、モデルの出力トークン上限、および実行全体のトークン使用量を制限する
-`--max-tokens-budget` のいずれとも独立しています。組み込みのデフォルトに戻すには
-`ocr config unset max_tokens` を実行してください。
+OCR は組み込みのタスクテンプレートのデフォルト値を使用します。この上限が制約するのは
+**プロンプト**だけです。モデルの出力上限は別の `MAX_COMPLETION_TOKENS`（デフォルト
+`16384`）が制御するため、`max_tokens` を上げても出力予算は一緒に広がりません。また、
+実行全体のトークン使用量を制限する `--max-tokens-budget` とも独立しています。
+組み込みのデフォルトに戻すには `ocr config unset max_tokens` を実行してください。
+
+### レビューの労力プリセット（effort）
+
+`effort` は、ファイルグループごとに main ループを何ラウンド実行するかを決めます:
+`low` = 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド。
+ラウンドが多いほど recall は上がりますが、時間とトークン消費も増えます。
+
+```bash
+ocr config set effort high     # 永続化
+ocr review --effort low        # この実行のみ
+ocr config unset effort        # デフォルトの medium に戻す
+```
+
+優先順位は `--effort` フラグ > 保存済みの `effort` > デフォルトの `medium` です。
 
 ### 接続性を検証する
 

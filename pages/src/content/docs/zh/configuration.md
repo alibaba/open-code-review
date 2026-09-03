@@ -42,7 +42,10 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 | 名称 | 协议 | Base URL | API key 环境变量 |
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
+| `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
+| `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
 | `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
 | `dashscope-tokenplan` | openai | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_TOKENPLAN_KEY` |
 | `volcengine` | openai | `https://ark.cn-beijing.volces.com/api/v3` | `ARK_API_KEY` |
@@ -78,10 +81,53 @@ ocr config set providers.litellm.url      https://gateway.internal:8000/v1
 配置的 `url` 优先于预设 Base URL。当 `providers.<name>.url` 未设置（或
 被清除）时，OCR 回退到预设默认值——因此只需在端点不同时才设置。
 
+### AWS Bedrock
+
+`bedrock` 使用与 `anthropic` 相同的 Messages API，但请求不携带 API key，而是
+用标准 AWS 凭证链做 SigV4 签名，主机由区域决定。没有 `api_key` 需要设置，也不
+接受用它替代签名：
+
+```bash
+ocr config set provider                      bedrock
+ocr config set model                         us.anthropic.claude-sonnet-4-6
+ocr config set providers.bedrock.aws_region  us-west-2
+ocr config set providers.bedrock.aws_profile example-profile
+```
+
+| 字段 | 含义 |
+|---|---|
+| `providers.bedrock.aws_region` | 处理请求的 `bedrock-runtime` 主机所在区域。未设置时回退到 `AWS_REGION` 或当前 profile。 |
+| `providers.bedrock.aws_profile` | 解析凭证所用的具名 profile。未设置时回退到 `AWS_PROFILE` 或环境中的凭证链。 |
+
+两者都是可选的：不设置时由标准凭证链决定，与其他 AWS 工具一致。显式固定可以
+让运行结果可复现，无需先导出 `AWS_PROFILE`——在默认值不同的 CI runner 上尤为
+重要。
+
+模型标识符同时受账号**和**区域限制，因此 OCR 内置的列表只是起点，而非封闭集合：
+只要在你的账号中有效，推理配置文件 ID 或应用推理配置文件 ARN 即使不在列表中也
+会被接受。运行 `aws bedrock list-inference-profiles --region <region>` 可以查看
+账号提供了哪些；注意新系列不接受 `-v1:0` 这类版本后缀。
+
+bedrock 没有配置的 URL——主机由区域决定——所以 `ocr llm test` 显示区域和 profile
+而不是 URL：
+
+```
+Source: provider:bedrock
+Region: us-east-1
+Profile: example-profile
+Model:  claude-sonnet-5
+✓ Connection test successful
+```
+
+`llm.protocol` 和 `OCR_LLM_PROTOCOL` **不支持** bedrock。该配置块描述的是一个
+URL 加一个 token，没有地方放区域或 profile，而 bedrock 这两个值都不使用，因此
+会被明确拒绝，而不是接受后悄悄忽略。
+
 ### 自定义 provider
 
 任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`
-（`protocol` 取 `anthropic`、`openai` 或 `openai-responses`）：
+（`protocol` 取 `anthropic`、`openai`、`openai-responses` 或
+`anthropic-bedrock`）：
 
 ```bash
 ocr config set provider                             my-gateway
@@ -100,6 +146,18 @@ ocr config set custom_providers.openai-responses-gateway.url          https://ap
 ocr config set custom_providers.openai-responses-gateway.protocol     openai-responses
 ocr config set custom_providers.openai-responses-gateway.model        gpt-5
 ocr config set custom_providers.openai-responses-gateway.api_key      "$OPENAI_API_KEY"
+```
+
+使用 `anthropic-bedrock` 协议的自定义 provider 不需要 `url`——主机由区域决定——
+并且可以使用与内置 provider 相同的 AWS 字段。第二个区域或 profile 就是这样拥有
+自己的条目的：
+
+```bash
+ocr config set provider                                bedrock-eu
+ocr config set custom_providers.bedrock-eu.protocol    anthropic-bedrock
+ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
+ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
+ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
 ```
 
 `url` 既可以填 API 的 Base URL，也可以填完整的 `/responses` 端点，OCR 会自动归一化处理。
@@ -204,25 +262,40 @@ ocr config set custom_providers.my-gateway.retry_codes 403,400
 
 ### 每文件提示词上限
 
-OCR 默认为每次文件评审设置 58,888 token 的提示词上限。如果模型上下文窗口更大，
-可以通过保存 `max_tokens` 来提高上限：
+OCR 默认为 `ocr review` 的每次评审设置 200,000 token 的提示词上限
+（`ocr scan` 使用更小的 58,888）。如果模型上下文窗口不同，可以通过保存
+`max_tokens` 来调整：
 
 ```bash
-ocr config set max_tokens 200000
+ocr config set max_tokens 400000
 ```
 
 该设置同时作用于 `ocr review` 和 `ocr scan`。使用 `--max-tokens` 可以在不修改
 已保存配置的情况下临时覆盖一次：
 
 ```bash
-ocr review --max-tokens 200000
-ocr scan --max-tokens 200000
+ocr review --max-tokens 400000
+ocr scan --max-tokens 120000
 ```
 
 单次运行的参数优先级高于 `max_tokens`；如果两者都未设置，OCR 会使用内置任务模板
-的默认值。该上限按文件计算，与模型的输出 token 上限、以及限制单次运行总 token
-用量的 `--max-tokens-budget` 都相互独立。可以用 `ocr config unset max_tokens`
-恢复为内置默认值。
+的默认值。该上限只约束**提示词**：模型的输出上限由单独的
+`MAX_COMPLETION_TOKENS`（默认 `16384`）控制，因此调高 `max_tokens` 不会连带放大
+输出预算。它同样与限制单次运行总 token 用量的 `--max-tokens-budget` 相互独立。
+可以用 `ocr config unset max_tokens` 恢复为内置默认值。
+
+### 评审投入档位（effort）
+
+`effort` 决定每个文件组要跑几轮 main 循环：`low` = 1 轮，`medium` = 2 轮（默认），
+`high` = 3 轮。轮数越多召回越高，耗时与 token 消耗也越多。
+
+```bash
+ocr config set effort high     # 持久化
+ocr review --effort low        # 仅本次运行
+ocr config unset effort        # 恢复默认的 medium
+```
+
+优先级为：`--effort` 参数 > 已保存的 `effort` > 默认 `medium`。
 
 ### 验证连通性
 

@@ -63,13 +63,19 @@ type compressionState struct {
 	pendingJob *compressionJob
 }
 
+// messageTokens counts visible text plus the Native replay payload that
+// ExtractText() does not see.
+func messageTokens(m llm.Message) int {
+	return llm.CountTokens(m.ExtractText()) + m.Native.EstimatedTokens()
+}
+
 // CountMessagesTokens returns the rough token count of msgs by summing the
-// per-message text token count. Exported because both review and scan top
+// per-message token count. Exported because both review and scan top
 // layers may want it for pre-flight checks.
 func CountMessagesTokens(msgs []llm.Message) int {
 	var total int
 	for _, m := range msgs {
-		total += llm.CountTokens(m.ExtractText())
+		total += messageTokens(m)
 	}
 	return total
 }
@@ -107,9 +113,9 @@ func computeActiveZoneSize(rounds []round, messages []llm.Message, maxTokens int
 	count := 0
 	tokensUsed := 0
 	for i := len(rounds) - 1; i >= 0; i-- {
-		roundTokens := llm.CountTokens(messages[rounds[i].assistantIdx].ExtractText())
+		roundTokens := messageTokens(messages[rounds[i].assistantIdx])
 		for _, ti := range rounds[i].toolIdxs {
-			roundTokens += llm.CountTokens(messages[ti].ExtractText())
+			roundTokens += messageTokens(messages[ti])
 		}
 		if tokensUsed+roundTokens > budget {
 			break
@@ -190,6 +196,11 @@ func buildMessageXML(msgs []llm.Message) string {
 		sb.WriteString("    <content>\n")
 		sb.WriteString(fmt.Sprintf("      %s\n", m.ExtractText()))
 		sb.WriteString("    </content>\n")
+		if m.ReasoningContent != "" {
+			sb.WriteString("    <reasoning>\n")
+			sb.WriteString(fmt.Sprintf("      %s\n", m.ReasoningContent))
+			sb.WriteString("    </reasoning>\n")
+		}
 		sb.WriteString("</message>")
 		if i < len(msgs)-1 {
 			sb.WriteString("\n")

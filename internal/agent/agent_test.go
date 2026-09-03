@@ -62,11 +62,11 @@ func agentTaskDoneResponse() *llm.ChatResponse {
 func codeCommentResponse(path string) *llm.ChatResponse {
 	content := ""
 	args := map[string]any{
-		"path": path,
 		"comments": []any{
 			map[string]any{
 				"content":       "potential null pointer",
 				"existing_code": "foo := bar.Baz()",
+				"path":          path,
 			},
 		},
 	}
@@ -90,7 +90,12 @@ func codeCommentResponse(path string) *llm.ChatResponse {
 	}
 }
 
-func TestBuildFilterCommentsJSON(t *testing.T) {
+// TestBuildGroupFilterCommentsJSON covers the group-level serialization: the
+// filter sees one flat, globally indexed list spanning every file in the group,
+// so each entry must carry its own path — that is what lets the model tell which
+// diff a candidate comment belongs to, and what parseFilterToolCalls' c-N indices
+// are resolved against.
+func TestBuildGroupFilterCommentsJSON(t *testing.T) {
 	tests := []struct {
 		name     string
 		comments []model.LlmComment
@@ -104,16 +109,16 @@ func TestBuildFilterCommentsJSON(t *testing.T) {
 		{
 			name: "single comment",
 			comments: []model.LlmComment{
-				{Content: "fix this", ExistingCode: "old code"},
+				{Path: "a.go", Content: "fix this", ExistingCode: "old code"},
 			},
 			wantIDs: []string{"c-0"},
 		},
 		{
-			name: "multiple comments sequential IDs",
+			name: "ids stay sequential across files",
 			comments: []model.LlmComment{
-				{Content: "issue A"},
-				{Content: "issue B", ExistingCode: "existing"},
-				{Content: "issue C"},
+				{Path: "a.go", Content: "issue A"},
+				{Path: "b.xml", Content: "issue B", ExistingCode: "existing"},
+				{Path: "a.go", Content: "issue C"},
 			},
 			wantIDs: []string{"c-0", "c-1", "c-2"},
 		},
@@ -121,10 +126,11 @@ func TestBuildFilterCommentsJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildFilterCommentsJSON(tt.comments)
+			got := buildGroupFilterCommentsJSON(tt.comments)
 
 			var items []struct {
 				ID           string `json:"id"`
+				Path         string `json:"path"`
 				Content      string `json:"content"`
 				ExistingCode string `json:"existing_code,omitempty"`
 			}
@@ -139,6 +145,9 @@ func TestBuildFilterCommentsJSON(t *testing.T) {
 			for i, item := range items {
 				if tt.wantIDs != nil && item.ID != tt.wantIDs[i] {
 					t.Errorf("items[%d].ID = %q, want %q", i, item.ID, tt.wantIDs[i])
+				}
+				if item.Path != tt.comments[i].Path {
+					t.Errorf("items[%d].Path = %q, want %q", i, item.Path, tt.comments[i].Path)
 				}
 				if item.Content != tt.comments[i].Content {
 					t.Errorf("items[%d].Content = %q, want %q", i, item.Content, tt.comments[i].Content)
@@ -837,19 +846,39 @@ func TestCountReviewable(t *testing.T) {
 	}
 }
 
-func TestBuildChangeFilesExcept(t *testing.T) {
+func TestBuildChangeFilesExceptGroup(t *testing.T) {
 	a := New(Args{})
 	a.diffs = []model.Diff{
-		{NewPath: "main.go", OldPath: "main.go"},
-		{NewPath: "helper.go", OldPath: "helper.go", IsNew: true},
-		{NewPath: "removed.go", OldPath: "removed.go", IsDeleted: true},
-		{NewPath: "renamed.go", OldPath: "old_name.go"},
+		{NewPath: "main.go", OldPath: "main.go", Insertions: 4, Deletions: 2},
+		{NewPath: "moved_new.go", OldPath: "moved_old.go", IsRenamed: true},
+		{NewPath: "helper.go", OldPath: "helper.go", IsNew: true, Insertions: 12},
+		{NewPath: "removed.go", OldPath: "removed.go", IsDeleted: true, Deletions: 30},
+		{NewPath: "renamed.go", OldPath: "old_name.go", IsRenamed: true, Insertions: 5, Deletions: 5},
 		{NewPath: "bin.dat", OldPath: "bin.dat", IsBinary: true},
 	}
 
-	got := a.buildChangeFilesExcept("main.go")
-	if strings.Contains(got, "main.go") {
-		t.Error("excluded file should not appear")
+	// Every member of the group must drop out, not just one file: the group's own
+	// diffs are already in <review_files>, so repeating them here would tell the
+	// model they are outside its review scope.
+	group := []model.Diff{
+		{NewPath: "main.go", OldPath: "main.go"},
+		{NewPath: "moved_new.go", OldPath: "moved_old.go", IsRenamed: true},
+	}
+	got := a.buildChangeFilesExceptGroup(group)
+
+	for _, member := range []string{"main.go", "moved_new.go"} {
+		if strings.Contains(got, member) {
+			t.Errorf("group member %s should not appear", member)
+		}
+	}
+	// A renamed group member is excluded by its old path too, so the file cannot
+	// slip back in under the name it had before the rename.
+	if strings.Contains(got, "moved_old.go") {
+		t.Error("group member's old path should not appear")
+	}
+	// renamed.go is outside the group, so RENAMED must still be reachable.
+	if !strings.Contains(got, "RENAMED") {
+		t.Error("expected RENAMED status for the non-member rename")
 	}
 	if !strings.Contains(got, "ADDED") {
 		t.Error("expected ADDED status for new file")
@@ -857,12 +886,63 @@ func TestBuildChangeFilesExcept(t *testing.T) {
 	if !strings.Contains(got, "DELETED") {
 		t.Error("expected DELETED status")
 	}
-	if !strings.Contains(got, "RENAMED") {
-		t.Error("expected RENAMED status")
+	// Churn stats must follow the path so the model can size up each diff before
+	// requesting it.
+	for _, want := range []string{
+		"ADDED   helper.go (+12/-0)",
+		"DELETED   removed.go (+0/-30)",
+		"RENAMED   renamed.go (+5/-5)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q", want)
+		}
 	}
 	if strings.Contains(got, "bin.dat") {
 		t.Error("binary files should be skipped")
 	}
+
+	// The separator is emitted before each entry, so a skipped final diff cannot
+	// leave a trailing newline behind. Excluding an entire group (plus binaries)
+	// makes "the last diff is skipped" the common case, so assert the exact string
+	// for both orderings rather than only the substrings above.
+	t.Run("no trailing newline when the last diff is skipped", func(t *testing.T) {
+		a := New(Args{})
+		a.diffs = []model.Diff{
+			{NewPath: "kept.go", OldPath: "kept.go", Insertions: 3, Deletions: 1},
+			{NewPath: "bin.dat", OldPath: "bin.dat", IsBinary: true},
+			{NewPath: "member.go", OldPath: "member.go"},
+		}
+		group := []model.Diff{{NewPath: "member.go", OldPath: "member.go"}}
+		if got, want := a.buildChangeFilesExceptGroup(group), "MODIFIED   kept.go (+3/-1)"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("entries are newline separated with a skip between them", func(t *testing.T) {
+		a := New(Args{})
+		a.diffs = []model.Diff{
+			{NewPath: "a.go", OldPath: "a.go", Insertions: 1},
+			{NewPath: "member.go", OldPath: "member.go"},
+			{NewPath: "b.go", OldPath: "b.go", IsNew: true, Insertions: 7},
+		}
+		group := []model.Diff{{NewPath: "member.go", OldPath: "member.go"}}
+		want := "MODIFIED   a.go (+1/-0)\nADDED   b.go (+7/-0)"
+		if got := a.buildChangeFilesExceptGroup(group); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("everything excluded yields an empty string", func(t *testing.T) {
+		a := New(Args{})
+		a.diffs = []model.Diff{
+			{NewPath: "member.go", OldPath: "member.go"},
+			{NewPath: "bin.dat", OldPath: "bin.dat", IsBinary: true},
+		}
+		group := []model.Diff{{NewPath: "member.go", OldPath: "member.go"}}
+		if got := a.buildChangeFilesExceptGroup(group); got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
 }
 
 func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {
@@ -885,7 +965,7 @@ func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {
 			MaxToolRequestTimes: 10,
 			MainTask: template.LlmConversation{
 				Messages: []template.ChatMessage{
-					{Role: "user", Content: "Review {{diff}} for {{current_file_path}}"},
+					{Role: "user", Content: "Review {{diffs}}"},
 				},
 			},
 		},
@@ -917,7 +997,7 @@ func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {
 
 func TestDispatchSubtasks_TokenThresholdSkipIsNotReusableCheckpoint(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 	sess := session.New(repoDir, "feature", "fake", session.SessionOptions{
 		ReviewMode: session.ReviewModeRange,
@@ -939,7 +1019,7 @@ func TestDispatchSubtasks_TokenThresholdSkipIsNotReusableCheckpoint(t *testing.T
 			MaxToolRequestTimes: 5,
 			MainTask: template.LlmConversation{
 				Messages: []template.ChatMessage{
-					{Role: "user", Content: strings.Repeat("context ", 200) + "{{diff}}"},
+					{Role: "user", Content: strings.Repeat("context ", 200) + "{{diffs}}"},
 				},
 			},
 		},
@@ -985,7 +1065,7 @@ func TestDispatchSubtasks_TokenThresholdSkipIsNotReusableCheckpoint(t *testing.T
 
 func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *testing.T) {
 	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
+	setTestHome(t, tmpHome)
 	repoDir := t.TempDir()
 	sess := session.New(repoDir, "feature", "fake", session.SessionOptions{
 		ReviewMode: session.ReviewModeRange,
@@ -1009,7 +1089,7 @@ func TestDispatchSubtasks_MainTaskWithoutTaskDoneIsNotReusableCheckpoint(t *test
 			MaxTokens:           100000,
 			MaxToolRequestTimes: 1,
 			MainTask: template.LlmConversation{
-				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diff}}"}},
+				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diffs}}"}},
 			},
 		},
 	})
@@ -1073,7 +1153,7 @@ func TestDispatchSubtasks_IncompleteMainTaskMarksPartialFailure(t *testing.T) {
 			MaxTokens:           100000,
 			MaxToolRequestTimes: 1,
 			MainTask: template.LlmConversation{
-				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diff}}"}},
+				Messages: []template.ChatMessage{{Role: "user", Content: "Review {{diffs}}"}},
 			},
 		},
 	})
@@ -1103,7 +1183,7 @@ func TestDispatchSubtasks_AllDeleted(t *testing.T) {
 			MaxToolRequestTimes: 5,
 			MainTask: template.LlmConversation{
 				Messages: []template.ChatMessage{
-					{Role: "user", Content: "Review {{diff}}"},
+					{Role: "user", Content: "Review {{diffs}}"},
 				},
 			},
 		},
@@ -1139,7 +1219,7 @@ func TestAgent_TokenAccumulation(t *testing.T) {
 			MaxToolRequestTimes: 10,
 			MainTask: template.LlmConversation{
 				Messages: []template.ChatMessage{
-					{Role: "user", Content: "Review {{diff}}"},
+					{Role: "user", Content: "Review {{diffs}}"},
 				},
 			},
 		},

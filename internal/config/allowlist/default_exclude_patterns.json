@@ -26,6 +26,7 @@
   "**/*.snap",
   "**/testdata/**",
   "**/fixtures/**",
+  "**/.ipynb_checkpoints/**",
   "**/*.generated.*",
   "**/*.gen.go",
   "**/*.pb.go",
@@ -43,5 +44,13 @@
   "**/*.capnp.go",
   "**/*.capnp.ts",
   "**/*_capnp.rs",
-  "**/*_capnp.py"
+  "**/*_capnp.py",
+  "**/tb_*.{v,sv,vhd,vhdl}",
+  "**/*_tb.{v,sv,vhd,vhdl}",
+  "lib/**/*.sol",
+  "**/*.t.sol",
+  "**/test/**/*.sol",
+  "**/tests/**/*.sol",
+  "**/test/**/*.vy",
+  "**/tests/**/*.vy"
 ]

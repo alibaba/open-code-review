@@ -244,10 +244,11 @@ type ReviewComment struct {
 
 // ViewSession holds fully parsed records for one session.
 type ViewSession struct {
-	Summary    SessionSummary
-	TokenUsage TokenUsageSummary
-	Files      []*FileGroup     // ordered by file path
-	Comments   []*ReviewComment // review findings from review_item_done/reused records
+	Summary      SessionSummary
+	TokenUsage   TokenUsageSummary
+	Files        []*FileGroup     // ordered by file path
+	SessionTasks []*FileGroup     // session-level tasks (grouping, etc.) separated from file-level
+	Comments     []*ReviewComment // review findings from review_item_done/reused records
 }
 
 // TokenUsageSummary aggregates token counts across the session.
@@ -283,13 +284,23 @@ const (
 	MainTask              TaskType = "main_task"
 	MemoryCompressionTask TaskType = "memory_compression_task"
 	ReLocationTask        TaskType = "re_location_task"
+	GroupingTask          TaskType = "grouping_task"
 )
+
+var sessionLevelPaths = map[string]bool{
+	"__grouping__": true,
+}
+
+func isSessionLevelPath(fp string) bool {
+	return sessionLevelPaths[fp]
+}
 
 // TaskCard links an LLM request with its response and tool calls.
 type TaskCard struct {
 	RequestMessages  any // preserved for display
 	RequestNo        int
 	ResponseContent  string
+	ReasoningContent string // the model's reasoning/thinking text for this turn, if the provider exposed any
 	ToolCalls        []ToolCallInfo
 	DurationMs       int64
 	Error            string
@@ -378,6 +389,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 		case "llm_response":
 			fp, _ := rec["filePath"].(string)
 			content, _ := rec["content"].(string)
+			reasoning, _ := rec["reasoning_content"].(string)
 			durationMs := int64(0)
 			if d, ok := rec["duration_ms"].(float64); ok {
 				durationMs = int64(d)
@@ -411,6 +423,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				if len(cards) > 0 && cards[len(cards)-1].ResponseContent == "" {
 					card := cards[len(cards)-1]
 					card.ResponseContent = content
+					card.ReasoningContent = reasoning
 					card.DurationMs = durationMs
 					card.Model = model
 					card.Error = errStr
@@ -563,6 +576,17 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	})
 	vs.TokenUsage.FileTokenBreakdown = fileBreakdown
 
+	// Separate session-level virtual paths from real file paths.
+	realFiles := make([]*FileGroup, 0, len(vs.Files))
+	for _, fg := range vs.Files {
+		if isSessionLevelPath(fg.FilePath) {
+			vs.SessionTasks = append(vs.SessionTasks, fg)
+		} else {
+			realFiles = append(realFiles, fg)
+		}
+	}
+	vs.Files = realFiles
+
 	sort.Slice(vs.Files, func(i, j int) bool {
 		return vs.Files[i].FilePath < vs.Files[j].FilePath
 	})
@@ -600,6 +624,7 @@ func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 			if err := json.Unmarshal(data, &manifest); err == nil && manifest.SchemaVersion == session.ManifestSchemaVersion {
 				summary.RunManifest = &manifest
 				summary.TerminalState = string(manifest.TerminalState)
+				summary.FilesReviewed = filesReviewedFromSelected(manifest.Coverage.Selected)
 				summary.SelectedCount = len(manifest.Coverage.Selected)
 				summary.CompletedCount = len(manifest.Coverage.Completed)
 				summary.ReusedCount = len(manifest.Coverage.Reused)
@@ -613,6 +638,14 @@ func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 		summary.Legacy = true
 		summary.FileCount = len(summary.FilesReviewed)
 	}
+}
+
+func filesReviewedFromSelected(selected []session.CoverageItem) []string {
+	files := make([]string, 0, len(selected))
+	for _, item := range selected {
+		files = append(files, item.Path)
+	}
+	return files
 }
 
 func taskDoneSucceeded(arguments string) bool {

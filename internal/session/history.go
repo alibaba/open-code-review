@@ -25,6 +25,7 @@ const (
 	MemoryCompressionTask TaskType = "memory_compression_task"
 	ReLocationTask        TaskType = "re_location_task"
 	ReviewFilterTask      TaskType = "review_filter_task"
+	GroupingTask          TaskType = "grouping_task"
 )
 
 const (
@@ -116,10 +117,12 @@ type TokenUsage struct {
 
 // ResponseRecord holds the parsed LLM response.
 type ResponseRecord struct {
-	Content   string
-	ToolCalls []llm.ToolCall
-	Model     string
-	Usage     *TokenUsage
+	Content          string
+	ToolCalls        []llm.ToolCall
+	Model            string
+	Usage            *TokenUsage
+	ReasoningContent string
+	Native           llm.NativeTurn
 }
 
 // ToolResultRecord records the result of a tool call executed after the LLM response.
@@ -127,6 +130,8 @@ type ToolResultRecord struct {
 	ToolName  string
 	Arguments string
 	Result    string
+	OK        bool
+	Duration  time.Duration
 }
 
 // SessionOptions holds optional metadata for a new session.
@@ -348,8 +353,17 @@ func (sh *SessionHistory) Finalize() error {
 		cancellationReason := sh.cancellationReason
 		duration := sh.EndTime.Sub(sh.StartTime)
 		filesReviewed := make([]string, 0, len(sh.FileSessions))
-		for fp := range sh.FileSessions {
-			filesReviewed = append(filesReviewed, fp)
+		if manifest != nil && manifest.SchemaVersion == ManifestSchemaVersion {
+			filesReviewed = make([]string, 0, len(manifest.Coverage.Selected))
+			for _, item := range manifest.Coverage.Selected {
+				filesReviewed = append(filesReviewed, item.Path)
+			}
+		} else {
+			// Legacy and scan sessions have no manifest, so retain the historical
+			// all-FileSessions behavior for their summary record.
+			for fp := range sh.FileSessions {
+				filesReviewed = append(filesReviewed, fp)
+			}
 		}
 		failures := atomic.LoadInt64(&sh.llmFailures)
 		sh.mu.Unlock()
@@ -397,10 +411,12 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 	cp := make([]llm.Message, len(msgs))
 	for i, m := range msgs {
 		cp[i] = llm.Message{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
-			ToolCalls:  append([]llm.ToolCall(nil), m.ToolCalls...),
+			Role:             m.Role,
+			Content:          m.Content,
+			ToolCallID:       m.ToolCallID,
+			ToolCalls:        append([]llm.ToolCall(nil), m.ToolCalls...),
+			Native:           m.Native,
+			ReasoningContent: m.ReasoningContent,
 		}
 	}
 	return cp
@@ -409,19 +425,30 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 // copyMessagesForJSON produces a JSON-friendly slice for persistence.
 func copyMessagesForJSON(msgs []llm.Message) any {
 	type msg struct {
-		Role       string `json:"role"`
-		Content    any    `json:"content"`
-		ToolCallID string `json:"tool_call_id,omitempty"`
+		Role          string         `json:"role"`
+		Content       any            `json:"content"`
+		ToolCallID    string         `json:"tool_call_id,omitempty"`
+		ToolCalls     []llm.ToolCall `json:"tool_calls,omitempty"`
+		NativePayload any            `json:"native_payload,omitempty"`
 	}
 	out := make([]msg, 0, len(msgs))
 	for _, m := range msgs {
 		out = append(out, msg{
-			Role:       m.Role,
-			Content:    m.Content,
-			ToolCallID: m.ToolCallID,
+			Role:          m.Role,
+			Content:       m.Content,
+			ToolCallID:    m.ToolCallID,
+			ToolCalls:     m.ToolCalls,
+			NativePayload: nativeTurnForJSON(m.Native),
 		})
 	}
 	return out
+}
+
+func nativeTurnForJSON(n llm.NativeTurn) any {
+	if n.Payload == nil {
+		return nil
+	}
+	return map[string]any{"family": n.Family, "payload": n.Payload}
 }
 
 // SetResponse records the LLM response in the most recent TaskRecord of the given type.
@@ -459,10 +486,12 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 	}
 
 	tr.Response = &ResponseRecord{
-		Content:   content,
-		ToolCalls: choice.Message.ToolCalls,
-		Model:     resp.Model,
-		Usage:     usage,
+		Content:          content,
+		ToolCalls:        choice.Message.ToolCalls,
+		Model:            resp.Model,
+		Usage:            usage,
+		ReasoningContent: choice.Message.ReasoningContent,
+		Native:           resp.Native(),
 	}
 	tr.Duration = duration
 
@@ -476,7 +505,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 					"arguments": tc.Function.Arguments,
 				})
 			}
-			p.WriteLLMResponse(fs.FilePath, tr.Type, content, toolCallsJSON, resp.Model, *usage, duration)
+			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration, nativeTurnForJSON(tr.Response.Native))
 		}
 	}
 }
@@ -503,15 +532,26 @@ func (sh *SessionHistory) LLMFailures() int64 {
 // AddToolResult appends a tool call result to this task record and writes a
 // tool_call record to the JSONL stream.
 func (tr *TaskRecord) AddToolResult(toolName, arguments, result string) {
+	tr.addToolResult(toolName, arguments, result, true, 0)
+}
+
+// AddToolFailure appends and persists a failed tool call result.
+func (tr *TaskRecord) AddToolFailure(toolName, arguments, result string, duration time.Duration) {
+	tr.addToolResult(toolName, arguments, result, false, duration)
+}
+
+func (tr *TaskRecord) addToolResult(toolName, arguments, result string, ok bool, duration time.Duration) {
 	tr.ToolResults = append(tr.ToolResults, ToolResultRecord{
 		ToolName:  toolName,
 		Arguments: arguments,
 		Result:    result,
+		OK:        ok,
+		Duration:  duration,
 	})
 
 	if fs := tr.fileSession; fs != nil {
 		if p := fs.session.persist; p != nil {
-			p.WriteToolCall(fs.FilePath, tr.Type, toolName, arguments, result, true, 0)
+			p.WriteToolCall(fs.FilePath, tr.Type, toolName, arguments, result, ok, duration)
 		}
 	}
 }

@@ -10,9 +10,11 @@ sidebar:
 ## 起動
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
+ocr viewer                       # start and open the browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
 ```
 
 デフォルトのアドレスは `localhost:5483` です。サーバーはフォアグラウンドで実行されます——`Ctrl+C` で停止します。セッションは各リクエスト時に
@@ -26,6 +28,39 @@ JSONL ファイルが現れ次第表示されます。
 > `forbidden host` が返されます。ワイルドカードバインドをアクセス可能にするには、
 > `OCR_VIEWER_ALLOWED_HOSTS` にカンマ区切りの許可ホスト名リストを設定します
 > （例：`OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`）。
+
+## ブラウザを開く
+
+サーバーが待ち受けを開始すると、`ocr viewer` はその URL をデフォルトブラウザで
+開きます。この挙動は `--open` で制御し、グローバルな `--color` と同じ 3 つの値を
+取ります。
+
+| 値 | 挙動 |
+|---|---|
+| `auto`（デフォルト） | うまく動く見込みがあるときだけ開く——下記を参照。 |
+| `always` | 無条件に開く。`auto` が見送るが実際にはブラウザに到達できる場合——出力がパイプされている、表示環境のない WSL など——に使ってください。 |
+| `never` | URL を表示するだけで、他には何もしない。 |
+
+`auto` モードでは、次の場合にブラウザを開き**ません**。
+
+- stdout が端末でない——出力がパイプまたはリダイレクトされている
+- `SSH_CONNECTION` が設定されており、**かつ**ディスプレイが転送されていない
+  ——リモートホスト上で開く先がない。`ssh -X` / `ssh -Y` は `DISPLAY` を設定する
+  ため、抑制されません
+- Linux で `DISPLAY` と `WAYLAND_DISPLAY` の両方が空——ディスプレイサーバーがない
+
+理由は ready 行の末尾に付記されます。意図的に抑制された自動オープンが、
+壊れているように見えることはありません。
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+Unix では `$BROWSER` が先に試されます。コロン区切りのコマンド一覧で、各項目は
+URL を表す `%s` プレースホルダーを含むか、URL を末尾の引数として受け取ります。
+それ以外の場合はプラットフォーム既定のコマンド——macOS は `open`、Linux と BSD は
+`xdg-open`、Windows は `rundll32` ——が実行されます。ブラウザを開けなかった場合は
+stderr への警告のみで、致命的にはなりません。いずれの場合もサーバーは動き続けます。
 
 ## 3 つのページ
 
@@ -54,13 +89,13 @@ JSONL ファイルが現れ次第表示されます。
 詳細ページが最も有用です。以下を表示します：
 
 1. **ヘッダー**——diff 範囲、モデル、ブランチ、合計 token、実行時間。
-2. **ファイルごとのグループ**——レビューされた各ファイルにつき 1 ブロック。各ファイル内には、5 つの「タスクタイプ」のスイムレーン：
+2. **ファイルごとのグループ**——レビューされた各**グループ**につき 1 ブロック。ファイルはレビュー前に意味的にまとめられるため、1 つのブロックが複数の関連ファイルをカバーすることがあり、そのタイトルはグループのファイルパスです。各グループ内には、5 つの「タスクタイプ」のスイムレーン：
 
 | タスクタイプ | 出現条件 |
 |---|---|
-| `plan_task` | plan フェーズが実行された（ファイルが ≥ `PLAN_MODE_LINE_THRESHOLD`）。 |
-| `main_task` | すべてのファイル。メインのレビューループ。 |
-| `review_filter_task` | そのファイルに対してレビュー後のコメントフィルタリング処理が実行された。 |
+| `plan_task` | plan フェーズが実行された（グループ内で最大のファイルが ≥ `PLAN_MODE_LINE_THRESHOLD`、または 2 ファイル以上で合計 ≥ `PLAN_MODE_GROUP_LINE_THRESHOLD`）。 |
+| `main_task` | すべてのグループ。メインのレビューループ——レビューラウンドごとに 1 パス。 |
+| `review_filter_task` | そのグループに対してレビュー後のコメントフィルタリング処理が実行された。 |
 | `memory_compression_task` | active+compress 領域が予算の 60 % / 80 % を超えた。 |
 | `re_location_task` | ある `code_comment` がアンカーできず、フォールバックの再位置特定が実行された。 |
 
@@ -85,7 +120,7 @@ JSONL トランスクリプト（各 `llm_request` レコードの `messages` �
 
 ### 「なぜモデルはこう言ったのか？」
 
-ターミナル出力であるコメントを開き、ビューアでそのファイルを見つけ、その `main_task` スイムレーンを下にたどります。
+ターミナル出力であるコメントを開き、ビューアでそのファイルを含む**グループ**を見つけ、その `main_task` スイムレーンを下にたどります。
 **ツール呼び出し**の中に、あなたが気にしている `code_comment` を含むカードこそが、それを生み出したラウンドです。カードの
 Response にはモデルの推論が表示されます。モデルに送信された prompt + コンテキストを正確に知るには、JSONL トランスクリプトで
 そのリクエスト番号の `llm_request` レコード（その `messages` フィールド）を開いてください。
@@ -119,6 +154,8 @@ JSONL ファイルの各行は 1 つのイベントです：
 {"type": "llm_response", "filePath": "src/foo.go", "taskType": "main_task", "model": "claude-sonnet-4-6", "content": "Found 2 issues…", "duration_ms": 8421, "usage": {"prompt_tokens": 12450, "completion_tokens": 320}}
 {"type": "tool_call", "filePath": "src/foo.go", "tool_name": "file_read", "arguments": "{\"file_path\":\"src/foo.go\",\"start_line\":1,\"end_line\":50}", "result": "File: src/foo.go (Total lines: 220)\nIS_TRUNCATED: false\nLINE_RANGE: 1-50\n1|package foo…", "ok": true, "duration_ms": 14}
 ```
+
+`filePath` が保持するのは**グループのキー**です: 1 ファイルのグループならその 1 つのパス、複数ファイルがまとめてレビューされた場合はそのグループのパスをソートしてカンマで連結したものになります。
 
 行は追記専用（append-only）です——不完全な JSONL は、セッションが実行中に中断されたことを意味し、ビューアは書き込み済みの
 内容をレンダリングします。

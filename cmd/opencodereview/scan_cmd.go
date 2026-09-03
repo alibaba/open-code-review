@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -31,6 +33,7 @@ type scanOptions struct {
 	excludes        string
 	outputFormat    string
 	audience        string
+	outputPath      string
 	background      string
 	concurrency     int
 	perFileTimeout  int
@@ -108,11 +111,21 @@ func splitPaths(raw string) []string {
 	return out
 }
 
-func executeScanContext(ctx context.Context, opts scanOptions) error {
+func executeScanContext(ctx context.Context, opts scanOptions) (retErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, opts.maxTools, opts.maxGitProcs, false)
+	out, closeOut, err := resolveOutputWriter(opts.outputPath, opts.outputFormat)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := closeOut(); cerr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("close output file: %w", cerr))
+		}
+	}()
+
+	cc, err := loadCommonContext(opts.repoDir, opts.rulePath, "", opts.maxTools, opts.maxGitProcs, false)
 	if err != nil {
 		return err
 	}
@@ -145,7 +158,7 @@ func executeScanContext(ctx context.Context, opts scanOptions) error {
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
-		return runScanPreviewContext(ctx, cc, scanTpl, scanPaths, opts.outputFormat)
+		return runScanPreviewContext(ctx, cc, scanTpl, scanPaths, opts.outputFormat, out)
 	}
 
 	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)
@@ -160,7 +173,6 @@ func executeScanContext(ctx context.Context, opts scanOptions) error {
 	if err != nil {
 		return err
 	}
-	scanTpl.MaxCompletionTokens = scanTpl.MaxTokens
 	maxTokens, err := resolveMaxTokens(scanTpl.MaxTokens, rt.AppCfg, opts.maxTokens)
 	if err != nil {
 		return err
@@ -213,6 +225,9 @@ func executeScanContext(ctx context.Context, opts scanOptions) error {
 		Resume:                resumeState,
 	})
 
+	closeRaw := bindRawWriter(rt.RawHolder, cc.RepoDir, ag.Session())
+	defer closeRaw()
+
 	q := newQuietHandle(opts.outputFormat, opts.audience)
 	defer q.Restore()
 
@@ -237,7 +252,7 @@ func executeScanContext(ctx context.Context, opts scanOptions) error {
 		return fmt.Errorf("scan failed: %w", err)
 	}
 
-	return emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, nil)
+	return emitRunResult(runCtx, ag, comments, startTime, opts.outputFormat, opts.audience, q, llmIdentity, out, nil)
 }
 
 func scanRunTraceID(runCtx context.Context) string {
@@ -261,7 +276,7 @@ func loadScanResumeState(repoDir string, opts scanOptions, scanPaths []string) (
 	return state, nil
 }
 
-func runScanPreviewContext(ctx context.Context, cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string) error {
+func runScanPreviewContext(ctx context.Context, cc *commonContext, scanTpl *template.ScanTemplate, scanPaths []string, outputFormat string, out io.Writer) error {
 	preview, err := scan.Preview(ctx, scan.Args{
 		RepoDir:          cc.RepoDir,
 		Paths:            scanPaths,
@@ -275,5 +290,5 @@ func runScanPreviewContext(ctx context.Context, cc *commonContext, scanTpl *temp
 	if err != nil {
 		return fmt.Errorf("scan preview failed: %w", err)
 	}
-	return outputPreview(preview, outputFormat)
+	return outputPreview(preview, outputFormat, out)
 }

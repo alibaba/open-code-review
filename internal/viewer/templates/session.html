@@ -92,7 +92,7 @@
                 <tbody>
                 {{range .}}
                     <tr>
-                        <td title="{{.FilePath}}">{{.FilePath | truncate 60}}</td>
+                        <td title="{{sessionTaskLabel .FilePath}}">{{sessionTaskLabel .FilePath | truncate 60}}</td>
                         <td title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</td>
                         <td title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</td>
                         {{if or $.Session.TokenUsage.TotalCacheReadTokens $.Session.TokenUsage.TotalCacheWriteTokens}}<td title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</td><td title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</td>{{end}}
@@ -193,6 +193,23 @@
 </details>
 {{end}}
 
+{{if .Session.SessionTasks}}
+<details class="file-accordion section-accordion" open>
+    <summary class="file-accordion-header">
+        <span class="chevron"></span>
+        <span class="section-title">Session Tasks</span>
+        <span class="file-count-badge">{{len .Session.SessionTasks}} tasks</span>
+    </summary>
+    <div class="file-accordion-body">
+        <div class="conversations">
+{{range .Session.SessionTasks}}
+{{template "task-cards" .}}
+{{end}}
+        </div>
+    </div>
+</details>
+{{end}}
+
 {{if .Session.Files}}
 <details class="file-accordion section-accordion">
     <summary class="file-accordion-header">
@@ -203,10 +220,23 @@
     <div class="file-accordion-body">
         <div class="conversations">
 {{range .Session.Files}}
+{{template "task-cards" .}}
+{{end}}
+        </div>
+    </div>
+</details>
+{{end}}
+
+<script src="/static/session.js"></script>
+</main>
+</body>
+</html>
+
+{{define "task-cards"}}
 <details class="file-accordion">
     <summary class="file-accordion-header">
         <span class="chevron"></span>
-        <span class="file-path">{{.FilePath}}</span>
+        <span class="file-path">{{sessionTaskLabel .FilePath}}</span>
         <span class="file-count-badge">{{cardCount .Tasks}} requests</span>
     </summary>
     <div class="file-accordion-body">
@@ -223,8 +253,30 @@
                     {{if .Model}}<span class="badge badge-model">{{.Model}}</span>{{end}}
                     {{if or .PromptTokens .CompletionTokens}}<span class="badge badge-tokens">P:<span title="{{.PromptTokens}}">{{formatNumber .PromptTokens}}</span> C:<span title="{{.CompletionTokens}}">{{formatNumber .CompletionTokens}}</span>{{if or .CacheReadTokens .CacheWriteTokens}} CR:<span title="{{.CacheReadTokens}}">{{formatNumber .CacheReadTokens}}</span> CW:<span title="{{.CacheWriteTokens}}">{{formatNumber .CacheWriteTokens}}</span>{{end}}</span>{{end}}
                     {{if .DurationMs}}<span class="badge badge-duration">{{.DurationMs}}ms</span>{{end}}
-                    {{if .Error}}<span class="badge badge-error">{{.Error}}</span>{{end}}
+                    {{if .Error}}<span class="badge badge-error">Error</span>{{end}}
                 </div>
+                {{if .Error}}
+                <details class="error-detail">
+                    <summary class="error-detail-toggle">
+                        <span class="chevron-sm"></span>
+                        <span>Error Detail</span>
+                    </summary>
+                    <div class="error-detail-body">
+                        <pre class="error-content">{{.Error}}</pre>
+                    </div>
+                </details>
+                {{end}}
+                {{with .ReasoningContent}}
+                <details class="tool-detail">
+                    <summary class="tool-detail-toggle">
+                        <span class="chevron-sm"></span>
+                        <span>Reasoning</span>
+                    </summary>
+                    <div class="tool-detail-body">
+                        <div class="response-text">{{.}}</div>
+                    </div>
+                </details>
+                {{end}}
                 {{with .ResponseContent}}
                 <div class="card-body response-content">
                     <div class="response-text">{{.}}</div>
@@ -270,12 +322,3 @@
     </div>
 </details>
 {{end}}
-        </div>
-    </div>
-</details>
-{{end}}
-
-<script src="/static/session.js"></script>
-</main>
-</body>
-</html>

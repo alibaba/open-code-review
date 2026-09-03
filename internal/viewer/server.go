@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,7 +18,10 @@ import (
 //go:embed templates/*.html static/style.css static/session.js static/repos.js
 var assets embed.FS
 
-func StartServer(addr string) error {
+// StartServer binds addr and serves until the listener fails. openMode is one
+// of OpenAuto, OpenAlways or OpenNever; callers should have run
+// ValidateOpenMode first, and anything unrecognized behaves as OpenAuto.
+func StartServer(addr, openMode string) error {
 	root, err := SessionsRoot()
 	if err != nil {
 		return fmt.Errorf("resolve sessions root: %w", err)
@@ -61,12 +65,64 @@ func StartServer(addr string) error {
 	handler := securityHeaders(guarded)
 
 	srv := &http.Server{
-		Addr:    addr,
 		Handler: handler,
 	}
 
-	fmt.Printf("\nOpen browser: http://%s\n", DisplayAddr(addr))
-	return srv.ListenAndServe()
+	// Bind before printing or opening anything: once Listen returns, early
+	// connections queue in the accept backlog instead of being refused, so the
+	// browser cannot outrun the server.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	// srv.Serve takes ownership and closes ln itself; this covers the
+	// early-return path below and any future one. Close is idempotent enough
+	// here — the second call just reports ErrClosed, which nothing reads.
+	defer ln.Close()
+
+	url, err := displayURL(addr, ln.Addr().String())
+	if err != nil {
+		return err
+	}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- srv.Serve(ln)
+	}()
+
+	autoOpen, suppressed := shouldAutoOpen(openMode)
+	if suppressed != "" {
+		fmt.Printf("Viewer ready: %s (browser not opened: %s)\n", url, suppressed)
+	} else {
+		fmt.Printf("Viewer ready: %s\n", url)
+	}
+	if autoOpen {
+		go func() {
+			if err := openBrowser(url); err != nil {
+				browserWarnf("could not open browser: %v", err)
+			}
+		}()
+	}
+
+	return <-serveErr
+}
+
+// displayURL builds the URL to print and hand to the browser.
+//
+// The host comes from the requested address, not from the listener: net.Listen
+// resolves a hostname to an IP literal, while the Host allowlist in hostGuard is
+// built from the requested address (resolveAllowedHostsFromEnv). Using the
+// resolved form makes the two disagree, so `ocr viewer --addr box.local:5483`
+// would auto-open http://192.168.1.10:5483 and land on "403 forbidden host".
+//
+// The port comes from the listener so `--addr :0` reports the port the kernel
+// actually assigned rather than the literal 0.
+func displayURL(requestedAddr, listenerAddr string) (string, error) {
+	_, port, err := net.SplitHostPort(listenerAddr)
+	if err != nil {
+		return "", fmt.Errorf("parse listener addr %q: %w", listenerAddr, err)
+	}
+	return "http://" + DisplayAddr(net.JoinHostPort(splitBindHost(requestedAddr), port)), nil
 }
 
 var cstZone = func() *time.Location {
@@ -196,15 +252,25 @@ func parseTemplate(name string) (*template.Template, error) {
 				return "task-memory"
 			case ReLocationTask:
 				return "task-relocation"
+			case GroupingTask:
+				return "task-grouping"
 			default:
 				return "task-default"
+			}
+		},
+		"sessionTaskLabel": func(fp string) string {
+			switch fp {
+			case "__grouping__":
+				return "File Grouping"
+			default:
+				return fp
 			}
 		},
 		"orderedTasks": func(tasks map[TaskType][]*TaskCard) []struct {
 			Type  TaskType
 			Cards []*TaskCard
 		} {
-			order := []TaskType{PlanTask, MainTask, ReLocationTask, MemoryCompressionTask}
+			order := []TaskType{PlanTask, MainTask, ReLocationTask, MemoryCompressionTask, GroupingTask}
 			var result []struct {
 				Type  TaskType
 				Cards []*TaskCard
@@ -218,7 +284,7 @@ func parseTemplate(name string) (*template.Template, error) {
 				}
 			}
 			for tt, cards := range tasks {
-				if tt != PlanTask && tt != MainTask && tt != ReLocationTask && tt != MemoryCompressionTask {
+				if tt != PlanTask && tt != MainTask && tt != ReLocationTask && tt != MemoryCompressionTask && tt != GroupingTask {
 					result = append(result, struct {
 						Type  TaskType
 						Cards []*TaskCard
