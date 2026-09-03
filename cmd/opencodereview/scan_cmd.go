@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/config/template"
@@ -86,7 +87,7 @@ var scanCmd = &cobra.Command{
 		if err := validateScanOptions(&scanOpts); err != nil {
 			return err
 		}
-		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
+		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		return executeScanContext(ctx, scanOpts)
 	},
