@@ -154,6 +154,16 @@ inputs:
   head_sha:
     description: Override the head commit SHA (use with base_ref for comment triggers).
     required: false
+  pr_number:
+    description: >-
+      Override the pull request number the run fetches and posts to. Defaults to
+      the number in the event payload (pull_request / pull_request_target /
+      issue_comment), then to github.event.workflow_run.pull_requests[0].number.
+      Provide it for a trigger that carries no pull request of its own, or when a
+      workflow_run payload lists more than one; the action fails before any
+      review work when no number resolves.
+    required: false
+    default: ''
   node_version:
     description: Node.js version for actions/setup-node.
     required: false
@@ -279,15 +289,38 @@ runs:
       env:
         INPUT_BASE_REF: ${{ inputs.base_ref }}
         INPUT_HEAD_SHA: ${{ inputs.head_sha }}
+        INPUT_PR_NUMBER: ${{ inputs.pr_number }}
         EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
         EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        EVENT_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        # workflow_run carries no pull request of its own, so the run that
+        # triggered it is reachable only through this array. GitHub fills it in
+        # only for head branches that live in this repository, and it can list
+        # more than one PR when several share a head; either case is what
+        # pr_number is for.
+        WORKFLOW_RUN_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
       run: |
         BASE_REF="${INPUT_BASE_REF:-$EVENT_BASE_REF}"
         HEAD_SHA="${INPUT_HEAD_SHA:-$EVENT_HEAD_SHA}"
+        PR_NUMBER="${INPUT_PR_NUMBER:-${EVENT_PR_NUMBER:-$WORKFLOW_RUN_PR_NUMBER}}"
+        # Fail here rather than after the review: everything downstream posts to
+        # this number, and an empty one used to reach GitHub as
+        # /repos/OWNER/REPO/issues//comments — a 404 that discarded a completed
+        # review's findings.
+        if [ -z "$PR_NUMBER" ]; then
+          echo "::error::No pull request number: the '${GITHUB_EVENT_NAME:-unknown}' event payload carries none. Pass the pr_number input; a workflow_run payload names the PR under workflow_run.pull_requests[0].number."
+          exit 1
+        fi
+        if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error::Resolved pull request number '${PR_NUMBER}' is not a positive integer; pr_number must be the PR's number alone."
+          exit 1
+        fi
         echo "BASE_REF=$BASE_REF" >> "$GITHUB_ENV"
         echo "HEAD_SHA=$HEAD_SHA" >> "$GITHUB_ENV"
+        echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
         echo "PR base ref: $BASE_REF"
         echo "PR head sha: $HEAD_SHA"
+        echo "PR number: $PR_NUMBER"
 
     - name: Checkout base
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -302,7 +335,7 @@ runs:
       if: env.HEAD_SHA != ''
       shell: bash
       env:
-        PR_NUM: ${{ github.event.pull_request.number || github.event.issue.number }}
+        PR_NUM: ${{ env.PR_NUMBER }}
       run: |
         if [ -n "$PR_NUM" ]; then
           git fetch origin "pull/${PR_NUM}/head"
@@ -429,6 +462,10 @@ runs:
         OCR_HEAD_SHA: ${{ env.HEAD_SHA }}
         OCR_BASE_REF: ${{ env.BASE_REF }}
         OCR_MERGE_BASE: ${{ env.MERGE_BASE }}
+        # Same origin, but this one cannot arrive empty: "Resolve PR refs" fails
+        # the job when no PR number resolves, so a checkpoint is always read for
+        # a known PR rather than for issue //comments.
+        OCR_PR_NUMBER: ${{ env.PR_NUMBER }}
         # Everything that changes what a review would say. Any difference
         # invalidates the checkpoint, because findings from the previous run are
         # no longer comparable to what this configuration would produce.
@@ -602,7 +639,7 @@ runs:
               github,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              prNumber: context.issue.number,
+              prNumber: Number(process.env.OCR_PR_NUMBER),
               // Non-empty only when the token is the default one, whose app
               // identity is known; empty keeps the wider bot check.
               appSlug: process.env.OCR_CHECKPOINT_APP_SLUG || '',
@@ -716,6 +753,9 @@ runs:
         OCR_RANGE_REASON: ${{ steps.range.outputs.range_reason }}
         OCR_BASE_REF: ${{ env.BASE_REF }}
         OCR_MERGE_BASE: ${{ env.MERGE_BASE }}
+        # Resolved by "Resolve PR refs", which fails the job when no number is
+        # available; context.issue.number resolves nothing on a workflow_run.
+        OCR_PR_NUMBER: ${{ env.PR_NUMBER }}
       with:
         github-token: ${{ inputs.github_token }}
         script: |
@@ -738,6 +778,7 @@ runs:
             context,
             core,
             fs,
+            prNumber: Number(process.env.OCR_PR_NUMBER),
             resultPath: '/tmp/ocr-result.json',
             stderrPath: '/tmp/ocr-stderr.log',
             stickySummary: ${{ inputs.sticky_summary == 'true' }},
