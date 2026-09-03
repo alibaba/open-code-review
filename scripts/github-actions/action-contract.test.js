@@ -570,6 +570,138 @@ function testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps() {
   }
 }
 
+function testValidateInputsRejectsInvalidEffortAndBudget() {
+  const validation = validationStep();
+  assert.ok(validation, "action.yml must retain input validation");
+  const cases = [
+    [{ effort: "extreme" }, /effort must be one of/],
+    [{ effort: "max" }, /effort must be one of/],
+    [{ max_tokens_budget: "-5" }, /max_tokens_budget must be/],
+    [{ max_tokens_budget: "10.5" }, /max_tokens_budget must be/],
+    [{ max_tokens_budget: "abc" }, /max_tokens_budget must be/],
+  ];
+  for (const [overrides, pattern] of cases) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues(overrides), fixture);
+      assert.notStrictEqual(
+        result.status,
+        0,
+        `inputs ${JSON.stringify(overrides)} should be rejected; ${resultDescription(result)}`
+      );
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        pattern,
+        `rejection for ${JSON.stringify(overrides)} must name the offending input; ${resultDescription(result)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
+function testEffortAndBudgetNormalizeAndForwardAcrossSteps() {
+  const validation = validationStep();
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(validation, "action.yml must retain input validation");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      effort: "HIGH",
+      max_tokens_budget: "010000",
+      llm_url: "https://llm.example.invalid/v1",
+      llm_auth_token: "unused-token",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+    });
+    const validationResult = runStep(validation, values, fixture);
+    assert.strictEqual(validationResult.status, 0, `validation failed; ${resultDescription(validationResult)}`);
+    const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+    assert.strictEqual(exported.EFFORT, "high", "validation must export lowercase effort");
+    assert.strictEqual(
+      exported.MAX_TOKENS_BUDGET,
+      "10000",
+      "validation must export normalized decimal max_tokens_budget"
+    );
+    const result = runStep(
+      run,
+      values,
+      fixture,
+      {
+        MERGE_BASE: "base-sha",
+        HEAD_SHA: "head-sha",
+        REVIEW_TASK_TIMEOUT: exported.REVIEW_TASK_TIMEOUT,
+        EFFORT: exported.EFFORT,
+        MAX_TOKENS_BUDGET: exported.MAX_TOKENS_BUDGET,
+      },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    const effortIndex = reviewCall.args.indexOf("--effort");
+    assert.ok(effortIndex >= 0, "Run OpenCodeReview must forward --effort");
+    assert.strictEqual(reviewCall.args[effortIndex + 1], "high");
+    const budgetIndex = reviewCall.args.indexOf("--max-tokens-budget");
+    assert.ok(budgetIndex >= 0, "Run OpenCodeReview must forward --max-tokens-budget");
+    assert.strictEqual(reviewCall.args[budgetIndex + 1], "10000");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testZeroMaxTokensBudgetNormalizesToUnlimited() {
+  const validation = validationStep();
+  assert.ok(validation, "action.yml must retain input validation");
+  const fixture = makeFixture();
+  try {
+    const result = runStep(validation, inputValues({ max_tokens_budget: "0" }), fixture);
+    assert.strictEqual(result.status, 0, `validation failed; ${resultDescription(result)}`);
+    const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+    assert.strictEqual(exported.MAX_TOKENS_BUDGET, "", "max_tokens_budget=0 must normalize to unlimited (empty)");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testEmptyEffortAndBudgetOmitTheFlags() {
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_auth_token: "unused-token",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+    });
+    const result = runStep(
+      run,
+      values,
+      fixture,
+      {
+        MERGE_BASE: "base-sha",
+        HEAD_SHA: "head-sha",
+        REVIEW_TASK_TIMEOUT: "15",
+        EFFORT: "",
+        MAX_TOKENS_BUDGET: "",
+      },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    assert.ok(!reviewCall.args.includes("--effort"), "empty effort must omit --effort so the CLI default applies");
+    assert.ok(
+      !reviewCall.args.includes("--max-tokens-budget"),
+      "empty max_tokens_budget must omit --max-tokens-budget so the CLI default applies"
+    );
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
 function testConfigureBuildsCompleteLlmConfig() {
   const configure = stepNamed("Configure OCR");
   assert.ok(configure, "action.yml must retain the Configure OCR step");
@@ -1004,7 +1136,7 @@ function testContractHarnessFailsClosedOnUnsupportedYamlShapes() {
 
 function testRequiredStepTopologyAndEnvironmentContracts() {
   const required = {
-    "Validate review_task_timeout": ["REVIEW_TASK_TIMEOUT"],
+    "Validate inputs": ["REVIEW_TASK_TIMEOUT", "EFFORT_INPUT", "MAX_TOKENS_BUDGET_INPUT"],
     "Install OpenCodeReview": ["OCR_VERSION"],
     "Configure OCR": [
       "OCR_LLM_URL",
@@ -1097,6 +1229,10 @@ const TESTS = [
   ["default llm_timeout exports independently from review_task_timeout", testDefaultLlmTimeoutExportedSeparatelyFromReviewTimeout],
   ["empty llm_timeout normalizes before review invocation", testEmptyLlmTimeoutNormalizesBeforeReviewInvocation],
   ["review_task_timeout with a leading zero normalizes across steps", testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps],
+  ["effort and max_tokens_budget reject malformed values", testValidateInputsRejectsInvalidEffortAndBudget],
+  ["effort and max_tokens_budget normalize and forward across steps", testEffortAndBudgetNormalizeAndForwardAcrossSteps],
+  ["max_tokens_budget=0 normalizes to unlimited", testZeroMaxTokensBudgetNormalizesToUnlimited],
+  ["empty effort and max_tokens_budget omit the CLI flags", testEmptyEffortAndBudgetOmitTheFlags],
   ["Configure OCR builds a complete llm config", testConfigureBuildsCompleteLlmConfig],
   ["Configure OCR never persists the token", testConfigureNeverPersistsToken],
   ["Configure OCR neutralizes stale provider and static token", testConfigureNeutralizesStaleProviderAndStaticToken],
