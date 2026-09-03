@@ -118,7 +118,8 @@ async function runPostReviewComments({
 
   const owner = context.repo.owner;
   const repo = context.repo.repo;
-  const prNumber = prNumberOverride != null ? prNumberOverride : context.issue.number;
+  const prNumber =
+    prNumberOverride !== null && prNumberOverride !== undefined ? prNumberOverride : context.issue.number;
 
   // Per-run idempotency tags. context.runId / context.runAttempt come from
   // @actions/github's Context (parsed from GITHUB_RUN_ID / GITHUB_RUN_ATTEMPT).
