@@ -27,12 +27,64 @@ import (
 // errs toward rejecting a repair, never toward accepting a lossy one.
 var contentFieldPattern = regexp.MustCompile(`"content"\s*:`)
 
-// controlEscapes maps the bare control characters that are illegal inside a
-// JSON string to their escaped form.
-var controlEscapes = map[byte]string{
-	'\n': `\n`,
-	'\r': `\r`,
-	'\t': `\t`,
+// knownCommentFields is the set of field names the code_comment schema defines.
+// A repaired batch carrying anything else means the scan re-read a stretch of
+// prose as structure — see repairedCommentsAcceptable.
+var knownCommentFields = map[string]struct{}{
+	"content":         {},
+	"existing_code":   {},
+	"suggestion_code": {},
+	"category":        {},
+	"severity":        {},
+	"path":            {},
+	"thinking":        {},
+}
+
+// escapeControl returns the JSON escape for a control character. JSON forbids
+// every byte below 0x20 inside a string, so the ones without a short form get
+// the \u00XX escape rather than being left to fail the parse.
+func escapeControl(c byte) string {
+	switch c {
+	case '\n':
+		return `\n`
+	case '\r':
+		return `\r`
+	case '\t':
+		return `\t`
+	case '\b':
+		return `\b`
+	case '\f':
+		return `\f`
+	}
+	const hex = "0123456789abcdef"
+	return `\u00` + string([]byte{hex[c>>4], hex[c&0x0f]})
+}
+
+// isLegalEscape reports whether s[i] opens a valid JSON escape sequence, given
+// that s[i-1] is a backslash. \u additionally requires four hex digits.
+func isLegalEscape(s string, i int) bool {
+	if i >= len(s) {
+		return false
+	}
+	switch s[i] {
+	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+		return true
+	case 'u':
+		if i+5 > len(s) {
+			return false
+		}
+		for _, c := range []byte(s[i+1 : i+5]) {
+			if !isHexDigit(c) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func isHexDigit(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
 // repairSerializedComments escapes what makes a model-serialized `comments`
@@ -73,14 +125,28 @@ func repairSerializedComments(s string) (string, int) {
 
 		switch {
 		case c == '\\':
-			// Copy an existing escape pair verbatim. A trailing lone backslash
-			// is left alone for the parser to reject.
-			b.WriteByte(c)
-			i++
-			if i < len(s) {
+			if isLegalEscape(s, i+1) {
+				// A real escape pair; copy it verbatim.
+				b.WriteByte(c)
+				i++
 				b.WriteByte(s[i])
 				i++
+				break
 			}
+			// The dropped escaping level hits backslashes too, not just quotes:
+			// prose citing a regex (\d), a Windows path (C:\Users) or a literal
+			// \n leaves a backslash that opens no valid sequence. Escaping it
+			// recovers a batch that would otherwise be lost to the same root
+			// cause as the quotes.
+			//
+			// A backslash followed by b/f/n/r/t/u is a legal escape and is left
+			// alone above, so `C:\bin` still decodes to a backspace rather than
+			// the path the prose meant. JSON gives no way to tell those apart,
+			// and inventing one would corrupt genuine escapes — which are far
+			// more common in this field than Windows paths.
+			b.WriteString(`\\`)
+			escaped++
+			i++
 		case c == '"':
 			if next := nextSignificantByte(s, i+1); next < 0 || isJSONStructural(s[next]) {
 				inString = false
@@ -90,8 +156,8 @@ func repairSerializedComments(s string) (string, int) {
 				escaped++
 			}
 			i++
-		case controlEscapes[c] != "":
-			b.WriteString(controlEscapes[c])
+		case c < 0x20:
+			b.WriteString(escapeControl(c))
 			escaped++
 			i++
 		default:
@@ -129,11 +195,26 @@ func isJSONStructural(b byte) bool {
 // every comment the original text described.
 //
 // Parsing again is not enough on its own: a misjudged terminator can yield JSON
-// that is valid but wrong, most plausibly by merging two comments into one. So
-// each entry must keep a non-empty content, and the entry count must not fall
-// below the number of `"content":` fields in the original text. The count is
-// what rules out a silent merge; without it a repair could halve a batch and
-// still look successful.
+// that is valid but wrong. Three things have to hold.
+//
+// Every entry keeps a non-empty content, and the entry count does not fall below
+// the number of `"content":` fields in the original text — that rules out a
+// repair that merged two comments by ending a string early, which would
+// otherwise halve a batch and still look successful.
+//
+// No entry carries a field the schema does not define. When the scan ends a
+// string too early, the prose after it is re-read as structure, and a stretch of
+// review text almost never spells a real field name — so an unknown key is the
+// signature of exactly that mistake.
+//
+// A window remains, and narrowing it further is not possible from local
+// evidence: `"a word", "existing_code":"x"` inside prose is byte-for-byte
+// indistinguishable from a genuine string terminator followed by the next
+// field, so a repair can still truncate a value when the prose happens to spell
+// a real field name right after a quoted term. The checks above shrink that to
+// prose citing this schema's own field names in that exact shape; anything else
+// either fails to parse or trips the unknown-field check. Callers get the
+// original parse error in those cases, which is the safe direction.
 func repairedCommentsAcceptable(entries []any, original string) bool {
 	if len(entries) == 0 {
 		return false
@@ -146,6 +227,11 @@ func repairedCommentsAcceptable(entries []any, original string) bool {
 		content, _ := obj["content"].(string)
 		if strings.TrimSpace(content) == "" {
 			return false
+		}
+		for field := range obj {
+			if _, known := knownCommentFields[field]; !known {
+				return false
+			}
 		}
 	}
 	return len(entries) >= len(contentFieldPattern.FindAllStringIndex(original, -1))

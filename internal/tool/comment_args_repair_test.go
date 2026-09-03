@@ -4,6 +4,7 @@
 package tool
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -135,6 +136,161 @@ func TestParseComments_RepairRejectedWhenABatchEntryEndsUpEmpty(t *testing.T) {
 	}
 	if !strings.Contains(errMsg, "invalid character") {
 		t.Errorf("rejected repair must fall back to the parser wording, got %q", errMsg)
+	}
+}
+
+func TestParseComments_RepairsIllegalBackslashEscape(t *testing.T) {
+	// The dropped escaping level hits backslashes as well as quotes. Prose that
+	// cites a regex or a Windows path leaves a backslash opening no valid
+	// sequence, which failed the whole batch before.
+	for _, tc := range []struct {
+		name, serialized, want string
+	}{
+		{
+			name:       "regex in prose",
+			serialized: `[{"content":"the pattern \d+ only matches digits","path":"a.go"}]`,
+			want:       `the pattern \d+ only matches digits`,
+		},
+		{
+			// \U and \s open no valid sequence. A segment starting with one of
+			// b/f/n/r/t/u would be a legal escape and is left alone by design —
+			// see the note in repairSerializedComments.
+			name:       "windows path in prose",
+			serialized: `[{"content":"the path C:\Users\src is invalid","path":"a.go"}]`,
+			want:       `the path C:\Users\src is invalid`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			comments, repaired, errMsg := ParseCommentsWithPath(
+				map[string]any{"comments": tc.serialized}, "fallback.go")
+			if errMsg != "" {
+				t.Fatalf("expected the repair to recover the batch, got error: %s", errMsg)
+			}
+			if repaired == 0 {
+				t.Error("repaired = 0, want the illegal escape counted")
+			}
+			if len(comments) != 1 || comments[0].Content != tc.want {
+				t.Fatalf("content = %q, want %q", comments[0].Content, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseComments_RepairsAllControlCharacters(t *testing.T) {
+	// JSON forbids every byte below 0x20, not just the three with short escapes.
+	serialized := "[{\"content\":\"bell\x07 and vtab\x0b here\",\"path\":\"a.go\"}]"
+	comments, repaired, errMsg := ParseCommentsWithPath(
+		map[string]any{"comments": serialized}, "fallback.go")
+	if errMsg != "" {
+		t.Fatalf("expected the repair to recover the batch, got error: %s", errMsg)
+	}
+	if repaired != 2 {
+		t.Errorf("repaired = %d, want 2", repaired)
+	}
+	if len(comments) != 1 || comments[0].Content != "bell\x07 and vtab\x0b here" {
+		t.Fatalf("content = %q, want the control characters preserved", comments[0].Content)
+	}
+}
+
+func TestParseComments_RepairRejectedWhenProseBecameAField(t *testing.T) {
+	// Ending a string early re-reads the prose after it as structure. Review
+	// text almost never spells a real field name, so the stray key is the
+	// signature of that mistake and the batch is refused rather than emitted
+	// with a truncated value.
+	serialized := `[{"content":"the flag is named "verbose", "and it defaults to true":"yes"}]`
+	comments, repaired, errMsg := ParseCommentsWithPath(
+		map[string]any{"comments": serialized}, "fallback.go")
+	if errMsg == "" {
+		t.Fatalf("repair was accepted (%d comments, %d escaped); want it declined "+
+			"because prose was re-read as a field name", len(comments), repaired)
+	}
+	if !strings.Contains(errMsg, "invalid character") {
+		t.Errorf("rejected repair must fall back to the parser wording, got %q", errMsg)
+	}
+}
+
+func TestIsLegalEscape(t *testing.T) {
+	// Getting this wrong in either direction is costly: too strict corrupts
+	// genuine escapes, too loose leaves the batch unparseable.
+	for _, tc := range []struct {
+		in   string // the text after the backslash
+		want bool
+	}{
+		{`"`, true}, {`\`, true}, {`/`, true},
+		{"b", true}, {"f", true}, {"n", true}, {"r", true}, {"t", true},
+		{"u0041", true}, {"uFFFF", true}, {"uabcd", true},
+		{"u00", false},   // too few hex digits
+		{"u00zz", false}, // not hex
+		{"uD8", false},   // truncated
+		{"d", false},     // regex \d
+		{"U0041", false}, // uppercase U is not the escape
+		{"x41", false},   // \x is not JSON
+		{"", false},      // nothing follows the backslash
+		{" ", false},     // space
+	} {
+		if got := isLegalEscape(tc.in, 0); got != tc.want {
+			t.Errorf("isLegalEscape(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+	// Index past the end must not panic.
+	if isLegalEscape("n", 5) {
+		t.Error("out-of-range index must report false")
+	}
+}
+
+func TestEscapeControl(t *testing.T) {
+	for _, tc := range []struct {
+		in   byte
+		want string
+	}{
+		{'\n', `\n`}, {'\r', `\r`}, {'\t', `\t`}, {'\b', `\b`}, {'\f', `\f`},
+		{0x00, `\u0000`}, {0x07, `\u0007`}, {0x0b, `\u000b`}, {0x1f, `\u001f`},
+	} {
+		if got := escapeControl(tc.in); got != tc.want {
+			t.Errorf("escapeControl(%#x) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// Every escape it produces has to be one the JSON parser accepts.
+	for c := byte(0); c < 0x20; c++ {
+		var target string
+		blob := `["` + escapeControl(c) + `"]`
+		if err := json.Unmarshal([]byte(blob), &[]*string{&target}); err != nil {
+			t.Errorf("escapeControl(%#x) produced unparseable JSON %q: %v", c, blob, err)
+		}
+	}
+}
+
+func TestRepairSerializedComments_PreservesUnicodeEscape(t *testing.T) {
+	// \u sequences are legal and must survive untouched, or a repair would
+	// mangle content it was supposed to rescue.
+	in := `[{"content":"snowman ☃ and a quote "here"","path":"a.go"}]`
+	out, escaped := repairSerializedComments(in)
+	if escaped != 2 {
+		t.Fatalf("escaped = %d, want 2 (only the prose quotes)", escaped)
+	}
+	if !strings.Contains(out, `☃`) {
+		t.Errorf("unicode escape was rewritten: %q", out)
+	}
+}
+
+func TestRepairedCommentsAcceptable_RejectsUnknownField(t *testing.T) {
+	original := `[{"content":"first"}]`
+	withStray := []any{map[string]any{
+		"content":        "first",
+		"not a real key": "swallowed prose",
+	}}
+	if repairedCommentsAcceptable(withStray, original) {
+		t.Error("an entry carrying a field the schema does not define must be rejected")
+	}
+
+	// Every documented field must stay acceptable, or the guard would reject
+	// legitimate batches.
+	full := []any{map[string]any{
+		"content": "first", "existing_code": "x", "suggestion_code": "y",
+		"category": "bug", "severity": "high", "path": "a.go", "thinking": "why",
+	}}
+	if !repairedCommentsAcceptable(full, original) {
+		t.Error("a batch using only schema fields must be accepted")
 	}
 }
 
