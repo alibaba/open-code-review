@@ -196,10 +196,16 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 
 	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
 	defer func() {
-		for _, mc := range mcpClients {
-			if err := mc.Close(); err != nil {
-				fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to close MCP server %q: %v\n", mc.Name(), err)
-			}
+		// The close phase must stay bounded even after a cancellation (#1141):
+		// context.Background() rather than the run ctx, so a Ctrl-C that
+		// already fired does not collapse this budget to zero and orphan every
+		// subprocess. CloseAll closes concurrently and gives up after the
+		// deadline; the SDK still escalates SIGTERM to SIGKILL in the
+		// meantime, and whatever outlives the process is reclaimed by the OS.
+		closeCtx, cancel := context.WithTimeout(context.Background(), mcp.CloseTimeout)
+		defer cancel()
+		if err := mcp.CloseAll(closeCtx, mcpClients); err != nil {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %v\n", err)
 		}
 	}()
 

@@ -5,14 +5,36 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+const (
+	// SubprocessTerminateDuration bounds each escalation stage of the SDK's
+	// stdio subprocess shutdown: the wait after closing stdin, the wait after
+	// SIGTERM, and the wait after SIGKILL. The SDK default is 5s per stage,
+	// so one unresponsive server could hold Close for ~15s (#1141). 800ms
+	// per stage keeps a single server's worst case at ~2.4s while still
+	// giving a well-behaved server ample time to exit on its own.
+	SubprocessTerminateDuration = 800 * time.Millisecond
+
+	// CloseTimeout bounds the whole MCP close phase regardless of how many
+	// servers are configured: CloseAll stops waiting once it expires and
+	// leaves any remaining subprocess to the OS. It sits above the
+	// per-server worst case (3 stages x SubprocessTerminateDuration = 2.4s)
+	// with headroom for scheduling jitter, yet still inside the 3s shutdown
+	// budget, docker stop's 10s grace period, and the VS Code extension's 3s
+	// SIGKILL escalation.
+	CloseTimeout = 2800 * time.Millisecond
 )
 
 // Client wraps a single MCP server connection.
@@ -21,6 +43,12 @@ type Client struct {
 	session *mcp.ClientSession
 	tools   []*mcp.Tool
 }
+
+// subprocessTerminateDuration is the per-stage shutdown budget handed to every
+// CommandTransport. It defaults to SubprocessTerminateDuration and is widened
+// only by tests running under the race detector, whose re-exec'd children pay
+// ~1s of runtime overhead before noticing stdin EOF.
+var subprocessTerminateDuration = SubprocessTerminateDuration
 
 // NewClient starts an MCP server subprocess (stdio transport), initializes the
 // connection, and caches the list of available tools. The context governs the
@@ -39,7 +67,7 @@ func NewClient(ctx context.Context, name, command string, args, env []string, di
 		nil,
 	)
 
-	transport := &mcp.CommandTransport{Command: cmd}
+	transport := &mcp.CommandTransport{Command: cmd, TerminateDuration: subprocessTerminateDuration}
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("connect to MCP server %q: %w", name, err)
@@ -175,6 +203,85 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 
 func (c *Client) Close() error {
 	return c.session.Close()
+}
+
+// CloseAll closes every client concurrently and waits for all of them, or for
+// ctx to expire, whichever comes first. Serial closing multiplied the SDK's
+// per-server shutdown bound by the number of configured servers (#1141);
+// closing in parallel keeps the whole phase at the single slowest server's
+// cost, and the ctx deadline caps even that.
+//
+// Each per-client error is wrapped with the server name, and on the happy path
+// the results are joined in configuration order, so one warning can report
+// every failed server. When ctx expires first, a final non-blocking check
+// prefers completion over a timeout report (the last Close can finish at the
+// same instant the deadline fires); on a genuine timeout the returned error
+// wraps the deadline failure, reports how many servers finished, how many of
+// those had errors, and how many were still shutting down, keeping any errors
+// already collected from servers that finished in time: their
+// Close goroutines keep running and the SDK still escalates SIGTERM to
+// SIGKILL, but if the process exits first the remaining subprocesses are left
+// to the OS.
+func CloseAll(ctx context.Context, clients []*Client) error {
+	if len(clients) == 0 {
+		return nil
+	}
+
+	errs := make([]error, len(clients))
+	remaining := len(clients)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(len(clients))
+	for i, c := range clients {
+		go func() {
+			defer wg.Done()
+			err := c.Close()
+			mu.Lock()
+			remaining--
+			if err != nil {
+				errs[i] = fmt.Errorf("close MCP server %q: %w", c.name, err)
+			}
+			mu.Unlock()
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		mu.Lock()
+		defer mu.Unlock()
+		return errors.Join(errs...)
+	case <-ctx.Done():
+		// The last Close() can complete at nearly the same instant the
+		// deadline expires; with both cases ready Go picks one
+		// pseudo-randomly, so prefer completion over reporting a spurious
+		// timeout for a fully successful close (#1141 review feedback).
+		select {
+		case <-done:
+			mu.Lock()
+			defer mu.Unlock()
+			return errors.Join(errs...)
+		default:
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		errorCount := 0
+		for _, err := range errs {
+			if err != nil {
+				errorCount++
+			}
+		}
+		if joined := errors.Join(errs...); joined != nil {
+			return fmt.Errorf("%w; %d of %d server(s) closed before the deadline, %d with errors, %d still shutting down: %w",
+				ctx.Err(), len(clients)-remaining, len(clients), errorCount, remaining, joined)
+		}
+		return fmt.Errorf("timed out closing %d MCP server(s): %w; %d still shutting down, subprocesses left to the OS", len(clients), ctx.Err(), remaining)
+	}
 }
 
 func contentToText(contents []mcp.Content) string {
