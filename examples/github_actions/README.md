@@ -179,6 +179,20 @@ The task and request timeouts are independent:
     max_tokens_budget: '10000000'
 ```
 
+### Stream live review progress
+
+By default the review runs with the machine-oriented `agent` audience and stays silent in the workflow log until it finishes; stderr is captured to a log file and uploaded as an artifact. Set `stream_progress: 'true'` to switch to the human audience and tee stderr into the workflow log, so `[ocr]` progress lines stream live while the review runs — stderr is still captured to the file for artifacts and comment posting.
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `stream_progress` | `'false'` | Stream live `[ocr]` review progress to the workflow log (human audience on stderr) instead of staying silent until the run finishes. One of `'true'` / `'false'`. |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    stream_progress: 'true'
+```
+
 ### Add custom review rules
 
 ```yaml
