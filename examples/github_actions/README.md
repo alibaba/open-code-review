@@ -85,7 +85,7 @@ Go to your repository's **Settings → Secrets and variables → Actions**.
 | `OCR_LLM_MODEL` | Yes | Model name |
 | `OCR_LLM_USE_ANTHROPIC` | Yes | `true` for Anthropic Claude, `false` for OpenAI-compatible |
 
-> **Note:** `GITHUB_TOKEN` is automatically provided by GitHub Actions with the required `pull-requests: write` permission. The action also sets `llm.extra_body` to disable thinking mode for compatibility with various LLM providers.
+> **Note:** `GITHUB_TOKEN` is automatically provided by GitHub Actions with the required `pull-requests: write` permission. By default the action sets `llm.extra_body` to `{"thinking": {"type": "disabled"}}`, disabling thinking mode for compatibility with various LLM providers; override it with the `llm_extra_body` input when your model needs different behavior, or use `llm_reasoning_effort` to steer reasoning depth on OpenAI-compatible protocols.
 
 ## Customization
 
@@ -179,6 +179,20 @@ The task and request timeouts are independent:
     max_tokens_budget: '10000000'
 ```
 
+### Set reasoning effort
+
+For models with steerable reasoning depth (e.g. GLM-5.x, OpenAI reasoning models), the `llm_reasoning_effort` input is merged into the request body as `reasoning_effort` via the action's existing `llm.extra_body` plumbing — no CLI support beyond the published versions is needed. Anthropic providers have no equivalent field and ignore it. An explicit `reasoning_effort` key inside `llm_extra_body` wins over this input.
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `llm_reasoning_effort` | `''` | One of `minimal`, `low`, `medium`, `high`, `max` (case-insensitive). Empty sends nothing. |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_reasoning_effort: low
+```
+
 ### Stream live review progress
 
 By default the review runs with the machine-oriented `agent` audience and stays silent in the workflow log until it finishes; stderr is captured to a log file and uploaded as an artifact. Set `stream_progress: 'true'` to switch to the human audience and tee stderr into the workflow log, so `[ocr]` progress lines stream live while the review runs — stderr is still captured to the file for artifacts and comment posting.
@@ -252,7 +266,7 @@ The action posts a summary issue comment plus inline review comments. Two inputs
 | `corrupt_checkpoint` | the summary carries no readable checkpoint marker (absent, malformed, or two of them) |
 | `schema_invalid` | the marker is for another PR, another marker version, or records a run that did not complete |
 | `base_changed` | the base ref or the merge-base moved, so the diff basis is no longer the one the checkpoint was taken against |
-| `config_changed` | the model, language, `llm_extra_body`, `llm_extra_headers`, `llm_auth_header`, `llm_timeout`, `effort`, `max_tokens_budget`, `background`, routing inputs, the resolved OCR version, or the contents of `rule` / `.opencodereview/rule.json` changed — or `ocr version` printed nothing, so the version could not be established at all |
+| `config_changed` | the model, language, `llm_extra_body`, `llm_reasoning_effort`, `llm_extra_headers`, `llm_auth_header`, `llm_timeout`, `effort`, `max_tokens_budget`, `background`, routing inputs, the resolved OCR version, or the contents of `rule` / `.opencodereview/rule.json` changed — or `ocr version` printed nothing, so the version could not be established at all |
 | `not_ancestor` | the checkpoint commit is in this clone but is not on the new head's history (the branch was reset to an earlier commit) |
 | `unknown_object` | the checkpoint commit is not in this clone, so ancestry could not be checked — where a force-push usually lands, since the replaced commit is no longer fetched |
 | `rule_unreadable` | a rule file was given but could not be read, so no stored fingerprint can be trusted to mean "same rules" |

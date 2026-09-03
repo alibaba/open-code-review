@@ -702,6 +702,38 @@ function testEmptyEffortAndBudgetOmitTheFlags() {
   }
 }
 
+function testValidateInputsRejectsInvalidReasoningEffort() {
+  const validation = validationStep();
+  assert.ok(validation, "action.yml must retain input validation");
+  for (const value of ["extreme", "1", "reasoning"]) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues({ llm_reasoning_effort: value }), fixture);
+      assert.notStrictEqual(
+        result.status,
+        0,
+        `llm_reasoning_effort=${JSON.stringify(value)} should be rejected; ${resultDescription(result)}`
+      );
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        /llm_reasoning_effort must be one of/,
+        `rejection for llm_reasoning_effort=${JSON.stringify(value)} must name the input; ${resultDescription(result)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+  const fixture = makeFixture();
+  try {
+    const result = runStep(validation, inputValues({ llm_reasoning_effort: "MAX" }), fixture);
+    assert.strictEqual(result.status, 0, `llm_reasoning_effort=MAX should be accepted; ${resultDescription(result)}`);
+    const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+    assert.strictEqual(exported.LLM_REASONING_EFFORT, "max", "validation must export lowercase llm_reasoning_effort");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
 function testStreamProgressInputDefaultsToFalse() {
   assert.ok(INPUTS.stream_progress, "action.yml must define the stream_progress input");
   assert.strictEqual(
@@ -806,6 +838,98 @@ function testRunStreamsProgressWhenOptedIn() {
     assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
     assert.ok(!reviewCall.args.includes("--audience"), "stream_progress=true must drop --audience agent");
     assert.ok(fs.existsSync(fixture.stderrPath), "the streaming path must still capture stderr to the log file");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testLlmExtraBodyDefaultDisablesThinking() {
+  assert.ok(INPUTS.llm_extra_body, "action.yml must define the llm_extra_body input");
+  assert.strictEqual(
+    INPUTS.llm_extra_body.default,
+    '{"thinking": {"type": "disabled"}}',
+    "llm_extra_body default must disable thinking mode; enabling it must be an explicit opt-in"
+  );
+}
+
+function testConfigureMergesReasoningEffortIntoExtraBody() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  const baseValues = {
+    llm_url: "https://llm.example.invalid/v1",
+    llm_model: "contract-model",
+    llm_use_anthropic: "false",
+    llm_auth_token: "unused-token",
+  };
+  const cases = [
+    [
+      "the default body disables thinking when nothing is set",
+      {},
+      {},
+      { thinking: { type: "disabled" } },
+    ],
+    [
+      "the effort merges into the default body",
+      {},
+      { LLM_REASONING_EFFORT: "low" },
+      { thinking: { type: "disabled" }, reasoning_effort: "low" },
+    ],
+    [
+      "an explicitly empty extra_body still receives the effort",
+      { llm_extra_body: "" },
+      { LLM_REASONING_EFFORT: "low" },
+      { reasoning_effort: "low" },
+    ],
+    [
+      "an explicit extra_body key wins over the input",
+      { llm_extra_body: '{"reasoning_effort":"high"}' },
+      { LLM_REASONING_EFFORT: "low" },
+      { reasoning_effort: "high" },
+    ],
+    [
+      "merges alongside existing extra_body keys",
+      { llm_extra_body: '{"thinking":{"type":"enabled"}}' },
+      { LLM_REASONING_EFFORT: "max" },
+      { thinking: { type: "enabled" }, reasoning_effort: "max" },
+    ],
+  ];
+  for (const [label, overrides, extraEnv, expected] of cases) {
+    const fixture = makeFixture();
+    try {
+      const values = inputValues(Object.assign({}, baseValues, overrides));
+      const result = runStep(configure, values, fixture, extraEnv);
+      assert.strictEqual(result.status, 0, `Configure OCR failed for "${label}"; ${resultDescription(result)}`);
+      const configured = configValues(readJsonLines(fixture.configPath));
+      const body =
+        typeof configured["llm.extra_body"] === "string"
+          ? JSON.parse(configured["llm.extra_body"])
+          : configured["llm.extra_body"];
+      assert.deepStrictEqual(body, expected, `extra_body mismatch for "${label}"`);
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
+function testConfigureRejectsMalformedExtraBodyWithActionableError() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+      llm_auth_token: "unused-token",
+      llm_extra_body: "{not json",
+    });
+    const result = runStep(configure, values, fixture, { LLM_REASONING_EFFORT: "low" });
+    assert.notStrictEqual(result.status, 0, "Configure OCR must fail on malformed llm_extra_body");
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /::error::llm_extra_body is not valid JSON/,
+      `the failure must name the llm_extra_body input; ${resultDescription(result)}`
+    );
   } finally {
     removeFixture(fixture);
   }
@@ -1249,6 +1373,7 @@ function testRequiredStepTopologyAndEnvironmentContracts() {
       "REVIEW_TASK_TIMEOUT",
       "EFFORT_INPUT",
       "MAX_TOKENS_BUDGET_INPUT",
+      "LLM_REASONING_EFFORT_INPUT",
       "STREAM_PROGRESS_INPUT",
     ],
     "Install OpenCodeReview": ["OCR_VERSION"],
@@ -1347,10 +1472,14 @@ const TESTS = [
   ["effort and max_tokens_budget normalize and forward across steps", testEffortAndBudgetNormalizeAndForwardAcrossSteps],
   ["max_tokens_budget=0 normalizes to unlimited", testZeroMaxTokensBudgetNormalizesToUnlimited],
   ["empty effort and max_tokens_budget omit the CLI flags", testEmptyEffortAndBudgetOmitTheFlags],
+  ["llm_reasoning_effort rejects values outside the OpenAI/GLM vocabulary", testValidateInputsRejectsInvalidReasoningEffort],
   ["stream_progress defaults to false and describes [ocr] progress", testStreamProgressInputDefaultsToFalse],
   ["stream_progress validation accepts true/false case-insensitively", testValidateInputsValidatesStreamProgress],
   ["Run OpenCodeReview keeps --audience agent and the log file by default", testRunKeepsAgentAudienceAndLogFileByDefault],
   ["Run OpenCodeReview streams live progress when opted in", testRunStreamsProgressWhenOptedIn],
+  ["llm_extra_body defaults to disabling thinking", testLlmExtraBodyDefaultDisablesThinking],
+  ["Configure OCR merges reasoning_effort into extra_body", testConfigureMergesReasoningEffortIntoExtraBody],
+  ["Configure OCR rejects malformed extra_body with an actionable error", testConfigureRejectsMalformedExtraBodyWithActionableError],
   ["Configure OCR builds a complete llm config", testConfigureBuildsCompleteLlmConfig],
   ["Configure OCR never persists the token", testConfigureNeverPersistsToken],
   ["Configure OCR neutralizes stale provider and static token", testConfigureNeutralizesStaleProviderAndStaticToken],
