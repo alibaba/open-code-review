@@ -71,29 +71,48 @@ func (p *CodeCommentProvider) Execute(_ context.Context, args map[string]any) (s
 
 // ParseCommentsWithPath is like ParseComments but uses defaultPath as a fallback
 // when individual comment objects omit the path field.
-func ParseCommentsWithPath(args map[string]any, defaultPath string) ([]model.LlmComment, string) {
-	comments, errMsg := parseCommentsInner(args, defaultPath)
-	return comments, errMsg
+//
+// repairedChars is non-zero when `comments` arrived as a serialized string that
+// only parsed after the deterministic repair (see comment_args_repair.go). The
+// comments themselves are unaffected; callers report it so a schema violation
+// the framework papers over still leaves a trace.
+func ParseCommentsWithPath(args map[string]any, defaultPath string) (comments []model.LlmComment, repairedChars int, errMsg string) {
+	return parseCommentsInner(args, defaultPath)
 }
 
 // ParseComments extracts LlmComment entries from tool call arguments without writing
 // to the Collector. Returns parsed comments and an error message (empty on success).
 func ParseComments(args map[string]any) ([]model.LlmComment, string) {
-	return parseCommentsInner(args, "")
+	comments, _, errMsg := parseCommentsInner(args, "")
+	return comments, errMsg
 }
 
-func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmComment, string) {
+func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmComment, int, string) {
 	var rawComments []any
+	repairedChars := 0
 	if arr, ok := args["comments"].([]any); ok && len(arr) > 0 {
 		rawComments = arr
 	} else if s, ok := args["comments"].(string); ok && s != "" {
 		if err := json.Unmarshal([]byte(s), &rawComments); err != nil {
-			return nil, fmt.Sprintf("Error: failed to parse 'comments' JSON string: %v", err)
+			// The schema declares an array; a string is a violation that in
+			// practice fails to parse over an unescaped prose quote, taking the
+			// whole batch with it. Try the deterministic repair before giving
+			// up, and keep the original error when it does not hold up.
+			entries, escaped := parseRepairedComments(s)
+			if entries == nil {
+				// Keep the wording — and specifically "invalid character" — as
+				// the parser produced it. That phrasing is what leads the model
+				// to regenerate the batch; describing the violation instead
+				// makes it resend the same broken string.
+				return nil, 0, fmt.Sprintf("Error: failed to parse 'comments' JSON string: %v", err)
+			}
+			rawComments = entries
+			repairedChars = escaped
 		}
 	}
 	if len(rawComments) == 0 {
 		raw, _ := json.Marshal(args)
-		return nil, fmt.Sprintf("Error: 'comments' array is required. Got args: %s", string(raw))
+		return nil, 0, fmt.Sprintf("Error: 'comments' array is required. Got args: %s", string(raw))
 	}
 
 	var comments []model.LlmComment
@@ -136,7 +155,7 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 
 		comments = append(comments, cm)
 	}
-	return comments, ""
+	return comments, repairedChars, ""
 }
 
 func normalizeCodeCommentCategory(category string) string {

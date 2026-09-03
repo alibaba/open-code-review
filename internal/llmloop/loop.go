@@ -610,7 +610,16 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		telemetry.PrintToolCallStarted(t.Name(), args)
 		_, toolSpan := telemetry.StartToolSpan(ctx, t.Name())
 
-		comments, errMsg := tool.ParseCommentsWithPath(args, newPath)
+		comments, repairedChars, errMsg := tool.ParseCommentsWithPath(args, newPath)
+		if repairedChars > 0 {
+			// The batch survived only because the deterministic repair ran. The
+			// model sees a plain success, so this warning is the sole record
+			// that a schema violation happened at all — without it the repair
+			// would silently absorb an unbounded number of them.
+			r.RecordWarning("comment_args_repaired", newPath, fmt.Sprintf(
+				"comments arrived as a serialized string instead of an array; "+
+					"repaired %d unescaped character(s)", repairedChars))
+		}
 		if errMsg != "" {
 			dur := time.Since(startTime)
 			toolErr := fmt.Errorf("%s", errMsg)

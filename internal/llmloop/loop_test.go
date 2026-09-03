@@ -865,3 +865,79 @@ func TestMainLoopStopUnknownValue(t *testing.T) {
 		t.Error("an unrecognized stop reuses the StopNone catch-all; the collapsed message is back")
 	}
 }
+
+// TestExecuteToolCall_CodeCommentRepairedArgsWarns covers the caller half of the
+// deterministic repair: the model gets a plain success, so the run warning is
+// the only record that its `comments` violated the array schema. Without it the
+// repair would absorb an unbounded number of violations unobserved.
+func TestExecuteToolCall_CodeCommentRepairedArgsWarns(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	r := NewRunner(Deps{Tools: reg, CommentCollector: collector})
+
+	// `comments` serialized into a string, with a prose quote left unescaped —
+	// the observed failure shape.
+	serialized := `[{"content":"the name suggests "a trusted proxy exists" here","existing_code":"foo","path":"Auth.java"}]`
+	argsJSON, err := json.Marshal(map[string]any{"comments": serialized})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cp := r.executeToolCall(context.Background(), "Auth.java", llm.ToolCall{
+		Function: llm.FunctionCall{Name: "code_comment", Arguments: string(argsJSON)},
+	}, nil, "")
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("result = %+v, want the batch recovered", cp)
+	}
+
+	comments := collector.Comments()
+	if len(comments) != 1 {
+		t.Fatalf("collected %d comments, want 1", len(comments))
+	}
+	if !strings.Contains(comments[0].Content, `"a trusted proxy exists"`) {
+		t.Errorf("quoted term lost: %q", comments[0].Content)
+	}
+
+	warnings := r.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %+v, want exactly one", warnings)
+	}
+	if warnings[0].Type != "comment_args_repaired" || warnings[0].File != "Auth.java" {
+		t.Errorf("warning = %+v, want comment_args_repaired on Auth.java", warnings[0])
+	}
+	if !strings.Contains(warnings[0].Message, "serialized string") {
+		t.Errorf("warning message = %q", warnings[0].Message)
+	}
+}
+
+// TestExecuteToolCall_CodeCommentWellFormedArgsDoesNotWarn is the contrast that
+// keeps the test above honest: a schema-conformant batch must produce no
+// warning, so comment_args_repaired counts real violations only.
+func TestExecuteToolCall_CodeCommentWellFormedArgsDoesNotWarn(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	r := NewRunner(Deps{Tools: reg, CommentCollector: collector})
+
+	argsJSON, err := json.Marshal(map[string]any{"comments": []any{
+		map[string]any{"content": "issue", "existing_code": "foo", "path": "a.go"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cp := r.executeToolCall(context.Background(), "a.go", llm.ToolCall{
+		Function: llm.FunctionCall{Name: "code_comment", Arguments: string(argsJSON)},
+	}, nil, "")
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("result = %+v", cp)
+	}
+	if w := r.Warnings(); len(w) != 0 {
+		t.Errorf("warnings = %+v, want none", w)
+	}
+}
