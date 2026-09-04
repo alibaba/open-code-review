@@ -913,6 +913,55 @@ func TestExecuteToolCall_CodeCommentRepairedArgsWarns(t *testing.T) {
 	}
 }
 
+// TestExecuteToolCall_CodeCommentSuspectRepairWarnsWithField covers the case the
+// count alone cannot express: the repair held up structurally but may have cut a
+// value short. The model still sees a plain success, so unless the warning names
+// the suspect field a truncated recovery is indistinguishable from a clean one in
+// every output format — stderr, JSON and SARIF all carry only this message.
+func TestExecuteToolCall_CodeCommentSuspectRepairWarnsWithField(t *testing.T) {
+	collector := tool.NewCommentCollector()
+	reg := tool.NewRegistry()
+	reg.Register(&tool.CodeCommentProvider{Collector: collector})
+	reg.Freeze()
+
+	r := NewRunner(Deps{Tools: reg, CommentCollector: collector})
+
+	// The suggestion's closing quote is missing, so the repair reads the comma
+	// after it as a terminator.
+	serialized := `[{"content":"use a literal","suggestion_code":"x = "y","existing_code":"z","path":"a.go"}]`
+	argsJSON, err := json.Marshal(map[string]any{"comments": serialized})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cp := r.executeToolCall(context.Background(), "a.go", llm.ToolCall{
+		Function: llm.FunctionCall{Name: "code_comment", Arguments: string(argsJSON)},
+	}, nil, "")
+	if cp.Data != tool.CommentSucceed {
+		t.Fatalf("result = %+v, want the batch recovered", cp)
+	}
+
+	comments := collector.Comments()
+	if len(comments) != 1 {
+		t.Fatalf("collected %d comments, want 1", len(comments))
+	}
+	// The finding survives; only the unsafe fix hint is gone.
+	if comments[0].SuggestionCode != "" {
+		t.Errorf("suggestion_code = %q, want it withheld from every auto-apply path",
+			comments[0].SuggestionCode)
+	}
+
+	warnings := r.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %+v, want exactly one", warnings)
+	}
+	for _, want := range []string{"suggestion_code may be truncated", "withheld 1 suggestion_code"} {
+		if !strings.Contains(warnings[0].Message, want) {
+			t.Errorf("warning %q does not report %q", warnings[0].Message, want)
+		}
+	}
+}
+
 // TestExecuteToolCall_CodeCommentWellFormedArgsDoesNotWarn is the contrast that
 // keeps the test above honest: a schema-conformant batch must produce no
 // warning, so comment_args_repaired counts real violations only.

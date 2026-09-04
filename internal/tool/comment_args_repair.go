@@ -5,6 +5,7 @@ package tool
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -237,23 +238,168 @@ func repairedCommentsAcceptable(entries []any, original string) bool {
 	return len(entries) >= len(contentFieldPattern.FindAllStringIndex(original, -1))
 }
 
+const (
+	suggestionCodeField = "suggestion_code"
+	pathField           = "path"
+)
+
+// commentTextFields are the string-valued fields worth checking for truncation.
+// The order is fixed so the warning text never depends on map iteration order.
+//
+// thinking is deliberately absent even though knownCommentFields accepts it and
+// parseCommentsInner copies it through. That set answers whether a field is
+// legal; this one answers whether its truncation needs acting on, and the two
+// questions have different answers here. A truncated thinking costs nothing —
+// it reaches the JSON output only, with no terminal or viewer rendering — while
+// suspecting it would drop a perfectly good suggestion_code from the same entry,
+// since the drop is per-entry. Checking it would trade a real fix hint for a
+// diagnostic string's last few characters.
+var commentTextFields = []string{"content", "existing_code", suggestionCodeField, pathField}
+
+// hasOddQuotes reports whether v carries an odd number of double quotes, which
+// is the signature of a value cut short at a misjudged terminator.
+//
+// The argument is structural, not statistical. A terminator is only ever
+// misjudged at a quote followed by ',' '}' ']' or ':' — and in prose only a
+// *closing* quote is followed by punctuation, since an opening quote is followed
+// by the term itself. Prose quotes a term with a pair, so the closing quote is
+// the even-numbered one and a value cut there keeps an odd number of quotes. A
+// value the repair read correctly keeps whole pairs, hence an even number.
+//
+// The parity holds for prose, which is where the reported failures live. A code
+// snippet can legitimately carry an odd number of quotes, so such a value is
+// flagged with nothing lost. That false positive costs one warning plus, for
+// suggestion_code, a fix suggestion the model can restate — never a change to
+// the comment itself.
+func hasOddQuotes(v string) bool {
+	return strings.Count(v, `"`)%2 == 1
+}
+
+// flagSuspectTruncations reports the fields of a repaired batch that a misjudged
+// terminator may have cut short, and withholds the two whose truncation has a
+// consequence past being hard to read.
+//
+// suggestion_code is dropped whenever *any* field of the same entry is suspect,
+// not only when it is suspect itself. It is the value a consumer can apply — both
+// the SARIF `fixes` array and the GitHub ```suggestion block gate on it being
+// non-empty — and the deleted region it replaces comes from StartLine/EndLine,
+// which are derived from existing_code. So a truncated existing_code is just as
+// dangerous as a truncated suggestion: matchConsecutive compares whole lines, so
+// the cut anchor cannot match anything and every deterministic resolver declines;
+// the LLM re-location that follows then guesses from a mutilated excerpt and
+// writes line numbers anyway, which is the failure resolver.go describes as
+// "looking located while pointing at an unrelated line". A fix built on those
+// numbers deletes the wrong region. Dropping the suggestion closes that path for
+// the whole entry and costs only a hint the model can restate.
+//
+// A suspect path is deleted so parseCommentsInner falls back to defaultPath — the
+// file under review, which is where the comment came from. A truncated path is
+// non-empty, so without this it would suppress that fallback and travel into the
+// SARIF artifactLocation URI and the fingerprint while naming a file that does
+// not exist. When defaultPath is empty too the comment is dropped downstream,
+// which is the right outcome: a comment whose path is corrupt cannot be placed.
+//
+// content and existing_code are reported and left intact. Prose cut short is
+// still worth reading, and existing_code is the anchor every resolver needs —
+// removing it would lose the position outright rather than protect it.
+func flagSuspectTruncations(entries []any) (suspects []string, droppedSuggestions, droppedPaths int) {
+	suspect := make(map[string]bool, len(commentTextFields))
+	for _, raw := range entries {
+		obj, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		entrySuspect := false
+		for _, field := range commentTextFields {
+			v, ok := obj[field].(string)
+			if !ok || !hasOddQuotes(v) {
+				continue
+			}
+			suspect[field] = true
+			entrySuspect = true
+			if field == pathField {
+				delete(obj, pathField)
+				droppedPaths++
+			}
+		}
+		if !entrySuspect {
+			continue
+		}
+		if _, ok := obj[suggestionCodeField].(string); ok {
+			delete(obj, suggestionCodeField)
+			droppedSuggestions++
+		}
+	}
+	for _, field := range commentTextFields {
+		if suspect[field] {
+			suspects = append(suspects, field)
+		}
+	}
+	return suspects, droppedSuggestions, droppedPaths
+}
+
+// CommentRepair records what the deterministic repair did to a serialized
+// `comments` argument. Callers report it so a schema violation the framework
+// papers over still leaves a trace; a nil value means no repair ran.
+type CommentRepair struct {
+	// EscapedChars counts the characters the repair escaped.
+	EscapedChars int
+	// SuspectFields names the fields whose repaired value carries an odd number
+	// of quotes — see hasOddQuotes. Without this the warning could not tell a
+	// clean recovery from a truncated one, and the truncation would be
+	// unobservable in every output format.
+	SuspectFields []string
+	// DroppedSuggestions counts the suggestion_code values withheld because
+	// something in their entry was suspect.
+	DroppedSuggestions int
+	// DroppedPaths counts the suspect path values replaced by the file under
+	// review.
+	DroppedPaths int
+}
+
+// Message renders the repair as a single warning line.
+func (r *CommentRepair) Message() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "comments arrived as a serialized string instead of an array; "+
+		"repaired %d unescaped character(s)", r.EscapedChars)
+	if len(r.SuspectFields) > 0 {
+		fmt.Fprintf(&b, "; %s may be truncated at a misjudged string terminator",
+			strings.Join(r.SuspectFields, ", "))
+	}
+	if r.DroppedSuggestions > 0 {
+		fmt.Fprintf(&b, "; withheld %d suggestion_code value(s) so no auto-apply "+
+			"consumer can offer them", r.DroppedSuggestions)
+	}
+	if r.DroppedPaths > 0 {
+		fmt.Fprintf(&b, "; %d suspect path(s) fell back to the file under review",
+			r.DroppedPaths)
+	}
+	return b.String()
+}
+
 // parseRepairedComments attempts the deterministic repair of a serialized
-// `comments` string and returns the recovered entries plus the number of
-// characters escaped. It returns (nil, 0) when the text needed no repair, the
+// `comments` string and returns the recovered entries plus a description of what
+// the repair did. It returns (nil, nil) when the text needed no repair, the
 // repair still did not parse, or the result failed the preservation check — in
 // every one of those cases the caller must keep reporting the original parse
 // error.
-func parseRepairedComments(s string) ([]any, int) {
+func parseRepairedComments(s string) ([]any, *CommentRepair) {
 	repaired, escaped := repairSerializedComments(s)
 	if escaped == 0 {
-		return nil, 0
+		return nil, nil
 	}
 	var entries []any
 	if err := json.Unmarshal([]byte(repaired), &entries); err != nil {
-		return nil, 0
+		return nil, nil
 	}
 	if !repairedCommentsAcceptable(entries, s) {
-		return nil, 0
+		return nil, nil
 	}
-	return entries, escaped
+	suspects, droppedSuggestions, droppedPaths := flagSuspectTruncations(entries)
+	return entries, &CommentRepair{
+		EscapedChars:       escaped,
+		SuspectFields:      suspects,
+		DroppedSuggestions: droppedSuggestions,
+		DroppedPaths:       droppedPaths,
+	}
 }
