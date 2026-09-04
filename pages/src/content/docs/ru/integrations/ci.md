@@ -104,6 +104,39 @@ curl -o .github/workflows/ocr-review.yml \
 > которые не поддерживают это поле. Удалите строку, если вашему провайдеру
 > требуется включённый режим мышления.
 
+### Параметры action
+
+Исходный workflow делегирует ревью переиспользуемому составному action
+([`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml))
+через `uses: alibaba/open-code-review@main`. Помимо учётных данных выше,
+эти входные параметры настраивают само ревью — передавайте их в `with:` шага
+action:
+
+| Параметр | По умолчанию | Описание |
+|---|---|---|
+| `effort` | `''` | Пресет интенсивности ревью, передаваемый в `ocr review --effort`: `low`, `medium` или `high` (без учёта регистра). Пустое значение сохраняет значение CLI по умолчанию (настроенное значение или medium). Требуется OCR v1.10.0 или новее — на более старых версиях action завершается раньше с понятной ошибкой. |
+| `max_tokens_budget` | `''` | Общий лимит токенов (ввод + вывод), передаваемый в `ocr review --max-tokens-budget`. Пустое значение или `'0'` означает «без ограничений». После превышения лимита диспетчеризация останавливается, пропущенные файлы отмечаются как `failed(budget)`, частичные результаты по-прежнему публикуются, а ревью завершается с кодом 0. |
+| `llm_reasoning_effort` | `''` | Глубина рассуждений для моделей с управляемым полем запроса `reasoning_effort` (например, GLM-5.x, reasoning-модели OpenAI): `minimal`, `low`, `medium`, `high`, `max` (без учёта регистра). Значение вливается в тело запроса через `llm_extra_body`, поэтому работает со всеми опубликованными версиями CLI; явный ключ `reasoning_effort` в `llm_extra_body` имеет приоритет над этим параметром. Пустое значение (по умолчанию) ничего не отправляет. Только для OpenAI-совместимых протоколов — Anthropic API отклоняет неизвестные поля тела, поэтому на протоколе Anthropic action завершается сразу; управляйте режимом мышления Anthropic через явный ключ в `llm_extra_body`. |
+| `stream_progress` | `'false'` | Значение `'true'` транслирует живые строки прогресса `[ocr]` в лог workflow (human audience в stderr) вместо молчания до конца запуска. Влияет только на отображение: stderr по-прежнему записывается в файл для артефактов и публикации комментариев. |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+    effort: high
+    max_tokens_budget: '10000000'
+    llm_reasoning_effort: low
+    stream_progress: 'true'
+```
+
+Полный список параметров см. в
+[`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml) —
+включая режимы публикации (`sticky_summary`, `incremental`), маршрутизацию по
+важности/категориям и чекпоинты между пушами.
+
 ### Настройка
 
 Все следующие изменения вносятся в только что скопированный файл workflow

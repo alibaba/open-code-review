@@ -45,9 +45,11 @@ inputs:
       Reasoning depth for the model (one of: minimal, low, medium, high, max;
       case-insensitive), merged into the request body as reasoning_effort via
       llm.extra_body — no CLI support beyond the published versions is needed.
-      Works for OpenAI-compatible protocols (e.g. GLM-5.x, OpenAI reasoning
-      models); Anthropic providers have no equivalent field and ignore it.
-      Empty (default) sends nothing. An explicit reasoning_effort key in
+      OpenAI-compatible protocols only (e.g. GLM-5.x, OpenAI reasoning
+      models); the Anthropic API rejects unknown body fields, so the action
+      fails fast when this is set on the Anthropic protocol — steer Anthropic
+      thinking through an explicit llm_extra_body key instead. Empty
+      (default) sends nothing. An explicit reasoning_effort key in
       llm_extra_body wins over this input.
     required: false
     default: ''

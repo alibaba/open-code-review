@@ -181,7 +181,7 @@ The task and request timeouts are independent:
 
 ### Set reasoning effort
 
-For models with steerable reasoning depth (e.g. GLM-5.x, OpenAI reasoning models), the `llm_reasoning_effort` input is merged into the request body as `reasoning_effort` via the action's existing `llm.extra_body` plumbing — no CLI support beyond the published versions is needed. Anthropic providers have no equivalent field and ignore it. An explicit `reasoning_effort` key inside `llm_extra_body` wins over this input.
+For models with steerable reasoning depth (e.g. GLM-5.x, OpenAI reasoning models), the `llm_reasoning_effort` input is merged into the request body as `reasoning_effort` via the action's existing `llm.extra_body` plumbing — no CLI support beyond the published versions is needed. OpenAI-compatible protocols only: the Anthropic API rejects unknown body fields, so the action fails fast when the input is set there — steer Anthropic thinking through an explicit `llm_extra_body` key instead. An explicit `reasoning_effort` key inside `llm_extra_body` wins over this input.
 
 | Input | Default | Description |
 |-------|---------|-------------|
