@@ -29,30 +29,30 @@ import (
 )
 
 type reviewOptions struct {
-	toolConfigPath  string
-	rulePath        string
-	repoDir         string
-	from            string
-	to              string
-	commit          string
-	resume          string
-	excludes        string
-	outputFormat    string
-	audience        string
-	outputPath      string
-	background      string
-	backgroundFile  string
-	provider        string
-	model           string
-	concurrency     int
-	perFileTimeout  int
-	maxTools        int
-	maxGitProcs     int
-	maxTokens       int
-	maxTokensBudget int
-	effort          string
-	noFilter        bool
-	preview         bool
+	toolConfigPath        string
+	rulePath              string
+	repoDir               string
+	from                  string
+	to                    string
+	commit                string
+	resume                string
+	excludes              string
+	outputFormat          string
+	audience              string
+	outputPath            string
+	background            string
+	backgroundFile        string
+	provider              string
+	model                 string
+	concurrency           int
+	concurrentTaskTimeout int
+	maxTools              int
+	maxGitProcs           int
+	maxTokens             int
+	maxTokensBudget       int
+	effort                string
+	noFilter              bool
+	preview               bool
 }
 
 var reviewOpts reviewOptions
@@ -223,7 +223,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		CommentCollector:      rt.Collector,
 		CommentWorkerPool:     agent.NewCommentWorkerPool(opts.concurrency),
 		MaxConcurrency:        opts.concurrency,
-		ConcurrentTaskTimeout: opts.perFileTimeout,
+		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
 		Provider:              rt.Provider,
 		Background:            opts.background,
@@ -373,8 +373,9 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // It must run before agent.New: agent.New creates the session, and session.New
 // writes session_start immediately, so validating any later would leave an orphan
 // session on disk behind every rejection. It must also run after max-tokens is
-// resolved, because the per-file token ceiling decides which large diffs are
-// dropped and therefore which files the input identity covers.
+// resolved, because agent.filterLargeDiffs measures each file's diff against
+// that ceiling on its own — grouping never enters this decision — and what it
+// drops is what the input identity stops covering.
 //
 // provider and model are explicit exactly when their flag was passed on this
 // command line: both default to the empty string and nothing else can set them,

@@ -25,29 +25,29 @@ import (
 )
 
 type scanOptions struct {
-	toolConfigPath  string
-	rulePath        string
-	repoDir         string
-	paths           string
-	excludes        string
-	outputFormat    string
-	audience        string
-	outputPath      string
-	background      string
-	concurrency     int
-	perFileTimeout  int
-	maxTools        int
-	maxGitProcs     int
-	preview         bool
-	noPlan          bool
-	noDedup         bool
-	noSummary       bool
-	batch           string
-	maxTokens       int
-	maxTokensBudget int
-	provider        string
-	model           string
-	resume          string
+	toolConfigPath        string
+	rulePath              string
+	repoDir               string
+	paths                 string
+	excludes              string
+	outputFormat          string
+	audience              string
+	outputPath            string
+	background            string
+	concurrency           int
+	concurrentTaskTimeout int
+	maxTools              int
+	maxGitProcs           int
+	preview               bool
+	noPlan                bool
+	noDedup               bool
+	noSummary             bool
+	batch                 string
+	maxTokens             int
+	maxTokensBudget       int
+	provider              string
+	model                 string
+	resume                string
 }
 
 var scanOpts scanOptions
@@ -207,7 +207,7 @@ func executeScan(opts scanOptions) (retErr error) {
 		CommentCollector:      rt.Collector,
 		CommentWorkerPool:     llmloop.NewCommentWorkerPool(opts.concurrency),
 		MaxConcurrency:        opts.concurrency,
-		ConcurrentTaskTimeout: opts.perFileTimeout,
+		ConcurrentTaskTimeout: opts.concurrentTaskTimeout,
 		Model:                 rt.Model,
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,

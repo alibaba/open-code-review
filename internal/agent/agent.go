@@ -101,7 +101,7 @@ type Args struct {
 	// executeToolCall instead of via a separate worker pool.
 	CommentWorkerPool *CommentWorkerPool
 
-	// Concurrency limit for per-file subtasks. MaxConcurrency <= 0 defaults to 8.
+	// Concurrency limit for per-group subtasks. MaxConcurrency <= 0 defaults to 8.
 	MaxConcurrency int
 
 	// Concurrent task timeout in minutes. 0 means no timeout.
@@ -146,7 +146,7 @@ type Args struct {
 	SealedInput *diff.InputResolution
 
 	// MaxTokensBudget caps the aggregate token usage (input+output) across the
-	// whole run; dispatch stops once the running total + a per-file look-ahead
+	// whole run; dispatch stops once the running total + a per-group look-ahead
 	// would exceed it. 0 = unlimited. Mirrors scan.Args.MaxTokensBudget.
 	MaxTokensBudget int64
 
@@ -177,7 +177,7 @@ type RuntimeConfig struct {
 
 // Agent orchestrates the AI-powered code review. LLM tool-use loop / memory
 // compression / token aggregation now live in internal/llmloop.Runner; this
-// struct holds the diff-side state and orchestrates per-file subtasks.
+// struct holds the diff-side state and orchestrates per-group subtasks.
 type Agent struct {
 	args            Args
 	diffs           []model.Diff // parsed diffs
@@ -274,10 +274,10 @@ func (a *Agent) newRequestMeta(filePath string, taskType session.TaskType, reque
 	}
 }
 
-// Run executes the full review pipeline: parse diffs -> plan per file -> LLM tool-loop -> collect comments.
+// Run executes the full review pipeline: parse diffs -> group -> plan per group -> LLM tool-loop -> collect comments.
 func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// Base prompt-cache affinity key for any LLM request in this run that a task doesn't re-scope.
-	// Each task conversation (plan, per-file main loop, compression, ...) refines it with llm.SessionTaskKey where it starts,
+	// Each task conversation (plan, per-group main loop, compression, ...) refines it with llm.SessionTaskKey where it starts,
 	// so affinity keys stay per-conversation, the granularity provider prompt caches actually reuse prefixes at.
 	ctx = llm.ContextWithSessionKey(ctx, a.SessionID())
 
@@ -373,7 +373,7 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	a.session.RecordResumeLineage(session.NewResumeLineage(
 		a.args.Resume, a.session.SessionID, a.args.Provider, a.args.Model))
 
-	// Step 2: Dispatch per-file subtasks concurrently
+	// Step 2: Dispatch per-group subtasks concurrently
 	comments, err := a.dispatchSubtasks(ctx)
 	if len(comments) > 0 {
 		telemetry.RecordCommentsGenerated(ctx, int64(len(comments)))
@@ -586,7 +586,7 @@ func (a *Agent) injectDiffMap() {
 	}
 }
 
-// dispatchSubtasks runs the Plan + Main phases for each changed file concurrently.
+// dispatchSubtasks runs the Plan + Main phases for each file group concurrently.
 func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error) {
 	startTime := time.Now()
 	defer func() {
@@ -1161,7 +1161,7 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 // safe, generic reason. It never returns the raw error text (which may embed a
 // provider payload, credentials or absolute paths); the full error is persisted
 // separately in the session checkpoint. Context deadline/cancel are recognized
-// via errors.Is (the per-file timeout is the only deadline in play), and the
+// via errors.Is (the per-group subtask timeout is the only deadline in play), and the
 // empty-template precondition is a configuration failure.
 func classifyItemError(err error) (session.FailureClass, string) {
 	switch {
@@ -2154,7 +2154,7 @@ func orderedToolParameters(raw json.RawMessage) ([]orderedToolParameter, bool) {
 }
 
 // allDiffs exposes the reviewed diff set for cross-file comment re-filing.
-// It is read-only and safe to call from the per-file subtask goroutines: every
+// It is read-only and safe to call from the per-group subtask goroutines: every
 // mutation of a.diffs (filterDiffs, filterLargeDiffs) completes before dispatch
 // begins, so the slice is stable for the rest of the run.
 func (a *Agent) allDiffs() []model.Diff {

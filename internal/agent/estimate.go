@@ -50,8 +50,8 @@ type Estimate struct {
 // but counts tokens of the diff text (d.Diff) rather than whole-file content,
 // since the diff path reviews patches, not full files. Returns 0 for deleted
 // files (they are skipped before dispatch and must not trip the gate). Used
-// both by the aggregate estimate (estimateDiffCost) and by the per-file budget
-// look-ahead in dispatchSubtasks.
+// both by the aggregate estimate (estimateDiffCost) and by the per-group budget
+// look-ahead in dispatchSubtasks, which sums this over a group's diffs.
 func estimateDiffFileTokens(d model.Diff) int64 {
 	if d.IsDeleted || d.Diff == "" {
 		return 0
