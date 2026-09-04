@@ -751,7 +751,7 @@ function testStreamProgressInputDefaultsToFalse() {
 function testValidateInputsValidatesStreamProgress() {
   const validation = validationStep();
   assert.ok(validation, "action.yml must retain input validation");
-  for (const value of ["yes", "1", "", "on"]) {
+  for (const value of ["yes", "1", "on"]) {
     const fixture = makeFixture();
     try {
       const result = runStep(validation, inputValues({ stream_progress: value }), fixture);
@@ -769,14 +769,24 @@ function testValidateInputsValidatesStreamProgress() {
       removeFixture(fixture);
     }
   }
-  const fixture = makeFixture();
-  try {
-    const result = runStep(validation, inputValues({ stream_progress: "TRUE" }), fixture);
-    assert.strictEqual(result.status, 0, `stream_progress=TRUE should be accepted; ${resultDescription(result)}`);
-    const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
-    assert.strictEqual(exported.STREAM_PROGRESS, "true", "validation must export lowercase stream_progress");
-  } finally {
-    removeFixture(fixture);
+  const acceptance = [
+    ["TRUE", "true"],
+    ["", "false"],
+  ];
+  for (const [value, expected] of acceptance) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues({ stream_progress: value }), fixture);
+      assert.strictEqual(result.status, 0, `stream_progress=${JSON.stringify(value)} should be accepted; ${resultDescription(result)}`);
+      const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+      assert.strictEqual(
+        exported.STREAM_PROGRESS,
+        expected,
+        `validation must export ${JSON.stringify(expected)} for stream_progress=${JSON.stringify(value)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
   }
 }
 
@@ -955,6 +965,36 @@ function testConfigureRejectsMalformedExtraBodyWithActionableError() {
     );
   } finally {
     removeFixture(fixture);
+  }
+}
+
+function testConfigureRejectsNonObjectExtraBody() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  for (const extraBody of ["null", "[]", "5", '"text"']) {
+    const fixture = makeFixture();
+    try {
+      const values = inputValues({
+        llm_url: "https://llm.example.invalid/v1",
+        llm_model: "contract-model",
+        llm_use_anthropic: "false",
+        llm_auth_token: "unused-token",
+        llm_extra_body: extraBody,
+      });
+      const result = runStep(configure, values, fixture, { LLM_REASONING_EFFORT: "low" });
+      assert.notStrictEqual(
+        result.status,
+        0,
+        `Configure OCR must fail on non-object llm_extra_body=${extraBody}; ${resultDescription(result)}`
+      );
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        /::error::llm_extra_body must be a JSON object/,
+        `the failure must name the llm_extra_body input for ${extraBody}; ${resultDescription(result)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
   }
 }
 
@@ -1277,6 +1317,39 @@ function testOfficialNpmPackageInstallIsPreserved() {
   }
 }
 
+function testInstallRejectsStreamProgressBelowV198() {
+  const install = installStep();
+  assert.ok(install, "action.yml must retain the Install OpenCodeReview step");
+  const cases = [
+    { output: "open-code-review 1.9.7 linux/amd64", streamProgress: "true", valid: false },
+    { output: "open-code-review 1.9.8 linux/amd64", streamProgress: "true", valid: true },
+    { output: "open-code-review v1.10.0 linux/amd64", streamProgress: "true", valid: true },
+    { output: "open-code-review 1.9.7 linux/amd64", streamProgress: "false", valid: true },
+  ];
+  for (const testCase of cases) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(install, inputValues({ ocr_version: "contract-test" }), fixture, {
+        OCR_FAKE_VERSION_OUTPUT: testCase.output,
+        STREAM_PROGRESS: testCase.streamProgress,
+      });
+      const message = `version ${JSON.stringify(testCase.output)} with stream_progress=${JSON.stringify(testCase.streamProgress)}; ${resultDescription(result)}`;
+      if (testCase.valid) {
+        assert.strictEqual(result.status, 0, `should pass: ${message}`);
+      } else {
+        assert.notStrictEqual(result.status, 0, `should fail: ${message}`);
+        assert.match(
+          `${result.stdout}\n${result.stderr}`,
+          /::error::The stream_progress input requires OpenCodeReview v1\.9\.8 or newer/,
+          `the failure must name the stream_progress input and the version floor; ${message}`
+        );
+      }
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
 function testInstallRejectsEffortBelowV1100() {
   const install = installStep();
   assert.ok(install, "action.yml must retain the Install OpenCodeReview step");
@@ -1537,6 +1610,7 @@ const TESTS = [
   ["Configure OCR merges reasoning_effort into extra_body", testConfigureMergesReasoningEffortIntoExtraBody],
   ["Configure OCR rejects reasoning_effort on the anthropic protocol", testConfigureRejectsReasoningEffortOnAnthropic],
   ["Configure OCR rejects malformed extra_body with an actionable error", testConfigureRejectsMalformedExtraBodyWithActionableError],
+  ["Configure OCR rejects a non-object extra_body", testConfigureRejectsNonObjectExtraBody],
   ["Configure OCR builds a complete llm config", testConfigureBuildsCompleteLlmConfig],
   ["Configure OCR never persists the token", testConfigureNeverPersistsToken],
   ["Configure OCR neutralizes stale provider and static token", testConfigureNeutralizesStaleProviderAndStaticToken],
@@ -1549,6 +1623,7 @@ const TESTS = [
   ["the official OpenCodeReview NPM install is preserved", testOfficialNpmPackageInstallIsPreserved],
   ["Install OpenCodeReview enforces the auth_token_cmd version floor", testInstallEnforcesAuthTokenCommandVersionFloor],
   ["Install OpenCodeReview rejects the effort input below v1.10.0", testInstallRejectsEffortBelowV1100],
+  ["Install OpenCodeReview rejects stream_progress below v1.9.8", testInstallRejectsStreamProgressBelowV198],
   ["contract harness fails closed on unsupported YAML shapes", testContractHarnessFailsClosedOnUnsupportedYamlShapes],
   ["required action steps and env contracts are present", testRequiredStepTopologyAndEnvironmentContracts],
   ["GitHub Actions contracts run in a dedicated workflow", testContractsRunInDedicatedWorkflow],

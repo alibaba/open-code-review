@@ -88,7 +88,7 @@ inputs:
     description: >-
       Review effort preset passed to `ocr review --effort`. One of: low,
       medium, high (case-insensitive). Empty keeps the CLI default (the
-      configured value, or medium).
+      configured value, or medium). Requires OpenCodeReview v1.10.0 or newer.
     required: false
     default: ''
   max_tokens_budget:
@@ -103,8 +103,9 @@ inputs:
     description: >-
       Stream live [ocr] review progress to the workflow log (human audience
       on stderr) instead of staying silent until the run finishes. One of:
-      true, false (case-insensitive). false (default) keeps the silent
-      agent-audience run with stderr captured to a log file.
+      true, false (case-insensitive); empty falls back to false. false
+      (default) keeps the silent agent-audience run with stderr captured to
+      a log file. Requires OpenCodeReview v1.9.8 or newer when enabled.
     required: false
     default: 'false'
   upload_artifacts:
@@ -434,6 +435,7 @@ runs:
         # checkpoint config fingerprint.
         NORMALIZED_STREAM_PROGRESS="$(printf '%s' "$STREAM_PROGRESS_INPUT" | tr '[:upper:]' '[:lower:]')"
         case "$NORMALIZED_STREAM_PROGRESS" in
+          "") NORMALIZED_STREAM_PROGRESS=false ;;
           true|false) ;;
           *)
             echo "::error::stream_progress must be one of: true, false (got '$STREAM_PROGRESS_INPUT')"
@@ -476,6 +478,16 @@ runs:
         if [ -n "${EFFORT:-}" ] &&
           (( OCR_VERSION_MAJOR < 1 || (OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR < 10) )); then
           echo "::error::The effort input requires OpenCodeReview v1.10.0 or newer"
+          exit 1
+        fi
+
+        # Human-audience progress only moved to stderr in v1.9.8 (66d71b2); on
+        # older releases stream_progress drops --audience agent and progress
+        # lines interleave into the stdout JSON, corrupting the result file.
+        if [ "${STREAM_PROGRESS:-false}" = "true" ] &&
+          (( OCR_VERSION_MAJOR < 1 || (OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR < 9) ||
+             (OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR == 9 && OCR_VERSION_PATCH < 8) )); then
+          echo "::error::The stream_progress input requires OpenCodeReview v1.9.8 or newer"
           exit 1
         fi
 
@@ -546,6 +558,10 @@ runs:
                 // stderr escapes the command substitution, so the workflow
                 // command reaches the log; the non-zero exit fails the step.
                 console.error(`::error::llm_extra_body is not valid JSON: ${error.message}`);
+                process.exit(1);
+              }
+              if (body === null || typeof body !== "object" || Array.isArray(body)) {
+                console.error("::error::llm_extra_body must be a JSON object");
                 process.exit(1);
               }
               if (body.reasoning_effort === undefined) body.reasoning_effort = process.env.LLM_REASONING_EFFORT;
