@@ -79,14 +79,8 @@ type resumeRecord struct {
 
 // SessionFilePath returns the JSONL path for a persisted session.
 func SessionFilePath(repoDir, sessionID string) (string, error) {
-	if sessionID == "" {
-		return "", fmt.Errorf("session id is required")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve home dir: %w", err)
-	}
-	return filepath.Join(home, ".opencodereview", sessionSubDir, encodeRepoPath(repoDir), sessionID+".jsonl"), nil
+	current, _, err := sessionFileCandidates(repoDir, sessionID)
+	return current, err
 }
 
 // LoadResumeState replays a previous session JSONL into a fingerprint index. A
@@ -109,7 +103,7 @@ func LoadReviewResumeState(repoDir, sessionID string) (*ResumeState, error) {
 }
 
 func loadResumeState(repoDir, sessionID string, skipUnparseable bool) (*ResumeState, error) {
-	path, err := SessionFilePath(repoDir, sessionID)
+	path, err := findSessionFile(repoDir, sessionID)
 	if err != nil {
 		return nil, err
 	}

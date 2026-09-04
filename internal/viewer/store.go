@@ -37,7 +37,10 @@ type RepoInfo struct {
 	LastModified time.Time
 }
 
-// DiscoverRepos walks the sessions root and returns one entry per subdirectory.
+// DiscoverRepos walks the sessions root and returns one entry per repository.
+// Legacy session directories may contain records for multiple repositories
+// because their path encoding was not collision-resistant; those records are
+// split by the cwd recorded in each session_start event.
 func DiscoverRepos(root string) ([]RepoInfo, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -47,30 +50,46 @@ func DiscoverRepos(root string) ([]RepoInfo, error) {
 		return nil, fmt.Errorf("read sessions dir: %w", err)
 	}
 
-	var repos []RepoInfo
+	repoGroups := make(map[string]*RepoInfo)
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		repoDir := filepath.Join(root, e.Name())
-		info := RepoInfo{EncodedPath: e.Name()}
-
 		subEntries, err := os.ReadDir(repoDir)
 		if err != nil {
 			continue
 		}
 		for _, se := range subEntries {
-			if strings.HasSuffix(se.Name(), ".jsonl") {
-				info.SessionCount++
-				if fi, err := se.Info(); err == nil {
-					if fi.ModTime().After(info.LastModified) {
-						info.LastModified = fi.ModTime()
-					}
+			if se.IsDir() || !strings.HasSuffix(se.Name(), ".jsonl") {
+				continue
+			}
+			key := e.Name()
+			if !isVersionedRepoKey(key) {
+				cwd, readErr := readSessionCWD(filepath.Join(repoDir, se.Name()))
+				if readErr != nil {
+					continue
+				}
+				if cwd != "" {
+					key = session.RepoSessionKey(cwd)
 				}
 			}
+			info := repoGroups[key]
+			if info == nil {
+				info = &RepoInfo{EncodedPath: key}
+				repoGroups[key] = info
+			}
+			info.SessionCount++
+			if fi, statErr := se.Info(); statErr == nil && fi.ModTime().After(info.LastModified) {
+				info.LastModified = fi.ModTime()
+			}
 		}
+	}
+
+	var repos []RepoInfo
+	for _, info := range repoGroups {
 		if info.SessionCount > 0 {
-			repos = append(repos, info)
+			repos = append(repos, *info)
 		}
 	}
 
@@ -112,6 +131,12 @@ func ListSessions(root, encodedRepo string) ([]SessionSummary, error) {
 	repoDir := filepath.Join(root, encodedRepo)
 	entries, err := os.ReadDir(repoDir)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read repo dir: %w", err)
+		}
+		if isVersionedRepoKey(encodedRepo) {
+			return listLegacySessions(root, encodedRepo)
+		}
 		return nil, fmt.Errorf("read repo dir: %w", err)
 	}
 
@@ -129,6 +154,88 @@ func ListSessions(root, encodedRepo string) ([]SessionSummary, error) {
 		summaries = append(summaries, s)
 	}
 
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].Timestamp.After(summaries[j].Timestamp)
+	})
+	if isVersionedRepoKey(encodedRepo) {
+		legacy, legacyErr := listLegacySessions(root, encodedRepo)
+		if legacyErr != nil {
+			return nil, legacyErr
+		}
+		summaries = append(summaries, legacy...)
+		sort.Slice(summaries, func(i, j int) bool {
+			return summaries[i].Timestamp.After(summaries[j].Timestamp)
+		})
+	}
+	return summaries, nil
+}
+
+func isVersionedRepoKey(encodedRepo string) bool {
+	return session.IsRepoSessionKey(encodedRepo)
+}
+
+// readSessionCWD reads only through the session_start record. Repository
+// discovery and legacy lookup need the owning repository, not the potentially
+// large request and response records that follow it.
+func readSessionCWD(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		var rec struct {
+			Type string `json:"type"`
+			CWD  string `json:"cwd"`
+		}
+		if json.Unmarshal(line, &rec) == nil && rec.Type == "session_start" {
+			return rec.CWD, nil
+		}
+		if readErr == io.EOF {
+			return "", nil
+		}
+		if readErr != nil {
+			return "", readErr
+		}
+	}
+}
+
+func listLegacySessions(root, encodedRepo string) ([]SessionSummary, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, fmt.Errorf("read sessions root: %w", err)
+	}
+	var summaries []SessionSummary
+	for _, dirEntry := range entries {
+		if !dirEntry.IsDir() {
+			continue
+		}
+		// Current-format directories are already read directly. Scanning them
+		// here would duplicate their sessions in the legacy compatibility pass.
+		if isVersionedRepoKey(dirEntry.Name()) {
+			continue
+		}
+		dir := filepath.Join(root, dirEntry.Name())
+		files, readErr := os.ReadDir(dir)
+		if readErr != nil {
+			continue
+		}
+		for _, fileEntry := range files {
+			if fileEntry.IsDir() || !strings.HasSuffix(fileEntry.Name(), ".jsonl") {
+				continue
+			}
+			path := filepath.Join(dir, fileEntry.Name())
+			summary, peekErr := peekSession(path)
+			if peekErr != nil || summary.CWD == "" || session.RepoSessionKey(summary.CWD) != encodedRepo {
+				continue
+			}
+			summary.SessionID = strings.TrimSuffix(fileEntry.Name(), ".jsonl")
+			summaries = append(summaries, summary)
+		}
+	}
 	sort.Slice(summaries, func(i, j int) bool {
 		return summaries[i].Timestamp.After(summaries[j].Timestamp)
 	})
@@ -323,7 +430,17 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	path := filepath.Join(root, encodedRepo, sessionID+".jsonl")
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open session file: %w", err)
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("open session file: %w", err)
+		}
+		path, err = findLegacySession(root, encodedRepo, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("open session file: %w", err)
+		}
+		f, err = os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("open session file: %w", err)
+		}
 	}
 	defer f.Close()
 
@@ -592,6 +709,31 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	vs.Summary.SessionID = sessionID
 	vs.Summary.CommentCount = len(vs.Comments)
 	return vs, readErr
+}
+
+func findLegacySession(root, encodedRepo, sessionID string) (string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return "", err
+	}
+	name := sessionID + ".jsonl"
+	for _, dirEntry := range entries {
+		if !dirEntry.IsDir() {
+			continue
+		}
+		if isVersionedRepoKey(dirEntry.Name()) {
+			continue
+		}
+		path := filepath.Join(root, dirEntry.Name(), name)
+		if _, statErr := os.Stat(path); statErr != nil {
+			continue
+		}
+		cwd, readErr := readSessionCWD(path)
+		if readErr == nil && cwd != "" && session.RepoSessionKey(cwd) == encodedRepo {
+			return path, nil
+		}
+	}
+	return "", os.ErrNotExist
 }
 
 func applySessionEnd(summary *SessionSummary, rec map[string]any) {
