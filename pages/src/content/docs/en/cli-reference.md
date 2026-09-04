@@ -131,6 +131,8 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
 | `--tools <path>` | — | embedded | Path to a custom JSON tool-config file. Overrides the embedded tool definitions. |
+| `--post-to-pr` | — | `false` | Post review findings to the matching GitHub pull request. Requires range mode (`--from` and `--to`) and a GitHub token. |
+| `--github-token <token>` | — | — | GitHub token for posting pull-request comments. Falls back to the `GITHUB_TOKEN` environment variable when omitted. |
 
 > Mode flags are mutually exclusive: pass either `--from`/`--to`, or
 > `--commit`, or neither (workspace mode). Mixing them is a hard error.
@@ -183,6 +185,55 @@ ocr review --from main --to feature-branch
 OCR computes `merge-base(main, feature-branch)..feature-branch` so you only
 see the diff *introduced by* the feature branch — not unrelated changes
 that landed on `main` since branching.
+
+##### Posting findings to a GitHub pull request
+
+Use `--post-to-pr` to opt in to posting review findings to GitHub. Posting
+requires range mode with both `--from` and `--to`; provide the token with
+`--github-token`, or let the CLI read it from `GITHUB_TOKEN`.
+
+The CLI discovers the unique open pull request whose base branch and reviewed
+head commit match the range. You do not provide a pull-request number. During
+location resolution, OCR records whether each finding came from the old or new
+side of the changed file. At posting time, OCR also builds an inventory of the
+pull-request diff. A finding becomes an inline comment only when its provenance
+is the new side and its entire range is contained in a verified, complete
+right-side diff hunk. Old-side findings, findings without side provenance,
+invalid ranges, and ranges that cannot be verified from a complete patch are
+preserved in the pull-request summary. Overlapping numeric line ranges alone do
+not make a finding ambiguous when its side is known.
+
+Inline comments and summaries are sent in deterministic, retry-safe batches.
+Before every write, OCR checks that the pull request is open, its base branch
+and head still match, and the current base tip produces the exact merge-base
+commit recorded by the completed review. A moving base tip is allowed only
+when that merge-base stays unchanged. Existing inline and fallback sequences
+are resumed without duplicating findings or retrying an inline batch that has
+already fallen back to the summary.
+
+The local review output is produced before GitHub delivery. If any posting
+step fails, OCR keeps that output but exits with a non-zero status so scripts
+and CI cannot mistake the delivery failure for success.
+
+The token must have access to the target repository and permission to read and
+write pull requests. For a fine-grained personal access token or GitHub App,
+grant the repository's **Pull requests: Read and write** permission. For a
+classic personal access token, grant the appropriate `repo` or `public_repo`
+scope. In GitHub Actions, set `pull-requests: write`; repository and fork
+policies can still restrict write access. This permission also covers the issue
+comments used when a finding cannot be posted inline.
+
+For GitHub.com, leave `GITHUB_SERVER_URL` and `GITHUB_API_URL` unset (or use
+`https://github.com` and `https://api.github.com`). For GitHub Enterprise
+Server, set `GITHUB_SERVER_URL` to the HTTPS server URL. The CLI derives
+`https://HOST/api/v3` by default; if `GITHUB_API_URL` is set explicitly, it must
+also use HTTPS and the same host as `GITHUB_SERVER_URL`. The Git remote must use
+that configured server host. Posting stops before sending the token when these
+hosts do not match.
+
+```bash
+GITHUB_TOKEN="$TOKEN" ocr review --from main --to feature-branch --post-to-pr
+```
 
 #### Commit mode
 

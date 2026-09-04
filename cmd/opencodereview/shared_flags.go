@@ -58,6 +58,19 @@ func addConcurrencyFlags(cmd *cobra.Command, concurrency, timeout, maxTools, max
 	cmd.Flags().IntVar(maxTokensBudget, "max-tokens-budget", 0, "cap total token usage (input+output) for this review; dispatch stops once exceeded and skipped files are reported as failed(budget). Partial results are published and review exits 0; it exits non-zero only if every selected item failed (0 = unlimited)")
 }
 
+func addGitHubFlags(cmd *cobra.Command, githubToken *string, postToPR *bool) {
+	cmd.Flags().StringVar(githubToken, "github-token", "", "GitHub token for posting PR comments (uses GITHUB_TOKEN env var if not set)")
+	cmd.Flags().BoolVar(postToPR, "post-to-pr", false, "post review comments to GitHub PR (requires --from/--to and GitHub token)")
+}
+
+// getGitHubToken returns the GitHub token from flag or environment
+func getGitHubToken(flagToken string) string {
+	if flagToken != "" {
+		return flagToken
+	}
+	return os.Getenv("GITHUB_TOKEN")
+}
+
 func addModelFlag(cmd *cobra.Command, target *string) {
 	cmd.Flags().StringVar(target, "model", "", "override LLM model for this run (e.g., claude-opus-4-6)")
 }
@@ -124,6 +137,17 @@ func validateOutputFormat(format string) (string, error) {
 func validateReviewOptions(opts *reviewOptions) error {
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
+	}
+	if opts.postToPR {
+		if opts.from == "" || opts.to == "" || opts.commit != "" {
+			return fmt.Errorf("--post-to-pr requires --from and --to flags for range-based discovery")
+		}
+		if opts.preview {
+			return fmt.Errorf("--post-to-pr cannot be used with --preview")
+		}
+		if getGitHubToken(opts.githubToken) == "" {
+			return fmt.Errorf("--post-to-pr requires a GitHub token from --github-token or GITHUB_TOKEN")
+		}
 	}
 	if opts.preview && opts.resume != "" {
 		return fmt.Errorf("--preview and --resume cannot be used together")
@@ -217,6 +241,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	cmd.RegisterFlagCompletionFunc("effort", completeEnum(template.EffortNames()...))
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
 	addPreviewFlag(cmd, &opts.preview)
+	addGitHubFlags(cmd, &opts.githubToken, &opts.postToPR)
 }
 
 // registerScanFlags registers all scan command flags on cmd, binding to opts.

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -255,6 +256,12 @@ func (sh *SessionHistory) GetOrCreateFileSession(filePath string) *FileSession {
 
 // RecordReviewItemDone persists the file-level checkpoint used by resume.
 func (sh *SessionHistory) RecordReviewItemDone(filePath, oldPath, newPath, fingerprint string, comments []model.LlmComment) {
+	sh.RecordReviewItemDoneWithSides(filePath, oldPath, newPath, fingerprint, comments, nil)
+}
+
+// RecordReviewItemDoneWithSides persists a checkpoint and the location side
+// aligned with each comment.
+func (sh *SessionHistory) RecordReviewItemDoneWithSides(filePath, oldPath, newPath, fingerprint string, comments []model.LlmComment, sides []location.Side) {
 	if sh == nil {
 		return
 	}
@@ -265,12 +272,18 @@ func (sh *SessionHistory) RecordReviewItemDone(filePath, oldPath, newPath, finge
 		sh.GetOrCreateFileSession(filePath)
 	}
 	if p := sh.persist; p != nil {
-		p.WriteReviewItemDone(filePath, oldPath, newPath, fingerprint, comments)
+		p.WriteReviewItemDoneWithSides(filePath, oldPath, newPath, fingerprint, comments, sides)
 	}
 }
 
 // RecordReviewItemReused records that this run reused a checkpoint from another session.
 func (sh *SessionHistory) RecordReviewItemReused(filePath, oldPath, newPath, fingerprint, sourceSessionID string, comments []model.LlmComment) {
+	sh.RecordReviewItemReusedWithSides(filePath, oldPath, newPath, fingerprint, sourceSessionID, comments, nil)
+}
+
+// RecordReviewItemReusedWithSides records a reused checkpoint and carries its
+// persisted location provenance into the new session.
+func (sh *SessionHistory) RecordReviewItemReusedWithSides(filePath, oldPath, newPath, fingerprint, sourceSessionID string, comments []model.LlmComment, sides []location.Side) {
 	if sh == nil {
 		return
 	}
@@ -281,7 +294,7 @@ func (sh *SessionHistory) RecordReviewItemReused(filePath, oldPath, newPath, fin
 		sh.GetOrCreateFileSession(filePath)
 	}
 	if p := sh.persist; p != nil {
-		p.WriteReviewItemReused(filePath, oldPath, newPath, fingerprint, sourceSessionID, comments)
+		p.WriteReviewItemReusedWithSides(filePath, oldPath, newPath, fingerprint, sourceSessionID, comments, sides)
 	}
 }
 

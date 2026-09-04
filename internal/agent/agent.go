@@ -29,6 +29,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/llmloop"
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
@@ -245,6 +246,7 @@ func New(args Args) *Agent {
 		Session:           args.Session,
 		DiffLookup:        a.findDiff,
 		AllDiffs:          a.allDiffs,
+		CommentReviewPath: a.commentReviewPath,
 		// Non-nil only here: the same Runner serves scan, whose requests must
 		// stay out of the retry report. See newRequestMeta.
 		NewRequestMeta: a.newRequestMeta,
@@ -464,6 +466,44 @@ func (a *Agent) FileGroups() []FileGroupInfo {
 	return result
 }
 
+// CommentSides returns source-side provenance aligned with the comments from Run.
+func (a *Agent) CommentSides() []location.Side {
+	if a == nil || a.args.CommentCollector == nil {
+		return nil
+	}
+	return a.args.CommentCollector.Sides()
+}
+
+func (a *Agent) commentReviewPath(runPath string, comment model.LlmComment) string {
+	for _, group := range a.fileGroups {
+		if fileGroupKey(group.Diffs) != runPath || len(group.Diffs) == 0 {
+			continue
+		}
+		if len(group.Diffs) == 1 {
+			return group.Diffs[0].NewPath
+		}
+		for _, d := range group.Diffs {
+			if d.NewPath == comment.Path {
+				return d.NewPath
+			}
+		}
+		paths := make([]string, len(group.Diffs))
+		for i, d := range group.Diffs {
+			paths[i] = d.NewPath
+		}
+		sort.Strings(paths)
+		return paths[0]
+	}
+	return runPath
+}
+
+func locationSideAt(sides []location.Side, index int) location.Side {
+	if index < 0 || index >= len(sides) {
+		return location.SideUnknown
+	}
+	return sides[index]
+}
+
 // TotalTokensUsed returns PromptTokens + CompletionTokens across all LLM calls.
 // For Anthropic, PromptTokens already includes cache read/write tokens.
 func (a *Agent) TotalTokensUsed() int64 { return a.runner.TotalTokensUsed() }
@@ -637,6 +677,9 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	var wg sync.WaitGroup
+	var resultMu sync.Mutex
+	filterReviewItems := make(map[string]struct{})
+	var completedItems []completedReviewItem
 
 	concurrency := a.args.MaxConcurrency
 	if concurrency <= 0 {
@@ -743,6 +786,11 @@ dispatchLoop:
 				a.recordWarning("subtask_error", g.Label, err.Error())
 				return
 			}
+			resultMu.Lock()
+			for _, d := range g.Diffs {
+				filterReviewItems[d.NewPath] = struct{}{}
+			}
+			resultMu.Unlock()
 			if !completed {
 				if stop != nil {
 					// A group that stopped short of task_done may still have produced
@@ -755,9 +803,11 @@ dispatchLoop:
 					var failedCount int64
 					for _, d := range g.Diffs {
 						fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-						if comments := a.args.CommentCollector.CommentsForPath(d.NewPath); len(comments) > 0 {
+						if comments, _ := a.args.CommentCollector.CommentsAndSidesForReviewItem(d.NewPath); len(comments) > 0 {
 							a.markCompleted(d)
-							a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+							resultMu.Lock()
+							completedItems = append(completedItems, completedReviewItem{diff: d, fingerprint: fingerprint})
+							resultMu.Unlock()
 							continue
 						}
 						a.markFailed(d, stop.class, stop.reason)
@@ -782,19 +832,35 @@ dispatchLoop:
 				}
 				return
 			}
+			resultMu.Lock()
 			for _, d := range g.Diffs {
-				fingerprint := reviewItemFingerprint(a.reviewMode(), d)
-				comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
 				a.markCompleted(d)
-				a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
+				completedItems = append(completedItems, completedReviewItem{
+					diff:        d,
+					fingerprint: reviewItemFingerprint(a.reviewMode(), d),
+				})
 			}
+			resultMu.Unlock()
 		}(group)
 	}
 
 	wg.Wait()
-	// All subtasks finished — collect comments from the global collector once.
+	// All main-task subtasks must finish before filtering. A comment can be
+	// re-filed to another diff by an asynchronous worker, so filtering a final
+	// path while producers are still active makes the result depend on goroutine
+	// order. The pool-wide wait is safe here because no further Submit calls can
+	// occur after the subtask join.
 	if a.args.CommentWorkerPool != nil {
 		a.args.CommentWorkerPool.Await()
+	}
+	a.executeReviewFilters(ctx, filterReviewItems, concurrency, timeout)
+
+	// Persist checkpoints only after every final-path filter has completed. Each
+	// checkpoint remains owned by its producing review item, including comments
+	// that were re-filed to a different destination path.
+	for _, item := range completedItems {
+		comments, sides := a.args.CommentCollector.CommentsAndSidesForReviewItem(item.diff.NewPath)
+		a.session.RecordReviewItemDoneWithSides(item.diff.NewPath, item.diff.OldPath, item.diff.NewPath, item.fingerprint, comments, sides)
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		a.recordContextFailure(ctxErr)
@@ -864,10 +930,10 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 			toDispatch = append(toDispatch, d)
 			continue
 		}
-		for _, cm := range item.Comments {
-			a.args.CommentCollector.Add(cm)
+		for i, cm := range item.Comments {
+			a.args.CommentCollector.AddForReviewItem(cm, locationSideAt(item.CommentSides, i), effectivePath(d))
 		}
-		a.session.RecordReviewItemReused(effectivePath(d), d.OldPath, d.NewPath, fingerprint, resume.SessionID, item.Comments)
+		a.session.RecordReviewItemReusedWithSides(effectivePath(d), d.OldPath, d.NewPath, fingerprint, resume.SessionID, item.Comments, item.CommentSides)
 		a.markReused(d)
 		reused++
 	}
@@ -1208,6 +1274,11 @@ type subtaskStop struct {
 	reportAsError bool
 }
 
+type completedReviewItem struct {
+	diff        model.Diff
+	fingerprint string
+}
+
 // registerCoverage freezes the coverage denominator before any reuse or
 // concurrent dispatch: it registers every non-deleted diff as a selected item
 // and seals the set. Deleted files are excluded — they are never dispatched, so
@@ -1316,7 +1387,7 @@ func (a *Agent) checkPromptBudget(ctx context.Context, messages []llm.Message, g
 // groupHasComments reports whether any file in the group has comments.
 func (a *Agent) groupHasComments(g FileGroup) bool {
 	for _, d := range g.Diffs {
-		if len(a.args.CommentCollector.CommentsForPath(d.NewPath)) > 0 {
+		if comments, _ := a.args.CommentCollector.CommentsAndSidesForReviewItem(d.NewPath); len(comments) > 0 {
 			return true
 		}
 	}
@@ -1468,8 +1539,6 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 		if a.args.CommentWorkerPool != nil {
 			a.args.CommentWorkerPool.AwaitKey(groupKey)
 		}
-		a.executeGroupReviewFilter(ctx, g, baseline)
-
 		// Compute newly confirmed comments from this round.
 		var newlyConfirmed []model.LlmComment
 		for _, d := range g.Diffs {
@@ -1887,6 +1956,175 @@ func buildGroupFilterCommentsJSON(comments []model.LlmComment) string {
 		items[i] = filterComment{
 			ID:           fmt.Sprintf("c-%d", i),
 			Path:         cm.Path,
+			Content:      cm.Content,
+			ExistingCode: cm.ExistingCode,
+		}
+	}
+	data, _ := json.Marshal(items)
+	return string(data)
+}
+
+// executeReviewFilter runs the REVIEW_FILTER_TASK to remove comments that are
+// provably incorrect based solely on the diff. Errors are logged and ignored.
+func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath string) {
+	a.executeReviewFilterForReviewItems(ctx, d, newPath, nil)
+}
+
+// executeReviewFilterForReviewItems filters only comments produced by the
+// selected review items. Filtering still groups candidates by their final path,
+// while the ownership scope prevents resumed comments from being reviewed a
+// second time.
+func (a *Agent) executeReviewFilterForReviewItems(ctx context.Context, d model.Diff, newPath string, reviewItems map[string]struct{}) {
+	ctx, span := telemetry.StartSpan(ctx, "review_filter.execute")
+	defer span.End()
+	telemetry.SetAttr(span, "file.path", newPath)
+
+	ft := a.args.Template.ReviewFilterTask
+	if ft == nil || len(ft.Messages) == 0 {
+		return
+	}
+	if a.args.SkipFilter {
+		telemetry.SetAttr(span, "skipped", true)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for %s (--no-filter)\n", newPath)
+		return
+	}
+
+	comments, pathIndices := a.args.CommentCollector.CommentsAndPathIndicesForReviewItems(newPath, reviewItems)
+	if len(comments) == 0 {
+		return
+	}
+	telemetry.SetAttr(span, "comments.before", len(comments))
+
+	commentsJSON := buildFilterCommentsJSON(comments)
+	messages := make([]llm.Message, 0, len(ft.Messages))
+	for _, m := range ft.Messages {
+		content := m.Content
+		content = strings.ReplaceAll(content, "{{path}}", newPath)
+		content = strings.ReplaceAll(content, "{{diff}}", d.Diff)
+		content = strings.ReplaceAll(content, "{{comments}}", commentsJSON)
+		messages = append(messages, llm.NewTextMessage(m.Role, content))
+	}
+
+	fs := a.session.GetOrCreateFileSession(newPath)
+	rec := fs.AppendTaskRecord(session.ReviewFilterTask, messages)
+	ctx = llm.ContextWithSessionKey(ctx,
+		llm.SessionTaskKey(a.session.SessionID, string(session.ReviewFilterTask), newPath))
+	startTime := time.Now()
+	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.ReviewFilterTask, rec.RequestNo))
+
+	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
+	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
+		Model:      a.args.Model,
+		Messages:   messages,
+		Tools:      filterTools,
+		ToolChoice: "required",
+		MaxTokens:  a.args.Template.CompletionTokenLimit(),
+	})
+	duration := time.Since(startTime)
+	if err != nil {
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		rec.SetError(err, duration)
+		fmt.Fprintf(stdout.Writer(), "[ocr] Review filter failed for %s: %v\n", newPath, err)
+		span.SetStatus(codes.Error, err.Error())
+		span.RecordError(err)
+		return
+	}
+	var totalTokens int64
+	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
+	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	rec.SetResponse(resp, duration)
+	a.runner.RecordUsage(resp.Usage)
+
+	indices := parseFilterToolCalls(resp.ToolCalls(), len(comments))
+	if indices == nil {
+		indices = parseFilterResponse(resp.Content(), len(comments))
+	}
+	telemetry.SetAttr(span, "comments.filtered", len(indices))
+	if len(indices) == 0 {
+		telemetry.Event(ctx, "review_filter.completed",
+			attribute.String("file.path", newPath),
+			attribute.Int("total_comments", len(comments)),
+			attribute.Int("removed", 0))
+		return
+	}
+
+	removeIndices := make(map[int]struct{}, len(indices))
+	for index := range indices {
+		removeIndices[pathIndices[index]] = struct{}{}
+	}
+	a.args.CommentCollector.RemoveByPathAndIndices(newPath, removeIndices)
+	telemetry.Event(ctx, "review_filter.completed",
+		attribute.String("file.path", newPath),
+		attribute.Int("total_comments", len(comments)),
+		attribute.Int("removed", len(indices)))
+	fmt.Fprintf(stdout.Writer(), "[ocr] Review filter removed %d comment(s) for %s\n", len(indices), newPath)
+}
+
+// executeReviewFilters runs the post-join filter phase once per final comment
+// path. Filters retain the configured per-file concurrency limit, but no
+// checkpoint can be persisted until the whole phase joins.
+func (a *Agent) executeReviewFilters(ctx context.Context, reviewItems map[string]struct{}, concurrency int, timeout time.Duration) {
+	ft := a.args.Template.ReviewFilterTask
+	if ft == nil || len(ft.Messages) == 0 {
+		return
+	}
+	paths := a.args.CommentCollector.FinalPathsForReviewItems(reviewItems)
+	if len(paths) == 0 {
+		return
+	}
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, concurrency)
+	for _, path := range paths {
+		d := a.findDiff(path)
+		if d == nil {
+			fmt.Fprintf(stdout.Writer(), "[ocr] Review filter skipped for %s: diff not found\n", path)
+			continue
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(path string, d model.Diff) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(stdout.Writer(), "[ocr] Review filter panic for %s: %v\n%s\n", path, r, debug.Stack())
+					telemetry.ErrorEvent(ctx, "review_filter.panic", fmt.Errorf("panic: %v", r),
+						telemetry.AnyToAttr("file.path", path))
+					a.recordWarning("review_filter_error", path, fmt.Sprintf("panic: %v", r))
+				}
+			}()
+
+			filterCtx := ctx
+			var cancel context.CancelFunc
+			if timeout > 0 {
+				filterCtx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+			}
+			a.executeReviewFilterForReviewItems(filterCtx, d, path, reviewItems)
+		}(path, *d)
+	}
+	wg.Wait()
+}
+
+// buildFilterCommentsJSON serializes comments into a JSON array with generated IDs.
+func buildFilterCommentsJSON(comments []model.LlmComment) string {
+	type filterComment struct {
+		ID           string `json:"id"`
+		Content      string `json:"content"`
+		ExistingCode string `json:"existing_code,omitempty"`
+	}
+	items := make([]filterComment, len(comments))
+	for i, cm := range comments {
+		items[i] = filterComment{
+			ID:           fmt.Sprintf("c-%d", i),
 			Content:      cm.Content,
 			ExistingCode: cm.ExistingCode,
 		}

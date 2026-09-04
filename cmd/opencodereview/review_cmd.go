@@ -18,8 +18,11 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/agent"
 	"github.com/alibaba/open-code-review/internal/diff"
+	"github.com/alibaba/open-code-review/internal/ghpost"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/mcp"
+	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/telemetry"
 	"github.com/alibaba/open-code-review/internal/tool"
@@ -53,6 +56,9 @@ type reviewOptions struct {
 	effort          string
 	noFilter        bool
 	preview         bool
+	// GitHub integration flags
+	githubToken string
+	postToPR    bool
 }
 
 var reviewOpts reviewOptions
@@ -174,7 +180,6 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	if err != nil {
 		return err
 	}
-
 	llmIdentity := &jsonLLMIdentity{
 		Provider: rt.Provider,
 		Model:    rt.Model,
@@ -293,6 +298,16 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 			emitErr = fmt.Errorf("emit review result: %w", emitErr)
 		}
 	}
+
+	var postErr error
+	if opts.postToPR && resultErr == nil && len(comments) > 0 {
+		target, err := githubPostingTargetFromManifest(cc.RepoDir, manifest)
+		if err != nil {
+			postErr = githubPostingError(err)
+		} else if _, err := ghpost.Post(runCtx, target, githubFindings(comments, ag.CommentSides()), ghpost.Options{Token: getGitHubToken(opts.githubToken)}); err != nil {
+			postErr = githubPostingError(err)
+		}
+	}
 	if resultErr != nil {
 		q.Restore()
 		// The report has exactly one exit per run. emitRunResult already published
@@ -307,9 +322,30 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		if id := ag.SessionID(); id != "" {
 			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
 		}
-		return errors.Join(resultErr, emitErr)
+		return errors.Join(resultErr, emitErr, postErr)
 	}
-	return emitErr
+	return errors.Join(emitErr, postErr)
+}
+
+func githubFindings(comments []model.LlmComment, sides []location.Side) []ghpost.Finding {
+	findings := make([]ghpost.Finding, len(comments))
+	for i, comment := range comments {
+		side := ghpost.SideUnknown
+		if i < len(sides) {
+			switch sides[i] {
+			case location.SideOld:
+				side = ghpost.SideOld
+			case location.SideNew:
+				side = ghpost.SideNew
+			}
+		}
+		findings[i] = ghpost.Finding{Comment: comment, Side: side}
+	}
+	return findings
+}
+
+func githubPostingError(err error) error {
+	return fmt.Errorf("post review to GitHub: %w", err)
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {
@@ -398,6 +434,9 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)
 	}
+	if state == nil {
+		return sealed, nil
+	}
 	if err := state.ValidateResume(session.ResumeRequest{
 		Identity:         sealed.Identity,
 		Provider:         rt.Provider,
@@ -408,6 +447,23 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 		return nil, err
 	}
 	return sealed, nil
+}
+
+func githubPostingTargetFromManifest(repoDir string, manifest *session.RunManifest) (ghpost.Target, error) {
+	if manifest == nil {
+		return ghpost.Target{}, fmt.Errorf("run manifest is missing")
+	}
+	input := manifest.Input
+	if input.Mode != session.InputModeRange || input.RequestedFrom == "" || input.ResolvedBase == "" || input.ResolvedHead == "" ||
+		input.ExactRange != input.ResolvedBase+".."+input.ResolvedHead {
+		return ghpost.Target{}, fmt.Errorf("run manifest does not contain a complete immutable range; refusing to post")
+	}
+	return ghpost.Target{
+		RepoDir:      repoDir,
+		BaseRef:      input.RequestedFrom,
+		ResolvedBase: input.ResolvedBase,
+		ResolvedHead: input.ResolvedHead,
+	}, nil
 }
 
 // fileReadRef picks the ref file_read resolves paths against.

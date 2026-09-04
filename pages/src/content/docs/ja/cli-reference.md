@@ -125,6 +125,8 @@ ocr r      [flags]   (alias)
 | `--model <name>` | — | — | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 並行 git サブプロセスの最大数。 |
 | `--tools <path>` | — | 埋め込み | カスタム JSON ツール設定ファイルのパス。埋め込みのツール定義を上書きします。 |
+| `--post-to-pr` | — | `false` | レビューの指摘を一致する GitHub pull request に投稿します。範囲モード（`--from` と `--to`）および GitHub token が必要です。 |
+| `--github-token <token>` | — | — | pull-request コメントの投稿に使用する GitHub token。省略時は環境変数 `GITHUB_TOKEN` を使用します。 |
 
 > モード引数は排他です: `--from`/`--to` を渡すか、`--commit` を渡すか、いずれも渡さない（ワークスペースモード）かのいずれかです。
 > 混在させるとそのままエラーになります。
@@ -169,6 +171,48 @@ ocr review --from main --to feature-branch
 ```
 
 OCR は `merge-base(main, feature-branch)..feature-branch` を計算するため、feature ブランチが*導入した* diff だけが表示されます。ブランチを切ったあとに `main` へ入った無関係な変更は含まれません。
+
+##### 指摘を GitHub pull request に投稿する
+
+`--post-to-pr` で投稿を明示的に有効化します。`--from` と `--to` の両方を指定する
+範囲モードが必要です。token は `--github-token` で渡すか、CLI に `GITHUB_TOKEN`
+から読み込ませます。
+
+CLI は base ブランチとレビュー済み head commit が一致する唯一の open pull request
+を検索するため、pull-request 番号を指定する必要はありません。位置を解決する際、OCR は
+各指摘が変更ファイルの旧側と新側のどちらから得られたかを記録します。投稿時には
+pull-request diff の行インベントリも作成します。取得元が新側で、範囲全体が検証済みの
+完全な右側 diff hunk に含まれる指摘だけが inline コメントになります。旧側の指摘、
+取得元の side 情報がない指摘、無効な範囲、完全な patch から検証できない範囲は
+pull-request summary に保持されます。side が判明している場合、数値上の行範囲が重なる
+だけでは指摘は曖昧になりません。
+
+Inline コメントと summary は、決定的で安全に再試行できる batch として送信されます。
+各書き込みの直前に、OCR は pull request が open のままであること、base ブランチと
+head が一致すること、現在の base tip と head の merge-base が完了したレビューに記録
+された正確な commit であることを確認します。base tip の移動は merge-base が変わらない
+場合に限り許可されます。既存の inline または fallback シーケンスは、指摘を重複させず、
+すでに summary へ fallback した inline batch を再試行せずに再開されます。
+
+ローカルのレビュー出力は GitHub への配信前に生成されます。投稿処理が失敗した場合も
+出力は保持されますが、スクリプトや CI が配信失敗を成功と誤認しないよう、OCR は非ゼロの
+ステータスで終了します。
+
+Token には対象リポジトリへのアクセスと pull request の読み書き権限が必要です。
+fine-grained personal access token または GitHub App では **Pull requests: Read and
+write**、classic personal access token では適切な `repo` または `public_repo` scope
+を付与してください。GitHub Actions では `pull-requests: write` を設定します。この権限は
+inline 投稿できない指摘に使う issue コメントにも適用されます。
+
+GitHub.com では `GITHUB_SERVER_URL` と `GITHUB_API_URL` を未設定にするか、
+`https://github.com` と `https://api.github.com` を使用します。GitHub Enterprise
+Server では `GITHUB_SERVER_URL` に HTTPS の server URL を設定します。既定の API は
+`https://HOST/api/v3` です。明示的な `GITHUB_API_URL` も HTTPS を使用し、server URL
+と同じ host でなければなりません。
+
+```bash
+GITHUB_TOKEN="$TOKEN" ocr review --from main --to feature-branch --post-to-pr
+```
 
 #### Commit モード
 

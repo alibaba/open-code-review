@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/location"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -399,7 +400,7 @@ func TestReviewItemResumeRoundTrip(t *testing.T) {
 		Content:      "fix this",
 		ExistingCode: "old()",
 	}}
-	sh.RecordReviewItemDone("a.go", "a.go", "a.go", "fp-a", comments)
+	sh.RecordReviewItemDoneWithSides("a.go", "a.go", "a.go", "fp-a", comments, []location.Side{location.SideOld})
 	sh.RecordReviewItemFailed("b.go", "b.go", "b.go", "fp-b", "rate limit")
 	sh.Finalize()
 
@@ -422,6 +423,9 @@ func TestReviewItemResumeRoundTrip(t *testing.T) {
 	}
 	if item.FilePath != "a.go" || len(item.Comments) != 1 || item.Comments[0].Content != "fix this" {
 		t.Errorf("item mismatch: %+v", item)
+	}
+	if len(item.CommentSides) != 1 || item.CommentSides[0] != location.SideOld {
+		t.Errorf("comment sides = %v, want OLD", item.CommentSides)
 	}
 	if _, ok := state.Item("fp-b"); ok {
 		t.Error("failed item should not be reusable")

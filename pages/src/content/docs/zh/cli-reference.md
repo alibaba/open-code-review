@@ -126,6 +126,8 @@ unstaged + untracked 变更。
 | `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
 | `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |
 | `--tools <path>` | — | 内嵌 | 自定义 JSON 工具配置文件路径。覆盖内嵌工具定义。 |
+| `--post-to-pr` | — | `false` | 将评审发现发布到匹配的 GitHub pull request。需要区间模式（`--from` 和 `--to`）以及 GitHub token。 |
+| `--github-token <token>` | — | — | 用于发布 pull-request 评论的 GitHub token。省略时回退到 `GITHUB_TOKEN` 环境变量。 |
 
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
@@ -172,6 +174,42 @@ ocr review --from main --to feature-branch
 
 OCR 计算 `merge-base(main, feature-branch)..feature-branch`，因此你只看到
 feature 分支*引入*的 diff——而非分支切出后落到 `main` 上的无关变更。
+
+##### 将发现发布到 GitHub pull request
+
+使用 `--post-to-pr` 显式启用发布。发布要求同时提供 `--from` 与 `--to` 的区间模式；
+token 可通过 `--github-token` 提供，也可由 CLI 从 `GITHUB_TOKEN` 读取。
+
+CLI 会查找 base 分支与已评审 head commit 都匹配的唯一 open pull request，无需提供
+pull-request 编号。解析位置时，OCR 会记录每个发现来自变更文件的旧侧还是新侧。发布时，
+OCR 还会为 pull-request diff 建立行清单。只有来源为新侧，且整个范围包含在经过验证的完整
+右侧 diff hunk 中的发现才会成为 inline 评论。旧侧发现、没有来源侧信息的发现、无效范围，
+以及无法通过完整 patch 验证的范围都会保留在 pull-request summary 中。如果来源侧已知，
+数值行范围重叠本身不会使发现产生歧义。
+
+Inline 评论与 summary 会以确定且可安全重试的批次发送。每次写入前，OCR 都会检查 pull
+request 仍为 open、base 分支和 head 未改变，并确认当前 base tip 与 head 的 merge-base
+仍是已完成评审记录的准确 commit。base tip 可以移动，但 merge-base 必须保持不变。已有的
+inline 或 fallback 序列会继续执行，不会重复发现，也不会再次尝试已经回退到 summary 的
+inline 批次。
+
+本地评审输出会在 GitHub 发布之前生成。任何发布步骤失败时，OCR 会保留该输出，但以非零
+状态退出，避免脚本或 CI 将发布失败误判为成功。
+
+Token 必须能够访问目标仓库，并具有读取和写入 pull request 的权限。对 fine-grained
+personal access token 或 GitHub App，请授予仓库的 **Pull requests: Read and write**
+权限；classic personal access token 需要相应的 `repo` 或 `public_repo` scope。
+GitHub Actions 中请设置 `pull-requests: write`。该权限也覆盖无法 inline 发布时使用的
+issue 评论。
+
+GitHub.com 应保持 `GITHUB_SERVER_URL` 与 `GITHUB_API_URL` 未设置（或分别使用
+`https://github.com` 与 `https://api.github.com`）。GitHub Enterprise Server 应将
+`GITHUB_SERVER_URL` 设为 HTTPS server URL；默认 API 为 `https://HOST/api/v3`。
+显式设置的 `GITHUB_API_URL` 也必须使用 HTTPS，并与 server URL 使用相同 host。
+
+```bash
+GITHUB_TOKEN="$TOKEN" ocr review --from main --to feature-branch --post-to-pr
+```
 
 #### Commit 模式
 
