@@ -106,18 +106,18 @@ func newTestDeps(client llm.LLMClient) Deps {
 	}
 }
 
-func TestRunPerFile_TaskDoneImmediately(t *testing.T) {
+func TestRunMainTask_TaskDoneImmediately(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
 	deps := newTestDeps(client)
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review this file")}
-	completed, _, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, _, err := runner.RunMainTask(context.Background(), msgs, "main.go")
 	if err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+		t.Fatalf("RunMainTask: %v", err)
 	}
 	if !completed {
-		t.Fatal("expected task_done to complete RunPerFile")
+		t.Fatal("expected task_done to complete RunMainTask")
 	}
 	if client.calls != 1 {
 		t.Errorf("expected 1 LLM call, got %d", client.calls)
@@ -130,52 +130,52 @@ func TestRunPerFile_TaskDoneImmediately(t *testing.T) {
 	}
 }
 
-func TestRunPerFile_UsesCompletionTokenLimit(t *testing.T) {
+func TestRunMainTask_UsesCompletionTokenLimit(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
 	deps := newTestDeps(client)
 	deps.Template.MaxTokens = 200000
 	deps.Template.MaxCompletionTokens = 58888
 	runner := NewRunner(deps)
 
-	_, _, err := runner.RunPerFile(
+	_, _, err := runner.RunMainTask(
 		context.Background(),
 		[]llm.Message{llm.NewTextMessage("user", "review")},
 		"main.go",
 	)
 	if err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+		t.Fatalf("RunMainTask: %v", err)
 	}
 	if got := client.requests[0].MaxTokens; got != 58888 {
 		t.Fatalf("request MaxTokens = %d, want 58888", got)
 	}
 }
 
-func TestRunPerFile_TaskDoneExplicitDone(t *testing.T) {
+func TestRunMainTask_TaskDoneExplicitDone(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		taskDoneResponseWithArguments(`{"state":"DONE"}`),
 	}}
 	runner := NewRunner(newTestDeps(client))
 
-	completed, _, err := runner.RunPerFile(
+	completed, _, err := runner.RunMainTask(
 		context.Background(),
 		[]llm.Message{llm.NewTextMessage("user", "review this file")},
 		"main.go",
 	)
 	if err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+		t.Fatalf("RunMainTask: %v", err)
 	}
 	if !completed {
-		t.Fatal("expected task_done DONE to complete RunPerFile")
+		t.Fatal("expected task_done DONE to complete RunMainTask")
 	}
 }
 
-func TestRunPerFile_TaskDoneFailed(t *testing.T) {
+func TestRunMainTask_TaskDoneFailed(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		taskDoneResponseWithArguments(`{"state":"FAILED"}`),
 	}}
 	runner := NewRunner(newTestDeps(client))
 
-	completed, _, err := runner.RunPerFile(
+	completed, _, err := runner.RunMainTask(
 		context.Background(),
 		[]llm.Message{llm.NewTextMessage("user", "review this file")},
 		"main.go",
@@ -184,14 +184,14 @@ func TestRunPerFile_TaskDoneFailed(t *testing.T) {
 		t.Fatalf("expected task_done FAILED error, got %v", err)
 	}
 	if completed {
-		t.Fatal("task_done FAILED must not complete RunPerFile")
+		t.Fatal("task_done FAILED must not complete RunMainTask")
 	}
 	if client.calls != 1 {
 		t.Fatalf("expected terminal failure after 1 LLM call, got %d", client.calls)
 	}
 }
 
-func TestRunPerFile_InvalidTaskDoneStateRetries(t *testing.T) {
+func TestRunMainTask_InvalidTaskDoneStateRetries(t *testing.T) {
 	tests := []struct {
 		name      string
 		arguments string
@@ -210,13 +210,13 @@ func TestRunPerFile_InvalidTaskDoneStateRetries(t *testing.T) {
 			}}
 			runner := NewRunner(newTestDeps(client))
 
-			completed, _, err := runner.RunPerFile(
+			completed, _, err := runner.RunMainTask(
 				context.Background(),
 				[]llm.Message{llm.NewTextMessage("user", "review this file")},
 				"main.go",
 			)
 			if err != nil {
-				t.Fatalf("RunPerFile: %v", err)
+				t.Fatalf("RunMainTask: %v", err)
 			}
 			if !completed {
 				t.Fatal("expected retry to complete with task_done DONE")
@@ -228,7 +228,7 @@ func TestRunPerFile_InvalidTaskDoneStateRetries(t *testing.T) {
 	}
 }
 
-func TestRunPerFile_TagsRequestsWithTaskSessionKey(t *testing.T) {
+func TestRunMainTask_TagsRequestsWithTaskSessionKey(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
 		taskDoneResponse(),
@@ -237,8 +237,8 @@ func TestRunPerFile_TagsRequestsWithTaskSessionKey(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review this file")}
-	if _, _, err := runner.RunPerFile(context.Background(), msgs, "main.go"); err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+	if _, _, err := runner.RunMainTask(context.Background(), msgs, "main.go"); err != nil {
+		t.Fatalf("RunMainTask: %v", err)
 	}
 
 	want := llm.SessionTaskKey(deps.Session.SessionID, string(session.MainTask), "main.go")
@@ -252,7 +252,7 @@ func TestRunPerFile_TagsRequestsWithTaskSessionKey(t *testing.T) {
 	}
 }
 
-func TestRunPerFile_ToolCallThenDone(t *testing.T) {
+func TestRunMainTask_ToolCallThenDone(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
 		taskDoneResponse(),
@@ -261,12 +261,12 @@ func TestRunPerFile_ToolCallThenDone(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	completed, _, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, _, err := runner.RunMainTask(context.Background(), msgs, "main.go")
 	if err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+		t.Fatalf("RunMainTask: %v", err)
 	}
 	if !completed {
-		t.Fatal("expected task_done to complete RunPerFile")
+		t.Fatal("expected task_done to complete RunMainTask")
 	}
 	if client.calls != 2 {
 		t.Errorf("expected 2 LLM calls, got %d", client.calls)
@@ -281,7 +281,7 @@ func TestRunPerFile_ToolCallThenDone(t *testing.T) {
 	}
 }
 
-func TestRunPerFile_ContextCancelled(t *testing.T) {
+func TestRunMainTask_ContextCancelled(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{taskDoneResponse()}}
 	deps := newTestDeps(client)
 	runner := NewRunner(deps)
@@ -290,16 +290,16 @@ func TestRunPerFile_ContextCancelled(t *testing.T) {
 	cancel()
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	completed, _, err := runner.RunPerFile(ctx, msgs, "main.go")
+	completed, _, err := runner.RunMainTask(ctx, msgs, "main.go")
 	if err == nil {
 		t.Error("expected error for cancelled context")
 	}
 	if completed {
-		t.Fatal("cancelled context should not complete RunPerFile")
+		t.Fatal("cancelled context should not complete RunMainTask")
 	}
 }
 
-func TestRunPerFile_UnknownTool(t *testing.T) {
+func TestRunMainTask_UnknownTool(t *testing.T) {
 	content := ""
 	unknownToolResp := &llm.ChatResponse{
 		Choices: []llm.Choice{{
@@ -323,19 +323,19 @@ func TestRunPerFile_UnknownTool(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	completed, _, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, _, err := runner.RunMainTask(context.Background(), msgs, "main.go")
 	if err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+		t.Fatalf("RunMainTask: %v", err)
 	}
 	if !completed {
-		t.Fatal("expected task_done to complete RunPerFile")
+		t.Fatal("expected task_done to complete RunMainTask")
 	}
 	if client.calls != 2 {
 		t.Errorf("expected 2 calls, got %d", client.calls)
 	}
 }
 
-func TestRunPerFile_MaxToolRequestsWithoutTaskDoneDoesNotComplete(t *testing.T) {
+func TestRunMainTask_MaxToolRequestsWithoutTaskDoneDoesNotComplete(t *testing.T) {
 	content := ""
 	client := &fakeClient{responses: []*llm.ChatResponse{{
 		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
@@ -347,19 +347,19 @@ func TestRunPerFile_MaxToolRequestsWithoutTaskDoneDoesNotComplete(t *testing.T) 
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	completed, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
 	if err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+		t.Fatalf("RunMainTask: %v", err)
 	}
 	if completed {
-		t.Fatal("RunPerFile completed without task_done")
+		t.Fatal("RunMainTask completed without task_done")
 	}
 	if stop != StopMaxRounds {
 		t.Fatalf("expected StopMaxRounds, got %v", stop)
 	}
 }
 
-func TestRunPerFile_EmptyToolResultsStopWithEmptyRounds(t *testing.T) {
+func TestRunMainTask_EmptyToolResultsStopWithEmptyRounds(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
 		fileReadToolCallResponse("call_2", `{"path":"main.go"}`),
@@ -372,12 +372,12 @@ func TestRunPerFile_EmptyToolResultsStopWithEmptyRounds(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	completed, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
 	if err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+		t.Fatalf("RunMainTask: %v", err)
 	}
 	if completed {
-		t.Fatal("RunPerFile completed without task_done")
+		t.Fatal("RunMainTask completed without task_done")
 	}
 	if stop != StopEmptyRounds {
 		t.Fatalf("stop = %v, want StopEmptyRounds", stop)
@@ -387,7 +387,7 @@ func TestRunPerFile_EmptyToolResultsStopWithEmptyRounds(t *testing.T) {
 	}
 }
 
-func TestRunPerFile_UncompressibleContextStopsWithCompression(t *testing.T) {
+func TestRunMainTask_UncompressibleContextStopsWithCompression(t *testing.T) {
 	emptySummary := ""
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
@@ -404,12 +404,12 @@ func TestRunPerFile_UncompressibleContextStopsWithCompression(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", strings.Repeat("word ", 100))}
-	completed, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
 	if err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+		t.Fatalf("RunMainTask: %v", err)
 	}
 	if completed {
-		t.Fatal("RunPerFile completed without task_done")
+		t.Fatal("RunMainTask completed without task_done")
 	}
 	if stop != StopCompression {
 		t.Fatalf("stop = %v, want StopCompression", stop)
@@ -659,7 +659,7 @@ func graceRoundCommentResponse() *llm.ChatResponse {
 	}
 }
 
-func TestRunPerFile_GraceRoundSubmitsComment(t *testing.T) {
+func TestRunMainTask_GraceRoundSubmitsComment(t *testing.T) {
 	// Round 1: file_read (exhausts budget with MaxToolRequestTimes=1)
 	// Grace round: model calls code_comment
 	client := &fakeClient{responses: []*llm.ChatResponse{
@@ -688,9 +688,9 @@ func TestRunPerFile_GraceRoundSubmitsComment(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	completed, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	completed, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
 	if err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+		t.Fatalf("RunMainTask: %v", err)
 	}
 	if completed {
 		t.Fatal("expected not completed (budget exhausted)")
@@ -721,7 +721,7 @@ func TestRunPerFile_GraceRoundSubmitsComment(t *testing.T) {
 	}
 }
 
-func TestRunPerFile_GraceRoundSkippedWhenContextCancelled(t *testing.T) {
+func TestRunMainTask_GraceRoundSkippedWhenContextCancelled(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
 	}}
@@ -748,7 +748,7 @@ func TestRunPerFile_GraceRoundSkippedWhenContextCancelled(t *testing.T) {
 	runner = NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	_, stop, _ := runner.RunPerFile(ctx, msgs, "main.go")
+	_, stop, _ := runner.RunMainTask(ctx, msgs, "main.go")
 	if stop != StopMaxRounds {
 		t.Fatalf("stop = %v, want StopMaxRounds", stop)
 	}
@@ -774,7 +774,7 @@ func (c *cancelAfterNClient) CompletionsWithCtx(ctx context.Context, req llm.Cha
 	return resp, err
 }
 
-func TestRunPerFile_GraceRoundNotTriggeredOnEmptyRoundsStop(t *testing.T) {
+func TestRunMainTask_GraceRoundNotTriggeredOnEmptyRoundsStop(t *testing.T) {
 	client := &fakeClient{responses: []*llm.ChatResponse{
 		fileReadToolCallResponse("call_1", `{"path":"main.go"}`),
 		fileReadToolCallResponse("call_2", `{"path":"main.go"}`),
@@ -797,9 +797,9 @@ func TestRunPerFile_GraceRoundNotTriggeredOnEmptyRoundsStop(t *testing.T) {
 	runner := NewRunner(deps)
 
 	msgs := []llm.Message{llm.NewTextMessage("user", "review")}
-	_, stop, err := runner.RunPerFile(context.Background(), msgs, "main.go")
+	_, stop, err := runner.RunMainTask(context.Background(), msgs, "main.go")
 	if err != nil {
-		t.Fatalf("RunPerFile: %v", err)
+		t.Fatalf("RunMainTask: %v", err)
 	}
 	if stop != StopEmptyRounds {
 		t.Fatalf("stop = %v, want StopEmptyRounds", stop)

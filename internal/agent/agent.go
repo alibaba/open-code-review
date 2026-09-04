@@ -1446,7 +1446,7 @@ func (a *Agent) executeGroupSubtask(ctx context.Context, g FileGroup) (bool, *su
 			defer mainSpan.End()
 			telemetry.SetAttr(mainSpan, "group.label", groupKey)
 			telemetry.SetAttr(mainSpan, "round", round)
-			completed, stop, err := a.runner.RunPerFile(ctx, messages, groupKey)
+			completed, stop, err := a.runner.RunMainTask(ctx, messages, groupKey)
 			if err != nil {
 				mainSpan.SetStatus(codes.Error, err.Error())
 				mainSpan.RecordError(err)
