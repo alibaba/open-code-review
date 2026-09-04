@@ -10,9 +10,11 @@ sidebar:
 ## 启动
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
+ocr viewer                       # start and open the browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
 ```
 
 默认地址是 `localhost:5483`。服务器在前台运行——`Ctrl+C` 停止。会话在每次请求时
@@ -26,6 +28,35 @@ JSONL 文件出现就会显示。
 > `forbidden host`。要让通配绑定可被访问，设置
 > `OCR_VIEWER_ALLOWED_HOSTS` 为逗号分隔的允许主机名列表
 > （如 `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`）。
+
+## 打开浏览器
+
+服务器一开始监听，`ocr viewer` 就会在默认浏览器中打开该 URL。这一行为由
+`--open` 控制，取值与全局的 `--color` 一致：
+
+| 取值 | 行为 |
+|---|---|
+| `auto`（默认） | 仅在大概率可用时打开——见下文。 |
+| `always` | 无条件打开。用于 `auto` 拒绝但其实有可用浏览器的场景——输出被管道接走，或 WSL 上没有显示环境。 |
+| `never` | 只打印 URL，不做别的。 |
+
+在 `auto` 模式下，以下情况**不会**打开浏览器：
+
+- stdout 不是终端——输出被管道或重定向了；
+- `SSH_CONNECTION` 已设置**且**没有转发任何显示环境——远程主机上无处可开。
+  `ssh -X` / `ssh -Y` 会设置 `DISPLAY`，因此不会被抑制；
+- Linux 上 `DISPLAY` 和 `WAYLAND_DISPLAY` 都为空——没有显示服务器。
+
+原因会附加在 ready 行末尾，这样"有意抑制"就不会被误认为"功能坏了"：
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+在 Unix 上会优先尝试 `$BROWSER`：以冒号分隔的命令列表，每一项要么含有代表
+URL 的 `%s` 占位符，要么把 URL 作为末尾参数接收。否则使用各平台的默认命令——
+macOS 上是 `open`，Linux 与 BSD 上是 `xdg-open`，Windows 上是 `rundll32`。
+打开浏览器失败只会在 stderr 上给出一条警告，绝不致命；无论如何服务器都继续提供服务。
 
 ## 三个页面
 
@@ -54,13 +85,14 @@ JSONL 文件出现就会显示。
 详情页是最有用的那个。它显示：
 
 1. **头部**——diff 范围、模型、分支、总 token、运行时长。
-2. **文件分组**——每个被评审文件一个块。每个文件内，五条“任务类型”泳道：
+2. **文件分组**——每个被评审的**组**一个块。文件在评审前已按语义打包，因此一个块
+   可能覆盖多个相关文件，其标题是该组的文件路径。每个组内，五条“任务类型”泳道：
 
 | 任务类型 | 何时出现 |
 |---|---|
-| `plan_task` | 运行了 plan 阶段（文件 ≥ `PLAN_MODE_LINE_THRESHOLD`）。 |
-| `main_task` | 每个文件。主评审循环。 |
-| `review_filter_task` | 为该文件运行了评审后评论过滤流程。 |
+| `plan_task` | 运行了 plan 阶段（组内最大文件 ≥ `PLAN_MODE_LINE_THRESHOLD`，或 2 个以上文件合计 ≥ `PLAN_MODE_GROUP_LINE_THRESHOLD`）。 |
+| `main_task` | 每个组。主评审循环——每个评审轮一遍。 |
+| `review_filter_task` | 为该组运行了评审后评论过滤流程。 |
 | `memory_compression_task` | active+compress 区超过 60 % / 80 % 预算。 |
 | `re_location_task` | 某条 `code_comment` 无法锚定，回退重新定位运行。 |
 
@@ -85,7 +117,8 @@ JSONL 文件出现就会显示。
 
 ### “模型为什么这么说？”
 
-在终端输出中打开一条评论，在查看器中定位该文件，沿着它的 `main_task` 泳道向下查看。
+在终端输出中打开一条评论，在查看器中定位包含该文件的那个**组**，沿着它的
+`main_task` 泳道向下查看。
 **工具调用**中包含你关心的 `code_comment` 的那张卡片，就是产出它的那一轮。卡片的
 Response 显示模型推理；要确切知道发给模型的 prompt + 上下文，在 JSONL 转录中
 打开该请求号的 `llm_request` 记录（其 `messages` 字段）。
@@ -119,6 +152,9 @@ JSONL 文件每行是一个事件：
 {"type": "llm_response", "filePath": "src/foo.go", "taskType": "main_task", "model": "claude-sonnet-4-6", "content": "Found 2 issues…", "duration_ms": 8421, "usage": {"prompt_tokens": 12450, "completion_tokens": 320}}
 {"type": "tool_call", "filePath": "src/foo.go", "tool_name": "file_read", "arguments": "{\"file_path\":\"src/foo.go\",\"start_line\":1,\"end_line\":50}", "result": "File: src/foo.go (Total lines: 220)\nIS_TRUNCATED: false\nLINE_RANGE: 1-50\n1|package foo…", "ok": true, "duration_ms": 14}
 ```
+
+`filePath` 存放的是**组的 key**：单文件组就是那一个路径；多个文件一起被评审时，
+则是该组路径排序后用逗号连接的结果。
 
 行是 append-only——不完整的 JSONL 意味着会话在运行中被中断，查看器会渲染已写入的
 内容。

@@ -45,5 +45,13 @@
   "**/*.capnp.ts",
   "**/*_capnp.rs",
   "**/*_capnp.py",
-  "**/test/**/*.ml"
+  "**/test/**/*.ml",
+  "**/tb_*.{v,sv,vhd,vhdl}",
+  "**/*_tb.{v,sv,vhd,vhdl}",
+  "lib/**/*.sol",
+  "**/*.t.sol",
+  "**/test/**/*.sol",
+  "**/tests/**/*.sol",
+  "**/test/**/*.vy",
+  "**/tests/**/*.vy"
 ]

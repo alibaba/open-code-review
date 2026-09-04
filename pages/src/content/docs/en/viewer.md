@@ -12,9 +12,11 @@ review.
 ## Launching
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
+ocr viewer                       # start and open the browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
 ```
 
 The default address is `localhost:5483`. The server holds the foreground
@@ -30,6 +32,39 @@ another terminal shows up the moment its JSONL file appears.
 > `forbidden host`. To expose a wildcard bind, set
 > `OCR_VIEWER_ALLOWED_HOSTS` to a comma-separated list of allowed
 > hostnames (e.g. `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`).
+
+## Opening the browser
+
+`ocr viewer` opens the URL in your default browser as soon as the server is
+listening. `--open` controls this and takes the same three values as the global
+`--color`:
+
+| Value | Behavior |
+|---|---|
+| `auto` (default) | Open only where it is likely to work — see below. |
+| `always` | Open unconditionally. Use this where `auto` declines but a browser is in fact reachable — piped output, or WSL with no display. |
+| `never` | Print the URL and do nothing else. |
+
+In `auto` mode the browser is **not** opened when:
+
+- stdout is not a terminal — output is piped or redirected;
+- `SSH_CONNECTION` is set **and** no display is forwarded — a remote host with
+  nothing to open into. `ssh -X` and `ssh -Y` set `DISPLAY`, so they are not
+  suppressed;
+- on Linux, `DISPLAY` and `WAYLAND_DISPLAY` are both empty — no display server.
+
+The reason is appended to the ready line, so a deliberately suppressed
+auto-open never looks like a broken one:
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+On Unix, `$BROWSER` is tried first: a colon-separated list of commands, each
+either containing a `%s` placeholder for the URL or receiving it as a trailing
+argument. Otherwise the platform default runs — `open` on macOS, `xdg-open` on
+Linux and the BSDs, `rundll32` on Windows. Failing to open a browser is a
+warning on stderr and never fatal; the server keeps serving either way.
 
 ## Three pages
 
@@ -61,14 +96,16 @@ timestamp.
 The detail page is the interesting one. It shows:
 
 1. **Header** — diff range, model, branch, total tokens, run duration.
-2. **File group** — one block per reviewed file. Inside each file, five
+2. **File group** — one block per reviewed group. Files are grouped
+   semantically before review, so a block may cover several related
+   files; its title is the group's file paths. Inside each group, five
    "task type" lanes:
 
 | Task type | When it appears |
 |---|---|
-| `plan_task` | The plan phase ran (file ≥ `PLAN_MODE_LINE_THRESHOLD`). |
-| `main_task` | Every file. The main review loop. |
-| `review_filter_task` | The post-review comment-filtering pass ran for this file. |
+| `plan_task` | The plan phase ran (largest file ≥ `PLAN_MODE_LINE_THRESHOLD`, or 2+ files totalling ≥ `PLAN_MODE_GROUP_LINE_THRESHOLD`). |
+| `main_task` | Every group. The main review loop — one pass per review round. |
+| `review_filter_task` | The post-review comment-filtering pass ran for this group. |
 | `memory_compression_task` | The active+compress zone exceeded 60 % / 80 % budget. |
 | `re_location_task` | A `code_comment` couldn't be anchored, fallback re-location ran. |
 
@@ -100,8 +137,8 @@ The viewer is designed around three workflows:
 
 ### "Why did the model say that?"
 
-Open a comment in your terminal output, locate the file in the viewer,
-and walk down its `main_task` lane. The card whose **tool calls**
+Open a comment in your terminal output, locate the group containing the
+file in the viewer, and walk down its `main_task` lane. The card whose **tool calls**
 include the `code_comment` you care about is the round that produced
 it. The card's Response shows the model's reasoning; for the exact
 prompt + context the model was sent, open the `llm_request` record for
@@ -141,6 +178,10 @@ Each line in the JSONL file is one event:
 {"type": "llm_response", "filePath": "src/foo.go", "taskType": "main_task", "model": "claude-sonnet-4-6", "content": "Found 2 issues…", "duration_ms": 8421, "usage": {"prompt_tokens": 12450, "completion_tokens": 320}}
 {"type": "tool_call", "filePath": "src/foo.go", "tool_name": "file_read", "arguments": "{\"file_path\":\"src/foo.go\",\"start_line\":1,\"end_line\":50}", "result": "File: src/foo.go (Total lines: 220)\nIS_TRUNCATED: false\nLINE_RANGE: 1-50\n1|package foo…", "ok": true, "duration_ms": 14}
 ```
+
+`filePath` holds the **group key**: a single path for a one-file group,
+or the group's paths sorted and comma-joined when several files were
+reviewed together.
 
 Lines are append-only — a partial JSONL means a session was killed
 mid-run, and the viewer renders what it has.

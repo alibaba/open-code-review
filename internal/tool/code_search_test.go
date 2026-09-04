@@ -281,11 +281,14 @@ func TestGitGrep_InvalidRef_ReturnsError(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "nonexistent_ref_abc123", Mode: ModeCommit})
 	result, err := p.gitGrep(context.Background(), "Hello", false, false, nil)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected invalid ref to return an error")
 	}
-	if !strings.Contains(result, "Error:") {
-		t.Errorf("expected error message for invalid ref, got: %s", result)
+	if result != "" {
+		t.Errorf("expected empty result for invalid ref, got: %s", result)
+	}
+	if !strings.Contains(err.Error(), "git grep failed") {
+		t.Errorf("expected git grep failure, got: %v", err)
 	}
 }
 
@@ -293,11 +296,65 @@ func TestGitGrep_PerlRegexp_InvalidPattern_ReturnsError(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "", Mode: ModeWorkspace})
 	result, err := p.gitGrep(context.Background(), "(unclosed", false, true, nil)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected invalid perl regexp to return an error")
 	}
-	if !strings.Contains(result, "Error:") {
-		t.Errorf("expected error message for invalid perl regexp, got: %s", result)
+	if result != "" {
+		t.Errorf("expected empty result for invalid perl regexp, got: %s", result)
+	}
+	if !strings.Contains(err.Error(), "git grep failed") {
+		t.Errorf("expected git grep failure, got: %v", err)
+	}
+}
+
+func TestTrimGitUsage(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		want   string
+	}{
+		{
+			name:   "English",
+			stderr: "error: unknown option `max-count'\nusage: git grep [<options>]\n\n    --cached",
+			want:   "error: unknown option `max-count'",
+		},
+		{
+			name:   "Chinese",
+			stderr: "\u9519\u8bef\uff1a\u672a\u77e5\u9009\u9879 `max-count'\n\u7528\u6cd5\uff1agit grep [<\u9009\u9879>]\n\n    --cached",
+			want:   "\u9519\u8bef\uff1a\u672a\u77e5\u9009\u9879 `max-count'",
+		},
+		{
+			name:   "French",
+			stderr: "erreur : option inconnue `max-count'\nutilisation : git grep [<options>]\n\n    --cached",
+			want:   "erreur : option inconnue `max-count'",
+		},
+		{
+			name:   "Japanese",
+			stderr: "\u30a8\u30e9\u30fc: \u4e0d\u660e\u306a\u30aa\u30d7\u30b7\u30e7\u30f3 `max-count'\n\u4f7f\u7528\u6cd5: git grep [<\u30aa\u30d7\u30b7\u30e7\u30f3>]\n\n    --cached",
+			want:   "\u30a8\u30e9\u30fc: \u4e0d\u660e\u306a\u30aa\u30d7\u30b7\u30e7\u30f3 `max-count'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := trimGitUsage(tt.stderr, 129); got != tt.want {
+				t.Errorf("trimGitUsage() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTrimGitUsage_PreservesDiagnosticWithoutUsage(t *testing.T) {
+	stderr := "fatal: ambiguous argument 'missing': unknown revision\nhint: verify the revision name"
+	got := trimGitUsage(stderr, 128)
+	if got != stderr {
+		t.Errorf("trimGitUsage() = %q, want %q", got, stderr)
+	}
+}
+
+func TestTrimGitUsage_WhitespaceOnly(t *testing.T) {
+	if got := trimGitUsage(" \n\t", 129); got != "" {
+		t.Errorf("trimGitUsage() = %q, want empty string", got)
 	}
 }
 
@@ -430,6 +487,24 @@ func TestCodeSearchProvider_Execute_Found(t *testing.T) {
 	}
 	if !strings.Contains(got, "hello.go") {
 		t.Errorf("expected hello.go in result, got: %s", got)
+	}
+}
+
+func TestCodeSearchProvider_Execute_PropagatesGitFailure(t *testing.T) {
+	dir := setupTestRepo(t)
+	p := NewCodeSearch(&FileReader{RepoDir: dir, Ref: "nonexistent_ref_abc123", Mode: ModeCommit})
+
+	got, err := p.Execute(context.Background(), map[string]any{
+		"search_text": "Hello",
+	})
+	if err == nil {
+		t.Fatal("expected git grep failure to propagate from Execute")
+	}
+	if got != "" {
+		t.Errorf("expected empty result on git grep failure, got: %s", got)
+	}
+	if !strings.Contains(err.Error(), "git grep failed") {
+		t.Errorf("expected git grep failure, got: %v", err)
 	}
 }
 

@@ -15,12 +15,14 @@
     "**/*.java": "java.md",
     "**/*.go": "go.md",
     "**/*.{ftl,ftlh,ftlx}": "freemarker.md",
+    "**/*.{hbs,mustache}": "handlebars_mustache.md",
+    "**/*.pug": "pug.md",
     "**/*.ets": "arkts.md",
     "**/*.astro": "astro.md",
-    "**/*.{ts,js,tsx,jsx}": "ts_js_tsx_jsx.md",
+    "**/*.{ts,js,tsx,jsx,mjs,cjs}": "ts_js_tsx_jsx.md",
     "**/*.{kt}": "kotlin.md",
     "**/*.rs": "rust.md",
-    "**/*.{cpp,cc,hpp}": "cpp.md",
+    "**/*.{cpp,cc,cxx,hpp,hxx}": "cpp.md",
     "**/*.c": "c.md",
     "**/*.{py,ipynb}": "python.md",
     "**/*.{php,phtml}": "php.md",
@@ -43,6 +45,12 @@
     "**/*.thrift": "thrift.md",
     "**/*.capnp": "capnp.md",
     "**/*.{ml,mli}": "ocaml.md",
-    "**/*.{re,rei}": "ocaml.md"
+    "**/*.{re,rei}": "ocaml.md",
+    "**/*.{v,sv,vh}": "verilog.md",
+    "**/*.{vhd,vhdl}": "vhdl.md",
+    "**/*.m": "matlab.md",
+    "**/*.mm": "objc.md",
+    "**/*.sol": "solidity.md",
+    "**/*.vy": "vyper.md"
   }
 }

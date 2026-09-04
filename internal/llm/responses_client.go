@@ -52,6 +52,10 @@ func NewOpenAIResponsesClient(cfg ClientConfig) *OpenAIResponsesClient {
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
 	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters.
+	if cfg.rawHolder != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
+	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
 	}
@@ -183,6 +187,11 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 		case "user":
 			input = append(input, responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser))
 		case "assistant":
+			// Reuse native output items to preserve reasoning/encrypted_content.
+			if items, ok := msg.Native.Payload.([]responses.ResponseInputItemUnionParam); ok && len(items) > 0 {
+				input = append(input, items...)
+				continue
+			}
 			if content != "" {
 				input = append(input, responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleAssistant))
 			}
@@ -214,7 +223,8 @@ func (c *OpenAIResponsesClient) buildResponsesParams(model string, req ChatReque
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: input,
 		},
-		Store: openai.Bool(false),
+		Store:   openai.Bool(false),
+		Include: []responses.ResponseIncludable{responses.ResponseIncludableReasoningEncryptedContent},
 	}
 
 	if instructions != "" {
@@ -255,11 +265,11 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 
 	var toolCalls []ToolCall
 	var reasoningParts []string
+	var nativeItems []responses.ResponseInputItemUnionParam
+	// hasActionableItem gates Native: a lone reasoning item (no message or
+	// function_call) is not valid standalone input and risks a 400 on replay.
+	var hasActionableItem bool
 	for _, item := range sdkResp.Output {
-		// TODO(phase): ResponseOutputMessage.Phase (commentary/final_answer) is
-		// currently dropped. For gpt-5.3-codex+ models, preserve and resend
-		// Phase on assistant messages to avoid performance degradation. See
-		// DESIGN_STATE_CACHE_PHASE.md §3.
 		switch item.Type {
 		case "function_call":
 			fc := item.AsFunctionCall()
@@ -271,6 +281,9 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 					Arguments: fc.Arguments,
 				},
 			})
+			p := fc.ToParam()
+			nativeItems = append(nativeItems, responses.ResponseInputItemUnionParam{OfFunctionCall: &p})
+			hasActionableItem = true
 		case "reasoning":
 			// Best-effort: aggregate every summary entry's Text (not just the
 			// first) so multi-paragraph reasoning isn't truncated.
@@ -280,12 +293,24 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 					reasoningParts = append(reasoningParts, s.Text)
 				}
 			}
+			p := r.ToParam()
+			nativeItems = append(nativeItems, responses.ResponseInputItemUnionParam{OfReasoning: &p})
+		case "message":
+			m := item.AsMessage()
+			p := m.ToParam()
+			nativeItems = append(nativeItems, responses.ResponseInputItemUnionParam{OfOutputMessage: &p})
+			hasActionableItem = true
 		}
 	}
 
 	var reasoningContent string
 	if len(reasoningParts) > 0 {
 		reasoningContent = strings.Join(reasoningParts, "\n")
+	}
+
+	var native NativeTurn
+	if hasActionableItem && len(nativeItems) > 0 {
+		native = NativeTurn{Family: "openai-responses", Payload: nativeItems}
 	}
 
 	finishReason := mapResponsesFinishReason(string(sdkResp.Status), toolCalls)
@@ -315,6 +340,7 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 				Content:          contentPtr,
 				ReasoningContent: reasoningContent,
 				ToolCalls:        toolCalls,
+				Native:           native,
 			},
 			FinishReason: finishReason,
 		}},

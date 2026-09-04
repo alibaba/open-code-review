@@ -47,6 +47,9 @@
   ".ftl",
   ".ftlh",
   ".ftlx",
+  ".hbs",
+  ".mustache",
+  ".pug",
   ".astro",
   ".vue",
   ".ipynb",
@@ -98,5 +101,12 @@
   ".ml",
   ".mli",
   ".re",
-  ".rei"
+  ".rei",
+  ".v",
+  ".sv",
+  ".vh",
+  ".vhd",
+  ".vhdl",
+  ".sol",
+  ".vy"
 ]

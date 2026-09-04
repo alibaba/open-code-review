@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -91,11 +92,23 @@ type Runner struct {
 	warnings              []AgentWarning
 	toolCallsMu           sync.Mutex
 	toolCalls             map[string]int64
+	toolCallSequence      int64
+	toolFailures          []ToolFailureDetail
 	// bg tracks every background goroutine that can still issue an LLM
 	// request after RunPerFile returned. WaitBackground joins them so a
 	// retry-report Freeze at the run boundary cannot observe an
 	// un-finalized request. See WaitBackground.
 	bg sync.WaitGroup
+}
+
+// ToolFailureDetail describes one failed registered-tool invocation.
+type ToolFailureDetail struct {
+	ToolCallNumber int64  `json:"tool_call_number"`
+	ToolName       string `json:"tool_name"`
+	FilePath       string `json:"file_path,omitempty"`
+	// Arguments is the raw tool-call argument string returned by the LLM.
+	Arguments string `json:"arguments"`
+	Error     string `json:"error"`
 }
 
 // NewRunner returns a Runner bound to the given dependencies.
@@ -172,13 +185,46 @@ func (r *Runner) ToolCalls() map[string]int64 {
 	return out
 }
 
-func (r *Runner) recordToolCall(name string) {
+// ToolFailures returns failed tool calls ordered by their global call number.
+func (r *Runner) ToolFailures() []ToolFailureDetail {
 	r.toolCallsMu.Lock()
+	defer r.toolCallsMu.Unlock()
+
+	out := append([]ToolFailureDetail(nil), r.toolFailures...)
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ToolCallNumber < out[j].ToolCallNumber
+	})
+	return out
+}
+
+func (r *Runner) recordToolCall(name string) int64 {
+	r.toolCallsMu.Lock()
+	defer r.toolCallsMu.Unlock()
 	if r.toolCalls == nil {
 		r.toolCalls = make(map[string]int64)
 	}
 	r.toolCalls[name]++
+	r.toolCallSequence++
+	return r.toolCallSequence
+}
+
+func (r *Runner) recordToolFailure(number int64, name, filePath, errMsg string,
+	rec *session.TaskRecord, rawArguments string, duration time.Duration) {
+	detail := ToolFailureDetail{
+		ToolCallNumber: number,
+		ToolName:       name,
+		FilePath:       filePath,
+		Arguments:      rawArguments,
+		Error:          errMsg,
+	}
+
+	r.toolCallsMu.Lock()
+	r.toolFailures = append(r.toolFailures, detail)
 	r.toolCallsMu.Unlock()
+
+	if rec != nil {
+		rec.AddToolFailure(name, rawArguments, errMsg, duration)
+	}
 }
 
 // RecordUsage adds the prompt/completion/cache tokens reported by an LLM
@@ -351,14 +397,16 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 		llmSpan.End()
 		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
-		content := resp.Content()
+		content := resp.VisibleContent()
 		calls := resp.ToolCalls()
 
 		if len(calls) == 0 {
 			fmt.Fprintf(stdout.Writer(), "[ocr] No tool calls parsed for %s, retrying...\n", newPath)
 			messages = append(messages, llm.NewTextMessage("user", "You did not successfully call any tools. Please try again or use task_done if finished."))
-			if content != "" {
-				messages = append(messages[:len(messages)-1], llm.NewTextMessage("assistant", content), messages[len(messages)-1])
+			native := resp.Native()
+			reasoning := resp.ReasoningContent()
+			if content != "" || native.Payload != nil || reasoning != "" {
+				messages = append(messages[:len(messages)-1], llm.NewToolCallMessage(content, nil, native, reasoning), messages[len(messages)-1])
 			}
 			continue
 		}
@@ -413,7 +461,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 			consecutiveEmptyRounds = 0
 		}
 
-		succeed := r.addNextMessage(ctx, content, calls, results, &messages, newPath, st)
+		succeed := r.addNextMessage(ctx, content, calls, resp.Native(), thinking, results, &messages, newPath, st)
 		if !succeed {
 			fmt.Fprintf(stdout.Writer(), "[ocr] Context compression exceeded threshold for %s, stopping.\n", newPath)
 			stop = StopCompression
@@ -448,33 +496,47 @@ func (r *Runner) runGraceRound(ctx context.Context, messages []llm.Message, newP
 		return
 	}
 
-	resp, err := r.deps.LLMClient.CompletionsWithCtx(ctx, llm.ChatRequest{
+	fs := r.deps.Session.GetOrCreateFileSession(newPath)
+	rec := fs.AppendTaskRecord(session.MainTask, messages)
+	startTime := time.Now()
+	reqCtx := r.requestCtx(ctx, newPath, session.MainTask, rec.RequestNo)
+
+	_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
+	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  messages,
 		Tools:     graceDefs,
 		MaxTokens: r.deps.Template.CompletionTokenLimit(),
 		SessionID: sessionID,
 	})
+	duration := time.Since(startTime)
 	if err != nil {
+		rec.SetError(err, duration)
+		telemetry.RecordLLMResult(llmSpan, duration, 0, err)
+		llmSpan.End()
+		telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, 0, "error")
 		fmt.Fprintf(stdout.Writer(), "[ocr] Grace round LLM error for %s: %v\n", newPath, err)
 		return
 	}
 
+	rec.SetResponse(resp, duration)
+	totalTokens := int64(0)
 	if resp.Usage != nil {
+		totalTokens = resp.Usage.TotalTokens
 		atomic.AddInt64(&r.totalInputTokens, resp.Usage.PromptTokens)
 		atomic.AddInt64(&r.totalOutputTokens, resp.Usage.CompletionTokens)
 		atomic.AddInt64(&r.totalCacheReadTokens, resp.Usage.CacheReadTokens)
 		atomic.AddInt64(&r.totalCacheWriteTokens, resp.Usage.CacheWriteTokens)
 	}
+	telemetry.RecordLLMResult(llmSpan, duration, totalTokens, nil)
+	llmSpan.End()
+	telemetry.RecordLLMRequest(ctx, r.deps.Model, duration, totalTokens, "ok")
 
 	calls := resp.ToolCalls()
 	if len(calls) == 0 {
 		return
 	}
 
-	fs := r.deps.Session.GetOrCreateFileSession(newPath)
-	rec := fs.AppendTaskRecord(session.MainTask, append([]llm.Message(nil), messages...))
-	rec.SetResponse(resp, 0)
 	thinking := resp.ReasoningContent()
 	for _, call := range calls {
 		r.executeToolCall(ctx, newPath, call, rec, thinking)
@@ -500,38 +562,6 @@ func graceRoundToolDefs(defs []llm.ToolDef) []llm.ToolDef {
 func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.ToolCall, rec *session.TaskRecord, thinking string) tool.TaskCheckpoint {
 	t := tool.OfName(call.Function.Name)
 
-	if !t.IsKnown() {
-		p, ok := r.deps.Tools.Get(call.Function.Name)
-		if !ok {
-			return tool.Of(tool.NotAvailableMsg)
-		}
-		r.recordToolCall(call.Function.Name)
-		dynArgs, err := parseToolArgs(call.Function.Arguments)
-		if err != nil {
-			return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", call.Function.Name, err))
-		}
-		telemetry.PrintToolCallStarted(call.Function.Name, dynArgs)
-		_, toolSpan := telemetry.StartToolSpan(ctx, call.Function.Name)
-		startTime := time.Now()
-		result, err := p.Execute(ctx, dynArgs)
-		dur := time.Since(startTime)
-		if err != nil {
-			telemetry.RecordToolResult(toolSpan, call.Function.Name, dur.Milliseconds(), err)
-			toolSpan.End()
-			telemetry.RecordToolCall(ctx, call.Function.Name, dur, false)
-			telemetry.PrintToolCallError(call.Function.Name, err)
-			return tool.Of(fmt.Sprintf("Error executing tool %s: %v", call.Function.Name, err))
-		}
-		telemetry.RecordToolResult(toolSpan, call.Function.Name, dur.Milliseconds(), nil)
-		toolSpan.End()
-		telemetry.RecordToolCall(ctx, call.Function.Name, dur, true)
-		telemetry.PrintToolCallFinished(call.Function.Name, dur)
-		if rec != nil {
-			rec.AddToolResult(call.Function.Name, call.Function.Arguments, result)
-		}
-		return tool.Of(result)
-	}
-
 	if t == tool.TaskDone {
 		args, err := parseToolArgs(call.Function.Arguments)
 		if err != nil {
@@ -555,22 +585,23 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		}
 	}
 
-	p := lookupTool(r.deps.Tools, t)
-	if p == nil {
+	toolName := call.Function.Name
+	p, found := r.deps.Tools.Get(toolName)
+	if !found {
 		return tool.Of(tool.NotAvailableMsg)
 	}
 
-	r.recordToolCall(t.Name())
+	toolCallNumber := r.recordToolCall(toolName)
+	callStarted := time.Now()
 
 	args, err := parseToolArgs(call.Function.Arguments)
 	if err != nil {
-		return tool.Of(fmt.Sprintf("Error parsing tool arguments for %s: %v", t.Name(), err))
-	}
-
-	// Always inject the current file path for code_comment.
-	// The model sometimes hallucinates a path, so we override it.
-	if t == tool.CodeComment && newPath != "" {
-		args["path"] = newPath
+		errMsg := fmt.Sprintf("Error parsing tool arguments for %s: %v", toolName, err)
+		telemetry.PrintToolCallStarted(toolName, nil)
+		telemetry.PrintToolCallError(toolName, fmt.Errorf("%s", errMsg))
+		r.recordToolFailure(toolCallNumber, toolName, newPath, errMsg,
+			rec, call.Function.Arguments, time.Since(callStarted))
+		return tool.Of(errMsg)
 	}
 
 	startTime := time.Now()
@@ -579,12 +610,22 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 		telemetry.PrintToolCallStarted(t.Name(), args)
 		_, toolSpan := telemetry.StartToolSpan(ctx, t.Name())
 
-		comments, errMsg := tool.ParseComments(args)
+		comments, repair, errMsg := tool.ParseCommentsWithPath(args, newPath)
+		if repair != nil {
+			// The model sees a plain success, so this warning is the only record
+			// that its `comments` violated the array schema — without it the
+			// repair would absorb an unbounded number of them unobserved.
+			r.RecordWarning("comment_args_repaired", newPath, repair.Message())
+		}
 		if errMsg != "" {
 			dur := time.Since(startTime)
-			telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), fmt.Errorf("%s", errMsg))
+			toolErr := fmt.Errorf("%s", errMsg)
+			telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), toolErr)
 			toolSpan.End()
 			telemetry.RecordToolCall(ctx, t.Name(), dur, false)
+			r.recordToolFailure(toolCallNumber, toolName, newPath, errMsg,
+				rec, call.Function.Arguments, dur)
+			telemetry.PrintToolCallError(t.Name(), toolErr)
 			return tool.Of(errMsg)
 		}
 
@@ -692,22 +733,24 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 	}
 
 	// Synchronous path for all other tools
-	telemetry.PrintToolCallStarted(t.Name(), args)
-	_, toolSpan := telemetry.StartToolSpan(ctx, t.Name())
+	telemetry.PrintToolCallStarted(toolName, args)
+	_, toolSpan := telemetry.StartToolSpan(ctx, toolName)
 	result, err := p.Execute(ctx, args)
 	dur := time.Since(startTime)
 	ok := err == nil
-	telemetry.RecordToolResult(toolSpan, t.Name(), dur.Milliseconds(), err)
+	telemetry.RecordToolResult(toolSpan, toolName, dur.Milliseconds(), err)
 	toolSpan.End()
-	telemetry.RecordToolCall(ctx, t.Name(), dur, ok)
+	telemetry.RecordToolCall(ctx, toolName, dur, ok)
 
 	if err != nil {
-		telemetry.PrintToolCallError(t.Name(), err)
-		return tool.Of(fmt.Sprintf("Error executing tool %s: %v", t.Name(), err))
+		r.recordToolFailure(toolCallNumber, toolName, newPath, err.Error(),
+			rec, call.Function.Arguments, dur)
+		telemetry.PrintToolCallError(toolName, err)
+		return tool.Of(fmt.Sprintf("Error executing tool %s: %v", toolName, err))
 	}
-	telemetry.PrintToolCallFinished(t.Name(), dur)
+	telemetry.PrintToolCallFinished(toolName, dur)
 	if rec != nil {
-		rec.AddToolResult(t.Name(), call.Function.Arguments, result)
+		rec.AddToolResult(toolName, call.Function.Arguments, result)
 	}
 	return tool.Of(result)
 }
@@ -717,7 +760,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 // warning (80%) MaxTokens thresholds. Returns false when even after
 // synchronous compression the conversation is still over the warning
 // threshold — caller should stop the loop in that case.
-func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, results []tool.ToolCallResult, messages *[]llm.Message, filePath string, st *compressionState) bool {
+func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, toolCalls []llm.ToolCall, native llm.NativeTurn, reasoningContent string, results []tool.ToolCallResult, messages *[]llm.Message, filePath string, st *compressionState) bool {
 	maxAllowed := r.deps.Template.MaxTokens
 	softLimit := int(float64(maxAllowed) * tokenSoftThreshold)
 	warnLimit := PromptTokenLimit(maxAllowed)
@@ -737,9 +780,9 @@ func (r *Runner) addNextMessage(ctx context.Context, assistantContent string, to
 	}
 
 	if len(toolCalls) > 0 {
-		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls))
-	} else if assistantContent != "" {
-		*messages = append(*messages, llm.NewTextMessage("assistant", assistantContent))
+		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, toolCalls, native, reasoningContent))
+	} else if assistantContent != "" || native.Payload != nil {
+		*messages = append(*messages, llm.NewToolCallMessage(assistantContent, nil, native, reasoningContent))
 	}
 
 	for _, rs := range results {
@@ -780,14 +823,4 @@ func parseToolArgs(raw string) (map[string]any, error) {
 		args = make(map[string]any)
 	}
 	return args, nil
-}
-
-// lookupTool returns the provider for a given tool from the registry, or
-// nil when not registered.
-func lookupTool(reg *tool.Registry, t tool.Tool) tool.Provider {
-	p, ok := reg.Get(t.Name())
-	if !ok {
-		return nil
-	}
-	return p
 }
