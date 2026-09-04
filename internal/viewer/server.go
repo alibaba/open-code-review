@@ -93,7 +93,7 @@ func newMux(root string) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Static assets.
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS()))))
 
 	// Routes
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {

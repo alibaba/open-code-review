@@ -301,9 +301,13 @@ func TestMux_HasNoWriteRoutes(t *testing.T) {
 		{"DELETE root", http.MethodDelete, "/", http.StatusMethodNotAllowed},
 		{"PATCH root", http.MethodPatch, "/", http.StatusMethodNotAllowed},
 		{"OPTIONS root", http.MethodOptions, "/", http.StatusMethodNotAllowed},
+		{"POST static asset", http.MethodPost, "/static/session.js", http.StatusMethodNotAllowed},
+		{"PUT static asset", http.MethodPut, "/static/session.js", http.StatusMethodNotAllowed},
+		{"DELETE static asset", http.MethodDelete, "/static/session.js", http.StatusMethodNotAllowed},
 		{"GET session route still served", http.MethodGet, "/r/repo/s1", http.StatusOK},
 		{"HEAD session route still served", http.MethodHead, "/r/repo/s1", http.StatusOK},
 		{"GET repo route still served", http.MethodGet, "/r/repo", http.StatusOK},
+		{"GET static asset still served", http.MethodGet, "/static/session.js", http.StatusOK},
 		{"POST to unknown write-looking path stays 404", http.MethodPost, "/r/repo/s1/marks", http.StatusNotFound},
 		{"GET unknown path stays 404", http.MethodGet, "/nope", http.StatusNotFound},
 	}
