@@ -496,17 +496,34 @@ type OpenAIClient struct {
 	sdk openai.Client
 }
 
-// openAIHTTPClient returns an HTTP client whose ResponseHeaderTimeout is set to
-// timeout, overriding openai-go's hardcoded 10-minute default (which it applies
-// unless a client is supplied via WithHTTPClient) so a configured timeout_sec is
-// honored on a slow endpoint (#1161). Mirrors the SDK's own default client.
-func openAIHTTPClient(timeout time.Duration) *http.Client {
-	if t, ok := http.DefaultTransport.(*http.Transport); ok {
-		t = t.Clone()
-		t.ResponseHeaderTimeout = timeout
-		return &http.Client{Transport: t}
+// responseHeaderTimeoutMargin is added to the request timeout when setting
+// ResponseHeaderTimeout so the per-request context deadline (WithRequestTimeout),
+// which is 30s earlier, is the one to fire first. An equal ResponseHeaderTimeout
+// would race the context deadline, and a header-timeout win surfaces as a
+// nil-response transport error that shouldRetry treats as retryable, so the
+// request would be retried up to 5 more times (each with a fresh full timeout)
+// instead of failing on ctx.Err(). The margin still replaces the SDK's hardcoded
+// 10-minute default.
+const responseHeaderTimeoutMargin = 30 * time.Second
+
+// httpClientWithHeaderTimeout returns an HTTP client whose ResponseHeaderTimeout
+// is the request timeout plus responseHeaderTimeoutMargin, overriding the openai-go
+// and anthropic-sdk-go hardcoded 10-minute default (which each applies unless a
+// client is supplied via WithHTTPClient) so a configured timeout_sec is honored on
+// a slow endpoint (#1161). A timeout of zero or less leaves ResponseHeaderTimeout
+// unset (no cap), matching the SDKs' "no timeout" semantics; the callers here clamp
+// it to a positive value first, so this only guards a direct call. Mirrors the SDKs'
+// own default clients.
+func httpClientWithHeaderTimeout(timeout time.Duration) *http.Client {
+	t, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Client{Transport: http.DefaultTransport}
 	}
-	return &http.Client{Transport: http.DefaultTransport}
+	t = t.Clone()
+	if timeout > 0 {
+		t.ResponseHeaderTimeout = timeout + responseHeaderTimeoutMargin
+	}
+	return &http.Client{Transport: t}
 }
 
 // NewOpenAIClient creates a new OpenAI-compatible LLM client.
@@ -532,7 +549,7 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithMaxRetries(5),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
-		openaiopt.WithHTTPClient(openAIHTTPClient(cfg.Timeout)),
+		openaiopt.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
@@ -942,6 +959,11 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
+		// anthropic-sdk-go's default client hardcodes the same 10-minute
+		// ResponseHeaderTimeout as openai-go, applied because this path does not
+		// pass WithoutEnvironmentDefaults, so a long timeout_sec is capped at 10
+		// minutes on a slow endpoint without this (#1161).
+		option.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
 
 	switch authHeader {
@@ -1002,6 +1024,10 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
+		// No httpClientWithHeaderTimeout here (unlike NewAnthropicClient): bedrock.WithConfig
+		// is an option.Join carrying WithoutEnvironmentDefaults, so NewClient skips
+		// DefaultClientOptions and never installs the SDK's 10-minute-header-timeout
+		// default client. Adding one would impose a new cap, not remove one.
 		// Bedrock authenticates by SigV4 signature, added by the middleware
 		// below at transport time. Any API-key header the SDK would otherwise
 		// attach — including an empty one — is rejected outright with
