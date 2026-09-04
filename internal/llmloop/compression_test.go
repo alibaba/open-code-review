@@ -131,6 +131,67 @@ func TestPartitionMessages_EverythingFits(t *testing.T) {
 	}
 }
 
+// TestBoundCompressZoneStart_EverythingFits guards the common case: when the
+// whole compress zone fits within limit, nothing should be trimmed.
+func TestBoundCompressZoneStart_EverythingFits(t *testing.T) {
+	messages := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		msg("assistant", "short reply one"),
+		msg("tool", "ok one"),
+		msg("assistant", "short reply two"),
+		msg("tool", "ok two"),
+	}
+	got := boundCompressZoneStart(messages, 2, len(messages), 100000)
+	if got != 2 {
+		t.Errorf("boundCompressZoneStart = %d, want 2 (nothing trimmed)", got)
+	}
+}
+
+// TestBoundCompressZoneStart_TrimsOldestFirst is the regression test for the
+// bug reported against production: a compress zone whose accumulated content
+// (e.g. many rounds of large tool-call output) exceeds even a generous
+// compression budget must be trimmed from its OLDEST end, never sent to the
+// LLM whole. Before this fix, runCompression sent the entire compress zone
+// unconditionally, which could make a single compression request larger than
+// the model's real context window (see alibaba/open-code-review#838).
+func TestBoundCompressZoneStart_TrimsOldestFirst(t *testing.T) {
+	big := strings.Repeat("x ", 5000) // large tool result, several thousand tokens
+	messages := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		msg("assistant", "call 1"),
+		msg("tool", big), // oldest round — should be dropped
+		msg("assistant", "call 2"),
+		msg("tool", big), // newest round — should be kept
+	}
+	roundTokens := messageTokens(messages[4]) + messageTokens(messages[5])
+	// A limit that fits exactly one round but not both.
+	limit := roundTokens + 10
+
+	got := boundCompressZoneStart(messages, 2, len(messages), limit)
+	if got != 4 {
+		t.Errorf("boundCompressZoneStart = %d, want 4 (only the newest round kept)", got)
+	}
+}
+
+// TestBoundCompressZoneStart_SingleMessageExceedsLimit guards against ever
+// returning an empty range: even when the single newest message alone
+// exceeds limit, it must still be included so runCompression always has
+// something to summarize.
+func TestBoundCompressZoneStart_SingleMessageExceedsLimit(t *testing.T) {
+	messages := []llm.Message{
+		msg("system", "sys"),
+		msg("user", "prompt"),
+		msg("assistant", "call"),
+		msg("tool", strings.Repeat("x ", 100000)), // far larger than limit alone
+	}
+	got := boundCompressZoneStart(messages, 2, len(messages), 10)
+	if got != len(messages)-1 {
+		t.Errorf("boundCompressZoneStart = %d, want %d (still includes the one oversized message)", got, len(messages)-1)
+	}
+}
+
 func TestStripMarkdownFences(t *testing.T) {
 	tests := []struct {
 		name  string

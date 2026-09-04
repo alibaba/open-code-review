@@ -216,6 +216,43 @@ func copyMessages(msgs []llm.Message) []llm.Message {
 	return out
 }
 
+// maxCompressionContextTokens bounds how much conversation content a single
+// memory-compression call may attempt to summarize. The compress zone's size
+// is otherwise unbounded: it is whatever accumulated between the frozen and
+// active zones, which can include many rounds of tool-call output (e.g. broad
+// code_search/file_read results). Without this cap, a single compression
+// request can end up needing far more tokens than the model's real context
+// window, so the LLM call itself fails and the whole review aborts (see
+// alibaba/open-code-review#838 — three-zone compression can let live/compress
+// content overfill past its intended threshold). This is independent of the
+// per-file MaxTokens template setting: it is a hard backstop sized well under
+// real-world model context windows (even the smallest current-generation
+// models offer >= 128K tokens), so it only engages in pathological cases.
+const maxCompressionContextTokens = 200_000
+
+// boundCompressZoneStart returns the start index of the largest trailing
+// slice of msgs[frozenEnd:compressEnd] whose combined token count fits within
+// limit. The compress zone summarizes its oldest content first (closest to
+// the frozen zone) and its newest content last (closest to the active zone
+// it hands off to), so trimming from the old end discards the least
+// contextually relevant material when a single call cannot fit everything.
+// Always includes at least the single newest message in the zone, even if
+// that message alone exceeds limit, so the caller never ends up with an
+// empty range to summarize.
+func boundCompressZoneStart(msgs []llm.Message, frozenEnd, compressEnd, limit int) int {
+	tokens := 0
+	i := compressEnd
+	for i > frozenEnd {
+		t := messageTokens(msgs[i-1])
+		if i < compressEnd && tokens+t > limit {
+			break
+		}
+		tokens += t
+		i--
+	}
+	return i
+}
+
 // runCompression performs three-zone memory compression on the given
 // messages, summarizing the compress zone while preserving the active zone
 // intact. Returns rebuilt as [frozen] + [compressed_summary appended to
@@ -230,7 +267,13 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 		return msgs, nil
 	}
 
-	contextXML := buildMessageXML(msgs[part.frozenEnd:part.compressEnd])
+	compressStart := boundCompressZoneStart(msgs, part.frozenEnd, part.compressEnd, maxCompressionContextTokens)
+	contextXML := buildMessageXML(msgs[compressStart:part.compressEnd])
+	if compressStart > part.frozenEnd {
+		contextXML = fmt.Sprintf(
+			"<truncation_notice>%d earlier message(s) omitted: accumulated conversation history exceeded the %d-token compression size limit and could not be summarized in a single request.</truncation_notice>\n%s",
+			compressStart-part.frozenEnd, maxCompressionContextTokens, contextXML)
+	}
 
 	compressionMsgs := make([]llm.Message, 0, len(r.deps.Template.MemoryCompressionTask.Messages))
 	for _, m := range r.deps.Template.MemoryCompressionTask.Messages {
