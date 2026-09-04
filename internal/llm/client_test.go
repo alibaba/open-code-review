@@ -2044,3 +2044,23 @@ func TestAnthropicClient_RetryCodesTriggersRetry(t *testing.T) {
 		t.Errorf("Content() = %q, want %q", got, "success")
 	}
 }
+
+func TestOpenAIHTTPClientHonorsTimeout(t *testing.T) {
+	// #1161: openai-go's default client hardcodes a 10-minute ResponseHeaderTimeout,
+	// so a long timeout_sec is ignored on a slow endpoint. openAIHTTPClient must set
+	// it to the configured timeout on a cloned transport.
+	const want = 42 * time.Second
+	c := openAIHTTPClient(want)
+
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport = %T, want *http.Transport", c.Transport)
+	}
+	if tr.ResponseHeaderTimeout != want {
+		t.Fatalf("ResponseHeaderTimeout = %v, want %v", tr.ResponseHeaderTimeout, want)
+	}
+	// Must be a clone, not the shared http.DefaultTransport (which we must not mutate).
+	if def, ok := http.DefaultTransport.(*http.Transport); ok && tr == def {
+		t.Fatal("returned the shared http.DefaultTransport instead of a clone")
+	}
+}

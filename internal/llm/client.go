@@ -496,6 +496,19 @@ type OpenAIClient struct {
 	sdk openai.Client
 }
 
+// openAIHTTPClient returns an HTTP client whose ResponseHeaderTimeout is set to
+// timeout, overriding openai-go's hardcoded 10-minute default (which it applies
+// unless a client is supplied via WithHTTPClient) so a configured timeout_sec is
+// honored on a slow endpoint (#1161). Mirrors the SDK's own default client.
+func openAIHTTPClient(timeout time.Duration) *http.Client {
+	if t, ok := http.DefaultTransport.(*http.Transport); ok {
+		t = t.Clone()
+		t.ResponseHeaderTimeout = timeout
+		return &http.Client{Transport: t}
+	}
+	return &http.Client{Transport: http.DefaultTransport}
+}
+
 // NewOpenAIClient creates a new OpenAI-compatible LLM client.
 // ExtraHeaders are applied per request (not baked into the SDK client) so
 // SessionKeyTemplateVar can expand to the session key each request carries.
@@ -519,6 +532,7 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithMaxRetries(5),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
+		openaiopt.WithHTTPClient(openAIHTTPClient(cfg.Timeout)),
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
