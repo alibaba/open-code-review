@@ -73,10 +73,9 @@ func (p *CodeCommentProvider) Execute(_ context.Context, args map[string]any) (s
 // when individual comment objects omit the path field.
 //
 // repair is non-nil when `comments` arrived as a serialized string that only
-// parsed after the deterministic repair (see comment_args_repair.go). The
-// comments themselves are unaffected apart from suggestion_code values the
-// repair judged unsafe; callers report it so a schema violation the framework
-// papers over still leaves a trace.
+// parsed after the deterministic repair (see comment_args_repair.go). It reports a
+// schema violation, not a change to the findings: a repair is accepted only when
+// no recovered value looks cut short.
 func ParseCommentsWithPath(args map[string]any, defaultPath string) (comments []model.LlmComment, repair *CommentRepair, errMsg string) {
 	return parseCommentsInner(args, defaultPath)
 }
@@ -99,16 +98,14 @@ func parseCommentsInner(args map[string]any, defaultPath string) ([]model.LlmCom
 		rawComments = arr
 	} else if s, ok := args["comments"].(string); ok && s != "" {
 		if err := json.Unmarshal([]byte(s), &rawComments); err != nil {
-			// The schema declares an array; a string is a violation that in
-			// practice fails to parse over an unescaped prose quote, taking the
-			// whole batch with it. Try the deterministic repair before giving
-			// up, and keep the original error when it does not hold up.
+			// A string here is a schema violation that in practice fails to
+			// parse and takes the whole batch with it. Try the repair first.
 			entries, rep := parseRepairedComments(s)
 			if entries == nil {
-				// Keep the wording — and specifically "invalid character" — as
-				// the parser produced it. That phrasing is what leads the model
-				// to regenerate the batch; describing the violation instead
-				// makes it resend the same broken string.
+				// Keep "invalid character" as the parser produced it: that
+				// phrasing is what leads the model to regenerate the batch,
+				// while naming the schema violation instead makes it resend the
+				// same broken string.
 				return nil, nil, fmt.Sprintf("Error: failed to parse 'comments' JSON string: %v", err)
 			}
 			rawComments = entries

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 )
 
 // These fixtures are the observed shape of the failure: `comments` arrives as a
@@ -412,85 +414,58 @@ func TestParseRepairedComments_DeclinesWhenNothingToEscape(t *testing.T) {
 	}
 }
 
-// TestParseComments_SuspectSuggestionIsDroppedNotApplied covers the one field
-// whose truncation has a consequence beyond being hard to read. A suggestion_code
-// cut short at a misjudged terminator is syntactically incomplete code, and both
-// the SARIF `fixes` array and the GitHub ```suggestion block gate on it being
-// non-empty — so leaving it in place puts that code one click away from being
-// committed. Clearing it closes every such consumer without any of them knowing
-// about this check, while the comment itself still reaches the reviewer.
-func TestParseComments_SuspectSuggestionIsDroppedNotApplied(t *testing.T) {
-	// The trailing quote of the suggestion is missing, so the repair reads the
-	// following comma as a terminator and cuts `x = "y` short.
-	serialized := `[{"content":"use a literal","suggestion_code":"x = "y","existing_code":"z","path":"a.go"}]`
+// assertDeclined is the shared assertion for a batch the repair must refuse: no
+// comments, no repair description, and the parser's own wording handed back so
+// the model regenerates the batch instead of resending the broken string.
+func assertDeclined(t *testing.T, serialized, why string) {
+	t.Helper()
 	comments, repair, errMsg := ParseCommentsWithPath(
 		map[string]any{"comments": serialized}, "fallback.go")
-	if errMsg != "" {
-		t.Fatalf("the batch must still be recovered, got error: %s", errMsg)
+	if errMsg == "" {
+		t.Fatalf("repair was accepted (%d comments); want it declined because %s",
+			len(comments), why)
 	}
-	if len(comments) != 1 {
-		t.Fatalf("recovered %d comments, want 1 — the comment is not the casualty", len(comments))
+	if len(comments) != 0 || repair != nil {
+		t.Errorf("comments=%d repair=%+v; want nothing recovered", len(comments), repair)
 	}
-	if comments[0].SuggestionCode != "" {
-		t.Errorf("suggestion_code = %q, want it dropped so no consumer can apply it",
-			comments[0].SuggestionCode)
-	}
-	// The rest of the finding is untouched: dropping the suggestion costs a fix
-	// hint, not the review comment.
-	if comments[0].Content != "use a literal" {
-		t.Errorf("content = %q, want it intact", comments[0].Content)
-	}
-	if comments[0].ExistingCode != "z" || comments[0].Path != "a.go" {
-		t.Errorf("existing_code = %q, path = %q; both should survive",
-			comments[0].ExistingCode, comments[0].Path)
-	}
-	if repair == nil {
-		t.Fatal("a repair that dropped a value must still be reported")
-	}
-	if repair.DroppedSuggestions != 1 {
-		t.Errorf("DroppedSuggestions = %d, want 1", repair.DroppedSuggestions)
-	}
-	if len(repair.SuspectFields) != 1 || repair.SuspectFields[0] != "suggestion_code" {
-		t.Errorf("SuspectFields = %v, want [suggestion_code]", repair.SuspectFields)
+	if !strings.Contains(errMsg, "invalid character") {
+		t.Errorf("a declined repair must fall back to the parser wording, got %q", errMsg)
 	}
 }
 
-// TestParseComments_SuspectContentIsReportedNotAltered pins the other half of the
-// policy: a content cut short is still worth reading, so it is named in the
-// warning and otherwise left exactly as recovered.
-func TestParseComments_SuspectContentIsReportedNotAltered(t *testing.T) {
-	serialized := `[{"content":"call it "hard", "path":"a.go"}]`
-	comments, repair, errMsg := ParseCommentsWithPath(
-		map[string]any{"comments": serialized}, "fallback.go")
-	if errMsg != "" {
-		t.Fatalf("expected the batch to be recovered, got error: %s", errMsg)
-	}
-	if len(comments) != 1 || comments[0].Content != `call it "hard` {
-		t.Fatalf("content = %q, want the truncated text left as recovered", comments[0].Content)
-	}
-	if repair == nil {
-		t.Fatal("a suspect value must be reported")
-	}
-	if repair.DroppedSuggestions != 0 {
-		t.Errorf("DroppedSuggestions = %d, want 0 — only suggestion_code is dropped",
-			repair.DroppedSuggestions)
-	}
-	if len(repair.SuspectFields) != 1 || repair.SuspectFields[0] != "content" {
-		t.Errorf("SuspectFields = %v, want [content]", repair.SuspectFields)
-	}
-	// The whole point of the field list: without it a truncated recovery is
-	// indistinguishable from a clean one in every output format.
-	if !strings.Contains(repair.Message(), "content may be truncated") {
-		t.Errorf("warning does not name the suspect value: %q", repair.Message())
-	}
+// One case per checked field, each feeding a value the scan cuts short. All must
+// be refused rather than partially recovered: a cut existing_code matches nothing
+// (matchConsecutive compares whole lines) so the position gets guessed, a cut
+// suggestion_code is incomplete code that SARIF `fixes` and the GitHub
+// ```suggestion block would still offer, and a cut path is non-empty enough to
+// suppress the defaultPath fallback. The original error resends the batch intact.
+
+func TestParseComments_SuspectSuggestionRejectsTheBatch(t *testing.T) {
+	assertDeclined(t,
+		`[{"content":"use a literal","suggestion_code":"x = "y","existing_code":"z","path":"a.go"}]`,
+		"suggestion_code may be cut short")
 }
 
-// TestParseComments_CleanRepairReportsNoSuspect is the contrast that keeps the
-// detector honest. Every one of these is the actually-observed failure shape —
-// the quotes are all present and only the escaping level was dropped — and none
-// of them loses anything, so flagging one would cost a real suggestion for
-// nothing.
-func TestParseComments_CleanRepairReportsNoSuspect(t *testing.T) {
+func TestParseComments_SuspectContentRejectsTheBatch(t *testing.T) {
+	assertDeclined(t, `[{"content":"call it "hard", "path":"a.go"}]`,
+		"content may be cut short")
+}
+
+func TestParseComments_SuspectExistingCodeRejectsTheBatch(t *testing.T) {
+	assertDeclined(t,
+		`[{"content":"ok","existing_code":"s := "v","suggestion_code":"q","path":"a.go"}]`,
+		"existing_code may be cut short")
+}
+
+func TestParseComments_SuspectPathRejectsTheBatch(t *testing.T) {
+	assertDeclined(t, `[{"content":"ok","path":"a.go"x","existing_code":"z"}]`,
+		"path may be cut short")
+}
+
+// TestParseComments_CleanRepairIsAcceptedIntact is the contrast that keeps the
+// detector honest: every fixture here is an actually-observed failure shape, so
+// suspecting one would make the repair decline the batches it exists to save.
+func TestParseComments_CleanRepairIsAcceptedIntact(t *testing.T) {
 	for _, tc := range []struct{ name, serialized string }{
 		{"prose quote in english", proseQuoteEnglish},
 		{"prose quote in chinese", proseQuoteChinese},
@@ -509,89 +484,24 @@ func TestParseComments_CleanRepairReportsNoSuspect(t *testing.T) {
 			if repair == nil {
 				t.Fatal("a repaired batch must be reported")
 			}
-			if len(repair.SuspectFields) != 0 {
-				t.Errorf("SuspectFields = %v, want none for a clean recovery", repair.SuspectFields)
-			}
-			if repair.DroppedSuggestions != 0 {
-				t.Errorf("DroppedSuggestions = %d, want 0", repair.DroppedSuggestions)
-			}
-			// A clean recovery must keep its suggestion, or the detector would be
-			// silently discarding valid fixes.
+			// An accepted batch is intact by construction, so its suggestion must
+			// survive — a dropped one would mean the repair is lossy after all.
 			for _, cm := range comments {
 				if strings.Contains(tc.serialized, `"suggestion_code"`) && cm.SuggestionCode == "" {
-					t.Errorf("suggestion_code was dropped from a clean batch: %+v", cm)
+					t.Errorf("suggestion_code missing from an accepted batch: %+v", cm)
 				}
 			}
 		})
 	}
 }
 
-// TestParseComments_SuspectExistingCodeAlsoWithholdsSuggestion covers the reason
-// the drop is per-entry rather than per-field. A truncated existing_code cannot
-// match anything — matchConsecutive compares whole lines — so every deterministic
-// resolver declines and the LLM re-location guesses line numbers from a mutilated
-// excerpt. A fix assembled from those numbers deletes the wrong region, so the
-// suggestion has to go even though the suggestion itself looks fine.
-func TestParseComments_SuspectExistingCodeAlsoWithholdsSuggestion(t *testing.T) {
-	serialized := `[{"content":"ok","existing_code":"s := "v","suggestion_code":"q","path":"a.go"}]`
-	comments, repair, errMsg := ParseCommentsWithPath(
-		map[string]any{"comments": serialized}, "fallback.go")
-	if errMsg != "" {
-		t.Fatalf("the batch must still be recovered, got error: %s", errMsg)
-	}
-	if len(comments) != 1 {
-		t.Fatalf("recovered %d comments, want 1", len(comments))
-	}
-	if comments[0].SuggestionCode != "" {
-		t.Errorf("suggestion_code = %q, want it withheld — its deleted region would "+
-			"come from the truncated anchor", comments[0].SuggestionCode)
-	}
-	// The anchor itself stays: every resolver needs it, and removing it would lose
-	// the position outright instead of protecting it.
-	if comments[0].ExistingCode != `s := "v` {
-		t.Errorf("existing_code = %q, want it left as recovered", comments[0].ExistingCode)
-	}
-	if repair.DroppedSuggestions != 1 {
-		t.Errorf("DroppedSuggestions = %d, want 1", repair.DroppedSuggestions)
-	}
-	if len(repair.SuspectFields) != 1 || repair.SuspectFields[0] != "existing_code" {
-		t.Errorf("SuspectFields = %v, want [existing_code]", repair.SuspectFields)
-	}
-}
-
-// TestParseComments_SuspectPathFallsBackToFileUnderReview pins the one field that
-// would otherwise be written out verbatim. A truncated path is non-empty, so it
-// would suppress the defaultPath fallback and name a file that does not exist in
-// the SARIF artifactLocation URI and the fingerprint.
-func TestParseComments_SuspectPathFallsBackToFileUnderReview(t *testing.T) {
-	// The path value keeps an odd quote, the signature of a misjudged terminator.
-	serialized := `[{"content":"ok","path":"a.go"x","existing_code":"z"}]`
-	comments, repair, errMsg := ParseCommentsWithPath(
-		map[string]any{"comments": serialized}, "fallback.go")
-	if errMsg != "" {
-		t.Fatalf("the batch must still be recovered, got error: %s", errMsg)
-	}
-	if len(comments) != 1 {
-		t.Fatalf("recovered %d comments, want 1", len(comments))
-	}
-	if comments[0].Path != "fallback.go" {
-		t.Errorf("path = %q, want the file under review", comments[0].Path)
-	}
-	if repair.DroppedPaths != 1 {
-		t.Errorf("DroppedPaths = %d, want 1", repair.DroppedPaths)
-	}
-	if !strings.Contains(repair.Message(), "fell back to the file under review") {
-		t.Errorf("warning does not report the fallback: %q", repair.Message())
-	}
-}
-
-// TestParseComments_TruncatedThinkingCostsNoSuggestion pins the decision to leave
+// TestParseComments_TruncatedThinkingStillAccepted pins the decision to leave
 // thinking out of commentTextFields. Adding it looks like a completeness win —
-// knownCommentFields accepts the field and it does carry prose — but because the
-// drop is per-entry, suspecting it would take a perfectly good suggestion_code
-// down with it. A truncated thinking reaches the JSON output only, with no
-// terminal or viewer rendering, so that trade is backwards.
-func TestParseComments_TruncatedThinkingCostsNoSuggestion(t *testing.T) {
+// knownCommentFields accepts the field and it does carry prose — but suspecting
+// it would refuse the whole batch over a value that reaches the JSON output only,
+// with no terminal or viewer rendering. That trade is backwards, so a cut
+// thinking is the one truncation this path tolerates.
+func TestParseComments_TruncatedThinkingStillAccepted(t *testing.T) {
 	serialized := `[{"content":"ok","thinking":"because of "this","suggestion_code":"q","existing_code":"z","path":"a.go"}]`
 	comments, repair, errMsg := ParseCommentsWithPath(
 		map[string]any{"comments": serialized}, "fallback.go")
@@ -602,14 +512,11 @@ func TestParseComments_TruncatedThinkingCostsNoSuggestion(t *testing.T) {
 		t.Fatalf("recovered %d comments, want 1", len(comments))
 	}
 	if comments[0].SuggestionCode != "q" {
-		t.Errorf("suggestion_code = %q, want it kept — a truncated thinking is not "+
-			"a reason to withhold a usable fix", comments[0].SuggestionCode)
+		t.Errorf("suggestion_code = %q, want it kept — a cut thinking is not a reason "+
+			"to refuse a usable batch", comments[0].SuggestionCode)
 	}
-	if repair.DroppedSuggestions != 0 {
-		t.Errorf("DroppedSuggestions = %d, want 0", repair.DroppedSuggestions)
-	}
-	if len(repair.SuspectFields) != 0 {
-		t.Errorf("SuspectFields = %v, want none — thinking is not checked", repair.SuspectFields)
+	if repair == nil {
+		t.Fatal("a repaired batch must be reported")
 	}
 }
 
@@ -633,38 +540,101 @@ func TestHasOddQuotes(t *testing.T) {
 }
 
 func TestCommentRepairMessage(t *testing.T) {
-	// A clean repair says only what it escaped, so the common case stays terse.
-	clean := (&CommentRepair{EscapedChars: 2}).Message()
-	if !strings.Contains(clean, "repaired 2 unescaped character(s)") {
-		t.Errorf("clean message = %q", clean)
+	// Every accepted repair is an intact one, so the message reports the schema
+	// violation and the escape count and nothing else. It must not imply loss.
+	msg := (&CommentRepair{EscapedChars: 2}).Message()
+	if !strings.Contains(msg, "repaired 2 unescaped character(s)") {
+		t.Errorf("message = %q", msg)
 	}
-	if strings.Contains(clean, "truncated") || strings.Contains(clean, "withheld") {
-		t.Errorf("a clean repair must not mention truncation: %q", clean)
+	if !strings.Contains(msg, "serialized string instead of an array") {
+		t.Errorf("message must name the schema violation: %q", msg)
 	}
-
-	full := (&CommentRepair{
-		EscapedChars:       3,
-		SuspectFields:      []string{"content", "suggestion_code", "path"},
-		DroppedSuggestions: 1,
-		DroppedPaths:       2,
-	}).Message()
-	for _, want := range []string{
-		"repaired 3 unescaped character(s)",
-		"content, suggestion_code, path may be truncated",
-		"withheld 1 suggestion_code value(s)",
-		"2 suspect path(s) fell back to the file under review",
-	} {
-		if !strings.Contains(full, want) {
-			t.Errorf("message %q missing %q", full, want)
+	for _, forbidden := range []string{"truncated", "withheld", "fell back"} {
+		if strings.Contains(msg, forbidden) {
+			t.Errorf("an accepted repair is intact and must not mention %q: %q", forbidden, msg)
 		}
 	}
 }
 
-func TestFlagSuspectTruncations_SkipsNonObjectEntries(t *testing.T) {
-	// repairedCommentsAcceptable rejects these before the flagger runs, but it
-	// must not panic if it ever sees one.
-	suspects, dropped, droppedPaths := flagSuspectTruncations([]any{"not an object", 42, nil})
-	if len(suspects) != 0 || dropped != 0 || droppedPaths != 0 {
-		t.Errorf("suspects=%v dropped=%d droppedPaths=%d; want all empty", suspects, dropped, droppedPaths)
+func TestHasSuspectTruncation(t *testing.T) {
+	t.Run("skips non-object entries", func(t *testing.T) {
+		// repairedCommentsAcceptable rejects these first, but this must not panic
+		// if it ever sees one.
+		if hasSuspectTruncation([]any{"not an object", 42, nil}) {
+			t.Error("entries that are not objects carry no suspect value")
+		}
+	})
+
+	t.Run("detects a cut value in any checked field", func(t *testing.T) {
+		for _, field := range commentTextFields {
+			entries := []any{map[string]any{"content": "ok", field: `cut "here`}}
+			if !hasSuspectTruncation(entries) {
+				t.Errorf("a cut %s must be detected", field)
+			}
+		}
+	})
+
+	t.Run("ignores thinking", func(t *testing.T) {
+		entries := []any{map[string]any{"content": "ok", "thinking": `cut "here`}}
+		if hasSuspectTruncation(entries) {
+			t.Error("thinking is deliberately unchecked; see commentTextFields")
+		}
+	})
+
+	t.Run("accepts whole pairs", func(t *testing.T) {
+		entries := []any{map[string]any{"content": `a "term" and "another"`, "path": "a.go"}}
+		if hasSuspectTruncation(entries) {
+			t.Error("values keeping whole pairs are not suspect")
+		}
+	})
+}
+
+// TestKnownCommentFieldsCoversTheSchema stops the allow-list from drifting from
+// the shipped schema: a field the schema defines but this set omits would make
+// repairedCommentsAcceptable reject every batch that uses it.
+//
+// It covers the embedded default only. A caller pointing --tools at a custom file
+// with extra comment fields still loses the repair, accepted here because the
+// failure direction is safe — the batch falls back to the original error.
+func TestKnownCommentFieldsCoversTheSchema(t *testing.T) {
+	entries, err := toolsconfig.Load("")
+	if err != nil {
+		t.Fatalf("load embedded tools config: %v", err)
+	}
+	var def struct {
+		Parameters struct {
+			Properties struct {
+				Comments struct {
+					Items struct {
+						Properties map[string]json.RawMessage `json:"properties"`
+					} `json:"items"`
+				} `json:"comments"`
+			} `json:"properties"`
+		} `json:"parameters"`
+	}
+	found := false
+	for _, e := range entries {
+		if e.Name != CodeComment.Name() {
+			continue
+		}
+		if err := json.Unmarshal(e.Definition, &def); err != nil {
+			t.Fatalf("unmarshal %s definition: %v", e.Name, err)
+		}
+		found = true
+		break
+	}
+	if !found {
+		t.Fatalf("%s is not in the embedded tools config", CodeComment.Name())
+	}
+
+	schemaFields := def.Parameters.Properties.Comments.Items.Properties
+	if len(schemaFields) == 0 {
+		t.Fatal("no comment fields parsed out of the schema; the shape must have changed")
+	}
+	for field := range schemaFields {
+		if _, known := knownCommentFields[field]; !known {
+			t.Errorf("schema defines %q but knownCommentFields omits it, so any repaired "+
+				"batch using that field would be rejected", field)
+		}
 	}
 }

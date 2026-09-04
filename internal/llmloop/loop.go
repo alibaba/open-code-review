@@ -612,12 +612,9 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 
 		comments, repair, errMsg := tool.ParseCommentsWithPath(args, newPath)
 		if repair != nil {
-			// The batch survived only because the deterministic repair ran. The
-			// model sees a plain success, so this warning is the sole record
-			// that a schema violation happened at all — without it the repair
-			// would silently absorb an unbounded number of them. The message
-			// also names any value the repair may have truncated, which is
-			// otherwise unobservable in every output format.
+			// The model sees a plain success, so this warning is the only record
+			// that its `comments` violated the array schema — without it the
+			// repair would absorb an unbounded number of them unobserved.
 			r.RecordWarning("comment_args_repaired", newPath, repair.Message())
 		}
 		if errMsg != "" {

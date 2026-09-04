@@ -586,37 +586,6 @@ func TestSarifResultFromComment_FixesWithEmptyPath(t *testing.T) {
 	}
 }
 
-// TestSarifResultFromComment_NoFixWhenSuggestionWithheld records the far end of
-// the serialized-comments repair. When that repair may have cut a suggestion_code
-// short it clears the field (see tool.flagSuspectTruncations) precisely because
-// this function gates fixes on it being non-empty — a truncated suggestion is
-// syntactically incomplete code, and a SARIF fix is machine-applicable. The
-// comment must still be reported in full; only the fix is withheld.
-func TestSarifResultFromComment_NoFixWhenSuggestionWithheld(t *testing.T) {
-	c := model.LlmComment{
-		Path:         "a.go",
-		Content:      "use a literal",
-		ExistingCode: "old code",
-		// Cleared by the repair because it was suspect.
-		SuggestionCode: "",
-		StartLine:      3,
-		EndLine:        3,
-		Category:       "bug",
-		Severity:       "high",
-	}
-	result := sarifResultFromComment(c)
-	if result.Fixes != nil {
-		t.Errorf("Fixes must be nil when the suggestion was withheld, got %+v", result.Fixes)
-	}
-	// The finding itself is not the casualty: it keeps its location and message.
-	if result.Message.Text != "use a literal" {
-		t.Errorf("message = %q, want the comment reported in full", result.Message.Text)
-	}
-	if len(result.Locations) != 1 {
-		t.Fatalf("locations = %+v, want the comment still anchored", result.Locations)
-	}
-}
-
 // --- partialFingerprints stability ---
 
 func TestSarifFingerprints_Stable(t *testing.T) {

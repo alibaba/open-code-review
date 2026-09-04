@@ -866,10 +866,8 @@ func TestMainLoopStopUnknownValue(t *testing.T) {
 	}
 }
 
-// TestExecuteToolCall_CodeCommentRepairedArgsWarns covers the caller half of the
-// deterministic repair: the model gets a plain success, so the run warning is
-// the only record that its `comments` violated the array schema. Without it the
-// repair would absorb an unbounded number of violations unobserved.
+// The model gets a plain success, so the run warning is the only record that its
+// `comments` violated the array schema.
 func TestExecuteToolCall_CodeCommentRepairedArgsWarns(t *testing.T) {
 	collector := tool.NewCommentCollector()
 	reg := tool.NewRegistry()
@@ -913,12 +911,10 @@ func TestExecuteToolCall_CodeCommentRepairedArgsWarns(t *testing.T) {
 	}
 }
 
-// TestExecuteToolCall_CodeCommentSuspectRepairWarnsWithField covers the case the
-// count alone cannot express: the repair held up structurally but may have cut a
-// value short. The model still sees a plain success, so unless the warning names
-// the suspect field a truncated recovery is indistinguishable from a clean one in
-// every output format — stderr, JSON and SARIF all carry only this message.
-func TestExecuteToolCall_CodeCommentSuspectRepairWarnsWithField(t *testing.T) {
+// The far side of the accept/decline decision: a refused batch must reach the
+// model as a failure, since that error is what makes it resend. No warning
+// either, because nothing was papered over.
+func TestExecuteToolCall_CodeCommentSuspectRepairReportsTheError(t *testing.T) {
 	collector := tool.NewCommentCollector()
 	reg := tool.NewRegistry()
 	reg.Register(&tool.CodeCommentProvider{Collector: collector})
@@ -937,34 +933,20 @@ func TestExecuteToolCall_CodeCommentSuspectRepairWarnsWithField(t *testing.T) {
 	cp := r.executeToolCall(context.Background(), "a.go", llm.ToolCall{
 		Function: llm.FunctionCall{Name: "code_comment", Arguments: string(argsJSON)},
 	}, nil, "")
-	if cp.Data != tool.CommentSucceed {
-		t.Fatalf("result = %+v, want the batch recovered", cp)
+	if !strings.Contains(cp.Data, "invalid character") {
+		t.Fatalf("result = %+v, want the parser wording that makes the model retry", cp)
 	}
 
-	comments := collector.Comments()
-	if len(comments) != 1 {
-		t.Fatalf("collected %d comments, want 1", len(comments))
+	if got := collector.Comments(); len(got) != 0 {
+		t.Errorf("collected %+v, want nothing from a refused batch", got)
 	}
-	// The finding survives; only the unsafe fix hint is gone.
-	if comments[0].SuggestionCode != "" {
-		t.Errorf("suggestion_code = %q, want it withheld from every auto-apply path",
-			comments[0].SuggestionCode)
-	}
-
-	warnings := r.Warnings()
-	if len(warnings) != 1 {
-		t.Fatalf("warnings = %+v, want exactly one", warnings)
-	}
-	for _, want := range []string{"suggestion_code may be truncated", "withheld 1 suggestion_code"} {
-		if !strings.Contains(warnings[0].Message, want) {
-			t.Errorf("warning %q does not report %q", warnings[0].Message, want)
-		}
+	if w := r.Warnings(); len(w) != 0 {
+		t.Errorf("warnings = %+v, want none — a refused repair papers over nothing", w)
 	}
 }
 
-// TestExecuteToolCall_CodeCommentWellFormedArgsDoesNotWarn is the contrast that
-// keeps the test above honest: a schema-conformant batch must produce no
-// warning, so comment_args_repaired counts real violations only.
+// The contrast that keeps the tests above honest: a conformant batch must warn
+// nothing, so comment_args_repaired counts real violations only.
 func TestExecuteToolCall_CodeCommentWellFormedArgsDoesNotWarn(t *testing.T) {
 	collector := tool.NewCommentCollector()
 	reg := tool.NewRegistry()
