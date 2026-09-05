@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Session Detail - Open Code Review Viewer</title>
 
-    <link rel="stylesheet" href="/static/style.css">
+    {{if $.Static}}<style>{{$.InlineCSS}}</style>{{else}}<link rel="stylesheet" href="/static/style.css">{{end}}
 </head>
 <body>
-<nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a><span class="sep">/</span><a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a><span class="sep">/</span><span class="current">{{.Session.Summary.SessionID | truncate 12}}</span></nav>
+<nav class="breadcrumb">{{if $.Static}}<span class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</span>{{else}}<a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a>{{end}}<span class="sep">/</span>{{if $.Static}}<span class="crumb">{{$.RepoName}}</span>{{else}}<a href="/r/{{.EncodedRepo}}">{{.RepoName}}</a>{{end}}<span class="sep">/</span><span class="current">{{.Session.Summary.SessionID | truncate 12}}</span></nav>
 <main>
 <div class="session-header">
     <h2>Session: {{.Session.Summary.SessionID}}</h2>
@@ -227,7 +227,7 @@
 </details>
 {{end}}
 
-<script src="/static/session.js"></script>
+{{if $.Static}}<script>{{$.InlineJS}}</script>{{else}}<script src="/static/session.js"></script>{{end}}
 </main>
 </body>
 </html>

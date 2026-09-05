@@ -81,6 +81,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session show <id>` | `ocr sessions show <id>` | Inspect one session and its per-file checkpoints. |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | Print the review comments recorded in one session. |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | Compare two sessions' findings: new, persisting, resolved, not reviewed. |
+| `ocr session export [id]` | — | Export one session as a self-contained HTML file. |
 | `ocr viewer` | — | Launch the local web UI for past review sessions (`localhost:5483`). |
 | `ocr version` | — | Print version, commit, platform, build date, and GitHub URL. |
 
@@ -474,6 +475,29 @@ output stays pipeable.
 |---|---|---|
 | `--repo <path>` | current dir | Repository whose sessions should be compared. |
 | `--json` | `false` | Emit the comparison as JSON (`new`, `persisting`, `resolved`, `not_reviewed`). |
+
+### `ocr session export`
+
+Renders one session as a single self-contained HTML file. The viewer's
+stylesheet and script are inlined, so the artifact opens over `file://` with no
+network access at all and CI can archive a review as a build artifact.
+
+```bash
+ocr session export -o review.html
+ocr session export 20250601-100000-abc123 -o review.html
+```
+
+With no session id the newest session for the repository is exported. That is
+the default because a *successful* `ocr review` never prints its session id.
+Without `-o` the HTML goes to stdout.
+
+The exported page embeds the reviewed source excerpts the session recorded, so
+treat the file with the same care as the repository itself before publishing it.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--repo <path>` | current dir | Repository whose session should be exported. |
+| `--output <path>`, `-o` | stdout | Write the HTML to a file instead of stdout. |
 
 ## `ocr rules`
 

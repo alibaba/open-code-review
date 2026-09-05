@@ -348,12 +348,16 @@ type quietHandle struct {
 }
 
 // isMachineReadable reports whether the output format writes a structured
-// document to stdout that must not be interleaved with progress text. Both
-// json and sarif move [ocr] progress lines off stdout and suppress the trace
-// summary, which is already carried inside the document.
+// document to stdout that must not be interleaved with progress text. json and
+// sarif move [ocr] progress lines off stdout and suppress the trace summary,
+// which is already carried inside the document. html joins them for the second
+// reason resolveOutputWriter consults this: it must not run the exported page
+// through stripAnsiWriter, which would eat the ESC bytes in trace-quoted
+// source. It is not a value validateOutputFormat accepts, so it reaches this
+// function only from `session export`.
 func isMachineReadable(outputFormat string) bool {
 	switch strings.ToLower(strings.TrimSpace(outputFormat)) {
-	case "json", "sarif":
+	case "json", "sarif", "html":
 		return true
 	default:
 		return false
