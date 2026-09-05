@@ -682,6 +682,21 @@ ocr completion powershell > ocr.ps1
 PowerShell 프로필에 `ocr.ps1`을 점으로 불러오는 줄을 추가하세요.
 
 
+## man 페이지 {#man-page}
+
+`ocr`는 UNIX 매뉴얼 페이지를 제공합니다. 설치 후 다음 명령으로 읽을 수 있습니다:
+
+```sh
+man ocr
+```
+
+`install.sh` 설치 프로그램이 페이지를 자동으로 설치합니다. 직접 생성하려면(예: 사용자 지정 `MANPATH` 하위):
+
+```sh
+ocr man <directory>
+```
+
+
 ## 팁과 주의점 {#tips-gotchas}
 
 - `--audience agent`는 `--format json`을 **뜻하지 않고**, `--format json`도 조용한
