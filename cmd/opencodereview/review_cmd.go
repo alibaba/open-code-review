@@ -217,6 +217,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		SystemRule:            cc.Resolver,
 		FileFilter:            cc.FileFilter,
 		LLMClient:             rt.Client,
+		RetryCollector:        rt.RetryCollector,
 		Tools:                 tools,
 		PlanToolDefs:          rt.PlanToolDefs,
 		MainToolDefs:          rt.MainToolDefs,
@@ -261,12 +262,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	comments, runErr := ag.Run(runCtx)
 	manifest := ag.RunManifest()
 
-	// Freeze the retry report at the same boundary as the manifest: ag.Run has
-	// returned and joined its background work, so every request this run made is
-	// finalized and the report can no longer change. run_id is the session's
-	// in-memory UUID (ag.Session().SessionID) rather than ag.SessionID(), which
-	// returns "" when persistence failed — the report's logical_request_id must
-	// stay stable and unique per run even for an unpersisted session.
+	// The agent already froze an equal snapshot before session_end was written.
+	// Freeze is a deterministic read over the collector, so taking the CLI's own
+	// snapshot here preserves the existing output path without exposing agent
+	// state solely for reuse.
 	retryReport, freezeErr := rt.RetryCollector.Freeze(ag.Session().SessionID)
 	if freezeErr != nil {
 		// A construction error means the collector's invariants were violated, so
