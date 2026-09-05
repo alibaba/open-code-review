@@ -102,6 +102,50 @@ func TestLookupProvider_CLIPresets(t *testing.T) {
 	}
 }
 
+func TestLookupProvider_ClaudeCodeDetails(t *testing.T) {
+	p, ok := LookupProvider("claude-code")
+	if !ok {
+		t.Fatal("claude-code not found")
+	}
+	if p.Protocol != ProtocolClaudeCLI {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolClaudeCLI)
+	}
+	if p.BaseURL != "" {
+		t.Errorf("BaseURL = %q, want empty", p.BaseURL)
+	}
+	if p.EnvVar != "" {
+		t.Errorf("EnvVar = %q, want empty", p.EnvVar)
+	}
+	if !p.AmbientAuth {
+		t.Error("AmbientAuth = false, want true")
+	}
+	if len(p.Models) == 0 {
+		t.Fatal("Models is empty")
+	}
+}
+
+func TestLookupProvider_CodexDetails(t *testing.T) {
+	p, ok := LookupProvider("codex")
+	if !ok {
+		t.Fatal("codex not found")
+	}
+	if p.Protocol != ProtocolCodexCLI {
+		t.Errorf("Protocol = %q, want %q", p.Protocol, ProtocolCodexCLI)
+	}
+	if p.BaseURL != "" {
+		t.Errorf("BaseURL = %q, want empty", p.BaseURL)
+	}
+	if p.EnvVar != "" {
+		t.Errorf("EnvVar = %q, want empty", p.EnvVar)
+	}
+	if !p.AmbientAuth {
+		t.Error("AmbientAuth = false, want true")
+	}
+	if len(p.Models) == 0 {
+		t.Fatal("Models is empty")
+	}
+}
+
 func TestLookupProvider_Unknown(t *testing.T) {
 	_, ok := LookupProvider("nonexistent-provider")
 	if ok {
