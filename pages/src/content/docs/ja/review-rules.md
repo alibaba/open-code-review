@@ -127,6 +127,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.astro` | `astro.md`: Astro コンポーネントと islands。 |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
+| `**/*.scala` | `scala.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |

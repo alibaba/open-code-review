@@ -156,6 +156,7 @@ diff 단계에서 일어납니다.
 | `**/*.astro` | `astro.md` — Astro 컴포넌트와 아일랜드. |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
+| `**/*.scala` | `scala.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |

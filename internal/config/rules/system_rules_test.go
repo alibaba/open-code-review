@@ -94,6 +94,7 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"scripts/config.mjs", "TypeScript"},
 		{"server/bootstrap.cjs", "TypeScript"},
 		{"app.kt", "Null Safety"},
+		{"src/main/scala/com/example/Service.scala", "Scala Review Principles"},
 		{"src/main/handler.cpp", "Smart Pointer"},
 		{"src/main/handler.cxx", "Smart Pointer"},
 		{"include/handler.hxx", "Smart Pointer"},

@@ -148,6 +148,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.astro` | `astro.md`——Astro 组件与 islands。 |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
 | `**/*.{kt}` | `kotlin.md` |
+| `**/*.scala` | `scala.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
