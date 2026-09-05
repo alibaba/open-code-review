@@ -26,6 +26,33 @@ func TestCLIBinaryName(t *testing.T) {
 	}
 }
 
+// TestCLIBackendDisplayPrefersEPCLIPath verifies that the Backend display line
+// uses ep.CLIPath when set, falling back to cliBinaryName otherwise.
+func TestCLIBackendDisplayPrefersEPCLIPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		cliPath  string
+		protocol string
+		want     string
+	}{
+		{"custom cli_path", "/opt/bin/claude-nightly", llm.ProtocolClaudeCLI, "/opt/bin/claude-nightly"},
+		{"empty cli_path falls back", "", llm.ProtocolClaudeCLI, "claude"},
+		{"codex custom path", "/usr/local/bin/codex-dev", llm.ProtocolCodexCLI, "/usr/local/bin/codex-dev"},
+		{"codex default", "", llm.ProtocolCodexCLI, "codex"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := tc.cliPath
+			if backend == "" {
+				backend = cliBinaryName(tc.protocol)
+			}
+			if backend != tc.want {
+				t.Errorf("backend = %q, want %q", backend, tc.want)
+			}
+		})
+	}
+}
+
 // TestRunLLMProvidersShowsLocalCLIForCLIProviders: the CLI presets have no base
 // URL, so their BASE URL column must read "(local CLI)" rather than blank.
 func TestRunLLMProvidersShowsLocalCLIForCLIProviders(t *testing.T) {

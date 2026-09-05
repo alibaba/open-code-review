@@ -111,7 +111,11 @@ func runLLMTest() error {
 	if llm.IsCLIProtocol(ep.Protocol) {
 		// A CLI backend has no URL — it runs a local binary that carries its
 		// own login — so report the binary instead of a blank URL line.
-		fmt.Printf("Backend: %s (local CLI, uses its own login)\n", cliBinaryName(ep.Protocol))
+		backend := ep.CLIPath
+		if backend == "" {
+			backend = cliBinaryName(ep.Protocol)
+		}
+		fmt.Printf("Backend: %s (local CLI, uses its own login)\n", backend)
 	} else if region, profile, ok := bedrockContext(llmClient); ok {
 		// Bedrock has no configured URL — the region decides the host — so
 		// report what was resolved instead. A request that reached the wrong
