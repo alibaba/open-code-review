@@ -7,6 +7,8 @@
 //   - "anthropic-bedrock" — the same API served by AWS Bedrock, SigV4-signed
 //   - "openai" — OpenAI Chat Completions API
 //   - "openai-responses" — OpenAI Responses API
+//   - "claude-cli" — a locally installed Claude Code CLI as the model
+//   - "codex-cli" — a locally installed Codex CLI as the model
 package llm
 
 import (
@@ -351,6 +353,12 @@ type ClientConfig struct {
 	// Empty means the standard AWS credential chain decides.
 	AWSProfile string
 	AWSRegion  string
+
+	// CLIPath and CLIArgs are used only by the CLI protocols (claude-cli,
+	// codex-cli). CLIPath overrides the executable found on PATH; CLIArgs are
+	// extra arguments appended to the CLI invocation.
+	CLIPath string
+	CLIArgs []string
 }
 
 // retryCodesMiddleware returns an HTTP middleware that forces the SDK to retry
@@ -383,7 +391,10 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // NewLLMClient creates the appropriate client based on the resolved endpoint protocol.
 // protocol dispatch (canonical names from protocol.go):
 //   - ProtocolAnthropic ("anthropic") -> AnthropicClient
+//   - ProtocolAnthropicBedrock ("anthropic-bedrock") -> AnthropicClient (SigV4)
 //   - ProtocolOpenAIResponses ("openai-responses") -> OpenAIResponsesClient
+//   - ProtocolClaudeCLI ("claude-cli") -> CLIClient (claude)
+//   - ProtocolCodexCLI ("codex-cli") -> CLIClient (codex)
 //   - ProtocolOpenAIChatCompletions ("openai") or anything else -> OpenAIClient
 //
 // The defensive default keeps legacy callers that somehow bypass resolver
@@ -409,6 +420,8 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		rawHolder:      raw,
 		AWSProfile:     ep.AWSProfile,
 		AWSRegion:      ep.AWSRegion,
+		CLIPath:        ep.CLIPath,
+		CLIArgs:        ep.CLIArgs,
 	}
 	switch ep.Protocol {
 	case ProtocolAnthropic:
@@ -417,6 +430,10 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		return NewAnthropicBedrockClient(cfg)
 	case ProtocolOpenAIResponses:
 		return NewOpenAIResponsesClient(cfg)
+	case ProtocolClaudeCLI:
+		return NewClaudeCLIClient(cfg)
+	case ProtocolCodexCLI:
+		return NewCodexCLIClient(cfg)
 	default:
 		return NewOpenAIClient(cfg)
 	}

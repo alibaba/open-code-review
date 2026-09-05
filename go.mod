@@ -11,6 +11,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/google/uuid v1.6.0
+	github.com/lao/llm-driver v0.1.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/openai/openai-go/v3 v3.51.0
 	github.com/pkoukk/tiktoken-go v0.1.8
