@@ -179,6 +179,7 @@ matching order:
 | `**/*.jl` | `julia.md` — Julia source. |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
 | `**/*.bicep` | `bicep.md` — Bicep (Azure) templates. |
+| `**/*.nu` | `nushell.md` — Nushell scripts. |
 | `**/*.elm` | `elm.md` - Elm source. |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |

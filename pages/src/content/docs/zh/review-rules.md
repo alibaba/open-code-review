@@ -162,6 +162,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.jl` | `julia.md`——Julia 源代码。 |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md`——Terraform / HCL。 |
 | `**/*.bicep` | `bicep.md`——Bicep（Azure）模板。 |
+| `**/*.nu` | `nushell.md`——Nushell 脚本。 |
 | `**/*.elm` | `elm.md` - Elm 源代码。 |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`——Jsonnet 配置模板与库。 |
 | `**/*.thrift` | `thrift.md`——Apache Thrift IDL 线协议兼容性。 |

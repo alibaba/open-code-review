@@ -170,6 +170,7 @@ diff 단계에서 일어납니다.
 | `**/*.jl` | `julia.md` — Julia 소스. |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
 | `**/*.bicep` | `bicep.md` — Bicep(Azure) 템플릿. |
+| `**/*.nu` | `nushell.md` — Nushell 스크립트. |
 | `**/*.elm` | `elm.md` — Elm 소스. |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL 통신 호환성. |

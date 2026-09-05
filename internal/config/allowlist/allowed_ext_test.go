@@ -72,6 +72,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".NIMS", true},
 		{".nimble", true},
 		{".NIMBLE", true},
+		{".nu", true},
+		{".NU", true},
 		{".ipynb", true},
 		{".IPYNB", true},
 		{".elm", true},
@@ -235,6 +237,14 @@ func TestIsExcludedPath(t *testing.T) {
 		{"nim non-test", "src/parser.nim", false},
 		{"nim tests in filename", "src/tests_helper.nim", false},
 
+		// Nushell test files
+		{"nushell tests directory", "tests/parser.nu", true},
+		{"nushell nested tests directory", "packages/core/tests/unit/parser.nu", true},
+		{"nushell test directory", "test/parser.nu", true},
+		{"nushell test prefix", "src/test_parser.nu", true},
+		{"nushell test hyphen prefix", "src/test-parser.nu", true},
+		{"nushell test suffix", "src/parser_test.nu", true},
+		{"nushell non-test", "src/parser.nu", false},
 		// Elm test files
 		{"elm test directory", "tests/ParserTest.elm", true},
 		{"elm nested test directory", "packages/core/tests/unit/ParserTest.elm", true},
