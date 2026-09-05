@@ -512,15 +512,27 @@ func TestCodeSearchProvider_Execute_WithFilePatterns(t *testing.T) {
 	dir := setupTestRepo(t)
 	p := NewCodeSearch(&FileReader{RepoDir: dir, Mode: ModeWorkspace})
 
-	got, err := p.Execute(context.Background(), map[string]any{
-		"search_text":   "Util",
-		"file_patterns": []any{"pkg/"},
-	})
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name    string
+		pattern string
+	}{
+		{name: "forward slash", pattern: "pkg/"},
+		{name: "backslash", pattern: "pkg\\"},
 	}
-	if !strings.Contains(got, "util.go") {
-		t.Errorf("expected util.go in result, got: %s", got)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := p.Execute(context.Background(), map[string]any{
+				"search_text":   "Util",
+				"file_patterns": []any{test.pattern},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(got, "util.go") {
+				t.Errorf("expected util.go for pattern %q, got: %s", test.pattern, got)
+			}
+		})
 	}
 }
 
@@ -535,6 +547,9 @@ func TestCodeSearchProvider_Execute_RejectsTraversalPattern(t *testing.T) {
 		{name: "leading parent", pattern: "../pkg", want: "Error: file_patterns must not contain .."},
 		{name: "middle parent", pattern: "pkg/../internal", want: "Error: file_patterns must not contain .."},
 		{name: "trailing parent", pattern: "pkg/..", want: "Error: file_patterns must not contain .."},
+		{name: "leading parent backslash", pattern: `..\pkg`, want: "Error: file_patterns must not contain .."},
+		{name: "middle parent backslash", pattern: `pkg\..\internal`, want: "Error: file_patterns must not contain .."},
+		{name: "trailing parent backslash", pattern: `pkg\..`, want: "Error: file_patterns must not contain .."},
 	}
 
 	for _, test := range tests {
