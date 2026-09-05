@@ -590,13 +590,38 @@ func (c *OpenAIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) 
 		// NewStreaming method sets stream=true on the wire itself. When
 		// streaming is NOT enabled, leaving the key in the body would make
 		// the API answer with text/event-stream and the non-streaming path
-		// fails to decode (see issue #647).
-		if k == "stream" {
+		// fails to decode (see issue #647). "stream_options" is owned by the
+		// streaming branch below for the same reason: providers reject it
+		// unless stream is true.
+		if k == "stream" || k == "stream_options" {
 			continue
 		}
 		opts = append(opts, openaiopt.WithJSONSet(k, v))
 	}
 	if stream, ok := c.cfg.ExtraBody["stream"].(bool); ok && stream {
+		if streamOptions, ok := c.cfg.ExtraBody["stream_options"]; !ok {
+			// OpenAI-compatible servers omit token usage from streams unless
+			// asked, silently losing cost accounting for streamed requests.
+			// Ask for the final usage chunk by default.
+			params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
+		} else if streamOptions != nil {
+			// An explicit stream_options in extra_body replaces the default,
+			// but usage stays requested unless include_usage itself is spelled
+			// out: configuring an unrelated stream option must not silently
+			// disable cost accounting. An explicit null suppresses the field
+			// entirely, for gateways that reject stream_options.
+			if object, ok := streamOptions.(map[string]any); ok {
+				if _, has := object["include_usage"]; !has {
+					merged := make(map[string]any, len(object)+1)
+					for key, value := range object {
+						merged[key] = value
+					}
+					merged["include_usage"] = true
+					streamOptions = merged
+				}
+			}
+			opts = append(opts, openaiopt.WithJSONSet("stream_options", streamOptions))
+		}
 		return c.completionsStreaming(ctx, params, opts...)
 	}
 
