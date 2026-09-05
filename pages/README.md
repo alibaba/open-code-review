@@ -35,7 +35,7 @@ Equivalent npm script:
 npm run dev
 ```
 
-Default dev server settings (from `webpack.config.js`):
+Default dev server settings (from `webpack.config.cjs`):
 
 - URL: `http://localhost:3030`
 - Host: `0.0.0.0`
@@ -55,6 +55,8 @@ npm run build
 
 Build output is generated in `pages/dist/`.
 
+Each client-side route also gets its own static `index.html` (e.g. `docs/quickstart/index.html`), generated from the `DocSlug`/`BlogSlug` unions in `src/content/`. GitHub Pages serves `<dir>/index.html` with HTTP 200, so the sitemap URLs are indexable instead of resolving to `404.html` with a 404 status.
+
 ### Type checking
 
 ```bash
@@ -68,17 +70,27 @@ pages/
 ├── src/                # React + TypeScript source code
 │   ├── components/     # Reusable UI components
 │   ├── pages/          # Route-level page components
+│   ├── content/        # Docs and blog registries (DocSlug/BlogSlug unions)
 │   ├── i18n/           # Localization resources and i18n context
 │   ├── styles/         # Global styles (Tailwind entry, custom CSS)
 │   └── index.tsx       # Frontend entry point
+├── public/             # Static files copied verbatim into dist/
+│   ├── CNAME           # Custom domain for GitHub Pages
+│   ├── images/         # Site imagery (e.g. blog post previews)
+│   ├── og-image.png    # Open Graph / social share image
+│   ├── robots.txt      # Crawler directives and sitemap URL
+│   └── sitemap.xml     # Site URL inventory for search engines
+├── scripts/            # Build helpers (extract-slugs.cjs parses the slug unions)
 ├── dist/               # Production build artifacts (generated)
 ├── index.html          # HTML template used by HtmlWebpackPlugin
-├── webpack.config.js   # Bundling + dev server config
-├── tailwind.config.js  # Tailwind theme/content configuration
-├── postcss.config.js   # PostCSS pipeline (Tailwind + Autoprefixer)
+├── webpack.config.cjs  # Bundling + dev server config
+├── tailwind.config.cjs # Tailwind theme/content configuration
+├── postcss.config.cjs  # PostCSS pipeline (Tailwind + Autoprefixer)
 ├── tsconfig.json       # TypeScript compiler options
 └── package.json        # Dependencies and scripts
 ```
+
+The `public/` directory is copied as-is into the production build and deployed at the site root. It hosts the `CNAME` for the custom domain, the Open Graph share image, site imagery under `images/`, and the search-engine files (`robots.txt` and `sitemap.xml`).
 
 ## Development Guidelines
 
@@ -103,11 +115,11 @@ Please include:
 
 ### Tailwind CSS configuration notes
 
-- Tailwind config is in `tailwind.config.js`.
+- Tailwind config is in `tailwind.config.cjs`.
 - Content scanning targets:
   - `./src/**/*.{ts,tsx}`
   - `./index.html`
-- PostCSS integration is configured in `postcss.config.js` with:
+- PostCSS integration is configured in `postcss.config.cjs` with:
   - `tailwindcss`
   - `autoprefixer`
 
