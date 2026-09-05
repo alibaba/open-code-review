@@ -1136,8 +1136,8 @@ func TestSetConfigValueUnknownKeyMessage(t *testing.T) {
 		t.Fatal("expected error for unknown key")
 	}
 	want := "unknown config key: bogus.key\n" +
-		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
-		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
+		"Supported keys: provider, model, max_tokens, effort, providers.<name>.<field>, custom_providers.<name>.<field>, mcp_servers.<name>.<field>, llm.url, llm.auth_token, llm.auth_token_cmd, llm.auth_header, llm.model, llm.timeout_sec, llm.protocol, llm.use_anthropic, llm.extra_body, llm.extra_headers, llm.retry_codes, language, telemetry.enabled, telemetry.exporter, telemetry.otlp_endpoint, telemetry.content_logging\n" +
+		"Provider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\n" +
 		"Protocol values: anthropic, anthropic-bedrock, openai, openai-responses\n" +
 		"MCP server fields: type, command, args, env, url, headers, tools, setup"
 	if err.Error() != want {
@@ -1666,5 +1666,29 @@ func TestSetConfigValueLlmRetryCodesNoWarningForValidCodes(t *testing.T) {
 	}
 	if len(cfg.Llm.RetryCodes) != 2 {
 		t.Errorf("RetryCodes = %v, want [403 400]", cfg.Llm.RetryCodes)
+	}
+}
+
+func TestSetConfigValueTimeoutSeconds(t *testing.T) {
+	cfg := &Config{CustomProviders: map[string]ProviderEntry{"gateway": {}}}
+	if err := setConfigValue(cfg, "llm.timeout_sec", "120"); err != nil {
+		t.Fatalf("setConfigValue() llm timeout error = %v", err)
+	}
+	if cfg.Llm.TimeoutSec != 120 {
+		t.Fatalf("llm.timeout_sec = %d, want 120", cfg.Llm.TimeoutSec)
+	}
+	if err := setConfigValue(cfg, "custom_providers.gateway.timeout_sec", "45"); err != nil {
+		t.Fatalf("setConfigValue() provider timeout error = %v", err)
+	}
+	if got := cfg.CustomProviders["gateway"].TimeoutSec; got != 45 {
+		t.Fatalf("provider timeout_sec = %d, want 45", got)
+	}
+}
+
+func TestSetConfigValueTimeoutSecondsRejectsInvalidValues(t *testing.T) {
+	for _, value := range []string{"not-a-number", "-1"} {
+		if err := setConfigValue(&Config{}, "llm.timeout_sec", value); err == nil {
+			t.Fatalf("setConfigValue() accepted timeout_sec=%q", value)
+		}
 	}
 }
