@@ -152,7 +152,13 @@ func executeScan(opts scanOptions) (retErr error) {
 	scanPaths := splitPaths(opts.paths)
 
 	if opts.preview {
+		maxTokens, err := resolveScanPreviewMaxTokens(scanTpl.MaxTokens, opts.maxTokens)
+		if err != nil {
+			return err
+		}
+		scanTpl.MaxTokens = maxTokens
 		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat, out)
+
 	}
 
 	resumeState, err := loadScanResumeState(cc.RepoDir, opts, scanPaths)
@@ -281,4 +287,19 @@ func runScanPreview(cc *commonContext, scanTpl *template.ScanTemplate, scanPaths
 		return fmt.Errorf("scan preview failed: %w", err)
 	}
 	return outputPreview(preview, outputFormat, out)
+}
+
+// resolveScanPreviewMaxTokens applies the same max_tokens precedence as a real
+// scan without resolving an LLM endpoint. Preview must remain usable without
+// an API key while still reporting the files the scan would select.
+func resolveScanPreviewMaxTokens(templateDefault, cliOverride int) (int, error) {
+	cfgPath, err := defaultConfigPath()
+	if err != nil {
+		return 0, err
+	}
+	appCfg, err := LoadAppConfig(cfgPath)
+	if err != nil {
+		return 0, fmt.Errorf("load app config: %w", err)
+	}
+	return resolveMaxTokens(templateDefault, appCfg, cliOverride)
 }
