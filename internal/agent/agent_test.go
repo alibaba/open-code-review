@@ -614,12 +614,11 @@ func TestFilterLargeDiffs(t *testing.T) {
 	}
 }
 
-// exactNTokens builds a string that llm.CountTokens reports as exactly n
-// tokens, failing loudly if the tokenizer disagrees so fixture drift cannot
-// silently weaken the boundary assertions below.
+// exactNTokens uses a four-byte fragment that is one cl100k_base token, so it
+// also stays exact under CountTokens' four-bytes-per-token fallback.
 func exactNTokens(t *testing.T, n int) string {
 	t.Helper()
-	s := strings.TrimSpace(strings.Repeat("a ", n))
+	s := strings.Repeat("test", n)
 	if got := llm.CountTokens(s); got != n {
 		t.Fatalf("fixture drift: llm.CountTokens(<%d-token string>) = %d, want %d", n, got, n)
 	}
