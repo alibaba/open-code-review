@@ -81,6 +81,38 @@ var registry = []Provider{
 		},
 	},
 	{
+		// Claude Code CLI as the model. No api_key and no base URL: `claude`
+		// must be installed and logged in (`claude login`). OCR spawns
+		// `claude -p --bare` once per agent-loop round and exchanges JSON with
+		// it; the CLI's own tools stay disabled because OCR runs the review
+		// loop itself. Model names are whatever `claude --model` accepts.
+		Name:        "claude-code",
+		DisplayName: "Claude Code CLI (local login, no API key)",
+		Protocol:    ProtocolClaudeCLI,
+		AmbientAuth: true,
+		Models: []string{
+			"claude-opus-5",
+			"claude-sonnet-5",
+			"claude-opus-4-8",
+			"claude-sonnet-4-6",
+		},
+	},
+	{
+		// Codex CLI as the model. No api_key and no base URL: `codex` must be
+		// installed and logged in (`codex login`). OCR spawns
+		// `codex exec --json --sandbox read-only` once per round. Model names
+		// are whatever `codex --model` accepts.
+		Name:        "codex",
+		DisplayName: "Codex CLI (local login, no API key)",
+		Protocol:    ProtocolCodexCLI,
+		AmbientAuth: true,
+		Models: []string{
+			"gpt-5.5",
+			"gpt-5.4",
+			"gpt-5.4-mini",
+		},
+	},
+	{
 		Name:        "openai",
 		DisplayName: "OpenAI API",
 		Protocol:    ProtocolOpenAIChatCompletions,

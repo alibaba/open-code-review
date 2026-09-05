@@ -35,6 +35,13 @@ const (
 	// official SDK's bedrock middleware performs that rewriting, so this
 	// shares the Anthropic client rather than reimplementing the protocol.
 	ProtocolAnthropicBedrock = "anthropic-bedrock"
+	// ProtocolClaudeCLI drives a locally installed Claude Code CLI
+	// (`claude -p`) as the model. No URL, no token: the CLI's own login is
+	// the credential. See cli_client.go.
+	ProtocolClaudeCLI = "claude-cli"
+	// ProtocolCodexCLI drives a locally installed Codex CLI (`codex exec`)
+	// as the model. Same ambient-auth shape as ProtocolClaudeCLI.
+	ProtocolCodexCLI = "codex-cli"
 )
 
 // NormalizeProtocol canonicalizes protocol names. It is case-insensitive and
@@ -55,18 +62,29 @@ func NormalizeProtocol(raw string) string {
 		return ProtocolOpenAIResponses
 	case ProtocolAnthropicBedrock:
 		return ProtocolAnthropicBedrock
+	case ProtocolClaudeCLI:
+		return ProtocolClaudeCLI
+	case ProtocolCodexCLI:
+		return ProtocolCodexCLI
 	default:
 		return normalized
 	}
 }
 
-// ValidateProtocol accepts the four canonical protocol names and rejects
-// everything else.
+// ValidateProtocol accepts the canonical protocol names and rejects
+// everything else with a message listing the supported set.
 func ValidateProtocol(p string) error {
 	switch p {
-	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock:
+	case ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock, ProtocolClaudeCLI, ProtocolCodexCLI:
 		return nil
 	default:
-		return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock)
+		return fmt.Errorf("unsupported protocol %q; supported protocols are %q, %q, %q, %q, %q, %q", p, ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock, ProtocolClaudeCLI, ProtocolCodexCLI)
 	}
+}
+
+// IsCLIProtocol reports whether p runs a local CLI as the model. Such a
+// protocol carries no URL and no token: like bedrock it is ambient-auth,
+// and it is configurable only as a provider entry.
+func IsCLIProtocol(p string) bool {
+	return p == ProtocolClaudeCLI || p == ProtocolCodexCLI
 }

@@ -18,8 +18,12 @@ func TestNormalizeProtocol(t *testing.T) {
 		{"canonical anthropic is idempotent", ProtocolAnthropic, ProtocolAnthropic},
 		{"canonical openai is idempotent", ProtocolOpenAIChatCompletions, ProtocolOpenAIChatCompletions},
 		{"canonical openai-responses is idempotent", ProtocolOpenAIResponses, ProtocolOpenAIResponses},
+		{"canonical claude-cli is idempotent", ProtocolClaudeCLI, ProtocolClaudeCLI},
+		{"canonical codex-cli is idempotent", ProtocolCodexCLI, ProtocolCodexCLI},
 		{"anthropic case-insensitive", "ANTHROPIC", ProtocolAnthropic},
 		{"openai-responses case-insensitive", "OpenAI-Responses", ProtocolOpenAIResponses},
+		{"claude-cli case-insensitive", "Claude-CLI", ProtocolClaudeCLI},
+		{"codex-cli case-insensitive", " codex-cli ", ProtocolCodexCLI},
 		{"unknown passthrough lowercased", "gRPC", "grpc"},
 		{"unknown anthropic-vertex preserved", "anthropic-vertex", "anthropic-vertex"},
 	}
@@ -42,6 +46,8 @@ func TestValidateProtocol(t *testing.T) {
 		{"anthropic ok", ProtocolAnthropic, false, ""},
 		{"openai ok", ProtocolOpenAIChatCompletions, false, ""},
 		{"openai-responses ok", ProtocolOpenAIResponses, false, ""},
+		{"claude-cli ok", ProtocolClaudeCLI, false, ""},
+		{"codex-cli ok", ProtocolCodexCLI, false, ""},
 		{"empty rejected", "", true, "unsupported protocol"},
 		{"grpc rejected", "grpc", true, "unsupported protocol"},
 		{"anthropic-vertex rejected", "anthropic-vertex", true, "unsupported protocol"},
@@ -73,9 +79,28 @@ func TestValidateProtocol_ErrorMessageListsAllProtocols(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	for _, sub := range []string{ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses} {
+	for _, sub := range []string{ProtocolAnthropic, ProtocolOpenAIChatCompletions, ProtocolOpenAIResponses, ProtocolAnthropicBedrock, ProtocolClaudeCLI, ProtocolCodexCLI} {
 		if !strings.Contains(err.Error(), sub) {
 			t.Errorf("error %q should mention %q", err.Error(), sub)
+		}
+	}
+}
+
+func TestIsCLIProtocol(t *testing.T) {
+	tests := []struct {
+		p    string
+		want bool
+	}{
+		{ProtocolClaudeCLI, true},
+		{ProtocolCodexCLI, true},
+		{ProtocolAnthropic, false},
+		{ProtocolAnthropicBedrock, false},
+		{ProtocolOpenAIChatCompletions, false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := IsCLIProtocol(tt.p); got != tt.want {
+			t.Errorf("IsCLIProtocol(%q) = %v, want %v", tt.p, got, tt.want)
 		}
 	}
 }

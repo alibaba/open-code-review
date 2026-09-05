@@ -23,7 +23,9 @@ func TestLookupProvider_KnownProviders(t *testing.T) {
 		if p.Protocol == "" {
 			t.Errorf("LookupProvider(%q).Protocol is empty", name)
 		}
-		if p.BaseURL == "" {
+		// Ambient-auth providers (bedrock, the CLI presets) carry no BaseURL by
+		// design: the transport or the local CLI supplies the endpoint.
+		if p.BaseURL == "" && !p.AmbientAuth {
 			t.Errorf("LookupProvider(%q).BaseURL is empty", name)
 		}
 		if len(p.Models) == 0 {
@@ -64,6 +66,42 @@ func TestLookupProvider_MiniMaxDetails(t *testing.T) {
 	}
 }
 
+// TestLookupProvider_CLIPresets checks the two CLI-backed presets resolve, are
+// marked ambient-auth, carry no BaseURL or EnvVar (the CLI's own login is the
+// credential), and map to the CLI protocols.
+func TestLookupProvider_CLIPresets(t *testing.T) {
+	tests := []struct {
+		name         string
+		wantProtocol string
+	}{
+		{"claude-code", ProtocolClaudeCLI},
+		{"codex", ProtocolCodexCLI},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, ok := LookupProvider(tt.name)
+			if !ok {
+				t.Fatalf("LookupProvider(%q) returned false, want true", tt.name)
+			}
+			if !p.AmbientAuth {
+				t.Errorf("LookupProvider(%q).AmbientAuth = false, want true", tt.name)
+			}
+			if p.Protocol != tt.wantProtocol {
+				t.Errorf("LookupProvider(%q).Protocol = %q, want %q", tt.name, p.Protocol, tt.wantProtocol)
+			}
+			if p.BaseURL != "" {
+				t.Errorf("LookupProvider(%q).BaseURL = %q, want empty", tt.name, p.BaseURL)
+			}
+			if p.EnvVar != "" {
+				t.Errorf("LookupProvider(%q).EnvVar = %q, want empty", tt.name, p.EnvVar)
+			}
+			if len(p.Models) == 0 {
+				t.Errorf("LookupProvider(%q).Models is empty", tt.name)
+			}
+		})
+	}
+}
+
 func TestLookupProvider_Unknown(t *testing.T) {
 	_, ok := LookupProvider("nonexistent-provider")
 	if ok {
@@ -76,7 +114,7 @@ func TestListProviders_Order(t *testing.T) {
 	if len(providers) < 3 {
 		t.Fatalf("expected at least 3 providers, got %d", len(providers))
 	}
-	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
+	expected := []string{"anthropic", "baidu-qianfan", "bedrock", "claude-code", "codex", "dashscope", "dashscope-tokenplan", "deepseek", "edenai", "gemini", "hy-tokenplan", "iflytek", "kimi", "kimi-global", "litellm", "mimo", "minimax", "minimax-cn", "mistral", "novita", "ollama-cloud", "openai", "openai-responses", "siliconflow", "siliconflow-cn", "tencent-tokenhub", "volcengine", "xai", "z-ai", "z-ai-coding"}
 	if len(providers) != len(expected) {
 		t.Fatalf("expected %d providers, got %d", len(expected), len(providers))
 	}

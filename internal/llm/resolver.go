@@ -44,6 +44,12 @@ type ResolvedEndpoint struct {
 	// providers. Empty means "let the AWS SDK decide".
 	AWSProfile string
 	AWSRegion  string
+
+	// CLIPath and CLIArgs apply to the CLI protocols (claude-cli, codex-cli).
+	// CLIPath overrides the executable looked up on PATH; CLIArgs are extra
+	// arguments appended to the CLI invocation. Both are empty by default.
+	CLIPath string
+	CLIArgs []string
 }
 
 // Environment variable names for OCR-specific configuration.
@@ -243,6 +249,17 @@ func errBedrockNotConfigurable(key string) error {
 		key, ProtocolAnthropicBedrock)
 }
 
+// errCLINotConfigurable mirrors errBedrockNotConfigurable for the CLI
+// protocols: the two url+token strategies describe a single HTTP endpoint, but
+// a CLI protocol has neither a url nor a token — the local CLI's own login is
+// the credential. Accepting the value would switch backends and silently ignore
+// the url and token they carry, so it is refused at the point it is read and the
+// user is pointed at the provider form, which is the only way to configure it.
+func errCLINotConfigurable(key string) error {
+	return fmt.Errorf("%s cannot be a CLI protocol (%q or %q): a CLI protocol runs a locally installed CLI as the model and has no use for a url or a token; configure it as a provider instead (\"provider\": \"claude-code\" or \"codex\")",
+		key, ProtocolClaudeCLI, ProtocolCodexCLI)
+}
+
 // tryOCREnv reads OCR-specific environment variables.
 func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 	url := os.Getenv(envOCRLLMURL)
@@ -264,6 +281,9 @@ func tryOCREnv(modelOverride string) (ResolvedEndpoint, bool, error) {
 		}
 		if protocol == ProtocolAnthropicBedrock {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", errBedrockNotConfigurable(envOCRLLMProtocol))
+		}
+		if IsCLIProtocol(protocol) {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR environment: %w", errCLINotConfigurable(envOCRLLMProtocol))
 		}
 	}
 	if protocol == "" {
@@ -329,6 +349,12 @@ type providerEntryConfig struct {
 	// makes a review run reproducible without exporting AWS_PROFILE first.
 	AWSProfile string `json:"aws_profile,omitempty"`
 	AWSRegion  string `json:"aws_region,omitempty"`
+
+	// CLIPath and CLIArgs apply to the CLI protocols (claude-cli, codex-cli).
+	// CLIPath overrides the executable found on PATH; CLIArgs are appended to
+	// the CLI invocation. Both are optional.
+	CLIPath string   `json:"cli_path,omitempty"`
+	CLIArgs []string `json:"cli_args,omitempty"`
 }
 
 type configFile struct {
@@ -456,7 +482,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		if err := ValidateProtocol(normalized); err != nil {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q: %w", cfg.Provider, err)
 		}
-		if normalized != ProtocolAnthropicBedrock && entry.URL == "" {
+		if !IsCLIProtocol(normalized) && normalized != ProtocolAnthropicBedrock && entry.URL == "" {
 			return ResolvedEndpoint{}, false, fmt.Errorf("custom provider %q requires a url field for protocol %q", cfg.Provider, normalized)
 		}
 		url = entry.URL
@@ -470,7 +496,8 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	// SigV4 signing and needs a token like anything else. Conversely an entry
 	// that selects the bedrock protocol explicitly signs its requests whatever
 	// the preset says.
-	ambientAuth := protocol == ProtocolAnthropicBedrock ||
+	ambientAuth := IsCLIProtocol(protocol) ||
+		protocol == ProtocolAnthropicBedrock ||
 		(isPreset && preset.AmbientAuth && entry.Protocol == "")
 
 	// No credential at all is an error, and it is reported before api_key_cmd
@@ -589,6 +616,8 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		AmbientAuth:  ambientAuth,
 		AWSProfile:   entry.AWSProfile,
 		AWSRegion:    entry.AWSRegion,
+		CLIPath:      entry.CLIPath,
+		CLIArgs:      entry.CLIArgs,
 	}, true, nil
 }
 
@@ -632,6 +661,9 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		}
 		if protocol == ProtocolAnthropicBedrock {
 			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", errBedrockNotConfigurable("llm.protocol"))
+		}
+		if IsCLIProtocol(protocol) {
+			return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", errCLINotConfigurable("llm.protocol"))
 		}
 	}
 	if protocol == "" {
