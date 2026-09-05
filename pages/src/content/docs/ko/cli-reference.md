@@ -690,7 +690,7 @@ PowerShell 프로필에 `ocr.ps1`을 점으로 불러오는 줄을 추가하세�
 man ocr
 ```
 
-`install.sh` 설치 프로그램이 페이지를 자동으로 설치합니다. 직접 생성하려면(예: 사용자 지정 `MANPATH` 하위):
+`install.sh` 설치 프로그램이 페이지를 자동으로 설치합니다. 다른 설치 방식(npm, 소스 빌드)은 자동으로 설치하지 않으므로, 직접 생성하여 `MANPATH`에 배치하세요:
 
 ```sh
 ocr man <directory>

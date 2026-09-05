@@ -672,7 +672,7 @@ ocr completion powershell > ocr.ps1
 man ocr
 ```
 
-`install.sh` 安装器会自动安装该页面。如需自行生成（例如放到自定义的 `MANPATH` 下）：
+`install.sh` 安装器会自动安装该页面。其他安装方式（npm、源码构建）不会自动安装，请自行生成并放到你的 `MANPATH` 下：
 
 ```sh
 ocr man <directory>

@@ -711,8 +711,9 @@ Add a line to your PowerShell profile that dot-sources `ocr.ps1`.
 man ocr
 ```
 
-The `install.sh` installer installs the page automatically. To generate the
-pages yourself (for example, under a custom `MANPATH`):
+The `install.sh` installer installs the page automatically. Other install
+methods (npm, source builds) do not, so generate the pages yourself and install
+them on your `MANPATH`:
 
 ```sh
 ocr man <directory>

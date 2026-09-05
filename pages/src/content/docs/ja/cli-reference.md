@@ -657,7 +657,7 @@ ocr completion powershell > ocr.ps1
 man ocr
 ```
 
-`install.sh` インストーラーがページを自動で配置します。自分で生成するには（たとえばカスタムの `MANPATH` 配下へ）：
+`install.sh` インストーラーがページを自動で配置します。他のインストール方法（npm、ソースビルド）では自動配置されないため、自分で生成して `MANPATH` に配置してください：
 
 ```sh
 ocr man <directory>
