@@ -175,10 +175,20 @@ func argValue(args []string, flag string) string {
 	return ""
 }
 
+// indexOf returns the first index of s in args, or -1 if absent.
+func indexOf(args []string, s string) int {
+	for i, a := range args {
+		if a == s {
+			return i
+		}
+	}
+	return -1
+}
+
 // --- tests ---
 
-// Test 1: tool-less single user message → raw stdin, Claude flags present, no
-// --json-schema, no --append-system-prompt, user cfg.CLIArgs last.
+// Test 1: tool-less single user message -> raw stdin, Claude flags present, no
+// --json-schema, no --append-system-prompt, security flags after cfg.CLIArgs.
 func TestCLIClient_ClaudeToolless(t *testing.T) {
 	args, stdin := captureFiles(t)
 	script := writeFakeCLI(t, "claude", claudeSuccess("hello there"))
@@ -214,8 +224,18 @@ func TestCLIClient_ClaudeToolless(t *testing.T) {
 	if contains(a, "--json-schema") {
 		t.Errorf("argv %q must not contain --json-schema for a tool-less request", a)
 	}
-	if last := a[len(a)-2:]; !slicesEqual(last, []string{"--extra", "z"}) {
-		t.Errorf("cfg.CLIArgs not last: tail = %q", last)
+	// Security flags must follow user-supplied CLIArgs so they cannot be overridden.
+	extraIdx := indexOf(a, "--extra")
+	toolsIdx := indexOf(a, "--tools")
+	strictIdx := indexOf(a, "--strict-mcp-config")
+	if extraIdx < 0 || toolsIdx < 0 || strictIdx < 0 {
+		t.Fatalf("argv %q missing expected flags", a)
+	}
+	if toolsIdx < extraIdx {
+		t.Errorf("security flag --tools (idx %d) must come after user arg --extra (idx %d); argv = %q", toolsIdx, extraIdx, a)
+	}
+	if strictIdx < extraIdx {
+		t.Errorf("security flag --strict-mcp-config (idx %d) must come after user arg --extra (idx %d); argv = %q", strictIdx, extraIdx, a)
 	}
 	if resp.Content() != "hello there" {
 		t.Errorf("Content() = %q, want %q", resp.Content(), "hello there")
@@ -262,7 +282,41 @@ func TestCLIClient_CodexArgs(t *testing.T) {
 	}
 }
 
-// Test 3: tools present → --json-schema whose name enum equals the tool names;
+// TestCLIClient_CodexSecurityFlagsAfterCLIArgs verifies that Codex's security-
+// critical flags (--ignore-user-config, shell_environment_policy) come after any
+// user-supplied cfg.CLIArgs so they cannot be overridden.
+func TestCLIClient_CodexSecurityFlagsAfterCLIArgs(t *testing.T) {
+	args, _ := captureFiles(t)
+	script := writeFakeCLI(t, "codex", codexSuccess(envelope("ok")))
+	c := NewCodexCLIClient(ClientConfig{
+		CLIPath: script,
+		Model:   "gpt-5.5",
+		CLIArgs: []string{"--custom", "val"},
+	})
+
+	_, err := c.CompletionsWithCtx(context.Background(), ChatRequest{
+		Messages: []Message{NewTextMessage("user", "Review bar.go")},
+		Tools:    sampleTools(),
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	a := args()
+	customIdx := indexOf(a, "--custom")
+	ignoreIdx := indexOf(a, "--ignore-user-config")
+	envIdx := indexOf(a, "-c")
+	if customIdx < 0 || ignoreIdx < 0 || envIdx < 0 {
+		t.Fatalf("argv %q missing expected flags", a)
+	}
+	if ignoreIdx < customIdx {
+		t.Errorf("security flag --ignore-user-config (idx %d) must come after user arg --custom (idx %d); argv = %q", ignoreIdx, customIdx, a)
+	}
+	if envIdx < customIdx {
+		t.Errorf("security flag -c (idx %d) must come after user arg --custom (idx %d); argv = %q", envIdx, customIdx, a)
+	}
+}
+
+// Test 3: tools present -> --json-schema whose name enum equals the tool names;
 // stdin carries the tool catalog and the response-format section.
 func TestCLIClient_ClaudeToolSchema(t *testing.T) {
 	args, stdin := captureFiles(t)

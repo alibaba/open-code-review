@@ -26,10 +26,11 @@ import (
 // there is no prompt-cache reuse across rounds (each round is a fresh process).
 // Upgrade path: Claude's `--resume` session reuse (out of scope for v1).
 type CLIClient struct {
-	cfg      ClientConfig
-	provider llmdriver.Provider // ProviderClaude or ProviderOpenAI
-	cliName  string             // "claude" or "codex"; the PATH executable and login command
-	baseArgs []string           // per-provider default flags (before per-request and cfg.CLIArgs)
+	cfg          ClientConfig
+	provider     llmdriver.Provider // ProviderClaude or ProviderOpenAI
+	cliName      string             // "claude" or "codex"; the PATH executable and login command
+	baseArgs     []string           // per-provider default flags (before cfg.CLIArgs)
+	securityArgs []string           // security-critical flags, appended AFTER cfg.CLIArgs so they cannot be overridden
 }
 
 // NewClaudeCLIClient builds a CLIClient backed by `claude -p`. The default flags
@@ -38,12 +39,17 @@ type CLIClient struct {
 // external servers out. The system prompt is passed per request via
 // --system-prompt (see CompletionsWithCtx), so Request.System stays empty and
 // the library never also emits --append-system-prompt.
+//
+// Security-critical flags (--tools "" and --strict-mcp-config) are appended AFTER
+// any user-supplied cfg.CLIArgs so a configured cli_args value cannot supersede
+// them.
 func NewClaudeCLIClient(cfg ClientConfig) *CLIClient {
 	return &CLIClient{
-		cfg:      cfg,
-		provider: llmdriver.ProviderClaude,
-		cliName:  "claude",
-		baseArgs: []string{"--bare", "--tools", "", "--strict-mcp-config"},
+		cfg:          cfg,
+		provider:     llmdriver.ProviderClaude,
+		cliName:      "claude",
+		baseArgs:     []string{"--bare"},
+		securityArgs: []string{"--tools", "", "--strict-mcp-config"},
 	}
 }
 
@@ -66,13 +72,17 @@ func NewClaudeCLIClient(cfg ClientConfig) *CLIClient {
 // its own working directory, which is OCR's — the same directory the earlier
 // `-C $(pwd)` fallback resolved to in production, so this drops a stranded knob
 // without changing where Codex runs.
+//
+// Security-critical flags (--ignore-user-config and the shell_environment_policy
+// config) are appended AFTER any user-supplied cfg.CLIArgs so a configured
+// cli_args value cannot supersede them.
 func NewCodexCLIClient(cfg ClientConfig) *CLIClient {
 	return &CLIClient{
 		cfg:      cfg,
 		provider: llmdriver.ProviderOpenAI,
 		cliName:  "codex",
-		baseArgs: []string{
-			"--ephemeral",
+		baseArgs: []string{"--ephemeral"},
+		securityArgs: []string{
 			"--ignore-user-config",
 			"-c", `shell_environment_policy.inherit="none"`,
 		},
@@ -111,7 +121,8 @@ func (c *CLIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*C
 
 	// Per-provider argument assembly. Claude takes the system prompt as a flag
 	// (leaving Request.System empty so the library adds no --append-system-prompt);
-	// Codex takes it through Request.System. User cfg.CLIArgs always come last.
+	// Codex takes it through Request.System. User cfg.CLIArgs come after baseArgs
+	// but before securityArgs, so they cannot override the security-critical flags.
 	args := append([]string(nil), c.baseArgs...)
 	if c.provider == llmdriver.ProviderClaude {
 		if system != "" {
@@ -121,6 +132,7 @@ func (c *CLIClient) CompletionsWithCtx(ctx context.Context, req ChatRequest) (*C
 		request.System = system
 	}
 	args = append(args, c.cfg.CLIArgs...)
+	args = append(args, c.securityArgs...)
 
 	toolNames := toolNameSet(req.Tools)
 	if len(req.Tools) > 0 {
