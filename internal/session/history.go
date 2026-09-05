@@ -38,22 +38,24 @@ const (
 // SessionHistory is the top-level container for an entire CR run.
 // It is safe for concurrent use by multiple goroutines.
 type SessionHistory struct {
-	mu           sync.Mutex
-	SessionID    string
-	RepoDir      string
-	GitBranch    string
-	Model        string
-	ReviewMode   string
-	DiffFrom     string
-	DiffTo       string
-	DiffCommit   string
-	ScanPaths    []string
-	ResumedFrom  string
-	StartTime    time.Time
-	EndTime      time.Time
-	persist      *jsonlWriter
-	FileSessions map[string]*FileSession
-	llmFailures  int64
+	mu                 sync.Mutex
+	SessionID          string
+	RepoDir            string
+	GitBranch          string
+	Model              string
+	ReviewMode         string
+	DiffFrom           string
+	DiffTo             string
+	DiffCommit         string
+	ScanPaths          []string
+	ResumedFrom        string
+	StartTime          time.Time
+	EndTime            time.Time
+	persist            *jsonlWriter
+	FileSessions       map[string]*FileSession
+	llmFailures        int64
+	terminalReason     string
+	cancellationReason string
 
 	// manifest is the run's coverage accumulator, sharing the session ID as its
 	// run_id. It is only created when SessionOptions.Operation is non-empty (the
@@ -77,6 +79,11 @@ type SessionHistory struct {
 	// finalizeOnce.Do returns, which establishes the happens-before.
 	finalizeErr error
 }
+
+// TerminalReasonCancelled marks a session interrupted by its caller. It is a
+// process-level outcome: a cancelled session is shown as aborted even though
+// its run manifest records the interrupted coverage as failed/cancelled.
+const TerminalReasonCancelled = "cancelled"
 
 // FileSession represents the conversation records for a single file subtask.
 type FileSession struct {
@@ -312,6 +319,20 @@ func (sh *SessionHistory) RecordReviewItemFailed(filePath, oldPath, newPath, fin
 	}
 }
 
+// MarkCancelled records the controlled terminal outcome for a run interrupted
+// by its caller. It must be called before Finalize for the reason to reach disk.
+func (sh *SessionHistory) MarkCancelled(err error) {
+	if sh == nil {
+		return
+	}
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	sh.terminalReason = TerminalReasonCancelled
+	if err != nil {
+		sh.cancellationReason = err.Error()
+	}
+}
+
 // Finalize marks the session as complete, sets the end time, and persists the
 // final summary record. When a frozen manifest was stored via SetFinalManifest
 // it is embedded into session_end as run_manifest, which is the last physical
@@ -328,6 +349,8 @@ func (sh *SessionHistory) Finalize() error {
 		p := sh.persist
 		persistInitErr := sh.persistInitErr
 		manifest := sh.finalManifest
+		terminalReason := sh.terminalReason
+		cancellationReason := sh.cancellationReason
 		duration := sh.EndTime.Sub(sh.StartTime)
 		filesReviewed := make([]string, 0, len(sh.FileSessions))
 		if manifest != nil && manifest.SchemaVersion == ManifestSchemaVersion {
@@ -354,7 +377,7 @@ func (sh *SessionHistory) Finalize() error {
 		// result is cached in finalizeErr. sync.Once guarantees every other
 		// caller blocks until this completes, then reads the same finalizeErr.
 		if p != nil {
-			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest)
+			sh.finalizeErr = p.WriteSessionEnd(duration, filesReviewed, failures, manifest, terminalReason, cancellationReason)
 		}
 	})
 	return sh.finalizeErr

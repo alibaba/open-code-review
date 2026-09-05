@@ -4,6 +4,7 @@
 package session
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -111,6 +112,36 @@ func TestLoadDetail_ReturnsItems(t *testing.T) {
 	}
 	if done := byType["done"]; done.Comments != 1 {
 		t.Errorf("done comments = %d, want 1", done.Comments)
+	}
+}
+
+func TestLoadDetail_CancelledSessionHasTerminalReason(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := t.TempDir()
+
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeFullScan})
+	sh.RecordReviewItemDone("done.go", "done.go", "done.go", "fp-done", nil)
+	sh.RecordReviewItemFailed("pending.go", "pending.go", "pending.go", "fp-pending", context.Canceled.Error())
+	sh.MarkCancelled(context.Canceled)
+	if err := sh.Finalize(); err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+
+	summary, _, err := LoadDetail(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadDetail: %v", err)
+	}
+	if !summary.Aborted {
+		t.Fatal("cancelled session should be aborted")
+	}
+	if summary.TerminalReason != TerminalReasonCancelled {
+		t.Errorf("TerminalReason = %q, want cancelled", summary.TerminalReason)
+	}
+	if summary.CancellationReason != context.Canceled.Error() {
+		t.Errorf("CancellationReason = %q, want %q", summary.CancellationReason, context.Canceled)
+	}
+	if summary.CompletedFiles != 1 || summary.FailedFiles != 1 {
+		t.Errorf("checkpoint counts = completed:%d failed:%d, want 1 and 1", summary.CompletedFiles, summary.FailedFiles)
 	}
 }
 

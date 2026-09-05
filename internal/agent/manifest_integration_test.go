@@ -221,6 +221,13 @@ func TestManifestFlowCancellationPersistsResumableSession(t *testing.T) {
 	if manifest.RunFailure == nil || manifest.RunFailure.Classification != session.RunFailureCancelled {
 		t.Fatalf("run failure = %+v, want cancelled", manifest.RunFailure)
 	}
+	summary, _, err := session.LoadDetail(a.args.RepoDir, a.session.SessionID)
+	if err != nil {
+		t.Fatalf("load cancelled session summary: %v", err)
+	}
+	if !summary.Aborted || summary.TerminalReason != session.TerminalReasonCancelled {
+		t.Fatalf("cancelled review summary = %+v", summary)
+	}
 	if len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 2 {
 		t.Fatalf("coverage = %+v, want one completed and two failed", manifest.Coverage)
 	}
@@ -323,6 +330,41 @@ func TestManifestFlowRunInputFailureIsPersisted(t *testing.T) {
 	}
 	if summary.RunManifest == nil || summary.RunManifest.TerminalState != session.StateFailed || summary.Aborted {
 		t.Fatalf("persisted summary = %+v", summary)
+	}
+}
+
+// TestRun_CancelledWhileLoadingDiffsPersistsCancelledSession prevents Ctrl+C
+// during git diff from being classified as an invalid review input.
+func TestRun_CancelledWhileLoadingDiffsPersistsCancelledSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repoDir := initPreviewRepo(t)
+	sh := session.New(repoDir, "main", "fake", session.SessionOptions{
+		ReviewMode: session.ReviewModeWorkspace,
+		Operation:  session.OperationReview,
+	})
+	a := New(Args{
+		RepoDir:   repoDir,
+		LLMClient: manifestFlowClient{},
+		Model:     "fake",
+		Session:   sh,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := a.Run(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context canceled", err)
+	}
+	manifest := a.RunManifest()
+	if manifest == nil || manifest.RunFailure == nil || manifest.RunFailure.Classification != session.RunFailureCancelled {
+		t.Fatalf("manifest = %+v, want cancelled run failure", manifest)
+	}
+	summary, err := session.LoadSummary(repoDir, sh.SessionID)
+	if err != nil {
+		t.Fatalf("load cancelled session summary: %v", err)
+	}
+	if !summary.Aborted || summary.TerminalReason != session.TerminalReasonCancelled {
+		t.Fatalf("cancelled review summary = %+v", summary)
 	}
 }
 

@@ -289,7 +289,10 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		// no item was selected yet. Record the run-level input failure at this
 		// trigger point, then finalize and persist so the run still emits a
 		// session_end with a failed manifest instead of looking aborted.
-		if b := a.session.Manifest(); b != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			a.recordContextFailure(context.Canceled)
+			a.session.MarkCancelled(context.Canceled)
+		} else if b := a.session.Manifest(); b != nil {
 			_ = b.SetRunFailure(session.RunFailureInput, "failed to resolve review input")
 		}
 		manifestErr := a.finalizeManifest()
@@ -328,6 +331,10 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		// run_failure), which is the correct terminal state for "nothing to do".
 		// A persistence failure here is still a delivery error — a clean skip
 		// cannot be claimed if its session_end never reached disk.
+		if errors.Is(ctx.Err(), context.Canceled) {
+			a.recordContextFailure(context.Canceled)
+			a.session.MarkCancelled(context.Canceled)
+		}
 		manifestErr := a.finalizeManifest()
 		if ferr := a.session.Finalize(); ferr != nil {
 			manifestErr = errors.Join(manifestErr, fmt.Errorf("finalize session: %w", ferr))
@@ -390,6 +397,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// persistence failure is a delivery error in its own right: when the review
 	// also failed, both facts are reported (errors.Join) rather than letting the
 	// review error hide the fact that session_end never reached disk.
+	if errors.Is(ctx.Err(), context.Canceled) {
+		a.session.MarkCancelled(context.Canceled)
+	}
 	if manifestErr := a.finalizeManifest(); manifestErr != nil {
 		err = errors.Join(err, manifestErr)
 	}
@@ -798,6 +808,9 @@ dispatchLoop:
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		a.recordContextFailure(ctxErr)
+		if errors.Is(ctxErr, context.Canceled) {
+			a.session.MarkCancelled(ctxErr)
+		}
 		return a.args.CommentCollector.Comments(), ctxErr
 	}
 

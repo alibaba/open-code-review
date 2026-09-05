@@ -156,6 +156,25 @@ func TestRenderTemplate_SessionPage(t *testing.T) {
 	}
 }
 
+func TestRenderTemplate_SessionPageShowsCancellationReason(t *testing.T) {
+	rr := httptest.NewRecorder()
+	vs := &ViewSession{Summary: SessionSummary{
+		SessionID:          "cancelled",
+		Aborted:            true,
+		TerminalReason:     "cancelled",
+		CancellationReason: "context canceled",
+	}}
+	renderTemplate(rr, "session.html", sessionPageData{
+		EncodedRepo: "repo",
+		RepoName:    "MyRepo",
+		Session:     vs,
+	})
+
+	if body := rr.Body.String(); !strings.Contains(body, "aborted (cancelled: context canceled)") {
+		t.Fatalf("cancelled status detail missing from page: %s", body)
+	}
+}
+
 func TestRenderTemplate_SecondarySectionsCollapsedByDefault(t *testing.T) {
 	rr := httptest.NewRecorder()
 	vs := &ViewSession{
