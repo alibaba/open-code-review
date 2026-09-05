@@ -241,6 +241,49 @@ func severityCounts(comments []*ReviewComment) SeverityCount {
 	return counts
 }
 
+// codeLine is one rendered line of an Existing Code block. Num is the file
+// line number, or 0 when the number cannot be trusted.
+type codeLine struct {
+	Num  int
+	Text string
+}
+
+// numberedCodeLines pairs each line of existing_code with its file line number.
+//
+// Num is left at 0 on every line whenever the reported range and the snippet
+// cannot both be true. internal/diff/resolver.go matches existing_code against
+// the file with blank lines dropped on both sides (splitAndNormalize and
+// resolveFromFileContent), so endLine-startLine+1 is not guaranteed to equal
+// the number of lines in the snippet, and numbering it anyway would put line
+// numbers next to the wrong code. In a review tool no gutter beats a wrong one.
+func numberedCodeLines(code string, startLine, endLine int) []codeLine {
+	if code == "" {
+		return nil
+	}
+	raw := strings.Split(code, "\n")
+	// A trailing newline terminates the last line, it does not start a new one.
+	if len(raw) > 1 && raw[len(raw)-1] == "" {
+		raw = raw[:len(raw)-1]
+	}
+	lines := make([]codeLine, len(raw))
+	for i, text := range raw {
+		lines[i] = codeLine{Text: strings.TrimSuffix(text, "\r")}
+	}
+	if endLine == 0 {
+		// A record with only start_line set is a single-line finding. A
+		// non-zero inverted range is left alone so the guard below rejects
+		// it, matching the hasRegion test in cmd/opencodereview/sarif.go.
+		endLine = startLine
+	}
+	if startLine <= 0 || endLine-startLine+1 != len(lines) {
+		return lines
+	}
+	for i := range lines {
+		lines[i].Num = startLine + i
+	}
+	return lines
+}
+
 func parseTemplate(name string) (*template.Template, error) {
 	funcMap := template.FuncMap{
 		"formatDuration": formatDuration,
@@ -360,6 +403,7 @@ func parseTemplate(name string) (*template.Template, error) {
 				return "cat-default"
 			}
 		},
+		"numberedCodeLines": numberedCodeLines,
 	}
 	content, err := assets.ReadFile("templates/" + name)
 	if err != nil {

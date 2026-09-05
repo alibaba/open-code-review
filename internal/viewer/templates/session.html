@@ -148,11 +148,13 @@
         </summary>
         <div class="comment-file-body">
         {{range .Comments}}
+            {{$lines := numberedCodeLines .ExistingCode .StartLine .EndLine}}
+            {{$numbered := and $lines (index $lines 0).Num}}
             <div class="comment-card" data-comment-card data-category="{{commentCategory .Category}}" data-severity="{{commentSeverity .Severity}}" data-mark-id="{{.MarkID}}">
                 <div class="comment-meta">
                     {{if .Category}}<span class="comment-badge {{categoryClass .Category}}">{{.Category}}</span>{{end}}
                     {{if .Severity}}<span class="comment-badge {{severityClass .Severity}}">{{.Severity}}</span>{{end}}
-                    {{if .StartLine}}<span class="comment-lines">L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}</span>{{end}}
+                    {{if .StartLine}}<span class="comment-lines{{if $numbered}} sr-only{{end}}">L{{.StartLine}}{{if and .EndLine (ne .EndLine .StartLine)}}-L{{.EndLine}}{{end}}</span>{{end}}
                     <span class="comment-badge mark-chip" data-mark-chip hidden></span>
                 </div>
                 <div class="comment-content">{{.Content}}</div>
@@ -161,7 +163,8 @@
                     {{if .ExistingCode}}
                     <div class="code-panel code-existing">
                         <div class="code-panel-label">Existing Code</div>
-                        <pre><code>{{.ExistingCode}}</code></pre>
+                        {{if $numbered}}<pre class="code-numbered"><code>{{range $i, $l := $lines}}{{if $i}}
+{{end}}<span class="code-line"><span class="line-no" aria-hidden="true">{{$l.Num}}</span><span class="line-text">{{$l.Text}}</span></span>{{end}}</code></pre>{{else}}<pre><code>{{.ExistingCode}}</code></pre>{{end}}
                     </div>
                     {{end}}
                     {{if .SuggestionCode}}
