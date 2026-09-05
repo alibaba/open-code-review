@@ -43,6 +43,7 @@ func ParseHunks(rawDiffText string) []Hunk {
 	var current *Hunk
 
 	for _, line := range lines {
+		line = strings.TrimSuffix(line, "\r")
 		if m := hunkHeaderRe.FindStringSubmatch(line); m != nil {
 			// Flush previous hunk
 			if current != nil {

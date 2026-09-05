@@ -47,6 +47,7 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 	defer cancel()
 
 	for _, line := range lines {
+		line = strings.TrimSuffix(line, "\r")
 		if m := diffHeaderRe.FindStringSubmatch(line); m != nil {
 			// Flush previous diff
 			if current != nil {
