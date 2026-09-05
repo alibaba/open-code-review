@@ -72,6 +72,8 @@ an LLM request.
 
 - Reviews use `--audience agent` and JSON output.
 - The process is launched with an argument array and `shell: false`.
+- Background context uses OCR's sanitised 8,000-character file input through a
+  private temporary file, removed after success, failure, cancellation, or timeout.
 - Reviews have a 15-minute overall timeout and a 10 MiB output limit.
 - Cancelling the OpenCode tool terminates the OCR process.
 - OCR credentials remain in the existing OCR configuration or environment.

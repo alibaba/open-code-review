@@ -4,7 +4,7 @@
 import assert from "node:assert/strict"
 import { access, chmod, copyFile, link, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { delimiter, join } from "node:path"
+import { delimiter, dirname, join } from "node:path"
 import test from "node:test"
 import { OpenCodeReviewPlugin } from "../dist/open-code-review.js"
 
@@ -74,7 +74,7 @@ function toolContext(worktree, signal = new AbortController().signal) {
   }
 }
 
-async function waitForFile(path, timeoutMs = 1_000) {
+async function waitForFile(path, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
@@ -169,13 +169,63 @@ test("fake OCR helper removes its temporary directory", async () => {
   await assert.rejects(access(temporaryDirectory), { code: "ENOENT" })
 })
 
-test("ocr_review creates agent-friendly workspace arguments", async () => {
+test("ocr_review trims and passes multi-paragraph background through a private temporary file", async () => {
+  const background = ` \nReview requirements\n\n${"x".repeat(6_000)}\n\t `
+  await withFakeOcr(
+    [
+      "const fs = require('node:fs')",
+      "const path = require('node:path')",
+      "const args = process.argv.slice(2)",
+      "const backgroundIndex = args.indexOf('--background-file')",
+      "const backgroundPath = args[backgroundIndex + 1]",
+      "console.log(JSON.stringify({",
+      "  status: 'success',",
+      "  argv: args,",
+      "  backgroundPath,",
+      "  background: fs.readFileSync(backgroundPath, 'utf8'),",
+      "  backgroundMode: fs.statSync(backgroundPath).mode & 0o777,",
+      "  backgroundDirectoryMode: fs.statSync(path.dirname(backgroundPath)).mode & 0o777,",
+      "}))",
+    ].join("\n"),
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      const output = await hooks.tool.ocr_review.execute(
+        { background, timeoutMinutes: 30 },
+        toolContext(worktree),
+      )
+      const parsed = JSON.parse(output)
+      assert.equal(parsed.background, background.trim())
+      assert.equal(parsed.argv.includes("--background"), false)
+      assert.deepEqual(parsed.argv, [
+        "review",
+        "--audience",
+        "agent",
+        "--format",
+        "json",
+        "--repo",
+        worktree,
+        "--background-file",
+        parsed.backgroundPath,
+        "--timeout",
+        "30",
+      ])
+      if (process.platform !== "win32") {
+        assert.equal(parsed.backgroundMode, 0o600)
+        assert.equal(parsed.backgroundDirectoryMode, 0o700)
+      }
+      await assert.rejects(access(parsed.backgroundPath), { code: "ENOENT" })
+      await assert.rejects(access(dirname(parsed.backgroundPath)), { code: "ENOENT" })
+    },
+  )
+})
+
+test("ocr_review treats whitespace-only background as absent", async () => {
   await withFakeOcr(
     "console.log(JSON.stringify({status:'success', argv:process.argv.slice(2)}))",
     async (worktree) => {
       const { hooks } = await loadPlugin(worktree)
       const output = await hooks.tool.ocr_review.execute(
-        { background: "Add rate limiting", timeoutMinutes: 30 },
+        { background: "  \n\t " },
         toolContext(worktree),
       )
       assert.deepEqual(JSON.parse(output).argv, [
@@ -186,10 +236,6 @@ test("ocr_review creates agent-friendly workspace arguments", async () => {
         "json",
         "--repo",
         worktree,
-        "--background",
-        "Add rate limiting",
-        "--timeout",
-        "30",
       ])
     },
   )
@@ -305,6 +351,51 @@ test("ocr_review reports non-zero exits with OCR output", async () => {
   )
 })
 
+test("ocr_review removes its temporary background after a non-zero exit", async () => {
+  await withFakeOcr(
+    [
+      "const fs = require('node:fs')",
+      "const args = process.argv.slice(2)",
+      "const backgroundIndex = args.indexOf('--background-file')",
+      "fs.writeFileSync('background-path.txt', args[backgroundIndex + 1])",
+      "console.error('review failed')",
+      "process.exit(7)",
+    ].join("\n"),
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      await assert.rejects(
+        hooks.tool.ocr_review.execute(
+          { background: "Failure cleanup context" },
+          toolContext(worktree),
+        ),
+        /review failed/,
+      )
+      const backgroundPath = await readFile(join(worktree, "background-path.txt"), "utf8")
+      await assert.rejects(access(backgroundPath), { code: "ENOENT" })
+      await assert.rejects(access(dirname(backgroundPath)), { code: "ENOENT" })
+    },
+  )
+})
+
+test("ocr_review reports child process signal termination", { skip: process.platform === "win32" }, async () => {
+  await withFakeOcr(
+    "process.kill(process.pid, 'SIGTERM')",
+    async (worktree) => {
+      const { hooks } = await loadPlugin(worktree)
+      await assert.rejects(
+        hooks.tool.ocr_review.execute({}, toolContext(worktree)),
+        (error) => {
+          assert.equal(error.name, "OcrExecutionError")
+          assert.equal(error.exitCode, null)
+          assert.equal(error.signal, "SIGTERM")
+          assert.match(error.message, /terminated by signal SIGTERM/)
+          return true
+        },
+      )
+    },
+  )
+})
+
 test("ocr_review explains how to install a missing OCR executable", async () => {
   await withTemporaryDirectory(async (directory) => {
     const previousPath = process.env.PATH
@@ -323,18 +414,41 @@ test("ocr_review explains how to install a missing OCR executable", async () => 
 
 test("ocr_review terminates when OpenCode cancels the tool", async () => {
   await withFakeOcr(
-    "setInterval(() => {}, 1000)",
+    [
+      "const fs = require('node:fs')",
+      "const args = process.argv.slice(2)",
+      "const backgroundIndex = args.indexOf('--background-file')",
+      "fs.writeFileSync('background-path.txt', args[backgroundIndex + 1])",
+      "fs.writeFileSync('ocr-child.pid', String(process.pid))",
+      "setInterval(() => {}, 1000)",
+    ].join("\n"),
     async (worktree) => {
       const { hooks } = await loadPlugin(worktree)
       const controller = new AbortController()
-      setTimeout(() => controller.abort(), 20)
+      const execution = hooks.tool.ocr_review.execute(
+        { background: "Cancellation cleanup context" },
+        toolContext(worktree, controller.signal),
+      )
+      const pathRecord = join(worktree, "background-path.txt")
+      await waitForFile(pathRecord)
+      const backgroundPath = await readFile(pathRecord, "utf8")
+      const pidRecord = join(worktree, "ocr-child.pid")
+      await waitForFile(pidRecord)
+      const pid = Number(await readFile(pidRecord, "utf8"))
+      controller.abort()
       await assert.rejects(
-        hooks.tool.ocr_review.execute(
-          {},
-          toolContext(worktree, controller.signal),
-        ),
+        execution,
         /cancelled by OpenCode/,
       )
+      await assert.rejects(access(backgroundPath), { code: "ENOENT" })
+      await assert.rejects(access(dirname(backgroundPath)), { code: "ENOENT" })
+      try {
+        await waitForProcessExit(pid)
+      } finally {
+        if (isProcessRunning(pid)) {
+          process.kill(pid, "SIGKILL")
+        }
+      }
     },
   )
 })
