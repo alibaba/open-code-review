@@ -62,12 +62,15 @@ var cpProtocols = []string{
 	llm.ProtocolOpenAIChatCompletions,
 	llm.ProtocolOpenAIResponses,
 	llm.ProtocolAnthropicBedrock,
+	llm.ProtocolClaudeCLI,
+	llm.ProtocolCodexCLI,
 }
 
 // manualProtocols lists the protocol options offered in the Manual form, which
-// writes llm.url and llm.auth_token. Bedrock is deliberately absent: that block
-// holds no region or profile, and bedrock uses neither the url nor the token it
-// does hold, so the resolver rejects the combination outright.
+// writes llm.url and llm.auth_token. The ambient protocols (bedrock and the
+// local-CLI protocols) are deliberately absent: that block holds only a url and
+// a token, which none of them uses, so the resolver rejects the combination
+// outright.
 var manualProtocols = []string{
 	llm.ProtocolAnthropic,
 	llm.ProtocolOpenAIChatCompletions,
@@ -198,7 +201,15 @@ type providerTUIModel struct {
 // ends at the protocol step instead of walking three fields that would be
 // written as dead config.
 func (m providerTUIModel) cpAmbientProtocol() bool {
-	return cpProtocols[m.cpProtocolIdx] == llm.ProtocolAnthropicBedrock
+	return isAmbientProtocol(cpProtocols[m.cpProtocolIdx])
+}
+
+// isAmbientProtocol reports whether a protocol authenticates from the
+// environment rather than a stored credential: bedrock (AWS chain) and the
+// local-CLI protocols (the CLI's own login). None has a url, api key or auth
+// header to collect.
+func isAmbientProtocol(p string) bool {
+	return p == llm.ProtocolAnthropicBedrock || llm.IsCLIProtocol(p)
 }
 
 func cpProtocolIndex(protocol string) int {
@@ -1252,8 +1263,12 @@ func (m providerTUIModel) applyCreateCustomProvider() (tea.Model, tea.Cmd) {
 		AuthHeader: r.authHeader,
 		APIKey:     strings.TrimSpace(m.apiKeyInput.Value()),
 	}
-	if r.protocol == llm.ProtocolAnthropicBedrock {
+	if isAmbientProtocol(r.protocol) {
+		// Ambient protocols (bedrock, claude-cli, codex-cli) carry no url, key
+		// or auth header; the form skips those steps, so clear anything stale.
+		entry.URL = ""
 		entry.APIKey = ""
+		entry.AuthHeader = ""
 	}
 	m.existingCfg.CustomProviders[r.provider] = entry
 
@@ -1299,6 +1314,8 @@ func cloneProviderEntry(v ProviderEntry) ProviderEntry {
 		RetryCodes: append([]int(nil), v.RetryCodes...),
 		AWSProfile: v.AWSProfile,
 		AWSRegion:  v.AWSRegion,
+		CLIPath:    v.CLIPath,
+		CLIArgs:    append([]string(nil), v.CLIArgs...),
 	}
 	if v.ExtraBody != nil {
 		out.ExtraBody = make(map[string]any, len(v.ExtraBody))
@@ -1369,10 +1386,13 @@ func (m *providerTUIModel) applyEditCustomProviderSave() error {
 	if key, edited := m.customAPIKeyForSave(); edited {
 		entry.APIKey = key
 	}
-	// Switching an entry to an ambient protocol drops the key it no longer uses,
-	// rather than leaving a live credential in a file nothing reads it from.
-	if entry.Protocol == llm.ProtocolAnthropicBedrock {
+	// Switching an entry to an ambient protocol (bedrock, claude-cli, codex-cli)
+	// drops the url, key and auth header it no longer uses, rather than leaving a
+	// live credential in a file nothing reads it from.
+	if isAmbientProtocol(entry.Protocol) {
+		entry.URL = ""
 		entry.APIKey = ""
+		entry.AuthHeader = ""
 	}
 	// If name changed, delete old key
 	if r.editTargetName != "" && r.editTargetName != r.provider {

@@ -108,7 +108,11 @@ func runLLMTest() error {
 		model = resp.Model
 	}
 	fmt.Printf("Source: %s\n", ep.Source)
-	if region, profile, ok := bedrockContext(llmClient); ok {
+	if llm.IsCLIProtocol(ep.Protocol) {
+		// A CLI backend has no URL — it runs a local binary that carries its
+		// own login — so report the binary instead of a blank URL line.
+		fmt.Printf("Backend: %s (local CLI, uses its own login)\n", cliBinaryName(ep.Protocol))
+	} else if region, profile, ok := bedrockContext(llmClient); ok {
 		// Bedrock has no configured URL — the region decides the host — so
 		// report what was resolved instead. A request that reached the wrong
 		// region otherwise fails in a way that looks like a bad model ID.
@@ -132,6 +136,20 @@ func runLLMTest() error {
 	return nil
 }
 
+// cliBinaryName returns the CLI binary a local-CLI protocol drives, for display
+// in `ocr llm test`. It falls back to the protocol name for any future CLI
+// protocol that has no mapping yet.
+func cliBinaryName(protocol string) string {
+	switch protocol {
+	case llm.ProtocolClaudeCLI:
+		return "claude"
+	case llm.ProtocolCodexCLI:
+		return "codex"
+	default:
+		return protocol
+	}
+}
+
 // bedrockContext reports the region and profile a Bedrock client resolved.
 // ok is false for every other client, which keeps the test output unchanged for
 // URL-based providers.
@@ -150,7 +168,12 @@ func runLLMProviders() {
 	fmt.Fprintf(w, "  NAME\tPROTOCOL\tBASE URL\n")
 	fmt.Fprintf(w, "  ----\t--------\t--------\n")
 	for _, p := range providers {
-		fmt.Fprintf(w, "  %s\t%s\t%s\n", p.Name, p.Protocol, p.BaseURL)
+		baseURL := p.BaseURL
+		if baseURL == "" && llm.IsCLIProtocol(p.Protocol) {
+			// A CLI provider has no base URL; a blank column reads as missing.
+			baseURL = "(local CLI)"
+		}
+		fmt.Fprintf(w, "  %s\t%s\t%s\n", p.Name, p.Protocol, baseURL)
 	}
 	if err := w.Flush(); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to flush output: %v\n", err)

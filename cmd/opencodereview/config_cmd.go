@@ -332,6 +332,16 @@ type ProviderEntry struct {
 	// first time any config command runs.
 	AWSProfile string `json:"aws_profile,omitempty"`
 	AWSRegion  string `json:"aws_region,omitempty"`
+
+	// CLIPath and CLIArgs configure providers that run a local CLI as the model
+	// (protocol claude-cli / codex-cli). Both are optional: CLIPath overrides the
+	// binary name looked up on PATH, and CLIArgs are extra arguments passed to
+	// every spawn. Like the AWS fields they must exist here as well as in the
+	// resolver's own view of the file — config is unmarshalled into this struct
+	// and marshalled back on every write, so a field missing from it is silently
+	// dropped from a hand-written config the first time any config command runs.
+	CLIPath string   `json:"cli_path,omitempty"`
+	CLIArgs []string `json:"cli_args,omitempty"`
 }
 
 // MCPServerConfig holds configuration for a single MCP server.
@@ -538,6 +548,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		if normalized == llm.ProtocolAnthropicBedrock {
 			return fmt.Errorf("llm.protocol cannot be %q: bedrock derives its host from aws_region and signs with the AWS credential chain, so it has no use for llm.url or llm.auth_token; run `ocr config set provider bedrock` instead", normalized)
 		}
+		// The llm block is a single url + token endpoint. A CLI protocol runs a
+		// local binary and has no url or token, so it is refused here and
+		// configured as a provider entry instead.
+		if llm.IsCLIProtocol(normalized) {
+			return fmt.Errorf("llm.protocol cannot be %q: it runs a local CLI as the model and has no use for llm.url or llm.auth_token; run `ocr config set provider claude-code` (or codex) instead", normalized)
+		}
 		cfg.Llm.Protocol = normalized
 		// Mirror use_anthropic so older binaries that predate llm.protocol
 		// still pick the right protocol family: anthropic -> true, the OpenAI
@@ -602,7 +618,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile, cli_path, cli_args\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses, claude-cli, codex-cli\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -635,6 +651,14 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: clearing aws_region/aws_profile on %q: protocol %q does not use the AWS credential chain\n", providerName, normalized)
 			entry.AWSRegion = ""
 			entry.AWSProfile = ""
+		}
+		// Same clearing for cli_path/cli_args when the entry moves off a CLI
+		// protocol: they are read only by the local-CLI backends, so leaving them
+		// would be dead config that reads as applied.
+		if !llm.IsCLIProtocol(normalized) && (entry.CLIPath != "" || len(entry.CLIArgs) > 0) {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: clearing cli_path/cli_args on %q: protocol %q does not run a local CLI\n", providerName, normalized)
+			entry.CLIPath = ""
+			entry.CLIArgs = nil
 		}
 	case "model":
 		entry.Model = value
@@ -684,8 +708,22 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 		} else {
 			entry.AWSProfile = normalized
 		}
+	case "cli_path":
+		if !providerAcceptsCLISettings(providerName, entry) {
+			return fmt.Errorf("%s does not apply to provider %q: cli_path and cli_args are only used by providers that run a local CLI as the model (protocol %s or %s)", field, providerName, llm.ProtocolClaudeCLI, llm.ProtocolCodexCLI)
+		}
+		entry.CLIPath = strings.TrimSpace(value)
+	case "cli_args":
+		if !providerAcceptsCLISettings(providerName, entry) {
+			return fmt.Errorf("%s does not apply to provider %q: cli_path and cli_args are only used by providers that run a local CLI as the model (protocol %s or %s)", field, providerName, llm.ProtocolClaudeCLI, llm.ProtocolCodexCLI)
+		}
+		var args []string
+		if err := json.Unmarshal([]byte(value), &args); err != nil {
+			return fmt.Errorf("invalid JSON array for %s: %w", key, err)
+		}
+		entry.CLIArgs = args
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile, cli_path, cli_args", field)
 	}
 	return nil
 }
@@ -704,6 +742,21 @@ func providerAcceptsAWSSettings(providerName string, entry *ProviderEntry) bool 
 	}
 	preset, isPreset := llm.LookupProvider(providerName)
 	return isPreset && preset.AmbientAuth
+}
+
+// providerAcceptsCLISettings reports whether cli_path / cli_args mean anything
+// for this provider. Only the local-CLI protocols read them, so storing them
+// anywhere else would be dead config that reads as applied.
+//
+// Like providerAcceptsAWSSettings, the entry's own protocol decides whenever it
+// sets one (a preset's protocol can be overridden per entry); only when the
+// entry is silent does the preset's own protocol answer.
+func providerAcceptsCLISettings(providerName string, entry *ProviderEntry) bool {
+	if entry.Protocol != "" {
+		return llm.IsCLIProtocol(llm.NormalizeProtocol(entry.Protocol))
+	}
+	preset, isPreset := llm.LookupProvider(providerName)
+	return isPreset && llm.IsCLIProtocol(preset.Protocol)
 }
 
 // normalizeAWSSetting trims the value and rejects the shapes AWS itself will

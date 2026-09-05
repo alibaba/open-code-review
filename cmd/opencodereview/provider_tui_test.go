@@ -2764,13 +2764,16 @@ func TestApplyCustomProviderConfigNormalizesAuthHeader(t *testing.T) {
 func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
 	// The Custom form offers every canonical protocol, in canonical order, so
 	// result() picks up the right string for each index. The Manual form writes
-	// llm.url + llm.auth_token and so omits bedrock, which uses neither; the two
-	// lists share their prefix, which is what keeps a single index helper honest.
+	// llm.url + llm.auth_token and so omits the ambient protocols (bedrock and
+	// the local-CLI protocols), which use neither; the two lists share their
+	// leading prefix, which is what keeps a single index helper honest.
 	want := []string{
 		llm.ProtocolAnthropic,
 		llm.ProtocolOpenAIChatCompletions,
 		llm.ProtocolOpenAIResponses,
 		llm.ProtocolAnthropicBedrock,
+		llm.ProtocolClaudeCLI,
+		llm.ProtocolCodexCLI,
 	}
 	if len(cpProtocols) != len(want) {
 		t.Fatalf("cpProtocols has %d entries, want %d", len(cpProtocols), len(want))
@@ -2781,7 +2784,11 @@ func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
 		}
 	}
 
-	wantManual := want[:len(want)-1]
+	wantManual := []string{
+		llm.ProtocolAnthropic,
+		llm.ProtocolOpenAIChatCompletions,
+		llm.ProtocolOpenAIResponses,
+	}
 	if len(manualProtocols) != len(wantManual) {
 		t.Fatalf("manualProtocols has %d entries, want %d", len(manualProtocols), len(wantManual))
 	}
@@ -2791,8 +2798,8 @@ func TestCpProtocols_ContainsAllCanonicalNames(t *testing.T) {
 		}
 	}
 	for _, p := range manualProtocols {
-		if p == llm.ProtocolAnthropicBedrock {
-			t.Error("manualProtocols offers bedrock; the llm block has no region, profile or use for its url and token")
+		if p == llm.ProtocolAnthropicBedrock || llm.IsCLIProtocol(p) {
+			t.Errorf("manualProtocols offers ambient protocol %q; the llm block has no region, profile or use for its url and token", p)
 		}
 	}
 }
@@ -2810,6 +2817,8 @@ func TestCpProtocolIndex(t *testing.T) {
 		{"alias OPENAI case-insensitive", "OPENAI", 1},
 		{"empty defaults to chat-completions", "", 1},
 		{"canonical bedrock", llm.ProtocolAnthropicBedrock, 3},
+		{"canonical claude-cli", llm.ProtocolClaudeCLI, 4},
+		{"canonical codex-cli", llm.ProtocolCodexCLI, 5},
 		{"unknown defaults to chat-completions", "grpc", 1},
 	}
 	for _, tt := range tests {
