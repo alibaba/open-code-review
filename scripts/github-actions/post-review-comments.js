@@ -77,6 +77,7 @@ async function runPostReviewComments({
   incremental = false,
   incrementalOverlapThreshold = DEFAULT_OVERLAP_THRESHOLD,
   reviewCommentBatchSize = DEFAULT_BATCH_SIZE,
+  approveOnClean = true,
   // Fail-open finding-publication controls (#478). Both optional and empty by
   // default: with neither set, behavior is byte-identical to today (modulo the
   // additive badge prefix on rendered comments). buildPolicy parses them once
@@ -243,8 +244,25 @@ async function runPostReviewComments({
   const warnings = result.warnings || [];
   stats.total = comments.length;
 
-  // No comments: post a "looks good" summary.
   if (comments.length === 0) {
+    if (approveOnClean && result.status === "complete") {
+      try {
+        const approved = await submitCleanApproval({
+          github,
+          context,
+          owner,
+          repo,
+          prNumber,
+          message: result.message || "No comments generated. Looks good to me.",
+          log,
+        });
+        if (approved) stats.summaryUrl = approved.html_url;
+        setStatsOutputs(out, stats);
+        return;
+      } catch (e) {
+        log(`[approve] could not submit approval (${e.message}); posting summary comment instead.`);
+      }
+    }
     const message = result.message || "No comments generated. Looks good to me.";
     // A clean run is still a complete run: this path advances the checkpoint.
     const body = appendCheckpoint(`${SUMMARY_MARKER}\n✅ **OpenCodeReview**: ${message}${rangeNote}`, result.manifest);
@@ -909,6 +927,66 @@ function setStatsOutputs(out, stats, batchCounters, batchSize) {
         failed: stats.failed,
       })
     );
+  }
+}
+
+async function submitCleanApproval({ github, context, owner, repo, prNumber, message, log }) {
+  let commitSha;
+  if (context.eventName === "pull_request_target") {
+    commitSha = context.payload.pull_request.head.sha;
+  } else {
+    try {
+      const { data: pullRequest } = await github.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: prNumber,
+      });
+      commitSha = pullRequest.head.sha;
+    } catch (e) {
+      throw new Error(`could not resolve head commit: ${e.message}`);
+    }
+  }
+  if (!commitSha) {
+    throw new Error("no head commit sha available");
+  }
+
+  // Idempotency: do not re-approve a commit this bot already approved. This is
+  // the one case where approval is intentionally skipped (not a failure), so
+  // the caller posts nothing.
+  try {
+    const botLogin = await getAuthenticatedLogin(github, log);
+    const reviews = await readAllPages("listReviews", (page, per_page) =>
+      github.rest.pulls.listReviews({ owner, repo, pull_number: prNumber, per_page, page }), log);
+    const alreadyApproved = reviews.some(
+      (r) =>
+        r.state === "APPROVED" &&
+        r.commit_id === commitSha &&
+        botLogin &&
+        r.user &&
+        r.user.login === botLogin
+    );
+    if (alreadyApproved) {
+      log("[approve] this commit is already approved by the bot; skipping.");
+      return null;
+    }
+  } catch (e) {
+    log(`[approve] could not check existing reviews (${e.message}); proceeding to approve.`);
+  }
+
+  try {
+    const body = `✅ **OpenCodeReview**: ${message}`;
+    const { data: review } = await github.rest.pulls.createReview({
+      owner,
+      repo,
+      pull_number: prNumber,
+      commit_id: commitSha,
+      event: "APPROVE",
+      body,
+    });
+    log("Submitted formal APPROVE review for the clean run.");
+    return review;
+  } catch (e) {
+    throw new Error(`failed to submit APPROVE review: ${e.message}`);
   }
 }
 

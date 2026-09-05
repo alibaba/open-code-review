@@ -180,7 +180,7 @@ function makeGithub(opts = {}) {
           createReviewCalls.push(params);
           ops.push({ type: "createReview", params });
           const callIdx = createReviewCalls.length - 1;
-          const successRes = () => ({ data: {}, headers: { "x-ratelimit-remaining": successRemaining() } });
+          const successRes = () => ({ data: opts.reviewData || {}, headers: { "x-ratelimit-remaining": successRemaining() } });
           // Discriminate batch vs per-comment by body, NOT callIdx. Under
           // multi-batch (N < toSend.length) several batch calls precede the
           // per-comment fallbacks, so callIdx === 0 is unsound. Batch calls
@@ -571,6 +571,108 @@ async function testNoCommentsStickyUpdate() {
   assert.strictEqual(github.updatedComments.length, 1);
   assert.strictEqual(github.issueComments.length, 0);
   assert.match(github.updatedComments[0].body, /All clear\./);
+}
+
+// Clean run (status "complete", nothing found): the summary comment is replaced
+// by a formal APPROVE review when approve_on_clean is enabled (default).
+async function testCleanRunApproves() {
+  const result = {
+    comments: [],
+    status: "complete",
+    message: "Review complete: 0 finding(s) across 2 selected item(s).",
+  };
+
+  const { github, outputs } = await run({
+    result,
+    githubOpts: { reviewData: { html_url: "http://ex/approval" } },
+  });
+
+  assert.strictEqual(github.createReviewCalls.length, 1, "formal APPROVE review submitted");
+  const sent = github.createReviewCalls[0];
+  assert.strictEqual(sent.event, "APPROVE");
+  assert.strictEqual(sent.commit_id, "head-sha");
+  assert.match(sent.body, /Review complete: 0 finding\(s\) across 2 selected item\(s\)\./);
+  assert.strictEqual(github.issueComments.length, 0, "no summary comment posted");
+  assert.strictEqual(github.updatedComments.length, 0, "no existing comment updated");
+  assert.strictEqual(outputs.summary_comment_url, "http://ex/approval", "summary URL is the review's web (html_url) link, not the API url");
+}
+
+// Same clean run with approval disabled: falls back to the summary comment.
+async function testCleanRunApprovalDisabledComments() {
+  const result = {
+    comments: [],
+    status: "complete",
+    message: "Review complete: 0 finding(s) across 2 selected item(s).",
+  };
+
+  const { github } = await run({ result, opts: { approveOnClean: false } });
+
+  assert.strictEqual(github.createReviewCalls.length, 0, "no review submitted");
+  assert.strictEqual(github.issueComments.length, 1, "summary comment posted");
+  assert.match(github.issueComments[0].body, /Review complete: 0 finding\(s\) across 2 selected item\(s\)\./);
+}
+
+// Clean run where the APPROVE submit fails (e.g. API error): the run must not
+// go silent — it falls back to the regular summary comment as an artifact.
+async function testCleanRunApprovalFailureFallsBackToComment() {
+  const result = {
+    comments: [],
+    status: "complete",
+    message: "Review complete: 0 finding(s) across 2 selected item(s).",
+  };
+
+  const { github, outputs } = await run({
+    result,
+    githubOpts: { individualError: "approval API unavailable" },
+  });
+
+  assert.strictEqual(github.createReviewCalls.length, 1, "approval attempted once");
+  assert.strictEqual(github.createReviewCalls[0].event, "APPROVE");
+  assert.strictEqual(github.issueComments.length, 1, "fallback summary comment posted");
+  assert.match(github.issueComments[0].body, /Review complete: 0 finding\(s\) across 2 selected item\(s\)\./);
+  assert.ok(outputs.summary_comment_url, "summary URL populated from the fallback comment");
+}
+
+// Nothing selected (status "skipped"): never approve, comment only.
+async function testNoItemsSelectedCommentsOnly() {
+  const result = { comments: [], status: "skipped", message: "No supported files changed." };
+
+  const { github } = await run({ result });
+
+  assert.strictEqual(github.createReviewCalls.length, 0, "no approval when nothing selected");
+  assert.strictEqual(github.issueComments.length, 1, "summary comment posted");
+  assert.match(github.issueComments[0].body, /No supported files changed\./);
+}
+
+// Partial coverage: never approve, comment only.
+async function testPartialStatusCommentsOnly() {
+  const result = {
+    comments: [],
+    status: "partial",
+    message: "Review partially complete: 0 finding(s); 1 of 2 selected item(s) failed.",
+  };
+
+  const { github } = await run({ result });
+
+  assert.strictEqual(github.createReviewCalls.length, 0, "no approval on partial coverage");
+  assert.strictEqual(github.issueComments.length, 1, "summary comment posted");
+  assert.match(github.issueComments[0].body, /Review partially complete/);
+}
+
+// The same commit was already approved by the bot: idempotent skip, nothing posted.
+async function testAlreadyApprovedSkips() {
+  const result = { comments: [], status: "complete", message: "All clear." };
+
+  const { github } = await run({
+    result,
+    githubOpts: {
+      reviews: [{ state: "APPROVED", commit_id: "head-sha", user: { login: "github-actions[bot]" } }],
+    },
+  });
+
+  assert.strictEqual(github.createReviewCalls.length, 0, "already approved, skip");
+  assert.strictEqual(github.issueComments.length, 0, "no summary comment posted");
+  assert.strictEqual(github.updatedComments.length, 0, "no existing comment updated");
 }
 
 async function testIncrementalSkipsOverlapping() {
@@ -2224,6 +2326,12 @@ async function main() {
   await testNonStickyCreatesNewCommentOnFallback();
   await testNonStickyFallbackAllSuccessStillPostsSummary();
   await testNoCommentsStickyUpdate();
+  await testCleanRunApproves();
+  await testCleanRunApprovalDisabledComments();
+  await testCleanRunApprovalFailureFallsBackToComment();
+  await testNoItemsSelectedCommentsOnly();
+  await testPartialStatusCommentsOnly();
+  await testAlreadyApprovedSkips();
   await testIncrementalSkipsOverlapping();
   await testIncrementalAllOverlapPostsNoReview();
   await testIncrementalMultiLineIoUDefaultThreshold();
