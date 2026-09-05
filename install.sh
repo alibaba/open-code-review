@@ -96,7 +96,8 @@ install_manpage() {
   bin_path="$1"
   install_dir="$2"
   tmp="$3"
-  man1="${install_dir%/bin}/share/man/man1"
+  manroot="${install_dir%/bin}/share/man"
+  man1="$manroot/man1"
 
   "$bin_path" man "$tmp/man" >/dev/null 2>&1 || {
     printf 'warning: could not generate man pages\n' >&2
@@ -117,14 +118,14 @@ install_manpage() {
       return 0
     fi
   else
-    printf 'note: man pages generated at %s; %s is not writable, so install them yourself\n' "$tmp/man" "$man1"
+    printf 'note: %s is not writable and sudo is unavailable; generate the pages yourself with `%s man <directory>` and install them onto your MANPATH\n' "$man1" "$bin_path"
     return 0
   fi
 
   printf 'installed man pages to %s\n' "$man1"
-  case "$man1" in
+  case "$manroot" in
     /usr/*|/opt/*) ;;
-    *) printf 'note: add %s to MANPATH to read `man ocr`\n' "$man1" ;;
+    *) printf 'note: add %s to MANPATH to read `man ocr`\n' "$manroot" ;;
   esac
 }
 
