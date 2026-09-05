@@ -53,6 +53,8 @@ type reviewOptions struct {
 	effort          string
 	noFilter        bool
 	preview         bool
+
+	onGroupingFailure string
 }
 
 var reviewOpts reviewOptions
@@ -232,6 +234,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		SealedInput:           sealedInput,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,
+		OnGroupingFailure:     opts.onGroupingFailure,
 		RuntimeConfig:         rt.RuntimeConfig,
 	})
 

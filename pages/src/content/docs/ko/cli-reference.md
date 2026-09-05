@@ -120,6 +120,7 @@ ocr r      [flags]   (alias)
 | `--background-file <path>` | `-B` | — | 리뷰 배경으로 쓸 Markdown 파일 경로. `--background`와 함께 지정하면 이쪽이 우선합니다. |
 | `--exclude <patterns>` | — | — | 제외할 gitignore 형식 패턴(쉼표 구분). `rule.json`의 `excludes` 항목과 합쳐집니다. |
 | `--concurrency <n>` | — | `8` | 병렬로 리뷰할 파일 그룹의 최대 개수. |
+| `--on-grouping-failure <mode>` | — | `fallback` | LLM 그룹화 호출이 실패했을 때의 동작입니다. `fallback`은 파일을 하나씩 리뷰하고 `grouping_failed` 경고를 기록하며, `abort`는 종료 코드 1로 리뷰를 중단합니다. |
 | `--timeout <minutes>` | — | `15` | 그룹당 제한 시간. `0`이면 타임아웃을 끕니다. effort 라운드 수에 비례해 선형 확장됩니다(예: low/medium/high에서 15/30/45분). |
 | `--effort <level>` | — | `medium` | 리뷰 강도 프리셋: `low`(라운드 1회), `medium`(2회), `high`(3회). 라운드를 늘리면 놓치는 지적이 줄지만 비용도 그만큼 늘어납니다. 이 실행에 한해 저장된 `effort` 설정을 덮어씁니다. |
 | `--rule <path>` | — | — | 커스텀 JSON 리뷰 규칙 파일 경로. 프로젝트 수준과 전역 `rule.json`을 덮어씁니다. |
@@ -340,7 +341,7 @@ ocr review --format json | jq .summary   # stdout은 JSON 문서 하나입니다
 | 코드 | 뜻 |
 |---|---|
 | `0` | 리뷰가 끝났습니다(코멘트가 0건일 수도, 치명적이지 않은 경고가 있을 수도 있습니다). |
-| `1` | 치명적 오류입니다. 잘못된 플래그, LLM 엔드포인트 해석 실패, 그룹별 서브 Agent 전멸 등이며 오류 내용은 stderr에 출력됩니다. |
+| `1` | 치명적 오류입니다. 잘못된 플래그, LLM 엔드포인트 해석 실패, 그룹별 서브 Agent 전멸, `--on-grouping-failure=abort` 상태에서의 LLM 그룹화 실패 등이며 오류 내용은 stderr에 출력됩니다. |
 
 치명적이지 않은 경고(서브 Agent 하나 실패, 파일이 토큰 한계 초과 등)는 실행 중간에
 출력되고, JSON 모드에서는 `warnings` 배열에 담깁니다.

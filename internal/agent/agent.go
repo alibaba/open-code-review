@@ -154,6 +154,12 @@ type Args struct {
 	// defines one. Set via the --no-filter CLI flag.
 	SkipFilter bool
 
+	// OnGroupingFailure decides what a failed LLM grouping call does: "abort"
+	// stops the run and records it, anything else (including the zero value, so
+	// existing callers keep their behaviour) falls back to per-file dispatch and
+	// records a warning. Set via the --on-grouping-failure CLI flag.
+	OnGroupingFailure string
+
 	// RuntimeConfig carries the non-secret, allowlisted runtime settings that
 	// identify how this run was configured, for the manifest's
 	// runtime_config_sha256. It is populated by the cmd layer from the resolved
@@ -631,10 +637,57 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 		a.args.Template, llmloop.PromptTokenLimit(a.args.Template.MaxTokens),
 		&groupingSessionOpts{session: a.session, provider: a.args.Provider, model: a.args.Model})
 	groups := groupResult.groups
-	a.fileGroups = groups
 	if groupResult.usage != nil {
 		a.runner.RecordUsage(groupResult.usage)
 	}
+	if groupResult.failure != nil {
+		if a.args.OnGroupingFailure == "abort" {
+			// An abort must land as a run_failure, never as a pending failure
+			// cause: only a non-nil run_failure forces terminal_state=failed
+			// (computeTerminal, manifest.go). On a resumed run applyResume has
+			// already settled the reused items, so a coverage-derived state
+			// would stop at "partial" and the abort would vanish.
+			//
+			// Classify the context cause first. SetRunFailure is
+			// first-cause-wins and this return is upstream of the post-dispatch
+			// gate below, so without it a Ctrl-C or an elapsed deadline during
+			// grouping would be filed as "unknown". ctx.Err() alone is not
+			// enough: the outer ctx can still be live while groupResult.failure
+			// wraps context.DeadlineExceeded or context.Canceled from the
+			// per-request timeout scoped below it (option.WithRequestTimeout,
+			// see retry_boundary.go's parentCancelled doc), so unwrap the
+			// failure too, the way classifyItemError does.
+			cause := ctx.Err()
+			if cause == nil {
+				cause = groupResult.failure
+			}
+			// "unknown" is the closest of the fixed run failure classes for a
+			// non-context grouping error: the enum is documented as closed on a
+			// frozen v1 schema, so a grouping-specific class is a maintainer's
+			// call.
+			class, reason := session.RunFailureUnknown, "grouping failed; --on-grouping-failure=abort"
+			switch {
+			case errors.Is(cause, context.DeadlineExceeded):
+				class, reason = session.RunFailureTimeout, "review deadline exceeded during grouping"
+			case errors.Is(cause, context.Canceled):
+				class, reason = session.RunFailureCancelled, "review was cancelled during grouping"
+			}
+			if b := a.session.Manifest(); b != nil {
+				if setErr := b.SetRunFailure(class, reason); setErr != nil {
+					a.recordWarning("manifest_error", "", setErr.Error())
+				}
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			return nil, fmt.Errorf("grouping failed and --on-grouping-failure=abort: %w", groupResult.failure)
+		}
+		// The default. The warning is the point: it reaches text, JSON and SARIF
+		// through Warnings(), where the printed line alone did not.
+		a.recordWarning("grouping_failed", "", groupResult.failure.Error())
+		fmt.Fprintln(stdout.Writer(), "[ocr] falling back to per-file dispatch")
+	}
+	a.fileGroups = groups
 
 	var wg sync.WaitGroup
 

@@ -121,6 +121,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--background-file <path>` | `-B` | — | Path to a Markdown file used as review background. Takes precedence over `--background` when both are set. |
 | `--exclude <patterns>` | — | — | Comma-separated gitignore-style patterns to exclude; merged with the `excludes` section of `rule.json` |
 | `--concurrency <n>` | — | `8` | Maximum number of file groups reviewed in parallel. |
+| `--on-grouping-failure <mode>` | — | `fallback` | What a failed LLM grouping call does: `fallback` reviews each file on its own and records a `grouping_failed` warning; `abort` stops the review with exit code 1. |
 | `--timeout <minutes>` | — | `15` | Per-group deadline. `0` disables the timeout. Scaled linearly by the number of effort review rounds (e.g. 15/30/45 min for low/medium/high). |
 | `--effort <level>` | — | `medium` | Review effort preset: `low` (1 review round), `medium` (2 rounds), `high` (3 rounds). More rounds improve recall at proportionally higher cost. Overrides the saved `effort` setting for this run. |
 | `--rule <path>` | — | — | Path to a custom JSON review rule file. Overrides the project-level and global `rule.json`. |
@@ -346,7 +347,7 @@ envelope instead so callers can distinguish "no changes" from "no findings":
 | Code | Meaning |
 |---|---|
 | `0` | Review completed (possibly with zero comments, possibly with non-fatal warnings). |
-| `1` | Fatal error — bad flags, can't resolve LLM endpoint, all per-group sub-agents failed, etc. The error text is printed to stderr. |
+| `1` | Fatal error — bad flags, can't resolve LLM endpoint, all per-group sub-agents failed, an LLM grouping call failed under `--on-grouping-failure=abort`, etc. The error text is printed to stderr. |
 
 Non-fatal warnings (a single sub-agent failed, a file exceeded the token
 threshold, etc.) are printed inline; in JSON mode they're added to the

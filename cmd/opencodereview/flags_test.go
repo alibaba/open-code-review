@@ -244,3 +244,34 @@ func TestParseScanFlags_NormalizedFormat(t *testing.T) {
 		t.Errorf("outputFormat = %q, want sarif", opts.outputFormat)
 	}
 }
+
+func TestParseReviewFlags_OnGroupingFailure(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    string
+		wantErr bool
+	}{
+		{name: "fallback", args: []string{"--on-grouping-failure", "fallback"}, want: "fallback"},
+		{name: "abort", args: []string{"--on-grouping-failure", "abort"}, want: "abort"},
+		{name: "absent", args: []string{"--commit", "abc123"}, want: "fallback"},
+		{name: "invalid", args: []string{"--on-grouping-failure", "skip"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts, err := parseReviewFlags(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error for an invalid --on-grouping-failure value")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if opts.onGroupingFailure != tt.want {
+				t.Errorf("onGroupingFailure = %q, want %q", opts.onGroupingFailure, tt.want)
+			}
+		})
+	}
+}

@@ -44,9 +44,16 @@ type groupingResponse struct {
 }
 
 // groupDiffsResult holds the grouping output and any LLM usage to record.
+//
+// failure is set only when an attempted LLM partition failed; the groups beside
+// it are then the per-file fallback. The paths that decide a partition without a
+// round trip leave it nil, so a caller acting on it cannot mistake a deliberate
+// skip for a broken one. What to do about a failure is the caller's policy, not
+// this function's: it always returns a usable partition.
 type groupDiffsResult struct {
-	groups []FileGroup
-	usage  *llm.UsageInfo
+	groups  []FileGroup
+	usage   *llm.UsageInfo
+	failure error
 }
 
 // groupingSessionOpts carries optional session-recording context.
@@ -94,8 +101,13 @@ func groupDiffs(ctx context.Context, diffs []model.Diff, client llm.LLMClient, m
 
 	groups, usage, err := callGroupingLLM(ctx, diffs, client, modelName, tpl.GroupingTask, tpl.CompletionTokenLimit(), sessOpts)
 	if err != nil {
-		fmt.Fprintf(stdout.Writer(), "[ocr] LLM grouping failed (%v), falling back to per-file dispatch\n", err)
-		return groupDiffsResult{groups: toSingleFileGroups(diffs), usage: usage}
+		// The line stops at what happened: the caller decides, and prints,
+		// whatever follows. It is not the only record either — the write goes to
+		// io.Discard under --audience agent, so the failure also rides out on the
+		// telemetry event and on the failure field below.
+		fmt.Fprintf(stdout.Writer(), "[ocr] LLM grouping failed: %v\n", err)
+		emitGroupingFailed(ctx, len(diffs), totalChanged, tpl, err)
+		return groupDiffsResult{groups: toSingleFileGroups(diffs), usage: usage, failure: err}
 	}
 
 	groups = enforceGroupTokenBudget(groups, tokenLimit)
@@ -158,6 +170,22 @@ func groupWithoutLLM(ctx context.Context, diffs []model.Diff, strategy template.
 func emitGroupingSkipped(ctx context.Context, strategy template.GroupingStrategy, fileCount int, totalChanged int64, tpl template.Template) {
 	telemetry.Event(ctx, "grouping.skipped",
 		telemetry.AnyToAttr("strategy", strategy.String()),
+		telemetry.AnyToAttr("file.count", fileCount),
+		telemetry.AnyToAttr("lines.changed", totalChanged),
+		telemetry.AnyToAttr("threshold.files", tpl.GroupingMinFiles),
+		telemetry.AnyToAttr("threshold.lines", tpl.GroupingBundleLineThreshold))
+}
+
+// emitGroupingFailed records a partition the LLM was asked for and could not
+// deliver. It carries emitGroupingSkipped's attribute set so the two are
+// comparable, with strategy pinned to the one that was attempted.
+//
+// ErrorEvent rather than Event: a failed grouping is an error, and only
+// ErrorEvent sets the span status and calls RecordError, which is what makes it
+// findable in a trace backend without knowing the event name.
+func emitGroupingFailed(ctx context.Context, fileCount int, totalChanged int64, tpl template.Template, err error) {
+	telemetry.ErrorEvent(ctx, "grouping.failed", err,
+		telemetry.AnyToAttr("strategy", template.GroupingViaLLM.String()),
 		telemetry.AnyToAttr("file.count", fileCount),
 		telemetry.AnyToAttr("lines.changed", totalChanged),
 		telemetry.AnyToAttr("threshold.files", tpl.GroupingMinFiles),

@@ -6,18 +6,22 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/config/rules"
 	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
+	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
+	"github.com/alibaba/open-code-review/internal/tool"
 )
 
 type fakeGroupingClient struct {
@@ -747,6 +751,355 @@ func TestGroupChurn(t *testing.T) {
 			}
 			if maxFile != tt.maxFile {
 				t.Errorf("maxFile = %d, want %d", maxFile, tt.maxFile)
+			}
+		})
+	}
+}
+
+// TestGroupDiffs_LLMError_SetsFailure pins that a grouping LLM error reaches the
+// caller through groupDiffsResult.failure instead of only being printed — the
+// print goes to io.Discard under --audience agent, so before this the only
+// record of a failed partition was a line nobody read. The log line must also
+// stop announcing a fallback, because the caller now decides whether there is
+// one.
+func TestGroupDiffs_LLMError_SetsFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		ctx  context.Context
+	}{
+		{name: "background context", ctx: context.Background()},
+		{name: "nil context", ctx: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diffs := []model.Diff{{NewPath: "a.go"}, {NewPath: "b.go"}}
+			client := &fakeGroupingClient{err: fmt.Errorf("connection refused")}
+			tpl := template.Template{
+				GroupingTask: &template.LlmConversation{
+					Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+				},
+			}
+
+			var buf bytes.Buffer
+			restore := stdout.Swap(&buf)
+			result := groupDiffs(tt.ctx, diffs, client, "fake", tpl, 0, nil)
+			restore()
+
+			if result.failure == nil {
+				t.Fatal("failure = nil, want the grouping LLM error")
+			}
+			if !strings.Contains(result.failure.Error(), "connection refused") {
+				t.Errorf("failure = %v, want it to wrap %q", result.failure, "connection refused")
+			}
+			if len(result.groups) != 2 {
+				t.Fatalf("got %d groups, want 2 (the per-file groups are still returned)", len(result.groups))
+			}
+			if strings.Contains(buf.String(), "falling back") {
+				t.Errorf("grouping still announces the fallback it no longer decides: %q", buf.String())
+			}
+		})
+	}
+}
+
+// TestGroupDiffs_NoFailureOnDecisionExits pins that only the LLM error path sets
+// failure. The paths that decide a partition without a round trip are successes,
+// so --on-grouping-failure=abort must not fire on any of them.
+func TestGroupDiffs_NoFailureOnDecisionExits(t *testing.T) {
+	llmTpl := template.Template{
+		GroupingTask: &template.LlmConversation{
+			Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+		},
+	}
+	lowChurn := []model.Diff{
+		{NewPath: "a.go", Insertions: 10, Deletions: 5, Diff: "diff a"},
+		{NewPath: "b.go", Insertions: 8, Deletions: 2, Diff: "diff b"},
+	}
+	tests := []struct {
+		name       string
+		diffs      []model.Diff
+		tpl        template.Template
+		wantGroups int
+	}{
+		{name: "single file", diffs: []model.Diff{{NewPath: "a.go"}}, tpl: llmTpl, wantGroups: 1},
+		{name: "no grouping task", diffs: lowChurn, tpl: template.Template{}, wantGroups: 2},
+		{name: "below threshold, bundled", diffs: lowChurn, tpl: groupingSkipTemplate(4, 200), wantGroups: 1},
+		{name: "below threshold, per file", diffs: lowChurn, tpl: groupingSkipTemplate(4, 1), wantGroups: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &fakeGroupingClient{err: fmt.Errorf("must not be called")}
+			result := groupDiffs(context.Background(), tt.diffs, client, "fake", tt.tpl, 0, nil)
+			if client.called {
+				t.Error("grouping LLM was called on a path that decides without one")
+			}
+			if result.failure != nil {
+				t.Errorf("failure = %v, want nil", result.failure)
+			}
+			if len(result.groups) != tt.wantGroups {
+				t.Errorf("got %d groups, want %d", len(result.groups), tt.wantGroups)
+			}
+		})
+	}
+}
+
+// failGroupingClient fails only the grouping call — grouping.go builds its
+// request with no tools, so len(req.Tools) == 0 identifies it — and finishes
+// every review round on the first tool call. The call count then says exactly
+// how far dispatch got.
+type failGroupingClient struct {
+	calls int64 // atomic
+	// err overrides the default grouping failure, e.g. to simulate a
+	// per-request timeout (option.WithRequestTimeout) that wraps
+	// context.DeadlineExceeded/Canceled while the outer ctx is still live.
+	err error
+}
+
+func (c *failGroupingClient) CompletionsWithCtx(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	atomic.AddInt64(&c.calls, 1)
+	if len(req.Tools) == 0 {
+		if c.err != nil {
+			return nil, c.err
+		}
+		return nil, fmt.Errorf("grouping upstream returned 503")
+	}
+	return &llm.ChatResponse{
+		Choices: []llm.Choice{{
+			Message: llm.ResponseMessage{
+				Role: "assistant",
+				ToolCalls: []llm.ToolCall{{
+					ID:       "1",
+					Type:     "function",
+					Function: llm.FunctionCall{Name: "task_done", Arguments: "{}"},
+				}},
+			},
+			FinishReason: "tool_calls",
+		}},
+		Model: "fake",
+		Usage: &llm.UsageInfo{TotalTokens: 10},
+	}, nil
+}
+
+// newGroupingFailureAgent builds an agent over three files whose grouping call
+// always fails, under the given --on-grouping-failure policy.
+func newGroupingFailureAgent(t *testing.T, onGroupingFailure string) (*Agent, *failGroupingClient) {
+	t.Helper()
+	return newGroupingFailureAgentWithErr(t, onGroupingFailure, nil)
+}
+
+// newGroupingFailureAgentWithErr is newGroupingFailureAgent with the grouping
+// error under caller control, so a per-request timeout/cancellation wrapped by
+// the LLM client can be simulated without the outer ctx being done.
+func newGroupingFailureAgentWithErr(t *testing.T, onGroupingFailure string, err error) (*Agent, *failGroupingClient) {
+	t.Helper()
+	setTestHome(t, t.TempDir())
+	fake := &failGroupingClient{err: err}
+	tpl := budgetAgentTestTemplate()
+	tpl.GroupingTask = &template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+	}
+	a := New(Args{
+		LLMClient:         fake,
+		Model:             "fake",
+		CommentCollector:  tool.NewCommentCollector(),
+		Tools:             tool.NewRegistry(),
+		MaxConcurrency:    1,
+		Template:          tpl,
+		OnGroupingFailure: onGroupingFailure,
+		MainToolDefs: []llm.ToolDef{
+			{Type: "function", Function: llm.FunctionDef{Name: "task_done", Description: "done"}},
+		},
+	})
+	t.Cleanup(func() { _ = a.Session().Finalize() })
+	a.diffs = makeBudgetDiffs(3)
+	a.currentDate = "2025-06-26 10:00"
+	a.args.Tools.Freeze()
+	return a, fake
+}
+
+// TestDispatchSubtasks_OnGroupingFailureAbort is the issue's ask: with
+// --on-grouping-failure=abort a failed partition stops the run and is recorded,
+// rather than silently degrading to per-file review and exiting 0.
+func TestDispatchSubtasks_OnGroupingFailureAbort(t *testing.T) {
+	t.Run("aborts before any file is reviewed", func(t *testing.T) {
+		a, fake := newGroupingFailureAgent(t, "abort")
+
+		_, err := a.dispatchSubtasks(context.Background())
+		if err == nil {
+			t.Fatal("dispatchSubtasks: err = nil, want the grouping failure to abort the run")
+		}
+		if !strings.Contains(err.Error(), "503") {
+			t.Errorf("err = %v, want it to wrap the grouping failure", err)
+		}
+		if calls := atomic.LoadInt64(&fake.calls); calls != 1 {
+			t.Errorf("LLM calls = %d, want 1 (grouping only — no file may be reviewed)", calls)
+		}
+
+		manifest := finishManifestFlow(t, a)
+		if manifest.TerminalState != session.StateFailed {
+			t.Errorf("terminal state = %q, want %q", manifest.TerminalState, session.StateFailed)
+		}
+		if manifest.RunFailure == nil || manifest.RunFailure.Classification != session.RunFailureUnknown {
+			t.Errorf("run failure = %+v, want classification %q", manifest.RunFailure, session.RunFailureUnknown)
+		}
+	})
+
+	t.Run("a cancelled run keeps its own cause", func(t *testing.T) {
+		a, _ := newGroupingFailureAgent(t, "abort")
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := a.dispatchSubtasks(ctx)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context.Canceled", err)
+		}
+
+		manifest := finishManifestFlow(t, a)
+		if manifest.RunFailure == nil || manifest.RunFailure.Classification != session.RunFailureCancelled {
+			t.Errorf("run failure = %+v, want classification %q (run_failure is first-cause-wins)",
+				manifest.RunFailure, session.RunFailureCancelled)
+		}
+	})
+}
+
+// TestDispatchSubtasks_OnGroupingFailureAbort_PerRequestTimeout covers the case
+// CodeRabbit flagged: a per-request timeout (option.WithRequestTimeout) is
+// scoped below the outer ctx, so groupResult.failure can wrap
+// context.DeadlineExceeded/Canceled while ctx.Err() is still nil. The abort
+// branch must recognize that via errors.Is, the same way classifyItemError
+// does, and file it as the matching run_failure instead of RunFailureUnknown.
+func TestDispatchSubtasks_OnGroupingFailureAbort_PerRequestTimeout(t *testing.T) {
+	tests := []struct {
+		name           string
+		failure        error
+		wantItemClass  session.FailureClass
+		wantRunFailure session.RunFailureClass
+	}{
+		{
+			name:           "per-request deadline exceeded",
+			failure:        fmt.Errorf("grouping request: %w", context.DeadlineExceeded),
+			wantItemClass:  session.FailureTimeout,
+			wantRunFailure: session.RunFailureTimeout,
+		},
+		{
+			name:           "per-request cancellation",
+			failure:        fmt.Errorf("grouping request: %w", context.Canceled),
+			wantItemClass:  session.FailureCancelled,
+			wantRunFailure: session.RunFailureCancelled,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, fake := newGroupingFailureAgentWithErr(t, "abort", tt.failure)
+
+			_, err := a.dispatchSubtasks(context.Background())
+			if !errors.Is(err, tt.failure) {
+				t.Fatalf("dispatchSubtasks err = %v, want it to wrap %v", err, tt.failure)
+			}
+			if calls := atomic.LoadInt64(&fake.calls); calls != 1 {
+				t.Errorf("LLM calls = %d, want 1 (grouping only)", calls)
+			}
+
+			manifest := finishManifestFlow(t, a)
+
+			if manifest.RunFailure == nil || manifest.RunFailure.Classification != tt.wantRunFailure {
+				t.Errorf("run failure = %+v, want classification %q", manifest.RunFailure, tt.wantRunFailure)
+			}
+
+			if len(manifest.Coverage.Failed) == 0 {
+				t.Fatal("coverage.failed is empty, want the aborted items to be swept as failed")
+			}
+			for _, item := range manifest.Coverage.Failed {
+				if item.Classification != tt.wantItemClass {
+					t.Errorf("item %s classification = %q, want %q (not %q)",
+						item.ItemID, item.Classification, tt.wantItemClass, session.FailureUnknown)
+				}
+			}
+		})
+	}
+}
+
+// TestDispatchSubtasks_OnGroupingFailureAbort_ResumedRun is why the abort path
+// must record a run_failure and not only a pending failure cause: applyResume
+// settles the reused items, so a coverage-derived terminal state stops at
+// "partial" and the abort vanishes from the manifest. Only a non-nil
+// run_failure forces "failed" (session.computeTerminal).
+func TestDispatchSubtasks_OnGroupingFailureAbort_ResumedRun(t *testing.T) {
+	diffs := makeBudgetDiffs(3)
+	fingerprint := reviewItemFingerprint(session.ReviewModeRange, diffs[0])
+	resume := &session.ResumeState{
+		SessionID:  "parent-run",
+		ReviewMode: session.ReviewModeRange,
+		DiffFrom:   "main",
+		DiffTo:     "feature",
+		Items: map[string]session.ResumeItem{
+			fingerprint: {
+				FilePath:    diffs[0].NewPath,
+				OldPath:     diffs[0].OldPath,
+				NewPath:     diffs[0].NewPath,
+				Fingerprint: fingerprint,
+			},
+		},
+	}
+	// A per-request deadline: the outer ctx stays live, so this is the path that
+	// used to leave RunFailure nil.
+	fake := &failGroupingClient{err: fmt.Errorf("grouping request: %w", context.DeadlineExceeded)}
+	a := newManifestFlowAgentWithClient(t, diffs, resume, fake)
+	a.args.OnGroupingFailure = "abort"
+	a.args.Template.GroupingTask = &template.LlmConversation{
+		Messages: []template.ChatMessage{{Role: "user", Content: "{{file_list}}"}},
+	}
+	seedParentManifest(t, a, fingerprint)
+
+	// Two files still need review after the reuse, so grouping is actually
+	// attempted rather than short-circuiting on a single file.
+	if _, err := a.dispatchSubtasks(context.Background()); err == nil {
+		t.Fatal("dispatchSubtasks: err = nil, want the grouping failure to abort the run")
+	}
+
+	manifest := finishManifestFlow(t, a)
+	if len(manifest.Coverage.Reused) != 1 {
+		t.Fatalf("coverage.reused = %d, want 1 (the resume must have reused a file)",
+			len(manifest.Coverage.Reused))
+	}
+	if manifest.TerminalState != session.StateFailed {
+		t.Errorf("terminal state = %q, want %q (an abort must not report partial)",
+			manifest.TerminalState, session.StateFailed)
+	}
+	if manifest.RunFailure == nil || manifest.RunFailure.Classification != session.RunFailureTimeout {
+		t.Errorf("run failure = %+v, want classification %q",
+			manifest.RunFailure, session.RunFailureTimeout)
+	}
+}
+
+// TestDispatchSubtasks_OnGroupingFailureFallback pins the default: the review
+// still completes per file, and the failure that used to vanish is now a warning
+// that reaches text, JSON and SARIF output.
+func TestDispatchSubtasks_OnGroupingFailureFallback(t *testing.T) {
+	for _, policy := range []string{"fallback", ""} {
+		name := policy
+		if name == "" {
+			name = "unset (existing callers)"
+		}
+		t.Run(name, func(t *testing.T) {
+			a, fake := newGroupingFailureAgent(t, policy)
+
+			if _, err := a.dispatchSubtasks(context.Background()); err != nil {
+				t.Fatalf("dispatchSubtasks: %v", err)
+			}
+			if calls := atomic.LoadInt64(&fake.calls); calls != 4 {
+				t.Errorf("LLM calls = %d, want 4 (1 grouping + 3 per-file reviews)", calls)
+			}
+
+			var found bool
+			for _, w := range a.Warnings() {
+				if w.Type == "grouping_failed" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("warnings = %+v, want a grouping_failed entry", a.Warnings())
 			}
 		})
 	}

@@ -111,6 +111,15 @@ func validateAudience(audience string) error {
 	}
 }
 
+func validateOnGroupingFailure(policy string) error {
+	switch policy {
+	case "fallback", "abort":
+		return nil
+	default:
+		return fmt.Errorf("invalid --on-grouping-failure value %q: must be 'fallback' or 'abort'", policy)
+	}
+}
+
 func validateOutputFormat(format string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(format))
 	switch normalized {
@@ -129,6 +138,9 @@ func validateReviewOptions(opts *reviewOptions) error {
 		return fmt.Errorf("--preview and --resume cannot be used together")
 	}
 	if err := validateAudience(opts.audience); err != nil {
+		return err
+	}
+	if err := validateOnGroupingFailure(opts.onGroupingFailure); err != nil {
 		return err
 	}
 	normalizedFormat, err := validateOutputFormat(opts.outputFormat)
@@ -216,6 +228,10 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	cmd.Flags().StringVar(&opts.effort, "effort", "", "review effort preset: low | medium | high (\"\" = configured or default medium)")
 	cmd.RegisterFlagCompletionFunc("effort", completeEnum(template.EffortNames()...))
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
+	// Registered on review only: ocr scan never groups.
+	cmd.Flags().StringVar(&opts.onGroupingFailure, "on-grouping-failure", "fallback",
+		"what a failed LLM grouping call does: fallback (review each file alone) or abort (stop with exit 1)")
+	cmd.RegisterFlagCompletionFunc("on-grouping-failure", completeEnum("fallback", "abort"))
 	addPreviewFlag(cmd, &opts.preview)
 }
 
