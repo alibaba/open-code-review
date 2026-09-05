@@ -171,6 +171,7 @@ diff 단계에서 일어납니다.
 | `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
 | `**/*.bicep` | `bicep.md` — Bicep(Azure) 템플릿. |
 | `**/*.elm` | `elm.md` — Elm 소스. |
+| `**/*.{ps1,psm1,psd1}` | `powershell.md` — PowerShell 스크립트, 모듈 및 데이터/매니페스트 파일. |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet 설정 템플릿과 라이브러리. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL 통신 호환성. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto 스키마 통신 호환성. |

@@ -158,6 +158,9 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
 		{"contracts/token.vy", "Language Restrictions"},
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
+		{"scripts/deploy.ps1", "PowerShell Review Principles"},
+		{"modules/Build/Build.psm1", "PowerShell Review Principles"},
+		{"modules/Build/Build.psd1", "PowerShell Review Principles"},
 	}
 
 	for _, tt := range tests {
