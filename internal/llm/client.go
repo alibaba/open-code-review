@@ -43,6 +43,37 @@ var AppVersion = "dev"
 // shrink it, same as keyCmdTimeout.
 var bedrockConfigLoadTimeout = 60 * time.Second
 
+// responseHeaderTimeoutMargin is added to the request timeout when setting
+// ResponseHeaderTimeout so the per-request context deadline (WithRequestTimeout),
+// which is 30s earlier, is the one to fire first. An equal ResponseHeaderTimeout
+// would race the context deadline, and a header-timeout win surfaces as a
+// nil-response transport error that shouldRetry treats as retryable, so the
+// request would be retried up to 5 more times (each with a fresh full timeout)
+// instead of failing on ctx.Err(). The margin still replaces the SDK's hardcoded
+// 10-minute default.
+const responseHeaderTimeoutMargin = 30 * time.Second
+
+// httpClientWithHeaderTimeout returns an HTTP client whose ResponseHeaderTimeout is
+// the request timeout plus responseHeaderTimeoutMargin, overriding the openai-go and
+// anthropic-sdk-go hardcoded 10-minute default (which each applies unless a client is
+// supplied via WithHTTPClient) so a configured timeout_sec is honored on a slow
+// endpoint (#1161). Shared by the OpenAI, OpenAI Responses and Anthropic constructors.
+// A timeout of zero or less leaves ResponseHeaderTimeout unset (no cap), matching the
+// SDKs' "no timeout" semantics; the callers clamp to a positive value first, so this
+// only guards a direct call. Package var, not func, so a test can assert each
+// constructor installs it, same as bedrockConfigLoadTimeout.
+var httpClientWithHeaderTimeout = func(timeout time.Duration) *http.Client {
+	t, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Client{Transport: http.DefaultTransport}
+	}
+	t = t.Clone()
+	if timeout > 0 {
+		t.ResponseHeaderTimeout = timeout + responseHeaderTimeoutMargin
+	}
+	return &http.Client{Transport: t}
+}
+
 // defaultAnthropicMaxTokens is used when ChatRequest.MaxTokens is unset.
 // The thinking guard also compares against this to decide whether to drop thinking.
 const defaultAnthropicMaxTokens = 8192
@@ -494,36 +525,6 @@ func encodingForModel(modelName string) string {
 type OpenAIClient struct {
 	cfg ClientConfig
 	sdk openai.Client
-}
-
-// responseHeaderTimeoutMargin is added to the request timeout when setting
-// ResponseHeaderTimeout so the per-request context deadline (WithRequestTimeout),
-// which is 30s earlier, is the one to fire first. An equal ResponseHeaderTimeout
-// would race the context deadline, and a header-timeout win surfaces as a
-// nil-response transport error that shouldRetry treats as retryable, so the
-// request would be retried up to 5 more times (each with a fresh full timeout)
-// instead of failing on ctx.Err(). The margin still replaces the SDK's hardcoded
-// 10-minute default.
-const responseHeaderTimeoutMargin = 30 * time.Second
-
-// httpClientWithHeaderTimeout returns an HTTP client whose ResponseHeaderTimeout
-// is the request timeout plus responseHeaderTimeoutMargin, overriding the openai-go
-// and anthropic-sdk-go hardcoded 10-minute default (which each applies unless a
-// client is supplied via WithHTTPClient) so a configured timeout_sec is honored on
-// a slow endpoint (#1161). A timeout of zero or less leaves ResponseHeaderTimeout
-// unset (no cap), matching the SDKs' "no timeout" semantics; the callers here clamp
-// it to a positive value first, so this only guards a direct call. Mirrors the SDKs'
-// own default clients.
-func httpClientWithHeaderTimeout(timeout time.Duration) *http.Client {
-	t, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return &http.Client{Transport: http.DefaultTransport}
-	}
-	t = t.Clone()
-	if timeout > 0 {
-		t.ResponseHeaderTimeout = timeout + responseHeaderTimeoutMargin
-	}
-	return &http.Client{Transport: t}
 }
 
 // NewOpenAIClient creates a new OpenAI-compatible LLM client.
