@@ -127,6 +127,8 @@ ocr config model             # Pick a model for the active provider
 
 The interactive UI guides you through provider selection, API key entry, and model configuration, then automatically tests connectivity.
 
+OCR can also run on a local Claude Code or Codex CLI login with no API key (`ocr config set provider claude-code`) — see [Claude Code CLI and Codex CLI](https://open-codereview.ai/docs/configuration#claude-code-cli-and-codex-cli-no-api-key).
+
 For CLI setup, environment variables, custom providers, and other advanced configuration, see [Configuration](https://open-codereview.ai/docs/configuration).
 
 **2. Review**

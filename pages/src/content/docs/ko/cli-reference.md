@@ -552,6 +552,8 @@ Model:  <effective model>
 ✓ Connection test successful
 ```
 
+로컬 CLI 프로바이더(`claude-code` / `codex`, 프로토콜 `claude-cli` / `codex-cli`)에서는 CLI 백엔드에 URL이 없으므로 `URL:` 줄이 CLI 바이너리 이름을 알려 주는 `Backend:` 줄로 바뀝니다. `bedrock`에서는 `Region:` / `Profile:` 줄로 바뀝니다.
+
 0이 아닌 종료 코드는 엔드포인트 설정이 덜 됐거나 요청이 실패했다는(네트워크·인증·모델
 오류) 뜻입니다. 둘 중 무엇인지는 오류 메시지가 알려 줍니다.
 

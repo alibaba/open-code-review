@@ -49,6 +49,8 @@ API-ключ. Если `providers.<name>.api_key` не задан, OCR испо�
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | определяется `aws_region` | — (цепочка учётных данных AWS) |
+| `claude-code` | claude-cli | — (локальный CLI `claude`) | — (вход через CLI) |
+| `codex` | codex-cli | — (локальный CLI `codex`) | — (вход через CLI) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
@@ -138,12 +140,75 @@ Model:  claude-sonnet-5
 эти значения bedrock не использует, поэтому такая комбинация отклоняется, а не
 принимается и молча игнорируется.
 
+### Claude Code CLI и Codex CLI (без API-ключа) {#claude-code-cli-and-codex-cli-no-api-key}
+
+OCR может работать через локально установленный CLI Claude Code или Codex вместо
+API-ключа. Модель доступна через ваш уже выполненный вход в CLI, поэтому нет ни
+`api_key`, ни `url`, и хранить нужно только выбор провайдера.
+
+**Предварительные требования.** CLI должен быть установлен, и в нём должен быть
+выполнен вход:
+
+- `claude-code` требует, чтобы бинарник `claude` был в `PATH` и был выполнен `claude login`.
+- `codex` требует, чтобы бинарник `codex` был в `PATH` и был выполнен `codex login`.
+
+Проверено с Claude Code 2.1.261 и Codex 0.153.2.
+
+**Как это работает.** OCR сам выполняет цикл ревью и вызывает CLI только как
+модель: он запускает по одному процессу CLI на каждый раунд основного цикла и
+обменивается с ним запросом и ответом. Собственные инструменты CLI остаются
+отключёнными — Claude Code запускается с отключёнными инструментами, Codex — в
+песочнице только для чтения — потому что ревью ведёт OCR, а не CLI. При этом
+используется ваш собственный вход в CLI, а автоматизированное использование
+регулируется условиями обслуживания соответствующего поставщика.
+
+**Настройка.** Выберите провайдера и модель, которую принимает CLI:
+
+```bash
+ocr config set provider claude-code
+ocr config set model    claude-sonnet-5
+```
+
+```bash
+ocr config set provider codex
+ocr config set model    gpt-5.5
+```
+
+**Необязательные поля.** Оба необязательны и используются только
+CLI-провайдерами:
+
+| Поле | Значение |
+|---|---|
+| `providers.<name>.cli_path` | Путь к бинарнику CLI, переопределяющий имя, которое ищется в `PATH`. |
+| `providers.<name>.cli_args` | Дополнительные аргументы, передаваемые при каждом запуске, в виде JSON-массива строк, например `'["--add-dir","/extra"]'`. |
+
+```bash
+ocr config set providers.claude-code.cli_path /opt/claude/bin/claude
+ocr config set providers.claude-code.cli_args '["--add-dir","/extra"]'
+```
+
+**Ограничения частоты запросов.** Параллельные группы ревью означают параллельные
+процессы CLI. `--concurrency N` (по умолчанию 8) ограничивает, сколько их
+выполняется одновременно, и является рычагом, позволяющим не превышать лимиты
+частоты запросов подписки — уменьшите его, если CLI начинает ограничивать
+запросы.
+
+`ocr llm test` печатает строку `Backend:` вместо `URL:`, потому что у
+CLI-бэкенда нет URL:
+
+```
+Source:  provider:claude-code
+Backend: claude (local CLI, uses its own login)
+Model:   claude-sonnet-5
+✓ Connection test successful
+```
+
 ### Пользовательские провайдеры
 
 Любое имя провайдера, которого нет в таблице выше, считается
 пользовательским. Для него необходимо задать как минимум `url` и `protocol`
 (`protocol` может принимать значения `anthropic`, `openai`,
-`openai-responses` или `anthropic-bedrock`):
+`openai-responses`, `anthropic-bedrock`, `claude-cli` или `codex-cli`):
 
 ```bash
 ocr config set provider                             my-gateway
@@ -175,6 +240,13 @@ ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
 ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
 ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
 ```
+
+Пользовательскому провайдеру на протоколе `claude-cli` или `codex-cli` не нужны
+ни `url`, ни `api_key` — он запускает локальный CLI под вашим собственным входом
+(см. [Claude Code CLI и Codex CLI](#claude-code-cli-and-codex-cli-no-api-key)
+выше). Используйте пользовательскую запись только для запуска второй
+конфигурации того же CLI; в остальных случаях выбирайте встроенный провайдер
+`claude-code` или `codex`.
 
 В качестве `url` можно указать как базовый URL API, так и полный эндпоинт
 `/responses` — OCR нормализует оба варианта.

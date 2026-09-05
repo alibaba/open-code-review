@@ -127,6 +127,8 @@ ocr config model             # Выбрать модель для активно
 
 Интерактивный UI проведёт вас через выбор провайдера, ввод API-ключа и настройку модели, после чего автоматически проверит подключение.
 
+OCR также может работать через локальный вход в CLI Claude Code или Codex без API-ключа (`ocr config set provider claude-code`) — см. [Claude Code CLI и Codex CLI](https://open-codereview.ai/docs/configuration#claude-code-cli-and-codex-cli-no-api-key).
+
 Настройка через CLI, переменные окружения, пользовательские провайдеры и другие расширенные параметры описаны в [руководстве по конфигурации](https://open-codereview.ai/docs/configuration).
 
 **2. Запустите ревью**

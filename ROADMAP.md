@@ -43,6 +43,11 @@ OpenCodeReview currently provides:
   (e.g. Claude Code) to execute using its own agent loop and included
   subscription usage — removing the need for a standalone API key.
 
+- **CLI-as-backend mode** — Ships alongside delegation: `ocr` keeps
+  driving the review loop itself but uses a locally installed Claude Code
+  or Codex CLI as the model, through the CLI's own login instead of an API
+  key (`ocr config set provider claude-code`).
+
 ### Ultra Mode
 
 - **Higher-recall review mode** — An opt-in mode that trades increased

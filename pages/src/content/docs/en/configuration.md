@@ -46,6 +46,8 @@ environment variable.
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | derived from `aws_region` | — (AWS credential chain) |
+| `claude-code` | claude-cli | — (local `claude` CLI) | — (CLI login) |
+| `codex` | codex-cli | — (local `codex` CLI) | — (CLI login) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
@@ -133,11 +135,85 @@ block describes one URL and one token, has nowhere to put a region or a profile,
 and bedrock uses neither value it does carry, so the combination is rejected
 rather than accepted and ignored.
 
+### Claude Code CLI and Codex CLI (no API key)
+
+OCR can run on a locally installed Claude Code or Codex CLI instead of an API
+key. The model is reached through your existing CLI login, so there is no
+`api_key`, no `url`, and nothing to store but the choice of provider.
+
+**Prerequisites.** The CLI must be installed and logged in:
+
+- `claude-code` needs the `claude` binary on `PATH` and a completed `claude login`.
+- `codex` needs the `codex` binary on `PATH` and a completed `codex login`.
+
+Tested with Claude Code 2.1.261 and Codex 0.153.2.
+
+**How it works.** OCR runs the review loop itself and calls the CLI only as the
+model: it spawns one CLI process per agent-loop round and exchanges the request
+and reply with it. The CLI's own tools stay off — Claude Code runs with its
+tools disabled, Codex under a read-only sandbox — because OCR, not the CLI,
+drives the review. This uses your own CLI login, and automated use is subject to
+each vendor's terms of service.
+
+**Host exposure differs between the two.** Claude Code runs as a pure text model
+(`--tools ""`), so it cannot touch the host. Codex keeps its shell tool, held to
+a read-only sandbox: it cannot write or reach the network, but it *can read* any
+file the invoking user can — not just the repository. OCR scrubs the environment
+handed to the shell commands Codex runs (`shell_environment_policy.inherit="none"`),
+which closes the direct `env`-in-a-shell channel for inherited secrets such as
+`OCR_LLM_TOKEN` or `GITHUB_TOKEN`. That scrubbing does not delete those secrets
+from Codex's own process, so on-disk reads remain the residual exposure: config
+and key files (`~/.ssh`, `~/.aws`) stay readable, and on Linux the process
+environment itself is recoverable through `/proc/<pid>/environ`. Reviewing
+untrusted code (for example a pull request from a fork) with the `codex` provider
+therefore grants a prompt-injectable model host-wide read access; prefer
+`claude-code`, or run Codex reviews on an isolated checkout, when the diff is
+untrusted.
+
+**Configure it.** Pick the provider and a model the CLI accepts:
+
+```bash
+ocr config set provider claude-code
+ocr config set model    claude-sonnet-5
+```
+
+```bash
+ocr config set provider codex
+ocr config set model    gpt-5.5
+```
+
+**Optional fields.** Both are optional and used only by the CLI providers:
+
+| Field | Meaning |
+|---|---|
+| `providers.<name>.cli_path` | Path to the CLI binary, overriding the name looked up on `PATH`. |
+| `providers.<name>.cli_args` | Extra arguments passed to every spawn, as a JSON array of strings, e.g. `'["--add-dir","/extra"]'`. |
+
+```bash
+ocr config set providers.claude-code.cli_path /opt/claude/bin/claude
+ocr config set providers.claude-code.cli_args '["--add-dir","/extra"]'
+```
+
+**Rate limits.** Parallel review groups mean parallel CLI processes. `--concurrency N`
+(default 8) bounds how many run at once and is the lever to stay under a
+subscription's rate limits — lower it if the CLI starts throttling.
+
+`ocr llm test` prints a `Backend:` line instead of `URL:`, because a CLI backend
+has no URL:
+
+```
+Source:  provider:claude-code
+Backend: claude (local CLI, uses its own login)
+Model:   claude-sonnet-5
+✓ Connection test successful
+```
+
 ### Custom providers
 
 Any provider name not in the table above is treated as custom and must
 supply at least `url` and `protocol` (`protocol` is `anthropic`,
-`openai`, `openai-responses`, or `anthropic-bedrock`):
+`openai`, `openai-responses`, `anthropic-bedrock`, `claude-cli`, or
+`codex-cli`):
 
 ```bash
 ocr config set provider                             my-gateway
@@ -169,6 +245,12 @@ ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
 ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
 ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
 ```
+
+A custom provider on the `claude-cli` or `codex-cli` protocol needs no `url` and
+no `api_key` — it runs the local CLI under your own login (see
+[Claude Code CLI and Codex CLI](#claude-code-cli-and-codex-cli-no-api-key)
+above). Use a custom entry only to run a second configuration of the same CLI;
+otherwise pick the built-in `claude-code` or `codex` provider.
 
 The `url` can be either the API base URL or the full `/responses` endpoint — OCR normalizes it either way.
 

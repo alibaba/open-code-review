@@ -127,6 +127,8 @@ ocr config model             # 활성 provider의 model 선택
 
 대화형 UI가 provider 선택, API key 입력, model 설정을 안내하며, 완료 후 자동으로 연결 테스트를 수행합니다.
 
+OCR은 API 키 없이 로컬 Claude Code나 Codex CLI 로그인으로도 실행할 수 있습니다(`ocr config set provider claude-code`) — [Claude Code CLI와 Codex CLI](https://open-codereview.ai/docs/configuration#claude-code-cli-and-codex-cli-no-api-key)를 참고하세요.
+
 CLI 설정, 환경 변수, 커스텀 provider 등 고급 설정은 [설정 가이드](https://open-codereview.ai/docs/configuration)를 참조하세요.
 
 **2. 리뷰 실행**

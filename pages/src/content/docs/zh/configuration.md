@@ -43,6 +43,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | 由 `aws_region` 决定 | —（AWS 凭证链） |
+| `claude-code` | claude-cli | —（本地 `claude` CLI） | —（CLI 登录） |
+| `codex` | codex-cli | —（本地 `codex` CLI） | —（CLI 登录） |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
@@ -123,11 +125,65 @@ Model:  claude-sonnet-5
 URL 加一个 token，没有地方放区域或 profile，而 bedrock 这两个值都不使用，因此
 会被明确拒绝，而不是接受后悄悄忽略。
 
+### Claude Code CLI 与 Codex CLI（无需 API key） {#claude-code-cli-and-codex-cli-no-api-key}
+
+OCR 可以在本地安装的 Claude Code 或 Codex CLI 上运行，而不需要 API key。模型通过
+你已有的 CLI 登录访问，因此没有 `api_key`、没有 `url`，除了选择 provider 之外无需
+保存任何内容。
+
+**前置条件。** CLI 必须已安装并登录：
+
+- `claude-code` 需要 `claude` 二进制文件在 `PATH` 上，并已完成 `claude login`。
+- `codex` 需要 `codex` 二进制文件在 `PATH` 上，并已完成 `codex login`。
+
+已在 Claude Code 2.1.261 与 Codex 0.153.2 上测试。
+
+**工作原理。** OCR 自己运行评审循环，只把 CLI 当作模型来调用：它在每轮 agent 循环
+中派生一个 CLI 进程，并与之交换请求和回复。CLI 自身的工具保持关闭——Claude Code
+在禁用工具的状态下运行，Codex 在只读沙箱中运行——因为驱动评审的是 OCR 而非 CLI。
+这会使用你自己的 CLI 登录，自动化使用须遵守各厂商的服务条款。
+
+**配置方式。** 选择 provider 和 CLI 接受的一个 model：
+
+```bash
+ocr config set provider claude-code
+ocr config set model    claude-sonnet-5
+```
+
+```bash
+ocr config set provider codex
+ocr config set model    gpt-5.5
+```
+
+**可选字段。** 两者都是可选的，且仅由 CLI provider 使用：
+
+| 字段 | 含义 |
+|---|---|
+| `providers.<name>.cli_path` | CLI 二进制文件路径，覆盖在 `PATH` 上查找的名称。 |
+| `providers.<name>.cli_args` | 传给每次派生的额外参数，为 JSON 字符串数组，如 `'["--add-dir","/extra"]'`。 |
+
+```bash
+ocr config set providers.claude-code.cli_path /opt/claude/bin/claude
+ocr config set providers.claude-code.cli_args '["--add-dir","/extra"]'
+```
+
+**速率限制。** 并行的评审组意味着并行的 CLI 进程。`--concurrency N`（默认 8）限制
+同时运行的数量，是控制在订阅速率限制之内的手段——如果 CLI 开始限流，就调低它。
+
+`ocr llm test` 会打印 `Backend:` 行而非 `URL:`，因为 CLI 后端没有 URL：
+
+```
+Source:  provider:claude-code
+Backend: claude (local CLI, uses its own login)
+Model:   claude-sonnet-5
+✓ Connection test successful
+```
+
 ### 自定义 provider
 
 任何不在上表中的 provider 名都视为自定义，至少要提供 `url` 和 `protocol`
-（`protocol` 取 `anthropic`、`openai`、`openai-responses` 或
-`anthropic-bedrock`）：
+（`protocol` 取 `anthropic`、`openai`、`openai-responses`、
+`anthropic-bedrock`、`claude-cli` 或 `codex-cli`）：
 
 ```bash
 ocr config set provider                             my-gateway
@@ -159,6 +215,12 @@ ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
 ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
 ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
 ```
+
+使用 `claude-cli` 或 `codex-cli` 协议的自定义 provider 既不需要 `url` 也不需要
+`api_key`——它在你自己的登录下运行本地 CLI（见上文
+[Claude Code CLI 与 Codex CLI](#claude-code-cli-and-codex-cli-no-api-key)）。仅当
+你要为同一个 CLI 运行第二套配置时才使用自定义条目；否则请选用内置的
+`claude-code` 或 `codex` provider。
 
 `url` 既可以填 API 的 Base URL，也可以填完整的 `/responses` 端点，OCR 会自动归一化处理。
 

@@ -127,6 +127,8 @@ ocr config model             # アクティブなプロバイダーのモデル�
 
 対話的UIがプロバイダーの選択、APIキーの入力、モデル設定をガイドし、完了後に自動的に接続テストを行います。
 
+OCRはAPIキーなしで、ローカルのClaude CodeまたはCodex CLIのログイン上でも動かせます（`ocr config set provider claude-code`）——[Claude Code CLI and Codex CLI](https://open-codereview.ai/docs/configuration#claude-code-cli-and-codex-cli-no-api-key)を参照してください。
+
 CLIセットアップ、環境変数、カスタムプロバイダーなどの高度な設定については、[設定ガイド](https://open-codereview.ai/docs/configuration)を参照してください。
 
 **2. レビュー**

@@ -127,6 +127,8 @@ ocr config model             # 为当前供应商选择模型
 
 交互式界面会引导你完成供应商选择、API Key 输入和模型配置，完成后自动测试连通性。
 
+OCR 也可以在本地的 Claude Code 或 Codex CLI 登录上运行，无需 API key（`ocr config set provider claude-code`）——参见 [Claude Code CLI 与 Codex CLI](https://open-codereview.ai/docs/configuration#claude-code-cli-and-codex-cli-no-api-key)。
+
 命令行设置、环境变量、自定义供应商等高级配置，详见[配置指南](https://open-codereview.ai/docs/configuration)。
 
 **2. 开始审查**

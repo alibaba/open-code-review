@@ -42,6 +42,8 @@ ocr config set providers.anthropic.api_key sk-ant-xxxxxxxxxx
 |---|---|---|---|
 | `anthropic` | anthropic | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` |
 | `bedrock` | anthropic-bedrock | `aws_region`에서 결정 | — (AWS 자격 증명 체인) |
+| `claude-code` | claude-cli | — (로컬 `claude` CLI) | — (CLI 로그인) |
+| `codex` | codex-cli | — (로컬 `codex` CLI) | — (CLI 로그인) |
 | `openai` | openai | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | `openai-responses` | openai-responses | `https://api.openai.com/v1` | `OPENAI_RESPONSES_API_KEY` |
 | `gemini` | openai | `https://generativelanguage.googleapis.com/v1beta/openai` | `GEMINI_API_KEY` |
@@ -109,9 +111,57 @@ Model:  claude-sonnet-5
 
 Bedrock은 `llm.protocol`이나 `OCR_LLM_PROTOCOL`로는 사용할 수 **없습니다**. 이 블록은 URL 하나와 토큰 하나를 기술하는 구조라 리전이나 프로필을 담을 자리가 없고, bedrock은 이 블록이 담는 두 값 중 어느 것도 쓰지 않습니다. 그래서 이 조합은 받아들인 뒤 무시하는 대신 거부합니다.
 
+### Claude Code CLI와 Codex CLI (API 키 불필요) {#claude-code-cli-and-codex-cli-no-api-key}
+
+OCR은 API 키 대신 로컬에 설치된 Claude Code나 Codex CLI로 실행할 수 있습니다. 모델에는 이미 로그인해 둔 CLI를 통해 접근하므로 `api_key`도, `url`도 없고, 저장할 것은 프로바이더 선택뿐입니다.
+
+**사전 준비.** CLI가 설치되어 있고 로그인되어 있어야 합니다:
+
+- `claude-code`는 `PATH`에 `claude` 바이너리가 있고 `claude login`이 완료되어 있어야 합니다.
+- `codex`는 `PATH`에 `codex` 바이너리가 있고 `codex login`이 완료되어 있어야 합니다.
+
+Claude Code 2.1.261과 Codex 0.153.2에서 테스트했습니다.
+
+**동작 방식.** OCR이 리뷰 루프를 직접 돌리고 CLI는 모델로만 호출합니다. Agent 루프 라운드마다 CLI 프로세스를 하나씩 띄워 요청과 응답을 주고받습니다. 리뷰를 이끄는 주체는 CLI가 아니라 OCR이므로 CLI 자체 도구는 꺼진 채로 둡니다. Claude Code는 도구를 비활성화한 상태로, Codex는 읽기 전용 샌드박스로 실행됩니다. 이는 여러분 본인의 CLI 로그인을 사용하며, 자동화 사용은 각 벤더의 서비스 약관을 따릅니다.
+
+**설정 방법.** 프로바이더와 CLI가 받는 모델을 고릅니다:
+
+```bash
+ocr config set provider claude-code
+ocr config set model    claude-sonnet-5
+```
+
+```bash
+ocr config set provider codex
+ocr config set model    gpt-5.5
+```
+
+**선택 필드.** 둘 다 선택 사항이며 CLI 프로바이더에서만 사용됩니다:
+
+| 필드 | 의미 |
+|---|---|
+| `providers.<name>.cli_path` | CLI 바이너리 경로. `PATH`에서 이름으로 찾는 대신 이 경로를 씁니다. |
+| `providers.<name>.cli_args` | 매 실행에 전달할 추가 인자. 문자열 JSON 배열로 지정합니다(예: `'["--add-dir","/extra"]'`). |
+
+```bash
+ocr config set providers.claude-code.cli_path /opt/claude/bin/claude
+ocr config set providers.claude-code.cli_args '["--add-dir","/extra"]'
+```
+
+**레이트 리밋.** 병렬 리뷰 그룹은 곧 병렬 CLI 프로세스를 뜻합니다. `--concurrency N`(기본값 8)은 동시에 몇 개가 돌지 제한하며, 구독 요금제의 레이트 리밋 아래로 유지하는 조절 수단입니다. CLI가 스로틀링을 시작하면 값을 낮추세요.
+
+CLI 백엔드에는 URL이 없으므로 `ocr llm test`는 `URL:` 대신 `Backend:` 줄을 출력합니다:
+
+```
+Source:  provider:claude-code
+Backend: claude (local CLI, uses its own login)
+Model:   claude-sonnet-5
+✓ Connection test successful
+```
+
 ### 커스텀 프로바이더 {#custom-providers}
 
-위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock` 중 하나):
+위 표에 없는 프로바이더 이름은 커스텀으로 취급하며 최소한 `url`과 `protocol`을 지정해야 합니다(`protocol`은 `anthropic`, `openai`, `openai-responses`, `anthropic-bedrock`, `claude-cli`, `codex-cli` 중 하나):
 
 ```bash
 ocr config set provider                             my-gateway
@@ -140,6 +190,8 @@ ocr config set custom_providers.bedrock-eu.aws_region  eu-west-1
 ocr config set custom_providers.bedrock-eu.aws_profile eu-profile
 ocr config set custom_providers.bedrock-eu.model       eu.anthropic.claude-sonnet-4-6
 ```
+
+`claude-cli`나 `codex-cli` 프로토콜을 쓰는 커스텀 프로바이더는 `url`도 `api_key`도 필요 없습니다. 본인의 로그인으로 로컬 CLI를 실행합니다(위 [Claude Code CLI와 Codex CLI](#claude-code-cli-and-codex-cli-no-api-key) 참고). 같은 CLI의 두 번째 구성을 실행할 때만 커스텀 항목을 쓰고, 그 외에는 내장 `claude-code`나 `codex` 프로바이더를 고르세요.
 
 `url`은 API Base URL이든 전체 `/responses` 엔드포인트든 상관없습니다. OCR이 어느 쪽이든 정규화합니다.
 

@@ -526,6 +526,11 @@ Model:  <effective model>
 ✓ Connection test successful
 ```
 
+ローカル CLI provider（`claude-code` / `codex`、プロトコル `claude-cli` /
+`codex-cli`）の場合、CLI バックエンドには URL がないため、`URL:` 行は CLI バイナリ名を
+示す `Backend:` 行に置き換わります。`bedrock` の場合は `Region:` / `Profile:` 行に
+置き換わります。
+
 非ゼロで終了した場合は、エンドポイントが完全に設定されていないか、リクエストが失敗した（ネットワーク / 認証 / モデルのエラー）ことを意味します。エラーメッセージがどのケースかを示します。
 
 ### `ocr llm providers`

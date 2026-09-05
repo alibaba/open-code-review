@@ -569,6 +569,11 @@ Model:  <effective model>
 ✓ Connection test successful
 ```
 
+For a local-CLI provider (`claude-code` / `codex`, protocol `claude-cli` /
+`codex-cli`) the `URL:` line is replaced by a `Backend:` line naming the CLI
+binary, because a CLI backend has no URL. For `bedrock` it is replaced by
+`Region:` / `Profile:` lines.
+
 A non-zero exit means either the endpoint isn't fully configured or the
 request failed (network / auth / model error). The error message tells you
 which.

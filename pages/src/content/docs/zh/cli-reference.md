@@ -535,6 +535,10 @@ Model:  <effective model>
 ✓ Connection test successful
 ```
 
+对于本地 CLI provider（`claude-code` / `codex`，协议 `claude-cli` / `codex-cli`），
+`URL:` 行会被替换为标明 CLI 二进制文件名的 `Backend:` 行，因为 CLI 后端没有 URL。
+对于 `bedrock`，则替换为 `Region:` / `Profile:` 行。
+
 非零退出意味着端点未完整配置，或请求失败（网络 / 鉴权 / 模型错误）。错误信息
 会指明具体是哪一种。
 
