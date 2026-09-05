@@ -80,6 +80,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session show <id>` | `ocr sessions show <id>` | 세션 하나와 파일별 체크포인트를 살펴봅니다. |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 세션에 기록된 리뷰 코멘트를 출력합니다. |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 두 세션의 지적을 비교합니다: 새로 생긴 것, 남아 있는 것, 해결된 것, 리뷰하지 않은 것. |
+| `ocr session export [id]` | — | 세션 하나를 단일 HTML 파일로 내보냅니다. |
 | `ocr viewer` | — | 지난 리뷰 세션을 볼 수 있는 로컬 웹 UI를 띄웁니다(`localhost:5483`). |
 | `ocr version` | — | 버전, 커밋, 플랫폼, 빌드 날짜, GitHub URL을 출력합니다. |
 
@@ -463,6 +464,29 @@ ocr session compare --json <before-session-id> <after-session-id>
 |---|---|---|
 | `--repo <path>` | 현재 디렉터리 | 비교할 세션이 속한 저장소. |
 | `--json` | `false` | 비교 결과를 JSON으로 출력합니다(`new`, `persisting`, `resolved`, `not_reviewed`). |
+
+### `ocr session export` {#ocr-session-export}
+
+세션 하나를 단일 HTML 파일로 렌더링합니다. 뷰어의 스타일시트와 스크립트가
+인라인으로 들어가므로, 결과물은 네트워크 접근 없이 `file://`로 열리며 CI가
+리뷰 결과를 빌드 아티팩트로 보관할 수 있습니다.
+
+```bash
+ocr session export -o review.html
+ocr session export 20250601-100000-abc123 -o review.html
+```
+
+세션 id를 주지 않으면 해당 저장소의 가장 최근 세션을 내보냅니다. 성공한
+`ocr review`는 세션 id를 출력하지 않기 때문에 이것이 기본값입니다. `-o`를 주지
+않으면 HTML은 표준 출력으로 나갑니다.
+
+내보낸 페이지에는 세션이 기록한 리뷰 대상 소스 발췌가 들어 있습니다. 공개하기
+전에 저장소 자체와 같은 수준으로 주의해서 다루세요.
+
+| 플래그 | 기본값 | 설명 |
+|---|---|---|
+| `--repo <path>` | 현재 디렉터리 | 내보낼 세션이 속한 저장소. |
+| `--output <path>`, `-o` | 표준 출력 | HTML을 표준 출력 대신 파일로 씁니다. |
 
 ## `ocr rules` {#ocr-rules}
 
