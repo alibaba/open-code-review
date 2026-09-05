@@ -137,6 +137,13 @@ type Args struct {
 	// Resume is an optional read-only checkpoint index from a previous review session.
 	Resume *session.ResumeState
 
+	// Reuse is an optional read-only reuse index synthesized from a previous
+	// run's JSON output (--reuse-from). It feeds the same fingerprint reuse
+	// engine as Resume (applyResume) but carries no resume contract: no
+	// ValidateOptions/ValidateResume admission, no lineage, no parent run id.
+	// It is consulted only when Resume is nil.
+	Reuse *session.ResumeState
+
 	// SealedInput pins this run to commit endpoints a pre-flight resolve already
 	// froze, instead of resolving From/To/Commit again. Set only on the resume
 	// path, where admission compared an identity derived from those endpoints:
@@ -843,6 +850,11 @@ func (a *Agent) recordContextFailure(err error) {
 
 func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 	resume := a.args.Resume
+	source := "Resume"
+	if resume == nil {
+		resume = a.args.Reuse
+		source = "Reuse"
+	}
 	if resume == nil {
 		return diffs
 	}
@@ -880,7 +892,7 @@ func (a *Agent) applyResume(diffs []model.Diff) []model.Diff {
 		PreviousModel: resume.Model,
 		CurrentModel:  a.args.Model,
 	}
-	fmt.Fprintf(stdout.Writer(), "[ocr] Resume %s: reusing %d file(s), reviewing %d file(s)\n", resume.SessionID, reused, rerun)
+	fmt.Fprintf(stdout.Writer(), "[ocr] %s %s: reusing %d file(s), reviewing %d file(s)\n", source, resume.SessionID, reused, rerun)
 	return toDispatch
 }
 

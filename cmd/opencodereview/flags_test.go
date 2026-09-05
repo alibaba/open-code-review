@@ -65,6 +65,30 @@ func TestParseReviewFlags_PreviewWithResume(t *testing.T) {
 	}
 }
 
+func TestParseReviewFlags_ReuseFrom(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--from", "main", "--to", "feature", "--reuse-from", "ocr-result.json"})
+	if err != nil {
+		t.Fatalf("parseReviewFlags: %v", err)
+	}
+	if opts.reuseFrom != "ocr-result.json" {
+		t.Errorf("reuseFrom = %q, want ocr-result.json", opts.reuseFrom)
+	}
+}
+
+func TestParseReviewFlags_ReuseWithResumeRejected(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--from", "main", "--to", "feature", "--reuse-from", "prev.json", "--resume", "session-123"})
+	if err == nil {
+		t.Fatal("expected error for --reuse-from with --resume")
+	}
+}
+
+func TestParseReviewFlags_PreviewWithReuseFromRejected(t *testing.T) {
+	_, err := parseReviewFlags([]string{"--from", "main", "--to", "feature", "--reuse-from", "prev.json", "--preview"})
+	if err == nil {
+		t.Fatal("expected error for --preview with --reuse-from")
+	}
+}
+
 func TestParseReviewFlags_InvalidAudience(t *testing.T) {
 	_, err := parseReviewFlags([]string{"--audience", "robot"})
 	if err == nil {

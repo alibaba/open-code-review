@@ -128,6 +128,12 @@ func validateReviewOptions(opts *reviewOptions) error {
 	if opts.preview && opts.resume != "" {
 		return fmt.Errorf("--preview and --resume cannot be used together")
 	}
+	if opts.reuseFrom != "" && opts.resume != "" {
+		return fmt.Errorf("--reuse-from and --resume cannot be used together")
+	}
+	if opts.preview && opts.reuseFrom != "" {
+		return fmt.Errorf("--preview and --reuse-from cannot be used together")
+	}
 	if err := validateAudience(opts.audience); err != nil {
 		return err
 	}
@@ -206,6 +212,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)
 	cmd.Flags().StringVar(&opts.resume, "resume", "", "resume from a previous review session id")
 	cmd.RegisterFlagCompletionFunc("resume", completeSessionIDs)
+	cmd.Flags().StringVar(&opts.reuseFrom, "reuse-from", "", "reuse completed findings from a previous run's JSON output file (e.g. the artifact uploaded by the GitHub Action); files whose diff is unchanged are not re-reviewed")
 	addExcludeFlag(cmd, &opts.excludes)
 	addOutputFlags(cmd, &opts.outputFormat, &opts.audience)
 	addOutputPathFlag(cmd, &opts.outputPath)

@@ -36,6 +36,7 @@ type reviewOptions struct {
 	to              string
 	commit          string
 	resume          string
+	reuseFrom       string
 	excludes        string
 	outputFormat    string
 	audience        string
@@ -75,6 +76,9 @@ var reviewCmd = &cobra.Command{
 
   # Resume a previous range review
   ocr review --from master --to dev-ref --resume <session-id>
+
+  # Reuse findings from a previous run's JSON output (cross-push)
+  ocr review --from master --to dev-ref --reuse-from ocr-result.json
 
   # Output JSON format
   ocr review --format json
@@ -146,6 +150,21 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
 	if err != nil {
 		return err
+	}
+
+	// --reuse-from synthesizes a reuse index from a previous run's JSON output.
+	// It must stay mutually exclusive with --resume (flag validation), and the
+	// gate below keeps opts.resume empty on this path, so the strict resume
+	// machinery above (loadReviewResumeState) and below (validateResumeIdentity)
+	// never sees the synthetic state. A degraded source only warns: the run
+	// proceeds as today's full review.
+	var reuseState *session.ResumeState
+	if opts.reuseFrom != "" && opts.resume == "" {
+		state, reuseWarnings := loadReuseState(ctx, cc.RepoDir, opts.reuseFrom)
+		for _, w := range reuseWarnings {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING [reuse_from] %s: %s\n", sanitizeTerminal(opts.reuseFrom), sanitizeTerminal(w))
+		}
+		reuseState = state
 	}
 
 	rt, err := loadLLMRuntime(cc.Template, opts.toolConfigPath, llm.ResolveOptions{
@@ -229,6 +248,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Background:            opts.background,
 		GitRunner:             cc.GitRunner,
 		Resume:                resumeState,
+		Reuse:                 reuseState,
 		SealedInput:           sealedInput,
 		MaxTokensBudget:       int64(opts.maxTokensBudget),
 		SkipFilter:            opts.noFilter,
