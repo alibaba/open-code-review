@@ -155,6 +155,20 @@ func TestValidateReviewRefs_InvalidCommit(t *testing.T) {
 	}
 }
 
+func TestValidateReviewRefs_ValidPatchBranch(t *testing.T) {
+	dir := initTestGitRepo(t)
+	if err := validateReviewRefs(dir, reviewOptions{diffDir: "patches", branch: "HEAD"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateReviewRefs_InvalidPatchBranch(t *testing.T) {
+	dir := initTestGitRepo(t)
+	if err := validateReviewRefs(dir, reviewOptions{diffDir: "patches", branch: "missing-branch"}); err == nil {
+		t.Fatal("expected invalid --branch to fail")
+	}
+}
+
 func TestValidateReviewRefs_EmptySkipped(t *testing.T) {
 	dir := initTestGitRepo(t)
 	err := validateReviewRefs(dir, reviewOptions{})

@@ -45,7 +45,11 @@ type SealedInput struct {
 func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 	defer stdout.Quiet()()
 
-	resolution, err := resolveInputBeforeDiff(ctx, args)
+	resolution := args.SealedInput
+	var err error
+	if resolution == nil {
+		resolution, err = resolveInputBeforeDiff(ctx, args)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +71,16 @@ func ResolveIdentity(ctx context.Context, args Args) (*SealedInput, error) {
 // merge-base against that frozen head; commit mode needs only the frozen head.
 func resolveInputBeforeDiff(ctx context.Context, args Args) (*diff.InputResolution, error) {
 	switch {
+	case args.DiffDir != "":
+		ref := args.PatchRef
+		if ref == "" {
+			ref = "HEAD"
+		}
+		head, err := resolveCommitHead(ctx, args, ref)
+		if err != nil {
+			return nil, fmt.Errorf("resolve patch post-image ref %q: %w", ref, err)
+		}
+		return &diff.InputResolution{ResolvedHead: head}, nil
 	case args.Commit != "":
 		head, err := resolveCommitHead(ctx, args, args.Commit)
 		if err != nil {

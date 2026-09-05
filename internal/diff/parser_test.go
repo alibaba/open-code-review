@@ -272,3 +272,79 @@ index 1234567..89abcde 100644
 		t.Errorf("Insertions = %d, want 1", d.Insertions)
 	}
 }
+
+func TestParseDiffText_QuotedGitPaths(t *testing.T) {
+	diffText := "diff --git \"a/docs/space\\040and\\011tab.txt\" \"b/docs/space\\040and\\011tab.txt\"\n" +
+		"--- \"a/docs/space\\040and\\011tab.txt\"\n" +
+		"+++ \"b/docs/space\\040and\\011tab.txt\"\n" +
+		"@@ -1 +1 @@\n-old\n+new\n"
+
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	if got, want := diffs[0].NewPath, "docs/space and\ttab.txt"; got != want {
+		t.Fatalf("NewPath = %q, want %q", got, want)
+	}
+}
+
+func TestParseDiffText_QuotedRenamePaths(t *testing.T) {
+	diffText := "diff --git \"a/old\\040name.txt\" \"b/new\\040name.txt\"\n" +
+		"similarity index 100%\nrename from \"old\\040name.txt\"\nrename to \"new\\040name.txt\"\n"
+
+	diffs, err := ParseDiffText(context.Background(), diffText, t.TempDir(), "", nil)
+	if err != nil {
+		t.Fatalf("ParseDiffText: %v", err)
+	}
+	if len(diffs) != 1 {
+		t.Fatalf("expected 1 diff, got %d", len(diffs))
+	}
+	if got, want := diffs[0].OldPath, "old name.txt"; got != want {
+		t.Errorf("OldPath = %q, want %q", got, want)
+	}
+	if got, want := diffs[0].NewPath, "new name.txt"; got != want {
+		t.Errorf("NewPath = %q, want %q", got, want)
+	}
+}
+
+func TestParseDiffText_MixedQuotedGitPaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		header  string
+		oldPath string
+		newPath string
+	}{
+		{
+			name:    "quoted new path",
+			header:  "diff --git a/plain.txt \"b/name\\twith-tab.txt\"",
+			oldPath: "plain.txt",
+			newPath: "name\twith-tab.txt",
+		},
+		{
+			name:    "quoted old path",
+			header:  "diff --git \"a/name\\twith-tab.txt\" b/plain.txt",
+			oldPath: "name\twith-tab.txt",
+			newPath: "plain.txt",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diffs, err := ParseDiffText(context.Background(), tt.header+"\n", t.TempDir(), "", nil)
+			if err != nil {
+				t.Fatalf("ParseDiffText: %v", err)
+			}
+			if len(diffs) != 1 {
+				t.Fatalf("expected 1 diff, got %d", len(diffs))
+			}
+			if got := diffs[0].OldPath; got != tt.oldPath {
+				t.Errorf("OldPath = %q, want %q", got, tt.oldPath)
+			}
+			if got := diffs[0].NewPath; got != tt.newPath {
+				t.Errorf("NewPath = %q, want %q", got, tt.newPath)
+			}
+		})
+	}
+}

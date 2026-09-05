@@ -48,6 +48,38 @@ func TestParseReviewFlagsProviderAndModelOverrides(t *testing.T) {
 	}
 }
 
+func TestParseReviewFlagsPatchBranch(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--repo", "/tmp/repo", "--patch", "/tmp/patches", "--branch", "feature"})
+	if err != nil {
+		t.Fatalf("parseReviewFlags: %v", err)
+	}
+	if opts.branch != "feature" {
+		t.Fatalf("branch = %q, want feature", opts.branch)
+	}
+}
+
+func TestParseReviewFlagsBranchRequiresDiff(t *testing.T) {
+	if _, err := parseReviewFlags([]string{"--branch", "feature"}); err == nil {
+		t.Fatal("expected --branch without --patch to fail")
+	}
+}
+
+func TestParseReviewFlagsApplyPatch(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--patch", "/tmp/patches", "--apply-patch"})
+	if err != nil {
+		t.Fatalf("parseReviewFlags: %v", err)
+	}
+	if !opts.diffApply {
+		t.Fatal("diffApply = false, want true")
+	}
+}
+
+func TestParseReviewFlagsApplyPatchRequiresPatch(t *testing.T) {
+	if _, err := parseReviewFlags([]string{"--apply-patch"}); err == nil {
+		t.Fatal("expected --apply-patch without --patch to fail")
+	}
+}
+
 func TestParseReviewFlagsResume(t *testing.T) {
 	opts, err := parseReviewFlags([]string{"--from", "main", "--to", "feature", "--resume", "session-123"})
 	if err != nil {

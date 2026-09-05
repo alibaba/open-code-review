@@ -122,6 +122,20 @@ func validateOutputFormat(format string) (string, error) {
 }
 
 func validateReviewOptions(opts *reviewOptions) error {
+	if opts.branch != "" && opts.diffDir == "" {
+		return fmt.Errorf("--branch requires --patch")
+	}
+	if opts.diffApply && opts.diffDir == "" {
+		return fmt.Errorf("--apply-patch requires --patch")
+	}
+	if opts.diffDir != "" {
+		if opts.from != "" || opts.to != "" || opts.commit != "" {
+			return fmt.Errorf("--patch cannot be combined with --from/--to or --commit")
+		}
+		if opts.resume != "" {
+			return fmt.Errorf("--patch cannot be combined with --resume")
+		}
+	}
 	if err := validateDiffMode(opts.from, opts.to, opts.commit); err != nil {
 		return err
 	}
@@ -204,6 +218,9 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addRuleFlag(cmd, &opts.rulePath)
 	addRepoFlag(cmd, &opts.repoDir)
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)
+	cmd.Flags().StringVar(&opts.diffDir, "patch", "", "directory containing unified .patch or .diff files")
+	cmd.Flags().StringVar(&opts.branch, "branch", "", "repository branch whose tip is the patch post-image (requires --patch; default: HEAD)")
+	cmd.Flags().BoolVar(&opts.diffApply, "apply-patch", false, "apply patches to the selected branch in an isolated review snapshot")
 	cmd.Flags().StringVar(&opts.resume, "resume", "", "resume from a previous review session id")
 	cmd.RegisterFlagCompletionFunc("resume", completeSessionIDs)
 	addExcludeFlag(cmd, &opts.excludes)

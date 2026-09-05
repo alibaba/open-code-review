@@ -8,7 +8,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"strings"
 )
 
 const defaultMaxConcurrent = 16
@@ -66,6 +68,51 @@ func (r *Runner) Output(ctx context.Context, repoDir string, args ...string) ([]
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = repoDir
 	return cmd.Output()
+}
+
+// OutputWithInputEnv executes a git command with stdin and additional
+// environment variables, returning stdout only.
+func (r *Runner) OutputWithInputEnv(ctx context.Context, repoDir string, input []byte, env []string, args ...string) ([]byte, error) {
+	if err := r.acquire(ctx); err != nil {
+		return nil, err
+	}
+	defer r.release()
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = repoDir
+	cmd.Env = MergeEnv(os.Environ(), env)
+	cmd.Stdin = bytes.NewReader(input)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil && stderr.Len() > 0 {
+		return nil, fmt.Errorf("%w: %s", err, stderr.String())
+	}
+	return out, err
+}
+
+// MergeEnv applies overrides by key instead of appending duplicate entries.
+// Some libc implementations resolve duplicate variables to the first entry,
+// so appending an override alone is not reliable.
+func MergeEnv(base, overrides []string) []string {
+	overrideKeys := make(map[string]struct{}, len(overrides))
+	for _, item := range overrides {
+		if key, _, ok := strings.Cut(item, "="); ok {
+			overrideKeys[key] = struct{}{}
+		}
+	}
+	merged := make([]string, 0, len(base)+len(overrides))
+	for _, item := range base {
+		key, _, ok := strings.Cut(item, "=")
+		if !ok {
+			merged = append(merged, item)
+			continue
+		}
+		if _, overridden := overrideKeys[key]; !overridden {
+			merged = append(merged, item)
+		}
+	}
+	return append(merged, overrides...)
 }
 
 // RunSplit executes a git command and returns stdout and stderr separately.

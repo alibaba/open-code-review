@@ -34,12 +34,13 @@ const (
 	InputModeRange     = "range"
 	InputModeCommit    = "commit"
 	InputModeWorkspace = "workspace"
+	InputModePatch     = "patch"
 )
 
-// validInputMode reports whether m is one of the three mandatory input modes.
+// validInputMode reports whether m is one of the supported input modes.
 func validInputMode(m string) bool {
 	switch m {
-	case InputModeRange, InputModeCommit, InputModeWorkspace:
+	case InputModeRange, InputModeCommit, InputModeWorkspace, InputModePatch:
 		return true
 	default:
 		return false

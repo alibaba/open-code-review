@@ -35,6 +35,9 @@ type reviewOptions struct {
 	from            string
 	to              string
 	commit          string
+	diffDir         string
+	branch          string
+	diffApply       bool
 	resume          string
 	excludes        string
 	outputFormat    string
@@ -72,6 +75,12 @@ var reviewCmd = &cobra.Command{
   # Review a specific commit
   ocr review --commit abc123
   ocr review -c abc123
+
+  # Review external patch files against the current HEAD of a local repository
+  ocr review --repo /path/to/repository --patch /path/to/diffs
+
+  # Review external patch files against a specific branch tip
+  ocr review --repo /path/to/repository --patch /path/to/diffs --branch feature
 
   # Resume a previous range review
   ocr review --from master --to dev-ref --resume <session-id>
@@ -133,6 +142,11 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return err
 	}
 
+	patchInput, err := resolvePatchInput(ctx, cc, opts)
+	if err != nil {
+		return err
+	}
+
 	bg, err := resolveBackground(cc.RepoDir, opts.background, opts.backgroundFile, opts.commit)
 	if err != nil {
 		return err
@@ -140,7 +154,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	opts.background = bg
 
 	if opts.preview {
-		return runPreviewContext(ctx, cc, opts, out)
+		return runPreviewContext(ctx, cc, opts, out, patchInput)
 	}
 
 	resumeState, err := loadReviewResumeState(cc.RepoDir, opts)
@@ -170,7 +184,7 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 	// Strictly before agent.New, so a rejected resume persists nothing. The sealed
 	// input it returns pins the run to the very commits this check passed on, so
 	// the decision cannot be undone by a ref moving afterwards.
-	sealed, err := validateResumeIdentity(ctx, cc, opts, rt, resumeState)
+	sealed, err := validateResumeIdentity(ctx, cc, opts, rt, resumeState, patchInput)
 	if err != nil {
 		return err
 	}
@@ -180,12 +194,8 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		Model:    rt.Model,
 	}
 
-	var sealedInput *diff.InputResolution
-	if sealed != nil {
-		sealedInput = &sealed.Resolution
-	}
+	sealedInput, mode := resolveSealedReadState(sealed, patchInput, opts)
 
-	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
 	fileReader := &tool.FileReader{
 		RepoDir: cc.RepoDir,
 		Mode:    mode,
@@ -212,6 +222,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		From:                  opts.from,
 		To:                    opts.to,
 		Commit:                opts.commit,
+		DiffDir:               opts.diffDir,
+		PatchRef:              opts.branch,
+		DiffApply:             opts.diffApply,
 		ReviewMode:            reviewModeFromOptions(opts),
 		Template:              *cc.Template,
 		SystemRule:            cc.Resolver,
@@ -305,11 +318,18 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		}
 		emitFailureUsage(ag, time.Since(startTime), opts.outputFormat, llmIdentity, failureReport)
 		if id := ag.SessionID(); id != "" {
-			fmt.Fprintf(os.Stderr, "[ocr] Session: %s (retry with: --resume %s)\n", id, id)
+			fmt.Fprintln(os.Stderr, reviewFailureSessionMessage(id, opts))
 		}
 		return errors.Join(resultErr, emitErr)
 	}
 	return emitErr
+}
+
+func reviewFailureSessionMessage(id string, opts reviewOptions) string {
+	if opts.diffDir != "" {
+		return fmt.Sprintf("[ocr] Session: %s", id)
+	}
+	return fmt.Sprintf("[ocr] Session: %s (retry with: --resume %s)", id, id)
 }
 
 func reviewResultError(runErr error, manifest *session.RunManifest) error {
@@ -380,20 +400,24 @@ func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeS
 // command line: both default to the empty string and nothing else can set them,
 // so a provider that changed via config file or environment stays implicit —
 // which is the transition this check exists to reject.
-func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState) (*agent.SealedInput, error) {
+func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewOptions, rt *llmRuntime, state *session.ResumeState, patchInput *diff.InputResolution) (*agent.SealedInput, error) {
 	if state == nil {
 		return nil, nil
 	}
 	sealed, err := agent.ResolveIdentity(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		ReviewMode: reviewModeFromOptions(opts),
-		Template:   *cc.Template,
-		SystemRule: cc.Resolver,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:     cc.RepoDir,
+		From:        opts.from,
+		To:          opts.to,
+		Commit:      opts.commit,
+		ReviewMode:  reviewModeFromOptions(opts),
+		Template:    *cc.Template,
+		SystemRule:  cc.Resolver,
+		FileFilter:  cc.FileFilter,
+		GitRunner:   cc.GitRunner,
+		PatchRef:    opts.branch,
+		DiffApply:   opts.diffApply,
+		DiffDir:     opts.diffDir,
+		SealedInput: patchInput,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("resolve current input identity: %w", err)
@@ -408,6 +432,67 @@ func validateResumeIdentity(ctx context.Context, cc *commonContext, opts reviewO
 		return nil, err
 	}
 	return sealed, nil
+}
+
+// resolvePatchInput resolves the post-image identity for a --patch run and
+// returns it as an InputResolution; a non-patch run gets (nil, nil).
+//
+// It bundles the three patch-specific steps that used to be scattered through
+// executeReviewContext: upfront directory validation, resolution of the ref
+// the patch applies against (--branch, defaulting to HEAD), and, for
+// --apply-patch, materialization of the patch into an unreferenced commit.
+// The resolved head is then pinned to that materialized commit, so every
+// consumer downstream sees one immutable post-image.
+//
+// Materialization is skipped in preview mode: a preview must stay a cheap,
+// side-effect-free projection of what a run would review, even an
+// unapplicable patch must not fail it.
+func resolvePatchInput(ctx context.Context, cc *commonContext, opts reviewOptions) (*diff.InputResolution, error) {
+	if opts.diffDir == "" {
+		return nil, nil
+	}
+	if err := diff.ValidatePatchDirectory(opts.diffDir); err != nil {
+		return nil, fmt.Errorf("validate --patch: %w", err)
+	}
+	ref := opts.branch
+	if ref == "" {
+		ref = "HEAD"
+	}
+	head := diff.NewCommitProvider(cc.RepoDir, ref, cc.GitRunner).ResolveInput(ctx).ResolvedHead
+	if head == "" {
+		return nil, fmt.Errorf("resolve patch post-image ref %q in --repo", ref)
+	}
+	patchInput := &diff.InputResolution{ResolvedHead: head}
+	if !opts.preview && opts.diffApply {
+		materialized, err := diff.MaterializePatchCommit(ctx, cc.RepoDir, opts.diffDir, patchInput.ResolvedHead, cc.GitRunner)
+		if err != nil {
+			return nil, fmt.Errorf("materialize patch post-image: %w", err)
+		}
+		patchInput.ResolvedHead = materialized
+	}
+	return patchInput, nil
+}
+
+// resolveSealedReadState picks what the run reads files against: the resolution
+// a successful resume admission sealed, falling back to the patch post-image,
+// plus the review mode file_read should use.
+//
+// The sealed resolution wins over the patch input because admission pinned the
+// run to the very commits it validated; re-deriving them from the ref would
+// let a ref that moved since reopen the sealed/actual mismatch the sealing
+// exists to prevent.
+func resolveSealedReadState(sealed *agent.SealedInput, patchInput *diff.InputResolution, opts reviewOptions) (*diff.InputResolution, tool.ReviewMode) {
+	var sealedInput *diff.InputResolution
+	if sealed != nil {
+		sealedInput = &sealed.Resolution
+	} else {
+		sealedInput = patchInput
+	}
+	mode := tool.ParseReviewMode(opts.from, opts.to, opts.commit)
+	if opts.diffDir != "" && (opts.branch != "" || opts.diffApply) {
+		mode = tool.ModeCommit
+	}
+	return sealedInput, mode
 }
 
 // fileReadRef picks the ref file_read resolves paths against.
@@ -429,6 +514,9 @@ func fileReadRef(mode tool.ReviewMode, opts reviewOptions, sealed *diff.InputRes
 }
 
 func reviewModeFromOptions(opts reviewOptions) string {
+	if opts.diffDir != "" {
+		return session.ReviewModePatch
+	}
 	if opts.commit != "" {
 		return session.ReviewModeCommit
 	}
@@ -470,6 +558,7 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 		{"--from", opts.from},
 		{"--to", opts.to},
 		{"--commit", opts.commit},
+		{"--branch", opts.branch},
 	}
 	for _, item := range refs {
 		if item.ref == "" {
@@ -489,14 +578,18 @@ func validateReviewRefs(repoDir string, opts reviewOptions) error {
 	return nil
 }
 
-func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer) error {
+func runPreviewContext(ctx context.Context, cc *commonContext, opts reviewOptions, out io.Writer, sealedInput *diff.InputResolution) error {
 	preview, err := agent.Preview(ctx, agent.Args{
-		RepoDir:    cc.RepoDir,
-		From:       opts.from,
-		To:         opts.to,
-		Commit:     opts.commit,
-		FileFilter: cc.FileFilter,
-		GitRunner:  cc.GitRunner,
+		RepoDir:     cc.RepoDir,
+		From:        opts.from,
+		To:          opts.to,
+		Commit:      opts.commit,
+		DiffDir:     opts.diffDir,
+		PatchRef:    opts.branch,
+		DiffApply:   opts.diffApply && sealedInput != nil,
+		FileFilter:  cc.FileFilter,
+		GitRunner:   cc.GitRunner,
+		SealedInput: sealedInput,
 	})
 	if err != nil {
 		return fmt.Errorf("preview failed: %w", err)

@@ -6,6 +6,7 @@ package agent
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,6 +35,16 @@ func initIdentityRepo(t *testing.T) string {
 
 func identityArgs(dir string, maxTokens int) Args {
 	return Args{RepoDir: dir, Template: template.Template{MaxTokens: maxTokens}}
+}
+
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return string(out)
 }
 
 // TestResolveIdentityMatchesRunPath is the assertion the whole resume check rests
@@ -177,6 +188,50 @@ func TestResolveInputBeforeDiffCommit(t *testing.T) {
 	}
 	if sealed.Identity.RepositorySHA256 == "" {
 		t.Fatal("resolved identity must include the repository identity")
+	}
+}
+
+func TestResolveInputBeforeDiffPatchBranch(t *testing.T) {
+	dir := sealRepo(t)
+	gitIn(t, dir, "branch", "review-post-image")
+	want := strings.TrimSpace(gitOutput(t, dir, "rev-parse", "review-post-image"))
+	patchDir := t.TempDir()
+	patch := "diff --git a/base.txt b/base.txt\n--- a/base.txt\n+++ b/base.txt\n@@ -1 +1 @@\n-base\n+post-image\n"
+	if err := os.WriteFile(filepath.Join(patchDir, "change.patch"), []byte(patch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolution, err := resolveInputBeforeDiff(context.Background(), Args{
+		RepoDir:  dir,
+		DiffDir:  patchDir,
+		PatchRef: "review-post-image",
+	})
+	if err != nil {
+		t.Fatalf("resolveInputBeforeDiff: %v", err)
+	}
+	if resolution.ResolvedHead != want {
+		t.Fatalf("ResolvedHead = %q, want branch tip %q", resolution.ResolvedHead, want)
+	}
+}
+
+func TestResolveInputBeforeDiffPatchDefaultsToHead(t *testing.T) {
+	dir := sealRepo(t)
+	want := strings.TrimSpace(gitOutput(t, dir, "rev-parse", "HEAD"))
+	patchDir := t.TempDir()
+	patch := "diff --git a/base.txt b/base.txt\n--- a/base.txt\n+++ b/base.txt\n@@ -1 +1 @@\n-base\n+post-image\n"
+	if err := os.WriteFile(filepath.Join(patchDir, "change.patch"), []byte(patch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolution, err := resolveInputBeforeDiff(context.Background(), Args{
+		RepoDir: dir,
+		DiffDir: patchDir,
+	})
+	if err != nil {
+		t.Fatalf("resolveInputBeforeDiff: %v", err)
+	}
+	if resolution.ResolvedHead != want {
+		t.Fatalf("ResolvedHead = %q, want HEAD %q", resolution.ResolvedHead, want)
 	}
 }
 
