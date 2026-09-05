@@ -52,7 +52,7 @@ jobs:
           go build -ldflags "${LD_FLAGS}" -o "${BIN_NAME}" ./cmd/opencodereview
           echo "bin_name=${BIN_NAME}" >> $GITHUB_ENV
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
           path: ${{ env.bin_name }}
@@ -136,7 +136,7 @@ jobs:
             echo "RELEASE_NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: binary-*
           merge-multiple: true
@@ -176,7 +176,7 @@ jobs:
       - name: Install jq
         run: apt-get update && apt-get install -y jq
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: binary-*
           merge-multiple: true
