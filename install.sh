@@ -71,6 +71,7 @@ main() {
   install_binary "$tmp/$asset" "$INSTALL_DIR" "$BIN"
 
   printf 'installed %s %s -> %s\n' "$BIN" "$VERSION" "$INSTALL_DIR/$BIN"
+  install_manpage "$INSTALL_DIR/$BIN" "$INSTALL_DIR" "$tmp"
   post_install_path_notice "$BIN" "$INSTALL_DIR"
 }
 
@@ -89,6 +90,42 @@ install_binary() {
   else
     err "$dir is not writable and sudo is unavailable; set OCR_INSTALL_DIR to a writable path"
   fi
+}
+
+install_manpage() {
+  bin_path="$1"
+  install_dir="$2"
+  tmp="$3"
+  man1="${install_dir%/bin}/share/man/man1"
+
+  "$bin_path" man "$tmp/man" >/dev/null 2>&1 || {
+    printf 'warning: could not generate man pages\n' >&2
+    return 0
+  }
+
+  if mkdir -p "$man1" 2>/dev/null && [ -w "$man1" ]; then
+    install -m 0644 "$tmp"/man/*.1 "$man1" 2>/dev/null || {
+      printf 'warning: could not install man pages to %s\n' "$man1" >&2
+      return 0
+    }
+  elif command -v sudo >/dev/null 2>&1; then
+    printf 'note: %s is not writable; escalating with sudo\n' "$man1"
+    if sudo mkdir -p "$man1" 2>/dev/null && sudo install -m 0644 "$tmp"/man/*.1 "$man1" 2>/dev/null; then
+      :
+    else
+      printf 'warning: could not install man pages to %s\n' "$man1" >&2
+      return 0
+    fi
+  else
+    printf 'note: man pages generated at %s; %s is not writable, so install them yourself\n' "$tmp/man" "$man1"
+    return 0
+  fi
+
+  printf 'installed man pages to %s\n' "$man1"
+  case "$man1" in
+    /usr/*|/opt/*) ;;
+    *) printf 'note: add %s to MANPATH to read `man ocr`\n' "$man1" ;;
+  esac
 }
 
 post_install_path_notice() {
