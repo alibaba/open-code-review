@@ -242,6 +242,68 @@ func TestApplyOfficialProviderConfigCLINoKey(t *testing.T) {
 	}
 }
 
+// TestSetProtocolToCLIClearsStaleCredentials: switching a provider from an
+// HTTP protocol to a CLI protocol must clear URL, APIKey, and AuthHeader
+// so stale credentials do not persist in the config file.
+func TestSetProtocolToCLIClearsStaleCredentials(t *testing.T) {
+	for _, proto := range []string{llm.ProtocolClaudeCLI, llm.ProtocolCodexCLI} {
+		t.Run(proto, func(t *testing.T) {
+			cfg := &Config{}
+			if err := setCustomProviderValue(cfg, "custom_providers.mine.protocol", "openai"); err != nil {
+				t.Fatalf("set initial protocol: %v", err)
+			}
+			if err := setCustomProviderValue(cfg, "custom_providers.mine.url", "https://api.example.com/v1"); err != nil {
+				t.Fatalf("set url: %v", err)
+			}
+			if err := setCustomProviderValue(cfg, "custom_providers.mine.api_key", "sk-secret-123"); err != nil {
+				t.Fatalf("set api_key: %v", err)
+			}
+			if err := setCustomProviderValue(cfg, "custom_providers.mine.auth_header", "x-api-key"); err != nil {
+				t.Fatalf("set auth_header: %v", err)
+			}
+
+			stderr := captureStderr(t, func() {
+				if err := setCustomProviderValue(cfg, "custom_providers.mine.protocol", proto); err != nil {
+					t.Fatalf("set protocol to %s: %v", proto, err)
+				}
+			})
+
+			entry := cfg.CustomProviders["mine"]
+			if entry.URL != "" {
+				t.Errorf("URL = %q after switching to %s, want empty", entry.URL, proto)
+			}
+			if entry.APIKey != "" {
+				t.Errorf("APIKey = %q after switching to %s, want empty", entry.APIKey, proto)
+			}
+			if entry.AuthHeader != "" {
+				t.Errorf("AuthHeader = %q after switching to %s, want empty", entry.AuthHeader, proto)
+			}
+			if !strings.Contains(stderr, "Cleared") {
+				t.Errorf("stderr = %q, want a message containing 'Cleared'", stderr)
+			}
+		})
+	}
+}
+
+// TestSetProtocolToCLINoMessageWhenClean: switching to a CLI protocol when
+// no credentials are set should not print a clearing message.
+func TestSetProtocolToCLINoMessageWhenClean(t *testing.T) {
+	cfg := &Config{}
+	if err := setCustomProviderValue(cfg, "custom_providers.mine.protocol", "openai"); err != nil {
+		t.Fatalf("set initial protocol: %v", err)
+	}
+
+	stderr := captureStderr(t, func() {
+		if err := setCustomProviderValue(cfg, "custom_providers.mine.protocol", llm.ProtocolClaudeCLI); err != nil {
+			t.Fatalf("set protocol: %v", err)
+		}
+	})
+
+	if strings.Contains(stderr, "Cleared") {
+		t.Errorf("stderr = %q, want no clearing message when no credentials were present", stderr)
+	}
+}
+
 // TestProviderTUIClaudeCodeOfficialSkipsAPIKeyStep mirrors the bedrock official
 // flow: claude-code has no key to collect, so the model step is the last one.
 func TestProviderTUIClaudeCodeOfficialSkipsAPIKeyStep(t *testing.T) {

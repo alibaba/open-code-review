@@ -660,6 +660,15 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			entry.CLIPath = ""
 			entry.CLIArgs = nil
 		}
+		// A CLI protocol runs a local binary and has no use for a URL, API
+		// key, or auth header. Clear them so stale credentials do not persist
+		// in the config file.
+		if llm.IsCLIProtocol(normalized) && (entry.URL != "" || entry.APIKey != "" || entry.AuthHeader != "") {
+			fmt.Fprintf(os.Stderr, "[ocr] Cleared URL/API key (not used by CLI providers)\n")
+			entry.URL = ""
+			entry.APIKey = ""
+			entry.AuthHeader = ""
+		}
 	case "model":
 		entry.Model = value
 	case "models":
