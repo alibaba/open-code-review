@@ -224,7 +224,7 @@ The action posts a summary issue comment plus inline review comments. Two inputs
 | `corrupt_checkpoint` | the summary carries no readable checkpoint marker (absent, malformed, or two of them) |
 | `schema_invalid` | the marker is for another PR, another marker version, or records a run that did not complete |
 | `base_changed` | the base ref or the merge-base moved, so the diff basis is no longer the one the checkpoint was taken against |
-| `config_changed` | the model, language, `llm_extra_body`, `llm_extra_headers`, `llm_auth_header`, `llm_timeout`, `background`, routing inputs, the resolved OCR version, or the contents of `rule` / `.opencodereview/rule.json` changed — or `ocr version` printed nothing, so the version could not be established at all |
+| `config_changed` | the model, language, `llm_extra_body`, `llm_extra_headers`, `llm_auth_header`, `llm_timeout`, `background`, `effort`, routing inputs, the resolved OCR version, or the contents of `rule` / `.opencodereview/rule.json` changed — or `ocr version` printed nothing, so the version could not be established at all |
 | `not_ancestor` | the checkpoint commit is in this clone but is not on the new head's history (the branch was reset to an earlier commit) |
 | `unknown_object` | the checkpoint commit is not in this clone, so ancestry could not be checked — where a force-push usually lands, since the replaced commit is no longer fetched |
 | `rule_unreadable` | a rule file was given but could not be read, so no stored fingerprint can be trusted to mean "same rules" |
@@ -313,6 +313,20 @@ If the read API itself is unavailable (rate-limited or `5xx`), the check returns
 - uses: alibaba/open-code-review@main
   with:
     review_concurrency: 5
+```
+
+### Set the review effort and a token budget
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `effort` | CLI default (`medium`) | Review-round preset passed to `ocr review --effort`: `low`, `medium` or `high` (one, two or three rounds per file). The round count is the biggest single lever on token use and wall-clock time. Changing it invalidates checkpoints. |
+| `max_tokens_budget` | unlimited | Cap on total tokens (input + output) for the whole review, passed to `ocr review --max-tokens-budget`. Dispatch stops once it is exceeded; partial results still publish and the run exits 0. |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    effort: low
+    max_tokens_budget: '150000'
 ```
 
 ### Provide background context

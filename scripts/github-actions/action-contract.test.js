@@ -839,6 +839,59 @@ function testRunRetainsExtraHeadersEnvironmentOverride() {
   }
 }
 
+function testRunForwardsEffortAndTokenBudget() {
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  const base = {
+    llm_url: "https://llm.example.invalid/v1",
+    llm_auth_token: "unused-token",
+    llm_model: "contract-model",
+    llm_use_anthropic: "false",
+  };
+  const runEnv = { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15" };
+  // Set: both flags reach the review command with their values.
+  const set = makeFixture();
+  try {
+    const values = inputValues(Object.assign({}, base, { effort: "high", max_tokens_budget: "150000" }));
+    const result = runStep(run, values, set, runEnv, { replaceResultPaths: true });
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview failed with effort and budget set; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(set.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    const effortIndex = reviewCall.args.indexOf("--effort");
+    assert.ok(effortIndex >= 0, "effort must be forwarded as --effort");
+    assert.strictEqual(reviewCall.args[effortIndex + 1], "high");
+    const budgetIndex = reviewCall.args.indexOf("--max-tokens-budget");
+    assert.ok(budgetIndex >= 0, "max_tokens_budget must be forwarded as --max-tokens-budget");
+    assert.strictEqual(reviewCall.args[budgetIndex + 1], "150000");
+  } finally {
+    removeFixture(set);
+  }
+  // Empty: neither flag is passed, so the CLI keeps its own defaults.
+  const empty = makeFixture();
+  try {
+    const result = runStep(run, inputValues(base), empty, runEnv, { replaceResultPaths: true });
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview failed with empty effort and budget; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(empty.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    assert.strictEqual(reviewCall.args.indexOf("--effort"), -1, "an empty effort must not reach the command line");
+    assert.strictEqual(reviewCall.args.indexOf("--max-tokens-budget"), -1, "an empty budget must not reach the command line");
+  } finally {
+    removeFixture(empty);
+  }
+  // Malformed values fail the step before `ocr review` runs.
+  for (const overrides of [{ effort: "max" }, { max_tokens_budget: "150k" }]) {
+    const bad = makeFixture();
+    try {
+      const result = runStep(run, inputValues(Object.assign({}, base, overrides)), bad, runEnv, { replaceResultPaths: true });
+      assert.notStrictEqual(result.status, 0, `${JSON.stringify(overrides)} must fail the Run OpenCodeReview step`);
+      const reviewCall = readJsonLines(bad.callsPath).find((call) => call.args[0] === "review");
+      assert.ok(!reviewCall, `${JSON.stringify(overrides)} must be rejected before ocr review is invoked`);
+    } finally {
+      removeFixture(bad);
+    }
+  }
+}
+
 function testRunFailsClosedWhenValidatedTaskTimeoutIsMissing() {
   const run = stepNamed("Run OpenCodeReview");
   assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
@@ -1106,6 +1159,7 @@ const TESTS = [
   ["Configure OCR clears stale persisted retry codes", testConfigureClearsStaleRetryCodesBeforeEndpointConfig],
   ["Run OpenCodeReview retains the extra-headers env override", testRunRetainsExtraHeadersEnvironmentOverride],
   ["Run OpenCodeReview fails closed without validated task timeout", testRunFailsClosedWhenValidatedTaskTimeoutIsMissing],
+  ["Run OpenCodeReview forwards effort and max_tokens_budget", testRunForwardsEffortAndTokenBudget],
   ["the official OpenCodeReview NPM install is preserved", testOfficialNpmPackageInstallIsPreserved],
   ["Install OpenCodeReview enforces the auth_token_cmd version floor", testInstallEnforcesAuthTokenCommandVersionFloor],
   ["contract harness fails closed on unsupported YAML shapes", testContractHarnessFailsClosedOnUnsupportedYamlShapes],
