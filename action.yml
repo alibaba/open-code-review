@@ -67,6 +67,19 @@ inputs:
   rule:
     description: Path to a custom rules JSON file passed to `ocr review --rule`.
     required: false
+  effort:
+    description: >-
+      Review effort preset passed to `ocr review --effort`: low, medium or
+      high (one, two or three review rounds per file). Empty keeps the CLI's
+      configured or default preset. Changing it invalidates checkpoints.
+    required: false
+  max_tokens_budget:
+    description: >-
+      Cap on total token usage (input + output) for the whole review, passed
+      to `ocr review --max-tokens-budget`. Dispatch stops once it is
+      exceeded; partial results still publish and the run exits 0. A
+      non-negative integer; empty or 0 means unlimited.
+    required: false
   upload_artifacts:
     description: >-
       Upload raw JSON result and stderr as workflow artifacts. Must be the
@@ -461,6 +474,7 @@ runs:
         OCR_FP_ROUTE_SEVERITY_BELOW: ${{ inputs.route_severity_below }}
         OCR_FP_ROUTE_CATEGORIES: ${{ inputs.route_categories }}
         OCR_FP_BACKGROUND: ${{ inputs.background }}
+        OCR_FP_EFFORT: ${{ inputs.effort }}
         OCR_RULE_PATH: ${{ inputs.rule }}
         # `github.token` is always the "github-actions" app, so when the caller
         # did not override the token we know exactly which app wrote our summary
@@ -584,6 +598,9 @@ runs:
                 process.env.OCR_FP_ROUTE_SEVERITY_BELOW,
                 process.env.OCR_FP_ROUTE_CATEGORIES,
                 process.env.OCR_FP_BACKGROUND,
+                // Appended only when set, so checkpoints taken before the
+                // input existed stay valid for everyone who never uses it.
+                ...(process.env.OCR_FP_EFFORT ? [process.env.OCR_FP_EFFORT] : []),
                 versionActual,
                 ruleDigest,
                 localRuleDigest,
@@ -654,6 +671,8 @@ runs:
         OCR_REVIEW_CONCURRENCY: ${{ inputs.review_concurrency }}
         OCR_BACKGROUND: ${{ inputs.background }}
         OCR_RULE: ${{ inputs.rule }}
+        OCR_EFFORT: ${{ inputs.effort }}
+        OCR_MAX_TOKENS_BUDGET: ${{ inputs.max_tokens_budget }}
         # Step output, not job env: empty when the resolve step was skipped or
         # chose the full range, and never inherited from an earlier use of this
         # action in the same job.
@@ -665,10 +684,25 @@ runs:
           echo "::error::Validated review_task_timeout is missing; the timeout validation step must complete first"
           exit 1
         fi
+        # Both are checked here so a typo fails the step with its own
+        # message instead of surfacing as an `ocr review` usage error.
+        case "$OCR_EFFORT" in
+          ""|low|medium|high) ;;
+          *)
+            echo "::error::effort must be low, medium or high (got '${OCR_EFFORT}')"
+            exit 1
+            ;;
+        esac
+        if [ -n "$OCR_MAX_TOKENS_BUDGET" ] && ! [[ "$OCR_MAX_TOKENS_BUDGET" =~ ^[0-9]+$ ]]; then
+          echo "::error::max_tokens_budget must be a non-negative integer (got '${OCR_MAX_TOKENS_BUDGET}')"
+          exit 1
+        fi
         ARGS=(--from "${RANGE_FROM:-$MERGE_BASE}" --to "${HEAD_SHA}" --audience agent --format json --timeout "$REVIEW_TASK_TIMEOUT")
         [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
         [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")
+        [ -n "$OCR_EFFORT" ] && ARGS+=(--effort "$OCR_EFFORT")
+        [ -n "$OCR_MAX_TOKENS_BUDGET" ] && ARGS+=(--max-tokens-budget "$OCR_MAX_TOKENS_BUDGET")
         set +e
         ocr review "${ARGS[@]}" > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log
         OCR_EXIT_CODE=$?
