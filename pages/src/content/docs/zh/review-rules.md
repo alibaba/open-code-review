@@ -312,7 +312,7 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
 }
 ```
 
-### 在内置 per-language 规则之上叠加全局安全规则
+### 在内置的每种语言规则之上添加全局安全规则
 
 一条 通配 `**/*` 用户规则通常会丢弃内置的 per-language 系统规则。要保留它们，
 设置 `"merge_system_rule": true`——系统一半仍按文件解析，因此每种语言都保留其专属的
