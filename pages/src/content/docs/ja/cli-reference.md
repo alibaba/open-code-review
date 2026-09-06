@@ -120,6 +120,7 @@ ocr r      [flags]   (alias)
 | `--max-tools <n>` | — | テンプレートのデフォルト | ファイルごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`100`）を使用します。1〜49 は `50` に引き上げられます。解決後の値はテンプレートのデフォルトを**上回る場合にのみ**適用されます（引き上げのみ可能で、引き下げはできません）。 |
 | `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | ファイルごとの**プロンプト**トークン上限（review のデフォルトは `200000`）。この実行で保存済みの `max_tokens` 設定を上書きします。出力の上限には影響しません。そちらは `MAX_COMPLETION_TOKENS`（`16384`）が個別に制御します。 |
 | `--max-tokens-budget <n>` | — | `0`（無制限） | レビュー全体の入力 + 出力トークン使用量を制限します。予算を超えると処理の割り当てを停止し、部分的な結果は引き続き公開されます。 |
+| `--budget-preflight <warn\|confirm\|abort>` | — | `warn` | 推定トークン使用量が予算を超えた場合の動作を選択します。`warn` は従来の非ブロッキング動作を維持します。`confirm` は開始前に確認を求め、対話型ターミナルがない場合は失敗します（fail-closed）。`abort` はセッションの作成や LLM 呼び出しの前に終了します。正のトークン予算が必要です。 |
 | `--effort <level>` | — | 設定または `medium` | レビューの労力プリセット: `low` = main ループ 1 ラウンド、`medium` = 2 ラウンド（デフォルト）、`high` = 3 ラウンド。ラウンドが多いほど recall は上がりますが、時間とトークンも増えます。`ocr config set effort <level>` で永続化できます。 |
 | `--provider <name>` | — | — | 今回の実行で設定済み provider を選択します。`providers` と `custom_providers` の両方の名前を使用できます。 |
 | `--model <name>` | — | — | 今回の実行で解決済みの LLM model を上書きします（例: `claude-opus-4-6`）。 |
@@ -356,6 +357,12 @@ ocr scan --path internal/agent                  # 単一ディレクトリをス
 ocr scan --path internal/agent,internal/llm/client.go
 ocr scan --exclude '**/generated/*,*.pb.go'
 ```
+
+`ocr scan` は `--max-tokens-budget` と `--budget-preflight <warn|confirm|abort>` も受け付けます。
+事前チェックは、除外、サイズによるフィルタ、再利用可能な再開チェックポイントを適用した後に
+残る作業を見積もります。見積もりが予算を超えた場合、`warn` は続行し、`confirm` は開始前に
+確認を求め、`abort` はセッションの作成や LLM 呼び出しの前に終了します。この見積もりは
+おおよそのトークン使用量であり、プロバイダー固有の課金クレジットではありません。
 
 完全なフラグリストは `ocr scan -h` を参照してください。
 

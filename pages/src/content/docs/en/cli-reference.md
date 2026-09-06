@@ -127,6 +127,7 @@ staged + unstaged + untracked changes in the current directory's repo.
 | `--max-tools <n>` | — | template default | Max tool-call rounds per group. `0` uses the template default (`100`); values 1–49 are clamped up to `50`. The flag only ever *raises* the cap — a value below the template default is ignored. |
 | `--max-tokens <n>` | — | config or template default | Prompt (input) token ceiling per group; the template default is `200000`. Overrides the saved `max_tokens` setting for this run. Does not change the output cap — see `MAX_COMPLETION_TOKENS`. |
 | `--max-tokens-budget <n>` | — | `0` (unlimited) | Cap total input + output token usage for the review. Dispatch stops once the budget is exceeded and partial results are still published. |
+| `--budget-preflight <warn\|confirm\|abort>` | — | `warn` | Choose what happens when the estimated token usage exceeds the budget. `warn` preserves the existing non-blocking behavior, `confirm` asks before starting and fails closed without an interactive terminal, and `abort` exits before creating a session or calling the LLM. Requires a positive token budget. |
 | `--provider <name>` | — | — | Select a configured provider for this run. Names under both `providers` and `custom_providers` are accepted. |
 | `--model <name>` | — | — | Override the resolved LLM model for this run (e.g., `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | Maximum number of concurrent git subprocesses. |
@@ -380,6 +381,13 @@ ocr scan --path internal/agent                  # scan one directory
 ocr scan --path internal/agent,internal/llm/client.go
 ocr scan --exclude '**/generated/*,*.pb.go'
 ```
+
+`ocr scan` also accepts `--max-tokens-budget` and
+`--budget-preflight <warn|confirm|abort>`. The preflight estimates the work
+remaining after exclusions, size filtering, and reusable resume checkpoints.
+When the estimate exceeds the budget, `warn` continues, `confirm` asks before
+starting, and `abort` exits before creating a session or calling the LLM.
+The estimate is approximate token usage, not provider-specific billing credits.
 
 See `ocr scan -h` for the full flag list.
 

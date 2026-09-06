@@ -121,6 +121,7 @@ unstaged + untracked 变更。
 | `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |
 | `--max-tokens <n>` | — | 配置或模板默认 | 每文件**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
 | `--max-tokens-budget <n>` | — | `0`（无限制） | 限制本次评审的输入 + 输出 token 总量。超出预算后停止分发，并仍会发布部分结果。 |
+| `--budget-preflight <warn\|confirm\|abort>` | — | `warn` | 用于选择当估算 token 用量超过预算时的处理方式。`warn` 保留原有的非阻塞行为；`confirm` 在启动前询问，且没有交互式终端时 fail-closed；`abort` 在创建会话或调用 LLM 之前退出。要求设置正的 token 预算。 |
 | `--effort <level>` | — | 配置或 `medium` | 评审投入档位：`low` = 1 轮 main 循环，`medium` = 2 轮（默认），`high` = 3 轮。轮数越多召回越高、耗时与 token 也越多。可用 `ocr config set effort <level>` 持久化。 |
 | `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
 | `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
@@ -358,6 +359,11 @@ ocr scan --path internal/agent                  # 扫描单个目录
 ocr scan --path internal/agent,internal/llm/client.go
 ocr scan --exclude '**/generated/*,*.pb.go'
 ```
+
+`ocr scan` 同样接受 `--max-tokens-budget` 与 `--budget-preflight <warn|confirm|abort>`。
+预检会估算排除、大小过滤及可复用的断点续评检查点之后剩余的作业。当估算超过预算时，`warn`
+继续，`confirm` 在启动前询问，`abort` 在创建会话或调用 LLM 之前退出。估算是近似的 token
+用量，并非提供商特有的计费额度。
 
 完整参数列表见 `ocr scan -h`。
 

@@ -126,6 +126,7 @@ ocr r      [flags]   (alias)
 | `--max-tools <n>` | — | 템플릿 기본값 | 그룹당 최대 도구 호출 라운드 수. `0`이면 템플릿 기본값(`100`)을 쓰고, 1~49는 `50`으로 올려 맞춥니다. 이 플래그는 상한을 *올리기만* 합니다. 템플릿 기본값보다 낮은 값은 무시됩니다. |
 | `--max-tokens <n>` | — | 설정 또는 템플릿 기본값 | 그룹당 프롬프트(입력) 토큰 상한이며 템플릿 기본값은 `200000`입니다. 이 실행에 한해 저장된 `max_tokens` 설정을 덮어씁니다. 출력 상한은 바뀌지 않습니다. `MAX_COMPLETION_TOKENS`를 참고하세요. |
 | `--max-tokens-budget <n>` | — | `0`(무제한) | 리뷰 전체의 입력+출력 토큰 사용량을 제한합니다. 예산을 넘기면 작업 전달을 멈추지만 그때까지의 결과는 그대로 내보냅니다. |
+| `--budget-preflight <warn\|confirm\|abort>` | — | `warn` | 예상 토큰 사용량이 예산을 넘을 때 어떻게 할지를 고릅니다. `warn`은 기존의 비차단 동작을 유지하고, `confirm`은 시작 전에 물어보며 대화형 터미널이 없으면 실패합니다(fail-closed). `abort`는 세션이나 LLM 호출이 만들어지기 전에 종료합니다. 양수 토큰 예산이 필요합니다. |
 | `--provider <name>` | — | — | 이 실행에 쓸 프로바이더를 고릅니다. `providers`와 `custom_providers` 양쪽의 이름을 모두 받습니다. |
 | `--model <name>` | — | — | 이 실행에 한해 해석된 LLM 모델을 덮어씁니다(예: `claude-opus-4-6`). |
 | `--max-git-procs <n>` | — | `16` | 동시에 띄울 git 서브프로세스의 최대 개수. |
@@ -373,6 +374,12 @@ ocr scan --path internal/agent                  # 디렉터리 하나만 스캔
 ocr scan --path internal/agent,internal/llm/client.go
 ocr scan --exclude '**/generated/*,*.pb.go'
 ```
+
+`ocr scan`은 `--max-tokens-budget`과 `--budget-preflight <warn|confirm|abort>`도 받습니다.
+사전 점검은 제외 항목, 크기 필터, 재사용 가능한 재개 체크포인트를 적용한 뒤 남은 작업을
+추정합니다. 추정치가 예산을 넘으면 `warn`은 계속 진행하고, `confirm`은 시작 전에 물어보며,
+`abort`는 세션이나 LLM 호출이 만들어지기 전에 종료합니다. 추정치는 대략적인 토큰 사용량일
+뿐 프로바이더별 과금 크레딧이 아닙니다.
 
 전체 플래그 목록은 `ocr scan -h`로 확인하세요.
 
