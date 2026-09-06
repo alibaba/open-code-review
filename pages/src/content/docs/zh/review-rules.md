@@ -112,21 +112,21 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 ## 文件如何被过滤
 
-过滤是一个五重门算法，位于
+过滤是一个五项检查的算法，位于
 [`internal/agent/preview.go`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go)。
-对每个 diff，OCR 依次问：
+对每个 diff，OCR 依次判断：
 
 1. **`binary`**——文件是二进制吗？排除。
 2. **`user_exclude`**——路径匹配任何用户 `exclude` 模式吗？排除。
 3. **`user_include`**——若用户定义了 `include`，路径匹配吗？若是，**立即保留**
-   （绕过下面的 `unsupported_ext` 和 `default_path` 门）。
+   （绕过下面的 `unsupported_ext` 和 `default_path` 检查项）。
 4. **`unsupported_ext`**——文件扩展名在
    [白名单](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)
    里吗？不在则排除。
 5. **`default_path`**——路径匹配某个内置测试文件排除模式
    （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）吗？排除。
 
-通过全部五重门的文件才发给 LLM。`deleted` 原因（不是门——它在 `Preview()` 中
+通过全部五项检查的文件才发给 LLM。`deleted` 原因（不是检查项——它在 `Preview()` 中
 单独计算）标记新路径为 `/dev/null` 的文件；没有新内容可评审。用
 `ocr review --preview` 可在不花 token 的情况下打印此过滤结果。
 
@@ -155,18 +155,18 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，位于
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)
-的 diff 层，先于 per-file 过滤运行。
+的 diff 层，在按文件过滤之前运行。
 
 要**评审**一个匹配这些测试文件模式的文件，把它加入用户 `include` 列表——那会
-覆盖 default-path 门。
+覆盖默认路径检查。
 
-## 每文件的规则解析
+## 每个文件的规则解析
 
 过滤决定某文件*将被*评审后，OCR 选择 agent 应遵循的规则文本：
 
-1. 按声明顺序试 `--rule`（custom）层。
-2. 按声明顺序试 `<repo>/.opencodereview/rule.json`。
-3. 按声明顺序试 `~/.opencodereview/rule.json`。
+1. 按声明顺序匹配 `--rule`（custom）层。
+2. 按声明顺序匹配 `<repo>/.opencodereview/rule.json`。
+3. 按声明顺序匹配 `~/.opencodereview/rule.json`。
 4. 回退到内嵌系统规则层。
 
 以下是内嵌 `system_rules.json` 的部分模式，按相对匹配顺序排列：
@@ -206,7 +206,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.jl` | `julia.md`——Julia 源代码。 |
 | `**/*.{tf,hcl,tfvars}` | `terraform.md`——Terraform / HCL。 |
 | `**/*.bicep` | `bicep.md`——Bicep（Azure）模板。 |
-| `**/*.elm` | `elm.md` - Elm 源代码。 |
+| `**/*.elm` | `elm.md`——Elm 源代码。 |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`——Jsonnet 配置模板与库。 |
 | `**/*.thrift` | `thrift.md`——Apache Thrift IDL 线协议兼容性。 |
 | `**/*.capnp` | `capnp.md`——Cap'n Proto schema 线协议兼容性。 |
@@ -215,13 +215,13 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.m` | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
 | `**/*.sol` | `solidity.md`——Solidity 智能合约。 |
 | `**/*.vy` | `vyper.md`——Vyper 智能合约。 |
-| *(fallback)* | `default.md` |
+| *（回退）* | `default.md` |
 
 解析出的规则正文成为 plan 和 main task prompt 中 `{{system_rule}}` 占位符的内容。
 
 ### 针对 `.m` 文件的内容嗅探
 
-`.m` 被 MATLAB 和 Objective-C 共用。OCR 会窥探文件首个非空行来区分：如果
+`.m` 被 MATLAB 和 Objective-C 共用。OCR 会检查文件首个非空行来区分：如果
 看起来像 Objective-C（如 `#import`、`@implementation`、C 风格注释），则使用
 `objc.md` 而非 `matlab.md`。无法读取内容时回退到 `matlab.md`。
 
@@ -299,7 +299,7 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
 
 ### 全局个人偏好
 
-放到 `~/.opencodereview/rule.json`，你机器上每个仓库都会继承：
+放到 `~/.opencodereview/rule.json`，本机每个仓库都会继承：
 
 ```json
 {
@@ -337,4 +337,4 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
 
 - [CLI 参考](../cli-reference/)——`ocr review --rule`、`--preview` 与 `ocr rules check`。
 - [配置](../configuration/)——config 文件位置与分层解析链。
-- [架构](../architecture/)——解析出的规则如何馈入 agent prompt。
+- [架构](../architecture/)——解析出的规则如何传入 agent prompt。
