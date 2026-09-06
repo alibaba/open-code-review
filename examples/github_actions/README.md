@@ -445,6 +445,20 @@ OCR supports both OpenAI and Anthropic API formats:
   - Self-hosted models (vLLM, Ollama, etc.)
 - **Anthropic APIs** (set variable `OCR_LLM_USE_ANTHROPIC=true`, i.e. `llm_use_anthropic: true`):
   - Anthropic Claude models
+- **OpenAI Responses API** (`llm_protocol: openai-responses`):
+  - Reasoning models used with function tools, or endpoints that only serve `/v1/responses`
+
+`llm_protocol` (`anthropic`, `openai` or `openai-responses`) takes precedence over `llm_use_anthropic` when set, and `llm.use_anthropic` is mirrored from it. An `OCR_LLM_PROTOCOL` variable in the job environment is honoured the same way when the input is empty.
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ vars.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: 'false'
+    llm_protocol: openai-responses
+```
 
 ## Troubleshooting
 

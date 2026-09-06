@@ -696,6 +696,81 @@ function testConfigureProtocolTracksUseAnthropic() {
   }
 }
 
+function testConfigureHonoursExplicitProtocol() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  const base = {
+    llm_url: "https://llm.example.invalid/v1",
+    llm_model: "contract-model",
+    llm_auth_token: "protocol-token-sentinel",
+  };
+  // The explicit protocol wins, and use_anthropic follows it — the boolean
+  // alone is what forced every Responses API user onto chat/completions.
+  const cases = [
+    { input: "openai-responses", useAnthropic: "false", expectAnthropic: "false", expectProtocol: "openai-responses" },
+    { input: "openai-responses", useAnthropic: "true", expectAnthropic: "false", expectProtocol: "openai-responses" },
+    { input: "Anthropic", useAnthropic: "false", expectAnthropic: "true", expectProtocol: "anthropic" },
+    { input: "openai", useAnthropic: "true", expectAnthropic: "false", expectProtocol: "openai" },
+  ];
+  for (const testCase of cases) {
+    const fixture = makeFixture();
+    try {
+      const values = inputValues(Object.assign({}, base, {
+        llm_use_anthropic: testCase.useAnthropic,
+        llm_protocol: testCase.input,
+      }));
+      const result = runStep(configure, values, fixture);
+      assert.strictEqual(
+        result.status,
+        0,
+        `Configure OCR failed for llm_protocol=${testCase.input}; ${resultDescription(result)}`
+      );
+      const configured = configValues(configOperations(fixture));
+      assert.strictEqual(configured["llm.protocol"], testCase.expectProtocol);
+      assert.strictEqual(configured["llm.use_anthropic"], testCase.expectAnthropic);
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+
+  // OCR_LLM_PROTOCOL from the job environment is honoured when the input is
+  // empty: it is the variable the CLI itself reads, and the one the report
+  // set without effect.
+  const inherited = makeFixture();
+  try {
+    const values = inputValues(Object.assign({}, base, { llm_use_anthropic: "false" }));
+    const result = runStep(configure, values, inherited, { OCR_LLM_PROTOCOL: "openai-responses" });
+    assert.strictEqual(result.status, 0, `Configure OCR failed with inherited OCR_LLM_PROTOCOL; ${resultDescription(result)}`);
+    const configured = configValues(configOperations(inherited));
+    assert.strictEqual(configured["llm.protocol"], "openai-responses");
+    assert.strictEqual(configured["llm.use_anthropic"], "false");
+  } finally {
+    removeFixture(inherited);
+  }
+
+  // The input outranks the inherited variable.
+  const both = makeFixture();
+  try {
+    const values = inputValues(Object.assign({}, base, { llm_use_anthropic: "false", llm_protocol: "anthropic" }));
+    const result = runStep(configure, values, both, { OCR_LLM_PROTOCOL: "openai-responses" });
+    assert.strictEqual(result.status, 0, `Configure OCR failed with both protocol sources; ${resultDescription(result)}`);
+    assert.strictEqual(configValues(configOperations(both))["llm.protocol"], "anthropic");
+  } finally {
+    removeFixture(both);
+  }
+
+  // An unknown protocol fails the step rather than silently configuring one.
+  const unknown = makeFixture();
+  try {
+    const values = inputValues(Object.assign({}, base, { llm_use_anthropic: "false", llm_protocol: "grpc" }));
+    const result = runStep(configure, values, unknown);
+    assert.notStrictEqual(result.status, 0, "an unknown llm_protocol must fail the Configure OCR step");
+    assert.match(`${result.stdout}${result.stderr}`, /llm_protocol must be/, "the failure must name the accepted protocols");
+  } finally {
+    removeFixture(unknown);
+  }
+}
+
 function testConfigurePreservesLegacyUseAnthropicResolution() {
   const configure = stepNamed("Configure OCR");
   assert.ok(configure, "action.yml must retain the Configure OCR step");
@@ -1101,6 +1176,7 @@ const TESTS = [
   ["Configure OCR never persists the token", testConfigureNeverPersistsToken],
   ["Configure OCR neutralizes stale provider and static token", testConfigureNeutralizesStaleProviderAndStaticToken],
   ["Configure OCR sets a protocol consistent with use_anthropic", testConfigureProtocolTracksUseAnthropic],
+  ["Configure OCR honours an explicit llm_protocol", testConfigureHonoursExplicitProtocol],
   ["Configure OCR preserves legacy use_anthropic resolution", testConfigurePreservesLegacyUseAnthropicResolution],
   ["Configure OCR clears stale persisted extra headers", testConfigureClearsStaleExtraHeadersBeforeTokenCommand],
   ["Configure OCR clears stale persisted retry codes", testConfigureClearsStaleRetryCodesBeforeEndpointConfig],

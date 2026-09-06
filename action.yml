@@ -22,8 +22,18 @@ inputs:
       Selects the LLM protocol (mapped to env OCR_USE_ANTHROPIC). An explicitly supplied empty
       string, true, 1, or yes selects Anthropic
       case-insensitively; every other value selects the OpenAI-compatible
-      protocol, preserving the CLI environment contract.
+      protocol, preserving the CLI environment contract. Ignored when
+      llm_protocol names the protocol explicitly.
     required: true
+  llm_protocol:
+    description: >-
+      Explicit LLM protocol written to `llm.protocol`: anthropic, openai or
+      openai-responses (case-insensitive). When set it wins over
+      llm_use_anthropic, which is mirrored from it the way `ocr config set
+      llm.protocol` mirrors the boolean. Leave empty to keep deriving the
+      protocol from llm_use_anthropic; an OCR_LLM_PROTOCOL variable in the
+      job or step environment is honoured the same way when this is empty.
+    required: false
   llm_auth_header:
     description: Custom auth header name (mapped to env OCR_LLM_AUTH_HEADER).
     required: false
@@ -380,11 +390,16 @@ runs:
         OCR_LLM_URL: ${{ inputs.llm_url }}
         OCR_LLM_MODEL: ${{ inputs.llm_model }}
         OCR_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
+        OCR_LLM_PROTOCOL_INPUT: ${{ inputs.llm_protocol }}
         OCR_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         OCR_EXTRA_BODY: ${{ inputs.llm_extra_body }}
         OCR_LANGUAGE: ${{ inputs.language }}
       shell: bash
       run: |
+        # An explicit protocol wins over llm_use_anthropic: the input first,
+        # then OCR_LLM_PROTOCOL inherited from the job or step environment.
+        # Read it before the derivation below reuses that variable name.
+        EXPLICIT_PROTOCOL="$(printf '%s' "${OCR_LLM_PROTOCOL_INPUT:-${OCR_LLM_PROTOCOL:-}}" | tr '[:upper:]' '[:lower:]')"
         NORMALIZED_USE_ANTHROPIC="$(printf '%s' "$OCR_USE_ANTHROPIC" | tr '[:upper:]' '[:lower:]')"
         case "$NORMALIZED_USE_ANTHROPIC" in
           ""|true|1|yes)
@@ -394,6 +409,24 @@ runs:
           *)
             OCR_USE_ANTHROPIC="false"
             OCR_LLM_PROTOCOL="openai"
+            ;;
+        esac
+        # use_anthropic is mirrored from the explicit protocol the same way
+        # `ocr config set llm.protocol` mirrors it, so the two never disagree.
+        case "$EXPLICIT_PROTOCOL" in
+          "")
+            ;;
+          anthropic)
+            OCR_USE_ANTHROPIC="true"
+            OCR_LLM_PROTOCOL="anthropic"
+            ;;
+          openai|openai-responses)
+            OCR_USE_ANTHROPIC="false"
+            OCR_LLM_PROTOCOL="$EXPLICIT_PROTOCOL"
+            ;;
+          *)
+            echo "::error::llm_protocol must be anthropic, openai or openai-responses (got '${EXPLICIT_PROTOCOL}')"
+            exit 1
             ;;
         esac
         ocr config unset provider
@@ -443,6 +476,7 @@ runs:
         OCR_FP_LLM_URL: ${{ inputs.llm_url }}
         OCR_FP_LLM_MODEL: ${{ inputs.llm_model }}
         OCR_FP_LLM_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
+        OCR_FP_LLM_PROTOCOL: ${{ inputs.llm_protocol }}
         OCR_FP_LANGUAGE: ${{ inputs.language }}
         OCR_FP_LLM_EXTRA_BODY: ${{ inputs.llm_extra_body }}
         OCR_FP_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
@@ -575,6 +609,9 @@ runs:
                 process.env.OCR_FP_LLM_URL,
                 process.env.OCR_FP_LLM_MODEL,
                 process.env.OCR_FP_LLM_USE_ANTHROPIC,
+                // Appended only when set, so checkpoints taken before the
+                // input existed stay valid for everyone who never uses it.
+                ...(process.env.OCR_FP_LLM_PROTOCOL ? [process.env.OCR_FP_LLM_PROTOCOL] : []),
                 process.env.OCR_FP_LANGUAGE,
                 process.env.OCR_FP_LLM_EXTRA_BODY,
                 process.env.OCR_FP_LLM_AUTH_HEADER,
