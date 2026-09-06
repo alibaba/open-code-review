@@ -191,6 +191,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.mm` | `objc.md` — исходный код Objective-C++. |
 | `**/*.sol` | `solidity.md` — смарт-контракты Solidity. |
 | `**/*.vy` | `vyper.md` — смарт-контракты Vyper. |
+| `**/*.cr` | `crystal.md` — исходный код Crystal. |
 | *(fallback)* | `default.md` |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

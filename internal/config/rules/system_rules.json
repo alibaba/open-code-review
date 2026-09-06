@@ -49,6 +49,7 @@
     "**/*.m": "matlab.md",
     "**/*.mm": "objc.md",
     "**/*.sol": "solidity.md",
-    "**/*.vy": "vyper.md"
+    "**/*.vy": "vyper.md",
+    "**/*.cr": "crystal.md"
   }
 }

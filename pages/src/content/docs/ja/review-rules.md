@@ -151,6 +151,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.mm` | `objc.md`: Objective-C++ ソースコード。 |
 | `**/*.sol` | `solidity.md`: Solidity スマートコントラクト。 |
 | `**/*.vy` | `vyper.md`: Vyper スマートコントラクト。 |
+| `**/*.cr` | `crystal.md`: Crystal ソースコード。 |
 | *(fallback)* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。
