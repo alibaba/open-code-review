@@ -361,6 +361,226 @@ function assertValidation(value, expectedValid) {
   }
 }
 
+function prRefsStep() {
+  const step = stepNamed("Resolve PR refs");
+  assert.ok(step, "action.yml must retain the Resolve PR refs step");
+  return step;
+}
+
+// The step reads its candidate PR numbers from `github.*` expressions, which the
+// harness deliberately refuses to resolve. So the sources are supplied here the
+// way the runner would have rendered them for a given event, and the precedence
+// between them — the part that is actually under test — runs as written.
+function runPrRefs(sources) {
+  const fixture = makeFixture();
+  try {
+    const env = Object.assign(
+      {
+        INPUT_BASE_REF: "",
+        INPUT_HEAD_SHA: "",
+        INPUT_PR_NUMBER: "",
+        EVENT_BASE_REF: "main",
+        EVENT_HEAD_SHA: "a".repeat(40),
+        EVENT_PR_NUMBER: "",
+        WORKFLOW_RUN_PR_NUMBER: "",
+        GITHUB_EVENT_NAME: "workflow_run",
+      },
+      sources
+    );
+    const result = runShell(renderedRun(prRefsStep(), inputValues()), env, fixture);
+    return { result, exported: readEnvAssignments(path.join(fixture.dir, "github-env")) };
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testPrNumberInputIsOptionalAndDocumented() {
+  assert.ok(INPUTS.pr_number, "action.yml must define the pr_number input");
+  assert.strictEqual(
+    INPUTS.pr_number.default,
+    "",
+    "pr_number must default to empty so every current trigger keeps today's resolution"
+  );
+  const inputBlock = ACTION_TEXT.match(
+    /^  pr_number:\s*$([\s\S]*?)(?=^  [A-Za-z0-9_]+:\s*$|^outputs:|^runs:)/m
+  );
+  assert.ok(inputBlock, "action.yml must expose pr_number metadata");
+  assert.match(inputBlock[1], /required:\s*false/, "pr_number must stay optional");
+  assert.match(
+    inputBlock[1],
+    /workflow_run/,
+    "pr_number must document the trigger it exists for"
+  );
+}
+
+function testPrNumberResolutionOrder() {
+  const cases = [
+    [
+      "the explicit input outranks every payload field",
+      { INPUT_PR_NUMBER: "4242", EVENT_PR_NUMBER: "7", WORKFLOW_RUN_PR_NUMBER: "9" },
+      "4242",
+    ],
+    [
+      "pull_request / issue_comment payloads are used when no input is given",
+      { EVENT_PR_NUMBER: "7", WORKFLOW_RUN_PR_NUMBER: "9" },
+      "7",
+    ],
+    [
+      "workflow_run.pull_requests[0] is the last resort",
+      { WORKFLOW_RUN_PR_NUMBER: "9" },
+      "9",
+    ],
+  ];
+  for (const [label, sources, expected] of cases) {
+    const { result, exported } = runPrRefs(sources);
+    assert.strictEqual(result.status, 0, `${label}; ${resultDescription(result)}`);
+    assert.strictEqual(exported.PR_NUMBER, expected, label);
+    assert.strictEqual(exported.BASE_REF, "main", `${label}; the ref resolution is unchanged`);
+    assert.strictEqual(exported.HEAD_SHA, "a".repeat(40), `${label}; the head resolution is unchanged`);
+  }
+}
+
+function testPrNumberFailsBeforeAnyReviewWork() {
+  const { result, exported } = runPrRefs({});
+  assert.notStrictEqual(
+    result.status,
+    0,
+    `an unresolvable PR number must stop the run; ${resultDescription(result)}`
+  );
+  const output = `${result.stdout}${result.stderr}`;
+  assert.match(output, /::error::/, "the failure must be annotated for the run summary");
+  assert.match(output, /pr_number/, "…and must name the input that fixes it");
+  assert.match(output, /workflow_run\.pull_requests\[0\]\.number/, "…and where that payload keeps it");
+  assert.strictEqual(exported.PR_NUMBER, undefined, "nothing is exported when no number is known");
+
+  // The point of failing here is that it costs nothing: no install, no LLM
+  // quota, no half-finished review whose findings have nowhere to go.
+  const refs = prRefsStep();
+  for (const later of ["Install OpenCodeReview", "Run OpenCodeReview", "Post review comments"]) {
+    const step = stepNamed(later);
+    assert.ok(step, `action.yml must retain the ${later} step`);
+    assert.ok(refs.index < step.index, `PR number resolution must precede ${later}`);
+  }
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({ ocr_version: "contract-test" });
+    const install = installStep();
+    const script = `${renderedRun(refs, values)}\n${renderedRun(install, values)}`;
+    const env = Object.assign(
+      {
+        INPUT_BASE_REF: "",
+        INPUT_HEAD_SHA: "",
+        INPUT_PR_NUMBER: "",
+        EVENT_BASE_REF: "main",
+        EVENT_HEAD_SHA: "a".repeat(40),
+        EVENT_PR_NUMBER: "",
+        WORKFLOW_RUN_PR_NUMBER: "",
+        GITHUB_EVENT_NAME: "workflow_run",
+      },
+      renderedEnv(install, values)
+    );
+    const combined = runShell(script, env, fixture);
+    assert.notStrictEqual(combined.status, 0, `the run must stop; ${resultDescription(combined)}`);
+    assert.deepStrictEqual(
+      readJsonLines(fixture.npmCallsPath),
+      [],
+      "NPM must not run after PR-number resolution fails"
+    );
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testPrNumberRejectsValuesThatAreNotAPrNumber() {
+  for (const value of ["#123", "123abc", "0", "-1", "12.0", " ", "pull/123"]) {
+    const { result, exported } = runPrRefs({ INPUT_PR_NUMBER: value });
+    assert.notStrictEqual(
+      result.status,
+      0,
+      `pr_number=${JSON.stringify(value)} must be rejected; ${resultDescription(result)}`
+    );
+    assert.strictEqual(exported.PR_NUMBER, undefined, "a rejected value is never exported");
+  }
+  for (const value of ["1", "4242"]) {
+    const { result, exported } = runPrRefs({ INPUT_PR_NUMBER: value });
+    assert.strictEqual(
+      result.status,
+      0,
+      `pr_number=${JSON.stringify(value)} must be accepted; ${resultDescription(result)}`
+    );
+    assert.strictEqual(exported.PR_NUMBER, value);
+  }
+}
+
+function testResolvedPrNumberReachesTheHeadFetch() {
+  const step = stepNamed("Fetch PR head (fork-safe)");
+  assert.ok(step, "action.yml must retain the fork-safe head fetch");
+  assert.strictEqual(
+    step.env.PR_NUM,
+    "${{ env.PR_NUMBER }}",
+    "the fetch must use the resolved number rather than re-reading the payload"
+  );
+  const fixture = makeFixture();
+  try {
+    const gitCalls = path.join(fixture.dir, "git-calls.jsonl");
+    fs.writeFileSync(
+      path.join(fixture.bin, "git"),
+      `#!/usr/bin/env node
+require("fs").appendFileSync(process.env.OCR_GIT_CALLS, JSON.stringify(process.argv.slice(2)) + "\\n");
+`,
+      { mode: 0o755 }
+    );
+    const result = runShell(
+      renderedRun(step, inputValues()),
+      { PR_NUM: "4242", OCR_GIT_CALLS: gitCalls },
+      fixture
+    );
+    assert.strictEqual(result.status, 0, resultDescription(result));
+    assert.deepStrictEqual(
+      readJsonLines(gitCalls),
+      [["fetch", "origin", "pull/4242/head"]],
+      "the head fetch must name the resolved PR"
+    );
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testPrNumberWiredIntoBothGithubScriptSteps() {
+  for (const name of ["Resolve review range", "Post review comments"]) {
+    const step = stepNamed(name);
+    assert.ok(step, `action.yml must retain the ${name} step`);
+    assert.strictEqual(
+      step.env.OCR_PR_NUMBER,
+      "${{ env.PR_NUMBER }}",
+      `${name} must read the resolved PR number`
+    );
+  }
+  assert.doesNotMatch(
+    ACTION_TEXT,
+    /prNumber:\s*context\.issue\.number/,
+    "no step may fall back to context.issue.number, which resolves nothing on workflow_run"
+  );
+  assert.strictEqual(
+    (ACTION_TEXT.match(/prNumber: Number\(process\.env\.OCR_PR_NUMBER\)/g) || []).length,
+    2,
+    "both github-script steps must pass the resolved number"
+  );
+}
+
+function testExampleReadmeDocumentsPrNumberResolution() {
+  assert.match(
+    EXAMPLE_README_TEXT,
+    /\| `pr_number` input \|/,
+    "GitHub Actions README must document pr_number as the first resolution source"
+  );
+  assert.match(
+    EXAMPLE_README_TEXT,
+    /pr_number: \$\{\{ github\.event\.workflow_run\.pull_requests\[0\]\.number \}\}/,
+    "GitHub Actions README must show the workflow_run wiring it exists for"
+  );
+}
+
 function testReviewTaskTimeoutInputNameAndScope() {
   assert.ok(INPUTS.review_task_timeout, "action.yml must define the review_task_timeout input");
   assert.ok(!INPUTS.review_timeout, "the not-yet-released review_timeout input must be renamed");
@@ -1112,6 +1332,13 @@ const TESTS = [
   ["required action steps and env contracts are present", testRequiredStepTopologyAndEnvironmentContracts],
   ["GitHub Actions contracts run in a dedicated workflow", testContractsRunInDedicatedWorkflow],
   ["GitHub Actions README documents timeout and version contracts", testExampleReadmeDocumentsTimeoutAndVersionContracts],
+  ["pr_number is an optional, documented input", testPrNumberInputIsOptionalAndDocumented],
+  ["the PR number resolves input, then payload, then workflow_run", testPrNumberResolutionOrder],
+  ["an unresolvable PR number fails before any review work", testPrNumberFailsBeforeAnyReviewWork],
+  ["pr_number rejects values that are not a PR number", testPrNumberRejectsValuesThatAreNotAPrNumber],
+  ["the resolved PR number reaches the fork-safe head fetch", testResolvedPrNumberReachesTheHeadFetch],
+  ["both github-script steps read the resolved PR number", testPrNumberWiredIntoBothGithubScriptSteps],
+  ["GitHub Actions README documents PR number resolution", testExampleReadmeDocumentsPrNumberResolution],
 ];
 
 function main() {

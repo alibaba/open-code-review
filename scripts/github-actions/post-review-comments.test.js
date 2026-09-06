@@ -2358,6 +2358,8 @@ async function main() {
   await testActionPinsAuthorToTheDefaultTokenApp();
   await testActionResolveStepDeclaresItsRefInputs();
   await testCheckpointMarkerMatchingIsStateless();
+  // Optional pr_number (#1150)
+  await testPrNumberOverrideAddressesEveryCall();
   console.log("All post-review-comments tests passed.");
 }
 function testParseDiffHunkRanges() {
@@ -4185,6 +4187,9 @@ function resolveEnv(over = {}) {
       OCR_HEAD_SHA: CK_NEW,
       OCR_BASE_REF: "main",
       OCR_MERGE_BASE: CK_MB,
+      // Written by "Resolve PR refs", which fails the job rather than leaving
+      // it empty; ckPayload records the same PR, so the checkpoint matches.
+      OCR_PR_NUMBER: "123",
       OCR_STICKY_SUMMARY: "true",
       OCR_FULL_REVIEW: "false",
       OCR_EVENT_ACTION: "synchronize",
@@ -4266,6 +4271,7 @@ async function testActionScriptFingerprintCoversRepoLocalRules() {
           OCR_HEAD_SHA: CK_NEW,
           OCR_BASE_REF: "main",
           OCR_MERGE_BASE: CK_MB,
+          OCR_PR_NUMBER: "123",
           OCR_STICKY_SUMMARY: "true",
           OCR_FULL_REVIEW: "false",
           OCR_EVENT_ACTION: "synchronize",
@@ -5052,17 +5058,18 @@ async function testCheckpointReasonsMatchTheDocs() {
   assert.strictEqual(/force-push/.test(forcePush[1]), true, "unknown_object is where a force-push actually lands");
 }
 
-// The resolve step's git refs come from $GITHUB_ENV, written by two earlier
-// steps. Reading them straight off the ambient job env made that dependency
-// invisible: nothing in the step said it needed those steps to have run. Pin
-// both halves — the declaration, and what happens when the declaration is empty
-// because an upstream step was skipped.
+// The resolve step's git refs and PR number come from $GITHUB_ENV, written by
+// two earlier steps. Reading them straight off the ambient job env made that
+// dependency invisible: nothing in the step said it needed those steps to have
+// run. Pin both halves — the declaration, and what happens when the declaration
+// is empty because an upstream step was skipped.
 async function testActionResolveStepDeclaresItsRefInputs() {
   const block = actionStepBlock("Resolve review range");
   for (const [envVar, source] of [
     ["OCR_HEAD_SHA", "env.HEAD_SHA"],
     ["OCR_BASE_REF", "env.BASE_REF"],
     ["OCR_MERGE_BASE", "env.MERGE_BASE"],
+    ["OCR_PR_NUMBER", "env.PR_NUMBER"],
   ]) {
     assert.strictEqual(
       block.includes(`${envVar}: \${{ ${source} }}`),
@@ -5071,7 +5078,7 @@ async function testActionResolveStepDeclaresItsRefInputs() {
     );
     assert.strictEqual(block.includes(`process.env.${envVar}`), true, `…and read it as ${envVar}`);
   }
-  for (const bare of ["process.env.HEAD_SHA", "process.env.BASE_REF", "process.env.MERGE_BASE"]) {
+  for (const bare of ["process.env.HEAD_SHA", "process.env.BASE_REF", "process.env.MERGE_BASE", "process.env.PR_NUMBER"]) {
     assert.strictEqual(block.includes(bare), false, `no undeclared ${bare} may remain`);
   }
 
@@ -5088,6 +5095,74 @@ async function testActionResolveStepDeclaresItsRefInputs() {
   assert.strictEqual(core.outputs.range_reason, "base_changed", "…because the stored base cannot match an empty one");
   assert.strictEqual(core.outputs.range_from, "", "empty range_from means ${RANGE_FROM:-$MERGE_BASE}");
   assert.strictEqual(core.warnings.length, 0, "and it is a decision, not a crash");
+}
+
+// ---------------------------------------------------------------------------
+// Optional pr_number (#1150)
+// ---------------------------------------------------------------------------
+
+// Everything this module writes is addressed by one number. On a workflow_run
+// the event payload holds no issue and no pull request, so context.issue.number
+// is undefined and every call used to be addressed to /issues//… — a 404 after
+// a completed review. The caller now resolves the number and passes it in.
+async function testPrNumberOverrideAddressesEveryCall() {
+  const findings = {
+    comments: [{ path: "src/a.js", content: "finding", start_line: 3, end_line: 3 }],
+    warnings: [],
+  };
+  const workflowRunContext = {
+    repo: { owner: "owner", repo: "repo" },
+    // What @actions/github's Context yields for a workflow_run payload.
+    issue: { number: undefined },
+    eventName: "workflow_run",
+    payload: { workflow_run: { pull_requests: [{ number: 4242 }] } },
+  };
+
+  const github = makeGithub({
+    files: [{ filename: "src/a.js", patch: "@@ -1,3 +1,3 @@\n a\n b\n c" }],
+  });
+  await runPostReviewComments({
+    github,
+    context: workflowRunContext,
+    core: mockCore(),
+    fs: mockFs(JSON.stringify(findings), ""),
+    prNumber: 4242,
+    stickySummary: true,
+  });
+
+  // Every read and write, not just the summary: the head lookup, the diff
+  // inventory, the review itself and the summary comment all address the PR the
+  // caller resolved.
+  const addressed = [
+    ...github.getPullCalls.map((c) => c.pull_number),
+    ...github.listFilesCalls.map((c) => c.pull_number),
+    ...github.createReviewCalls.map((c) => c.pull_number),
+    ...github.listCommentsCalls.map((c) => c.issue_number),
+    ...github.issueComments.map((c) => c.issue_number),
+  ];
+  assert.ok(github.createReviewCalls.length > 0, "the review must be posted");
+  assert.ok(github.issueComments.length > 0, "the summary must be posted");
+  assert.deepStrictEqual(
+    [...new Set(addressed)],
+    [4242],
+    "every call must address the resolved PR, and none of them undefined"
+  );
+
+  // Omitting the option keeps the event-derived number, so callers that never
+  // pass one (and every trigger that carries a PR) are unaffected.
+  const legacy = makeGithub({ files: [{ filename: "src/a.js", patch: "@@ -1,3 +1,3 @@\n a\n b\n c" }] });
+  await runPostReviewComments({
+    github: legacy,
+    context,
+    core: mockCore(),
+    fs: mockFs(JSON.stringify(findings), ""),
+    stickySummary: true,
+  });
+  assert.deepStrictEqual(
+    [...new Set(legacy.createReviewCalls.map((c) => c.pull_number))],
+    [context.issue.number],
+    "without the option the event's own number is still used"
+  );
 }
 
 // The flagless marker RegExp is shared across calls now. That is only safe
