@@ -55,9 +55,56 @@ Three independent fields:
   be reviewed.
 - `exclude` — optional. Glob patterns for files OCR must *not* review.
   Highest precedence within the filter.
-- `rules` — array of `{path, rule}` entries, evaluated **in declaration
-  order**. The first `path` whose glob matches the file determines the
-  prompt OCR sends to the model for that file.
+- `rules` — array of `{path, rule, merge_system_rule?}` entries, evaluated
+  **in declaration order**. The first `path` whose glob matches the file
+  determines the prompt OCR sends to the model for that file.
+  `merge_system_rule` is optional and defaults to `false` (replace).
+
+### Merging with the system rule
+
+By default, a matching user rule *replaces* the per-language system rule for
+that file. Set `"merge_system_rule": true` on the entry to keep the system
+rule alongside your own instead:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+```bash
+$ ocr rules check src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+The system half is resolved **per file**, from the same embedded table above —
+one catch-all `**/*` entry yields `java.md` for a `.java` file, `python.md` for
+a `.py` file or a `.ipynb` file, and `default.md` for an unrecognized extension.
+`merge_system_rule` works in all three user layers (`--rule`,
+`<repo>/.opencodereview/rule.json`, and `~/.opencodereview/rule.json`).
+
+It merges the **system** layer only. Multiple *user* entries matching the same
+file still resolve first-match-wins, and a matching layer still shadows the
+lower user layers — `merge_system_rule` never stacks several user rules.
 
 ### Glob features
 
@@ -292,6 +339,27 @@ inherits them:
   ]
 }
 ```
+
+### Global security rules on top of the built-in per-language rules
+
+A catch-all `**/*` user rule normally discards the built-in per-language system
+rules. To keep them, set `"merge_system_rule": true` — the system half is still
+resolved per file, so every language keeps its dedicated review focus:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+Put this in `~/.opencodereview/rule.json` for every repo on your machine, or in
+`<repo>/.opencodereview/rule.json` for a single project.
 
 ## See Also
 

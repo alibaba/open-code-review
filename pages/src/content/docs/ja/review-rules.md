@@ -44,7 +44,45 @@ OCR は**4 層の優先順位チェーン**でルールを解決します。各�
 
 - `include`: 任意。組み込みのデフォルト除外パターン（テストファイルの除外。下記参照）を*バイパス*するための glob パターンです。ホワイトリストではありません。どの `include` パターンにも一致しないファイルも、依然として `unsupported_ext` と `default_path` のチェックを通過し、レビューされる可能性があります。
 - `exclude`: 任意。OCR がレビューしないファイルの glob パターンです。フィルタリングで最も優先されます。
-- `rules`: `{path, rule}` エントリの配列で、**宣言順**に評価されます。そのファイルに最初に一致した `path` glob のエントリが、OCR がモデルに送る prompt を決定します。
+- `rules`: `{path, rule, merge_system_rule?}` エントリの配列で、**宣言順**に評価されます。そのファイルに最初に一致した `path` glob のエントリが、OCR がモデルに送る prompt を決定します。`merge_system_rule` は任意で、デフォルトは `false`（置き換え）です。
+
+### システムルールとのマージ
+
+デフォルトでは、一致したユーザールールはそのファイルの言語別システムルールを*置き換えます*。エントリに `"merge_system_rule": true` を設定すると、システムルールを自分のルールと併存させられます:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+```bash
+$ ocr rules check src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+システム側は**ファイルごと**に、上記と同じ埋め込みテーブルから解決されます。1 つの catch-all `**/*` エントリで、`.java` ファイルには `java.md`、`.py` または `.ipynb` ファイルには `python.md`、認識できない拡張子には `default.md` が得られます。`merge_system_rule` は 3 つのユーザー層すべて（`--rule`、`<repo>/.opencodereview/rule.json`、`~/.opencodereview/rule.json`）で機能します。
+
+これは**システム**層のみをマージします。同じファイルに一致する複数の*ユーザー*エントリは依然として first-match-wins で解決され、一致した層は下位のユーザー層を覆い隠します。`merge_system_rule` が複数のユーザールールを重ねることはありません。
 
 ### glob の機能
 
@@ -151,7 +189,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.mm` | `objc.md`: Objective-C++ ソースコード。 |
 | `**/*.sol` | `solidity.md`: Solidity スマートコントラクト。 |
 | `**/*.vy` | `vyper.md`: Vyper スマートコントラクト。 |
-| *(fallback)* | `default.md` |
+| *（フォールバック）* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。
 
@@ -247,6 +285,24 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
   ]
 }
 ```
+
+### 組み込みの言語別ルールの上にグローバルなセキュリティルールを重ねる
+
+catch-all `**/*` のユーザールールは、通常は組み込みの言語別システムルールを破棄します。それらを残すには `"merge_system_rule": true` を設定します。システム側はファイルごとに解決されるため、どの言語も専用のレビュー観点を保ちます:
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+これを `~/.opencodereview/rule.json` に置けば自分のマシン上のすべてのリポジトリに、`<repo>/.opencodereview/rule.json` に置けば単一のプロジェクトに適用されます。
 
 ## 関連項目
 

@@ -53,8 +53,53 @@ OCR은 **네 겹의 우선순위 사슬**로 규칙을 해석합니다. 파일 �
   있습니다.
 - `exclude` — 선택. OCR이 리뷰하면 *안 되는* 파일의 glob 패턴입니다. 필터 안에서
   가장 높은 우선순위를 가집니다.
-- `rules` — `{path, rule}` 항목의 배열이며 **선언 순서대로** 평가합니다. 파일에
+- `rules` — `{path, rule, merge_system_rule?}` 항목의 배열이며 **선언 순서대로** 평가합니다. 파일에
   처음 일치하는 `path`가 그 파일을 리뷰할 때 OCR이 모델에 보낼 프롬프트를 정합니다.
+  `merge_system_rule`은 선택이며 기본값은 `false`(교체)입니다.
+
+### 시스템 규칙과 병합하기 {#merging-with-the-system-rule}
+
+기본적으로 일치한 사용자 규칙은 그 파일의 언어별 시스템 규칙을 *교체합니다*. 항목에
+`"merge_system_rule": true`를 설정하면 시스템 규칙을 내 규칙과 함께 유지할 수 있습니다.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+```bash
+$ ocr rules check src/main/java/com/example/UserService.java
+Source: Project (.opencodereview/rule.json)
+Pattern: **/*
+Rule:
+────────────────────────────────────────
+## System-Specific Rules (Mandatory)
+
+…contents of java.md…
+
+---
+
+## User-Specific Rules (Mandatory)
+
+Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.
+────────────────────────────────────────
+```
+
+시스템 측은 위와 같은 내장 테이블에서 **파일별로** 해석됩니다. 하나의 catch-all `**/*`
+항목이면 `.java` 파일에는 `java.md`, `.py` 또는 `.ipynb` 파일에는 `python.md`, 알 수 없는 확장자에는
+`default.md`가 됩니다. `merge_system_rule`은 세 사용자 계층 모두(`--rule`,
+`<repo>/.opencodereview/rule.json`, `~/.opencodereview/rule.json`)에서 동작합니다.
+
+이는 **시스템** 계층만 병합합니다. 같은 파일에 걸리는 여러 *사용자* 항목은 여전히
+first-match-wins로 해석되고, 일치한 계층은 여전히 아래 사용자 계층을 가립니다.
+`merge_system_rule`이 여러 사용자 규칙을 쌓아 올리지는 않습니다.
 
 ### glob 기능 {#glob-features}
 
@@ -279,6 +324,28 @@ ocr review --rule ./.review-rules-only-for-this-pr.json
   ]
 }
 ```
+
+### 내장 언어별 규칙 위에 전역 보안 규칙 올리기
+{#global-security-rules-on-top-of-the-built-in-per-language-rules}
+
+catch-all `**/*` 사용자 규칙은 보통 내장 언어별 시스템 규칙을 버립니다. 그것을 유지하려면
+`"merge_system_rule": true`를 설정하세요. 시스템 측은 여전히 파일별로 해석되므로 모든 언어가
+전용 리뷰 초점을 유지합니다.
+
+```json
+{
+  "rules": [
+    {
+      "path": "**/*",
+      "rule": "Security review: flag hardcoded secrets, unvalidated redirects, and missing authz checks.",
+      "merge_system_rule": true
+    }
+  ]
+}
+```
+
+이것을 `~/.opencodereview/rule.json`에 두면 그 머신의 모든 저장소에,
+`<repo>/.opencodereview/rule.json`에 두면 단일 프로젝트에 적용됩니다.
 
 ## 관련 문서 {#see-also}
 
