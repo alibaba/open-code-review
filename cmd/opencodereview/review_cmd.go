@@ -196,10 +196,10 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 
 	mcpClients := initMCPClients(ctx, rt.AppCfg, tools, cc.RepoDir, Version)
 	defer func() {
-		for _, mc := range mcpClients {
-			if err := mc.Close(); err != nil {
-				fmt.Fprintf(os.Stderr, "[ocr] WARNING: failed to close MCP server %q: %v\n", mc.Name(), err)
-			}
+		closeCtx, cancel := context.WithTimeout(context.Background(), mcp.CloseAllTimeout)
+		defer cancel()
+		if err := mcp.CloseAll(closeCtx, mcpClients); err != nil {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %v\n", err)
 		}
 	}()
 
