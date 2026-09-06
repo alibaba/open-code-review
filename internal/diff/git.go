@@ -61,6 +61,15 @@ type Provider struct {
 	commit string // single commit hash/ref
 
 	mergeBase string // cached common ancestor for range mode
+
+	// Shallow on-demand fetch state (#634): deepenTried records the deepest
+	// fetch round attempted while recovering a missing merge-base (0 = the
+	// deepen loop never ran), and deepenDiag carries the last fetch failure
+	// for surfacing in rangeBaseError. Written only on the merge-base
+	// recovery path, which — like mergeBase itself — is not called
+	// concurrently on one Provider.
+	deepenTried int
+	deepenDiag  string
 }
 
 // NewProvider creates a Provider for range mode: from..to (via merge-base).
@@ -178,7 +187,7 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 	case ModeRange:
 		base := p.MergeBase(ctx)
 		if base == "" {
-			return nil, fmt.Errorf("cannot find merge-base between %s and %s", p.from, p.to)
+			return nil, p.rangeBaseError()
 		}
 		out, stderr, err := p.runGitSplit(ctx, "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", "--no-color", "-U"+fmt.Sprint(DiffContextLines), "--end-of-options", base, p.to, "--")
 		if err != nil {
@@ -404,10 +413,35 @@ func (p *Provider) filterDiffs(diffs []model.Diff) []model.Diff {
 
 func (p *Provider) computeMergeBase(ctx context.Context, from, to string) string {
 	out, err := p.runGit(ctx, "merge-base", "--end-of-options", from, to)
-	if err != nil {
-		return ""
+	if err == nil {
+		if base := strings.TrimSpace(out); base != "" {
+			return base
+		}
 	}
-	return strings.TrimSpace(out)
+	// Empty result: in a shallow clone (GitLab CI GIT_DEPTH=1) the common
+	// ancestor may simply not be cloned yet. Give the on-demand deepen loop a
+	// chance (#634) before letting the caller emit the usual error. The loop
+	// gates on shallowness and an origin URL, so non-shallow repositories pay
+	// one constant-time probe here and nothing else.
+	return p.deepenForMergeBase(ctx, from, to)
+}
+
+// rangeBaseError builds the range-mode failure for a missing merge-base. On
+// paths where the shallow deepen loop actually ran, it appends a hint about the
+// shallow-clone situation — including the fetch failure, when that is what
+// stopped the loop; on every other path the message is byte-identical to the
+// historical one.
+func (p *Provider) rangeBaseError() error {
+	base := fmt.Errorf("cannot find merge-base between %s and %s", p.from, p.to)
+	if p.deepenTried == 0 {
+		return base
+	}
+	if p.deepenDiag != "" {
+		return fmt.Errorf("%w (shallow clone: fetching from origin up to depth %d failed: %s)",
+			base, p.deepenTried, p.deepenDiag)
+	}
+	return fmt.Errorf("%w (shallow clone: fetched history from origin up to depth %d without finding a common ancestor; increase the clone depth (e.g. GIT_DEPTH) or use a full clone)",
+		base, p.deepenTried)
 }
 
 // RemoteIdentity returns a stable, credential-free identity string for the
