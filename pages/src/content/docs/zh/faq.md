@@ -215,8 +215,24 @@ agent` 保证的干净 stdout 是*对解析器友好的*——要屏蔽一切，
 
 ### JSON 输出是 `{ "files_reviewed": 0, "comments": [] }`
 
-工作区没有合格文件。这是有意为之——显式形状让调用方区分“无可评审内容”与“已评审
-文件中无发现”。零评论的正常评审产出的是普通空数组 `[]`。
+没有合格文件可评审。`files_reviewed` 不是顶层字段——它在 `summary` 下面，此路径下读作
+`0`；`comments` 才是顶层的 `[]`。同一个对象还带 `"status": "skipped"`、
+`"message": "Review skipped: no items were selected."`，以及一个 `terminal_state`
+为 `"skipped"`、`coverage` 各数组全空的 `manifest`。
+
+评审过文件但无发现的正常评审同样返回**带 `comments: []` 的 JSON 对象**：
+`summary.files_reviewed` 是实际评审的文件数，`status` 为 `"complete"`，`message` 读作
+`"Review complete: 0 finding(s) across N selected item(s)."`。不同运行的可选顶层字段
+可能不同，因此不要依赖对象形状或某个可选 key 的存在来区分；对于带 manifest 的 review 输出，
+应使用 `summary.files_reviewed` 或 `manifest.terminal_state`。调用方同时必须允许下述
+manifest-less 路径里 `summary` 和 `manifest` 都不存在。`review --format json` 永远向
+stdout 写出恰好一个 JSON 对象，绝不会是裸数组。
+
+manifest-less 的 no-files 路径更精简：它同时省略 `summary` 和 `manifest`，但仍会报告
+`"status": "skipped"`、`"message": "No supported files changed."` 以及
+`"comments": []`，并且 `tool_calls` 始终存在。`ocr scan` 总是 manifest-less；当它满足
+no-files 条件时会走这一路径。`ocr review` 在 manifest 构造失败且满足 no-files 条件时
+也可能进入同一路径。`llm`、`trace_id` 等可选元数据可能出现。
 
 ### 会话 JSONL 在哪？
 
@@ -250,8 +266,11 @@ metrics 体系——见[遥测](../telemetry/)。
 
 常见因素：
 
-- 文件 ≥ 50 行（或多文件组合计 ≥ 100 行）时 plan 阶段开启。它每组多一次 LLM 调用。
-  降低阈值可减少成本；升高阈值可提升小 PR 的速度。
+- 文件 ≥ 50 行（或多文件组合计 ≥ 100 行）时 plan 阶段开启。它每组多一次 LLM 调用，
+  所以**调高**这些阈值才省钱；调低会让更多组进入规划、反而更贵。两个阈值在 `0` 上
+  行为不同：`PLAN_MODE_LINE_THRESHOLD` 为 `0` 或负数意味着*恒定规划*，是最贵的设置；
+  而 `PLAN_MODE_GROUP_LINE_THRESHOLD` 为 `0` 会关掉分组闸门。只有当该闸门原本会是
+  唯一触发条件时，这才会省下一次 plan 调用。触发条件见上文“plan 阶段花了很久而文件很小”。
 - main 循环默认跑 2 轮（`medium` 档）。用 `--effort low` 只跑 1 轮可近似减半评审
   成本；`--effort high`（3 轮）召回更高但更贵。
 - `MAX_TOOL_REQUEST_TIMES = 100` 很宽松。用满轮数的模型会产出比 3 轮就完成的模型
