@@ -33,9 +33,26 @@ inputs:
   llm_extra_body:
     description: >-
       extra_body JSON for LLM requests. No env var exists for this, so it is
-      written via `ocr config set llm.extra_body`.
+      written via `ocr config set llm.extra_body`. The default disables
+      thinking mode for compatibility with various LLM providers; override it
+      with provider-specific JSON when a model needs different behavior. An
+      explicit reasoning_effort key here wins over the llm_reasoning_effort
+      input.
     required: false
     default: '{"thinking": {"type": "disabled"}}'
+  llm_reasoning_effort:
+    description: >-
+      Reasoning depth for the model (one of: minimal, low, medium, high, max;
+      case-insensitive), merged into the request body as reasoning_effort via
+      llm.extra_body — no CLI support beyond the published versions is needed.
+      OpenAI-compatible protocols only (e.g. GLM-5.x, OpenAI reasoning
+      models); the Anthropic API rejects unknown body fields, so the action
+      fails fast when this is set on the Anthropic protocol — steer Anthropic
+      thinking through an explicit llm_extra_body key instead. Empty
+      (default) sends nothing. An explicit reasoning_effort key in
+      llm_extra_body wins over this input.
+    required: false
+    default: ''
   language:
     description: >-
       Review output language, written via `ocr config set language`
@@ -67,6 +84,30 @@ inputs:
   rule:
     description: Path to a custom rules JSON file passed to `ocr review --rule`.
     required: false
+  effort:
+    description: >-
+      Review effort preset passed to `ocr review --effort`. One of: low,
+      medium, high (case-insensitive). Empty keeps the CLI default (the
+      configured value, or medium). Requires OpenCodeReview v1.10.0 or newer.
+    required: false
+    default: ''
+  max_tokens_budget:
+    description: >-
+      Total token cap passed to `ocr review --max-tokens-budget`. Base-10
+      integer; empty or 0 means unlimited. Once the cap is exceeded, dispatch
+      stops, skipped files are reported as failed(budget), partial results
+      are still published, and the review exits 0.
+    required: false
+    default: ''
+  stream_progress:
+    description: >-
+      Stream live [ocr] review progress to the workflow log (human audience
+      on stderr) instead of staying silent until the run finishes. One of:
+      true, false (case-insensitive); empty falls back to false. false
+      (default) keeps the silent agent-audience run with stderr captured to
+      a log file. Requires OpenCodeReview v1.9.8 or newer when enabled.
+    required: false
+    default: 'false'
   upload_artifacts:
     description: >-
       Upload raw JSON result and stderr as workflow artifacts. Must be the
@@ -316,9 +357,13 @@ runs:
         echo "MERGE_BASE=$MERGE_BASE" >> "$GITHUB_ENV"
         echo "Reviewing ${HEAD_SHA} from merge-base ${MERGE_BASE} (base origin/${BASE_REF})"
 
-    - name: Validate review_task_timeout
+    - name: Validate inputs
       env:
         REVIEW_TASK_TIMEOUT: ${{ inputs.review_task_timeout }}
+        EFFORT_INPUT: ${{ inputs.effort }}
+        MAX_TOKENS_BUDGET_INPUT: ${{ inputs.max_tokens_budget }}
+        LLM_REASONING_EFFORT_INPUT: ${{ inputs.llm_reasoning_effort }}
+        STREAM_PROGRESS_INPUT: ${{ inputs.stream_progress }}
       shell: bash
       run: |
         if [[ ! "$REVIEW_TASK_TIMEOUT" =~ ^[0-9]+$ ]]; then
@@ -339,6 +384,65 @@ runs:
           exit 1
         fi
         echo "REVIEW_TASK_TIMEOUT=$REVIEW_TASK_TIMEOUT_NUMBER" >> "$GITHUB_ENV"
+
+        # Empty keeps the CLI default; otherwise one of the named presets.
+        # Normalized to lowercase so the Run step appends a value `ocr review
+        # --effort` accepts verbatim.
+        NORMALIZED_EFFORT="$(printf '%s' "$EFFORT_INPUT" | tr '[:upper:]' '[:lower:]')"
+        case "$NORMALIZED_EFFORT" in
+          ""|low|medium|high) ;;
+          *)
+            echo "::error::effort must be one of: low, medium, high (got '$EFFORT_INPUT')"
+            exit 1
+            ;;
+        esac
+        echo "EFFORT=$NORMALIZED_EFFORT" >> "$GITHUB_ENV"
+
+        # Empty or 0 means unlimited; both normalize to empty so the Run step
+        # simply omits the flag.
+        NORMALIZED_MAX_TOKENS_BUDGET="$MAX_TOKENS_BUDGET_INPUT"
+        if [[ -n "$NORMALIZED_MAX_TOKENS_BUDGET" ]]; then
+          if [[ ! "$NORMALIZED_MAX_TOKENS_BUDGET" =~ ^[0-9]+$ ]]; then
+            echo "::error::max_tokens_budget must be a base-10 integer >= 0 (empty or 0 = unlimited)"
+            exit 1
+          fi
+          while [[ "$NORMALIZED_MAX_TOKENS_BUDGET" == 0* && "$NORMALIZED_MAX_TOKENS_BUDGET" != "0" ]]; do
+            NORMALIZED_MAX_TOKENS_BUDGET="${NORMALIZED_MAX_TOKENS_BUDGET#0}"
+          done
+          if [[ "$NORMALIZED_MAX_TOKENS_BUDGET" == "0" ]]; then
+            NORMALIZED_MAX_TOKENS_BUDGET=""
+          fi
+        fi
+        echo "MAX_TOKENS_BUDGET=$NORMALIZED_MAX_TOKENS_BUDGET" >> "$GITHUB_ENV"
+
+        # Empty leaves the request body untouched; otherwise the union of the
+        # OpenAI and GLM vocabularies, normalized to lowercase for the
+        # extra_body injection in the Configure OCR step (which uses node,
+        # guaranteed on PATH by the Actions runtime).
+        NORMALIZED_LLM_REASONING_EFFORT="$(printf '%s' "$LLM_REASONING_EFFORT_INPUT" | tr '[:upper:]' '[:lower:]')"
+        case "$NORMALIZED_LLM_REASONING_EFFORT" in
+          ""|minimal|low|medium|high|max) ;;
+          *)
+            echo "::error::llm_reasoning_effort must be one of: minimal, low, medium, high, max (got '$LLM_REASONING_EFFORT_INPUT')"
+            exit 1
+            ;;
+        esac
+        echo "LLM_REASONING_EFFORT=$NORMALIZED_LLM_REASONING_EFFORT" >> "$GITHUB_ENV"
+
+        # Display-only toggle: 'true' streams human-audience progress lines to
+        # the workflow log, 'false' keeps the silent agent-audience run. It
+        # changes nothing the review would say, so it stays out of the
+        # checkpoint config fingerprint.
+        NORMALIZED_STREAM_PROGRESS="$(printf '%s' "$STREAM_PROGRESS_INPUT" | tr '[:upper:]' '[:lower:]')"
+        case "$NORMALIZED_STREAM_PROGRESS" in
+          "") NORMALIZED_STREAM_PROGRESS=false ;;
+          true|false) ;;
+          *)
+            echo "::error::stream_progress must be one of: true, false (got '$STREAM_PROGRESS_INPUT')"
+            exit 1
+            ;;
+        esac
+        echo "STREAM_PROGRESS=$NORMALIZED_STREAM_PROGRESS" >> "$GITHUB_ENV"
 
     - name: Install OpenCodeReview
       shell: bash
@@ -364,6 +468,26 @@ runs:
           (( OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR < 9 )) ||
           (( OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR == 9 && OCR_VERSION_PATCH < 6 )); then
           echo "::error::Installed OpenCodeReview ${OCR_VERSION_LINE} is unsupported; v1.9.6 or newer is required"
+          exit 1
+        fi
+
+        # --effort was introduced in v1.10.0; reject an explicit effort input
+        # on older releases instead of letting the CLI fail on an unknown flag.
+        # max_tokens_budget predates the v1.9.6 floor and llm_reasoning_effort
+        # rides extra_body, so neither needs a gate.
+        if [ -n "${EFFORT:-}" ] &&
+          (( OCR_VERSION_MAJOR < 1 || (OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR < 10) )); then
+          echo "::error::The effort input requires OpenCodeReview v1.10.0 or newer"
+          exit 1
+        fi
+
+        # Human-audience progress only moved to stderr in v1.9.8 (66d71b2); on
+        # older releases stream_progress drops --audience agent and progress
+        # lines interleave into the stdout JSON, corrupting the result file.
+        if [ "${STREAM_PROGRESS:-false}" = "true" ] &&
+          (( OCR_VERSION_MAJOR < 1 || (OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR < 9) ||
+             (OCR_VERSION_MAJOR == 1 && OCR_VERSION_MINOR == 9 && OCR_VERSION_PATCH < 8) )); then
+          echo "::error::The stream_progress input requires OpenCodeReview v1.9.8 or newer"
           exit 1
         fi
 
@@ -396,6 +520,14 @@ runs:
             OCR_LLM_PROTOCOL="openai"
             ;;
         esac
+        # reasoning_effort is OpenAI-compatible vocabulary; the Anthropic API
+        # rejects unknown body fields, so fail fast instead of breaking every
+        # request. Anthropic thinking control goes through an explicit
+        # llm_extra_body key instead.
+        if [ -n "${LLM_REASONING_EFFORT:-}" ] && [ "$OCR_LLM_PROTOCOL" = "anthropic" ]; then
+          echo "::error::llm_reasoning_effort is supported only with OpenAI-compatible protocols"
+          exit 1
+        fi
         ocr config unset provider
         ocr config set llm.auth_token ""
         ocr config set llm.extra_headers ""
@@ -406,7 +538,37 @@ runs:
         ocr config set llm.protocol "$OCR_LLM_PROTOCOL"
         ocr config set llm.auth_header "$OCR_LLM_AUTH_HEADER"
         ocr config set llm.auth_token_cmd 'printf "%s" "$OCR_LLM_TOKEN"'
-        ocr config set llm.extra_body "$OCR_EXTRA_BODY"
+        # reasoning_effort rides the existing extra_body merge, so any
+        # published CLI version supports it. An explicit reasoning_effort key
+        # in llm_extra_body wins over the input — the hand-written body is the
+        # more specific intent. The value was validated and normalized by the
+        # Validate inputs step. node (not jq) does the merge: the Actions
+        # runtime guarantees node on PATH even inside container jobs, while jq
+        # is only preinstalled on GitHub-hosted images. An explicitly empty
+        # extra_body parses as an empty object so the merge still lands.
+        EFFECTIVE_EXTRA_BODY="$OCR_EXTRA_BODY"
+        if [ -n "${LLM_REASONING_EFFORT:-}" ]; then
+          EFFECTIVE_EXTRA_BODY="$(printf '%s' "$EFFECTIVE_EXTRA_BODY" | node -e '
+            let raw = "";
+            process.stdin.on("data", (chunk) => (raw += chunk)).on("end", () => {
+              let body;
+              try {
+                body = raw ? JSON.parse(raw) : {};
+              } catch (error) {
+                // stderr escapes the command substitution, so the workflow
+                // command reaches the log; the non-zero exit fails the step.
+                console.error(`::error::llm_extra_body is not valid JSON: ${error.message}`);
+                process.exit(1);
+              }
+              if (body === null || typeof body !== "object" || Array.isArray(body)) {
+                console.error("::error::llm_extra_body must be a JSON object");
+                process.exit(1);
+              }
+              if (body.reasoning_effort === undefined) body.reasoning_effort = process.env.LLM_REASONING_EFFORT;
+              process.stdout.write(JSON.stringify(body));
+            });')"
+        fi
+        ocr config set llm.extra_body "$EFFECTIVE_EXTRA_BODY"
         ocr config set language "$OCR_LANGUAGE"
 
     - name: Resolve review range
@@ -445,10 +607,16 @@ runs:
         OCR_FP_LLM_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
         OCR_FP_LANGUAGE: ${{ inputs.language }}
         OCR_FP_LLM_EXTRA_BODY: ${{ inputs.llm_extra_body }}
+        OCR_FP_LLM_REASONING_EFFORT: ${{ inputs.llm_reasoning_effort }}
         OCR_FP_LLM_AUTH_HEADER: ${{ inputs.llm_auth_header }}
         # A timeout change shifts which runs finish and which are cut short, so
         # it shifts the partial/complete distribution the checkpoint gates on.
         OCR_FP_LLM_TIMEOUT: ${{ inputs.llm_timeout }}
+        # Effort shifts how many rounds a review runs and the budget caps how
+        # much it may spend; both change what a review would say, so both
+        # invalidate the checkpoint.
+        OCR_FP_EFFORT: ${{ inputs.effort }}
+        OCR_FP_MAX_TOKENS_BUDGET: ${{ inputs.max_tokens_budget }}
         # Extra headers can point the same `llm_model` string at a different
         # backend model or a different provider entirely, so they change what a
         # review would say and must invalidate the checkpoint. Their VALUES can
@@ -577,8 +745,11 @@ runs:
                 process.env.OCR_FP_LLM_USE_ANTHROPIC,
                 process.env.OCR_FP_LANGUAGE,
                 process.env.OCR_FP_LLM_EXTRA_BODY,
+                process.env.OCR_FP_LLM_REASONING_EFFORT,
                 process.env.OCR_FP_LLM_AUTH_HEADER,
                 process.env.OCR_FP_LLM_TIMEOUT,
+                process.env.OCR_FP_EFFORT,
+                process.env.OCR_FP_MAX_TOKENS_BUDGET,
                 extraHeadersDigest,
                 process.env.OCR_FP_RULE,
                 process.env.OCR_FP_ROUTE_SEVERITY_BELOW,
@@ -662,16 +833,39 @@ runs:
       run: |
         export OCR_LLM_TIMEOUT="${OCR_LLM_TIMEOUT:-300}"
         if [ -z "${REVIEW_TASK_TIMEOUT:-}" ]; then
-          echo "::error::Validated review_task_timeout is missing; the timeout validation step must complete first"
+          echo "::error::Validated review_task_timeout is missing; the Validate inputs step must complete first"
           exit 1
         fi
-        ARGS=(--from "${RANGE_FROM:-$MERGE_BASE}" --to "${HEAD_SHA}" --audience agent --format json --timeout "$REVIEW_TASK_TIMEOUT")
+        ARGS=(--from "${RANGE_FROM:-$MERGE_BASE}" --to "${HEAD_SHA}")
+        # stream_progress 'false' (default): agent audience, stderr captured to
+        # the log file without a live tee. Opt-in 'true': no --audience agent,
+        # so human-audience routing sends [ocr] progress lines to stderr; a
+        # FIFO feeds a background tee so progress streams live into the
+        # workflow log while still landing in the file for artifacts and the
+        # posting step. The tee is a real background job rather than process
+        # substitution so `wait` below guarantees the file is fully flushed
+        # before anything reads it. Neither mode disturbs $?.
+        [ "${STREAM_PROGRESS:-false}" = "true" ] || ARGS+=(--audience agent)
+        ARGS+=(--format json --timeout "$REVIEW_TASK_TIMEOUT")
         [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
         [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")
+        [ -n "${EFFORT:-}" ] && ARGS+=(--effort "$EFFORT")
+        [ -n "${MAX_TOKENS_BUDGET:-}" ] && ARGS+=(--max-tokens-budget "$MAX_TOKENS_BUDGET")
         set +e
-        ocr review "${ARGS[@]}" > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log
-        OCR_EXIT_CODE=$?
+        if [ "${STREAM_PROGRESS:-false}" = "true" ]; then
+          OCR_STDERR_FIFO="$(mktemp -u)"
+          mkfifo "$OCR_STDERR_FIFO" || exit 1
+          tee /tmp/ocr-stderr.log < "$OCR_STDERR_FIFO" >&2 &
+          TEE_PID=$!
+          ocr review "${ARGS[@]}" > /tmp/ocr-result.json 2> "$OCR_STDERR_FIFO"
+          OCR_EXIT_CODE=$?
+          wait "$TEE_PID"
+          rm -f "$OCR_STDERR_FIFO"
+        else
+          ocr review "${ARGS[@]}" > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log
+          OCR_EXIT_CODE=$?
+        fi
         set -e
         echo "OCR_EXIT_CODE=$OCR_EXIT_CODE" >> "$GITHUB_ENV"
         echo "=== OCR result ==="

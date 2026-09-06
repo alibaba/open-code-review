@@ -72,6 +72,34 @@ curl -o .github/workflows/ocr-review.yml \
 > `ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'`
 > も実行され、このフィールドをサポートしない LLM プロバイダー向けに thinking-mode リクエストをオフにします。プロバイダーが thinking-mode を維持する必要がある場合は、その行を削除してください。
 
+### アクションの入力
+
+上流のワークフローは、`uses: alibaba/open-code-review@main` を通じてレビューを再利用可能なコンポジットアクション（[`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)）に委譲しています。上記の認証情報に加えて、以下の入力でレビュー自体を調整できます——アクションステップの `with:` に指定してください。
+
+| 入力 | デフォルト | 説明 |
+|---|---|---|
+| `effort` | `''` | `ocr review --effort` に渡すレビュー強度プリセット：`low`、`medium`、`high`（大文字小文字を区別しません）。空の場合は CLI のデフォルト（設定済みの値、なければ medium）を使います。OCR v1.10.0 以降が必要で、それより古いバージョンではアクションが明確なエラーで早期に失敗します。 |
+| `max_tokens_budget` | `''` | `ocr review --max-tokens-budget` に渡すトークン総量（入力 + 出力）の上限。空または `'0'` は無制限です。上限を超えるとディスパッチが停止し、スキップされたファイルは `failed(budget)` として報告され、部分的な結果は引き続き公開され、レビューは 0 で終了します。 |
+| `llm_reasoning_effort` | `''` | `reasoning_effort` リクエストフィールドを調整できるモデル（GLM-5.x、OpenAI reasoning モデルなど）の推論深度：`minimal`、`low`、`medium`、`high`、`max`（大文字小文字を区別しません）。`llm_extra_body` 経由でリクエストボディにマージされるため、公開済みのすべての CLI バージョンで動作します。`llm_extra_body` 内の明示的な `reasoning_effort` キーがこの入力より優先されます。空（デフォルト）の場合は送信しません。OpenAI 互換プロトコル専用です——Anthropic API は未知のボディフィールドを拒否するため、そのプロトコルではアクションが即座に失敗します。Anthropic の thinking 制御には `llm_extra_body` の明示的なキーを使ってください。 |
+| `stream_progress` | `'false'` | `'true'` にすると、レビューが終了するまで沈黙する代わりに、`[ocr]` の進捗行をワークフローログへライブで流します（stderr の human audience）。表示のみの切り替えで、stderr は引き続きファイルにキャプチャされ、アーティファクトとコメント投稿に使われます。 |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_url: ${{ secrets.OCR_LLM_URL }}
+    llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+    llm_model: ${{ vars.OCR_LLM_MODEL }}
+    llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+    effort: high
+    max_tokens_budget: '10000000'
+    llm_reasoning_effort: low
+    stream_progress: 'true'
+```
+
+入力の完全な一覧は
+[`action.yml`](https://github.com/alibaba/open-code-review/blob/main/action.yml)
+を参照してください——投稿モード（`sticky_summary`、`incremental`）、重要度/カテゴリのルーティング、プッシュをまたぐチェックポイントなどを含みます。
+
 ### カスタマイズ
 
 以下はすべて、あなたがコピーしたばかりのワークフローファイル

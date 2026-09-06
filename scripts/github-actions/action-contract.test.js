@@ -570,6 +570,434 @@ function testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps() {
   }
 }
 
+function testValidateInputsRejectsInvalidEffortAndBudget() {
+  const validation = validationStep();
+  assert.ok(validation, "action.yml must retain input validation");
+  const cases = [
+    [{ effort: "extreme" }, /effort must be one of/],
+    [{ effort: "max" }, /effort must be one of/],
+    [{ max_tokens_budget: "-5" }, /max_tokens_budget must be/],
+    [{ max_tokens_budget: "10.5" }, /max_tokens_budget must be/],
+    [{ max_tokens_budget: "abc" }, /max_tokens_budget must be/],
+  ];
+  for (const [overrides, pattern] of cases) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues(overrides), fixture);
+      assert.notStrictEqual(
+        result.status,
+        0,
+        `inputs ${JSON.stringify(overrides)} should be rejected; ${resultDescription(result)}`
+      );
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        pattern,
+        `rejection for ${JSON.stringify(overrides)} must name the offending input; ${resultDescription(result)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
+function testEffortAndBudgetNormalizeAndForwardAcrossSteps() {
+  const validation = validationStep();
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(validation, "action.yml must retain input validation");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      effort: "HIGH",
+      max_tokens_budget: "010000",
+      llm_url: "https://llm.example.invalid/v1",
+      llm_auth_token: "unused-token",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+    });
+    const validationResult = runStep(validation, values, fixture);
+    assert.strictEqual(validationResult.status, 0, `validation failed; ${resultDescription(validationResult)}`);
+    const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+    assert.strictEqual(exported.EFFORT, "high", "validation must export lowercase effort");
+    assert.strictEqual(
+      exported.MAX_TOKENS_BUDGET,
+      "10000",
+      "validation must export normalized decimal max_tokens_budget"
+    );
+    const result = runStep(
+      run,
+      values,
+      fixture,
+      {
+        MERGE_BASE: "base-sha",
+        HEAD_SHA: "head-sha",
+        REVIEW_TASK_TIMEOUT: exported.REVIEW_TASK_TIMEOUT,
+        EFFORT: exported.EFFORT,
+        MAX_TOKENS_BUDGET: exported.MAX_TOKENS_BUDGET,
+      },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    const effortIndex = reviewCall.args.indexOf("--effort");
+    assert.ok(effortIndex >= 0, "Run OpenCodeReview must forward --effort");
+    assert.strictEqual(reviewCall.args[effortIndex + 1], "high");
+    const budgetIndex = reviewCall.args.indexOf("--max-tokens-budget");
+    assert.ok(budgetIndex >= 0, "Run OpenCodeReview must forward --max-tokens-budget");
+    assert.strictEqual(reviewCall.args[budgetIndex + 1], "10000");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testZeroMaxTokensBudgetNormalizesToUnlimited() {
+  const validation = validationStep();
+  assert.ok(validation, "action.yml must retain input validation");
+  const fixture = makeFixture();
+  try {
+    const result = runStep(validation, inputValues({ max_tokens_budget: "0" }), fixture);
+    assert.strictEqual(result.status, 0, `validation failed; ${resultDescription(result)}`);
+    const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+    assert.strictEqual(exported.MAX_TOKENS_BUDGET, "", "max_tokens_budget=0 must normalize to unlimited (empty)");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testEmptyEffortAndBudgetOmitTheFlags() {
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_auth_token: "unused-token",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+    });
+    const result = runStep(
+      run,
+      values,
+      fixture,
+      {
+        MERGE_BASE: "base-sha",
+        HEAD_SHA: "head-sha",
+        REVIEW_TASK_TIMEOUT: "15",
+        EFFORT: "",
+        MAX_TOKENS_BUDGET: "",
+      },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    assert.ok(!reviewCall.args.includes("--effort"), "empty effort must omit --effort so the CLI default applies");
+    assert.ok(
+      !reviewCall.args.includes("--max-tokens-budget"),
+      "empty max_tokens_budget must omit --max-tokens-budget so the CLI default applies"
+    );
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testValidateInputsRejectsInvalidReasoningEffort() {
+  const validation = validationStep();
+  assert.ok(validation, "action.yml must retain input validation");
+  for (const value of ["extreme", "1", "reasoning"]) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues({ llm_reasoning_effort: value }), fixture);
+      assert.notStrictEqual(
+        result.status,
+        0,
+        `llm_reasoning_effort=${JSON.stringify(value)} should be rejected; ${resultDescription(result)}`
+      );
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        /llm_reasoning_effort must be one of/,
+        `rejection for llm_reasoning_effort=${JSON.stringify(value)} must name the input; ${resultDescription(result)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+  const fixture = makeFixture();
+  try {
+    const result = runStep(validation, inputValues({ llm_reasoning_effort: "MAX" }), fixture);
+    assert.strictEqual(result.status, 0, `llm_reasoning_effort=MAX should be accepted; ${resultDescription(result)}`);
+    const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+    assert.strictEqual(exported.LLM_REASONING_EFFORT, "max", "validation must export lowercase llm_reasoning_effort");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testStreamProgressInputDefaultsToFalse() {
+  assert.ok(INPUTS.stream_progress, "action.yml must define the stream_progress input");
+  assert.strictEqual(
+    INPUTS.stream_progress.default,
+    "false",
+    "stream_progress must default to 'false' so live progress stays opt-in"
+  );
+  const inputBlock = ACTION_TEXT.match(
+    /^  stream_progress:\s*$([\s\S]*?)(?=^  [A-Za-z0-9_]+:\s*$|^outputs:|^runs:)/m
+  );
+  assert.ok(inputBlock, "action.yml must expose stream_progress metadata");
+  assert.match(inputBlock[1], /\[ocr\].*progress|progress.*\[ocr\]/i, "stream_progress must describe the [ocr] progress lines");
+}
+
+function testValidateInputsValidatesStreamProgress() {
+  const validation = validationStep();
+  assert.ok(validation, "action.yml must retain input validation");
+  for (const value of ["yes", "1", "on"]) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues({ stream_progress: value }), fixture);
+      assert.notStrictEqual(
+        result.status,
+        0,
+        `stream_progress=${JSON.stringify(value)} should be rejected; ${resultDescription(result)}`
+      );
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        /stream_progress must be one of/,
+        `rejection for stream_progress=${JSON.stringify(value)} must name the input; ${resultDescription(result)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+  const acceptance = [
+    ["TRUE", "true"],
+    ["", "false"],
+  ];
+  for (const [value, expected] of acceptance) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(validation, inputValues({ stream_progress: value }), fixture);
+      assert.strictEqual(result.status, 0, `stream_progress=${JSON.stringify(value)} should be accepted; ${resultDescription(result)}`);
+      const exported = readEnvAssignments(path.join(fixture.dir, "github-env"));
+      assert.strictEqual(
+        exported.STREAM_PROGRESS,
+        expected,
+        `validation must export ${JSON.stringify(expected)} for stream_progress=${JSON.stringify(value)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
+function testRunKeepsAgentAudienceAndLogFileByDefault() {
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  assert.match(
+    run.run,
+    /STREAM_PROGRESS:-false\}" = "true" \]; then\s+OCR_STDERR_FIFO="\$\(mktemp -u\)"\s+mkfifo "\$OCR_STDERR_FIFO" \|\| exit 1\s+tee \/tmp\/ocr-stderr\.log < "\$OCR_STDERR_FIFO" >&2 &\s+TEE_PID=\$!\s+ocr review "\$\{ARGS\[@\]\}" > \/tmp\/ocr-result\.json 2> "\$OCR_STDERR_FIFO"\s+OCR_EXIT_CODE=\$\?\s+wait "\$TEE_PID"\s+rm -f "\$OCR_STDERR_FIFO"\s+else\s+ocr review "\$\{ARGS\[@\]\}" > \/tmp\/ocr-result\.json 2>\/tmp\/ocr-stderr\.log/,
+    "the live-tee path must be gated on stream_progress, flush the FIFO-fed tee via wait, and the default path must redirect stderr to the log file"
+  );
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_auth_token: "unused-token",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+    });
+    const result = runStep(
+      run,
+      values,
+      fixture,
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15" },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    const audienceIndex = reviewCall.args.indexOf("--audience");
+    assert.ok(audienceIndex >= 0, "the default path must keep --audience agent");
+    assert.strictEqual(reviewCall.args[audienceIndex + 1], "agent");
+    assert.ok(fs.existsSync(fixture.stderrPath), "the default path must still capture stderr to the log file");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testRunStreamsProgressWhenOptedIn() {
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_auth_token: "unused-token",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+    });
+    const result = runStep(
+      run,
+      values,
+      fixture,
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: "15", STREAM_PROGRESS: "true" },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    assert.ok(!reviewCall.args.includes("--audience"), "stream_progress=true must drop --audience agent");
+    assert.ok(fs.existsSync(fixture.stderrPath), "the streaming path must still capture stderr to the log file");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testLlmExtraBodyDefaultDisablesThinking() {
+  assert.ok(INPUTS.llm_extra_body, "action.yml must define the llm_extra_body input");
+  assert.strictEqual(
+    INPUTS.llm_extra_body.default,
+    '{"thinking": {"type": "disabled"}}',
+    "llm_extra_body default must disable thinking mode; enabling it must be an explicit opt-in"
+  );
+}
+
+function testConfigureMergesReasoningEffortIntoExtraBody() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  const baseValues = {
+    llm_url: "https://llm.example.invalid/v1",
+    llm_model: "contract-model",
+    llm_use_anthropic: "false",
+    llm_auth_token: "unused-token",
+  };
+  const cases = [
+    [
+      "the default body disables thinking when nothing is set",
+      {},
+      {},
+      { thinking: { type: "disabled" } },
+    ],
+    [
+      "the effort merges into the default body",
+      {},
+      { LLM_REASONING_EFFORT: "low" },
+      { thinking: { type: "disabled" }, reasoning_effort: "low" },
+    ],
+    [
+      "an explicitly empty extra_body still receives the effort",
+      { llm_extra_body: "" },
+      { LLM_REASONING_EFFORT: "low" },
+      { reasoning_effort: "low" },
+    ],
+    [
+      "an explicit extra_body key wins over the input",
+      { llm_extra_body: '{"reasoning_effort":"high"}' },
+      { LLM_REASONING_EFFORT: "low" },
+      { reasoning_effort: "high" },
+    ],
+    [
+      "merges alongside existing extra_body keys",
+      { llm_extra_body: '{"thinking":{"type":"enabled"}}' },
+      { LLM_REASONING_EFFORT: "max" },
+      { thinking: { type: "enabled" }, reasoning_effort: "max" },
+    ],
+  ];
+  for (const [label, overrides, extraEnv, expected] of cases) {
+    const fixture = makeFixture();
+    try {
+      const values = inputValues(Object.assign({}, baseValues, overrides));
+      const result = runStep(configure, values, fixture, extraEnv);
+      assert.strictEqual(result.status, 0, `Configure OCR failed for "${label}"; ${resultDescription(result)}`);
+      const configured = configValues(readJsonLines(fixture.configPath));
+      const body =
+        typeof configured["llm.extra_body"] === "string"
+          ? JSON.parse(configured["llm.extra_body"])
+          : configured["llm.extra_body"];
+      assert.deepStrictEqual(body, expected, `extra_body mismatch for "${label}"`);
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
+function testConfigureRejectsReasoningEffortOnAnthropic() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_model: "contract-model",
+      llm_use_anthropic: "true",
+      llm_auth_token: "unused-token",
+    });
+    const result = runStep(configure, values, fixture, { LLM_REASONING_EFFORT: "low" });
+    assert.notStrictEqual(result.status, 0, "Configure OCR must reject llm_reasoning_effort on the anthropic protocol");
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /::error::llm_reasoning_effort is supported only with OpenAI-compatible protocols/,
+      `the failure must name the llm_reasoning_effort input; ${resultDescription(result)}`
+    );
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testConfigureRejectsMalformedExtraBodyWithActionableError() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+      llm_auth_token: "unused-token",
+      llm_extra_body: "{not json",
+    });
+    const result = runStep(configure, values, fixture, { LLM_REASONING_EFFORT: "low" });
+    assert.notStrictEqual(result.status, 0, "Configure OCR must fail on malformed llm_extra_body");
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /::error::llm_extra_body is not valid JSON/,
+      `the failure must name the llm_extra_body input; ${resultDescription(result)}`
+    );
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testConfigureRejectsNonObjectExtraBody() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  for (const extraBody of ["null", "[]", "5", '"text"']) {
+    const fixture = makeFixture();
+    try {
+      const values = inputValues({
+        llm_url: "https://llm.example.invalid/v1",
+        llm_model: "contract-model",
+        llm_use_anthropic: "false",
+        llm_auth_token: "unused-token",
+        llm_extra_body: extraBody,
+      });
+      const result = runStep(configure, values, fixture, { LLM_REASONING_EFFORT: "low" });
+      assert.notStrictEqual(
+        result.status,
+        0,
+        `Configure OCR must fail on non-object llm_extra_body=${extraBody}; ${resultDescription(result)}`
+      );
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        /::error::llm_extra_body must be a JSON object/,
+        `the failure must name the llm_extra_body input for ${extraBody}; ${resultDescription(result)}`
+      );
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
 function testConfigureBuildsCompleteLlmConfig() {
   const configure = stepNamed("Configure OCR");
   assert.ok(configure, "action.yml must retain the Configure OCR step");
@@ -889,6 +1317,72 @@ function testOfficialNpmPackageInstallIsPreserved() {
   }
 }
 
+function testInstallRejectsStreamProgressBelowV198() {
+  const install = installStep();
+  assert.ok(install, "action.yml must retain the Install OpenCodeReview step");
+  const cases = [
+    { output: "open-code-review 1.9.7 linux/amd64", streamProgress: "true", valid: false },
+    { output: "open-code-review 1.9.8 linux/amd64", streamProgress: "true", valid: true },
+    { output: "open-code-review v1.10.0 linux/amd64", streamProgress: "true", valid: true },
+    { output: "open-code-review 1.9.7 linux/amd64", streamProgress: "false", valid: true },
+  ];
+  for (const testCase of cases) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(install, inputValues({ ocr_version: "contract-test" }), fixture, {
+        OCR_FAKE_VERSION_OUTPUT: testCase.output,
+        STREAM_PROGRESS: testCase.streamProgress,
+      });
+      const message = `version ${JSON.stringify(testCase.output)} with stream_progress=${JSON.stringify(testCase.streamProgress)}; ${resultDescription(result)}`;
+      if (testCase.valid) {
+        assert.strictEqual(result.status, 0, `should pass: ${message}`);
+      } else {
+        assert.notStrictEqual(result.status, 0, `should fail: ${message}`);
+        assert.match(
+          `${result.stdout}\n${result.stderr}`,
+          /::error::The stream_progress input requires OpenCodeReview v1\.9\.8 or newer/,
+          `the failure must name the stream_progress input and the version floor; ${message}`
+        );
+      }
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
+function testInstallRejectsEffortBelowV1100() {
+  const install = installStep();
+  assert.ok(install, "action.yml must retain the Install OpenCodeReview step");
+  const cases = [
+    { output: "open-code-review 1.9.10 linux/amd64", effort: "low", valid: false },
+    { output: "open-code-review 1.10.0 linux/amd64", effort: "low", valid: true },
+    { output: "open-code-review v2.0.0 linux/amd64", effort: "high", valid: true },
+    { output: "open-code-review 1.9.10 linux/amd64", effort: "", valid: true },
+  ];
+  for (const testCase of cases) {
+    const fixture = makeFixture();
+    try {
+      const result = runStep(install, inputValues({ ocr_version: "contract-test" }), fixture, {
+        OCR_FAKE_VERSION_OUTPUT: testCase.output,
+        EFFORT: testCase.effort,
+      });
+      const message = `version ${JSON.stringify(testCase.output)} with effort=${JSON.stringify(testCase.effort)}; ${resultDescription(result)}`;
+      if (testCase.valid) {
+        assert.strictEqual(result.status, 0, `should pass: ${message}`);
+      } else {
+        assert.notStrictEqual(result.status, 0, `should fail: ${message}`);
+        assert.match(
+          `${result.stdout}\n${result.stderr}`,
+          /::error::The effort input requires OpenCodeReview v1\.10\.0 or newer/,
+          `the failure must name the effort input and the version floor; ${message}`
+        );
+      }
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
 function testInstallEnforcesAuthTokenCommandVersionFloor() {
   const install = installStep();
   assert.ok(install, "action.yml must retain the Install OpenCodeReview step");
@@ -1004,7 +1498,13 @@ function testContractHarnessFailsClosedOnUnsupportedYamlShapes() {
 
 function testRequiredStepTopologyAndEnvironmentContracts() {
   const required = {
-    "Validate review_task_timeout": ["REVIEW_TASK_TIMEOUT"],
+    "Validate inputs": [
+      "REVIEW_TASK_TIMEOUT",
+      "EFFORT_INPUT",
+      "MAX_TOKENS_BUDGET_INPUT",
+      "LLM_REASONING_EFFORT_INPUT",
+      "STREAM_PROGRESS_INPUT",
+    ],
     "Install OpenCodeReview": ["OCR_VERSION"],
     "Configure OCR": [
       "OCR_LLM_URL",
@@ -1097,6 +1597,20 @@ const TESTS = [
   ["default llm_timeout exports independently from review_task_timeout", testDefaultLlmTimeoutExportedSeparatelyFromReviewTimeout],
   ["empty llm_timeout normalizes before review invocation", testEmptyLlmTimeoutNormalizesBeforeReviewInvocation],
   ["review_task_timeout with a leading zero normalizes across steps", testReviewTimeoutLeadingZeroIsNormalizedAcrossSteps],
+  ["effort and max_tokens_budget reject malformed values", testValidateInputsRejectsInvalidEffortAndBudget],
+  ["effort and max_tokens_budget normalize and forward across steps", testEffortAndBudgetNormalizeAndForwardAcrossSteps],
+  ["max_tokens_budget=0 normalizes to unlimited", testZeroMaxTokensBudgetNormalizesToUnlimited],
+  ["empty effort and max_tokens_budget omit the CLI flags", testEmptyEffortAndBudgetOmitTheFlags],
+  ["llm_reasoning_effort rejects values outside the OpenAI/GLM vocabulary", testValidateInputsRejectsInvalidReasoningEffort],
+  ["stream_progress defaults to false and describes [ocr] progress", testStreamProgressInputDefaultsToFalse],
+  ["stream_progress validation accepts true/false case-insensitively", testValidateInputsValidatesStreamProgress],
+  ["Run OpenCodeReview keeps --audience agent and the log file by default", testRunKeepsAgentAudienceAndLogFileByDefault],
+  ["Run OpenCodeReview streams live progress when opted in", testRunStreamsProgressWhenOptedIn],
+  ["llm_extra_body defaults to disabling thinking", testLlmExtraBodyDefaultDisablesThinking],
+  ["Configure OCR merges reasoning_effort into extra_body", testConfigureMergesReasoningEffortIntoExtraBody],
+  ["Configure OCR rejects reasoning_effort on the anthropic protocol", testConfigureRejectsReasoningEffortOnAnthropic],
+  ["Configure OCR rejects malformed extra_body with an actionable error", testConfigureRejectsMalformedExtraBodyWithActionableError],
+  ["Configure OCR rejects a non-object extra_body", testConfigureRejectsNonObjectExtraBody],
   ["Configure OCR builds a complete llm config", testConfigureBuildsCompleteLlmConfig],
   ["Configure OCR never persists the token", testConfigureNeverPersistsToken],
   ["Configure OCR neutralizes stale provider and static token", testConfigureNeutralizesStaleProviderAndStaticToken],
@@ -1108,6 +1622,8 @@ const TESTS = [
   ["Run OpenCodeReview fails closed without validated task timeout", testRunFailsClosedWhenValidatedTaskTimeoutIsMissing],
   ["the official OpenCodeReview NPM install is preserved", testOfficialNpmPackageInstallIsPreserved],
   ["Install OpenCodeReview enforces the auth_token_cmd version floor", testInstallEnforcesAuthTokenCommandVersionFloor],
+  ["Install OpenCodeReview rejects the effort input below v1.10.0", testInstallRejectsEffortBelowV1100],
+  ["Install OpenCodeReview rejects stream_progress below v1.9.8", testInstallRejectsStreamProgressBelowV198],
   ["contract harness fails closed on unsupported YAML shapes", testContractHarnessFailsClosedOnUnsupportedYamlShapes],
   ["required action steps and env contracts are present", testRequiredStepTopologyAndEnvironmentContracts],
   ["GitHub Actions contracts run in a dedicated workflow", testContractsRunInDedicatedWorkflow],
