@@ -361,9 +361,10 @@ ocr scan --exclude '**/generated/*,*.pb.go'
 ```
 
 `ocr scan` 同样接受 `--max-tokens-budget` 与 `--budget-preflight <warn|confirm|abort>`。
-预检会估算排除、大小过滤及可复用的断点续评检查点之后剩余的作业。当估算超过预算时，`warn`
-继续，`confirm` 在启动前询问，`abort` 在创建会话或调用 LLM 之前退出。估算是近似的 token
-用量，并非提供商特有的计费额度。
+`warn` 保持原有的非阻塞行为，不会额外执行 admission preflight。对于 `confirm` 和 `abort`，
+预检只估算经过排除、大小过滤及可复用的断点续评检查点之后，仍需要新 LLM dispatch 的剩余
+作业。当该估算超过预算时，`confirm` 在启动前询问，`abort` 在创建会话或调用 LLM 之前退出。
+估算是近似的 token 用量，并非提供商特有的计费额度。
 
 完整参数列表见 `ocr scan -h`。
 

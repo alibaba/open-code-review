@@ -383,10 +383,12 @@ ocr scan --exclude '**/generated/*,*.pb.go'
 ```
 
 `ocr scan` also accepts `--max-tokens-budget` and
-`--budget-preflight <warn|confirm|abort>`. The preflight estimates the work
-remaining after exclusions, size filtering, and reusable resume checkpoints.
-When the estimate exceeds the budget, `warn` continues, `confirm` asks before
-starting, and `abort` exits before creating a session or calling the LLM.
+`--budget-preflight <warn|confirm|abort>`. `warn` preserves the existing
+non-blocking behavior and does not run the additional admission preflight.
+For `confirm` and `abort`, the admission estimate covers only work that still
+needs a new LLM dispatch after exclusions, size filtering, and reusable resume
+checkpoints. When that estimate exceeds the budget, `confirm` asks before
+starting and `abort` exits before creating a session or calling the LLM.
 The estimate is approximate token usage, not provider-specific billing credits.
 
 See `ocr scan -h` for the full flag list.

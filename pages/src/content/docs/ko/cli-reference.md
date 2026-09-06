@@ -376,10 +376,11 @@ ocr scan --exclude '**/generated/*,*.pb.go'
 ```
 
 `ocr scan`은 `--max-tokens-budget`과 `--budget-preflight <warn|confirm|abort>`도 받습니다.
-사전 점검은 제외 항목, 크기 필터, 재사용 가능한 재개 체크포인트를 적용한 뒤 남은 작업을
-추정합니다. 추정치가 예산을 넘으면 `warn`은 계속 진행하고, `confirm`은 시작 전에 물어보며,
-`abort`는 세션이나 LLM 호출이 만들어지기 전에 종료합니다. 추정치는 대략적인 토큰 사용량일
-뿐 프로바이더별 과금 크레딧이 아닙니다.
+`warn`은 기존의 비차단 동작을 유지하며 추가 admission preflight를 실행하지 않습니다.
+`confirm`과 `abort`에서는 제외 항목, 크기 필터, 재사용 가능한 재개 체크포인트를 적용한 뒤
+새 LLM dispatch가 필요한 남은 작업만 사전에 추정합니다. 그 추정치가 예산을 넘으면 `confirm`은
+시작 전에 물어보고, `abort`는 세션이나 LLM 호출이 만들어지기 전에 종료합니다. 추정치는
+대략적인 토큰 사용량일 뿐 프로바이더별 과금 크레딧이 아닙니다.
 
 전체 플래그 목록은 `ocr scan -h`로 확인하세요.
 
