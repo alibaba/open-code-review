@@ -75,6 +75,10 @@ async function runPostReviewComments({
   stderrPath = "/tmp/ocr-stderr.log",
   stickySummary = true,
   incremental = false,
+  // "bot" = deduplicate only against this token's own comments; "all" = against
+  // every review comment on the PR regardless of author. Case-insensitive;
+  // unknown values behave as "bot".
+  incrementalScope = "bot",
   incrementalOverlapThreshold = DEFAULT_OVERLAP_THRESHOLD,
   reviewCommentBatchSize = DEFAULT_BATCH_SIZE,
   // Fail-open finding-publication controls (#478). Both optional and empty by
@@ -316,13 +320,18 @@ async function runPostReviewComments({
   }
 
   // Incremental filtering (non-destructive): drop current inline comments
-  // whose (path, line range) overlaps an existing bot review comment, so we
-  // only append comments on lines not yet covered. History is never deleted.
+  // whose (path, line range) overlaps an existing review comment, so we only
+  // append comments on lines not yet covered. History is never deleted. The
+  // history is this token's own comments (scope "bot", the default) or every
+  // review comment on the PR (scope "all").
   let toSend = reviewComments;
   if (incremental && reviewComments.length > 0) {
     const existing = await listExistingReviewComments(github, owner, repo, prNumber, log);
-    const botLogin = await getAuthenticatedLogin(github, log);
-    const hist = existing.filter((c) => isBotComment(c, botLogin));
+    let hist = existing;
+    if (String(incrementalScope).trim().toLowerCase() !== "all") {
+      const botLogin = await getAuthenticatedLogin(github, log);
+      hist = existing.filter((c) => isBotComment(c, botLogin));
+    }
     toSend = reviewComments.filter(
       ({ reviewComment }) => !overlapsHistory(reviewComment, hist, incrementalOverlapThreshold)
     );
