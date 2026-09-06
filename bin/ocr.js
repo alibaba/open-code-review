@@ -41,6 +41,13 @@ if (!resolved) {
 }
 const binaryPath = resolved.path;
 
+if (resolved.fromStaged) {
+  const ver = resolved.stagedVersion ? ` (v${resolved.stagedVersion})` : "";
+  process.stderr.write(
+    `\x1b[2m[ocr] Using staged binary${ver}; run npm i -g @alibaba-group/open-code-review to reinstall.\x1b[0m\n`
+  );
+}
+
 const hintFile = path.join(os.homedir(), ".opencodereview", "update-available");
 try {
   const hint = JSON.parse(fs.readFileSync(hintFile, "utf8"));
