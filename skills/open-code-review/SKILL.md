@@ -46,6 +46,7 @@ ocr review --audience agent --background "business context here" [user-args]
 - **Timeout**: effective timeout per review group = `--timeout` × review rounds. Default `--timeout 15` with default effort `medium` (2 rounds) gives 30 minutes; `low`/`high` give 15/45 minutes.
 - **Concurrency**: default concurrency is 8 file workers; reduce with `--concurrency <n>` if rate limits are hit
 - **Preview mode**: use `--preview` or `-p` to preview which files will be reviewed without running the LLM
+- **Output file**: use `--output <path>` or `-o <path>` to write the full result to a file instead of stdout (`-` means stdout)
 - **Installation**: if `ocr` command is not found, install it by running `npm i -g @alibaba-group/open-code-review`
 
 **Common invocation patterns:**
@@ -60,7 +61,7 @@ ocr review --audience agent --background "business context here" [user-args]
 **Output mode:**
 
 - Always use `--audience agent` to suppress progress UI and emit only the final summary
-- **Prevent output truncation**: For large reviews or restricted tool environments, redirect output to a temporary file (`ocr review --audience agent ... > /tmp/ocr_out.txt 2>&1`) and inspect it in full via a file reading tool instead of piping through `tail` or `head`, which drops earlier review comments.
+- **Prevent output truncation**: For large reviews or restricted tool environments, pass `--output /tmp/ocr_out.txt` (`ocr` v1.10.0+) and inspect the file in full via a file reading tool instead of piping stdout through `tail` or `head`, which drops earlier review comments. If the command fails with `unknown flag: --output`, fall back to shell redirection (`> /tmp/ocr_out.txt 2>&1`).
 
 **On failure:** If `ocr review` exits non-zero (e.g. an LLM connection error), do not retry blindly — consult the Troubleshooting section below for the matching fix before re-running.
 
@@ -174,7 +175,7 @@ ocr rules check src/main/java/com/example/Foo.java
 - **Plan phase triggers at 50 lines** — diffs exceeding 50 changed lines run an extra risk-analysis phase before main review. This adds latency but improves quality.
 - **Don't pass `--audience human`** — it streams progress UI that pollutes output. Always use `--audience agent`.
 - **Comment language follows config** — set `language` config to `English` or `Chinese` (default: Chinese) to control review comment language.
-- **Avoid output truncation** — Large review runs produce verbose output. Never pipe command output to `tail` or `head` as it drops review comments from earlier sections. Redirect output to a file and read it in full.
+- **Avoid output truncation** — Large review runs produce verbose output. Never pipe command output to `tail` or `head` as it drops review comments from earlier sections. Use `--output <path>` (shell redirection works on older CLI versions) and read it in full.
 
 ## Validation
 
