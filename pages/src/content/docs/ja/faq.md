@@ -234,9 +234,19 @@ JSON モードでは `warnings` にも表示されます。
 
 ### JSON 出力が `{ "files_reviewed": 0, "comments": [] }`
 
-ワークスペースに対象ファイルがありません。これは意図的なものです——明示的な形により、呼び出し側は
-「レビュー対象がない」ことと「レビューしたファイルに指摘がない」ことを区別できます。コメントが
-ゼロの正常なレビューは、通常の空配列 `[]` を返します。
+レビュー対象のファイルがありません。`files_reviewed` はトップレベルのフィールドではなく `summary` の
+下にあり、この経路では `0` になります。トップレベルの `[]` は `comments` のほうです。同じオブジェクトは
+`"status": "skipped"` と `"message": "Review skipped: no items were selected."`、および
+`terminal_state` が `"skipped"` で `coverage` の各配列が空の `manifest` も含みます。
+
+ファイルをレビューして指摘がなかった場合も、返るのは**同じオブジェクト形状**です。`comments` は引き続き
+`[]` ですが、`summary.files_reviewed` は実際にレビューしたファイル数になり、`status` は `"complete"`、
+`message` は `"Review complete: 0 finding(s) across N selected item(s)."` です。両者は形状ではなく
+`summary.files_reviewed` か `manifest.terminal_state` で区別してください——`review --format json` は
+stdout に必ず JSON オブジェクトを 1 つだけ書き出し、裸の配列にはなりません。
+
+`summary` をまったく持たない、より簡素な `{"status": "skipped", "message": "No supported files
+changed.", "comments": []}` は、`ocr scan` がスキャン対象のないときに出力するものです。
 
 ### セッション JSONL はどこにある？
 
@@ -271,8 +281,12 @@ OTLP exporter に切り替えて metrics 基盤に送ってください——[�
 よくある要因:
 
 - ファイルが 50 行以上（または複数ファイルのグループで合計 100 行以上）のとき plan フェーズが
-  起動します。これはグループごとに LLM 呼び出しを 1 回追加します。閾値を下げるとコストを
-  削減でき、上げると小さな PR の速度を向上できます。
+  起動します。これはグループごとに LLM 呼び出しを 1 回追加するので、コストを下げられるのは閾値を
+  **上げた**ほうです。下げるとより多くのグループが plan を通り、かえって高くなります。2 つの閾値は
+  `0` で挙動が異なります。`PLAN_MODE_LINE_THRESHOLD` が `0` 以下なら*常に plan* となり、これが最も
+  高い設定です。一方 `PLAN_MODE_GROUP_LINE_THRESHOLD` が `0` だとグループ側のゲートが無効になり、
+  これは確かに呼び出しを省けます。起動条件は上の「ファイルが小さいのに plan フェーズに時間がかかる」を
+  参照してください。
 - main ループはデフォルトで 2 ラウンド実行されます（`medium` プリセット）。`--effort low` で
   1 ラウンドにすればレビューコストはおよそ半分になります。`--effort high`（3 ラウンド）は
   recall が上がりますがより高価です。
