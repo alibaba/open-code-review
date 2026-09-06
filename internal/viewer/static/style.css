@@ -318,6 +318,47 @@ h3 {
     word-break: break-all;
     font-size: 1.25rem;
 }
+.page-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+}
+.page-heading h2,
+.session-header .page-heading h2 {
+    min-width: 0;
+    margin: 0;
+}
+.session-header .page-heading {
+    margin-bottom: 0.75rem;
+}
+.back-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    gap: 0.35rem;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 0.75rem;
+    color: var(--text-secondary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+.back-link:hover {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+}
+.back-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
 .meta {
     display: flex;
     flex-wrap: wrap;

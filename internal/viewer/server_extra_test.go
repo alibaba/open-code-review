@@ -156,6 +156,66 @@ func TestRenderTemplate_SessionPage(t *testing.T) {
 	}
 }
 
+func TestRenderTemplate_BackNavigation(t *testing.T) {
+	tests := []struct {
+		name          string
+		template      string
+		data          any
+		wantLink      string
+		wantAriaLabel string
+	}{
+		{
+			name:          "sessions to repositories",
+			template:      "sessions.html",
+			data:          sessionsData{EncodedRepo: "repo", RepoName: "MyRepo"},
+			wantLink:      `class="back-link" href="/"`,
+			wantAriaLabel: `aria-label="Back to repositories"`,
+		},
+		{
+			name:     "session to sessions",
+			template: "session.html",
+			data: sessionPageData{
+				EncodedRepo: "owner%2Frepo",
+				RepoName:    "MyRepo",
+				Session:     &ViewSession{Summary: SessionSummary{SessionID: "abc"}},
+			},
+			wantLink:      `class="back-link" href="/r/owner%2Frepo"`,
+			wantAriaLabel: `aria-label="Back to sessions"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			renderTemplate(rr, tt.template, tt.data)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rr.Code)
+			}
+			body := rr.Body.String()
+			for _, required := range []string{tt.wantLink, tt.wantAriaLabel, `<nav class="breadcrumb">`} {
+				if !strings.Contains(body, required) {
+					t.Errorf("rendered %s missing %q", tt.template, required)
+				}
+			}
+		})
+	}
+}
+
+func TestBackNavigationTouchTarget(t *testing.T) {
+	stylesheet, err := assets.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatalf("read style.css: %v", err)
+	}
+
+	css := string(stylesheet)
+	for _, required := range []string{".back-link {", "min-width: 44px;", "min-height: 44px;"} {
+		if !strings.Contains(css, required) {
+			t.Errorf("back-link styles missing %q", required)
+		}
+	}
+}
+
 func TestRenderTemplate_SecondarySectionsCollapsedByDefault(t *testing.T) {
 	rr := httptest.NewRecorder()
 	vs := &ViewSession{

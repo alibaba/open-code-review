@@ -10,7 +10,10 @@
 <body>
 <nav class="breadcrumb"><a href="/" class="nav-brand"><span class="brand-icon"></span>Open Code Review Viewer</a><span class="sep">/</span><span class="current">{{.RepoName}}</span></nav>
 <main>
-<h2>Sessions: {{.RepoName}}</h2>
+<div class="page-heading">
+    <a class="back-link" href="/" aria-label="Back to repositories"><span aria-hidden="true">&larr;</span> Back</a>
+    <h2>Sessions: {{.RepoName}}</h2>
+</div>
 {{if .Sessions}}
 <table class="table">
     <thead><tr><th>Session ID</th><th>Branch</th><th>Mode</th><th>Model</th><th>Files</th><th>Status</th><th>Comments</th><th>Duration</th><th>Started At</th></tr></thead>
