@@ -93,7 +93,7 @@ Security review: flag hardcoded secrets, unvalidated redirects, and missing auth
 得到 `default.md`。`merge_system_rule` 在全部三个用户层都生效（`--rule`、
 `<repo>/.opencodereview/rule.json`、`~/.opencodereview/rule.json`）。
 
-它只合并**系统**层。多个*用户*条目匹配同一文件时仍按 first-match-wins 解析，
+它只合并**系统**层。多个*用户*条目匹配同一文件时仍按 首个匹配的条目选出 解析，
 匹配层仍遮蔽更低的用户层——`merge_system_rule` 绝不会叠加多条用户规则。
 
 ### glob 能力
