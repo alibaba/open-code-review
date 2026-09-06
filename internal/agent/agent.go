@@ -930,6 +930,7 @@ func (a *Agent) initManifest() {
 		Provider:              a.args.Provider,
 		Model:                 a.args.Model,
 		ConfiguredConcurrency: a.args.MaxConcurrency,
+		MaxToolRequestTimes:   a.args.Template.MaxToolRequestTimes,
 		RuleConfigSHA256:      a.ruleConfigSHA256(),
 		RuntimeConfigSHA256:   a.runtimeConfigSHA256(),
 	})

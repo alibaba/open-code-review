@@ -496,14 +496,21 @@ func TestIdentityAndExecutionFields(t *testing.T) {
 	b.SetParentRunID("run-parent")
 	b.SetRepository(ManifestRepository{IdentitySHA256: "sha256:repo"})
 	b.SetInput(ManifestInput{Mode: InputModeRange, ResolvedBase: "8f6c", ResolvedHead: "c2d1", ExactRange: "8f6c..c2d1"})
-	b.SetExecution(ManifestExecution{Provider: "anthropic", Model: "claude", ConfiguredConcurrency: 16})
+	b.SetExecution(ManifestExecution{Provider: "anthropic", Model: "claude", ConfiguredConcurrency: 16, MaxToolRequestTimes: 75})
 	b.MarkCompleted("a")
 	m := mustFinalize(t, b)
 	if m.ParentRunID != "run-parent" || m.Repository.IdentitySHA256 != "sha256:repo" {
 		t.Fatalf("identity not set: %+v", m)
 	}
-	if m.Input.Mode != InputModeRange || m.Input.ExactRange != "8f6c..c2d1" || m.Execution.ConfiguredConcurrency != 16 {
+	if m.Input.Mode != InputModeRange || m.Input.ExactRange != "8f6c..c2d1" || m.Execution.ConfiguredConcurrency != 16 || m.Execution.MaxToolRequestTimes != 75 {
 		t.Fatalf("input/execution not set: %+v", m)
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if !strings.Contains(string(data), `"max_tool_request_times":75`) {
+		t.Fatalf("serialized manifest missing max_tool_request_times: %s", data)
 	}
 	if m.SchemaVersion != ManifestSchemaVersion || m.RunID != "run-1" || m.Operation != "review" {
 		t.Fatalf("header wrong: %+v", m)

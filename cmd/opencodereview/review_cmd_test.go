@@ -13,6 +13,29 @@ import (
 	"github.com/alibaba/open-code-review/internal/session"
 )
 
+func TestResolveReviewMaxTools(t *testing.T) {
+	tests := []struct {
+		name            string
+		templateDefault int
+		cliValue        int
+		want            int
+	}{
+		{name: "template default", templateDefault: 100, cliValue: 0, want: 100},
+		{name: "minimum override", templateDefault: 100, cliValue: 50, want: 50},
+		{name: "lower override", templateDefault: 100, cliValue: 75, want: 75},
+		{name: "equal override", templateDefault: 100, cliValue: 100, want: 100},
+		{name: "higher override", templateDefault: 100, cliValue: 125, want: 125},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveReviewMaxTools(tt.templateDefault, tt.cliValue); got != tt.want {
+				t.Errorf("resolveReviewMaxTools() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateReviewRefsRejectsOptionLikeCommit(t *testing.T) {
 	err := validateReviewRefs(t.TempDir(), reviewOptions{commit: "-O./pwn.sh"})
 	if err == nil {

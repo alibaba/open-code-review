@@ -168,6 +168,9 @@ func TestManifestFlowCompleteAndPartial(t *testing.T) {
 		if manifest.TerminalState != session.StateComplete || len(manifest.Coverage.Completed) != 1 || len(manifest.Coverage.Failed) != 0 {
 			t.Fatalf("manifest = %+v", manifest)
 		}
+		if manifest.Execution.MaxToolRequestTimes != 5 {
+			t.Fatalf("max_tool_request_times = %d, want 5", manifest.Execution.MaxToolRequestTimes)
+		}
 	})
 
 	t.Run("mixed provider result is partial", func(t *testing.T) {
