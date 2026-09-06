@@ -322,6 +322,7 @@ type ClientConfig struct {
 	ExtraBody    map[string]any    // Vendor-specific fields merged into every request body
 	ExtraHeaders map[string]string // Extra HTTP headers sent with every request
 	RetryCodes   []int             // Additional HTTP status codes that trigger retry
+	MaxRetries   *int              // SDK retry limit; nil preserves the OCR default
 	// SessionKey is the fallback prompt-cache affinity key
 	// for requests whose context carries none (see ContextWithSessionKey).
 	//
@@ -405,6 +406,7 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 		ExtraBody:      ep.ExtraBody,
 		ExtraHeaders:   ep.ExtraHeaders,
 		RetryCodes:     ep.RetryCodes,
+		MaxRetries:     ep.MaxRetries,
 		retryCollector: collector,
 		rawHolder:      raw,
 		AWSProfile:     ep.AWSProfile,
@@ -420,6 +422,15 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder
 	default:
 		return NewOpenAIClient(cfg)
 	}
+}
+
+const defaultLLMMaxRetries = 5
+
+func effectiveMaxRetries(configured *int) int {
+	if configured == nil {
+		return defaultLLMMaxRetries
+	}
+	return *configured
 }
 
 // --- Token counting with tiktoken ---
@@ -516,7 +527,7 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 	opts := []openaiopt.RequestOption{
 		openaiopt.WithAPIKey(cfg.APIKey),
 		openaiopt.WithBaseURL(sdkBaseURL),
-		openaiopt.WithMaxRetries(5),
+		openaiopt.WithMaxRetries(effectiveMaxRetries(cfg.MaxRetries)),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
 	}
@@ -925,7 +936,7 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 
 	opts := []option.RequestOption{
 		option.WithBaseURL(sdkBaseURL),
-		option.WithMaxRetries(5),
+		option.WithMaxRetries(effectiveMaxRetries(cfg.MaxRetries)),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
 	}
@@ -985,7 +996,7 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	// would be overwritten rather than honoured. A custom endpoint (a VPC
 	// endpoint, say) would need to be threaded through the AWS config instead.
 	opts := []option.RequestOption{
-		option.WithMaxRetries(5),
+		option.WithMaxRetries(effectiveMaxRetries(cfg.MaxRetries)),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
 		// Bedrock authenticates by SigV4 signature, added by the middleware
