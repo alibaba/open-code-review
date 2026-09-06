@@ -11,10 +11,10 @@ import (
 	"github.com/alibaba/open-code-review/internal/stdout"
 )
 
-// EstimatePreflight computes the same rough token projection that Run prints
-// before dispatch, without creating a session or issuing any LLM request. It is
-// intended for command-layer admission checks that can reject an expensive scan
-// before NewAgent persists session_start.
+// EstimatePreflight computes the rough token projection for work this run can
+// actually dispatch, without creating a session or issuing any LLM request. It
+// is intended for command-layer admission checks that can reject an expensive
+// scan before NewAgent persists session_start.
 func EstimatePreflight(ctx context.Context, args Args) (Estimate, error) {
 	// Enumeration filters print progress in the normal run. A preflight is an
 	// internal probe and the command layer owns the user-facing budget message,
@@ -32,5 +32,17 @@ func EstimatePreflight(ctx context.Context, args Args) (Estimate, error) {
 	a := &Agent{args: args, items: items}
 	a.items = a.filterScanItems(a.items)
 	a.items = a.filterLargeScans(a.items)
+
+	if args.Resume != nil {
+		pending := a.items[:0]
+		for _, it := range a.items {
+			if _, ok := args.Resume.Item(scanItemFingerprint(it)); ok {
+				continue
+			}
+			pending = append(pending, it)
+		}
+		a.items = pending
+	}
+
 	return estimateCost(a.items, a.planEnabled(), a.dedupEnabled(), a.summaryEnabled()), nil
 }

@@ -8,10 +8,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
-func TestEstimatePreflight(t *testing.T) {
+func initPreflightTestRepo(t *testing.T) (string, string) {
+	t.Helper()
 	repo := t.TempDir()
 	runGit := func(args ...string) {
 		t.Helper()
@@ -37,7 +42,11 @@ func TestEstimatePreflight(t *testing.T) {
 	}
 	runGit("add", "main.go")
 	runGit("commit", "-m", "base")
+	return repo, path
+}
 
+func TestEstimatePreflight(t *testing.T) {
+	repo, path := initPreflightTestRepo(t)
 	if err := os.WriteFile(path, []byte("package main\n\nfunc value() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -54,5 +63,59 @@ func TestEstimatePreflight(t *testing.T) {
 	}
 	if est.TotalTokens != est.InputTokens+est.OutputTokens {
 		t.Fatalf("TotalTokens = %d, input + output = %d", est.TotalTokens, est.InputTokens+est.OutputTokens)
+	}
+}
+
+func TestEstimatePreflightExcludesOversizedDiffs(t *testing.T) {
+	repo, path := initPreflightTestRepo(t)
+	content := "package main\n\n" + strings.Repeat("var value = 1234567890\n", 200)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	est, err := EstimatePreflight(context.Background(), Args{
+		RepoDir:  repo,
+		Template: template.Template{MaxTokens: 64},
+	})
+	if err != nil {
+		t.Fatalf("EstimatePreflight: %v", err)
+	}
+	if est.Files != 0 || est.TotalTokens != 0 {
+		t.Fatalf("oversized diff estimate = %+v, want no dispatchable work", est)
+	}
+}
+
+func TestEstimatePreflightExcludesReusableResumeDiffs(t *testing.T) {
+	repo, path := initPreflightTestRepo(t)
+	if err := os.WriteFile(path, []byte("package main\n\nfunc value() int { return 2 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	probe := &Agent{args: Args{RepoDir: repo}}
+	if err := probe.loadDiffs(context.Background()); err != nil {
+		t.Fatalf("loadDiffs: %v", err)
+	}
+	probe.diffs = probe.filterDiffs(probe.diffs)
+	if len(probe.diffs) != 1 {
+		t.Fatalf("filtered diffs = %d, want 1", len(probe.diffs))
+	}
+	fingerprint := reviewItemFingerprint(probe.reviewMode(), probe.diffs[0])
+	resume := &session.ResumeState{
+		Items: map[string]session.ResumeItem{
+			fingerprint: {Fingerprint: fingerprint},
+		},
+		Manifest: &session.RunManifest{
+			Coverage: session.Coverage{
+				Completed: []session.CoverageItem{{Fingerprint: fingerprint}},
+			},
+		},
+	}
+
+	est, err := EstimatePreflight(context.Background(), Args{RepoDir: repo, Resume: resume})
+	if err != nil {
+		t.Fatalf("EstimatePreflight: %v", err)
+	}
+	if est.Files != 0 || est.TotalTokens != 0 {
+		t.Fatalf("resumed estimate = %+v, want no newly dispatchable work", est)
 	}
 }

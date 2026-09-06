@@ -60,6 +60,18 @@ func normalizeBudgetPreflight(raw string) (string, error) {
 	}
 }
 
+func resolveBudgetPreflightMaxTokens(templateDefault, cliOverride int) (int, error) {
+	cfgPath, err := defaultConfigPath()
+	if err != nil {
+		return 0, err
+	}
+	appCfg, err := LoadAppConfig(cfgPath)
+	if err != nil {
+		return 0, fmt.Errorf("load app config: %w", err)
+	}
+	return resolveMaxTokens(templateDefault, appCfg, cliOverride)
+}
+
 func runReviewBudgetPreflight(cmd *cobra.Command, _ []string) error {
 	policy, err := normalizeBudgetPreflight(reviewBudgetPreflight)
 	if err != nil {
@@ -92,6 +104,21 @@ func runReviewBudgetPreflight(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	resumeState, err := loadReviewResumeState(cc.RepoDir, reviewOpts)
+	if err != nil {
+		return err
+	}
+
+	// Admission must use the same effective max_tokens as the real run because
+	// oversized diffs are excluded against that ceiling before dispatch. Unlike
+	// the old headline warning, confirm/abort can block execution, so estimating
+	// against a different ceiling can produce a false rejection.
+	maxTokens, err := resolveBudgetPreflightMaxTokens(cc.Template.MaxTokens, reviewOpts.maxTokens)
+	if err != nil {
+		return err
+	}
+	cc.Template.MaxTokens = maxTokens
+
 	est, err := agent.EstimatePreflight(cmd.Context(), agent.Args{
 		RepoDir:    cc.RepoDir,
 		From:       reviewOpts.from,
@@ -101,6 +128,7 @@ func runReviewBudgetPreflight(cmd *cobra.Command, _ []string) error {
 		Template:   *cc.Template,
 		FileFilter: cc.FileFilter,
 		GitRunner:  cc.GitRunner,
+		Resume:     resumeState,
 	})
 	if err != nil {
 		return fmt.Errorf("budget preflight: %w", err)
@@ -153,17 +181,15 @@ func runScanBudgetPreflight(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--budget-preflight=%s requires --max-tokens-budget to be greater than 0", policy)
 	}
 
-	// Match the real scan's max_tokens precedence without resolving an LLM
-	// endpoint: the estimate is local-only and needs only the app config value.
-	cfgPath, err := defaultConfigPath()
+	scanPaths := splitPaths(scanOpts.paths)
+	resumeState, err := loadScanResumeState(cc.RepoDir, scanOpts, scanPaths)
 	if err != nil {
 		return err
 	}
-	appCfg, err := LoadAppConfig(cfgPath)
-	if err != nil {
-		return fmt.Errorf("load app config: %w", err)
-	}
-	maxTokens, err := resolveMaxTokens(scanTpl.MaxTokens, appCfg, scanOpts.maxTokens)
+
+	// Match the real scan's max_tokens precedence without resolving an LLM
+	// endpoint: the estimate is local-only and needs only the app config value.
+	maxTokens, err := resolveBudgetPreflightMaxTokens(scanTpl.MaxTokens, scanOpts.maxTokens)
 	if err != nil {
 		return err
 	}
@@ -171,7 +197,7 @@ func runScanBudgetPreflight(cmd *cobra.Command, _ []string) error {
 
 	est, err := scan.EstimatePreflight(cmd.Context(), scan.Args{
 		RepoDir:          cc.RepoDir,
-		Paths:            splitPaths(scanOpts.paths),
+		Paths:            scanPaths,
 		Template:         *scanTpl,
 		FileFilter:       cc.FileFilter,
 		GitRunner:        cc.GitRunner,
@@ -179,6 +205,7 @@ func runScanBudgetPreflight(cmd *cobra.Command, _ []string) error {
 		SkipPlan:         scanOpts.noPlan,
 		SkipDedup:        scanOpts.noDedup,
 		SkipSummary:      scanOpts.noSummary,
+		Resume:           resumeState,
 	})
 	if err != nil {
 		return fmt.Errorf("budget preflight: %w", err)
