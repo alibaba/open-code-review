@@ -4316,6 +4316,12 @@ async function testActionScriptFingerprintCoversRepoLocalRules() {
   assert.notStrictEqual(shifted, shiftedBack, "no input value may shift a fingerprint field boundary");
   const otherVersion = await fingerprint({ OCR_VERSION_ACTUAL: "1.2.4" });
   assert.notStrictEqual(otherVersion, edited, "a changed OCR version must invalidate the checkpoint");
+
+  // The effort preset decides how many review rounds run, so a checkpoint a
+  // `low` run recorded must not let a later `high` run skip the commits it
+  // covered less thoroughly.
+  const otherEffort = await fingerprint({ OCR_FP_EFFORT: "high" });
+  assert.notStrictEqual(otherEffort, edited, "a changed effort preset must invalidate the checkpoint");
 }
 
 // U1. GET /user is 403 ("Resource not accessible by integration") for the

@@ -872,6 +872,200 @@ function testRunFailsClosedWhenValidatedTaskTimeoutIsMissing() {
   }
 }
 
+// --- effort / max_tokens_budget ---
+//
+// Both are optional passthroughs to `ocr review`. "Unset" has to stay
+// distinguishable from "set to something": appending the flag with an empty
+// value would not restore the CLI default, it would hand the CLI an empty
+// argument.
+
+function effortAndBudgetValidationStep() {
+  return stepNamed("Validate effort and max_tokens_budget");
+}
+
+// The Run step needs a validated timeout and a merge base in the environment;
+// these tests care only about the argv it builds from there.
+function reviewCallWith(overrides) {
+  const run = stepNamed("Run OpenCodeReview");
+  assert.ok(run, "action.yml must retain the Run OpenCodeReview step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues(
+      Object.assign(
+        {
+          review_task_timeout: "10",
+          llm_url: "https://llm.example.invalid/v1",
+          llm_auth_token: "unused-token",
+          llm_model: "contract-model",
+          llm_use_anthropic: "false",
+        },
+        overrides
+      )
+    );
+    const result = runStep(
+      run,
+      values,
+      fixture,
+      { MERGE_BASE: "base-sha", HEAD_SHA: "head-sha", REVIEW_TASK_TIMEOUT: values.review_task_timeout },
+      { replaceResultPaths: true }
+    );
+    assert.strictEqual(result.status, 0, `Run OpenCodeReview shell block failed; ${resultDescription(result)}`);
+    const reviewCall = readJsonLines(fixture.callsPath).find((call) => call.args[0] === "review");
+    assert.ok(reviewCall, "Run OpenCodeReview must invoke `ocr review`");
+    return reviewCall;
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+// Every value forwarded for `flag`, so a test can tell "absent" from "present
+// once" from "duplicated" instead of only asserting inclusion.
+function flagValues(args, flag) {
+  const values = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === flag) values.push(args[index + 1]);
+  }
+  return values;
+}
+
+function assertTuningValidation(overrides, expectedValid, expectedMessage) {
+  const step = effortAndBudgetValidationStep();
+  assert.ok(step, "action.yml must validate effort and max_tokens_budget in a dedicated step");
+  const fixture = makeFixture();
+  try {
+    const result = runStep(step, inputValues(overrides), fixture);
+    const description = `${JSON.stringify(overrides)}; ${resultDescription(result)}`;
+    if (expectedValid) {
+      assert.strictEqual(result.status, 0, `value should be accepted; ${description}`);
+    } else {
+      assert.notStrictEqual(result.status, 0, `value should be rejected; ${description}`);
+      assert.match(
+        `${result.stdout}\n${result.stderr}`,
+        expectedMessage,
+        `the rejection must name the input and its accepted values; ${description}`
+      );
+    }
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+function testEffortAndBudgetInputsAreOptional() {
+  for (const name of ["effort", "max_tokens_budget"]) {
+    assert.ok(INPUTS[name], `action.yml must define the ${name} input`);
+    assert.strictEqual(
+      INPUTS[name].default,
+      undefined,
+      `${name} must carry no default, so leaving it unset keeps the CLI's own default`
+    );
+  }
+}
+
+function testUnsetEffortAndBudgetAppendNoFlags() {
+  const reviewCall = reviewCallWith({});
+  for (const flag of ["--effort", "--max-tokens-budget"]) {
+    assert.deepStrictEqual(
+      flagValues(reviewCall.args, flag),
+      [],
+      `an unset input must not append ${flag}; args=${JSON.stringify(reviewCall.args)}`
+    );
+  }
+}
+
+function testEffortAndBudgetForwardedToReviewCommand() {
+  const reviewCall = reviewCallWith({ effort: "high", max_tokens_budget: "120000" });
+  assert.deepStrictEqual(
+    flagValues(reviewCall.args, "--effort"),
+    ["high"],
+    `effort must be forwarded once as --effort; args=${JSON.stringify(reviewCall.args)}`
+  );
+  assert.deepStrictEqual(
+    flagValues(reviewCall.args, "--max-tokens-budget"),
+    ["120000"],
+    `max_tokens_budget must be forwarded once as --max-tokens-budget; args=${JSON.stringify(reviewCall.args)}`
+  );
+}
+
+// 0 is a real value, not a synonym for unset: the CLI documents it as
+// "unlimited", so it is forwarded rather than dropped, and the two paths agree
+// on what the review does.
+function testZeroBudgetIsForwardedVerbatim() {
+  const reviewCall = reviewCallWith({ max_tokens_budget: "0" });
+  assert.deepStrictEqual(
+    flagValues(reviewCall.args, "--max-tokens-budget"),
+    ["0"],
+    `an explicit 0 budget must reach the CLI; args=${JSON.stringify(reviewCall.args)}`
+  );
+}
+
+function testEffortValidationAcceptsThePresets() {
+  // Upper case included: `ocr review` lower-cases the preset itself, so the
+  // action must not be stricter than the flag it forwards to.
+  for (const value of ["", "low", "medium", "high", "HIGH", "Medium"]) {
+    assertTuningValidation({ effort: value }, true);
+  }
+}
+
+function testEffortValidationRejectsUnknownPresets() {
+  for (const value of ["extreme", "lowest", "low medium", " low", "2"]) {
+    assertTuningValidation({ effort: value }, false, /effort must be one of low, medium or high/);
+  }
+}
+
+function testBudgetValidationAcceptsNonNegativeIntegers() {
+  for (const value of ["", "0", "1", "120000"]) {
+    assertTuningValidation({ max_tokens_budget: value }, true);
+  }
+}
+
+function testBudgetValidationRejectsMalformedValues() {
+  // "010" is not a typo in this list: the CLI parses integer flags with a
+  // base-0 strconv, so a leading zero would silently mean octal 8.
+  for (const value of ["-1", "-120000", "1.5", "1e6", "+10", "abc", "12 000", "010"]) {
+    assertTuningValidation(
+      { max_tokens_budget: value },
+      false,
+      /max_tokens_budget must be a non-negative base-10 integer/
+    );
+  }
+}
+
+function testEffortAndBudgetValidationPrecedesNpmInstall() {
+  const validation = effortAndBudgetValidationStep();
+  const install = installStep();
+  assert.ok(validation, "action.yml must validate effort and max_tokens_budget before installation");
+  assert.ok(install, "action.yml must retain an OpenCodeReview installation step");
+  assert.ok(validation.index < install.index, "effort/max_tokens_budget validation must occur before NPM install");
+
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({ effort: "extreme", ocr_version: "contract-test" });
+    const script = `${renderedRun(validation, values)}\n${renderedRun(install, values)}`;
+    const env = Object.assign({}, renderedEnv(validation, values), renderedEnv(install, values));
+    const result = runShell(script, env, fixture);
+    assert.notStrictEqual(result.status, 0, `an invalid effort must stop the action; ${resultDescription(result)}`);
+    assert.deepStrictEqual(readJsonLines(fixture.npmCallsPath), [], "NPM must not run after effort validation fails");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
+// The effort preset changes how many review rounds run, so a checkpoint
+// recorded by a shallower run must not narrow a later, deeper one.
+function testEffortParticipatesInTheCheckpointFingerprint() {
+  const resolve = stepNamed("Resolve review range");
+  assert.ok(resolve, "action.yml must retain the Resolve review range step");
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(resolve.env, "OCR_FP_EFFORT"),
+    "Resolve review range must feed effort into the configuration fingerprint"
+  );
+  assert.match(
+    ACTION_TEXT,
+    /process\.env\.OCR_FP_EFFORT,/,
+    "the fingerprint digest must actually read OCR_FP_EFFORT"
+  );
+}
+
 function testOfficialNpmPackageInstallIsPreserved() {
   const install = installStep();
   assert.ok(install, "action.yml must retain the Install OpenCodeReview step");
@@ -1014,6 +1208,7 @@ function testRequiredStepTopologyAndEnvironmentContracts() {
       "OCR_EXTRA_BODY",
       "OCR_LANGUAGE",
     ],
+    "Validate effort and max_tokens_budget": ["OCR_EFFORT", "OCR_MAX_TOKENS_BUDGET"],
     "Run OpenCodeReview": [
       "OCR_LLM_URL",
       "OCR_LLM_TOKEN",
@@ -1025,6 +1220,8 @@ function testRequiredStepTopologyAndEnvironmentContracts() {
       "OCR_REVIEW_CONCURRENCY",
       "OCR_BACKGROUND",
       "OCR_RULE",
+      "OCR_EFFORT",
+      "OCR_MAX_TOKENS_BUDGET",
     ],
   };
   for (const [name, envNames] of Object.entries(required)) {
@@ -1087,6 +1284,19 @@ function testExampleReadmeDocumentsTimeoutAndVersionContracts() {
   );
 }
 
+function testExampleReadmeDocumentsEffortAndBudget() {
+  assert.match(
+    EXAMPLE_README_TEXT,
+    /\| `effort` \|[^\n]*low[^\n]*medium[^\n]*high[^\n]*\|/i,
+    "GitHub Actions README must document the effort presets"
+  );
+  assert.match(
+    EXAMPLE_README_TEXT,
+    /\| `max_tokens_budget` \|[^\n]*0[^\n]*unlimited[^\n]*\|/i,
+    "GitHub Actions README must document that a 0 budget means unlimited"
+  );
+}
+
 const TESTS = [
   ["review_task_timeout names and describes the CLI task deadline", testReviewTaskTimeoutInputNameAndScope],
   ["llm_timeout defaults to the CLI's 5-minute timeout", testLlmTimeoutInputDefault],
@@ -1106,12 +1316,23 @@ const TESTS = [
   ["Configure OCR clears stale persisted retry codes", testConfigureClearsStaleRetryCodesBeforeEndpointConfig],
   ["Run OpenCodeReview retains the extra-headers env override", testRunRetainsExtraHeadersEnvironmentOverride],
   ["Run OpenCodeReview fails closed without validated task timeout", testRunFailsClosedWhenValidatedTaskTimeoutIsMissing],
+  ["effort and max_tokens_budget are optional and undefaulted", testEffortAndBudgetInputsAreOptional],
+  ["unset effort and max_tokens_budget append no review flags", testUnsetEffortAndBudgetAppendNoFlags],
+  ["effort and max_tokens_budget reach ocr review once each", testEffortAndBudgetForwardedToReviewCommand],
+  ["an explicit 0 token budget is forwarded verbatim", testZeroBudgetIsForwardedVerbatim],
+  ["effort accepts the CLI presets in any case", testEffortValidationAcceptsThePresets],
+  ["effort rejects values the CLI would not accept", testEffortValidationRejectsUnknownPresets],
+  ["max_tokens_budget accepts non-negative integers", testBudgetValidationAcceptsNonNegativeIntegers],
+  ["max_tokens_budget rejects malformed values", testBudgetValidationRejectsMalformedValues],
+  ["effort/max_tokens_budget validation runs before NPM install", testEffortAndBudgetValidationPrecedesNpmInstall],
+  ["effort participates in the checkpoint fingerprint", testEffortParticipatesInTheCheckpointFingerprint],
   ["the official OpenCodeReview NPM install is preserved", testOfficialNpmPackageInstallIsPreserved],
   ["Install OpenCodeReview enforces the auth_token_cmd version floor", testInstallEnforcesAuthTokenCommandVersionFloor],
   ["contract harness fails closed on unsupported YAML shapes", testContractHarnessFailsClosedOnUnsupportedYamlShapes],
   ["required action steps and env contracts are present", testRequiredStepTopologyAndEnvironmentContracts],
   ["GitHub Actions contracts run in a dedicated workflow", testContractsRunInDedicatedWorkflow],
   ["GitHub Actions README documents timeout and version contracts", testExampleReadmeDocumentsTimeoutAndVersionContracts],
+  ["GitHub Actions README documents effort and max_tokens_budget", testExampleReadmeDocumentsEffortAndBudget],
 ];
 
 function main() {

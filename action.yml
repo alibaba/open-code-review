@@ -67,6 +67,22 @@ inputs:
   rule:
     description: Path to a custom rules JSON file passed to `ocr review --rule`.
     required: false
+  effort:
+    description: >-
+      Review effort preset passed to `ocr review --effort`: low, medium or
+      high, case-insensitively. It selects how many review rounds the agent
+      runs. Unset or empty appends no flag and keeps the CLI's own resolution,
+      which is the configured effort or otherwise medium.
+    required: false
+  max_tokens_budget:
+    description: >-
+      Aggregate token cap (input + output) for the whole review, passed to
+      `ocr review --max-tokens-budget`. A non-negative base-10 integer with no
+      leading zeros: dispatch stops once the budget is exceeded, the files that
+      were skipped are reported as failed(budget), and the partial result is
+      still published. 0 means unlimited, and so does leaving it unset or
+      empty, which appends no flag at all.
+    required: false
   upload_artifacts:
     description: >-
       Upload raw JSON result and stderr as workflow artifacts. Must be the
@@ -340,6 +356,42 @@ runs:
         fi
         echo "REVIEW_TASK_TIMEOUT=$REVIEW_TASK_TIMEOUT_NUMBER" >> "$GITHUB_ENV"
 
+    - name: Validate effort and max_tokens_budget
+      env:
+        OCR_EFFORT: ${{ inputs.effort }}
+        OCR_MAX_TOKENS_BUDGET: ${{ inputs.max_tokens_budget }}
+      shell: bash
+      run: |
+        # Both inputs are optional and both are forwarded verbatim, so the only
+        # thing to check is the shape of a value that was actually supplied.
+        # The CLI rejects the same values, but only after the npm install and
+        # the LLM configuration have run, and then as a generic non-zero exit
+        # buried in the stderr artifact. Checking here turns a typo into an
+        # annotated failure that costs seconds instead of a full review setup.
+        #
+        # Neither value is rewritten before it reaches the CLI. --effort needs
+        # no rewriting because `ocr review` lower-cases the preset itself. The
+        # budget is a different matter: the CLI parses integer flags with a
+        # base-0 strconv, so "010" would silently mean 8. Rather than normalize
+        # it across two steps the way review_task_timeout has to, a leading
+        # zero is simply refused - nobody writes a token budget that way, and a
+        # refusal cannot be misread.
+        if [ -n "$OCR_EFFORT" ]; then
+          case "$(printf '%s' "$OCR_EFFORT" | tr '[:upper:]' '[:lower:]')" in
+            low|medium|high) ;;
+            *)
+              echo "::error::effort must be one of low, medium or high (got '${OCR_EFFORT}')"
+              exit 1
+              ;;
+          esac
+        fi
+        if [ -n "$OCR_MAX_TOKENS_BUDGET" ]; then
+          if [[ ! "$OCR_MAX_TOKENS_BUDGET" =~ ^(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::max_tokens_budget must be a non-negative base-10 integer without leading zeros, where 0 means unlimited (got '${OCR_MAX_TOKENS_BUDGET}')"
+            exit 1
+          fi
+        fi
+
     - name: Install OpenCodeReview
       shell: bash
       env:
@@ -461,6 +513,21 @@ runs:
         OCR_FP_ROUTE_SEVERITY_BELOW: ${{ inputs.route_severity_below }}
         OCR_FP_ROUTE_CATEGORIES: ${{ inputs.route_categories }}
         OCR_FP_BACKGROUND: ${{ inputs.background }}
+        # The effort preset picks how many review rounds run, so a checkpoint
+        # recorded by a `low` run must not let a later `high` run skip the
+        # commits it covered less thoroughly.
+        #
+        # `max_tokens_budget` deliberately stays out, even though issue #1147
+        # proposed it alongside effort. The budget has exactly one entry
+        # point: the dispatch look-ahead in internal/agent/agent.go, the only
+        # writer of budgetExceeded, which always leaves at least one group
+        # undispatched and records a pending failed(budget) cause. That makes
+        # the manifest partial, and only a complete manifest ever advances a
+        # checkpoint - including for the round-skipping path, which is gated
+        # on the same flag. So a budget cannot record a checkpoint over a
+        # range it reviewed less than fully, and fingerprinting it would only
+        # force needless full reviews whenever the budget is retuned.
+        OCR_FP_EFFORT: ${{ inputs.effort }}
         OCR_RULE_PATH: ${{ inputs.rule }}
         # `github.token` is always the "github-actions" app, so when the caller
         # did not override the token we know exactly which app wrote our summary
@@ -584,6 +651,7 @@ runs:
                 process.env.OCR_FP_ROUTE_SEVERITY_BELOW,
                 process.env.OCR_FP_ROUTE_CATEGORIES,
                 process.env.OCR_FP_BACKGROUND,
+                process.env.OCR_FP_EFFORT,
                 versionActual,
                 ruleDigest,
                 localRuleDigest,
@@ -654,6 +722,8 @@ runs:
         OCR_REVIEW_CONCURRENCY: ${{ inputs.review_concurrency }}
         OCR_BACKGROUND: ${{ inputs.background }}
         OCR_RULE: ${{ inputs.rule }}
+        OCR_EFFORT: ${{ inputs.effort }}
+        OCR_MAX_TOKENS_BUDGET: ${{ inputs.max_tokens_budget }}
         # Step output, not job env: empty when the resolve step was skipped or
         # chose the full range, and never inherited from an earlier use of this
         # action in the same job.
@@ -669,6 +739,12 @@ runs:
         [ -n "$OCR_REVIEW_CONCURRENCY" ] && ARGS+=(--concurrency "$OCR_REVIEW_CONCURRENCY")
         [ -n "$OCR_BACKGROUND" ] && ARGS+=(--background "$OCR_BACKGROUND")
         [ -n "$OCR_RULE" ] && ARGS+=(--rule "$OCR_RULE")
+        # Empty means "no flag": the CLI then applies its own default, which is
+        # the configured effort (otherwise medium) and an unlimited budget. An
+        # explicit 0 budget is forwarded and means unlimited too, matching
+        # --max-tokens-budget's own documented semantics.
+        [ -n "$OCR_EFFORT" ] && ARGS+=(--effort "$OCR_EFFORT")
+        [ -n "$OCR_MAX_TOKENS_BUDGET" ] && ARGS+=(--max-tokens-budget "$OCR_MAX_TOKENS_BUDGET")
         set +e
         ocr review "${ARGS[@]}" > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log
         OCR_EXIT_CODE=$?
