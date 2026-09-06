@@ -976,7 +976,10 @@ func TestDispatchSubtasks_WithFakeLLM(t *testing.T) {
 	})
 
 	a.diffs = []model.Diff{
-		{NewPath: "main.go", OldPath: "main.go", Diff: "+new line", Insertions: 1},
+		// The quoted code must exist in the diff: an unresolvable quote is
+		// dropped by the comment emission gate, which this plumbing test is
+		// not about.
+		{NewPath: "main.go", OldPath: "main.go", Diff: "@@ -0,0 +1,1 @@\n+    foo := bar.Baz()\n", Insertions: 1},
 	}
 	a.currentDate = "2025-06-26 10:00"
 

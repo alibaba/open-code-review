@@ -687,7 +687,15 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 					}
 				}
 				if d != nil {
-					if !located && r.deps.Template.ReLocationTask != nil {
+					// In review mode (AllDiffs wired) the LLM rescue runs only
+					// when the quote plausibly belongs to the claimed file: the
+					// step sees only that file's diff, and a quote that shares
+					// no line with it can at best be answered with a fabricated
+					// location (issue #746). Scan mode (AllDiffs nil) keeps the
+					// unconditional behavior — it has no cross-file stage and
+					// its synthetic diffs are the only evidence available.
+					plausible := r.deps.AllDiffs == nil || diff.QuotePlausiblyInDiff(cm, d)
+					if !located && plausible && r.deps.Template.ReLocationTask != nil {
 						// rlStart stays ahead of prompt construction, which is
 						// where it sat when ReLocateComment built the messages
 						// itself — moving it would silently change what
@@ -722,7 +730,23 @@ func (r *Runner) executeToolCall(ctx context.Context, taskKey string, call llm.T
 						}
 					}
 				}
-				r.deps.CommentCollector.Add(*cm)
+				// Emission gate, review mode only (AllDiffs wired; scan keeps
+				// its legacy unconditional collection). A comment is emitted
+				// when it is located, or when it carries no anchorable quote
+				// AND the run holds a diff for its claimed path (general
+				// advice on a reviewed file). A quoted comment that ended
+				// resolution unlocated quotes code present in no reviewed
+				// file — emitting it would bind it to a file it does not
+				// belong to (issue #746), so it is dropped with a warning
+				// instead. Quote-less comments on paths with no diff (e.g. a
+				// grouped review's comma-joined key) are dropped the same
+				// way: that pseudo-path can never be resolved.
+				if r.deps.AllDiffs == nil || cm.StartLine > 0 || (d != nil && !diff.HasAnchorableQuote(cm)) {
+					r.deps.CommentCollector.Add(*cm)
+				} else {
+					r.RecordWarning("comment_unresolved", cm.Path, fmt.Sprintf(
+						"comment on %s quotes code not present in any reviewed file; dropped", cm.Path))
+				}
 			}
 		}
 
