@@ -1080,6 +1080,20 @@ p {
     font-size: 0.85rem;
 }
 
+/* Visually hidden but still in the accessibility tree. Used for the line
+   range when the code gutter carries the numbers visually. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 .comment-lines {
     font-family: var(--mono);
     font-size: 0.72rem;
@@ -1131,6 +1145,33 @@ p {
     background: none;
 }
 
+/* Line-number gutter for the Existing Code block — issue #1172.
+   The newlines between rows exist so the raw markup stays readable; the rows
+   are block-level, so white-space is reset on the <pre> to keep those newlines
+   from rendering as blank lines, and pre-wrap moves onto the code text alone. */
+.code-panel pre.code-numbered {
+    white-space: normal;
+}
+.code-numbered .code-line {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+}
+.code-numbered .line-no {
+    flex: 0 0 auto;
+    min-width: 2.5em;
+    text-align: right;
+    user-select: none;
+    -webkit-user-select: none;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+.code-numbered .line-text {
+    flex: 1 1 auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .code-existing .code-panel-label {
     background: #fef2f2;
     color: #dc2626;
@@ -1151,6 +1192,7 @@ p {
     .code-existing pre { background: rgba(220, 38, 38, 0.05); }
     .code-suggestion .code-panel-label { background: rgba(52, 211, 153, 0.12); color: #6ee7b7; }
     .code-suggestion pre { background: rgba(52, 211, 153, 0.05); }
+    .code-numbered .line-no { color: #8b93b5; }
 }
 
 /* ── Responsive ── */
