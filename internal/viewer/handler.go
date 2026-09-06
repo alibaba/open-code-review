@@ -5,6 +5,7 @@ package viewer
 
 import (
 	"fmt"
+	"html/template"
 	"net/http"
 	"path/filepath"
 )
@@ -59,6 +60,15 @@ type sessionPageData struct {
 	EncodedRepo string
 	RepoName    string
 	Session     *ViewSession
+
+	// Static marks a render destined for a standalone file rather than the
+	// live server. It inlines the two /static/ assets below and turns the
+	// site-absolute breadcrumb links, which are dead over file://, into plain
+	// text. The zero value is what the HTTP handler renders, so the served
+	// page is byte-identical to what it was before export existed.
+	Static    bool
+	InlineCSS template.CSS
+	InlineJS  template.JS
 }
 
 func handleSession(w http.ResponseWriter, r *http.Request, root, repo, sessionID string) {

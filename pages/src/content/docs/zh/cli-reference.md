@@ -79,6 +79,7 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 | `ocr session show <id>` | `ocr sessions show <id>` | 查看单个会话及其逐文件检查点。 |
 | `ocr session comments <id>` | `ocr sessions comments <id>` | 输出单个会话中记录的评审评论。 |
 | `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 对比两个会话的问题：新增、仍存在、已解决、未评审。 |
+| `ocr session export [id]` | — | 将单个会话导出为自包含的 HTML 文件。 |
 | `ocr viewer` | — | 启动用于历史评审会话的本地 Web UI（`localhost:5483`）。 |
 | `ocr version` | — | 打印版本、commit、平台、构建日期与 GitHub URL。 |
 
@@ -446,6 +447,28 @@ ocr session compare --json <before-session-id> <after-session-id>
 |---|---|---|
 | `--repo <path>` | 当前目录 | 要对比会话的仓库。 |
 | `--json` | `false` | 以 JSON 输出对比结果（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
+
+### `ocr session export`
+
+将单个会话渲染为一个自包含的 HTML 文件。查看器的样式表和脚本会被内联，
+因此该文件可以通过 `file://` 打开而无需任何网络访问，CI 也可以将评审
+结果归档为构建产物。
+
+```bash
+ocr session export -o review.html
+ocr session export 20250601-100000-abc123 -o review.html
+```
+
+不指定会话 id 时，导出该仓库最新的会话。之所以这样默认，是因为
+`ocr review` 成功时并不会打印会话 id。不指定 `-o` 时，HTML 输出到标准输出。
+
+导出的页面内嵌了该会话记录的被评审源码片段，因此在发布之前，请像对待
+仓库本身一样谨慎处理该文件。
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `--repo <path>` | 当前目录 | 要导出会话的仓库。 |
+| `--output <path>`、`-o` | 标准输出 | 将 HTML 写入文件而不是标准输出。 |
 
 ## `ocr rules`
 
