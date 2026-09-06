@@ -139,6 +139,9 @@ jobs:
       - name: Test
         run: go test -count=1 ./...
 
+      - name: Test Node launcher
+        run: npm run test:launcher
+
       - name: Build
         run: go build -o opencodereview.exe ./cmd/opencodereview
 
