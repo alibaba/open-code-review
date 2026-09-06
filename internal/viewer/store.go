@@ -131,8 +131,17 @@ func ListSessions(root, encodedRepo string) ([]SessionSummary, error) {
 		summaries = append(summaries, s)
 	}
 
+	// Timestamp alone is not a total order: two sessions can share one
+	// (same second, or both zero for an aborted run before its first
+	// timestamped record). sessions.html pairs row i with row i+1 as
+	// "compare", so an order that reshuffles on ties makes that pairing
+	// non-deterministic across renders. SessionID breaks the tie so the
+	// order is deterministic across calls, not just stable within one sort.
 	sort.Slice(summaries, func(i, j int) bool {
-		return summaries[i].Timestamp.After(summaries[j].Timestamp)
+		if !summaries[i].Timestamp.Equal(summaries[j].Timestamp) {
+			return summaries[i].Timestamp.After(summaries[j].Timestamp)
+		}
+		return summaries[i].SessionID > summaries[j].SessionID
 	})
 	return summaries, nil
 }
@@ -321,10 +330,32 @@ type ToolCallInfo struct {
 	DurationMs int64
 }
 
+// safeSegment validates that s is safe to use as a single path component and
+// returns it unchanged. Every caller must join the returned value, not its
+// own copy of s: a validate-then-use-the-original-variable shape leaves the
+// join sourced from the untrusted argument, which static path-injection
+// analysis (this codebase's CodeQL scan included) cannot tell apart from a
+// join with no check at all. Returning the checked value is what makes the
+// join provably downstream of the check.
+func safeSegment(s string) (string, error) {
+	if s == "" || strings.Contains(s, "..") || strings.ContainsAny(s, `/\`) {
+		return "", fmt.Errorf("invalid path segment: %q", s)
+	}
+	return s, nil
+}
+
 // LoadSession fully parses a JSONL file into a ViewSession.
 func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
+	encodedRepo, err := safeSegment(encodedRepo)
+	if err != nil {
+		return nil, err
+	}
+	sessionID, err = safeSegment(sessionID)
+	if err != nil {
+		return nil, err
+	}
 	path := filepath.Join(root, encodedRepo, sessionID+".jsonl")
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // encodedRepo and sessionID are validated by safeSegment above
 	if err != nil {
 		return nil, fmt.Errorf("open session file: %w", err)
 	}

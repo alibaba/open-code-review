@@ -302,28 +302,11 @@ func describeCompareSide(sessionID string, s *session.Summary) sessionCompareSid
 	return side
 }
 
-// reviewedPaths returns the paths the run actually reviewed, or nil for a
-// legacy session that recorded no manifest - nil tells Compare to fall back to
-// counting every unmatched finding as resolved.
-//
-// Completed and Reused are the only partitions that mean "the LLM's verdict on
-// this file is current": Reused carries a checkpoint forward from a resume
-// chain, which is still a verdict. Selected is deliberately not used - it is
-// the intended set, so an interrupted run would report every file it never got
-// to as clean. Failed and Waived items are selected but undecided for the same
-// reason.
+// reviewedPaths returns the paths the run actually reviewed. The partition
+// choice and its rationale live with session.ReviewedPaths, which the web
+// viewer's compare page calls too - the two must not drift.
 func reviewedPaths(s *session.Summary) map[string]bool {
-	if s.RunManifest == nil {
-		return nil
-	}
-	cov := s.RunManifest.Coverage
-	paths := make(map[string]bool, len(cov.Completed)+len(cov.Reused))
-	for _, items := range [][]session.CoverageItem{cov.Completed, cov.Reused} {
-		for _, item := range items {
-			paths[item.Path] = true
-		}
-	}
-	return paths
+	return session.ReviewedPaths(s.RunManifest)
 }
 
 // printSessionCompare writes to stdout, matching the other `ocr session`
