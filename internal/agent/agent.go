@@ -501,10 +501,11 @@ func (a *Agent) ToolFailures() []llmloop.ToolFailureDetail { return a.runner.Too
 //
 // This is a diagnostic signal, not a terminal state. The stop records a pending
 // failure cause (not a run_failure), so the manifest attributes the undispatched
-// items to failed(budget) and its coverage alone determines the terminal state
-// and exit code: partial/0 whenever anything was covered, failed/non-zero only
-// when the cap left nothing covered. Per-file token/tool-round exhaustion
-// does NOT set this flag — it is an item-level failed(budget) outcome instead.
+// items to failed(budget) and its coverage alone determines the terminal state:
+// partial whenever anything was covered, failed when the cap left nothing
+// covered. The CLI keeps a budget-only partial at exit 0. Exhausting a per-file
+// token or tool-round budget does NOT set this flag — it is an item-level
+// failed(budget) outcome instead.
 func (a *Agent) BudgetExceeded() bool { return a.budgetExceeded.Load() }
 
 // recordWarning adds a non-fatal warning to the agent's warning list.
@@ -811,8 +812,9 @@ dispatchLoop:
 		reused = a.resumeInfo.ReusedFiles
 	}
 	// A resumed run can still have usable coverage when every newly dispatched
-	// subtask hard-fails. Preserve the legacy all-failed error only when there is
-	// no reused result; otherwise the manifest is partial and must exit 0.
+	// subtask hard-fails. Preserve the dispatcher-level all-failed error only when
+	// there is no reused result; otherwise the manifest is partial and the CLI
+	// decides the process status from the recorded failure classifications.
 	if failed > 0 && failed == dispatched && reused == 0 {
 		// Even when all subtasks failed, some may have produced comments before
 		// hitting the error. Return those comments instead of discarding them.

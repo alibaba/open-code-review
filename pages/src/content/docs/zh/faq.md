@@ -190,11 +190,12 @@ OCR 跳过该文件并继续——JSON 模式下你也会在 `warnings` 中看�
 - 模型完全不支持原生工具调用（本地模型常见）——见
   ["No tool calls parsed"（本地模型 / Ollama）](#no-tool-calls-parsed-本地模型-ollama)。
 
-### 一些子 agent 失败；运行仍以 0 退出
+### 一些子 agent 失败；为什么运行以非零码退出？
 
-有意为之。OCR 隔离 per-file 失败，使一个有问题的文件不会拖垮 20 文件的评审。只要*有*
-成功的，聚合退出码就是 `0`；仅当完全失败（零成功子 agent）才非零退出。查看 JSON
-模式的 `warnings` 数组或文本模式的 stderr，看哪些文件失败了。
+OCR 会隔离 per-group 失败，并继续发布已完成分组的发现。但 timeout、provider 错误、
+配置错误等操作性失败仍会使命令以非零码退出，即使其他分组已成功，这样 CI 才能发现
+覆盖不完整。仅由已配置预算限制导致的部分评审仍为成功退出。可在 JSON 模式下查看
+`manifest.coverage.failed` 和 `warnings`，或查看文本摘要，以了解哪些分组失败以及能否恢复。
 
 ### CI 运行比本地慢得多
 

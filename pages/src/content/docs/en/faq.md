@@ -227,13 +227,15 @@ is usually one of:
   local models) — see
   ["No tool calls parsed" (local models / Ollama)](#no-tool-calls-parsed-local-models-ollama).
 
-### Some sub-agents fail; the run still exits 0
+### Some sub-agents fail; why is the exit code non-zero?
 
-By design. OCR isolates per-group failures so one bad group doesn't kill
-a 20-file review. The aggregate exit code is `0` if *anything*
-succeeded; only a fully-failed run (zero successful sub-agents) exits
-non-zero. Check the `warnings` array in JSON mode or stderr in text
-mode to see which groups failed.
+OCR isolates per-group failures and still publishes findings from completed
+groups. Operational failures such as timeouts, provider errors, and bad
+configuration nevertheless make the command exit non-zero, even when sibling
+groups succeeded, so CI can detect incomplete coverage. A partial review caused
+only by configured budget limits remains a successful exit. Check
+`manifest.coverage.failed` and `warnings` in JSON mode, or the text summary, to
+see which groups failed and whether the run can be resumed.
 
 ### CI run is much slower than local
 

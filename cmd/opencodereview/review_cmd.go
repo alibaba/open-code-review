@@ -316,15 +316,13 @@ func reviewResultError(runErr error, manifest *session.RunManifest) error {
 	if runErr != nil {
 		return fmt.Errorf("review failed: %w", runErr)
 	}
-	if manifest != nil && manifest.TerminalState == session.StateFailed {
-		// The exit contract is: non-zero only for a run-level failure, or when
-		// every selected item failed. Any usable coverage — even incomplete — exits
-		// 0, so complete/partial/skipped all succeed and only failed lands here.
-		// That makes a budget stop exit 0 whenever anything was covered (it is a
-		// controlled truncation recording no run_failure) and non-zero only when
-		// the cap left nothing covered at all. Partial results are published
-		// regardless: runReview emits the frozen manifest before this error decides
-		// the exit status.
+	if reviewManifestRequiresNonZeroExit(manifest) {
+		// Operational item failures make a partial review fail the process so CI
+		// cannot mistake incomplete coverage for success. A controlled budget stop
+		// remains the sole partial-success case; when every item failed, StateFailed
+		// still exits non-zero regardless of classification. Partial and failed
+		// results remain publishable because runReview emits the frozen manifest
+		// before this error decides the process status.
 		//
 		// Reasons stored in the manifest already went through sanitizeReason, so
 		// they are safe to echo on stderr.
@@ -334,10 +332,37 @@ func reviewResultError(runErr error, manifest *session.RunManifest) error {
 			}
 			return fmt.Errorf("review failed (%s)", rf.Classification)
 		}
-		return fmt.Errorf("review failed: %d of %d selected item(s) failed",
+		prefix := "review failed"
+		if manifest.TerminalState == session.StatePartial {
+			prefix = "review incomplete"
+		}
+		return fmt.Errorf("%s: %d of %d selected item(s) failed", prefix,
 			len(manifest.Coverage.Failed), len(manifest.Coverage.Selected))
 	}
 	return nil
+}
+
+// reviewManifestRequiresNonZeroExit is the shared CLI/SARIF success policy.
+// A partial review caused exclusively by declared budget limits keeps its
+// historical successful exit, but timeout, provider, configuration, panic and
+// unknown item failures are operational failures even when sibling items
+// completed. A fully failed manifest always fails the process.
+func reviewManifestRequiresNonZeroExit(manifest *session.RunManifest) bool {
+	if manifest == nil {
+		return false
+	}
+	if manifest.TerminalState == session.StateFailed {
+		return true
+	}
+	if manifest.TerminalState != session.StatePartial {
+		return false
+	}
+	for _, item := range manifest.Coverage.Failed {
+		if item.Classification != session.FailureBudget {
+			return true
+		}
+	}
+	return false
 }
 
 func loadReviewResumeState(repoDir string, opts reviewOptions) (*session.ResumeState, error) {
