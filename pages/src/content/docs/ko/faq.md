@@ -253,10 +253,11 @@ stderr로 나갑니다(경고, 오류). `--audience agent`가 보장하는 깨�
 `"status": "skipped"`와 `"message": "Review skipped: no items were selected."`, 그리고
 `terminal_state`가 `"skipped"`이고 `coverage`의 각 배열이 비어 있는 `manifest`도 함께 실립니다.
 
-파일을 리뷰했는데 지적이 없는 경우에도 **같은 객체 모양**이 반환됩니다. `comments`는 여전히 `[]`이지만
+파일을 리뷰했는데 지적이 없는 경우에도 **`comments: []`을 담은 JSON 객체**가 반환됩니다.
 `summary.files_reviewed`는 실제로 리뷰한 파일 수가 되고, `status`는 `"complete"`, `message`는
-`"Review complete: 0 finding(s) across N selected item(s)."`입니다. 둘은 모양이 아니라
-`summary.files_reviewed`나 `manifest.terminal_state`로 구분하세요. `review --format json`은 stdout에
+`"Review complete: 0 finding(s) across N selected item(s)."`입니다. 실행마다 선택적 최상위
+필드가 달라질 수 있으므로 객체 모양이나 선택적 키의 유무로 두 상태를 구분하지 마세요.
+`summary.files_reviewed`나 `manifest.terminal_state`를 사용하세요. `review --format json`은 stdout에
 항상 JSON 객체 하나만 기록하며, 맨 배열을 내보내는 일은 없습니다.
 
 `summary`가 아예 없는 더 간소한 `{"status": "skipped", "message": "No supported files changed.",
@@ -305,8 +306,8 @@ LLM 호출에는 별도 스팬이 생기지 않고 메트릭으로 기록됩니�
   임계값을 **올리는** 것입니다. 낮추면 더 많은 그룹이 plan 단계를 지나 오히려 비싸집니다.
   두 임계값은 `0`에서 다르게 동작합니다. `PLAN_MODE_LINE_THRESHOLD`가 `0` 이하이면
   *항상 plan*이며, 이게 가장 비싼 설정입니다. 반면 `PLAN_MODE_GROUP_LINE_THRESHOLD`가
-  `0`이면 그룹 쪽 게이트가 꺼지고, 이 경우는 실제로 호출을 아낍니다. 발동 조건은 위의
-  "파일은 작은데 plan 단계가 한참 걸립니다"를 참고하세요.
+  `0`이면 그룹 쪽 게이트가 꺼집니다. 그 게이트가 원래 유일한 발동 조건이었을 때에만
+  plan 호출을 하나 아낄 수 있습니다. 발동 조건은 위의 "파일은 작은데 plan 단계가 한참 걸립니다"를 참고하세요.
 - `MAX_TOOL_REQUEST_TIMES = 100`은 넉넉한 값입니다. 라운드를 다 쓰는 모델은 3
   라운드에 끝내는 모델보다 대화가 길어져(토큰이 늘어) 비쌉니다. 강한 모델일수록
   대체로 빨리 끝냅니다. 반대로 "max tool requests reached"를 피하려고

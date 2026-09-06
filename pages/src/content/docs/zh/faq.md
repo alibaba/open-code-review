@@ -220,11 +220,12 @@ agent` 保证的干净 stdout 是*对解析器友好的*——要屏蔽一切，
 `"message": "Review skipped: no items were selected."`，以及一个 `terminal_state`
 为 `"skipped"`、`coverage` 各数组全空的 `manifest`。
 
-评审过文件但无发现的正常评审返回**同样的对象形状**：`comments` 仍是 `[]`，但
+评审过文件但无发现的正常评审同样返回**带 `comments: []` 的 JSON 对象**：
 `summary.files_reviewed` 是实际评审的文件数，`status` 为 `"complete"`，`message` 读作
-`"Review complete: 0 finding(s) across N selected item(s)."`。区分两者要靠
-`summary.files_reviewed` 或 `manifest.terminal_state`，而不是形状——`review --format
-json` 永远向 stdout 写出恰好一个 JSON 对象，绝不会是裸数组。
+`"Review complete: 0 finding(s) across N selected item(s)."`。不同运行的可选顶层字段
+可能不同，因此不要依赖对象形状或某个可选 key 的存在来区分；应使用
+`summary.files_reviewed` 或 `manifest.terminal_state`。`review --format json` 永远向
+stdout 写出恰好一个 JSON 对象，绝不会是裸数组。
 
 更精简的 `{"status": "skipped", "message": "No supported files changed.",
 "comments": []}`（完全没有 `summary`）是 `ocr scan` 在无可扫描内容时产出的。
@@ -264,8 +265,8 @@ metrics 体系——见[遥测](../telemetry/)。
 - 文件 ≥ 50 行（或多文件组合计 ≥ 100 行）时 plan 阶段开启。它每组多一次 LLM 调用，
   所以**调高**这些阈值才省钱；调低会让更多组进入规划、反而更贵。两个阈值在 `0` 上
   行为不同：`PLAN_MODE_LINE_THRESHOLD` 为 `0` 或负数意味着*恒定规划*，是最贵的设置；
-  而 `PLAN_MODE_GROUP_LINE_THRESHOLD` 为 `0` 会关掉分组闸门，这确实省下那次调用。
-  触发条件见上文“plan 阶段花了很久而文件很小”。
+  而 `PLAN_MODE_GROUP_LINE_THRESHOLD` 为 `0` 会关掉分组闸门。只有当该闸门原本会是
+  唯一触发条件时，这才会省下一次 plan 调用。触发条件见上文“plan 阶段花了很久而文件很小”。
 - main 循环默认跑 2 轮（`medium` 档）。用 `--effort low` 只跑 1 轮可近似减半评审
   成本；`--effort high`（3 轮）召回更高但更贵。
 - `MAX_TOOL_REQUEST_TIMES = 100` 很宽松。用满轮数的模型会产出比 3 轮就完成的模型

@@ -264,13 +264,15 @@ field — it sits under `summary`, where it reads `0` on this path, while
 selected."`, and a `manifest` whose `terminal_state` is `"skipped"` with
 every `coverage` array empty.
 
-A review that examined files and found nothing returns **the same object
-shape**: `comments` is still `[]`, but `summary.files_reviewed` counts
-the files actually reviewed, `status` is `"complete"`, and `message`
-reads `"Review complete: 0 finding(s) across N selected item(s)."`.
-Tell the two apart by `summary.files_reviewed` or
-`manifest.terminal_state`, not by the shape — `review --format json`
-always writes exactly one JSON object to stdout, never a bare array.
+A review that examined files and found nothing also returns **a JSON
+object with `comments: []`**: `summary.files_reviewed` counts the files
+actually reviewed, `status` is `"complete"`, and `message` reads
+`"Review complete: 0 finding(s) across N selected item(s)."`. Optional
+top-level fields can differ between runs, so do not distinguish these
+states by object shape or by the presence of an optional key. Use
+`summary.files_reviewed` or `manifest.terminal_state` instead.
+`review --format json` always writes exactly one JSON object to stdout,
+never a bare array.
 
 The leaner `{"status": "skipped", "message": "No supported files
 changed.", "comments": []}`, which has no `summary` at all, is what
@@ -321,9 +323,10 @@ Common levers:
   them sends more groups through planning and costs more. The two do not
   behave alike at zero. `PLAN_MODE_LINE_THRESHOLD` at `0` or below means
   *always plan* — the dearest setting available — whereas
-  `PLAN_MODE_GROUP_LINE_THRESHOLD` at `0` turns the group gate off,
-  which does save the call. See "Plan phase took forever and the file is
-  small" above for the trigger rules.
+  `PLAN_MODE_GROUP_LINE_THRESHOLD` at `0` turns the group gate off. That
+  can save the plan call when the group gate would otherwise be the only
+  trigger. See "Plan phase took forever and the file is small" above for
+  the trigger rules.
 - `MAX_TOOL_REQUEST_TIMES = 100` is generous. A model that uses every
   round will produce a longer (more tokens) conversation than one that
   finishes in 3 rounds. Stronger models tend to finish faster.

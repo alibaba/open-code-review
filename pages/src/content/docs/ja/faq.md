@@ -239,11 +239,12 @@ JSON モードでは `warnings` にも表示されます。
 `"status": "skipped"` と `"message": "Review skipped: no items were selected."`、および
 `terminal_state` が `"skipped"` で `coverage` の各配列が空の `manifest` も含みます。
 
-ファイルをレビューして指摘がなかった場合も、返るのは**同じオブジェクト形状**です。`comments` は引き続き
-`[]` ですが、`summary.files_reviewed` は実際にレビューしたファイル数になり、`status` は `"complete"`、
-`message` は `"Review complete: 0 finding(s) across N selected item(s)."` です。両者は形状ではなく
-`summary.files_reviewed` か `manifest.terminal_state` で区別してください——`review --format json` は
-stdout に必ず JSON オブジェクトを 1 つだけ書き出し、裸の配列にはなりません。
+ファイルをレビューして指摘がなかった場合も、**`comments: []` を持つ JSON オブジェクト**が返ります。
+`summary.files_reviewed` は実際にレビューしたファイル数になり、`status` は `"complete"`、
+`message` は `"Review complete: 0 finding(s) across N selected item(s)."` です。実行によって
+省略可能なトップレベルフィールドは異なり得るため、オブジェクト形状や特定の省略可能フィールドの有無で
+両者を判別しないでください。`summary.files_reviewed` または `manifest.terminal_state` を使ってください。
+`review --format json` は stdout に必ず JSON オブジェクトを 1 つだけ書き出し、裸の配列にはなりません。
 
 `summary` をまったく持たない、より簡素な `{"status": "skipped", "message": "No supported files
 changed.", "comments": []}` は、`ocr scan` がスキャン対象のないときに出力するものです。
@@ -284,9 +285,9 @@ OTLP exporter に切り替えて metrics 基盤に送ってください——[�
   起動します。これはグループごとに LLM 呼び出しを 1 回追加するので、コストを下げられるのは閾値を
   **上げた**ほうです。下げるとより多くのグループが plan を通り、かえって高くなります。2 つの閾値は
   `0` で挙動が異なります。`PLAN_MODE_LINE_THRESHOLD` が `0` 以下なら*常に plan* となり、これが最も
-  高い設定です。一方 `PLAN_MODE_GROUP_LINE_THRESHOLD` が `0` だとグループ側のゲートが無効になり、
-  これは確かに呼び出しを省けます。起動条件は上の「ファイルが小さいのに plan フェーズに時間がかかる」を
-  参照してください。
+  高い設定です。一方 `PLAN_MODE_GROUP_LINE_THRESHOLD` が `0` だとグループ側のゲートが無効になります。
+  この設定で plan 呼び出しを省けるのは、そのグループ側ゲートだけが本来の発火条件だった場合です。
+  起動条件は上の「ファイルが小さいのに plan フェーズに時間がかかる」を参照してください。
 - main ループはデフォルトで 2 ラウンド実行されます（`medium` プリセット）。`--effort low` で
   1 ラウンドにすればレビューコストはおよそ半分になります。`--effort high`（3 ラウンド）は
   recall が上がりますがより高価です。
