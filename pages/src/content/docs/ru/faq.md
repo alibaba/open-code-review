@@ -275,16 +275,20 @@ JSON с `comments: []`**: `summary.files_reviewed` равен числу дей�
 `"Review complete: 0 finding(s) across N selected item(s)."`. Необязательные
 поля верхнего уровня могут различаться между запусками, поэтому не различайте
 эти состояния по форме объекта или наличию отдельного необязательного поля.
-Используйте `summary.files_reviewed` или `manifest.terminal_state`.
+Для вывода review с manifest используйте `summary.files_reviewed` или
+`manifest.terminal_state`. При этом вызывающая сторона должна допускать, что
+на описанном ниже manifest-less пути отсутствуют и `summary`, и `manifest`.
 `review --format json` всегда выводит в stdout ровно один объект JSON и никогда
 — «голый» массив.
 
-Когда `ocr scan` не находит файлов для сканирования, используется более
-компактный путь no-files: поле `summary` отсутствует, но вывод по-прежнему
-содержит `"status": "skipped"`, `"message": "No supported files changed."`
-и `"comments": []`. Также присутствуют обычные поля вроде `tool_calls`, а
-необязательные метаданные, например `llm` или `trace_id`, могут присутствовать
-в зависимости от запуска.
+Более компактный manifest-less путь no-files не содержит ни `summary`, ни
+`manifest`, но по-прежнему сообщает `"status": "skipped"`, `"message": "No
+supported files changed."` и `"comments": []`; `tool_calls` присутствует
+всегда. `ocr scan` всегда работает без review manifest и при выполнении условия
+no-files использует этот путь. `ocr review` также может попасть на него, если
+построить manifest не удалось и выполнено условие no-files. Необязательные
+метаданные, например `llm` или `trace_id`, могут присутствовать в зависимости
+от запуска.
 
 ### Где хранятся файлы JSONL сеансов?
 

@@ -269,16 +269,20 @@ object with `comments: []`**: `summary.files_reviewed` counts the files
 actually reviewed, `status` is `"complete"`, and `message` reads
 `"Review complete: 0 finding(s) across N selected item(s)."`. Optional
 top-level fields can differ between runs, so do not distinguish these
-states by object shape or by the presence of an optional key. Use
-`summary.files_reviewed` or `manifest.terminal_state` instead.
-`review --format json` always writes exactly one JSON object to stdout,
-never a bare array.
+states by object shape or by the presence of an optional key. On
+manifest-backed review output, use `summary.files_reviewed` or
+`manifest.terminal_state` instead. Callers must still tolerate both
+`summary` and `manifest` being absent on the manifest-less path described
+below. `review --format json` always writes exactly one JSON object to
+stdout, never a bare array.
 
-The no-files path for `ocr scan` is leaner: it omits `summary`, while
-still reporting `"status": "skipped"`, `"message": "No supported files
-changed."`, and `"comments": []`. Other normal output fields such as
-`tool_calls`, and optional metadata such as `llm` or `trace_id`, may
-also be present.
+The manifest-less no-files path is leaner: it omits both `summary` and
+`manifest`, while still reporting `"status": "skipped"`, `"message": "No
+supported files changed."`, and `"comments": []`. `tool_calls` is always
+present. `ocr scan` is always manifest-less; when its no-files guard
+matches it uses this path. `ocr review` can also reach the same path when
+manifest construction fails and the no-files guard matches. Optional
+metadata such as `llm` or `trace_id` may be present.
 
 ### Where do session JSONLs live?
 

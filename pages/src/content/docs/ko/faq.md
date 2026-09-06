@@ -256,15 +256,16 @@ stderr로 나갑니다(경고, 오류). `--audience agent`가 보장하는 깨�
 파일을 리뷰했는데 지적이 없는 경우에도 **`comments: []`을 담은 JSON 객체**가 반환됩니다.
 `summary.files_reviewed`는 실제로 리뷰한 파일 수가 되고, `status`는 `"complete"`, `message`는
 `"Review complete: 0 finding(s) across N selected item(s)."`입니다. 실행마다 선택적 최상위
-필드가 달라질 수 있으므로 객체 모양이나 선택적 키의 유무로 두 상태를 구분하지 마세요.
-`summary.files_reviewed`나 `manifest.terminal_state`를 사용하세요. `review --format json`은 stdout에
-항상 JSON 객체 하나만 기록하며, 맨 배열을 내보내는 일은 없습니다.
+필드가 달라질 수 있으므로 객체 모양이나 선택적 키의 유무로 두 상태를 구분하지 마세요. manifest가 있는
+review 출력에서는 `summary.files_reviewed`나 `manifest.terminal_state`를 사용하세요. 다만 호출자는
+아래의 manifest-less 경로에서 `summary`와 `manifest`가 둘 다 없을 수 있다는 점도 처리해야 합니다.
+`review --format json`은 stdout에 항상 JSON 객체 하나만 기록하며, 맨 배열을 내보내는 일은 없습니다.
 
-`ocr scan`에서 스캔할 대상이 없을 때는 더 간소한 no-files 경로를 사용합니다.
-이 출력에는 `summary`가 없지만 `"status": "skipped"`,
-`"message": "No supported files changed."`, `"comments": []`는 들어갑니다.
-또한 `tool_calls` 같은 일반 필드와 `llm`, `trace_id` 같은 선택적 메타데이터가
-함께 나올 수 있습니다.
+manifest-less no-files 경로는 더 간소해서 `summary`와 `manifest`를 모두 생략하지만
+`"status": "skipped"`, `"message": "No supported files changed."`, `"comments": []`는
+계속 포함하며 `tool_calls`도 항상 포함합니다. `ocr scan`은 항상 manifest-less이고 no-files 조건을
+만족하면 이 경로를 사용합니다. `ocr review`도 manifest 생성에 실패하고 no-files 조건을 만족하면
+같은 경로에 들어갈 수 있습니다. `llm`, `trace_id` 같은 선택적 메타데이터는 함께 나올 수 있습니다.
 
 ### 세션 JSONL은 어디에 있나요? {#where-do-session-jsonls-live}
 

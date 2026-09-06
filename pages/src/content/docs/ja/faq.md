@@ -243,14 +243,16 @@ JSON モードでは `warnings` にも表示されます。
 `summary.files_reviewed` は実際にレビューしたファイル数になり、`status` は `"complete"`、
 `message` は `"Review complete: 0 finding(s) across N selected item(s)."` です。実行によって
 省略可能なトップレベルフィールドは異なり得るため、オブジェクト形状や特定の省略可能フィールドの有無で
-両者を判別しないでください。`summary.files_reviewed` または `manifest.terminal_state` を使ってください。
-`review --format json` は stdout に必ず JSON オブジェクトを 1 つだけ書き出し、裸の配列にはなりません。
+両者を判別しないでください。manifest を持つ review 出力では `summary.files_reviewed` または
+`manifest.terminal_state` を使ってください。ただし、呼び出し側は後述の manifest-less 経路で
+`summary` と `manifest` の両方が存在しない場合も扱う必要があります。`review --format json` は
+stdout に必ず JSON オブジェクトを 1 つだけ書き出し、裸の配列にはなりません。
 
-`ocr scan` でスキャン対象がない場合は、より簡素な no-files 経路を通ります。
-この出力には `summary` はありませんが、`"status": "skipped"`、
-`"message": "No supported files changed."`、`"comments": []` は含まれます。
-また、`tool_calls` などの通常フィールドや、`llm`、`trace_id` などの省略可能な
-メタデータが含まれる場合もあります。
+manifest-less の no-files 経路はより簡素で、`summary` と `manifest` の両方を省略しますが、
+`"status": "skipped"`、`"message": "No supported files changed."`、`"comments": []` は
+引き続き含まれ、`tool_calls` も常に含まれます。`ocr scan` は常に manifest-less で、no-files 条件を
+満たすとこの経路を使います。`ocr review` も manifest の構築に失敗し、no-files 条件を満たした場合は
+同じ経路に入ることがあります。`llm`、`trace_id` などの省略可能なメタデータが含まれる場合もあります。
 
 ### セッション JSONL はどこにある？
 

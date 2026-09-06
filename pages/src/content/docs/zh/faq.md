@@ -223,14 +223,16 @@ agent` 保证的干净 stdout 是*对解析器友好的*——要屏蔽一切，
 评审过文件但无发现的正常评审同样返回**带 `comments: []` 的 JSON 对象**：
 `summary.files_reviewed` 是实际评审的文件数，`status` 为 `"complete"`，`message` 读作
 `"Review complete: 0 finding(s) across N selected item(s)."`。不同运行的可选顶层字段
-可能不同，因此不要依赖对象形状或某个可选 key 的存在来区分；应使用
-`summary.files_reviewed` 或 `manifest.terminal_state`。`review --format json` 永远向
+可能不同，因此不要依赖对象形状或某个可选 key 的存在来区分；对于带 manifest 的 review 输出，
+应使用 `summary.files_reviewed` 或 `manifest.terminal_state`。调用方同时必须允许下述
+manifest-less 路径里 `summary` 和 `manifest` 都不存在。`review --format json` 永远向
 stdout 写出恰好一个 JSON 对象，绝不会是裸数组。
 
-`ocr scan` 在无可扫描内容时走的是更精简的 no-files 路径：它不包含 `summary`，
-但仍会报告 `"status": "skipped"`、`"message": "No supported files changed."`
-以及 `"comments": []`。输出中还会包含 `tool_calls` 等常规字段，并可能带有
-`llm`、`trace_id` 等可选元数据。
+manifest-less 的 no-files 路径更精简：它同时省略 `summary` 和 `manifest`，但仍会报告
+`"status": "skipped"`、`"message": "No supported files changed."` 以及
+`"comments": []`，并且 `tool_calls` 始终存在。`ocr scan` 总是 manifest-less；当它满足
+no-files 条件时会走这一路径。`ocr review` 在 manifest 构造失败且满足 no-files 条件时
+也可能进入同一路径。`llm`、`trace_id` 等可选元数据可能出现。
 
 ### 会话 JSONL 在哪？
 
