@@ -2622,3 +2622,62 @@ func TestResolveEndpoint_RedundantRetryCodesFiltered(t *testing.T) {
 		t.Errorf("RetryCodes = %v, want [403] (429 should be filtered)", ep.RetryCodes)
 	}
 }
+
+// Regression test for #1155: a caller's task timeout (--timeout) must raise
+// the per-request HTTP deadline above the client's 5-minute default, while
+// OCR_LLM_TIMEOUT and config-file timeout_sec keep precedence.
+func TestResolveEndpointWithOptions_TaskTimeoutRaisesRequestDeadline(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{Model: "config-model", URL: "https://config.example.com/v1", AuthToken: "config-token"}})
+
+	// Task timeout applies when no env or config-file request timeout is set.
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{Model: "config-model", TaskTimeout: 30 * time.Minute})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Timeout != 30*time.Minute {
+		t.Fatalf("ep.Timeout = %v, want 30m from TaskTimeout", ep.Timeout)
+	}
+
+	// Zero task timeout leaves the client default in place.
+	ep, err = ResolveEndpointWithOptions(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions(zero): %v", err)
+	}
+	if ep.Timeout != 0 {
+		t.Fatalf("ep.Timeout = %v, want 0 (client default)", ep.Timeout)
+	}
+}
+
+func TestResolveEndpointWithOptions_EnvTimeoutBeatsTaskTimeout(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	t.Setenv("OCR_LLM_TIMEOUT", "45")
+	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{Model: "config-model", URL: "https://config.example.com/v1", AuthToken: "config-token"}})
+
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{TaskTimeout: 30 * time.Minute})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Timeout != 45*time.Second {
+		t.Fatalf("ep.Timeout = %v, want env's 45s over TaskTimeout's 30m", ep.Timeout)
+	}
+}
+
+func TestResolveEndpointWithOptions_ConfigTimeoutBeatsTaskTimeout(t *testing.T) {
+	clearAllEnv(t)
+	t.Setenv("OCR_LLM_URL", "https://env.example.com/v1")
+	t.Setenv("OCR_LLM_TOKEN", "env-token")
+	path, _ := writeResolverConfig(t, configFile{Llm: llmFileConfig{Model: "config-model", URL: "https://config.example.com/v1", AuthToken: "config-token", TimeoutSec: 60}})
+
+	ep, err := ResolveEndpointWithOptions(path, ResolveOptions{TaskTimeout: 30 * time.Minute})
+	if err != nil {
+		t.Fatalf("ResolveEndpointWithOptions: %v", err)
+	}
+	if ep.Timeout != 60*time.Second {
+		t.Fatalf("ep.Timeout = %v, want config's 60s over TaskTimeout's 30m", ep.Timeout)
+	}
+}
