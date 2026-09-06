@@ -260,8 +260,11 @@ stderr로 나갑니다(경고, 오류). `--audience agent`가 보장하는 깨�
 `summary.files_reviewed`나 `manifest.terminal_state`를 사용하세요. `review --format json`은 stdout에
 항상 JSON 객체 하나만 기록하며, 맨 배열을 내보내는 일은 없습니다.
 
-`summary`가 아예 없는 더 간소한 `{"status": "skipped", "message": "No supported files changed.",
-"comments": []}`는 `ocr scan`이 스캔할 대상이 없을 때 내보내는 출력입니다.
+`ocr scan`에서 스캔할 대상이 없을 때는 더 간소한 no-files 경로를 사용합니다.
+이 출력에는 `summary`가 없지만 `"status": "skipped"`,
+`"message": "No supported files changed."`, `"comments": []`는 들어갑니다.
+또한 `tool_calls` 같은 일반 필드와 `llm`, `trace_id` 같은 선택적 메타데이터가
+함께 나올 수 있습니다.
 
 ### 세션 JSONL은 어디에 있나요? {#where-do-session-jsonls-live}
 

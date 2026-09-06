@@ -274,9 +274,11 @@ states by object shape or by the presence of an optional key. Use
 `review --format json` always writes exactly one JSON object to stdout,
 never a bare array.
 
-The leaner `{"status": "skipped", "message": "No supported files
-changed.", "comments": []}`, which has no `summary` at all, is what
-`ocr scan` emits when nothing is scannable.
+The no-files path for `ocr scan` is leaner: it omits `summary`, while
+still reporting `"status": "skipped"`, `"message": "No supported files
+changed."`, and `"comments": []`. Other normal output fields such as
+`tool_calls`, and optional metadata such as `llm` or `trace_id`, may
+also be present.
 
 ### Where do session JSONLs live?
 

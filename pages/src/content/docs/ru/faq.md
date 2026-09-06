@@ -279,9 +279,12 @@ JSON с `comments: []`**: `summary.files_reviewed` равен числу дей�
 `review --format json` всегда выводит в stdout ровно один объект JSON и никогда
 — «голый» массив.
 
-Более компактный объект `{"status": "skipped", "message": "No supported files
-changed.", "comments": []}`, в котором вообще нет `summary`, выдаёт `ocr scan`,
-когда сканировать нечего.
+Когда `ocr scan` не находит файлов для сканирования, используется более
+компактный путь no-files: поле `summary` отсутствует, но вывод по-прежнему
+содержит `"status": "skipped"`, `"message": "No supported files changed."`
+и `"comments": []`. Также присутствуют обычные поля вроде `tool_calls`, а
+необязательные метаданные, например `llm` или `trace_id`, могут присутствовать
+в зависимости от запуска.
 
 ### Где хранятся файлы JSONL сеансов?
 

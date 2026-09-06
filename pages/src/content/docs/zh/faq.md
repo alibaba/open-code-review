@@ -227,8 +227,10 @@ agent` 保证的干净 stdout 是*对解析器友好的*——要屏蔽一切，
 `summary.files_reviewed` 或 `manifest.terminal_state`。`review --format json` 永远向
 stdout 写出恰好一个 JSON 对象，绝不会是裸数组。
 
-更精简的 `{"status": "skipped", "message": "No supported files changed.",
-"comments": []}`（完全没有 `summary`）是 `ocr scan` 在无可扫描内容时产出的。
+`ocr scan` 在无可扫描内容时走的是更精简的 no-files 路径：它不包含 `summary`，
+但仍会报告 `"status": "skipped"`、`"message": "No supported files changed."`
+以及 `"comments": []`。输出中还会包含 `tool_calls` 等常规字段，并可能带有
+`llm`、`trace_id` 等可选元数据。
 
 ### 会话 JSONL 在哪？
 

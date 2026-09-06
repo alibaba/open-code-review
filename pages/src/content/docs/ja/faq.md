@@ -246,8 +246,11 @@ JSON モードでは `warnings` にも表示されます。
 両者を判別しないでください。`summary.files_reviewed` または `manifest.terminal_state` を使ってください。
 `review --format json` は stdout に必ず JSON オブジェクトを 1 つだけ書き出し、裸の配列にはなりません。
 
-`summary` をまったく持たない、より簡素な `{"status": "skipped", "message": "No supported files
-changed.", "comments": []}` は、`ocr scan` がスキャン対象のないときに出力するものです。
+`ocr scan` でスキャン対象がない場合は、より簡素な no-files 経路を通ります。
+この出力には `summary` はありませんが、`"status": "skipped"`、
+`"message": "No supported files changed."`、`"comments": []` は含まれます。
+また、`tool_calls` などの通常フィールドや、`llm`、`trace_id` などの省略可能な
+メタデータが含まれる場合もあります。
 
 ### セッション JSONL はどこにある？
 
