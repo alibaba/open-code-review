@@ -58,37 +58,30 @@ npm run build
 
 Build output is generated in `pages/dist/`.
 
-Use the script rather than calling Webpack directly without setting the Node
-environment. `webpack.config.cjs` derives `isProduction` from `NODE_ENV` alone,
-and that one flag decides both Webpack `mode` and whether
-`@babel/preset-react` runs its development transform:
+Use the project script or webpack-cli's `--node-env` option rather than calling
+Webpack without setting the Node environment. `webpack.config.cjs` derives
+`isProduction` from `NODE_ENV` alone, and that one flag decides both Webpack
+`mode` and whether `@babel/preset-react` runs its development transform:
 
-| Command                                  | Result                                                                                                                                                          |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npx webpack`                            | Development mode, including the development React build. Do not use this for a production artifact.                                                             |
-| `npx webpack --mode production`          | Webpack optimizes the bundle and selects production React, but `NODE_ENV` remains unset for the config, so Babel still enables its React development transform. |
-| `npx webpack --node-env production`      | Production mode with `NODE_ENV=production`; works across `cmd.exe`, PowerShell, Git Bash, and POSIX shells.                                                     |
-| `npm run build`                          | Production mode with `NODE_ENV=production` and `--mode production`.                                                                                             |
+| Command                             | Result                                                                                                                                                          |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npx webpack`                       | Development mode, including the development React build. Do not use this for a production artifact.                                                             |
+| `npx webpack --mode production`     | Webpack optimizes the bundle and selects production React, but `NODE_ENV` remains unset for the config, so Babel still enables its React development transform. |
+| `npx webpack --node-env production` | Production mode with `NODE_ENV=production`; works across `cmd.exe`, PowerShell, Git Bash, and POSIX shells.                                                     |
+| `npm run build`                     | Production mode with `NODE_ENV=production` and `--mode production`.                                                                                             |
 
-On Windows with npm's default `cmd.exe` script shell, `npm run build` fails as
-written. The script is `NODE_ENV=production webpack --mode production`, and
-that inline assignment is POSIX syntax; `cmd.exe` reads
-`NODE_ENV=production` as a command name:
-
-```text
-'NODE_ENV' is not recognized as an internal or external command,
-operable program or batch file.
-```
-
-Use webpack-cli's shell-independent `--node-env` option instead:
+For a shell-independent production build, use:
 
 ```bash
 npx webpack --node-env production
 ```
 
 webpack-cli sets `process.env.NODE_ENV` before loading the config, so this uses
-the same production configuration without relying on shell-specific inline
-environment-variable syntax.
+the intended production configuration without relying on shell-specific inline
+environment-variable syntax. The project script itself could be made
+cross-platform by using `webpack --node-env production`; changing
+`package.json` is intentionally outside the scope of this documentation-only
+change.
 
 ### Checks
 
@@ -101,14 +94,14 @@ Pages CI runs the following sequence for every PR that touches `pages/**`:
 5. Smoke-test the built `dist/`
 6. `npm run size`
 
-For local pre-PR validation, run the npm-script checks in the same order. On
-Windows, replace the `npm run build` step with
-`npx webpack --node-env production`.
+For local pre-PR validation, run the npm-script checks in the same order. If the
+npm script shell does not support POSIX inline environment assignments, use
+`npx webpack --node-env production` for the production-build step.
 
 `npm run lint` runs ESLint over `src/`; `npm test` runs the Vitest suite once
-(`vitest run`) in a `jsdom` environment; and `npm run size` checks the combined
-size of the files matched by `dist/*.bundle.js` against the 150 kB budget
-declared in `package.json`.
+(`vitest run`) in a `jsdom` environment; and `npm run size` measures the
+combined brotli-compressed size of the files matched by `dist/*.bundle.js`
+against the 150 kB budget declared in `package.json`.
 
 ## Project Structure
 
@@ -194,7 +187,7 @@ Please include:
 - [ ] `npm run lint` passes
 - [ ] `npm test` passes
 - [ ] `npm run typecheck` passes
-- [ ] Production build succeeds (`npm run build` when npm scripts use a POSIX shell; otherwise use `npx webpack --node-env production`)
+- [ ] Production build succeeds (`npm run build` on a POSIX script shell or `npx webpack --node-env production` as the portable equivalent)
 - [ ] `npm run size` passes
 - [ ] Before/after screenshots added to PR when an affected view exists
 - [ ] Scope is limited to one logical change
