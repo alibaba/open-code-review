@@ -74,6 +74,13 @@ func addPreviewFlag(cmd *cobra.Command, target *bool) {
 	cmd.Flags().BoolVarP(target, "preview", "p", false, "preview which files will be reviewed without running the LLM")
 }
 
+func addBudgetPreflightFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVar(target, "budget-preflight", budgetPreflightWarn,
+		"when the rough estimate exceeds the effective token budget: warn, confirm, or abort")
+	cmd.RegisterFlagCompletionFunc("budget-preflight", completeEnum(
+		budgetPreflightWarn, budgetPreflightConfirm, budgetPreflightAbort))
+}
+
 func completeEnum(values ...string) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return values, cobra.ShellCompDirectiveNoFileComp
@@ -217,6 +224,7 @@ func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	cmd.RegisterFlagCompletionFunc("effort", completeEnum(template.EffortNames()...))
 	cmd.Flags().BoolVar(&opts.noFilter, "no-filter", false, "keep all review comments without LLM post-filtering")
 	addPreviewFlag(cmd, &opts.preview)
+	addBudgetPreflightFlag(cmd, &reviewBudgetPreflight)
 }
 
 // registerScanFlags registers all scan command flags on cmd, binding to opts.
@@ -244,6 +252,7 @@ func registerScanFlags(cmd *cobra.Command, opts *scanOptions) {
 	addModelFlag(cmd, &opts.model)
 	cmd.Flags().StringVar(&opts.resume, "resume", "", "resume from a previous scan session id")
 	cmd.RegisterFlagCompletionFunc("batch", completeEnum("none", "by-language", "by-directory"))
+	addBudgetPreflightFlag(cmd, &scanBudgetPreflight)
 }
 
 // registerDelegateFlags registers all delegate shared flags on cmd, binding to opts.
