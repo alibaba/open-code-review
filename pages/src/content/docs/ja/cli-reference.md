@@ -649,6 +649,20 @@ ocr completion powershell > ocr.ps1
 
 その後、`ocr.ps1` を読み込む行を PowerShell プロファイルに追加してください。
 
+## man ページ
+
+`ocr` は UNIX のマニュアルページを同梱しています。インストール後は次で読めます：
+
+```sh
+man ocr
+```
+
+`install.sh` インストーラーがページを自動で配置します。他のインストール方法（npm、ソースビルド）では自動配置されないため、自分で生成して `MANPATH` に配置してください：
+
+```sh
+ocr man <directory>
+```
+
 ## ヒントと注意点
 
 - `--audience agent` は `--format json` を**含意しません**。両者は異なることを制御します。UI の抑制 vs 構造化されたペイロードです。両方が必要な場合は組み合わせて使用してください。
