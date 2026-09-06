@@ -430,6 +430,7 @@ var supportedConfigKeys = []string{
 	"llm.auth_token_cmd",
 	"llm.auth_header",
 	"llm.model",
+	"llm.timeout_sec",
 	"llm.protocol",
 	"llm.use_anthropic",
 	"llm.extra_body",
@@ -527,6 +528,12 @@ func setConfigValue(cfg *Config, key, value string) error {
 		cfg.Llm.ExtraHeaders = parsed
 	case "llm.model", "llm.Model":
 		cfg.Llm.Model = value
+	case "llm.timeout_sec", "llm.TimeoutSec":
+		timeout, err := parseTimeoutSeconds(value)
+		if err != nil {
+			return fmt.Errorf("invalid timeout_sec: %w", err)
+		}
+		cfg.Llm.TimeoutSec = timeout
 	case "llm.protocol", "llm.Protocol":
 		normalized := llm.NormalizeProtocol(value)
 		if err := llm.ValidateProtocol(normalized); err != nil {
@@ -602,7 +609,7 @@ func setConfigValue(cfg *Config, key, value string) error {
 		}
 		cfg.Llm.RetryCodes = codes
 	default:
-		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
+		return fmt.Errorf("unknown config key: %s\nSupported keys: %s\nProvider fields: api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile\nProtocol values: anthropic, anthropic-bedrock, openai, openai-responses\nMCP server fields: type, command, args, env, url, headers, tools, setup", key, strings.Join(supportedConfigKeys, ", "))
 	}
 	return nil
 }
@@ -671,6 +678,12 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: %s\n", w)
 		}
 		entry.RetryCodes = codes
+	case "timeout_sec":
+		timeout, err := parseTimeoutSeconds(value)
+		if err != nil {
+			return fmt.Errorf("invalid timeout_sec for %s: %w", key, err)
+		}
+		entry.TimeoutSec = timeout
 	case "aws_region", "aws_profile":
 		normalized, err := normalizeAWSSetting(field, key, value)
 		if err != nil {
@@ -685,9 +698,20 @@ func applyProviderField(providerName string, entry *ProviderEntry, field, key, v
 			entry.AWSProfile = normalized
 		}
 	default:
-		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
+		return fmt.Errorf("unknown provider field %q: supported fields are api_key, api_key_cmd, url, protocol, model, models, auth_header, timeout_sec, extra_body, extra_headers, retry_codes, aws_region, aws_profile", field)
 	}
 	return nil
+}
+
+func parseTimeoutSeconds(value string) (int, error) {
+	seconds, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("must be an integer, got %q", value)
+	}
+	if seconds < 0 {
+		return 0, fmt.Errorf("must be non-negative, got %d", seconds)
+	}
+	return seconds, nil
 }
 
 // providerAcceptsAWSSettings reports whether aws_region / aws_profile mean
