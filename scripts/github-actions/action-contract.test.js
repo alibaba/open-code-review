@@ -745,6 +745,49 @@ function testConfigurePreservesLegacyUseAnthropicResolution() {
   }
 }
 
+function testConfigureProtocolHonorsExplicitLlmProtocol() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  for (const protocol of ["openai-responses", "openai", "anthropic", "custom-protocol"]) {
+    const fixture = makeFixture();
+    try {
+      const values = inputValues({
+        llm_url: "https://llm.example.invalid/v1",
+        llm_model: "contract-model",
+        llm_protocol: protocol,
+        llm_use_anthropic: "false",
+        llm_auth_token: "protocol-token-sentinel",
+      });
+      const result = runStep(configure, values, fixture);
+      assert.strictEqual(result.status, 0, `Configure OCR failed for llm_protocol=${protocol}; ${resultDescription(result)}`);
+      const configured = configValues(configOperations(fixture));
+      assert.strictEqual(configured["llm.protocol"], protocol);
+    } finally {
+      removeFixture(fixture);
+    }
+  }
+}
+
+function testConfigureProtocolHonorsEnvOverride() {
+  const configure = stepNamed("Configure OCR");
+  assert.ok(configure, "action.yml must retain the Configure OCR step");
+  const fixture = makeFixture();
+  try {
+    const values = inputValues({
+      llm_url: "https://llm.example.invalid/v1",
+      llm_model: "contract-model",
+      llm_use_anthropic: "false",
+      llm_auth_token: "protocol-token-sentinel",
+    });
+    const result = runStep(configure, values, fixture, { OCR_LLM_PROTOCOL: "openai-responses" });
+    assert.strictEqual(result.status, 0, `Configure OCR failed with OCR_LLM_PROTOCOL env; ${resultDescription(result)}`);
+    const configured = configValues(configOperations(fixture));
+    assert.strictEqual(configured["llm.protocol"], "openai-responses");
+  } finally {
+    removeFixture(fixture);
+  }
+}
+
 function testConfigureClearsStaleExtraHeadersBeforeTokenCommand() {
   const configure = stepNamed("Configure OCR");
   assert.ok(configure, "action.yml must retain the Configure OCR step");
@@ -1009,6 +1052,7 @@ function testRequiredStepTopologyAndEnvironmentContracts() {
     "Configure OCR": [
       "OCR_LLM_URL",
       "OCR_LLM_MODEL",
+      "OCR_LLM_PROTOCOL",
       "OCR_USE_ANTHROPIC",
       "OCR_LLM_AUTH_HEADER",
       "OCR_EXTRA_BODY",
@@ -1018,6 +1062,7 @@ function testRequiredStepTopologyAndEnvironmentContracts() {
       "OCR_LLM_URL",
       "OCR_LLM_TOKEN",
       "OCR_LLM_MODEL",
+      "OCR_LLM_PROTOCOL",
       "OCR_USE_ANTHROPIC",
       "OCR_LLM_AUTH_HEADER",
       "OCR_LLM_EXTRA_HEADERS",
@@ -1102,6 +1147,8 @@ const TESTS = [
   ["Configure OCR neutralizes stale provider and static token", testConfigureNeutralizesStaleProviderAndStaticToken],
   ["Configure OCR sets a protocol consistent with use_anthropic", testConfigureProtocolTracksUseAnthropic],
   ["Configure OCR preserves legacy use_anthropic resolution", testConfigurePreservesLegacyUseAnthropicResolution],
+  ["Configure OCR honors explicit llm_protocol input", testConfigureProtocolHonorsExplicitLlmProtocol],
+  ["Configure OCR honors OCR_LLM_PROTOCOL env override", testConfigureProtocolHonorsEnvOverride],
   ["Configure OCR clears stale persisted extra headers", testConfigureClearsStaleExtraHeadersBeforeTokenCommand],
   ["Configure OCR clears stale persisted retry codes", testConfigureClearsStaleRetryCodesBeforeEndpointConfig],
   ["Run OpenCodeReview retains the extra-headers env override", testRunRetainsExtraHeadersEnvironmentOverride],
