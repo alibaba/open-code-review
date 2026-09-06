@@ -50,8 +50,8 @@ GitHub: https://github.com/alibaba/open-code-review
 所有命令均可使用，且放在子命令前后皆可
 （`ocr --color=never review` 与 `ocr review --color=never` 等价）。
 
-| 参数 | 默认值 | 说明 |
-|---|---|---|
+| 参数                            | 默认值 | 说明                                                                                                                                        |
+| ------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--color <auto\|always\|never>` | `auto` | 何时输出 ANSI 颜色。`auto` 仅在 stdout 是终端时着色，因此管道或重定向得到的是纯文本。`always` 会在管道中保留颜色（便于配合 `\| less -R`）。 |
 
 当 stdout 不是终端时，文本输出始终为纯文本，因此可以安全地通过管道传递：
@@ -64,23 +64,23 @@ ocr review --commit HEAD | gh issue comment 123 --body-file -
 
 ## 命令总览
 
-| 命令 | 别名 | 作用 |
-|---|---|---|
-| `ocr review` | `ocr r` | 运行代码评审并输出评论。 |
-| `ocr scan` | `ocr s` | 无需 Git diff，扫描完整文件。 |
-| `ocr rules check <file>` | — | 显示某文件路径适用哪条规则及其来源。 |
-| `ocr config set <key> <value>` | — | 将一个配置值持久化到 `~/.opencodereview/config.json`。 |
-| `ocr config unset <key>` | — | 清除一个已保存的配置值（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
-| `ocr config provider` | — | 交互式 provider 配置 TUI。 |
-| `ocr config model` | — | 交互式 model 选择 TUI。 |
-| `ocr llm test` | — | 发送一条简短 chat 请求以验证配置的端点。 |
-| `ocr llm providers` | — | 列出所有内置 LLM provider。 |
-| `ocr session list` | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话。 |
-| `ocr session show <id>` | `ocr sessions show <id>` | 查看单个会话及其逐文件检查点。 |
-| `ocr session comments <id>` | `ocr sessions comments <id>` | 输出单个会话中记录的评审评论。 |
-| `ocr session compare <before> <after>` | `ocr session diff <before> <after>` | 对比两个会话的问题：新增、仍存在、已解决、未评审。 |
-| `ocr viewer` | — | 启动用于历史评审会话的本地 Web UI（`localhost:5483`）。 |
-| `ocr version` | — | 打印版本、commit、平台、构建日期与 GitHub URL。 |
+| 命令                                   | 别名                                  | 作用                                                                                                            |
+| -------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `ocr review`                           | `ocr r`                               | 运行代码评审并输出评论。                                                                                        |
+| `ocr scan`                             | `ocr s`                               | 无需 Git diff，扫描完整文件。                                                                                   |
+| `ocr rules check <file>`               | —                                     | 显示某文件路径适用哪条规则及其来源。                                                                            |
+| `ocr config set <key> <value>`         | —                                     | 将一个配置值持久化到 `~/.opencodereview/config.json`。                                                          |
+| `ocr config unset <key>`               | —                                     | 清除一个已保存的配置值（`provider`、`max_tokens`、`effort`、`custom_providers.<name>`、`mcp_servers.<name>`）。 |
+| `ocr config provider`                  | —                                     | 交互式 provider 配置 TUI。                                                                                      |
+| `ocr config model`                     | —                                     | 交互式 model 选择 TUI。                                                                                         |
+| `ocr llm test`                         | —                                     | 发送一条简短 chat 请求以验证配置的端点。                                                                        |
+| `ocr llm providers`                    | —                                     | 列出所有内置 LLM provider。                                                                                     |
+| `ocr session list`                     | `ocr sessions list`, `ocr session ls` | 列出已保存的评审会话。                                                                                          |
+| `ocr session show <id>`                | `ocr sessions show <id>`              | 查看单个会话及其逐文件检查点。                                                                                  |
+| `ocr session comments <id>`            | `ocr sessions comments <id>`          | 输出单个会话中记录的评审评论。                                                                                  |
+| `ocr session compare <before> <after>` | `ocr session diff <before> <after>`   | 对比两个会话的问题：新增、仍存在、已解决、未评审。                                                              |
+| `ocr viewer`                           | —                                     | 启动用于历史评审会话的本地 Web UI（`localhost:5483`）。                                                         |
+| `ocr version`                          | —                                     | 打印版本、commit、平台、构建日期与 GitHub URL。                                                                 |
 
 `ocr` 和 `ocr -h` 打印顶层用法。每个子命令也接受 `-h` / `--help`。
 
@@ -100,33 +100,33 @@ unstaged + untracked 变更。
 
 ### 参数
 
-| 参数 | 简写 | 默认 | 说明 |
-|---|---|---|---|
-| `--repo <path>` | — | 当前目录 | Git 仓库根。 |
-| `--from <ref>` | — | — | diff 起始 ref（如 `main`）。 |
-| `--to <ref>` | — | — | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。 |
-| `--commit <sha>` | `-c` | — | 评审单个 commit（相对其父）。 |
-| `--preview` | `-p` | `false` | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。 |
-| `--no-filter` | — | `false` | 保留所有评审评论，并跳过每个文件的 `REVIEW_FILTER_TASK` LLM 后处理调用。 |
-| `--resume <session-id>` | — | — | 从之前兼容的区间或单 commit 评审会话恢复。 |
-| `--format <fmt>` | `-f` | `text` | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。 |
-| `--output <path>` | `-o` | 标准输出 | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
-| `--audience <who>` | — | `human` | `human` 流式输出进度行（`--format` 为 `json`/`sarif` 时输出到 stderr，使 stdout 保持为单个可解析文档）；`agent` 完全抑制进度行，只打印最终摘要 / JSON。 |
-| `--background <text>` | `-b` | — | 注入 plan + main prompt 的可选需求 / 业务上下文。 |
-| `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
-| `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式；与 `rule.json` 的 excludes 合并。 |
-| `--concurrency <n>` | — | `8` | 并行评审的最大文件数。 |
-| `--timeout <minutes>` | — | `15` | 每文件截止时间。`0` 关闭超时。按 effort 轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。 |
-| `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
-| `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |
-| `--max-tokens <n>` | — | 配置或模板默认 | 每文件**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
-| `--max-tokens-budget <n>` | — | `0`（无限制） | 限制本次评审的输入 + 输出 token 总量。超出预算后停止分发，并仍会发布部分结果。 |
-| `--budget-preflight <warn\|confirm\|abort>` | — | `warn` | 用于选择当估算 token 用量超过预算时的处理方式。`warn` 保留原有的非阻塞行为；`confirm` 在启动前询问，且没有交互式终端时 fail-closed；`abort` 在创建会话或调用 LLM 之前退出。要求设置正的 token 预算。 |
-| `--effort <level>` | — | 配置或 `medium` | 评审投入档位：`low` = 1 轮 main 循环，`medium` = 2 轮（默认），`high` = 3 轮。轮数越多召回越高、耗时与 token 也越多。可用 `ocr config set effort <level>` 持久化。 |
-| `--provider <name>` | — | — | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。 |
-| `--model <name>` | — | — | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。 |
-| `--max-git-procs <n>` | — | `16` | 并发 git 子进程的最大数。 |
-| `--tools <path>` | — | 内嵌 | 自定义 JSON 工具配置文件路径。覆盖内嵌工具定义。 |
+| 参数                                        | 简写 | 默认            | 说明                                                                                                                                                                                                 |
+| ------------------------------------------- | ---- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--repo <path>`                             | —    | 当前目录        | Git 仓库根。                                                                                                                                                                                         |
+| `--from <ref>`                              | —    | —               | diff 起始 ref（如 `main`）。                                                                                                                                                                         |
+| `--to <ref>`                                | —    | —               | diff 结束 ref（如 `feature-branch`）。设置后 OCR 计算 `merge-base(from, to)..to`。                                                                                                                   |
+| `--commit <sha>`                            | `-c` | —               | 评审单个 commit（相对其父）。                                                                                                                                                                        |
+| `--preview`                                 | `-p` | `false`         | 运行过滤流水线但跳过 LLM。打印文件列表与排除原因。支持 `--format json`；不支持 `--format sarif`（预览没有已完成的发现可供输出）。                                                                    |
+| `--no-filter`                               | —    | `false`         | 保留所有评审评论，并跳过每个文件的 `REVIEW_FILTER_TASK` LLM 后处理调用。                                                                                                                             |
+| `--resume <session-id>`                     | —    | —               | 从之前兼容的区间或单 commit 评审会话恢复。                                                                                                                                                           |
+| `--format <fmt>`                            | `-f` | `text`          | `text`（人类可读）、`json`（机器可读的评论数组）或 `sarif`（用于 GitHub Code Scanning 的 SARIF 2.1.0 报告）。                                                                                        |
+| `--output <path>`                           | `-o` | 标准输出        | 将评审结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。                                                                      |
+| `--audience <who>`                          | —    | `human`         | `human` 流式输出进度行（`--format` 为 `json`/`sarif` 时输出到 stderr，使 stdout 保持为单个可解析文档）；`agent` 完全抑制进度行，只打印最终摘要 / JSON。                                              |
+| `--background <text>`                       | `-b` | —               | 注入 plan + main prompt 的可选需求 / 业务上下文。                                                                                                                                                    |
+| `--background-file <path>`                  | `-B` | —               | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。                                                                                                                           |
+| `--exclude <patterns>`                      | —    | —               | 逗号分隔的 gitignore 风格排除模式；与 `rule.json` 的 excludes 合并。                                                                                                                                 |
+| `--concurrency <n>`                         | —    | `8`             | 并行评审的最大文件数。                                                                                                                                                                               |
+| `--timeout <minutes>`                       | —    | `15`            | 每文件截止时间。`0` 关闭超时。按 effort 轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。                                                                                                    |
+| `--rule <path>`                             | —    | —               | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。                                                                                                                                         |
+| `--max-tools <n>`                           | —    | 模板默认        | 每文件最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。                                                            |
+| `--max-tokens <n>`                          | —    | 配置或模板默认  | 每文件**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。                                       |
+| `--max-tokens-budget <n>`                   | —    | `0`（无限制）   | 限制本次评审的输入 + 输出 token 总量。超出预算后停止分发，并仍会发布部分结果。                                                                                                                       |
+| `--budget-preflight <warn\|confirm\|abort>` | —    | `warn`          | 用于选择当估算 token 用量超过预算时的处理方式。`warn` 保留原有的非阻塞行为；`confirm` 在启动前询问，且没有交互式终端时 fail-closed；`abort` 在创建会话或调用 LLM 之前退出。要求设置正的 token 预算。 |
+| `--effort <level>`                          | —    | 配置或 `medium` | 评审投入档位：`low` = 1 轮 main 循环，`medium` = 2 轮（默认），`high` = 3 轮。轮数越多召回越高、耗时与 token 也越多。可用 `ocr config set effort <level>` 持久化。                                   |
+| `--provider <name>`                         | —    | —               | 为本次运行选择已配置的 provider。支持 `providers` 和 `custom_providers` 中的名称。                                                                                                                   |
+| `--model <name>`                            | —    | —               | 为本次运行覆盖已解析出的 LLM model（如 `claude-opus-4-6`）。                                                                                                                                         |
+| `--max-git-procs <n>`                       | —    | `16`            | 并发 git 子进程的最大数。                                                                                                                                                                            |
+| `--tools <path>`                            | —    | 内嵌            | 自定义 JSON 工具配置文件路径。覆盖内嵌工具定义。                                                                                                                                                     |
 
 > 模式参数互斥：传 `--from`/`--to`，或 `--commit`，或都不传（工作区模式）。
 > 混用会直接报错。
@@ -296,16 +296,16 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 
 顶层字段：
 
-| 字段 | 说明 |
-|---|---|
-| `status` | `success`、`completed_with_warnings`、`completed_with_errors` 或 `skipped`。 |
-| `llm` | 实际解析的 LLM 标识。规范化后的 `model` 始终存在；`provider` 仅在使用已命名的配置 provider 时存在。 |
-| `message` | 可选。人类可读摘要，如 `"No comments generated. Looks good to me."`。 |
-| `summary` | 可选。运行聚合：`files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` 运行时省略。 |
-| `comments` | 总是存在，可能为空。每条评论的字段如上例。 |
-| `warnings` | 可选。当一个或多个子 agent 失败时存在；每条描述受影响文件与错误。 |
-| `session_id` | 可选。持久化的评审运行会包含该字段；重试兼容的区间或单 commit 评审时可传给 `ocr review --resume <session-id>`。 |
-| `resume` | 可选。恢复运行时存在，包含 `resumed_from`、`reused_files`、`rerun_files`、`previous_model` 和 `current_model`。 |
+| 字段         | 说明                                                                                                                                                                                                  |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`     | `success`、`completed_with_warnings`、`completed_with_errors` 或 `skipped`。                                                                                                                          |
+| `llm`        | 实际解析的 LLM 标识。规范化后的 `model` 始终存在；`provider` 仅在使用已命名的配置 provider 时存在。                                                                                                   |
+| `message`    | 可选。人类可读摘要，如 `"No comments generated. Looks good to me."`。                                                                                                                                 |
+| `summary`    | 可选。运行聚合：`files_reviewed`、`comments`、`total_tokens`、`input_tokens`、`output_tokens`、`cache_read_tokens`（omitempty）、`cache_write_tokens`（omitempty）、`elapsed`。`skipped` 运行时省略。 |
+| `comments`   | 总是存在，可能为空。每条评论的字段如上例。                                                                                                                                                            |
+| `warnings`   | 可选。当一个或多个子 agent 失败时存在；每条描述受影响文件与错误。                                                                                                                                     |
+| `session_id` | 可选。持久化的评审运行会包含该字段；重试兼容的区间或单 commit 评审时可传给 `ocr review --resume <session-id>`。                                                                                       |
+| `resume`     | 可选。恢复运行时存在，包含 `resumed_from`、`reused_files`、`rerun_files`、`previous_model` 和 `current_model`。                                                                                       |
 
 当没有文件可评审时，JSON 模式会发一个 `skipped` 外壳，以便调用方区分“无变更”
 与“无发现”：
@@ -324,9 +324,9 @@ ocr review --format json | jq .summary   # stdout 是单个 JSON 文档
 
 ### 退出码
 
-| 码 | 含义 |
-|---|---|
-| `0` | 评审完成（可能零评论，可能有非致命警告）。 |
+| 码  | 含义                                                                                          |
+| --- | --------------------------------------------------------------------------------------------- |
+| `0` | 评审完成（可能零评论，可能有非致命警告）。                                                    |
 | `1` | 致命错误——参数错误、无法解析 LLM 端点、所有 per-file 子 agent 失败等。错误文本打印到 stderr。 |
 
 非致命警告（单个子 agent 失败、某文件超过 token 阈值等）内联打印；JSON 模式下
@@ -346,12 +346,12 @@ ocr s      [flags]   (alias)
 
 ### 参数
 
-| 参数 | 简写 | 默认 | 说明 |
-|---|---|---|---|
-| `--path <list>` | - | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。 |
-| `--exclude <patterns>` | - | - | 逗号分隔的 gitignore 风格排除模式（如 `**/generated/*,*.pb.go`）；与 `rule.json` 的 excludes 合并。 |
-| `--output <path>` | `-o` | 标准输出 | 将扫描结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。 |
-| `--preview` | `-p` | `false` | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。支持 `--format json`；不支持 `--format sarif`。 |
+| 参数                   | 简写 | 默认     | 说明                                                                                                                                 |
+| ---------------------- | ---- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `--path <list>`        | -    | 整个仓库 | 逗号分隔的仓库相对目录或文件（如 `internal/agent`、`internal/llm/client.go`）。                                                      |
+| `--exclude <patterns>` | -    | -        | 逗号分隔的 gitignore 风格排除模式（如 `**/generated/*,*.pb.go`）；与 `rule.json` 的 excludes 合并。                                  |
+| `--output <path>`      | `-o` | 标准输出 | 将扫描结果写入 UTF-8 文件（`-` 表示标准输出）。首次写入时惰性创建文件，运行失败不会截断已有文件；文本格式自动剥离 ANSI 颜色码。      |
+| `--preview`            | `-p` | `false`  | 枚举并过滤文件但跳过 LLM。打印文件列表、可评审/排除数量、总行数及每个文件的排除原因。支持 `--format json`；不支持 `--format sarif`。 |
 
 ```bash
 ocr scan --preview                              # 查看会扫描哪些文件
@@ -390,11 +390,11 @@ ocr session list --limit 50
 ocr session list --json
 ```
 
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `--repo <path>` | 当前目录 | 要列出会话的仓库。 |
-| `--json` | `false` | 以 JSON 输出会话摘要。 |
-| `--limit <n>` | `20` | 限制列出的会话数量。使用 `0` 表示不限制。 |
+| 参数            | 默认     | 说明                                      |
+| --------------- | -------- | ----------------------------------------- |
+| `--repo <path>` | 当前目录 | 要列出会话的仓库。                        |
+| `--json`        | `false`  | 以 JSON 输出会话摘要。                    |
+| `--limit <n>`   | `20`     | 限制列出的会话数量。使用 `0` 表示不限制。 |
 
 ### `ocr session show`
 
@@ -406,10 +406,10 @@ ocr session show --json <session-id>
 ocr session show --repo /path/to/repo <session-id>
 ```
 
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `--repo <path>` | 当前目录 | 要查看会话的仓库。 |
-| `--json` | `false` | 以 JSON 输出会话元数据和逐文件条目。 |
+| 参数            | 默认     | 说明                                 |
+| --------------- | -------- | ------------------------------------ |
+| `--repo <path>` | 当前目录 | 要查看会话的仓库。                   |
+| `--json`        | `false`  | 以 JSON 输出会话元数据和逐文件条目。 |
 
 ### `ocr session comments`
 
@@ -423,12 +423,12 @@ ocr session comments --severity high <session-id>
 ocr session comments --severity critical,high --category bug,security <session-id>
 ```
 
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `--repo <path>` | 当前目录 | 要查看会话的仓库。 |
-| `--json` | `false` | 以 JSON 数组输出评论。 |
-| `--severity <list>` | 全部 | 逗号分隔的要包含的严重程度（`critical`、`high`、`medium`、`low`）。 |
-| `--category <list>` | 全部 | 逗号分隔的要包含的类别（如 `bug`、`security`）。 |
+| 参数                | 默认     | 说明                                                                |
+| ------------------- | -------- | ------------------------------------------------------------------- |
+| `--repo <path>`     | 当前目录 | 要查看会话的仓库。                                                  |
+| `--json`            | `false`  | 以 JSON 数组输出评论。                                              |
+| `--severity <list>` | 全部     | 逗号分隔的要包含的严重程度（`critical`、`high`、`medium`、`low`）。 |
+| `--category <list>` | 全部     | 逗号分隔的要包含的类别（如 `bug`、`security`）。                    |
 
 ### `ocr session compare`
 
@@ -448,10 +448,10 @@ ocr session compare --json <before-session-id> <after-session-id>
 两个会话必须属于同一个仓库，否则命令报错。评审模式不同只会在 stderr 输出
 警告，因此 `--json` 输出仍可直接用于管道。
 
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--repo <path>` | 当前目录 | 要对比会话的仓库。 |
-| `--json` | `false` | 以 JSON 输出对比结果（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
+| 参数            | 默认值   | 说明                                                                      |
+| --------------- | -------- | ------------------------------------------------------------------------- |
+| `--repo <path>` | 当前目录 | 要对比会话的仓库。                                                        |
+| `--json`        | `false`  | 以 JSON 输出对比结果（`new`、`persisting`、`resolved`、`not_reviewed`）。 |
 
 ## `ocr rules`
 
@@ -598,7 +598,6 @@ ocr -V
 （`<GOOS>/<GOARCH>`）、构建日期（存在时），以及 GitHub URL
 （`https://github.com/alibaba/open-code-review`）。
 
-
 ## ocr completion
 
 为 `ocr` 生成 shell 补全脚本，以便在 shell 中对命令名、参数和标志进行 Tab 补全。
@@ -668,7 +667,6 @@ ocr completion powershell > ocr.ps1
 ```
 
 然后在 PowerShell 配置文件中添加一行以加载 `ocr.ps1`。
-
 
 ## 提示与注意
 
