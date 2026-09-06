@@ -63,11 +63,11 @@ derives `isProduction` from `NODE_ENV` alone, and that one flag decides both
 Webpack `mode` and whether `@babel/preset-react` runs its development
 transform. Calling Webpack by hand gets at most half of that right:
 
-| Command | Result |
-| --- | --- |
-| `npx webpack` | Development mode, including the development React build. Do not use this for a production artifact. |
+| Command                         | Result                                                                                                                                                          |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npx webpack`                   | Development mode, including the development React build. Do not use this for a production artifact.                                                             |
 | `npx webpack --mode production` | Webpack optimizes the bundle and selects production React, but `NODE_ENV` remains unset for the config, so Babel still enables its React development transform. |
-| `npm run build` | Production mode with `NODE_ENV=production` and `--mode production`. |
+| `npm run build`                 | Production mode with `NODE_ENV=production` and `--mode production`.                                                                                             |
 
 On Windows with npm's default `cmd.exe` script shell, `npm run build` fails as
 written. The script is `NODE_ENV=production webpack --mode production`, and
