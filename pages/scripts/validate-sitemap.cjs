@@ -6,10 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { XMLValidator, XMLParser } = require('fast-xml-parser');
-
-// The site root every <loc> must live under — kept in sync with
-// pages/public/sitemap.xml and the routes in webpack.config.cjs.
-const SITE = 'https://open-codereview.ai';
+const { SITE, sitePaths } = require('./site-config.cjs');
 
 function validateSitemap(xml) {
   const wellFormed = XMLValidator.validate(xml);
@@ -26,6 +23,17 @@ function validateSitemap(xml) {
     if (typeof loc !== 'string' || !(loc === SITE || loc.startsWith(`${SITE}/`))) {
       return { ok: false, error: `<loc> must be a ${SITE} URL, got: ${JSON.stringify(loc)}` };
     }
+  }
+
+  const listed = urls.map(u => u.loc.slice(SITE.length));
+  const expected = sitePaths();
+  const missing = expected.filter(p => !listed.includes(p));
+  const extra = listed.filter(p => !expected.includes(p));
+  if (missing.length > 0 || extra.length > 0) {
+    const parts = [];
+    if (missing.length > 0) parts.push(`missing ${missing.join(', ')}`);
+    if (extra.length > 0) parts.push(`unexpected ${extra.join(', ')}`);
+    return { ok: false, error: `sitemap does not match site routes: ${parts.join('; ')}` };
   }
   return { ok: true, count: urls.length };
 }

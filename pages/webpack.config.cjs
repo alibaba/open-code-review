@@ -1,12 +1,11 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
-const { extractDocSlugs, extractBlogSlugs } = require('./scripts/extract-slugs.cjs');
+const { STATIC_ROUTES, docSlugs, blogSlugs } = require('./scripts/site-config.cjs');
 const isProduction = process.env.NODE_ENV === 'production';
 
-const STATIC_ROUTES = ['features', 'benchmark', 'quickstart', 'docs', 'blog'];
-const DOC_SLUGS = extractDocSlugs(__dirname);
-const BLOG_SLUGS = extractBlogSlugs(__dirname);
+const DOC_SLUGS = docSlugs();
+const BLOG_SLUGS = blogSlugs();
 
 module.exports = {
   mode: isProduction ? 'production' : 'development',

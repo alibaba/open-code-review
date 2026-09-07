@@ -43,8 +43,6 @@ jobs:
       - name: Prepare deployment artifact
         run: |
           mkdir -p _site
-          cp pages/public/robots.txt _site/robots.txt
-          cp pages/public/sitemap.xml _site/sitemap.xml
           cp -r pages/dist/* _site/
           cp pages/logo.svg _site/logo.svg
           cp install.sh _site/install.sh
@@ -60,9 +58,9 @@ jobs:
 
       - name: Lint crawler files
         run: |
-          test -f _site/robots.txt ; cmp pages/public/robots.txt _site/robots.txt
-          test -f _site/sitemap.xml ; cmp pages/public/sitemap.xml _site/sitemap.xml
-          node pages/scripts/validate-sitemap.cjs pages/public/sitemap.xml
+          test -f _site/robots.txt ; cmp pages/dist/robots.txt _site/robots.txt
+          test -f _site/sitemap.xml ; cmp pages/dist/sitemap.xml _site/sitemap.xml
+          node pages/scripts/validate-sitemap.cjs _site/sitemap.xml
 
       - uses: actions/upload-pages-artifact@v5
         with:

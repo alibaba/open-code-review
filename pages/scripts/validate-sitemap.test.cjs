@@ -4,16 +4,12 @@
 'use strict';
 
 const { validateSitemap, SITE } = require('./validate-sitemap.cjs');
-
-const VALID = `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>${SITE}/</loc></url>
-  <url><loc>${SITE}/docs/quickstart</loc></url>
-</urlset>`;
+const { buildSitemap } = require('./generate-sitemap.cjs');
+const { sitePaths } = require('./site-config.cjs');
 
 describe('validate-sitemap', () => {
-  it('accepts a well-formed sitemap with site URLs', () => {
-    expect(validateSitemap(VALID)).toEqual({ ok: true, count: 2 });
+  it('accepts the generated sitemap', () => {
+    expect(validateSitemap(buildSitemap())).toEqual({ ok: true, count: sitePaths().length });
   });
 
   it('rejects malformed XML', () => {
@@ -35,9 +31,26 @@ describe('validate-sitemap', () => {
   });
 
   it('rejects <loc> URLs outside the site', () => {
-    const bad = VALID.replace(`${SITE}/docs/quickstart`, 'https://evil.example/x');
+    const bad = buildSitemap().replace(`${SITE}/docs/quickstart`, 'https://evil.example/x');
     const result = validateSitemap(bad);
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(SITE);
+  });
+
+  it('rejects a sitemap missing a site route', () => {
+    const missing = buildSitemap().replace(/  <url>\n    <loc>https:\/\/open-codereview\.ai\/docs\/faq<\/loc>\n  <\/url>\n/, '');
+    const result = validateSitemap(missing);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/missing \/docs\/faq/);
+  });
+
+  it('rejects a sitemap listing an unknown route', () => {
+    const extra = buildSitemap().replace(
+      '</urlset>',
+      '  <url>\n    <loc>https://open-codereview.ai/docs/does-not-exist</loc>\n  </url>\n</urlset>'
+    );
+    const result = validateSitemap(extra);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/unexpected \/docs\/does-not-exist/);
   });
 });

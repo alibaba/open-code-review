@@ -53,7 +53,7 @@ jobs:
         working-directory: pages
         run: |
           FAILED=0
-          LOCS=$(grep -oE '<loc>[^<]+</loc>' public/sitemap.xml | sed -E 's#<loc>https://open-codereview\.ai##; s#</loc>##')
+          LOCS=$(node -e "process.stdout.write(require('./scripts/site-config.cjs').sitePaths().join(' '))")
           for loc in $LOCS; do
             file="dist/index.html"
             [ "$loc" != "/" ] && file="dist${loc}/index.html"
