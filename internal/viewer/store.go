@@ -9,6 +9,8 @@ package viewer
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -238,6 +240,7 @@ type ReviewComment struct {
 	EndLine        int
 	Category       string // bug, security, performance, maintainability, test, style, documentation, other
 	Severity       string // critical, high, medium, low
+	MarkID         string `json:"-"`
 }
 
 // ViewSession holds fully parsed records for one session.
@@ -298,6 +301,7 @@ type TaskCard struct {
 	RequestMessages  any // preserved for display
 	RequestNo        int
 	ResponseContent  string
+	ReasoningContent string // the model's reasoning/thinking text for this turn, if the provider exposed any
 	ToolCalls        []ToolCallInfo
 	DurationMs       int64
 	Error            string
@@ -329,6 +333,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	vs := &ViewSession{Files: make([]*FileGroup, 0)}
 	vs.Summary.Aborted = true
 	fileIndex := make(map[string]*FileGroup)
+	markOccurrences := make(map[string]int)
 
 	readErr := readJSONLLines(f, func(line []byte) {
 		var rec map[string]any
@@ -386,6 +391,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 		case "llm_response":
 			fp, _ := rec["filePath"].(string)
 			content, _ := rec["content"].(string)
+			reasoning, _ := rec["reasoning_content"].(string)
 			durationMs := int64(0)
 			if d, ok := rec["duration_ms"].(float64); ok {
 				durationMs = int64(d)
@@ -419,6 +425,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 				if len(cards) > 0 && cards[len(cards)-1].ResponseContent == "" {
 					card := cards[len(cards)-1]
 					card.ResponseContent = content
+					card.ReasoningContent = reasoning
 					card.DurationMs = durationMs
 					card.Model = model
 					card.Error = errStr
@@ -505,8 +512,9 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 
 		case "review_item_done", "review_item_reused":
 			fp, _ := rec["filePath"].(string)
+			recUUID, _ := rec["uuid"].(string)
 			if comments, ok := rec["comments"].([]any); ok {
-				for _, c := range comments {
+				for ci, c := range comments {
 					cm, ok := c.(map[string]any)
 					if !ok {
 						continue
@@ -536,6 +544,7 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 					if v, ok := cm["severity"].(string); ok {
 						rc.Severity = v
 					}
+					rc.MarkID = commentMarkID(recUUID, ci, rc, markOccurrences)
 					vs.Comments = append(vs.Comments, rc)
 				}
 			}
@@ -591,6 +600,24 @@ func LoadSession(root, encodedRepo, sessionID string) (*ViewSession, error) {
 	return vs, readErr
 }
 
+// commentMarkID returns a stable identity for one comment within an immutable
+// session file. Records carry a top-level uuid: uuid#commentIndex is exact,
+// collision-free, and identical on every reload. Legacy records without a
+// uuid fall back to a sha256 over every comment field plus an occurrence
+// counter, so exact duplicate comments still get distinct identities.
+func commentMarkID(recordUUID string, commentIndex int, rc *ReviewComment, occurrences map[string]int) string {
+	if recordUUID != "" {
+		return fmt.Sprintf("%s#%d", recordUUID, commentIndex)
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%s\x00%s",
+		rc.FilePath, rc.Content, rc.SuggestionCode, rc.ExistingCode,
+		rc.StartLine, rc.EndLine, rc.Category, rc.Severity)))
+	key := hex.EncodeToString(sum[:])
+	n := occurrences[key]
+	occurrences[key] = n + 1
+	return fmt.Sprintf("%s#%d", key, n)
+}
+
 func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 	summary.Aborted = false
 	if dur, ok := rec["duration_seconds"].(float64); ok {
@@ -615,6 +642,7 @@ func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 			if err := json.Unmarshal(data, &manifest); err == nil && manifest.SchemaVersion == session.ManifestSchemaVersion {
 				summary.RunManifest = &manifest
 				summary.TerminalState = string(manifest.TerminalState)
+				summary.FilesReviewed = filesReviewedFromSelected(manifest.Coverage.Selected)
 				summary.SelectedCount = len(manifest.Coverage.Selected)
 				summary.CompletedCount = len(manifest.Coverage.Completed)
 				summary.ReusedCount = len(manifest.Coverage.Reused)
@@ -628,6 +656,14 @@ func applySessionEnd(summary *SessionSummary, rec map[string]any) {
 		summary.Legacy = true
 		summary.FileCount = len(summary.FilesReviewed)
 	}
+}
+
+func filesReviewedFromSelected(selected []session.CoverageItem) []string {
+	files := make([]string, 0, len(selected))
+	for _, item := range selected {
+		files = append(files, item.Path)
+	}
+	return files
 }
 
 func taskDoneSucceeded(arguments string) bool {

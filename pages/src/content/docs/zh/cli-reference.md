@@ -116,7 +116,7 @@ unstaged + untracked 变更。
 | `--background-file <path>` | `-B` | — | 用作评审背景的 Markdown 文件路径。与 `--background` 同时设置时会合并两者。 |
 | `--exclude <patterns>` | — | — | 逗号分隔的 gitignore 风格排除模式；与 `rule.json` 的 excludes 合并。 |
 | `--concurrency <n>` | — | `8` | 并行评审的最大文件数。 |
-| `--timeout <minutes>` | — | `10` | 每文件截止时间。`0` 关闭超时。 |
+| `--timeout <minutes>` | — | `15` | 每文件截止时间。`0` 关闭超时。按 effort 轮数线性缩放（如 low/medium/high 分别为 15/30/45 分钟）。 |
 | `--rule <path>` | — | — | 自定义 JSON 评审规则文件路径。覆盖项目级与全局 `rule.json`。 |
 | `--max-tools <n>` | — | 模板默认 | 每文件最大工具调用轮数。`0` 用模板默认（`100`）；1–49 会被上调到 `50`；解析后的值只在**大于**模板默认值时才生效（即只能上调，不能下调）。 |
 | `--max-tokens <n>` | — | 配置或模板默认 | 每文件**提示词** token 上限（review 默认 `200000`）。覆盖本次运行已保存的 `max_tokens` 设置。不影响输出上限——那由 `MAX_COMPLETION_TOKENS`（`16384`）单独控制。 |
@@ -564,13 +564,21 @@ ocr viewer [flags]
 
 Flags:
   --addr <address>   listen address (default: localhost:5483)
+  --open <mode>      when to open the browser: auto, always, never (default: auto)
 
 Examples:
-  ocr viewer                     # start on default port
+  ocr viewer                     # start and open the browser
   ocr viewer --addr :3000        # bind to all interfaces on port 3000
+  ocr viewer --open=never        # just print the URL
+  ocr viewer --open=always       # force it when auto declines (piped output, WSL)
 ```
 
 启动一个内嵌 HTTP 服务器，读取 `~/.opencodereview/sessions/...`，并以浏览器友好的 UI 渲染历史评审会话。见[会话查看器](../viewer/)。
+
+`--open=auto` 在以下情况跳过打开浏览器：stdout 不是终端、设置了
+`SSH_CONNECTION` 且没有转发显示环境、或 Linux 上 `DISPLAY` 与 `WAYLAND_DISPLAY`
+均为空；跳过的原因会与 URL 一并打印。若 auto 拒绝但其实有可用浏览器，用
+`--open=always`。
 
 ## `ocr version`
 

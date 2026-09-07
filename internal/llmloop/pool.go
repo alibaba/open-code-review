@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 alibaba/open-code-review Contributors
 
-// Package llmloop carries the per-file LLM tool-use loop shared by `ocr
-// review` (diff-based) and `ocr scan` (full-file). It owns the chat
+// Package llmloop carries the per-subtask MAIN_TASK tool-use loop shared by
+// `ocr review` (diff-based) and `ocr scan` (full-file). It owns the chat
 // completion conversation state, three-zone memory compression, tool-call
 // dispatch (including async comment post-processing), and aggregate token /
 // warning bookkeeping. Callers above this package render the initial
 // messages (review uses MAIN_TASK, scan uses FULL_SCAN_TASK) and hand them
-// in via Runner.RunPerFile.
+// in via Runner.RunMainTask.
+//
+// A subtask is one file in scan and one file group in review, so nothing in
+// this package may assume its unit of work is a single file.
 package llmloop
 
 import (
@@ -19,7 +22,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/stdout"
 )
 
-// AgentWarning describes a non-fatal warning recorded during a per-file
+// AgentWarning describes a non-fatal warning recorded during one subtask's
 // review/scan. The name is kept for backwards compatibility with the
 // previous internal/agent package.
 type AgentWarning struct {
@@ -41,7 +44,7 @@ type CommentWorkerPool struct {
 	results   []model.LlmComment
 
 	// keys tracks per-key WaitGroups so callers can drain only the units
-	// submitted under one key (e.g. one reviewed file) without waiting for
+	// submitted under one key (e.g. one reviewed subtask) without waiting for
 	// — or racing — submissions made under other keys.
 	keysMu sync.Mutex
 	keys   map[string]*sync.WaitGroup
@@ -69,8 +72,10 @@ func (p *CommentWorkerPool) Submit(f func() ([]model.LlmComment, error)) {
 //
 // Callers must guarantee that all SubmitFor calls for a given key
 // happen-before the matching AwaitKey call for that key — the same contract
-// as Await, but scoped to one key. Per-file review satisfies this because a
-// file's tool-use loop finishes submitting before its AwaitKey runs.
+// as Await, but scoped to one key. Both callers satisfy this because one
+// MAIN_TASK conversation finishes submitting before the AwaitKey that drains
+// it. Review reuses one group key across its review rounds, submitting and
+// draining once per round, so Add never races that key's Wait.
 func (p *CommentWorkerPool) SubmitFor(key string, f func() ([]model.LlmComment, error)) {
 	p.keysMu.Lock()
 	if p.keys == nil {

@@ -182,7 +182,7 @@ ocr delegate rule src/main.go src/handler.go
   - [デフォルト（OCR が管理）](https://open-codereview.ai/docs/configuration) — OCR が設定済みの LLM を使用してレビューを実行
   - [デリゲートモード](https://open-codereview.ai/docs/delegate) — コーディングエージェントが自身の LLM を使用してレビューを実行。OCR の API キーは不要
 - [CI/CD 連携](https://open-codereview.ai/docs/cicd) — GitHub Actions、GitLab CI、GitFlic CI、Gerrit との統合
-- [セッションビューアー](https://open-codereview.ai/docs/viewer) — ブラウザでレビューセッションを閲覧・再生
+- [セッションビューアー](https://open-codereview.ai/docs/viewer) — ブラウザでレビューセッションを閲覧・再生、コメントを修正済み/無視としてマークして非表示にできます
 - [テレメトリー](https://open-codereview.ai/docs/telemetry) — 可観測性のためのOpenTelemetry統合
 - [FAQ](https://open-codereview.ai/docs/faq) — よくある質問とトラブルシューティング
 
