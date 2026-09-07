@@ -115,7 +115,7 @@ ocr r      [flags]   (alias)
 | `--background-file <path>` | `-B` | — | レビューの背景として使用する Markdown ファイルのパス。`--background` も指定した場合は両方を結合します。 |
 | `--exclude <patterns>` | — | — | 除外する gitignore 形式のパターン（カンマ区切り）。`rule.json` の excludes とマージされます。 |
 | `--concurrency <n>` | — | `8` | 並行してレビューするファイルの最大数。 |
-| `--timeout <minutes>` | — | `10` | ファイルごとの締め切り時間。`0` でタイムアウトを無効化します。 |
+| `--timeout <minutes>` | — | `15` | ファイルごとの締め切り時間。`0` でタイムアウトを無効化します。effort ラウンド数に応じて線形にスケールします（例: low/medium/high で 15/30/45 分）。 |
 | `--rule <path>` | — | — | カスタム JSON レビュールールファイルのパス。プロジェクトレベルおよびグローバルの `rule.json` を上書きします。 |
 | `--max-tools <n>` | — | テンプレートのデフォルト | ファイルごとの最大ツール呼び出し回数。`0` はテンプレートのデフォルト（`100`）を使用します。1〜49 は `50` に引き上げられます。解決後の値はテンプレートのデフォルトを**上回る場合にのみ**適用されます（引き上げのみ可能で、引き下げはできません）。 |
 | `--max-tokens <n>` | — | 設定またはテンプレートのデフォルト | ファイルごとの**プロンプト**トークン上限（review のデフォルトは `200000`）。この実行で保存済みの `max_tokens` 設定を上書きします。出力の上限には影響しません。そちらは `MAX_COMPLETION_TOKENS`（`16384`）が個別に制御します。 |
@@ -553,13 +553,21 @@ ocr viewer [flags]
 
 Flags:
   --addr <address>   listen address (default: localhost:5483)
+  --open <mode>      when to open the browser: auto, always, never (default: auto)
 
 Examples:
-  ocr viewer                     # start on default port
+  ocr viewer                     # start and open the browser
   ocr viewer --addr :3000        # bind to all interfaces on port 3000
+  ocr viewer --open=never        # just print the URL
+  ocr viewer --open=always       # force it when auto declines (piped output, WSL)
 ```
 
 埋め込み HTTP サーバーを起動し、`~/.opencodereview/sessions/...` を読み込んで、過去のレビューセッションをブラウザで扱いやすい UI としてレンダリングします。[セッションビューア](../viewer/)を参照してください。
+
+`--open=auto` は、stdout が端末でないとき、`SSH_CONNECTION` が設定されていて
+ディスプレイが転送されていないとき、Linux で `DISPLAY` も `WAYLAND_DISPLAY` も
+ないときにブラウザを開くのを省略します。その理由は URL と併せて表示されます。
+auto が見送るが実際にはブラウザに到達できる場合は `--open=always` を使います。
 
 ## `ocr version`
 

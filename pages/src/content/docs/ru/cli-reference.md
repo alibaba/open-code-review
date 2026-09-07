@@ -121,7 +121,7 @@ ocr r      [flags]   (alias)
 | `--background-file <path>` | `-B` | — | Путь к Markdown-файлу с контекстом ревью. Если также задан `--background`, используются оба источника. |
 | `--exclude <patterns>` | — | — | Разделённые запятыми шаблоны исключения в стиле gitignore; объединяются с excludes из `rule.json`. |
 | `--concurrency <n>` | — | `8` | Максимальное число файлов, проверяемых параллельно. |
-| `--timeout <minutes>` | — | `10` | Срок выполнения для каждого файла. `0` отключает тайм-аут. |
+| `--timeout <minutes>` | — | `15` | Срок выполнения для каждого файла. `0` отключает тайм-аут. Масштабируется линейно по числу раундов effort (например, 15/30/45 мин для low/medium/high). |
 | `--rule <path>` | — | — | Путь к пользовательскому JSON-файлу правил ревью. Переопределяет проектный и глобальный `rule.json`. |
 | `--max-tools <n>` | — | значение шаблона | Максимальное число раундов вызова инструментов для каждого файла. `0` использует значение шаблона (`100`); значения 1–49 повышаются до `50`; итоговое значение применяется только если оно **больше** значения шаблона (предел можно лишь повысить, но не понизить). |
 | `--max-tokens <n>` | — | значение конфигурации или шаблона | Предел токенов **промпта** для каждого файла (по умолчанию `200000` для review). Переопределяет сохранённое значение `max_tokens` для этого запуска. На предел вывода не влияет — он задаётся отдельно параметром `MAX_COMPLETION_TOKENS` (`16384`). |
@@ -580,15 +580,23 @@ ocr viewer [flags]
 
 Flags:
   --addr <address>   listen address (default: localhost:5483)
+  --open <mode>      when to open the browser: auto, always, never (default: auto)
 
 Examples:
-  ocr viewer                     # start on default port
+  ocr viewer                     # start and open the browser
   ocr viewer --addr :3000        # bind to all interfaces on port 3000
+  ocr viewer --open=never        # just print the URL
+  ocr viewer --open=always       # force it when auto declines (piped output, WSL)
 ```
 
 Запускает встроенный HTTP-сервер, который читает данные из
 `~/.opencodereview/sessions/...` и отображает прошлые сессии ревью в удобном
 для браузера интерфейсе. См. раздел [Просмотр сессий](../viewer/).
+
+`--open=auto` не открывает браузер, если stdout не терминал, если задана
+переменная `SSH_CONNECTION` и при этом дисплей не переадресован, или если в Linux
+нет ни `DISPLAY`, ни `WAYLAND_DISPLAY`; причина печатается рядом с URL. Там, где
+auto отказывается, а браузер доступен, используйте `--open=always`.
 
 ## `ocr version`
 

@@ -76,6 +76,7 @@ export OCR_CONTENT_LOGGING=0                        # reserved / currently a no-
 review.run
 ├── diff.parse
 ├── event.review.started                   (decision-point event)
+├── event.grouping.skipped                 (when the change set is below the grouping thresholds)
 ├── subtask.execute.group.<group-key1>
 │   ├── event.plan.skipped                 (when changes are below both thresholds)
 │   ├── event.plan.failed                  (when plan phase errored)
@@ -100,6 +101,7 @@ LLM の往復とツールの実行は個別の span としては発行**され�
 | `subtask.execute.group.<group-key>` | `group.label`、`group.file_count`、`lines.changed`、`lines.changed.max_file` |
 | `main.loop` | `group.label`、`round` |
 | `event.review.started` | `file.count`、`review.count`、`repo.dir` |
+| `event.grouping.skipped` | `strategy`、`file.count`、`lines.changed`、`threshold.files`、`threshold.lines` |
 | `event.plan.skipped` | `group.label`、`group.file_count`、`lines.changed`、`lines.changed.max_file`、`threshold`、`threshold.group` |
 | `event.plan.failed` | `group.label`、`message` |
 | `event.token.threshold.exceeded` | `group.label`、`tokens`、`max_tokens`、`round` |
@@ -128,6 +130,7 @@ OCR は OTel meter を通じて数値 metric を記録します——カウン�
 |---|---|
 | `review.started` | diff がロードされた。何ファイルをレビューするか判明している。 |
 | `no.files.changed` | diff の解析で 0 ファイルとなった。 |
+| `grouping.skipped` | 変更セットのファイル数が `GROUPING_MIN_FILES` を下回ったため、グルーピング呼び出しをスキップした。`strategy` は `bundle_all`（変更行数が `GROUPING_BUNDLE_LINE_THRESHOLD` 未満で、全ファイルを 1 グループに）または `per_file`（しきい値以上で、ファイルごとに 1 グループ）。単一ファイルの変更セットは常に `per_file`——しきい値の値に関わらず分割するものが無い——であり、ここでのみ報告され、ターミナルには出力されない。 |
 | `plan.skipped` | あるグループが 2 つの plan しきい値の両方を下回った: グループ内で最大のファイルの変更行数が `PLAN_MODE_LINE_THRESHOLD` 未満で、かつ（2 ファイル以上のグループでは）合計が `PLAN_MODE_GROUP_LINE_THRESHOLD` 未満。 |
 | `plan.failed` | plan フェーズでエラー。main ループは plan なしで実行される。 |
 | `token.threshold.exceeded` | prompt token が `MAX_TOKENS`（入力の上限）の 80 % を超えた。そのグループはスキップされる。 |
@@ -146,6 +149,12 @@ OCR は OTel meter を通じて数値 metric を記録します——カウン�
 
 LLM に送信された、または LLM から返された内容を検査する必要がある場合は、[セッションビューア](../viewer/)が読み取るローカルの
 JSONL トランスクリプトを使用してください。これらは完全に `~/.opencodereview/` 配下のディスク上に存在し、決して collector に送られません。
+
+より詳細なデバッグが必要な場合は `OCR_RAW_LOGGING=1` を設定すると、すべての
+LLM 呼び出しの生のリクエストとレスポンスが `~/.opencodereview/raw/`
+に記録され、セッションのトランスクリプトより詳細なデバッグ情報が得られます。デフォルトは無効です。
+ストリーミング出力を有効にすると、キャプチャはレスポンス全体を読み終えてから後続の処理へ渡します。
+キャプチャはヘッダを秘匿しますが、リクエストとレスポンスの本文はそのまま記録します。
 
 ## レシピ
 

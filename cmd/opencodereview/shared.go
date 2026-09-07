@@ -21,6 +21,7 @@ import (
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/llm"
+	"github.com/alibaba/open-code-review/internal/llmloop"
 	"github.com/alibaba/open-code-review/internal/model"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/alibaba/open-code-review/internal/stdout"
@@ -190,7 +191,11 @@ type llmRuntime struct {
 	// carry no RequestMeta, so every attempt is dropped and the frozen report is
 	// nil.
 	RetryCollector *llm.RetryCollector
-	AppCfg         *Config
+	// RawHolder is the opt-in raw LLM capture sink (OCR_RAW_LOGGING=1),
+	// created with the client because the middleware mounts at construction;
+	// the per-session writer is bound later by bindRawWriter. Nil when off.
+	RawHolder *llm.RawHolder
+	AppCfg    *Config
 	// RuntimeConfig holds the allowlisted, non-secret runtime settings (protocol,
 	// sanitized endpoint host, language, timeout) derived from the resolved
 	// endpoint and app config, for the run manifest's runtime_config_sha256. It
@@ -241,14 +246,20 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 
 	retryCollector := newRetryCollector()
 
+	var rawHolder *llm.RawHolder
+	if llm.RawLoggingEnabled() {
+		rawHolder = llm.NewRawHolder()
+	}
+
 	return &llmRuntime{
-		Client:         llm.NewLLMClient(ep, retryCollector),
+		Client:         llm.NewLLMClient(ep, retryCollector, rawHolder),
 		Model:          ep.Model,
 		Provider:       ep.Provider,
 		PlanToolDefs:   planToolDefs,
 		MainToolDefs:   mainToolDefs,
 		Collector:      tool.NewCommentCollector(),
 		RetryCollector: retryCollector,
+		RawHolder:      rawHolder,
 		AppCfg:         appCfg,
 		RuntimeConfig: agent.RuntimeConfig{
 			Protocol:     ep.Protocol,
@@ -257,6 +268,32 @@ func loadLLMRuntime(tpl *template.Template, toolConfigPath string, resolveOpts l
 			Timeout:      ep.Timeout,
 		},
 	}, nil
+}
+
+// bindRawWriter opens the session's raw capture file and attaches it to the
+// run's raw holder; defer the returned closer. A nil holder (capture off)
+// or an open failure returns a no-op closer: raw capture must never fail a
+// review.
+func bindRawWriter(holder *llm.RawHolder, repoDir string, sess *session.SessionHistory) func() {
+	noop := func() {}
+	if holder == nil {
+		return noop
+	}
+	w, err := session.NewRawFileWriter(repoDir, sess.SessionID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ocr] WARNING: raw logging disabled for this run: %v\n", err)
+		return noop
+	}
+	holder.Set(w)
+	return func() {
+		// Detach before closing: LLM calls that run after this closer must
+		// bypass capture, not write to a closed file. Without this the
+		// guarantee depends on defer registration order.
+		holder.Set(nil)
+		if err := w.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "[ocr] WARNING: close raw file: %v\n", err)
+		}
+	}
 }
 
 // sanitizeEndpointHost extracts the credential-free host[:port] from a full LLM
@@ -604,6 +641,7 @@ type ResultProvider interface {
 	// that skipped / failed the summary phase.
 	ProjectSummary() string
 	ToolCalls() map[string]int64
+	ToolFailures() []llmloop.ToolFailureDetail
 	// SessionID returns the persisted session identifier so callers can show it
 	// in JSON output or failure diagnostics. Returns "" when no session was
 	// created.
@@ -705,7 +743,7 @@ func emitRunResult(
 		return outputJSONWithWarnings(comments, ag.Warnings(), ag.FilesReviewed(),
 			ag.TotalInputTokens(), ag.TotalOutputTokens(), ag.TotalTokensUsed(),
 			ag.TotalCacheReadTokens(), ag.TotalCacheWriteTokens(), duration,
-			ag.ProjectSummary(), ag.ToolCalls(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
+			ag.ProjectSummary(), ag.ToolCalls(), ag.ToolFailures(), traceID, resumeInfo, ag.SessionID(), manifest, ag.BudgetExceeded(), llmIdentity, out, retryReport, groups)
 	}
 	if outputFormat == "sarif" {
 		return outputSARIF(comments, Version, ag.Warnings(), manifest, out)

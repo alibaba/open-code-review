@@ -50,7 +50,7 @@ func (g *gatedLLMClient) CompletionsWithCtx(ctx context.Context, _ llm.ChatReque
 
 // concurrentFakeClient is goroutine-safe and distinguishes compression
 // requests (no tools attached) from main-loop requests (tools attached),
-// mirroring how runCompression and RunPerFile build their ChatRequests.
+// mirroring how runCompression and RunMainTask build their ChatRequests.
 type concurrentFakeClient struct {
 	compressionCalls atomic.Int64
 }
@@ -116,9 +116,15 @@ func TestRecordWarning(t *testing.T) {
 func TestRecordToolCall(t *testing.T) {
 	t_tempDir = t.TempDir()
 	r := newTestRunner(&fakeLLMClient{}, template.Template{})
-	r.recordToolCall("file_read")
-	r.recordToolCall("file_read")
-	r.recordToolCall("code_comment")
+	if got := r.recordToolCall("file_read"); got != 1 {
+		t.Errorf("first tool call number = %d, want 1", got)
+	}
+	if got := r.recordToolCall("file_read"); got != 2 {
+		t.Errorf("second tool call number = %d, want 2", got)
+	}
+	if got := r.recordToolCall("code_comment"); got != 3 {
+		t.Errorf("third tool call number = %d, want 3", got)
+	}
 
 	calls := r.ToolCalls()
 	if calls["file_read"] != 2 {
@@ -126,6 +132,24 @@ func TestRecordToolCall(t *testing.T) {
 	}
 	if calls["code_comment"] != 1 {
 		t.Errorf("code_comment = %d, want 1", calls["code_comment"])
+	}
+}
+
+func TestToolFailures_AreOrderedAndSnapshotIsolated(t *testing.T) {
+	r := NewRunner(Deps{})
+	r.recordToolFailure(2, "tool_b", "b.go", "second", nil, `{}`, 0)
+	r.recordToolFailure(1, "tool_a", "a.go", "first", nil, `{}`, 0)
+
+	failures := r.ToolFailures()
+	if len(failures) != 2 || failures[0].ToolCallNumber != 1 || failures[1].ToolCallNumber != 2 {
+		t.Fatalf("ToolFailures() = %+v, want call numbers 1, 2", failures)
+	}
+	failures[0].Error = "mutated"
+	failures[0].Arguments = "mutated"
+
+	again := r.ToolFailures()
+	if again[0].Error != "first" || again[0].Arguments != `{}` {
+		t.Errorf("ToolFailures snapshot mutated internal state: %+v", again[0])
 	}
 }
 
@@ -644,7 +668,7 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 	}}
 
 	st := &compressionState{}
-	ok := r.addNextMessage(context.Background(), strings.Repeat("word ", 200), calls, results, &msgs, "f.go", st)
+	ok := r.addNextMessage(context.Background(), strings.Repeat("word ", 200), calls, llm.NativeTurn{}, "", results, &msgs, "f.go", st)
 
 	if !ok {
 		t.Error("expected true: sync compression should bring the count under the warning threshold")
@@ -666,7 +690,7 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 	}
 }
 
-func TestRunPerFile_ConcurrentFilesCompression_Race(t *testing.T) {
+func TestRunMainTask_ConcurrentFilesCompression_Race(t *testing.T) {
 	t_tempDir = t.TempDir()
 	tpl := template.Template{
 		MemoryCompressionTask: template.LlmConversation{
@@ -686,7 +710,7 @@ func TestRunPerFile_ConcurrentFilesCompression_Race(t *testing.T) {
 		CommentCollector: tool.NewCommentCollector(),
 		// MainToolDefs must be non-empty: the fake client classifies a
 		// request with no tools as a compression request, mirroring how
-		// RunPerFile and runCompression build their ChatRequests.
+		// RunMainTask and runCompression build their ChatRequests.
 		MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "file_read"}}},
 		Session:      session.New(t_tempDir, "main", "test-model", session.SessionOptions{ReviewMode: "diff"}),
 	})
@@ -701,14 +725,14 @@ func TestRunPerFile_ConcurrentFilesCompression_Race(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			msgs := []llm.Message{msg("system", "sys"), msg("user", "review this file")}
-			_, _, err := r.RunPerFile(context.Background(), msgs, fmt.Sprintf("f%d.go", i))
+			_, _, err := r.RunMainTask(context.Background(), msgs, fmt.Sprintf("f%d.go", i))
 			errs[i] = err
 		}(i)
 	}
 	wg.Wait()
 	for i, err := range errs {
 		if err != nil {
-			t.Errorf("file %d: RunPerFile: %v", i, err)
+			t.Errorf("file %d: RunMainTask: %v", i, err)
 		}
 	}
 	// Guard against the test going vacuous: if no compression request was

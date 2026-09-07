@@ -13,6 +13,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 
 	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
+	"github.com/alibaba/open-code-review/internal/pathutil"
 )
 
 func TestExpandBraces_NoBraces(t *testing.T) {
@@ -71,6 +72,12 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"foo.ftl", "Template Injection"},
 		{"foo.ftlh", "Template Injection"},
 		{"foo.ftlx", "Template Injection"},
+		{"templates/account.hbs", "Handlebars/Mustache Escaping Boundaries"},
+		{"templates/account.HBS", "Handlebars/Mustache Escaping Boundaries"},
+		{"templates/email.mustache", "Handlebars/Mustache Escaping Boundaries"},
+		{"templates/email.MUSTACHE", "Handlebars/Mustache Escaping Boundaries"},
+		{"templates/account.pug", "Pug Escaping and Output Contexts"},
+		{"templates/account.PUG", "Pug Escaping and Output Contexts"},
 		{"src/main/resources/mapper/usermapper.xml", "SQL Logic Error Detection"},
 		{"src/main/resources/dao/userdao.xml", "SQL Logic Error Detection"},
 		{"pom.xml", "snapshot"},
@@ -84,8 +91,13 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/pages/index.astro", "client:*"},
 		{"src/components/app.tsx", "React"},
 		{"lib/utils.ts", "TypeScript"},
+		{"scripts/config.mjs", "TypeScript"},
+		{"server/bootstrap.cjs", "TypeScript"},
 		{"app.kt", "Null Safety"},
+		{"scripts/setup.kts", "Null Safety"},
 		{"src/main/handler.cpp", "Smart Pointer"},
+		{"src/main/handler.cxx", "Smart Pointer"},
+		{"include/handler.hxx", "Smart Pointer"},
 		{"driver.c", "malloc"},
 		{"pages/Index.ets", "State Decorator"},
 		{"components/Button.ets", "State Decorator"},
@@ -137,7 +149,18 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
 		{"src/matmul.mojo", "Ownership, Borrowing, and Lifetimes"},
 		{"src/matmul.🔥", "Ownership, Borrowing, and Lifetimes"},
+		{"src/parser.ml", "Pattern Matching"},
+		{"lib/parser.mli", "Pattern Matching"},
+		{"src/Component.re", "Pattern Matching"},
+		{"lib/Component.rei", "Pattern Matching"},
+		{"rtl/counter.v", "Blocking and Non-Blocking Assignments"},
+		{"rtl/alu.sv", "Blocking and Non-Blocking Assignments"},
+		{"rtl/defines.vh", "Blocking and Non-Blocking Assignments"},
+		{"rtl/fifo.vhd", "numeric_std"},
+		{"rtl/fifo.vhdl", "numeric_std"},
 		{"Models/main.m", "Indexing, Shapes, and Implicit Expansion"},
+		{"ios/ViewController.mm", "ARC and Object Ownership"},
+		{"ios/ViewController.MM", "ARC and Object Ownership"},
 		{"src/Counter.sol", "Checks-Effects-Interactions"},
 		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
 		{"contracts/token.vy", "Language Restrictions"},
@@ -165,9 +188,6 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 		"readme.md",
 		"docs/architecture.txt",
 		"Makefile",
-		// Note: .m now matches matlab.md, so it's no longer a "no rule
-		// matches" example; .mm remains one.
-		"ios/ViewController.mm",
 	}
 
 	for _, path := range paths {
@@ -904,6 +924,38 @@ func TestResolveDetail_SystemPrismaPatternMatch(t *testing.T) {
 	}
 }
 
+func TestResolveDetail_SystemPugPatternMatch(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	dr := resolver.(DetailResolver)
+
+	for _, path := range []string{"index.pug", "views/account/profile.pug", "VIEWS/INDEX.PUG"} {
+		t.Run(path, func(t *testing.T) {
+			detail := dr.ResolveDetail(path)
+			if detail.Source != "system" {
+				t.Errorf("expected source 'system', got %q", detail.Source)
+			}
+			if detail.Pattern != "**/*.pug" {
+				t.Errorf("expected pattern '**/*.pug', got %q", detail.Pattern)
+			}
+			for _, required := range []string{
+				"Pug Escaping and Output Contexts",
+				"server-side template injection",
+				"&attributes",
+				"compileClient",
+				"Accessibility",
+			} {
+				if !strings.Contains(detail.Rule, required) {
+					t.Errorf("expected Pug rule to contain %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveDetail_SystemGoPatternMatch(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	resolver, _, err := NewResolver(t.TempDir(), "", ResolverOptions{})
@@ -1160,7 +1212,7 @@ func TestResolveRuleEntries_BasicFile(t *testing.T) {
 		{Path: "**/*.xml", Rule: "sql-rules.md"},
 		{Path: "**/*.go", Rule: "Always check for nil"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "Check for SQL injection" {
 		t.Errorf("expected file content, got %q", entries[0].Rule)
@@ -1181,7 +1233,7 @@ func TestResolveRuleEntries_MultiLineInline(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.ts", Rule: "security.md\nBut this is multi-line\nso it should stay inline"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "security.md\nBut this is multi-line\nso it should stay inline" {
 		t.Errorf("multi-line rule should stay inline, got %q", entries[0].Rule)
@@ -1194,7 +1246,7 @@ func TestResolveRuleEntries_MissingFile(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.xml", Rule: "nonexistent.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	// Missing file should clear the rule.
 	if entries[0].Rule != "" {
@@ -1213,7 +1265,7 @@ func TestResolveRuleEntries_AbsolutePath(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: ruleFile},
 	}
-	resolveRuleEntries(entries, "/some/other/repo")
+	resolveRuleEntries(entries, "/some/other/repo", "")
 
 	if entries[0].Rule != "absolute rule content" {
 		t.Errorf("expected absolute file content, got %q", entries[0].Rule)
@@ -1234,7 +1286,7 @@ func TestResolveRuleEntries_TooLarge(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "big.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "" {
 		t.Errorf("oversized file should clear rule, got %q", entries[0].Rule)
@@ -1250,7 +1302,7 @@ func TestResolveRuleEntries_RelativePath(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "shared.md"},
 	}
-	resolveRuleEntries(entries, repoDir)
+	resolveRuleEntries(entries, repoDir, "")
 
 	if entries[0].Rule != "repo-level" {
 		t.Errorf("repo-level should win, got %q", entries[0].Rule)
@@ -1263,7 +1315,7 @@ func TestResolveRuleEntries_EmptyRule(t *testing.T) {
 		{Path: "**/*.ts", Rule: "  "},
 		{Path: "**/*.java", Rule: "\t\n"},
 	}
-	resolveRuleEntries(entries, "/tmp")
+	resolveRuleEntries(entries, "/tmp", "")
 
 	if entries[0].Rule != "" {
 		t.Errorf("empty rule should stay empty, got %q", entries[0].Rule)
@@ -1296,7 +1348,7 @@ func TestResolveRuleEntries_SymlinkSafety(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "evil.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 	// The symlink target is .json, which is not in the whitelist.
 	// The rule should be cleared.
 	if entries[0].Rule != "" {
@@ -1313,7 +1365,7 @@ func TestResolveRuleEntries_TxtExtension(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "rules.txt"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "rule from txt" {
 		t.Errorf(".txt should be accepted, got %q", entries[0].Rule)
@@ -1329,7 +1381,7 @@ func TestResolveRuleEntries_MarkdownExtension(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "rules.markdown"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "rule from markdown" {
 		t.Errorf(".markdown should be accepted, got %q", entries[0].Rule)
@@ -1349,7 +1401,7 @@ func TestResolveRuleEntries_SubdirectoryPath(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "docs/my-rule.md"},
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	if entries[0].Rule != "nested rule" {
 		t.Errorf("subdirectory path should work, got %q", entries[0].Rule)
@@ -1431,7 +1483,7 @@ func TestReadRuleFileSafe_NormalFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	content, err := readRuleFileSafe(f)
+	content, err := readRuleFileSafe(f, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1447,7 +1499,7 @@ func TestReadRuleFileSafe_UnsupportedExt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := readRuleFileSafe(f)
+	_, err := readRuleFileSafe(f, "")
 	if err == nil {
 		t.Fatal("expected error for .json")
 	}
@@ -1461,14 +1513,14 @@ func TestReadRuleFileSafe_TooLarge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := readRuleFileSafe(f)
+	_, err := readRuleFileSafe(f, "")
 	if err == nil {
 		t.Fatal("expected error for oversized file")
 	}
 }
 
 func TestReadRuleFileSafe_Missing(t *testing.T) {
-	_, err := readRuleFileSafe("/nonexistent/path.md")
+	_, err := readRuleFileSafe("/nonexistent/path.md", "")
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -1488,7 +1540,7 @@ func TestResolveRuleEntries_PathTraversalBlocked(t *testing.T) {
 		{Path: "**/*.go", Rule: outside},         // absolute path to outside — allowed
 		{Path: "**/*.ts", Rule: "../outside.md"}, // relative traversal — blocked
 	}
-	resolveRuleEntries(entries, dir)
+	resolveRuleEntries(entries, dir, "")
 
 	// Absolute path to outside is allowed (explicit design choice).
 	if entries[0].Rule != "should not be read" {
@@ -1505,7 +1557,7 @@ func TestResolveRuleEntries_EmptyRepoDirRelative(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: "rules.md"},
 	}
-	resolveRuleEntries(entries, "")
+	resolveRuleEntries(entries, "", "")
 
 	if entries[0].Rule != "" {
 		t.Errorf("relative path with empty repoDir should be rejected, got %q", entries[0].Rule)
@@ -1522,7 +1574,7 @@ func TestResolveRuleEntries_EmptyRepoDirAbsolute(t *testing.T) {
 	entries := []ProjectRuleEntry{
 		{Path: "**/*.go", Rule: absFile},
 	}
-	resolveRuleEntries(entries, "")
+	resolveRuleEntries(entries, "", "")
 
 	if entries[0].Rule != "absolute content" {
 		t.Errorf("absolute path with empty repoDir should work, got %q", entries[0].Rule)
@@ -1546,10 +1598,219 @@ func TestResolveRuleEntries_GlobalRuleFileResolution(t *testing.T) {
 		{Path: "**/*.go", Rule: "reusable.md"},
 	}
 	// repoDir = ~/.opencodereview (where rule.json lives)
-	resolveRuleEntries(entries, globalRuleDir)
+	resolveRuleEntries(entries, globalRuleDir, "")
 
 	if entries[0].Rule != "global reusable rule" {
 		t.Errorf("global rule file should be resolved, got %q", entries[0].Rule)
+	}
+}
+
+// ── project-layer confinement tests ──
+
+// canonicalRoot returns the canonical (symlink-resolved) form of dir, mirroring
+// loadProjectRule's pathutil.CanonicalPath call.
+func canonicalRoot(t *testing.T, dir string) string {
+	t.Helper()
+	root, err := pathutil.CanonicalPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// TestResolveRuleEntries_ProjectConfinesAbsolutePath verifies that with a confineRoot
+// (the untrusted project rule layer) an absolute rule path is confined to repoDir: an
+// absolute path inside the repo is allowed, one outside the repo is rejected.
+func TestResolveRuleEntries_ProjectConfinesAbsolutePath(t *testing.T) {
+	repoDir := t.TempDir()
+	inside := filepath.Join(repoDir, "inside.md")
+	if err := os.WriteFile(inside, []byte("inside repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(outside, []byte("OUTSIDE SECRET\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: inside},  // absolute, inside repo — allowed
+		{Path: "**/*.ts", Rule: outside}, // absolute, outside repo — blocked
+	}
+	resolveRuleEntries(entries, repoDir, canonicalRoot(t, repoDir))
+
+	if entries[0].Rule != "inside repo" {
+		t.Errorf("absolute path inside repo should be allowed, got %q", entries[0].Rule)
+	}
+	if entries[1].Rule != "" {
+		t.Errorf("absolute path outside repo should be blocked, got %q", entries[1].Rule)
+	}
+}
+
+// TestResolveRuleEntries_ProjectConfinesSymlinkEscape verifies that with confine=true,
+// an in-repo symlink pointing at an out-of-repo file is rejected after resolution.
+func TestResolveRuleEntries_ProjectConfinesSymlinkEscape(t *testing.T) {
+	repoDir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "host-secret.md")
+	if err := os.WriteFile(outside, []byte("HOST SECRET\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(repoDir, "rules.md")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "rules.md"},
+	}
+	resolveRuleEntries(entries, repoDir, canonicalRoot(t, repoDir))
+
+	if entries[0].Rule != "" {
+		t.Errorf("symlink escaping repo should be blocked, got %q", entries[0].Rule)
+	}
+}
+
+// TestResolveRuleEntries_TrustedAbsoluteOutsideAllowed guards that the trusted layers
+// (confine=false) keep the previous behavior: absolute paths may point outside repoDir.
+func TestResolveRuleEntries_TrustedAbsoluteOutsideAllowed(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "shared.md")
+	if err := os.WriteFile(outside, []byte("shared rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: outside},
+	}
+	resolveRuleEntries(entries, dir, "")
+
+	if entries[0].Rule != "shared rules" {
+		t.Errorf("trusted absolute path should still be allowed, got %q", entries[0].Rule)
+	}
+}
+
+// TestReadRuleFileSafe_ConfineRejectsOutside verifies the confinement check itself.
+func TestReadRuleFileSafe_ConfineRejectsOutside(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "secret.md")
+	if err := os.WriteFile(outside, []byte("secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := readRuleFileSafe(outside, canonicalRoot(t, root)); err == nil {
+		t.Fatal("expected confinement error for path outside root")
+	}
+
+	inside := filepath.Join(root, "ok.md")
+	if err := os.WriteFile(inside, []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readRuleFileSafe(inside, canonicalRoot(t, root)); err != nil {
+		t.Fatalf("path inside root should be allowed, got %v", err)
+	}
+}
+
+// TestLoadProjectRule_ConfinesUntrustedReferences exercises the real entry point: a
+// malicious .opencodereview/rule.json referencing an absolute path outside the repo
+// must not leak that file's contents into the resolved rule.
+func TestLoadProjectRule_ConfinesUntrustedReferences(t *testing.T) {
+	repoDir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(outside, []byte("AWS_KEY=AKIA-SECRET\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgDir := filepath.Join(repoDir, ".opencodereview")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgData, err := json.Marshal(ProjectRule{
+		Rules: []ProjectRuleEntry{{Path: "**/*.go", Rule: outside}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "rule.json"), cfgData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pr, err := loadProjectRule(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr == nil || len(pr.Rules) != 1 {
+		t.Fatalf("expected one project rule, got %+v", pr)
+	}
+	if pr.Rules[0].Rule != "" {
+		t.Errorf("untrusted absolute reference must be cleared, got %q", pr.Rules[0].Rule)
+	}
+}
+
+// TestLoadProjectRule_RejectsSymlinkedDir verifies that an attacker-committed
+// ".opencodereview" directory symlink pointing outside the repo cannot make
+// loadProjectRule read a rule file from outside the repository.
+func TestLoadProjectRule_RejectsSymlinkedDir(t *testing.T) {
+	repoDir := t.TempDir()
+	outsideDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsideDir, "rule.json"), []byte(`{"rules":[{"path":"**/*.go","rule":"OUTSIDE"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDir, filepath.Join(repoDir, ".opencodereview")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	pr, err := loadProjectRule(repoDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pr != nil {
+		t.Errorf("symlinked .opencodereview dir outside repo must be skipped, got %+v", pr)
+	}
+}
+
+// TestLoadProjectRule_RejectsSymlinkedRuleFile verifies that a symlinked "rule.json"
+// pointing outside the repo cannot be read.
+func TestLoadProjectRule_RejectsSymlinkedRuleFile(t *testing.T) {
+	repoDir := t.TempDir()
+	cfgDir := filepath.Join(repoDir, ".opencodereview")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside-rule.json")
+	if err := os.WriteFile(outside, []byte(`{"rules":[{"path":"**/*.go","rule":"OUTSIDE"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(cfgDir, "rule.json")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	pr, err := loadProjectRule(repoDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pr != nil {
+		t.Errorf("symlinked rule.json outside repo must be skipped, got %+v", pr)
+	}
+}
+
+// TestResolveRuleEntries_ProjectRelativeInsideAllowed covers the confined relative
+// (non-symlink) path that stays inside the repo.
+func TestResolveRuleEntries_ProjectRelativeInsideAllowed(t *testing.T) {
+	repoDir := t.TempDir()
+	docs := filepath.Join(repoDir, "docs")
+	if err := os.MkdirAll(docs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(docs, "my-rule.md"), []byte("nested rule\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ProjectRuleEntry{
+		{Path: "**/*.go", Rule: "docs/my-rule.md"},
+	}
+	resolveRuleEntries(entries, repoDir, canonicalRoot(t, repoDir))
+
+	if entries[0].Rule != "nested rule" {
+		t.Errorf("confined relative in-repo path should be read, got %q", entries[0].Rule)
 	}
 }
 

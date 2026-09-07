@@ -849,11 +849,11 @@ func TestCountReviewable(t *testing.T) {
 func TestBuildChangeFilesExceptGroup(t *testing.T) {
 	a := New(Args{})
 	a.diffs = []model.Diff{
-		{NewPath: "main.go", OldPath: "main.go"},
-		{NewPath: "moved_new.go", OldPath: "moved_old.go"},
-		{NewPath: "helper.go", OldPath: "helper.go", IsNew: true},
-		{NewPath: "removed.go", OldPath: "removed.go", IsDeleted: true},
-		{NewPath: "renamed.go", OldPath: "old_name.go"},
+		{NewPath: "main.go", OldPath: "main.go", Insertions: 4, Deletions: 2},
+		{NewPath: "moved_new.go", OldPath: "moved_old.go", IsRenamed: true},
+		{NewPath: "helper.go", OldPath: "helper.go", IsNew: true, Insertions: 12},
+		{NewPath: "removed.go", OldPath: "removed.go", IsDeleted: true, Deletions: 30},
+		{NewPath: "renamed.go", OldPath: "old_name.go", IsRenamed: true, Insertions: 5, Deletions: 5},
 		{NewPath: "bin.dat", OldPath: "bin.dat", IsBinary: true},
 	}
 
@@ -862,7 +862,7 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 	// model they are outside its review scope.
 	group := []model.Diff{
 		{NewPath: "main.go", OldPath: "main.go"},
-		{NewPath: "moved_new.go", OldPath: "moved_old.go"},
+		{NewPath: "moved_new.go", OldPath: "moved_old.go", IsRenamed: true},
 	}
 	got := a.buildChangeFilesExceptGroup(group)
 
@@ -886,6 +886,17 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 	if !strings.Contains(got, "DELETED") {
 		t.Error("expected DELETED status")
 	}
+	// Churn stats must follow the path so the model can size up each diff before
+	// requesting it.
+	for _, want := range []string{
+		"ADDED   helper.go (+12/-0)",
+		"DELETED   removed.go (+0/-30)",
+		"RENAMED   renamed.go (+5/-5)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q", want)
+		}
+	}
 	if strings.Contains(got, "bin.dat") {
 		t.Error("binary files should be skipped")
 	}
@@ -897,12 +908,12 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 	t.Run("no trailing newline when the last diff is skipped", func(t *testing.T) {
 		a := New(Args{})
 		a.diffs = []model.Diff{
-			{NewPath: "kept.go", OldPath: "kept.go"},
+			{NewPath: "kept.go", OldPath: "kept.go", Insertions: 3, Deletions: 1},
 			{NewPath: "bin.dat", OldPath: "bin.dat", IsBinary: true},
 			{NewPath: "member.go", OldPath: "member.go"},
 		}
 		group := []model.Diff{{NewPath: "member.go", OldPath: "member.go"}}
-		if got, want := a.buildChangeFilesExceptGroup(group), "MODIFIED   kept.go"; got != want {
+		if got, want := a.buildChangeFilesExceptGroup(group), "MODIFIED   kept.go (+3/-1)"; got != want {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	})
@@ -910,12 +921,12 @@ func TestBuildChangeFilesExceptGroup(t *testing.T) {
 	t.Run("entries are newline separated with a skip between them", func(t *testing.T) {
 		a := New(Args{})
 		a.diffs = []model.Diff{
-			{NewPath: "a.go", OldPath: "a.go"},
+			{NewPath: "a.go", OldPath: "a.go", Insertions: 1},
 			{NewPath: "member.go", OldPath: "member.go"},
-			{NewPath: "b.go", OldPath: "b.go", IsNew: true},
+			{NewPath: "b.go", OldPath: "b.go", IsNew: true, Insertions: 7},
 		}
 		group := []model.Diff{{NewPath: "member.go", OldPath: "member.go"}}
-		want := "MODIFIED   a.go\nADDED   b.go"
+		want := "MODIFIED   a.go (+1/-0)\nADDED   b.go (+7/-0)"
 		if got := a.buildChangeFilesExceptGroup(group); got != want {
 			t.Errorf("got %q, want %q", got, want)
 		}
