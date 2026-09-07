@@ -26,7 +26,7 @@
         <span><strong>Model:</strong> <code>{{.Session.Summary.Model}}</code></span>
         <span><strong>Duration:</strong> {{formatDuration .Session.Summary.DurationSec}}</span>
         <span><strong>Files:</strong> {{.Session.Summary.FileCount}}</span>
-        <span><strong>Status:</strong> {{if .Session.Summary.Aborted}}aborted{{else if .Session.Summary.Legacy}}legacy{{else}}{{.Session.Summary.TerminalState}}{{end}}</span>
+        <span><strong>Status:</strong> {{if .Session.Summary.Aborted}}aborted ({{.Session.Summary.TerminalReason}}{{if .Session.Summary.CancellationReason}}: {{.Session.Summary.CancellationReason}}{{end}}){{else if .Session.Summary.Legacy}}legacy{{else}}{{.Session.Summary.TerminalState}}{{end}}</span>
     </div>
 </div>
 

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/alibaba/open-code-review/internal/session"
 )
 
 func writeJSONL(t *testing.T, path string, lines ...string) {
@@ -249,6 +251,33 @@ func TestPeekSession_NoSessionEnd(t *testing.T) {
 	}
 	if !s.Aborted || s.Legacy {
 		t.Fatalf("unfinished session flags = aborted:%v legacy:%v", s.Aborted, s.Legacy)
+	}
+}
+
+// TestPeekSession_CancelledSessionIsAborted keeps viewer status aligned with
+// `ocr session list` for a completed session that was interrupted.
+func TestPeekSession_CancelledSessionIsAborted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cancelled.jsonl")
+	writeJSONL(t, path,
+		`{"type":"session_start","timestamp":"2025-01-01T00:00:00Z","cwd":"/x","model":"m"}`,
+		`{"type":"session_end","terminal_reason":"cancelled","cancellation_reason":"context canceled"}`)
+
+	s, err := peekSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Aborted {
+		t.Fatal("cancelled session should be aborted")
+	}
+	if s.TerminalReason != session.TerminalReasonCancelled {
+		t.Errorf("TerminalReason = %q, want cancelled", s.TerminalReason)
+	}
+	if s.CancellationReason != "context canceled" {
+		t.Errorf("CancellationReason = %q, want context canceled", s.CancellationReason)
+	}
+	if !s.Legacy {
+		t.Fatal("session without a manifest should remain legacy")
 	}
 }
 

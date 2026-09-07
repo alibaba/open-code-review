@@ -4,12 +4,43 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/alibaba/open-code-review/internal/llm"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/sdk/trace"
 )
+
+func TestExecuteScanContextStopsBeforeSetupWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := executeScanContext(ctx, scanOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+func TestScanRunTraceIDUsesSpanContext(t *testing.T) {
+	previousProvider := otel.GetTracerProvider()
+	provider := trace.NewTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	runCtx, span := provider.Tracer("test").Start(context.Background(), "scan.run")
+	defer span.End()
+
+	if got, want := scanRunTraceID(runCtx), span.SpanContext().TraceID().String(); got != want {
+		t.Fatalf("trace ID = %q, want scan.run trace ID %q", got, want)
+	}
+}
 
 func TestExcludeToolDef(t *testing.T) {
 	defs := []llm.ToolDef{

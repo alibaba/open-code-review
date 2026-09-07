@@ -319,6 +319,14 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	items, err := provider.Enumerate(ctx)
 	if err != nil {
 		scanSpan.End()
+		if errors.Is(ctx.Err(), context.Canceled) {
+			a.session.MarkCancelled(context.Canceled)
+			enumerateErr := fmt.Errorf("enumerate files: %w", err)
+			if ferr := a.session.Finalize(); ferr != nil {
+				return nil, errors.Join(enumerateErr, fmt.Errorf("finalize session: %w", ferr))
+			}
+			return nil, enumerateErr
+		}
 		return nil, fmt.Errorf("enumerate files: %w", err)
 	}
 	telemetry.SetAttr(scanSpan, "files.enumerated", len(items))
@@ -342,6 +350,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 		// A clean skip still has to reach disk: if session_end never persisted,
 		// the skip cannot be claimed. Scan has no manifest builder, but the
 		// session_end delivery contract still applies.
+		if errors.Is(ctx.Err(), context.Canceled) {
+			a.session.MarkCancelled(context.Canceled)
+		}
 		if ferr := a.session.Finalize(); ferr != nil {
 			return []model.LlmComment{}, fmt.Errorf("finalize session: %w", ferr)
 		}
@@ -384,6 +395,9 @@ func (a *Agent) Run(ctx context.Context) ([]model.LlmComment, error) {
 	// A persistence failure is a delivery error in its own right: when the scan
 	// also failed, both facts are reported (errors.Join) rather than letting the
 	// dispatch error hide the fact that session_end never reached disk.
+	if errors.Is(ctx.Err(), context.Canceled) {
+		a.session.MarkCancelled(context.Canceled)
+	}
 	if ferr := a.session.Finalize(); ferr != nil {
 		finalizeErr := fmt.Errorf("finalize session: %w", ferr)
 		if err != nil {
@@ -549,6 +563,10 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 			// still return whatever we've collected so far.
 			// Persist completed items so the next resume does not scan them again.
 			a.recordBatchCheckpoints(checkpoints, batchStart, nil)
+			return a.args.CommentCollector.Comments(), err
+		}
+		if err := ctx.Err(); err != nil {
+			// Avoid a dedup request after cancellation; Run records the terminal state.
 			return a.args.CommentCollector.Comments(), err
 		}
 
@@ -862,6 +880,9 @@ func (a *Agent) maybeRunPlan(ctx context.Context, it model.ScanItem, rule string
 // union of all collected comments. Best-effort: any error / empty input
 // / no-template silently leaves projectSummary unset.
 func (a *Agent) maybeRunProjectSummary(ctx context.Context, comments []model.LlmComment) {
+	if ctx.Err() != nil {
+		return
+	}
 	if !a.summaryEnabled() {
 		return
 	}

@@ -6,6 +6,7 @@ package scan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -30,6 +31,88 @@ func newAgentForTest(t *testing.T, tpl template.ScanTemplate) *Agent {
 			ReviewMode: session.ReviewModeFullScan,
 		}),
 	})
+}
+
+// TestRun_CancelledDuringEnumerationFinalizesSession prevents an early
+// cancellation from leaving only a session_start record on disk.
+func TestRun_CancelledDuringEnumerationFinalizesSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repo := initTestRepo(t)
+	writeFile(t, repo, "a.go", []byte("package a\n"))
+	gitCommit(t, repo, "init")
+
+	sh := session.New(repo, "main", "test-model", session.SessionOptions{
+		ReviewMode: session.ReviewModeFullScan,
+	})
+	a := NewAgent(Args{
+		RepoDir:          repo,
+		Template:         makeTemplateWithFullScan(),
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		Session:          sh,
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := a.Run(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context canceled", err)
+	}
+
+	summary, _, err := session.LoadDetail(repo, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadDetail: %v", err)
+	}
+	if !summary.Aborted {
+		t.Fatal("cancelled enumeration should persist an aborted session")
+	}
+	if summary.TerminalReason != session.TerminalReasonCancelled {
+		t.Errorf("TerminalReason = %q, want cancelled", summary.TerminalReason)
+	}
+	if summary.CancellationReason != context.Canceled.Error() {
+		t.Errorf("CancellationReason = %q, want %q", summary.CancellationReason, context.Canceled)
+	}
+	if summary.EndTime.IsZero() {
+		t.Fatal("cancelled enumeration should persist session_end")
+	}
+}
+
+// TestRun_DeadlineDuringEnumerationDoesNotPersistCancelledSession prevents a
+// deadline from being reported as an explicit user cancellation.
+func TestRun_DeadlineDuringEnumerationDoesNotPersistCancelledSession(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	repo := initTestRepo(t)
+	writeFile(t, repo, "a.go", []byte("package a\n"))
+	gitCommit(t, repo, "init")
+
+	sh := session.New(repo, "main", "test-model", session.SessionOptions{
+		ReviewMode: session.ReviewModeFullScan,
+	})
+	a := NewAgent(Args{
+		RepoDir:          repo,
+		Template:         makeTemplateWithFullScan(),
+		CommentCollector: tool.NewCommentCollector(),
+		Tools:            tool.NewRegistry(),
+		Session:          sh,
+	})
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	_, err := a.Run(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run error = %v, want deadline exceeded", err)
+	}
+
+	summary, _, err := session.LoadDetail(repo, sh.SessionID)
+	if err != nil {
+		t.Fatalf("LoadDetail: %v", err)
+	}
+	if !summary.EndTime.IsZero() {
+		t.Fatal("enumeration deadline should not persist session_end")
+	}
+	if summary.TerminalReason != "" {
+		t.Errorf("TerminalReason = %q, want empty", summary.TerminalReason)
+	}
 }
 
 func makeTemplateWithFullScan() template.ScanTemplate {

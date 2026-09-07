@@ -84,29 +84,31 @@ func DiscoverRepos(root string) ([]RepoInfo, error) {
 
 // SessionSummary is built from session_start and session_end records.
 type SessionSummary struct {
-	SessionID      string
-	Timestamp      time.Time
-	CWD            string
-	GitBranch      string
-	Model          string
-	ReviewMode     string
-	DiffFrom       string
-	DiffTo         string
-	DiffCommit     string
-	FilesReviewed  []string
-	DurationSec    float64
-	FileCount      int
-	LLMFailures    int
-	CommentCount   int
-	Aborted        bool
-	Legacy         bool
-	TerminalState  string
-	SelectedCount  int
-	CompletedCount int
-	ReusedCount    int
-	FailedCount    int
-	WaivedCount    int
-	RunManifest    *session.RunManifest
+	SessionID          string
+	Timestamp          time.Time
+	CWD                string
+	GitBranch          string
+	Model              string
+	ReviewMode         string
+	DiffFrom           string
+	DiffTo             string
+	DiffCommit         string
+	FilesReviewed      []string
+	DurationSec        float64
+	FileCount          int
+	LLMFailures        int
+	CommentCount       int
+	Aborted            bool
+	TerminalReason     string
+	CancellationReason string
+	Legacy             bool
+	TerminalState      string
+	SelectedCount      int
+	CompletedCount     int
+	ReusedCount        int
+	FailedCount        int
+	WaivedCount        int
+	RunManifest        *session.RunManifest
 }
 
 // ListSessions returns lightweight summaries for all sessions in a repo subdir.
@@ -619,7 +621,11 @@ func commentMarkID(recordUUID string, commentIndex int, rc *ReviewComment, occur
 }
 
 func applySessionEnd(summary *SessionSummary, rec map[string]any) {
-	summary.Aborted = false
+	terminalReason, _ := rec["terminal_reason"].(string)
+	cancellationReason, _ := rec["cancellation_reason"].(string)
+	summary.TerminalReason = terminalReason
+	summary.CancellationReason = cancellationReason
+	summary.Aborted = terminalReason == session.TerminalReasonCancelled
 	if dur, ok := rec["duration_seconds"].(float64); ok {
 		summary.DurationSec = dur
 	}

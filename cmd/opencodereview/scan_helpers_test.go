@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -40,7 +41,7 @@ func TestRunScanPreview(t *testing.T) {
 		t.Fatalf("LoadScanDefault: %v", err)
 	}
 	silenceStdout(t, func() {
-		if err := runScanPreview(cc, scanTpl, nil, "text", os.Stdout); err != nil {
+		if err := runScanPreviewContext(context.Background(), cc, scanTpl, nil, "text", os.Stdout); err != nil {
 			t.Fatalf("runScanPreview error: %v", err)
 		}
 	})
@@ -59,7 +60,7 @@ func TestRunScanPreviewJSONFormat(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := runScanPreview(cc, scanTpl, nil, "json", os.Stdout); err != nil {
+		if err := runScanPreviewContext(context.Background(), cc, scanTpl, nil, "json", os.Stdout); err != nil {
 			t.Errorf("runScanPreview error: %v", err)
 		}
 	})
@@ -96,7 +97,7 @@ func TestRunScanPreviewCreatesNoSession(t *testing.T) {
 		t.Fatalf("LoadScanDefault: %v", err)
 	}
 	silenceStdout(t, func() {
-		if err := runScanPreview(cc, scanTpl, nil, "text", os.Stdout); err != nil {
+		if err := runScanPreviewContext(context.Background(), cc, scanTpl, nil, "text", os.Stdout); err != nil {
 			t.Fatalf("runScanPreview error: %v", err)
 		}
 	})
