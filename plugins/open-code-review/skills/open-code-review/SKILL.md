@@ -48,7 +48,7 @@ ocr review --audience agent --background "business context here" [user-args]
 - **Default** (no user arguments): reviews staged, unstaged, and untracked changes (workspace mode)
 - **Specific commit**: use `--commit` or `-c` to review a single commit against its parent
 - **Branch comparison**: use `--from <ref>` and `--to <ref>` to review diff between two refs
-- **Timeout**: default timeout is 15 minutes per file; adjust with `--timeout <minutes>`
+- **Timeout**: effective timeout per review group = `--timeout` × review rounds. Default `--timeout 15` with default effort `medium` (2 rounds) gives 30 minutes; `low`/`high` give 15/45 minutes.
 - **Concurrency**: default concurrency is 8 file workers; reduce with `--concurrency <n>` if rate limits are hit
 - **Preview mode**: use `--preview` or `-p` to preview which files will be reviewed without running the LLM
 - **Installation**: if `ocr` command is not found, install it by running `npm i -g @alibaba-group/open-code-review`

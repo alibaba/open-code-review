@@ -43,6 +43,37 @@ var AppVersion = "dev"
 // shrink it, same as keyCmdTimeout.
 var bedrockConfigLoadTimeout = 60 * time.Second
 
+// responseHeaderTimeoutMargin is added to the request timeout when setting
+// ResponseHeaderTimeout so the per-request context deadline (WithRequestTimeout),
+// which is 30s earlier, is the one to fire first. An equal ResponseHeaderTimeout
+// would race the context deadline, and a header-timeout win surfaces as a
+// nil-response transport error that shouldRetry treats as retryable, so the
+// request would be retried up to 5 more times (each with a fresh full timeout)
+// instead of failing on ctx.Err(). The margin still replaces the SDK's hardcoded
+// 10-minute default.
+const responseHeaderTimeoutMargin = 30 * time.Second
+
+// httpClientWithHeaderTimeout returns an HTTP client whose ResponseHeaderTimeout is
+// the request timeout plus responseHeaderTimeoutMargin, overriding the openai-go and
+// anthropic-sdk-go hardcoded 10-minute default (which each applies unless a client is
+// supplied via WithHTTPClient) so a configured timeout_sec is honored on a slow
+// endpoint (#1161). Shared by the OpenAI, OpenAI Responses and Anthropic constructors.
+// A timeout of zero or less leaves ResponseHeaderTimeout unset (no cap), matching the
+// SDKs' "no timeout" semantics; the callers clamp to a positive value first, so this
+// only guards a direct call. Package var, not func, so a test can assert each
+// constructor installs it, same as bedrockConfigLoadTimeout.
+var httpClientWithHeaderTimeout = func(timeout time.Duration) *http.Client {
+	t, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Client{Transport: http.DefaultTransport}
+	}
+	t = t.Clone()
+	if timeout > 0 {
+		t.ResponseHeaderTimeout = timeout + responseHeaderTimeoutMargin
+	}
+	return &http.Client{Transport: t}
+}
+
 // defaultAnthropicMaxTokens is used when ChatRequest.MaxTokens is unset.
 // The thinking guard also compares against this to decide whether to drop thinking.
 const defaultAnthropicMaxTokens = 8192
@@ -341,6 +372,12 @@ type ClientConfig struct {
 	// caller that builds a client without one.
 	retryCollector *RetryCollector
 
+	// rawHolder is the opt-in raw LLM capture sink (see raw.go).
+	// Unexported for the same reason as retryCollector: it is a handle on the
+	// current run, set only by NewLLMClient. A nil holder means capture is off
+	// and no raw middleware is mounted.
+	rawHolder *RawHolder
+
 	// AWSProfile and AWSRegion are used only by SigV4 providers (bedrock).
 	// Empty means the standard AWS credential chain decides.
 	AWSProfile string
@@ -385,9 +422,11 @@ func retryCodesMiddleware(codes []int) func(*http.Request, func(*http.Request) (
 // protocol).
 //
 // collector observes every HTTP attempt the returned client makes; pass nil to
-// build a client that is not observed. It is a parameter rather than a field on
-// ResolvedEndpoint because it belongs to the run, not to the endpoint.
-func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
+// build a client that is not observed. raw, when non-nil, mounts the raw
+// capture middleware (see raw.go) so every HTTP attempt is also recorded
+// verbatim. Both belong to the run, not to the endpoint, which is why they are
+// parameters rather than fields on ResolvedEndpoint.
+func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector, raw *RawHolder) LLMClient {
 	cfg := ClientConfig{
 		URL:            ep.URL,
 		APIKey:         ep.Token,
@@ -398,6 +437,7 @@ func NewLLMClient(ep ResolvedEndpoint, collector *RetryCollector) LLMClient {
 		ExtraHeaders:   ep.ExtraHeaders,
 		RetryCodes:     ep.RetryCodes,
 		retryCollector: collector,
+		rawHolder:      raw,
 		AWSProfile:     ep.AWSProfile,
 		AWSRegion:      ep.AWSRegion,
 	}
@@ -510,9 +550,16 @@ func NewOpenAIClient(cfg ClientConfig) *OpenAIClient {
 		openaiopt.WithMaxRetries(5),
 		openaiopt.WithHeader("User-Agent", userAgent("")),
 		openaiopt.WithRequestTimeout(cfg.Timeout),
+		openaiopt.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, openaiopt.WithMiddleware(mw))
+	}
+	// Raw must register before the retry observer: the SDK wraps middlewares
+	// last-in-innermost, and raw's full-body read plus disk write would
+	// otherwise inflate the observer's DurationToHeadersMS.
+	if cfg.rawHolder != nil {
+		opts = append(opts, openaiopt.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, openaiopt.WithMiddleware(newRetryObserver(cfg.retryCollector)))
@@ -913,6 +960,11 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
+		// anthropic-sdk-go's default client hardcodes the same 10-minute
+		// ResponseHeaderTimeout as openai-go, applied because this path does not
+		// pass WithoutEnvironmentDefaults, so a long timeout_sec is capped at 10
+		// minutes on a slow endpoint without this (#1161).
+		option.WithHTTPClient(httpClientWithHeaderTimeout(cfg.Timeout)),
 	}
 
 	switch authHeader {
@@ -930,6 +982,10 @@ func NewAnthropicClient(cfg ClientConfig) *AnthropicClient {
 
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
+	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters.
+	if cfg.rawHolder != nil {
+		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))
@@ -969,6 +1025,10 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 		option.WithMaxRetries(5),
 		option.WithHeader("User-Agent", userAgent("claude")),
 		option.WithRequestTimeout(cfg.Timeout),
+		// No httpClientWithHeaderTimeout here (unlike NewAnthropicClient): bedrock.WithConfig
+		// is an option.Join carrying WithoutEnvironmentDefaults, so NewClient skips
+		// DefaultClientOptions and never installs the SDK's 10-minute-header-timeout
+		// default client. Adding one would impose a new cap, not remove one.
 		// Bedrock authenticates by SigV4 signature, added by the middleware
 		// below at transport time. Any API-key header the SDK would otherwise
 		// attach — including an empty one — is rejected outright with
@@ -981,6 +1041,10 @@ func NewAnthropicBedrockClient(cfg ClientConfig) *AnthropicClient {
 	// session key template can expand — same as the plain Anthropic client.
 	if mw := retryCodesMiddleware(cfg.RetryCodes); mw != nil {
 		opts = append(opts, option.WithMiddleware(mw))
+	}
+	// Raw before the retry observer; see NewOpenAIClient for why order matters.
+	if cfg.rawHolder != nil {
+		opts = append(opts, option.WithMiddleware(newRawMiddleware(cfg.rawHolder)))
 	}
 	if cfg.retryCollector != nil {
 		opts = append(opts, option.WithMiddleware(newRetryObserver(cfg.retryCollector)))

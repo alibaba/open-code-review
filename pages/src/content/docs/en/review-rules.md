@@ -163,11 +163,11 @@ matching order:
 | `**/*.{hbs,mustache}` | `handlebars_mustache.md` — Handlebars and Mustache templates. |
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — Astro components and islands. |
-| `**/*.{ts,js,tsx,jsx}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
-| `**/*.{cpp,cc,hpp}` | `cpp.md` |
+| `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
 | `**/*.c` | `c.md` |
 | `**/*.{py,ipynb}` | `python.md` — Python source. |
 | `**/*.{php,phtml}` | `php.md` — PHP source and PHP templates. |
@@ -183,7 +183,10 @@ matching order:
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
+| `**/*.{v,sv,vh}` | `verilog.md` — Verilog and SystemVerilog RTL. |
+| `**/*.{vhd,vhdl}` | `vhdl.md` — VHDL RTL. |
 | `**/*.m` | `matlab.md` (or `objc.md` via [content sniffing](#content-sniffing-for-m-files)) |
+| `**/*.mm` | `objc.md` — Objective-C++ source. |
 | `**/*.sol` | `solidity.md` — Solidity smart contracts. |
 | `**/*.vy` | `vyper.md` — Vyper smart contracts. |
 | *(fallback)* | `default.md` |

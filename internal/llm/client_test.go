@@ -1641,7 +1641,7 @@ func TestNewLLMClient_ExpandsSessionKeyInExtraBody(t *testing.T) {
 		Model:     "gpt-test",
 		Protocol:  "openai",
 		ExtraBody: map[string]any{"prompt_cache_key": "{ocr_session_key}"},
-	}, nil)
+	}, nil, nil)
 
 	ctx := ContextWithSessionKey(context.Background(), "sess-from-run")
 	_, err := client.CompletionsWithCtx(ctx, ChatRequest{
@@ -1833,7 +1833,7 @@ func TestNewLLMClient_Dispatch(t *testing.T) {
 				Model:    "test-model",
 				Protocol: tt.protocol,
 			}
-			client := NewLLMClient(ep, nil)
+			client := NewLLMClient(ep, nil, nil)
 			got := typeName(client)
 			if got != tt.want {
 				t.Errorf("NewLLMClient(protocol=%q) = %s, want %s", tt.protocol, got, tt.want)
@@ -1852,7 +1852,7 @@ func TestNewLLMClient_OpenAIAliasDispatchesToOpenAIClient(t *testing.T) {
 		Model:    "test-model",
 		Protocol: NormalizeProtocol("openai"),
 	}
-	client := NewLLMClient(ep, nil)
+	client := NewLLMClient(ep, nil, nil)
 	if got := typeName(client); got != "*llm.OpenAIClient" {
 		t.Errorf("NormalizeProtocol(\"openai\") dispatched to %s, want *llm.OpenAIClient", got)
 	}

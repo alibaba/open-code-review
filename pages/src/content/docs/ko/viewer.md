@@ -11,9 +11,11 @@ sidebar:
 ## 실행하기 {#launching}
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
+ocr viewer                       # start and open the browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
 ```
 
 기본 주소는 `localhost:5483`입니다. 서버는 포그라운드를 잡고 있으며 `Ctrl+C`로
@@ -28,6 +30,38 @@ ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
 > 이름으로 UI에 접근하면 `forbidden host`가 돌아옵니다. 와일드카드 바인드를
 > 열려면 `OCR_VIEWER_ALLOWED_HOSTS`에 허용할 호스트 이름을 쉼표로 이어
 > 지정하세요(예: `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`).
+
+## 브라우저 열기 {#opening-the-browser}
+
+서버가 수신을 시작하면 `ocr viewer`가 해당 URL을 기본 브라우저에서 엽니다. 이
+동작은 `--open`으로 제어하며, 전역 `--color`와 같은 세 가지 값을 받습니다.
+
+| 값 | 동작 |
+|---|---|
+| `auto`(기본값) | 동작할 가능성이 높을 때만 엽니다 — 아래 참조. |
+| `always` | 조건 없이 엽니다. `auto`가 열지 않지만 실제로는 브라우저에 닿을 수 있는 경우 — 출력이 파이프될 때, 디스플레이가 없는 WSL 등 — 에 사용하세요. |
+| `never` | URL만 출력하고 그 외에는 아무것도 하지 않습니다. |
+
+`auto` 모드에서는 다음 경우에 브라우저를 열지 **않습니다**.
+
+- stdout이 터미널이 아님 — 출력이 파이프되거나 리다이렉트됨
+- `SSH_CONNECTION`이 설정되어 있고 **또한** 전달된 디스플레이가 없음 — 원격
+  호스트에서 열 곳이 없음. `ssh -X` / `ssh -Y`는 `DISPLAY`를 설정하므로 억제되지
+  않습니다
+- Linux에서 `DISPLAY`와 `WAYLAND_DISPLAY`가 모두 비어 있음 — 디스플레이 서버 없음
+
+그 이유는 ready 줄 끝에 덧붙습니다. 의도적으로 억제된 자동 열기가 고장난 것으로
+보이는 일은 없습니다.
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+Unix에서는 `$BROWSER`를 먼저 시도합니다. 콜론으로 구분된 명령 목록이며, 각
+항목은 URL을 뜻하는 `%s` 자리표시자를 포함하거나 URL을 마지막 인자로 받습니다.
+그 외에는 플랫폼 기본 명령이 실행됩니다 — macOS는 `open`, Linux와 BSD는
+`xdg-open`, Windows는 `rundll32`. 브라우저를 열지 못하면 stderr에 경고만 남기고
+치명적으로 처리하지 않습니다. 어느 쪽이든 서버는 계속 서비스합니다.
 
 ## 페이지 세 개 {#three-pages}
 
@@ -90,6 +124,36 @@ ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
 **나오지 않습니다**. 필요하다면 JSONL 기록을 직접 들여다보세요
 (`llm_request` 레코드마다 있는 `messages` 필드입니다).
 
+## 리뷰 코멘트 {#review-comments}
+
+작업 레인 아래에서 세션 페이지는 이번 리뷰가 만들어낸 모든 발견을
+**코멘트 카드**로 파일별로 묶어 보여 줍니다. 코멘트 본문과, 있을 때는 기존
+코드 / 제안 코드, 심각도 / 카테고리 배지가 표시됩니다. 필터 바의 칩으로
+심각도나 카테고리별로 좁힐 수 있습니다.
+
+### 고치면서 표시하기 {#marking-findings-as-you-fix-them}
+
+카드마다 세 개의 버튼——**Fixed** / **Ignored** /
+**Clear**——이 있어 코멘트 하나에 표시를 남깁니다.
+
+- 표시는 코멘트당 하나뿐입니다. 하나를 설정하면 다른 표시를 대체하고,
+  **Clear**로 해제합니다. 현재 상태는 카드의 색 배지로 보입니다.
+- **Hide marked**(기본 켬, 브라우저별로 기억)은 남은 발견을 처리하는 동안
+  표시된 카드를 화면에서 치워 둡니다. 도구 모음에 표시 수와 숨김 수가
+  나타나며, 언제든 끄면 전체를 다시 볼 수 있습니다.
+- **Clear all marks**는 세션 전체를 한 번에 되돌립니다.
+
+표시는 뷰어 상태이지 리뷰 데이터가 아니며, 뷰어 자체는 읽기 전용으로
+유지됩니다.
+
+- 표시는 브라우저의 `localStorage`에 세션 페이지 단위로 저장됩니다. 세션
+  JSONL 옆에는 아무것도 기록되지 않고, 뷰어는 쓰기 API를 아예 제공하지
+  않습니다.
+- 표시는 한 세션**이자 한 브라우저**에 속합니다. 다른 브라우저나 컴퓨터에서는
+  표시 없는 세션이 보이고, 해당 사이트의 브라우저 저장소를 지우면 처음부터
+  다시 시작합니다.
+- 같은 변경을 다시 리뷰하면 새 세션이 만들어지며 표시 없이 시작합니다.
+
 ## 활용 사례 {#use-cases}
 
 뷰어는 세 가지 흐름을 염두에 두고 만들었습니다.
@@ -141,8 +205,8 @@ JSONL 파일의 한 줄이 이벤트 하나입니다.
 줄은 덧붙이기만 합니다. JSONL이 중간에 끊겨 있다면 세션이 도중에 죽었다는
 뜻이며 뷰어는 남아 있는 만큼만 그려 줍니다.
 
-디스크를 비우려면 세션 파일을 통째로 지우세요. 뷰어는 다음 요청 때 색인을 다시
-만듭니다.
+디스크를 비우려면 세션 파일을 통째로 지우세요. 뷰어는 다음 요청 때 색인을
+다시 만듭니다.
 
 ## 개인정보 {#privacy}
 

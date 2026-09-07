@@ -248,9 +248,24 @@ stderr로 나갑니다(경고, 오류). `--audience agent`가 보장하는 깨�
 
 ### JSON 출력이 `{ "files_reviewed": 0, "comments": [] }`입니다 {#json-output-is-filesreviewed-0-comments}
 
-워크스페이스에 대상 파일이 없었다는 뜻입니다. 의도한 모양입니다. 이렇게 명시해야
-호출하는 쪽이 "리뷰할 것이 없었다"와 "리뷰한 파일에서 지적을 찾지 못했다"를
-구분할 수 있습니다. 코멘트가 0건인 평범한 리뷰라면 대신 빈 배열 `[]`이 나옵니다.
+리뷰할 대상 파일이 없었다는 뜻입니다. `files_reviewed`는 최상위 필드가 아니라 `summary` 아래에
+있으며, 이 경로에서는 `0`입니다. 최상위 `[]`은 `comments` 쪽입니다. 같은 객체에는
+`"status": "skipped"`와 `"message": "Review skipped: no items were selected."`, 그리고
+`terminal_state`가 `"skipped"`이고 `coverage`의 각 배열이 비어 있는 `manifest`도 함께 실립니다.
+
+파일을 리뷰했는데 지적이 없는 경우에도 **`comments: []`을 담은 JSON 객체**가 반환됩니다.
+`summary.files_reviewed`는 실제로 리뷰한 파일 수가 되고, `status`는 `"complete"`, `message`는
+`"Review complete: 0 finding(s) across N selected item(s)."`입니다. 실행마다 선택적 최상위
+필드가 달라질 수 있으므로 객체 모양이나 선택적 키의 유무로 두 상태를 구분하지 마세요. manifest가 있는
+review 출력에서는 `summary.files_reviewed`나 `manifest.terminal_state`를 사용하세요. 다만 호출자는
+아래의 manifest-less 경로에서 `summary`와 `manifest`가 둘 다 없을 수 있다는 점도 처리해야 합니다.
+`review --format json`은 stdout에 항상 JSON 객체 하나만 기록하며, 맨 배열을 내보내는 일은 없습니다.
+
+manifest-less no-files 경로는 더 간소해서 `summary`와 `manifest`를 모두 생략하지만
+`"status": "skipped"`, `"message": "No supported files changed."`, `"comments": []`는
+계속 포함하며 `tool_calls`도 항상 포함합니다. `ocr scan`은 항상 manifest-less이고 no-files 조건을
+만족하면 이 경로를 사용합니다. `ocr review`도 manifest 생성에 실패하고 no-files 조건을 만족하면
+같은 경로에 들어갈 수 있습니다. `llm`, `trace_id` 같은 선택적 메타데이터는 함께 나올 수 있습니다.
 
 ### 세션 JSONL은 어디에 있나요? {#where-do-session-jsonls-live}
 
@@ -291,8 +306,12 @@ LLM 호출에는 별도 스팬이 생기지 않고 메트릭으로 기록됩니�
   싸게 돌리고 싶다면 `--effort low`가 가장 큰 수단이고 `--effort high`가 가장
   비쌉니다.
 - plan 단계는 가장 큰 파일이 50줄 이상인 그룹, 또는 파일 2개 이상의 합이 100줄
-  이상인 그룹에서 켜집니다. 그룹마다 LLM 호출이 한 번 더 듭니다. 임계값을
-  낮추면 비용이 줄고, 올리면 작은 PR이 빨라집니다.
+  이상인 그룹에서 켜집니다. 그룹마다 LLM 호출이 한 번 더 들므로, 비용을 줄이는 쪽은
+  임계값을 **올리는** 것입니다. 낮추면 더 많은 그룹이 plan 단계를 지나 오히려 비싸집니다.
+  두 임계값은 `0`에서 다르게 동작합니다. `PLAN_MODE_LINE_THRESHOLD`가 `0` 이하이면
+  *항상 plan*이며, 이게 가장 비싼 설정입니다. 반면 `PLAN_MODE_GROUP_LINE_THRESHOLD`가
+  `0`이면 그룹 쪽 게이트가 꺼집니다. 그 게이트가 원래 유일한 발동 조건이었을 때에만
+  plan 호출을 하나 아낄 수 있습니다. 발동 조건은 위의 "파일은 작은데 plan 단계가 한참 걸립니다"를 참고하세요.
 - `MAX_TOOL_REQUEST_TIMES = 100`은 넉넉한 값입니다. 라운드를 다 쓰는 모델은 3
   라운드에 끝내는 모델보다 대화가 길어져(토큰이 늘어) 비쌉니다. 강한 모델일수록
   대체로 빨리 끝냅니다. 반대로 "max tool requests reached"를 피하려고

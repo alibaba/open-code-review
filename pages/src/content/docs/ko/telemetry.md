@@ -109,6 +109,7 @@ gRPC에는 URL 경로가 없으므로 이 이야기는 HTTP 프로토콜에만 �
 review.run
 ├── diff.parse
 ├── event.review.started                   (decision-point event)
+├── event.grouping.skipped                 (when the change set is below the grouping thresholds)
 ├── subtask.execute.group.<group-key1>
 │   ├── event.plan.skipped                 (when changes are below both thresholds)
 │   ├── event.plan.failed                  (when plan phase errored)
@@ -136,6 +137,7 @@ LLM 왕복과 도구 실행은 별도 스팬으로 **나오지 않습니다**. �
 | `subtask.execute.group.<group-key>` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file` |
 | `main.loop` | `group.label`, `round` |
 | `event.review.started` | `file.count`, `review.count`, `repo.dir` |
+| `event.grouping.skipped` | `strategy`, `file.count`, `lines.changed`, `threshold.files`, `threshold.lines` |
 | `event.plan.skipped` | `group.label`, `group.file_count`, `lines.changed`, `lines.changed.max_file`, `threshold`, `threshold.group` |
 | `event.plan.failed` | `group.label`, `message` |
 | `event.token.threshold.exceeded` | `group.label`, `tokens`, `max_tokens`, `round` |
@@ -166,6 +168,7 @@ OCR은 OTel 미터로 수치 메트릭을 기록합니다. 컬렉터가 뒷단�
 |---|---|
 | `review.started` | diff를 다 읽어 리뷰할 파일이 몇 개인지 알게 됐습니다. |
 | `no.files.changed` | diff를 풀어 보니 파일이 하나도 없었습니다. |
+| `grouping.skipped` | 변경 집합의 파일 수가 `GROUPING_MIN_FILES`보다 적어 그룹화 호출을 건너뛰었습니다. `strategy`는 `bundle_all`(변경량이 `GROUPING_BUNDLE_LINE_THRESHOLD`보다 적어 전체 파일을 한 그룹으로) 또는 `per_file`(그 값 이상이라 파일당 그룹 하나)입니다. 파일이 하나뿐인 변경 집합은 임계값과 무관하게 나눌 것이 없으므로 항상 `per_file`이며, 여기에만 기록되고 터미널에는 출력되지 않습니다. |
 | `plan.skipped` | 그룹이 plan 임계값 둘 다에 못 미쳤습니다. 가장 큰 파일의 변경이 `PLAN_MODE_LINE_THRESHOLD`보다 적고, (파일이 2개 이상인 그룹이라면) 합계도 `PLAN_MODE_GROUP_LINE_THRESHOLD`보다 적은 경우입니다. |
 | `plan.failed` | plan 단계에서 오류가 나 main 루프가 계획 없이 돌았습니다. |
 | `token.threshold.exceeded` | 프롬프트 토큰이 `MAX_TOKENS`(입력 상한)의 80%를 넘어 그룹을 건너뛰었습니다. |
@@ -188,6 +191,12 @@ OCR은 OTel 미터로 수치 메트릭을 기록합니다. 컬렉터가 뒷단�
 LLM에 무엇을 보내고 무엇을 받았는지 들여다봐야 한다면
 [세션 뷰어](../viewer/)가 읽는 로컬 JSONL 기록을 쓰세요. 이 기록은 전부
 `~/.opencodereview/` 아래 디스크에만 있고 컬렉터로는 결코 보내지 않습니다.
+
+더 깊은 디버깅이 필요하면 `OCR_RAW_LOGGING=1`을 설정하세요. 모든 LLM 호출의
+원시 요청과 응답이 `~/.opencodereview/raw/`에 기록되어 세션 기록보다 더 자세한
+디버깅 정보를 제공합니다. 기본값은 꺼짐입니다.
+스트리밍 출력을 켜면 캡처가 응답 본문을 모두 읽은 뒤에 나머지 처리로 넘깁니다.
+캡처는 헤더를 마스킹하지만 요청과 응답 본문은 그대로 기록합니다.
 
 ## 레시피 {#recipes}
 

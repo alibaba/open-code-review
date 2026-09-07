@@ -10,9 +10,11 @@ sidebar:
 ## 启动
 
 ```bash
-ocr viewer                  # binds localhost:5483
-ocr viewer --addr :3000     # bind to all interfaces on port 3000
+ocr viewer                       # start and open the browser
+ocr viewer --addr :3000          # bind to all interfaces on port 3000
 ocr viewer --addr 0.0.0.0:8080   # bind on all interfaces
+ocr viewer --open=never          # just print the URL
+ocr viewer --open=always         # force it when auto declines (piped output, WSL)
 ```
 
 默认地址是 `localhost:5483`。服务器在前台运行——`Ctrl+C` 停止。会话在每次请求时
@@ -26,6 +28,35 @@ JSONL 文件出现就会显示。
 > `forbidden host`。要让通配绑定可被访问，设置
 > `OCR_VIEWER_ALLOWED_HOSTS` 为逗号分隔的允许主机名列表
 > （如 `OCR_VIEWER_ALLOWED_HOSTS=box.local,192.168.1.10`）。
+
+## 打开浏览器
+
+服务器一开始监听，`ocr viewer` 就会在默认浏览器中打开该 URL。这一行为由
+`--open` 控制，取值与全局的 `--color` 一致：
+
+| 取值 | 行为 |
+|---|---|
+| `auto`（默认） | 仅在大概率可用时打开——见下文。 |
+| `always` | 无条件打开。用于 `auto` 拒绝但其实有可用浏览器的场景——输出被管道接走，或 WSL 上没有显示环境。 |
+| `never` | 只打印 URL，不做别的。 |
+
+在 `auto` 模式下，以下情况**不会**打开浏览器：
+
+- stdout 不是终端——输出被管道或重定向了；
+- `SSH_CONNECTION` 已设置**且**没有转发任何显示环境——远程主机上无处可开。
+  `ssh -X` / `ssh -Y` 会设置 `DISPLAY`，因此不会被抑制；
+- Linux 上 `DISPLAY` 和 `WAYLAND_DISPLAY` 都为空——没有显示服务器。
+
+原因会附加在 ready 行末尾，这样"有意抑制"就不会被误认为"功能坏了"：
+
+```
+Viewer ready: http://localhost:5483 (browser not opened: no DISPLAY or WAYLAND_DISPLAY)
+```
+
+在 Unix 上会优先尝试 `$BROWSER`：以冒号分隔的命令列表，每一项要么含有代表
+URL 的 `%s` 占位符，要么把 URL 作为末尾参数接收。否则使用各平台的默认命令——
+macOS 上是 `open`，Linux 与 BSD 上是 `xdg-open`，Windows 上是 `rundll32`。
+打开浏览器失败只会在 stderr 上给出一条警告，绝不致命；无论如何服务器都继续提供服务。
 
 ## 三个页面
 
@@ -80,6 +111,31 @@ JSONL 文件出现就会显示。
 发给模型的完整消息列表和作用域内工具定义**不**在卡片 UI 中渲染；如需要，可直接
 检查 JSONL 转录（每条 `llm_request` 记录的 `messages` 字段）。
 
+## 评审评论
+
+任务泳道下方，会话页面把本次评审产生的每条发现列为**评论卡片**，按文件分组，
+展示评论正文、存在时的现有代码 / 建议代码，以及严重程度 / 类别徽章。过滤栏上的
+筛选片可按严重程度或类别缩小列表。
+
+### 边修边标记
+
+每张卡片有三个按钮——**Fixed** / **Ignored** / **Clear**——为单条
+评论设置标记：
+
+- 标记互斥：设置一个会替换另一个，**Clear** 移除标记。当前状态以彩色徽章显示
+  在卡片上。
+- **Hide marked**（默认开启，按浏览器记忆）在你处理剩余发现时把已标记的卡片
+  收起来。工具栏会统计已标记和已隐藏的数量；随时关掉它即可重新看到全部。
+- **Clear all marks** 一次重置整个会话。
+
+标记是查看器状态，不是评审数据——查看器本身保持只读：
+
+- 标记存放在浏览器的 `localStorage` 中，按会话页面隔离。会话 JSONL 旁边
+  不会写入任何内容，查看器也完全不提供写接口。
+- 标记隶属于单个会话**和单个浏览器**：换一个浏览器或机器看到的是未标记的
+  会话；清除该站点的浏览器存储后会从头开始。
+- 对同一变更重新评审会生成新会话，从无标记开始。
+
 ## 使用场景
 
 查看器围绕三个工作流设计：
@@ -128,7 +184,7 @@ JSONL 文件每行是一个事件：
 行是 append-only——不完整的 JSONL 意味着会话在运行中被中断，查看器会渲染已写入的
 内容。
 
-要释放磁盘空间，删除整个会话文件；查看器在下次请求时重建索引。
+要释放磁盘空间，删除整个会话文件即可；查看器在下次请求时重建索引。
 
 ## 隐私
 

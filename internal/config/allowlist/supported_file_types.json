@@ -49,6 +49,7 @@
   ".ftlx",
   ".hbs",
   ".mustache",
+  ".pug",
   ".astro",
   ".vue",
   ".ipynb",
@@ -97,6 +98,15 @@
   ".zig",
   ".thrift",
   ".capnp",
+  ".ml",
+  ".mli",
+  ".re",
+  ".rei",
+  ".v",
+  ".sv",
+  ".vh",
+  ".vhd",
+  ".vhdl",
   ".sol",
   ".vy"
 ]
