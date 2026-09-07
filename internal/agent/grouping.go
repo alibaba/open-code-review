@@ -21,6 +21,11 @@ import (
 
 const maxFilesPerGroup = 10
 
+// reviewGroupBudgetFraction is the share of the per-item token budget a group's
+// file bodies may occupy before it is split to per-file review; the remainder
+// covers the review's working set (reasoning, tool framing, compression).
+const reviewGroupBudgetFraction = 0.55
+
 // smallChangeSetLabel labels the single group a below-threshold change set is
 // bundled into. Unlike an LLM-produced label it carries no semantics, because
 // no partition was computed: every file simply went in together.
@@ -332,26 +337,39 @@ func enforceMaxFilesPerGroup(groups []FileGroup) []FileGroup {
 	return result
 }
 
-// enforceGroupTokenBudget splits groups whose combined diffs exceed the token limit.
+// groupReviewTokens estimates the context a group's review must hold: each
+// member's diff plus its file body, which is read via file_read and is the term
+// the old diff-only budget missed.
+func groupReviewTokens(g FileGroup) int64 {
+	var total int64
+	for _, d := range g.Diffs {
+		if d.IsDeleted {
+			continue
+		}
+		total += int64(llm.CountTokens(d.Diff)) + int64(llm.CountTokens(d.NewFileContent))
+	}
+	return total
+}
+
+// enforceGroupTokenBudget splits a group to per-file review when its estimated
+// review context (diffs + the bodies read to review them) exceeds the budget.
 func enforceGroupTokenBudget(groups []FileGroup, tokenLimit int) []FileGroup {
 	if tokenLimit <= 0 {
 		return groups
 	}
+	budget := int64(float64(tokenLimit) * reviewGroupBudgetFraction)
 	var result []FileGroup
 	for _, g := range groups {
-		total := int64(0)
-		for _, d := range g.Diffs {
-			total += int64(llm.CountTokens(d.Diff))
-		}
-		if total <= int64(tokenLimit) {
+		// A single-file group cannot be split further.
+		if len(g.Diffs) <= 1 || groupReviewTokens(g) <= budget {
 			result = append(result, g)
-		} else {
-			for _, d := range g.Diffs {
-				result = append(result, FileGroup{
-					Label: g.Label + " (split: " + d.NewPath + ")",
-					Diffs: []model.Diff{d},
-				})
-			}
+			continue
+		}
+		for _, d := range g.Diffs {
+			result = append(result, FileGroup{
+				Label: g.Label + " (split: " + d.NewPath + ")",
+				Diffs: []model.Diff{d},
+			})
 		}
 	}
 	return result
