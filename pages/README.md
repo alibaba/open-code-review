@@ -138,8 +138,11 @@ to be `.cjs`. `postcss.config.cjs` likewise refers to `./tailwind.config.cjs`
 by name.
 
 The Markdown under `src/content/` is imported by `src/content/docs/index.ts`
-and `src/content/blog/index.ts` and ends up in the bundle, so it counts
-against the size budget. This file does not -- it is a developer guide only.
+and `src/content/blog/index.ts`, so it ships in the build output. Because
+`DocsPage` and `BlogPage` are lazy-loaded (`src/App.tsx`), that Markdown lands
+in the `docs-page` / `blog-page` async chunks rather than in
+`dist/*.bundle.js`, so it is not covered by the `npm run size` budget. This
+file is not bundled at all -- it is a developer guide only.
 
 ## Development Guidelines
 
