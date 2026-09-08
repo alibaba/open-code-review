@@ -189,6 +189,7 @@ matching order:
 | `**/*.mm` | `objc.md` — Objective-C++ source. |
 | `**/*.sol` | `solidity.md` — Solidity smart contracts. |
 | `**/*.vy` | `vyper.md` — Vyper smart contracts. |
+| `**/*.rego` | `rego.md` — Rego policy (OPA). |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
