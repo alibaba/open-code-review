@@ -62,6 +62,14 @@ jobs:
           test -f _site/sitemap.xml ; cmp pages/dist/sitemap.xml _site/sitemap.xml
           node pages/scripts/validate-sitemap.cjs _site/sitemap.xml
 
+      - name: Upload Sitemap (Debug)
+        uses: actions/upload-artifact@v7
+        with:
+          if-no-files-found: error
+          name: 'sitemap'
+          retention-days: 3
+          path: _site/sitemap.xml
+
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site

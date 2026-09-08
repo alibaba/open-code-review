@@ -44,6 +44,14 @@ jobs:
       - name: Build
         working-directory: pages
         run: npm run build
+        
+      - name: Upload Sitemap (Debug)
+        uses: actions/upload-artifact@v7
+        with:
+          if-no-files-found: warn
+          name: 'sitemap'
+          retention-days: 3
+          path: pages/public/sitemap.xml
 
       - name: Validate sitemap
         working-directory: pages
