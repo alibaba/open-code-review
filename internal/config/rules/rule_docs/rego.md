@@ -1,3 +1,4 @@
+#### Rego Review Principles
 > Favor precision over recall: only raise an issue when you are confident it is a real defect, and stay silent when the surrounding context is unclear — a false alarm costs more reviewer trust than a missed minor issue. Treat authorization-bypass and data-exposure findings as blocking, and style or idiom suggestions as non-blocking. Ground findings in the Rego under review and observable caller, schema, and configuration evidence. Do not assume the runtime shape or provenance of `input` or `data`, the OPA/Regal version, or enforcement behavior (fail-open vs fail-closed) when that context is unavailable.
 
 #### Obvious Typos or Spelling Errors
