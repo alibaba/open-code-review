@@ -2622,3 +2622,80 @@ func TestResolveEndpoint_RedundantRetryCodesFiltered(t *testing.T) {
 		t.Errorf("RetryCodes = %v, want [403] (429 should be filtered)", ep.RetryCodes)
 	}
 }
+
+func TestResolveEndpoint_MaxRetries(t *testing.T) {
+	zero := 0
+	one := 1
+	tests := []struct {
+		name string
+		cfg  configFile
+		want *int
+	}{
+		{
+			name: "provider zero disables retries",
+			cfg: configFile{
+				Provider: "test",
+				Model:    "m",
+				CustomProviders: map[string]providerEntryConfig{
+					"test": {APIKey: "k", URL: "http://localhost/v1", Protocol: "openai", Model: "m", MaxRetries: &zero},
+				},
+			},
+			want: &zero,
+		},
+		{
+			name: "legacy llm",
+			cfg: configFile{Llm: llmFileConfig{
+				URL: "http://localhost/v1/messages", AuthToken: "t", Model: "m", Protocol: "anthropic", MaxRetries: &one,
+			}},
+			want: &one,
+		},
+		{
+			name: "unset preserves default",
+			cfg: configFile{Llm: llmFileConfig{
+				URL: "http://localhost/v1/messages", AuthToken: "t", Model: "m", Protocol: "anthropic",
+			}},
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfgFile := filepath.Join(dir, "config.json")
+			data, err := json.Marshal(tt.cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(cfgFile, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			ep, err := ResolveEndpoint(cfgFile)
+			if err != nil {
+				t.Fatalf("ResolveEndpoint: %v", err)
+			}
+			if tt.want == nil {
+				if ep.MaxRetries != nil {
+					t.Fatalf("MaxRetries = %d, want nil", *ep.MaxRetries)
+				}
+			} else if ep.MaxRetries == nil || *ep.MaxRetries != *tt.want {
+				t.Fatalf("MaxRetries = %v, want %d", ep.MaxRetries, *tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveEndpoint_RejectsNegativeMaxRetries(t *testing.T) {
+	negative := -1
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.json")
+	cfg := configFile{Llm: llmFileConfig{
+		URL: "http://localhost/v1/messages", AuthToken: "t", Model: "m", Protocol: "anthropic", MaxRetries: &negative,
+	}}
+	data, _ := json.Marshal(cfg)
+	if err := os.WriteFile(cfgFile, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ResolveEndpoint(cfgFile)
+	if err == nil || !strings.Contains(err.Error(), "max_retries must be zero or greater") {
+		t.Fatalf("ResolveEndpoint error = %v", err)
+	}
+}

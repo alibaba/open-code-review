@@ -32,6 +32,9 @@ type ResolvedEndpoint struct {
 	// knob; users can still override via OCR_LLM_TIMEOUT.
 	Timeout    time.Duration
 	RetryCodes []int // additional HTTP status codes that trigger exponential-backoff retry
+	// MaxRetries controls SDK-level retries. Nil preserves the SDK policy used by
+	// OCR (five retries); a pointer allows zero to disable retries explicitly.
+	MaxRetries *int
 
 	// AmbientAuth marks an endpoint that carries no token and needs no base
 	// URL, because the transport supplies both — AWS SigV4 signing derives the
@@ -307,6 +310,7 @@ type llmFileConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	MaxRetries   *int              `json:"max_retries,omitempty"`
 }
 
 // providerEntryConfig represents a single provider entry in config.json.
@@ -322,6 +326,7 @@ type providerEntryConfig struct {
 	ExtraBody    map[string]any    `json:"extra_body,omitempty"`
 	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 	RetryCodes   []int             `json:"retry_codes,omitempty"`
+	MaxRetries   *int              `json:"max_retries,omitempty"`
 
 	// AWSProfile and AWSRegion apply to ambient-auth providers that sign with
 	// SigV4 (currently bedrock). Both are optional: without them the standard
@@ -555,6 +560,9 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 	if err != nil {
 		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
 	}
+	if err := validateMaxRetries(entry.MaxRetries); err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("provider %q: %w", cfg.Provider, err)
+	}
 
 	if protocol == ProtocolAnthropic {
 		url = ensureMessagesSuffix(url)
@@ -586,6 +594,7 @@ func tryProviderConfig(cfg configFile, modelOverride string) (ResolvedEndpoint, 
 		ExtraHeaders: extraHeaders,
 		Timeout:      timeout,
 		RetryCodes:   retryCodes,
+		MaxRetries:   entry.MaxRetries,
 		AmbientAuth:  ambientAuth,
 		AWSProfile:   entry.AWSProfile,
 		AWSRegion:    entry.AWSRegion,
@@ -667,6 +676,9 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 	if err != nil {
 		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
 	}
+	if err := validateMaxRetries(cfg.Llm.MaxRetries); err != nil {
+		return ResolvedEndpoint{}, false, fmt.Errorf("OCR config file: %w", err)
+	}
 
 	// Runs last, after every cheap validation above: token is empty here only for
 	// an otherwise-complete block whose auth_token_cmd is set (guaranteed by the
@@ -691,6 +703,7 @@ func tryLegacyLlmConfig(cfg configFile, modelOverride string) (ResolvedEndpoint,
 		ExtraHeaders: cfg.Llm.ExtraHeaders,
 		Timeout:      timeout,
 		RetryCodes:   retryCodes,
+		MaxRetries:   cfg.Llm.MaxRetries,
 	}, true, nil
 }
 
@@ -927,6 +940,13 @@ func ensureMessagesSuffix(rawURL string) string {
 		return rawURL
 	}
 	return u + "/v1/messages"
+}
+
+func validateMaxRetries(value *int) error {
+	if value != nil && *value < 0 {
+		return fmt.Errorf("max_retries must be zero or greater")
+	}
+	return nil
 }
 
 // sanitizeRetryCodes filters out SDK-default codes (408, 409, 429) and returns

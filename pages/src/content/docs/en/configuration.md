@@ -282,6 +282,23 @@ ignored. When supplied through `ocr config set`, OCR also prints a warning and
 omits them from the saved value. All 5xx responses are already retried by the
 SDK and cannot be added to `retry_codes`.
 
+### Retry attempts
+
+OCR retries transient SDK failures up to five times by default. Set
+`max_retries` to bound that retry budget for all SDK-retryable errors. The
+value is the number of retries after the initial request, so `0` disables
+retries and `1` allows at most two HTTP attempts.
+
+Set it globally for the legacy LLM endpoint or for one provider:
+
+```bash
+ocr config set llm.max_retries 1
+ocr config set custom_providers.my-gateway.max_retries 1
+```
+
+The value must be a non-negative integer. Leaving it unset preserves the
+default of five retries.
+
 ### Prompt limit
 
 `max_tokens` is the **prompt** (input) ceiling for a single review unit:
