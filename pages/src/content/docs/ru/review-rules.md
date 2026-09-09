@@ -51,10 +51,10 @@ OCR разрешает правила через **четырёхуровнев�
 Три независимых поля:
 
 - `include` — необязательно. Glob-шаблоны, которые *обходят* встроенные
-  стандартные шаблоны исключения (исключения тестовых файлов — см. ниже). Это
-  не белый список: файлы, не совпавшие ни с одним шаблоном `include`, всё равно
-  проходят проверки `unsupported_ext` и `default_path` и могут быть
-  отревьюены.
+  стандартные исключения путей (тестовые файлы, fixture, сгенерированные файлы
+  и шумные каталоги вроде `vendor/` в tracked diff; см. ниже). Это не белый
+  список: файлы, не совпавшие ни с одним шаблоном `include`, всё равно проходят
+  проверки `unsupported_ext` и `default_path` и могут быть отревьюены.
 - `exclude` — необязательно. Glob-шаблоны для файлов, которые OCR *не должен*
   ревьюить. Наивысший приоритет внутри фильтра.
 - `rules` — массив записей `{path, rule}`, вычисляемых **в порядке объявления**.
@@ -92,9 +92,11 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 4. **`unsupported_ext`** — Расширение файла есть в
    [списке разрешённых](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)?
    Исключается, если нет.
-5. **`default_path`** — Путь совпадает со встроенным шаблоном исключения
-   тестовых файлов (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`,
-   `**/*_spec.rb`, …)? Исключается.
+5. **`default_path`** — Путь совпадает со встроенным исключением пути, например
+   с шаблоном тестового файла (`**/*_test.go`,
+   `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`, …), fixture/сгенерированного
+   файла или с префиксом шумного каталога в tracked diff (`vendor/`,
+   `node_modules/`, `target/`, …)? Исключается.
 
 Файлы, прошедшие все пять проверок, отправляются в LLM. Причина `deleted`
 (не этап — она вычисляется отдельно в `Preview()`) помечает файлы, чей новый
@@ -105,7 +107,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 
 Встроенный список исключений (см.
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json))
-совпадает с шаблонами тестовых файлов:
+совпадает с шаблонами тестовых файлов, fixture и сгенерированного кода:
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
@@ -124,14 +126,22 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 - `**/oh_modules/**`
 - `**/*.test.ets`
 
-Фильтрация шумных каталогов (`vendor/`, `node_modules/`, `target/`, …)
-происходит раньше, на уровне diff в
-[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go),
-до запуска попереходного файлового фильтра.
+Для tracked diff причина `default_path` также покрывает стандартные префиксы
+шумных каталогов из
+[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go):
+`vendor/`, `node_modules/`, `target/`, `.idea/`, `.vscode/`, `.svn/`, `.git/`,
+`.happypack/`, `.cachefile/`, `_packages/`, `rpm/` и `pkgs/`. Такие записи
+показываются в `ocr review --preview` с явной причиной `default_path`.
 
-Чтобы **отревьюить** файл, совпадающий с одним из этих шаблонов тестовых
-файлов, добавьте его в пользовательский список `include` — это переопределяет
-этап default_path.
+Чтобы **отревьюить** tracked файл, совпадающий с одним из этих стандартных
+исключений путей, добавьте его в пользовательский список `include`. Например,
+`"include": ["vendor/**"]` ревьюит tracked vendored изменения, а
+`"include": ["**/*"]` включает full-scope tracked-diff ревью.
+
+В workspace-режиме untracked файлы внутри стандартных шумных каталогов всё ещё
+пропускаются до того, как OCR синтезирует diff всего файла, чтобы не читать
+большие деревья зависимостей или сборки. Если такой файл нужно отревьюить,
+сначала добавьте его в stage или commit, чтобы он появился в tracked diff.
 
 ## Разрешение правила для файла
 

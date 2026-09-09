@@ -42,7 +42,7 @@ OCR は**4 層の優先順位チェーン**でルールを解決します。各�
 
 3 つの独立したフィールドがあります:
 
-- `include`: 任意。組み込みのデフォルト除外パターン（テストファイルの除外。下記参照）を*バイパス*するための glob パターンです。ホワイトリストではありません。どの `include` パターンにも一致しないファイルも、依然として `unsupported_ext` と `default_path` のチェックを通過し、レビューされる可能性があります。
+- `include`: 任意。組み込みのデフォルトパス除外（テストファイル、fixture、生成ファイル、および tracked diff の `vendor/` などのノイズディレクトリ。下記参照）を*バイパス*するための glob パターンです。ホワイトリストではありません。どの `include` パターンにも一致しないファイルも、依然として `unsupported_ext` と `default_path` のチェックを通過し、レビューされる可能性があります。
 - `exclude`: 任意。OCR がレビューしないファイルの glob パターンです。フィルタリングで最も優先されます。
 - `rules`: `{path, rule}` エントリの配列で、**宣言順**に評価されます。そのファイルに最初に一致した `path` glob のエントリが、OCR がモデルに送る prompt を決定します。
 
@@ -66,13 +66,13 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 2. **`user_exclude`**: パスがいずれかのユーザー `exclude` パターンに一致するか？ 除外します。
 3. **`user_include`**: ユーザーが `include` を定義している場合、パスは一致するか？ 一致するなら**即座に保持**します（下記の `unsupported_ext` と `default_path` のゲートをバイパス）。
 4. **`unsupported_ext`**: ファイルの拡張子は[ホワイトリスト](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)にあるか？ なければ除外します。
-5. **`default_path`**: パスがいずれかの組み込みテストファイル除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）に一致するか？ 除外します。
+5. **`default_path`**: パスが組み込みのパス除外に一致するか？ たとえばテストファイルパターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）、fixture/生成ファイルパターン、または tracked diff のノイズディレクトリ接頭辞（`vendor/`、`node_modules/`、`target/`……）に一致すれば除外します。
 
 5 つのゲートをすべて通過したファイルだけが LLM に送られます。`deleted` の理由（これはゲートではなく、`Preview()` の中で個別に計算されます）は、新しいパスが `/dev/null` であるファイルを示します。レビューすべき新しい内容がありません。`ocr review --preview` を使えば、token を消費せずにこのフィルタリング結果を出力できます。
 
 ### デフォルトパスの除外
 
-組み込みの除外リスト（[`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json) を参照）は、テストファイルのパターンに一致します:
+組み込みの除外リスト（[`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json) を参照）は、テストファイル、fixture、生成コードのパターンに一致します:
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
@@ -91,9 +91,11 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/oh_modules/**`
 - `**/*.test.ets`
 
-ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) の diff 層で発生し、ファイルごとのフィルタリングより先に実行されます。
+tracked diff では、`default_path` は [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go) のデフォルトノイズディレクトリ接頭辞も対象にします: `vendor/`、`node_modules/`、`target/`、`.idea/`、`.vscode/`、`.svn/`、`.git/`、`.happypack/`、`.cachefile/`、`_packages/`、`rpm/`、`pkgs/`。これらの項目は `ocr review --preview` で明示的な `default_path` 理由とともに表示されます。
 
-これらのテストファイルパターンに一致するファイルを**レビューする**には、それをユーザー `include` リストに追加してください。それが default-path ゲートを上書きします。
+これらのデフォルトパス除外に一致する tracked ファイルを**レビューする**には、それをユーザー `include` リストに追加してください。たとえば `"include": ["vendor/**"]` は tracked vendored 変更をレビューし、`"include": ["**/*"]` は full-scope tracked-diff レビューになります。
+
+workspace モードでは、デフォルトノイズディレクトリ内の untracked ファイルは、OCR がファイル全体の diff を合成する前に引き続きスキップされます。巨大な依存関係やビルドツリーを読み込まないためです。そのようなファイルをレビューする必要がある場合は、先に stage または commit して tracked diff に現れるようにしてください。
 
 ## ファイルごとのルール解決
 

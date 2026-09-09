@@ -12,6 +12,12 @@ func ExcludedDirs() []string {
 	return out
 }
 
+// IsDefaultExcludedDirPath reports whether relPath is under one of OCR's
+// built-in noisy-directory prefixes such as vendor/ or node_modules/.
+func IsDefaultExcludedDirPath(relPath string) bool {
+	return isDefaultExcludedDirPath(relPath)
+}
+
 // LoadGitignorePatterns reads and parses .gitignore patterns from the given
 // repository root. Returns nil if the file is missing or unreadable.
 func LoadGitignorePatterns(repoDir string) []string {

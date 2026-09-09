@@ -93,14 +93,14 @@ hardware, raise the LLM timeout instead — see
 
 ### My file isn't being reviewed
 
-Run `ocr review --preview` (no LLM cost). The output lists every
-candidate file with the **reason** it was kept or dropped:
+Run `ocr review --preview` (no LLM cost). The output lists every parsed
+diff candidate file with the **reason** it was kept or dropped:
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
-imgs/logo.png           binary    (excluded: unsupported_ext)
+vendor/lib.rs           modified  (excluded: default_path)
+docs/notes.md           modified  (excluded: unsupported_ext)
 ```
 
 The five exclusion reasons map to gates in the
@@ -111,8 +111,13 @@ The five exclusion reasons map to gates in the
 | `binary` | Nothing to do — binary files have no reviewable text. |
 | `user_exclude` | Remove the pattern from your `exclude` list. |
 | `unsupported_ext` | Add the extension to your `include` list to bypass the allowlist gate. |
-| `default_path` | Add the file to `include` — that overrides built-in test-file exclude patterns. |
+| `default_path` | Add a matching pattern to `include` — that overrides built-in default path exclusions for tracked diffs. |
 | `deleted` | Nothing to do — there's no new content to review. |
+
+Workspace-mode untracked files under OCR's default noisy directories
+(`vendor/`, `node_modules/`, `target/`, and similar dependency/build
+trees) are skipped before preview synthesizes full-file additions. Stage
+or commit such a file first if it must be reviewed.
 
 ### My custom rule isn't firing
 

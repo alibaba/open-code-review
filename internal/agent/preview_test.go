@@ -248,13 +248,11 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 		// still fall through to the default checks. If extension is valid and
 		// path is not default-excluded, they are still reviewed.
 		{
-			name: "non-included file with valid extension still reviewed (additive semantics)",
+			name: "non-included file in default excluded dir is excluded",
 			diff: model.Diff{
 				NewPath: "vendor/baz.go",
 			},
-			// .go is a supported extension and vendor/baz.go does not hit
-			// IsExcludedPath, so it falls through to ExcludeNone.
-			expected: ExcludeNone,
+			expected: ExcludeDefaultPath,
 		},
 		{
 			name: "non-included file in non-excluded directory still reviewed",
@@ -305,7 +303,7 @@ func TestWhyExcluded_UserIncludePattern(t *testing.T) {
 func TestWhyExcluded_IncludeBypassesDefaultPath(t *testing.T) {
 	agent := New(Args{
 		FileFilter: &rules.FileFilter{
-			Include: []string{"**/*_test.go"},
+			Include: []string{"**/*_test.go", "vendor/**"},
 		},
 	})
 
@@ -325,6 +323,13 @@ func TestWhyExcluded_IncludeBypassesDefaultPath(t *testing.T) {
 			name: "non-test file still reviewed via default checks",
 			diff: model.Diff{
 				NewPath: "main.go",
+			},
+			expected: ExcludeNone,
+		},
+		{
+			name: "vendored file explicitly included overrides default path exclusion",
+			diff: model.Diff{
+				NewPath: "vendor/lib.go",
 			},
 			expected: ExcludeNone,
 		},

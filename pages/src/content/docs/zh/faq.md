@@ -84,14 +84,14 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 
 ### 我的文件没被评审
 
-运行 `ocr review --preview`（无 LLM 成本）。输出列出每个候选文件及其被保留或
-丢弃的**原因**：
+运行 `ocr review --preview`（无 LLM 成本）。输出列出每个已解析的 diff 候选文件
+及其被保留或丢弃的**原因**：
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
-imgs/logo.png           binary    (excluded: unsupported_ext)
+vendor/lib.rs           modified  (excluded: default_path)
+docs/notes.md           modified  (excluded: unsupported_ext)
 ```
 
 五种排除原因对应[文件过滤](../review-rules/#how-files-are-filtered)中的门：
@@ -101,8 +101,12 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `binary` | 无需处理——二进制文件无可评审文本。 |
 | `user_exclude` | 从你的 `exclude` 列表移除该模式。 |
 | `unsupported_ext` | 把扩展名加入你的 `include` 列表以绕过白名单门。 |
-| `default_path` | 把文件加入 `include`——那会覆盖内置测试文件排除模式。 |
+| `default_path` | 加入匹配的 `include` 模式——这会覆盖 tracked diff 的内置默认路径排除。 |
 | `deleted` | 无需处理——没有新内容可评审。 |
+
+workspace 模式下，位于 OCR 默认噪声目录（`vendor/`、`node_modules/`、`target/`
+以及类似依赖/构建目录）中的 untracked 文件，会在 preview 合成整文件新增 diff
+之前被跳过。如果必须评审，请先 stage 或 commit 该文件。
 
 ### 我的自定义规则没触发
 

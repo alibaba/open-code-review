@@ -63,7 +63,7 @@ The function returns one of:
 binary          — file is binary
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
-default_path    — matched a built-in test-file exclude pattern
+default_path    — matched a built-in path exclusion
 ```
 
 …or empty if the file is kept. `deleted` is **not** returned by
@@ -76,16 +76,18 @@ file's diff reports `IsDeleted`. The gates run in this order:
    matches one, it's kept immediately (returns empty), bypassing the
    `unsupported_ext` and `default_path` gates below.
 4. `unsupported_ext` filters by extension allowlist.
-5. `default_path` is the last gate: it matches built-in **test-file**
-   exclude patterns (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`,
-   `**/__tests__/**`, `**/*_test.py`, `**/*_spec.rb`, `**/*.test.ets`, …).
-   Every pattern is rooted with a `**/` prefix.
+5. `default_path` is the last gate: it matches built-in path exclusions,
+   including test-file patterns (`**/*_test.go`,
+   `**/*.test.{js,jsx,ts,tsx}`, `**/__tests__/**`,
+   `**/*_test.py`, `**/*_spec.rb`, `**/*.test.ets`, …) and tracked
+   noisy-directory prefixes (`vendor/`, `node_modules/`, `target/`, …).
+   User `include` patterns bypass this gate.
 
-The noisy-directory filtering (`vendor/`, `node_modules/`, `target/`, …)
-happens earlier, at the diff-provider level, via the
-`providerDirIgnoreDirs` list in `internal/diff/git.go` — diffs for those
-directories are parsed and then stripped out by `filterDiffs` before
-they ever reach the per-file filter.
+Tracked diffs under noisy directories are intentionally left in the
+parsed diff set until this gate, so preview and delegate output can
+account for them with explicit paths and reasons. Workspace-mode
+untracked files under the same directories are still skipped in
+`internal/diff/git.go` before OCR synthesizes whole-file additions.
 
 Run `ocr review --preview` to see the full filter result without spending
 a token. See [Review Rules](../review-rules/#how-files-are-filtered) for

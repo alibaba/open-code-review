@@ -470,6 +470,94 @@ func TestRangeDiffSurvivesExternalDiffTool(t *testing.T) {
 	}
 }
 
+func TestRangeDiffReturnsTrackedDefaultExcludedDir(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	for _, dir := range []string{"src", "vendor"} {
+		if err := os.MkdirAll(filepath.Join(repo, dir), 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, "src", "app.rs"), []byte("pub fn app() -> i32 { 1 }\n"), 0o644); err != nil {
+		t.Fatalf("write src/app.rs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "vendor", "lib.rs"), []byte("pub fn dep() -> i32 { 1 }\n"), 0o644); err != nil {
+		t.Fatalf("write vendor/lib.rs: %v", err)
+	}
+	runGitTest(t, repo, "add", "src/app.rs", "vendor/lib.rs")
+	runGitTest(t, repo, "commit", "-q", "-m", "initial rust files")
+
+	if err := os.WriteFile(filepath.Join(repo, "src", "app.rs"), []byte("pub fn app() -> i32 { 2 }\n"), 0o644); err != nil {
+		t.Fatalf("rewrite src/app.rs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "vendor", "lib.rs"), []byte("pub fn dep() -> i32 { 2 }\n"), 0o644); err != nil {
+		t.Fatalf("rewrite vendor/lib.rs: %v", err)
+	}
+	runGitTest(t, repo, "add", "src/app.rs", "vendor/lib.rs")
+	runGitTest(t, repo, "commit", "-q", "-m", "update rust files")
+
+	provider := NewProvider(repo, "HEAD~1", "HEAD", gitcmd.New(0))
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff returned error: %v", err)
+	}
+
+	paths := make(map[string]bool, len(diffs))
+	for _, d := range diffs {
+		paths[d.NewPath] = true
+	}
+	if !paths["src/app.rs"] || !paths["vendor/lib.rs"] {
+		t.Fatalf("tracked diff paths = %v, want src/app.rs and vendor/lib.rs", paths)
+	}
+}
+
+func TestWorkspaceUntrackedDefaultExcludedDirStillSkipped(t *testing.T) {
+	repo := t.TempDir()
+	runGitTest(t, repo, "init", "-q")
+	runGitTest(t, repo, "config", "user.email", "test@example.com")
+	runGitTest(t, repo, "config", "user.name", "Test User")
+	runGitTest(t, repo, "config", "commit.gpgsign", "false")
+
+	if err := os.WriteFile(filepath.Join(repo, "base.go"), []byte("package base\n"), 0o644); err != nil {
+		t.Fatalf("write base.go: %v", err)
+	}
+	runGitTest(t, repo, "add", "base.go")
+	runGitTest(t, repo, "commit", "-q", "-m", "initial commit")
+
+	for _, dir := range []string{"src", "vendor"} {
+		if err := os.MkdirAll(filepath.Join(repo, dir), 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, "src", "untracked.go"), []byte("package src\n"), 0o644); err != nil {
+		t.Fatalf("write src/untracked.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "vendor", "untracked.go"), []byte("package vendor\n"), 0o644); err != nil {
+		t.Fatalf("write vendor/untracked.go: %v", err)
+	}
+
+	provider := NewWorkspaceProvider(repo, gitcmd.New(0))
+	diffs, err := provider.GetDiff(context.Background())
+	if err != nil {
+		t.Fatalf("GetDiff returned error: %v", err)
+	}
+
+	paths := make(map[string]bool, len(diffs))
+	for _, d := range diffs {
+		paths[d.NewPath] = true
+	}
+	if !paths["src/untracked.go"] {
+		t.Fatalf("workspace diff paths = %v, want src/untracked.go", paths)
+	}
+	if paths["vendor/untracked.go"] {
+		t.Fatalf("workspace diff paths = %v, want untracked vendor skipped", paths)
+	}
+}
+
 // TestCommitDiffMergeCommitReviewsFirstParentDiff covers `ocr review --commit
 // <merge>`: plain `git show` renders merge commits as a combined diff
 // ("diff --cc"), which ParseDiffText cannot parse, so the review silently

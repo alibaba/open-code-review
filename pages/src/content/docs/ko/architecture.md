@@ -61,7 +61,7 @@ diff를 다 읽고 나면 모든 파일이
 binary          — file is binary
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
-default_path    — matched a built-in test-file exclude pattern
+default_path    — matched a built-in path exclusion
 ```
 
 파일을 남기기로 했다면 빈 문자열을 반환합니다. `deleted`는 `whyExcluded`가
@@ -74,15 +74,16 @@ default_path    — matched a built-in test-file exclude pattern
    그 자리에서 남기고(빈 문자열 반환) 아래의 `unsupported_ext`와
    `default_path` 관문을 건너뜁니다.
 4. `unsupported_ext`는 확장자 허용 목록으로 거릅니다.
-5. `default_path`가 마지막 관문입니다. 내장 **테스트 파일** 제외 패턴
+5. `default_path`가 마지막 관문입니다. 테스트 파일 패턴
    (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/__tests__/**`,
-   `**/*_test.py`, `**/*_spec.rb`, `**/*.test.ets` 등)에 걸리는지 봅니다.
-   모든 패턴 앞에는 `**/` 접두사가 붙습니다.
+   `**/*_test.py`, `**/*_spec.rb`, `**/*.test.ets` 등)과 tracked diff의
+   잡음 디렉터리 접두사(`vendor/`, `node_modules/`, `target/` 등)를 포함한
+   내장 경로 제외에 걸리는지 봅니다. 사용자 `include` 패턴은 이 관문을 건너뜁니다.
 
-잡음이 많은 디렉터리(`vendor/`, `node_modules/`, `target/` 등)는 그보다 앞선
-diff 프로바이더 단계에서, `internal/diff/git.go`의 `providerDirIgnoreDirs`
-목록으로 걸러 냅니다. 이 디렉터리의 diff는 일단 파싱한 뒤 `filterDiffs`가
-떼어 내므로 파일 단위 필터까지 오지 못합니다.
+잡음 디렉터리 안의 tracked diff는 이 관문까지 파싱된 diff 집합에 남아 있으므로
+preview와 delegate 출력이 명시적인 경로와 사유를 보여 줄 수 있습니다. workspace
+모드에서 같은 디렉터리 안에 있는 untracked 파일은 `internal/diff/git.go`가 전체 파일
+추가 diff를 합성하기 전에 계속 건너뜁니다.
 
 `ocr review --preview`를 돌리면 토큰 한 톨 쓰지 않고 필터 결과 전체를 볼 수
 있습니다. 알고리즘 전체는
