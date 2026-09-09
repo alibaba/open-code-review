@@ -51,7 +51,8 @@ func TestRangeDiffPreservesTrackedGitignoreFilteringWhileReturningNoisyDirs(t *t
 			t.Fatalf("rewrite %s: %v", name, err)
 		}
 	}
-	runGitTest(t, repo, "add", ".gitignore", "src/main.go", "docs/generated/api.go", "vendor/lib.go")
+	runGitTest(t, repo, "add", "-u")
+	runGitTest(t, repo, "add", ".gitignore")
 	runGitTest(t, repo, "commit", "-q", "-m", "update tracked files")
 
 	provider := NewProvider(repo, "HEAD~1", "HEAD", gitcmd.New(0))
