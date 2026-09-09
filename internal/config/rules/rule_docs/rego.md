@@ -20,8 +20,7 @@
 #### Unsafe Variables and Iteration
 - Unbound or unsafe variables the compiler would reject being "fixed" by binding them to attacker-influenced `input` instead of a trusted value
 - `some x in input.collection` iterating a field that may be absent or a scalar rather than an array/set/object, making the rule undefined instead of denying
-- Partial iteration that checks only the first match (e.g. `input.roles[i] == "admin"` binding `i` once and succeeding) where every element needed checking; `every` or a comprehension with aggregation was required
-- Object key iteration (`some k, v in input.map`) that assumes keys present without `object.get` defaults or presence checks
+- An existential check such as `input.roles[i] == "admin"` used where observable policy requirements demand that every element satisfy a condition: Rego searches possible bindings for `i` and succeeds if any element matches; use `every` or an equivalent universal check only when that all-elements requirement is established
 
 #### Input, Data, and Trust Boundaries
 - Authorization-relevant `input` fields (roles, groups, `is_admin`, expiry) used as trusted facts when observable caller or policy code shows an attacker can supply them without validation; missing in-policy validation alone does not establish attacker control
@@ -34,10 +33,11 @@
 - `http.send` settings that demonstrably disable required safeguards (e.g. `tls_insecure_skip_verify: true` or a zero timeout on a path that requires a bound), or an error path that changes the authorization decision incorrectly; omitted options retain OPA's defaults of a five-second timeout and TLS certificate verification
 - Recommend HTTP response caching only for an established performance problem with an acceptable freshness contract; uncached requests are valid when decisions require fresh data
 - A custom function that is undefined for some inputs (no return value on a reachable path) used as though it always returns a value
-- `print()` or `trace()` calls left in committed policy, leaking evaluated values into logs
+- `print()` calls that emit secrets or other sensitive values to an enabled output/log stream beyond the intended trust boundary; establish the emitted values and output handling before reporting data exposure
+- `trace()` calls that put sensitive values in `Note` events when query tracing/explanations are collected and accessible beyond the intended trust boundary; `trace()` does not imply ordinary logging, and its presence alone is not a data-exposure finding
 
 #### Version Drift and Structure
-- `if`, `contains`, and `in` keywords used without the matching `import future.keywords` on toolchains that still require it, or the import retained as dead weight where the target version makes it unconditional — check the file's own imports before flagging
+- Version-incompatible use of `in`, `every`, `if`, or `contains` when the target toolchain and syntax mode are known: supported pre-v1 toolchains can enable these through the relevant `future.keywords` imports or `import rego.v1`; under OPA v1 syntax all four are available without imports. Account for compatibility settings rather than inferring the version from imports alone
 - `package` name shadowing an `import`ed path, so an unqualified rule reference resolves to a different package than the author meant
 - `default` rules contradicting each other on the same name, or a `default` value of a different type than the rule body produces
 - Duplicate rule names in the same package whose bodies union when the author meant override: multiple `allow if ...` definitions all contribute, none replaces another
