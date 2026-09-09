@@ -142,6 +142,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{tf,hcl,tfvars}` | `terraform.md`: Terraform / HCL。 |
 | `**/*.bicep` | `bicep.md`: Bicep（Azure）テンプレート。 |
 | `**/*.elm` | `elm.md` - Elm ソースコード。 |
+| `**/*.{ps1,psm1,psd1}` | `powershell.md`: PowerShell スクリプト、モジュール、データ／マニフェストファイル。 |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md`: Jsonnet の設定テンプレートとライブラリ。 |
 | `**/*.thrift` | `thrift.md`: Apache Thrift IDL のワイヤ互換性。 |
 | `**/*.capnp` | `capnp.md`: Cap'n Proto スキーマのワイヤ互換性。 |

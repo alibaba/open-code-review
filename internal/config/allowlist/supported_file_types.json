@@ -37,6 +37,8 @@
   ".zsh",
   ".fish",
   ".ps1",
+  ".psm1",
+  ".psd1",
   ".sql",
   ".css",
   ".scss",

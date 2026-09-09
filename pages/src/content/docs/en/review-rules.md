@@ -180,6 +180,7 @@ matching order:
 | `**/*.{tf,hcl,tfvars}` | `terraform.md` — Terraform / HCL. |
 | `**/*.bicep` | `bicep.md` — Bicep (Azure) templates. |
 | `**/*.elm` | `elm.md` - Elm source. |
+| `**/*.{ps1,psm1,psd1}` | `powershell.md` — PowerShell scripts, modules, and data/manifest files. |
 | `**/*.{jsonnet,libsonnet}` | `jsonnet.md` — Jsonnet configuration templates and libraries. |
 | `**/*.thrift` | `thrift.md` — Apache Thrift IDL wire compatibility. |
 | `**/*.capnp` | `capnp.md` — Cap'n Proto schema wire compatibility. |
