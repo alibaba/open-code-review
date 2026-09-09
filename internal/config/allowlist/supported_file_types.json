@@ -108,5 +108,9 @@
   ".vhd",
   ".vhdl",
   ".sol",
-  ".vy"
+  ".vy",
+  ".glsl",
+  ".hlsl",
+  ".wgsl",
+  ".metal"
 ]
