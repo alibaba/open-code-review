@@ -497,7 +497,7 @@ func TestScanAgent_WaitBackground_NoLeakOnRun(t *testing.T) {
 
 	// Verify that a.Run has NOT returned yet (held by a.runner.WaitBackground()).
 	// Use a timeout rather than default: the main goroutine's entire post-loop
-	// cleanup (RunPerFile return → dispatchSubtasks → Finalize) completes in
+	// cleanup (RunMainTask return → dispatchSubtasks → Finalize) completes in
 	// under 1ms on any machine, so 200ms is a generous upper bound. If Run
 	// returns within this window, WaitBackground is not holding it.
 	select {

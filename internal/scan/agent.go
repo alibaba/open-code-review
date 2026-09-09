@@ -790,7 +790,7 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 		return false, "", nil
 	}
 
-	completed, stop, err := a.runner.RunPerFile(ctx, messages, it.Path)
+	completed, stop, err := a.runner.RunMainTask(ctx, messages, it.Path)
 	if err != nil {
 		return false, "", err
 	}

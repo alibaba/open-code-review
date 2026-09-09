@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -519,31 +521,118 @@ func (w *stripAnsiWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// lazyFileWriter defers os.Create until the first Write so a run that never
-// produces output (LLM failure, preview error, interruption) leaves an
-// existing target file untouched instead of truncating it to zero bytes. The
-// "Results written" hint is printed to stderr only after the first successful
-// Write, so agents never see a path hint for a file that stayed empty or was
-// never persisted.
+const outputTempPrefix = ".ocr-out-"
+
+// createOutputTemp creates a collision-resistant file in the target directory.
+// Unlike os.CreateTemp, the 0666 mode preserves os.Create's umask-sensitive
+// permissions for new output files.
+func createOutputTemp(dir string) (*os.File, error) {
+	for range 100 {
+		path := filepath.Join(dir, outputTempPrefix+rand.Text())
+		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
+		if err == nil {
+			return f, nil
+		}
+		if !os.IsExist(err) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("too many temporary output filename collisions in %s", dir)
+}
+
+// resolveOutputCommitPath preserves os.Create's behavior for an existing
+// symlink: write through the link to its target instead of replacing the link
+// itself during the final rename.
+func resolveOutputCommitPath(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return path, nil
+		}
+		return "", fmt.Errorf("inspect output path %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return path, nil
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve output symlink %s: %w", path, err)
+	}
+	return resolved, nil
+}
+
+func cleanupOutputTemp(file *os.File, path string) error {
+	var cleanupErr error
+	if file != nil {
+		if err := file.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close temporary output file: %w", err))
+		}
+	}
+	if path != "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove temporary output file %s: %w", path, err))
+		}
+	}
+	return cleanupErr
+}
+
+// lazyFileWriter defers creating a same-directory temporary file until the
+// first Write. Close syncs and atomically renames a complete result into place,
+// so a run that never writes or encounters a write failure leaves the previous
+// target untouched. Replacing the directory entry intentionally gives readers
+// a consistent old-or-new snapshot; open descriptors and hard links keep
+// referring to the old inode.
 type lazyFileWriter struct {
-	path     string
-	strip    bool // strip ANSI when the target format is text
-	once     sync.Once
-	file     *os.File
-	stripper *stripAnsiWriter
-	err      error // os.Create error
-	writeErr error // first error from a Write
-	hinted   bool  // hint already printed after a successful Write
+	path       string
+	strip      bool // strip ANSI when the target format is text
+	once       sync.Once
+	file       *os.File // temporary file committed by Close
+	tempPath   string
+	commitPath string
+	stripper   *stripAnsiWriter
+	err        error // temporary-file creation or setup error
+	writeErr   error // first error from a Write
+	closed     bool
+	closeErr   error
 }
 
 func (w *lazyFileWriter) Write(p []byte) (int, error) {
+	if w.closed {
+		return 0, os.ErrClosed
+	}
 	w.once.Do(func() {
-		f, err := os.Create(w.path)
+		commitPath, err := resolveOutputCommitPath(w.path)
 		if err != nil {
-			w.err = fmt.Errorf("create output file %s: %w", w.path, err)
+			w.err = err
 			return
 		}
+
+		var existingMode os.FileMode
+		hasExistingMode := false
+		if info, statErr := os.Stat(commitPath); statErr == nil {
+			existingMode = info.Mode() & (os.ModePerm | os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+			hasExistingMode = true
+		} else if !os.IsNotExist(statErr) {
+			w.err = fmt.Errorf("inspect output file %s: %w", w.path, statErr)
+			return
+		}
+
+		f, err := createOutputTemp(filepath.Dir(commitPath))
+		if err != nil {
+			w.err = fmt.Errorf("create temporary output file for %s: %w", w.path, err)
+			return
+		}
+		if hasExistingMode {
+			if err := f.Chmod(existingMode); err != nil {
+				cleanupErr := cleanupOutputTemp(f, f.Name())
+				w.err = errors.Join(fmt.Errorf("preserve output permissions for %s: %w", w.path, err), cleanupErr)
+				return
+			}
+		}
+
 		w.file = f
+		w.tempPath = f.Name()
+		w.commitPath = commitPath
 		if w.strip {
 			w.stripper = &stripAnsiWriter{dst: f}
 		}
@@ -560,10 +649,6 @@ func (w *lazyFileWriter) Write(p []byte) (int, error) {
 	}
 	if err != nil && w.writeErr == nil {
 		w.writeErr = err
-	}
-	if err == nil && !w.hinted {
-		w.hinted = true
-		fmt.Fprintf(os.Stderr, "[ocr] Results written to %s\n", w.path)
 	}
 	return n, err
 }
@@ -589,22 +674,54 @@ func writeOutError(out io.Writer) error {
 	return nil
 }
 
-// Close closes the underlying file. It is a no-op when the file was never
-// created (no output produced), so failure paths cannot leave a fresh empty
-// file behind.
+// Close commits a complete output file atomically. It is a no-op when no Write
+// occurred, and it discards the temporary file when a Write already failed.
 func (w *lazyFileWriter) Close() error {
+	if w.closed {
+		return w.closeErr
+	}
+	w.closed = true
 	if w.file == nil {
 		return nil
 	}
-	return w.file.Close()
+	if w.writeErr != nil {
+		w.closeErr = cleanupOutputTemp(w.file, w.tempPath)
+		w.file = nil
+		w.tempPath = ""
+		return w.closeErr
+	}
+	if err := w.file.Sync(); err != nil {
+		cleanupErr := cleanupOutputTemp(w.file, w.tempPath)
+		w.file = nil
+		w.tempPath = ""
+		w.closeErr = errors.Join(fmt.Errorf("sync output file %s: %w", w.path, err), cleanupErr)
+		return w.closeErr
+	}
+	if err := w.file.Close(); err != nil {
+		cleanupErr := cleanupOutputTemp(w.file, w.tempPath)
+		w.file = nil
+		w.tempPath = ""
+		w.closeErr = errors.Join(fmt.Errorf("close output file %s: %w", w.path, err), cleanupErr)
+		return w.closeErr
+	}
+	w.file = nil
+	if err := os.Rename(w.tempPath, w.commitPath); err != nil {
+		cleanupErr := cleanupOutputTemp(nil, w.tempPath)
+		w.tempPath = ""
+		w.closeErr = errors.Join(fmt.Errorf("replace output file %s: %w", w.path, err), cleanupErr)
+		return w.closeErr
+	}
+	w.tempPath = ""
+	fmt.Fprintf(os.Stderr, "[ocr] Results written to %s\n", w.path)
+	return nil
 }
 
 // resolveOutputWriter resolves the --output target into a writer plus a
 // cleanup function.
 //   - "" or "-"      → os.Stdout with a no-op cleanup (colors preserved, no hint)
-//   - otherwise      → a lazyFileWriter over os.Create(path), deferred until the
-//     first Write; text format wraps the file in stripAnsiWriter so ANSI
-//     colors never reach the result file.
+//   - otherwise      → a lazyFileWriter over a same-directory temporary file,
+//     deferred until the first Write and atomically committed by Close; text
+//     format wraps the file in stripAnsiWriter so ANSI colors never reach it.
 //
 // Fail-fast checks (directory target, missing parent) run here without
 // creating or truncating anything; deeper errors (permissions, disk) surface

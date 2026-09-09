@@ -8,23 +8,47 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const runAsServerEnv = "_OCR_MCP_TEST_SERVER"
+const (
+	runAsServerEnv         = "_OCR_MCP_TEST_SERVER"
+	runAsHangingServerEnv  = "_OCR_MCP_TEST_HANG_SERVER"
+	runAsExit3ServerEnv    = "_OCR_MCP_TEST_EXIT3_SERVER"
+	runAsSlowExitServerEnv = "_OCR_MCP_TEST_SLOW_EXIT_SERVER"
+)
 
 func TestMain(m *testing.M) {
-	if os.Getenv(runAsServerEnv) != "" {
-		runTestMCPServer()
-		return
+	if raceDetectorEnabled {
+		// A race-instrumented child pays ~1s of runtime overhead between
+		// seeing stdin EOF and exiting (measured: 12ms plain vs ~1s raced).
+		// Tests that need a responsive child to beat its own shutdown budget
+		// widen that budget accordingly; tests that only rely on signal death
+		// keep the production value and pin it themselves.
+		subprocessTerminateDuration = 2500 * time.Millisecond
 	}
-	os.Exit(m.Run())
+	switch {
+	case os.Getenv(runAsServerEnv) != "":
+		runTestMCPServer()
+	case os.Getenv(runAsHangingServerEnv) != "":
+		runHangingMCPServer()
+	case os.Getenv(runAsExit3ServerEnv) != "":
+		runExit3MCPServer()
+	case os.Getenv(runAsSlowExitServerEnv) != "":
+		runSlowExitMCPServer()
+	default:
+		os.Exit(m.Run())
+	}
 }
 
-func runTestMCPServer() {
+// newTestMCPServer returns a working MCP server with a single echo tool.
+func newTestMCPServer() *mcp.Server {
 	server := mcp.NewServer(
 		&mcp.Implementation{Name: "test-server", Version: "v0.0.1"},
 		nil,
@@ -52,10 +76,55 @@ func runTestMCPServer() {
 			}, nil
 		},
 	)
+	return server
+}
 
-	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+func runTestMCPServer() {
+	if err := newTestMCPServer().Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatal(err)
 	}
+	// Exit explicitly with code 0 as soon as stdin EOF ends the server loop,
+	// rather than unwinding through the test runtime, whose teardown adds a
+	// slow and variable tail under the race detector.
+	os.Exit(0)
+}
+
+// runHangingMCPServer serves MCP normally but never exits: it ignores SIGTERM
+// and blocks forever once stdin closes, so only the SDK's SIGKILL escalation
+// can reclaim it. This is the unresponsive-server case from issue #1141.
+func runHangingMCPServer() {
+	signal.Ignore(syscall.SIGTERM)
+	go func() {
+		_ = newTestMCPServer().Run(context.Background(), &mcp.StdioTransport{})
+	}()
+	for {
+		// Sleeping keeps a timer pending, which keeps the runtime's deadlock
+		// detector quiet after the server goroutine returns on stdin EOF.
+		time.Sleep(time.Hour)
+	}
+}
+
+// runExit3MCPServer behaves like the normal server but exits with status 3
+// once stdin closes, so Close deterministically reports a child error.
+func runExit3MCPServer() {
+	_ = newTestMCPServer().Run(context.Background(), &mcp.StdioTransport{})
+	os.Exit(3)
+}
+
+// runSlowExitMCPServer models a cooperative but slow server: it serves MCP
+// until stdin closes (the parent's Close), then takes a while to wind down
+// its own state before exiting cleanly. It ignores SIGTERM so its wind-down
+// completes, exiting on its own before the SDK's SIGKILL escalation.
+func runSlowExitMCPServer() {
+	signal.Ignore(syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = newTestMCPServer().Run(context.Background(), &mcp.StdioTransport{})
+	}()
+	<-done                              // stdin EOF: the parent's Close started
+	time.Sleep(1200 * time.Millisecond) // cooperative wind-down
+	os.Exit(0)
 }
 
 func TestNewClient_Stdio(t *testing.T) {

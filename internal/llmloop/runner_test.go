@@ -50,7 +50,7 @@ func (g *gatedLLMClient) CompletionsWithCtx(ctx context.Context, _ llm.ChatReque
 
 // concurrentFakeClient is goroutine-safe and distinguishes compression
 // requests (no tools attached) from main-loop requests (tools attached),
-// mirroring how runCompression and RunPerFile build their ChatRequests.
+// mirroring how runCompression and RunMainTask build their ChatRequests.
 type concurrentFakeClient struct {
 	compressionCalls atomic.Int64
 }
@@ -690,7 +690,7 @@ func TestAddNextMessage_NoStartThenCancelSameCall(t *testing.T) {
 	}
 }
 
-func TestRunPerFile_ConcurrentFilesCompression_Race(t *testing.T) {
+func TestRunMainTask_ConcurrentFilesCompression_Race(t *testing.T) {
 	t_tempDir = t.TempDir()
 	tpl := template.Template{
 		MemoryCompressionTask: template.LlmConversation{
@@ -710,7 +710,7 @@ func TestRunPerFile_ConcurrentFilesCompression_Race(t *testing.T) {
 		CommentCollector: tool.NewCommentCollector(),
 		// MainToolDefs must be non-empty: the fake client classifies a
 		// request with no tools as a compression request, mirroring how
-		// RunPerFile and runCompression build their ChatRequests.
+		// RunMainTask and runCompression build their ChatRequests.
 		MainToolDefs: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "file_read"}}},
 		Session:      session.New(t_tempDir, "main", "test-model", session.SessionOptions{ReviewMode: "diff"}),
 	})
@@ -725,14 +725,14 @@ func TestRunPerFile_ConcurrentFilesCompression_Race(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			msgs := []llm.Message{msg("system", "sys"), msg("user", "review this file")}
-			_, _, err := r.RunPerFile(context.Background(), msgs, fmt.Sprintf("f%d.go", i))
+			_, _, err := r.RunMainTask(context.Background(), msgs, fmt.Sprintf("f%d.go", i))
 			errs[i] = err
 		}(i)
 	}
 	wg.Wait()
 	for i, err := range errs {
 		if err != nil {
-			t.Errorf("file %d: RunPerFile: %v", i, err)
+			t.Errorf("file %d: RunMainTask: %v", i, err)
 		}
 	}
 	// Guard against the test going vacuous: if no compression request was
