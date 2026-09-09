@@ -22,8 +22,21 @@ inputs:
       Selects the LLM protocol (mapped to env OCR_USE_ANTHROPIC). An explicitly supplied empty
       string, true, 1, or yes selects Anthropic
       case-insensitively; every other value selects the OpenAI-compatible
-      protocol, preserving the CLI environment contract.
+      protocol, preserving the CLI environment contract. Ignored when
+      llm_protocol is set to a non-empty value.
     required: true
+  llm_protocol:
+    description: >-
+      Explicit LLM protocol override (case-insensitive): one of `openai`,
+      `openai-responses`, `anthropic`. When set, wins over llm_use_anthropic —
+      this is the only way to reach the CLI's built-in openai-responses
+      preset from this action, needed for models that require the OpenAI
+      Responses API (e.g. GPT-5.6 Sol/Terra/Luna, whose function-tool +
+      reasoning_effort combination is not accepted on /v1/chat/completions).
+      Empty (default) preserves the legacy behavior of deriving the
+      protocol from llm_use_anthropic.
+    required: false
+    default: ''
   llm_auth_header:
     description: Custom auth header name (mapped to env OCR_LLM_AUTH_HEADER).
     required: false
@@ -364,6 +377,7 @@ runs:
         MAX_TOKENS_BUDGET_INPUT: ${{ inputs.max_tokens_budget }}
         LLM_REASONING_EFFORT_INPUT: ${{ inputs.llm_reasoning_effort }}
         STREAM_PROGRESS_INPUT: ${{ inputs.stream_progress }}
+        LLM_PROTOCOL_INPUT: ${{ inputs.llm_protocol }}
       shell: bash
       run: |
         if [[ ! "$REVIEW_TASK_TIMEOUT" =~ ^[0-9]+$ ]]; then
@@ -428,6 +442,20 @@ runs:
             ;;
         esac
         echo "LLM_REASONING_EFFORT=$NORMALIZED_LLM_REASONING_EFFORT" >> "$GITHUB_ENV"
+
+        # Explicit protocol override. Empty leaves protocol selection to
+        # llm_use_anthropic in the Configure OCR step; non-empty pins the CLI
+        # to one of the built-in provider presets. Case-insensitive so a
+        # caller's HIGH-vs-high style doesn't matter here either.
+        NORMALIZED_LLM_PROTOCOL="$(printf '%s' "$LLM_PROTOCOL_INPUT" | tr '[:upper:]' '[:lower:]')"
+        case "$NORMALIZED_LLM_PROTOCOL" in
+          ""|openai|openai-responses|anthropic) ;;
+          *)
+            echo "::error::llm_protocol must be one of: openai, openai-responses, anthropic (got '$LLM_PROTOCOL_INPUT')"
+            exit 1
+            ;;
+        esac
+        echo "LLM_PROTOCOL=$NORMALIZED_LLM_PROTOCOL" >> "$GITHUB_ENV"
 
         # Display-only toggle: 'true' streams human-audience progress lines to
         # the workflow log, 'false' keeps the silent agent-audience run. It
@@ -509,17 +537,31 @@ runs:
         OCR_LANGUAGE: ${{ inputs.language }}
       shell: bash
       run: |
-        NORMALIZED_USE_ANTHROPIC="$(printf '%s' "$OCR_USE_ANTHROPIC" | tr '[:upper:]' '[:lower:]')"
-        case "$NORMALIZED_USE_ANTHROPIC" in
-          ""|true|1|yes)
+        # Two resolution paths. When llm_protocol was supplied, use it verbatim
+        # (already lowercase-normalized + validated in the Validate inputs
+        # step); derive OCR_USE_ANTHROPIC from it so the CLI env var stays
+        # consistent with the resolved protocol. Otherwise fall back to the
+        # legacy llm_use_anthropic derivation, unchanged.
+        if [ -n "${LLM_PROTOCOL:-}" ]; then
+          OCR_LLM_PROTOCOL="$LLM_PROTOCOL"
+          if [ "$OCR_LLM_PROTOCOL" = "anthropic" ]; then
             OCR_USE_ANTHROPIC="true"
-            OCR_LLM_PROTOCOL="anthropic"
-            ;;
-          *)
+          else
             OCR_USE_ANTHROPIC="false"
-            OCR_LLM_PROTOCOL="openai"
-            ;;
-        esac
+          fi
+        else
+          NORMALIZED_USE_ANTHROPIC="$(printf '%s' "$OCR_USE_ANTHROPIC" | tr '[:upper:]' '[:lower:]')"
+          case "$NORMALIZED_USE_ANTHROPIC" in
+            ""|true|1|yes)
+              OCR_USE_ANTHROPIC="true"
+              OCR_LLM_PROTOCOL="anthropic"
+              ;;
+            *)
+              OCR_USE_ANTHROPIC="false"
+              OCR_LLM_PROTOCOL="openai"
+              ;;
+          esac
+        fi
         # reasoning_effort is OpenAI-compatible vocabulary; the Anthropic API
         # rejects unknown body fields, so fail fast instead of breaking every
         # request. Anthropic thinking control goes through an explicit
@@ -605,6 +647,11 @@ runs:
         OCR_FP_LLM_URL: ${{ inputs.llm_url }}
         OCR_FP_LLM_MODEL: ${{ inputs.llm_model }}
         OCR_FP_LLM_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
+        # A protocol change routes requests to a different endpoint (and,
+        # for openai-responses, a different request shape), so what a review
+        # would say shifts too. Empty when the caller didn't set llm_protocol,
+        # which is still distinct from an explicit "openai".
+        OCR_FP_LLM_PROTOCOL: ${{ inputs.llm_protocol }}
         OCR_FP_LANGUAGE: ${{ inputs.language }}
         OCR_FP_LLM_EXTRA_BODY: ${{ inputs.llm_extra_body }}
         # Normalized by Validate inputs, so spellings that mean the same thing
@@ -747,6 +794,7 @@ runs:
                 process.env.OCR_FP_LLM_URL,
                 process.env.OCR_FP_LLM_MODEL,
                 process.env.OCR_FP_LLM_USE_ANTHROPIC,
+                process.env.OCR_FP_LLM_PROTOCOL,
                 process.env.OCR_FP_LANGUAGE,
                 process.env.OCR_FP_LLM_EXTRA_BODY,
                 process.env.OCR_FP_LLM_REASONING_EFFORT,
