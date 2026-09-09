@@ -235,7 +235,7 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 	if err != nil {
 		return nil, err
 	}
-	return diffs, nil
+	return p.filterGitignoredDiffs(diffs), nil
 }
 
 // loadGitignorePatterns reads and parses .gitignore patterns from the repo root.
