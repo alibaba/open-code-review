@@ -131,6 +131,39 @@ definitions are **not** rendered in the card UI; if you need them,
 inspect the JSONL transcript directly (the `messages` field on each
 `llm_request` record).
 
+## Review comments
+
+Below the task lanes, the session page lists every finding the review
+produced as **comment cards**, grouped by file, showing the comment
+text, its existing/suggested code where present, and severity/category
+badges. Chips on the filter bar narrow the list by severity or category.
+
+### Marking findings as you fix them
+
+Each card carries three buttons — **Fixed** / **Ignored** /
+**Clear** — that set a per-comment mark:
+
+- Marks are mutually exclusive: setting one replaces another, and
+  **Clear** removes it. The current state shows as a colored chip on
+  the card.
+- **Hide marked** (on by default, remembered per browser) keeps marked
+  cards out of the way while you work through what is left. The toolbar
+  counts how many are marked and hidden; switch the toggle off any time
+  to see everything again.
+- **Clear all marks** resets the whole session at once.
+
+Marks are viewer state, not review data — the viewer itself stays
+read-only:
+
+- They are stored in your browser's `localStorage`, scoped to the
+  session page. Nothing is ever written next to the session JSONL, and
+  the viewer exposes no write API at all.
+- Marks belong to one session **and one browser**: another browser or
+  machine sees the session unmarked, and clearing the browser's storage
+  for the site starts it over.
+- Re-running a review of the same change produces a new session, which
+  starts unmarked.
+
 ## Use cases
 
 The viewer is designed around three workflows:
@@ -186,8 +219,8 @@ reviewed together.
 Lines are append-only — a partial JSONL means a session was killed
 mid-run, and the viewer renders what it has.
 
-To free disk space, delete entire session files; the viewer regenerates
-its index on the next request.
+To free disk space, delete entire session files; the viewer
+regenerates its index on the next request.
 
 ## Privacy
 

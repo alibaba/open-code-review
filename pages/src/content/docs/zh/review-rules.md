@@ -147,7 +147,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.ets` | `arkts.md`——ArkTS / HarmonyOS。 |
 | `**/*.astro` | `astro.md`——Astro 组件与 islands。 |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
@@ -169,6 +169,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.{v,sv,vh}` | `verilog.md`——Verilog 与 SystemVerilog RTL。 |
 | `**/*.{vhd,vhdl}` | `vhdl.md`——VHDL RTL。 |
 | `**/*.m` | `matlab.md`（或通过[内容嗅探](#针对-m-文件的内容嗅探)使用 `objc.md`） |
+| `**/*.mm` | `objc.md`——Objective-C++ 源代码。 |
 | `**/*.sol` | `solidity.md`——Solidity 智能合约。 |
 | `**/*.vy` | `vyper.md`——Vyper 智能合约。 |
 | *(fallback)* | `default.md` |

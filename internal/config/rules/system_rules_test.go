@@ -94,6 +94,7 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"scripts/config.mjs", "TypeScript"},
 		{"server/bootstrap.cjs", "TypeScript"},
 		{"app.kt", "Null Safety"},
+		{"scripts/setup.kts", "Null Safety"},
 		{"src/main/handler.cpp", "Smart Pointer"},
 		{"src/main/handler.cxx", "Smart Pointer"},
 		{"include/handler.hxx", "Smart Pointer"},
@@ -146,12 +147,18 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"if/common.thrift", "Field IDs and Wire Compatibility"},
 		{"schema/addressbook.capnp", "Ordinals and Wire Compatibility"},
 		{"src/rpc.capnp", "Ordinals and Wire Compatibility"},
+		{"src/parser.ml", "Pattern Matching"},
+		{"lib/parser.mli", "Pattern Matching"},
+		{"src/Component.re", "Pattern Matching"},
+		{"lib/Component.rei", "Pattern Matching"},
 		{"rtl/counter.v", "Blocking and Non-Blocking Assignments"},
 		{"rtl/alu.sv", "Blocking and Non-Blocking Assignments"},
 		{"rtl/defines.vh", "Blocking and Non-Blocking Assignments"},
 		{"rtl/fifo.vhd", "numeric_std"},
 		{"rtl/fifo.vhdl", "numeric_std"},
 		{"Models/main.m", "Indexing, Shapes, and Implicit Expansion"},
+		{"ios/ViewController.mm", "ARC and Object Ownership"},
+		{"ios/ViewController.MM", "ARC and Object Ownership"},
 		{"src/Counter.sol", "Checks-Effects-Interactions"},
 		{"contracts/Vault.sol", "Delegatecall and Proxy Upgradeability"},
 		{"contracts/token.vy", "Language Restrictions"},
@@ -179,9 +186,6 @@ func TestResolve_FallbackToDefault(t *testing.T) {
 		"readme.md",
 		"docs/architecture.txt",
 		"Makefile",
-		// Note: .m now matches matlab.md, so it's no longer a "no rule
-		// matches" example; .mm remains one.
-		"ios/ViewController.mm",
 	}
 
 	for _, path := range paths {

@@ -155,7 +155,7 @@ diff 단계에서 일어납니다.
 | `**/*.ets` | `arkts.md` — ArkTS / HarmonyOS. |
 | `**/*.astro` | `astro.md` — Astro 컴포넌트와 아일랜드. |
 | `**/*.{ts,js,tsx,jsx,mjs,cjs}` | `ts_js_tsx_jsx.md` |
-| `**/*.{kt}` | `kotlin.md` |
+| `**/*.{kt,kts}` | `kotlin.md` |
 | `**/*.rs` | `rust.md` |
 | `**/*.R` | `r.md` |
 | `**/*.{cpp,cc,cxx,hpp,hxx}` | `cpp.md` |
@@ -177,6 +177,7 @@ diff 단계에서 일어납니다.
 | `**/*.{v,sv,vh}` | `verilog.md` — Verilog 및 SystemVerilog RTL. |
 | `**/*.{vhd,vhdl}` | `vhdl.md` — VHDL RTL. |
 | `**/*.m` | `matlab.md`(또는 [내용 탐지](#content-sniffing-for-m-files)로 `objc.md`) |
+| `**/*.mm` | `objc.md` — Objective-C++ 소스. |
 | `**/*.sol` | `solidity.md` — Solidity 스마트 컨트랙트. |
 | `**/*.vy` | `vyper.md` — Vyper 스마트 컨트랙트. |
 | *(대체값)* | `default.md` |

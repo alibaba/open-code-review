@@ -31,6 +31,10 @@ func TestIsAllowedExt(t *testing.T) {
 		{".ETS", true},
 		{".json5", true},
 		{".JSON5", true},
+		{".kt", true},
+		{".KT", true},
+		{".kts", true},
+		{".KTS", true},
 		{".ftl", true},
 		{".FTL", true},
 		{".ftlh", true},
@@ -92,6 +96,14 @@ func TestIsAllowedExt(t *testing.T) {
 		{".THRIFT", true},
 		{".capnp", true},
 		{".CAPNP", true},
+		{".ml", true},
+		{".ML", true},
+		{".mli", true},
+		{".MLI", true},
+		{".re", true},
+		{".RE", true},
+		{".rei", true},
+		{".REI", true},
 		{".v", true},
 		{".V", true},
 		{".sv", true},
@@ -146,6 +158,8 @@ func TestIsExcludedPath(t *testing.T) {
 		// Kotlin test directory
 		{"kotlin test dir", "src/test/kotlin/FooTest.kt", true},
 		{"kotlin main dir", "src/main/kotlin/Foo.kt", false},
+		{"kotlin scripts test dir", "src/test/kotlin/scripts/FooTest.kts", true},
+		{"kotlin scripts main dir", "src/main/kotlin/scripts/Foo.kts", false},
 
 		// JS/TS test files
 		{"js test file", "src/utils.test.js", true},
@@ -200,6 +214,11 @@ func TestIsExcludedPath(t *testing.T) {
 		{"julia test file", "test/runtests.jl", true},
 		{"julia test nested", "MyPkg/test/unit/foo.jl", true},
 		{"julia non-test", "src/model.jl", false},
+
+		// OCaml test files
+		{"ocaml test file", "test/foo_test.ml", true},
+		{"ocaml test nested", "lib/test/unit/parser.ml", true},
+		{"ocaml non-test", "src/parser.ml", false},
 
 		// Swift test files
 		{"swift Tests suffix", "MyAppTests/UserTests.swift", true},
