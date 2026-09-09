@@ -19,12 +19,14 @@ inputs:
     required: true
   llm_use_anthropic:
     description: >-
-      Selects the LLM protocol (mapped to env OCR_USE_ANTHROPIC). An explicitly supplied empty
-      string, true, 1, or yes selects Anthropic
+      Legacy protocol selector (mapped to env OCR_USE_ANTHROPIC). An
+      explicitly supplied empty string, true, 1, or yes selects Anthropic
       case-insensitively; every other value selects the OpenAI-compatible
       protocol, preserving the CLI environment contract. Ignored when
-      llm_protocol is set to a non-empty value.
-    required: true
+      llm_protocol is set to a non-empty value — callers using llm_protocol
+      can omit this entirely.
+    required: false
+    default: ''
   llm_protocol:
     description: >-
       Explicit LLM protocol override (case-insensitive): one of `openai`,
@@ -649,9 +651,12 @@ runs:
         OCR_FP_LLM_USE_ANTHROPIC: ${{ inputs.llm_use_anthropic }}
         # A protocol change routes requests to a different endpoint (and,
         # for openai-responses, a different request shape), so what a review
-        # would say shifts too. Empty when the caller didn't set llm_protocol,
-        # which is still distinct from an explicit "openai".
-        OCR_FP_LLM_PROTOCOL: ${{ inputs.llm_protocol }}
+        # would say shifts too. Read the normalized value from Validate
+        # inputs (same pattern as LLM_REASONING_EFFORT) so `OPENAI` vs
+        # `openai` don't hash differently and unnecessarily invalidate the
+        # checkpoint. Empty when the caller didn't set llm_protocol, which is
+        # still distinct from an explicit "openai".
+        OCR_FP_LLM_PROTOCOL: ${{ env.LLM_PROTOCOL }}
         OCR_FP_LANGUAGE: ${{ inputs.language }}
         OCR_FP_LLM_EXTRA_BODY: ${{ inputs.llm_extra_body }}
         # Normalized by Validate inputs, so spellings that mean the same thing
