@@ -4211,17 +4211,28 @@ async function testResolveCleanupNeverBreaksOutputs() {
 // undocumented resolve knob to discover.
 async function testResolvePacingUsesSuccessDelay() {
   const threads = [botThread({ id: "A" }), botThread({ id: "B" }), botThread({ id: "C" })];
-  const elapsed = async (delay) => {
+  // Records the sleeps the loop asks for instead of timing them: a wall-clock
+  // lower bound flakes, because a timer can fire ~1ms early against Date.now().
+  const sleeps = async (delay) => {
     const gh = makeGithub({ threads });
     const core = mockCore();
-    const started = Date.now();
-    await withEnv({ OCR_SUCCESS_DELAY: delay }, () => resolveOutdatedThreads(resolveArgs(gh, core)));
+    const realSetTimeout = global.setTimeout;
+    const asked = [];
+    global.setTimeout = (callback, ms, ...args) => {
+      asked.push(ms);
+      return realSetTimeout(callback, 0, ...args);
+    };
+    try {
+      await withEnv({ OCR_SUCCESS_DELAY: delay }, () => resolveOutdatedThreads(resolveArgs(gh, core)));
+    } finally {
+      global.setTimeout = realSetTimeout;
+    }
     assert.strictEqual(gh.resolveMutationCalls().length, 3);
-    return Date.now() - started;
+    return asked;
   };
   // Two sleeps between three mutations, none after the last.
-  assert.strictEqual(await elapsed("40") >= 80, true, "OCR_SUCCESS_DELAY must pace the mutations");
-  assert.strictEqual(await elapsed("0") < 80, true, "zero delay must not sleep");
+  assert.deepStrictEqual(await sleeps("40"), [40, 40], "OCR_SUCCESS_DELAY must pace the mutations");
+  assert.deepStrictEqual(await sleeps("0"), [], "zero delay must not sleep");
 }
 
 // U9. The resolve gate stopped using the IoU threshold; action.yml's own
