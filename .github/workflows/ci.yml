@@ -34,6 +34,11 @@ jobs:
       - name: Trust workspace
         run: git config --global --replace-all safe.directory '*'
 
+      - name: Verify generated provider presets
+        run: |
+          go generate ./...
+          git diff --exit-code -- extensions/vscode/src/shared/providers.generated.ts
+
       - name: Verify license headers
         run: bash scripts/verify-license.sh
 
