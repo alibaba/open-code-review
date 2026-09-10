@@ -120,6 +120,9 @@ func ParseDiffText(ctx context.Context, diffText string, repoDir string, ref str
 func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string, runner *gitcmd.Runner) {
 	if d.IsDeleted || d.NewPath == "/dev/null" {
 		d.NewPath = "/dev/null"
+		// No new-file bytes exist, but the hunk still carries deleted lines
+		// the model will read. Detect on the payload itself.
+		decodeDiffFile(d, nil)
 		return
 	}
 	if ref != "" {
@@ -136,15 +139,19 @@ func finalizeDiff(ctx context.Context, d *model.Diff, repoDir string, ref string
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read file %s at ref %s: %v\n",
 				d.NewPath, ref, err)
+			decodeDiffFile(d, nil)
 			return
 		}
 		d.NewFileContent = string(output)
+		decodeDiffFile(d, output)
 		return
 	}
 	content, err := readWorkspaceFileForDiff(repoDir, d.NewPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ocr] WARNING: cannot read file %s for review: %v\n", d.NewPath, err)
+		decodeDiffFile(d, nil)
 		return
 	}
 	d.NewFileContent = string(content)
+	decodeDiffFile(d, content)
 }

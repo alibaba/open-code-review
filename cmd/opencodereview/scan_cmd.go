@@ -157,6 +157,13 @@ func executeScan(opts scanOptions) (retErr error) {
 			return err
 		}
 		scanTpl.MaxTokens = maxTokens
+		// Enumeration itself writes to stdout.Writer() (the per-file
+		// charset-decode notice), which `out` does not cover, so the
+		// machine-readable formats must be silenced around the whole preview
+		// rather than around a final emit. Without this the JSON document is
+		// preceded by human-readable lines and no longer parses.
+		q := newQuietHandle(opts.outputFormat, opts.audience)
+		defer q.Restore()
 		return runScanPreview(cc, scanTpl, scanPaths, opts.outputFormat, out)
 
 	}

@@ -5,6 +5,7 @@ package tool
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/alibaba/open-code-review/internal/gitcmd"
 	"github.com/alibaba/open-code-review/internal/pathutil"
+	"github.com/alibaba/open-code-review/internal/textenc"
 )
 
 // ReviewMode represents the active review mode.
@@ -88,7 +90,8 @@ func (fr *FileReader) readFromDisk(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read file %q: %w", path, err)
 	}
-	return string(content), nil
+	text, _, _ := textenc.DecodeSource(path, content)
+	return text, nil
 }
 
 func (fr *FileReader) resolveWorkspacePath(path string) (string, error) {
@@ -125,7 +128,8 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 		if err != nil {
 			return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
 		}
-		return string(output), nil
+		text, _, _ := textenc.DecodeSource(path, output)
+		return text, nil
 	}
 
 	cmd := exec.CommandContext(ctx, "git", args...)
@@ -134,7 +138,41 @@ func (fr *FileReader) readFromGitShow(parentCtx context.Context, path string) (s
 	if err != nil {
 		return "", fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
 	}
-	return string(output), nil
+	text, _, _ := textenc.DecodeSource(path, output)
+	return text, nil
+}
+
+// decodeMaxBytes bounds how much of a file file_read will buffer in order to
+// run charset detection. Detection needs whole-file evidence — a head window is
+// measurably harmful, because a file whose first non-ASCII line sits past the
+// window collapses from confidence 100 to 55 and turns into a false skip — so a
+// file larger than this keeps the streaming path and its bytes stay raw.
+//
+// The number matches scan.DefaultMaxFileSizeBytes. file_read has no other byte
+// cap (only fileReadMaxLines) and the model picks which file to read, so
+// without this an unbounded allocation would be driven by model input.
+//
+// It is one constant with no config knob. Raise it if a real repo has >2 MiB
+// legacy source files.
+const decodeMaxBytes = 2 << 20
+
+// decodeThenScan buffers up to decodeMaxBytes from r so charset detection sees
+// whole-file evidence, decodes, and scans the result. A stream larger than the
+// cap is handed on unread through io.MultiReader, keeping today's streaming
+// behaviour with its bytes raw. Peak buffering is bounded at the cap either way.
+//
+// Decoding must happen before scanLines: once the bytes are split into lines
+// there is no whole-file evidence left to detect on.
+func decodeThenScan(path string, r io.Reader, startLine, maxLines int) ([]string, int, error) {
+	data, err := io.ReadAll(io.LimitReader(r, decodeMaxBytes+1))
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(data) > decodeMaxBytes {
+		return scanLines(io.MultiReader(bytes.NewReader(data), r), startLine, maxLines)
+	}
+	text, _, _ := textenc.DecodeSource(path, data)
+	return scanLines(strings.NewReader(text), startLine, maxLines)
 }
 
 // ReadLines returns a window of lines from the file plus the total line count.
@@ -201,7 +239,7 @@ func (fr *FileReader) readLinesFromDisk(path string, startLine, maxLines int) ([
 	}
 	defer f.Close()
 
-	return scanLines(f, startLine, maxLines)
+	return decodeThenScan(path, f, startLine, maxLines)
 }
 
 func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, startLine, maxLines int) ([]string, int, error) {
@@ -213,7 +251,7 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 	if fr.Runner != nil {
 		err := fr.Runner.Stream(ctx, fr.RepoDir, func(stdout io.Reader) error {
 			var scanErr error
-			collected, totalLines, scanErr = scanLines(stdout, startLine, maxLines)
+			collected, totalLines, scanErr = decodeThenScan(path, stdout, startLine, maxLines)
 			return scanErr
 		}, args...)
 		if err != nil {
@@ -232,7 +270,7 @@ func (fr *FileReader) readLinesFromGitShow(ctx context.Context, path string, sta
 		return nil, 0, fmt.Errorf("git show %s:%s: %w", fr.Ref, path, err)
 	}
 
-	collected, totalLines, scanErr := scanLines(stdoutPipe, startLine, maxLines)
+	collected, totalLines, scanErr := decodeThenScan(path, stdoutPipe, startLine, maxLines)
 	if scanErr != nil {
 		cmd.Process.Kill()
 	}

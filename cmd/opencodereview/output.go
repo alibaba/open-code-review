@@ -775,9 +775,13 @@ func outputPreviewText(p *agent.DiffPreview, out io.Writer) {
 			if e.WillReview {
 				continue
 			}
+			reason := sanitizeTerminal(string(e.ExcludeReason))
+			if e.DetectedCharset != "" {
+				reason += ": " + sanitizeTerminal(e.DetectedCharset)
+			}
 			fmt.Fprintf(out, "  %s  "+pathFmt+" %s\n",
 				statusBadge(e.Status), sanitizeTerminal(e.Path),
-				colorf("\033[2m", "(%s)", sanitizeTerminal(string(e.ExcludeReason))))
+				colorf("\033[2m", "(%s)", reason))
 		}
 	}
 

@@ -100,7 +100,7 @@ node_modules/lib.js     added     (excluded: default_path)
 imgs/logo.png           binary    (excluded: unsupported_ext)
 ```
 
-5 種類の除外理由は、[ファイルフィルタリング](../review-rules/#how-files-are-filtered)のゲートに対応します。
+このうち 5 種類は[ファイルフィルタリング](../review-rules/#how-files-are-filtered)のゲートに対応し、`deleted` はそのあとに付く preview のステータスです。
 
 | 理由 | 修正方法 |
 |---|---|
@@ -108,6 +108,7 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `user_exclude` | あなたの `exclude` リストからそのパターンを削除してください。 |
 | `unsupported_ext` | ホワイトリストゲートを回避するため、拡張子を `include` リストに追加してください。 |
 | `default_path` | ファイルを `include` に追加してください——組み込みのテストファイル除外パターンを上書きします。 |
+| `undecodable_encoding` | このファイルのバイト列は、サポート対象のどの文字コードでも有効なテキストではありません。UTF-8 に変換するか、生成物であれば `exclude` に追加してください。 |
 | `deleted` | 対処不要——レビュー対象の新しい内容がありません。 |
 
 ### カスタムルールが発火しない

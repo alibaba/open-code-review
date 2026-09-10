@@ -12,8 +12,8 @@ sidebar:
 flowchart TD
     A["<b>ocr review</b>"]
     B["<b>bootstrap</b><br/><span style='font-size:0.85em'>Resolve LLM endpoint (config → env → rc files)<br/>Load template, tool registry, system rules</span>"]
-    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range</span>"]
-    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>5-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
+    C["<b>diff provider</b><br/><span style='font-size:0.85em'>git diff / ls-files / show — produce []model.Diff<br/>Modes: Workspace · Commit · Range<br/>Per file: detect charset, decode non-UTF-8 to UTF-8 (decode.go)</span>"]
+    D["<b>filter & rules</b><br/><span style='font-size:0.85em'>6-gate filter (preview.go) — drop binaries,<br/>excluded paths, unsupported extensions. Pick rule per file.</span>"]
     D2["<b>semantic grouping</b><br/><span style='font-size:0.85em'>One LLM call over file metadata — bundle related<br/>files into groups (max 10 files each)</span>"]
     E["<b>subtask dispatch</b><br/><span style='font-size:0.85em'>For every group in parallel (concurrency=N):<br/>Plan phase (optional) → Main loop × rounds → Comments</span>"]
     F["<b>output writer</b><br/><span style='font-size:0.85em'>Synchronous line-resolution & review-filter; renders text<br/>or JSON depending on --format / --audience.</span>"]
@@ -37,7 +37,9 @@ flowchart TD
 
 untracked ファイルはディスクから読み込まれ、ファイル全体の新規追加として扱われるため、commit 前にレビューできます。
 
-## 5 段階ゲートのファイルフィルタリング
+各ファイルの新規ファイルバイト列は、読み込み時に `finalizeDiff` から `decodeDiffFile` に渡され、妥当な UTF-8 はバイト単位でそのまま通過して検出器は動きません。GB18030、Big5、Shift-JIS、EUC-JP、EUC-KR のいずれかが信頼度ゲートを超えて検出されたファイルは、hunk のペイロードと新規ファイル内容の両方がメモリ上で UTF-8 にデコードされます（`diff --git`、`index`、`---`、`+++`、`@@` などのフレーム行はバイト単位のまま。ディスクには何も書きません）。
+
+## 6 段階ゲートのファイルフィルタリング
 
 diff の読み込み後、各ファイルは [`whyExcluded`](https://github.com/alibaba/open-code-review/blob/main/internal/agent/preview.go) を通過します。この関数は次のいずれかを返します:
 
@@ -46,15 +48,17 @@ binary          — file is binary
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
 default_path    — matched a built-in test-file exclude pattern
+undecodable_encoding — バイトがサポート対象のどの文字コードでもテキストとして解読できない
 ```
 
 ……またはファイルが保持される場合は空を返します。`deleted` は `whyExcluded` からは**返されません**。これは `Preview()` の中でそのあと計算されます。保持されたファイルの diff が `IsDeleted` を報告したときです。各ゲートは以下の順序で実行されます:
 
 1. `binary`: バイナリファイルが最初に破棄されます。
-2. `user_exclude`: あなたのプロジェクトの `exclude` が常に優先されます。
-3. `user_include`: include パターンが設定されており**かつ**ファイルがそのいずれかに一致する場合、即座に保持され（空を返す）、下記の `unsupported_ext` と `default_path` のゲートをバイパスします。
-4. `unsupported_ext` は拡張子のホワイトリストでフィルタリングします。
-5. `default_path` は最後のゲートです: 組み込みの**テストファイル**除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、`**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）に一致します。各パターンはルートプレフィックスとして `**/` を付けます。
+2. `undecodable_encoding`: サポート対象のどの文字コードでもテキストとして解読できないファイルは、拡張子ゲートより前に破棄されます。
+3. `user_exclude`: あなたのプロジェクトの `exclude` が常に優先されます。
+4. `user_include`: include パターンが設定されており**かつ**ファイルがそのいずれかに一致する場合、即座に保持され（空を返す）、下記の `unsupported_ext` と `default_path` のゲートをバイパスします。
+5. `unsupported_ext` は拡張子のホワイトリストでフィルタリングします。
+6. `default_path` は最後のゲートです: 組み込みの**テストファイル**除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、`**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）に一致します。各パターンはルートプレフィックスとして `**/` を付けます。
 
 ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、diff-provider 層で、`internal/diff/git.go` の `providerDirIgnoreDirs` リストを通じて発生します。これらのディレクトリの diff は解析されたあと `filterDiffs` によって除去され、ファイルごとのフィルターに到達することは決してありません。
 
