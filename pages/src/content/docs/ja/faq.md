@@ -90,14 +90,14 @@ LLM タイムアウトを引き上げてください——[タイムアウト](.
 
 ### ファイルがレビューされない
 
-`ocr review --preview` を実行してください（LLM コストなし）。出力には各候補ファイルと、それが
-保持されたか破棄されたかの**理由**が一覧されます。
+`ocr review --preview` を実行してください（LLM コストなし）。出力には解析された各
+diff 候補ファイルと、それが保持されたか破棄されたかの**理由**が一覧されます。
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
-imgs/logo.png           binary    (excluded: unsupported_ext)
+vendor/lib.rs           modified  (excluded: default_path)
+docs/notes.md           modified  (excluded: unsupported_ext)
 ```
 
 5 種類の除外理由は、[ファイルフィルタリング](../review-rules/#how-files-are-filtered)のゲートに対応します。
@@ -107,8 +107,10 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `binary` | 対処不要——バイナリファイルにはレビュー可能なテキストがありません。 |
 | `user_exclude` | あなたの `exclude` リストからそのパターンを削除してください。 |
 | `unsupported_ext` | ホワイトリストゲートを回避するため、拡張子を `include` リストに追加してください。 |
-| `default_path` | ファイルを `include` に追加してください——組み込みのテストファイル除外パターンを上書きします。 |
+| `default_path` | 一致するパターンを `include` に追加してください——tracked diff の組み込みデフォルトパス除外を上書きします。 |
 | `deleted` | 対処不要——レビュー対象の新しい内容がありません。 |
+
+workspace モードでは、OCR のデフォルトノイズディレクトリ（`vendor/`、`node_modules/`、`target/`、および同種の依存関係/ビルドツリー）内の untracked ファイルは、preview がファイル全体の追加 diff を合成する前にスキップされます。レビューが必要な場合は、先にそのファイルを stage または commit してください。
 
 ### カスタムルールが発火しない
 

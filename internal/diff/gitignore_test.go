@@ -32,6 +32,29 @@ func TestExcludedDirs(t *testing.T) {
 	}
 }
 
+func TestIsDefaultExcludedDirPath(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"exact dir", "vendor", true},
+		{"nested file", "vendor/pkg/file.go", true},
+		{"nested windows path", `vendor\pkg\file.go`, true},
+		{"lookalike dir", "vendor_extra/file.go", false},
+		{"regular source", "src/vendorish/file.go", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsDefaultExcludedDirPath(tt.path)
+			if got != tt.want {
+				t.Errorf("IsDefaultExcludedDirPath(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadGitignorePatterns(t *testing.T) {
 	t.Run("valid gitignore", func(t *testing.T) {
 		dir := t.TempDir()

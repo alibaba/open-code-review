@@ -99,14 +99,14 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 ### Мой файл не проверяется
 
 Запустите `ocr review --preview` (без затрат на LLM). В выводе перечислены все
-файлы-кандидаты с **причиной**, по которой каждый из них был оставлен или
-исключён:
+разобранные diff-файлы-кандидаты с **причиной**, по которой каждый из них был
+оставлен или исключён:
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
-imgs/logo.png           binary    (excluded: unsupported_ext)
+vendor/lib.rs           modified  (excluded: default_path)
+docs/notes.md           modified  (excluded: unsupported_ext)
 ```
 
 Пять причин исключения соответствуют этапам
@@ -117,8 +117,13 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `binary` | Ничего делать не нужно: бинарные файлы не содержат текста, пригодного для ревью. |
 | `user_exclude` | Удалите шаблон из списка `exclude`. |
 | `unsupported_ext` | Добавьте расширение в список `include`, чтобы обойти проверку списка разрешённых типов. |
-| `default_path` | Добавьте файл в `include`: это переопределяет встроенные шаблоны исключения тестовых файлов. |
+| `default_path` | Добавьте совпадающий шаблон в `include`: это переопределяет встроенные стандартные исключения путей для tracked diff. |
 | `deleted` | Ничего делать не нужно: нового содержимого для ревью нет. |
+
+В workspace-режиме untracked файлы в стандартных шумных каталогах OCR
+(`vendor/`, `node_modules/`, `target/` и похожие деревья зависимостей/сборки)
+пропускаются до того, как preview синтезирует diff всего файла. Если такой файл
+нужно ревьюить, сначала добавьте его в stage или commit.
 
 ### Моё пользовательское правило не срабатывает
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	allowedext "github.com/alibaba/open-code-review/internal/config/allowlist"
+	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -50,6 +51,10 @@ func (a *Agent) whyExcluded(d model.Diff) ExcludeReason {
 	ext := a.extFromPath(path)
 	if ext != "" && !allowedext.IsAllowedExt(ext) {
 		return ExcludeExtension
+	}
+
+	if diff.IsDefaultExcludedDirPath(path) {
+		return ExcludeDefaultPath
 	}
 
 	if allowedext.IsExcludedPath(path) {

@@ -23,7 +23,10 @@ import (
 // DiffContextLines defines the number of context lines around each changed hunk.
 const DiffContextLines = 3
 
-// providerDirIgnoreDirs: directory prefixes to always exclude from diff results.
+// providerDirIgnoreDirs holds directory prefixes that OCR skips by default.
+// Tracked diffs are still returned by GetDiff so the agent preview can account
+// for them and user include rules can opt them back in. The list remains an
+// early guard for untracked workspace files and whole-tree scans.
 var providerDirIgnoreDirs = []string{
 	".idea/",
 	".vscode/",
@@ -232,7 +235,7 @@ func (p *Provider) GetDiff(ctx context.Context) ([]model.Diff, error) {
 	if err != nil {
 		return nil, err
 	}
-	return p.filterDiffs(diffs), nil
+	return p.filterGitignoredDiffs(diffs), nil
 }
 
 // loadGitignorePatterns reads and parses .gitignore patterns from the repo root.
@@ -264,11 +267,8 @@ func (p *Provider) loadGitignorePatterns() []string {
 func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bool {
 	// Hardcoded directory prefix checks. These are an unconditional blocklist:
 	// a .gitignore negation cannot re-admit .git/ or node_modules/.
-	for _, prefix := range providerDirIgnoreDirs {
-		dirPart := strings.TrimSuffix(prefix, "/")
-		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
-			return true
-		}
+	if isDefaultExcludedDirPath(relPath) {
+		return true
 	}
 
 	excluded := false
@@ -291,6 +291,18 @@ func (p *Provider) isPathExcluded(relPath string, gitignorePatterns []string) bo
 		}
 	}
 	return excluded
+}
+
+func isDefaultExcludedDirPath(relPath string) bool {
+	relPath = filepath.ToSlash(relPath)
+	relPath = strings.ReplaceAll(relPath, "\\", "/")
+	for _, prefix := range providerDirIgnoreDirs {
+		dirPart := strings.TrimSuffix(prefix, "/")
+		if relPath == dirPart || strings.HasPrefix(relPath, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchGitignorePattern checks if relPath matches a single .gitignore pattern.
@@ -382,22 +394,6 @@ func matchGitignoreDirectory(relPath, pattern string) bool {
 		}
 	}
 	return false
-}
-
-// filterDiffs removes diffs whose file paths are excluded.
-func (p *Provider) filterDiffs(diffs []model.Diff) []model.Diff {
-	patterns := p.loadGitignorePatterns()
-	var result []model.Diff
-	for _, d := range diffs {
-		path := d.NewPath
-		if path == "/dev/null" {
-			path = d.OldPath
-		}
-		if !p.isPathExcluded(path, patterns) {
-			result = append(result, d)
-		}
-	}
-	return result
 }
 
 // ---- Internal helpers ----

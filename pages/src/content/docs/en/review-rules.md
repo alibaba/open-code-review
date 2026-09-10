@@ -49,10 +49,10 @@ is always *some* rule resolved.
 Three independent fields:
 
 - `include` — optional. Glob patterns that *bypass* built-in default
-  exclude patterns (test-file exclusions — see below). It is not a
-  whitelist: files not matching any `include` pattern still proceed
-  through the `unsupported_ext` and `default_path` checks and may still
-  be reviewed.
+  path exclusions (test files, fixtures, generated files, and tracked
+  noisy directories such as `vendor/`; see below). It is not a whitelist:
+  files not matching any `include` pattern still proceed through the
+  `unsupported_ext` and `default_path` checks and may still be reviewed.
 - `exclude` — optional. Glob patterns for files OCR must *not* review.
   Highest precedence within the filter.
 - `rules` — array of `{path, rule}` entries, evaluated **in declaration
@@ -90,9 +90,11 @@ For each diff, OCR asks:
 4. **`unsupported_ext`** — Is the file extension in the
    [allowlist](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)?
    Excluded if not.
-5. **`default_path`** — Does the path match a built-in test-file exclude
-   pattern (`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`,
-   …)? Excluded.
+5. **`default_path`** — Does the path match a built-in path exclusion,
+   such as a test-file pattern (`**/*_test.go`,
+   `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb`, …), fixture/generated
+   pattern, or a tracked noisy-directory prefix (`vendor/`,
+   `node_modules/`, `target/`, …)? Excluded.
 
 Files that survive all five gates are sent to the LLM. A `deleted`
 reason (not a gate — it's computed separately in `Preview()`) marks
@@ -104,7 +106,7 @@ spending a token.
 
 The built-in exclude list (see
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json))
-matches test-file patterns:
+matches test-file, fixture, and generated-code patterns:
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
@@ -123,13 +125,23 @@ matches test-file patterns:
 - `**/oh_modules/**`
 - `**/*.test.ets`
 
-Noisy-directory filtering (`vendor/`, `node_modules/`, `target/`, …)
-happens earlier, at the diff level in
-[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go),
-before the per-file filter runs.
+For tracked diffs, `default_path` also covers OCR's default noisy
+directory prefixes from
+[`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go):
+`vendor/`, `node_modules/`, `target/`, `.idea/`, `.vscode/`, `.svn/`,
+`.git/`, `.happypack/`, `.cachefile/`, `_packages/`, `rpm/`, and
+`pkgs/`. These entries are shown by `ocr review --preview` with an
+explicit `default_path` reason.
 
-To **review** a file that matches one of these test-file patterns, add
-it to the user `include` list — that overrides the default-path gate.
+To **review** a tracked file that matches one of these default-path
+exclusions, add it to the user `include` list. For example,
+`"include": ["vendor/**"]` reviews tracked vendored changes, and
+`"include": ["**/*"]` performs a full-scope tracked-diff review.
+
+Workspace-mode untracked files inside the default noisy directories are
+still skipped before OCR synthesizes whole-file diffs, to avoid reading
+large dependency or build trees. If one of those files must be reviewed,
+stage it or commit it so it appears in the tracked diff.
 
 ## Rule resolution per file
 

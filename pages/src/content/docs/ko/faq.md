@@ -92,14 +92,14 @@ curl http://127.0.0.1:11434/v1/chat/completions -H "Content-Type: application/js
 
 ### 제 파일이 리뷰되지 않습니다 {#my-file-isn-t-being-reviewed}
 
-`ocr review --preview`를 돌려 보세요(LLM 비용이 들지 않습니다). 후보 파일마다
-남긴 **이유** 또는 버린 **이유**가 함께 나옵니다.
+`ocr review --preview`를 돌려 보세요(LLM 비용이 들지 않습니다). 파싱된 diff
+후보 파일마다 남긴 **이유** 또는 버린 **이유**가 함께 나옵니다.
 
 ```
 src/foo.go              modified
 src/foo_test.go         modified  (excluded: user_exclude)
-node_modules/lib.js     added     (excluded: default_path)
-imgs/logo.png           binary    (excluded: unsupported_ext)
+vendor/lib.rs           modified  (excluded: default_path)
+docs/notes.md           modified  (excluded: unsupported_ext)
 ```
 
 제외 사유 다섯 가지는
@@ -110,8 +110,12 @@ imgs/logo.png           binary    (excluded: unsupported_ext)
 | `binary` | 할 일이 없습니다. 바이너리 파일에는 리뷰할 텍스트가 없습니다. |
 | `user_exclude` | `exclude` 목록에서 해당 패턴을 빼세요. |
 | `unsupported_ext` | 확장자를 `include` 목록에 넣어 허용 목록 관문을 건너뛰세요. |
-| `default_path` | 파일을 `include`에 넣으세요. 내장 테스트 파일 제외 패턴을 덮어씁니다. |
+| `default_path` | 일치하는 패턴을 `include`에 넣으세요. tracked diff의 내장 기본 경로 제외를 덮어씁니다. |
 | `deleted` | 할 일이 없습니다. 리뷰할 새 내용이 없습니다. |
+
+workspace 모드에서는 OCR의 기본 잡음 디렉터리(`vendor/`, `node_modules/`, `target/`
+및 비슷한 의존성/빌드 트리) 안의 untracked 파일을 preview가 전체 파일 추가 diff로
+합성하기 전에 건너뜁니다. 리뷰해야 한다면 먼저 해당 파일을 stage 또는 commit 하세요.
 
 ### 제가 만든 규칙이 안 걸립니다 {#my-custom-rule-isn-t-firing}
 

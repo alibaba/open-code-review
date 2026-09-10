@@ -45,9 +45,10 @@ OCR 用一条**四层优先级链**解析规则。对每个文件路径，按序
 
 三个独立字段：
 
-- `include`——可选。glob 模式，用于*绕过*内置的默认排除模式（测试文件排除——见
-  下文）。它不是白名单：不匹配任何 `include` 模式的文件仍会经过
-  `unsupported_ext` 和 `default_path` 检查，可能仍被评审。
+- `include`——可选。glob 模式，用于*绕过*内置默认路径排除（测试文件、
+  fixture、生成文件，以及 tracked diff 中的 `vendor/` 等噪声目录——见下文）。
+  它不是白名单：不匹配任何 `include` 模式的文件仍会经过 `unsupported_ext`
+  和 `default_path` 检查，可能仍被评审。
 - `exclude`——可选。OCR 不予评审的文件 glob 模式。过滤中优先级最高。
 - `rules`——`{path, rule}` 条目数组，按**声明顺序**求值。第一个 `path` glob
   匹配该文件的条目，决定 OCR 发给模型的 prompt。
@@ -79,8 +80,10 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 4. **`unsupported_ext`**——文件扩展名在
    [白名单](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)
    里吗？不在则排除。
-5. **`default_path`**——路径匹配某个内置测试文件排除模式
-   （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）吗？排除。
+5. **`default_path`**——路径匹配某个内置路径排除吗？例如测试文件模式
+   （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/*_spec.rb`……）、
+   fixture/生成文件模式，或 tracked diff 中的噪声目录前缀（`vendor/`、
+   `node_modules/`、`target/`……）。匹配则排除。
 
 通过全部五重门的文件才发给 LLM。`deleted` 原因（不是门——它在 `Preview()` 中
 单独计算）标记新路径为 `/dev/null` 的文件；没有新内容可评审。用
@@ -90,7 +93,7 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 
 内置排除列表（见
 [`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json)）
-匹配测试文件模式：
+匹配测试文件、fixture 和生成代码模式：
 
 - `**/*_test.go`
 - `**/src/test/java/**/*.java`
@@ -109,12 +112,20 @@ OCR 用 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 - `**/oh_modules/**`
 - `**/*.test.ets`
 
-噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，位于
+对于 tracked diff，`default_path` 还覆盖
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)
-的 diff 层，先于 per-file 过滤运行。
+中的默认噪声目录前缀：`vendor/`、`node_modules/`、`target/`、`.idea/`、
+`.vscode/`、`.svn/`、`.git/`、`.happypack/`、`.cachefile/`、`_packages/`、
+`rpm/` 和 `pkgs/`。这些条目会在 `ocr review --preview` 中带着明确的
+`default_path` 原因显示出来。
 
-要**评审**一个匹配这些测试文件模式的文件，把它加入用户 `include` 列表——那会
-覆盖 default-path 门。
+要**评审**一个匹配默认路径排除的 tracked 文件，把它加入用户 `include` 列表。
+例如 `"include": ["vendor/**"]` 会评审 tracked vendored 变更，
+`"include": ["**/*"]` 则执行 full-scope tracked-diff 评审。
+
+workspace 模式下位于默认噪声目录中的 untracked 文件，仍会在 OCR 合成整文件 diff
+之前被跳过，以避免读取庞大的依赖或构建目录。如果这些文件确实需要评审，请先
+stage 或 commit，使它们出现在 tracked diff 中。
 
 ## 每文件的规则解析
 

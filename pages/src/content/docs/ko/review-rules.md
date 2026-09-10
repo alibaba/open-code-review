@@ -47,10 +47,10 @@ OCR은 **네 겹의 우선순위 사슬**로 규칙을 해석합니다. 파일 �
 
 서로 독립적인 필드 세 개가 있습니다.
 
-- `include` — 선택. 내장 기본 제외 패턴(아래에서 설명하는 테스트 파일 제외)을
-  *건너뛰는* glob 패턴입니다. 화이트리스트가 아닙니다. 어떤 `include` 패턴에도
-  걸리지 않은 파일도 `unsupported_ext`와 `default_path` 검사를 계속 거치며 리뷰될 수
-  있습니다.
+- `include` — 선택. 내장 기본 경로 제외(테스트 파일, fixture, 생성 파일, 그리고
+  tracked diff의 `vendor/` 같은 잡음 디렉터리; 아래 참고)를 *건너뛰는* glob
+  패턴입니다. 화이트리스트가 아닙니다. 어떤 `include` 패턴에도 걸리지 않은 파일도
+  `unsupported_ext`와 `default_path` 검사를 계속 거치며 리뷰될 수 있습니다.
 - `exclude` — 선택. OCR이 리뷰하면 *안 되는* 파일의 glob 패턴입니다. 필터 안에서
   가장 높은 우선순위를 가집니다.
 - `rules` — `{path, rule}` 항목의 배열이며 **선언 순서대로** 평가합니다. 파일에
@@ -85,8 +85,10 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 4. **`unsupported_ext`** — 파일 확장자가
    [허용 목록](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/supported_file_types.json)에
    있는가? 없으면 제외.
-5. **`default_path`** — 경로가 내장 테스트 파일 제외 패턴(`**/*_test.go`,
-   `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb` 등)에 걸리는가? 그렇다면 제외.
+5. **`default_path`** — 경로가 내장 경로 제외에 걸리는가? 예를 들면 테스트 파일
+   패턴(`**/*_test.go`, `**/*.test.{js,jsx,ts,tsx}`, `**/*_spec.rb` 등),
+   fixture/생성 파일 패턴, 또는 tracked diff의 잡음 디렉터리 접두사(`vendor/`,
+   `node_modules/`, `target/` 등)에 걸리면 제외합니다.
 
 다섯 관문을 모두 통과한 파일이 LLM으로 갑니다. `deleted` 사유는 관문이 아니라
 `Preview()`에서 따로 계산하며, 새 경로가 `/dev/null`인 파일을 가리킵니다. 리뷰할 새
@@ -95,7 +97,7 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 
 ### 기본 경로 제외 목록 {#default-path-exclusions}
 
-내장 제외 목록은 테스트 파일 패턴에 걸립니다
+내장 제외 목록은 테스트 파일, fixture, 생성 코드 패턴에 걸립니다
 ([`internal/config/allowlist/default_exclude_patterns.json`](https://github.com/alibaba/open-code-review/blob/main/internal/config/allowlist/default_exclude_patterns.json)
 참고).
 
@@ -116,13 +118,20 @@ OCR은 [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublesta
 - `**/oh_modules/**`
 - `**/*.test.ets`
 
-잡음이 많은 디렉터리(`vendor/`, `node_modules/`, `target/` 등)를 걸러내는 일은 더
-앞에서, 파일별 필터가 돌기 전
+tracked diff에서는 `default_path`가
 [`internal/diff/git.go`](https://github.com/alibaba/open-code-review/blob/main/internal/diff/git.go)의
-diff 단계에서 일어납니다.
+기본 잡음 디렉터리 접두사도 포함합니다. 예: `vendor/`, `node_modules/`, `target/`,
+`.idea/`, `.vscode/`, `.svn/`, `.git/`, `.happypack/`, `.cachefile/`, `_packages/`,
+`rpm/`, `pkgs/`. 이런 항목은 `ocr review --preview`에 명시적인 `default_path`
+사유와 함께 표시됩니다.
 
-이런 테스트 파일 패턴에 걸리는 파일을 **리뷰하고 싶다면** 사용자 `include` 목록에
-넣으세요. `include`가 기본 경로 관문을 덮어씁니다.
+이런 기본 경로 제외에 걸리는 tracked 파일을 **리뷰하고 싶다면** 사용자 `include`
+목록에 넣으세요. 예를 들어 `"include": ["vendor/**"]`는 tracked vendored 변경을
+리뷰하고, `"include": ["**/*"]`는 full-scope tracked-diff 리뷰를 수행합니다.
+
+workspace 모드에서는 기본 잡음 디렉터리 안의 untracked 파일이 OCR의 전체 파일 diff
+합성 전에 계속 건너뛰어집니다. 큰 의존성/빌드 트리를 읽지 않기 위해서입니다. 그런
+파일을 리뷰해야 한다면 먼저 stage 또는 commit 해서 tracked diff에 나타나게 하세요.
 
 ## 파일별 규칙 해석 {#rule-resolution-per-file}
 

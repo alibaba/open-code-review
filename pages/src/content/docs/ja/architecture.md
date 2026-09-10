@@ -45,7 +45,7 @@ diff の読み込み後、各ファイルは [`whyExcluded`](https://github.com/
 binary          — file is binary
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
-default_path    — matched a built-in test-file exclude pattern
+default_path    — matched a built-in path exclusion
 ```
 
 ……またはファイルが保持される場合は空を返します。`deleted` は `whyExcluded` からは**返されません**。これは `Preview()` の中でそのあと計算されます。保持されたファイルの diff が `IsDeleted` を報告したときです。各ゲートは以下の順序で実行されます:
@@ -54,9 +54,9 @@ default_path    — matched a built-in test-file exclude pattern
 2. `user_exclude`: あなたのプロジェクトの `exclude` が常に優先されます。
 3. `user_include`: include パターンが設定されており**かつ**ファイルがそのいずれかに一致する場合、即座に保持され（空を返す）、下記の `unsupported_ext` と `default_path` のゲートをバイパスします。
 4. `unsupported_ext` は拡張子のホワイトリストでフィルタリングします。
-5. `default_path` は最後のゲートです: 組み込みの**テストファイル**除外パターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、`**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）に一致します。各パターンはルートプレフィックスとして `**/` を付けます。
+5. `default_path` は最後のゲートです: 組み込みのパス除外に一致します。これにはテストファイルパターン（`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、`**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）と、tracked diff のノイズディレクトリ接頭辞（`vendor/`、`node_modules/`、`target/`……）が含まれます。ユーザー `include` パターンはこのゲートをバイパスします。
 
-ノイズディレクトリのフィルタリング（`vendor/`、`node_modules/`、`target/`……）は、より早い段階、diff-provider 層で、`internal/diff/git.go` の `providerDirIgnoreDirs` リストを通じて発生します。これらのディレクトリの diff は解析されたあと `filterDiffs` によって除去され、ファイルごとのフィルターに到達することは決してありません。
+ノイズディレクトリ内の tracked diff はこのゲートまで解析済み diff 集合に残されるため、preview と delegate の出力は明示的なパスと理由を表示できます。workspace モードで同じディレクトリ内にある untracked ファイルは、`internal/diff/git.go` がファイル全体の追加 diff を合成する前に引き続きスキップします。
 
 `ocr review --preview` を実行すると、token を消費せずに完全なフィルタリング結果を確認できます。完全なアルゴリズムは[レビュールール](../review-rules/#how-files-are-filtered)を参照してください。
 

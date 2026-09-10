@@ -56,7 +56,7 @@ diff 加载后，每个文件经过
 binary          — file is binary
 user_exclude    — matched a pattern in your `exclude` list
 unsupported_ext — extension is not in supported_file_types.json
-default_path    — matched a built-in test-file exclude pattern
+default_path    — matched a built-in path exclusion
 ```
 
 ……或文件被保留时返回空。`deleted` **不**由 `whyExcluded` 返回；它在 `Preview()`
@@ -67,15 +67,15 @@ default_path    — matched a built-in test-file exclude pattern
 3. `user_include`——若配置了 include 模式**且**文件匹配其一，立即保留
    （返回空），绕过下面的 `unsupported_ext` 和 `default_path` 门。
 4. `unsupported_ext` 按扩展名白名单过滤。
-5. `default_path` 是最后一道门：匹配内置**测试文件**排除模式
+5. `default_path` 是最后一道门：匹配内置路径排除，包括测试文件模式
    （`**/*_test.go`、`**/*.test.{js,jsx,ts,tsx}`、`**/__tests__/**`、
-   `**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）。每个模式都以
-   `**/` 作为根前缀。
+   `**/*_test.py`、`**/*_spec.rb`、`**/*.test.ets`……）以及 tracked diff
+   中的噪声目录前缀（`vendor/`、`node_modules/`、`target/`……）。
+   用户 `include` 模式会绕过这道门。
 
-噪声目录过滤（`vendor/`、`node_modules/`、`target/`……）发生在更早的阶段，
-位于 diff-provider 层，通过 `internal/diff/git.go` 中的 `providerDirIgnoreDirs`
-列表——这些目录的 diff 被解析后由 `filterDiffs` 剔除，永远不会到达 per-file
-过滤器。
+噪声目录下的 tracked diff 会保留在已解析 diff 集中，直到这道门处理，所以
+preview 和 delegate 输出能列出明确路径与原因。workspace 模式中位于同类目录下的
+untracked 文件，仍会在 `internal/diff/git.go` 合成整文件新增 diff 前被跳过。
 
 运行 `ocr review --preview` 可不花 token 查看完整过滤结果。完整算法见
 [评审规则](../review-rules/#how-files-are-filtered)。
