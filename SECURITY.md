@@ -9,6 +9,12 @@
 
 Only the latest released version receives security updates. Users are encouraged to upgrade promptly.
 
+## AI Policy
+
+You are welcome to use AI or LLM tools while investigating a vulnerability, but the responsibility for anything you submit rests entirely with you. Treat whatever a model produces as an unverified draft, and confirm it is correct before relying on it in a report. Whenever AI or LLMs played a role in your research or in writing up your findings, tell us where and how you used them, and include the prompts so we can reproduce your reasoning.
+
+Machine-generated text is usually longer than it needs to be, and brevity matters to us. Please cut AI-written content down to what is essential before sending it over: every report is read in full by a maintainer, and a focused one is a faster fix.
+
 ## Reporting a Vulnerability
 
 **Please do NOT report security vulnerabilities through public GitHub issues.**

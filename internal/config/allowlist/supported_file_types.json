@@ -47,6 +47,9 @@
   ".ftl",
   ".ftlh",
   ".ftlx",
+  ".hbs",
+  ".mustache",
+  ".pug",
   ".astro",
   ".vue",
   ".ipynb",
@@ -94,5 +97,17 @@
   ".libsonnet",
   ".zig",
   ".thrift",
-  ".capnp"
+  ".capnp",
+  ".ml",
+  ".mli",
+  ".re",
+  ".rei",
+  ".v",
+  ".sv",
+  ".vh",
+  ".vhd",
+  ".vhdl",
+  ".sol",
+  ".vy",
+  ".rego"
 ]

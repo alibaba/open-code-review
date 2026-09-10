@@ -85,7 +85,7 @@ Go to your repository's **Settings → Secrets and variables → Actions**.
 | `OCR_LLM_MODEL` | Yes | Model name |
 | `OCR_LLM_USE_ANTHROPIC` | Yes | `true` for Anthropic Claude, `false` for OpenAI-compatible |
 
-> **Note:** `GITHUB_TOKEN` is automatically provided by GitHub Actions with the required `pull-requests: write` permission. The action also sets `llm.extra_body` to disable thinking mode for compatibility with various LLM providers.
+> **Note:** `GITHUB_TOKEN` is automatically provided by GitHub Actions with the required `pull-requests: write` permission. By default the action sets `llm.extra_body` to `{"thinking": {"type": "disabled"}}`, disabling thinking mode for compatibility with various LLM providers; override it with the `llm_extra_body` input when your model needs different behavior, or use `llm_reasoning_effort` to steer reasoning depth on OpenAI-compatible protocols.
 
 ## Customization
 
@@ -155,7 +155,7 @@ The task and request timeouts are independent:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `review_task_timeout` | `'10'` | Per-file/concurrent-task timeout in minutes passed to `ocr review --timeout`; it is not a whole-review wall-clock cap. |
+| `review_task_timeout` | `'15'` | Per-file/concurrent-task timeout in minutes passed to `ocr review --timeout`; it is not a whole-review wall-clock cap. |
 | `llm_timeout` | `'300'` | LLM HTTP request timeout in seconds, applied independently to each model request. |
 
 ```yaml
@@ -163,6 +163,48 @@ The task and request timeouts are independent:
   with:
     review_task_timeout: '30'
     llm_timeout: '900'
+```
+
+### Control review effort and token budget
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `effort` | `''` | Review effort preset passed to `ocr review --effort`: `low`, `medium`, or `high` (case-insensitive). Higher effort runs more review rounds. Empty keeps the CLI default (the configured value, or medium). |
+| `max_tokens_budget` | `''` | Total token cap (input+output) passed to `ocr review --max-tokens-budget`. Empty or `'0'` means unlimited. Once the cap is exceeded, dispatch stops, skipped files are reported as failed(budget), partial results are still published, and the review exits 0. |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    effort: high
+    max_tokens_budget: '10000000'
+```
+
+### Set reasoning effort
+
+For models with steerable reasoning depth (e.g. GLM-5.x, OpenAI reasoning models), the `llm_reasoning_effort` input is merged into the request body as `reasoning_effort` via the action's existing `llm.extra_body` plumbing — no CLI support beyond the published versions is needed. OpenAI-compatible protocols only: the Anthropic API rejects unknown body fields, so the action fails fast when the input is set there — steer Anthropic thinking through an explicit `llm_extra_body` key instead. An explicit `reasoning_effort` key inside `llm_extra_body` wins over this input.
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `llm_reasoning_effort` | `''` | One of `minimal`, `low`, `medium`, `high`, `max` (case-insensitive). Empty sends nothing. |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    llm_reasoning_effort: low
+```
+
+### Stream live review progress
+
+By default the review runs with the machine-oriented `agent` audience and stays silent in the workflow log until it finishes; stderr is captured to a log file and uploaded as an artifact. Set `stream_progress: 'true'` to switch to the human audience and tee stderr into the workflow log, so `[ocr]` progress lines stream live while the review runs — stderr is still captured to the file for artifacts and comment posting.
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `stream_progress` | `'false'` | Stream live `[ocr]` review progress to the workflow log (human audience on stderr) instead of staying silent until the run finishes. One of `'true'` / `'false'`. |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    stream_progress: 'true'
 ```
 
 ### Add custom review rules
@@ -229,6 +271,71 @@ Four things worth knowing before you turn this on:
 - **A force-push can mark a live finding's thread outdated.** GitHub sets `isOutdated` when the thread's lines are no longer in the diff, and it stays set even after a force-push that lands identical content, so a rebase can outdate a thread whose finding is still real. The current-run overlap check catches this when the model re-reports the finding; if it doesn't, the thread closes while the problem remains. This is the main reason to run `'report'` first.
 - **It only does anything on re-runs.** A thread can only become outdated after a later push, so the feature is exercised only by workflows that review on update (`types: [opened, synchronize, reopened]`, as in the sample workflow above). This repository's own review workflow triggers on `opened` only and never reaches the resolution path — do not read its runs as evidence the feature works for you.
 - **Resolving is not deleting.** Resolved threads collapse but stay readable, and anyone can unresolve one.
+
+### Review only what changed since the last run (checkpoints)
+
+`incremental` filters the comments a run produces; it still reviews the whole `merge-base..head` diff every time. On a long-lived PR that means re-reading the same 40 commits on every push. `checkpoint_range` fixes the other half: a run that reviewed everything it selected records the head it covered in a hidden marker inside its sticky summary comment, and the next run reviews `<that head>..<new head>` instead.
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `checkpoint_range` | `'false'` | Review only the range since the last recorded checkpoint. Requires `sticky_summary: 'true'` (the checkpoint lives in that comment). |
+| `full_review` | `'false'` | Force one full review even with `checkpoint_range` enabled. The run still records a new checkpoint. |
+
+```yaml
+- uses: alibaba/open-code-review@main
+  with:
+    sticky_summary: 'true'
+    checkpoint_range: 'true'
+```
+
+**When in doubt, this reviews the full range.** A checkpoint is used only when every one of these holds; otherwise the run reviews `merge-base..head` exactly as it does today, and the reason is reported in the `range_summary` output and the step log:
+
+| Reason | The run reviewed the full range because |
+|--------|------------------------------------------|
+| `disabled` | `checkpoint_range` is not `'true'` |
+| `sticky_disabled` | `sticky_summary` is not `'true'`, so there is nowhere durable to keep a checkpoint |
+| `manual_full_review` | `full_review: 'true'` was requested |
+| `event_full_scope` | the PR was reopened or marked ready for review — both ask for a fresh look at the whole diff |
+| `no_summary_comment` | the PR has no sticky summary yet (the first run) |
+| `author_unverified` | the summary comment was not written by the identity this run expects (see the trust boundary below) |
+| `corrupt_checkpoint` | the summary carries no readable checkpoint marker (absent, malformed, or two of them) |
+| `schema_invalid` | the marker is for another PR, another marker version, or records a run that did not complete |
+| `base_changed` | the base ref or the merge-base moved, so the diff basis is no longer the one the checkpoint was taken against |
+| `config_changed` | the model, language, `llm_extra_body`, `llm_reasoning_effort`, `llm_extra_headers`, `llm_auth_header`, `llm_timeout`, `effort`, `max_tokens_budget`, `background`, routing inputs, the resolved OCR version, or the contents of `rule` / `.opencodereview/rule.json` changed — or `ocr version` printed nothing, so the version could not be established at all |
+| `not_ancestor` | the checkpoint commit is in this clone but is not on the new head's history (the branch was reset to an earlier commit) |
+| `unknown_object` | the checkpoint commit is not in this clone, so ancestry could not be checked — where a force-push usually lands, since the replaced commit is no longer fetched |
+| `rule_unreadable` | a rule file was given but could not be read, so no stored fingerprint can be trusted to mean "same rules" |
+| `resolver_error` | the comment could not be read, or `git merge-base --is-ancestor` could not run |
+
+One reason is not a fallback: `same_head_noop`, when the recorded checkpoint already *is* the current head. There is nothing to review, so the run leaves the existing summary comment exactly as it is instead of replacing it with "No comments generated".
+
+These outputs report what happened. All of them are empty when `checkpoint_range` is not enabled:
+
+| Output | Value |
+|--------|-------|
+| `range_mode` | `checkpoint` or `full` |
+| `range_reason` | the reason from the table above |
+| `range_summary` | mode, reason and range in one line, e.g. `checkpoint (ok): <from>..<to>` |
+| `range_from` | the commit the review started from, empty for a full review |
+| `range_to` | the head the review ran up to |
+| `checkpoint_before` | the head recorded by the marker that was read, whether or not it was used |
+| `ancestry` | `ancestor`, `not_ancestor`, `unknown_object`, `error`, or empty when ancestry was not probed |
+| `source_run` | the workflow run id that wrote the marker that was read |
+| `checkpoint_after` | the head recorded as the new checkpoint, or empty when the run did not advance one |
+
+Three properties are worth knowing before you enable it:
+
+- **Widen-only.** The start of the range only ever moves back. An older checkpoint produces a wider review, never a narrower one, and a checkpoint only advances past a run whose manifest reported `terminal_state: complete`, whose findings all posted, and whose summary comment actually published. A run that fails halfway carries the previous checkpoint forward unchanged rather than skipping the range it did not review — and a run that cannot read the existing marker leaves it in place rather than erasing it.
+- **Same-head reruns change nothing.** Re-running the workflow without pushing reports `same_head_noop` and leaves the previous run's summary untouched.
+- **The sticky summary shows the latest range, not the whole PR.** The summary comment is rewritten on every run, so findings it reported for an earlier range (findings with no line information, routed findings, warnings) are replaced by the new range's; a run that narrowed the range says so in one line at the end of the summary. Inline review comments are separate comments and stay. If you rely on the summary as a running list for the whole PR, use `full_review: 'true'` to rebuild it, or leave `checkpoint_range` off.
+
+> **Caveat — what `complete` covers.** `terminal_state: complete` means nothing in the set the run *selected* failed. Items the run waived, or excluded before selection (unsupported files, size limits), are inside that guarantee. So a checkpoint means "everything this configuration chose to review was reviewed", not "every byte of the diff was read". Changing the configuration invalidates the checkpoint (`config_changed`), which is what keeps that promise honest across runs.
+
+> **Custom rules are fingerprinted by content.** Both rule sources are covered by their *contents*, not just their paths: the file you pass as `rule`, and the repo's own `.opencodereview/rule.json`, which OCR loads whether or not `rule` is set. Editing either invalidates the checkpoint (`config_changed`), so the next run re-reviews from the merge-base under the new rules rather than narrowing to the newest commits. The built-in rule set is embedded in the binary and moves with `ocr_version`, which is already part of the fingerprint. A rule file that exists but cannot be read forces a full review (`rule_unreadable`).
+
+> **Caveat — the trust boundary is write permission.** The checkpoint is read only from a comment GitHub attributes to the writer this run expects. On the default `github_token` that is exactly one app, `github-actions`, since the default token always belongs to it: a marker in a comment posted by any other bot — `dependabot[bot]`, a linter app, another workflow's App — is rejected. If you pass your own `github_token`, the run cannot learn which app that token belongs to (there is no API an installation token can call for it), so the check widens to "any writer GitHub attributes to a bot" and any bot that can post an issue comment carrying the summary marker is trusted. A comment from a human account is rejected either way, even when it names an app, since GitHub sets `performed_via_github_app` for comments people write through an App as well. What GitHub attests is who *posted* the comment, not that its body is unmodified: anyone with write permission on the repository can edit a bot comment and move the checkpoint forward, causing a range to be skipped. The boundary this buys is "write-permission holders are trusted" — a fork contributor, who is exactly the untrusted party under `pull_request_target`, posts as themselves and so cannot plant or alter a marker. If that is not an acceptable assumption for your repository, leave `checkpoint_range` off.
+>
+> Because a sticky summary keeps its original author, switching a repository from a custom App token to the default one leaves the old comment attributed to the old app, and every run reports `author_unverified` until that comment is deleted. That is the fail-closed direction (a full review, never a skipped range), and the step log names the app it expected.
 
 ### Adjust retry and delay settings
 
