@@ -190,6 +190,7 @@ matching order:
 | `**/*.sol` | `solidity.md` — Solidity smart contracts. |
 | `**/*.vy` | `vyper.md` — Vyper smart contracts. |
 | `**/*.rego` | `rego.md` — Rego policy (OPA). |
+| `**/*.{clj,cljs,cljc,edn}` | `clojure.md` — Clojure / ClojureScript source and EDN data. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the

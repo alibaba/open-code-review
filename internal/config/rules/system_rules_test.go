@@ -165,6 +165,10 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
 		{"policies/authz.rego", "Default Posture"},
 		{"policies/authz.REGO", "Default Posture"},
+		{"src/myapp/core.clj", "Laziness, Sequences, and Resource Scope"},
+		{"src/myapp/views.cljs", "Laziness, Sequences, and Resource Scope"},
+		{"src/myapp/shared.cljc", "Laziness, Sequences, and Resource Scope"},
+		{"deps.edn", "EDN Data, Configuration, and Untrusted Input"},
 	}
 
 	for _, tt := range tests {

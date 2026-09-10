@@ -192,6 +192,7 @@ OCR использует [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com
 | `**/*.sol` | `solidity.md` — смарт-контракты Solidity. |
 | `**/*.vy` | `vyper.md` — смарт-контракты Vyper. |
 | `**/*.rego` | `rego.md` — политики Rego (OPA). |
+| `**/*.{clj,cljs,cljc,edn}` | `clojure.md` — исходный код Clojure / ClojureScript и данные EDN. |
 | *(fallback)* | `default.md` |
 
 Разрешённое тело правила становится значением плейсхолдера `{{system_rule}}`

@@ -109,5 +109,9 @@
   ".vhdl",
   ".sol",
   ".vy",
-  ".rego"
+  ".rego",
+  ".clj",
+  ".cljs",
+  ".cljc",
+  ".edn"
 ]
