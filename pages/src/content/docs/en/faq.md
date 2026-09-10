@@ -257,10 +257,32 @@ redirect: `ocr review --audience agent 2>/dev/null`.
 
 ### JSON output is `{ "files_reviewed": 0, "comments": [] }`
 
-Workspace had no eligible files. This is intentional — the explicit
-shape lets callers distinguish "nothing to review" from "no findings
-found in the reviewed files". A normal review with zero comments
-produces a regular empty array `[]` instead.
+Nothing was eligible to review. `files_reviewed` is not a top-level
+field — it sits under `summary`, where it reads `0` on this path, while
+`comments` is the top-level `[]`. The same object carries
+`"status": "skipped"`, `"message": "Review skipped: no items were
+selected."`, and a `manifest` whose `terminal_state` is `"skipped"` with
+every `coverage` array empty.
+
+A review that examined files and found nothing also returns **a JSON
+object with `comments: []`**: `summary.files_reviewed` counts the files
+actually reviewed, `status` is `"complete"`, and `message` reads
+`"Review complete: 0 finding(s) across N selected item(s)."`. Optional
+top-level fields can differ between runs, so do not distinguish these
+states by object shape or by the presence of an optional key. On
+manifest-backed review output, use `summary.files_reviewed` or
+`manifest.terminal_state` instead. Callers must still tolerate both
+`summary` and `manifest` being absent on the manifest-less path described
+below. `review --format json` always writes exactly one JSON object to
+stdout, never a bare array.
+
+The manifest-less no-files path is leaner: it omits both `summary` and
+`manifest`, while still reporting `"status": "skipped"`, `"message": "No
+supported files changed."`, and `"comments": []`. `tool_calls` is always
+present. `ocr scan` is always manifest-less; when its no-files guard
+matches it uses this path. `ocr review` can also reach the same path when
+manifest construction fails and the no-files guard matches. Optional
+metadata such as `llm` or `trace_id` may be present.
 
 ### Where do session JSONLs live?
 
@@ -302,9 +324,15 @@ Common levers:
   with the round count, so `--effort low` is the single biggest lever if
   you want a cheaper run; `--effort high` is the most expensive.
 - Plan phase is on for groups whose largest file is ≥ 50 lines, or whose
-  2+ files total ≥ 100 lines. It costs an extra LLM call per group.
-  Lowering the thresholds reduces cost; raising them improves small-PR
-  speed.
+  2+ files total ≥ 100 lines. It costs an extra LLM call per group, so
+  **raising** those thresholds is what makes a run cheaper; lowering
+  them sends more groups through planning and costs more. The two do not
+  behave alike at zero. `PLAN_MODE_LINE_THRESHOLD` at `0` or below means
+  *always plan* — the dearest setting available — whereas
+  `PLAN_MODE_GROUP_LINE_THRESHOLD` at `0` turns the group gate off. That
+  can save the plan call when the group gate would otherwise be the only
+  trigger. See "Plan phase took forever and the file is small" above for
+  the trigger rules.
 - `MAX_TOOL_REQUEST_TIMES = 100` is generous. A model that uses every
   round will produce a longer (more tokens) conversation than one that
   finishes in 3 rounds. Stronger models tend to finish faster.
