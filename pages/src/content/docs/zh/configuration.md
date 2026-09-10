@@ -188,8 +188,7 @@ provider 没有环境变量回退），所以设任意占位值即可。模型�
 - `OCR_LLM_TIMEOUT` 环境变量——整数秒；对每条解析路径都覆盖配置文件里
   的值。
 
-`ocr config set` 不支持 `timeout_sec` key——直接编辑
-`~/.opencodereview/config.json`：
+两个 `timeout_sec` key 都可以使用 `ocr config set` 设置：
 
 ```json
 {

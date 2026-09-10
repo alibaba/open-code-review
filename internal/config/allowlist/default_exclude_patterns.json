@@ -1,7 +1,7 @@
 [
   "**/*_test.go",
   "**/src/test/java/**/*.java",
-  "**/src/test/**/*.kt",
+  "**/src/test/**/*.{kt,kts}",
   "**/*.test.{js,jsx,ts,tsx}",
   "**/*.spec.{js,jsx,ts,tsx}",
   "**/__tests__/**",
@@ -49,5 +49,14 @@
   "**/*.capnp.go",
   "**/*.capnp.ts",
   "**/*_capnp.rs",
-  "**/*_capnp.py"
+  "**/*_capnp.py",
+  "**/test/**/*.ml",
+  "**/tb_*.{v,sv,vhd,vhdl}",
+  "**/*_tb.{v,sv,vhd,vhdl}",
+  "lib/**/*.sol",
+  "**/*.t.sol",
+  "**/test/**/*.sol",
+  "**/tests/**/*.sol",
+  "**/test/**/*.vy",
+  "**/tests/**/*.vy"
 ]

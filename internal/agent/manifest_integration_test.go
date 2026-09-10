@@ -528,7 +528,7 @@ func TestManifestFlowGroupBudgetStopIsPartialWhenSomeFilesHaveComments(t *testin
 	// llmloop.Runner snapshots Template by value at construction time — mutating
 	// a.args.Template afterward (as other tests in this file do for MaxTokens,
 	// which executeGroupSubtask re-reads from a.args.Template directly) would
-	// not reach the runner's copy that RunPerFile actually consumes.
+	// not reach the runner's copy that RunMainTask actually consumes.
 	a := New(Args{
 		RepoDir:          repoDir,
 		From:             "main",

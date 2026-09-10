@@ -150,7 +150,7 @@ func TestResolveBedrockPassesAWSSettings(t *testing.T) {
 	}
 
 	cfg := ClientConfig{}
-	if c, ok := NewLLMClient(ep, nil).(*AnthropicClient); ok {
+	if c, ok := NewLLMClient(ep, nil, nil).(*AnthropicClient); ok {
 		cfg = c.cfg
 	} else {
 		t.Fatal("NewLLMClient did not return *AnthropicClient for the bedrock protocol")

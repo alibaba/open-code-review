@@ -104,7 +104,7 @@ func TestLookupDiff(t *testing.T) {
 	}
 }
 
-func TestFilterScanItems(t *testing.T) {
+func TestSelectScanItems_Reviewability(t *testing.T) {
 	a := NewAgent(Args{
 		Template: makeTemplateWithFullScan(),
 		FileFilter: &rules.FileFilter{
@@ -122,7 +122,7 @@ func TestFilterScanItems(t *testing.T) {
 		{Path: "handler.go", Content: "package h\n", LineCount: 1},
 	}
 
-	kept := a.filterScanItems(items)
+	kept := selectedScanItems(a.selectScanItems(items))
 	if len(kept) != 2 {
 		t.Fatalf("expected 2 kept, got %d", len(kept))
 	}
