@@ -9,6 +9,12 @@
 
 Only the latest released version receives security updates. Users are encouraged to upgrade promptly.
 
+## AI Policy
+
+AI and LLM tools may help with security research but you remain fully responsible for everything you submit: treat their output as a fallible first draft and verify its correctness yourself before reporting. Disclose how, when and where you used AI or LLMs in your research or write-up, including the prompts used so we can verify them.
+
+AI output tends not to prioritise brevity, but we care deeply about it. Edit anything AI-generated down to the essentials before sending it to us: we are volunteers reading every word, and a concise report is a faster fix.
+
 ## Reporting a Vulnerability
 
 **Please do NOT report security vulnerabilities through public GitHub issues.**
