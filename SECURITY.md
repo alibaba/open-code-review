@@ -11,9 +11,9 @@ Only the latest released version receives security updates. Users are encouraged
 
 ## AI Policy
 
-AI and LLM tools may help with security research but you remain fully responsible for everything you submit: treat their output as a fallible first draft and verify its correctness yourself before reporting. Disclose how, when and where you used AI or LLMs in your research or write-up, including the prompts used so we can verify them.
+You are welcome to use AI or LLM tools while investigating a vulnerability, but the responsibility for anything you submit rests entirely with you. Treat whatever a model produces as an unverified draft, and confirm it is correct before relying on it in a report. Whenever AI or LLMs played a role in your research or in writing up your findings, tell us where and how you used them, and include the prompts so we can reproduce your reasoning.
 
-AI output tends not to prioritise brevity, but we care deeply about it. Edit anything AI-generated down to the essentials before sending it to us: we are volunteers reading every word, and a concise report is a faster fix.
+Machine-generated text is usually longer than it needs to be, and brevity matters to us. Please cut AI-written content down to what is essential before sending it over: every report is read in full by a maintainer, and a focused one is a faster fix.
 
 ## Reporting a Vulnerability
 

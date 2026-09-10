@@ -150,9 +150,9 @@ intentionally thin — flag parsing then dispatch to the agent package.
 
 ## AI-Assisted Development
 
-We welcome you to use AI-assisted development to make your work easier. However, what we cannot accept is having AI generate code and committing it directly without review, without addressing the redundancies and issues in the AI's output. This not only severely reduces the efficiency of collaboration between reviewers and you, but also hinders PR handling.
+Using AI to help with your development is perfectly welcome, and we are glad if it makes contributing easier. What we cannot accept is code that a model produced going straight into a commit unread, with none of its redundancy or mistakes cleaned up. Submissions like that slow down the review conversation and make a pull request harder to move forward.
 
-Therefore, when you use AI in your development work, you must comply with the following rules.
+If AI played a part in how you worked, please follow the rules below.
 
 ### Rules:
 

@@ -80,14 +80,6 @@ body:
     validations:
       required: true
 
-  - type: checkboxes
-    id: local-reproduction
-    attributes:
-      label: Local Reproduction
-      options:
-        - label: "I was able to reproduce the issue locally."
-          required: false
-
   - type: textarea
     id: expected
     attributes:
