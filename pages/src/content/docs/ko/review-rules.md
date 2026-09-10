@@ -181,6 +181,7 @@ diff 단계에서 일어납니다.
 | `**/*.sol` | `solidity.md` — Solidity 스마트 컨트랙트. |
 | `**/*.vy` | `vyper.md` — Vyper 스마트 컨트랙트. |
 | `**/*.rego` | `rego.md` — Rego 정책 (OPA). |
+| `**/*.dhall` | `dhall.md` — Dhall 설정 언어. |
 | *(대체값)* | `default.md` |
 
 해석된 규칙 본문은 plan과 main 작업 프롬프트에서 `{{system_rule}}` 자리에 들어갑니다.

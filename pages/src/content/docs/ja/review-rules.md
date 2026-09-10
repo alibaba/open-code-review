@@ -152,6 +152,7 @@ OCR は [`bmatcuk/doublestar/v4`](https://pkg.go.dev/github.com/bmatcuk/doublest
 | `**/*.sol` | `solidity.md`: Solidity スマートコントラクト。 |
 | `**/*.vy` | `vyper.md`: Vyper スマートコントラクト。 |
 | `**/*.rego` | `rego.md`: Rego ポリシー（OPA）。 |
+| `**/*.dhall` | `dhall.md`: Dhall 設定言語。 |
 | *(fallback)* | `default.md` |
 
 解決されたルール本文は、plan および main task prompt 内の `{{system_rule}}` プレースホルダーの内容になります。

@@ -165,6 +165,8 @@ func TestResolve_DefaultRules(t *testing.T) {
 		{"src/amm.vy", "Reentrancy and `@nonreentrant`"},
 		{"policies/authz.rego", "Default Posture"},
 		{"policies/authz.REGO", "Default Posture"},
+		{"config/prod.dhall", "Integrity Hashes"},
+		{"schemas/package.dhall", "Integrity Hashes"},
 	}
 
 	for _, tt := range tests {

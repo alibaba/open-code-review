@@ -120,6 +120,8 @@ func TestIsAllowedExt(t *testing.T) {
 		{".VY", true},
 		{".rego", true},
 		{".REGO", true},
+		{".dhall", true},
+		{".DHALL", true},
 		{".txt", false},
 		{".md", false},
 		{".png", false},

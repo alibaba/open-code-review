@@ -190,6 +190,7 @@ matching order:
 | `**/*.sol` | `solidity.md` — Solidity smart contracts. |
 | `**/*.vy` | `vyper.md` — Vyper smart contracts. |
 | `**/*.rego` | `rego.md` — Rego policy (OPA). |
+| `**/*.dhall` | `dhall.md` — Dhall configuration language. |
 | *(fallback)* | `default.md` |
 
 The resolved rule body becomes the `{{system_rule}}` placeholder in the
